@@ -235,6 +235,7 @@ was created because this repository has no configured Git remote.
 | Managed-agent technical design | `Connect/docs/enhancements.md` |
 | Managed-agent verification | `Connect/docs/managed-agent-verification.md` |
 | Tensor package boundary, persistence, and implemented modalities | `Tensor/README.md` |
+| CE provider-settings requirements and contract gaps (not an approved API design) | `docs/provider-settings-contract-support-and-gaps.md` |
 | Detailed implementation work | Jira tickets; project and parent TBD |
 
 If this document conflicts with an approved design bible or Jira technical specification, stop and

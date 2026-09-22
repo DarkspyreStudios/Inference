@@ -1,0 +1,264 @@
+# Provider settings contracts: current support and missing capabilities
+
+Date: 2026-09-22
+
+Consumer: DarkspyreCE Desktop
+
+Baseline: synchronized Common / Connect / Tensor NuGet **11.2.0**, release source `83c1ac3`
+
+Status: **Consumer requirements and source-backed gap assessment; not an approved API design or implementation authorization.**
+
+## Required consumer experience
+
+DarkspyreCE needs Settings grouped by **Text, Image, Audio**. Every group must support both
+**Connect** (out-of-process) and **Tensor** (in-process) implementations. Configured providers appear
+as compact cards in a dense horizontal grid that wraps to the next row. Each group has an Add
+action; selecting a card opens its configuration in the shared dialog editor. No editable forms
+are open on the collection landing page. Existing design-PDF typography, spacing, colors, and
+surface treatment remain the visual authority, with the explicitly requested collection-first
+interaction taking precedence over the older inline Settings forms.
+
+The panels and setup wizards must be driven by **contract properties and callable methods**.
+The provider supplies its configuration semantics, field/section/step descriptions, available
+choices, validation, actions, and status. CE supplies reusable controls, layout, dialogs, accessible
+interaction, local persistence, protected credential storage, and explicit user authorization.
+
+The UI may map semantic field kinds to shared controls. It must not switch on provider names or
+transport IDs to decide which fields to invent, which API to call, what a successful setup means,
+or whether a model is compatible. Reflection over a configuration object is not sufficient: the
+contract must describe purposeful grouping and progressive disclosure, not a flat property editor.
+If a required behavior is missing, update the owning library rather than adding a CE-only substitute.
+
+## Summary by capability and implementation
+
+| Area | Current support in 11.2.0 | Missing for this consumer |
+|---|---|---|
+| Common contracts | Portable Text/LLM, Image, Decision inference; implementation identity and family; typed capabilities, results and failures | Cross-family setup/editing semantics actually shared by implemented providers; capability classification and discoverable setup operations sufficient for generic Settings |
+| Connect Text | `LlmProviderCatalog`, `LlmProviderDefinition`, ordered `LlmSetupStep` metadata, basic inputs, provider/model capabilities and execution/authentication methods | Rich field descriptions, structured setup validation/state, uniform action invocation, dynamic configuration choices and existing-connection editing |
+| Connect Image / ComfyUI | Transport descriptors, capability flags, health test, workflow preparation, upload, submission, status, progress, download and cancellation | Provider-authored configuration/editor/wizard descriptions and their action/validation contracts |
+| Tensor Text / Qwen | Typed LLM contract, explicit lifecycle, one declared Qwen model pack, model/capability listing, backend selection | Setup/editing metadata, host model discovery, compatibility evaluation and resolution, supported model selection beyond the pinned implementation definition, observable readiness |
+| Tensor Image / Supra | Typed image contract, explicit lifecycle, pinned multi-artifact Supra pack, CPU/CUDA declarations, image capabilities | Same setup/discovery/compatibility gaps; provider-owned selection of a complete compatible image model pack, not a lone weight file |
+| Connect Audio | No Audio capability/provider/setup surface found | Real audio contracts, implementations, discovery and configuration support |
+| Tensor Audio | No Audio capability/engine/setup surface found | Real audio contracts, engines, compatible model-pack discovery and configuration support |
+| Tensor Decision / Laya | Typed decision inference and a pinned model pack | Not requested as a fourth CE section; shared discovery must nevertheless classify it correctly rather than mislabel it Text or Audio |
+
+Audio is a library capability gap, not merely a missing settings label. The requested Audio group
+cannot be fulfilled by a placeholder that saves unusable configurations. The exact audio tasks
+(for example, synthesis, transcription, or both) and initial providers/engines need explicit design.
+
+## 1. Shared discovery, configuration and wizard contracts
+
+### Current support
+
+`InferenceImplementationDescriptor` identifies an implementation and whether it belongs to Connect
+or Tensor. Portable inference interfaces expose their own typed capabilities. Connect Text has a
+separate metadata catalog; Connect Image discovers registered transports; Tensor accepts a host-
+composed model catalog. These are useful existing contracts, but not one complete configuration
+surface covering the requested groups.
+
+### Missing
+
+- Discoverable provider definitions with stable identity, display metadata, capability type, family,
+  supported setup/edit operations, and availability on the current machine. Discovery must not
+  require opening a connection, loading weights, or downloading a model.
+- Purposeful sections and ordered wizard steps, including advanced sections, semantic input kinds,
+  defaults, constraints, required/secret/read-only state, and conditional visibility or enablement.
+- Static and asynchronous choices with stable values, labels, paging/search where needed, dependency
+  refresh behavior, and an explicit declaration of whether manual entry is supported.
+- Callable validation returning field- and step-associated failures, warnings and actionable
+  messages. Human-readable completion instructions alone cannot drive Next, Save or Finish.
+- Provider-owned action availability and execution: begin/continue/cancel setup, authenticate,
+  discover/select models, test/check readiness, and applicable installation/lifecycle actions.
+  Actions need typed results, progress, cancellation, retryability and completion state. Names here
+  describe required semantics, not approved method signatures.
+- A usable existing-configuration edit flow: safe readback, secret-present indicators without secret
+  disclosure, validation of changes, and identification of changes requiring reauthentication,
+  retesting, model unload or other explicit operations.
+- A consistent status projection for cards and dialogs. Configured, authenticated, installed,
+  verified, loaded and ready are distinct states; unknown or stale health is not success.
+- Declared side effects: a check must say when it may send a paid inference request, open a browser,
+  interact with an external CLI, download weights or load native resources. Saving or browsing
+  Settings must not silently perform those actions.
+
+Share only semantics genuinely common to Connect and Tensor in `Darkspyre.Inference.Common`.
+Authentication/protocol details remain in Connect; model-pack/runtime details remain in Tensor.
+This request does not authorize a universal wrapper, an untyped settings bag, or new facade packages.
+
+## 2. Connect Text contracts and individual providers
+
+### Current support
+
+`LlmProviderDefinition` supplies ID, name, description, transport, default endpoint/model,
+guided-setup visibility, ordering and setup steps. `LlmSetupStep` supplies instructions, an action
+enum, inputs, platform-specific guidance, completion guidance and troubleshooting. `LlmSetupInput`
+currently supplies only ID, display name, help text, required and secret flags.
+
+`LlmProviderService` already provides authentication, credential-setting, sign-in, model listing,
+capability and inference operations. `ILlmConnectionSource` is the existing host-owned credential
+seam: credential replacement compares an opaque version atomically and must not upsert. Keep it;
+the gaps below are not a request to move the application's database or vault into Connect.
+
+| Provider | Current definition/behavior | Needed in the configuration contract |
+|---|---|---|
+| OpenAI API key / Responses | API-key setup, endpoint default, model and test steps | Typed key/endpoint inputs, validation and callable setup state; explicit test side effects |
+| OpenAI-compatible Chat | Endpoint default, optional-key metadata, model/test steps; `IsGuidedSetupOption = false` | Contract-driven advanced-provider availability, endpoint and authentication rules, discovery/manual-entry behavior without a CE exception |
+| Anthropic API key / Messages | API-key definition, endpoint default, model/test steps | Same complete field/action/editing semantics, retaining its own credential policy |
+| ChatGPT subscription / direct Codex | Device authorization metadata and existing sign-in methods | Generic authorization interaction/result/progress/expiry/cancel semantics and safe credential completion through the versioned host seam |
+| Claude subscription / official CLI | CLI verification step, external-login guidance, model/test steps | Callable prerequisite/auth checks and typed executable configuration; distinguish CLI-owned authentication from optional model-catalog OAuth |
+| Gemini subscription / Antigravity CLI | Executable input, platform instructions, CLI verification, model/test steps | Typed executable input, availability and verification results; no host scraping or copying CLI tokens |
+| AWS Bedrock Converse | AWS-profile setup and region-aware model/test guidance | Declarative profile/region choices and validation tied to existing AWS operations; no host hardcoded AWS wizard |
+| AWS AgentCore Harness | Profile, region, Harness ARN inputs, model override and session-based test guidance | Typed ARN/profile/region configuration, action binding, capability-driven model selection and test outcome |
+
+### Missing across these providers
+
+The existing action enum describes what a host should do, but is not a complete generic action
+execution contract. Several execution methods are provider-specific. CE must not reconstruct the
+dispatch rules from provider IDs, input IDs, help text or endpoint strings. Extend the existing
+metadata and expose provider-owned setup operations so one reusable renderer can support all of
+these definitions, including editing after first-time setup. Preserve native versus host-owned
+authentication distinctions and the current credential concurrency guarantees.
+
+Sources: [definitions and setup inputs](../Connect/src/LLM/Darkspyre.Inference.Connect.LLM/LlmProviderDefinition.cs),
+[catalog](../Connect/src/LLM/Darkspyre.Inference.Connect.LLM/LlmProviderCatalog.cs),
+[built-in definitions](../Connect/src/LLM/Darkspyre.Inference.Connect.LLM/Providers/ProviderDefinitions.cs),
+[Bedrock definitions](../Connect/src/LLM/Darkspyre.Inference.Connect.LLM.Bedrock/BedrockProviderDefinitions.cs),
+[provider service](../Connect/src/LLM/Darkspyre.Inference.Connect.LLM/LlmProviderService.cs),
+[credential seam](../Connect/src/LLM/Darkspyre.Inference.Connect.LLM/ILlmConnectionSource.cs).
+
+## 3. Connect Image / ComfyUI
+
+### Current support
+
+`ImageProviderService` lists registered transport descriptors and resolves the implementation.
+`ImageConnection` carries endpoint, per-request timeout and optional headers. `ImageWorkflow`
+supplies workflow metadata plus opaque transport configuration. `IImageTransport` exposes health
+testing, preparation, reference upload, submission, status, WebSocket progress, download and
+cancellation. The host retains workflow storage, durable jobs, media, cache and retry policy.
+
+### Missing
+
+The descriptor does not describe editable connection fields, validation, grouped setup steps,
+authentication/header configuration, workflow choices or setup action state. Provide those through
+the library contract. Where choices belong to the host, such as its saved workflows, declare the
+required host capability rather than embedding CE persistence or filesystem access in Connect.
+The existing execution contract and opaque provider state must remain usable by CE's durable jobs;
+a generic wizard must not require replacing them with an all-in-one generation call.
+
+Sources: [transport descriptor](../Connect/src/Image/Darkspyre.Inference.Connect.Image/ImageTransport.cs),
+[connection](../Connect/src/Image/Darkspyre.Inference.Connect.Image/ImageConnection.cs),
+[workflow](../Connect/src/Image/Darkspyre.Inference.Connect.Image/ImageWorkflow.cs),
+[transport operations](../Connect/src/Image/Darkspyre.Inference.Connect.Image/ImageTransportContracts.cs).
+
+## 4. Tensor configuration, discovery and model installation
+
+### Current support
+
+`TensorModelPackDefinition` records a model/revision key, capability, runtime architecture, license,
+project URI, supported backends and artifacts. Each artifact has a role, relative path, expected
+length, SHA-256 and source URIs. `TensorModelCatalog` validates host-supplied definitions; it does
+not search a hosting service.
+
+`ITensorModelPackManager` already provides definition lookup, status, installation with progress and
+cancellation, verification, lease acquisition and removal. `TensorModelInstallProgress` includes
+stage, artifact role and transferred/total bytes. Installation checks pinned artifact lengths and
+hashes. Public Hugging Face resolve URLs already appear in the built-in model definitions.
+**Do not replace this downloader with a CE implementation.**
+
+`ITensorModelInstance` supplies explicit Start, Load, Unload and Stop operations. Requests never
+implicitly download or load weights. Stop is terminal for an instance, and cancellation cannot free
+native resources while active work still uses them. Preserve these lifecycle rules.
+
+### Missing: model-host discovery and compatibility
+
+1. Provider-owned, cancellable search/browse of supported hosts such as Hugging Face, including
+   paged results, variants and revisions. The host service adapter handles its protocol; CE does
+   not scrape pages or construct download URLs.
+2. Engine-owned compatibility evaluation. Check actual architecture, format, quantization where
+   applicable, required companion artifacts, tokenizer/configuration, backend and platform
+   requirements. Distinguish supported, unsupported and not yet verified; return reasons. Names,
+   extensions and model-host tags alone are not proof of compatibility.
+3. Resolution of a selected candidate into a complete, immutable, installable pack: pinned revision,
+   all artifact roles, source identities, integrity metadata, sizes and license information.
+   Unknown size or unverifiable integrity must be explicit, not invented. Model repository content
+   is untrusted input and must not become executable setup instructions.
+4. Protected access for private/gated model hosts, access-denied and license/gating state, and
+   explicit user action when required. Do not leak a host token across redirects/source hosts or
+   persist it in a model URL or ordinary configuration.
+5. Selection support in the actual engines. Current Qwen and Supra implementations select their
+   built-in pinned definitions; allowing an arbitrary catalog entry in a picker does not make it
+   loadable. The engine must validate and accept each model/variant advertised as compatible.
+6. Provider-described configuration choices and current-machine readiness: supported versus
+   available backends, relevant memory/disk/runtime requirements, model selection and advanced
+   options. An enum of backend names is not a successful hardware-availability check.
+
+### Missing: generic setup integration over the existing manager
+
+- Describe the model picker and explicit Download/Install action as wizard properties and methods.
+  A selection or Save alone must not start a potentially large download.
+- Expose total download/disk requirements where known, artifact-level and overall progress,
+  cancellation, verification results, failed/cancelled state and actionable retry behavior.
+  Report whether resume is supported; do not claim resumability from the presence of cancellation.
+- Keep discovery, installation, verification and loading visibly distinct. An installed model is
+  not necessarily loadable on this machine; a configured provider is not necessarily ready.
+- Define duplicate-install, active-lease, removal, unload and shutdown behavior without weakening
+  the existing model manager and lifetime rules. Operation status must remain observable after a
+  settings dialog closes; UI component lifetime must not accidentally own the operation.
+
+| Tensor implementation | Existing model/runtime boundary | Additional provider-specific requirement |
+|---|---|---|
+| Qwen Text | `QwenLlmInference`, `TensorLlmModels.Qwen3FourBillionQ4Km`, typed LLM interface and explicit lifecycle | Enumerate genuinely supported GGUF candidates/variants; validate their architecture and backend compatibility; load the selected supported pack rather than always selecting the built-in one |
+| Supra Image | `SupraImageInference`, `TensorImageModels.Supra2Image`, typed image interface; pack includes Supra, text encoder/tokenizer and VAE artifacts | Resolve and validate the entire compatible artifact set. Surface current output and prompt limitations through capabilities; do not offer arbitrary image-model repositories as interchangeable |
+| Laya Decision | Typed decision interface and its own pinned definition | Keep correct capability identity in shared discovery. CE's requested three settings groups do not authorize adding a Decision section |
+| Audio | No engine or model-pack capability contract found | Define actual audio tasks, engines, supported artifacts and compatibility rules before an audio model picker can be functional |
+
+Sources: [catalog and pack definitions](../Tensor/src/Common/Darkspyre.Inference.Tensor.Common/TensorModels.cs),
+[pack manager](../Tensor/src/Common/Darkspyre.Inference.Tensor.Common/TensorModelPackManager.cs),
+[model lifecycle](../Tensor/src/Common/Darkspyre.Inference.Tensor.Common/ITensorModelInstance.cs),
+[Qwen engine](../Tensor/src/LLM/Darkspyre.Inference.Tensor.LLM.Qwen/QwenLlmInference.cs),
+[Qwen pack](../Tensor/src/LLM/Darkspyre.Inference.Tensor.LLM.Qwen/TensorLlmModels.cs),
+[Supra engine](../Tensor/src/Image/Darkspyre.Inference.Tensor.Image.Supra/SupraImageInference.cs),
+[Supra pack](../Tensor/src/Image/Darkspyre.Inference.Tensor.Image.Supra/TensorImageModels.cs),
+[Tensor integration guide](../Tensor/README.md).
+
+## 5. Audio contract gap
+
+The inspected 11.2.0 package assemblies, public documentation and source provide LLM/Text, Image
+and Decision capabilities, not a standalone Audio lane. LLM image/document attachments or incidental
+mentions of audio do not constitute an audio provider configuration or execution contract.
+
+To satisfy the requested Connect and Tensor Audio section, define the intended tasks and their
+typed input/output, capability, discovery, configuration, setup, testing, progress/cancellation and
+failure contracts. Implement the selected Connect adapters and Tensor engines. Tensor audio must
+participate in the same compatible-model discovery and verified installation flow. This document
+does not select vendors, engine architectures, voice catalogs or supported audio formats by guess.
+
+## Ownership and acceptance gates
+
+Inference owns provider semantics, provider/model-host protocols, compatibility decisions, setup
+metadata and operations, and its existing Tensor model manager/lifecycle. CE owns reusable visual
+components, local connection/configuration persistence, protected secret storage through supported
+seams, user consent and application operation ownership. No library-owned UI framework or CE-specific
+database model is required. No provider source is copied into the consumer.
+
+Before CE implements the full requested settings surface, the owning library work should demonstrate:
+
+1. A single reusable renderer can list, add, configure and edit each supported Text/Image/Audio
+   Connect/Tensor provider without provider-name/transport-specific UI branches.
+2. Typed descriptors and methods cover dependent fields, dynamic choices, validation, authentication,
+   tests and asynchronous progress. Existing configuration and secrets survive cancelled edits and
+   stale concurrent completions cannot overwrite newer credentials/configuration.
+3. Tensor discovery returns only candidates with explicit compatibility outcomes and can resolve a
+   supported selection into a verified installable pack that its chosen engine can actually load.
+4. Installation is explicit, cancellable and observable; corrupted, inaccessible, incompatible or
+   partially downloaded artifacts never appear ready. No automatic download/load happens merely
+   from opening Settings, constructing an engine or making an inference request.
+5. Audio is backed by real implementations and contracts. Missing capabilities produce a library
+   blocker, not invented UI support or an undocumented reduction of the requirement.
+6. Deterministic tests use controlled provider/model-host responses and small fixtures. Paid calls,
+   full model downloads and native inference are not mandatory development gates.
+
+Next phase: agree the library contract design, including package ownership, concrete method/data
+shapes, configuration/credential transaction boundaries, asynchronous operation lifetime, Audio
+scope and model-host support. Then implement and publish the synchronized package family, and
+consume those contracts in CE's technical design. This handoff does not approve code changes,
+package publication, model downloads or changes to a user's configured providers.
