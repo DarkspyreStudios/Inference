@@ -18,7 +18,7 @@
     <Authors>Darkspyre Studios</Authors>
     <Company>Darkspyre Studios</Company>
     <RepositoryType>git</RepositoryType>
-    <RepositoryUrl>https://github.com/DarkspyreStudios/LlmConnect</RepositoryUrl>
+    <RepositoryUrl>https://github.com/DarkspyreStudios/Inference</RepositoryUrl>
     <PackageLicenseFile>LICENSE.md</PackageLicenseFile>
     <PackageRequireLicenseAcceptance>true</PackageRequireLicenseAcceptance>
     <PackageReadmeFile>README.md</PackageReadmeFile>

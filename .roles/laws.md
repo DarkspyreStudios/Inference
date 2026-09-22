@@ -1,4 +1,4 @@
-# DarkspyreCE engineering laws
+# Darkspyre.Inference engineering laws
 
 These cross-cutting rules govern every design, implementation, review, and cleanup in this
 repository. A change that violates a law is wrong unless the exception is declared here and
@@ -120,25 +120,21 @@ development data over adding upgrade code or dual readers.
 Tracked source, hand-authored fixtures, documentation, and assets are not disposable. Secrets remain
 protected even when their local store is reset.
 
-## L17 — The product is local
+## L17 — Product-family boundaries are explicit
 
-DarkspyreCE owns one local user's private workspace. Story data, memory, canonical state, media,
-provider profiles, and operation state remain on that installation. Network access is limited to a
-model provider explicitly configured by the user and a separately approved update mechanism.
+`Connect` owns connections to external inference providers. `Tensor` owns self-hosted inference.
+`Console` is a separate product surface. A capability belongs to exactly one product family, and
+shared repository placement does not permit one family to absorb another family's runtime,
+persistence, user interface, or deployment concerns.
 
-Do not introduce a hosted application API, account system, multi-user ownership model, public
-content catalog, synchronization service, content telemetry, or server moderation workflow without
-returning to general design.
-
-Technical validation remains mandatory. Imports, files, paths, structured values, provider results,
-and canonical writes enforce their structural, integrity, authority, and resource-boundary rules.
-Any non-overridable content policy is a separate explicit product decision.
+Cross-family integration occurs through explicit package contracts. Do not use shared source,
+linked files, or an umbrella assembly to blur ownership.
 
 ## L18 — Donor extraction is explicit
 
 No donor project or directory is copied wholesale merely because it compiles. Every extracted area
-is classified by `docs/source-extraction-manifest.md` as retain, convert, rewrite, or exclude. Donor
-comments, tests, and documents that encode hosted authority are not current requirements.
+is classified by the active technical design as retain, convert, rewrite, or exclude. Donor comments,
+tests, and documents that encode application-specific authority are not current requirements.
 
 ## M-a — Provider model
 
@@ -153,31 +149,21 @@ implementations, rather than duplicated configuration, define the catalog.
 
 ## M-b — Request path and dependency direction
 
-The local interactive path is one-way:
+The provider path is one-way:
 
-`Page -> Component -> application contract -> application Service -> deterministic Logic`
+`Host -> provider-neutral capability -> selected adapter -> external provider`
 
-An application Service may orchestrate provider-neutral capability contracts. Concrete persistence,
-filesystem, credential-vault, model, media, and operating-system adapters live outside the
-application layer. A layer does not skip its next owned boundary to reach those implementations.
-
-Routed Pages are composition roots for route parameters and layout only. Components own feature
-state and invoke application contracts. The Desktop project is the application composition root: it
-selects adapters and starts owned background facilities, but it does not contain use-case logic.
+Hosts supply connection information, protected credentials, and policy through capability contracts.
+Adapters own provider protocols. A capability package does not reach into a host's persistence,
+filesystem, media library, authorization system, or user interface.
 
 ## M-c — Concrete implementations stay inside their owning adapters
 
-Implementation-specific APIs are legal only inside the adapter that owns that implementation and in
-the Desktop composition root that selects it. EF contexts stay inside persistence adapters; `File`
-and `Directory` stay inside file-backed adapters; provider SDKs stay inside provider adapters; vault
-APIs stay inside the credential adapter.
+Implementation-specific APIs are legal only inside the adapter that owns that implementation and the
+host composition root that selects it. Provider SDKs stay in provider-specific packages. Vault APIs
+stay in host tools or credential adapters, and persistence APIs stay outside shipping capability
+libraries unless the capability contract explicitly owns persistence.
 
-Consumers depend on semantic contracts and never receive database handles, absolute paths,
-provider-native payloads, concrete clients, or vault instances as a way to bypass them.
-
-EF persistence adapters use a factory rather than retaining a scoped context. When a use case needs
-one atomic multi-record operation, one semantic transaction contract owns the context and
-transaction. Independently created repositories are not composed in a way that weakens atomicity.
-
-Do not create universal wrappers merely to hide implementations. Contracts are named for the
-capability the consumer needs.
+Consumers depend on semantic contracts and never receive provider-native payloads, concrete SDK
+clients, secret-store handles, or persistence handles as a way to bypass them. Do not create universal
+wrappers merely to hide implementations; contracts are named for the capability the consumer needs.

@@ -1,7 +1,7 @@
 # Design: Darkspyre.Inference.Connect 4.0
 
-**Status:** LLM package-family rename implemented; image extraction and the coordinated 4.0 release
-remain pending. Housekeeping was performed first and committed separately. **Date:** 2026-09-21.
+**Status:** The Inference repository structure and LLM package-family rename are repaired and verified.
+Image extraction and the coordinated 4.0 release remain pending. **Date:** 2026-09-21.
 **Baseline:** LlmConnect 3.0.0.
 
 This record preserves the agreed destination while prerequisite housekeeping refactors are made. It
@@ -30,15 +30,17 @@ Self-hosted inference is a separate product line rather than another Connect pro
 is parallel to Connect. For example, self-hosted image generation belongs under:
 
 ```text
-Darkspyre.Inference.Tenser.Image
+Darkspyre.Inference.Tensor.Image
 ```
 
-`Tenser` is the intended product spelling. Tenser is included here only to make the namespace
-boundary explicit; no Tenser project is part of this work.
+`Tensor` is the canonical spelling. Tensor is included here only to make the product boundary
+explicit; no Tensor project is part of this work.
 
-The Connect family is one canonical repository and product family made of capability-focused NuGet
-packages. It is not one monolithic assembly and it does not have an empty umbrella
-`Darkspyre.Inference.Connect` package.
+`Darkspyre.Inference` is the canonical repository. `Connect`, `Console`, and `Tensor` are sibling
+product workspaces inside it. Connect is a product family made of capability-focused NuGet packages;
+it is not one monolithic assembly and it does not have an empty umbrella
+`Darkspyre.Inference.Connect` package. Console and Tensor do not participate in the Connect 4.0
+implementation.
 
 ## 2. Housekeeping prerequisite: shared storage packages
 
@@ -100,30 +102,39 @@ The 4.0 names are:
 | `Mathis.LlmConnect` | `Darkspyre.Inference.Connect.LLM` |
 | `Mathis.LlmConnect.Bedrock` | `Darkspyre.Inference.Connect.LLM.Bedrock` |
 | New capability | `Darkspyre.Inference.Connect.Image` |
-| `Mathis.LlmConnect.slnx` | `Darkspyre.Inference.Connect.slnx` |
+| `Mathis.LlmConnect.slnx` | `Connect/Darkspyre.Inference.Connect.slnx` |
 
 Package ID, assembly name, project name, folder name, and root namespace match for each shipping
 library. The intended repository layout is:
 
 ```text
-Darkspyre.Inference.Connect.slnx
-src/
-  Darkspyre.Inference.Connect.LLM/
-  Darkspyre.Inference.Connect.LLM.Bedrock/
-  Darkspyre.Inference.Connect.Image/
-tests/
-  Darkspyre.Inference.Connect.LLM.Tests/
-  Darkspyre.Inference.Connect.LLM.Bedrock.Tests/
-  Darkspyre.Inference.Connect.Image.Tests/
-tools/
-  Darkspyre.Inference.Connect.ConsoleTester/
-examples/
-  Darkspyre.Inference.Connect.LLM.Examples/
+Inference/
+  Connect/
+    Darkspyre.Inference.Connect.slnx
+    src/
+      LLM/
+        Darkspyre.Inference.Connect.LLM/
+        Darkspyre.Inference.Connect.LLM.Bedrock/
+      Image/
+        Darkspyre.Inference.Connect.Image/
+    tests/
+      LLM/
+        Darkspyre.Inference.Connect.LLM.Tests/
+        Darkspyre.Inference.Connect.LLM.Bedrock.Tests/
+      Image/
+        Darkspyre.Inference.Connect.Image.Tests/
+    tools/
+      Darkspyre.Inference.Connect.ConsoleTester/
+    examples/
+      Darkspyre.Inference.Connect.LLM.Examples/
+  Console/
+  Tensor/
 ```
 
-The test split enforces dependency isolation: core LLM tests do not acquire AWS SDK dependencies,
-and image tests do not acquire LLM or Bedrock dependencies. Non-shipping tools and examples may
-reference more than one package when their purpose requires it.
+Source and test projects are grouped physically and logically by capability. The test split enforces
+dependency isolation: core LLM tests do not acquire AWS SDK dependencies, and image tests do not
+acquire LLM or Bedrock dependencies. Non-shipping tools and examples may reference more than one
+package when their purpose requires it.
 
 Existing LLM-specific public vocabulary remains LLM-specific inside the new namespace. Types such as
 `ILlmClient`, `LlmConnection`, `LlmProviderService`, and the `AddLlmConnect` registration method do
@@ -132,9 +143,9 @@ not need generic replacements merely because the product family is broader. Thei
 vocabularies; no universal `IProvider`, `ProviderRequest`, or least-common-denominator result is
 introduced.
 
-Renaming the Git remote or a developer's checkout directory is operational housekeeping, not part of
-the public .NET contract. The repository remains the one canonical implementation regardless of when
-that external rename occurs.
+The repository identity is `DarkspyreStudios/Inference`. Changing a developer's checkout directory is
+operational housekeeping, but package metadata and release links must target the Inference repository
+before 4.0 is packed.
 
 ## 5. Provider implementation dependency rule
 
@@ -233,24 +244,28 @@ symmetrical project tree.
 
 Work proceeds in discrete, reviewable units:
 
-1. **Storage housekeeping.** Complete the shared-package migration in section 2 without changing the
+1. **Repository-structure housekeeping.** Establish the Inference repository baseline, correct the
+   copied governance documents, use the canonical `Tensor` spelling, and repair all project, content,
+   solution, package, and documentation paths after capability grouping. The complete Connect
+   solution must build before capability work continues.
+2. **Storage housekeeping.** Complete the shared-package migration in section 2 without changing the
    public LLM behavior or the stored credential identities.
-2. **Other housekeeping.** Complete separately agreed refactors against the 3.0 baseline. Each
+3. **Other housekeeping.** Complete separately agreed refactors against the 3.0 baseline. Each
    refactor keeps behavior stable, updates its tests and documentation, and is committed independently.
    This design does not pre-approve any other housekeeping change.
-3. **LLM 4.0 rename.** Rename solution, projects, packages, assemblies, namespaces, tests, tools,
+4. **LLM 4.0 rename.** Rename solution, projects, packages, assemblies, namespaces, tests, tools,
    examples, documentation, and all in-scope callers in one coordinated breaking change. Bump the
    package family to `4.0.0` and remove the old names rather than retaining shims.
-4. **Image extraction and ChatEngine migration.** In one coordinated implementation unit, add
+5. **Image extraction and ChatEngine migration.** In one coordinated implementation unit, add
    `Darkspyre.Inference.Connect.Image`, adapt the ChatEngine contracts to provider-neutral values,
    move and test the ComfyUI transport, replace ChatEngine's local image transport implementation
    with the package, map at the application boundary, and delete the displaced source. The necessary
    commits may live in separate repositories, but the unit is not complete or released while both
    implementations remain live.
-5. **Release verification.** Restore, build, test, verify formatting, pack every package, audit
+6. **Release verification.** Restore, build, test, verify formatting, pack every package, audit
    dependencies for vulnerabilities, inspect package contents and dependency isolation, and perform
    any agreed live smoke tests before creating the immutable `4.0.0` tag.
-6. **Later modalities.** Design and migrate Audio, STT, and TTS one capability at a time. Each
+7. **Later modalities.** Design and migrate Audio, STT, and TTS one capability at a time. Each
    migration updates all of its consumers and removes the previous duplicate implementation.
 
 Housekeeping must not partially apply the 4.0 naming or introduce parallel seams. Conversely, the
@@ -262,6 +277,9 @@ cannot be preserved, implementation stops and the design is revisited.
 The initial 4.0 work is complete only when:
 
 - shipping package, assembly, project, and namespace names match section 4;
+- the repository and physical capability layout match section 4, with every solution, project,
+  package-content, documentation, and tooling path resolving from its declaring file;
+- current repository instructions and build commands describe Inference rather than donor projects;
 - no embedded SecureStore or local persistence-store implementation remains, and any direct store
   consumer uses the package named in section 2;
 - all packages in the coordinated release report version `4.0.0`;
