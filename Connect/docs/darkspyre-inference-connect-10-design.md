@@ -1,7 +1,8 @@
 # Design: Darkspyre.Inference.Connect 10.0
 
-**Status:** The Inference repository structure and LLM package-family rename are repaired and verified.
-Image extraction and the coordinated 10.0 release remain pending. **Date:** 2026-09-21.
+**Status:** The Inference repository structure, LLM package-family rename, and provider-neutral Image
+package are implemented and verified. ChatEngine adoption and the coordinated 10.0 release remain
+pending. **Date:** 2026-09-21.
 **Baseline:** LlmConnect 3.0.0.
 
 This record preserves the agreed destination while prerequisite housekeeping refactors are made. It
@@ -143,6 +144,13 @@ not need generic replacements merely because the product family is broader. Thei
 vocabularies; no universal `IProvider`, `ProviderRequest`, or least-common-denominator result is
 introduced.
 
+The first implemented LLM and Image contracts do not have a genuinely shared semantic contract.
+Endpoint strings, display names, and capability flags are shaped by their owning modality and are not
+generalized merely because their properties look similar. Consequently
+`Darkspyre.Inference.Connect.Common` is not created in this unit. A later capability may introduce it
+only when two implemented connector packages would otherwise duplicate the same contract and
+behavior.
+
 The repository identity is `DarkspyreStudios/Inference`. Changing a developer's checkout directory is
 operational housekeeping, but package metadata and release links must target the Inference repository
 before 10.0 is packed.
@@ -221,6 +229,13 @@ The ComfyUI adapter preserves the established behavior that is provider-connecti
 rendering, health probing, reference upload, request submission, WebSocket progress, polling, output
 download, and cancellation. Deterministic tests pin request construction, parsing, progress ordering,
 error behavior, cancellation, and empty/edge paths without requiring a live ComfyUI server.
+
+The reusable API consists of `ImageConnection`, `ImageWorkflow`, `ImageReference`, the transport
+request/progress/job/output contracts, `IImageTransport`, and `ImageProviderService`. The built-in
+ComfyUI implementation is registered through `AddImageConnect`. Its prepared request and completed
+output state are opaque round-trip values; hosts may persist them for durable job recovery but do not
+interpret provider wire data. Host persistence, retry timing, and asset storage remain outside the
+package.
 
 ## 8. Future capability boundaries
 

@@ -1,10 +1,16 @@
-# Darkspyre.Inference.Connect.LLM
+# Darkspyre.Inference.Connect
 
 > **Proprietary software.** Copyright © 2026 Brandon Mathis. All rights reserved.
 > No permission is granted to use, copy, modify, or distribute this software
 > without prior written authorization. See [LICENSE.md](LICENSE.md).
 
-`Darkspyre.Inference.Connect.LLM` is the canonical provider-neutral .NET library shared by Darkspyre applications. It supports OpenAI Responses, OpenAI-compatible chat endpoints, Anthropic Messages, direct ChatGPT subscription access and the official Claude and Antigravity CLIs, host-executed tools, Codex, Claude, and Bedrock AgentCore agent sessions, structured output, streaming, model discovery, subscription account usage, embeddings, and provider-specific connection options. Provider display names, defaults, and ordered setup instructions are exposed through `LlmProviderDefinition`, allowing every host to render the same guided setup. AWS Bedrock Converse and AgentCore Harness are available through the optional `Darkspyre.Inference.Connect.LLM.Bedrock` package.
+`Darkspyre.Inference.Connect` is the provider-neutral package family shared by Darkspyre applications.
+`Darkspyre.Inference.Connect.LLM` supports OpenAI Responses, OpenAI-compatible chat endpoints,
+Anthropic Messages, direct ChatGPT subscription access and the official Claude and Antigravity CLIs,
+host-executed tools, managed agents, structured output, streaming, discovery, account usage, and
+embeddings. `Darkspyre.Inference.Connect.Image` supplies the image-provider contracts and built-in
+ComfyUI HTTP/WebSocket transport. AWS Bedrock Converse and AgentCore Harness remain in the optional
+`Darkspyre.Inference.Connect.LLM.Bedrock` package.
 
 The packages target .NET 10 and can be consumed by both .NET 10 and .NET 11 applications. Credentials
 for direct API transports remain owned by the host through `ILlmConnectionSource`; the connector
@@ -32,6 +38,11 @@ See the [Agent DS handoff](docs/agent-ds-contract-handoff.md),
 |---|---|
 | `Darkspyre.Inference.Connect.LLM` | Core transports, authentication, structured output, streaming, discovery, and embeddings |
 | `Darkspyre.Inference.Connect.LLM.Bedrock` | Optional AWS Bedrock Converse and AgentCore Harness transports |
+| `Darkspyre.Inference.Connect.Image` | Image workflow preparation, health, upload, submission, progress, polling, download, and cancellation; includes ComfyUI |
+
+There is currently no `Darkspyre.Inference.Connect.Common` package. LLM and Image have no contracts
+with identical semantics, and coincidentally similar endpoint or display fields are kept in their
+capability packages rather than generalized prematurely.
 
 ## Restore from GitHub Packages
 
@@ -74,6 +85,54 @@ var result = await provider.CompleteAsync(
     },
     cancellationToken);
 ```
+
+## Image provider integration
+
+Register the image capability and resolve its provider-neutral transport through
+`ImageProviderService`:
+
+```csharp
+services.AddImageConnect();
+
+ImageProviderService images = services.GetRequiredService<ImageProviderService>();
+IImageTransport transport = images.GetRequiredTransport(ImageTransport.ComfyUi);
+```
+
+The host owns connection persistence, credentials, workflow storage, durable job scheduling, media
+storage, retry policy, and user authorization. It maps those records into short-lived neutral values:
+
+```csharp
+var connection = new ImageConnection
+{
+    Transport = ImageTransport.ComfyUi,
+    Endpoint = "http://127.0.0.1:8188",
+    RequestTimeout = TimeSpan.FromMinutes(10)
+};
+
+PreparedImageTransportRequest prepared = transport.Prepare(new ImageTransportPreparationRequest
+{
+    Workflow = workflow,
+    PositivePrompt = prompt,
+    NegativePrompt = negativePrompt,
+    Width = 1216,
+    Height = 832,
+    Seed = seed,
+    CacheKey = cacheKey,
+    Reference = reference
+});
+
+string providerJobId = await transport.SubmitAsync(connection, prepared, cancellationToken);
+ImageTransportJobSnapshot status = await transport.GetJobAsync(
+    connection,
+    providerJobId,
+    workflow,
+    cancellationToken);
+```
+
+`ImageWorkflow.TransportConfiguration`, `PreparedImageTransportRequest.ProviderRequest`, and
+`ImageTransportOutput.ProviderState` are opaque adapter-owned data. Consumers may round-trip them for
+durable recovery but must not interpret them as ComfyUI contracts. The package does not own an image
+database, media library, workflow catalog, cache, or background worker.
 
 ## Host-executed tools
 
@@ -763,4 +822,4 @@ dotnet pack Darkspyre.Inference.Connect.slnx -c Release --no-restore
 dotnet list Darkspyre.Inference.Connect.slnx package --vulnerable --include-transitive
 ```
 
-Releases are immutable semantic-version tags such as `v10.0.0`. Both packages are built and published from the approved local release environment to the private GitHub Packages feed; GitHub Actions is not the release pipeline.
+Releases are immutable semantic-version tags such as `v10.0.0`. All packages are built and published from the approved local release environment to the private GitHub Packages feed; GitHub Actions is not the release pipeline.

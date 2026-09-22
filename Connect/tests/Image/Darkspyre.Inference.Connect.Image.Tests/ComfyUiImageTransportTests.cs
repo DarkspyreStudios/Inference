@@ -1,0 +1,267 @@
+using System.Net;
+using System.Text;
+using System.Text.Json;
+using Darkspyre.Inference.Connect.Image.Providers;
+using Microsoft.Extensions.Logging.Abstractions;
+
+namespace Darkspyre.Inference.Connect.Image.Tests;
+
+public sealed class ComfyUiImageTransportTests
+{
+    [Fact]
+    public void PrepareRendersWorkflowAndProviderNeutralReference()
+    {
+        ComfyUiImageTransport transport = CreateTransport(new StubHandler(_ => NotFound()));
+        ImageReference reference = Reference();
+
+        PreparedImageTransportRequest prepared = transport.Prepare(new ImageTransportPreparationRequest
+        {
+            Workflow = Workflow(requiresReference: true),
+            PositivePrompt = "A rainy neon street.",
+            NegativePrompt = "captions",
+            Width = 1_216,
+            Height = 832,
+            Seed = 42,
+            CacheKey = "cache-key",
+            Label = "Neon scene",
+            Reference = reference
+        });
+
+        using JsonDocument document = JsonDocument.Parse(prepared.ProviderRequest);
+        JsonElement inputs = document.RootElement.GetProperty("1").GetProperty("inputs");
+        Assert.Equal("A rainy neon street.", inputs.GetProperty("positive").GetString());
+        Assert.Equal("captions", inputs.GetProperty("negative").GetString());
+        Assert.Equal(1_216, inputs.GetProperty("width").GetInt32());
+        Assert.Equal(832, inputs.GetProperty("height").GetInt32());
+        Assert.Equal(42, inputs.GetProperty("seed").GetInt64());
+        Assert.Equal(20, inputs.GetProperty("steps").GetInt32());
+        Assert.Equal($"darkspyre-reference-{reference.Id:N}.png", inputs.GetProperty("reference").GetString());
+        Assert.Equal("cache-key-42", inputs.GetProperty("prefix").GetString());
+    }
+
+    [Fact]
+    public void PrepareRejectsMissingRequiredReferenceAndUnresolvedPlaceholders()
+    {
+        ComfyUiImageTransport transport = CreateTransport(new StubHandler(_ => NotFound()));
+        ImageTransportPreparationRequest request = Request(Workflow(requiresReference: true));
+
+        InvalidOperationException missing = Assert.Throws<InvalidOperationException>(() => transport.Prepare(request));
+        Assert.Contains("requires a reference image", missing.Message, StringComparison.Ordinal);
+
+        ImageWorkflow invalid = Workflow() with
+        {
+            TransportConfiguration = Json("""
+                {
+                  "outputNodeId": "10",
+                  "filenamePrefixTemplate": "${cacheKey}",
+                  "defaultParameters": {},
+                  "workflow": { "1": { "class_type": "KSampler", "inputs": { "positive": "${positivePrompt}" } } }
+                }
+                """)
+        };
+        InvalidOperationException placeholder = Assert.Throws<InvalidOperationException>(() =>
+            transport.Prepare(Request(invalid)));
+        Assert.Contains("${width}", placeholder.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task HealthChecksReachabilityAndRequiredWorkflowNodes()
+    {
+        var handler = new StubHandler(request => request.RequestUri!.AbsolutePath switch
+        {
+            "/system_stats" => JsonResponse("{\"system\":{}}"),
+            "/object_info" => JsonResponse("{\"KSampler\":{}}"),
+            _ => NotFound()
+        });
+        ComfyUiImageTransport transport = CreateTransport(handler);
+
+        ImageProviderHealth health = await transport.TestAsync(Connection(), Workflow());
+
+        Assert.True(health.IsHealthy);
+        Assert.Contains("supports every node", health.Message, StringComparison.Ordinal);
+        Assert.Contains("KSampler", health.Diagnostics, StringComparison.Ordinal);
+        Assert.DoesNotContain("system", health.Diagnostics, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SubmitStatusDownloadAndCancellationPreserveOpaqueAdapterState()
+    {
+        var paths = new List<string>();
+        var bodies = new List<string>();
+        var handler = new StubHandler(async request =>
+        {
+            paths.Add(request.RequestUri!.PathAndQuery);
+            if (request.Content is not null)
+            {
+                bodies.Add(await request.Content.ReadAsStringAsync());
+            }
+
+            return request.RequestUri.AbsolutePath switch
+            {
+                "/prompt" => JsonResponse("{\"prompt_id\":\"job-1\"}"),
+                "/history/job-1" => JsonResponse(
+                    "{\"job-1\":{\"outputs\":{\"10\":{\"images\":[{\"filename\":\"result.png\",\"subfolder\":\"generated\",\"type\":\"output\"}]}}}}"),
+                "/view" => new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new ByteArrayContent([1, 2, 3])
+                },
+                "/queue" or "/interrupt" => JsonResponse("{}"),
+                _ => NotFound()
+            };
+        });
+        ComfyUiImageTransport transport = CreateTransport(handler);
+        ImageConnection connection = Connection() with
+        {
+            AdditionalHeaders = new Dictionary<string, string> { ["X-Test-Connection"] = "present" }
+        };
+        PreparedImageTransportRequest prepared = transport.Prepare(Request(Workflow()));
+
+        string jobId = await transport.SubmitAsync(connection, prepared);
+        ImageTransportJobSnapshot snapshot = await transport.GetJobAsync(connection, jobId, Workflow());
+        byte[] bytes = await transport.DownloadAsync(connection, Assert.IsType<ImageTransportOutput>(snapshot.Output));
+        bool cancelled = await transport.TryCancelAsync(connection, jobId, interruptRunning: true);
+
+        Assert.Equal("job-1", jobId);
+        Assert.Equal(ImageTransportJobState.Completed, snapshot.State);
+        Assert.Equal("result.png", snapshot.Output?.FileName);
+        Assert.Equal([1, 2, 3], bytes);
+        Assert.True(cancelled);
+        Assert.Contains("/view?filename=result.png&subfolder=generated&type=output", paths);
+        Assert.Contains("/queue", paths);
+        Assert.Contains("/interrupt", paths);
+        Assert.Contains(bodies, body => body.Contains("\"client_id\"", StringComparison.Ordinal));
+        Assert.All(handler.Headers, headers => Assert.Equal("present", headers["X-Test-Connection"]));
+        Assert.DoesNotContain("outputs", snapshot.Diagnostics, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ReferenceUploadUsesDeterministicNameAndContentType()
+    {
+        string? body = null;
+        string? contentType = null;
+        var handler = new StubHandler(async request =>
+        {
+            body = await request.Content!.ReadAsStringAsync();
+            contentType = request.Content.Headers.ContentType?.MediaType;
+            return JsonResponse("{}");
+        });
+        ComfyUiImageTransport transport = CreateTransport(handler);
+        ImageReference reference = Reference();
+        await using var content = new MemoryStream([4, 5, 6]);
+
+        await transport.UploadReferenceAsync(Connection(), reference, content);
+
+        Assert.Equal("multipart/form-data", contentType);
+        Assert.Contains($"darkspyre-reference-{reference.Id:N}.png", body, StringComparison.Ordinal);
+        Assert.Contains("image/png", body, StringComparison.Ordinal);
+        Assert.Contains("true", body, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("{\"type\":\"executing\",\"data\":{\"prompt_id\":\"job\",\"node\":\"1\"}}", "Executing")]
+    [InlineData("{\"type\":\"executing\",\"data\":{\"prompt_id\":\"job\",\"node\":null}}", "Finished")]
+    [InlineData("{\"type\":\"execution_success\",\"data\":{\"prompt_id\":\"job\"}}", "Finished")]
+    [InlineData("{\"type\":\"execution_error\",\"data\":{\"prompt_id\":\"job\",\"exception_message\":\"bad node\"}}", "Failed")]
+    [InlineData("not-json", "None")]
+    public void WebSocketFramesMapToProviderNeutralProgress(string json, string expected)
+    {
+        ComfySignal signal = ComfyUiImageTransport.InterpretFrame(json);
+
+        Assert.Equal(expected, signal.Kind.ToString());
+    }
+
+    private static ComfyUiImageTransport CreateTransport(HttpMessageHandler handler) =>
+        new(new StubHttpClientFactory(handler), NullLogger<ComfyUiImageTransport>.Instance);
+
+    private static ImageConnection Connection() => new()
+    {
+        Transport = ImageTransport.ComfyUi,
+        Endpoint = "http://comfy.test:8188"
+    };
+
+    private static ImageReference Reference() => new()
+    {
+        Id = Guid.Parse("7ec55b60-b1f5-4e71-b2de-aa8accfd2ef0"),
+        FileName = "reference.PNG",
+        ContentType = "image/png"
+    };
+
+    private static ImageTransportPreparationRequest Request(ImageWorkflow workflow) => new()
+    {
+        Workflow = workflow,
+        PositivePrompt = "A city at night",
+        Width = 1_024,
+        Height = 1_024,
+        Seed = 7,
+        CacheKey = "cache-key"
+    };
+
+    private static ImageWorkflow Workflow(bool requiresReference = false) => new()
+    {
+        Id = "scene",
+        Label = "Scene",
+        Transport = ImageTransport.ComfyUi,
+        RequiresReferenceImage = requiresReference,
+        TransportConfiguration = Json("""
+            {
+              "outputNodeId": "10",
+              "filenamePrefixTemplate": "${cacheKey}-${seed}",
+              "defaultParameters": { "steps": 20 },
+              "workflow": {
+                "1": {
+                  "class_type": "KSampler",
+                  "inputs": {
+                    "positive": "${positivePrompt}",
+                    "negative": "${negativePrompt}",
+                    "width": "${width}",
+                    "height": "${height}",
+                    "seed": "${seed}",
+                    "steps": "${steps}",
+                    "reference": "${referenceImageName}",
+                    "prefix": "${filenamePrefix}"
+                  }
+                }
+              }
+            }
+            """)
+    };
+
+    private static JsonElement Json(string value) => JsonElement.Parse(value);
+
+    private static HttpResponseMessage JsonResponse(string value) => new(HttpStatusCode.OK)
+    {
+        Content = new StringContent(value, Encoding.UTF8, "application/json")
+    };
+
+    private static HttpResponseMessage NotFound() => new(HttpStatusCode.NotFound);
+
+    private sealed class StubHttpClientFactory(HttpMessageHandler handler) : IHttpClientFactory
+    {
+        public HttpClient CreateClient(string name) => new(handler, disposeHandler: false);
+    }
+
+    private sealed class StubHandler : HttpMessageHandler
+    {
+        private readonly Func<HttpRequestMessage, Task<HttpResponseMessage>> _response;
+
+        public StubHandler(Func<HttpRequestMessage, HttpResponseMessage> response)
+            : this(request => Task.FromResult(response(request)))
+        {
+        }
+
+        public StubHandler(Func<HttpRequestMessage, Task<HttpResponseMessage>> response) => _response = response;
+
+        public List<IReadOnlyDictionary<string, string>> Headers { get; } = [];
+
+        protected override async Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            Headers.Add(request.Headers.ToDictionary(
+                header => header.Key,
+                header => string.Join(",", header.Value),
+                StringComparer.OrdinalIgnoreCase));
+            return await _response(request);
+        }
+    }
+}

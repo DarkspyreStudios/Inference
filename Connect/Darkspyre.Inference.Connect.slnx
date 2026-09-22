@@ -6,9 +6,15 @@
     <Project Path="src/LLM/Darkspyre.Inference.Connect.LLM.Bedrock/Darkspyre.Inference.Connect.LLM.Bedrock.csproj" />
     <Project Path="src/LLM/Darkspyre.Inference.Connect.LLM/Darkspyre.Inference.Connect.LLM.csproj" />
   </Folder>
+  <Folder Name="/src/Image/">
+    <Project Path="src/Image/Darkspyre.Inference.Connect.Image/Darkspyre.Inference.Connect.Image.csproj" />
+  </Folder>
   <Folder Name="/tests/LLM/">
     <Project Path="tests/LLM/Darkspyre.Inference.Connect.LLM.Bedrock.Tests/Darkspyre.Inference.Connect.LLM.Bedrock.Tests.csproj" />
     <Project Path="tests/LLM/Darkspyre.Inference.Connect.LLM.Tests/Darkspyre.Inference.Connect.LLM.Tests.csproj" />
+  </Folder>
+  <Folder Name="/tests/Image/">
+    <Project Path="tests/Image/Darkspyre.Inference.Connect.Image.Tests/Darkspyre.Inference.Connect.Image.Tests.csproj" />
   </Folder>
   <Folder Name="/tools/">
     <Project Path="tools/Darkspyre.Inference.Connect.ConsoleTester/Darkspyre.Inference.Connect.ConsoleTester.csproj" />

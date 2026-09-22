@@ -43,9 +43,9 @@ The technical assembly and namespace prefix is `Darkspyre.Inference`.
 | `Darkspyre.Inference.Tensor.Image` | In-process image inference |
 | `Darkspyre.Inference.Tensor.Decision` | In-process decision inference using Laya, an open-source BERT-based decision model |
 
-`Darkspyre.Inference.Connect.LLM` is the first implemented package. It is functionally complete and
-currently undergoing the structural refactor into this unified package family. The implementation
-state of the other packages is not defined by this document.
+`Darkspyre.Inference.Connect.LLM` and `Darkspyre.Inference.Connect.Image` are the implemented Connect
+capabilities in the first unified release. Image initially contains the HTTP/WebSocket ComfyUI
+transport. The implementation state of later capabilities is not defined by this document.
 
 ## Execution boundary
 
@@ -76,6 +76,10 @@ Darkspyre.Inference.Common
 
 Place a contract or model in `Darkspyre.Inference.Common` only when connector and tensor packages
 truly share it. Connector-only contracts and models belong in `Darkspyre.Inference.Connect.Common`.
+Do not create either Common package until at least two implemented capabilities share a contract with
+the same semantics. Similar property names, such as endpoint or display-name fields, are not by
+themselves a shared contract. The initial LLM and Image capability review found no qualifying shared
+contract, so neither package depends on a Common package in the first implementation.
 
 The repository uses .NET Central Package Management (CPM). Package versions are declared centrally,
 and any implementation package may reference the centrally managed version of a NuGet dependency
