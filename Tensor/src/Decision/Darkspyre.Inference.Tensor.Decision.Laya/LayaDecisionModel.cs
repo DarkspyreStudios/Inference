@@ -5,7 +5,7 @@ using TensorSharp.Models.Direct;
 using TensorSharp.Runtime;
 using TsTensor = global::TensorSharp.Tensor;
 
-namespace Darkspyre.Inference.Tensor.Decision;
+namespace Darkspyre.Inference.Tensor.Decision.Laya;
 
 internal readonly record struct LayaModelOutput(float[] Logits, float ActionProbability);
 

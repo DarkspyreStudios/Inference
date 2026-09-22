@@ -2,7 +2,7 @@ using Microsoft.ML.Tokenizers;
 using TensorSharp.Runtime;
 using MlSentencePieceTokenizer = Microsoft.ML.Tokenizers.SentencePieceTokenizer;
 
-namespace Darkspyre.Inference.Tensor.Image;
+namespace Darkspyre.Inference.Tensor.Image.Supra;
 
 internal sealed class SupraTextTokenizer
 {

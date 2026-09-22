@@ -1,7 +1,7 @@
 using System.Text.Json;
 using Darkspyre.Inference.Common.Decision;
 
-namespace Darkspyre.Inference.Tensor.Decision.Tests;
+namespace Darkspyre.Inference.Tensor.Decision.Laya.Tests;
 
 public sealed class LayaSequenceBuilderTests
 {

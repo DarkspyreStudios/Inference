@@ -18,6 +18,6 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\..\src\Decision\Darkspyre.Inference.Tensor.Decision\Darkspyre.Inference.Tensor.Decision.csproj" />
+    <ProjectReference Include="..\..\..\src\Decision\Darkspyre.Inference.Tensor.Decision.Laya\Darkspyre.Inference.Tensor.Decision.Laya.csproj" />
   </ItemGroup>
 </Project>

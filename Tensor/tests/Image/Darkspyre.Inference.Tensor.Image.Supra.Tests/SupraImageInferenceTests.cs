@@ -2,10 +2,28 @@ using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Common.Image;
 using Darkspyre.Inference.Tensor.Common;
 
-namespace Darkspyre.Inference.Tensor.Image.Tests;
+namespace Darkspyre.Inference.Tensor.Image.Supra.Tests;
 
 public sealed class SupraImageInferenceTests
 {
+    [Fact]
+    public async Task ValidRequestNeverLoadsAHiddenModel()
+    {
+        await using var inference = new SupraImageInference(new MissingPackManager());
+        await inference.StartAsync();
+        var request = new ImageGenerationRequest
+        {
+            ModelId = TensorImageModels.Supra2Image.Key.ModelId,
+            Prompt = "a small glowing jellyfish"
+        };
+
+        InferenceException exception = await Assert.ThrowsAsync<InferenceException>(
+            () => inference.GenerateAsync(request));
+
+        Assert.Equal(InferenceFailureCode.ModelUnavailable, exception.Code);
+        await inference.StopAsync();
+    }
+
     [Fact]
     public async Task CapabilitiesDescribeTheFixedSupraSurface()
     {
@@ -57,7 +75,7 @@ public sealed class SupraImageInferenceTests
         };
 
         InferenceException exception = await Assert.ThrowsAsync<InferenceException>(
-            () => inference.GenerateAsync(request));
+            () => inference.LoadAsync(TensorImageModels.Supra2Image.Key));
 
         Assert.Equal(InferenceFailureCode.ModelUnavailable, exception.Code);
     }
@@ -105,6 +123,8 @@ public sealed class SupraImageInferenceTests
 
     private sealed class MissingPackManager : ITensorModelPackManager
     {
+        public TensorModelPackDefinition GetRequiredDefinition(TensorModelKey key) => TensorImageModels.Supra2Image;
+
         public Task<TensorModelPackStatus> GetStatusAsync(
             TensorModelKey key,
             CancellationToken cancellationToken = default) =>

@@ -2,10 +2,32 @@ using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Common.LLM;
 using Darkspyre.Inference.Tensor.Common;
 
-namespace Darkspyre.Inference.Tensor.LLM.Tests;
+namespace Darkspyre.Inference.Tensor.LLM.Qwen.Tests;
 
 public sealed class QwenLlmInferenceTests
 {
+    [Fact]
+    public async Task ValidRequestNeverLoadsAHiddenModel()
+    {
+        await using var inference = new QwenLlmInference(new MissingPackManager());
+        await inference.StartAsync();
+        var request = new LlmInferenceRequest
+        {
+            ModelId = TensorLlmModels.Qwen3FourBillionQ4Km.Key.ModelId,
+            Messages = [new LlmMessage("user", "hello")]
+        };
+
+        InferenceException exception = await Assert.ThrowsAsync<InferenceException>(async () =>
+        {
+            await foreach (LlmStreamEvent _ in inference.StreamAsync(request))
+            {
+            }
+        });
+
+        Assert.Equal(InferenceFailureCode.ModelUnavailable, exception.Code);
+        await inference.StopAsync();
+    }
+
     [Fact]
     public async Task CapabilitiesDescribeTheImplementedPortableLane()
     {
@@ -50,6 +72,8 @@ public sealed class QwenLlmInferenceTests
 
     private sealed class MissingPackManager : ITensorModelPackManager
     {
+        public TensorModelPackDefinition GetRequiredDefinition(TensorModelKey key) => TensorLlmModels.Qwen3FourBillionQ4Km;
+
         public Task<TensorModelPackStatus> GetStatusAsync(
             TensorModelKey key,
             CancellationToken cancellationToken = default) =>

@@ -3,7 +3,7 @@ using TensorSharp.Models.Direct;
 using TensorSharp.Runtime;
 using TsTensor = TensorSharp.Tensor;
 
-namespace Darkspyre.Inference.Tensor.Image;
+namespace Darkspyre.Inference.Tensor.Image.Supra;
 
 internal sealed class StableDiffusionVaeDecoder : IDisposable
 {

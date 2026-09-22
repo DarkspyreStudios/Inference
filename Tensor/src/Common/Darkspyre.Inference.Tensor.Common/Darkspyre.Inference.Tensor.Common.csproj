@@ -11,4 +11,8 @@
     <PackageReference Include="Darkspyre.TensorSharp.Runtime" />
   </ItemGroup>
 
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\..\Common\src\Darkspyre.Inference.Common\Darkspyre.Inference.Common.csproj" />
+  </ItemGroup>
+
 </Project>

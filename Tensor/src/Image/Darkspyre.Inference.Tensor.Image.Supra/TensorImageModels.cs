@@ -1,6 +1,6 @@
 using Darkspyre.Inference.Tensor.Common;
 
-namespace Darkspyre.Inference.Tensor.Image;
+namespace Darkspyre.Inference.Tensor.Image.Supra;
 
 public static class TensorImageModels
 {

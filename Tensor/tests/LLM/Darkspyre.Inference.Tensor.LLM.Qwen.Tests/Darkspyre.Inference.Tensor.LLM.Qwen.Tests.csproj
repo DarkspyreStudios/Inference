@@ -18,6 +18,6 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\..\src\LLM\Darkspyre.Inference.Tensor.LLM\Darkspyre.Inference.Tensor.LLM.csproj" />
+    <ProjectReference Include="..\..\..\src\LLM\Darkspyre.Inference.Tensor.LLM.Qwen\Darkspyre.Inference.Tensor.LLM.Qwen.csproj" />
   </ItemGroup>
 </Project>

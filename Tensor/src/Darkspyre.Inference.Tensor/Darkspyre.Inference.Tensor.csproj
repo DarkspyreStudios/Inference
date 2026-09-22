@@ -2,7 +2,7 @@
   <PropertyGroup>
     <PackageId>Darkspyre.Inference.Tensor</PackageId>
     <IncludeBuildOutput>false</IncludeBuildOutput>
-    <Description>In-process LLM, image, and typed-decision inference for Darkspyre applications.</Description>
+    <Description>In-process LLM, image, and typed-decision contracts and engines for Darkspyre applications.</Description>
     <PackageTags>ai;inference;llm;image-generation;decision;tensorsharp</PackageTags>
   </PropertyGroup>
 
@@ -10,8 +10,11 @@
     <ProjectReference Include="..\..\..\Common\src\Darkspyre.Inference.Common\Darkspyre.Inference.Common.csproj" />
     <ProjectReference Include="..\Common\Darkspyre.Inference.Tensor.Common\Darkspyre.Inference.Tensor.Common.csproj" PrivateAssets="all" />
     <ProjectReference Include="..\Decision\Darkspyre.Inference.Tensor.Decision\Darkspyre.Inference.Tensor.Decision.csproj" PrivateAssets="all" />
+    <ProjectReference Include="..\Decision\Darkspyre.Inference.Tensor.Decision.Laya\Darkspyre.Inference.Tensor.Decision.Laya.csproj" PrivateAssets="all" />
     <ProjectReference Include="..\Image\Darkspyre.Inference.Tensor.Image\Darkspyre.Inference.Tensor.Image.csproj" PrivateAssets="all" />
+    <ProjectReference Include="..\Image\Darkspyre.Inference.Tensor.Image.Supra\Darkspyre.Inference.Tensor.Image.Supra.csproj" PrivateAssets="all" />
     <ProjectReference Include="..\LLM\Darkspyre.Inference.Tensor.LLM\Darkspyre.Inference.Tensor.LLM.csproj" PrivateAssets="all" />
+    <ProjectReference Include="..\LLM\Darkspyre.Inference.Tensor.LLM.Qwen\Darkspyre.Inference.Tensor.LLM.Qwen.csproj" PrivateAssets="all" />
   </ItemGroup>
 
   <ItemGroup>
@@ -29,9 +32,15 @@
     <None Include="..\Common\Darkspyre.Inference.Tensor.Common\bin\$(Configuration)\$(TargetFramework)\Darkspyre.Inference.Tensor.Common.xml" Pack="true" PackagePath="lib\$(TargetFramework)" />
     <None Include="..\Decision\Darkspyre.Inference.Tensor.Decision\bin\$(Configuration)\$(TargetFramework)\Darkspyre.Inference.Tensor.Decision.dll" Pack="true" PackagePath="lib\$(TargetFramework)" />
     <None Include="..\Decision\Darkspyre.Inference.Tensor.Decision\bin\$(Configuration)\$(TargetFramework)\Darkspyre.Inference.Tensor.Decision.xml" Pack="true" PackagePath="lib\$(TargetFramework)" />
+    <None Include="..\Decision\Darkspyre.Inference.Tensor.Decision.Laya\bin\$(Configuration)\$(TargetFramework)\Darkspyre.Inference.Tensor.Decision.Laya.dll" Pack="true" PackagePath="lib\$(TargetFramework)" />
+    <None Include="..\Decision\Darkspyre.Inference.Tensor.Decision.Laya\bin\$(Configuration)\$(TargetFramework)\Darkspyre.Inference.Tensor.Decision.Laya.xml" Pack="true" PackagePath="lib\$(TargetFramework)" />
     <None Include="..\Image\Darkspyre.Inference.Tensor.Image\bin\$(Configuration)\$(TargetFramework)\Darkspyre.Inference.Tensor.Image.dll" Pack="true" PackagePath="lib\$(TargetFramework)" />
     <None Include="..\Image\Darkspyre.Inference.Tensor.Image\bin\$(Configuration)\$(TargetFramework)\Darkspyre.Inference.Tensor.Image.xml" Pack="true" PackagePath="lib\$(TargetFramework)" />
+    <None Include="..\Image\Darkspyre.Inference.Tensor.Image.Supra\bin\$(Configuration)\$(TargetFramework)\Darkspyre.Inference.Tensor.Image.Supra.dll" Pack="true" PackagePath="lib\$(TargetFramework)" />
+    <None Include="..\Image\Darkspyre.Inference.Tensor.Image.Supra\bin\$(Configuration)\$(TargetFramework)\Darkspyre.Inference.Tensor.Image.Supra.xml" Pack="true" PackagePath="lib\$(TargetFramework)" />
     <None Include="..\LLM\Darkspyre.Inference.Tensor.LLM\bin\$(Configuration)\$(TargetFramework)\Darkspyre.Inference.Tensor.LLM.dll" Pack="true" PackagePath="lib\$(TargetFramework)" />
     <None Include="..\LLM\Darkspyre.Inference.Tensor.LLM\bin\$(Configuration)\$(TargetFramework)\Darkspyre.Inference.Tensor.LLM.xml" Pack="true" PackagePath="lib\$(TargetFramework)" />
+    <None Include="..\LLM\Darkspyre.Inference.Tensor.LLM.Qwen\bin\$(Configuration)\$(TargetFramework)\Darkspyre.Inference.Tensor.LLM.Qwen.dll" Pack="true" PackagePath="lib\$(TargetFramework)" />
+    <None Include="..\LLM\Darkspyre.Inference.Tensor.LLM.Qwen\bin\$(Configuration)\$(TargetFramework)\Darkspyre.Inference.Tensor.LLM.Qwen.xml" Pack="true" PackagePath="lib\$(TargetFramework)" />
   </ItemGroup>
 </Project>

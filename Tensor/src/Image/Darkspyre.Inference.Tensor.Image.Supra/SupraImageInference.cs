@@ -3,14 +3,15 @@ using System.Reflection;
 using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Common.Image;
 using Darkspyre.Inference.Tensor.Common;
+using Darkspyre.Inference.Tensor.Image;
 using TensorSharp.Cuda;
 using TensorSharp.Models.Direct;
 using TensorSharp.Models.Media;
 using TensorSharp.Runtime;
 
-namespace Darkspyre.Inference.Tensor.Image;
+namespace Darkspyre.Inference.Tensor.Image.Supra;
 
-public sealed class SupraImageInference : IImageInference, IAsyncDisposable
+public sealed class SupraImageInference : ITensorImageInference
 {
     private const int DefaultSteps = 50;
     private const float DefaultGuidance = 3f;
@@ -21,7 +22,7 @@ public sealed class SupraImageInference : IImageInference, IAsyncDisposable
     private readonly TensorBackendKind _requestedBackend;
     private readonly TensorExecutionCoordinator _coordinator;
     private readonly bool _ownsCoordinator;
-    private readonly SemaphoreSlim _loadGate = new(1, 1);
+    private readonly TensorModelLifetime _lifetime = new();
     private TensorModelPackLease? _modelLease;
     private SupraImageModel? _model;
     private TensorBackendKind? _loadedBackend;
@@ -29,17 +30,12 @@ public sealed class SupraImageInference : IImageInference, IAsyncDisposable
 
     public SupraImageInference(
         ITensorModelPackManager packs,
-        TensorModelPackDefinition? definition = null,
         TensorBackendKind backend = TensorBackendKind.Auto,
         TensorExecutionCoordinator? coordinator = null)
     {
         ArgumentNullException.ThrowIfNull(packs);
         _packs = packs;
-        _definition = definition ?? TensorImageModels.Supra2Image;
-        if (_definition.Capability != TensorCapability.Image)
-        {
-            throw new ArgumentException("The model pack is not an image pack.", nameof(definition));
-        }
+        _definition = TensorImageModels.Supra2Image;
 
         _requestedBackend = backend;
         _coordinator = coordinator ?? new TensorExecutionCoordinator();
@@ -78,7 +74,9 @@ public sealed class SupraImageInference : IImageInference, IAsyncDisposable
         ArgumentNullException.ThrowIfNull(request);
         ValidateRequest(request);
         progress?.Report(new ImageGenerationProgress(ImageGenerationStage.Queued));
-        await EnsureLoadedAsync(cancellationToken).ConfigureAwait(false);
+        await using TensorModelLifetime.ExecutionLease modelUse = await _lifetime.EnterExecutionAsync(cancellationToken)
+            .ConfigureAwait(false);
+        CancellationToken executionToken = modelUse.CancellationToken;
         SupraImageModel model = _model
             ?? throw new InferenceException(InferenceFailureCode.ModelUnavailable, "The Supra image model was not loaded.");
         TensorBackendKind backend = _loadedBackend
@@ -86,7 +84,7 @@ public sealed class SupraImageInference : IImageInference, IAsyncDisposable
         await using IAsyncDisposable execution = await _coordinator.AcquireAsync(
             _definition.Key,
             backend,
-            cancellationToken).ConfigureAwait(false);
+            executionToken).ConfigureAwait(false);
 
         int steps = request.Steps ?? DefaultSteps;
         float guidance = checked((float)(request.GuidanceScale ?? DefaultGuidance));
@@ -97,7 +95,7 @@ public sealed class SupraImageInference : IImageInference, IAsyncDisposable
         {
             for (int imageIndex = 0; imageIndex < request.Count; imageIndex++)
             {
-                cancellationToken.ThrowIfCancellationRequested();
+                executionToken.ThrowIfCancellationRequested();
                 long seed = unchecked(baseSeed + imageIndex);
                 progress?.Report(new ImageGenerationProgress(ImageGenerationStage.EncodingPrompt));
                 byte[] rgb = model.Generate(
@@ -110,7 +108,7 @@ public sealed class SupraImageInference : IImageInference, IAsyncDisposable
                         imageIndex * maximum + value,
                         request.Count * maximum)),
                     () => progress?.Report(new ImageGenerationProgress(ImageGenerationStage.Decoding)),
-                    cancellationToken);
+                    executionToken);
                 byte[] png = MediaCodecs.Image.EncodePng(
                     rgb,
                     SupraDiT.ImageSize,
@@ -149,127 +147,135 @@ public sealed class SupraImageInference : IImageInference, IAsyncDisposable
         };
     }
 
-    public async ValueTask UnloadAsync()
-    {
-        await _loadGate.WaitAsync().ConfigureAwait(false);
-        try
-        {
-            _model?.Dispose();
-            _model = null;
-            if (_modelLease is not null)
-            {
-                await _modelLease.DisposeAsync().ConfigureAwait(false);
-                _modelLease = null;
-            }
+    public Task StartAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
 
-            _loadedBackend = null;
-        }
-        finally
+    public async Task UnloadAsync(CancellationToken cancellationToken = default)
+    {
+        using IDisposable unloading = await _lifetime.EnterUnloadAsync(cancellationToken).ConfigureAwait(false);
+        _model?.Dispose();
+        _model = null;
+        if (_modelLease is not null)
         {
-            _loadGate.Release();
+            await _modelLease.DisposeAsync().ConfigureAwait(false);
+            _modelLease = null;
         }
+
+        _loadedBackend = null;
+        _lifetime.MarkUnloaded();
     }
 
-    public async ValueTask DisposeAsync()
+    public async Task StopAsync(CancellationToken cancellationToken = default)
     {
         if (_disposed)
         {
             return;
         }
 
-        await UnloadAsync().ConfigureAwait(false);
+        await UnloadAsync(cancellationToken).ConfigureAwait(false);
         _disposed = true;
-        _loadGate.Dispose();
+        _lifetime.Dispose();
         if (_ownsCoordinator)
         {
             _coordinator.Dispose();
         }
 
-        GC.SuppressFinalize(this);
     }
 
-    private async Task EnsureLoadedAsync(CancellationToken cancellationToken)
+    public async ValueTask DisposeAsync() => await StopAsync().ConfigureAwait(false);
+
+    public async Task LoadAsync(TensorModelKey model, CancellationToken cancellationToken = default)
     {
-        if (_model is not null)
+        ThrowIfDisposed();
+        ArgumentNullException.ThrowIfNull(model);
+        if (model != _definition.Key)
         {
-            return;
+            throw new InferenceException(InferenceFailureCode.ModelUnavailable, $"Supra does not support model '{model}'.");
         }
 
-        await _loadGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        TensorModelPackDefinition definition;
         try
         {
-            if (_model is not null)
-            {
-                return;
-            }
-
-            TensorBackendKind backend = ResolveBackend(_requestedBackend);
-            if (!_definition.SupportedBackends.Contains(backend))
-            {
-                throw new InferenceException(
-                    InferenceFailureCode.BackendUnavailable,
-                    $"Model pack '{_definition.Key}' does not support backend '{backend}'.");
-            }
-
-            TensorModelPackLease lease;
-            try
-            {
-                lease = await _packs.AcquireAsync(_definition.Key, cancellationToken).ConfigureAwait(false);
-            }
-            catch (TensorModelPackException exception)
-            {
-                throw new InferenceException(InferenceFailureCode.ModelUnavailable, exception.Message, exception);
-            }
-
-            SupraImageModel? model = null;
-            try
-            {
-                SupraTextTokenizer tokenizer = await SupraTextTokenizer.CreateAsync(
-                    lease.GetRequiredArtifact("text-tokenizer"),
-                    cancellationToken).ConfigureAwait(false);
-                using SafetensorsFile textWeights = await SafetensorsFile.OpenAsync(
-                    lease.GetRequiredArtifact("text-model"),
-                    cancellationToken).ConfigureAwait(false);
-                using TorchStateDictionaryFile ditWeights = await TorchStateDictionaryFile.OpenAsync(
-                    lease.GetRequiredArtifact("supra-model"),
-                    cancellationToken).ConfigureAwait(false);
-                using SafetensorsFile vaeWeights = await SafetensorsFile.OpenAsync(
-                    lease.GetRequiredArtifact("vae-model"),
-                    cancellationToken).ConfigureAwait(false);
-                cancellationToken.ThrowIfCancellationRequested();
-                model = new SupraImageModel(
-                    tokenizer,
-                    textWeights,
-                    ditWeights,
-                    vaeWeights,
-                    backend == TensorBackendKind.Cuda);
-                cancellationToken.ThrowIfCancellationRequested();
-                _model = model;
-                _modelLease = lease;
-                _loadedBackend = backend;
-                model = null;
-            }
-            catch (OperationCanceledException)
-            {
-                model?.Dispose();
-                await lease.DisposeAsync().ConfigureAwait(false);
-                throw;
-            }
-            catch (Exception exception) when (exception is not InferenceException)
-            {
-                model?.Dispose();
-                await lease.DisposeAsync().ConfigureAwait(false);
-                throw new InferenceException(
-                    exception is InvalidDataException
-                        ? InferenceFailureCode.ModelCorrupt
-                        : InferenceFailureCode.BackendUnavailable,
-                    $"TensorSharp could not load Supra2-IMG on backend '{backend}'.",
-                    exception);
-            }
+            definition = _packs.GetRequiredDefinition(model);
         }
-        finally
+        catch (KeyNotFoundException exception)
         {
-            _loadGate.Release();
+            throw new InferenceException(InferenceFailureCode.ModelUnavailable, exception.Message, exception);
+        }
+
+        if (definition.Capability != TensorCapability.Image
+            || definition.RuntimeArchitecture != _definition.RuntimeArchitecture)
+        {
+            throw new InferenceException(InferenceFailureCode.UnsupportedFeature, "The model pack is not supported by Supra.");
+        }
+
+        using IDisposable loading = await _lifetime.EnterLoadAsync(cancellationToken).ConfigureAwait(false);
+
+        TensorBackendKind backend = ResolveBackend(_requestedBackend);
+        if (!definition.SupportedBackends.Contains(backend))
+        {
+            throw new InferenceException(
+                InferenceFailureCode.BackendUnavailable,
+                $"Model pack '{_definition.Key}' does not support backend '{backend}'.");
+        }
+
+        TensorModelPackLease lease;
+        try
+        {
+            lease = await _packs.AcquireAsync(model, cancellationToken).ConfigureAwait(false);
+        }
+        catch (TensorModelPackException exception)
+        {
+            throw new InferenceException(InferenceFailureCode.ModelUnavailable, exception.Message, exception);
+        }
+
+        SupraImageModel? loadedModel = null;
+        try
+        {
+            SupraTextTokenizer tokenizer = await SupraTextTokenizer.CreateAsync(
+                lease.GetRequiredArtifact("text-tokenizer"),
+                cancellationToken).ConfigureAwait(false);
+            using SafetensorsFile textWeights = await SafetensorsFile.OpenAsync(
+                lease.GetRequiredArtifact("text-model"),
+                cancellationToken).ConfigureAwait(false);
+            using TorchStateDictionaryFile ditWeights = await TorchStateDictionaryFile.OpenAsync(
+                lease.GetRequiredArtifact("supra-model"),
+                cancellationToken).ConfigureAwait(false);
+            using SafetensorsFile vaeWeights = await SafetensorsFile.OpenAsync(
+                lease.GetRequiredArtifact("vae-model"),
+                cancellationToken).ConfigureAwait(false);
+            cancellationToken.ThrowIfCancellationRequested();
+            loadedModel = new SupraImageModel(
+                tokenizer,
+                textWeights,
+                ditWeights,
+                vaeWeights,
+                backend == TensorBackendKind.Cuda);
+            cancellationToken.ThrowIfCancellationRequested();
+            _lifetime.MarkLoaded();
+            _model = loadedModel;
+            _modelLease = lease;
+            _loadedBackend = backend;
+            loadedModel = null;
+        }
+        catch (OperationCanceledException)
+        {
+            loadedModel?.Dispose();
+            await lease.DisposeAsync().ConfigureAwait(false);
+            throw;
+        }
+        catch (Exception exception) when (exception is not InferenceException)
+        {
+            loadedModel?.Dispose();
+            await lease.DisposeAsync().ConfigureAwait(false);
+            throw new InferenceException(
+                exception switch
+                {
+                    OutOfMemoryException => InferenceFailureCode.CapacityExhausted,
+                    InvalidDataException => InferenceFailureCode.ModelCorrupt,
+                    _ => InferenceFailureCode.BackendUnavailable
+                },
+                $"TensorSharp could not load Supra2-IMG on backend '{backend}'.",
+                exception);
         }
     }
 

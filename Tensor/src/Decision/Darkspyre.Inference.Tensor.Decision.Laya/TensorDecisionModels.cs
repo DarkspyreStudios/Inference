@@ -1,6 +1,6 @@
 using Darkspyre.Inference.Tensor.Common;
 
-namespace Darkspyre.Inference.Tensor.Decision;
+namespace Darkspyre.Inference.Tensor.Decision.Laya;
 
 public static class TensorDecisionModels
 {

@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <AssemblyName>Darkspyre.Inference.Tensor.LLM.Qwen</AssemblyName>
+    <Description>Qwen GGUF in-process LLM inference through TensorSharp.</Description>
+    <PackageTags>ai;inference;llm;qwen;gguf;tensorsharp</PackageTags>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Darkspyre.TensorSharp.Backends.Cuda" GeneratePathProperty="true" />
+    <PackageReference Include="Darkspyre.TensorSharp.Chat" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Darkspyre.Inference.Tensor.LLM\Darkspyre.Inference.Tensor.LLM.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="$(PkgDarkspyre_TensorSharp_Backends_Cuda)/contentFiles/any/net10.0/native/ptx/*.ptx">
+      <Link>cuda_kernels/%(Filename)%(Extension)</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </Content>
+  </ItemGroup>
+</Project>

@@ -35,6 +35,8 @@ public readonly record struct TensorModelInstallProgress(
 
 public interface ITensorModelPackManager
 {
+    TensorModelPackDefinition GetRequiredDefinition(TensorModelKey key);
+
     Task<TensorModelPackStatus> GetStatusAsync(
         TensorModelKey key,
         CancellationToken cancellationToken = default);
@@ -81,6 +83,12 @@ public sealed class TensorModelPackManager : ITensorModelPackManager, IDisposabl
         _httpClient = httpClient ?? new HttpClient();
         _ownsHttpClient = httpClient is null;
         _storeName = storeName;
+    }
+
+    public TensorModelPackDefinition GetRequiredDefinition(TensorModelKey key)
+    {
+        ThrowIfDisposed();
+        return _catalog.GetRequired(key);
     }
 
     public async Task<TensorModelPackStatus> GetStatusAsync(

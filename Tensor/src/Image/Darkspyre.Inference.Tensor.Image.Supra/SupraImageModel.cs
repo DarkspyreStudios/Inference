@@ -4,7 +4,7 @@ using TensorSharp.Cuda;
 using TensorSharp.Models.Direct;
 using TensorSharp.Runtime;
 
-namespace Darkspyre.Inference.Tensor.Image;
+namespace Darkspyre.Inference.Tensor.Image.Supra;
 
 internal sealed class SupraImageModel : IDisposable
 {

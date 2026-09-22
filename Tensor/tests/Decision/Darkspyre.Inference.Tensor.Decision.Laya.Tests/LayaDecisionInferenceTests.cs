@@ -3,10 +3,29 @@ using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Common.Decision;
 using Darkspyre.Inference.Tensor.Common;
 
-namespace Darkspyre.Inference.Tensor.Decision.Tests;
+namespace Darkspyre.Inference.Tensor.Decision.Laya.Tests;
 
 public sealed class LayaDecisionInferenceTests
 {
+    [Fact]
+    public async Task ValidRequestNeverLoadsAHiddenModel()
+    {
+        await using var inference = new LayaDecisionInference(new MissingPackManager());
+        await inference.StartAsync();
+        var request = new DecisionInferenceRequest
+        {
+            ModelId = TensorDecisionModels.LayaTypedDecisions.Key.ModelId,
+            State = JsonElement.Parse("{}"),
+            Questions = [new BooleanDecisionQuestion { Id = "ready", Instructions = "Is the system ready?" }]
+        };
+
+        InferenceException exception = await Assert.ThrowsAsync<InferenceException>(
+            () => inference.DecideAsync(request));
+
+        Assert.Equal(InferenceFailureCode.ModelUnavailable, exception.Code);
+        await inference.StopAsync();
+    }
+
     [Fact]
     public async Task CapabilitiesDescribeAllTypedDecisionKinds()
     {
@@ -68,7 +87,7 @@ public sealed class LayaDecisionInferenceTests
         };
 
         InferenceException exception = await Assert.ThrowsAsync<InferenceException>(
-            () => inference.DecideAsync(request));
+            () => inference.LoadAsync(TensorDecisionModels.LayaTypedDecisions.Key));
 
         Assert.Equal(InferenceFailureCode.ModelUnavailable, exception.Code);
     }
@@ -91,6 +110,8 @@ public sealed class LayaDecisionInferenceTests
 
     private sealed class MissingPackManager : ITensorModelPackManager
     {
+        public TensorModelPackDefinition GetRequiredDefinition(TensorModelKey key) => TensorDecisionModels.LayaTypedDecisions;
+
         public Task<TensorModelPackStatus> GetStatusAsync(
             TensorModelKey key,
             CancellationToken cancellationToken = default) =>

@@ -4,7 +4,7 @@ using Microsoft.ML.Tokenizers;
 using TensorSharp.Runtime;
 using MlBpeTokenizer = Microsoft.ML.Tokenizers.BpeTokenizer;
 
-namespace Darkspyre.Inference.Tensor.Decision;
+namespace Darkspyre.Inference.Tensor.Decision.Laya;
 
 internal interface ILayaTokenizer
 {

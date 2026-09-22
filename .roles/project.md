@@ -34,7 +34,7 @@ published NuGets.
 |---|---|
 | `Darkspyre.Inference.Common` | Interfaces and models genuinely shared by connector-based and in-process tensor inference |
 | `Darkspyre.Inference.Connect` | All implemented out-of-process connectors; contains capability-specific assemblies such as `.Connect.LLM`, `.Connect.LLM.Bedrock`, and `.Connect.Image` |
-| `Darkspyre.Inference.Tensor` | All implemented in-process engines; contains `.Tensor.Common`, `.Tensor.LLM`, `.Tensor.Image`, and `.Tensor.Decision` assemblies |
+| `Darkspyre.Inference.Tensor` | All implemented in-process engines; contains `.Tensor.Common`, the `.Tensor.LLM`, `.Tensor.Image`, and `.Tensor.Decision` capability contracts, and the `.Tensor.LLM.Qwen`, `.Tensor.Image.Supra`, and `.Tensor.Decision.Laya` implementations |
 
 LLM and Image are the implemented Connect capabilities in the first unified release. Image initially
 contains the HTTP/WebSocket ComfyUI transport. LLM, Image, and Decision are the implemented Tensor
@@ -60,9 +60,9 @@ Darkspyre.Inference.Common
 
 Darkspyre.Inference.Tensor package
 └── Darkspyre.Inference.Tensor.Common assembly
-    ├── Darkspyre.Inference.Tensor.LLM assembly
-    ├── Darkspyre.Inference.Tensor.Image assembly
-    └── Darkspyre.Inference.Tensor.Decision assembly
+    ├── Darkspyre.Inference.Tensor.LLM assembly → .Tensor.LLM.Qwen implementation
+    ├── Darkspyre.Inference.Tensor.Image assembly → .Tensor.Image.Supra implementation
+    └── Darkspyre.Inference.Tensor.Decision assembly → .Tensor.Decision.Laya implementation
 ```
 
 Place a contract or model in `Darkspyre.Inference.Common` only when the Connect and Tensor products
@@ -76,10 +76,20 @@ implementation share the same semantic contract even though the first Connect re
 ship a decision provider.
 `Darkspyre.Inference.Tensor.Common` is an internal product assembly, included in the
 `Darkspyre.Inference.Tensor` NuGet, and is limited to behavior actually shared by two Tensor
-capabilities, such as model packs, persistence-backed weights, and execution coordination. Laya
-architecture, tokenization, calibration, and model-pack details remain in the Tensor Decision
-assembly. There is still no `Connect.Common` assembly: no implemented connector-only contract is
-shared broadly enough.
+capabilities, such as the host-controlled model lifecycle, model packs, persistence-backed weights,
+and execution coordination. The capability assemblies define interchangeable interfaces; engine
+implementations live in separate assemblies within the same NuGet. Laya architecture, tokenization,
+calibration, and its model-pack definition remain in the Tensor Decision Laya assembly. There is
+still no `Connect.Common` assembly: no implemented connector-only contract is shared broadly enough.
+
+Current Tensor source has the explicit `StartAsync`/`LoadAsync`/request/`UnloadAsync`/`StopAsync`
+contract described in `Tensor/README.md`. The host controls when to load an installed pack and when
+to end the resident model's lifetime; no request implicitly loads or downloads weights. Stop is
+terminal for an instance. An uncancelled teardown waits for active requests; cancellation requests
+their prompt termination but must still wait for native execution to stop using the model. These
+source changes are unreleased: the published `11.1.0` Tensor package retains its earlier assembly
+layout and contracts. Do not pack, publish, tag, or bump the shared version without separate
+authorization.
 
 The repository uses .NET Central Package Management (CPM). Package versions are declared centrally,
 and any implementation package may reference the centrally managed version of a NuGet dependency

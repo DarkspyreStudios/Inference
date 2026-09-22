@@ -2,7 +2,7 @@
   <PropertyGroup>
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
-    <AssemblyName>Darkspyre.Inference.Tensor.Image.Tests</AssemblyName>
+    <AssemblyName>Darkspyre.Inference.Tensor.Image.Supra.Tests</AssemblyName>
   </PropertyGroup>
 
   <ItemGroup>
@@ -19,6 +19,6 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\..\src\Image\Darkspyre.Inference.Tensor.Image\Darkspyre.Inference.Tensor.Image.csproj" />
+    <ProjectReference Include="..\..\..\src\Image\Darkspyre.Inference.Tensor.Image.Supra\Darkspyre.Inference.Tensor.Image.Supra.csproj" />
   </ItemGroup>
 </Project>

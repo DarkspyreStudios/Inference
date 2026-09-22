@@ -1,6 +1,6 @@
 using Darkspyre.Inference.Tensor.Common;
 
-namespace Darkspyre.Inference.Tensor.LLM;
+namespace Darkspyre.Inference.Tensor.LLM.Qwen;
 
 public static class TensorLlmModels
 {

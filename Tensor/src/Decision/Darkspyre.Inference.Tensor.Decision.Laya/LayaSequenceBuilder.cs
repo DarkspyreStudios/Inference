@@ -1,7 +1,7 @@
 using System.Text.Json;
 using Darkspyre.Inference.Common.Decision;
 
-namespace Darkspyre.Inference.Tensor.Decision;
+namespace Darkspyre.Inference.Tensor.Decision.Laya;
 
 internal readonly record struct LayaSequence(
     int[] TokenIds,

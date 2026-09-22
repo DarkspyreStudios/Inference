@@ -2,32 +2,13 @@
   <PropertyGroup>
     <IsPackable>false</IsPackable>
     <AssemblyName>Darkspyre.Inference.Tensor.Image</AssemblyName>
-    <Description>In-process Supra2-IMG generation through TensorSharp using Darkspyre typed contracts.</Description>
-    <PackageTags>ai;inference;image;supra;dit;tensorsharp</PackageTags>
-    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <Description>Shared in-process image generation contract.</Description>
+    <PackageTags>ai;inference;image</PackageTags>
   </PropertyGroup>
-
-  <ItemGroup>
-    <PackageReference Include="Darkspyre.TensorSharp.Backends.Cuda" GeneratePathProperty="true" />
-    <PackageReference Include="Darkspyre.TensorSharp.Models" />
-    <PackageReference Include="Darkspyre.ML.Tokenizers" />
-  </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\..\..\..\Common\src\Darkspyre.Inference.Common\Darkspyre.Inference.Common.csproj" />
     <ProjectReference Include="..\..\Common\Darkspyre.Inference.Tensor.Common\Darkspyre.Inference.Tensor.Common.csproj" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <InternalsVisibleTo Include="Darkspyre.Inference.Tensor.Image.Tests" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <Content Include="$(PkgDarkspyre_TensorSharp_Backends_Cuda)/contentFiles/any/net10.0/native/ptx/*.ptx">
-      <Link>cuda_kernels/%(Filename)%(Extension)</Link>
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
-    </Content>
   </ItemGroup>
 
 </Project>
