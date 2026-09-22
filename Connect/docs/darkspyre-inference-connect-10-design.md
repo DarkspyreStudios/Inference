@@ -321,3 +321,19 @@ The initial 10.0 work is complete only when:
 
 Historical release records and archived package artifacts may retain their original names when they
 are clearly historical rather than current integration guidance.
+
+## 11. Initial Common and Connect publication
+
+The user authorized publishing the completed Common and Connect packages while the new Tensor package
+IDs remain under development. On 2026-09-22, commit `bf9e6d5` passed zero-warning Debug and Release
+builds, 187 tests (Common 1, Image 14, LLM 127, Bedrock 45), formatting verification, and a transitive
+dependency vulnerability audit with no reported vulnerabilities. Package contents and dependency
+graphs were inspected before these immutable private packages were published and read back through the
+GitHub Packages API:
+
+- `Darkspyre.Inference.Common` 10.0.0
+- `Darkspyre.Inference.Connect.Image` 10.0.0
+- `Darkspyre.Inference.Connect.LLM` 10.0.0
+- `Darkspyre.Inference.Connect.LLM.Bedrock` 10.0.0
+
+No family Git tag was created because the intended Tensor 10.0.0 baseline is still in development.
