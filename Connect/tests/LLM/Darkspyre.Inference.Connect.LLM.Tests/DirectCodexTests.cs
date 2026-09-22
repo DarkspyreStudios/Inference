@@ -33,6 +33,8 @@ public sealed class DirectCodexTests
         Assert.Equal("account", handler.Headers["ChatGPT-Account-ID"]);
         Assert.Equal("thread", handler.Headers["session-id"]);
         Assert.Equal("darkspyre-inference-connect", handler.Headers["originator"]);
+        Assert.Equal("Darkspyre.Inference.Connect.LLM/0.155.1", handler.Headers["User-Agent"]);
+        Assert.Equal("0.155.1", handler.Headers["version"]);
         using var sent = JsonDocument.Parse(handler.Body!);
         Assert.False(sent.RootElement.GetProperty("store").GetBoolean());
         Assert.True(sent.RootElement.GetProperty("stream").GetBoolean());
@@ -187,7 +189,7 @@ public sealed class DirectCodexTests
         Assert.Equal(200000, models[0].MaxContextTokens);
         Assert.Null(models[1].MaxContextTokens);
         Assert.Null(models[0].MaxOutputTokens);
-        Assert.Contains("/models?client_version=", handler.Uri?.AbsoluteUri);
+        Assert.Contains("/models?client_version=0.155.1", handler.Uri?.AbsoluteUri);
         Assert.Equal("Bearer token", handler.Headers["Authorization"]);
     }
 

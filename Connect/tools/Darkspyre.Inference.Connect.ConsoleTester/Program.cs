@@ -10,7 +10,7 @@ namespace Darkspyre.Inference.Connect.ConsoleTester;
 
 internal static class Program
 {
-    // Preserve the pre-4.0 service name so existing SecureStore credentials remain accessible.
+    // Preserve the original LlmConnect service name so existing SecureStore credentials remain accessible.
     private const string CredentialServiceName = "com.darkspyrestudios.llmconnect.console-tester";
     private static readonly JsonSerializerOptions UsageJsonOptions = new()
     {

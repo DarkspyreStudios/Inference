@@ -150,7 +150,7 @@ It is normally null for Chat Completions and Bedrock. Preserve it on ordinary as
 and never decode it or move it between providers, account scopes, or models. There is no longer a
 request-level continuation token.
 
-## Managed agent context (4.0.0)
+## Managed agent context (10.0.0)
 
 [HostOwnedAgentContext.cs](HostOwnedAgentContext.cs) demonstrates the implemented managed Codex
 contract: open host context, capture with bytes, and continue after host compaction. Claude and

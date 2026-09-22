@@ -9,7 +9,7 @@ The repository root is `Darkspyre.Inference`. `Connect/`, `Console/`, and `Tenso
 product workspaces with separate responsibilities. A product workspace owns its solution, build
 configuration, package versions, documentation, tests, examples, and tools.
 
-`Connect` is the only active workspace in the 4.0 refactor. Empty product roots do not justify
+`Connect` is the only active workspace in the 10.0 refactor. Empty product roots do not justify
 placeholder projects or packages.
 
 ## Connect capability layout
@@ -50,9 +50,19 @@ not acquire its SDK dependencies.
 ## Storage dependencies
 
 Shipping Connect capability libraries remain independent of application persistence and credential
-storage. Host tools use `Darkspyre.SecureStore` for secrets and `Darkspyre.PersistenceStore` for
-non-secret durable local state only when they have a real storage requirement. Do not copy either
-implementation into this repository.
+storage. Host tools use `Darkspyre.SecureStore` for secrets and `Darkspyre.Persistence` for non-secret
+durable local state only when they have a real storage requirement. Do not copy either implementation
+into this repository.
+
+Repository-wide dependency versions live only in `/Directory.Packages.props`. Projects reference only
+the packages they consume and omit versions from `PackageReference`; Central Package Management
+selects the shared version. Repository-wide build and package metadata, including the unified package
+version, live in `/Directory.Build.props`.
+
+Provider protocol compatibility versions are independent of the NuGet package version. In
+particular, the direct Codex adapter uses one explicit Codex compatibility version for its
+`User-Agent`, `version` header, and model-catalog `client_version` query; it must not derive those
+values from the `Darkspyre.Inference` release version.
 
 ## Documentation and packages
 

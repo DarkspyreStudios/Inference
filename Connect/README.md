@@ -21,7 +21,7 @@ change.
 
 ## Packages
 
-**Version 4.0.0:** the former `Mathis.LlmConnect` package family is now
+**Version 10.0.0:** the former `Mathis.LlmConnect` package family is now
 `Darkspyre.Inference.Connect.LLM`. Package IDs, assemblies, projects, folders, and namespaces move
 together without compatibility shims. The direct Codex and host-owned managed-agent behavior from
 3.0.0 is retained; Claude and AgentCore retain provider-owned sessions.
@@ -763,4 +763,4 @@ dotnet pack Darkspyre.Inference.Connect.slnx -c Release --no-restore
 dotnet list Darkspyre.Inference.Connect.slnx package --vulnerable --include-transitive
 ```
 
-Releases are immutable semantic-version tags such as `v0.4.0`. Both packages are built and published from the approved local release environment to the private GitHub Packages feed; GitHub Actions is not the release pipeline.
+Releases are immutable semantic-version tags such as `v10.0.0`. Both packages are built and published from the approved local release environment to the private GitHub Packages feed; GitHub Actions is not the release pipeline.

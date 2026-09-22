@@ -1,12 +1,12 @@
 # Agent DS: managed-agent contract handoff
 
-Status: **version 4.0.0**, 2026-09-21. Direct Codex and the managed engine retain the behavior
+Status: **version 10.0.0**, 2026-09-21. Direct Codex and the managed engine retain the behavior
 live-tested for 3.0.0 under the new package and namespace. Version 2.2.0 does not contain these changes.
 Direct Codex now uses host-owned device OAuth; Claude/Antigravity remain CLI-owned.
-This is a breaking major release; update consumers to 4.0.0 using the migration guidance below.
+This is a breaking major release; update consumers to 10.0.0 using the migration guidance below.
 
 Agent DS can now implement its data mappings, ownership selection, event handling and host compactor
-against these exact types. Consume Darkspyre.Inference.Connect.LLM through the private NuGet 4.0.0 package;
+against these exact types. Consume Darkspyre.Inference.Connect.LLM through the private NuGet 10.0.0 package;
 do not copy library source into Agent DS. Keep the new path capability-gated.
 The [README](../README.md) is the canonical integration contract; the
 [technical design](enhancements.md) defines the execution semantics.
@@ -181,4 +181,4 @@ same-run host compaction with retained instructions and no duplicate prompt or s
 Agent DS can now integrate its existing store and compactor against this implementation. Keep
 capability gating and its existing durability/security responsibilities. The library adds no
 storage seam, durable harness, scheduler, command executor, or automatic replay of external effects.
-Both core and Bedrock packages use the coordinated 4.0.0 release version.
+Both core and Bedrock packages use the coordinated 10.0.0 release version.

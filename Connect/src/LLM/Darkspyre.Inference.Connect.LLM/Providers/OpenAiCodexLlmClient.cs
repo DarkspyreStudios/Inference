@@ -9,7 +9,7 @@ namespace Darkspyre.Inference.Connect.LLM.Providers;
 internal sealed class OpenAiCodexLlmClient(HttpClient http) : ResponsesLlmClientBase(http), ILlmAccountUsageClient
 {
     internal const string DefaultEndpoint = "https://chatgpt.com/backend-api/codex";
-    private const string ClientVersion = "0.142.5";
+    private const string CodexCompatibilityVersion = "0.155.1";
 
     public override LlmTransport Transport => LlmTransport.OpenAiCodex;
 
@@ -91,7 +91,7 @@ internal sealed class OpenAiCodexLlmClient(HttpClient http) : ResponsesLlmClient
     {
         if (!GetCapabilities(connection).SupportsModelListing) { return []; }
         using var request = new HttpRequestMessage(HttpMethod.Get,
-            ProviderHttp.BuildUri(connection, $"models?client_version={ClientVersion}"));
+            ProviderHttp.BuildUri(connection, $"models?client_version={CodexCompatibilityVersion}"));
         ApplyCodexHeaders(request, connection);
         using var response = await Http.SendAsync(request, cancellationToken);
         await ProviderHttp.ThrowIfUnsuccessfulAsync(response, Transport, LlmCredential.Parse(connection.Credential),
@@ -173,7 +173,7 @@ internal sealed class OpenAiCodexLlmClient(HttpClient http) : ResponsesLlmClient
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", tokens.AccessToken);
         request.Headers.Add("ChatGPT-Account-ID", tokens.AccountId);
         request.Headers.Add("originator", "darkspyre-inference-connect");
-        request.Headers.UserAgent.ParseAdd("Darkspyre.Inference.Connect.LLM/4.0");
-        request.Headers.Add("version", ClientVersion);
+        request.Headers.UserAgent.ParseAdd($"Darkspyre.Inference.Connect.LLM/{CodexCompatibilityVersion}");
+        request.Headers.Add("version", CodexCompatibilityVersion);
     }
 }

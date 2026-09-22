@@ -1,13 +1,13 @@
-# Design: Darkspyre.Inference.Connect 4.0
+# Design: Darkspyre.Inference.Connect 10.0
 
 **Status:** The Inference repository structure and LLM package-family rename are repaired and verified.
-Image extraction and the coordinated 4.0 release remain pending. **Date:** 2026-09-21.
+Image extraction and the coordinated 10.0 release remain pending. **Date:** 2026-09-21.
 **Baseline:** LlmConnect 3.0.0.
 
 This record preserves the agreed destination while prerequisite housekeeping refactors are made. It
-defines product and package naming, ownership boundaries, dependency rules, the first 4.0 scope, and
+defines product and package naming, ownership boundaries, dependency rules, the first 10.0 scope, and
 the order of migration. It does not authorize placeholder modality projects or expand a housekeeping
-change into the 4.0 migration.
+change into the 10.0 migration.
 
 ## 1. Product model
 
@@ -39,19 +39,19 @@ explicit; no Tensor project is part of this work.
 `Darkspyre.Inference` is the canonical repository. `Connect`, `Console`, and `Tensor` are sibling
 product workspaces inside it. Connect is a product family made of capability-focused NuGet packages;
 it is not one monolithic assembly and it does not have an empty umbrella
-`Darkspyre.Inference.Connect` package. Console and Tensor do not participate in the Connect 4.0
+`Darkspyre.Inference.Connect` package. Console and Tensor do not participate in the Connect 10.0
 implementation.
 
 ## 2. Housekeeping prerequisite: shared storage packages
 
 Darkspyre's storage implementations are independent products and are not owned or copied by the
-Connect family. Before the 4.0 namespace and assembly refactor, remove any embedded SecureStore or
+Connect family. Before the 10.0 namespace and assembly refactor, remove any embedded SecureStore or
 local persistence-store projects and source from this repository and replace any consumers with the
 canonical NuGet packages:
 
 ```text
 Darkspyre.SecureStore
-Darkspyre.PersistenceStore
+Darkspyre.Persistence
 ```
 
 Package versions are centrally pinned. A project that directly consumes a store references its
@@ -62,9 +62,9 @@ The LLM core's `ILlmConnectionSource` remains the provider-neutral host seam. It
 implementation and must not be replaced by a direct SecureStore dependency. A host or tool may adapt
 `Darkspyre.SecureStore` to that seam while preserving its existing `ServiceName`, credential names,
 and stored values. Secrets and OAuth credentials are never stored through
-`Darkspyre.PersistenceStore`.
+`Darkspyre.Persistence`.
 
-`Darkspyre.PersistenceStore` is used only where a Connect-owned tool needs durable, non-secret local
+`Darkspyre.Persistence` is used only where a Connect-owned tool needs durable, non-secret local
 state. The shipping capability libraries remain storage-agnostic; application conversation state,
 jobs, provider configuration, and media persistence remain host-owned as defined in section 6.
 
@@ -73,11 +73,11 @@ console tester is the only SecureStore consumer. Therefore this housekeeping uni
 finishing the SecureStore package-ID migration and ensuring that later source movement does not copy
 either storage implementation into Connect. If a local persistence implementation appears on the
 implementation branch, it is deleted only after all of its consumers have moved to
-`Darkspyre.PersistenceStore` and compatibility has been verified.
+`Darkspyre.Persistence` and compatibility has been verified.
 
-## 3. Version 4.0 scope
+## 3. Version 10.0 scope
 
-The first 4.0 implementation contains two capabilities:
+The first 10.0 implementation contains two capabilities:
 
 1. Refactor the existing LlmConnect implementation into `Darkspyre.Inference.Connect.LLM`.
 2. Extract image-generation contracts and implementations from ChatEngine into
@@ -89,15 +89,15 @@ they are migrated only after a separate design pass confirms each public contrac
 unwired forward projects, and duplicate seams are not created in advance.
 
 The rename and contract movement are intentionally breaking. All packages produced by the coordinated
-release use version `4.0.0`. There are no `Mathis.LlmConnect` compatibility packages, namespace
+release use version `10.0.0`. There are no `Mathis.LlmConnect` compatibility packages, namespace
 forwarders, deprecated duplicate contracts, or other transition shims. Every in-scope consumer is
 updated in the same migration unit in accordance with L1 and L9.
 
 ## 4. Package and project layout
 
-The 4.0 names are:
+The 10.0 names are:
 
-| Current | Version 4.0 |
+| Current | Version 10.0 |
 | --- | --- |
 | `Mathis.LlmConnect` | `Darkspyre.Inference.Connect.LLM` |
 | `Mathis.LlmConnect.Bedrock` | `Darkspyre.Inference.Connect.LLM.Bedrock` |
@@ -138,14 +138,14 @@ package when their purpose requires it.
 
 Existing LLM-specific public vocabulary remains LLM-specific inside the new namespace. Types such as
 `ILlmClient`, `LlmConnection`, `LlmProviderService`, and the `AddLlmConnect` registration method do
-not need generic replacements merely because the product family is broader. Their 4.0 namespace is
+not need generic replacements merely because the product family is broader. Their 10.0 namespace is
 `Darkspyre.Inference.Connect.LLM`. Image, STT, TTS, and audio contracts use their own capability
 vocabularies; no universal `IProvider`, `ProviderRequest`, or least-common-denominator result is
 introduced.
 
 The repository identity is `DarkspyreStudios/Inference`. Changing a developer's checkout directory is
 operational housekeeping, but package metadata and release links must target the Inference repository
-before 4.0 is packed.
+before 10.0 is packed.
 
 ## 5. Provider implementation dependency rule
 
@@ -253,9 +253,9 @@ Work proceeds in discrete, reviewable units:
 3. **Other housekeeping.** Complete separately agreed refactors against the 3.0 baseline. Each
    refactor keeps behavior stable, updates its tests and documentation, and is committed independently.
    This design does not pre-approve any other housekeeping change.
-4. **LLM 4.0 rename.** Rename solution, projects, packages, assemblies, namespaces, tests, tools,
+4. **LLM 10.0 rename.** Rename solution, projects, packages, assemblies, namespaces, tests, tools,
    examples, documentation, and all in-scope callers in one coordinated breaking change. Bump the
-   package family to `4.0.0` and remove the old names rather than retaining shims.
+   package family to `10.0.0` and remove the old names rather than retaining shims.
 5. **Image extraction and ChatEngine migration.** In one coordinated implementation unit, add
    `Darkspyre.Inference.Connect.Image`, adapt the ChatEngine contracts to provider-neutral values,
    move and test the ComfyUI transport, replace ChatEngine's local image transport implementation
@@ -264,17 +264,17 @@ Work proceeds in discrete, reviewable units:
    implementations remain live.
 6. **Release verification.** Restore, build, test, verify formatting, pack every package, audit
    dependencies for vulnerabilities, inspect package contents and dependency isolation, and perform
-   any agreed live smoke tests before creating the immutable `4.0.0` tag.
+   any agreed live smoke tests before creating the immutable `10.0.0` tag.
 7. **Later modalities.** Design and migrate Audio, STT, and TTS one capability at a time. Each
    migration updates all of its consumers and removes the previous duplicate implementation.
 
-Housekeeping must not partially apply the 4.0 naming or introduce parallel seams. Conversely, the
-4.0 migration must not absorb unrelated cleanup. If a prerequisite reveals that the agreed boundary
+Housekeeping must not partially apply the 10.0 naming or introduce parallel seams. Conversely, the
+10.0 migration must not absorb unrelated cleanup. If a prerequisite reveals that the agreed boundary
 cannot be preserved, implementation stops and the design is revisited.
 
-## 10. Completion criteria for 4.0
+## 10. Completion criteria for 10.0
 
-The initial 4.0 work is complete only when:
+The initial 10.0 work is complete only when:
 
 - shipping package, assembly, project, and namespace names match section 4;
 - the repository and physical capability layout match section 4, with every solution, project,
@@ -282,7 +282,7 @@ The initial 4.0 work is complete only when:
 - current repository instructions and build commands describe Inference rather than donor projects;
 - no embedded SecureStore or local persistence-store implementation remains, and any direct store
   consumer uses the package named in section 2;
-- all packages in the coordinated release report version `4.0.0`;
+- all packages in the coordinated release report version `10.0.0`;
 - the LLM and image APIs are provider-neutral and provider wire types remain internal;
 - AWS SDK references exist only in the Bedrock package and its tests/consumers;
 - ChatEngine uses the image package and no duplicate image-provider seam or ComfyUI transport remains;
