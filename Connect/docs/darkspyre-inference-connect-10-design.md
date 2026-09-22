@@ -345,3 +345,19 @@ GitHub Packages API:
 
 No family Git tag was created because the intended Tensor baseline was still in development. These
 10.0 capability packages remain historical and are not the current three-package release surface.
+
+## 12. Unified 10.1 publication
+
+On 2026-09-22, implementation commit `11b6ec7` established and published the approved three-package
+surface:
+
+- `Darkspyre.Inference.Common` 10.1.0
+- `Darkspyre.Inference.Connect` 10.1.0
+- `Darkspyre.Inference.Tensor` 10.1.0
+
+The Connect and Tensor archives each declare an exact `Darkspyre.Inference.Common` 10.1.0 dependency
+and do not contain the Common assembly. Tensor depends on the stable Darkspyre TensorSharp `2.8.6.2`
+package closure. Debug and Release builds completed with zero warnings; Connect passed 189 tests and
+Tensor passed 26 tests in each configuration. Formatting verification, vulnerability audits, package
+content/dependency inspection, and GitHub Packages readback all passed. No family tag was created
+because the Inference repository has no configured Git remote.

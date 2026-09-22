@@ -18,7 +18,7 @@ specifications.
 | Version line | `<net>.<release>.<minor>`: .NET generation, breaking-contract release, compatible tweak/fix |
 | Release model | `Common`, `Connect`, and `Tensor` always publish together at the one version declared in `/Directory.Build.props` |
 | Primary branch | `master` |
-| Lifecycle stage | Breaking consolidation and refactor toward the first unified `10.x.x` release baseline |
+| Lifecycle stage | Unified `10.1.0` release baseline published; compatible maintenance remains on `10.1.x` |
 | Jira project and parent | TBD |
 | Jira subject label | TBD |
 
@@ -133,6 +133,26 @@ build to .NET 11 advances the first component and resets the later components fo
 release (`11.<release>.<minor>`). Immutable releases are never overwritten. The family tag is
 created only after all three packages have passed their gates.
 
+## Published baseline
+
+The first unified three-package baseline was published to the private DarkspyreStudios GitHub
+Packages feed on 2026-09-22 from implementation commit `11b6ec7`:
+
+- `Darkspyre.Inference.Common` 10.1.0
+- `Darkspyre.Inference.Connect` 10.1.0
+- `Darkspyre.Inference.Tensor` 10.1.0
+
+Connect and Tensor declare `Darkspyre.Inference.Common` 10.1.0 as a NuGet dependency and do not
+embed its assembly. Tensor uses the stable Darkspyre TensorSharp fork package set `2.8.6.2`, built
+from the fork's `darkspyre` commit `05658d9c`.
+
+Both focused solutions passed zero-warning Debug and Release builds. Connect passed 189 tests and
+Tensor passed 26 tests in each configuration; Common's three tests appear in both focused totals.
+Formatting verification and transitive dependency vulnerability audits passed. The final archives
+were inspected for contents, dependency graphs, synchronized versions, and source commit metadata,
+then their published `10.1.0` versions were read back through the GitHub Packages API. No family tag
+was created because this repository has no configured Git remote.
+
 ## Canonical documents
 
 | Area | Authority |
@@ -158,6 +178,6 @@ required. Do not add compatibility packages, type forwarders, duplicate namespac
 APIs, or migration paths unless an approved design bible or Jira ticket explicitly requires one.
 
 Previously published packages remain historical releases on the private feed; they are not the
-design authority for the unified package family. Internal `10.x.x` work remains disposable until the
-first unified release. Provider behavior and stored credential identities are preserved unless an
-approved design explicitly changes them.
+design authority for the unified package family. `10.1.0` is the first unified compatibility
+baseline. Provider behavior and stored credential identities are preserved unless an approved design
+explicitly changes them.
