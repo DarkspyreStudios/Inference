@@ -18,7 +18,7 @@ specifications.
 | Version line | `<net>.<release>.<minor>`: .NET generation, breaking-contract release, compatible tweak/fix |
 | Release model | `Common`, `Connect`, and `Tensor` always publish together at the one version declared in `/Directory.Build.props` |
 | Primary branch | `master` |
-| Lifecycle stage | Coordinated `11.2.0` release candidate; `11.1.0` remains the latest published baseline until all three new packages are verified and published |
+| Lifecycle stage | Unified `11.2.0` release published; compatible maintenance remains on `11.2.x` |
 | Jira project and parent | TBD |
 | Jira subject label | TBD |
 
@@ -82,7 +82,7 @@ implementations live in separate assemblies within the same NuGet. Laya architec
 calibration, and its model-pack definition remain in the Tensor Decision Laya assembly. There is
 still no `Connect.Common` assembly: no implemented connector-only contract is shared broadly enough.
 
-The `11.2.0` Tensor source has the explicit `StartAsync`/`LoadAsync`/request/`UnloadAsync`/`StopAsync`
+The `11.2.0` Tensor release has the explicit `StartAsync`/`LoadAsync`/request/`UnloadAsync`/`StopAsync`
 contract described in `Tensor/README.md`. The host controls when to load an installed pack and when
 to end the resident model's lifetime; no request implicitly loads or downloads weights. Stop is
 terminal for an instance. An uncancelled teardown waits for active requests; cancellation requests
@@ -149,7 +149,32 @@ build to .NET 11 advances the first component and resets the later components fo
 release (`11.<release>.<minor>`). Immutable releases are never overwritten. The family tag is
 created only after all three packages have passed their gates.
 
-## Current published 11.1.0 baseline
+## Current published 11.2.0 baseline
+
+The synchronized three-package release was published to the private DarkspyreStudios GitHub
+Packages feed on 2026-09-22 from release-source commit `83c1ac3`:
+
+- `Darkspyre.Inference.Common` 11.2.0
+- `Darkspyre.Inference.Connect` 11.2.0
+- `Darkspyre.Inference.Tensor` 11.2.0
+
+This breaking-contract release keeps `net11.0` and changes Tensor from concrete capability
+assemblies to capability contracts plus separate Qwen, Supra, and Laya implementation assemblies.
+It adds explicit host-controlled model load, request, unload, and terminal stop semantics. No host,
+Bridge, API transport, or consuming Desktop application is included.
+
+Both focused solutions passed authenticated restore, zero-warning Debug and Release builds,
+formatting verification, and transitive dependency vulnerability audits. Connect passed 189 tests
+and Tensor passed 32 tests in each configuration; Common's three tests appear in both totals.
+Archive inspection confirmed `net11.0` assemblies and XML documentation, exact `11.2.0` Common
+dependencies in Connect and Tensor, and no embedded Common assembly in either product package. A
+fresh consumer restored and ran first against the local archives and then against the published
+feed. All three published versions were read back through the GitHub Packages API. This release did
+not rerun the earlier full-weight Supra generation smoke test; it verified package loading and the
+automated lifecycle tests. The repository still has no configured Git remote, so any family tag is
+local only until a remote is configured.
+
+## Published 11.1.0 baseline
 
 The synchronized three-package baseline was published to the private DarkspyreStudios GitHub
 Packages feed on 2026-09-22 from implementation commit `54dbc5a`:
