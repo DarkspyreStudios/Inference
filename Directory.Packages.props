@@ -12,6 +12,11 @@
     <PackageVersion Include="AWSSDK.SecurityToken" Version="4.0.5" />
     <PackageVersion Include="Darkspyre.Persistence" Version="1.0.0" />
     <PackageVersion Include="Darkspyre.SecureStore" Version="1.0.0" />
+    <PackageVersion Include="Darkspyre.TensorSharp.Backends.Cuda" Version="2.8.6-darkspyre.1" />
+    <PackageVersion Include="Darkspyre.TensorSharp.Chat" Version="2.8.6-darkspyre.1" />
+    <PackageVersion Include="Darkspyre.TensorSharp.Models" Version="2.8.6-darkspyre.1" />
+    <PackageVersion Include="Darkspyre.TensorSharp.Runtime" Version="2.8.6-darkspyre.1" />
+    <PackageVersion Include="Darkspyre.TensorSharp.Tensors" Version="2.8.6-darkspyre.1" />
     <PackageVersion Include="JsonSchema.Net" Version="9.4.0" />
     <PackageVersion Include="Microsoft.Bcl.Memory" Version="10.0.9" />
     <PackageVersion Include="Microsoft.Extensions.Http" Version="10.0.9" />

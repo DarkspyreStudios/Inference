@@ -17,5 +17,8 @@ LlmInferenceResult result = await inference.CompleteAsync(new LlmInferenceReques
 ```
 
 The same `ILlmInference` and `IImageInference` contracts are implemented by the corresponding Tensor
-packages. Rich provider-specific operations remain on their owning Connect APIs; Common is the
-portable inference lane, not a least-common-denominator replacement for provider management.
+packages. `IDecisionInference` adds a typed decision lane with distinct choice, ordinal-score, and
+boolean question and answer records; its polymorphic JSON discriminators can be projected by a host
+service without falling back to untyped dictionaries. Rich provider-specific operations remain on
+their owning packages; Common is the portable inference lane, not a least-common-denominator
+replacement for implementation management.

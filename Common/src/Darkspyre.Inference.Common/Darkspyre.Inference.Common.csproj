@@ -3,7 +3,7 @@
     <PackageId>Darkspyre.Inference.Common</PackageId>
     <AssemblyName>Darkspyre.Inference.Common</AssemblyName>
     <Description>Shared typed contracts for Darkspyre Connect and Tensor inference implementations.</Description>
-    <PackageTags>ai;inference;llm;image-generation</PackageTags>
+    <PackageTags>ai;inference;llm;image-generation;decision-models</PackageTags>
   </PropertyGroup>
 
   <ItemGroup>

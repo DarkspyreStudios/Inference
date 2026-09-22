@@ -65,7 +65,8 @@ Darkspyre.Inference.Common
 ├── Darkspyre.Inference.Connect.LLM
 ├── Darkspyre.Inference.Connect.Image
 ├── Darkspyre.Inference.Tensor.LLM
-└── Darkspyre.Inference.Tensor.Image
+├── Darkspyre.Inference.Tensor.Image
+└── Darkspyre.Inference.Tensor.Decision
 
 Darkspyre.Inference.Tensor.Common
 ├── Darkspyre.Inference.Tensor.LLM
@@ -78,11 +79,14 @@ truly share it. Connector-only contracts and models belong in `Darkspyre.Inferen
 Do not create a Common package until at least two implemented capabilities share a contract with the
 same semantics. Similar property names, such as endpoint or display-name fields, are not by themselves
 a shared contract. LLM messages, tools, typed requests/results, streaming events, and image-generation
-requests/results now qualify because both Connect and Tensor implement those semantics.
+requests/results now qualify because both Connect and Tensor implement those semantics. Typed
+decision requests and results also live in Common: the host-facing product and the in-process Laya
+implementation share the same semantic contract even though the first Connect release does not yet
+ship a decision provider.
 `Darkspyre.Inference.Tensor.Common` is limited to behavior actually shared by two Tensor capabilities,
-such as model packs, persistence-backed weights, and execution coordination. Laya-specific decision
-contracts remain in `Tensor.Decision` unless a second family implements the same decision semantics.
-There is still no `Connect.Common`: no implemented connector-only contract is shared broadly enough.
+such as model packs, persistence-backed weights, and execution coordination. Laya architecture,
+tokenization, calibration, and model-pack details remain in `Tensor.Decision`. There is still no
+`Connect.Common`: no implemented connector-only contract is shared broadly enough.
 
 The repository uses .NET Central Package Management (CPM). Package versions are declared centrally,
 and any implementation package may reference the centrally managed version of a NuGet dependency
@@ -141,6 +145,7 @@ family `v10.0.0` tag is created only when the intended baseline is complete.
 | Current LLM integration contract | `Connect/README.md` |
 | Managed-agent technical design | `Connect/docs/enhancements.md` |
 | Managed-agent verification | `Connect/docs/managed-agent-verification.md` |
+| Tensor package boundary, persistence, and implemented modalities | `Tensor/README.md` |
 | Detailed implementation work | Jira tickets; project and parent TBD |
 
 If this document conflicts with an approved design bible or Jira technical specification, stop and

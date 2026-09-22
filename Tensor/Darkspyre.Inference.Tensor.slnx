@@ -1,0 +1,24 @@
+<Solution>
+  <Folder Name="/Common/">
+    <Project Path="../Common/src/Darkspyre.Inference.Common/Darkspyre.Inference.Common.csproj" />
+    <Project Path="../Common/tests/Darkspyre.Inference.Common.Tests/Darkspyre.Inference.Common.Tests.csproj" />
+  </Folder>
+  <Folder Name="/src/Common/">
+    <Project Path="src/Common/Darkspyre.Inference.Tensor.Common/Darkspyre.Inference.Tensor.Common.csproj" />
+  </Folder>
+  <Folder Name="/src/Decision/">
+    <Project Path="src/Decision/Darkspyre.Inference.Tensor.Decision/Darkspyre.Inference.Tensor.Decision.csproj" />
+  </Folder>
+  <Folder Name="/src/LLM/">
+    <Project Path="src/LLM/Darkspyre.Inference.Tensor.LLM/Darkspyre.Inference.Tensor.LLM.csproj" />
+  </Folder>
+  <Folder Name="/tests/Common/">
+    <Project Path="tests/Common/Darkspyre.Inference.Tensor.Common.Tests/Darkspyre.Inference.Tensor.Common.Tests.csproj" />
+  </Folder>
+  <Folder Name="/tests/Decision/">
+    <Project Path="tests/Decision/Darkspyre.Inference.Tensor.Decision.Tests/Darkspyre.Inference.Tensor.Decision.Tests.csproj" />
+  </Folder>
+  <Folder Name="/tests/LLM/">
+    <Project Path="tests/LLM/Darkspyre.Inference.Tensor.LLM.Tests/Darkspyre.Inference.Tensor.LLM.Tests.csproj" />
+  </Folder>
+</Solution>
