@@ -18,7 +18,7 @@ specifications.
 | Version line | `<net>.<release>.<minor>`: .NET generation, breaking-contract release, compatible tweak/fix |
 | Release model | `Common`, `Connect`, and `Tensor` always publish together at the one version declared in `/Directory.Build.props` |
 | Primary branch | `master` |
-| Lifecycle stage | Unified `11.1.0` release baseline published; compatible maintenance remains on `11.1.x` |
+| Lifecycle stage | Coordinated `11.2.0` release candidate; `11.1.0` remains the latest published baseline until all three new packages are verified and published |
 | Jira project and parent | TBD |
 | Jira subject label | TBD |
 
@@ -82,14 +82,14 @@ implementations live in separate assemblies within the same NuGet. Laya architec
 calibration, and its model-pack definition remain in the Tensor Decision Laya assembly. There is
 still no `Connect.Common` assembly: no implemented connector-only contract is shared broadly enough.
 
-Current Tensor source has the explicit `StartAsync`/`LoadAsync`/request/`UnloadAsync`/`StopAsync`
+The `11.2.0` Tensor source has the explicit `StartAsync`/`LoadAsync`/request/`UnloadAsync`/`StopAsync`
 contract described in `Tensor/README.md`. The host controls when to load an installed pack and when
 to end the resident model's lifetime; no request implicitly loads or downloads weights. Stop is
 terminal for an instance. An uncancelled teardown waits for active requests; cancellation requests
-their prompt termination but must still wait for native execution to stop using the model. These
-source changes are unreleased: the published `11.1.0` Tensor package retains its earlier assembly
-layout and contracts. Do not pack, publish, tag, or bump the shared version without separate
-authorization.
+their prompt termination but must still wait for native execution to stop using the model. This is
+a breaking Tensor contract and assembly-layout change from the published `11.1.0` baseline; the
+coordinated family version advances to `11.2.0`. The host, Bridge, API transport, and Desktop
+application migrations remain outside this package release.
 
 The repository uses .NET Central Package Management (CPM). Package versions are declared centrally,
 and any implementation package may reference the centrally managed version of a NuGet dependency

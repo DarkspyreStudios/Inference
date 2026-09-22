@@ -844,6 +844,6 @@ dotnet pack Darkspyre.Inference.Connect.slnx -c Release --no-restore
 dotnet list Darkspyre.Inference.Connect.slnx package --vulnerable --include-transitive
 ```
 
-Releases are immutable tags such as `v11.1.0`. `Common`, `Connect`, and `Tensor` are built and
+Releases are immutable tags such as `v11.2.0`. `Common`, `Connect`, and `Tensor` are built and
 published in tandem from the approved local release environment to the private GitHub Packages feed;
 GitHub Actions is not the release pipeline.

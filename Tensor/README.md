@@ -10,8 +10,7 @@ filesystem default and still exposes only `IPersistenceStore`. TensorSharp uses 
 `FileStream` in place and temporarily projects non-file store streams when a native loader needs a
 path.
 
-Assemblies included in the Tensor product source (the next Tensor NuGet release will include all of
-them; the published 11.1.0 package still contains the earlier assembly layout):
+Assemblies included in the Tensor NuGet:
 
 - `Darkspyre.Inference.Tensor.Common` — the host-controlled model lifecycle, model packs,
   verification, direct-file persistence, and execution coordination.
