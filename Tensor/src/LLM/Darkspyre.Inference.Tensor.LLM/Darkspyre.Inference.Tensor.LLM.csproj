@@ -1,6 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <PackageId>Darkspyre.Inference.Tensor.LLM</PackageId>
+    <IsPackable>false</IsPackable>
     <AssemblyName>Darkspyre.Inference.Tensor.LLM</AssemblyName>
     <Description>In-process Qwen GGUF inference through TensorSharp using Darkspyre typed LLM contracts.</Description>
     <PackageTags>ai;inference;llm;qwen;gguf;tensorsharp</PackageTags>
@@ -24,7 +24,4 @@
     </Content>
   </ItemGroup>
 
-  <ItemGroup>
-    <None Include="..\..\..\README.md" Pack="true" PackagePath="README.md" />
-  </ItemGroup>
 </Project>

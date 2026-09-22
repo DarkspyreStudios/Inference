@@ -4,7 +4,7 @@
 tool/attachment, context reopen/fork, and same-run compaction scenarios. See the
 [verification record](managed-agent-verification.md). Agent DS integration remains consumer work.
 The sections below retain the agreed design and its implementation gates.
-See [contract handoff](agent-ds-contract-handoff.md) for the current 10.0.0 consumer migration.
+See [contract handoff](agent-ds-contract-handoff.md) for the current 10.1.0 consumer migration.
 
 **Date:** 2026-09-21. **Baseline:** Darkspyre.Inference.Connect.LLM 2.2.0, local revision
 `fe7bb66`; Agent DS `7cff782`; Pi `c7cdb460aa8a0cebef3446c4166729b8a0d97ead`.
@@ -564,7 +564,7 @@ Required consumer changes:
 
 No Agent DS schema migration or consumer code change is part of the library contract checkpoint.
 Library callers and examples are migrated together; Agent DS performs its portion against this handoff.
-Public breaking changes require the next major package release under repository rules; do not
+Public breaking changes advance the release component (`10.<release>.0`) under repository rules; do not
 choose, bump, publish, or overwrite a package during design.
 
 Codex App Server is not silently retained as a second default or automatic rollback lane. Before
@@ -754,7 +754,7 @@ The implementation unit should include deterministic tests for:
 
 Update the public capability documentation, agent-session examples, XML documentation, and README
 in the same implementation unit. Because this is an externally consumed public contract, version it
-according to the repository's semantic-versioning policy rather than adding a parallel compatibility
+according to the repository's `<net>.<release>.<minor>` policy rather than adding a parallel compatibility
 API.
 
 ### Non-goals

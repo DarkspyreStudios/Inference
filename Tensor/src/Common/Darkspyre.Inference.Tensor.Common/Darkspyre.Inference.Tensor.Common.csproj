@@ -1,6 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <PackageId>Darkspyre.Inference.Tensor.Common</PackageId>
+    <IsPackable>false</IsPackable>
     <AssemblyName>Darkspyre.Inference.Tensor.Common</AssemblyName>
     <Description>Shared model-pack, persistence, backend, and execution infrastructure for Darkspyre Tensor inference.</Description>
     <PackageTags>ai;inference;tensor;model-weights</PackageTags>
@@ -11,7 +11,4 @@
     <PackageReference Include="Darkspyre.TensorSharp.Runtime" />
   </ItemGroup>
 
-  <ItemGroup>
-    <None Include="..\..\..\README.md" Pack="true" PackagePath="README.md" />
-  </ItemGroup>
 </Project>

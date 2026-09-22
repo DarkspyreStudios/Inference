@@ -10,6 +10,9 @@
     <Project Path="src/LLM/Darkspyre.Inference.Connect.LLM.Bedrock/Darkspyre.Inference.Connect.LLM.Bedrock.csproj" />
     <Project Path="src/LLM/Darkspyre.Inference.Connect.LLM/Darkspyre.Inference.Connect.LLM.csproj" />
   </Folder>
+  <Folder Name="/src/">
+    <Project Path="src/Darkspyre.Inference.Connect/Darkspyre.Inference.Connect.csproj" />
+  </Folder>
   <Folder Name="/src/Image/">
     <Project Path="src/Image/Darkspyre.Inference.Connect.Image/Darkspyre.Inference.Connect.Image.csproj" />
   </Folder>

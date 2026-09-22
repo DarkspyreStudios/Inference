@@ -1,0 +1,37 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <PackageId>Darkspyre.Inference.Connect</PackageId>
+    <IncludeBuildOutput>false</IncludeBuildOutput>
+    <Description>Out-of-process LLM and image inference connectors for Darkspyre applications.</Description>
+    <PackageTags>ai;inference;llm;image-generation;openai;anthropic;bedrock;comfyui</PackageTags>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\Common\src\Darkspyre.Inference.Common\Darkspyre.Inference.Common.csproj" />
+    <ProjectReference Include="..\Image\Darkspyre.Inference.Connect.Image\Darkspyre.Inference.Connect.Image.csproj" PrivateAssets="all" />
+    <ProjectReference Include="..\LLM\Darkspyre.Inference.Connect.LLM\Darkspyre.Inference.Connect.LLM.csproj" PrivateAssets="all" />
+    <ProjectReference Include="..\LLM\Darkspyre.Inference.Connect.LLM.Bedrock\Darkspyre.Inference.Connect.LLM.Bedrock.csproj" PrivateAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="AWSSDK.Bedrock" />
+    <PackageReference Include="AWSSDK.BedrockAgentCore" />
+    <PackageReference Include="AWSSDK.BedrockRuntime" />
+    <PackageReference Include="AWSSDK.Core" />
+    <PackageReference Include="AWSSDK.SecurityToken" />
+    <PackageReference Include="JsonSchema.Net" />
+    <PackageReference Include="Microsoft.Extensions.Http" />
+    <PackageReference Include="Microsoft.ML.Tokenizers" />
+    <PackageReference Include="Microsoft.ML.Tokenizers.Data.O200kBase" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="..\..\README.md" Pack="true" PackagePath="README.md" />
+    <None Include="..\Image\Darkspyre.Inference.Connect.Image\bin\$(Configuration)\$(TargetFramework)\Darkspyre.Inference.Connect.Image.dll" Pack="true" PackagePath="lib\$(TargetFramework)" />
+    <None Include="..\Image\Darkspyre.Inference.Connect.Image\bin\$(Configuration)\$(TargetFramework)\Darkspyre.Inference.Connect.Image.xml" Pack="true" PackagePath="lib\$(TargetFramework)" />
+    <None Include="..\LLM\Darkspyre.Inference.Connect.LLM\bin\$(Configuration)\$(TargetFramework)\Darkspyre.Inference.Connect.LLM.dll" Pack="true" PackagePath="lib\$(TargetFramework)" />
+    <None Include="..\LLM\Darkspyre.Inference.Connect.LLM\bin\$(Configuration)\$(TargetFramework)\Darkspyre.Inference.Connect.LLM.xml" Pack="true" PackagePath="lib\$(TargetFramework)" />
+    <None Include="..\LLM\Darkspyre.Inference.Connect.LLM.Bedrock\bin\$(Configuration)\$(TargetFramework)\Darkspyre.Inference.Connect.LLM.Bedrock.dll" Pack="true" PackagePath="lib\$(TargetFramework)" />
+    <None Include="..\LLM\Darkspyre.Inference.Connect.LLM.Bedrock\bin\$(Configuration)\$(TargetFramework)\Darkspyre.Inference.Connect.LLM.Bedrock.xml" Pack="true" PackagePath="lib\$(TargetFramework)" />
+  </ItemGroup>
+</Project>

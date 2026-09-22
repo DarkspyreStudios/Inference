@@ -9,23 +9,24 @@ The repository root is `Darkspyre.Inference`. `Connect/`, `Console/`, and `Tenso
 product workspaces with separate responsibilities. A product workspace owns its solution, build
 configuration, package versions, documentation, tests, examples, and tools.
 
-`Connect` is the only active workspace in the 10.0 refactor. Empty product roots do not justify
-placeholder projects or packages.
+`Connect` and `Tensor` are active workspaces in the unified 10.x family. Empty product roots do not
+justify placeholder projects or packages.
 
-## Connect capability layout
+## Capability layout
 
-Connect groups shipping projects and tests by capability:
+Connect and Tensor group source assemblies and tests by capability:
 
 ```text
-Connect/
-  src/<Capability>/<PackageId>/
+<Product>/
+  src/<Capability>/<AssemblyName>/
+  src/<ProductPackageId>/
   tests/<Capability>/<TestProject>/
   examples/<ExampleProject>/
   tools/<ToolProject>/
 ```
 
 Examples may be capability-specific without another directory level. A tool that intentionally
-exercises several Connect capabilities remains at the product-level `tools/` directory.
+exercises several capabilities remains at the product-level `tools/` directory.
 
 The solution's logical folders mirror the physical capability grouping. Every relative project and
 content reference resolves from the project that declares it; moving a project includes updating and
@@ -33,19 +34,22 @@ verifying every reference in the same unit.
 
 ## Package identity
 
-For every shipping library, package ID, assembly name, project directory, project file, and root
-namespace match. Capability package names use `Darkspyre.Inference.Connect.<Capability>`. A
-provider-specific package appends the provider name, for example
-`Darkspyre.Inference.Connect.LLM.Bedrock`.
+The repository publishes exactly three packages: `Darkspyre.Inference.Common`,
+`Darkspyre.Inference.Connect`, and `Darkspyre.Inference.Tensor`. Common has one matching assembly.
+Connect and Tensor are product packages containing their capability-specific assemblies; their
+package projects do not create empty facade assemblies. Capability project, assembly, folder, and
+root-namespace names match, but those projects are not independently packable.
 
-There is no empty `Darkspyre.Inference` or `Darkspyre.Inference.Connect` umbrella package.
+The Connect and Tensor packages reference the `Darkspyre.Inference.Common` NuGet at the synchronized
+release version. They do not embed the Common assembly. All three package versions come from the
+single repository `/Directory.Build.props`; a project must not override that version.
 
 ## Provider dependencies
 
-A capability package contains its provider-neutral contracts and implementations that need no
-provider-specific third-party SDK. An implementation that requires such an SDK lives in a separate
-provider package referencing the capability package. Consumers that do not select that provider do
-not acquire its SDK dependencies.
+A capability assembly contains its provider-neutral contracts and implementations. An implementation
+that requires a provider-specific SDK remains in a separate provider assembly so its dependency and
+ownership boundary are visible in source. The Connect product NuGet includes all implemented
+Connect assemblies and declares the union of their runtime package dependencies.
 
 ## Storage dependencies
 
@@ -71,7 +75,9 @@ Capability-specific detail may live beside its examples or in `Connect/docs/`, b
 must not describe one capability as the whole Connect family once another capability ships.
 
 Every package includes a readable package README and the repository license. Pack verification must
-confirm that content references still resolve after directory changes.
+confirm that the Common assembly appears only in the Common package, Connect and Tensor declare an
+exact synchronized dependency on Common, and each product package contains every owned capability
+assembly plus its XML documentation.
 
 Package creation is a publish-stage action. During refactoring, do not run `dotnet pack` or create
 `.nupkg` artifacts unless the user explicitly says to publish. Ordinary verification stops at

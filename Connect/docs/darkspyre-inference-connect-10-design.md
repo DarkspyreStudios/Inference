@@ -1,9 +1,9 @@
 # Design: Darkspyre.Inference.Connect 10.0
 
-**Status:** The Inference repository structure, LLM package-family rename, provider-neutral Image
-package, and shared typed Common inference lane are implemented. Initial Common/Connect publication
-was authorized while Tensor development continues; application adoption remains outside this package
-unit. **Date:** 2026-09-22.
+**Status:** The Inference repository structure, LLM assembly-family rename, provider-neutral Image
+assembly, and shared typed Common inference lane are implemented. Capability-scoped 10.0 packages
+are historical. The approved 10.1 release surface is exactly Common, Connect, and Tensor, published
+in tandem from the one shared version. **Date:** 2026-09-22.
 **Baseline:** LlmConnect 3.0.0.
 
 This record preserves the agreed destination while prerequisite housekeeping refactors are made. It
@@ -14,7 +14,7 @@ change into the 10.0 migration.
 ## 1. Product model
 
 `Darkspyre.Inference` is the product family. `Connect` means a connection to an external inference
-provider. The capability follows `Connect` in package, assembly, and namespace names:
+provider. The capability follows `Connect` in assembly and namespace names:
 
 ```text
 Darkspyre.Inference.Connect.LLM
@@ -38,11 +38,11 @@ Darkspyre.Inference.Tensor.Image
 `Tensor` is the canonical spelling. Tensor is included here only to make the product boundary
 explicit; no Tensor project is part of this work.
 
-`Darkspyre.Inference` is the canonical repository. `Common`, `Connect`, `Console`, and `Tensor` are sibling
-product workspaces inside it. Connect is a product family made of capability-focused NuGet packages;
-it is not one monolithic assembly and it does not have an empty umbrella
-`Darkspyre.Inference.Connect` package. Common defines only semantic contracts implemented by both
-Connect and Tensor; it does not select or fall back between them.
+`Darkspyre.Inference` is the canonical repository. `Common`, `Connect`, `Console`, and `Tensor` are
+sibling product workspaces inside it. Connect is distributed as the
+`Darkspyre.Inference.Connect` NuGet containing capability-focused assemblies; it is not one
+monolithic assembly. Common defines only semantic contracts implemented by both Connect and Tensor;
+it is a separate package dependency and is never embedded into either product package.
 
 ## 2. Housekeeping prerequisite: shared storage packages
 
@@ -92,10 +92,11 @@ not part of the first implementation unit. Their current GMTools implementations
 they are migrated only after a separate design pass confirms each public contract. Empty packages,
 unwired forward projects, and duplicate seams are not created in advance.
 
-The rename and contract movement are intentionally breaking. All packages produced by the coordinated
-release use version `10.0.0`. There are no `Mathis.LlmConnect` compatibility packages, namespace
-forwarders, deprecated duplicate contracts, or other transition shims. Every in-scope consumer is
-updated in the same migration unit in accordance with L1 and L9.
+The rename and contract movement were intentionally breaking. The historical capability packages
+used version `10.0.0`. The first coordinated three-product release uses `10.1.0`. There are no
+`Mathis.LlmConnect` compatibility packages, namespace forwarders, deprecated duplicate contracts, or
+other transition shims. Every in-scope consumer is updated in the same migration unit in accordance
+with L1 and L9.
 
 ## 4. Package and project layout
 
@@ -108,8 +109,8 @@ The 10.0 names are:
 | New capability | `Darkspyre.Inference.Connect.Image` |
 | `Mathis.LlmConnect.slnx` | `Connect/Darkspyre.Inference.Connect.slnx` |
 
-Package ID, assembly name, project name, folder name, and root namespace match for each shipping
-library. The intended repository layout is:
+These remain assembly and namespace names in 10.1. They are no longer independently published
+package IDs. The intended repository layout is:
 
 ```text
 Inference/
@@ -119,6 +120,7 @@ Inference/
   Connect/
     Darkspyre.Inference.Connect.slnx
     src/
+      Darkspyre.Inference.Connect/
       LLM/
         Darkspyre.Inference.Connect.LLM/
         Darkspyre.Inference.Connect.LLM.Bedrock/
@@ -141,7 +143,11 @@ Inference/
 Source and test projects are grouped physically and logically by capability. The test split enforces
 dependency isolation: core LLM tests do not acquire AWS SDK dependencies, and image tests do not
 acquire LLM or Bedrock dependencies. Non-shipping tools and examples may reference more than one
-package when their purpose requires it.
+assembly when their purpose requires it.
+
+The 10.1 publish surface is `Darkspyre.Inference.Common`, `Darkspyre.Inference.Connect`, and
+`Darkspyre.Inference.Tensor`. Connect includes its LLM, Bedrock, and Image assemblies and declares a
+NuGet dependency on Common at the synchronized version; it does not include the Common assembly.
 
 Existing LLM-specific public vocabulary remains LLM-specific inside the new namespace. Types such as
 `ILlmClient`, `LlmConnection`, `LlmProviderService`, and the `AddLlmConnect` registration method do
@@ -153,7 +159,7 @@ introduced.
 LLM messages, tools, typed request/result objects, stream events, image generation request/results,
 provenance, and portable failures have the same semantics across Connect and Tensor and therefore live
 in `Darkspyre.Inference.Common`. Rich connection management, authentication, provider diagnostics,
-workflow preparation, and durable provider job state remain in their Connect capability package.
+workflow preparation, and durable provider job state remain in their Connect capability assembly.
 `Darkspyre.Inference.Connect.Common` is not created because no connector-only contract is shared by
 two implemented Connect capabilities.
 
@@ -168,14 +174,15 @@ before 10.0 is packed.
 
 ## 5. Provider implementation dependency rule
 
-A capability package contains its provider-neutral contracts and implementations that use the .NET
-base libraries, shared framework facilities, or the capability package's ordinary foundational
+A capability assembly contains its provider-neutral contracts and implementations that use the .NET
+base libraries, shared framework facilities, or the capability assembly's ordinary foundational
 dependencies. HTTP, WebSocket, and process-based adapters do not need separate packages solely because
 they speak to a named provider.
 
 An implementation that requires an additional provider-specific third-party SDK is placed in its own
-package. That package references the capability package, and consumers that do not use the provider
-do not acquire its SDK dependency. Package names append the provider to the full capability name:
+assembly. The Connect product package includes all implemented provider assemblies and therefore
+declares the union of their dependencies. Assembly names append the provider to the full capability
+name:
 
 ```text
 Darkspyre.Inference.Connect.LLM.Bedrock
@@ -184,10 +191,9 @@ Darkspyre.Inference.Connect.STT.<Provider>
 Darkspyre.Inference.Connect.TTS.<Provider>
 ```
 
-Bedrock remains the concrete precedent: AWS SDK dependencies stay in
-`Darkspyre.Inference.Connect.LLM.Bedrock`. The initial ComfyUI image implementation uses HTTP and
-WebSockets and therefore remains in `Darkspyre.Inference.Connect.Image`; it does not require a
-separate package.
+Bedrock remains the concrete precedent: AWS SDK usage stays in the
+`Darkspyre.Inference.Connect.LLM.Bedrock` assembly. The initial ComfyUI image implementation uses
+HTTP and WebSockets and therefore remains in `Darkspyre.Inference.Connect.Image`.
 
 ## 6. Ownership boundary
 
@@ -250,7 +256,8 @@ package.
 
 ## 8. Future capability boundaries
 
-The later capability packages follow the same ownership and dependency rules:
+Later capability assemblies follow the same ownership and dependency rules and join the Connect
+product package when implemented:
 
 - `Darkspyre.Inference.Connect.Audio` covers generated audio such as sound effects, not speech
   transcription or speech synthesis.
@@ -262,9 +269,9 @@ must be copied unchanged. Application-specific path services, file providers, pl
 memory caches, persistence, and orchestration remain in GMTools. Provider prompts, secret-bearing
 headers, and raw responses are never logged by the extracted implementations.
 
-Whether a named future implementation lives in the capability package or a provider child package is
-decided by the third-party SDK rule in section 5, not by provider popularity or by a desire to create a
-symmetrical project tree.
+Whether a named future implementation lives in the capability assembly or a provider child assembly
+is decided by the third-party SDK rule in section 5, not by provider popularity or by a desire to
+create a symmetrical project tree.
 
 ## 9. Sequencing
 
@@ -287,7 +294,7 @@ Work proceeds in discrete, reviewable units:
    of displaced application code occur in each consumer's own migration unit.
 6. **Shared inference lane.** Add `Darkspyre.Inference.Common` only after both Connect and Tensor have
    approved implementations, then expose explicit Connect Bind adapters and verify their typed maps.
-7. **Release verification.** Restore, build, test, verify formatting, pack every completed package, audit
+7. **Release verification.** Restore, build, test, verify formatting, pack all three product packages, audit
    dependencies for vulnerabilities, inspect package contents and dependency isolation, and perform
    any agreed live smoke tests before creating the immutable `10.0.0` tag.
 8. **Later modalities.** Design and migrate Audio, STT, and TTS one capability at a time. Each
@@ -301,15 +308,15 @@ cannot be preserved, implementation stops and the design is revisited.
 
 The initial 10.0 work is complete only when:
 
-- shipping package, assembly, project, and namespace names match section 4;
+- shipping package composition and assembly, project, and namespace names match section 4;
 - the repository and physical capability layout match section 4, with every solution, project,
   package-content, documentation, and tooling path resolving from its declaring file;
 - current repository instructions and build commands describe Inference rather than donor projects;
 - no embedded SecureStore or local persistence-store implementation remains, and any direct store
   consumer uses the package named in section 2;
-- all packages in the coordinated release report version `10.0.0`;
+- Common, Connect, and Tensor report the one version selected by `/Directory.Build.props`;
 - the LLM and image APIs are provider-neutral and provider wire types remain internal;
-- AWS SDK references exist only in the Bedrock package and its tests/consumers;
+- AWS SDK usage exists only in the Bedrock assembly and its tests/consumers;
 - Common and Connect packages contain only their owned contracts and implementations; consumer
   migrations remove duplicate application seams in their own completed units;
 - source, tests, examples, and current integration documentation contain no accidental references to
@@ -336,4 +343,5 @@ GitHub Packages API:
 - `Darkspyre.Inference.Connect.LLM` 10.0.0
 - `Darkspyre.Inference.Connect.LLM.Bedrock` 10.0.0
 
-No family Git tag was created because the intended Tensor 10.0.0 baseline is still in development.
+No family Git tag was created because the intended Tensor baseline was still in development. These
+10.0 capability packages remain historical and are not the current three-package release surface.

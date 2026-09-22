@@ -11,12 +11,12 @@ specifications.
 | Item | Value |
 |---|---|
 | Product family | `Darkspyre.Inference.*` |
-| Purpose | Consolidate Darkspyre Studios' inference-related implementations into one cohesive family of libraries and NuGet packages |
+| Purpose | Consolidate Darkspyre Studios' inference-related implementations into one cohesive family of libraries distributed as three NuGet packages |
 | Repository | `/Volumes/Data/Development/DarkspyreStudios/Inference` |
 | Target framework | `net10.0` |
 | Distribution | Private DarkspyreStudios NuGet feed |
-| Version line | `10.x.x`; the package major version follows the supported .NET major version |
-| Release model | All `Darkspyre.Inference.*` packages share one version; the initial 10.0 rollout may publish completed package IDs in stages before the immutable family tag |
+| Version line | `<net>.<release>.<minor>`: .NET generation, breaking-contract release, compatible tweak/fix |
+| Release model | `Common`, `Connect`, and `Tensor` always publish together at the one version declared in `/Directory.Build.props` |
 | Primary branch | `master` |
 | Lifecycle stage | Breaking consolidation and refactor toward the first unified `10.x.x` release baseline |
 | Jira project and parent | TBD |
@@ -26,26 +26,19 @@ The technical assembly and namespace prefix is `Darkspyre.Inference`.
 
 ## Package families
 
-`Connect` and `Tensor` are namespace and package-family headings. There is no
-`Darkspyre.Inference.Connect` or `Darkspyre.Inference.Tensor` package.
+The release surface contains exactly three NuGet packages. Capability names remain assembly and
+namespace boundaries inside their owning product package; they are not independently versioned or
+published NuGets.
 
 | Package or family | Responsibility |
 |---|---|
 | `Darkspyre.Inference.Common` | Interfaces and models genuinely shared by connector-based and in-process tensor inference |
-| `Darkspyre.Inference.Connect.*` | Family of connectors to out-of-process inference providers |
-| `Darkspyre.Inference.Connect.Common` | Interfaces and models shared by connector packages, but not by tensor packages |
-| `Darkspyre.Inference.Connect.LLM` | Connectors for hosted LLM providers, including Codex, Claude, the Antigravity (`AGV`) CLI, Bedrock, and the OpenAI API |
-| `Darkspyre.Inference.Connect.Image` | Connectors for out-of-process image providers, initially including ComfyUI |
-| `Darkspyre.Inference.Connect.STT` | Connectors for hosted speech-to-text providers |
-| `Darkspyre.Inference.Connect.TTS` | Connectors for hosted text-to-speech providers |
-| `Darkspyre.Inference.Tensor.*` | Family of inference engines loaded and executed inside the consuming process |
-| `Darkspyre.Inference.Tensor.LLM` | In-process text inference |
-| `Darkspyre.Inference.Tensor.Image` | In-process image inference |
-| `Darkspyre.Inference.Tensor.Decision` | In-process decision inference using Laya, an open-source BERT-based decision model |
+| `Darkspyre.Inference.Connect` | All implemented out-of-process connectors; contains capability-specific assemblies such as `.Connect.LLM`, `.Connect.LLM.Bedrock`, and `.Connect.Image` |
+| `Darkspyre.Inference.Tensor` | All implemented in-process engines; contains `.Tensor.Common`, `.Tensor.LLM`, `.Tensor.Image`, and `.Tensor.Decision` assemblies |
 
-`Darkspyre.Inference.Connect.LLM` and `Darkspyre.Inference.Connect.Image` are the implemented Connect
-capabilities in the first unified release. Image initially contains the HTTP/WebSocket ComfyUI
-transport. The implementation state of later capabilities is not defined by this document.
+LLM and Image are the implemented Connect capabilities in the first unified release. Image initially
+contains the HTTP/WebSocket ComfyUI transport. LLM, Image, and Decision are the implemented Tensor
+capabilities. The implementation state of later capabilities is not defined by this document.
 
 ## Execution boundary
 
@@ -62,20 +55,18 @@ The intended shared dependency flow is:
 
 ```text
 Darkspyre.Inference.Common
-├── Darkspyre.Inference.Connect.LLM
-├── Darkspyre.Inference.Connect.Image
-├── Darkspyre.Inference.Tensor.LLM
-├── Darkspyre.Inference.Tensor.Image
-└── Darkspyre.Inference.Tensor.Decision
+├── Darkspyre.Inference.Connect
+└── Darkspyre.Inference.Tensor
 
-Darkspyre.Inference.Tensor.Common
-├── Darkspyre.Inference.Tensor.LLM
-├── Darkspyre.Inference.Tensor.Image
-└── Darkspyre.Inference.Tensor.Decision
+Darkspyre.Inference.Tensor package
+└── Darkspyre.Inference.Tensor.Common assembly
+    ├── Darkspyre.Inference.Tensor.LLM assembly
+    ├── Darkspyre.Inference.Tensor.Image assembly
+    └── Darkspyre.Inference.Tensor.Decision assembly
 ```
 
-Place a contract or model in `Darkspyre.Inference.Common` only when connector and tensor packages
-truly share it. Connector-only contracts and models belong in `Darkspyre.Inference.Connect.Common`.
+Place a contract or model in `Darkspyre.Inference.Common` only when the Connect and Tensor products
+truly share it. Connector-only contracts and models belong in their Connect capability assembly.
 Do not create a Common package until at least two implemented capabilities share a contract with the
 same semantics. Similar property names, such as endpoint or display-name fields, are not by themselves
 a shared contract. LLM messages, tools, typed requests/results, streaming events, and image-generation
@@ -83,10 +74,12 @@ requests/results now qualify because both Connect and Tensor implement those sem
 decision requests and results also live in Common: the host-facing product and the in-process Laya
 implementation share the same semantic contract even though the first Connect release does not yet
 ship a decision provider.
-`Darkspyre.Inference.Tensor.Common` is limited to behavior actually shared by two Tensor capabilities,
-such as model packs, persistence-backed weights, and execution coordination. Laya architecture,
-tokenization, calibration, and model-pack details remain in `Tensor.Decision`. There is still no
-`Connect.Common`: no implemented connector-only contract is shared broadly enough.
+`Darkspyre.Inference.Tensor.Common` is an internal product assembly, included in the
+`Darkspyre.Inference.Tensor` NuGet, and is limited to behavior actually shared by two Tensor
+capabilities, such as model packs, persistence-backed weights, and execution coordination. Laya
+architecture, tokenization, calibration, and model-pack details remain in the Tensor Decision
+assembly. There is still no `Connect.Common` assembly: no implemented connector-only contract is
+shared broadly enough.
 
 The repository uses .NET Central Package Management (CPM). Package versions are declared centrally,
 and any implementation package may reference the centrally managed version of a NuGet dependency
@@ -104,7 +97,8 @@ include `Darkspyre.SecureStore` and `Darkspyre.Persistence`.
 Additional subset solutions are not yet defined by this document.
 
 There is no root `Darkspyre.Inference` package. The root solution is an aggregate build surface, not
-a package or assembly.
+a package or assembly. The product packaging projects are
+`Connect/src/Darkspyre.Inference.Connect` and `Tensor/src/Darkspyre.Inference.Tensor`.
 
 ## Required commands
 
@@ -129,10 +123,15 @@ project discovered by the subset solution.
 The Pack command is reserved for the explicitly authorized publish phase. Do not run it during the
 ongoing refactor or create package artifacts merely as a routine verification step.
 
-For the first 10.0 baseline only, the user explicitly authorized publishing the completed Common and
-Connect package IDs while Tensor remains under development. Those package versions are immutable;
-Tensor packages join the same 10.0.0 version as distinct package IDs after their own gates pass. The
-family `v10.0.0` tag is created only when the intended baseline is complete.
+Several capability-scoped packages were initially published at `10.0.0` and remain immutable
+historical artifacts. The first release of the three-package product surface uses `10.1.0`; those
+three packages are `Darkspyre.Inference.Common`, `Darkspyre.Inference.Connect`, and
+`Darkspyre.Inference.Tensor`. All read the same version from `/Directory.Build.props` and are always
+released in tandem. Compatible tweaks and bug fixes advance the minor component (`10.1.1`,
+`10.1.2`, and so on). A breaking contract advances the release component (`10.2.0`). Moving the
+build to .NET 11 advances the first component and resets the later components for the selected
+release (`11.<release>.<minor>`). Immutable releases are never overwritten. The family tag is
+created only after all three packages have passed their gates.
 
 ## Canonical documents
 

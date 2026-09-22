@@ -1,6 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <PackageId>Darkspyre.Inference.Tensor.Decision</PackageId>
+    <IsPackable>false</IsPackable>
     <AssemblyName>Darkspyre.Inference.Tensor.Decision</AssemblyName>
     <Description>In-process Laya typed-decision inference through TensorSharp using Darkspyre typed contracts.</Description>
     <PackageTags>ai;inference;decision;laya;modernbert;tensorsharp</PackageTags>
@@ -30,7 +30,4 @@
     </Content>
   </ItemGroup>
 
-  <ItemGroup>
-    <None Include="..\..\..\README.md" Pack="true" PackagePath="README.md" />
-  </ItemGroup>
 </Project>

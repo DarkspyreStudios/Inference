@@ -99,7 +99,7 @@ services.AddSingleton<ILlmConnectionSource>(services =>
     services.GetRequiredService<MySecureConnectionSource>());
 
 services.AddLlmConnect();
-services.AddLlmConnectBedrock(); // Only when the Bedrock package is referenced.
+services.AddLlmConnectBedrock(); // Bedrock is included in the Connect product package.
 ```
 
 `MySecureConnectionSource` owns application API keys, direct Codex device OAuth, optional Claude catalog OAuth, and optionally

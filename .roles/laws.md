@@ -154,13 +154,14 @@ The provider path is one-way:
 `Host -> provider-neutral capability -> selected adapter -> external provider`
 
 Hosts supply connection information, protected credentials, and policy through capability contracts.
-Adapters own provider protocols. A capability package does not reach into a host's persistence,
+Adapters own provider protocols. A capability assembly does not reach into a host's persistence,
 filesystem, media library, authorization system, or user interface.
 
 ## M-c — Concrete implementations stay inside their owning adapters
 
 Implementation-specific APIs are legal only inside the adapter that owns that implementation and the
-host composition root that selects it. Provider SDKs stay in provider-specific packages. Vault APIs
+host composition root that selects it. Provider SDK usage stays in provider-specific assemblies; the
+owning product NuGet declares those SDK package dependencies. Vault APIs
 stay in host tools or credential adapters, and persistence APIs stay outside shipping capability
 libraries unless the capability contract explicitly owns persistence.
 

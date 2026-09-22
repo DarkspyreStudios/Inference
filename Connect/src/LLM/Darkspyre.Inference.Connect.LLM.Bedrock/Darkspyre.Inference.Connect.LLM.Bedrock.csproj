@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <PackageId>Darkspyre.Inference.Connect.LLM.Bedrock</PackageId>
+    <IsPackable>false</IsPackable>
     <AssemblyName>Darkspyre.Inference.Connect.LLM.Bedrock</AssemblyName>
     <Description>AWS Bedrock Converse and AgentCore Harness transports for Darkspyre.Inference.Connect.LLM.</Description>
     <PackageTags>llm;ai;aws;bedrock;agentcore</PackageTags>
@@ -21,10 +21,6 @@
     <PackageReference Include="AWSSDK.BedrockRuntime" />
     <PackageReference Include="AWSSDK.Core" />
     <PackageReference Include="AWSSDK.SecurityToken" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <None Include="..\..\..\README.md" Pack="true" PackagePath="README.md" />
   </ItemGroup>
 
 </Project>

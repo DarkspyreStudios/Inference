@@ -4,17 +4,18 @@
 > No permission is granted to use, copy, modify, or distribute this software
 > without prior written authorization. See [LICENSE.md](LICENSE.md).
 
-`Darkspyre.Inference.Connect` is the provider-neutral package family shared by Darkspyre applications.
-`Darkspyre.Inference.Common` supplies the typed portable LLM and image inference contracts implemented
-by both Connect and Tensor.
-`Darkspyre.Inference.Connect.LLM` supports OpenAI Responses, OpenAI-compatible chat endpoints,
+`Darkspyre.Inference.Connect` is the out-of-process inference NuGet used by Darkspyre applications.
+It references `Darkspyre.Inference.Common`, which supplies the typed portable LLM and image inference
+contracts implemented by both Connect and Tensor; it does not embed the Common assembly.
+The `Darkspyre.Inference.Connect.LLM` assembly supports OpenAI Responses, OpenAI-compatible chat endpoints,
 Anthropic Messages, direct ChatGPT subscription access and the official Claude and Antigravity CLIs,
 host-executed tools, managed agents, structured output, streaming, discovery, account usage, and
-embeddings. `Darkspyre.Inference.Connect.Image` supplies the image-provider contracts and built-in
-ComfyUI HTTP/WebSocket transport. AWS Bedrock Converse and AgentCore Harness remain in the optional
-`Darkspyre.Inference.Connect.LLM.Bedrock` package.
+embeddings. The `Darkspyre.Inference.Connect.Image` assembly supplies the image-provider contracts
+and built-in ComfyUI HTTP/WebSocket transport. AWS Bedrock Converse and AgentCore Harness remain
+isolated in the `Darkspyre.Inference.Connect.LLM.Bedrock` assembly. All three assemblies ship in the
+one Connect NuGet.
 
-The packages target .NET 10 and can be consumed by both .NET 10 and .NET 11 applications. Credentials
+The packages target .NET 10. Credentials
 for direct API transports remain owned by the host through `ILlmConnectionSource`; the connector
 never owns an application database or secret store. Wrapped CLI transports instead use the official
 CLI's existing login, which Darkspyre.Inference.Connect.LLM never reads or copies. Optional Claude catalog OAuth is a
@@ -29,23 +30,24 @@ change.
 
 ## Packages
 
-**Version 10.0.0:** the former `Mathis.LlmConnect` package family is now
-`Darkspyre.Inference.Connect.LLM`. Package IDs, assemblies, projects, folders, and namespaces move
-together without compatibility shims. The direct Codex and host-owned managed-agent behavior from
-3.0.0 is retained; Claude and AgentCore retain provider-owned sessions.
+The coordinated release contains three NuGets. They always use the same version from the repository
+`Directory.Build.props` and publish together. Version numbers use
+`<net>.<release>.<minor>`: .NET generation, breaking-contract release, and compatible tweak/fix.
+The direct Codex and host-owned managed-agent behavior from the former `Mathis.LlmConnect` 3.0.0 is
+retained; Claude and AgentCore retain provider-owned sessions.
 See the [Agent DS handoff](docs/agent-ds-contract-handoff.md),
 [technical design](docs/enhancements.md), and [verification record](docs/managed-agent-verification.md).
 
 | Package | Purpose |
 |---|---|
-| `Darkspyre.Inference.Common` | Typed LLM and image requests, results, capabilities, streaming events, provenance, and failures shared by Connect and Tensor |
-| `Darkspyre.Inference.Connect.LLM` | Core transports, authentication, structured output, streaming, discovery, and embeddings |
-| `Darkspyre.Inference.Connect.LLM.Bedrock` | Optional AWS Bedrock Converse and AgentCore Harness transports |
-| `Darkspyre.Inference.Connect.Image` | Image workflow preparation, health, upload, submission, progress, polling, download, and cancellation; includes ComfyUI |
+| `Darkspyre.Inference.Common` | Typed LLM, image, and decision requests, results, capabilities, streaming events, provenance, and failures shared by Connect and Tensor |
+| `Darkspyre.Inference.Connect` | Core LLM transports, Bedrock/AgentCore, and ComfyUI image connection assemblies |
+| `Darkspyre.Inference.Tensor` | In-process LLM, image, and typed-decision inference |
 
-There is no `Darkspyre.Inference.Connect.Common` package. Connector-only endpoint, authentication,
-provider-management, and job contracts remain in their capability packages. Only semantic inference
-contracts that are also implemented by Tensor belong in `Darkspyre.Inference.Common`.
+There is no `Darkspyre.Inference.Connect.Common` package or assembly. Connector-only endpoint,
+authentication, provider-management, and job contracts remain in their capability assemblies. Only
+semantic inference contracts that are also implemented by Tensor belong in
+`Darkspyre.Inference.Common`.
 
 ## Portable inference lane
 
@@ -89,7 +91,6 @@ Register the connector and provide the host-owned connection source:
 services.AddLlmConnect();
 services.AddScoped<ILlmConnectionSource, MyProtectedConnectionSource>();
 
-// Optional, when the host references Darkspyre.Inference.Connect.LLM.Bedrock:
 services.AddLlmConnectBedrock();
 ```
 
@@ -843,4 +844,6 @@ dotnet pack Darkspyre.Inference.Connect.slnx -c Release --no-restore
 dotnet list Darkspyre.Inference.Connect.slnx package --vulnerable --include-transitive
 ```
 
-Releases are immutable semantic-version tags such as `v10.0.0`. All packages are built and published from the approved local release environment to the private GitHub Packages feed; GitHub Actions is not the release pipeline.
+Releases are immutable tags such as `v10.1.0`. `Common`, `Connect`, and `Tensor` are built and
+published in tandem from the approved local release environment to the private GitHub Packages feed;
+GitHub Actions is not the release pipeline.

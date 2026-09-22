@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <PackageId>Darkspyre.Inference.Connect.Image</PackageId>
+    <IsPackable>false</IsPackable>
     <AssemblyName>Darkspyre.Inference.Connect.Image</AssemblyName>
     <Description>Provider-neutral image-generation connections with ComfyUI workflow, job, progress, download, and cancellation support.</Description>
     <PackageTags>ai;image-generation;comfyui;websocket</PackageTags>
@@ -17,10 +17,6 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="Darkspyre.Inference.Connect.Image.Tests" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <None Include="..\..\..\README.md" Pack="true" PackagePath="README.md" />
   </ItemGroup>
 
 </Project>
