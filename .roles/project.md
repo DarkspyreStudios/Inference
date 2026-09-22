@@ -18,7 +18,7 @@ specifications.
 | Version line | `<net>.<release>.<minor>`: .NET generation, breaking-contract release, compatible tweak/fix |
 | Release model | `Common`, `Connect`, and `Tensor` always publish together at the one version declared in `/Directory.Build.props` |
 | Primary branch | `master` |
-| Lifecycle stage | Unified `11.1.0` release candidate verified; publication pending |
+| Lifecycle stage | Unified `11.1.0` release baseline published; compatible maintenance remains on `11.1.x` |
 | Jira project and parent | TBD |
 | Jira subject label | TBD |
 
@@ -139,11 +139,18 @@ build to .NET 11 advances the first component and resets the later components fo
 release (`11.<release>.<minor>`). Immutable releases are never overwritten. The family tag is
 created only after all three packages have passed their gates.
 
-## Current 11.1.0 release candidate
+## Current published 11.1.0 baseline
 
-The current family build targets `net11.0` with SDK `11.0.100-rc.1.26425.128` and version `11.1.0`.
-The framework-generation change does not alter the approved inference contracts and does not include
-upgrading any consuming Desktop application.
+The synchronized three-package baseline was published to the private DarkspyreStudios GitHub
+Packages feed on 2026-09-22 from implementation commit `54dbc5a`:
+
+- `Darkspyre.Inference.Common` 11.1.0
+- `Darkspyre.Inference.Connect` 11.1.0
+- `Darkspyre.Inference.Tensor` 11.1.0
+
+The family targets `net11.0` with SDK `11.0.100-rc.1.26425.128`. The framework-generation change
+does not alter the approved inference contracts and does not include upgrading any consuming Desktop
+application.
 
 The release uses `Darkspyre.ML.Tokenizers` 2.0.0.1 from its `darkspyre` commit `b1b44954` for the
 SentencePiece disabled-special-token correction. Connect continues to use the public
@@ -155,7 +162,11 @@ Both focused solutions pass zero-warning Debug and Release builds. Connect passe
 Tensor passes 26 tests in each configuration; Common's three tests appear in both focused totals.
 Formatting verification and transitive dependency vulnerability audits pass. The installed
 Supra2-IMG model pack also completes a one-step CPU generation with seed 42 and produces a valid
-256x256 PNG through the `net11.0` implementation.
+256x256 PNG through both the source projects and a downstream consumer of the final package archives.
+Archive inspection confirms the `net11.0` assemblies, the synchronized Common dependency, the
+absence of embedded Common assemblies in Connect and Tensor, and the intended tokenizer dependency
+graph. All three published versions were read back through the GitHub Packages API. No family tag
+was created because this repository has no configured Git remote.
 
 ## Published 10.1.0 baseline
 
