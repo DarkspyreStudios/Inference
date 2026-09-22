@@ -72,3 +72,7 @@ must not describe one capability as the whole Connect family once another capabi
 
 Every package includes a readable package README and the repository license. Pack verification must
 confirm that content references still resolve after directory changes.
+
+Package creation is a publish-stage action. During refactoring, do not run `dotnet pack` or create
+`.nupkg` artifacts unless the user explicitly says to publish. Ordinary verification stops at
+restore, zero-warning build, tests, format verification, and the dependency vulnerability audit.

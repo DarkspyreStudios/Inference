@@ -118,6 +118,9 @@ project discovered by the subset solution.
 | Pack | `dotnet pack Darkspyre.Inference.Connect.slnx --no-build --no-restore` |
 | Dependency audit | `dotnet list Darkspyre.Inference.Connect.slnx package --vulnerable --include-transitive` |
 
+The Pack command is reserved for the explicitly authorized publish phase. Do not run it during the
+ongoing refactor or create package artifacts merely as a routine verification step.
+
 ## Canonical documents
 
 | Area | Authority |
