@@ -1,0 +1,138 @@
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
+using Darkspyre.Inference.Connect.LLM.Internal;
+
+namespace Darkspyre.Inference.Connect.LLM.Providers;
+
+internal sealed class ClaudeAuthenticator(HttpClient http)
+    : OAuthAuthenticatorBase(http), IClaudePkceLogin
+{
+    private const string AuthorizeUrl = "https://claude.com/cai/oauth/authorize";
+    private const string Scopes =
+        "user:profile user:inference user:sessions:claude_code user:mcp_servers user:file_upload";
+
+    internal const string ManualRedirectUri =
+        "https://console.anthropic.com/oauth/code/callback";
+
+    public override LlmTransport Transport => LlmTransport.AnthropicClaudeCli;
+
+    protected override string ClientId => "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
+
+    protected override string TokenEndpoint => "https://platform.claude.com/v1/oauth/token";
+
+    public LlmAuthorizationSession Start(string redirectUri)
+    {
+        string codeVerifier = Base64Url(RandomNumberGenerator.GetBytes(32));
+        string codeChallenge = Base64Url(
+            SHA256.HashData(Encoding.ASCII.GetBytes(codeVerifier)));
+        string state = Base64Url(RandomNumberGenerator.GetBytes(32));
+        var query = new Dictionary<string, string>
+        {
+            ["code"] = "true",
+            ["client_id"] = ClientId,
+            ["response_type"] = "code",
+            ["redirect_uri"] = redirectUri,
+            ["scope"] = Scopes,
+            ["code_challenge"] = codeChallenge,
+            ["code_challenge_method"] = "S256",
+            ["state"] = state
+        };
+        string queryString = string.Join(
+            "&",
+            query.Select(pair => $"{pair.Key}={Uri.EscapeDataString(pair.Value)}"));
+        return new LlmAuthorizationSession
+        {
+            AuthorizeUrl = $"{AuthorizeUrl}?{queryString}",
+            State = state,
+            CodeVerifier = codeVerifier,
+            RedirectUri = redirectUri
+        };
+    }
+
+    public async Task<LlmCredential> CompleteAsync(
+        LlmAuthorizationSession session,
+        string code,
+        string state,
+        CancellationToken cancellationToken = default)
+    {
+        if (!string.Equals(state, session.State, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("Claude login state mismatch; start the login again.");
+        }
+
+        using var request = new HttpRequestMessage(HttpMethod.Post, TokenEndpoint)
+        {
+            Content = JsonContent.Create(new
+            {
+                grant_type = "authorization_code",
+                code,
+                redirect_uri = session.RedirectUri,
+                client_id = ClientId,
+                code_verifier = session.CodeVerifier,
+                state
+            })
+        };
+        using HttpResponseMessage response = await Http.SendAsync(request, cancellationToken);
+        await ThrowIfUnsuccessfulAsync(response, "Claude token exchange", cancellationToken);
+        using JsonDocument document = await ParseJsonAsync(response, cancellationToken);
+        return BuildCredential(document.RootElement, previous: null);
+    }
+
+    protected override HttpRequestMessage BuildRefreshRequest(LlmOAuthTokens tokens) =>
+        new(HttpMethod.Post, TokenEndpoint)
+        {
+            Content = JsonContent.Create(new
+            {
+                grant_type = "refresh_token",
+                refresh_token = tokens.RefreshToken,
+                client_id = ClientId,
+                scope = Scopes
+            })
+        };
+
+    protected override LlmCredential MapTokens(
+        JsonElement tokenResponse,
+        LlmOAuthTokens previous) => BuildCredential(tokenResponse, previous);
+
+    private static LlmCredential BuildCredential(
+        JsonElement root,
+        LlmOAuthTokens? previous)
+    {
+        string accessToken = LlmJson.GetString(root, "access_token")
+            ?? previous?.AccessToken
+            ?? string.Empty;
+        int? expiresIn = LlmJson.GetInt(root, "expires_in");
+        long? expiresAt = expiresIn is { } seconds
+            ? DateTimeOffset.UtcNow.AddSeconds(seconds).ToUnixTimeSeconds()
+            : Jwt.ReadExpiration(accessToken)?.ToUnixTimeSeconds()
+                ?? previous?.ExpiresAtUnixSeconds;
+        string? scope = LlmJson.GetString(root, "scope");
+        IReadOnlyList<string>? scopes = scope?.Split(
+            ' ',
+            StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            ?? previous?.Scopes;
+        string? email = previous?.Email;
+        if (root.TryGetProperty("account", out JsonElement account)
+            && account.ValueKind == JsonValueKind.Object)
+        {
+            email = LlmJson.GetString(account, "email_address") ?? email;
+        }
+
+        return new LlmCredential
+        {
+            OAuth = new LlmOAuthTokens
+            {
+                AccessToken = accessToken,
+                RefreshToken = LlmJson.GetString(root, "refresh_token")
+                    ?? previous?.RefreshToken,
+                ExpiresAtUnixSeconds = expiresAt,
+                Email = email,
+                Scopes = scopes
+            }
+        };
+    }
+
+    private static string Base64Url(byte[] bytes) =>
+        Convert.ToBase64String(bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_');
+}

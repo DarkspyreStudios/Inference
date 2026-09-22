@@ -1,0 +1,481 @@
+using System.Runtime.CompilerServices;
+using System.Text;
+using System.Text.Json;
+using System.Text.Json.Nodes;
+using Darkspyre.Inference.Connect.LLM.Internal;
+using Microsoft.ML.Tokenizers;
+
+namespace Darkspyre.Inference.Connect.LLM.Providers;
+
+/// <summary>Shared Responses projection, streaming and retained-output mapping.</summary>
+internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(http), ILlmContextEstimator
+{
+    private static readonly Lazy<TiktokenTokenizer> Tokenizer = new(() => TiktokenTokenizer.CreateForEncoding("o200k_base"));
+
+    public long? EstimateInputTokens(LlmConnection connection, LlmChatRequest request)
+    {
+        ValidateRequest(connection, request, GetCapabilities(connection, request.ModelId));
+        var enforcement = request.StructuredOutput is null ? (LlmStructuredOutputEnforcement?)null
+            : StructuredOutput.ResolveEnforcement(request.StructuredOutput, GetCapabilities(connection, request.ModelId));
+        JsonObject payload = BuildPayload(connection, request, enforcement);
+        RequestJson.ApplyProviderOptions(payload, connection, request);
+        if (request.Messages.Any(message => message.Attachments.Count > 0
+            || message.ToolResults.Any(result => result.Attachments.Count > 0)
+            || message.ResponseState?.Payload.Contains("encrypted_content", StringComparison.Ordinal) == true))
+        {
+            return null;
+        }
+        // Tokenize the actual textual projection, including schemas/framing. This is an estimate:
+        // server framing/current-model tokenization can differ from the bundled o200k encoding.
+        var input = new JsonObject
+        {
+            ["input"] = payload["input"]?.DeepClone(),
+            ["instructions"] = payload["instructions"]?.DeepClone(),
+            ["tools"] = payload["tools"]?.DeepClone(),
+            ["text"] = payload["text"]?.DeepClone()
+        };
+        return Tokenizer.Value.CountTokens(input.ToJsonString());
+    }
+
+    public override async IAsyncEnumerable<LlmStreamEvent> StreamAsync(
+        LlmConnection connection,
+        LlmChatRequest request,
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        LlmProviderCapabilities capabilities = GetCapabilities(connection, request.ModelId);
+        ValidateRequest(connection, request, capabilities);
+        LlmStructuredOutputEnforcement? enforcement = request.StructuredOutput is null
+            ? null
+            : StructuredOutput.ResolveEnforcement(request.StructuredOutput, capabilities);
+
+        JsonObject payload = BuildPayload(connection, request, enforcement);
+        RequestJson.ApplyProviderOptions(payload, connection, request);
+        using var httpRequest = new HttpRequestMessage(
+            HttpMethod.Post,
+            ProviderHttp.BuildUri(connection, "responses"))
+        {
+            Content = JsonContent.Create(payload)
+        };
+        ApplyRequestHeaders(httpRequest, connection, request);
+
+        LlmCredential? credential = LlmCredential.Parse(connection.Credential);
+        using HttpResponseMessage response = await Http.SendAsync(
+            httpRequest,
+            HttpCompletionOption.ResponseHeadersRead,
+            cancellationToken);
+        await ProviderHttp.ThrowIfUnsuccessfulAsync(
+            response,
+            Transport,
+            credential,
+            "OpenAI Responses request",
+            cancellationToken);
+
+        await using Stream stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+        var text = new StringBuilder();
+        var refusal = new StringBuilder();
+        var toolCallStream = new OpenAiToolCallStream();
+        var completedOutput = new SortedDictionary<int, JsonElement>();
+        bool completed = false;
+
+        await foreach (string data in Sse.ReadDataPayloadsAsync(stream, cancellationToken))
+        {
+            if (data == "[DONE]")
+            {
+                continue;
+            }
+
+            JsonDocument document;
+            try
+            {
+                document = JsonDocument.Parse(data);
+            }
+            catch (JsonException exception)
+            {
+                throw ProtocolException(
+                    "OpenAI Responses returned a malformed stream event.",
+                    response,
+                    data,
+                    credential,
+                    exception);
+            }
+
+            using (document)
+            {
+                JsonElement root = document.RootElement;
+                string? type = LlmJson.GetString(root, "type");
+                switch (type)
+                {
+                    case "response.text.delta":
+                    case "response.output_text.delta":
+                        {
+                            string delta = LlmJson.GetString(root, "delta") ?? string.Empty;
+                            if (delta.Length > 0)
+                            {
+                                text.Append(delta);
+                                yield return new LlmTextDeltaEvent(delta);
+                            }
+
+                            break;
+                        }
+
+                    case "response.reasoning_summary_text.delta":
+                    case "response.reasoning_text.delta":
+                        if (LlmJson.GetString(root, "delta") is { Length: > 0 } reasoning)
+                        {
+                            yield return new LlmReasoningDeltaEvent(reasoning,
+                                type == "response.reasoning_summary_text.delta");
+                        }
+                        break;
+                    case "response.refusal.delta":
+                        {
+                            string delta = LlmJson.GetString(root, "delta") ?? string.Empty;
+                            if (delta.Length > 0)
+                            {
+                                refusal.Append(delta);
+                                yield return new LlmRefusalDeltaEvent(delta);
+                            }
+
+                            break;
+                        }
+
+                    case "response.output_item.added":
+                        foreach (LlmStreamEvent toolEvent in toolCallStream.ObserveAdded(root))
+                        {
+                            yield return toolEvent;
+                        }
+
+                        break;
+
+                    case "response.function_call_arguments.delta":
+                        foreach (LlmStreamEvent toolEvent in toolCallStream.ObserveArgumentsDelta(root))
+                        {
+                            yield return toolEvent;
+                        }
+
+                        break;
+
+                    case "response.output_item.done":
+                        if (root.TryGetProperty("item", out var outputItem))
+                        {
+                            int index = LlmJson.GetInt(root, "output_index") ?? completedOutput.Count;
+                            completedOutput[index] = outputItem.Clone();
+                        }
+                        foreach (LlmStreamEvent toolEvent in toolCallStream.ObserveDone(root))
+                        {
+                            yield return toolEvent;
+                        }
+
+                        break;
+
+                    case "response.completed":
+                    case "response.incomplete":
+                    case "response.failed":
+                    case "response.cancelled":
+                        {
+                            if (LlmJson.GetObject(root, "response") is { } failed
+                                && LlmJson.GetObject(failed, "error") is { } error
+                                && LlmJson.GetString(error, "code") == "context_length_exceeded")
+                            {
+                                throw StreamError(failed, response, data, credential);
+                            }
+                            LlmChatResult result = BuildResult(
+                                CompleteOutput(root, completedOutput),
+                                response,
+                                data,
+                                text.ToString(),
+                                refusal.ToString(),
+                                request.StructuredOutput,
+                                enforcement,
+                                credential,
+                                connection,
+                                request.ModelId);
+                            foreach (LlmStreamEvent toolEvent in toolCallStream.CompleteMissing(result.ToolCalls))
+                            {
+                                yield return toolEvent;
+                            }
+
+                            completed = true;
+                            yield return new LlmCompletionEvent(result);
+                            break;
+                        }
+
+                    case "error":
+                        throw StreamError(root, response, data, credential);
+                }
+            }
+
+            if (completed)
+            {
+                yield break;
+            }
+        }
+
+        throw ProtocolException(
+            "OpenAI Responses ended without a terminal event.",
+            response,
+            string.Empty,
+            credential);
+    }
+
+    protected virtual JsonObject BuildPayload(
+        LlmConnection connection,
+        LlmChatRequest request,
+        LlmStructuredOutputEnforcement? enforcement)
+    {
+        JsonArray input = OpenAiResponsesTools.BuildInput(
+            request,
+            connection,
+            OpenAiResponsesTools.BuildMessage);
+
+        var payload = new JsonObject
+        {
+            ["model"] = request.ModelId,
+            ["input"] = input,
+            ["stream"] = true,
+            ["store"] = false
+        };
+
+        if (!string.IsNullOrWhiteSpace(request.Instructions))
+        {
+            payload["instructions"] = request.Instructions;
+        }
+
+        if (request.Temperature is double temperature)
+        {
+            payload["temperature"] = temperature;
+        }
+
+        if (request.MaxOutputTokens is int maxOutputTokens)
+        {
+            payload["max_output_tokens"] = maxOutputTokens;
+        }
+
+        if (!string.IsNullOrWhiteSpace(request.ReasoningEffort))
+        {
+            payload["reasoning"] = new JsonObject { ["effort"] = request.ReasoningEffort };
+        }
+
+        // Stateless ordinary responses need their reasoning state just as tool responses do.
+        payload["include"] = new JsonArray("reasoning.encrypted_content");
+        if (request.Tools.Count > 0)
+        {
+            payload["tools"] = OpenAiResponsesTools.BuildTools(request.Tools);
+        }
+
+        if (request.ToolChoice is { } toolChoice)
+        {
+            payload["tool_choice"] = OpenAiResponsesTools.BuildToolChoice(toolChoice);
+        }
+
+        if (request.AllowParallelToolCalls is bool allowParallelToolCalls)
+        {
+            payload["parallel_tool_calls"] = allowParallelToolCalls;
+        }
+
+        if (request.StructuredOutput is { } structured
+            && enforcement != LlmStructuredOutputEnforcement.LocalValidationOnly)
+        {
+            payload["text"] = BuildStructuredText(structured, enforcement!.Value);
+        }
+
+        if (request.ConversationKey is not null)
+        {
+            payload["prompt_cache_key"] = request.ConversationKey;
+        }
+        return payload;
+    }
+
+    private static JsonElement CompleteOutput(JsonElement root, SortedDictionary<int, JsonElement> completedOutput)
+    {
+        JsonElement response = root.TryGetProperty("response", out var nested) ? nested : root;
+        if (completedOutput.Count == 0 || (response.TryGetProperty("output", out var output)
+                && output.ValueKind == JsonValueKind.Array && output.GetArrayLength() > 0))
+        {
+            return root;
+        }
+        // Codex SSE may provide complete items only in output_item.done and an empty terminal
+        // output array. Preserve those items in source order for tool completion and future replay.
+        var node = JsonNode.Parse(root.GetRawText())!.AsObject();
+        var target = node["response"] as JsonObject ?? node;
+        target["output"] = new JsonArray([.. completedOutput.Values.Select(item => JsonNode.Parse(item.GetRawText()))]);
+        return JsonSerializer.SerializeToElement(node);
+    }
+
+    protected virtual void ApplyRequestHeaders(
+        HttpRequestMessage message, LlmConnection connection, LlmChatRequest request) =>
+        ProviderHttp.ApplyHeaders(message, connection);
+
+    private static JsonObject BuildStructuredText(
+        LlmStructuredOutputRequest structured,
+        LlmStructuredOutputEnforcement enforcement)
+    {
+        JsonObject format = enforcement switch
+        {
+            LlmStructuredOutputEnforcement.ProviderJsonSchema => new JsonObject
+            {
+                ["type"] = "json_schema",
+                ["name"] = structured.Name,
+                ["strict"] = structured.Strict,
+                ["schema"] = JsonNode.Parse(structured.Schema.GetRawText())
+            },
+            LlmStructuredOutputEnforcement.ProviderJsonObject => new JsonObject
+            {
+                ["type"] = "json_object"
+            },
+            LlmStructuredOutputEnforcement.LocalValidationOnly =>
+                throw new ArgumentException("Local validation does not add a provider response format.", nameof(enforcement)),
+            _ => throw new ArgumentOutOfRangeException(nameof(enforcement))
+        };
+
+        if (!string.IsNullOrWhiteSpace(structured.Description)
+            && enforcement == LlmStructuredOutputEnforcement.ProviderJsonSchema)
+        {
+            format["description"] = structured.Description;
+        }
+
+        return new JsonObject { ["format"] = format };
+    }
+
+    private static LlmChatResult BuildResult(
+        JsonElement eventRoot,
+        HttpResponseMessage response,
+        string rawEvent,
+        string streamedText,
+        string streamedRefusal,
+        LlmStructuredOutputRequest? structuredRequest,
+        LlmStructuredOutputEnforcement? enforcement,
+        LlmCredential? credential,
+        LlmConnection connection,
+        string modelId)
+    {
+        JsonElement responseRoot = eventRoot.TryGetProperty("response", out JsonElement nested)
+            && nested.ValueKind == JsonValueKind.Object
+                ? nested
+                : eventRoot;
+
+        (string finalText, string finalRefusal) = ReadOutput(responseRoot);
+        finalText = finalText.Length > 0 ? finalText : streamedText;
+        finalRefusal = finalRefusal.Length > 0 ? finalRefusal : streamedRefusal;
+
+        LlmToolCall[] toolCalls = OpenAiResponsesTools.ReadToolCalls(responseRoot);
+
+        string? providerStatus = LlmJson.GetString(responseRoot, "status");
+        LlmCompletionStatus status = finalRefusal.Length > 0
+            ? LlmCompletionStatus.Refused
+            : providerStatus switch
+            {
+                "incomplete" or "cancelled" => LlmCompletionStatus.Incomplete,
+                "failed" => LlmCompletionStatus.Failed,
+                _ when toolCalls.Length > 0 => LlmCompletionStatus.RequiresAction,
+                _ => LlmCompletionStatus.Completed
+            };
+
+        string? incompleteReason = LlmJson.GetObject(responseRoot, "incomplete_details") is { } details
+            ? LlmJson.GetString(details, "reason")
+            : null;
+
+        LlmStructuredOutputValidation? validation = null;
+        if (structuredRequest is not null
+            && enforcement is not null
+            && status != LlmCompletionStatus.RequiresAction)
+        {
+            validation = finalRefusal.Length > 0
+                ? new LlmStructuredOutputValidation(
+                    enforcement.Value,
+                    false,
+                    false,
+                    ["Structured output was not evaluated because the provider refused the request."])
+                : StructuredOutput.Validate(finalText, structuredRequest, enforcement.Value);
+        }
+
+        return new LlmChatResult
+        {
+            Text = finalText,
+            Refusal = finalRefusal.Length == 0 ? null : finalRefusal,
+            Status = status,
+            FinishReason = status == LlmCompletionStatus.RequiresAction ? "tool_calls" : providerStatus,
+            IncompleteReason = incompleteReason,
+            Usage = ReadUsage(responseRoot),
+            ProviderResponseId = LlmJson.GetString(responseRoot, "id"),
+            ToolCalls = toolCalls,
+            ResponseState = status is LlmCompletionStatus.Failed or LlmCompletionStatus.Incomplete
+                ? null
+                : OpenAiResponsesTools.EncodeResponseState(
+                    responseRoot,
+                    connection,
+                    modelId),
+            StructuredOutput = validation,
+            Diagnostics = new LlmProviderDiagnostics(
+                (int)response.StatusCode,
+                ProviderHttp.ReadRequestId(response),
+                SecretRedactor.Sanitize(rawEvent, credential))
+        };
+    }
+
+    private static (string Text, string Refusal) ReadOutput(JsonElement root)
+    {
+        var text = new StringBuilder();
+        var refusal = new StringBuilder();
+        if (!root.TryGetProperty("output", out JsonElement output)
+            || output.ValueKind != JsonValueKind.Array)
+        {
+            return (string.Empty, string.Empty);
+        }
+
+        foreach (JsonElement item in output.EnumerateArray())
+        {
+            if (!item.TryGetProperty("content", out JsonElement content)
+                || content.ValueKind != JsonValueKind.Array)
+            {
+                continue;
+            }
+
+            foreach (JsonElement part in content.EnumerateArray())
+            {
+                switch (LlmJson.GetString(part, "type"))
+                {
+                    case "output_text":
+                        text.Append(LlmJson.GetString(part, "text"));
+                        break;
+                    case "refusal":
+                        refusal.Append(LlmJson.GetString(part, "refusal"));
+                        break;
+                }
+            }
+        }
+
+        return (text.ToString(), refusal.ToString());
+    }
+
+    private static LlmChatUsage? ReadUsage(JsonElement root)
+    {
+        if (LlmJson.GetObject(root, "usage") is not { } usage)
+        {
+            return null;
+        }
+
+        return new LlmChatUsage(
+            LlmJson.GetInt(usage, "input_tokens"),
+            LlmJson.GetInt(usage, "output_tokens"),
+            LlmJson.GetInt(usage, "total_tokens"));
+    }
+
+    private LlmProviderException StreamError(
+        JsonElement root,
+        HttpResponseMessage response,
+        string rawEvent,
+        LlmCredential? credential)
+    {
+        JsonElement error = LlmJson.GetObject(root, "error") ?? root;
+        string providerMessage = SecretRedactor.Sanitize(
+            LlmJson.GetString(error, "message") ?? "The provider returned a stream error.",
+            credential);
+        return new LlmProviderException(
+            providerMessage,
+            Transport,
+            response.StatusCode,
+            LlmJson.GetString(error, "code"),
+            ProviderHttp.ReadRequestId(response),
+            sanitizedResponseBody: SecretRedactor.Sanitize(rawEvent, credential));
+    }
+}

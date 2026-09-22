@@ -1,0 +1,78 @@
+using System.Collections.Concurrent;
+using Amazon.Bedrock;
+using Amazon.Bedrock.Model;
+
+namespace Darkspyre.Inference.Connect.LLM.Bedrock;
+
+internal sealed class BedrockLoggingGuard
+{
+    internal static readonly TimeSpan CacheTtl = TimeSpan.FromMinutes(5);
+    private readonly ConcurrentDictionary<string, DateTimeOffset> _verifiedAt = new(
+        StringComparer.OrdinalIgnoreCase);
+
+    public Task EnsureLoggingDisabledAsync(
+        IAmazonBedrock control,
+        LlmAwsCredentials aws,
+        CancellationToken cancellationToken = default) =>
+        EnsureLoggingDisabledAsync(
+            BedrockClientFactory.ScopeKey(aws),
+            aws.Region!,
+            async ct => (await control.GetModelInvocationLoggingConfigurationAsync(
+                new GetModelInvocationLoggingConfigurationRequest(),
+                ct)).LoggingConfig,
+            cancellationToken);
+
+    internal async Task EnsureLoggingDisabledAsync(
+        string scopeKey,
+        string region,
+        Func<CancellationToken, Task<LoggingConfig?>> fetchLoggingConfig,
+        CancellationToken cancellationToken = default)
+    {
+        if (_verifiedAt.TryGetValue(scopeKey, out DateTimeOffset verified)
+            && DateTimeOffset.UtcNow - verified < CacheTtl)
+        {
+            return;
+        }
+
+        LoggingConfig? config;
+        try
+        {
+            config = await fetchLoggingConfig(cancellationToken);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            throw new InvalidOperationException(
+                "Refusing to send to Bedrock because model invocation logging could not be verified "
+                + $"as disabled in {region}. Grant bedrock:GetModelInvocationLoggingConfiguration "
+                + "or use another connection.",
+                exception);
+        }
+
+        if (DescribeEnabledLogging(config) is { } detail)
+        {
+            throw new InvalidOperationException(
+                $"Refusing to send to Bedrock because model invocation logging is enabled in "
+                + $"{region} ({detail}).");
+        }
+
+        _verifiedAt[scopeKey] = DateTimeOffset.UtcNow;
+    }
+
+    internal static string? DescribeEnabledLogging(LoggingConfig? config)
+    {
+        if (config is null)
+        {
+            return null;
+        }
+
+        var reasons = new List<string>();
+        if (config.TextDataDeliveryEnabled == true) reasons.Add("text delivery");
+        if (config.ImageDataDeliveryEnabled == true) reasons.Add("image delivery");
+        if (config.EmbeddingDataDeliveryEnabled == true) reasons.Add("embedding delivery");
+        if (config.VideoDataDeliveryEnabled == true) reasons.Add("video delivery");
+        if (config.AudioDataDeliveryEnabled == true) reasons.Add("audio delivery");
+        if (config.CloudWatchConfig is not null) reasons.Add("CloudWatch destination");
+        if (config.S3Config is not null) reasons.Add("S3 destination");
+        return reasons.Count == 0 ? null : string.Join(", ", reasons);
+    }
+}
