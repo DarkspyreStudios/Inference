@@ -15,7 +15,7 @@ and built-in ComfyUI HTTP/WebSocket transport. AWS Bedrock Converse and AgentCor
 isolated in the `Darkspyre.Inference.Connect.LLM.Bedrock` assembly. All three assemblies ship in the
 one Connect NuGet.
 
-The packages target .NET 10. Credentials
+The packages target .NET 11. Credentials
 for direct API transports remain owned by the host through `ILlmConnectionSource`; the connector
 never owns an application database or secret store. Wrapped CLI transports instead use the official
 CLI's existing login, which Darkspyre.Inference.Connect.LLM never reads or copies. Optional Claude catalog OAuth is a
@@ -844,6 +844,6 @@ dotnet pack Darkspyre.Inference.Connect.slnx -c Release --no-restore
 dotnet list Darkspyre.Inference.Connect.slnx package --vulnerable --include-transitive
 ```
 
-Releases are immutable tags such as `v10.1.0`. `Common`, `Connect`, and `Tensor` are built and
+Releases are immutable tags such as `v11.1.0`. `Common`, `Connect`, and `Tensor` are built and
 published in tandem from the approved local release environment to the private GitHub Packages feed;
 GitHub Actions is not the release pipeline.

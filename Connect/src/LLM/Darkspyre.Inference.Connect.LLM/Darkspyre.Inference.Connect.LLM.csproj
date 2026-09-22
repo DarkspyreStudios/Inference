@@ -10,7 +10,8 @@
   <ItemGroup>
     <PackageReference Include="JsonSchema.Net" />
     <PackageReference Include="Microsoft.Extensions.Http" />
-    <PackageReference Include="Microsoft.ML.Tokenizers" />
+    <PackageReference Include="Darkspyre.ML.Tokenizers" />
+    <PackageReference Include="Microsoft.ML.Tokenizers" ExcludeAssets="all" PrivateAssets="all" />
     <PackageReference Include="Microsoft.ML.Tokenizers.Data.O200kBase" />
   </ItemGroup>
 

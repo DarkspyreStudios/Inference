@@ -3,7 +3,7 @@
 Shared, implementation-neutral contracts for in-process Tensor inference and out-of-process Connect
 providers. The package contains semantic request, response, capability, progress, provenance, and
 failure types. It does not select an implementation or provide automatic fallback between local and
-external inference.
+external inference. The current synchronized package family targets .NET 11.
 
 Applications choose an implementation explicitly and work with typed contracts:
 

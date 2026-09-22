@@ -1,6 +1,6 @@
 <Project>
   <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
+    <TargetFramework>net11.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
@@ -15,7 +15,7 @@
     <Copyright>Copyright © 2026 Brandon Mathis. All rights reserved.</Copyright>
     <RepositoryType>git</RepositoryType>
     <RepositoryUrl>https://github.com/DarkspyreStudios/Inference</RepositoryUrl>
-    <Version>10.1.0</Version>
+    <Version>11.1.0</Version>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(IsPackable)' != 'false'">

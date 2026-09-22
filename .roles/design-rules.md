@@ -9,7 +9,7 @@ The repository root is `Darkspyre.Inference`. `Connect/`, `Console/`, and `Tenso
 product workspaces with separate responsibilities. A product workspace owns its solution, build
 configuration, package versions, documentation, tests, examples, and tools.
 
-`Connect` and `Tensor` are active workspaces in the unified 10.x family. Empty product roots do not
+`Connect` and `Tensor` are active workspaces in the unified 11.x family. Empty product roots do not
 justify placeholder projects or packages.
 
 ## Capability layout

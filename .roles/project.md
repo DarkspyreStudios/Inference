@@ -13,12 +13,12 @@ specifications.
 | Product family | `Darkspyre.Inference.*` |
 | Purpose | Consolidate Darkspyre Studios' inference-related implementations into one cohesive family of libraries distributed as three NuGet packages |
 | Repository | `/Volumes/Data/Development/DarkspyreStudios/Inference` |
-| Target framework | `net10.0` |
+| Target framework | `net11.0` |
 | Distribution | Private DarkspyreStudios NuGet feed |
 | Version line | `<net>.<release>.<minor>`: .NET generation, breaking-contract release, compatible tweak/fix |
 | Release model | `Common`, `Connect`, and `Tensor` always publish together at the one version declared in `/Directory.Build.props` |
 | Primary branch | `master` |
-| Lifecycle stage | Unified `10.1.0` release baseline published; compatible maintenance remains on `10.1.x` |
+| Lifecycle stage | Unified `11.1.0` release candidate verified; publication pending |
 | Jira project and parent | TBD |
 | Jira subject label | TBD |
 
@@ -86,6 +86,12 @@ and any implementation package may reference the centrally managed version of a 
 when its design requires it. Supporting DarkspyreStudios packages available through the private feed
 include `Darkspyre.SecureStore` and `Darkspyre.Persistence`.
 
+The tokenizer runtime assembly comes from the focused `Darkspyre.ML.Tokenizers` fork. Connect keeps
+Microsoft's public `Microsoft.ML.Tokenizers.Data.O200kBase` package rather than forking unchanged
+encoding data; its direct fork dependency is the nearer runtime asset than the data package's
+transitive public tokenizer dependency. Tensor uses the same fork for SentencePiece and BPE. Do not
+fork adjacent Microsoft packages unless Darkspyre actually needs to change their implementation.
+
 ## Solutions
 
 | Solution | Intended scope |
@@ -133,7 +139,25 @@ build to .NET 11 advances the first component and resets the later components fo
 release (`11.<release>.<minor>`). Immutable releases are never overwritten. The family tag is
 created only after all three packages have passed their gates.
 
-## Published baseline
+## Current 11.1.0 release candidate
+
+The current family build targets `net11.0` with SDK `11.0.100-rc.1.26425.128` and version `11.1.0`.
+The framework-generation change does not alter the approved inference contracts and does not include
+upgrading any consuming Desktop application.
+
+The release uses `Darkspyre.ML.Tokenizers` 2.0.0.1 from its `darkspyre` commit `b1b44954` for the
+SentencePiece disabled-special-token correction. Connect continues to use the public
+`Microsoft.ML.Tokenizers.Data.O200kBase` 2.0.0 package. Tensor uses the Darkspyre TensorSharp
+2.8.6.3 package set from its `darkspyre` commit `28a29882`; that patch preserves the documented
+rank-four channels-last result of direct image group normalization.
+
+Both focused solutions pass zero-warning Debug and Release builds. Connect passes 189 tests and
+Tensor passes 26 tests in each configuration; Common's three tests appear in both focused totals.
+Formatting verification and transitive dependency vulnerability audits pass. The installed
+Supra2-IMG model pack also completes a one-step CPU generation with seed 42 and produces a valid
+256x256 PNG through the `net11.0` implementation.
+
+## Published 10.1.0 baseline
 
 The first unified three-package baseline was published to the private DarkspyreStudios GitHub
 Packages feed on 2026-09-22 from implementation commit `11b6ec7`:
@@ -172,10 +196,12 @@ resolve the conflict rather than inferring which shape is current.
 
 ## Compatibility posture
 
-The unified `10.x.x` line is a deliberately breaking baseline. Source and binary compatibility with
-previously published inference packages, including the `Mathis.LlmConnect` 3.0 predecessor, is not
-required. Do not add compatibility packages, type forwarders, duplicate namespaces, parallel legacy
-APIs, or migration paths unless an approved design bible or Jira ticket explicitly requires one.
+The unified package surface introduced by `10.1.0` is the compatibility baseline. Source and binary
+compatibility with earlier capability packages, including the `Mathis.LlmConnect` 3.0 predecessor,
+is not required. Moving to `11.1.0` changes the target framework generation without intentionally
+changing those approved inference contracts. Do not add compatibility packages, type forwarders,
+duplicate namespaces, parallel legacy APIs, or migration paths unless an approved design bible or
+Jira ticket explicitly requires one.
 
 Previously published packages remain historical releases on the private feed; they are not the
 design authority for the unified package family. `10.1.0` is the first unified compatibility

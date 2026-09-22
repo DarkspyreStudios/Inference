@@ -1,7 +1,7 @@
 # Darkspyre.Inference.Tensor
 
 In-process, first-class .NET inference built on TensorSharp and distributed as the
-`Darkspyre.Inference.Tensor` NuGet. It references the synchronized
+`Darkspyre.Inference.Tensor` NuGet. The current package targets .NET 11 and references the synchronized
 `Darkspyre.Inference.Common` NuGet rather than embedding Common. Model weights are installed
 separately through Tensor's
 model-pack manager into the `IPersistenceStore` supplied by the application; constructing a runtime
@@ -23,13 +23,18 @@ Assemblies included in the Tensor package:
 - `Darkspyre.Inference.Tensor.Decision` — Laya typed decision inference using the pinned
   `convaiinnovations/laya-typed-decisions` safetensors checkpoint. Its BPE tokenizer, ModernBERT
   encoder, typed decision heads, and calibration execute directly through TensorSharp on CPU or
-CUDA; neither PyTorch nor a Python runtime is used.
+  CUDA; neither PyTorch nor a Python runtime is used.
 
 Supra's publisher supplies the DiT as a PyTorch ZIP state dictionary rather than safetensors. The
 Darkspyre TensorSharp fork reads that file as data through a whitelist-only checkpoint reader. It
 accepts only the tensor rebuild, storage, and container forms required by the pinned checkpoint and
 rejects arbitrary pickle globals and reducers. Flan-T5 and the VAE use their pinned safetensors
 artifacts. No Python or PyTorch component is loaded or executed.
+
+Tensor uses `Darkspyre.ML.Tokenizers` for the focused SentencePiece correction needed by Flan-T5
+models whose BOS token is intentionally disabled. TensorSharp 2.8.6.3 supplies the direct runtime,
+including rank-four channels-last image group normalization. These fork packages retain the upstream
+assemblies and namespaces; consuming code remains first-class C# and does not load Python or PyTorch.
 
 Each capability assembly publishes its pack definition separately from installation. A desktop
 application composes the packs it supports into a `TensorModelCatalog`, constructs one

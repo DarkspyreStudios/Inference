@@ -10,7 +10,7 @@
   <ItemGroup>
     <PackageReference Include="Darkspyre.TensorSharp.Backends.Cuda" GeneratePathProperty="true" />
     <PackageReference Include="Darkspyre.TensorSharp.Models" />
-    <PackageReference Include="Microsoft.ML.Tokenizers" />
+    <PackageReference Include="Darkspyre.ML.Tokenizers" />
   </ItemGroup>
 
   <ItemGroup>
