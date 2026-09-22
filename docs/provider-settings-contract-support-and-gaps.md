@@ -2,11 +2,43 @@
 
 Date: 2026-09-22
 
-Consumer: DarkspyreCE Desktop
+Consumers: DarkspyreCE Desktop and Agent-DS, through the shared `Darkspyre.Inference.UI.Settings` library
 
 Baseline: synchronized Common / Connect / Tensor NuGet **11.2.0**, release source `83c1ac3`
 
 Status: **Consumer requirements and source-backed gap assessment; not an approved API design or implementation authorization.**
+
+## Shared UI repository and library
+
+The configuration components will belong to a standalone Blazor library named
+**`Darkspyre.Inference.UI.Settings`**, built with **Lumeo**, in the sibling repository:
+
+`/Volumes/Data/Development/DarkspyreStudios/Darkspyre.Inference.UI/`
+
+The repository name deliberately covers more than Settings so other genuinely shared inference UI
+libraries can be added later. Settings is the first library; no additional libraries are presently
+specified. It is not a feature folder inside CE, Agent-DS, Connect, or Tensor.
+
+The shared library **will be built against the forthcoming, not-yet-released metadata and operation
+contracts of the Connect and Tensor objects**. The 11.2.0 inventory below identifies what those
+contracts need to supply; it is not the contract surface the new UI must be restricted to. Do not
+substitute today's incomplete metadata, host-specific forms, or a second local metadata model.
+
+`Darkspyre.Inference.UI.Settings` provides the reusable groups, dense wrapping configuration cards,
+Add/edit surfaces, dialog editors, wizard rendering, model selection and installation-progress
+surfaces. Provider definitions drive their content and behavior. Lumeo supplies the shared controls;
+presentation remains separate from provider protocol, compatibility and lifecycle implementations.
+
+DarkspyreCE and Agent-DS each compose the shared components and layer their own themes on them.
+The library must support inheritance/extension as well as theme customization without duplicating
+provider configuration logic. The exact public extension points and theme contract belong in the
+technical design. CE's World Atlas palette and application shell are not baked into the library.
+Each host retains local persistence, protected credential storage, user consent and application
+operation ownership through the appropriate seams.
+
+The new UI library does not introduce a Blazor or Lumeo dependency into Common, Connect or Tensor.
+Its packaging, compatible dependency versions and release policy require technical design; do not
+assume it becomes a fourth member of the synchronized three-package runtime release.
 
 ## Required consumer experience
 
@@ -20,14 +52,16 @@ interaction taking precedence over the older inline Settings forms.
 
 The panels and setup wizards must be driven by **contract properties and callable methods**.
 The provider supplies its configuration semantics, field/section/step descriptions, available
-choices, validation, actions, and status. CE supplies reusable controls, layout, dialogs, accessible
-interaction, local persistence, protected credential storage, and explicit user authorization.
+choices, validation, actions, and status. The shared UI library supplies reusable Lumeo controls,
+layout, dialogs and accessible interaction. Each consuming application supplies its theme, local
+persistence, protected credential storage and explicit user authorization.
 
 The UI may map semantic field kinds to shared controls. It must not switch on provider names or
 transport IDs to decide which fields to invent, which API to call, what a successful setup means,
 or whether a model is compatible. Reflection over a configuration object is not sufficient: the
 contract must describe purposeful grouping and progressive disclosure, not a flat property editor.
-If a required behavior is missing, update the owning library rather than adding a CE-only substitute.
+If a required behavior is missing, update the owning provider library rather than adding a
+consumer-specific or UI-library substitute.
 
 ## Summary by capability and implementation
 
@@ -234,13 +268,15 @@ does not select vendors, engine architectures, voice catalogs or supported audio
 
 ## Ownership and acceptance gates
 
-Inference owns provider semantics, provider/model-host protocols, compatibility decisions, setup
-metadata and operations, and its existing Tensor model manager/lifecycle. CE owns reusable visual
-components, local connection/configuration persistence, protected secret storage through supported
-seams, user consent and application operation ownership. No library-owned UI framework or CE-specific
-database model is required. No provider source is copied into the consumer.
+Common, Connect and Tensor own provider semantics, provider/model-host protocols, compatibility
+decisions, setup metadata and operations, and the existing Tensor model manager/lifecycle.
+`Darkspyre.Inference.UI.Settings` owns the shared Lumeo/Blazor presentation foundation. CE and
+Agent-DS own their themes, application composition, local connection/configuration persistence,
+protected secret storage through supported seams, user consent and application operation ownership.
+The runtime libraries remain UI-framework-neutral. No host-specific database model or copied
+provider source belongs in the shared UI library.
 
-Before CE implements the full requested settings surface, the owning library work should demonstrate:
+Before delivering the shared settings surface to CE and Agent-DS, the library work should demonstrate:
 
 1. A single reusable renderer can list, add, configure and edit each supported Text/Image/Audio
    Connect/Tensor provider without provider-name/transport-specific UI branches.
@@ -256,9 +292,14 @@ Before CE implements the full requested settings surface, the owning library wor
    blocker, not invented UI support or an undocumented reduction of the requirement.
 6. Deterministic tests use controlled provider/model-host responses and small fixtures. Paid calls,
    full model downloads and native inference are not mandatory development gates.
+7. CE and Agent-DS consume the same Settings library with distinct themes and supported extensions.
+   Neither host duplicates provider forms or wizard behavior. Shared accessibility, dialog behavior,
+   density and responsive wrapping remain intact under both themes.
 
 Next phase: agree the library contract design, including package ownership, concrete method/data
 shapes, configuration/credential transaction boundaries, asynchronous operation lifetime, Audio
-scope and model-host support. Then implement and publish the synchronized package family, and
-consume those contracts in CE's technical design. This handoff does not approve code changes,
-package publication, model downloads or changes to a user's configured providers.
+scope and model-host support. Define the standalone Settings library and its host integration,
+theming and extension contracts against that forthcoming metadata. The provider runtime and shared UI
+then implement their approved designs, with the UI consuming the released provider contracts.
+This handoff does not approve scaffolding, code changes, package publication, model downloads or
+changes to a user's configured providers.
