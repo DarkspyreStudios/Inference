@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using Darkspyre.Inference.Common.LLM;
 using Darkspyre.Inference.Connect.LLM.Internal;
 
 namespace Darkspyre.Inference.Connect.LLM;
@@ -77,6 +78,16 @@ public sealed class LlmProviderService
 
     public const string ClaudeManualRedirectUri =
         Providers.ClaudeAuthenticator.ManualRedirectUri;
+
+    /// <summary>
+    /// Binds the portable inference contract to one explicitly selected Connect connection. The
+    /// returned adapter does not retain or expose provider response state or diagnostics.
+    /// </summary>
+    public ILlmInference Bind(string connectionId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(connectionId);
+        return new ConnectLlmInference(this, connectionId);
+    }
 
     public async Task<bool> IsAuthenticatedAsync(
         string connectionId,

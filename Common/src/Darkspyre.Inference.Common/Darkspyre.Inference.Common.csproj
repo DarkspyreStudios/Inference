@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <PackageId>Darkspyre.Inference.Common</PackageId>
+    <AssemblyName>Darkspyre.Inference.Common</AssemblyName>
+    <Description>Shared typed contracts for Darkspyre Connect and Tensor inference implementations.</Description>
+    <PackageTags>ai;inference;llm;image-generation</PackageTags>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="..\..\README.md" Pack="true" PackagePath="README.md" />
+  </ItemGroup>
+</Project>

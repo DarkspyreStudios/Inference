@@ -16,7 +16,7 @@ specifications.
 | Target framework | `net10.0` |
 | Distribution | Private DarkspyreStudios NuGet feed |
 | Version line | `10.x.x`; the package major version follows the supported .NET major version |
-| Release model | All `Darkspyre.Inference.*` packages share one version and release together |
+| Release model | All `Darkspyre.Inference.*` packages share one version; the initial 10.0 rollout may publish completed package IDs in stages before the immutable family tag |
 | Primary branch | `master` |
 | Lifecycle stage | Breaking consolidation and refactor toward the first unified `10.x.x` release baseline |
 | Jira project and parent | TBD |
@@ -62,13 +62,12 @@ The intended shared dependency flow is:
 
 ```text
 Darkspyre.Inference.Common
-└── Darkspyre.Inference.Connect.Common
-    ├── Darkspyre.Inference.Connect.LLM
-    ├── Darkspyre.Inference.Connect.Image
-    ├── Darkspyre.Inference.Connect.STT
-    └── Darkspyre.Inference.Connect.TTS
+├── Darkspyre.Inference.Connect.LLM
+├── Darkspyre.Inference.Connect.Image
+├── Darkspyre.Inference.Tensor.LLM
+└── Darkspyre.Inference.Tensor.Image
 
-Darkspyre.Inference.Common
+Darkspyre.Inference.Tensor.Common
 ├── Darkspyre.Inference.Tensor.LLM
 ├── Darkspyre.Inference.Tensor.Image
 └── Darkspyre.Inference.Tensor.Decision
@@ -76,10 +75,14 @@ Darkspyre.Inference.Common
 
 Place a contract or model in `Darkspyre.Inference.Common` only when connector and tensor packages
 truly share it. Connector-only contracts and models belong in `Darkspyre.Inference.Connect.Common`.
-Do not create either Common package until at least two implemented capabilities share a contract with
-the same semantics. Similar property names, such as endpoint or display-name fields, are not by
-themselves a shared contract. The initial LLM and Image capability review found no qualifying shared
-contract, so neither package depends on a Common package in the first implementation.
+Do not create a Common package until at least two implemented capabilities share a contract with the
+same semantics. Similar property names, such as endpoint or display-name fields, are not by themselves
+a shared contract. LLM messages, tools, typed requests/results, streaming events, and image-generation
+requests/results now qualify because both Connect and Tensor implement those semantics.
+`Darkspyre.Inference.Tensor.Common` is limited to behavior actually shared by two Tensor capabilities,
+such as model packs, persistence-backed weights, and execution coordination. Laya-specific decision
+contracts remain in `Tensor.Decision` unless a second family implements the same decision semantics.
+There is still no `Connect.Common`: no implemented connector-only contract is shared broadly enough.
 
 The repository uses .NET Central Package Management (CPM). Package versions are declared centrally,
 and any implementation package may reference the centrally managed version of a NuGet dependency
@@ -91,7 +94,8 @@ include `Darkspyre.SecureStore` and `Darkspyre.Persistence`.
 | Solution | Intended scope |
 |---|---|
 | `Darkspyre.Inference.slnx` | Complete solution containing every library in the package family |
-| `Darkspyre.Inference.Connect.slnx` | Focused subset containing the `Connect.*` libraries |
+| `Darkspyre.Inference.Connect.slnx` | Focused subset containing Common plus the `Connect.*` libraries and their tests |
+| `Tensor/Darkspyre.Inference.Tensor.slnx` | Focused subset containing the Tensor libraries and their tests |
 
 Additional subset solutions are not yet defined by this document.
 
@@ -120,6 +124,11 @@ project discovered by the subset solution.
 
 The Pack command is reserved for the explicitly authorized publish phase. Do not run it during the
 ongoing refactor or create package artifacts merely as a routine verification step.
+
+For the first 10.0 baseline only, the user explicitly authorized publishing the completed Common and
+Connect package IDs while Tensor remains under development. Those package versions are immutable;
+Tensor packages join the same 10.0.0 version as distinct package IDs after their own gates pass. The
+family `v10.0.0` tag is created only when the intended baseline is complete.
 
 ## Canonical documents
 

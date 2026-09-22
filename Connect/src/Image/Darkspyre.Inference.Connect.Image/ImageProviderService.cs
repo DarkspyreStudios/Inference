@@ -29,6 +29,25 @@ public sealed class ImageProviderService
 
     public IReadOnlyList<ImageTransportDescriptor> AvailableTransports { get; }
 
+    public Darkspyre.Inference.Common.Image.IImageInference Bind(
+        ImageConnection connection,
+        ImageWorkflow workflow,
+        TimeSpan? pollInterval = null)
+    {
+        ArgumentNullException.ThrowIfNull(connection);
+        ArgumentNullException.ThrowIfNull(workflow);
+        if (connection.Transport != workflow.Transport)
+        {
+            throw new ArgumentException("The image connection and workflow select different transports.");
+        }
+
+        return new ConnectImageInference(
+            GetRequiredTransport(connection.Transport),
+            connection,
+            workflow,
+            pollInterval ?? TimeSpan.FromMilliseconds(250));
+    }
+
     public IImageTransport GetRequiredTransport(ImageTransport transport) =>
         _transports.TryGetValue(transport, out IImageTransport? implementation)
             ? implementation

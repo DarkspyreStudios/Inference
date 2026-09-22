@@ -1,8 +1,9 @@
 # Design: Darkspyre.Inference.Connect 10.0
 
-**Status:** The Inference repository structure, LLM package-family rename, and provider-neutral Image
-package are implemented and verified. ChatEngine adoption and the coordinated 10.0 release remain
-pending. **Date:** 2026-09-21.
+**Status:** The Inference repository structure, LLM package-family rename, provider-neutral Image
+package, and shared typed Common inference lane are implemented. Initial Common/Connect publication
+was authorized while Tensor development continues; application adoption remains outside this package
+unit. **Date:** 2026-09-22.
 **Baseline:** LlmConnect 3.0.0.
 
 This record preserves the agreed destination while prerequisite housekeeping refactors are made. It
@@ -37,11 +38,11 @@ Darkspyre.Inference.Tensor.Image
 `Tensor` is the canonical spelling. Tensor is included here only to make the product boundary
 explicit; no Tensor project is part of this work.
 
-`Darkspyre.Inference` is the canonical repository. `Connect`, `Console`, and `Tensor` are sibling
+`Darkspyre.Inference` is the canonical repository. `Common`, `Connect`, `Console`, and `Tensor` are sibling
 product workspaces inside it. Connect is a product family made of capability-focused NuGet packages;
 it is not one monolithic assembly and it does not have an empty umbrella
-`Darkspyre.Inference.Connect` package. Console and Tensor do not participate in the Connect 10.0
-implementation.
+`Darkspyre.Inference.Connect` package. Common defines only semantic contracts implemented by both
+Connect and Tensor; it does not select or fall back between them.
 
 ## 2. Housekeeping prerequisite: shared storage packages
 
@@ -78,11 +79,13 @@ implementation branch, it is deleted only after all of its consumers have moved 
 
 ## 3. Version 10.0 scope
 
-The first 10.0 implementation contains two capabilities:
+The first 10.0 Connect implementation contains two capabilities plus their cross-family contract:
 
 1. Refactor the existing LlmConnect implementation into `Darkspyre.Inference.Connect.LLM`.
 2. Extract image-generation contracts and implementations from ChatEngine into
    `Darkspyre.Inference.Connect.Image`, using ChatEngine's current image transport as the basis.
+3. Publish `Darkspyre.Inference.Common` typed LLM and image inference contracts, with explicit Bind
+   adapters from the richer Connect services and matching implementations in Tensor.
 
 Audio generation, speech-to-text, and text-to-speech are part of the intended Connect family but are
 not part of the first implementation unit. Their current GMTools implementations inform the boundary;
@@ -110,6 +113,9 @@ library. The intended repository layout is:
 
 ```text
 Inference/
+  Common/
+    src/Darkspyre.Inference.Common/
+    tests/Darkspyre.Inference.Common.Tests/
   Connect/
     Darkspyre.Inference.Connect.slnx
     src/
@@ -144,12 +150,17 @@ not need generic replacements merely because the product family is broader. Thei
 vocabularies; no universal `IProvider`, `ProviderRequest`, or least-common-denominator result is
 introduced.
 
-The first implemented LLM and Image contracts do not have a genuinely shared semantic contract.
-Endpoint strings, display names, and capability flags are shaped by their owning modality and are not
-generalized merely because their properties look similar. Consequently
-`Darkspyre.Inference.Connect.Common` is not created in this unit. A later capability may introduce it
-only when two implemented connector packages would otherwise duplicate the same contract and
-behavior.
+LLM messages, tools, typed request/result objects, stream events, image generation request/results,
+provenance, and portable failures have the same semantics across Connect and Tensor and therefore live
+in `Darkspyre.Inference.Common`. Rich connection management, authentication, provider diagnostics,
+workflow preparation, and durable provider job state remain in their Connect capability package.
+`Darkspyre.Inference.Connect.Common` is not created because no connector-only contract is shared by
+two implemented Connect capabilities.
+
+The portable adapters are obtained explicitly from `LlmProviderService.Bind(connectionId)` and
+`ImageProviderService.Bind(connection, workflow)`. They never auto-select a backend and never fall
+back between Connect and Tensor. Existing richer Connect APIs remain first-class for applications
+that need provider-specific management or session behavior.
 
 The repository identity is `DarkspyreStudios/Inference`. Changing a developer's checkout directory is
 operational housekeeping, but package metadata and release links must target the Inference repository
@@ -271,16 +282,15 @@ Work proceeds in discrete, reviewable units:
 4. **LLM 10.0 rename.** Rename solution, projects, packages, assemblies, namespaces, tests, tools,
    examples, documentation, and all in-scope callers in one coordinated breaking change. Bump the
    package family to `10.0.0` and remove the old names rather than retaining shims.
-5. **Image extraction and ChatEngine migration.** In one coordinated implementation unit, add
-   `Darkspyre.Inference.Connect.Image`, adapt the ChatEngine contracts to provider-neutral values,
-   move and test the ComfyUI transport, replace ChatEngine's local image transport implementation
-   with the package, map at the application boundary, and delete the displaced source. The necessary
-   commits may live in separate repositories, but the unit is not complete or released while both
-   implementations remain live.
-6. **Release verification.** Restore, build, test, verify formatting, pack every package, audit
+5. **Image extraction.** Add `Darkspyre.Inference.Connect.Image`, adapt the donor contracts to
+   provider-neutral values, and move and test the ComfyUI transport. Application adoption and removal
+   of displaced application code occur in each consumer's own migration unit.
+6. **Shared inference lane.** Add `Darkspyre.Inference.Common` only after both Connect and Tensor have
+   approved implementations, then expose explicit Connect Bind adapters and verify their typed maps.
+7. **Release verification.** Restore, build, test, verify formatting, pack every completed package, audit
    dependencies for vulnerabilities, inspect package contents and dependency isolation, and perform
    any agreed live smoke tests before creating the immutable `10.0.0` tag.
-7. **Later modalities.** Design and migrate Audio, STT, and TTS one capability at a time. Each
+8. **Later modalities.** Design and migrate Audio, STT, and TTS one capability at a time. Each
    migration updates all of its consumers and removes the previous duplicate implementation.
 
 Housekeeping must not partially apply the 10.0 naming or introduce parallel seams. Conversely, the
@@ -300,7 +310,8 @@ The initial 10.0 work is complete only when:
 - all packages in the coordinated release report version `10.0.0`;
 - the LLM and image APIs are provider-neutral and provider wire types remain internal;
 - AWS SDK references exist only in the Bedrock package and its tests/consumers;
-- ChatEngine uses the image package and no duplicate image-provider seam or ComfyUI transport remains;
+- Common and Connect packages contain only their owned contracts and implementations; consumer
+  migrations remove duplicate application seams in their own completed units;
 - source, tests, examples, and current integration documentation contain no accidental references to
   the removed package or namespace names;
 - restore, zero-warning build, tests, format verification, package creation, and vulnerability audit

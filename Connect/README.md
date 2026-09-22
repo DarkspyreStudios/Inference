@@ -5,6 +5,8 @@
 > without prior written authorization. See [LICENSE.md](LICENSE.md).
 
 `Darkspyre.Inference.Connect` is the provider-neutral package family shared by Darkspyre applications.
+`Darkspyre.Inference.Common` supplies the typed portable LLM and image inference contracts implemented
+by both Connect and Tensor.
 `Darkspyre.Inference.Connect.LLM` supports OpenAI Responses, OpenAI-compatible chat endpoints,
 Anthropic Messages, direct ChatGPT subscription access and the official Claude and Antigravity CLIs,
 host-executed tools, managed agents, structured output, streaming, discovery, account usage, and
@@ -36,13 +38,32 @@ See the [Agent DS handoff](docs/agent-ds-contract-handoff.md),
 
 | Package | Purpose |
 |---|---|
+| `Darkspyre.Inference.Common` | Typed LLM and image requests, results, capabilities, streaming events, provenance, and failures shared by Connect and Tensor |
 | `Darkspyre.Inference.Connect.LLM` | Core transports, authentication, structured output, streaming, discovery, and embeddings |
 | `Darkspyre.Inference.Connect.LLM.Bedrock` | Optional AWS Bedrock Converse and AgentCore Harness transports |
 | `Darkspyre.Inference.Connect.Image` | Image workflow preparation, health, upload, submission, progress, polling, download, and cancellation; includes ComfyUI |
 
-There is currently no `Darkspyre.Inference.Connect.Common` package. LLM and Image have no contracts
-with identical semantics, and coincidentally similar endpoint or display fields are kept in their
-capability packages rather than generalized prematurely.
+There is no `Darkspyre.Inference.Connect.Common` package. Connector-only endpoint, authentication,
+provider-management, and job contracts remain in their capability packages. Only semantic inference
+contracts that are also implemented by Tensor belong in `Darkspyre.Inference.Common`.
+
+## Portable inference lane
+
+Bind a configured Connect implementation when an application wants to select Connect or Tensor
+without changing its request and result types:
+
+```csharp
+ILlmInference llm = providerService.Bind(connectionId);
+LlmInferenceResult result = await llm.CompleteAsync(new LlmInferenceRequest
+{
+    ModelId = modelId,
+    Messages = [new LlmMessage("user", prompt)]
+}, cancellationToken);
+```
+
+Image workflows expose the same boundary through `ImageProviderService.Bind(connection, workflow)`.
+Binding is explicit and retains exactly one backend. Neither adapter retries through a different
+provider nor falls back from Connect to Tensor.
 
 ## Restore from GitHub Packages
 

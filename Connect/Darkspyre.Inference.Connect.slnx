@@ -1,4 +1,8 @@
 <Solution>
+  <Folder Name="/Common/">
+    <Project Path="../Common/src/Darkspyre.Inference.Common/Darkspyre.Inference.Common.csproj" />
+    <Project Path="../Common/tests/Darkspyre.Inference.Common.Tests/Darkspyre.Inference.Common.Tests.csproj" />
+  </Folder>
   <Folder Name="/examples/">
     <Project Path="examples/Darkspyre.Inference.Connect.LLM.Examples/Darkspyre.Inference.Connect.LLM.Examples.csproj" />
   </Folder>
