@@ -27,8 +27,11 @@ Persist it with `Configuration` and reconstruct catalog registrations on restart
 does not install the pack. The explicit Tensor Install action owns registration and download.
 Backend prerequisite checks are likewise explicit, and available does not guarantee model allocation.
 
-Qwen/Supra examples currently list their built-in supported packs; remote source discovery is a
-later unit of the approved implementation, not yet claimed here. `LayaModelSelectionExample`
+Qwen/Supra examples offer registered compatible packs and accept an optional `modelSource` (for
+example, a host-owned `HuggingFaceModelSource`). With that source, their real engine resolvers drive
+repository/revision/variant choices and explicit metadata-only resolution in the same generic
+editor. Qwen checks complete GGUF headers/shards; Supra resolves the DiT with its pinned encoder,
+tokenizer and VAE. Resolve and Save never install or load weights. `LayaModelSelectionExample`
 instead offers compatible packs from the host's catalog to the same generic editor and demonstrates
 Load/request/Unload/Load on one Laya instance. Construct the manager with that same catalog, install
 the chosen packs explicitly, and save the selected `TensorModelKey` through the typed host target.

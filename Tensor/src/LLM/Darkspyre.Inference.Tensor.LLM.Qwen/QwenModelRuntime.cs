@@ -67,6 +67,33 @@ internal static class QwenModelCompatibility
     }
 
     public static void ValidateCheckpoint(GgufFile file, TensorModelPackDefinition definition)
+        => ValidateCheckpoint(new CheckpointMetadata(file.Version, file.Metadata, file.Tensors, file.FilePaths), definition);
+
+    internal static void ValidateHeaders(IReadOnlyList<(TensorSourceArtifact Artifact, GgufMetadata Header)> files,
+        TensorModelPackDefinition definition)
+    {
+        var tensors = new Dictionary<string, GgufTensorInfo>(StringComparer.Ordinal);
+        for (int index = 0; index < files.Count; index++)
+        {
+            GgufMetadata header = files[index].Header;
+            var view = new CheckpointMetadata(header.Version, header.Values, header.Tensors, [files[index].Artifact.Path]);
+            if (header.Version != files[0].Header.Version || view.GetUint32("split.count", 1) != files.Count
+                || view.GetUint32("split.no", (uint)index) != index
+                || (view.GetString("general.architecture") is string architecture && architecture != "qwen3"))
+            { throw new InvalidDataException("Inconsistent GGUF shard metadata."); }
+            foreach (GgufTensorInfo tensor in header.Tensors.Values)
+            {
+                if (!tensors.TryAdd(tensor.Name, tensor)) { throw new InvalidDataException("Duplicate GGUF tensor across shards."); }
+                long bytes = TensorBytes(tensor);
+                if (checked(header.DataOffset + (long)tensor.Offset + bytes) > header.FileLength)
+                { throw new InvalidDataException("GGUF tensor storage exceeds the artifact length."); }
+            }
+        }
+        GgufMetadata primary = files[0].Header;
+        ValidateCheckpoint(new CheckpointMetadata(primary.Version, primary.Values, tensors, files.Select(file => file.Artifact.Path).ToArray()), definition);
+    }
+
+    private static void ValidateCheckpoint(CheckpointMetadata file, TensorModelPackDefinition definition)
     {
         if (file.Version is not (2 or 3) || file.GetString("general.architecture") != "qwen3")
         { throw new InvalidDataException("This adapter requires Qwen3 GGUF version 2 or 3."); }
@@ -91,12 +118,7 @@ internal static class QwenModelCompatibility
         { throw new InvalidDataException("The Qwen pack does not contain the complete declared shard set."); }
         foreach (GgufTensorInfo tensor in file.Tensors.Values)
         {
-            if (!Enum.IsDefined(tensor.Type) || tensor.Shape.Length is < 1 or > 4 || tensor.Shape.Any(dimension => dimension is 0 or > int.MaxValue)
-                || (long)tensor.Shape[0] % GgufFile.GetBlockSize(tensor.Type) != 0)
-            { throw new InvalidDataException("Unsupported Qwen tensor dimensions or quantization."); }
-            long elements = 1;
-            foreach (ulong dimension in tensor.Shape) { elements = checked(elements * (long)dimension); }
-            long bytes = checked(elements / GgufFile.GetBlockSize(tensor.Type) * GgufFile.GetTypeSize(tensor.Type));
+            long bytes = TensorBytes(tensor);
             _ = checked((long)tensor.Offset + bytes); // Reject overflowing storage ranges before allocating the model.
         }
         Shape(file, "token_embd.weight", hidden, vocabulary.Length);
@@ -119,12 +141,31 @@ internal static class QwenModelCompatibility
         }
     }
 
-    private static int Positive(GgufFile file, string name)
+    private static long TensorBytes(GgufTensorInfo tensor)
+    {
+        if (!Enum.IsDefined(tensor.Type) || tensor.Shape.Length is < 1 or > 4 || tensor.Shape.Any(dimension => dimension is 0 or > int.MaxValue)
+            || (long)tensor.Shape[0] % GgufFile.GetBlockSize(tensor.Type) != 0)
+        { throw new InvalidDataException("Unsupported Qwen tensor dimensions or quantization."); }
+        long elements = 1;
+        foreach (ulong dimension in tensor.Shape) { elements = checked(elements * (long)dimension); }
+        return checked(elements / GgufFile.GetBlockSize(tensor.Type) * GgufFile.GetTypeSize(tensor.Type));
+    }
+
+    private sealed record CheckpointMetadata(uint Version, IReadOnlyDictionary<string, object> Values,
+        IReadOnlyDictionary<string, GgufTensorInfo> Tensors, IReadOnlyList<string> FilePaths)
+    {
+        public string? GetString(string key) => Values.TryGetValue(key, out object? value) ? value as string : null;
+        public string[]? GetStringArray(string key) => Values.TryGetValue(key, out object? value) ? value as string[] : null;
+        public uint GetUint32(string key, uint defaultValue = 0) => Values.TryGetValue(key, out object? value)
+            ? Convert.ToUInt32(value, System.Globalization.CultureInfo.InvariantCulture) : defaultValue;
+    }
+
+    private static int Positive(CheckpointMetadata file, string name)
     {
         uint value = file.GetUint32(name);
         return value is > 0 and <= int.MaxValue ? (int)value : throw new InvalidDataException("Missing or invalid Qwen dimensions.");
     }
-    private static void Shape(GgufFile file, string name, params int[] dimensions)
+    private static void Shape(CheckpointMetadata file, string name, params int[] dimensions)
     {
         if (!file.Tensors.TryGetValue(name, out GgufTensorInfo? tensor) || !tensor.Shape.SequenceEqual(dimensions.Select(value => (ulong)value)))
         { throw new InvalidDataException($"Qwen tensor '{name}' has a missing or incompatible shape."); }

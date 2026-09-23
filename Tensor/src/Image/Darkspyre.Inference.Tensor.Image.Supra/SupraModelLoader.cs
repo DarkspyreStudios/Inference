@@ -23,7 +23,9 @@ internal sealed class SupraModelLoader : ISupraModelLoader
         using TorchStateDictionaryFile ditWeights = await TorchStateDictionaryFile.OpenAsync(lease.GetRequiredArtifact("supra-model"), cancellationToken).ConfigureAwait(false);
         using SafetensorsFile vaeWeights = await SafetensorsFile.OpenAsync(lease.GetRequiredArtifact("vae-model"), cancellationToken).ConfigureAwait(false);
         cancellationToken.ThrowIfCancellationRequested();
-        // Constructors validate the actual tensor schema before the resident model is published.
+        SupraCheckpointSchema.ValidateDit(ditWeights.Tensors, ditWeights.IntegerMetadata);
+        SupraCheckpointSchema.ValidateText(textWeights.Tensors);
+        SupraCheckpointSchema.ValidateVae(vaeWeights.Tensors);
         return new SupraImageModel(tokenizer, textWeights, ditWeights, vaeWeights, backend == TensorBackendKind.Cuda);
     }
 }

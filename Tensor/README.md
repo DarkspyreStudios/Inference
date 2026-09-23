@@ -121,8 +121,8 @@ opening a store or loading native libraries. Their `CreateSession` methods bind 
 `ISetupCommitTarget<TensorSetupChanges>` and the existing pack manager to the common setup editor.
 The default setup list contains the built-in pack for each engine. Hosts may supply `offeredModels`
 with their own registered compatible packs. Qwen and Supra validate the pack's capability, family,
-roles and declared backends before offering it. Remote source-to-engine resolution and remote
-setup selection remain pending in the approved implementation.
+roles and declared backends before offering it. Supply an `ITensorModelSource` through the optional
+`source` argument to enable remote discovery and the engine's real metadata-only resolver.
 
 Selection/Save does not install or load. Install, verify, load, unload and stop are distinct callable
 actions with declared side effects. The supplied instance is optional and remains host-owned. Its
@@ -164,8 +164,9 @@ Inference still owns no path-materialization implementation; the fork owns clean
 cancellation and unload. The host continues to use only the pack manager and `IPersistenceStore`.
 
 Supra uses `TensorImageModels.SupraRuntimeArchitecture` and requires all four roles: `supra-model`,
-`text-model`, `text-tokenizer`, `vae-model`. Its existing restricted checkpoint reader and native
-component constructors still validate actual data. A pack label is not proof of tensor compatibility.
+`text-model`, `text-tokenizer`, `vae-model`. Its resolver and loader share the required DiT, text
+encoder and VAE tensor schema, checked before native allocation. The restricted checkpoint reader
+and native component constructors still validate actual data. A pack label is not proof of compatibility.
 The 256x256 output, prompt/sampler constraints and generation algorithm are unchanged.
 
 ## Model source metadata and registration (unreleased development)
@@ -174,8 +175,8 @@ The 256x256 output, prompt/sampler constraints and generation algorithm are unch
 listing and candidate metadata. Candidate lookup pins the returned immutable commit and retains
 per-artifact provenance, license, nullable length and nullable SHA-256. A Git blob ID is never used
 as a file hash. These calls read bounded JSON metadata only: they neither install/load weights nor
-execute repository code. A candidate is not evidence that an engine supports it; engine-specific
-resolution is still pending in the approved implementation.
+execute repository code. A candidate is not evidence that an engine supports it; use the engine's
+resolver to obtain compatibility evidence and a complete installable manifest.
 
 `ListVariantsAsync` lists repository artifact metadata without opening weight bodies.
 `ReadMetadataAsync` is explicit bounded inspection (at most 16 MiB per header range, or 4 MiB for an
@@ -190,8 +191,23 @@ definition becomes selectable/saveable. Source/backend changes invalidate resolu
 completions cannot select a model. Browsing, resolving and Save do not register, install or load.
 Install registers the resolved immutable definition in the supplied manager before downloading and
 verifying it. Unregistered resolved selections report not installed rather than querying an unknown
-manager key. **The concrete Qwen/Supra resolver policies and their composition into this flow remain
-the next implementation unit**; the new interface is not itself a compatibility implementation.
+manager key. `QwenSetup.CreateSession` and `SupraSetup.CreateSession` compose their respective
+`QwenModelResolver` and `SupraModelResolver` when a source is supplied. Construction performs no I/O.
+
+`QwenModelResolver` inspects actual GGUF headers, including every numbered shard, through the same
+architecture/tokenizer/tensor/storage policy used by Load. Selecting any shard resolves the complete
+set under one canonical identity. `SupraModelResolver` inspects the restricted PyTorch ZIP metadata
+of the selected DiT and resolves the pinned Flan-T5 text encoder, SentencePiece tokenizer and VAE
+from their own immutable repositories. The encoder/VAE headers must satisfy the shared pipeline
+schema. The tokenizer must match the known supported vocabulary's pinned length and SHA-256;
+installation verifies its bytes. Same-schema DiT fine-tunes resolve under their own keys; arbitrary
+encoder/tokenizer/VAE substitutions are not advertised as supported.
+
+`TensorMetadataReader` bridges the existing format parsers to cached 64 KiB source ranges on a
+worker thread. Each format inspection has a 16 MiB parser-read bound and a complete resolution has
+a 64 MiB transfer budget. It creates no temporary files, installs no weights and allocates no native
+model. Missing metadata, range support, integrity or companions stays Unverified; incompatible
+inspected schemas are Unsupported. Supported is not a claim that memory allocation will succeed.
 
 `TensorResolvedPack` owns deterministic manifest identity, including variant, capability, backend
 set, integrity and per-artifact source/license provenance. Artifact/source ordering does not change
@@ -278,14 +294,15 @@ explicit install/verify/load/unload/stop actions apply; changing the saved selec
 
 ## Local-only GGUF dependency build
 
-This checkout pins `Darkspyre.TensorSharp.*` **2.8.6.4-local.gguf.a1ce7780**, built from TensorSharp
-`darkspyre` commit `a1ce778010cb6b9fb275edec5907e84759f76381`. It is not published. The Inference
+This checkout pins `Darkspyre.TensorSharp.*` **2.8.6.4-local.gguf.9b248715**, built from TensorSharp
+`darkspyre` commit `9b248715`. It includes named GGUF persistence and bounded metadata inspection
+through the existing GGUF, safetensors and restricted PyTorch readers. It is not published. The Inference
 family version remains 11.2.0 and no Inference NuGet archives were created for this fix.
 
 Local archives live in the sibling TensorSharp repository at `artifacts/gguf-local-feed`.
 Build that commit's Core (Tensors), Runtime.Logging, Runtime, AgentHost, Backends.Cuda,
 Backends.GGML, Backends.MLX, Models and Chat projects with `dotnet pack -c Release`, using both
-`-p:Version=2.8.6.4-local.gguf.a1ce7780` and `-p:PackageVersion=2.8.6.4-local.gguf.a1ce7780`.
+`-p:Version=2.8.6.4-local.gguf.9b248715` and `-p:PackageVersion=2.8.6.4-local.gguf.9b248715`.
 The managed-only validation build uses `-p:TensorSharpSkipGgmlNative=true` and
 `-p:TensorSharpSkipMlxNative=true`; it does not claim native library/device validation.
 

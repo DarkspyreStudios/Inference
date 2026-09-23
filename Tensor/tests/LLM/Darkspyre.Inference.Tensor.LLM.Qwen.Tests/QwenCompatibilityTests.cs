@@ -74,7 +74,7 @@ public sealed class QwenCompatibilityTests
         { SupportedBackends = new HashSet<TensorBackendKind> { TensorBackendKind.Auto } }));
     }
 
-    private static byte[] Fixture(string change, int? shard = null)
+    internal static byte[] Fixture(string change, int? shard = null)
     {
         var tensors = new List<(string Name, ulong[] Shape)>
         {

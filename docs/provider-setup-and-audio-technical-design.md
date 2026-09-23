@@ -673,6 +673,20 @@ Inference version bump, publication or new model architecture is included.
 Remote engine resolution/setup binding, Whisper and final settings cross-row acceptance remain
 outstanding. These fixes do not mark that broader work complete.
 
+The pinned built-in `laya-typed-decisions` agent configuration actually declares 1024/256, unlike
+the handoff's `laya` reference configuration (512/192). Both are retained as offline regression
+fixtures. Reading the selected pack resolves this distinction without imposing new fixed limits.
+
+Phase exit: these fixes pass zero-warning Debug/Release builds and deterministic tests
+(Tensor 165, Connect 291, TensorSharp persistence 22). All 24 tokenizer golden rows pass.
+Both Inference solution format checks and transitive vulnerability audits pass; the fork's
+changed-file formatting and Chat dependency audit pass. The nine local dependency archives have
+matching local-version references and were consumed through NuGet by the Inference verification.
+There was no full-weight/native-device experiment, Inference package build, publication or version
+bump. UI source and the other worker's pending documentation remain untouched. The shared
+`Directory.Packages.props` whole-file commit preserves that worker's already-staged Lumeo,
+ASP.NET Components and bunit declarations alongside this unit's TensorSharp dependency pin.
+
 ### Unit 3c — bounded source inspection, generic resolution editing and backend observations (2026-09-22)
 
 Implementation continues under section 5. The shared source contract now lists artifact variants and
@@ -703,8 +717,8 @@ remain unknown. The read-only observation is invalidated on edits. No model allo
 mandatory probe gate before Load, native initialization during definition discovery, or general
 machine-diagnostics facility is added.
 
-The **concrete Qwen/Supra resolver policies and composition remain unwired and are the next section-5
-work item**. The shared resolver seam is tracked here deliberately; it is not reported as an engine
+At this checkpoint, the **concrete Qwen/Supra resolver policies and composition remained unwired**.
+The shared resolver seam was tracked here deliberately; it was not reported as an engine
 compatibility implementation. Whisper/STT and final cross-row acceptance also remain outstanding.
 No UI files, family/dependency versions or package archives are changed by this unit.
 
@@ -718,16 +732,48 @@ boundary tests; no live GPU or native model allocation is claimed. No dependency
 because dependency inputs were unchanged. The independently staged UI/rules edits and consumer-gap
 document changes remain outside this commit; there are no remaining untracked files.
 
-The pinned built-in `laya-typed-decisions` agent configuration actually declares 1024/256, unlike
-the handoff's `laya` reference configuration (512/192). Both are retained as offline regression
-fixtures. Reading the selected pack resolves this distinction without imposing new fixed limits.
+### Unit 3d — concrete Qwen/Supra metadata resolution and settings selection (2026-09-22)
 
-Phase exit: these fixes pass zero-warning Debug/Release builds and deterministic tests
-(Tensor 165, Connect 291, TensorSharp persistence 22). All 24 tokenizer golden rows pass.
-Both Inference solution format checks and transitive vulnerability audits pass; the fork's
-changed-file formatting and Chat dependency audit pass. The nine local dependency archives have
-matching local-version references and were consumed through NuGet by the Inference verification.
-There was no full-weight/native-device experiment, Inference package build, publication or version
-bump. UI source and the other worker's pending documentation remain untouched. The shared
-`Directory.Packages.props` whole-file commit preserves that worker's already-staged Lumeo,
-ASP.NET Components and bunit declarations alongside this unit's TensorSharp dependency pin.
+Implementation phase: the engine resolvers now use the existing format readers, not duplicate
+checkpoint parsers. TensorSharp's `darkspyre` commit `9b248715` exposes bounded metadata inspection
+for GGUF, safetensors and restricted PyTorch ZIP checkpoints. The caller retains its seekable stream;
+inspection does not read tensor payloads, create temporary files or initialize native models.
+The approved local-only dependency closure is rebuilt as `2.8.6.4-local.gguf.9b248715`; no release
+version or Inference archive is created. The fork's 36 focused metadata/persistence/parser tests
+pass in Debug/Release, with zero build warnings/errors and changed-file formatting verified.
+
+`TensorMetadataReader` adapts these synchronous readers to cached 64 KiB metadata ranges on a
+worker thread, preserving cancellation and typed source failures. Format inspection is limited to
+16 MiB of parser reads; one resolution shares a 64 MiB transfer budget. Unknown sizes, inconsistent
+ranges and exhausted budgets cannot produce a supported installable pack.
+
+`QwenModelResolver` validates complete single/split GGUF headers with the same Qwen3 policy as Load,
+including tensor storage bounds, tokenizer/chat metadata and shard identity. Every required shard
+must be present exactly once. Selecting another shard yields the same canonical manifest/key.
+`SupraModelResolver` inspects the DiT's actual restricted checkpoint metadata and resolves all three
+pinned companions from their respective immutable repositories. The loader and resolver share one
+DiT/encoder/VAE schema; tokenizer compatibility uses the known supported vocabulary's pinned hash
+and size, with bytes verified at installation. Same-schema DiT fine-tunes receive distinct complete
+pack identities. Missing companions/integrity/access stays Unverified; incompatible schemas are
+Unsupported. Repository tags and names are never the compatibility decision.
+
+The Qwen/Supra setup factories compose these resolvers through their optional `source` argument.
+The generic example accepts the same host-owned source. Tests exercise real setup-to-resolution-to-
+Save for both engines, without registration, installation or loading. The separate existing explicit
+Install path remains the only settings operation that registers and downloads a resolved pack.
+The backend availability observations completed in unit 3c are retained unchanged.
+
+Offline Supra fixtures contain factual metadata extracted from the already-installed published
+checkpoint, not weights or executable code. Synthetic sparse archives exercise the real readers.
+Optional live bounded-metadata checks also resolved both built-in public Hugging Face packs as
+Supported, retaining their original keys: Qwen reported 398 tensors and a 40,960-token context;
+Supra returned all four artifact roles. These checks did not install/load models or download full
+weights and do not claim native inference or memory-allocation success.
+
+Phase exit: this Qwen/Supra unit is complete. Tensor passes **221 tests** and Connect **291 tests**
+in Debug and Release, with zero build warnings/errors. Both focused-solution formatting checks and
+transitive dependency vulnerability audits pass. The TensorSharp dependency update was restored
+with process-scoped private-feed credentials; subsequent checks used the restored assets. Existing
+UI/rules changes and the consumer-gap document remain outside this commit; no untracked files remain.
+No UI work, Inference package creation, family version change or publication occurred. Whisper/STT
+and the final capability-table acceptance pass remain required; implementation continues for those.

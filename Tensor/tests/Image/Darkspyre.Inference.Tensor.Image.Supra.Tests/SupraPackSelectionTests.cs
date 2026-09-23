@@ -61,6 +61,28 @@ public sealed class SupraPackSelectionTests : IDisposable
     }
 
     [Fact]
+    public async Task RemoteSetupCommitsCompleteManifestWithoutRegisteringOrInstalling()
+    {
+        var source = new SupraMetadataFixture.Source(SupraMetadataFixture.Read());
+        using var http = new HttpClient(new Handler());
+        using var packs = Manager(http);
+        var target = new Target();
+        await using TensorSetupSession setup = SupraSetup.CreateSession(new(SetupChangeIntent.Create, "remote", null),
+            target, packs, source: source);
+        foreach ((string field, string value) in new[] { ("repository", source.Candidate.Selection.Repository),
+            ("source-revision", "main"), ("variant", source.Candidate.Selection.Variant!), ("backend", "Cpu") })
+        { Assert.Equal(SetupEditState.Applied, Field(setup, field).SetValue(value).State); }
+        ISetupAction resolve = setup.Snapshot.Actions.Single(action => action.Descriptor.Id == "resolve");
+        Assert.Equal(SetupActionState.Completed, (await resolve.ExecuteAsync()).State);
+        Assert.Equal(SetupCommitState.Committed, (await setup.CommitAsync()).State);
+        Assert.Equal(TensorImageModels.Supra2Image.Key, target.Changes!.Configuration.Model);
+        Assert.Equal(4, target.Changes.Definition.Artifacts.Count);
+        Assert.All(target.Changes.Definition.Artifacts, artifact => Assert.NotNull(artifact.Provenance));
+        Assert.Empty(packs.Definitions);
+        Assert.False(Directory.Exists(_root));
+    }
+
+    [Fact]
     public async Task MissingCompanionAndWrongFamilyFailBeforeNativeWork()
     {
         TensorModelPackDefinition pack = Pack("host/missing");

@@ -31,7 +31,6 @@ internal sealed class SupraImageModel : ISupraImageModel
         ArgumentNullException.ThrowIfNull(textWeights);
         ArgumentNullException.ThrowIfNull(ditWeights);
         ArgumentNullException.ThrowIfNull(vaeWeights);
-        ValidateCheckpoint(ditWeights);
         _tokenizer = tokenizer;
         _allocator = useCuda ? new CudaAllocator() : new CpuAllocator(BlasEnum.DotNet);
         _disposableAllocator = _allocator as IDisposable;
@@ -115,24 +114,6 @@ internal sealed class SupraImageModel : ISupraImageModel
         _textEncoder?.Dispose();
         _context.Dispose();
         _disposableAllocator?.Dispose();
-    }
-
-    private static void ValidateCheckpoint(TorchStateDictionaryFile checkpoint)
-    {
-        if (!checkpoint.IntegerMetadata.TryGetValue("patch", out long patch) || patch != 2
-            || !checkpoint.IntegerMetadata.TryGetValue("ctx_len", out long contextLength)
-            || contextLength != SupraTextTokenizer.MaximumLength)
-        {
-            throw new InvalidDataException("Supra checkpoint architecture metadata is incompatible.");
-        }
-
-        if (!checkpoint.TensorShape("config.uncond_text")
-                .SequenceEqual([SupraTextTokenizer.MaximumLength, FlanT5Encoder.HiddenSize])
-            || !checkpoint.TensorShape("config.uncond_mask")
-                .SequenceEqual([SupraTextTokenizer.MaximumLength]))
-        {
-            throw new InvalidDataException("Supra checkpoint unconditional text tensors are incompatible.");
-        }
     }
 
     private static int PrefixLength(float[] mask)

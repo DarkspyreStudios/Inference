@@ -13,7 +13,8 @@ public static class SetupCompositionExample
     public static IReadOnlyList<IInferenceSetupSession> CreateDrafts(
         LlmProviderService llms, ImageProviderService images, ITensorModelPackManager packs,
         IImageWorkflowChoiceSource workflows, ISetupCommitTarget<LlmSetupChanges> llmTarget,
-        ISetupCommitTarget<ImageSetupChanges> imageTarget, ISetupCommitTarget<TensorSetupChanges> tensorTarget)
+        ISetupCommitTarget<ImageSetupChanges> imageTarget, ISetupCommitTarget<TensorSetupChanges> tensorTarget,
+        ITensorModelSource? modelSource = null)
     {
         ArgumentNullException.ThrowIfNull(llms);
         ArgumentNullException.ThrowIfNull(images);
@@ -26,10 +27,10 @@ public static class SetupCompositionExample
             new(SetupChangeIntent.Create, Guid.NewGuid().ToString("N"), null), imageTarget, workflows));
         sessions.Add(QwenSetup.CreateSession(new(SetupChangeIntent.Create, Guid.NewGuid().ToString("N"), null), tensorTarget, packs,
             offeredModels: packs.Definitions.Where(pack => pack.Capability == TensorCapability.Llm
-                && pack.RuntimeArchitecture == TensorLlmModels.QwenRuntimeArchitecture).ToArray()));
+                && pack.RuntimeArchitecture == TensorLlmModels.QwenRuntimeArchitecture).ToArray(), source: modelSource));
         sessions.Add(SupraSetup.CreateSession(new(SetupChangeIntent.Create, Guid.NewGuid().ToString("N"), null), tensorTarget, packs,
             offeredModels: packs.Definitions.Where(pack => pack.Capability == TensorCapability.Image
-                && pack.RuntimeArchitecture == TensorImageModels.SupraRuntimeArchitecture).ToArray()));
+                && pack.RuntimeArchitecture == TensorImageModels.SupraRuntimeArchitecture).ToArray(), source: modelSource));
         return sessions.AsReadOnly();
     }
 }
