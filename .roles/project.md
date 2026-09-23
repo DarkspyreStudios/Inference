@@ -154,6 +154,14 @@ build to .NET 11 advances the first component and resets the later components fo
 release (`11.<release>.<minor>`). Immutable releases are never overwritten. The family tag is
 created only after all three packages have passed their gates.
 
+## 11.4.1-rc.1 release preparation (2026-09-23)
+
+The user authorized a synchronized compatible-tweak release of all four packages. It includes
+`5ba23f9`: Laya Core ML uses `MLComputeUnits=CPUAndGPU`, excluding Neural Engine preparation.
+The recorded acceptance experiment and no-cache decision remain in the Laya technical design.
+No public contract or dependency version changes. Publication requires the normal authenticated
+restore, build/test, format/audit, archive and package-only consumer checks.
+
 ## Published 11.4.0-rc.1 contract release (2026-09-23)
 
 The user authorized all four packages at `11.4.0-rc.1`. This advances the breaking-contract
