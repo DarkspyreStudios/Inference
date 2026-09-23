@@ -18,7 +18,7 @@ specifications.
 | Version line | `<net>.<release>.<minor>`: .NET generation, breaking-contract release, compatible tweak/fix |
 | Release model | `Common`, `Connect`, `Tensor`, and `UI.Settings` publish together at the one version declared in `/Directory.Build.props` |
 | Primary branch | `master` |
-| Lifecycle stage | Four-package `11.4.1-rc.1` published privately; .NET 11 RC dependencies |
+| Lifecycle stage | Four-package `11.5.0-rc.1` published privately; .NET 11 RC dependencies |
 | Jira project and parent | TBD |
 | Jira subject label | TBD |
 
@@ -154,13 +154,25 @@ build to .NET 11 advances the first component and resets the later components fo
 release (`11.<release>.<minor>`). Immutable releases are never overwritten. The family tag is
 created only after all three packages have passed their gates.
 
-## 11.5.0-rc.1 contract version (not published)
+## Published 11.5.0-rc.1 reasoning contract release (2026-09-23)
 
 The shared version advances to `11.5.0-rc.1` for the provider-neutral reasoning-level contract
 replacement. Common, Connect, Tensor and UI.Settings remain synchronized. This source-only unit
 includes the complete reasoning implementation and documentation prepared by another worker,
-together with the version update. It does not create packages or publish to NuGet.
+together with the version update. The subsequent user-authorized publication includes all four
+packages from release source `500a572f6de98a994d1a4cbc5eae041577f04290`.
 Source is hosted privately at `https://github.com/DarkspyreStudios/Inference` on `origin/master`.
+
+Authenticated restores, zero-warning Debug/Release builds and tests pass: Connect 327, Tensor 292
+and UI 49 per configuration (24 Common tests are included in each). Formatting checks and all
+transitive vulnerability audits pass. Release binaries were rebuilt/retested at the source commit.
+Archive checks verify owned assemblies only, exact `[11.5.0-rc.1]` Common dependencies, required UI
+assets and no embedded sibling or third-party/native binaries. The package-only consumer passes
+against local archives and again with an empty package cache and no HTTP cache against normal
+feeds, including Whisper native runtime initialization. All four feed archives are byte-identical
+to the verified local archives; GitHub readback confirms version and private visibility.
+The release source is tagged `v11.5.0-rc.1`; source, publication record and tag are pushed to origin.
+No paid provider calls, model downloads or consuming-application migrations were performed.
 
 ## Published 11.4.1-rc.1 Tensor update (2026-09-23)
 

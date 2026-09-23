@@ -2,7 +2,7 @@
 
 Date: 2026-09-23
 
-Status: **Implemented; source version 11.5.0-rc.1, not yet published.** Decisions are in section 9.
+Status: **Implemented and published privately in 11.5.0-rc.1.** Decisions are in section 9.
 
 ## 1. Problem
 
@@ -178,4 +178,5 @@ and the Connect and Tensor transitive vulnerability audits report no vulnerable 
 change, package or publication is part of this unit; section 7's 11.5.0 release is a separate step.
 
 The subsequent coordinated source-version update selects `11.5.0-rc.1`. The complete implementation
-and version update are committed together at the user's request; NuGet publication remains separate.
+and version update are committed together at the user's request. All four packages were subsequently
+published from `500a572` after release verification; `.roles/project.md` records the evidence.
