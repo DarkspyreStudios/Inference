@@ -1,5 +1,7 @@
 namespace Darkspyre.Inference.Common.Setup;
 
+public enum SetupPathSelectionKind { File, Folder }
+
 public sealed record SetupFieldDescription(string Id, string DisplayName)
 {
     public string HelpText { get; init; } = string.Empty;
@@ -28,9 +30,10 @@ public abstract class SetupValueField<T>(
 
 public sealed class SetupTextField(
     SetupFieldDescription description, string value, string defaultValue, Func<string, SetupEditResult> edit,
-    int? maximumLength = null) : SetupValueField<string>(description, value, defaultValue, edit)
+    int? maximumLength = null, SetupPathSelectionKind? pathSelection = null) : SetupValueField<string>(description, value, defaultValue, edit)
 {
     public int? MaximumLength { get; } = maximumLength;
+    public SetupPathSelectionKind? PathSelection { get; } = pathSelection;
 }
 
 public sealed class SetupUriField(

@@ -246,6 +246,12 @@ Preparation/upload/submission/status/progress/download/cancel APIs are not repla
 
 ## 5. Tensor discovery, compatible selection and installation
 
+The approved location extension is defined by
+[`tensor-model-locations.tech-design.md`](tensor-model-locations.tech-design.md). It adds local
+files/folders and independent URLs alongside repository discovery, source-neutral artifact access,
+three-artifact ONNX Laya resolution and explicit staged Import for unknown integrity. The historical
+implementation records below describe their original release scope, not a repository-only restriction.
+
 ### Source discovery versus engine compatibility
 
 `ITensorModelSource` belongs in Tensor.Common. Its cancellable `SearchAsync`, `ListRevisionsAsync`
@@ -254,7 +260,9 @@ Hugging Face; candidates carry source/repository/revision/variant identities, ar
 access/license state and nullable size/integrity values. Search is not an installable catalog.
 
 Each engine owns an `ITensorModelResolver` with `EvaluateAsync(candidate, backend, token)` and
-`ResolveAsync(selection, token)`. Compatibility is Supported, Unsupported or Unverified with reasons
+`ResolveAsync(selection, token)`. Selection now carries a typed `TensorModelLocation`; repository
+browsing is optional and artifact reading is separated through `ITensorArtifactReader`.
+Compatibility is Supported, Unsupported or Unverified with reasons
 and evidence. Missing metadata is Unverified, not proof of compatibility. Evaluation may explicitly
 fetch bounded metadata/header ranges, but cannot silently download full weights or run repository
 code. Unsupported range requests do not fall back to downloading the entire file during browsing.

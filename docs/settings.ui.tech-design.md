@@ -110,6 +110,14 @@ authenticate, test, download, or load a model.
 
 ## 4. Field and wizard behavior
 
+The unpublished model-location extension adds `SetupTextField.PathSelection` (file or folder).
+When the interaction host also implements `IInferenceSettingsPathPicker`, the renderer offers
+Browse for these fields and for existing Connect executable fields. Native picker implementation
+and permissions remain host-owned; manual entry, including executable command names, is preserved.
+Cancel does not edit. A result from an older field/revision or superseded input is discarded rather
+than replayed. Picker failure reports a generic local input error. No Tensor reference or provider
+name dispatch is introduced. See [the location design](tensor-model-locations.tech-design.md).
+
 The renderer uses Common `SetupStep`, `SetupSection`, and `SetupField` variants. It maps text,
 URI, and executable reference to Lumeo single-line inputs; integer and decimal to numeric input;
 submitted Boolean values to checkbox; bounded choices to select; searchable/paged or manually

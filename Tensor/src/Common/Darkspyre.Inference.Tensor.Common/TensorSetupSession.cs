@@ -23,6 +23,13 @@ public sealed class TensorSetupSession : InferenceSetupSession<TensorSetupChange
     private string _repository = string.Empty;
     private string _sourceRevision = string.Empty;
     private string _variant = string.Empty;
+    private string _locationKind;
+    private string _localPath = string.Empty;
+    private Uri? _sourceUrl;
+    private string _license = string.Empty;
+    private string _sha256 = string.Empty;
+    private long? _length;
+    private readonly Dictionary<string, string> _companions = new(StringComparer.Ordinal);
     private TensorModelKey? _model;
     private TensorBackendKind _backend;
 
@@ -47,6 +54,7 @@ public sealed class TensorSetupSession : InferenceSetupSession<TensorSetupChange
         _original = existing;
         _backendProbe = backendProbe;
         _resolver = resolver;
+        _locationKind = resolver?.Source is null ? "file" : "repository";
         _model = existing?.Model;
         _backend = existing?.Backend ?? TensorBackendKind.Auto;
         Status = new()
@@ -79,12 +87,46 @@ public sealed class TensorSetupSession : InferenceSetupSession<TensorSetupChange
             : $"{selection.Artifacts.Count} artifacts; {selection.Artifacts.Sum(artifact => (decimal)artifact.Length):0} bytes; license: {selection.License}. Installation does not support resume."),
         Observation("pack-artifacts", "Pack artifacts and provenance", selection is null ? "No resolved pack selected."
             : string.Join(Environment.NewLine, selection.Artifacts.Select(artifact => $"{artifact.Role}: {artifact.RelativePath}; {artifact.Length} bytes; "
-                + (artifact.Provenance is { } provenance ? $"{provenance.Repository}@{provenance.Revision}; {provenance.License}" : "Source provenance not supplied by the host."))))
+                + (artifact.Provenance is { } provenance ? $"{(provenance.Repository is null ? provenance.Origin.ToString() : provenance.Repository + "@" + provenance.Revision)}; {provenance.License}" : "Source provenance not supplied by the host."))))
         ]) };
         if (_resolver is not null)
         {
-            sections.Add(new("source", "Browse remote model metadata", [
-                new SetupChoiceField(new("repository", "Repository"), repository, string.Empty,
+            sections.Add(new("location", "Model location", [
+                new SetupChoiceField(new("location-kind", "Location type"), _locationKind, _resolver.Source is null ? "file" : "repository",
+                    value => EditSource(revision, "location-kind", value), false,
+                    (query, token) => QueryChoicesAsync(query, _ => Task.FromResult(Page(query,
+                        new[] { new SetupChoice("file", "Local file"), new("folder", "Local folder"), new("url", "Artifact URL") }
+                            .Concat(_resolver.Source is null ? [] : new[] { new SetupChoice("repository", "Repository") }))), token), revision),
+                new SetupTextField(new("local-path", "Absolute model path") { IsVisible = _locationKind is "file" or "folder", IsRequired = true,
+                    HelpText = "A folder is inspected only at its top level. Selecting a file does not grant discovery of adjacent files." },
+                    _localPath, string.Empty, value => EditSource(revision, "local-path", value),
+                    pathSelection: _locationKind == "folder" ? SetupPathSelectionKind.Folder : SetupPathSelectionKind.File),
+                new SetupUriField(new("source-url", "Artifact URL") { IsVisible = _locationKind == "url", IsRequired = true,
+                    HelpText = "Use a durable HTTPS URL. The host supplies credentials separately." }, _sourceUrl, null,
+                    value => Edit(revision, () => { _sourceUrl = value; ClearResolution(); })),
+                new SetupTextField(new("folder-primary", "Primary artifact filename") { IsVisible = _locationKind == "folder",
+                    HelpText = "Optional when exactly one model matches this family's format; required for ambiguous folders or split GGUF." },
+                    _variant, string.Empty, value => EditSource(revision, "variant", value)),
+                new SetupTextField(new("source-license", "Artifact license") { IsRequired = _locationKind != "repository",
+                    HelpText = "Declare the actual license for these artifacts; the library never invents a license." },
+                    _license, string.Empty, value => EditSource(revision, "source-license", value)),
+                new SetupTextField(new("source-sha256", "Expected primary SHA-256") { IsVisible = _locationKind != "repository",
+                    HelpText = "Optional before Import. Import computes a content hash but does not authenticate its publisher." },
+                    _sha256, string.Empty, value => EditSource(revision, "source-sha256", value)),
+                new SetupIntegerField(new("source-length", "Expected primary length (bytes)") { IsVisible = _locationKind != "repository" },
+                    _length, null, value => Edit(revision, () => { _length = value; ClearResolution(); }), minimum: 0)
+            ]));
+            if (_resolver.Requirements.Count > 1)
+                sections.Add(new("companions", "Required companions", _resolver.Requirements.Skip(1).Select(requirement => (SetupField)
+                    new SetupTextField(new("companion-" + requirement.Role, requirement.Role + " location")
+                    {
+                        HelpText = "Optional absolute file path or HTTPS URL override. Folder filename: " + requirement.FileName
+                            + (requirement.Default is null ? ". Otherwise provide this artifact explicitly." : ". Default: " + requirement.Default.Location)
+                    }, _companions.GetValueOrDefault(requirement.Role, string.Empty), string.Empty,
+                        value => EditSource(revision, "companion-" + requirement.Role, value), pathSelection: SetupPathSelectionKind.File)).ToArray()));
+            if (_resolver.Source is not null && _locationKind == "repository")
+                sections.Add(new("source", "Browse repository metadata", [
+                    new SetupChoiceField(new("repository", "Repository"), repository, string.Empty,
                     value => EditSource(revision, "repository", value), true,
                     (query, token) => QueryChoicesAsync(query, async ct =>
                     {
@@ -111,11 +153,28 @@ public sealed class TensorSetupSession : InferenceSetupSession<TensorSetupChange
                                 item.Length is long length ? $"{length} bytes" : "Size unknown")))
                             : SourcePage(query, result, item => new(item.Path, item.Path), "variant");
                     }, token), revision, SetupSideEffect.Network, SetupChoiceCapabilities.Searchable),
+            ]));
+            sections.Add(new("inspection", "Inspection results", [
                 Observation("compatibility", "Compatibility", _evaluation is null ? "Not evaluated."
                     : $"{_evaluation.State} ({_evaluation.SourceState}). " + string.Join(" ", _evaluation.Issues.Select(issue => issue.Message))),
                 Observation("compatibility-evidence", "Compatibility evidence", _evaluation is null ? "Not evaluated."
                     : string.Join(Environment.NewLine, _evaluation.Evidence.Select(evidence => $"{evidence.ArtifactPath}: {evidence.Check} — {evidence.Detail}")))
             ]));
+            if (_resolver.AdditionalArtifactRolePrefix is { } prefix)
+                sections.Add(new("additional-artifacts", "Additional model artifacts", [
+                    new SetupRepeatableGroupField(new("additional-artifacts", "Additional shards")
+                    { HelpText = "For split files, select every remaining shard explicitly, or select their containing folder." },
+                    _companions.Where(item => item.Key.StartsWith(prefix, StringComparison.Ordinal)).Select(item => new SetupFieldRow(item.Key,
+                        [new SetupTextField(new("companion-" + item.Key, "Shard path or URL"), item.Value, string.Empty,
+                            value => EditSource(revision, "companion-" + item.Key, value), pathSelection: SetupPathSelectionKind.File)])).ToArray(),
+                    () => _companions.Keys.Count(key => key.StartsWith(prefix, StringComparison.Ordinal)) >= 255
+                        ? new(SetupEditState.Invalid, [new("artifact-limit", "At most 255 additional shards can be selected.")]) : Edit(revision, () =>
+                    {
+                        int index = Enumerable.Range(2, 255).First(index => !_companions.ContainsKey(prefix + index));
+                        _companions.Add(prefix + index, string.Empty); ClearResolution();
+                    }),
+                    id => Edit(revision, () => { if (id.StartsWith(prefix, StringComparison.Ordinal)) _companions.Remove(id); ClearResolution(); }))
+                ]));
         }
         return [new("model", "Model and backend", "Select a supported pack. Browsing and saving never install or load weights.", sections)];
     }
@@ -133,8 +192,13 @@ public sealed class TensorSetupSession : InferenceSetupSession<TensorSetupChange
 
     private SetupEditResult EditSource(long revision, string field, string value)
     {
-        if (value is null || value.Length > 1024 || value.Any(char.IsControl))
+        if (value is null || value.Length > 4096 || value.Any(char.IsControl))
         { return new(SetupEditState.Invalid, [new("source-selection", "Enter a valid source identity.", field)]); }
+        if (field == "location-kind" && value is not ("file" or "folder" or "url" or "repository")
+            || field == "source-sha256" && value.Length != 0 && (value.Length != 64 || !value.All(Uri.IsHexDigit))
+            || field == "local-path" && value.Length != 0 && !Path.IsPathFullyQualified(value)
+            || field.StartsWith("companion-", StringComparison.Ordinal) && value.Length != 0 && ParseLocation(value) is null)
+        { return new(SetupEditState.Invalid, [new("source-selection", "Enter a valid location or integrity value.", field)]); }
         return Edit(revision, () =>
         {
             switch (field)
@@ -142,6 +206,19 @@ public sealed class TensorSetupSession : InferenceSetupSession<TensorSetupChange
                 case "repository": _repository = value; _sourceRevision = _variant = string.Empty; break;
                 case "source-revision": _sourceRevision = value; _variant = string.Empty; break;
                 case "variant": _variant = value; break;
+                case "location-kind": _locationKind = value; break;
+                case "local-path": _localPath = value; break;
+                case "source-license": _license = value; break;
+                case "source-sha256": _sha256 = value; break;
+                default:
+                    if (field.StartsWith("companion-", StringComparison.Ordinal))
+                    {
+                        string role = field[10..];
+                        if (value.Length == 0 && !(_resolver?.AdditionalArtifactRolePrefix is { } prefix && role.StartsWith(prefix, StringComparison.Ordinal)))
+                            _companions.Remove(role);
+                        else _companions[role] = value;
+                    }
+                    break;
             }
             ClearResolution();
         });
@@ -160,13 +237,13 @@ public sealed class TensorSetupSession : InferenceSetupSession<TensorSetupChange
             {
                 _model = selected.Key;
                 if (selected.Key != _resolved?.Key)
-                { _repository = _sourceRevision = _variant = string.Empty; _evaluation = null; _resolved = null; }
+                { _repository = _sourceRevision = _variant = _localPath = _license = _sha256 = string.Empty; _sourceUrl = null; _length = null; _companions.Clear(); _evaluation = null; _resolved = null; _locationKind = _resolver?.Source is null ? "file" : "repository"; }
             });
     }
 
     private SetupEditResult SelectBackend(long revision, string value) =>
         Enum.TryParse(value, out TensorBackendKind backend) && Backends().Contains(backend)
-            ? Edit(revision, () => { _backend = backend; if (_repository.Length != 0) { ClearResolution(); } })
+            ? Edit(revision, () => { _backend = backend; if (HasLocation) { ClearResolution(); } })
             : new(SetupEditState.Invalid, [new("backend-unsupported", "Select a supported backend.", "backend")]);
 
     private IEnumerable<TensorBackendKind> Backends() => new[] { TensorBackendKind.Auto }.Concat(
@@ -196,9 +273,12 @@ public sealed class TensorSetupSession : InferenceSetupSession<TensorSetupChange
             BindAction(revision, new("backend-check", "Check backend prerequisites", SetupActionPurpose.CheckPrerequisites,
                 SetupSideEffect.LocalVerification, _backendProbe is not null,
                 _backendProbe is null ? "This composition does not provide a native backend probe." : null), CheckBackendAsync),
-            BindAction(revision, new("resolve", "Resolve compatible model pack", SetupActionPurpose.DiscoverModels,
-                SetupSideEffect.Network, _resolver is not null && _repository.Length != 0 && _sourceRevision.Length != 0 && _variant.Length != 0,
-                _resolver is null ? "This composition does not provide an engine model resolver." : "Select a repository, revision and variant. Resolve reads bounded metadata, never full weights."), ResolveAsync),
+            BindAction(revision, new("resolve", "Inspect model location", SetupActionPurpose.DiscoverModels,
+                SetupSideEffect.Network | SetupSideEffect.LocalVerification, _resolver is not null && HasLocation,
+                "Select a location. Inspection reads bounded metadata, never full weights; missing integrity requires explicit Import."), ResolveAsync),
+            BindAction(revision, new("import", "Import model artifacts", SetupActionPurpose.Install,
+                SetupSideEffect.Network | SetupSideEffect.Download | SetupSideEffect.LocalVerification, _resolver is not null && HasLocation,
+                "Copies complete artifacts, calculates hashes, validates compatibility and installs through the host's persistence store. Does not load a model."), ImportAsync),
             BindAction(revision, new("status", "Check installation and readiness", SetupActionPurpose.CheckReadiness,
                 SetupSideEffect.LocalVerification, selected), CheckAsync),
             BindAction(revision, new("install", "Install selected pack", SetupActionPurpose.Install,
@@ -224,7 +304,7 @@ public sealed class TensorSetupSession : InferenceSetupSession<TensorSetupChange
             Status = Status with { Installed = SetupObservation.Unknown, Verified = SetupObservation.Unknown };
         });
         progress?.Report(new("Resolving", "Inspecting bounded model metadata and required companions."));
-        TensorModelResolution result = await _resolver!.ResolveAsync(new(new(_repository, _sourceRevision, _variant), _backend), token).ConfigureAwait(false);
+        TensorModelResolution result = await _resolver!.ResolveAsync(CreateSelection(), token).ConfigureAwait(false);
         token.ThrowIfCancellationRequested();
         TensorModelPackDefinition? definition = result.Evaluation.State == TensorCompatibilityState.Supported && result.Definition is not null
             ? new TensorModelCatalog([result.Definition]).GetRequired(result.Definition.Key) : null;
@@ -232,6 +312,45 @@ public sealed class TensorSetupSession : InferenceSetupSession<TensorSetupChange
         return definition is not null ? SetupActionResult.Completed : new(SetupActionState.Failed,
             result.Evaluation.Issues.Select(issue => new SetupIssue(issue.Code, issue.Message, "variant")).DefaultIfEmpty(
                 new("model-unresolved", "Compatibility and the complete installable pack have not been established.", "variant")).ToArray(), IsRetryable: true);
+    }
+
+    private bool HasLocation => _locationKind switch
+    {
+        "repository" => _resolver?.Source is not null && _repository.Length != 0 && _sourceRevision.Length != 0 && _variant.Length != 0,
+        "url" => _sourceUrl is not null,
+        _ => _localPath.Length != 0
+    };
+
+    private static TensorModelLocation? ParseLocation(string text) => Path.IsPathFullyQualified(text)
+        ? new TensorModelLocation.LocalFile(text)
+        : Uri.TryCreate(text, UriKind.Absolute, out Uri? uri) && uri.Scheme is "https" or "http"
+            ? new TensorModelLocation.RemoteFile(uri) : null;
+
+    private TensorModelSelection CreateSelection() => new(_locationKind switch
+    {
+        "repository" => new TensorModelLocation.RepositoryArtifact(_resolver!.Source!.Id, new(_repository, _sourceRevision, _variant)),
+        "folder" => new TensorModelLocation.LocalFolder(_localPath, _variant),
+        "url" => new TensorModelLocation.RemoteFile(_sourceUrl!),
+        _ => new TensorModelLocation.LocalFile(_localPath)
+    }, _backend, string.IsNullOrWhiteSpace(_license) ? null : _license, _length, _sha256.Length == 0 ? null : _sha256,
+        _companions.Where(item => item.Value.Length != 0).Select(item => new TensorArtifactLocation(item.Key, ParseLocation(item.Value)!)).ToArray());
+
+    private async Task<SetupActionResult> ImportAsync(IProgress<SetupProgress>? progress, CancellationToken token)
+    {
+        TensorModelSelection selection = CreateSelection();
+        Publish(() => { ClearResolution(); Status = Status with { Installed = SetupObservation.Unknown, Verified = SetupObservation.Unknown }; });
+        TensorModelImportResult result = await _packs.ImportAsync(new(selection, _resolver!), new InstallProgress(progress), token).ConfigureAwait(false);
+        token.ThrowIfCancellationRequested();
+        TensorModelResolution resolution = result.Resolution;
+        Publish(() =>
+        {
+            _evaluation = resolution.Evaluation;
+            _resolved = resolution.Evaluation.State == TensorCompatibilityState.Supported && resolution.Definition is not null
+                ? _packs.GetRequiredDefinition(resolution.Definition.Key) : null;
+            _model = _resolved?.Key;
+        });
+        return _model is not null ? await VerifyAsync(progress, token).ConfigureAwait(false)
+            : new(SetupActionState.Failed, resolution.Evaluation.Issues.Select(issue => new SetupIssue(issue.Code, issue.Message)).ToArray(), IsRetryable: true);
     }
 
     private async Task<SetupActionResult> CheckBackendAsync(IProgress<SetupProgress>? progress, CancellationToken token)
@@ -312,7 +431,9 @@ public sealed class TensorSetupSession : InferenceSetupSession<TensorSetupChange
 
     protected override bool IsDraftDirty => _model != _original?.Model
         || _backend != (_original?.Backend ?? TensorBackendKind.Auto)
-        || _repository.Length != 0 || _sourceRevision.Length != 0 || _variant.Length != 0;
+        || _repository.Length != 0 || _sourceRevision.Length != 0 || _variant.Length != 0
+        || _localPath.Length != 0 || _sourceUrl is not null || _license.Length != 0 || _sha256.Length != 0 || _length is not null
+        || _companions.Count != 0 || _locationKind != (_resolver?.Source is null ? "file" : "repository");
 
     protected override TensorSetupChanges CreateChanges() => new(_identity,
         new(Definition.Implementation.Id, _model!, _backend),

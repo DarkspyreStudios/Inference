@@ -262,7 +262,7 @@ public sealed class TensorModelPackManagerTests : IDisposable
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) => send(request, cancellationToken);
     }
 
-    private sealed class MemoryPersistenceStore : IPersistenceStore
+    internal sealed class MemoryPersistenceStore : IPersistenceStore
     {
         private readonly Dictionary<(string Store, string Asset), byte[]> _assets = [];
         private readonly Lock _gate = new();

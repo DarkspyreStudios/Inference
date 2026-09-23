@@ -8,13 +8,20 @@ public sealed record TensorCompatibilityEvidence(string ArtifactPath, string Che
 public sealed record TensorModelEvaluation(TensorCompatibilityState State,
     IReadOnlyList<TensorSourceIssue> Issues, IReadOnlyList<TensorCompatibilityEvidence> Evidence,
     TensorSourceState SourceState = TensorSourceState.Available);
-public sealed record TensorModelSelection(TensorCandidateSelection Candidate, TensorBackendKind Backend = TensorBackendKind.Auto);
+public sealed record TensorModelSelection(TensorModelLocation Location, TensorBackendKind Backend = TensorBackendKind.Auto,
+    string? License = null, long? ExpectedLength = null, string? ExpectedSha256 = null,
+    IReadOnlyList<TensorArtifactLocation>? Companions = null);
 public sealed record TensorModelResolution(TensorModelEvaluation Evaluation, TensorModelPackDefinition? Definition = null);
 
 /// <summary>Engine-owned metadata evaluation and complete immutable pack resolution. Never loads model weights.</summary>
 public interface ITensorModelResolver
 {
-    ITensorModelSource Source { get; }
+    ITensorModelSource? Source { get; }
+    IReadOnlyList<TensorArtifactRequirement> Requirements { get; }
+    string? AdditionalArtifactRolePrefix { get; }
+    Task<TensorSourceResult<TensorModelCandidate>> DiscoverAsync(TensorModelSelection selection, CancellationToken cancellationToken = default);
+    Task<TensorModelResolution> ResolveCandidateAsync(TensorModelCandidate candidate, TensorBackendKind backend,
+        ITensorArtifactReader reader, CancellationToken cancellationToken = default);
     Task<TensorModelEvaluation> EvaluateAsync(TensorModelCandidate candidate, TensorBackendKind backend, CancellationToken cancellationToken = default);
     Task<TensorModelResolution> ResolveAsync(TensorModelSelection selection, CancellationToken cancellationToken = default);
 }
@@ -64,12 +71,12 @@ public static class TensorResolvedPack
         string fingerprint = Convert.ToHexStringLower(SHA256.HashData(manifest));
         var definition = new TensorModelPackDefinition
         {
-            Key = new(candidate.Selection.Repository + "/" + candidate.Selection.Variant,
-                candidate.Selection.Revision + ":" + fingerprint),
+            Key = new((candidate.Selection.Repository ?? "imported") + "/" + candidate.Selection.Variant,
+                (candidate.Selection.Revision is { Length: > 0 } revision ? revision + ":" : string.Empty) + fingerprint),
             Capability = capability,
             RuntimeArchitecture = architecture,
             License = string.Join(" AND ", artifacts.Select(artifact => artifact.Provenance!.License!).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal)),
-            ProjectUri = candidate.Artifacts.Count == 0 ? null : candidate.Artifacts[0].Provenance.Origin,
+            ProjectUri = candidate.Artifacts.Count == 0 || candidate.Artifacts[0].Provenance.Origin.IsFile ? null : candidate.Artifacts[0].Provenance.Origin,
             SupportedBackends = backends,
             Artifacts = artifacts
         };

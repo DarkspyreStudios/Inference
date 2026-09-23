@@ -5,6 +5,33 @@ namespace Darkspyre.Inference.Tensor.Image.Supra.Tests;
 public sealed class SupraModelResolverTests
 {
     [Fact]
+    public async Task IndependentUrlsUseContentIdentityNotHuggingFaceAsCompatibilityEvidence()
+    {
+        var source = new SupraMetadataFixture.Source(SupraMetadataFixture.Read());
+        var reader = new MirrorReader(source);
+        TensorModelArtifactDefinition primary = TensorImageModels.Supra2Image.Artifacts.Single(item => item.Role == "supra-model");
+        TensorModelLocation Location(TensorModelArtifactDefinition artifact) => new TensorModelLocation.RemoteFile(new("https://mirror.test/" + artifact.Role + ".bin"));
+        var selection = new TensorModelSelection(Location(primary), License: primary.Provenance!.License,
+            ExpectedLength: primary.Length, ExpectedSha256: primary.Sha256,
+            Companions: TensorImageModels.Supra2Image.Artifacts.Where(item => item.Role != "supra-model").Select(item =>
+                new TensorArtifactLocation(item.Role, Location(item), item.Provenance!.License, item.Length, item.Sha256)).ToArray());
+        TensorModelResolution result = await new SupraModelResolver(reader: reader).ResolveAsync(selection);
+        Assert.Equal(TensorCompatibilityState.Supported, result.Evaluation.State);
+        Assert.Equal(4, result.Definition!.Artifacts.Count);
+        Assert.All(result.Definition.Artifacts, artifact =>
+        { Assert.Null(artifact.Provenance!.Repository); Assert.Equal("mirror.test", artifact.Sources[0].Host); });
+    }
+
+    private sealed class MirrorReader(SupraMetadataFixture.Source source) : ITensorArtifactReader
+    {
+        public Task<TensorSourceResult<TensorMetadataContent>> ReadMetadataAsync(TensorSourceArtifact artifact, TensorMetadataRead read, CancellationToken cancellationToken = default)
+        {
+            string role = Path.GetFileNameWithoutExtension(artifact.DownloadUri.AbsolutePath);
+            TensorModelArtifactDefinition original = TensorImageModels.Supra2Image.Artifacts.Single(item => item.Role == role);
+            return source.ReadMetadataAsync(artifact with { Path = original.Provenance!.Path, Provenance = original.Provenance }, read, cancellationToken);
+        }
+    }
+    [Fact]
     public void InstalledCheckpointMetadataMatchesTheSharedPipelineSchema()
     {
         SupraMetadataFixture fixture = SupraMetadataFixture.Read();
@@ -17,7 +44,7 @@ public sealed class SupraModelResolverTests
     public async Task BoundedResolutionAssemblesAllFourPinnedRolesAndPreservesBuiltinKey()
     {
         var source = new SupraMetadataFixture.Source(SupraMetadataFixture.Read());
-        TensorModelResolution result = await new SupraModelResolver(source).ResolveAsync(new(source.Candidate.Selection));
+        TensorModelResolution result = await new SupraModelResolver(source).ResolveAsync(new(new TensorModelLocation.RepositoryArtifact(source.Id, source.Candidate.Selection)));
         Assert.Equal(TensorCompatibilityState.Supported, result.Evaluation.State);
         Assert.Equal(TensorImageModels.Supra2Image.Key, result.Definition!.Key);
         Assert.Equal(4, result.Definition.Artifacts.Count);
@@ -38,7 +65,7 @@ public sealed class SupraModelResolverTests
             DownloadUri = new("https://huggingface.co/owner/finetune/resolve/" + new string('2', 40) + "/model_final_ema.pt")
         };
         source.Candidate = source.Candidate with { Selection = source.Candidate.Selection with { Repository = "owner/finetune", Revision = new('2', 40) }, Artifacts = [primary] };
-        TensorModelResolution result = await new SupraModelResolver(source).ResolveAsync(new(source.Candidate.Selection, TensorBackendKind.Cpu));
+        TensorModelResolution result = await new SupraModelResolver(source).ResolveAsync(new(new TensorModelLocation.RepositoryArtifact(source.Id, source.Candidate.Selection), TensorBackendKind.Cpu));
         Assert.Equal(TensorCompatibilityState.Supported, result.Evaluation.State);
         Assert.NotEqual(TensorImageModels.Supra2Image.Key, result.Definition!.Key);
         Assert.Equal("owner/finetune", result.Definition.Artifacts.Single(item => item.Role == "supra-model").Provenance!.Repository);
@@ -63,7 +90,7 @@ public sealed class SupraModelResolverTests
             case "vae-missing": fixture.Vae.Remove("decoder.up_blocks.2.upsamplers.0.conv.weight"); break;
         }
         var source = new SupraMetadataFixture.Source(fixture);
-        TensorModelResolution result = await new SupraModelResolver(source).ResolveAsync(new(source.Candidate.Selection));
+        TensorModelResolution result = await new SupraModelResolver(source).ResolveAsync(new(new TensorModelLocation.RepositoryArtifact(source.Id, source.Candidate.Selection)));
         Assert.Equal(TensorCompatibilityState.Unsupported, result.Evaluation.State);
         Assert.Null(result.Definition);
     }
@@ -75,7 +102,7 @@ public sealed class SupraModelResolverTests
     public async Task MissingCompanionIsUnverifiedNotALoneInstallableDit(string role)
     {
         var source = new SupraMetadataFixture.Source(SupraMetadataFixture.Read()) { MissingRole = role };
-        TensorModelResolution result = await new SupraModelResolver(source).ResolveAsync(new(source.Candidate.Selection));
+        TensorModelResolution result = await new SupraModelResolver(source).ResolveAsync(new(new TensorModelLocation.RepositoryArtifact(source.Id, source.Candidate.Selection)));
         Assert.Equal(TensorCompatibilityState.Unverified, result.Evaluation.State);
         Assert.Equal(TensorSourceState.NotFound, result.Evaluation.SourceState);
         Assert.Null(result.Definition);

@@ -13,51 +13,39 @@ public static class WhisperSetup
     public static TensorSetupSession CreateSession(SetupConfigurationIdentity identity,
         ISetupCommitTarget<TensorSetupChanges> target, ITensorModelPackManager packs,
         TensorSetupConfiguration? existing = null, ITensorSpeechToTextInference? instance = null,
-        IReadOnlyList<TensorModelPackDefinition>? offeredModels = null, ITensorModelSource? source = null)
+        IReadOnlyList<TensorModelPackDefinition>? offeredModels = null, ITensorModelSource? source = null, ITensorArtifactReader? reader = null)
     {
         IReadOnlyList<TensorModelPackDefinition> models = offeredModels ?? TensorSpeechModels.Whisper;
         foreach (TensorModelPackDefinition model in models) WhisperCompatibility.Validate(model);
         return new(Definition, identity, target, models, packs, existing, instance, new WhisperBackendProbe(),
-            source is null ? null : new WhisperModelResolver(source));
+            new WhisperModelResolver(source, reader));
     }
 }
 
 /// <summary>Resolves published Whisper model content by immutable integrity identity and actual GGML header.
 /// Unknown content stays Unverified; a filename or model-host tag is not architecture evidence.</summary>
-public sealed class WhisperModelResolver : ITensorModelResolver
+public sealed class WhisperModelResolver : TensorModelResolver
 {
-    public ITensorModelSource Source { get; }
-    public WhisperModelResolver(ITensorModelSource source) { ArgumentNullException.ThrowIfNull(source); Source = source; }
+    public WhisperModelResolver(ITensorModelSource? source = null, ITensorArtifactReader? reader = null) : base(source, reader) { }
+    public override IReadOnlyList<TensorArtifactRequirement> Requirements => [new("model", "*.bin")];
 
-    public async Task<TensorModelEvaluation> EvaluateAsync(TensorModelCandidate candidate, TensorBackendKind backend, CancellationToken cancellationToken = default)
-        => (await ResolveCandidateAsync(candidate, backend, cancellationToken).ConfigureAwait(false)).Evaluation;
-
-    public async Task<TensorModelResolution> ResolveAsync(TensorModelSelection selection, CancellationToken cancellationToken = default)
+    public override async Task<TensorModelResolution> ResolveCandidateAsync(TensorModelCandidate candidate, TensorBackendKind backend,
+        ITensorArtifactReader reader, CancellationToken cancellationToken = default)
     {
-        ArgumentNullException.ThrowIfNull(selection);
-        TensorSourceResult<TensorModelCandidate> candidate = await Source.GetCandidateAsync(selection.Candidate, cancellationToken).ConfigureAwait(false);
-        return candidate.State == TensorSourceState.Available && candidate.Value is not null
-            ? await ResolveCandidateAsync(candidate.Value, selection.Backend, cancellationToken).ConfigureAwait(false)
-            : new(new(TensorCompatibilityState.Unverified, candidate.Issues ?? [new("source-unavailable", "The model source is unavailable.")], [], candidate.State));
-    }
-
-    private async Task<TensorModelResolution> ResolveCandidateAsync(TensorModelCandidate candidate, TensorBackendKind backend, CancellationToken token)
-    {
-        ArgumentNullException.ThrowIfNull(candidate); token.ThrowIfCancellationRequested();
+        ArgumentNullException.ThrowIfNull(candidate); cancellationToken.ThrowIfCancellationRequested();
         static TensorModelResolution Failure(TensorCompatibilityState state, string code, string message) => new(new(state, [new(code, message)], []));
         if (backend is not (TensorBackendKind.Auto or TensorBackendKind.Cpu))
             return Failure(TensorCompatibilityState.Unsupported, "backend-unsupported", "This adapter supplies the CPU runtime only.");
         TensorSourceArtifact[] selected = candidate.Artifacts.Where(item => item.Path == candidate.Selection.Variant).ToArray();
-        if (candidate.SourceId != Source.Id || selected.Length != 1)
+        if (selected.Length != 1)
             return Failure(TensorCompatibilityState.Unverified, "candidate-unavailable", "The selected source artifact is missing or ambiguous.");
         TensorSourceArtifact artifact = selected[0];
         TensorModelPackDefinition? known = TensorSpeechModels.KnownContent(artifact.Length, artifact.Sha256);
-        if (known is null || string.IsNullOrWhiteSpace(candidate.License) || string.IsNullOrWhiteSpace(artifact.Provenance.License)
-            || artifact.Provenance.Repository != candidate.Selection.Repository || artifact.Provenance.Revision != candidate.Selection.Revision)
+        if (known is null || string.IsNullOrWhiteSpace(candidate.License) || string.IsNullOrWhiteSpace(artifact.Provenance.License))
             return Failure(TensorCompatibilityState.Unverified, "whisper-content-unverified", "Resolution currently verifies the twelve published Whisper weight sets by their pinned size and SHA-256; other content requires further compatibility evidence.");
         try
         {
-            WhisperModelMetadata metadata = await new TensorMetadataReader(Source).ReadAsync(artifact, WhisperCompatibility.Inspect, token).ConfigureAwait(false);
+            WhisperModelMetadata metadata = await new TensorMetadataReader(reader).ReadAsync(artifact, WhisperCompatibility.Inspect, cancellationToken).ConfigureAwait(false);
             SpeechModelInfo expected = TensorSpeechModels.Info(known);
             if (metadata.EnglishOnly != expected.EnglishOnly || metadata.SupportsTranslation != expected.SupportsTranslationToEnglish)
                 return Failure(TensorCompatibilityState.Unsupported, "whisper-header", "The checkpoint header disagrees with its declared weight identity.");

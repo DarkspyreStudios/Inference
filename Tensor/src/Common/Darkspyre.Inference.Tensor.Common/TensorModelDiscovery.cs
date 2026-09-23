@@ -7,7 +7,7 @@ public sealed record TensorSourcePage<T>(IReadOnlyList<T> Items, string? Continu
 public sealed record TensorSourceQuery(string Search = "", string? Continuation = null, int PageSize = 50);
 public sealed record TensorRepositoryQuery(string Repository, string? Continuation = null, int PageSize = 50);
 public sealed record TensorVariantQuery(string Repository, string Revision);
-public sealed record TensorCandidateSelection(string Repository, string Revision, string Variant);
+public sealed record TensorCandidateSelection(string? Repository, string? Revision, string Variant);
 public sealed record TensorSourceModel(string Repository, string? Revision, string? License, bool? IsPrivate, bool? IsGated);
 public sealed record TensorSourceRevision(string Revision, DateTimeOffset? CreatedAt);
 
@@ -16,22 +16,29 @@ public sealed record TensorCandidateMetadata(string? Architecture, long? Context
 public sealed record TensorSourceArtifact(string Path, long? Length, string? Sha256, TensorArtifactProvenance Provenance, Uri DownloadUri);
 public sealed record TensorModelCandidate(
     string SourceId, TensorCandidateSelection Selection, TensorCandidateMetadata Metadata,
-    string? License, bool? IsPrivate, bool? IsGated, IReadOnlyList<TensorSourceArtifact> Artifacts);
+    string? License, bool? IsPrivate, bool? IsGated, IReadOnlyList<TensorSourceArtifact> Artifacts)
+{
+    public IReadOnlyDictionary<string, string> ArtifactRoles { get; init; } = new Dictionary<string, string>();
+}
 
 public enum TensorMetadataReadKind { HeaderRange, CompleteMetadataFile }
 public sealed record TensorMetadataRead(long Offset, int Length, TensorMetadataReadKind Kind = TensorMetadataReadKind.HeaderRange);
 public sealed record TensorMetadataContent(ReadOnlyMemory<byte> Bytes, long Offset, long TotalLength);
 
 /// <summary>Read-only source discovery. None of these operations installs or loads model weights.</summary>
-public interface ITensorModelSource
+public interface ITensorArtifactReader
+{
+    Task<TensorSourceResult<TensorMetadataContent>> ReadMetadataAsync(TensorSourceArtifact artifact, TensorMetadataRead read, CancellationToken cancellationToken = default);
+}
+
+/// <summary>Optional repository browsing adapter. File and URL access do not require a repository.</summary>
+public interface ITensorModelSource : ITensorArtifactReader
 {
     string Id { get; }
     Task<TensorSourceResult<TensorSourcePage<TensorSourceModel>>> SearchAsync(TensorSourceQuery query, CancellationToken cancellationToken = default);
     Task<TensorSourceResult<TensorSourcePage<TensorSourceRevision>>> ListRevisionsAsync(TensorRepositoryQuery query, CancellationToken cancellationToken = default);
     Task<TensorSourceResult<TensorSourcePage<TensorSourceArtifact>>> ListVariantsAsync(TensorVariantQuery query, CancellationToken cancellationToken = default);
     Task<TensorSourceResult<TensorModelCandidate>> GetCandidateAsync(TensorCandidateSelection selection, CancellationToken cancellationToken = default);
-    /// <summary>Explicit bounded inspection only. Unsupported range responses never trigger a full weight download.</summary>
-    Task<TensorSourceResult<TensorMetadataContent>> ReadMetadataAsync(TensorSourceArtifact artifact, TensorMetadataRead read, CancellationToken cancellationToken = default);
 }
 
 /// <summary>One-way, short-lived host credential. Never persist in model metadata or display in settings.</summary>

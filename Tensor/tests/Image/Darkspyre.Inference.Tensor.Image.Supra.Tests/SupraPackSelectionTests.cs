@@ -79,7 +79,7 @@ public sealed class SupraPackSelectionTests : IDisposable
         var target = new Target();
         await using TensorSetupSession setup = SupraSetup.CreateSession(new(SetupChangeIntent.Create, "remote", null),
             target, packs, source: source);
-        foreach ((string field, string value) in new[] { ("repository", source.Candidate.Selection.Repository),
+        foreach ((string field, string value) in new[] { ("repository", source.Candidate.Selection.Repository!),
             ("source-revision", "main"), ("variant", source.Candidate.Selection.Variant!), ("backend", "Cpu") })
         { Assert.Equal(SetupEditState.Applied, Field(setup, field).SetValue(value).State); }
         ISetupAction resolve = setup.Snapshot.Actions.Single(action => action.Descriptor.Id == "resolve");

@@ -11,7 +11,7 @@ public sealed class QwenModelResolverTests
     public async Task ActualHeaderPolicyResolvesPinnedPackWithoutDownloadingWeights()
     {
         var source = new Source();
-        TensorModelResolution result = await new QwenModelResolver(source).ResolveAsync(new(new("owner/model", "main", "model.gguf"), TensorBackendKind.Cpu));
+        TensorModelResolution result = await new QwenModelResolver(source).ResolveAsync(new(new TensorModelLocation.RepositoryArtifact(source.Id, new("owner/model", "main", "model.gguf")), TensorBackendKind.Cpu));
         Assert.Equal(TensorCompatibilityState.Supported, result.Evaluation.State);
         Assert.NotNull(result.Definition);
         Assert.StartsWith(Commit + ":", result.Definition.Key.Revision, StringComparison.Ordinal);
@@ -36,7 +36,7 @@ public sealed class QwenModelResolverTests
     {
         var source = new Source(change);
         var resolver = new QwenModelResolver(source);
-        TensorModelResolution result = await resolver.ResolveAsync(new(new("owner/model", Commit, "model.gguf")));
+        TensorModelResolution result = await resolver.ResolveAsync(new(new TensorModelLocation.RepositoryArtifact(source.Id, new("owner/model", Commit, "model.gguf"))));
         Assert.Equal(TensorCompatibilityState.Unsupported, result.Evaluation.State);
         Assert.Null(result.Definition);
         Assert.NotEmpty(result.Evaluation.Issues);
@@ -66,8 +66,8 @@ public sealed class QwenModelResolverTests
     {
         var source = new Source(split: true);
         var resolver = new QwenModelResolver(source);
-        TensorModelResolution first = await resolver.ResolveAsync(new(new("owner/model", Commit, source.Candidate.Artifacts[0].Path)));
-        TensorModelResolution second = await resolver.ResolveAsync(new(new("owner/model", Commit, source.Candidate.Artifacts[1].Path)));
+        TensorModelResolution first = await resolver.ResolveAsync(new(new TensorModelLocation.RepositoryArtifact(source.Id, new("owner/model", Commit, source.Candidate.Artifacts[0].Path))));
+        TensorModelResolution second = await resolver.ResolveAsync(new(new TensorModelLocation.RepositoryArtifact(source.Id, new("owner/model", Commit, source.Candidate.Artifacts[1].Path))));
         Assert.Equal(TensorCompatibilityState.Supported, first.Evaluation.State);
         Assert.Equal(first.Definition!.Key, second.Definition!.Key);
         Assert.Equal(2, first.Definition.Artifacts.Count);
@@ -116,6 +116,7 @@ public sealed class QwenModelResolverTests
     }
     private sealed class NoInstallPacks : ITensorModelPackManager
     {
+        public Task<TensorModelImportResult> ImportAsync(TensorModelImportRequest request, IProgress<TensorModelInstallProgress>? progress = null, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public IReadOnlyList<TensorModelPackDefinition> Definitions => [];
         public TensorModelPackDefinition Register(TensorModelPackDefinition definition) => throw new InvalidOperationException("Must not register during Save.");
         public TensorModelPackDefinition GetRequiredDefinition(TensorModelKey key) => throw new NotSupportedException();

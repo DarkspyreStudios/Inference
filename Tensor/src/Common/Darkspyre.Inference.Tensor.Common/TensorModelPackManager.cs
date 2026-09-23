@@ -54,6 +54,9 @@ public interface ITensorModelPackManager
         IProgress<TensorModelInstallProgress>? progress = null,
         CancellationToken cancellationToken = default);
 
+    Task<TensorModelImportResult> ImportAsync(TensorModelImportRequest request,
+        IProgress<TensorModelInstallProgress>? progress = null, CancellationToken cancellationToken = default);
+
     Task<TensorModelPackStatus> VerifyAsync(
         TensorModelKey key,
         CancellationToken cancellationToken = default);
@@ -141,10 +144,13 @@ public sealed class TensorModelPackManager : ITensorModelPackManager, IDisposabl
         }
     }
 
-    public async Task InstallAsync(
+    public Task InstallAsync(
         TensorModelKey key,
         IProgress<TensorModelInstallProgress>? progress = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default) => InstallCoreAsync(key, progress, null, cancellationToken);
+
+    private async Task InstallCoreAsync(TensorModelKey key, IProgress<TensorModelInstallProgress>? progress,
+        IReadOnlyDictionary<Uri, string>? staged, CancellationToken cancellationToken)
     {
         ThrowIfDisposed();
         TensorModelPackDefinition definition = _catalog.GetRequired(key);
@@ -188,7 +194,7 @@ public sealed class TensorModelPackManager : ITensorModelPackManager, IDisposabl
                     $"darkspyre-tensor-{Guid.NewGuid():N}.download");
                 try
                 {
-                    await DownloadAsync(key, artifact, temporaryPath, progress, completed, total, cancellationToken)
+                    await DownloadAsync(key, artifact, temporaryPath, progress, completed, total, staged, cancellationToken)
                         .ConfigureAwait(false);
                     Report(progress, new TensorModelInstallProgress(
                         TensorModelInstallStage.Saving,
@@ -245,6 +251,74 @@ public sealed class TensorModelPackManager : ITensorModelPackManager, IDisposabl
         {
             if (entered) { gate.Release(); }
         }
+    }
+
+    /// <summary>Explicit full acquisition. Final validation is metadata-only; no engine is started or loaded.</summary>
+    public async Task<TensorModelImportResult> ImportAsync(TensorModelImportRequest request,
+        IProgress<TensorModelInstallProgress>? progress = null, CancellationToken cancellationToken = default)
+    {
+        ThrowIfDisposed();
+        ArgumentNullException.ThrowIfNull(request);
+        var staged = new Dictionary<Uri, string>();
+        try
+        {
+            Report(progress, new(TensorModelInstallStage.Checking));
+            var discovery = await request.Resolver.DiscoverAsync(request.Selection, cancellationToken).ConfigureAwait(false);
+            if (discovery.State != TensorSourceState.Available || discovery.Value is null)
+            {
+                Report(progress, new(TensorModelInstallStage.Failed));
+                return new(new(new(TensorCompatibilityState.Unverified, discovery.Issues ?? [], [], discovery.State)));
+            }
+            TensorModelCandidate candidate = discovery.Value;
+            if (string.IsNullOrWhiteSpace(candidate.License) || candidate.Artifacts.Any(item => string.IsNullOrWhiteSpace(item.Provenance.License)))
+            {
+                Report(progress, new(TensorModelInstallStage.Failed));
+                return new(new(new(TensorCompatibilityState.Unverified,
+                    [new("license-required", "Supply the actual license for each artifact before importing.")], [])));
+            }
+            var artifacts = new List<TensorSourceArtifact>();
+            long completed = 0;
+            long? total = candidate.Artifacts.All(item => item.Length.HasValue) ? candidate.Artifacts.Sum(item => item.Length!.Value) : null;
+            foreach (TensorSourceArtifact artifact in candidate.Artifacts)
+            {
+                string path = Path.Combine(Path.GetTempPath(), $"darkspyre-tensor-import-{Guid.NewGuid():N}.download");
+                // Every staging path is retained for cleanup, including a failed partial copy.
+                if (!staged.TryAdd(artifact.DownloadUri, path))
+                    throw new ArgumentException("A model import must not assign one source URI to multiple artifacts.", nameof(request));
+                (long length, string hash) = await CopySourceAsync(artifact.DownloadUri, path, artifact.Path,
+                    artifact.Length, artifact.Sha256, progress, completed, total, cancellationToken).ConfigureAwait(false);
+                artifacts.Add(artifact with { Length = length, Sha256 = hash });
+                completed = checked(completed + length);
+            }
+            candidate = candidate with { Artifacts = artifacts.ToArray() };
+            TensorModelResolution resolution = await request.Resolver.ResolveCandidateAsync(candidate, request.Selection.Backend,
+                new StagedReader(staged), cancellationToken).ConfigureAwait(false);
+            cancellationToken.ThrowIfCancellationRequested();
+            if (resolution.Evaluation.State != TensorCompatibilityState.Supported || resolution.Definition is null)
+            {
+                Report(progress, new(TensorModelInstallStage.Failed));
+                return new(resolution);
+            }
+            resolution = resolution with { Definition = Register(resolution.Definition) };
+            // Reuse installation's hash checks, per-key serialization, lease protection and manifest-last publication.
+            await InstallCoreAsync(resolution.Definition.Key, progress, staged, cancellationToken).ConfigureAwait(false);
+            return new(resolution);
+        }
+        catch (OperationCanceledException) { Report(progress, new(TensorModelInstallStage.Cancelled)); throw; }
+        catch { Report(progress, new(TensorModelInstallStage.Failed)); throw; }
+        finally { foreach (string path in staged.Values) TryDelete(path); }
+    }
+
+    private sealed class StagedReader(IReadOnlyDictionary<Uri, string> staged) : ITensorArtifactReader
+    {
+        private readonly TensorArtifactReader _reader = new();
+        public Task<TensorSourceResult<TensorMetadataContent>> ReadMetadataAsync(TensorSourceArtifact artifact,
+            TensorMetadataRead read, CancellationToken cancellationToken = default) =>
+            _reader.ReadMetadataAsync(artifact with
+            {
+                DownloadUri = new Uri(staged[artifact.DownloadUri]),
+                Provenance = artifact.Provenance with { Repository = null, Revision = null }
+            }, read, cancellationToken);
     }
 
     public async Task<TensorModelPackStatus> VerifyAsync(
@@ -374,6 +448,7 @@ public sealed class TensorModelPackManager : ITensorModelPackManager, IDisposabl
         IProgress<TensorModelInstallProgress>? progress,
         long completed,
         long total,
+        IReadOnlyDictionary<Uri, string>? staged,
         CancellationToken cancellationToken)
     {
         Exception? lastFailure = null;
@@ -382,46 +457,10 @@ public sealed class TensorModelPackManager : ITensorModelPackManager, IDisposabl
             cancellationToken.ThrowIfCancellationRequested();
             try
             {
-                await using Stream input = await OpenSourceAsync(source, cancellationToken).ConfigureAwait(false);
-                await using var output = new FileStream(
-                    destination,
-                    FileMode.Create,
-                    FileAccess.Write,
-                    FileShare.None,
-                    1024 * 1024,
-                    FileOptions.Asynchronous | FileOptions.SequentialScan);
-                using IncrementalHash hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-                byte[] buffer = new byte[1024 * 1024];
-                long transferred = 0;
-                while (true)
-                {
-                    int read = await input.ReadAsync(buffer, cancellationToken).ConfigureAwait(false);
-                    if (read == 0)
-                    {
-                        break;
-                    }
-
-                    if (read > artifact.Length - transferred) { throw new InvalidDataException("The artifact exceeds its declared length."); }
-                    await output.WriteAsync(buffer.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
-                    hash.AppendData(buffer, 0, read);
-                    transferred += read;
-                    Report(progress, new TensorModelInstallProgress(
-                        TensorModelInstallStage.Downloading,
-                        artifact.Role,
-                        transferred,
-                        artifact.Length,
-                        completed + transferred,
-                        total));
-                }
-
-                await output.FlushAsync(cancellationToken).ConfigureAwait(false);
-                string actualHash = Convert.ToHexStringLower(hash.GetHashAndReset());
-                if (transferred != artifact.Length
-                    || !string.Equals(actualHash, artifact.Sha256, StringComparison.OrdinalIgnoreCase))
-                {
-                    throw new InvalidDataException(
-                        $"Downloaded artifact '{artifact.Role}' did not match its pinned length and SHA-256 hash.");
-                }
+                Uri input = staged is null ? source : staged.TryGetValue(source, out string? local) ? new Uri(local)
+                    : throw new InvalidDataException("The resolved artifact was not included in the staged import.");
+                await CopySourceAsync(input, destination, artifact.Role, artifact.Length, artifact.Sha256,
+                    progress, completed, total, cancellationToken).ConfigureAwait(false);
 
                 return;
             }
@@ -443,6 +482,34 @@ public sealed class TensorModelPackManager : ITensorModelPackManager, IDisposabl
             key,
             $"No source could provide artifact '{artifact.Role}'.",
             lastFailure);
+    }
+
+    private async Task<(long Length, string Hash)> CopySourceAsync(Uri source, string destination, string role,
+        long? expectedLength, string? expectedHash, IProgress<TensorModelInstallProgress>? progress,
+        long completed, long? total, CancellationToken token)
+    {
+        await using Stream input = await OpenSourceAsync(source, token).ConfigureAwait(false);
+        await using var output = new FileStream(destination, FileMode.Create, FileAccess.Write, FileShare.None,
+            1024 * 1024, FileOptions.Asynchronous | FileOptions.SequentialScan);
+        using IncrementalHash hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        byte[] buffer = new byte[1024 * 1024];
+        long transferred = 0;
+        while (true)
+        {
+            int read = await input.ReadAsync(buffer, token).ConfigureAwait(false);
+            if (read == 0) break;
+            if (expectedLength is long size && read > size - transferred) throw new InvalidDataException("The artifact exceeds its declared length.");
+            await output.WriteAsync(buffer.AsMemory(0, read), token).ConfigureAwait(false);
+            hash.AppendData(buffer, 0, read);
+            transferred = checked(transferred + read);
+            Report(progress, new(TensorModelInstallStage.Downloading, role, transferred, expectedLength, completed + transferred, total));
+        }
+        await output.FlushAsync(token).ConfigureAwait(false);
+        string actualHash = Convert.ToHexStringLower(hash.GetHashAndReset());
+        if (expectedLength is long length && transferred != length
+            || expectedHash is not null && !string.Equals(actualHash, expectedHash, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidDataException("The artifact did not match its expected length or SHA-256.");
+        return (transferred, actualHash);
     }
 
     private async Task<Stream> OpenSourceAsync(Uri source, CancellationToken cancellationToken)

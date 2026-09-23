@@ -1,5 +1,9 @@
 # Darkspyre.Inference.Tensor
 
+Unpublished source additions after 11.3.1-rc.1: Laya ONNX/Core ML and user-selected model locations
+with explicit Import. Neither addition is in the last published archive. The coordinated version
+has not been bumped and no new packages have been created.
+
 In-process, first-class .NET inference built on TensorSharp, ONNX Runtime and Whisper.net and distributed as the
 `Darkspyre.Inference.Tensor` NuGet. The current package targets .NET 11 and references the synchronized
 `Darkspyre.Inference.Common` NuGet rather than embedding Common. Model weights are installed
@@ -130,8 +134,10 @@ opening a store or loading native libraries. Their `CreateSession` methods bind 
 For Qwen and Supra, the default setup list contains the engine's built-in pack, and hosts may supply
 `offeredModels` with their own registered compatible packs. Laya has no built-in pack, so its
 `offeredModels` is required. Qwen and Supra validate the pack's capability, family,
-roles and declared backends before offering it. Supply an `ITensorModelSource` through the optional
-`source` argument to enable remote discovery and the engine's real metadata-only resolver.
+roles and declared backends before offering it. All four factories bind their model-family resolver
+for local files/folders and independent URLs. Supply an `ITensorModelSource` through the optional
+`source` argument to additionally enable repository browsing. The optional `reader` argument accepts
+host-configured artifact access, for example `new TensorArtifactReader(source, httpClient, access)`.
 
 Selection/Save does not install or load. Install, verify, load, unload and stop are distinct callable
 actions with declared side effects. The supplied instance is optional and remains host-owned. Its
@@ -182,6 +188,43 @@ The 256x256 output, prompt/sampler constraints and generation algorithm are unch
 
 ## Model source metadata and registration
 
+### User-selected locations (unpublished source)
+
+The same setup session exposes registered packs, local file/folder paths, direct artifact URLs and
+optional repository selection. Required companion locations and split-GGUF shard inputs come from
+the family resolver. A folder scan is top-level only (at most 256 files); ambiguous primary models
+require a filename. Direct file selections do not scan adjacent files. Direct URLs use durable HTTPS
+or numeric loopback HTTP, without query strings, fragments or user-info; access credentials remain
+host-owned. No web directory crawling or native model activation occurs during inspection.
+
+Inspect reads bounded metadata. When complete lengths/hashes are unavailable, **Import model
+artifacts** is an explicit full-copy/download action: it calculates integrity, checks the selected
+family against staged bytes, then uses the existing pack manager and application persistence store
+to install the complete pack. Missing licenses are requested, never fabricated. A calculated hash
+identifies the imported content, not its publisher. Expected hashes must match. Save still only
+commits a complete compatible definition; neither Save nor Import loads the model. Closing an
+unsaved editor does not remove an imported pack.
+
+```csharp
+var resolver = new QwenModelResolver();
+var selection = new TensorModelSelection(
+    new TensorModelLocation.LocalFolder(modelDirectory, "model.gguf"),
+    License: actualModelLicense);
+TensorModelImportResult imported = await packs.ImportAsync(
+    new TensorModelImportRequest(selection, resolver), cancellationToken: cancellationToken);
+// Check imported.Resolution.Evaluation and Definition. The host separately saves configuration
+// and decides when to call its engine's LoadAsync with the installed definition's key.
+```
+
+Local/URL artifact provenance has no fictitious repository/revision. Pack identity is deterministic
+over the complete manifest; local paths are not model IDs. Supra's companions remain constrained to
+the supported content, but their origin may be a local mirror or an independent URL. Whisper retains
+its twelve known content identities. Laya requires its three ONNX/tokenizer/agent-config artifacts
+and inspects metadata without creating an inference session. See the
+[canonical location/import design](../docs/tensor-model-locations.tech-design.md).
+
+### Repository adapters and compatibility
+
 `HuggingFaceModelSource` implements `ITensorModelSource` for paged repository search, revision
 listing and candidate metadata. Candidate lookup pins the returned immutable commit and retains
 per-artifact provenance, license, nullable length and nullable SHA-256. A Git blob ID is never used
@@ -195,21 +238,22 @@ explicitly requested complete small metadata file). It validates the pinned sour
 total length and response body bounds. A weight server that ignores Range is Unverified: no fallback
 whole-weight read occurs. Protected redirect rules also apply to these reads.
 
-The shared `TensorSetupSession` now accepts an engine-owned `ITensorModelResolver`. When supplied,
-the existing semantic editor presents network-declared repository/revision/variant choices and a
-separate **Resolve compatible model pack** action. Only a Supported result with a validated complete
+The shared `TensorSetupSession` accepts an engine-owned `ITensorModelResolver`. A supplied repository
+adapter adds network-declared repository/revision/variant choices alongside the other locations and
+the separate **Inspect model location** action. Only a Supported result with a validated complete
 definition becomes selectable/saveable. Source/backend changes invalidate resolution; stale query
 completions cannot select a model. Browsing, resolving and Save do not register, install or load.
 Install registers the resolved immutable definition in the supplied manager before downloading and
 verifying it. Unregistered resolved selections report not installed rather than querying an unknown
 manager key. `QwenSetup.CreateSession` and `SupraSetup.CreateSession` compose their respective
-`QwenModelResolver` and `SupraModelResolver` when a source is supplied. Construction performs no I/O.
+`QwenModelResolver` and `SupraModelResolver` regardless of whether a repository adapter is supplied.
+Construction performs no I/O.
 
 `QwenModelResolver` inspects actual GGUF headers, including every numbered shard, through the same
 architecture/tokenizer/tensor/storage policy used by Load. Selecting any shard resolves the complete
 set under one canonical identity. `SupraModelResolver` inspects the restricted PyTorch ZIP metadata
 of the selected DiT and resolves the pinned Flan-T5 text encoder, SentencePiece tokenizer and VAE
-from their own immutable repositories. The encoder/VAE headers must satisfy the shared pipeline
+from visible pinned defaults or explicit compatible locations. The encoder/VAE headers must satisfy the shared pipeline
 schema. The tokenizer must match the known supported vocabulary's pinned length and SHA-256;
 installation verifies its bytes. Same-schema DiT fine-tunes resolve under their own keys; arbitrary
 encoder/tokenizer/VAE substitutions are not advertised as supported.
@@ -299,9 +343,10 @@ provenance use that pack's actual key. Unloaded capabilities describe the family
 they do not assert that a named pack is registered, installed or verified.
 
 `LayaSetup.Definition` advertises the Decision task without activating the engine.
-`LayaSetup.CreateSession(identity, target, packs, offeredModels, existing, instance)` feeds the host's
+`LayaSetup.CreateSession(identity, target, packs, offeredModels, existing, instance, source, reader)` feeds the host's
 compatible definitions to the existing shared editor. `offeredModels` is required; an empty list
-offers none. Validate/register the same definitions in the manager's
+offers no pre-registered selections; local/URL resolution and optional repository browsing remain
+available. Validate/register the same definitions in the manager's
 catalog. The editor saves the selected key/backend in `TensorSetupConfiguration`, not raw weight
 bytes or a provider-specific UI payload. Selection and Save never unload an active model. The usual
 explicit install/verify/load/unload/stop actions apply; changing the saved selection reports

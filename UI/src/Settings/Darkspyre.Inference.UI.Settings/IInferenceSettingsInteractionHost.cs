@@ -13,3 +13,11 @@ public interface IInferenceSettingsInteractionHost
 
     ValueTask OpenBrowserAsync(Uri uri, CancellationToken cancellationToken = default);
 }
+
+/// <summary>Optional host-native picker. Null means cancelled; the host owns permissions and returns an absolute path.
+/// Hosts without this capability retain manual path and executable-name entry.</summary>
+public interface IInferenceSettingsPathPicker
+{
+    ValueTask<string?> SelectPathAsync(SetupPathSelectionKind kind, string currentValue,
+        CancellationToken cancellationToken = default);
+}

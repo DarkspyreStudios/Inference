@@ -43,7 +43,12 @@ internal sealed class LayaTokenizer : ILayaTokenizer
         using JsonDocument document = await JsonDocument.ParseAsync(
             content,
             cancellationToken: cancellationToken).ConfigureAwait(false);
-        if (!document.RootElement.TryGetProperty("pre_tokenizer", out JsonElement preTokenizer)
+        return Parse(document.RootElement);
+    }
+
+    internal static LayaTokenizer Parse(JsonElement root)
+    {
+        if (!root.TryGetProperty("pre_tokenizer", out JsonElement preTokenizer)
             || preTokenizer.ValueKind != JsonValueKind.Object
             || preTokenizer.EnumerateObject().Count() != 4
             || !preTokenizer.TryGetProperty("type", out JsonElement type) || type.ValueKind != JsonValueKind.String || type.GetString() != "ByteLevel"
@@ -53,7 +58,7 @@ internal sealed class LayaTokenizer : ILayaTokenizer
         {
             throw new InvalidDataException("Laya requires the ByteLevel GPT-2 pre-tokenizer without an added prefix space.");
         }
-        JsonElement model = document.RootElement.GetProperty("model");
+        JsonElement model = root.GetProperty("model");
         Dictionary<string, int> vocabulary = model.GetProperty("vocab")
             .EnumerateObject()
             .ToDictionary(static item => item.Name, static item => item.Value.GetInt32(), StringComparer.Ordinal);
@@ -64,7 +69,7 @@ internal sealed class LayaTokenizer : ILayaTokenizer
         }
 
         var specialTokens = new Dictionary<string, int>(StringComparer.Ordinal);
-        foreach (JsonElement item in document.RootElement.GetProperty("added_tokens").EnumerateArray())
+        foreach (JsonElement item in root.GetProperty("added_tokens").EnumerateArray())
         {
             // HF matches all added tokens before BPE, including ordinary whitespace runs.
             specialTokens.Add(item.GetProperty("content").GetString()!, item.GetProperty("id").GetInt32());

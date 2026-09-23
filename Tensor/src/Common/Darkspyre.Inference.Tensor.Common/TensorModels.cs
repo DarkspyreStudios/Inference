@@ -44,7 +44,7 @@ public sealed record TensorModelArtifactDefinition
 }
 
 /// <summary>Source metadata only. Never includes an access token or a transient signed download URL.</summary>
-public sealed record TensorArtifactProvenance(Uri Origin, string Repository, string Revision, string Path, string? License);
+public sealed record TensorArtifactProvenance(Uri Origin, string? Repository, string? Revision, string Path, string? License);
 
 public sealed record TensorModelPackDefinition
 {
@@ -183,11 +183,14 @@ public static class TensorModelDefinitionValidator
             }
             if (artifact.Provenance is TensorArtifactProvenance provenance)
             {
-                TensorSourceHttp.ValidateUri(provenance.Origin);
-                if (provenance.Origin != TensorSourceHttp.Origin(provenance.Origin))
+                if (!provenance.Origin.IsFile) { TensorSourceHttp.ValidateUri(provenance.Origin); }
+                if (provenance.Origin != (provenance.Origin.IsFile ? new Uri("file:///") : TensorSourceHttp.Origin(provenance.Origin)))
                 { throw new ArgumentException("Provenance must contain an origin, not a download URL.", nameof(definition)); }
-                ArgumentException.ThrowIfNullOrWhiteSpace(provenance.Repository);
-                ArgumentException.ThrowIfNullOrWhiteSpace(provenance.Revision);
+                if (provenance.Repository is not null || provenance.Revision is not null)
+                {
+                    ArgumentException.ThrowIfNullOrWhiteSpace(provenance.Repository);
+                    ArgumentException.ThrowIfNullOrWhiteSpace(provenance.Revision);
+                }
                 ValidateRelativePath(provenance.Path);
             }
         }

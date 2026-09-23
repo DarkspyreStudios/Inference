@@ -75,6 +75,7 @@ public sealed class HuggingFaceModelSource : ITensorModelSource, IDisposable
         ExecuteAsync(async () =>
         {
             ArgumentNullException.ThrowIfNull(selection);
+            ArgumentException.ThrowIfNullOrWhiteSpace(selection.Repository);
             ValidateRepository(selection.Repository);
             if (string.IsNullOrWhiteSpace(selection.Revision) || selection.Revision.Length > 256 || selection.Revision.Any(char.IsControl)) { throw new ArgumentException("Invalid revision."); }
             if (requireVariant) { TensorModelDefinitionValidator.ValidateRelativePath(selection.Variant); }
@@ -119,6 +120,8 @@ public sealed class HuggingFaceModelSource : ITensorModelSource, IDisposable
         {
             ArgumentNullException.ThrowIfNull(artifact);
             ArgumentNullException.ThrowIfNull(read);
+            ArgumentException.ThrowIfNullOrWhiteSpace(artifact.Provenance.Repository);
+            ArgumentException.ThrowIfNullOrWhiteSpace(artifact.Provenance.Revision);
             ValidateRepository(artifact.Provenance.Repository);
             TensorModelDefinitionValidator.ValidateRelativePath(artifact.Path);
             if (artifact.Provenance.Origin != Hub || !IsCommit(artifact.Provenance.Revision)

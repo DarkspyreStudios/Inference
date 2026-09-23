@@ -109,6 +109,7 @@ public sealed class TensorSetupTests
 
     private sealed class Packs : ITensorModelPackManager
     {
+        public Task<TensorModelImportResult> ImportAsync(TensorModelImportRequest request, IProgress<TensorModelInstallProgress>? progress = null, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public IReadOnlyList<TensorModelPackDefinition> Definitions => [Pack];
         public TensorModelPackDefinition Register(TensorModelPackDefinition definition) => throw new NotSupportedException();
         public int Calls { get; private set; }

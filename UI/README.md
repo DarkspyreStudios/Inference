@@ -34,6 +34,14 @@ provider-owned fields or actions.
 
 The canonical technical design is [the Settings UI design](../docs/settings.ui.tech-design.md).
 
+## Unpublished source: optional native path selection
+
+An interaction host may also implement `IInferenceSettingsPathPicker.SelectPathAsync`. Text fields
+with a `SetupPathSelectionKind.File` or `.Folder` hint, plus executable fields, then offer Browse.
+Return an absolute path or null for cancellation. The host owns the native dialog and access grants;
+manual entry remains available when no picker is supplied. Stale completions cannot overwrite a
+newer field or edit. This source addition is not present in the published 11.3.1-rc.1 package.
+
 ## Settings corrections in 11.3.1-rc.1
 
 Subscribe to `StateChanged` for a safe `SetupEditorState` (also available as `editor.State`).

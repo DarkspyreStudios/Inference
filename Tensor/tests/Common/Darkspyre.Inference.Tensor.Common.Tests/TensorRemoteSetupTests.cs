@@ -34,7 +34,7 @@ public sealed class TensorRemoteSetupTests
         Select(session, "variant", "model.bin");
         Assert.False((await session.ValidateAsync()).IsValid);
         Assert.Equal(SetupActionState.Completed, (await Action(session, "resolve").ExecuteAsync()).State);
-        Assert.Equal(new TensorModelSelection(new("owner/model", "commit", "model.bin")), resolver.Selection);
+        Assert.Equal(new TensorModelLocation.RepositoryArtifact("test", new("owner/model", "commit", "model.bin")), resolver.Selection!.Location);
         Assert.True((await session.ValidateAsync()).IsValid);
         Assert.Contains("17 bytes", Text(session, "pack-details").Value, StringComparison.Ordinal);
         Assert.Equal(SetupActionState.Completed, (await Action(session, "status").ExecuteAsync()).State);
@@ -174,6 +174,7 @@ public sealed class TensorRemoteSetupTests
 
     private sealed class Packs : ITensorModelPackManager
     {
+        public Task<TensorModelImportResult> ImportAsync(TensorModelImportRequest request, IProgress<TensorModelInstallProgress>? progress = null, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         private readonly TensorModelCatalog _catalog = new([]);
         public List<string> Operations { get; } = [];
         public int Calls => Operations.Count;
@@ -192,6 +193,10 @@ public sealed class TensorRemoteSetupTests
 
     private sealed class Resolver : ITensorModelResolver
     {
+        public IReadOnlyList<TensorArtifactRequirement> Requirements => [new("model", "*.bin")];
+        public string? AdditionalArtifactRolePrefix => null;
+        public Task<TensorSourceResult<TensorModelCandidate>> DiscoverAsync(TensorModelSelection selection, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<TensorModelResolution> ResolveCandidateAsync(TensorModelCandidate candidate, TensorBackendKind backend, ITensorArtifactReader reader, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Source SourceImpl { get; } = new();
         public ITensorModelSource Source => SourceImpl;
         public TensorCompatibilityState State { get; init; } = TensorCompatibilityState.Supported;

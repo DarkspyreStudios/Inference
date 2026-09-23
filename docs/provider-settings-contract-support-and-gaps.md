@@ -13,6 +13,9 @@ These changes are not in the historical 11.2.0 packages.** The approved authorit
 [the provider setup and audio technical design](provider-setup-and-audio-technical-design.md).
 UI surfaces and consumer integration belong to their separate work; this report does not certify them.
 
+That publication status describes the initial row coverage. The current source table below also
+includes the subsequently implemented, **not yet published**, Laya ONNX and model-location extensions.
+
 Settings corrections are included in **11.3.1-rc.1**, not in the previous 11.3.0-rc.1 archives:
 provider-owned dirty state and uncertain-commit state, snapshot-owned authentication interactions,
 attempt-scoped one-way callback input, explicit choice capabilities and decimal step metadata.
@@ -79,19 +82,20 @@ consumer-specific or UI-library substitute.
 
 ## Summary by capability and implementation
 
-This table describes the completed **11.3.1-rc.1 runtime/library release**, not the historical baseline. “Complete” is
-bounded by the approved initial implementations and the qualifications below.
+This table describes the current source, including **unpublished** Laya ONNX and model-location/import
+extensions after 11.3.1-rc.1. The published version is unchanged. “Complete” is bounded by the
+implemented family policies and qualifications below; host application integration is separate.
 
 | Area | Current library/settings data | Acceptance evidence |
 |---|---|---|
 | Common contracts | Complete: task grouping; typed fields, sections/steps, explicit choice capabilities, dependent choices, validation, current actions/interactions, draft dirty state, protected secret edits, versioned host commits and distinct status observations | [Shared contract tests](../Common/tests/Darkspyre.Inference.Common.Tests/SetupSessionTests.cs) and [provider-independent example renderer](../Common/examples/Darkspyre.Inference.Setup.Examples/SetupEditorExample.cs) |
 | Connect Text | Complete: all eight existing providers have real create/edit setup, field/choice metadata, auth/prerequisite checks and explicit tests; AWS bindings remain in Bedrock | [All-eight create/edit conformance](../Connect/tests/LLM/Darkspyre.Inference.Connect.LLM.Bedrock.Tests/BedrockRegistrationTests.cs), [setup/auth tests](../Connect/tests/LLM/Darkspyre.Inference.Connect.LLM.Tests/LlmSetupSessionTests.cs) and existing provider protocol suites |
 | Connect Image / ComfyUI | Complete: endpoint, timeout, protected headers, host workflow choices, validation, editing and separate health/generation actions; granular durable-job transport preserved | [Setup tests](../Connect/tests/Image/Darkspyre.Inference.Connect.Image.Tests/ImageSetupTests.cs) and [real transport protocol tests](../Connect/tests/Image/Darkspyre.Inference.Connect.Image.Tests/ComfyUiImageTransportTests.cs) |
-| Tensor Text / Qwen | Complete: setup/editing, bounded remote Qwen3 GGUF inspection, complete single/split-pack resolution, immutable selection, explicit installation/lifecycle and backend/readiness observations | [Resolver and real setup tests](../Tensor/tests/LLM/Darkspyre.Inference.Tensor.LLM.Qwen.Tests/QwenModelResolverTests.cs), [selected-pack/edit tests](../Tensor/tests/LLM/Darkspyre.Inference.Tensor.LLM.Qwen.Tests/QwenPackSelectionTests.cs) and [backend tests](../Tensor/tests/LLM/Darkspyre.Inference.Tensor.LLM.Qwen.Tests/QwenBackendProbeTests.cs) |
-| Tensor Image / Supra | Complete: setup/editing and same-schema DiT selection resolved with all four required roles; loader/resolver share compatibility policy; explicit backend/readiness observations | [Complete-pipeline resolution tests](../Tensor/tests/Image/Darkspyre.Inference.Tensor.Image.Supra.Tests/SupraModelResolverTests.cs) and [selected-pack/edit/remote-setup tests](../Tensor/tests/Image/Darkspyre.Inference.Tensor.Image.Supra.Tests/SupraPackSelectionTests.cs) |
+| Tensor Text / Qwen | Complete: setup/editing, repository or local file/folder/URL selection, bounded Qwen3 GGUF inspection, complete single/split-pack resolution, explicit Import/Install/lifecycle and backend/readiness observations | [File/folder/URL and shard tests](../Tensor/tests/LLM/Darkspyre.Inference.Tensor.LLM.Qwen.Tests/QwenLocationTests.cs), [resolver/setup tests](../Tensor/tests/LLM/Darkspyre.Inference.Tensor.LLM.Qwen.Tests/QwenModelResolverTests.cs), [selected-pack/edit tests](../Tensor/tests/LLM/Darkspyre.Inference.Tensor.LLM.Qwen.Tests/QwenPackSelectionTests.cs) |
+| Tensor Image / Supra | Complete: source-independent location/companion metadata and same-schema DiT resolution with all four roles; pinned companion content remains mandatory, Hugging Face origin does not; explicit Import/Install/lifecycle | [Complete-pipeline and independent-URL tests](../Tensor/tests/Image/Darkspyre.Inference.Tensor.Image.Supra.Tests/SupraModelResolverTests.cs) and [selected-pack/edit tests](../Tensor/tests/Image/Darkspyre.Inference.Tensor.Image.Supra.Tests/SupraPackSelectionTests.cs) |
 | Connect Audio | Complete: external PocketTTS speech synthesis and TangoFlux audio generation, typed contracts/capabilities, real protocol adapters, discovery where supported, setup/defaults/editing and explicit tests | [PocketTTS protocol and settings tests](../Connect/tests/TTS/Darkspyre.Inference.Connect.TTS.Tests/PocketTtsTests.cs), [TangoFlux settings tests](../Connect/tests/Audio/Darkspyre.Inference.Connect.Audio.Tests/AudioSetupTests.cs) and [audio protocol suite](../Connect/tests/Audio/Darkspyre.Inference.Connect.Audio.Tests/) |
-| Tensor Audio | Complete: resident Whisper STT, batch/identified-window transcription, all twelve pinned variants, compatible source resolution, setup/editing and explicit CPU-runtime checks | [Model/settings/resolver tests](../Tensor/tests/STT/Darkspyre.Inference.Tensor.STT.Whisper.Tests/WhisperMetadataTests.cs), [lifecycle tests](../Tensor/tests/STT/Darkspyre.Inference.Tensor.STT.Whisper.Tests/WhisperLifecycleTests.cs) and [PCM/storage tests](../Tensor/tests/STT/Darkspyre.Inference.Tensor.STT.Whisper.Tests/WhisperPcmAndStorageTests.cs) |
-| Tensor Decision / Laya | Complete: correct Decision classification, host-selected compatible packs, shared setup/editing/lifecycle, selected-pack tokenizer/calibration/sequence settings | [Pack-selection/settings tests](../Tensor/tests/Decision/Darkspyre.Inference.Tensor.Decision.Laya.Tests/LayaPackSelectionTests.cs) and [serving-parity/golden-token tests](../Tensor/tests/Decision/Darkspyre.Inference.Tensor.Decision.Laya.Tests/LayaServingParityTests.cs); no additional CE section |
+| Tensor Audio | Complete: resident Whisper STT, batch/identified-window transcription, twelve supported content identities, local/file/URL/repository metadata and explicit Import; setup/editing and CPU-runtime checks | [Model/settings/independent-source tests](../Tensor/tests/STT/Darkspyre.Inference.Tensor.STT.Whisper.Tests/WhisperMetadataTests.cs), [lifecycle tests](../Tensor/tests/STT/Darkspyre.Inference.Tensor.STT.Whisper.Tests/WhisperLifecycleTests.cs) and [PCM/storage tests](../Tensor/tests/STT/Darkspyre.Inference.Tensor.STT.Whisper.Tests/WhisperPcmAndStorageTests.cs) |
+| Tensor Decision / Laya | Complete: ONNX/Core ML/CPU implementation, local/file/URL/repository metadata, exactly three required artifacts, bounded metadata-only inspection and explicit Import; shared setup/lifecycle and selected-pack calibration/tokenizer settings | [Three-artifact import/inspection tests](../Tensor/tests/Decision/Darkspyre.Inference.Tensor.Decision.Laya.Tests/LayaModelResolverTests.cs), [pack-selection/settings tests](../Tensor/tests/Decision/Darkspyre.Inference.Tensor.Decision.Laya.Tests/LayaPackSelectionTests.cs) and [serving-parity/golden-token tests](../Tensor/tests/Decision/Darkspyre.Inference.Tensor.Decision.Laya.Tests/LayaServingParityTests.cs) |
 
 ### Cross-row acceptance and limits
 
@@ -110,6 +114,11 @@ cover bounded reads, private/gated/denied access, origin-scoped secrets through 
 identity, stale choices, explicit Install, progress, corrupt/partial installs and active leases.
 Opening/saving Settings does not register, download or load a remote selection. The typed commit
 carries its complete definition; explicit Install registers it through the existing manager.
+
+[Location/import tests](../Tensor/tests/Common/Darkspyre.Inference.Tensor.Common.Tests/TensorLocationImportTests.cs)
+cover explicit unknown-hash acquisition through the host store, missing license, ambiguity, mismatch,
+cancellation, range rejection and settings commit without a live engine. The source extension is
+specified in [the location/import design](tensor-model-locations.tech-design.md), not yet published.
 
 - Qwen supports the current Qwen3 GGUF schema, not every GGUF architecture. Supra supports its
   current Supra2/Flan-T5/VAE pipeline and matching DiT variants, not arbitrary diffusion families.

@@ -41,6 +41,8 @@
                 case SetupTextField text:
                     <Input Type="@(SensitiveInput ? "password" : "text")" Value="@_value" ValueChanged="@(value => SetTextAsync(text, value))"
                            Disabled="@Unavailable" MaxLength="@text.MaximumLength" />
+                    @if (text.PathSelection is not null && Host is IInferenceSettingsPathPicker)
+                    { <Button Variant="Button.ButtonVariant.Outline" Disabled="@(Unavailable || _picking)" OnClick="PickPathAsync">Browse…</Button> }
                     break;
                 case SetupUriField uri:
                     <Input Value="@_value" ValueChanged="@(value => SetUriAsync(uri, value))"
@@ -49,6 +51,8 @@
                 case SetupExecutableField executable:
                     <Input Value="@_value" ValueChanged="@(value => SetExecutableAsync(executable, value))"
                            Disabled="@Unavailable" />
+                    @if (Host is IInferenceSettingsPathPicker)
+                    { <Button Variant="Button.ButtonVariant.Outline" Disabled="@(Unavailable || _picking)" OnClick="PickPathAsync">Browse…</Button> }
                     break;
                 case SetupIntegerField integer:
                     <SetupNumberInput T="long" Text="@_value" Minimum="integer.Minimum" Maximum="integer.Maximum"
@@ -141,6 +145,7 @@
     private string _search = string.Empty;
     private bool _loading, _choiceOpen;
     private bool _disposed;
+    private bool _picking;
     private readonly CancellationTokenSource _lifetime = new();
     private CancellationTokenSource? _choiceCancellation;
     private long _choiceGeneration;
@@ -148,6 +153,26 @@
     private long _loadedRevision = -1;
     private bool _wasUnavailable;
     private bool Unavailable => Disabled || Field.Description.IsReadOnly || !Field.Description.IsEnabled || !Field.Description.IsVisible;
+
+    private async Task PickPathAsync()
+    {
+        if (Unavailable || _picking || Host is not IInferenceSettingsPathPicker picker) return;
+        SetupField field = Field;
+        long revision = Revision;
+        string previous = _value;
+        SetupPathSelectionKind kind = field is SetupTextField text ? text.PathSelection!.Value : SetupPathSelectionKind.File;
+        _picking = true;
+        try
+        {
+            string? value = await picker.SelectPathAsync(kind, previous, _lifetime.Token);
+            if (value is null || _disposed || Unavailable || revision != Revision || !ReferenceEquals(field, Field) || _value != previous) return;
+            if (field is SetupTextField path) await SetTextAsync(path, value);
+            else if (field is SetupExecutableField executable) await SetExecutableAsync(executable, value);
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception) when (!_disposed) { await InvalidAsync("The host could not select a path. Enter it manually or try again."); }
+        finally { _picking = false; }
+    }
     private string? FieldError => Input.Issues.FirstOrDefault(issue => issue.Severity == SetupIssueSeverity.Error)?.Message
         ?? Issues.FirstOrDefault(issue => issue.FieldId == Field.Description.Id && issue.Severity == SetupIssueSeverity.Error)?.Message;
 

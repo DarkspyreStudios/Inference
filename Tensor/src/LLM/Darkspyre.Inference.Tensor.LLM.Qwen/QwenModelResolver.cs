@@ -6,32 +6,24 @@ using TensorSharp.Runtime;
 namespace Darkspyre.Inference.Tensor.LLM.Qwen;
 
 /// <summary>Resolves complete Qwen3 GGUF packs through bounded metadata inspection, never weight loading.</summary>
-public sealed partial class QwenModelResolver : ITensorModelResolver
+public sealed partial class QwenModelResolver : TensorModelResolver
 {
-    public ITensorModelSource Source { get; }
-    public QwenModelResolver(ITensorModelSource source) { ArgumentNullException.ThrowIfNull(source); Source = source; }
+    public QwenModelResolver(ITensorModelSource? source = null, ITensorArtifactReader? reader = null) : base(source, reader) { }
+    public override IReadOnlyList<TensorArtifactRequirement> Requirements => [new("model", "*.gguf")];
+    public override string? AdditionalArtifactRolePrefix => "model-shard-";
+    protected override string CompanionPath(string role, string path, string primary) =>
+        primary[..(primary.LastIndexOf('/') + 1)] + Path.GetFileName(path);
+    protected override IReadOnlyList<TensorSourceArtifact> SelectArtifacts(TensorModelCandidate candidate) =>
+        CompleteSet(candidate, candidate.Artifacts.Single(artifact => artifact.Path == candidate.Selection.Variant));
 
-    public async Task<TensorModelEvaluation> EvaluateAsync(TensorModelCandidate candidate, TensorBackendKind backend, CancellationToken cancellationToken = default)
-        => (await ResolveCandidateAsync(candidate, backend, cancellationToken).ConfigureAwait(false)).Evaluation;
-
-    public async Task<TensorModelResolution> ResolveAsync(TensorModelSelection selection, CancellationToken cancellationToken = default)
-    {
-        ArgumentNullException.ThrowIfNull(selection);
-        TensorSourceResult<TensorModelCandidate> candidate = await Source.GetCandidateAsync(selection.Candidate, cancellationToken).ConfigureAwait(false);
-        return candidate.State == TensorSourceState.Available && candidate.Value is not null
-            ? await ResolveCandidateAsync(candidate.Value, selection.Backend, cancellationToken).ConfigureAwait(false)
-            : new(new(TensorCompatibilityState.Unverified, candidate.Issues ?? [new("source-unavailable", "The source could not provide a candidate.")], [], candidate.State));
-    }
-
-    private async Task<TensorModelResolution> ResolveCandidateAsync(TensorModelCandidate candidate, TensorBackendKind backend, CancellationToken token)
+    public override async Task<TensorModelResolution> ResolveCandidateAsync(TensorModelCandidate candidate, TensorBackendKind backend,
+        ITensorArtifactReader reader, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(candidate);
-        token.ThrowIfCancellationRequested();
+        cancellationToken.ThrowIfCancellationRequested();
         var evidence = new List<TensorCompatibilityEvidence>();
         TensorModelResolution Failure(TensorCompatibilityState state, string code, string message, TensorSourceState sourceState = TensorSourceState.Available) =>
             new(new(state, [new(code, message)], evidence.ToArray(), sourceState));
-        if (candidate.SourceId != Source.Id)
-        { return Failure(TensorCompatibilityState.Unverified, "candidate-source", "The candidate belongs to a different model source."); }
         TensorBackendKind actual = QwenLlmInference.ResolveBackend(backend);
         if (!TensorLlmModels.Qwen3FourBillionQ4Km.SupportedBackends.Contains(actual))
         { return Failure(TensorCompatibilityState.Unsupported, "backend-unsupported", "This Qwen adapter does not support the selected backend."); }
@@ -44,14 +36,13 @@ public sealed partial class QwenModelResolver : ITensorModelResolver
         {
             TensorSourceArtifact[] artifacts = CompleteSet(candidate, selected);
             if (string.IsNullOrWhiteSpace(candidate.License) || artifacts.Any(artifact => artifact.Length is not > 0
-                || string.IsNullOrWhiteSpace(artifact.Provenance.License) || artifact.Sha256 is not { Length: 64 } hash || !hash.All(Uri.IsHexDigit)
-                || artifact.Provenance.Revision != candidate.Selection.Revision || artifact.Provenance.Repository != candidate.Selection.Repository))
+                || string.IsNullOrWhiteSpace(artifact.Provenance.License) || artifact.Sha256 is not { Length: 64 } hash || !hash.All(Uri.IsHexDigit)))
             { return Failure(TensorCompatibilityState.Unverified, "pack-metadata-incomplete", "Every artifact needs a pinned source, length, SHA-256 and license before resolution."); }
-            var reader = new TensorMetadataReader(Source);
+            var metadataReader = new TensorMetadataReader(reader);
             var headers = new List<(TensorSourceArtifact Artifact, GgufMetadata Header)>();
             foreach (TensorSourceArtifact artifact in artifacts)
             {
-                GgufMetadata header = await reader.ReadAsync(artifact, stream => GgufFile.InspectMetadata(stream), token).ConfigureAwait(false);
+                GgufMetadata header = await metadataReader.ReadAsync(artifact, stream => GgufFile.InspectMetadata(stream), cancellationToken).ConfigureAwait(false);
                 headers.Add((artifact, header));
                 evidence.Add(new(artifact.Path, "gguf-header", $"GGUF {header.Version}; {header.Tensors.Count} tensors; {header.DataOffset} header/alignment bytes."));
             }

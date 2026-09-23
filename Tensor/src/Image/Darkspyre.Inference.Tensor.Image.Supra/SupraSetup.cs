@@ -13,12 +13,12 @@ public static class SupraSetup
     public static TensorSetupSession CreateSession(SetupConfigurationIdentity identity,
         ISetupCommitTarget<TensorSetupChanges> target, ITensorModelPackManager packs,
         TensorSetupConfiguration? existing = null, ITensorImageInference? instance = null,
-        IReadOnlyList<TensorModelPackDefinition>? offeredModels = null, ITensorModelSource? source = null)
+        IReadOnlyList<TensorModelPackDefinition>? offeredModels = null, ITensorModelSource? source = null, ITensorArtifactReader? reader = null)
     {
         IReadOnlyList<TensorModelPackDefinition> models = offeredModels ?? [TensorImageModels.Supra2Image];
         foreach (TensorModelPackDefinition model in models) { SupraModelCompatibility.Validate(model); }
         return new(Definition, identity, target, models, packs, existing, instance,
             TensorBackendProbes.CpuCuda(global::TensorSharp.Cuda.CudaBackend.IsAvailable),
-            source is null ? null : new SupraModelResolver(source));
+            new SupraModelResolver(source, reader));
     }
 }

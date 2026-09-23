@@ -4,11 +4,11 @@ namespace Darkspyre.Inference.Tensor.Common;
 /// No local files, model installation or native model allocation. One reader bounds an entire resolution's downloads.</summary>
 public sealed class TensorMetadataReader
 {
-    private readonly ITensorModelSource _source;
+    private readonly ITensorArtifactReader _source;
     private readonly Lock _gate = new();
     private int _remaining;
 
-    public TensorMetadataReader(ITensorModelSource source, int maximumBytes = 64 * 1024 * 1024)
+    public TensorMetadataReader(ITensorArtifactReader source, int maximumBytes = 64 * 1024 * 1024)
     {
         ArgumentNullException.ThrowIfNull(source);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maximumBytes);

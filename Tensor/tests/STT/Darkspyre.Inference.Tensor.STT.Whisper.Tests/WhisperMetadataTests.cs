@@ -7,6 +7,20 @@ namespace Darkspyre.Inference.Tensor.STT.Whisper.Tests;
 public sealed class WhisperMetadataTests
 {
     [Fact]
+    public async Task KnownContentCanBeInspectedAtAnIndependentUrlWithoutARepositoryAdapter()
+    {
+        var reader = new Source();
+        TensorModelArtifactDefinition artifact = reader.Pack.Artifacts[0];
+        var resolver = new WhisperModelResolver(reader: reader);
+        var selection = new TensorModelSelection(new TensorModelLocation.RemoteFile(new("https://models.test/whisper.bin")),
+            License: "MIT", ExpectedLength: artifact.Length, ExpectedSha256: artifact.Sha256);
+        TensorModelResolution result = await resolver.ResolveAsync(selection);
+        Assert.Equal(TensorCompatibilityState.Supported, result.Evaluation.State);
+        Assert.Null(result.Definition!.Artifacts[0].Provenance!.Repository);
+        Assert.Equal("models.test", result.Definition.Artifacts[0].Sources[0].Host);
+        Assert.Null((await resolver.ResolveAsync(selection with { ExpectedSha256 = new('b', 64) })).Definition);
+    }
+    [Fact]
     public void AllTwelveVariantsDeclareImmutableIntegrityAndHonestCapabilities()
     {
         Assert.Equal(12, TensorSpeechModels.Whisper.Count);
@@ -83,11 +97,11 @@ public sealed class WhisperMetadataTests
         { Artifacts = [source.Candidate.Artifacts[0] with { Sha256 = new('a', 64) }] }, TensorBackendKind.Cpu)).State);
         Assert.Empty(source.Reads);
         source.State = TensorSourceState.Gated;
-        Assert.Equal(TensorSourceState.Gated, (await resolver.ResolveAsync(new(source.Candidate.Selection))).Evaluation.SourceState);
+        Assert.Equal(TensorSourceState.Gated, (await resolver.ResolveAsync(new(new TensorModelLocation.RepositoryArtifact(source.Id, source.Candidate.Selection)))).Evaluation.SourceState);
         source.State = TensorSourceState.Available;
         source.Header = WhisperFixture.Header(english: true);
-        Assert.Equal(TensorCompatibilityState.Unsupported, (await resolver.ResolveAsync(new(source.Candidate.Selection))).Evaluation.State);
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => resolver.ResolveAsync(new(source.Candidate.Selection), new(true)));
+        Assert.Equal(TensorCompatibilityState.Unsupported, (await resolver.ResolveAsync(new(new TensorModelLocation.RepositoryArtifact(source.Id, source.Candidate.Selection)))).Evaluation.State);
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => resolver.ResolveAsync(new(new TensorModelLocation.RepositoryArtifact(source.Id, source.Candidate.Selection)), new(true)));
     }
 
     [Fact]

@@ -13,11 +13,11 @@ public static class QwenSetup
     public static TensorSetupSession CreateSession(SetupConfigurationIdentity identity,
         ISetupCommitTarget<TensorSetupChanges> target, ITensorModelPackManager packs,
         TensorSetupConfiguration? existing = null, ITensorLlmInference? instance = null,
-        IReadOnlyList<TensorModelPackDefinition>? offeredModels = null, ITensorModelSource? source = null)
+        IReadOnlyList<TensorModelPackDefinition>? offeredModels = null, ITensorModelSource? source = null, ITensorArtifactReader? reader = null)
     {
         IReadOnlyList<TensorModelPackDefinition> models = offeredModels ?? [TensorLlmModels.Qwen3FourBillionQ4Km];
         foreach (TensorModelPackDefinition model in models) { QwenModelCompatibility.Validate(model); }
         return new(Definition, identity, target, models, packs, existing, instance, new QwenBackendProbe(),
-            source is null ? null : new QwenModelResolver(source));
+            new QwenModelResolver(source, reader));
     }
 }
