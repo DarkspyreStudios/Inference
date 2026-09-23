@@ -107,3 +107,8 @@ Private-feed credentials remain process-scoped. This check does not load weights
 Package creation is a publish-stage action. During refactoring, do not run `dotnet pack` or create
 `.nupkg` artifacts unless the user explicitly says to publish. Ordinary verification stops at
 restore, zero-warning build, tests, format verification, and the dependency vulnerability audit.
+
+The root `deploy-major.sh` and `deploy-minor.sh` are explicit deployment entry points sharing
+`eng/deploy.sh`. Their prerequisites, version rules, release gates, source/tag pushes and partial
+publication failure handling are documented in `eng/README.md`. Run the offline orchestration
+tests when changing this release workflow; never test a script change by publishing a dummy version.

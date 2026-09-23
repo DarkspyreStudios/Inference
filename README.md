@@ -327,6 +327,19 @@ All four versions come from [Directory.Build.props](Directory.Build.props):
 `<net>.<release>.<minor>` means .NET generation, breaking-contract release, and compatible tweak/fix.
 The current `-rc.1` suffix reflects .NET 11 RC dependencies. Releases are coordinated and immutable.
 
+To deploy from a clean `master` checkout:
+
+```bash
+./deploy-major.sh --dry-run  # Preview the next breaking-contract version.
+./deploy-major.sh           # 11.5.x -> 11.6.0; retain the prerelease suffix.
+# Or, for a compatible tweak:
+./deploy-minor.sh           # 11.5.1 -> 11.5.2; retain the prerelease suffix.
+```
+
+Each deployment commits the version change, runs the release checks, publishes all four packages
+to the private feed, verifies fresh downloads, and pushes the release source and tag. See
+[deployment prerequisites and failure handling](eng/README.md) before running either command.
+
 ## License
 
 > **Proprietary software.** Copyright © 2026 Brandon Mathis. All rights reserved.
