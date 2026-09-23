@@ -154,6 +154,15 @@ build to .NET 11 advances the first component and resets the later components fo
 release (`11.<release>.<minor>`). Immutable releases are never overwritten. The family tag is
 created only after all three packages have passed their gates.
 
+## 11.4.0-rc.1 release preparation (2026-09-23)
+
+The user authorized all four packages at `11.4.0-rc.1`. This advances the breaking-contract
+release component for the typed model-location/resolver/import contracts and includes the completed
+Laya ONNX/Core ML migration. Common remains an exact synchronized NuGet dependency rather than an
+embedded DLL. The release also includes the optional host-owned file/folder picker capability.
+Publication follows authenticated restore, builds/tests, formatting/audit, archive inspection and
+a package-only consumer preflight. A fresh feed-only consumer verifies the published artifacts.
+
 ## Published 11.3.1-rc.1 correction release (2026-09-23)
 
 The user approved the Settings edits and requested a minor bump and private publication of all four

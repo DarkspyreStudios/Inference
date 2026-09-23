@@ -1,8 +1,7 @@
 # Darkspyre.Inference.Tensor
 
-Unpublished source additions after 11.3.1-rc.1: Laya ONNX/Core ML and user-selected model locations
-with explicit Import. Neither addition is in the last published archive. The coordinated version
-has not been bumped and no new packages have been created.
+Version **11.4.0-rc.1** includes Laya ONNX/Core ML and user-selected model locations with explicit
+Import. The release component advances for the changed public model-location/resolver contracts.
 
 In-process, first-class .NET inference built on TensorSharp, ONNX Runtime and Whisper.net and distributed as the
 `Darkspyre.Inference.Tensor` NuGet. The current package targets .NET 11 and references the synchronized
@@ -15,7 +14,7 @@ filesystem default and still exposes only `IPersistenceStore`. TensorSharp uses 
 path. Laya reads its model bytes through the store and passes them to ONNX Runtime, so the host
 alone decides where model files live.
 
-Assemblies included by Tensor **11.3.1-rc.1**:
+Assemblies included by Tensor **11.4.0-rc.1**:
 
 - `Darkspyre.Inference.Tensor.Common` — the host-controlled model lifecycle, model packs,
   verification, direct-file persistence, and execution coordination.
@@ -159,7 +158,7 @@ the configuration and reconstruct registrations when composing the manager after
 does not perform that unload. Stop remains terminal, and an
 already-cancelled teardown action token reaches the engine as urgency rather than skipping cleanup.
 See the [shared editor example](../Common/examples/Darkspyre.Inference.Setup.Examples/README.md).
-These setup contracts are included in the synchronized 11.3.1-rc.1 package family, including
+These setup contracts are included in the synchronized 11.4.0-rc.1 package family, including
 provider-owned dirty state and explicit choice capabilities for the shared Settings editor.
 
 Qwen and Supra now load the definition selected by `LoadAsync(key)`, rather than requiring the
@@ -188,7 +187,7 @@ The 256x256 output, prompt/sampler constraints and generation algorithm are unch
 
 ## Model source metadata and registration
 
-### User-selected locations (unpublished source)
+### User-selected locations
 
 The same setup session exposes registered packs, local file/folder paths, direct artifact URLs and
 optional repository selection. Required companion locations and split-GGUF shard inputs come from
@@ -410,7 +409,7 @@ the Audio / SpeechTranscription task without provider-name renderer branches.
 
 ## Package dependency boundary
 
-Tensor depends on **Darkspyre.Inference.Common [11.3.1-rc.1]** and the **Darkspyre.TensorSharp.*
+Tensor depends on **Darkspyre.Inference.Common [11.4.0-rc.1]** and the **Darkspyre.TensorSharp.*
 2.8.6.4** dependency closure through NuGet. None of their DLLs is embedded in Tensor. The TensorSharp
 release includes the named GGUF persistence and bounded metadata inspection changes previously
 validated at fork commit `9b248715`, through the existing GGUF, safetensors and restricted PyTorch

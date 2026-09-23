@@ -1,7 +1,7 @@
 # Darkspyre.Inference.UI.Settings
 
-Version **11.3.1-rc.1**, synchronized with Common, Connect and Tensor. Its exact Common NuGet
-dependency is `[11.3.1-rc.1]`; the package does not embed Common, Connect, Tensor or Lumeo DLLs.
+Version **11.4.0-rc.1**, synchronized with Common, Connect and Tensor. Its exact Common NuGet
+dependency is `[11.4.0-rc.1]`; the package does not embed Common, Connect, Tensor or Lumeo DLLs.
 The release-candidate suffix reflects the .NET 11 RC ASP.NET component dependency.
 
 This package provides one host-placed Blazor editor for a provider-owned
@@ -40,7 +40,7 @@ An interaction host may also implement `IInferenceSettingsPathPicker.SelectPathA
 with a `SetupPathSelectionKind.File` or `.Folder` hint, plus executable fields, then offer Browse.
 Return an absolute path or null for cancellation. The host owns the native dialog and access grants;
 manual entry remains available when no picker is supplied. Stale completions cannot overwrite a
-newer field or edit. This source addition is not present in the published 11.3.1-rc.1 package.
+newer field or edit. This capability is included starting with 11.4.0-rc.1.
 
 ## Settings corrections in 11.3.1-rc.1
 

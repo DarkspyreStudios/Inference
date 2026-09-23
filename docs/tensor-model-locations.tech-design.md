@@ -2,8 +2,9 @@
 
 Date: 2026-09-23
 
-Status: implementation complete and verified. This source unit is not published; the family version
-remains 11.3.1-rc.1. The independently completed Laya ONNX change belongs to the same future release.
+Status: implementation complete and verified; selected for the authorized 11.4.0-rc.1 release
+together with the independently completed Laya ONNX change. Publication evidence is recorded in
+`.roles/project.md`.
 
 ## Ownership and contracts
 
@@ -115,8 +116,8 @@ Picker tests cover file/folder selection, executable names, cancellation and sta
 No new full-weight model download, paid inference or consumer application migration is a gate.
 
 Public resolver/selection/provenance contracts changed; callers are migrated in this unit, without
-parallel legacy APIs. Coordinate the release component of the next family version when publication
-is authorized. This implementation does not bump a version, pack, publish or change dependencies.
+parallel legacy APIs. The authorized coordinated release is 11.4.0-rc.1. The original implementation
+unit did not bump a version, pack, publish or change dependencies; publication is a separate unit.
 
 ### Verification record
 
