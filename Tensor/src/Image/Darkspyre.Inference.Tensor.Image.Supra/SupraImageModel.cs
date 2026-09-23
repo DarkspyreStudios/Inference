@@ -6,7 +6,7 @@ using TensorSharp.Runtime;
 
 namespace Darkspyre.Inference.Tensor.Image.Supra;
 
-internal sealed class SupraImageModel : IDisposable
+internal sealed class SupraImageModel : ISupraImageModel
 {
     private const float VaeScale = 0.18215f;
 

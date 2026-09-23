@@ -4,11 +4,12 @@ namespace Darkspyre.Inference.Tensor.LLM.Qwen;
 
 public static class TensorLlmModels
 {
+    public const string QwenRuntimeArchitecture = "qwen3-gguf";
     public static TensorModelPackDefinition Qwen3FourBillionQ4Km { get; } = new()
     {
         Key = new TensorModelKey("qwen/qwen3-4b-q4-k-m", "bc640142c66e1fdd12af0bd68f40445458f3869b"),
         Capability = TensorCapability.Llm,
-        RuntimeArchitecture = "qwen3-gguf",
+        RuntimeArchitecture = QwenRuntimeArchitecture,
         License = "Apache-2.0",
         ProjectUri = new Uri("https://huggingface.co/Qwen/Qwen3-4B-GGUF"),
         SupportedBackends = new HashSet<TensorBackendKind>

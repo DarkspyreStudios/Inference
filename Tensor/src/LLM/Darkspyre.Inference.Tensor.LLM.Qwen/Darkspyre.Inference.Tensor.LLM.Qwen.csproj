@@ -12,6 +12,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="Darkspyre.Inference.Tensor.LLM.Qwen.Tests" />
     <ProjectReference Include="..\Darkspyre.Inference.Tensor.LLM\Darkspyre.Inference.Tensor.LLM.csproj" />
   </ItemGroup>
 

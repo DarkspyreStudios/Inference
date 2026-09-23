@@ -6,7 +6,6 @@ using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Common.LLM;
 using Darkspyre.Inference.Tensor.Common;
 using Darkspyre.Inference.Tensor.LLM;
-using Microsoft.Extensions.Logging.Abstractions;
 using TensorSharp.Runtime;
 using TensorSharp.Runtime.Grammar;
 using TensorSharp.Server;
@@ -16,12 +15,12 @@ namespace Darkspyre.Inference.Tensor.LLM.Qwen;
 public sealed class QwenLlmInference : ITensorLlmInference
 {
     private readonly ITensorModelPackManager _packs;
-    private readonly TensorModelPackDefinition _definition;
+    private TensorModelPackDefinition? _definition;
     private readonly TensorBackendKind _requestedBackend;
     private readonly TensorExecutionCoordinator _coordinator;
     private readonly bool _ownsCoordinator;
     private readonly TensorModelLifetime _lifetime = new();
-    private readonly ModelService _modelService = new(NullLogger<ModelService>.Instance);
+    private readonly IQwenModelRuntime _runtime;
     private TensorModelPackLease? _modelLease;
     private TensorBackendKind? _loadedBackend;
     private bool _disposed;
@@ -30,10 +29,15 @@ public sealed class QwenLlmInference : ITensorLlmInference
         ITensorModelPackManager packs,
         TensorBackendKind backend = TensorBackendKind.Auto,
         TensorExecutionCoordinator? coordinator = null)
+        : this(packs, new QwenModelRuntime(), backend, coordinator) { }
+
+    internal QwenLlmInference(ITensorModelPackManager packs, IQwenModelRuntime runtime,
+        TensorBackendKind backend = TensorBackendKind.Auto, TensorExecutionCoordinator? coordinator = null)
     {
         ArgumentNullException.ThrowIfNull(packs);
+        ArgumentNullException.ThrowIfNull(runtime);
         _packs = packs;
-        _definition = TensorLlmModels.Qwen3FourBillionQ4Km;
+        _runtime = runtime;
 
         _requestedBackend = backend;
         _coordinator = coordinator ?? new TensorExecutionCoordinator();
@@ -67,18 +71,15 @@ public sealed class QwenLlmInference : ITensorLlmInference
         CancellationToken cancellationToken = default)
     {
         ThrowIfDisposed();
-        TensorModelPackStatus status = await _packs.GetStatusAsync(_definition.Key, cancellationToken)
-            .ConfigureAwait(false);
         LlmCapabilities capabilities = await GetCapabilitiesAsync(cancellationToken: cancellationToken)
             .ConfigureAwait(false);
-        return
-        [
-            new LlmModelInfo(_definition.Key.ModelId, "Qwen3 4B Q4_K_M", "Qwen", capabilities)
+        return _packs.Definitions.Where(definition => definition.Capability == TensorCapability.Llm
+            && definition.RuntimeArchitecture == TensorLlmModels.QwenRuntimeArchitecture).Select(definition =>
+            new LlmModelInfo(definition.Key.ModelId, definition.Key.ModelId, "Qwen", capabilities)
             {
-                MaxContextTokens = 32_768,
-                MaxOutputTokens = status.State == TensorModelPackState.Installed ? 32_768 : null
-            }
-        ];
+                MaxContextTokens = definition.Key == _definition?.Key ? _runtime.ContextLength : null,
+                MaxOutputTokens = definition.Key == _definition?.Key ? _runtime.ContextLength : null
+            }).ToArray();
     }
 
     public async IAsyncEnumerable<LlmStreamEvent> StreamAsync(
@@ -90,11 +91,13 @@ public sealed class QwenLlmInference : ITensorLlmInference
         ValidateRequest(request);
         await using TensorModelLifetime.ExecutionLease modelUse = await _lifetime.EnterExecutionAsync(cancellationToken)
             .ConfigureAwait(false);
+        ValidateModelId(request.ModelId);
+        TensorModelPackDefinition definition = _definition!;
         CancellationToken executionToken = modelUse.CancellationToken;
         TensorBackendKind backend = _loadedBackend
             ?? throw new InferenceException(InferenceFailureCode.BackendUnavailable, "The Qwen backend was not loaded.");
         await using IAsyncDisposable execution = await _coordinator.AcquireAsync(
-            _definition.Key,
+            definition.Key,
             backend,
             executionToken).ConfigureAwait(false);
         using var session = new ChatSession();
@@ -119,14 +122,12 @@ public sealed class QwenLlmInference : ITensorLlmInference
         int outputTokens = 0;
         string? finishReason = null;
         long started = Stopwatch.GetTimestamp();
-        await foreach (ChatStreamUpdate update in _modelService.ChatStreamWithMetricsAsync(
+        await foreach (ChatStreamUpdate update in _runtime.StreamAsync(
                            session,
                            messages,
                            request.MaxOutputTokens ?? 1_024,
-                           executionToken,
                            sampling,
-                           tools: null,
-                           enableThinking: false).ConfigureAwait(false))
+                           executionToken).ConfigureAwait(false))
         {
             if (!update.Done)
             {
@@ -179,11 +180,11 @@ public sealed class QwenLlmInference : ITensorLlmInference
             Provenance = new InferenceProvenance
             {
                 ImplementationId = Descriptor.Id,
-                ModelId = _definition.Key.ModelId,
-                ModelRevision = _definition.Key.Revision,
+                ModelId = definition.Key.ModelId,
+                ModelRevision = definition.Key.Revision,
                 Runtime = "TensorSharp",
                 RuntimeVersion = RuntimeVersion(),
-                Backend = _modelService.LoadedBackend,
+                Backend = _runtime.LoadedBackend,
                 Elapsed = Stopwatch.GetElapsedTime(started)
             }
         });
@@ -202,10 +203,11 @@ public sealed class QwenLlmInference : ITensorLlmInference
             return;
         }
 
-        _modelService.UnloadModel();
+        _runtime.Unload();
         await _modelLease.DisposeAsync().ConfigureAwait(false);
         _modelLease = null;
         _loadedBackend = null;
+        _definition = null;
         _lifetime.MarkUnloaded();
     }
 
@@ -218,7 +220,7 @@ public sealed class QwenLlmInference : ITensorLlmInference
 
         await UnloadAsync(cancellationToken).ConfigureAwait(false);
         _disposed = true;
-        _modelService.Dispose();
+        _runtime.Dispose();
         _lifetime.Dispose();
         if (_ownsCoordinator)
         {
@@ -233,11 +235,6 @@ public sealed class QwenLlmInference : ITensorLlmInference
     {
         ThrowIfDisposed();
         ArgumentNullException.ThrowIfNull(model);
-        if (model != _definition.Key)
-        {
-            throw new InferenceException(InferenceFailureCode.ModelUnavailable, $"Qwen does not support model '{model}'.");
-        }
-
         TensorModelPackDefinition definition;
         try
         {
@@ -248,11 +245,9 @@ public sealed class QwenLlmInference : ITensorLlmInference
             throw new InferenceException(InferenceFailureCode.ModelUnavailable, exception.Message, exception);
         }
 
-        if (definition.Capability != TensorCapability.Llm
-            || definition.RuntimeArchitecture != _definition.RuntimeArchitecture)
-        {
-            throw new InferenceException(InferenceFailureCode.UnsupportedFeature, "The model pack is not supported by Qwen.");
-        }
+        try { QwenModelCompatibility.Validate(definition); }
+        catch (ArgumentException exception)
+        { throw new InferenceException(InferenceFailureCode.UnsupportedFeature, "The model pack is not supported by Qwen.", exception); }
 
         using IDisposable loading = await _lifetime.EnterLoadAsync(cancellationToken).ConfigureAwait(false);
 
@@ -261,7 +256,7 @@ public sealed class QwenLlmInference : ITensorLlmInference
         {
             throw new InferenceException(
                 InferenceFailureCode.BackendUnavailable,
-                $"Model pack '{_definition.Key}' does not support backend '{backend}'.");
+                $"Model pack '{definition.Key}' does not support backend '{backend}'.");
         }
 
         TensorModelPackLease lease;
@@ -277,29 +272,30 @@ public sealed class QwenLlmInference : ITensorLlmInference
         try
         {
             cancellationToken.ThrowIfCancellationRequested();
-            await _modelService.LoadModelAsync(
-                lease.GetRequiredArtifact("model"),
-                mmProj: null,
-                BackendName(backend),
-                cancellationToken).ConfigureAwait(false);
+            await _runtime.LoadAsync(definition, lease, BackendName(backend), cancellationToken).ConfigureAwait(false);
+            cancellationToken.ThrowIfCancellationRequested();
             _lifetime.MarkLoaded(model, backend);
             _modelLease = lease;
             _loadedBackend = backend;
+            _definition = definition;
         }
         catch (OperationCanceledException)
         {
-            _modelService.UnloadModel();
+            _runtime.Unload();
             await lease.DisposeAsync().ConfigureAwait(false);
             throw;
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
-            _modelService.UnloadModel();
+            _runtime.Unload();
             await lease.DisposeAsync().ConfigureAwait(false);
             throw new InferenceException(
-                exception is OutOfMemoryException
-                    ? InferenceFailureCode.CapacityExhausted
-                    : InferenceFailureCode.BackendUnavailable,
+                exception switch
+                {
+                    OutOfMemoryException => InferenceFailureCode.CapacityExhausted,
+                    InvalidDataException or IOException or OverflowException or FormatException => InferenceFailureCode.ModelCorrupt,
+                    _ => InferenceFailureCode.BackendUnavailable
+                },
                 $"TensorSharp could not load Qwen on backend '{backend}'.",
                 exception);
         }
@@ -319,8 +315,7 @@ public sealed class QwenLlmInference : ITensorLlmInference
 
         try
         {
-            var grammarCache = GrammarLibrary.ForJsonSchema(format.SchemaJson, _modelService.Model.Tokenizer);
-            sampling.Grammar = GrammarLibrary.NewConstraint(grammarCache, _modelService.Model.Tokenizer);
+            _runtime.ApplyGrammar(sampling, format);
             return sampling;
         }
         catch (Exception exception) when (
@@ -358,9 +353,8 @@ public sealed class QwenLlmInference : ITensorLlmInference
         return messages;
     }
 
-    private void ValidateRequest(LlmInferenceRequest request)
+    private static void ValidateRequest(LlmInferenceRequest request)
     {
-        ValidateModelId(request.ModelId);
         if (request.Messages.Count == 0 && string.IsNullOrWhiteSpace(request.Instructions))
         {
             throw new InferenceException(InferenceFailureCode.InvalidRequest, "At least one instruction or message is required.");
@@ -400,7 +394,10 @@ public sealed class QwenLlmInference : ITensorLlmInference
 
     private void ValidateModelId(string? modelId)
     {
-        if (modelId is not null && !string.Equals(modelId, _definition.Key.ModelId, StringComparison.Ordinal))
+        bool known = _definition is not null ? modelId == _definition.Key.ModelId
+            : _packs.Definitions.Any(definition => definition.Key.ModelId == modelId
+                && definition.Capability == TensorCapability.Llm && definition.RuntimeArchitecture == TensorLlmModels.QwenRuntimeArchitecture);
+        if (modelId is not null && !known)
         {
             throw new InferenceException(
                 InferenceFailureCode.ModelUnavailable,

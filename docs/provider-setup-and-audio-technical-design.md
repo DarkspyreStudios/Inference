@@ -599,3 +599,42 @@ This is a completed shared-foundation checkpoint, not completion of the settings
 resolvers, Qwen/Supra selected-pack loading and remote setup binding, Whisper, and the final
 cross-row acceptance remain active. The source contract is independently callable; no successful
 engine compatibility result or UI readiness is fabricated for its candidates.
+
+### Unit 3b — selected Qwen/Supra packs; dependency checkpoint (2026-09-22)
+
+Qwen and Supra now obtain the selected registered definition in `LoadAsync(key)`, use that key for
+execution coordination/request checks/provenance, and release it during Unload. Their setup entry
+points accept host-offered compatible definitions through the same shared typed session. The
+compiled generic example offers the manager-owned registered definitions without provider-specific
+renderer controls. Selection and Save do not install or load; setup does not own engine lifetime.
+
+Each engine owns one pack compatibility policy. Supra requires the complete four-role pipeline and
+retains its restricted checkpoint reader/component schema validation and generation algorithm.
+Qwen checks installed GGUF architecture/version, tokenizer/chat metadata, dimensions, required
+tensor names/shapes, storage encoding/ranges and shard declarations before model allocation.
+Qwen listing no longer copies a fixed 4B context limit onto arbitrary packs: limits remain unknown
+until validated loaded-runtime metadata is available. Controlled native boundaries test selected-key
+propagation, repeated model switching, failure/cancellation cleanup and graceful/urgent teardown.
+The Qwen metadata tests use small generated GGUF fixtures, including multiple layers and incompatible
+architecture, missing metadata/tensors, wrong shapes, unknown quantization and incomplete shards.
+
+Verification for this checkpoint: zero-warning Debug/Release builds and tests for both focused
+solutions (Tensor 111, including 23 new selection/metadata cases; Connect 291) and formatting checks.
+The dependency audits already passed in unit 3a; no dependency version changed here. No full-weight
+run is claimed. No packages, version changes, UI changes, model downloads or publication occurred.
+
+**Remaining dependency gate:** the current TensorSharp 2.8.6.3 `PersistenceFileLease.AcquireAsync`
+projects a non-FileStream artifact to one generated filename. `GgufFile.OpenSiblingShards` resolves
+the rest of a split checkpoint from filenames beside that file. `ModelService.LoadModelAsync`
+accepts only the model reference (plus an optional vision projector), not a complete shard set.
+Consequently a complete split Qwen pack cannot load from an arbitrary non-file persistence store
+through the current dependency. Single-file Qwen and Supra are unaffected; this is not a remote
+model-loading requirement or a claim that Supra has not already worked.
+
+The proposed focused follow-up is to extend the existing TensorSharp fork's persistence-backed
+loading to retain/project a complete named artifact set for the model's lifetime. This keeps the
+host on IPersistenceStore and avoids an Inference-owned second materialization path. Verification
+requires building local-only fork dependency packages, an exception to the present no-package-
+creation development rule; no publication or Inference version bump is proposed. Implementation
+pauses at this committed checkpoint for that direction. Remote engine resolution/setup binding,
+Whisper and final cross-row acceptance are still outstanding, not reported as complete.

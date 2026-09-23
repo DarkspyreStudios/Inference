@@ -118,8 +118,10 @@ in use by native execution.
 `QwenSetup.Definition` and `SupraSetup.Definition` describe providers without constructing an engine,
 opening a store or loading native libraries. Their `CreateSession` methods bind a typed host
 `ISetupCommitTarget<TensorSetupChanges>` and the existing pack manager to the common setup editor.
-The current setup list contains the built-in supported pack for each engine; remote model discovery
-and compatible selection beyond those definitions remain pending in the approved implementation.
+The default setup list contains the built-in pack for each engine. Hosts may supply `offeredModels`
+with their own registered compatible packs. Qwen and Supra validate the pack's capability, family,
+roles and declared backends before offering it. Remote source-to-engine resolution and remote
+setup selection remain pending in the approved implementation.
 
 Selection/Save does not install or load. Install, verify, load, unload and stop are distinct callable
 actions with declared side effects. The supplied instance is optional and remains host-owned. Its
@@ -133,6 +135,25 @@ previous configuration. Saving does not perform that unload. Stop remains termin
 already-cancelled teardown action token reaches the engine as urgency rather than skipping cleanup.
 See the [shared editor example](../Common/examples/Darkspyre.Inference.Setup.Examples/README.md).
 These source changes have not been published and do not change the development version.
+
+Qwen and Supra now load the definition selected by `LoadAsync(key)`, rather than requiring the
+built-in key. Register complete, immutable definitions in the same manager used by the engine.
+Neither Save nor a prompt installs/loads weights. Requests, execution coordination, observations
+and provenance use the resident pack's actual key. The host can Unload and then Load another
+compatible pack on the same instance; Stop remains terminal.
+
+Qwen currently targets `TensorLlmModels.QwenRuntimeArchitecture` (Qwen3 GGUF), not every architecture
+implemented by TensorSharp. Its loader checks the installed GGUF architecture/version, tokenizer
+and chat metadata, layer dimensions/tensor shapes, storage encoding and complete shard declarations
+before native allocation. Listed context/output limits remain unknown until validated loaded-runtime
+metadata is available; the built-in 4B limits are not copied onto other models. **Split GGUF loading
+from non-file persistence stores is still pending:** the current TensorSharp dependency's individual
+temporary-file projection does not preserve the sibling paths required by its split-file reader.
+
+Supra uses `TensorImageModels.SupraRuntimeArchitecture` and requires all four roles: `supra-model`,
+`text-model`, `text-tokenizer`, `vae-model`. Its existing restricted checkpoint reader and native
+component constructors still validate actual data. A pack label is not proof of tensor compatibility.
+The 256x256 output, prompt/sampler constraints and generation algorithm are unchanged.
 
 ## Model source metadata and registration (unreleased development)
 

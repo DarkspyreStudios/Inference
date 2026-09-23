@@ -17,14 +17,19 @@ public static class SetupCompositionExample
     {
         ArgumentNullException.ThrowIfNull(llms);
         ArgumentNullException.ThrowIfNull(images);
+        ArgumentNullException.ThrowIfNull(packs);
         // No network requests, model loads or installs occur here. The caller owns/disposes the sessions.
         List<IInferenceSetupSession> sessions = llms.SupportedProviders.Select(provider =>
             (IInferenceSetupSession)llms.CreateSetupSession(provider.Transport,
                 new(SetupChangeIntent.Create, Guid.NewGuid().ToString("N"), null), llmTarget)).ToList();
         sessions.Add(images.CreateSetupSession(ImageTransport.ComfyUi,
             new(SetupChangeIntent.Create, Guid.NewGuid().ToString("N"), null), imageTarget, workflows));
-        sessions.Add(QwenSetup.CreateSession(new(SetupChangeIntent.Create, Guid.NewGuid().ToString("N"), null), tensorTarget, packs));
-        sessions.Add(SupraSetup.CreateSession(new(SetupChangeIntent.Create, Guid.NewGuid().ToString("N"), null), tensorTarget, packs));
+        sessions.Add(QwenSetup.CreateSession(new(SetupChangeIntent.Create, Guid.NewGuid().ToString("N"), null), tensorTarget, packs,
+            offeredModels: packs.Definitions.Where(pack => pack.Capability == TensorCapability.Llm
+                && pack.RuntimeArchitecture == TensorLlmModels.QwenRuntimeArchitecture).ToArray()));
+        sessions.Add(SupraSetup.CreateSession(new(SetupChangeIntent.Create, Guid.NewGuid().ToString("N"), null), tensorTarget, packs,
+            offeredModels: packs.Definitions.Where(pack => pack.Capability == TensorCapability.Image
+                && pack.RuntimeArchitecture == TensorImageModels.SupraRuntimeArchitecture).ToArray()));
         return sessions.AsReadOnly();
     }
 }
