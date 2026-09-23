@@ -72,6 +72,8 @@ public sealed class QwenLlmInferenceTests
 
     private sealed class MissingPackManager : ITensorModelPackManager
     {
+        public IReadOnlyList<TensorModelPackDefinition> Definitions => [TensorLlmModels.Qwen3FourBillionQ4Km];
+        public TensorModelPackDefinition Register(TensorModelPackDefinition definition) => throw new NotSupportedException();
         public TensorModelPackDefinition GetRequiredDefinition(TensorModelKey key) => TensorLlmModels.Qwen3FourBillionQ4Km;
 
         public Task<TensorModelPackStatus> GetStatusAsync(

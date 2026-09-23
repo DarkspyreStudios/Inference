@@ -179,6 +179,6 @@ public sealed class TensorSetupSession : InferenceSetupSession<TensorSetupChange
     private sealed class InstallProgress(IProgress<SetupProgress>? progress) : IProgress<TensorModelInstallProgress>
     {
         public void Report(TensorModelInstallProgress value) => progress?.Report(
-            new(value.Stage.ToString(), value.ArtifactRole, value.BytesTransferred, value.TotalBytes));
+            new(value.Stage.ToString(), value.ArtifactRole, value.OverallBytesTransferred, value.OverallTotalBytes));
     }
 }

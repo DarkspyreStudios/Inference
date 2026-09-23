@@ -110,6 +110,8 @@ public sealed class LayaDecisionInferenceTests
 
     private sealed class MissingPackManager : ITensorModelPackManager
     {
+        public IReadOnlyList<TensorModelPackDefinition> Definitions => [TensorDecisionModels.LayaTypedDecisions];
+        public TensorModelPackDefinition Register(TensorModelPackDefinition definition) => throw new NotSupportedException();
         public TensorModelPackDefinition GetRequiredDefinition(TensorModelKey key) => TensorDecisionModels.LayaTypedDecisions;
 
         public Task<TensorModelPackStatus> GetStatusAsync(

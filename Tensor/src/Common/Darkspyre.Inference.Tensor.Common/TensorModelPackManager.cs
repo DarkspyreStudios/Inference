@@ -1,5 +1,4 @@
 using System.Collections.Concurrent;
-using System.Net;
 using System.Security.Cryptography;
 using System.Text.Json;
 using Darkspyre.Persistence;
@@ -24,17 +23,26 @@ public enum TensorModelInstallStage
     Checking,
     Downloading,
     Saving,
-    Completed
+    Completed,
+    Failed,
+    Cancelled
 }
 
 public readonly record struct TensorModelInstallProgress(
     TensorModelInstallStage Stage,
     string? ArtifactRole = null,
     long? BytesTransferred = null,
-    long? TotalBytes = null);
+    long? TotalBytes = null,
+    long? OverallBytesTransferred = null,
+    long? OverallTotalBytes = null,
+    bool SupportsResume = false);
 
 public interface ITensorModelPackManager
 {
+    IReadOnlyList<TensorModelPackDefinition> Definitions { get; }
+
+    TensorModelPackDefinition Register(TensorModelPackDefinition definition);
+
     TensorModelPackDefinition GetRequiredDefinition(TensorModelKey key);
 
     Task<TensorModelPackStatus> GetStatusAsync(
@@ -65,6 +73,7 @@ public sealed class TensorModelPackManager : ITensorModelPackManager, IDisposabl
     private readonly IPersistenceStore _persistence;
     private readonly HttpClient _httpClient;
     private readonly bool _ownsHttpClient;
+    private readonly TensorSourceHttp _sourceHttp;
     private readonly string _storeName;
     private readonly ConcurrentDictionary<TensorModelKey, SemaphoreSlim> _packGates = new();
     private readonly ConcurrentDictionary<TensorModelKey, int> _activeLeases = new();
@@ -74,15 +83,25 @@ public sealed class TensorModelPackManager : ITensorModelPackManager, IDisposabl
         TensorModelCatalog catalog,
         IPersistenceStore? persistence = null,
         HttpClient? httpClient = null,
-        string storeName = DefaultStoreName)
+        string storeName = DefaultStoreName,
+        TensorSourceAccess? sourceAccess = null)
     {
         ArgumentNullException.ThrowIfNull(catalog);
         ArgumentException.ThrowIfNullOrWhiteSpace(storeName);
         _catalog = catalog;
         _persistence = persistence ?? new TensorDirectFilePersistStore();
-        _httpClient = httpClient ?? new HttpClient();
+        _httpClient = httpClient ?? TensorSourceHttp.CreateClient();
         _ownsHttpClient = httpClient is null;
+        _sourceHttp = new(_httpClient, sourceAccess);
         _storeName = storeName;
+    }
+
+    public IReadOnlyList<TensorModelPackDefinition> Definitions { get { ThrowIfDisposed(); return _catalog.Definitions; } }
+
+    public TensorModelPackDefinition Register(TensorModelPackDefinition definition)
+    {
+        ThrowIfDisposed();
+        return _catalog.Register(definition);
     }
 
     public TensorModelPackDefinition GetRequiredDefinition(TensorModelKey key)
@@ -130,15 +149,29 @@ public sealed class TensorModelPackManager : ITensorModelPackManager, IDisposabl
         ThrowIfDisposed();
         TensorModelPackDefinition definition = _catalog.GetRequired(key);
         SemaphoreSlim gate = _packGates.GetOrAdd(key, static _ => new SemaphoreSlim(1, 1));
-        await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        bool entered = false;
+        long total = definition.Artifacts.Sum(artifact => artifact.Length);
+        long completed = 0;
         try
         {
-            progress?.Report(new TensorModelInstallProgress(TensorModelInstallStage.Checking));
+            await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            entered = true;
+            Report(progress, new(TensorModelInstallStage.Checking, OverallBytesTransferred: 0, OverallTotalBytes: total));
             TensorModelPackStatus existing = await VerifyAsync(key, cancellationToken).ConfigureAwait(false);
             if (existing.State == TensorModelPackState.Installed)
             {
-                progress?.Report(new TensorModelInstallProgress(TensorModelInstallStage.Completed));
+                Report(progress, new(TensorModelInstallStage.Completed, OverallBytesTransferred: total, OverallTotalBytes: total));
                 return;
+            }
+
+            if (_activeLeases.TryGetValue(key, out int leases) && leases > 0)
+            {
+                throw new TensorModelPackException(key, "A model pack in use cannot be repaired.");
+            }
+            // A previous manifest must not advertise an interrupted repair as installed.
+            if (existing.State == TensorModelPackState.Invalid)
+            {
+                await _persistence.DeleteAsync(_storeName, ManifestName(key), cancellationToken).ConfigureAwait(false);
             }
 
             foreach (TensorModelArtifactDefinition artifact in definition.Artifacts)
@@ -155,13 +188,15 @@ public sealed class TensorModelPackManager : ITensorModelPackManager, IDisposabl
                     $"darkspyre-tensor-{Guid.NewGuid():N}.download");
                 try
                 {
-                    await DownloadAsync(key, artifact, temporaryPath, progress, cancellationToken)
+                    await DownloadAsync(key, artifact, temporaryPath, progress, completed, total, cancellationToken)
                         .ConfigureAwait(false);
-                    progress?.Report(new TensorModelInstallProgress(
+                    Report(progress, new TensorModelInstallProgress(
                         TensorModelInstallStage.Saving,
                         artifact.Role,
                         artifact.Length,
-                        artifact.Length));
+                        artifact.Length,
+                        completed + artifact.Length,
+                        total));
                     await using var input = new FileStream(
                         temporaryPath,
                         FileMode.Open,
@@ -174,6 +209,7 @@ public sealed class TensorModelPackManager : ITensorModelPackManager, IDisposabl
                         ArtifactName(definition.Key, artifact.RelativePath),
                         input,
                         cancellationToken).ConfigureAwait(false);
+                    completed += artifact.Length;
                 }
                 finally
                 {
@@ -193,11 +229,21 @@ public sealed class TensorModelPackManager : ITensorModelPackManager, IDisposabl
                 ManifestName(definition.Key),
                 manifestContent,
                 cancellationToken).ConfigureAwait(false);
-            progress?.Report(new TensorModelInstallProgress(TensorModelInstallStage.Completed));
+            Report(progress, new(TensorModelInstallStage.Completed, OverallBytesTransferred: total, OverallTotalBytes: total));
+        }
+        catch (OperationCanceledException)
+        {
+            Report(progress, new(TensorModelInstallStage.Cancelled, OverallBytesTransferred: completed, OverallTotalBytes: total));
+            throw;
+        }
+        catch
+        {
+            Report(progress, new(TensorModelInstallStage.Failed, OverallBytesTransferred: completed, OverallTotalBytes: total));
+            throw;
         }
         finally
         {
-            gate.Release();
+            if (entered) { gate.Release(); }
         }
     }
 
@@ -326,6 +372,8 @@ public sealed class TensorModelPackManager : ITensorModelPackManager, IDisposabl
         TensorModelArtifactDefinition artifact,
         string destination,
         IProgress<TensorModelInstallProgress>? progress,
+        long completed,
+        long total,
         CancellationToken cancellationToken)
     {
         Exception? lastFailure = null;
@@ -353,14 +401,17 @@ public sealed class TensorModelPackManager : ITensorModelPackManager, IDisposabl
                         break;
                     }
 
+                    if (read > artifact.Length - transferred) { throw new InvalidDataException("The artifact exceeds its declared length."); }
                     await output.WriteAsync(buffer.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
                     hash.AppendData(buffer, 0, read);
                     transferred += read;
-                    progress?.Report(new TensorModelInstallProgress(
+                    Report(progress, new TensorModelInstallProgress(
                         TensorModelInstallStage.Downloading,
                         artifact.Role,
                         transferred,
-                        artifact.Length));
+                        artifact.Length,
+                        completed + transferred,
+                        total));
                 }
 
                 await output.FlushAsync(cancellationToken).ConfigureAwait(false);
@@ -383,7 +434,7 @@ public sealed class TensorModelPackManager : ITensorModelPackManager, IDisposabl
                                               or InvalidDataException
                                               or UnauthorizedAccessException)
             {
-                lastFailure = exception;
+                lastFailure = exception is TensorSourceException ? exception : new IOException("The artifact could not be downloaded or failed integrity verification.");
                 TryDelete(destination);
             }
         }
@@ -407,21 +458,9 @@ public sealed class TensorModelPackManager : ITensorModelPackManager, IDisposabl
                 FileOptions.Asynchronous | FileOptions.SequentialScan);
         }
 
-        if (!string.Equals(source.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase)
-            && !(string.Equals(source.Scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase)
-                 && IPAddress.TryParse(source.Host, out IPAddress? address)
-                 && IPAddress.IsLoopback(address)))
-        {
-            throw new IOException($"Model source '{source}' must use HTTPS, a loopback HTTP address, or a local file URI.");
-        }
-
-        HttpResponseMessage response = await _httpClient.GetAsync(
-            source,
-            HttpCompletionOption.ResponseHeadersRead,
-            cancellationToken).ConfigureAwait(false);
+        HttpResponseMessage response = await _sourceHttp.GetAsync(source, cancellationToken).ConfigureAwait(false);
         try
         {
-            response.EnsureSuccessStatusCode();
             Stream content = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
             return new ResponseStream(content, response);
         }
@@ -430,6 +469,12 @@ public sealed class TensorModelPackManager : ITensorModelPackManager, IDisposabl
             response.Dispose();
             throw;
         }
+    }
+
+    private static void Report(IProgress<TensorModelInstallProgress>? progress, TensorModelInstallProgress value)
+    {
+        // An observer cannot turn successful storage writes into a failed installation.
+        try { progress?.Report(value); } catch { }
     }
 
     private static async Task<(long Length, string Hash)> HashAsync(

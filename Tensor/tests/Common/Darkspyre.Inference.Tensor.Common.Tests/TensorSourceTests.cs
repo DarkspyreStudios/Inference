@@ -1,0 +1,196 @@
+using System.Net;
+using System.Text.Json;
+
+namespace Darkspyre.Inference.Tensor.Common.Tests;
+
+public sealed class TensorSourceTests
+{
+    private const string Commit = "1111111111111111111111111111111111111111";
+    private const string Hash = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
+    [Fact]
+    public async Task CandidatePinsRevisionPreservesUnknownsAndDoesNotReadWeights()
+    {
+        var requests = new List<Uri>();
+        using var http = Client((request, _) =>
+        {
+            requests.Add(request.RequestUri!);
+            return Task.FromResult(Json(new
+            {
+                id = "owner/model",
+                sha = Commit,
+                @private = true,
+                gated = "manual",
+                cardData = new { license = "apache-2.0" },
+                gguf = new { architecture = "qwen3", context_length = 40960, chat_template = "template" },
+                siblings = new object[]
+                {
+                    new { rfilename = "model.gguf", size = 100L, lfs = new { sha256 = Hash, size = 100L } },
+                    new { rfilename = "config.json", blobId = Commit }
+                }
+            }));
+        });
+        using var source = new HuggingFaceModelSource(http);
+        TensorSourceResult<TensorModelCandidate> result = await source.GetCandidateAsync(new("owner/model", "main", "model.gguf"));
+        Assert.Equal(TensorSourceState.Available, result.State);
+        TensorModelCandidate candidate = Assert.IsType<TensorModelCandidate>(result.Value);
+        Assert.Equal(Commit, candidate.Selection.Revision);
+        Assert.True(candidate.IsGated);
+        Assert.True(candidate.IsPrivate);
+        Assert.Equal(40960, candidate.Metadata.ContextLength);
+        Assert.True(candidate.Metadata.HasChatTemplate);
+        Assert.Equal(Hash, candidate.Artifacts[0].Sha256);
+        Assert.Equal(new Uri($"https://huggingface.co/owner/model/resolve/{Commit}/model.gguf"), candidate.Artifacts[0].DownloadUri);
+        Assert.Null(candidate.Artifacts[1].Sha256);
+        Assert.Null(candidate.Artifacts[1].Length);
+        Assert.Equal("apache-2.0", candidate.Artifacts[0].Provenance.License);
+        Assert.Single(requests);
+        Assert.StartsWith("/api/models/", requests[0].AbsolutePath, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SearchAndRevisionsUseBoundedPagesAndOpaqueCursors()
+    {
+        var requests = new List<Uri>();
+        using var http = Client((request, _) =>
+        {
+            requests.Add(request.RequestUri!);
+            bool commits = request.RequestUri!.AbsolutePath.Contains("commits", StringComparison.Ordinal);
+            HttpResponseMessage response = commits ? Json(new[] { new { id = Commit, date = "2026-09-22T12:00:00Z" } })
+                : Json(new[] { new { id = "owner/model", sha = Commit, @private = false, gated = false } });
+            response.Headers.Add("Link", $"<{request.RequestUri}&cursor=a%2Bb%3D>; rel=\"next\"");
+            return Task.FromResult(response);
+        });
+        using var source = new HuggingFaceModelSource(http);
+        TensorSourceResult<TensorSourcePage<TensorSourceModel>> first = await source.SearchAsync(new("qwen", PageSize: 2));
+        Assert.Equal("a+b=", first.Value!.Continuation);
+        Assert.Null(first.Value.Items[0].License);
+        await source.SearchAsync(new("qwen", first.Value.Continuation, 2));
+        Assert.Contains("cursor=a%2Bb%3D", requests[1].Query, StringComparison.Ordinal);
+        TensorSourceResult<TensorSourcePage<TensorSourceRevision>> revisions = await source.ListRevisionsAsync(new("owner/model", PageSize: 2));
+        Assert.Equal(Commit, revisions.Value!.Items.Single().Revision);
+        Assert.NotNull(revisions.Value.Items[0].CreatedAt);
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.Unauthorized, TensorSourceState.AuthenticationRequired)]
+    [InlineData(HttpStatusCode.Forbidden, TensorSourceState.AccessDenied)]
+    [InlineData(HttpStatusCode.NotFound, TensorSourceState.NotFound)]
+    [InlineData(HttpStatusCode.TooManyRequests, TensorSourceState.TransientFailure)]
+    [InlineData(HttpStatusCode.ServiceUnavailable, TensorSourceState.TransientFailure)]
+    public async Task AccessFailuresAreTypedAndSanitized(HttpStatusCode status, TensorSourceState expected)
+    {
+        using var http = Client((_, _) => Task.FromResult(new HttpResponseMessage(status) { Content = new StringContent("secret-remote-body") }));
+        using var source = new HuggingFaceModelSource(http);
+        var result = await source.SearchAsync(new());
+        Assert.Equal(expected, result.State);
+        Assert.DoesNotContain("secret-remote-body", result.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task GatedRepositoryIsNotCollapsedIntoForbidden()
+    {
+        using var http = Client((_, _) =>
+        {
+            var response = new HttpResponseMessage(HttpStatusCode.Forbidden);
+            response.Headers.Add("X-Error-Code", "GatedRepo");
+            return Task.FromResult(response);
+        });
+        using var source = new HuggingFaceModelSource(http);
+        Assert.Equal(TensorSourceState.Gated, (await source.SearchAsync(new())).State);
+    }
+
+    [Fact]
+    public async Task RedirectsNeverForwardCredentialAcrossOriginOrReattachAfterLeaving()
+    {
+        var auth = new List<string?>();
+        var origins = new List<Uri>();
+        int count = 0;
+        using var http = Client((request, _) =>
+        {
+            auth.Add(request.Headers.Authorization?.Parameter);
+            HttpResponseMessage response = ++count switch
+            {
+                1 => Redirect("https://huggingface.co/same-origin"),
+                2 => Redirect("https://cdn.example.test/artifact"),
+                3 => Redirect("https://huggingface.co/returned"),
+                _ => Json(Array.Empty<object>())
+            };
+            return Task.FromResult(response);
+        });
+        using var source = new HuggingFaceModelSource(http, (origin, _) =>
+        {
+            origins.Add(origin);
+            return ValueTask.FromResult<TensorSourceCredential?>(new("sensitive-token"));
+        });
+        Assert.Equal(TensorSourceState.Available, (await source.SearchAsync(new())).State);
+        Assert.Equal(new string?[] { "sensitive-token", "sensitive-token", null, null }, auth);
+        Assert.Equal(new Uri("https://huggingface.co/"), Assert.Single(origins));
+        Assert.DoesNotContain("sensitive-token", new TensorSourceCredential("sensitive-token").ToString(), StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("http://example.test/data")]
+    [InlineData("https://user:password@example.test/data")]
+    [InlineData("file:///tmp/data")]
+    public async Task UnsafeRedirectIsRejectedBeforeSecondRequest(string redirect)
+    {
+        int calls = 0;
+        using var http = Client((_, _) => { calls++; return Task.FromResult(Redirect(redirect)); });
+        using var source = new HuggingFaceModelSource(http);
+        Assert.Equal(TensorSourceState.InvalidRequest, (await source.SearchAsync(new())).State);
+        Assert.Equal(1, calls);
+    }
+
+    [Fact]
+    public async Task UntrustedPaginationDoesNotBecomeAnArbitraryRequest()
+    {
+        using var http = Client((_, _) =>
+        {
+            var response = Json(Array.Empty<object>());
+            response.Headers.Add("Link", "<https://evil.example/api/models?cursor=x>; rel=\"next\"");
+            return Task.FromResult(response);
+        });
+        using var source = new HuggingFaceModelSource(http);
+        Assert.Equal(TensorSourceState.Unverified, (await source.SearchAsync(new())).State);
+    }
+
+    [Fact]
+    public async Task InvalidQueryAndAlreadyCancelledCallDoNotSend()
+    {
+        using var http = Client((_, _) => throw new InvalidOperationException("Must not send."));
+        using var source = new HuggingFaceModelSource(http);
+        Assert.Equal(TensorSourceState.InvalidRequest, (await source.SearchAsync(new(PageSize: 101))).State);
+        Assert.Equal(TensorSourceState.InvalidRequest, (await source.GetCandidateAsync(new("../bad", "main", "model.gguf"))).State);
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => source.SearchAsync(new(), new CancellationToken(true)));
+    }
+
+    [Fact]
+    public async Task OversizedMetadataDoesNotGetParsedAsAValidCatalog()
+    {
+        using var http = Client((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+        { Content = new StringContent(new string(' ', 4 * 1024 * 1024 + 1)) }));
+        using var source = new HuggingFaceModelSource(http);
+        Assert.Equal(TensorSourceState.Unverified, (await source.SearchAsync(new())).State);
+    }
+
+    [Fact]
+    public async Task CallerCancellationPropagatesWhileTimeoutIsTyped()
+    {
+        using var cancellation = new CancellationTokenSource();
+        using var http = Client((_, token) => { cancellation.Cancel(); token.ThrowIfCancellationRequested(); throw new InvalidOperationException(); });
+        using var source = new HuggingFaceModelSource(http);
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => source.SearchAsync(new(), cancellation.Token));
+        using var timedHttp = Client((_, _) => throw new TaskCanceledException());
+        using var timedSource = new HuggingFaceModelSource(timedHttp);
+        Assert.Equal(TensorSourceState.TransientFailure, (await timedSource.SearchAsync(new())).State);
+    }
+
+    private static HttpClient Client(Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> send) => new(new Handler(send));
+    private sealed class Handler(Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> send) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) => send(request, cancellationToken);
+    }
+    private static HttpResponseMessage Json<T>(T value) => new(HttpStatusCode.OK) { Content = new StringContent(JsonSerializer.Serialize(value)) };
+    private static HttpResponseMessage Redirect(string uri) => new(HttpStatusCode.Redirect) { Headers = { Location = new Uri(uri) } };
+}

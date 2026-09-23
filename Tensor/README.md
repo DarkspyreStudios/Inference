@@ -134,6 +134,35 @@ already-cancelled teardown action token reaches the engine as urgency rather tha
 See the [shared editor example](../Common/examples/Darkspyre.Inference.Setup.Examples/README.md).
 These source changes have not been published and do not change the development version.
 
+## Model source metadata and registration (unreleased development)
+
+`HuggingFaceModelSource` implements `ITensorModelSource` for paged repository search, revision
+listing and candidate metadata. Candidate lookup pins the returned immutable commit and retains
+per-artifact provenance, license, nullable length and nullable SHA-256. A Git blob ID is never used
+as a file hash. These calls read bounded JSON metadata only: they neither install/load weights nor
+execute repository code. A candidate is not evidence that an engine supports it; engine-specific
+resolution and remote setup selection are still pending in the approved implementation.
+
+The host may supply `TensorSourceAccess` to the source and pack manager. It returns a short-lived
+bearer credential for the exact requested origin. No credential is stored in a pack definition.
+Authentication required, gated access, denied access, not found (possibly private), transient failure
+and unverified metadata are distinct source results. Redirects are bounded and authorization is
+never forwarded to another origin or reattached after leaving the original origin. Caller-supplied
+HTTP clients must disable automatic redirects, cookies/default credentials and default headers;
+the default clients already do so. Never persist transient signed download URLs.
+
+`TensorModelCatalog.Register` and the manager's forwarding `Register` return an immutable snapshot.
+Identical registrations are idempotent; a different definition at the same key fails. The catalog is
+the one owner observed by `TensorModelPackManager.Definitions`, not a separate discovery cache.
+The host persists chosen definitions and reconstructs registrations after restart. Registration,
+installation and configuration Save remain separate operations.
+
+Install progress includes per-artifact and overall byte counts, Completed/Failed/Cancelled terminal
+states, and `SupportsResume = false`. Duplicate installs serialize and verify existing artifacts.
+Active leases prevent removal or repair; interrupted repair invalidates its old install manifest.
+Progress observers cannot change the installation outcome. An installed manifest is not a substitute
+for content verification; use `VerifyAsync` before treating weights as verified.
+
 ## Host-selected Laya packs (unreleased development)
 
 Laya follows the same lifecycle: construct the engine with the pack manager, choose the model in

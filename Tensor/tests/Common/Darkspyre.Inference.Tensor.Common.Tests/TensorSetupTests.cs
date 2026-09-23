@@ -94,6 +94,8 @@ public sealed class TensorSetupTests
 
     private sealed class Packs : ITensorModelPackManager
     {
+        public IReadOnlyList<TensorModelPackDefinition> Definitions => [Pack];
+        public TensorModelPackDefinition Register(TensorModelPackDefinition definition) => throw new NotSupportedException();
         public int Calls { get; private set; }
         public TensorModelPackDefinition GetRequiredDefinition(TensorModelKey key) => Pack;
         public Task<TensorModelPackStatus> GetStatusAsync(TensorModelKey key, CancellationToken cancellationToken = default)

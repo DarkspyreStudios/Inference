@@ -564,3 +564,38 @@ no LLM implementation/test or shared runtime code changed in this unit.
 
 Implementation remains active for remote Qwen/Supra discovery/selection, Whisper and final
 cross-row acceptance. No version bump, package creation, publication or live model call occurred.
+
+### Unit 3a — source metadata, registration and protected installation (2026-09-22)
+
+Implemented the shared `ITensorModelSource` contracts and bounded Hugging Face metadata adapter:
+paged search/revision listing, immutable candidate revision, typed artifact/provenance/license data,
+and nullable integrity/size fields. Git object IDs are not treated as file hashes. Repository data is
+inert; discovery reads JSON only, never loads a remote model or executes its code. The user's
+clarification is explicit: discovery examines metadata for compatibility; only an installed pack is
+passed to an engine's Load. The already-tested Supra runtime is not blocked by remote inspection.
+
+`TensorModelCatalog.Register` now snapshots its collections, is thread-safe/idempotent, and rejects
+different definitions at an existing key. The manager forwards registration and publishes the same
+catalog's definitions. The shared source-access callback supplies exact-origin short-lived bearer
+credentials to metadata and installation. Redirects are bounded, HTTPS cannot downgrade, and a
+credential never crosses origins or returns after the chain has left its origin. Caller-supplied
+HTTP clients must disable automatic redirects/default credentials and carry no default headers.
+Sanitized source failures distinguish gated, authentication-required, denied, missing/private,
+transient and unverified outcomes without exposing response bodies or transient URLs.
+
+Installation retains persistence, serialization and verified leases. Progress adds overall totals,
+explicit failure/cancellation terminals and an honest no-resume declaration. Oversized artifacts
+are rejected while copying; observers cannot alter installation outcomes. Repair cannot overwrite
+a leased pack, and an interrupted repair cannot retain a manifest advertising installation.
+The first full test pass exposed a direct-file-store absent-directory case in manifest invalidation;
+the repair path now deletes only an existing invalid manifest, and all lifecycle tests pass again.
+
+Verification: zero-warning Debug/Release builds and tests for both focused solutions (Tensor 88,
+including 22 new source/registration/installer cases; Connect 291), formatting verification and
+transitive dependency audits. Tests use controlled HTTP/persistence, not model downloads. No package
+creation, version change, publication, UI edit or new TensorSharp dependency was required.
+
+This is a completed shared-foundation checkpoint, not completion of the settings request. Engine
+resolvers, Qwen/Supra selected-pack loading and remote setup binding, Whisper, and the final
+cross-row acceptance remain active. The source contract is independently callable; no successful
+engine compatibility result or UI readiness is fabricated for its candidates.
