@@ -132,7 +132,7 @@ Native picker rendering has component-test coverage, not consuming Desktop appli
 
 Date: 2026-09-23
 
-Status: **Implementation authorized on 2026-09-23.**
+Status: **Implemented and published privately in 11.5.1-rc.1.**
 
 `TensorSourceCredential` carries only a bearer token, and `TensorSourceHttp` always sends
 `Authorization: Bearer`. A protected source that demands HTTP Basic authentication, such as the

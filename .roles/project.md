@@ -18,7 +18,7 @@ specifications.
 | Version line | `<net>.<release>.<minor>`: .NET generation, breaking-contract release, compatible tweak/fix |
 | Release model | `Common`, `Connect`, `Tensor`, and `UI.Settings` publish together at the one version declared in `/Directory.Build.props` |
 | Primary branch | `master` |
-| Lifecycle stage | Four-package `11.5.0-rc.1` published privately; .NET 11 RC dependencies |
+| Lifecycle stage | Four-package `11.5.1-rc.1` published privately; .NET 11 RC dependencies |
 | Jira project and parent | TBD |
 | Jira subject label | TBD |
 
@@ -154,13 +154,23 @@ build to .NET 11 advances the first component and resets the later components fo
 release (`11.<release>.<minor>`). Immutable releases are never overwritten. The family tag is
 created only after all three packages have passed their gates.
 
-## 11.5.1-rc.1 release preparation (2026-09-23)
+## Published 11.5.1-rc.1 source authentication update (2026-09-23)
 
 The user authorized the coordinated `11.5.1-rc.1` release, including the staged Basic source
 authentication implementation and its tests/documentation from another worker. Both Bearer and
 Basic credentials retain the existing exact-origin request boundary and cross-origin redirect
 protection. All in-repository callers migrate to the credential factories. The source-credential
 amendment in `docs/tensor-model-locations.tech-design.md` records the release scope.
+
+All four packages were published privately from `1d24f8f244355f4d43a4d39d7d50aea7b29d5409`.
+Authenticated restores, zero-warning Debug/Release builds, formatting checks and transitive audits
+pass. Tests pass in both configurations: Connect 327, Tensor 298 and UI 49 (24 Common tests occur
+in each subset). Archive inspection confirms exact `[11.5.1-rc.1]` Common dependencies and no
+embedded sibling or third-party/native binaries. Local-archive and empty-cache feed-only consumer
+checks pass, including Whisper native initialization. Downloaded archives are byte-identical to
+the verified local files; GitHub readback confirms all four versions and private visibility.
+Release source, publication record and tag `v11.5.1-rc.1` are pushed to origin. No model download
+or paid provider call was used as a release gate.
 
 ## Published 11.5.0-rc.1 reasoning contract release (2026-09-23)
 

@@ -4,8 +4,9 @@ Date: 2026-09-23
 
 Consumers: DarkspyreCE Desktop and Agent-DS, through the shared `Darkspyre.Inference.UI.Settings` library
 
-Current publication: synchronized Common / Connect / Tensor / UI.Settings NuGet **11.5.0-rc.1**,
-private DarkspyreStudios feed, release source `500a572`. This release replaces the LLM reasoning
+Current publication: synchronized Common / Connect / Tensor / UI.Settings NuGet **11.5.1-rc.1**,
+private DarkspyreStudios feed, release source `1d24f8f`. This release adds Basic source credentials
+and retains the 11.5.0-rc.1 replacement of the LLM reasoning
 boolean/string contracts with typed levels and per-level setup overrides; see
 [the reasoning design](llm-reasoning-level.tech-design.md). Historical baseline: three-package **11.2.0**,
 release source `83c1ac3`.
