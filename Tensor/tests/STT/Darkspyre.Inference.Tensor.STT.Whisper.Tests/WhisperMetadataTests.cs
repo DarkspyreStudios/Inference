@@ -40,7 +40,18 @@ public sealed class WhisperMetadataTests
         Assert.Equal(SetupEditState.Applied, Field(session, "backend").SetValue("Cpu").State);
         Assert.Equal(SetupCommitState.Committed, (await session.CommitAsync()).State);
         Assert.Equal(selected.Key, target.Changes!.Configuration.Model);
+        var editTarget = new Target();
+        await using TensorSetupSession edit = WhisperSetup.CreateSession(new(SetupChangeIntent.Edit, "speech", "saved-v1"),
+            editTarget, packs, existing: target.Changes.Configuration);
+        Assert.Equal(selected.Key.ToString(), Field(edit, "model").Value);
+        TensorModelPackDefinition replacement = TensorSpeechModels.Whisper.Single(pack => pack.Key.ModelId == "whisper/tiny.en");
+        Assert.Equal(SetupEditState.Applied, Field(edit, "model").SetValue(replacement.Key.ToString()).State);
+        Assert.Equal(SetupCommitState.Committed, (await edit.CommitAsync()).State);
+        Assert.Equal("saved-v1", editTarget.Changes!.Identity.ExpectedVersion);
+        Assert.Equal(replacement.Key, editTarget.Changes.Configuration.Model);
+        Assert.True(editTarget.Changes.RequiresUnload);
         Assert.Equal(TensorModelPackState.NotInstalled, (await packs.GetStatusAsync(selected.Key)).State);
+        Assert.Equal(TensorModelPackState.NotInstalled, (await packs.GetStatusAsync(replacement.Key)).State);
         Assert.Null(session.Snapshot.Status.Loaded.Value);
     }
 

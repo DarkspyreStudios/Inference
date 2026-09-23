@@ -57,6 +57,16 @@ public sealed class SupraPackSelectionTests : IDisposable
         Assert.Equal(SetupEditState.Applied, Field(setup, "backend").SetValue(TensorBackendKind.Cpu.ToString()).State);
         Assert.Equal(SetupCommitState.Committed, (await setup.CommitAsync()).State);
         Assert.Equal(pack.Key, target.Changes!.Configuration.Model);
+        var editTarget = new Target();
+        await using TensorSetupSession edit = SupraSetup.CreateSession(new(SetupChangeIntent.Edit, "custom", "saved-v1"),
+            editTarget, packs, existing: target.Changes.Configuration, offeredModels: [pack]);
+        Assert.Equal(pack.Key.ToString(), Field(edit, "model").Value);
+        Assert.Equal(SetupEditState.Applied, Field(edit, "backend").SetValue(nameof(TensorBackendKind.Auto)).State);
+        Assert.Equal(SetupCommitState.Committed, (await edit.CommitAsync()).State);
+        Assert.Equal("saved-v1", editTarget.Changes!.Identity.ExpectedVersion);
+        Assert.Equal(pack.Key, editTarget.Changes.Configuration.Model);
+        Assert.Equal(TensorBackendKind.Auto, editTarget.Changes.Configuration.Backend);
+        Assert.True(editTarget.Changes.RequiresUnload);
         Assert.Equal(TensorModelPackState.NotInstalled, (await packs.GetStatusAsync(pack.Key)).State);
     }
 

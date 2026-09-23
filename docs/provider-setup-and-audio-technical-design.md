@@ -2,7 +2,9 @@
 
 Date: 2026-09-22
 
-Phase: **Implementation — technical design approved by the user on 2026-09-22.**
+Phase: **Implementation complete — technical design approved and source verified on 2026-09-22.**
+All eight runtime/settings rows are complete; see the final unit 5 acceptance record. UI integration
+and a coordinated release are separate work, not implied by source completion.
 
 Baseline: Common / Connect / Tensor 11.2.0. No version change, package creation, publication,
 consumer-application migration, or model download is part of this design unit.
@@ -445,6 +447,9 @@ Approval permits implementation, not package publication or a version bump.
 
 ## 9. Implementation record
 
+These entries are chronological checkpoints. Earlier pending-work statements describe their
+checkpoint only; the final unit 5 record is the current completion status.
+
 ### Unit 1 — shared setup and existing-provider bindings (2026-09-22)
 
 Implemented Common task classification, typed fields/drafts, revision-checked actions and choices,
@@ -834,3 +839,41 @@ No UI source, shared version or released packages changed; no Inference archives
 were downloaded/created. All new source/test/example files are tracked. Other-worker UI/rules and
 consumer-gap-document edits remain outside this commit. Implementation remains active for the final
 capability-table acceptance pass and completion report; this checkpoint does not mark the goal done.
+
+### Unit 5 — capability-table acceptance and completion (2026-09-22)
+
+Implementation phase exit: all eight runtime rows in the consumer's primary capability table are
+complete in source. The table now links the actual implementation acceptance suites and explicitly
+separates current support from the historical published 11.2.0 gaps. The final pass reviewed shared
+contract/host boundaries, all eight Connect Text providers, ComfyUI, PocketTTS, TangoFlux, Qwen,
+Supra, Whisper and Laya, including discovery, create/edit/commit, explicit operations, compatibility
+and truthful observations. No provider-specific UI behavior was added.
+
+The final conformance additions execute one identical create/edit/save loop across all eight real
+LLM registrations and a complete PocketTTS create/edit round trip without network calls. Existing
+Qwen, Supra and Whisper setup tests now also reopen saved configurations, edit typed model/backend
+choices, preserve the expected host version and report unload requirements without installation or
+native activation. Existing ComfyUI, TangoFlux and Laya tests already cover create and edit flows.
+The shared example remains a compiled semantic field/action renderer with typed host composition;
+it is not a claim that the separate Blazor application integration has been completed.
+
+Final gates: zero-warning/error Debug and Release builds and deterministic tests pass for both
+focused solutions. **Connect: 293 tests** (22 Common, 136 LLM, 48 Bedrock, 18 Image, 18 TTS, 51 Audio).
+**Tensor: 257 tests** (22 Common, 62 Tensor.Common, 35 Qwen, 32 Supra, 70 Laya, 36 Whisper).
+Common's 22 tests occur in each solution total, not two different suites. Both full-solution
+formatting checks and transitive dependency vulnerability audits pass. The source-only bridge and
+generic composition examples compile with these builds. No new full-weight/native inference run is
+claimed; optional live checks in units 3d/4 inspected bounded metadata only.
+
+There are no outstanding library/settings-data implementation items in the approved table.
+Compatibility remains deliberately bounded: Qwen3 GGUF, the current Supra2 pipeline, host-supplied
+Laya-family packs and the initial twelve published Whisper content identities for remote resolution.
+Unknown compatibility/runtime information stays unknown, not fabricated readiness. UI, host
+application integration, additional model architectures and general diagnostics remain outside scope.
+
+The source still references the locally verified TensorSharp dependency closure
+`2.8.6.4-local.gguf.9b248715`. A distributable dependency release and coordinated Inference release
+require their own authorization; published 11.2.0 does not contain these changes. The family version
+is unchanged, and no Inference package was created or published. This whole-file documentation unit
+preserves the other worker's corrected `Inference/UI/` workspace path in the gap document; their
+staged UI source, UI design and governing-rules changes remain outside the commit.

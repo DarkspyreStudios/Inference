@@ -1,28 +1,31 @@
-# Provider settings contracts: current support and missing capabilities
+# Provider settings contracts: completion and baseline gaps
 
 Date: 2026-09-22
 
 Consumers: DarkspyreCE Desktop and Agent-DS, through the shared `Darkspyre.Inference.UI.Settings` library
 
-Baseline: synchronized Common / Connect / Tensor NuGet **11.2.0**, release source `83c1ac3`
+Published baseline: synchronized Common / Connect / Tensor NuGet **11.2.0**, release source `83c1ac3`
 
-Status: **Consumer requirements and source-backed gap assessment; not an approved API design or implementation authorization.**
+Status: **All eight approved runtime/library rows are implemented in source. These changes are not
+in the published 11.2.0 packages.** The approved authority and implementation record are in
+[the provider setup and audio technical design](provider-setup-and-audio-technical-design.md).
+UI surfaces and consumer integration belong to their separate work; this report does not certify them.
 
 ## Shared UI repository and library
 
 The configuration components will belong to a standalone Blazor library named
-**`Darkspyre.Inference.UI.Settings`**, built with **Lumeo**, in the sibling repository:
+**`Darkspyre.Inference.UI.Settings`**, built with **Lumeo**, in the separate product workspace:
 
-`/Volumes/Data/Development/DarkspyreStudios/Darkspyre.Inference.UI/`
+`/Volumes/Data/Development/DarkspyreStudios/Inference/UI/`
 
-The repository name deliberately covers more than Settings so other genuinely shared inference UI
+The workspace name deliberately covers more than Settings so other genuinely shared inference UI
 libraries can be added later. Settings is the first library; no additional libraries are presently
 specified. It is not a feature folder inside CE, Agent-DS, Connect, or Tensor.
 
-The shared library **will be built against the forthcoming, not-yet-released metadata and operation
-contracts of the Connect and Tensor objects**. The 11.2.0 inventory below identifies what those
-contracts need to supply; it is not the contract surface the new UI must be restricted to. Do not
-substitute today's incomplete metadata, host-specific forms, or a second local metadata model.
+The shared library consumes the **implemented, not-yet-released metadata and operation contracts
+of the Connect and Tensor objects**. The current table below reports that source implementation;
+the historical 11.2.0 inventory after it records why those contracts were needed. Do not substitute
+host-specific forms or a second local metadata model for the provider-owned contracts.
 
 `Darkspyre.Inference.UI.Settings` provides the reusable groups, dense wrapping configuration cards,
 Add/edit surfaces, dialog editors, wizard rendering, model selection and installation-progress
@@ -37,8 +40,8 @@ Each host retains local persistence, protected credential storage, user consent 
 operation ownership through the appropriate seams.
 
 The new UI library does not introduce a Blazor or Lumeo dependency into Common, Connect or Tensor.
-Its packaging, compatible dependency versions and release policy require technical design; do not
-assume it becomes a fourth member of the synchronized three-package runtime release.
+Its packaging, compatible dependency versions and release policy belong to
+[its separately approved design](settings.ui.tech-design.md), not this runtime acceptance pass.
 
 ## Required consumer experience
 
@@ -65,20 +68,65 @@ consumer-specific or UI-library substitute.
 
 ## Summary by capability and implementation
 
-| Area | Current support in 11.2.0 | Missing for this consumer |
-|---|---|---|
-| Common contracts | Portable Text/LLM, Image, Decision inference; implementation identity and family; typed capabilities, results and failures | Cross-family setup/editing semantics actually shared by implemented providers; capability classification and discoverable setup operations sufficient for generic Settings |
-| Connect Text | `LlmProviderCatalog`, `LlmProviderDefinition`, ordered `LlmSetupStep` metadata, basic inputs, provider/model capabilities and execution/authentication methods | Rich field descriptions, structured setup validation/state, uniform action invocation, dynamic configuration choices and existing-connection editing |
-| Connect Image / ComfyUI | Transport descriptors, capability flags, health test, workflow preparation, upload, submission, status, progress, download and cancellation | Provider-authored configuration/editor/wizard descriptions and their action/validation contracts |
-| Tensor Text / Qwen | Typed LLM contract, explicit lifecycle, one declared Qwen model pack, model/capability listing, backend selection | Setup/editing metadata, host model discovery, compatibility evaluation and resolution, supported model selection beyond the pinned implementation definition, observable readiness |
-| Tensor Image / Supra | Typed image contract, explicit lifecycle, pinned multi-artifact Supra pack, CPU/CUDA declarations, image capabilities | Same setup/discovery/compatibility gaps; provider-owned selection of a complete compatible image model pack, not a lone weight file |
-| Connect Audio | No Audio capability/provider/setup surface found | Real audio contracts, implementations, discovery and configuration support |
-| Tensor Audio | No Audio capability/engine/setup surface found | Real audio contracts, engines, compatible model-pack discovery and configuration support |
-| Tensor Decision / Laya | Typed decision inference and a pinned model pack | Not requested as a fourth CE section; shared discovery must nevertheless classify it correctly rather than mislabel it Text or Audio |
+This table describes the completed **source**, not the still-published baseline. “Complete” is
+bounded by the approved initial implementations and the qualifications below.
 
-Audio is a library capability gap, not merely a missing settings label. The requested Audio group
-cannot be fulfilled by a placeholder that saves unusable configurations. The exact audio tasks
-(for example, synthesis, transcription, or both) and initial providers/engines need explicit design.
+| Area | Current library/settings data | Acceptance evidence |
+|---|---|---|
+| Common contracts | Complete: task grouping; typed fields, sections/steps, dependent choices, validation, actions/interactions, protected secret edits, versioned host commits and distinct status observations | [Shared contract tests](../Common/tests/Darkspyre.Inference.Common.Tests/SetupSessionTests.cs) and [provider-independent example renderer](../Common/examples/Darkspyre.Inference.Setup.Examples/SetupEditorExample.cs) |
+| Connect Text | Complete: all eight existing providers have real create/edit setup, field/choice metadata, auth/prerequisite checks and explicit tests; AWS bindings remain in Bedrock | [All-eight create/edit conformance](../Connect/tests/LLM/Darkspyre.Inference.Connect.LLM.Bedrock.Tests/BedrockRegistrationTests.cs), [setup/auth tests](../Connect/tests/LLM/Darkspyre.Inference.Connect.LLM.Tests/LlmSetupSessionTests.cs) and existing provider protocol suites |
+| Connect Image / ComfyUI | Complete: endpoint, timeout, protected headers, host workflow choices, validation, editing and separate health/generation actions; granular durable-job transport preserved | [Setup tests](../Connect/tests/Image/Darkspyre.Inference.Connect.Image.Tests/ImageSetupTests.cs) and [real transport protocol tests](../Connect/tests/Image/Darkspyre.Inference.Connect.Image.Tests/ComfyUiImageTransportTests.cs) |
+| Tensor Text / Qwen | Complete: setup/editing, bounded remote Qwen3 GGUF inspection, complete single/split-pack resolution, immutable selection, explicit installation/lifecycle and backend/readiness observations | [Resolver and real setup tests](../Tensor/tests/LLM/Darkspyre.Inference.Tensor.LLM.Qwen.Tests/QwenModelResolverTests.cs), [selected-pack/edit tests](../Tensor/tests/LLM/Darkspyre.Inference.Tensor.LLM.Qwen.Tests/QwenPackSelectionTests.cs) and [backend tests](../Tensor/tests/LLM/Darkspyre.Inference.Tensor.LLM.Qwen.Tests/QwenBackendProbeTests.cs) |
+| Tensor Image / Supra | Complete: setup/editing and same-schema DiT selection resolved with all four required roles; loader/resolver share compatibility policy; explicit backend/readiness observations | [Complete-pipeline resolution tests](../Tensor/tests/Image/Darkspyre.Inference.Tensor.Image.Supra.Tests/SupraModelResolverTests.cs) and [selected-pack/edit/remote-setup tests](../Tensor/tests/Image/Darkspyre.Inference.Tensor.Image.Supra.Tests/SupraPackSelectionTests.cs) |
+| Connect Audio | Complete: external PocketTTS speech synthesis and TangoFlux audio generation, typed contracts/capabilities, real protocol adapters, discovery where supported, setup/defaults/editing and explicit tests | [PocketTTS protocol and settings tests](../Connect/tests/TTS/Darkspyre.Inference.Connect.TTS.Tests/PocketTtsTests.cs), [TangoFlux settings tests](../Connect/tests/Audio/Darkspyre.Inference.Connect.Audio.Tests/AudioSetupTests.cs) and [audio protocol suite](../Connect/tests/Audio/Darkspyre.Inference.Connect.Audio.Tests/) |
+| Tensor Audio | Complete: resident Whisper STT, batch/identified-window transcription, all twelve pinned variants, compatible source resolution, setup/editing and explicit CPU-runtime checks | [Model/settings/resolver tests](../Tensor/tests/STT/Darkspyre.Inference.Tensor.STT.Whisper.Tests/WhisperMetadataTests.cs), [lifecycle tests](../Tensor/tests/STT/Darkspyre.Inference.Tensor.STT.Whisper.Tests/WhisperLifecycleTests.cs) and [PCM/storage tests](../Tensor/tests/STT/Darkspyre.Inference.Tensor.STT.Whisper.Tests/WhisperPcmAndStorageTests.cs) |
+| Tensor Decision / Laya | Complete: correct Decision classification, host-selected compatible packs, shared setup/editing/lifecycle, selected-pack tokenizer/calibration/sequence settings | [Pack-selection/settings tests](../Tensor/tests/Decision/Darkspyre.Inference.Tensor.Decision.Laya.Tests/LayaPackSelectionTests.cs) and [serving-parity/golden-token tests](../Tensor/tests/Decision/Darkspyre.Inference.Tensor.Decision.Laya.Tests/LayaServingParityTests.cs); no additional CE section |
+
+### Cross-row acceptance and limits
+
+The shared contract tests cover secret Keep/Replace/Clear, cancelled edits, stale async completions,
+busy mutation/commit, version conflicts, uncertain commits and observer failures. Typed host commit
+targets remain the only persistence authority. Connect tests exercise actual HTTP/CLI/provider
+adapters at controlled boundaries; saving does not authenticate, connect or infer. All eight LLM
+definitions pass the same create/edit/commit test. ComfyUI, PocketTTS, TangoFlux and each Tensor
+implementation also exercise create and existing-configuration edit flows.
+
+[Tensor source tests](../Tensor/tests/Common/Darkspyre.Inference.Tensor.Common.Tests/TensorSourceTests.cs),
+[resolution tests](../Tensor/tests/Common/Darkspyre.Inference.Tensor.Common.Tests/TensorResolutionTests.cs),
+[remote settings tests](../Tensor/tests/Common/Darkspyre.Inference.Tensor.Common.Tests/TensorRemoteSetupTests.cs)
+and [manager tests](../Tensor/tests/Common/Darkspyre.Inference.Tensor.Common.Tests/TensorModelPackManagerTests.cs)
+cover bounded reads, private/gated/denied access, origin-scoped secrets through redirects, immutable
+identity, stale choices, explicit Install, progress, corrupt/partial installs and active leases.
+Opening/saving Settings does not register, download or load a remote selection. The typed commit
+carries its complete definition; explicit Install registers it through the existing manager.
+
+- Qwen supports the current Qwen3 GGUF schema, not every GGUF architecture. Supra supports its
+  current Supra2/Flan-T5/VAE pipeline and matching DiT variants, not arbitrary diffusion families.
+- Whisper remote compatibility initially recognizes the twelve published weight identities plus
+  actual GGML header evidence. Unknown remote content remains Unverified. Only the CPU runtime
+  is supplied; English-only and turbo translation restrictions are explicit.
+- Supported schema, available backend, installed/verified pack and loaded/ready instance are distinct.
+  Missing evidence stays unknown; a backend probe does not guarantee enough memory for a load.
+- Installation does not claim resume support. No automatic retry of potentially billed generation,
+  model load, authentication, microphone capture, VAD, worker supervision or UI-owned engine lifetime
+  was added. Normal teardown protects requests; urgent teardown still waits for safe native completion.
+- Deterministic tests do not certify full-weight transcription quality or GPU/native performance.
+  Optional bounded live metadata checks resolved Qwen, Supra and all twelve Whisper definitions
+  without loading models or downloading full weights. The prior full-weight Supra run remains
+  historical evidence, not a new experiment in this acceptance pass.
+- The TensorSharp fork dependency is locally verified as `2.8.6.4-local.gguf.9b248715`. Its release
+  remains separate work before these source changes can be distributed. No new Inference package
+  artifacts, version bump or publication are part of this completion.
+- UI rendering/accessibility/themes and CE/Agent-DS integration are outside this runtime report.
+
+Final verification results are recorded in
+[implementation unit 5](provider-setup-and-audio-technical-design.md#unit-5--capability-table-acceptance-and-completion-2026-09-22).
+
+## Historical 11.2.0 baseline and original requirements
+
+The numbered sections below preserve the release-source gap assessment at `83c1ac3`.
+Their “Current support” and “Missing” labels refer to **that published baseline**, not today's
+completed source. The summary table above and approved design are the current implementation record.
 
 ## 1. Shared discovery, configuration and wizard contracts
 
@@ -296,10 +344,9 @@ Before delivering the shared settings surface to CE and Agent-DS, the library wo
    Neither host duplicates provider forms or wizard behavior. Shared accessibility, dialog behavior,
    density and responsive wrapping remain intact under both themes.
 
-Next phase: agree the library contract design, including package ownership, concrete method/data
-shapes, configuration/credential transaction boundaries, asynchronous operation lifetime, Audio
-scope and model-host support. Define the standalone Settings library and its host integration,
-theming and extension contracts against that forthcoming metadata. The provider runtime and shared UI
-then implement their approved designs, with the UI consuming the released provider contracts.
-This handoff does not approve scaffolding, code changes, package publication, model downloads or
-changes to a user's configured providers.
+The runtime contract design was subsequently approved and implemented; the current summary above
+and canonical technical design supersede this baseline's missing-capability assessment. Acceptance
+gates 1–6 have source-level runtime evidence; gate 7 and visual integration remain the separate UI
+worker's scope. Consumers can integrate against the source contracts now; consuming released NuGets
+requires a separately authorized coordinated release. This completion report does not authorize
+publication, full model downloads, UI changes or changes to a user's configured providers.

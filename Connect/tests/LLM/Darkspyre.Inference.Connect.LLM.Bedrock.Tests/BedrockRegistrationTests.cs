@@ -146,6 +146,72 @@ public sealed class BedrockRegistrationTests
         Assert.Null(session.Snapshot.Status.Ready.Value);
     }
 
+    [Fact]
+    public async Task EveryRegisteredProviderCompletesTheSameCreateAndEditCommitFlowWithoutConnecting()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton<ILlmConnectionSource>(new NoSavedConnectionAccess());
+        services.AddLlmConnect();
+        services.AddLlmConnectBedrock();
+        using ServiceProvider container = services.BuildServiceProvider();
+        using IServiceScope scope = container.CreateScope();
+        LlmProviderService providers = scope.ServiceProvider.GetRequiredService<LlmProviderService>();
+        Assert.Equal(8, providers.SupportedProviders.Count);
+        foreach (LlmProviderDefinition definition in providers.SupportedProviders)
+        {
+            var created = new SetupTarget();
+            await using LlmSetupSession draft = providers.CreateSetupSession(definition.Transport,
+                new(SetupChangeIntent.Create, "configuration", null), created);
+            string[] ids = Fields(draft).Select(field => field.Description.Id).ToArray();
+            // Fixture inputs exercise the real provider-owned fields. This is test data, not renderer dispatch.
+            foreach (string id in ids)
+            {
+                SetupField field = Fields(draft).Single(field => field.Description.Id == id);
+                SetupEditResult? result = field switch
+                {
+                    SetupSecretField secret => secret.SetValue(SetupSecretEdit.Replace("fixture-api-key")),
+                    SetupExecutableField executable => executable.SetValue(new("fixture-cli")),
+                    SetupTextField text when id == "harness-arn" => text.SetValue("arn:aws:bedrock-agentcore:us-east-1:123456789012:harness/fixture"),
+                    SetupChoiceField choice when id == "aws-profile" => choice.SetValue("fixture-profile"),
+                    SetupChoiceField choice when id == "aws-region" => choice.SetValue("us-east-1"),
+                    SetupChoiceField choice when id == "model" => choice.SetValue("fixture-model"),
+                    _ => null
+                };
+                if (result is not null) Assert.Equal(SetupEditState.Applied, result.State);
+            }
+            Assert.True((await draft.ValidateAsync()).IsValid);
+            Assert.Equal(SetupCommitState.Committed, (await draft.CommitAsync()).State);
+            Assert.Null(created.Changes!.Configuration.Connection.Credential);
+            Assert.Equal("fixture-model", created.Changes.Configuration.ModelId);
+            Assert.Null(draft.Snapshot.Status.Ready.Value);
+
+            LlmConnection saved = created.Changes.Configuration.Connection with
+            { Version = "saved-v1", Credential = created.Changes.Credential.Value };
+            var edited = new SetupTarget();
+            await using LlmSetupSession edit = providers.CreateSetupSession(definition.Transport,
+                new(SetupChangeIntent.Edit, "configuration", "saved-v1"), edited, saved, "fixture-model");
+            Assert.Equal("fixture-model", Assert.IsType<SetupChoiceField>(Fields(edit).Single(field => field.Description.Id == "model")).Value);
+            Assert.All(Fields(edit).OfType<SetupSecretField>(), field => Assert.True(field.HasValue));
+            Assert.Equal(SetupEditState.Applied, Assert.IsType<SetupChoiceField>(Fields(edit).Single(field => field.Description.Id == "model")).SetValue("edited-model").State);
+            Assert.Equal(SetupCommitState.Committed, (await edit.CommitAsync()).State);
+            Assert.Equal("saved-v1", edited.Changes!.Identity.ExpectedVersion);
+            Assert.Equal("edited-model", edited.Changes.Configuration.ModelId);
+            Assert.Equal(SetupSecretEditKind.Keep, edited.Changes.Credential.Kind);
+            Assert.True(edited.Changes.RequiresRetest);
+        }
+    }
+
+    private static IEnumerable<SetupField> Fields(LlmSetupSession session) =>
+        session.Snapshot.Steps.SelectMany(step => step.Sections).SelectMany(section => section.Fields);
+
+    private sealed class NoSavedConnectionAccess : ILlmConnectionSource
+    {
+        public Task<LlmConnection?> GetConnectionAsync(string connectionId, CancellationToken cancellationToken = default) =>
+            throw new InvalidOperationException("Setup must use only its draft, not saved connections.");
+        public Task SaveCredentialAsync(string connectionId, string credentialJson, string expectedVersion, CancellationToken cancellationToken = default) =>
+            throw new InvalidOperationException("Setup must commit only through the typed host target.");
+    }
+
     private sealed class SetupTarget : ISetupCommitTarget<LlmSetupChanges>
     {
         public LlmSetupChanges? Changes { get; private set; }

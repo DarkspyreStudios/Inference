@@ -160,6 +160,35 @@ public sealed class PocketTtsTests
     }
 
     [Fact]
+    public async Task SetupCreateAndEditRoundTripTypedDefaultsWithoutConnecting()
+    {
+        using var handler = new Handler((_, _) => throw new InvalidOperationException("No requests expected."));
+        using var http = new HttpClient(handler);
+        var service = new TtsProviderService([new PocketTtsHttpProvider(http)]);
+        var createTarget = new Target();
+        await using TtsSetupSession create = service.CreateSetupSession(TtsTransport.PocketTtsHttp,
+            new(SetupChangeIntent.Create, "connection", null), createTarget);
+        Assert.Equal(SetupEditState.Applied, Assert.Single(Fields(create).OfType<SetupChoiceField>(),
+            field => field.Description.Id == "voice").SetValue("host-voice").State);
+        Assert.Equal(SetupCommitState.Committed, (await create.CommitAsync()).State);
+        Assert.Equal("host-voice", createTarget.Changes!.Configuration.VoiceId);
+        var editTarget = new Target();
+        await using TtsSetupSession edit = service.CreateSetupSession(TtsTransport.PocketTtsHttp,
+            new(SetupChangeIntent.Edit, "connection", "saved-v1"), editTarget, createTarget.Changes.Configuration);
+        Assert.Equal("host-voice", Assert.Single(Fields(edit).OfType<SetupChoiceField>(), field => field.Description.Id == "voice").Value);
+        Assert.Equal(SetupEditState.Applied, Assert.Single(Fields(edit).OfType<SetupChoiceField>(),
+            field => field.Description.Id == "protocol").SetValue(nameof(PocketTtsProtocol.BridgeJson)).State);
+        Assert.Equal(SetupEditState.Applied, Assert.Single(Fields(edit).OfType<SetupDecimalField>()).SetValue(1.25m).State);
+        Assert.Equal(SetupCommitState.Committed, (await edit.CommitAsync()).State);
+        Assert.Equal("saved-v1", editTarget.Changes!.Identity.ExpectedVersion);
+        Assert.Equal("host-voice", editTarget.Changes.Configuration.VoiceId);
+        Assert.Equal(1.25, editTarget.Changes.Configuration.Speed);
+        Assert.Equal(PocketTtsProtocol.BridgeJson, editTarget.Changes.Configuration.Connection.PocketTts.Protocol);
+        Assert.Null(edit.Snapshot.Status.Ready.Value);
+        Assert.Equal(0, handler.Calls);
+    }
+
+    [Fact]
     public async Task SetupSeparatesVoiceChecksFromSynthesisAndExposesProtocolConstraints()
     {
         using var handler = new Handler((request, _) => Task.FromResult(request.Method == HttpMethod.Get ? Json(new { voices = TestVoices }) : Wave()));
