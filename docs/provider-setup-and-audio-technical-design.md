@@ -2,7 +2,7 @@
 
 Date: 2026-09-22
 
-Phase: **Technical design — proposed for approval, not implemented.**
+Phase: **Implementation — technical design approved by the user on 2026-09-22.**
 
 Baseline: Common / Connect / Tensor 11.2.0. No version change, package creation, publication,
 consumer-application migration, or model download is part of this design unit.
@@ -31,7 +31,7 @@ microphone capture/VAD, soundscape orchestration, Chroma, ComfyUI-style Tensor w
 machine-diagnostics library, and new facade NuGets. A Whisper bridge is buildable example source only.
 
 The gap assessment now also records a separate `Darkspyre.Inference.UI.Settings` Blazor/Lumeo
-library for CE and Agent-DS, in the sibling UI repository. It is a consumer of these forthcoming
+library for CE and Agent-DS, in the separately scoped UI project. It is a consumer of these forthcoming
 contracts, not part of this runtime implementation or its synchronized three-package release.
 This design adds no UI-framework dependency; that library's theming, extension points and packaging
 remain its own technical-design work.
@@ -370,7 +370,7 @@ finishes or is disposed. Normal Unload can therefore wait for an open stream; ca
 cancels its input/processing and still awaits native completion. Unload disposes processors/factory
 before releasing storage; Stop adds any remaining instance cleanup.
 
-**Persistence adaptation for approval:** the pinned Whisper.net version exposes model-path and
+**Approved persistence adaptation:** the pinned Whisper.net version exposes model-path and
 model-buffer factories, but no model-stream factory. Read the pack artifact through its persistence
 reference. For a returned FileStream, retain the stream and load its real path. For another store,
 the Whisper adapter creates a private temporary file projection and owns its cleanup, using bounded
@@ -404,7 +404,7 @@ real host. It is source in the solution, never a fourth product or runtime insid
 | App settings, Scribe, microphone, voice assets, caches and playback | Exclude | Remain in donor/consuming applications |
 | Historical Whisper HTTP bridge | Rewrite as example | Minimal source-only host, not recovered as a product |
 
-Implementation units, after approval:
+Approved implementation units:
 
 1. Shared setup contract plus real LLM/Image and Tensor projections; typed draft/commit boundaries,
    full provider action bindings, generic driver and conformance tests. No placeholder successful actions.
@@ -436,7 +436,39 @@ shared version as routine development verification.
 
 ## 8. Phase exit
 
-This document completes the proposed technical mapping of the agreed general scope. Approval is
-needed for these contracts and ownership choices before production implementation. In particular,
+The user approved this technical mapping and its ownership choices on 2026-09-22. In particular,
 the host commit boundary, dynamic immutable pack registration, selected-pack loader changes, and
 Whisper's internal non-file-store projection are explicit design decisions, not incidental refactors.
+Approval permits implementation, not package publication or a version bump.
+
+## 9. Implementation record
+
+### Unit 1 — shared setup and existing-provider bindings (2026-09-22)
+
+Implemented Common task classification, typed fields/drafts, revision-checked actions and choices,
+explicit secret edits, typed host commits and separate status observations. The session owns its
+operation lifetime; disposal waits for actions and queries. Observer exceptions cannot change an
+operation outcome. Commit conflicts remain editable; an uncertain commit closes the draft and
+requires host readback.
+
+Existing LLM providers now expose real setup sessions. Device/browser authorization updates a
+draft-local connection source, CLI verification uses the existing adapters, and AWS profile/region
+bindings stay in the Bedrock assembly. Optional catalog authorization is not CLI authentication.
+Compatible endpoints expose typed capability overrides; arbitrary provider JSON is preserved from
+the supplied configuration, not exposed as a generic editor payload. Model/endpoint checks and
+potentially billed tests remain explicit. ComfyUI supplies protected-header edits and host-owned
+workflow selection, with health and generation kept separate.
+
+Qwen/Supra have shared setup against the existing built-in packs and host-supplied live instances.
+Loaded/readiness observations read the existing lifetime owner; setup disposal never stops that
+instance. Laya is classified as Decision. This unit does **not** claim remote discovery or arbitrary
+pack loading: those remain unit 3. TTS, generated audio and Whisper remain units 2 and 4.
+
+The non-packable `Common/examples/Darkspyre.Inference.Setup.Examples` composes real sessions and
+provides one typed field/action renderer with no provider-name dispatch. Both focused solutions
+compile it. Integration READMEs distinguish these source changes from published 11.2.0.
+
+Verification: both focused solutions pass zero-warning Debug/Release builds, deterministic tests
+(Connect 223, Tensor 56; Common's 22 occur in both), formatting verification and transitive
+vulnerability audits. No paid calls, full-weight inference, model downloads, package creation,
+version changes or publication are part of this unit. Implementation remains active for units 2–5.

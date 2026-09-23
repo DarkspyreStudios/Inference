@@ -1,8 +1,16 @@
 namespace Darkspyre.Inference.Tensor.Common;
 
+public sealed record TensorModelObservation(
+    TensorModelKey? Model, TensorBackendKind? Backend, bool IsStopped, DateTimeOffset ObservedAt);
+
 /// <summary>An in-process tensor engine whose model lifetime is controlled by its host.</summary>
 public interface ITensorModelInstance : IAsyncDisposable
 {
+    /// <summary>A read-only projection from the instance's model-lifetime owner.</summary>
+    TensorModelObservation Observation { get; }
+
+    TensorBackendKind RequestedBackend { get; }
+
     /// <summary>Initializes resources needed for this instance; may be a no-op.</summary>
     Task StartAsync(CancellationToken cancellationToken = default);
 

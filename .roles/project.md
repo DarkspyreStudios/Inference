@@ -236,7 +236,7 @@ was created because this repository has no configured Git remote.
 | Managed-agent verification | `Connect/docs/managed-agent-verification.md` |
 | Tensor package boundary, persistence, and implemented modalities | `Tensor/README.md` |
 | Shared CE / Agent-DS Settings UI requirements and provider contract gaps (not an approved API design) | `docs/provider-settings-contract-support-and-gaps.md` |
-| Provider setup and audio technical design (proposed; awaiting approval) | `docs/provider-setup-and-audio-technical-design.md` |
+| Approved provider setup and audio technical design (implementation in progress) | `docs/provider-setup-and-audio-technical-design.md` |
 | Detailed implementation work | Jira tickets; project and parent TBD |
 
 If this document conflicts with an approved design bible or Jira technical specification, stop and

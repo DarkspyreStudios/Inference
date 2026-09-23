@@ -14,6 +14,7 @@ public sealed class LlmProviderService
     private readonly IReadOnlyDictionary<LlmTransport, ILlmClient> _clients;
     private readonly Dictionary<LlmTransport, ILlmAccountUsageClient> _accountUsageClients;
     private readonly Dictionary<LlmTransport, ILlmAuthenticator> _authenticators;
+    private readonly IReadOnlyDictionary<LlmTransport, ILlmSetupEnvironment> _setupEnvironments;
 
     public LlmProviderService(
         ILlmConnectionSource connections,
@@ -25,7 +26,8 @@ public sealed class LlmProviderService
     public LlmProviderService(
         ILlmConnectionSource connections,
         IEnumerable<ILlmClient> clients,
-        IEnumerable<ILlmAuthenticator> authenticators)
+        IEnumerable<ILlmAuthenticator> authenticators,
+        IEnumerable<ILlmSetupEnvironment>? setupEnvironments = null)
     {
         ArgumentNullException.ThrowIfNull(connections);
         ArgumentNullException.ThrowIfNull(clients);
@@ -61,6 +63,7 @@ public sealed class LlmProviderService
             .OfType<ILlmAccountUsageClient>()
             .ToDictionary(client => client.Transport);
         _authenticators = authenticators.ToDictionary(authenticator => authenticator.Transport);
+        _setupEnvironments = (setupEnvironments ?? []).ToDictionary(environment => environment.Transport);
         SupportedTransports = [.. _clients.Keys.OrderBy(transport => transport)];
         SupportedProviders =
         [
@@ -75,6 +78,16 @@ public sealed class LlmProviderService
 
     /// <summary>Canonical provider metadata and guided setup supplied by registered adapters.</summary>
     public IReadOnlyList<LlmProviderDefinition> SupportedProviders { get; }
+
+    public IReadOnlyList<Common.Setup.InferenceSetupDefinition> SetupDefinitions =>
+        SupportedProviders.Select(provider => provider.SetupDefinition).ToArray();
+
+    public LlmSetupSession CreateSetupSession(LlmTransport transport,
+        Common.Setup.SetupConfigurationIdentity identity,
+        Common.Setup.ISetupCommitTarget<LlmSetupChanges> target,
+        LlmConnection? existing = null, string? modelId = null) =>
+        new(ClientFor(transport), _authenticators.Values, identity, target, existing, modelId,
+            _setupEnvironments.GetValueOrDefault(transport));
 
     public const string ClaudeManualRedirectUri =
         Providers.ClaudeAuthenticator.ManualRedirectUri;

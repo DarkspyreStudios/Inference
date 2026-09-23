@@ -29,6 +29,17 @@ public sealed class ImageProviderService
 
     public IReadOnlyList<ImageTransportDescriptor> AvailableTransports { get; }
 
+    public IReadOnlyList<Common.Setup.InferenceSetupDefinition> SetupDefinitions =>
+        AvailableTransports.Select(ImageSetupSession.DefinitionFor).ToArray();
+
+    public ImageSetupSession CreateSetupSession(
+        ImageTransport transport,
+        Common.Setup.SetupConfigurationIdentity identity,
+        Common.Setup.ISetupCommitTarget<ImageSetupChanges> target,
+        IImageWorkflowChoiceSource? workflows = null,
+        ImageConnection? existing = null,
+        string? workflowId = null) => new(this, transport, identity, target, workflows, existing, workflowId);
+
     public Darkspyre.Inference.Common.Image.IImageInference Bind(
         ImageConnection connection,
         ImageWorkflow workflow,

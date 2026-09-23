@@ -340,36 +340,60 @@ Interactive completion methods accept the connection version captured before aut
 The `SignInAsync` convenience method captures that version internally. In both cases, the final save is
 still conditional, so a connection change during the external authentication round trip is rejected.
 
-## Guided setup metadata
+## Provider setup and editing (unreleased development)
 
-`LlmProviderCatalog` exposes canonical provider metadata without resolving configured connections,
-credentials, HTTP clients, or scoped runtime facades. A host can inject the singleton catalog into a
-settings surface and build a provider picker and ordered wizard without maintaining its own provider
-text:
+`LlmProviderCatalog.SetupDefinitions` describes providers without resolving connections or
+credentials. `LlmProviderService.CreateSetupSession` binds the shared typed editor to actual provider
+operations. `LlmProviderDefinition.SetupSteps` now uses Common's descriptive `SetupStep`; the old
+LLM-only input/action enums are removed. Render fields and invoke bound actions from the session,
+not by interpreting a descriptive step or switching on a provider ID.
 
 ```csharp
-foreach (LlmProviderDefinition providerDefinition in catalog.SupportedProviders)
-{
-    if (!providerDefinition.IsGuidedSetupOption)
-    {
-        continue;
-    }
+await using LlmSetupSession setup = llms.CreateSetupSession(
+    LlmTransport.OpenAiResponses,
+    new SetupConfigurationIdentity(SetupChangeIntent.Create, connectionId, null),
+    hostCommitTarget);
 
-    RenderProviderChoice(providerDefinition.DisplayName, providerDefinition.Description);
-    foreach (LlmSetupStep step in providerDefinition.SetupSteps)
-    {
-        RenderStep(step.Title, step.Instructions, step.Action);
-    }
+SetupSnapshot view = setup.Snapshot;
+// Render semantic field types, call their typed edit methods, and re-read Snapshot.
+// Inspect each action's declared side effects and obtain host authorization before invocation.
+SetupValidation validation = await setup.ValidateAsync(cancellationToken);
+if (validation.IsValid)
+{
+    SetupCommitResult saved = await setup.CommitAsync(cancellationToken);
+    // Handle Committed, Conflict, Invalid, or Uncertain; never blindly retry Uncertain.
 }
 ```
 
-Runtime clients expose the same `LlmProviderDefinition` instances through
-`LlmProviderService.SupportedProviders`, so catalog and execution metadata cannot drift.
+For editing, supply the exact saved `LlmConnection`, its model selection and an Edit identity whose
+expected version matches that connection. The host's `ISetupCommitTarget<LlmSetupChanges>` must
+atomically compare that version over configuration and credentials. Authentication uses a draft-local
+`ILlmConnectionSource`; neither device completion nor catalog OAuth replaces saved credentials
+before commit. Normal runtime credential refresh still uses the existing host seam unchanged.
+CLI-owned authentication remains external; optional Claude catalog OAuth does not establish CLI login.
 
-Each step describes its required inputs, secret handling, current-platform instructions, completion
-requirement, and troubleshooting guidance. The contract is UI-framework-neutral: the host renders the
-controls, opens browsers or terminals when requested, and stores credentials through its protected
-`ILlmConnectionSource` implementation.
+Setup snapshots never expose saved secrets. API-key fields support Keep/Replace/Clear; provider options,
+capability overrides and additional headers already on a connection are retained when editing.
+Auth interactions, dynamic choices, validation and explicit model tests use one common contract.
+`AddLlmConnectBedrock` registers AWS profile/region choices in the SDK-owning assembly.
+OpenAI-compatible remains an advanced provider with explicit manual-model support and typed
+default/enabled/disabled capability overrides. Existing provider JSON, headers and model-specific
+overrides are retained; the editor does not turn them into an arbitrary JSON settings payload.
+
+`ImageProviderService.SetupDefinitions` and `CreateSetupSession` provide the same editing surface for
+ComfyUI. Supply `IImageWorkflowChoiceSource` for host-owned saved workflows and a typed
+`ISetupCommitTarget<ImageSetupChanges>`. Header values remain protected, deletion is explicit, and
+health checking is separate from a potentially costly generation test. Reference-required workflows
+declare the generic generation test unavailable; their existing reference/upload/job APIs remain
+first-class. Setup does not replace durable job handling.
+
+The host retains sessions and action tasks when work should outlive a dialog, and explicitly disposes
+them to cancel an edit. Disposal never commits. A successful or uncertain commit closes that draft;
+an uncertain outcome requires readback before opening a new edit. The
+[generic editor example](../Common/examples/Darkspyre.Inference.Setup.Examples/README.md) compiles the
+same renderer against both Connect and Tensor. No UI framework is shipped in these packages.
+
+These source changes have not been published; the development version remains 11.2.0.
 
 ## Account usage
 

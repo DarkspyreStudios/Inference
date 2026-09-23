@@ -42,10 +42,7 @@ public sealed class SupraImageInference : ITensorImageInference
         _ownsCoordinator = coordinator is null;
     }
 
-    public InferenceImplementationDescriptor Descriptor { get; } = new(
-        "darkspyre.tensor.supra2-img",
-        "Darkspyre Tensor Supra2-IMG",
-        InferenceImplementationKind.Tensor);
+    public InferenceImplementationDescriptor Descriptor => SupraSetup.Definition.Implementation;
 
     public Task<ImageCapabilities> GetCapabilitiesAsync(
         string? modelId = null,
@@ -149,6 +146,9 @@ public sealed class SupraImageInference : ITensorImageInference
 
     public Task StartAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
 
+    public TensorModelObservation Observation => _lifetime.Observation;
+    public TensorBackendKind RequestedBackend => _requestedBackend;
+
     public async Task UnloadAsync(CancellationToken cancellationToken = default)
     {
         using IDisposable unloading = await _lifetime.EnterUnloadAsync(cancellationToken).ConfigureAwait(false);
@@ -251,7 +251,7 @@ public sealed class SupraImageInference : ITensorImageInference
                 vaeWeights,
                 backend == TensorBackendKind.Cuda);
             cancellationToken.ThrowIfCancellationRequested();
-            _lifetime.MarkLoaded();
+            _lifetime.MarkLoaded(model, backend);
             _model = loadedModel;
             _modelLease = lease;
             _loadedBackend = backend;

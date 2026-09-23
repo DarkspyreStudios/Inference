@@ -8,6 +8,9 @@ public sealed class TensorModelLifetime : IDisposable
     private readonly SemaphoreSlim _gate = new(1, 1);
     private CancellationTokenSource? _requestAbort;
     private int _unloading;
+    private TensorModelObservation _observation = new(null, null, false, DateTimeOffset.UtcNow);
+
+    public TensorModelObservation Observation => Volatile.Read(ref _observation);
 
     public async Task<IDisposable> EnterLoadAsync(CancellationToken cancellationToken = default)
     {
@@ -21,14 +24,16 @@ public sealed class TensorModelLifetime : IDisposable
         return new GateLease(this, reopenRequests: false);
     }
 
-    public void MarkLoaded()
+    public void MarkLoaded(TensorModelKey model, TensorBackendKind backend)
     {
+        ArgumentNullException.ThrowIfNull(model);
         if (_requestAbort is not null)
         {
             throw new InvalidOperationException("A model is already loaded.");
         }
 
         Volatile.Write(ref _requestAbort, new CancellationTokenSource());
+        Volatile.Write(ref _observation, new(model, backend, false, DateTimeOffset.UtcNow));
     }
 
     public async Task<ExecutionLease> EnterExecutionAsync(CancellationToken cancellationToken = default)
@@ -84,12 +89,14 @@ public sealed class TensorModelLifetime : IDisposable
     {
         _requestAbort?.Dispose();
         Volatile.Write(ref _requestAbort, null);
+        Volatile.Write(ref _observation, new(null, null, false, DateTimeOffset.UtcNow));
     }
 
     public void Dispose()
     {
         _requestAbort?.Dispose();
         _gate.Dispose();
+        Volatile.Write(ref _observation, new(null, null, true, DateTimeOffset.UtcNow));
     }
 
     private static InferenceException ModelUnavailable() =>

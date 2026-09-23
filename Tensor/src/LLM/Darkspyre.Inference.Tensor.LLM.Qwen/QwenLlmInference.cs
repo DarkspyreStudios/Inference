@@ -40,10 +40,7 @@ public sealed class QwenLlmInference : ITensorLlmInference
         _ownsCoordinator = coordinator is null;
     }
 
-    public InferenceImplementationDescriptor Descriptor { get; } = new(
-        "darkspyre.tensor.qwen",
-        "Darkspyre Tensor Qwen",
-        InferenceImplementationKind.Tensor);
+    public InferenceImplementationDescriptor Descriptor => QwenSetup.Definition.Implementation;
 
     public Task<LlmCapabilities> GetCapabilitiesAsync(
         string? modelId = null,
@@ -194,6 +191,9 @@ public sealed class QwenLlmInference : ITensorLlmInference
 
     public Task StartAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
 
+    public TensorModelObservation Observation => _lifetime.Observation;
+    public TensorBackendKind RequestedBackend => _requestedBackend;
+
     public async Task UnloadAsync(CancellationToken cancellationToken = default)
     {
         using IDisposable unloading = await _lifetime.EnterUnloadAsync(cancellationToken).ConfigureAwait(false);
@@ -282,7 +282,7 @@ public sealed class QwenLlmInference : ITensorLlmInference
                 mmProj: null,
                 BackendName(backend),
                 cancellationToken).ConfigureAwait(false);
-            _lifetime.MarkLoaded();
+            _lifetime.MarkLoaded(model, backend);
             _modelLease = lease;
             _loadedBackend = backend;
         }

@@ -1,3 +1,4 @@
+using Darkspyre.Inference.Common.Setup;
 using Darkspyre.Inference.Connect.LLM.Bedrock;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -63,8 +64,8 @@ public sealed class BedrockRegistrationTests
                 Assert.False(string.IsNullOrWhiteSpace(step.CompletionRequirement));
                 Assert.False(string.IsNullOrWhiteSpace(step.Troubleshooting));
             });
-            Assert.Equal(LlmSetupAction.SelectModel, definition.SetupSteps[^2].Action);
-            Assert.Equal(LlmSetupAction.TestConnection, definition.SetupSteps[^1].Action);
+            Assert.Equal("select-model", definition.SetupSteps[^2].Id);
+            Assert.Equal("test-connection", definition.SetupSteps[^1].Id);
         });
         Assert.True(guided.Single(definition => definition.Id == "gemini-subscription")
             .SetupSteps[0].HasPlatformInstructions);
@@ -74,7 +75,7 @@ public sealed class BedrockRegistrationTests
             .SetupSteps[0].HasPlatformInstructions);
         LlmProviderDefinition codex = guided.Single(
             definition => definition.Id == "chatgpt-subscription");
-        Assert.Equal(LlmSetupAction.AuthorizeDeviceCode, codex.SetupSteps[0].Action);
+        Assert.Equal("authorize-chatgpt", codex.SetupSteps[0].Id);
         Assert.Contains("codex", codex.DefaultEndpoint, StringComparison.OrdinalIgnoreCase);
 
         LlmProviderCatalog catalog = scopedProvider.GetRequiredService<LlmProviderCatalog>();
@@ -110,6 +111,46 @@ public sealed class BedrockRegistrationTests
                 "OpenAI-Compatible API"
             ],
             catalog.SupportedProviders.Select(definition => definition.DisplayName));
+    }
+
+    [Theory]
+    [InlineData(LlmTransport.AwsBedrockConverse)]
+    [InlineData(LlmTransport.AwsBedrockAgentCore)]
+    public async Task AwsSetupBindsTypedProfileAndRegionEditsWithoutAccessingAws(LlmTransport transport)
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton<ILlmConnectionSource>(new StubConnectionSource());
+        services.AddLlmConnect();
+        services.AddLlmConnectBedrock();
+        using ServiceProvider container = services.BuildServiceProvider();
+        using IServiceScope scope = container.CreateScope();
+        var target = new SetupTarget();
+        await using LlmSetupSession session = scope.ServiceProvider.GetRequiredService<LlmProviderService>()
+            .CreateSetupSession(transport, new(SetupChangeIntent.Create, "new", null), target, modelId: "default");
+        Assert.False((await session.ValidateAsync()).IsValid);
+        SetupChoiceField Choice(string id) => Assert.Single(session.Snapshot.Steps.SelectMany(step => step.Sections)
+            .SelectMany(section => section.Fields).OfType<SetupChoiceField>(), field => field.Description.Id == id);
+        Assert.Equal(SetupEditState.Applied, Choice("aws-profile").SetValue("fixture-profile").State);
+        Assert.Equal(SetupEditState.Applied, Choice("aws-region").SetValue("us-east-1").State);
+        if (transport == LlmTransport.AwsBedrockAgentCore)
+        {
+            SetupTextField arn = Assert.Single(session.Snapshot.Steps.SelectMany(step => step.Sections)
+                .SelectMany(section => section.Fields).OfType<SetupTextField>());
+            Assert.Equal(SetupEditState.Applied, arn.SetValue("arn:aws:bedrock-agentcore:us-east-1:123456789012:harness/fixture").State);
+        }
+        Assert.True((await session.ValidateAsync()).IsValid);
+        Assert.Equal(SetupCommitState.Committed, (await session.CommitAsync()).State);
+        LlmAwsCredentials aws = LlmCredential.Parse(target.Changes!.Credential.Value)!.Aws!;
+        Assert.Equal("fixture-profile", aws.Profile);
+        Assert.Equal("us-east-1", aws.Region);
+        Assert.Null(session.Snapshot.Status.Ready.Value);
+    }
+
+    private sealed class SetupTarget : ISetupCommitTarget<LlmSetupChanges>
+    {
+        public LlmSetupChanges? Changes { get; private set; }
+        public Task<SetupCommitResult> CommitAsync(LlmSetupChanges changes, CancellationToken cancellationToken = default)
+        { Changes = changes; return Task.FromResult(new SetupCommitResult(SetupCommitState.Committed, "v1")); }
     }
 
     private sealed class StubConnectionSource : ILlmConnectionSource

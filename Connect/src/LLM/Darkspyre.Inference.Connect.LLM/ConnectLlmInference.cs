@@ -12,7 +12,7 @@ internal sealed class ConnectLlmInference(
     public Common.InferenceImplementationDescriptor Descriptor { get; } = new(
         "darkspyre.connect.llm",
         "Darkspyre Connect LLM",
-        Common.InferenceImplementationKind.Connect);
+        Common.InferenceImplementationKind.Connect, Common.InferenceTask.TextGeneration);
 
     public async Task<CommonLlm.LlmCapabilities> GetCapabilitiesAsync(
         string? modelId = null,

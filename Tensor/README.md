@@ -106,3 +106,24 @@ escalates at that point. In-process native work may not observe cancellation imm
 host must not expect a fixed shutdown deadline. A host that abandons an LLM stream must dispose its
 enumerator so model teardown can complete. Cancellation does not authorize releasing memory still
 in use by native execution.
+
+## Provider setup (unreleased development)
+
+`QwenSetup.Definition` and `SupraSetup.Definition` describe providers without constructing an engine,
+opening a store or loading native libraries. Their `CreateSession` methods bind a typed host
+`ISetupCommitTarget<TensorSetupChanges>` and the existing pack manager to the common setup editor.
+The current setup list contains the built-in supported pack for each engine; remote model discovery
+and compatible selection beyond those definitions remain pending in the approved implementation.
+
+Selection/Save does not install or load. Install, verify, load, unload and stop are distinct callable
+actions with declared side effects. The supplied instance is optional and remains host-owned. Its
+`Observation` is a read-only view published by `TensorModelLifetime`, not a parallel setup cache.
+Without an instance, Loaded/Ready remain unknown. A backend name is a supported selection, not proof
+that the backend is available. Loading requires an instance configured for the selected backend;
+the editor does not silently replace instances or interrupt application work.
+
+`TensorSetupChanges.RequiresUnload` tells the host when a saved model/backend edit changes the
+previous configuration. Saving does not perform that unload. Stop remains terminal, and an
+already-cancelled teardown action token reaches the engine as urgency rather than skipping cleanup.
+See the [shared editor example](../Common/examples/Darkspyre.Inference.Setup.Examples/README.md).
+These source changes have not been published and do not change the development version.

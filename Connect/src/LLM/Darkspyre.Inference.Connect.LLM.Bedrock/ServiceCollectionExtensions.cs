@@ -9,6 +9,8 @@ public static class ServiceCollectionExtensions
         ArgumentNullException.ThrowIfNull(services);
         services.AddSingleton(BedrockProviderDefinitions.AwsProfile);
         services.AddSingleton(BedrockProviderDefinitions.AgentCoreHarness);
+        services.AddSingleton<ILlmSetupEnvironment>(new BedrockSetupEnvironment(LlmTransport.AwsBedrockConverse));
+        services.AddSingleton<ILlmSetupEnvironment>(new BedrockSetupEnvironment(LlmTransport.AwsBedrockAgentCore));
         services.AddSingleton<BedrockClientFactory>();
         services.AddSingleton<BedrockLoggingGuard>();
         services.AddSingleton<IBedrockAgentCoreInvoker, BedrockAgentCoreInvoker>();

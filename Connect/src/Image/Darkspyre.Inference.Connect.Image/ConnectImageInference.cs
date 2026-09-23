@@ -13,7 +13,7 @@ internal sealed class ConnectImageInference(
     public Common.InferenceImplementationDescriptor Descriptor { get; } = new(
         "darkspyre.connect.image",
         "Darkspyre Connect Image",
-        Common.InferenceImplementationKind.Connect);
+        Common.InferenceImplementationKind.Connect, Common.InferenceTask.ImageGeneration);
 
     public Task<CommonImage.ImageCapabilities> GetCapabilitiesAsync(
         string? modelId = null,

@@ -21,7 +21,7 @@ public sealed class TensorModelLifetimeTests
         using var lifetime = new TensorModelLifetime();
         using (await lifetime.EnterLoadAsync())
         {
-            lifetime.MarkLoaded();
+            lifetime.MarkLoaded(new("model", "revision"), TensorBackendKind.Cpu);
         }
 
         TensorModelLifetime.ExecutionLease execution = await lifetime.EnterExecutionAsync();
@@ -38,7 +38,7 @@ public sealed class TensorModelLifetimeTests
 
         using (await lifetime.EnterLoadAsync())
         {
-            lifetime.MarkLoaded();
+            lifetime.MarkLoaded(new("model", "revision"), TensorBackendKind.Cpu);
         }
 
         using (await lifetime.EnterUnloadAsync())
@@ -53,7 +53,7 @@ public sealed class TensorModelLifetimeTests
         using var lifetime = new TensorModelLifetime();
         using (await lifetime.EnterLoadAsync())
         {
-            lifetime.MarkLoaded();
+            lifetime.MarkLoaded(new("model", "revision"), TensorBackendKind.Cpu);
         }
 
         TensorModelLifetime.ExecutionLease execution = await lifetime.EnterExecutionAsync();

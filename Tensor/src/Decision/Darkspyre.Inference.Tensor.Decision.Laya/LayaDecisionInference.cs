@@ -49,7 +49,7 @@ public sealed class LayaDecisionInference : ITensorDecisionInference
     public InferenceImplementationDescriptor Descriptor { get; } = new(
         "darkspyre.tensor.laya",
         "Darkspyre Tensor Laya",
-        InferenceImplementationKind.Tensor);
+        InferenceImplementationKind.Tensor, InferenceTask.Decision);
 
     public Task<DecisionCapabilities> GetCapabilitiesAsync(
         string? modelId = null,
@@ -146,6 +146,9 @@ public sealed class LayaDecisionInference : ITensorDecisionInference
 
     public Task StartAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
 
+    public TensorModelObservation Observation => _lifetime.Observation;
+    public TensorBackendKind RequestedBackend => _requestedBackend;
+
     public async Task UnloadAsync(CancellationToken cancellationToken = default)
     {
         using IDisposable unloading = await _lifetime.EnterUnloadAsync(cancellationToken).ConfigureAwait(false);
@@ -238,7 +241,7 @@ public sealed class LayaDecisionInference : ITensorDecisionInference
             cancellationToken.ThrowIfCancellationRequested();
             loadedModel = LayaDecisionModel.Load(weights, backend == TensorBackendKind.Cuda);
             cancellationToken.ThrowIfCancellationRequested();
-            _lifetime.MarkLoaded();
+            _lifetime.MarkLoaded(model, backend);
             _tokenizer = tokenizer;
             _model = loadedModel;
             _modelLease = lease;

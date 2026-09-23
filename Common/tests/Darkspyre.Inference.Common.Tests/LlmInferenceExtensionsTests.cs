@@ -18,7 +18,7 @@ public sealed class LlmInferenceExtensionsTests
     private sealed class TestInference : ILlmInference
     {
         public InferenceImplementationDescriptor Descriptor { get; } =
-            new("test", "Test", InferenceImplementationKind.Tensor);
+            new("test", "Test", InferenceImplementationKind.Tensor, InferenceTask.TextGeneration);
 
         public Task<LlmCapabilities> GetCapabilitiesAsync(
             string? modelId = null,

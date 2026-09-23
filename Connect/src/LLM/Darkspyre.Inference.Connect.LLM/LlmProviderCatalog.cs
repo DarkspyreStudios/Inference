@@ -39,4 +39,7 @@ public sealed class LlmProviderCatalog
 
     /// <summary>Canonical provider metadata and guided setup supplied by registered adapters.</summary>
     public IReadOnlyList<LlmProviderDefinition> SupportedProviders { get; }
+
+    public IReadOnlyList<Common.Setup.InferenceSetupDefinition> SetupDefinitions =>
+        SupportedProviders.Select(provider => provider.SetupDefinition).ToArray();
 }
