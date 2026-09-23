@@ -4,13 +4,16 @@ namespace Darkspyre.Inference.Tensor.Decision.Laya;
 
 public static class TensorDecisionModels
 {
+    /// <summary>The Laya decision architecture, independent of a checkpoint's publisher or training run.</summary>
+    public const string LayaRuntimeArchitecture = "laya-modernbert";
+
     public static TensorModelPackDefinition LayaTypedDecisions { get; } = new()
     {
         Key = new TensorModelKey(
             "convaiinnovations/laya-typed-decisions",
             "f9ab0b228f0fc0f14d873dbc99038f135c2da1b2"),
         Capability = TensorCapability.Decision,
-        RuntimeArchitecture = "laya-modernbert",
+        RuntimeArchitecture = LayaRuntimeArchitecture,
         License = "Apache-2.0",
         ProjectUri = new Uri("https://huggingface.co/convaiinnovations/laya-typed-decisions"),
         SupportedBackends = new HashSet<TensorBackendKind>

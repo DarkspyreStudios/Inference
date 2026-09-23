@@ -9,7 +9,7 @@ namespace Darkspyre.Inference.Tensor.Decision.Laya;
 
 internal readonly record struct LayaModelOutput(float[] Logits, float ActionProbability);
 
-internal sealed class LayaDecisionModel : IDisposable
+internal sealed class LayaDecisionModel : ILayaDecisionModel
 {
     private const int HiddenSize = 1_024;
     private const int IntermediateSize = 2_624;

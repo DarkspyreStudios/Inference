@@ -21,14 +21,13 @@ public sealed class LayaDecisionInference : ITensorDecisionInference
     ];
 
     private readonly ITensorModelPackManager _packs;
-    private readonly TensorModelPackDefinition _definition;
+    private readonly ILayaModelLoader _loader;
     private readonly TensorBackendKind _requestedBackend;
     private readonly TensorExecutionCoordinator _coordinator;
     private readonly bool _ownsCoordinator;
     private readonly TensorModelLifetime _lifetime = new();
     private TensorModelPackLease? _modelLease;
-    private LayaTokenizer? _tokenizer;
-    private LayaDecisionModel? _model;
+    private LayaModelResources? _resources;
     private TensorBackendKind? _loadedBackend;
     private bool _disposed;
 
@@ -36,20 +35,24 @@ public sealed class LayaDecisionInference : ITensorDecisionInference
         ITensorModelPackManager packs,
         TensorBackendKind backend = TensorBackendKind.Auto,
         TensorExecutionCoordinator? coordinator = null)
+        : this(packs, new LayaModelLoader(), backend, coordinator)
+    {
+    }
+
+    internal LayaDecisionInference(ITensorModelPackManager packs, ILayaModelLoader loader,
+        TensorBackendKind backend = TensorBackendKind.Auto, TensorExecutionCoordinator? coordinator = null)
     {
         ArgumentNullException.ThrowIfNull(packs);
+        ArgumentNullException.ThrowIfNull(loader);
         _packs = packs;
-        _definition = TensorDecisionModels.LayaTypedDecisions;
+        _loader = loader;
 
         _requestedBackend = backend;
         _coordinator = coordinator ?? new TensorExecutionCoordinator();
         _ownsCoordinator = coordinator is null;
     }
 
-    public InferenceImplementationDescriptor Descriptor { get; } = new(
-        "darkspyre.tensor.laya",
-        "Darkspyre Tensor Laya",
-        InferenceImplementationKind.Tensor, InferenceTask.Decision);
+    public InferenceImplementationDescriptor Descriptor => LayaSetup.Definition.Implementation;
 
     public Task<DecisionCapabilities> GetCapabilitiesAsync(
         string? modelId = null,
@@ -57,7 +60,8 @@ public sealed class LayaDecisionInference : ITensorDecisionInference
     {
         ThrowIfDisposed();
         cancellationToken.ThrowIfCancellationRequested();
-        ValidateModelId(modelId);
+        // Before Load these are family capabilities, not evidence that a particular pack is installed.
+        if (_lifetime.Observation.Model is { } loaded) { ValidateModelId(modelId, loaded); }
         return Task.FromResult(new DecisionCapabilities
         {
             SupportedQuestionKinds = new HashSet<DecisionQuestionKind>
@@ -82,14 +86,15 @@ public sealed class LayaDecisionInference : ITensorDecisionInference
         await using TensorModelLifetime.ExecutionLease modelUse = await _lifetime.EnterExecutionAsync(cancellationToken)
             .ConfigureAwait(false);
         CancellationToken executionToken = modelUse.CancellationToken;
-        LayaTokenizer tokenizer = _tokenizer
-            ?? throw new InferenceException(InferenceFailureCode.ModelUnavailable, "The Laya tokenizer was not loaded.");
-        LayaDecisionModel model = _model
+        LayaModelResources resources = _resources
             ?? throw new InferenceException(InferenceFailureCode.ModelUnavailable, "The Laya model was not loaded.");
+        TensorModelKey selected = _modelLease?.Key
+            ?? throw new InferenceException(InferenceFailureCode.ModelUnavailable, "The Laya model pack was not loaded.");
+        ValidateModelId(request.ModelId, selected);
         TensorBackendKind backend = _loadedBackend
             ?? throw new InferenceException(InferenceFailureCode.BackendUnavailable, "The Laya backend was not loaded.");
         await using IAsyncDisposable execution = await _coordinator.AcquireAsync(
-            _definition.Key,
+            selected,
             backend,
             executionToken).ConfigureAwait(false);
 
@@ -99,7 +104,7 @@ public sealed class LayaDecisionInference : ITensorDecisionInference
         foreach (DecisionQuestion question in request.Questions)
         {
             executionToken.ThrowIfCancellationRequested();
-            LayaSequence sequence = LayaSequenceBuilder.Build(tokenizer, request.State, question);
+            LayaSequence sequence = LayaSequenceBuilder.Build(resources.Tokenizer, request.State, question);
             if (sequence.MarkerPositions.Length != sequence.OptionIds.Length)
             {
                 throw new InferenceException(
@@ -111,7 +116,8 @@ public sealed class LayaDecisionInference : ITensorDecisionInference
             LayaModelOutput output;
             try
             {
-                output = model.Forward(sequence);
+                output = resources.Model.Forward(sequence);
+                executionToken.ThrowIfCancellationRequested();
             }
             catch (Exception exception) when (exception is not OperationCanceledException and not InferenceException)
             {
@@ -134,8 +140,8 @@ public sealed class LayaDecisionInference : ITensorDecisionInference
             Provenance = new InferenceProvenance
             {
                 ImplementationId = Descriptor.Id,
-                ModelId = _definition.Key.ModelId,
-                ModelRevision = _definition.Key.Revision,
+                ModelId = selected.ModelId,
+                ModelRevision = selected.Revision,
                 Runtime = "TensorSharp",
                 RuntimeVersion = RuntimeVersion(),
                 Backend = backend.ToString(),
@@ -152,9 +158,8 @@ public sealed class LayaDecisionInference : ITensorDecisionInference
     public async Task UnloadAsync(CancellationToken cancellationToken = default)
     {
         using IDisposable unloading = await _lifetime.EnterUnloadAsync(cancellationToken).ConfigureAwait(false);
-        _model?.Dispose();
-        _model = null;
-        _tokenizer = null;
+        _resources?.Dispose();
+        _resources = null;
         if (_modelLease is not null)
         {
             await _modelLease.DisposeAsync().ConfigureAwait(false);
@@ -188,11 +193,6 @@ public sealed class LayaDecisionInference : ITensorDecisionInference
     {
         ThrowIfDisposed();
         ArgumentNullException.ThrowIfNull(model);
-        if (model != _definition.Key)
-        {
-            throw new InferenceException(InferenceFailureCode.ModelUnavailable, $"Laya does not support model '{model}'.");
-        }
-
         TensorModelPackDefinition definition;
         try
         {
@@ -203,20 +203,22 @@ public sealed class LayaDecisionInference : ITensorDecisionInference
             throw new InferenceException(InferenceFailureCode.ModelUnavailable, exception.Message, exception);
         }
 
-        if (definition.Capability != TensorCapability.Decision
-            || definition.RuntimeArchitecture != _definition.RuntimeArchitecture)
+        if (definition.Key != model)
         {
-            throw new InferenceException(InferenceFailureCode.UnsupportedFeature, "The model pack is not supported by Laya.");
+            throw new InferenceException(InferenceFailureCode.ModelUnavailable, "The pack manager returned a different model key.");
         }
+        try { LayaModelCompatibility.Validate(definition); }
+        catch (ArgumentException exception)
+        { throw new InferenceException(InferenceFailureCode.UnsupportedFeature, exception.Message, exception); }
 
         using IDisposable loading = await _lifetime.EnterLoadAsync(cancellationToken).ConfigureAwait(false);
 
         TensorBackendKind backend = ResolveBackend(_requestedBackend);
-        if (!definition.SupportedBackends.Contains(backend))
+        if (backend is not (TensorBackendKind.Cpu or TensorBackendKind.Cuda) || !definition.SupportedBackends.Contains(backend))
         {
             throw new InferenceException(
                 InferenceFailureCode.BackendUnavailable,
-                $"Model pack '{_definition.Key}' does not support backend '{backend}'.");
+                $"Model pack '{model}' does not support backend '{backend}'.");
         }
 
         TensorModelPackLease lease;
@@ -229,35 +231,24 @@ public sealed class LayaDecisionInference : ITensorDecisionInference
             throw new InferenceException(InferenceFailureCode.ModelUnavailable, exception.Message, exception);
         }
 
-        LayaDecisionModel? loadedModel = null;
+        LayaModelResources? loadedResources = null;
         try
         {
-            LayaTokenizer tokenizer = await LayaTokenizer.CreateAsync(
-                lease.GetRequiredArtifact("tokenizer"),
-                cancellationToken).ConfigureAwait(false);
-            using SafetensorsFile weights = await SafetensorsFile.OpenAsync(
-                lease.GetRequiredArtifact("model"),
-                cancellationToken).ConfigureAwait(false);
-            cancellationToken.ThrowIfCancellationRequested();
-            loadedModel = LayaDecisionModel.Load(weights, backend == TensorBackendKind.Cuda);
+            if (lease.Key != model)
+            { throw new InferenceException(InferenceFailureCode.ModelUnavailable, "The pack lease identifies a different model."); }
+            loadedResources = await _loader.LoadAsync(lease, backend, cancellationToken).ConfigureAwait(false);
             cancellationToken.ThrowIfCancellationRequested();
             _lifetime.MarkLoaded(model, backend);
-            _tokenizer = tokenizer;
-            _model = loadedModel;
+            _resources = loadedResources;
             _modelLease = lease;
             _loadedBackend = backend;
-            loadedModel = null;
+            loadedResources = null;
         }
-        catch (OperationCanceledException)
+        catch (Exception exception)
         {
-            loadedModel?.Dispose();
+            loadedResources?.Dispose();
             await lease.DisposeAsync().ConfigureAwait(false);
-            throw;
-        }
-        catch (Exception exception) when (exception is not InferenceException)
-        {
-            loadedModel?.Dispose();
-            await lease.DisposeAsync().ConfigureAwait(false);
+            if (exception is OperationCanceledException or InferenceException) { throw; }
             throw new InferenceException(
                 exception switch
                 {
@@ -319,9 +310,8 @@ public sealed class LayaDecisionInference : ITensorDecisionInference
         };
     }
 
-    private void ValidateRequest(DecisionInferenceRequest request)
+    private static void ValidateRequest(DecisionInferenceRequest request)
     {
-        ValidateModelId(request.ModelId);
         if (request.State.ValueKind == JsonValueKind.Undefined)
         {
             throw new InferenceException(InferenceFailureCode.InvalidRequest, "Decision state is required.");
@@ -394,9 +384,9 @@ public sealed class LayaDecisionInference : ITensorDecisionInference
         }
     }
 
-    private void ValidateModelId(string? modelId)
+    private static void ValidateModelId(string? modelId, TensorModelKey selected)
     {
-        if (modelId is not null && !string.Equals(modelId, _definition.Key.ModelId, StringComparison.Ordinal))
+        if (modelId is not null && !string.Equals(modelId, selected.ModelId, StringComparison.Ordinal))
         {
             throw new InferenceException(
                 InferenceFailureCode.ModelUnavailable,

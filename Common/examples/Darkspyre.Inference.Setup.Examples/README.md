@@ -22,6 +22,10 @@ Image header removals are explicit; omitted headers are untouched. LLM changes c
 credential mutation; never put it into ordinary connection settings. Save does not run provider
 tests, authenticate, install or load weights.
 
-Tensor examples currently list the built-in supported packs; remote source discovery and wider
-compatible selection are a later unit of the approved implementation, not yet claimed here.
+Qwen/Supra examples currently list their built-in supported packs; remote source discovery is a
+later unit of the approved implementation, not yet claimed here. `LayaModelSelectionExample`
+instead offers compatible packs from the host's catalog to the same generic editor and demonstrates
+Load/request/Unload/Load on one Laya instance. Construct the manager with that same catalog, install
+the chosen packs explicitly, and save the selected `TensorModelKey` through the typed host target.
+The implementation name identifies the Laya model family, not its original checkpoint.
 No package/version change or paid/native inference run is needed to build this example.

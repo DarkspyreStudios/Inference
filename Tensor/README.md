@@ -22,10 +22,16 @@ Assemblies included in the Tensor NuGet:
   CPU or CUDA. It returns PNG bytes through the shared image result. The current model supports
   256x256 output, deterministic seeds, Euler step counts, and classifier-free guidance; it does not
   support negative prompts.
-- `Darkspyre.Inference.Tensor.Decision.Laya` — Laya typed decision inference using the pinned
-  `convaiinnovations/laya-typed-decisions` safetensors checkpoint. Its BPE tokenizer, ModernBERT
+- `Darkspyre.Inference.Tensor.Decision.Laya` — Laya-family typed decision inference, including the
+  built-in `convaiinnovations/laya-typed-decisions` safetensors checkpoint. Its BPE tokenizer, ModernBERT
   encoder, typed decision heads, and calibration execute directly through TensorSharp on CPU or
   CUDA; neither PyTorch nor a Python runtime is used.
+
+Implementation names identify the model family they support, not a particular checkpoint or training
+run. Laya is not a general-purpose ModernBERT engine: a custom checkpoint must retain the supported
+Laya tensor schema, encoder dimensions/layers, typed heads and tokenizer conventions. Its existing
+input formatting and confidence calibration remain unchanged. Selecting a fine-tuned checkpoint
+does not independently establish that calibration is accurate for the new training distribution.
 
 Supra's publisher supplies the DiT as a PyTorch ZIP state dictionary rather than safetensors. The
 Darkspyre TensorSharp fork reads that file as data through a whitelist-only checkpoint reader. It
@@ -127,3 +133,49 @@ previous configuration. Saving does not perform that unload. Stop remains termin
 already-cancelled teardown action token reaches the engine as urgency rather than skipping cleanup.
 See the [shared editor example](../Common/examples/Darkspyre.Inference.Setup.Examples/README.md).
 These source changes have not been published and do not change the development version.
+
+## Host-selected Laya packs (unreleased development)
+
+Laya follows the same lifecycle: construct the engine with the pack manager, choose the model in
+`LoadAsync(key)`, run typed requests, and `UnloadAsync` before loading another compatible pack on
+the **same instance**. Stop is still terminal. The constructor does not pin a checkpoint, and neither
+construction nor a request downloads or loads one implicitly. The built-in pack remains available;
+no source copy or additional engine implementation is required for a compatible fine-tune.
+
+The host constructs `TensorModelPackDefinition` values using
+`TensorDecisionModels.LayaRuntimeArchitecture`, capability `Decision`, CPU/CUDA backend declarations,
+and the correct per-artifact lengths/hashes. The runtime requires `model` and `tokenizer` artifact
+roles. It continues to validate actual tensors/tokenizer data during native loading; the architecture
+label alone is not proof that arbitrary weights will work. `TensorModelDefinitionValidator.Validate`
+is the common metadata validator, also used by the catalog and Laya's family policy.
+
+```csharp
+// customPack describes the host's compatible trained checkpoint and its actual artifact sources.
+var catalog = new TensorModelCatalog([TensorDecisionModels.LayaTypedDecisions, customPack]);
+using var packs = new TensorModelPackManager(catalog, applicationStore, hostHttpClient);
+await packs.InstallAsync(customPack.Key, cancellationToken: cancellationToken); // Explicit download.
+
+await using var laya = new LayaDecisionInference(packs, TensorBackendKind.Cpu);
+await laya.StartAsync(cancellationToken);
+await laya.LoadAsync(customPack.Key, cancellationToken);
+DecisionInferenceResult result = await laya.DecideAsync(
+    request with { ModelId = customPack.Key.ModelId }, cancellationToken);
+await laya.UnloadAsync(); // A later Load may choose a different registered, installed Laya pack.
+```
+
+The manager must use a catalog containing the selected definition. An unknown key fails with
+`ModelUnavailable`; wrong family/capability or malformed pack metadata fails before native work.
+Missing/corrupt weights do not produce a resident model. The request's model ID is checked against
+the resident pack while holding its execution lease. Observation, execution coordination and result
+provenance use that pack's actual key, not the built-in key. Unloaded capabilities describe the family;
+they do not assert that a named pack is registered, installed or verified.
+
+`LayaSetup.Definition` advertises the Decision task without activating the engine.
+`LayaSetup.CreateSession(identity, target, packs, offeredModels, existing, instance)` feeds the host's
+compatible definitions to the existing shared editor. Omit `offeredModels` to offer the built-in
+pack; pass an empty list to offer none. Validate/register the same definitions in the manager's
+catalog. The editor saves the selected key/backend in `TensorSetupConfiguration`, not raw weight
+bytes or a provider-specific UI payload. Selection and Save never unload an active model. The usual
+explicit install/verify/load/unload/stop actions apply; changing the saved selection reports
+`RequiresUnload`, and session disposal does not stop the host's engine. See the compile-checked
+`LayaModelSelectionExample` in the shared examples.

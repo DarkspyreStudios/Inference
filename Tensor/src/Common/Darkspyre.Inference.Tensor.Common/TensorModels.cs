@@ -91,7 +91,8 @@ public sealed class TensorModelCatalog
     }
 }
 
-internal static class TensorModelDefinitionValidator
+/// <summary>Validates portable pack metadata before an engine applies its own compatibility policy.</summary>
+public static class TensorModelDefinitionValidator
 {
     public static void Validate(TensorModelPackDefinition definition)
     {
@@ -137,7 +138,7 @@ internal static class TensorModelDefinitionValidator
         }
     }
 
-    public static void ValidateRelativePath(string relativePath)
+    internal static void ValidateRelativePath(string relativePath)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(relativePath);
         if (Path.IsPathRooted(relativePath)

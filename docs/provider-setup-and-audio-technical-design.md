@@ -24,7 +24,7 @@ Connect, and in-process Whisper.net in Tensor.
 | Tensor Image / Supra | Complete compatible multi-artifact pack selection and setup | Missing/incompatible companion artifacts fail; selected pack reaches the real loader |
 | Connect Audio | TTS/PocketTTS and Audio/TangoFlux typed contracts, implementations and setup | Deterministic endpoint, voice, request, failure and cancellation tests |
 | Tensor Audio | STT/Whisper typed contracts, explicit lifetime, packs and setup | Batch/window transcription and lifecycle tested through a controlled native boundary |
-| Tensor Decision / Laya | Correct Decision classification in discovery | Never appears as Text or Audio; no new CE section or expanded model-search project |
+| Tensor Decision / Laya | Decision classification plus host-selected compatible pack loading/setup (subsequently authorized amendment below) | One instance unloads and loads another host-supplied Laya pack; no new CE section or remote model-search project |
 
 Out of scope: CE UI implementation, GMTools changes, hosted products, process supervision,
 microphone capture/VAD, soundscape orchestration, Chroma, ComfyUI-style Tensor workflows, a general
@@ -494,3 +494,39 @@ and deterministic tests (Connect 240, including 17 PocketTTS protocol/setup test
 Formatting verification and the Connect transitive dependency vulnerability audit pass. No new
 third-party dependency, package artifact, version bump, publication, live endpoint request or
 model download was required. Audio implementation is paused here for the Laya discussion.
+
+### Laya amendment — shared Tensor selection/lifecycle (2026-09-22)
+
+The user supplied a caller-defined-pack handoff, confirmed their custom-trained checkpoint already
+runs through Tensor, specified that implementation names identify **model families**, and explicitly
+required Laya to follow the broader Tensor design. That supersedes the handoff's constructor-bound
+single-pack proposal. General and technical direction are settled; this amendment is implemented.
+
+- Keep the Laya family implementation and current constructor. No checkpoint parameter or alternate
+  inference path: `LoadAsync(key)` obtains the host-registered definition from the existing manager.
+- Expose `TensorDecisionModels.LayaRuntimeArchitecture`. A single engine-owned policy validates common
+  metadata, Decision capability, the Laya family, required model/tokenizer roles and CPU/CUDA declarations
+  for both offered setup definitions and Load. The native loader retains its tensor-schema checks.
+- Use the acquired pack key for execution coordination, model-ID checks and provenance. Acquire the
+  request lifetime before checking the resident model identity so a model switch cannot race a request.
+  Normal Unload protects requests; urgent teardown still waits for native execution to finish.
+- `LayaSetup` binds the existing `TensorSetupSession` to host-offered compatible packs. Defaults may
+  offer the built-in pack; the host can instead offer private/custom packs. Save persists the key/backend
+  using `TensorSetupChanges`; no new settings payload, renderer dispatch, downloader or credential store.
+- Unload frees native resources and the pack lease, then another registered compatible pack can load
+  on that same instance. Stop remains terminal. A failed/cancelled load releases acquired resources
+  and does not publish a loaded model. Settings disposal never owns the engine's lifetime.
+- Tests use the real engine lifecycle, pack manager and persistence with controlled HTTP/native
+  boundaries; fixtures exercise two distinct custom packs, provenance, wrong-family rejection,
+  failure/cancellation cleanup, graceful/urgent unload and the generic selection/save flow. They do
+  not claim a new full-weight accuracy or calibration experiment. Formatting/calibration algorithms
+  and architecture support do not change.
+
+No version change, package creation/publication, UI implementation or consumer migration is authorized
+by this amendment. TangoFlux, remote Qwen/Supra discovery and Whisper remain pending.
+
+Phase exit: Laya implementation and integration documentation complete. Both focused solutions pass
+zero-warning Debug/Release builds and tests (Tensor 66, including 17 Laya tests; Connect 240).
+Formatting verification and the Tensor transitive vulnerability audit pass. The ten new Laya tests
+use controlled native execution, not a new full-weight run. The generic model-selection example
+compiles in both solutions. No packages were created or published and the shared version is unchanged.
