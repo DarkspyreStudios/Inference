@@ -18,7 +18,7 @@ The package also includes `Darkspyre.Inference.Connect.TTS` for external
 PocketTTS HTTP synthesis and `Darkspyre.Inference.Connect.Audio` for external TangoFlux generation.
 They are included in the Connect product project, not separate NuGets. See
 [PocketTTS integration](#pockettts-speech) and
-[TangoFlux integration](#tangoflux-audio). All five capability assemblies ship in Connect **11.4.1-rc.1**.
+[TangoFlux integration](#tangoflux-audio). All five capability assemblies ship in Connect **11.5.0-rc.1**.
 
 The packages target .NET 11. Credentials
 for direct API transports remain owned by the host through `ILlmConnectionSource`; the connector
@@ -76,6 +76,19 @@ LlmInferenceResult result = await llm.CompleteAsync(new LlmInferenceRequest
 Image workflows expose the same boundary through `ImageProviderService.Bind(connection, workflow)`.
 Binding is explicit and retains exactly one backend. Neither adapter retries through a different
 provider nor falls back from Connect to Tensor.
+
+### Reasoning levels
+
+`LlmInferenceRequest.ReasoningLevel` takes an `LlmReasoningLevel`: `None`, `Minimal`, `Low`, `Medium`,
+`High`, `ExtraHigh` or `Maximum`. On one model, each level asks for at least as much reasoning as the
+level below it; a level does not cost the same on two different models. Null leaves the provider's
+default in place. Each model reports the levels it accepts in `LlmCapabilities.ReasoningLevels`, and
+`SupportsReasoning` is true when that set contains a level above `None`. A request carrying a level
+the model does not accept fails with `InferenceFailureCode.InvalidRequest` before any provider call;
+no adapter substitutes a nearby level. Each adapter owns the mapping to its provider's wire form.
+`LlmCapabilityOverrides.ReasoningLevels` replaces a transport's set for a connection or one model,
+and the setup editor exposes it as one Default/Enabled/Disabled choice per level. The design is
+`docs/llm-reasoning-level.tech-design.md` in the repository root.
 
 ## PocketTTS speech
 
@@ -500,7 +513,7 @@ an uncertain outcome requires readback before opening a new edit. The
 [generic editor example](../Common/examples/Darkspyre.Inference.Setup.Examples/README.md) compiles the
 same renderer against both Connect and Tensor. No UI framework is shipped in these packages.
 
-These contracts are included in the 11.4.1-rc.1 family. The old LLM setup-input/action description
+These contracts are included in the 11.5.0-rc.1 family. The old LLM setup-input/action description
 types were replaced by Common setup contracts in the 11.3.0-rc.1 breaking-contract release.
 The 11.3.1-rc.1 correction adds provider-owned dirty state, current authentication interactions and
 explicit choice capabilities for the shared Settings editor.
@@ -542,7 +555,7 @@ The host owns this OAuth credential. An existing Codex CLI login is separate and
 copied, or used as a fallback. Former executable endpoints (`codex`, `local://codex-cli`, executable
 paths) now fail with migration guidance. Model discovery uses the direct authenticated catalog.
 
-Chat and managed agents share SSE request mapping, attachments, tool definitions, reasoning effort,
+Chat and managed agents share SSE request mapping, attachments, tool definitions, reasoning level,
 JSON Schema, and ordered opaque response-state replay. Requests use `store: false`; the library
 does not retrieve server history or send `previous_response_id`. `ConversationKey` provides cache
 affinity only; managed sessions use `ThreadId`. Temperature, JSON-object mode, and
@@ -803,6 +816,16 @@ new LlmConnection
 };
 ```
 
+### Reasoning
+
+Direct API-key requests map a reasoning level per model. Current models take
+`thinking: {type: "adaptive"}` with `output_config.effort` (`low`, `medium`, `high`, `xhigh`, `max`),
+and `None` sends `thinking: {type: "disabled"}` where the model accepts it. Opus 4.6 and Sonnet 4.6
+offer no `ExtraHigh`, and Opus 4.5 offers effort only up to `High`. Models without effort, such as
+Haiku 4.5, take a thinking budget of 1,024, 4,096, 16,384, 32,768 or 64,000 tokens for `Low` through
+`Maximum`, added to `max_tokens`. A model the adapter does not recognise accepts no level unless a
+capability override supplies the set.
+
 ### Maximum output tokens
 
 For direct API-key requests, omitting `MaxOutputTokens` sends `max_tokens` of 8192. Adaptive thinking is on by default on current Claude models, and thinking tokens count against `max_tokens`, so a lower ceiling can truncate the response before visible text and return `LlmCompletionStatus.Incomplete`. The official CLI does not expose a maximum-output-token option, so subscription requests reject `MaxOutputTokens` rather than silently ignoring it.
@@ -815,7 +838,7 @@ A refusal can also arrive after partial output. `Text` keeps the streamed partia
 
 ### Structured output
 
-Direct API-key connections report `SupportsJsonSchema = false` and `SupportsJsonObject = false`; schema-backed requests must permit `LlmStructuredOutputFallback.LocalValidation`. Subscription connections use the Claude CLI's native `--json-schema` contract and expose low, medium, high, xhigh, and max reasoning effort. Darkspyre.Inference.Connect.LLM uses the terminal event's canonical `structured_output` value and validates it locally before returning completion.
+Direct API-key connections report `SupportsJsonSchema = false` and `SupportsJsonObject = false`; schema-backed requests must permit `LlmStructuredOutputFallback.LocalValidation`. Subscription connections use the Claude CLI's native `--json-schema` contract and accept the `Low`, `Medium`, `High`, `ExtraHigh` and `Maximum` reasoning levels. Darkspyre.Inference.Connect.LLM uses the terminal event's canonical `structured_output` value and validates it locally before returning completion.
 
 ### Model discovery
 
@@ -850,7 +873,7 @@ new LlmConnection
 
 `Endpoint` may be `agy`, `local://antigravity-cli`, or an absolute executable path. Desktop apps launched outside a login shell should prefer the absolute path because their `PATH` can differ from Terminal or PowerShell. Model discovery calls `agy models`; model `auto` omits the command-line model override and uses the CLI default.
 
-Each request runs in an empty temporary workspace with terminal sandboxing and slash-command expansion disabled. Prompts are sent as BOM-free UTF-8 through standard input instead of process arguments. Native JSON Schema and low, medium, or high reasoning effort are supported; schema-backed requests use the terminal event's canonical `structured_output` value and are also validated locally before being returned. The free-text `response` remains a compatibility fallback for older CLI versions. Temperature, maximum output tokens, headers, and provider options are rejected rather than silently ignored.
+Each request runs in an empty temporary workspace with terminal sandboxing and slash-command expansion disabled. Prompts are sent as BOM-free UTF-8 through standard input instead of process arguments. Native JSON Schema and the `Low`, `Medium` and `High` reasoning levels are supported; schema-backed requests use the terminal event's canonical `structured_output` value and are also validated locally before being returned. The free-text `response` remains a compatibility fallback for older CLI versions. Temperature, maximum output tokens, headers, and provider options are rejected rather than silently ignored.
 
 Antigravity may emit its own internal tool activity, but the CLI owns that execution. Because
 Darkspyre.Inference.Connect.LLM cannot surface the call for host authorization and result submission, this adapter reports
@@ -915,7 +938,7 @@ The first checks direct tools, attachments and state replay. The second checks t
 JSON capture/reopen, fork and low-cap host compaction. Use a model returned by `models`.
 [Recorded results](docs/managed-agent-verification.md) distinguish live proof from deterministic tests.
 
-Pass `--attach-image path`, `--attach-document path`, `--effort low|medium|high|xhigh|max`, or
+Pass `--attach-image path`, `--attach-document path`, `--effort <level>` (a reasoning level name such as `high` or `ExtraHigh`), or
 `--schema path/to/schema.json` to exercise those request features. Attachment flags may be repeated.
 Prompt text is sent to the tester over standard input and dispatched through the selected provider;
 it is not placed in process arguments. Antigravity rejects attachment options because its headless

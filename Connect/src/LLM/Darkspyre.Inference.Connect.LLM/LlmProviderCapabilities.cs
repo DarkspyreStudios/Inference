@@ -1,3 +1,6 @@
+using System.Collections.Frozen;
+using Darkspyre.Inference.Common.LLM;
+
 namespace Darkspyre.Inference.Connect.LLM;
 
 /// <summary>Features a transport/model combination can accept without silent degradation.</summary>
@@ -15,7 +18,11 @@ public sealed record LlmProviderCapabilities
 
     public bool SupportsJsonObject { get; init; }
 
-    public bool SupportsReasoningEffort { get; init; }
+    /// <summary>The reasoning levels the model accepts. Empty when it accepts no reasoning control.</summary>
+    public IReadOnlySet<LlmReasoningLevel> ReasoningLevels { get; init; } = FrozenSet<LlmReasoningLevel>.Empty;
+
+    /// <summary>True when the model accepts a reasoning level above <see cref="LlmReasoningLevel.None"/>.</summary>
+    public bool SupportsReasoning => ReasoningLevels.Any(static level => level > LlmReasoningLevel.None);
 
     public bool SupportsTemperature { get; init; }
 
@@ -71,7 +78,7 @@ public sealed record LlmProviderCapabilities
             SupportsAccountUsage = overrides.SupportsAccountUsage ?? SupportsAccountUsage,
             SupportsJsonSchema = overrides.SupportsJsonSchema ?? SupportsJsonSchema,
             SupportsJsonObject = overrides.SupportsJsonObject ?? SupportsJsonObject,
-            SupportsReasoningEffort = overrides.SupportsReasoningEffort ?? SupportsReasoningEffort,
+            ReasoningLevels = overrides.ReasoningLevels ?? ReasoningLevels,
             SupportsTemperature = overrides.SupportsTemperature ?? SupportsTemperature,
             SupportsToolUse = overrides.SupportsToolUse ?? SupportsToolUse,
             SupportsAgentSessions = Restrict(overrides.SupportsAgentSessions, SupportsAgentSessions),
@@ -114,7 +121,8 @@ public sealed record LlmCapabilityOverrides
 
     public bool? SupportsJsonObject { get; init; }
 
-    public bool? SupportsReasoningEffort { get; init; }
+    /// <summary>The reasoning levels the endpoint accepts, replacing the transport's own set.</summary>
+    public IReadOnlySet<LlmReasoningLevel>? ReasoningLevels { get; init; }
 
     public bool? SupportsTemperature { get; init; }
 

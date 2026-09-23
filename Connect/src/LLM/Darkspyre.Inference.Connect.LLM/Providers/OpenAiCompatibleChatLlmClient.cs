@@ -20,7 +20,6 @@ internal sealed class OpenAiCompatibleChatLlmClient(HttpClient http) : LlmClient
         SupportsModelListing = true,
         SupportsJsonSchema = false,
         SupportsJsonObject = false,
-        SupportsReasoningEffort = false,
         SupportsTemperature = true,
         SupportsToolUse = true
     };
@@ -339,9 +338,9 @@ internal sealed class OpenAiCompatibleChatLlmClient(HttpClient http) : LlmClient
             payload["max_tokens"] = maxOutputTokens;
         }
 
-        if (!string.IsNullOrWhiteSpace(request.ReasoningEffort))
+        if (request.ReasoningLevel is { } level)
         {
-            payload["reasoning_effort"] = request.ReasoningEffort;
+            payload["reasoning_effort"] = LlmReasoningEffort.Word(level);
         }
 
         if (request.Tools.Count > 0)

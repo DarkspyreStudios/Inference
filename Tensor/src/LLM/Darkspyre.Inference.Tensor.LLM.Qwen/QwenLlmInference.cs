@@ -14,6 +14,10 @@ namespace Darkspyre.Inference.Tensor.LLM.Qwen;
 
 public sealed class QwenLlmInference : ITensorLlmInference
 {
+    /// <summary>Qwen runs with thinking disabled, so it accepts only <see cref="LlmReasoningLevel.None"/>.</summary>
+    private static readonly System.Collections.Frozen.FrozenSet<LlmReasoningLevel> ReasoningLevels =
+        System.Collections.Frozen.FrozenSet.ToFrozenSet([LlmReasoningLevel.None]);
+
     private readonly ITensorModelPackManager _packs;
     private TensorModelPackDefinition? _definition;
     private readonly TensorBackendKind _requestedBackend;
@@ -59,7 +63,7 @@ public sealed class QwenLlmInference : ITensorLlmInference
             SupportsModelListing = true,
             SupportsJsonSchema = true,
             SupportsJsonObject = true,
-            SupportsReasoningEffort = false,
+            ReasoningLevels = ReasoningLevels,
             SupportsTemperature = true,
             SupportsToolUse = false,
             SupportsPromptImages = false,
@@ -384,11 +388,12 @@ public sealed class QwenLlmInference : ITensorLlmInference
                 "The initial Qwen runtime supports text messages only.");
         }
 
-        if (!string.IsNullOrWhiteSpace(request.ReasoningEffort))
+        if (request.ReasoningLevel is { } level && !ReasoningLevels.Contains(level))
         {
+            // The engine always runs Qwen with thinking disabled, so only None describes a request.
             throw new InferenceException(
-                InferenceFailureCode.UnsupportedFeature,
-                "The initial Qwen runtime does not expose reasoning-effort controls.");
+                InferenceFailureCode.InvalidRequest,
+                $"Qwen accepts only reasoning level '{LlmReasoningLevel.None}'; '{level}' was requested.");
         }
     }
 

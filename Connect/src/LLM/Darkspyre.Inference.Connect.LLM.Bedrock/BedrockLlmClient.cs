@@ -24,7 +24,6 @@ internal sealed class BedrockLlmClient(
         SupportsModelListing = true,
         SupportsJsonSchema = false,
         SupportsJsonObject = false,
-        SupportsReasoningEffort = false,
         SupportsTemperature = true,
         SupportsToolUse = true,
         SupportsPromptImages = true,

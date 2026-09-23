@@ -2,6 +2,7 @@ using System.Runtime.CompilerServices;
 using System.Text.Json;
 using Darkspyre.Inference.Connect.LLM;
 using Darkspyre.Inference.Connect.LLM.Providers;
+using LlmReasoningLevel = Darkspyre.Inference.Common.LLM.LlmReasoningLevel;
 
 namespace Darkspyre.Inference.Connect.LLM.Tests;
 
@@ -48,7 +49,7 @@ public sealed class ClaudeCliLlmClientTests
                     ]
                 }
             ],
-            ReasoningEffort = "xhigh",
+            ReasoningLevel = LlmReasoningLevel.ExtraHigh,
             StructuredOutput = new LlmStructuredOutputRequest
             {
                 Name = "status",
@@ -111,7 +112,7 @@ public sealed class ClaudeCliLlmClientTests
 
         LlmProviderCapabilities capabilities = client.GetCapabilities(CliConnection());
         Assert.True(capabilities.SupportsJsonSchema);
-        Assert.True(capabilities.SupportsReasoningEffort);
+        Assert.True(capabilities.SupportsReasoning);
         Assert.False(capabilities.SupportsTemperature);
     }
 
@@ -361,6 +362,26 @@ public sealed class ClaudeCliLlmClientTests
 
         Assert.Equal(0, result.ExitCode);
         Assert.Equal("123", result.StandardOutput.Trim());
+    }
+
+    [Fact]
+    public async Task RejectsMinimalReasoningWithoutStartingTheCli()
+    {
+        var runner = new RecordingRunner(new ClaudeCliProcessResult(0, string.Empty, string.Empty));
+        using var http = new HttpClient(new UnexpectedHttpHandler());
+        var client = new ClaudeCliLlmClient(http, runner);
+
+        var error = await Assert.ThrowsAsync<Darkspyre.Inference.Common.InferenceException>(() => ReadAllAsync(client.StreamAsync(
+            CliConnection(),
+            new LlmChatRequest
+            {
+                ModelId = "claude-test",
+                ReasoningLevel = LlmReasoningLevel.Minimal,
+                Messages = [new LlmChatMessage("user", "Ready?")]
+            })));
+
+        Assert.Equal(Darkspyre.Inference.Common.InferenceFailureCode.InvalidRequest, error.Code);
+        Assert.Empty(runner.Invocations);
     }
 
     private static LlmConnection CliConnection() => new()

@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.Json;
 using Darkspyre.Inference.Connect.LLM;
+using LlmReasoningLevel = Darkspyre.Inference.Common.LLM.LlmReasoningLevel;
 
 namespace Darkspyre.Inference.Connect.ConsoleTester;
 
@@ -19,7 +20,7 @@ internal static class CodexProtocolProbe
         var request = new LlmChatRequest
         {
             ModelId = modelId,
-            ReasoningEffort = "low",
+            ReasoningLevel = LlmReasoningLevel.Low,
             ConversationKey = Guid.NewGuid().ToString(),
             Messages = messages,
             Tools = [tool],

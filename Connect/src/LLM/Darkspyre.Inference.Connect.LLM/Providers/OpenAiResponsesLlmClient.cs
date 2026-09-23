@@ -1,3 +1,5 @@
+using LlmReasoningLevel = Darkspyre.Inference.Common.LLM.LlmReasoningLevel;
+
 namespace Darkspyre.Inference.Connect.LLM.Providers;
 
 /// <summary>Streaming adapter for OpenAI's Responses API.</summary>
@@ -14,7 +16,9 @@ internal sealed class OpenAiResponsesLlmClient(HttpClient http) : ResponsesLlmCl
         SupportsModelListing = true,
         SupportsJsonSchema = true,
         SupportsJsonObject = true,
-        SupportsReasoningEffort = true,
+        ReasoningLevels = LlmReasoningEffort.Levels(
+            LlmReasoningLevel.Minimal, LlmReasoningLevel.Low, LlmReasoningLevel.Medium,
+            LlmReasoningLevel.High, LlmReasoningLevel.ExtraHigh),
         SupportsTemperature = true,
         SupportsToolUse = true,
         SupportsPromptImages = true,

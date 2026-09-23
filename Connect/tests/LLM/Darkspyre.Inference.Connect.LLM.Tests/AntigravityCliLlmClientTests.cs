@@ -2,6 +2,7 @@ using System.Runtime.CompilerServices;
 using System.Text.Json;
 using Darkspyre.Inference.Connect.LLM;
 using Darkspyre.Inference.Connect.LLM.Providers;
+using LlmReasoningLevel = Darkspyre.Inference.Common.LLM.LlmReasoningLevel;
 
 namespace Darkspyre.Inference.Connect.LLM.Tests;
 
@@ -233,6 +234,25 @@ public sealed class AntigravityCliLlmClientTests
     }
 
     [Fact]
+    public async Task RejectsAReasoningLevelAboveHighWithoutStartingTheCli()
+    {
+        var runner = new RecordingRunner(new AntigravityCliProcessResult(0, string.Empty, string.Empty));
+        var client = new AntigravityCliLlmClient(runner);
+
+        var error = await Assert.ThrowsAsync<Darkspyre.Inference.Common.InferenceException>(() => ReadAllAsync(client.StreamAsync(
+            Connection(),
+            new LlmChatRequest
+            {
+                ModelId = "gemini-3.1-pro-high",
+                ReasoningLevel = LlmReasoningLevel.ExtraHigh,
+                Messages = [new LlmChatMessage("user", "Score it.")]
+            })));
+
+        Assert.Equal(Darkspyre.Inference.Common.InferenceFailureCode.InvalidRequest, error.Code);
+        Assert.Empty(runner.Invocations);
+    }
+
+    [Fact]
     public async Task UsesNativeJsonSchemaAndReasoningEffort()
     {
         var runner = new RecordingRunner(new AntigravityCliProcessResult(
@@ -248,7 +268,7 @@ public sealed class AntigravityCliLlmClientTests
             new LlmChatRequest
             {
                 ModelId = "gemini-3.1-pro-high",
-                ReasoningEffort = "high",
+                ReasoningLevel = LlmReasoningLevel.High,
                 Messages = [new LlmChatMessage("user", "Score it.")],
                 StructuredOutput = new LlmStructuredOutputRequest
                 {

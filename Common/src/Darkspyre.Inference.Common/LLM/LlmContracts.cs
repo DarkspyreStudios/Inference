@@ -100,7 +100,8 @@ public sealed record LlmInferenceRequest
 
     public int? MaxOutputTokens { get; init; }
 
-    public string? ReasoningEffort { get; init; }
+    /// <summary>The requested reasoning level; null leaves the provider's default in place.</summary>
+    public LlmReasoningLevel? ReasoningLevel { get; init; }
 
     public LlmStructuredOutputRequest? StructuredOutput { get; init; }
 

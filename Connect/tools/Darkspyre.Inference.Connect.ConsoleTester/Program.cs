@@ -5,6 +5,7 @@ using Darkspyre.Inference.Connect.LLM;
 using Darkspyre.Inference.Connect.LLM.Bedrock;
 using Microsoft.Extensions.DependencyInjection;
 using SecureStore;
+using LlmReasoningLevel = Darkspyre.Inference.Common.LLM.LlmReasoningLevel;
 
 namespace Darkspyre.Inference.Connect.ConsoleTester;
 
@@ -264,7 +265,7 @@ internal static class Program
         {
             ModelId = options.Model,
             Messages = [new LlmChatMessage("user", prompt) { Attachments = attachments }],
-            ReasoningEffort = options.Effort,
+            ReasoningLevel = options.Effort,
             StructuredOutput = structuredOutput
         };
 
@@ -364,7 +365,7 @@ internal static class Program
                            {
                                Input = [new LlmAgentTextContent(prompt)],
                                Attachments = attachments,
-                               ReasoningEffort = options.Effort,
+                               ReasoningLevel = options.Effort,
                                OutputSchema = structuredOutput?.Schema
                            },
                            cancellationToken))
@@ -555,7 +556,7 @@ internal static class Program
     private static PromptOptions ParsePromptOptions(string[] args)
     {
         string? model = null;
-        string? effort = null;
+        LlmReasoningLevel? effort = null;
         string? schemaPath = null;
         var attachments = new List<AttachmentOption>();
         for (int index = 0; index < args.Length; index++)
@@ -576,7 +577,10 @@ internal static class Program
                     model = value;
                     break;
                 case "--effort":
-                    effort = value;
+                    effort = Enum.TryParse(value, ignoreCase: true, out LlmReasoningLevel level) && Enum.IsDefined(level)
+                        ? level
+                        : throw new ArgumentException(
+                            $"--effort must be one of: {string.Join(", ", Enum.GetNames<LlmReasoningLevel>())}.");
                     break;
                 case "--schema":
                     schemaPath = value;
@@ -755,7 +759,7 @@ internal static class Program
 
     private sealed record PromptOptions(
         string Model,
-        string? Effort,
+        LlmReasoningLevel? Effort,
         string? SchemaPath,
         IReadOnlyList<AttachmentOption> Attachments);
 

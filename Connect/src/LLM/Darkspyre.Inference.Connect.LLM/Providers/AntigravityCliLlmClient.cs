@@ -3,6 +3,8 @@ using System.Text;
 using System.Text.Json;
 using Darkspyre.Inference.Connect.LLM.Internal;
 
+using LlmReasoningLevel = Darkspyre.Inference.Common.LLM.LlmReasoningLevel;
+
 namespace Darkspyre.Inference.Connect.LLM.Providers;
 
 internal sealed class AntigravityCliLlmClient(IAntigravityCliRunner runner)
@@ -16,7 +18,8 @@ internal sealed class AntigravityCliLlmClient(IAntigravityCliRunner runner)
         SupportsAccountUsage = true,
         SupportsJsonSchema = true,
         SupportsJsonObject = false,
-        SupportsReasoningEffort = true,
+        ReasoningLevels = LlmReasoningEffort.Levels(
+            LlmReasoningLevel.Low, LlmReasoningLevel.Medium, LlmReasoningLevel.High),
         SupportsTemperature = false,
         SupportsToolUse = false
     };
@@ -66,9 +69,9 @@ internal sealed class AntigravityCliLlmClient(IAntigravityCliRunner runner)
         {
             arguments.AddRange(["--model", request.ModelId]);
         }
-        if (!string.IsNullOrWhiteSpace(request.ReasoningEffort))
+        if (request.ReasoningLevel is { } level)
         {
-            arguments.AddRange(["--effort", request.ReasoningEffort.Trim().ToLowerInvariant()]);
+            arguments.AddRange(["--effort", LlmReasoningEffort.Word(level)]);
         }
 
         if (request.Tools.Count > 0
@@ -435,23 +438,7 @@ internal sealed class AntigravityCliLlmClient(IAntigravityCliRunner runner)
             throw new NotSupportedException("Antigravity CLI does not expose a maximum-output-token option.");
         }
 
-        if (!string.IsNullOrWhiteSpace(request.ReasoningEffort))
-        {
-            if (!capabilities.SupportsReasoningEffort)
-            {
-                throw new NotSupportedException("The selected Antigravity CLI model does not support reasoning effort.");
-            }
-
-            string effort = request.ReasoningEffort.Trim();
-            if (!string.Equals(effort, "low", StringComparison.OrdinalIgnoreCase)
-                && !string.Equals(effort, "medium", StringComparison.OrdinalIgnoreCase)
-                && !string.Equals(effort, "high", StringComparison.OrdinalIgnoreCase))
-            {
-                throw new ArgumentException(
-                    "Antigravity CLI reasoning effort must be low, medium, or high.",
-                    nameof(request));
-            }
-        }
+        LlmReasoningEffort.Validate(request.ReasoningLevel, capabilities);
 
         if (request.ProviderOptions.Count > 0)
         {

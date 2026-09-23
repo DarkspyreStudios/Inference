@@ -250,9 +250,9 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
             payload["max_output_tokens"] = maxOutputTokens;
         }
 
-        if (!string.IsNullOrWhiteSpace(request.ReasoningEffort))
+        if (request.ReasoningLevel is { } level)
         {
-            payload["reasoning"] = new JsonObject { ["effort"] = request.ReasoningEffort };
+            payload["reasoning"] = new JsonObject { ["effort"] = LlmReasoningEffort.Word(level) };
         }
 
         // Stateless ordinary responses need their reasoning state just as tool responses do.

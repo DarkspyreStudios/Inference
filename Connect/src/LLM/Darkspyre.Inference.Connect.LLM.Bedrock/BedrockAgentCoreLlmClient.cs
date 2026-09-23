@@ -23,7 +23,6 @@ internal sealed class BedrockAgentCoreLlmClient(IBedrockAgentCoreInvoker invoker
         SupportsModelListing = false,
         SupportsJsonSchema = false,
         SupportsJsonObject = false,
-        SupportsReasoningEffort = false,
         SupportsTemperature = false,
         SupportsToolUse = false,
         SupportsAgentSessions = true,
@@ -377,11 +376,10 @@ internal sealed class BedrockAgentCoreLlmClient(IBedrockAgentCoreInvoker invoker
                 nameof(request),
                 "Maximum output tokens must be positive.");
         }
-        if (!string.IsNullOrWhiteSpace(request.ReasoningEffort))
-        {
-            throw new NotSupportedException(
-                "AgentCore Harness does not expose provider-neutral reasoning effort control.");
-        }
+        // AgentCore Harness exposes no reasoning control, so it accepts no level.
+        Darkspyre.Inference.Connect.LLM.Providers.LlmReasoningEffort.Validate(
+            request.ReasoningLevel,
+            System.Collections.Frozen.FrozenSet<Darkspyre.Inference.Common.LLM.LlmReasoningLevel>.Empty);
         if (request.ProviderOptions.Count > 0)
         {
             throw new NotSupportedException(

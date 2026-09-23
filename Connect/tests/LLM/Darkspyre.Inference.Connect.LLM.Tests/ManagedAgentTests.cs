@@ -3,6 +3,7 @@ using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
 using Darkspyre.Inference.Connect.LLM.Internal;
+using LlmReasoningLevel = Darkspyre.Inference.Common.LLM.LlmReasoningLevel;
 
 namespace Darkspyre.Inference.Connect.LLM.Tests;
 
@@ -22,10 +23,10 @@ public sealed class ManagedAgentTests
             return new() { Content = [new LlmAgentTextContent(call.CallId)] };
         }) with
         { Instructions = "base" });
-        var events = await Read(session.RunTurnAsync(Turn("hello") with { Instructions = "override", ReasoningEffort = "high" }));
+        var events = await Read(session.RunTurnAsync(Turn("hello") with { Instructions = "override", ReasoningLevel = LlmReasoningLevel.High }));
         Assert.Equal(["a", "b"], executed);
         Assert.Equal(LlmAgentCompletionReason.Completed, Assert.Single(events.OfType<LlmAgentTurnCompletedEvent>()).Reason);
-        Assert.All(harness.Requests, request => { Assert.Equal("override", request.Instructions); Assert.Equal("high", request.ReasoningEffort); });
+        Assert.All(harness.Requests, request => { Assert.Equal("override", request.Instructions); Assert.Equal(LlmReasoningLevel.High, request.ReasoningLevel); });
         Assert.Single(events.Select(item => item.TurnId).Distinct());
         Assert.Equal(35, events.OfType<LlmAgentUsageEvent>().Last().RunTotals?.TotalTokens);
         var context = await session.CaptureContextAsync();
@@ -37,7 +38,7 @@ public sealed class ManagedAgentTests
         harness.Results.Enqueue(new() { Diagnostics = new(200, null, null), Text = "last", Status = LlmCompletionStatus.Completed });
         await Read(session.RunTurnAsync(Turn("new")));
         Assert.Equal("base", harness.Requests.Last().Instructions);
-        Assert.Null(harness.Requests.Last().ReasoningEffort);
+        Assert.Null(harness.Requests.Last().ReasoningLevel);
     }
 
     [Fact]

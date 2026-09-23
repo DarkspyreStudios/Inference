@@ -30,7 +30,6 @@ internal sealed class AnthropicMessagesLlmClient : LlmClientBase
         SupportsAccountUsage = false,
         SupportsJsonSchema = false,
         SupportsJsonObject = false,
-        SupportsReasoningEffort = false,
         SupportsTemperature = false,
         SupportsToolUse = true,
         SupportsPromptImages = true,
@@ -50,11 +49,16 @@ internal sealed class AnthropicMessagesLlmClient : LlmClientBase
             throw new NotSupportedException(
                 "Anthropic Messages API connections accept only an API key or x-api-key secret header.");
         }
+        bool levelsOverridden = connection.CapabilityOverrides?.ReasoningLevels is not null
+            || (modelId is not null
+                && connection.ModelCapabilityOverrides.TryGetValue(modelId, out LlmCapabilityOverrides? modelOverrides)
+                && modelOverrides.ReasoningLevels is not null);
         return capabilities with
         {
             SupportsAccountUsage = false,
             SupportsAgentSessions = false,
-            SupportsAgentToolUse = false
+            SupportsAgentToolUse = false,
+            ReasoningLevels = levelsOverridden ? capabilities.ReasoningLevels : AnthropicReasoning.Levels(modelId)
         };
     }
 
@@ -443,6 +447,10 @@ internal sealed class AnthropicMessagesLlmClient : LlmClientBase
             ["messages"] = messages,
             ["stream"] = true
         };
+        if (request.ReasoningLevel is { } level)
+        {
+            AnthropicReasoning.Apply(payload, request.ModelId, level, request.MaxOutputTokens ?? DefaultMaxOutputTokens);
+        }
         if (system.Count > 0)
         {
             payload["system"] = system;

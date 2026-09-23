@@ -471,14 +471,14 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
                         new { subtype = "set_model", model = request.ModelId },
                         cancellationToken);
                 }
-                if (!string.IsNullOrWhiteSpace(request.ReasoningEffort))
+                if (request.ReasoningLevel is { } level)
                 {
-                    ValidateEffort(request.ReasoningEffort);
+                    LlmReasoningEffort.Validate(level, ClaudeCliLlmClient.ReasoningLevels);
                     await SendControlRequestAsync(
                         new
                         {
                             subtype = "apply_flag_settings",
-                            settings = new { effortLevel = request.ReasoningEffort.Trim().ToLowerInvariant() }
+                            settings = new { effortLevel = LlmReasoningEffort.Word(level) }
                         },
                         cancellationToken);
                 }
@@ -1267,21 +1267,6 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             JsonValueKind.Number => id.GetRawText(),
             _ => null
         };
-
-        private static void ValidateEffort(string effort)
-        {
-            string value = effort.Trim();
-            if (!string.Equals(value, "low", StringComparison.OrdinalIgnoreCase)
-                && !string.Equals(value, "medium", StringComparison.OrdinalIgnoreCase)
-                && !string.Equals(value, "high", StringComparison.OrdinalIgnoreCase)
-                && !string.Equals(value, "xhigh", StringComparison.OrdinalIgnoreCase)
-                && !string.Equals(value, "max", StringComparison.OrdinalIgnoreCase))
-            {
-                throw new ArgumentException(
-                    "Claude CLI reasoning effort must be low, medium, high, xhigh, or max.",
-                    nameof(effort));
-            }
-        }
 
         private static string RequiredString(JsonElement element, string propertyName) =>
             OptionalString(element, propertyName)

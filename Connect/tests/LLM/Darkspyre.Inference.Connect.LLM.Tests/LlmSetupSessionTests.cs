@@ -251,6 +251,30 @@ public sealed class LlmSetupSessionTests
         Assert.Equal(SetupChoiceCapabilities.Bounded, Field().Capabilities);
     }
 
+    private static readonly string[] DefaultedLevels = ["none", "low", "high", "extrahigh"];
+
+    [Fact]
+    public async Task ReasoningLevelOverrideBecomesExplicitAndReturnsToDefault()
+    {
+        var provider = new LlmProviderService(new UnusedSource(), [new Client(ProviderDefinitions.OpenAiCompatible)]);
+        await using LlmSetupSession session = provider.CreateSetupSession(LlmTransport.OpenAiCompatibleChat,
+            new(SetupChangeIntent.Create, "id", null), new Target());
+        SetupChoiceField Level(string name) =>
+            Assert.Single(Fields(session).OfType<SetupChoiceField>(), field => field.Description.Id == "reasoning-level-" + name);
+
+        Assert.Equal(7, Fields(session).OfType<SetupChoiceField>().Count(field => field.Description.Id.StartsWith("reasoning-level-", StringComparison.Ordinal)));
+        foreach (string name in DefaultedLevels) { Assert.Equal("default", Level(name).Value); }
+
+        Level("low").SetValue("enabled");
+        Assert.True(session.Snapshot.IsDirty);
+        Assert.Equal("enabled", Level("low").Value);
+        Assert.Equal("disabled", Level("high").Value);
+
+        Level("low").SetValue("default");
+        Assert.False(session.Snapshot.IsDirty);
+        Assert.Equal("default", Level("high").Value);
+    }
+
     private sealed class Client(LlmProviderDefinition definition) : ILlmClient, IExternalLlmAuthenticationProbe
     {
         public bool Authenticated { get; set; } = true;

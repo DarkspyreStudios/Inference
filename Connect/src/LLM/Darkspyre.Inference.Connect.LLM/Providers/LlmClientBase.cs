@@ -127,11 +127,7 @@ internal abstract class LlmClientBase(HttpClient http) : ILlmClient
             throw new ArgumentOutOfRangeException(nameof(request), "Maximum output tokens must be positive.");
         }
 
-        if (!string.IsNullOrWhiteSpace(request.ReasoningEffort)
-            && !capabilities.SupportsReasoningEffort)
-        {
-            throw new NotSupportedException("The selected connection does not support reasoning effort.");
-        }
+        LlmReasoningEffort.Validate(request.ReasoningLevel, capabilities);
 
         if (request.StructuredOutput is { } structured
             && (string.IsNullOrWhiteSpace(structured.Name)

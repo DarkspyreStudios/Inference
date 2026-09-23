@@ -3,6 +3,8 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using Darkspyre.Inference.Connect.LLM.Internal;
 
+using LlmReasoningLevel = Darkspyre.Inference.Common.LLM.LlmReasoningLevel;
+
 namespace Darkspyre.Inference.Connect.LLM.Providers;
 
 /// <summary>Direct ChatGPT subscription transport; never reads CLI credentials.</summary>
@@ -22,7 +24,9 @@ internal sealed class OpenAiCodexLlmClient(HttpClient http) : ResponsesLlmClient
         SupportsModelListing = true,
         SupportsAccountUsage = true,
         SupportsJsonSchema = true,
-        SupportsReasoningEffort = true,
+        ReasoningLevels = LlmReasoningEffort.Levels(
+            LlmReasoningLevel.Minimal, LlmReasoningLevel.Low, LlmReasoningLevel.Medium,
+            LlmReasoningLevel.High, LlmReasoningLevel.ExtraHigh),
         SupportsToolUse = true,
         SupportsAgentSessions = true,
         SupportsAgentToolUse = true,

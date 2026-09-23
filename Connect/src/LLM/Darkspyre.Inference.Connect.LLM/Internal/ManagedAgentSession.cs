@@ -543,7 +543,7 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
         Instructions = turn.Instructions ?? _options.Instructions,
         Messages = context.Entries.Select(entry => entry.Message with { OmittedAttachments = [] }).ToArray(),
         ConversationKey = ThreadId,
-        ReasoningEffort = turn.ReasoningEffort,
+        ReasoningLevel = turn.ReasoningLevel,
         StructuredOutput = turn.OutputSchema is { } schema ? new() { Name = "agent_output", Schema = schema } : null,
         Tools = _options.Tools.Select(tool => new LlmToolDefinition
         {

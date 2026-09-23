@@ -189,7 +189,7 @@ internal sealed class ConnectLlmInference(
         }).ToArray(),
         Temperature = request.Temperature,
         MaxOutputTokens = request.MaxOutputTokens,
-        ReasoningEffort = request.ReasoningEffort,
+        ReasoningLevel = request.ReasoningLevel,
         StructuredOutput = request.StructuredOutput is null
             ? null
             : new LlmStructuredOutputRequest
@@ -240,7 +240,7 @@ internal sealed class ConnectLlmInference(
         SupportsModelListing = capabilities.SupportsModelListing,
         SupportsJsonSchema = capabilities.SupportsJsonSchema,
         SupportsJsonObject = capabilities.SupportsJsonObject,
-        SupportsReasoningEffort = capabilities.SupportsReasoningEffort,
+        ReasoningLevels = capabilities.ReasoningLevels,
         SupportsTemperature = capabilities.SupportsTemperature,
         SupportsToolUse = capabilities.SupportsToolUse,
         SupportsPromptImages = capabilities.SupportsPromptImages,

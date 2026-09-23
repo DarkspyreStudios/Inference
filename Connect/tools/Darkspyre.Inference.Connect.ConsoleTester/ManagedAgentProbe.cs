@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Darkspyre.Inference.Connect.LLM;
+using LlmReasoningLevel = Darkspyre.Inference.Common.LLM.LlmReasoningLevel;
 
 namespace Darkspyre.Inference.Connect.ConsoleTester;
 
@@ -29,7 +30,7 @@ internal static class ManagedAgentProbe
         var result = await ReadAsync(session.RunTurnAsync(new()
         {
             Input = [new LlmAgentTextContent("Call darkspyre_inference_connect_attachment with kind document exactly once. Quote its text.")],
-            ReasoningEffort = "low",
+            ReasoningLevel = LlmReasoningLevel.Low,
             Instructions = "Use the requested tool. Include the exact document text in the final answer."
         }, cancellationToken));
         RequireCompleted(result, "attachment smoke test document");
@@ -46,7 +47,7 @@ internal static class ManagedAgentProbe
         result = await ReadAsync(reopened.RunTurnAsync(new()
         {
             Input = [new LlmAgentTextContent("Without calling any tools, quote the text of the document from earlier.")],
-            ReasoningEffort = "low"
+            ReasoningLevel = LlmReasoningLevel.Low
         }, cancellationToken));
         RequireCompleted(result, "attachment smoke test document");
         if (toolCalls != 1) { throw new InvalidOperationException("Reopen replayed an already completed tool."); }
@@ -58,7 +59,7 @@ internal static class ManagedAgentProbe
         {
             Input = [new LlmAgentTextContent("Reply with FORK only.")],
             Instructions = "Do not call tools. Reply with FORK only.",
-            ReasoningEffort = "low"
+            ReasoningLevel = LlmReasoningLevel.Low
         }, cancellationToken));
         RequireCompleted(result, "FORK");
         Console.WriteLine("PASS: independent host-context fork.");
@@ -80,7 +81,7 @@ internal static class ManagedAgentProbe
         {
             Input = [new LlmAgentTextContent("Confirm the current request.")],
             Instructions = "Reply with COMPACTED only.",
-            ReasoningEffort = "low"
+            ReasoningLevel = LlmReasoningLevel.Low
         };
         var preview = await compacting.GetContextStatusAsync(turn, cancellationToken);
         if (preview.NeedsCompaction != true) { throw new InvalidOperationException("Expected low-cap context pressure."); }

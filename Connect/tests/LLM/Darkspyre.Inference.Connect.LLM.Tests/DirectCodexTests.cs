@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using Darkspyre.Inference.Connect.LLM.Internal;
 using Darkspyre.Inference.Connect.LLM.Providers;
+using LlmReasoningLevel = Darkspyre.Inference.Common.LLM.LlmReasoningLevel;
 
 namespace Darkspyre.Inference.Connect.LLM.Tests;
 
@@ -24,7 +25,7 @@ public sealed class DirectCodexTests
         var result = await Complete(client, Connection(), Request() with
         {
             Instructions = "base",
-            ReasoningEffort = "high",
+            ReasoningLevel = LlmReasoningLevel.High,
             ConversationKey = "thread",
             Messages = [new("system", "system"), new("developer", "developer"), new("user", "hello")]
         });
@@ -173,9 +174,9 @@ public sealed class DirectCodexTests
         await Assert.ThrowsAsync<InvalidOperationException>(() => Complete(client, Connection() with { Credential = null }, Request()));
         await Assert.ThrowsAsync<NotSupportedException>(() => Complete(client, Connection() with
         { Credential = new LlmCredential { ApiKey = "key" }.Serialize() }, Request()));
-        await Assert.ThrowsAsync<NotSupportedException>(() => Complete(client, Connection() with
-        { ModelCapabilityOverrides = new Dictionary<string, LlmCapabilityOverrides> { ["model"] = new() { SupportsReasoningEffort = false } } },
-            Request() with { ReasoningEffort = "high" }));
+        await Assert.ThrowsAsync<Darkspyre.Inference.Common.InferenceException>(() => Complete(client, Connection() with
+        { ModelCapabilityOverrides = new Dictionary<string, LlmCapabilityOverrides> { ["model"] = new() { ReasoningLevels = new HashSet<LlmReasoningLevel>() } } },
+            Request() with { ReasoningLevel = LlmReasoningLevel.High }));
         Assert.Equal(0, handler.Calls);
     }
 

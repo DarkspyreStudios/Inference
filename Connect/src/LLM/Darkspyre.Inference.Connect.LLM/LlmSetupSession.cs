@@ -169,7 +169,10 @@ public sealed class LlmSetupSession : InferenceSetupSession<LlmSetupChanges>
             Override("model-listing", "Model listing", current.SupportsModelListing, (value, selection) => value with { SupportsModelListing = selection }),
             Override("json-schema", "JSON schema output", current.SupportsJsonSchema, (value, selection) => value with { SupportsJsonSchema = selection }),
             Override("json-object", "JSON object output", current.SupportsJsonObject, (value, selection) => value with { SupportsJsonObject = selection }),
-            Override("reasoning-effort", "Reasoning effort", current.SupportsReasoningEffort, (value, selection) => value with { SupportsReasoningEffort = selection }),
+            .. Enum.GetValues<Darkspyre.Inference.Common.LLM.LlmReasoningLevel>().Select(level => Override(
+                "reasoning-level-" + level.ToString().ToLowerInvariant(), "Reasoning level: " + level,
+                current.ReasoningLevels?.Contains(level),
+                (value, selection) => value with { ReasoningLevels = WithReasoningLevel(value.ReasoningLevels, level, selection) })),
             Override("temperature", "Temperature", current.SupportsTemperature, (value, selection) => value with { SupportsTemperature = selection }),
             Override("tools", "Tool use", current.SupportsToolUse, (value, selection) => value with { SupportsToolUse = selection }),
             Override("prompt-images", "Prompt images", current.SupportsPromptImages, (value, selection) => value with { SupportsPromptImages = selection }),
@@ -177,6 +180,21 @@ public sealed class LlmSetupSession : InferenceSetupSession<LlmSetupChanges>
             Override("tool-result-images", "Tool-result images", current.SupportsToolResultImages, (value, selection) => value with { SupportsToolResultImages = selection }),
             Override("tool-result-documents", "Tool-result documents", current.SupportsToolResultDocuments, (value, selection) => value with { SupportsToolResultDocuments = selection })
         ], IsAdvanced: true);
+    }
+
+    /// <summary>
+    /// Updates the accepted-level override for one level. An explicit Enabled or Disabled makes the
+    /// override explicit: the endpoint then accepts exactly the enabled levels. Default removes the level,
+    /// and the override returns to the adapter's detection once no level is enabled.
+    /// </summary>
+    private static HashSet<Darkspyre.Inference.Common.LLM.LlmReasoningLevel>? WithReasoningLevel(
+        IReadOnlySet<Darkspyre.Inference.Common.LLM.LlmReasoningLevel>? levels,
+        Darkspyre.Inference.Common.LLM.LlmReasoningLevel level, bool? selection)
+    {
+        HashSet<Darkspyre.Inference.Common.LLM.LlmReasoningLevel> updated = levels is null ? [] : [.. levels];
+        if (selection is true) { updated.Add(level); }
+        else { updated.Remove(level); }
+        return selection is null && updated.Count == 0 ? null : updated;
     }
 
     private void SetAws(LlmAwsCredentials aws)

@@ -154,6 +154,14 @@ build to .NET 11 advances the first component and resets the later components fo
 release (`11.<release>.<minor>`). Immutable releases are never overwritten. The family tag is
 created only after all three packages have passed their gates.
 
+## 11.5.0-rc.1 contract version (not published)
+
+The shared version advances to `11.5.0-rc.1` for the provider-neutral reasoning-level contract
+replacement. Common, Connect, Tensor and UI.Settings remain synchronized. This source-only unit
+includes the complete reasoning implementation and documentation prepared by another worker,
+together with the version update. It does not create packages or publish to NuGet.
+Source is hosted privately at `https://github.com/DarkspyreStudios/Inference` on `origin/master`.
+
 ## Published 11.4.1-rc.1 Tensor update (2026-09-23)
 
 The user authorized a synchronized compatible-tweak release of all four packages. It includes
@@ -373,6 +381,7 @@ was created because this repository has no configured Git remote.
 | Host-placed Settings editor technical design and release validation | `docs/settings.ui.tech-design.md` |
 | Completed provider setup and audio technical design | `docs/provider-setup-and-audio-technical-design.md` |
 | Laya decision engine on ONNX Runtime: design, artifact contract and implementation record | `docs/laya-onnx-runtime.tech-design.md` |
+| Provider-neutral LLM reasoning level: design and implementation record | `docs/llm-reasoning-level.tech-design.md` |
 | Tensor user-selected file/folder/URL locations, compatibility and explicit import | `docs/tensor-model-locations.tech-design.md` |
 | Detailed implementation work | Jira tickets; project and parent TBD |
 

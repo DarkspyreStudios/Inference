@@ -40,6 +40,29 @@ public sealed class QwenLlmInferenceTests
         Assert.True(capabilities.SupportsJsonSchema);
         Assert.False(capabilities.SupportsToolUse);
         Assert.False(capabilities.SupportsPromptImages);
+        Assert.Equal([LlmReasoningLevel.None], capabilities.ReasoningLevels);
+        Assert.False(capabilities.SupportsReasoning);
+    }
+
+    [Fact]
+    public async Task ReasoningAboveNoneFailsBeforeModelMaterialization()
+    {
+        await using var inference = new QwenLlmInference(new MissingPackManager());
+        var request = new LlmInferenceRequest
+        {
+            ModelId = TensorLlmModels.Qwen3FourBillionQ4Km.Key.ModelId,
+            Messages = [new LlmMessage("user", "hello")],
+            ReasoningLevel = LlmReasoningLevel.Low
+        };
+
+        InferenceException exception = await Assert.ThrowsAsync<InferenceException>(async () =>
+        {
+            await foreach (LlmStreamEvent _ in inference.StreamAsync(request))
+            {
+            }
+        });
+
+        Assert.Equal(InferenceFailureCode.InvalidRequest, exception.Code);
     }
 
     [Fact]

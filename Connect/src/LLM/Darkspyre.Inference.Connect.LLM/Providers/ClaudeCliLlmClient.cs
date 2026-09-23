@@ -4,6 +4,8 @@ using System.Text;
 using System.Text.Json;
 using Darkspyre.Inference.Connect.LLM.Internal;
 
+using LlmReasoningLevel = Darkspyre.Inference.Common.LLM.LlmReasoningLevel;
+
 namespace Darkspyre.Inference.Connect.LLM.Providers;
 
 /// <summary>Chat-style adapter over the separately authenticated official Claude CLI.</summary>
@@ -27,6 +29,11 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
 
     public override LlmProviderDefinition ProviderDefinition => ProviderDefinitions.ClaudeSubscription;
 
+    /// <summary>The effort levels the Claude CLI accepts, for its chat and agent lanes.</summary>
+    internal static readonly IReadOnlySet<LlmReasoningLevel> ReasoningLevels = LlmReasoningEffort.Levels(
+        LlmReasoningLevel.Low, LlmReasoningLevel.Medium, LlmReasoningLevel.High,
+        LlmReasoningLevel.ExtraHigh, LlmReasoningLevel.Maximum);
+
     protected override LlmProviderCapabilities DefaultCapabilities { get; } = new()
     {
         SupportsStreaming = true,
@@ -35,7 +42,7 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
         SupportsAccountUsage = true,
         SupportsJsonSchema = true,
         SupportsJsonObject = false,
-        SupportsReasoningEffort = true,
+        ReasoningLevels = ReasoningLevels,
         SupportsTemperature = false,
         SupportsToolUse = false,
         SupportsAgentSessions = true,
@@ -99,9 +106,9 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
             "--system-prompt", ClaudeSystemPrompt,
             "--model", request.ModelId
         };
-        if (!string.IsNullOrWhiteSpace(request.ReasoningEffort))
+        if (request.ReasoningLevel is { } level)
         {
-            arguments.AddRange(["--effort", request.ReasoningEffort.Trim().ToLowerInvariant()]);
+            arguments.AddRange(["--effort", LlmReasoningEffort.Word(level)]);
         }
         if (enforcement == LlmStructuredOutputEnforcement.ProviderJsonSchema)
         {
@@ -429,22 +436,6 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
         if (request.ProviderOptions.Count > 0)
         {
             throw new NotSupportedException("Claude CLI request provider options are not supported.");
-        }
-        if (string.IsNullOrWhiteSpace(request.ReasoningEffort))
-        {
-            return;
-        }
-
-        string effort = request.ReasoningEffort.Trim();
-        if (!string.Equals(effort, "low", StringComparison.OrdinalIgnoreCase)
-            && !string.Equals(effort, "medium", StringComparison.OrdinalIgnoreCase)
-            && !string.Equals(effort, "high", StringComparison.OrdinalIgnoreCase)
-            && !string.Equals(effort, "xhigh", StringComparison.OrdinalIgnoreCase)
-            && !string.Equals(effort, "max", StringComparison.OrdinalIgnoreCase))
-        {
-            throw new ArgumentException(
-                "Claude CLI reasoning effort must be low, medium, high, xhigh, or max.",
-                nameof(request));
         }
     }
 

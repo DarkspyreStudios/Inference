@@ -194,7 +194,8 @@ public sealed record LlmAgentTurnRequest
 
     public string? ModelId { get; init; }
 
-    public string? ReasoningEffort { get; init; }
+    /// <summary>The requested reasoning level; null leaves the provider's default in place.</summary>
+    public Darkspyre.Inference.Common.LLM.LlmReasoningLevel? ReasoningLevel { get; init; }
 
     public JsonElement? OutputSchema { get; init; }
 }

@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json;
 using Darkspyre.Inference.Connect.LLM;
 using Darkspyre.Inference.Connect.LLM.Providers;
+using LlmReasoningLevel = Darkspyre.Inference.Common.LLM.LlmReasoningLevel;
 
 namespace Darkspyre.Inference.Connect.LLM.Tests;
 
@@ -68,7 +69,7 @@ public sealed class LlmTransportTests
             Messages = [new LlmChatMessage("user", "Answer yes.")],
             Temperature = 0.4,
             MaxOutputTokens = 100,
-            ReasoningEffort = "low",
+            ReasoningLevel = LlmReasoningLevel.Low,
             StructuredOutput = new LlmStructuredOutputRequest
             {
                 Name = "answer",
@@ -222,7 +223,7 @@ public sealed class LlmTransportTests
             CapabilityOverrides = new LlmCapabilityOverrides
             {
                 SupportsJsonSchema = true,
-                SupportsReasoningEffort = true
+                ReasoningLevels = new HashSet<LlmReasoningLevel> { LlmReasoningLevel.Low, LlmReasoningLevel.Medium, LlmReasoningLevel.High }
             }
         };
         var request = new LlmChatRequest
@@ -230,7 +231,7 @@ public sealed class LlmTransportTests
             ModelId = "router/model",
             Instructions = "Use JSON.",
             Messages = [new LlmChatMessage("user", "Return three.")],
-            ReasoningEffort = "medium",
+            ReasoningLevel = LlmReasoningLevel.Medium,
             StructuredOutput = new LlmStructuredOutputRequest
             {
                 Name = "value",
@@ -565,7 +566,7 @@ public sealed class LlmTransportTests
             {
                 ["reasoning-model"] = new LlmCapabilityOverrides
                 {
-                    SupportsReasoningEffort = true,
+                    ReasoningLevels = new HashSet<LlmReasoningLevel> { LlmReasoningLevel.Low, LlmReasoningLevel.Medium, LlmReasoningLevel.High },
                     SupportsTemperature = false
                 }
             }
@@ -575,10 +576,145 @@ public sealed class LlmTransportTests
         LlmProviderCapabilities modelCapabilities = client.GetCapabilities(connection, "reasoning-model");
 
         Assert.True(connectionCapabilities.SupportsJsonObject);
-        Assert.False(connectionCapabilities.SupportsReasoningEffort);
+        Assert.False(connectionCapabilities.SupportsReasoning);
         Assert.True(modelCapabilities.SupportsJsonObject);
-        Assert.True(modelCapabilities.SupportsReasoningEffort);
+        Assert.True(modelCapabilities.SupportsReasoning);
         Assert.False(modelCapabilities.SupportsTemperature);
+    }
+
+    private const string ResponsesReadyEvents = """
+        data: {"type":"response.completed","response":{"id":"resp_ok","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}]}}
+
+        """;
+
+    [Theory]
+    [InlineData(LlmReasoningLevel.Minimal, "minimal")]
+    [InlineData(LlmReasoningLevel.Low, "low")]
+    [InlineData(LlmReasoningLevel.Medium, "medium")]
+    [InlineData(LlmReasoningLevel.High, "high")]
+    [InlineData(LlmReasoningLevel.ExtraHigh, "xhigh")]
+    public async Task ResponsesSendsTheEffortWordForEachOfferedLevel(LlmReasoningLevel level, string effort)
+    {
+        var handler = new RecordingHttpMessageHandler(_ => SseResponse(ResponsesReadyEvents));
+        using var http = new HttpClient(handler);
+        var client = new OpenAiResponsesLlmClient(http);
+
+        await ReadAllAsync(client.StreamAsync(ResponsesConnection(), new LlmChatRequest
+        {
+            ModelId = "gpt-test",
+            Messages = [new LlmChatMessage("user", "Ready?")],
+            ReasoningLevel = level
+        }));
+
+        using JsonDocument body = JsonDocument.Parse(handler.Body!);
+        Assert.Equal(effort, body.RootElement.GetProperty("reasoning").GetProperty("effort").GetString());
+    }
+
+    [Fact]
+    public async Task ResponsesRejectsAnUnofferedLevelBeforeCallingTheProvider()
+    {
+        var handler = new RecordingHttpMessageHandler(_ => SseResponse(ResponsesReadyEvents));
+        using var http = new HttpClient(handler);
+        var client = new OpenAiResponsesLlmClient(http);
+
+        var error = await Assert.ThrowsAsync<Darkspyre.Inference.Common.InferenceException>(() => ReadAllAsync(
+            client.StreamAsync(ResponsesConnection(), new LlmChatRequest
+            {
+                ModelId = "gpt-test",
+                Messages = [new LlmChatMessage("user", "Ready?")],
+                ReasoningLevel = LlmReasoningLevel.Maximum
+            })));
+
+        Assert.Equal(Darkspyre.Inference.Common.InferenceFailureCode.InvalidRequest, error.Code);
+        Assert.Equal(0, handler.CallCount);
+    }
+
+    [Fact]
+    public void CompatibleChatOffersReasoningLevelsOnlyFromItsOverride()
+    {
+        using var http = new HttpClient(new RecordingHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)));
+        var client = new OpenAiCompatibleChatLlmClient(http);
+        LlmConnection overridden = CompatibleConnection() with
+        {
+            CapabilityOverrides = new LlmCapabilityOverrides
+            {
+                ReasoningLevels = new HashSet<LlmReasoningLevel> { LlmReasoningLevel.Low, LlmReasoningLevel.High }
+            }
+        };
+
+        Assert.False(client.GetCapabilities(CompatibleConnection()).SupportsReasoning);
+        Assert.Equal(
+            new HashSet<LlmReasoningLevel> { LlmReasoningLevel.Low, LlmReasoningLevel.High },
+            client.GetCapabilities(overridden).ReasoningLevels);
+    }
+
+    [Theory]
+    [InlineData("claude-opus-4-7", LlmReasoningLevel.None, """{"type":"disabled"}""", null, 8192)]
+    [InlineData("claude-opus-4-7", LlmReasoningLevel.ExtraHigh, """{"type":"adaptive"}""", "xhigh", 8192)]
+    [InlineData("claude-opus-5", LlmReasoningLevel.None, """{"type":"disabled"}""", null, 8192)]
+    [InlineData("claude-fable-5-1", LlmReasoningLevel.Low, """{"type":"adaptive"}""", "low", 8192)]
+    [InlineData("claude-opus-4-6", LlmReasoningLevel.None, null, null, 8192)]
+    [InlineData("claude-opus-4-6", LlmReasoningLevel.Maximum, """{"type":"adaptive"}""", "max", 8192)]
+    [InlineData("claude-opus-4-5", LlmReasoningLevel.High, null, "high", 8192)]
+    [InlineData("claude-haiku-4-5", LlmReasoningLevel.None, null, null, 8192)]
+    [InlineData("claude-haiku-4-5", LlmReasoningLevel.Medium, """{"type":"enabled","budget_tokens":4096}""", null, 12288)]
+    public async Task AnthropicMapsEachLevelToTheModelsControl(
+        string model, LlmReasoningLevel level, string? thinking, string? effort, int maxTokens)
+    {
+        var handler = new RecordingHttpMessageHandler(_ => SseResponse(AnthropicReadyEvents));
+        using var http = new HttpClient(handler);
+        var client = new AnthropicMessagesLlmClient(http);
+
+        await ReadAllAsync(client.StreamAsync(AnthropicConnection(), AnthropicRequest() with
+        {
+            ModelId = model,
+            ReasoningLevel = level
+        }));
+
+        using JsonDocument body = JsonDocument.Parse(handler.Body!);
+        JsonElement root = body.RootElement;
+        Assert.Equal(thinking, root.TryGetProperty("thinking", out JsonElement value) ? value.GetRawText() : null);
+        Assert.Equal(effort, root.TryGetProperty("output_config", out JsonElement config)
+            ? config.GetProperty("effort").GetString() : null);
+        Assert.Equal(maxTokens, root.GetProperty("max_tokens").GetInt32());
+    }
+
+    [Theory]
+    [InlineData("claude-fable-5-1", LlmReasoningLevel.None)]
+    [InlineData("claude-opus-5-5", LlmReasoningLevel.None)]
+    [InlineData("claude-opus-4-6", LlmReasoningLevel.ExtraHigh)]
+    [InlineData("claude-opus-4-5", LlmReasoningLevel.Maximum)]
+    [InlineData("claude-opus-4-7", LlmReasoningLevel.Minimal)]
+    [InlineData("claude-test", LlmReasoningLevel.Low)]
+    public async Task AnthropicRejectsALevelTheModelDoesNotOffer(string model, LlmReasoningLevel level)
+    {
+        var handler = new RecordingHttpMessageHandler(_ => SseResponse(AnthropicReadyEvents));
+        using var http = new HttpClient(handler);
+        var client = new AnthropicMessagesLlmClient(http);
+
+        var error = await Assert.ThrowsAsync<Darkspyre.Inference.Common.InferenceException>(() => ReadAllAsync(
+            client.StreamAsync(AnthropicConnection(), AnthropicRequest() with { ModelId = model, ReasoningLevel = level })));
+
+        Assert.Equal(Darkspyre.Inference.Common.InferenceFailureCode.InvalidRequest, error.Code);
+        Assert.Equal(0, handler.CallCount);
+    }
+
+    [Fact]
+    public void AnthropicUsesAnExplicitLevelOverrideInPlaceOfItsModelTable()
+    {
+        using var http = new HttpClient(new RecordingHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)));
+        var client = new AnthropicMessagesLlmClient(http);
+        LlmConnection connection = AnthropicConnection() with
+        {
+            ModelCapabilityOverrides = new Dictionary<string, LlmCapabilityOverrides>
+            {
+                ["claude-opus-4-7"] = new() { ReasoningLevels = new HashSet<LlmReasoningLevel> { LlmReasoningLevel.High } }
+            }
+        };
+
+        Assert.Equal([LlmReasoningLevel.High], client.GetCapabilities(connection, "claude-opus-4-7").ReasoningLevels);
+        Assert.Contains(LlmReasoningLevel.ExtraHigh, client.GetCapabilities(connection, "claude-sonnet-5").ReasoningLevels);
+        Assert.Empty(client.GetCapabilities(connection, "claude-test").ReasoningLevels);
     }
 
     private static LlmConnection ResponsesConnection() => new()

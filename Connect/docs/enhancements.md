@@ -497,7 +497,7 @@ is retained and included in the next budget check; if it invalidates the replace
 the session stays paused. Interrupt discards undelivered steering, cancels the logical run and clears
 its override. Calls targeting old turn IDs reject without affecting newer work.
 
-Per-run model, instructions, reasoning effort, output schema and tool definitions are fixed across
+Per-run model, instructions, reasoning level, output schema and tool definitions are fixed across
 all model iterations and pauses. A new run may use different options after context compatibility
 validation. The per-turn instructions section below defines null/empty/replacement behavior.
 

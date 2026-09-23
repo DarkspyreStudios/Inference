@@ -137,7 +137,7 @@ of exactly-once recovery. Queued steering may make a replacement insufficient; a
 can be corrected against the same live pause. The engine, not a supplied `replacement.Revision`,
 chooses the new revision.
 
-Instructions, model, reasoning effort, schemas, tool definitions, usage and iteration counts stay
+Instructions, model, reasoning level, schemas, tool definitions, usage and iteration counts stay
 fixed across the logical run's pauses. `Instructions = null` uses the session base, `""` clears it
 for this run, and nonempty replaces it. Completion, failure, interruption or cancellation ends that
 override. Agent DS owns plugin instruction composition; Darkspyre.Inference.Connect.LLM does not persist it as user text.

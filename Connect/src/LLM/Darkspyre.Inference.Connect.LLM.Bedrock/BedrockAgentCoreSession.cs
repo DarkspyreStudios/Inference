@@ -533,11 +533,10 @@ internal sealed class BedrockAgentCoreSession : ILlmAgentSession
             supportsImages: false,
             supportsDocuments: false,
             nameof(request));
-        if (!string.IsNullOrWhiteSpace(request.ReasoningEffort))
-        {
-            throw new NotSupportedException(
-                "AgentCore Harness does not expose provider-neutral reasoning effort control.");
-        }
+        // AgentCore Harness exposes no reasoning control, so it accepts no level.
+        Darkspyre.Inference.Connect.LLM.Providers.LlmReasoningEffort.Validate(
+            request.ReasoningLevel,
+            System.Collections.Frozen.FrozenSet<Darkspyre.Inference.Common.LLM.LlmReasoningLevel>.Empty);
         if (request.OutputSchema is not null)
         {
             throw new NotSupportedException(
