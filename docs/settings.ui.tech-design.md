@@ -3,7 +3,7 @@
 Date: 2026-09-22
 
 Status: **Implementation authorized on 2026-09-22; build, test and coordinated private publication
-authorized on 2026-09-23.** The approved correction release is 11.3.1-rc.1, retaining the .NET 11 RC
+authorized on 2026-09-23.** The published correction release is 11.3.1-rc.1, retaining the .NET 11 RC
 dependency. Consuming-host migration remains separate.
 
 ## 1. Scope and ownership
@@ -252,8 +252,8 @@ The editor uses labeled controls, associated help/issues, keyboard-operable wiza
 controls, announced progress and status changes, and reduced-motion-safe transitions. If a host
 chooses a dialog, that host owns the focus trap, initial focus, Escape/backdrop behavior, dirty
 close confirmation, and focus restoration. UI.Settings exposes the state needed for those host
-decisions but does not impose a dialog lifecycle. Common currently has no reliable draft-dirty
-flag in the published 11.3.0-rc.1 archive; the approved source correction adds `Snapshot.IsDirty`.
+decisions but does not impose a dialog lifecycle. Common supplies reliable draft dirty state through
+`Snapshot.IsDirty` starting in 11.3.1-rc.1; this signal was absent in 11.3.0-rc.1.
 Hosts using the corrected editor use `State.HasUnsavedChanges` for close confirmation, and
 `State.CommitOutcomeUncertain` to require readback. Status-only updates do not trigger discard
 prompts, and invalid visible input cannot be lost merely because it never entered the typed draft.
@@ -365,3 +365,18 @@ at 1440×1000 and 390×844 using light inline and dark host-framed layouts; no h
 was observed and numeric labels/error presentation and keyboard focus were checked. The package
 verifier compiles. Archive creation/inspection was deferred in the implementation unit and is now
 authorized for the coordinated 11.3.1-rc.1 release.
+
+## 13. Correction release validation (2026-09-23)
+
+All four 11.3.1-rc.1 packages are published privately from release source
+`e2b4daedd8a96e60c986e7ea51a653de7cb8d546`, tagged locally as `v11.3.1-rc.1`. Authenticated restores,
+zero-warning Debug/Release builds, the above test totals, formatting and transitive dependency audits
+pass. Archive verification confirms exact `[11.3.1-rc.1]` Common dependencies, source identity,
+owned DLL/XML boundaries, UI static assets and the required Lumeo notice. No sibling or third-party
+DLLs/native libraries are bundled into these packages.
+
+A fresh four-PackageReference consumer passes before publication and again against the public/private
+feeds with an empty package cache and no HTTP cache. It loads the new Settings types and provider
+surfaces, initializes Whisper through its transitive public runtime dependency, and verifies the
+release source identity. All four downloaded archives match the local release files byte-for-byte;
+GitHub readback confirms private visibility. No application was migrated and Lumeo remains unmodified.

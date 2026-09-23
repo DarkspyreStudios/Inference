@@ -4,22 +4,22 @@ Date: 2026-09-23
 
 Consumers: DarkspyreCE Desktop and Agent-DS, through the shared `Darkspyre.Inference.UI.Settings` library
 
-Current publication: synchronized Common / Connect / Tensor / UI.Settings NuGet **11.3.0-rc.1**,
-private DarkspyreStudios feed, release source `1e431c5`. Historical baseline: three-package **11.2.0**,
+Current publication: synchronized Common / Connect / Tensor / UI.Settings NuGet **11.3.1-rc.1**,
+private DarkspyreStudios feed, release source `e2b4dae`. Historical baseline: three-package **11.2.0**,
 release source `83c1ac3`.
 
-Status: **All eight approved runtime/library rows are implemented and published in 11.3.0-rc.1.
+Status: **All eight approved runtime/library rows are implemented and published in 11.3.1-rc.1.
 These changes are not in the historical 11.2.0 packages.** The approved authority and implementation record are in
 [the provider setup and audio technical design](provider-setup-and-audio-technical-design.md).
 UI surfaces and consumer integration belong to their separate work; this report does not certify them.
 
-Post-release corrections are approved for **11.3.1-rc.1**, not in the published 11.3.0-rc.1 archives:
+Settings corrections are included in **11.3.1-rc.1**, not in the previous 11.3.0-rc.1 archives:
 provider-owned dirty state and uncertain-commit state, snapshot-owned authentication interactions,
 attempt-scoped one-way callback input, explicit choice capabilities and decimal step metadata.
 UI.Settings consumes these with a local-input Save gate, latest-request choice loading, compact
 bounded selects and an owned exact numeric control. All Connect/Tensor setup implementations are
-updated together; application integration remains separate. The user authorized publishing all four
-packages together at the new minor version. See
+updated together; application integration remains separate. All four packages were published and
+verified with an empty-cache feed-only consumer. See
 [the UI correction record](settings.ui.tech-design.md#12-post-release-settings-corrections-2026-09-23).
 
 ## Shared UI workspace and library
@@ -33,7 +33,7 @@ The workspace name deliberately covers more than Settings so other genuinely sha
 libraries can be added later. Settings is the first library; no additional libraries are presently
 specified. It is not a feature folder inside CE, Agent-DS, Connect, or Tensor.
 
-The shared library consumes the **published 11.3.0-rc.1 metadata and operation contracts
+The shared library consumes the **published 11.3.1-rc.1 metadata and operation contracts
 of the Connect and Tensor objects**. The current table below reports that source implementation;
 the historical 11.2.0 inventory after it records why those contracts were needed. Do not substitute
 host-specific forms or a second local metadata model for the provider-owned contracts.
@@ -79,12 +79,12 @@ consumer-specific or UI-library substitute.
 
 ## Summary by capability and implementation
 
-This table describes the completed **11.3.0-rc.1 runtime/library release**, not the historical baseline. “Complete” is
+This table describes the completed **11.3.1-rc.1 runtime/library release**, not the historical baseline. “Complete” is
 bounded by the approved initial implementations and the qualifications below.
 
 | Area | Current library/settings data | Acceptance evidence |
 |---|---|---|
-| Common contracts | Complete: task grouping; typed fields, sections/steps, dependent choices, validation, actions/interactions, protected secret edits, versioned host commits and distinct status observations | [Shared contract tests](../Common/tests/Darkspyre.Inference.Common.Tests/SetupSessionTests.cs) and [provider-independent example renderer](../Common/examples/Darkspyre.Inference.Setup.Examples/SetupEditorExample.cs) |
+| Common contracts | Complete: task grouping; typed fields, sections/steps, explicit choice capabilities, dependent choices, validation, current actions/interactions, draft dirty state, protected secret edits, versioned host commits and distinct status observations | [Shared contract tests](../Common/tests/Darkspyre.Inference.Common.Tests/SetupSessionTests.cs) and [provider-independent example renderer](../Common/examples/Darkspyre.Inference.Setup.Examples/SetupEditorExample.cs) |
 | Connect Text | Complete: all eight existing providers have real create/edit setup, field/choice metadata, auth/prerequisite checks and explicit tests; AWS bindings remain in Bedrock | [All-eight create/edit conformance](../Connect/tests/LLM/Darkspyre.Inference.Connect.LLM.Bedrock.Tests/BedrockRegistrationTests.cs), [setup/auth tests](../Connect/tests/LLM/Darkspyre.Inference.Connect.LLM.Tests/LlmSetupSessionTests.cs) and existing provider protocol suites |
 | Connect Image / ComfyUI | Complete: endpoint, timeout, protected headers, host workflow choices, validation, editing and separate health/generation actions; granular durable-job transport preserved | [Setup tests](../Connect/tests/Image/Darkspyre.Inference.Connect.Image.Tests/ImageSetupTests.cs) and [real transport protocol tests](../Connect/tests/Image/Darkspyre.Inference.Connect.Image.Tests/ComfyUiImageTransportTests.cs) |
 | Tensor Text / Qwen | Complete: setup/editing, bounded remote Qwen3 GGUF inspection, complete single/split-pack resolution, immutable selection, explicit installation/lifecycle and backend/readiness observations | [Resolver and real setup tests](../Tensor/tests/LLM/Darkspyre.Inference.Tensor.LLM.Qwen.Tests/QwenModelResolverTests.cs), [selected-pack/edit tests](../Tensor/tests/LLM/Darkspyre.Inference.Tensor.LLM.Qwen.Tests/QwenPackSelectionTests.cs) and [backend tests](../Tensor/tests/LLM/Darkspyre.Inference.Tensor.LLM.Qwen.Tests/QwenBackendProbeTests.cs) |

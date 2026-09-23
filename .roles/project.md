@@ -18,7 +18,7 @@ specifications.
 | Version line | `<net>.<release>.<minor>`: .NET generation, breaking-contract release, compatible tweak/fix |
 | Release model | `Common`, `Connect`, `Tensor`, and `UI.Settings` publish together at the one version declared in `/Directory.Build.props` |
 | Primary branch | `master` |
-| Lifecycle stage | Four-package `11.3.0-rc.1` published privately; .NET 11 RC dependencies |
+| Lifecycle stage | Four-package `11.3.1-rc.1` published privately; .NET 11 RC dependencies |
 | Jira project and parent | TBD |
 | Jira subject label | TBD |
 
@@ -154,15 +154,32 @@ build to .NET 11 advances the first component and resets the later components fo
 release (`11.<release>.<minor>`). Immutable releases are never overwritten. The family tag is
 created only after all three packages have passed their gates.
 
-## Authorized 11.3.1-rc.1 correction release (2026-09-23)
+## Published 11.3.1-rc.1 correction release (2026-09-23)
 
 The user approved the Settings edits and requested a minor bump and private publication of all four
 packages. `/Directory.Build.props` advances to `11.3.1-rc.1`, following the user-defined
 `<net>.<release>.<minor>` scheme and retaining the .NET 11 RC prerequisite suffix. No third-party
-dependency version changes. Connect, Tensor and UI.Settings must reference Common at exactly
-`[11.3.1-rc.1]`, never embed it or each other's assemblies. Release verification includes all three
-solution gates, archive inspection and a fresh four-package consumer before/after private-feed
-publication. The following implementation record documents the approved fixes.
+dependency version changes. Connect, Tensor and UI.Settings reference Common at exactly
+`[11.3.1-rc.1]`; archive inspection confirms no embedded Common, sibling, third-party or native DLLs.
+UI.Settings contains its Lumeo attribution and static assets. The following implementation record
+documents the approved fixes.
+
+All four packages were published to the private DarkspyreStudios GitHub Packages feed from source
+`e2b4daedd8a96e60c986e7ea51a653de7cb8d546`. Authenticated restores, zero-warning Debug/Release
+builds and all tests pass: Connect 301, Tensor 260 and UI 45 per configuration (shared Common tests
+are included in each total). Formatting checks and transitive vulnerability audits pass. The final
+Release binaries were rebuilt and retested after the release-source commit, then all four archives
+passed `eng/VerifyPackages`, including exact dependencies and source identity.
+
+`eng/VerifyConsumer` passes against local release archives and again with a new empty package cache,
+no HTTP cache and only normal public/private NuGet sources. It loads the new Settings contracts and
+provider surfaces at the release source identity, and initializes Whisper's public native runtime
+without a direct Whisper package reference. All four feed-downloaded archives are byte-identical to
+the verified local files. GitHub API readback confirms each version and private visibility. No model
+weights, paid calls or consumer-application migrations are part of the release.
+
+Immutable local tag `v11.3.1-rc.1` points to the release source. This repository still has no configured
+Git remote, so no source or tag was pushed. Earlier published versions remain unchanged.
 
 ## Settings corrections implementation (2026-09-23)
 
@@ -184,7 +201,7 @@ layout review uses rendered component fixtures under light inline and dark frame
 application certification. Verification requires no live provider calls or model weights.
 
 The initial implementation kept `11.3.0-rc.1` and created no package artifacts or publications;
-those published archives do not contain these fixes. Publication is subsequently authorized above. See
+those published archives do not contain these fixes. The subsequent publication is recorded above. See
 [`docs/settings.ui.tech-design.md`](../docs/settings.ui.tech-design.md#12-post-release-settings-corrections-2026-09-23).
 
 ## Published 11.3.0-rc.1 (2026-09-23)
