@@ -4,8 +4,9 @@ Date: 2026-09-23
 
 Consumers: DarkspyreCE Desktop and Agent-DS, through the shared `Darkspyre.Inference.UI.Settings` library
 
-Current publication: synchronized Common / Connect / Tensor / UI.Settings NuGet **11.4.0-rc.1**,
-private DarkspyreStudios feed, release source `4b66576`. Historical baseline: three-package **11.2.0**,
+Current publication: synchronized Common / Connect / Tensor / UI.Settings NuGet **11.4.1-rc.1**,
+private DarkspyreStudios feed, release source `eee7c30`. This compatible Laya Core ML execution
+update retains the 11.4.0-rc.1 settings contracts. Historical baseline: three-package **11.2.0**,
 release source `83c1ac3`.
 
 Status: **All eight approved runtime/library rows are implemented and published in 11.4.0-rc.1.

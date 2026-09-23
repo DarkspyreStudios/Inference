@@ -18,7 +18,7 @@ specifications.
 | Version line | `<net>.<release>.<minor>`: .NET generation, breaking-contract release, compatible tweak/fix |
 | Release model | `Common`, `Connect`, `Tensor`, and `UI.Settings` publish together at the one version declared in `/Directory.Build.props` |
 | Primary branch | `master` |
-| Lifecycle stage | Four-package `11.4.0-rc.1` published privately; .NET 11 RC dependencies |
+| Lifecycle stage | Four-package `11.4.1-rc.1` published privately; .NET 11 RC dependencies |
 | Jira project and parent | TBD |
 | Jira subject label | TBD |
 
@@ -154,13 +154,25 @@ build to .NET 11 advances the first component and resets the later components fo
 release (`11.<release>.<minor>`). Immutable releases are never overwritten. The family tag is
 created only after all three packages have passed their gates.
 
-## 11.4.1-rc.1 release preparation (2026-09-23)
+## Published 11.4.1-rc.1 Tensor update (2026-09-23)
 
 The user authorized a synchronized compatible-tweak release of all four packages. It includes
 `5ba23f9`: Laya Core ML uses `MLComputeUnits=CPUAndGPU`, excluding Neural Engine preparation.
 The recorded acceptance experiment and no-cache decision remain in the Laya technical design.
-No public contract or dependency version changes. Publication requires the normal authenticated
-restore, build/test, format/audit, archive and package-only consumer checks.
+No public contract or dependency version changes. All four packages were published to the private
+DarkspyreStudios feed from `eee7c30176600b980585c20d172fcbbb7b112d9b`.
+
+Authenticated restores, zero-warning Debug/Release builds and tests pass: Connect 301, Tensor 291
+and UI 49 per configuration (24 shared Common tests appear in each total). All formatting checks
+and transitive vulnerability audits pass. Archive verification confirms owned assemblies only,
+exact `[11.4.1-rc.1]` Common dependencies and no embedded sibling or third-party/native binaries.
+The package-only consumer passes against local archives and again against normal feeds with an
+empty package cache and no HTTP cache, including Whisper native runtime initialization. All four
+downloaded archives are byte-identical to the verified local files; GitHub readback confirms the
+version and private visibility. The full-weight acceptance experiment was not rerun for publication.
+
+Local immutable tag `v11.4.1-rc.1` points to the release source. No Git remote is configured, so no
+source/tag push occurred. Existing unrelated untracked root README and GitHub files were excluded.
 
 ## Published 11.4.0-rc.1 contract release (2026-09-23)
 
