@@ -96,6 +96,14 @@ local-only dependencies, missing owned assemblies/documentation and mismatched C
 Whisper runtime build assets flow through its public NuGet dependency (`PrivateAssets="none"`);
 Tensor marks the imported native files non-packable without disabling consumer output copying.
 
+`eng/VerifyConsumer` is a non-packable release smoke test with four PackageReferences and no source
+project references. It inherits the shared release version and checks loaded assembly source identities,
+the Settings correction contracts and Whisper's public native runtime. Before publication, restore it
+against `eng/VerifyConsumer/NuGet.Preflight.Config` (local Inference archives plus normal dependency
+feeds). After publication, restore against root `NuGet.Config` with a new empty package cache and
+`--no-http-cache`; build/run with `--no-restore` and pass the family version and release source commit.
+Private-feed credentials remain process-scoped. This check does not load weights or call providers.
+
 Package creation is a publish-stage action. During refactoring, do not run `dotnet pack` or create
 `.nupkg` artifacts unless the user explicitly says to publish. Ordinary verification stops at
 restore, zero-warning build, tests, format verification, and the dependency vulnerability audit.

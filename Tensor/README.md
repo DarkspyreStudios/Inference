@@ -10,7 +10,7 @@ filesystem default and still exposes only `IPersistenceStore`. TensorSharp uses 
 `FileStream` in place and temporarily projects non-file store streams when a native loader needs a
 path.
 
-Assemblies included by Tensor **11.3.0-rc.1**:
+Assemblies included by Tensor **11.3.1-rc.1**:
 
 - `Darkspyre.Inference.Tensor.Common` — the host-controlled model lifecycle, model packs,
   verification, direct-file persistence, and execution coordination.
@@ -148,7 +148,8 @@ the configuration and reconstruct registrations when composing the manager after
 does not perform that unload. Stop remains terminal, and an
 already-cancelled teardown action token reaches the engine as urgency rather than skipping cleanup.
 See the [shared editor example](../Common/examples/Darkspyre.Inference.Setup.Examples/README.md).
-These setup contracts are included in the synchronized 11.3.0-rc.1 package family.
+These setup contracts are included in the synchronized 11.3.1-rc.1 package family, including
+provider-owned dirty state and explicit choice capabilities for the shared Settings editor.
 
 Qwen and Supra now load the definition selected by `LoadAsync(key)`, rather than requiring the
 built-in key. Register complete, immutable definitions in the same manager used by the engine.
@@ -354,7 +355,7 @@ the Audio / SpeechTranscription task without provider-name renderer branches.
 
 ## Package dependency boundary
 
-Tensor depends on **Darkspyre.Inference.Common [11.3.0-rc.1]** and the **Darkspyre.TensorSharp.*
+Tensor depends on **Darkspyre.Inference.Common [11.3.1-rc.1]** and the **Darkspyre.TensorSharp.*
 2.8.6.4** dependency closure through NuGet. None of their DLLs is embedded in Tensor. The TensorSharp
 release includes the named GGUF persistence and bounded metadata inspection changes previously
 validated at fork commit `9b248715`, through the existing GGUF, safetensors and restricted PyTorch

@@ -154,7 +154,17 @@ build to .NET 11 advances the first component and resets the later components fo
 release (`11.<release>.<minor>`). Immutable releases are never overwritten. The family tag is
 created only after all three packages have passed their gates.
 
-## Settings corrections in source (2026-09-23; not published)
+## Authorized 11.3.1-rc.1 correction release (2026-09-23)
+
+The user approved the Settings edits and requested a minor bump and private publication of all four
+packages. `/Directory.Build.props` advances to `11.3.1-rc.1`, following the user-defined
+`<net>.<release>.<minor>` scheme and retaining the .NET 11 RC prerequisite suffix. No third-party
+dependency version changes. Connect, Tensor and UI.Settings must reference Common at exactly
+`[11.3.1-rc.1]`, never embed it or each other's assemblies. Release verification includes all three
+solution gates, archive inspection and a fresh four-package consumer before/after private-feed
+publication. The following implementation record documents the approved fixes.
+
+## Settings corrections implementation (2026-09-23)
 
 The approved five-defect Settings unit adds a local-input Save/Next gate, authoritative snapshot
 authentication interactions, provider-owned draft dirty state, latest-request-wins choice loading,
@@ -173,8 +183,8 @@ layout review uses rendered component fixtures under light inline and dark frame
 1440×1000 and 390×844, including errors, labels and keyboard focus. This is not CE/Agent-DS live
 application certification. Verification requires no live provider calls or model weights.
 
-The shared version remains `11.3.0-rc.1`. No package artifacts or publications are created; the
-published archives below do not contain these fixes. See
+The initial implementation kept `11.3.0-rc.1` and created no package artifacts or publications;
+those published archives do not contain these fixes. Publication is subsequently authorized above. See
 [`docs/settings.ui.tech-design.md`](../docs/settings.ui.tech-design.md#12-post-release-settings-corrections-2026-09-23).
 
 ## Published 11.3.0-rc.1 (2026-09-23)

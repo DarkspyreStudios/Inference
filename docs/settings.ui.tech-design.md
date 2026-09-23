@@ -3,7 +3,7 @@
 Date: 2026-09-22
 
 Status: **Implementation authorized on 2026-09-22; build, test and coordinated private publication
-authorized on 2026-09-23.** The shared family version is 11.3.0-rc.1, retaining the .NET 11 RC
+authorized on 2026-09-23.** The approved correction release is 11.3.1-rc.1, retaining the .NET 11 RC
 dependency. Consuming-host migration remains separate.
 
 ## 1. Scope and ownership
@@ -341,8 +341,9 @@ either application; those integration checks remain separately scoped.
 The user approved implementation of the five reported defects: local-input Save validation,
 authentication interactions/callback retention, reliable dirty-close state, dependent-choice races
 and metadata-driven control selection. The numeric control is library-owned; no Lumeo source or
-fork is changed. This is a source-only unit: the synchronized version stays 11.3.0-rc.1, published
-archives are immutable, and no packages are built or published.
+fork is changed. The initial source-only unit kept version 11.3.0-rc.1 and built/published no
+packages. The user subsequently approved the minor bump and coordinated 11.3.1-rc.1 publication;
+the old archives remain immutable.
 
 Common now supplies dirty/uncertain-commit state, choice capabilities and decimal step. Every
 Connect/Tensor setup implementation supplies the new semantics. UI.Settings owns transient input
@@ -362,4 +363,5 @@ and UI (45, including 24 shared Common tests and 21 component tests) in each con
 All three format checks and transitive vulnerability audits pass. Browser fixtures were reviewed
 at 1440×1000 and 390×844 using light inline and dark host-framed layouts; no horizontal overflow
 was observed and numeric labels/error presentation and keyboard focus were checked. The package
-verifier compiles, but archive creation/inspection is deliberately deferred to an authorized release.
+verifier compiles. Archive creation/inspection was deferred in the implementation unit and is now
+authorized for the coordinated 11.3.1-rc.1 release.

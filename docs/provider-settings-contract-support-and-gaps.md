@@ -13,12 +13,13 @@ These changes are not in the historical 11.2.0 packages.** The approved authorit
 [the provider setup and audio technical design](provider-setup-and-audio-technical-design.md).
 UI surfaces and consumer integration belong to their separate work; this report does not certify them.
 
-Post-release corrections are implemented in source, **not in the published 11.3.0-rc.1 archives**:
+Post-release corrections are approved for **11.3.1-rc.1**, not in the published 11.3.0-rc.1 archives:
 provider-owned dirty state and uncertain-commit state, snapshot-owned authentication interactions,
 attempt-scoped one-way callback input, explicit choice capabilities and decimal step metadata.
 UI.Settings consumes these with a local-input Save gate, latest-request choice loading, compact
 bounded selects and an owned exact numeric control. All Connect/Tensor setup implementations are
-updated together; no application integration or package publication is included. See
+updated together; application integration remains separate. The user authorized publishing all four
+packages together at the new minor version. See
 [the UI correction record](settings.ui.tech-design.md#12-post-release-settings-corrections-2026-09-23).
 
 ## Shared UI workspace and library

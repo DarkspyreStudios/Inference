@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+    <ManagePackageVersionsCentrally>false</ManagePackageVersionsCentrally>
+    <CentralPackageTransitivePinningEnabled>false</CentralPackageTransitivePinningEnabled>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Darkspyre.Inference.Common" Version="[$(Version)]" />
+    <PackageReference Include="Darkspyre.Inference.Connect" Version="[$(Version)]" />
+    <PackageReference Include="Darkspyre.Inference.Tensor" Version="[$(Version)]" />
+    <PackageReference Include="Darkspyre.Inference.UI.Settings" Version="[$(Version)]" />
+  </ItemGroup>
+</Project>

@@ -1,7 +1,7 @@
 # Darkspyre.Inference.UI.Settings
 
-Version **11.3.0-rc.1**, synchronized with Common, Connect and Tensor. Its exact Common NuGet
-dependency is `[11.3.0-rc.1]`; the package does not embed Common, Connect, Tensor or Lumeo DLLs.
+Version **11.3.1-rc.1**, synchronized with Common, Connect and Tensor. Its exact Common NuGet
+dependency is `[11.3.1-rc.1]`; the package does not embed Common, Connect, Tensor or Lumeo DLLs.
 The release-candidate suffix reflects the .NET 11 RC ASP.NET component dependency.
 
 This package provides one host-placed Blazor editor for a provider-owned
@@ -34,7 +34,7 @@ provider-owned fields or actions.
 
 The canonical technical design is [the Settings UI design](../docs/settings.ui.tech-design.md).
 
-## Settings corrections in source (not yet published)
+## Settings corrections in 11.3.1-rc.1
 
 Subscribe to `StateChanged` for a safe `SetupEditorState` (also available as `editor.State`).
 `HasUnsavedChanges` combines provider draft changes with locally invalid/unapplied input and an
