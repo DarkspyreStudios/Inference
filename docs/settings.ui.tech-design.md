@@ -293,5 +293,8 @@ The archive contains only UI.Settings' DLL/XML, scoped CSS/static-web-asset impo
 license. Common is an exact `[11.3.0-rc.1]` NuGet dependency; Connect/Tensor are neither dependencies
 nor embedded assemblies. The prerelease suffix keeps NuGet validation enabled for the required
 ASP.NET 11 RC package. A clean four-package consumer compiles and loads the component type.
+The package was published to the private DarkspyreStudios feed from release source `1e431c5`.
+GitHub API readback confirms private visibility; a fresh feed-only consumer restores the identical
+archive and loads the component at that source identity.
 This package verification does not certify the CE/Agent-DS themed host/browser matrix or migrate
 either application; those integration checks remain separately scoped.

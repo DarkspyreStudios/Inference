@@ -18,7 +18,7 @@ specifications.
 | Version line | `<net>.<release>.<minor>`: .NET generation, breaking-contract release, compatible tweak/fix |
 | Release model | `Common`, `Connect`, `Tensor`, and `UI.Settings` publish together at the one version declared in `/Directory.Build.props` |
 | Primary branch | `master` |
-| Lifecycle stage | Four-package `11.3.0-rc.1` release candidate; .NET 11 RC dependencies |
+| Lifecycle stage | Four-package `11.3.0-rc.1` published privately; .NET 11 RC dependencies |
 | Jira project and parent | TBD |
 | Jira subject label | TBD |
 
@@ -154,7 +154,7 @@ build to .NET 11 advances the first component and resets the later components fo
 release (`11.<release>.<minor>`). Immutable releases are never overwritten. The family tag is
 created only after all three packages have passed their gates.
 
-## 11.3.0-rc.1 release candidate (2026-09-23)
+## Published 11.3.0-rc.1 (2026-09-23)
 
 The user authorized the coordinated four-package private-feed release and the prerelease suffix.
 The breaking release component changes because the former LLM setup input/action types are replaced
@@ -180,7 +180,17 @@ harness to the pinned bUnit/Lumeo APIs. The first Tensor pack exposed Whisper's 
 native files; Tensor now excludes those files and lets its public runtime dependency's build assets
 reach consumers. No warning was suppressed and no third-party binary was copied into Tensor.
 
-Publication readback and final source identity are recorded after all archive/consumer checks pass.
+All four versions were published to the private DarkspyreStudios GitHub Packages feed from release
+source `1e431c5f56aec954ee13e8f58988d0fc833cfccb`. The required nine TensorSharp packages were published
+at 2.8.6.4 from `eb56c0dd354b6307e44d99f607cf240874170748`. GitHub API readback confirms the version
+and private visibility of every package, including the newly created UI.Settings package.
+
+A second fresh consumer restored using only the repository's normal public/private NuGet sources,
+an empty package cache and no HTTP cache. It loaded all tested Inference surfaces at the release
+source identity and initialized Whisper's public native runtime without a direct Whisper reference.
+All thirteen downloaded archives are byte-identical to the verified local release archives.
+Immutable local tags `v11.3.0-rc.1` (Inference) and `v2.8.6.4` (TensorSharp) identify those source
+commits. Inference still has no configured Git remote; no source or tag was pushed by this release.
 
 ## Published 11.2.0 baseline
 
