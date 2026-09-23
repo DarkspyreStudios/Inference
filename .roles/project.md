@@ -18,7 +18,7 @@ specifications.
 | Version line | `<net>.<release>.<minor>`: .NET generation, breaking-contract release, compatible tweak/fix |
 | Release model | `Common`, `Connect`, `Tensor`, and `UI.Settings` publish together at the one version declared in `/Directory.Build.props` |
 | Primary branch | `master` |
-| Lifecycle stage | Four-package `11.3.1-rc.1` published privately; .NET 11 RC dependencies |
+| Lifecycle stage | Four-package `11.4.0-rc.1` published privately; .NET 11 RC dependencies |
 | Jira project and parent | TBD |
 | Jira subject label | TBD |
 
@@ -154,14 +154,26 @@ build to .NET 11 advances the first component and resets the later components fo
 release (`11.<release>.<minor>`). Immutable releases are never overwritten. The family tag is
 created only after all three packages have passed their gates.
 
-## 11.4.0-rc.1 release preparation (2026-09-23)
+## Published 11.4.0-rc.1 contract release (2026-09-23)
 
 The user authorized all four packages at `11.4.0-rc.1`. This advances the breaking-contract
 release component for the typed model-location/resolver/import contracts and includes the completed
 Laya ONNX/Core ML migration. Common remains an exact synchronized NuGet dependency rather than an
 embedded DLL. The release also includes the optional host-owned file/folder picker capability.
-Publication follows authenticated restore, builds/tests, formatting/audit, archive inspection and
-a package-only consumer preflight. A fresh feed-only consumer verifies the published artifacts.
+All four packages were published to the private DarkspyreStudios GitHub Packages feed from source
+`4b6657649d307b7a8764ec894f92870ac30bdabc`. Authenticated restores, zero-warning Debug/Release
+builds and tests pass: Connect 301, Tensor 291 and UI 49 per configuration (24 Common tests are
+included in each subset). Formatting verification and transitive vulnerability audits pass.
+
+`eng/VerifyPackages` passes for all four archives: only owned assemblies/XML, exact
+`[11.4.0-rc.1]` Common dependencies, required UI assets and no embedded sibling, third-party or
+native binaries. The package-only consumer passes against local archives and then normal feeds
+with a new empty package cache and no HTTP cache. It loads the release source identity and
+initializes Whisper's public native runtime. All four downloaded archives are byte-identical to
+the verified local archives. GitHub readback confirms all four versions and private visibility.
+
+Immutable local tag `v11.4.0-rc.1` identifies the release source. No Git remote is configured,
+so source and tag were not pushed. No model downloads, paid calls or consumer migrations were run.
 
 ## Published 11.3.1-rc.1 correction release (2026-09-23)
 

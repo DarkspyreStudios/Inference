@@ -4,17 +4,17 @@ Date: 2026-09-23
 
 Consumers: DarkspyreCE Desktop and Agent-DS, through the shared `Darkspyre.Inference.UI.Settings` library
 
-Current publication: synchronized Common / Connect / Tensor / UI.Settings NuGet **11.3.1-rc.1**,
-private DarkspyreStudios feed, release source `e2b4dae`. Historical baseline: three-package **11.2.0**,
+Current publication: synchronized Common / Connect / Tensor / UI.Settings NuGet **11.4.0-rc.1**,
+private DarkspyreStudios feed, release source `4b66576`. Historical baseline: three-package **11.2.0**,
 release source `83c1ac3`.
 
-Status: **All eight approved runtime/library rows are implemented and published in 11.3.1-rc.1.
+Status: **All eight approved runtime/library rows are implemented and published in 11.4.0-rc.1.
 These changes are not in the historical 11.2.0 packages.** The approved authority and implementation record are in
 [the provider setup and audio technical design](provider-setup-and-audio-technical-design.md).
 UI surfaces and consumer integration belong to their separate work; this report does not certify them.
 
-That publication status describes the initial row coverage. The current source table below also
-includes the subsequently implemented, **not yet published**, Laya ONNX and model-location extensions.
+The initial row coverage shipped in 11.3.1-rc.1. The current table also includes Laya ONNX and
+model-location extensions, now published together in 11.4.0-rc.1.
 
 Settings corrections are included in **11.3.1-rc.1**, not in the previous 11.3.0-rc.1 archives:
 provider-owned dirty state and uncertain-commit state, snapshot-owned authentication interactions,
@@ -36,7 +36,7 @@ The workspace name deliberately covers more than Settings so other genuinely sha
 libraries can be added later. Settings is the first library; no additional libraries are presently
 specified. It is not a feature folder inside CE, Agent-DS, Connect, or Tensor.
 
-The shared library consumes the **published 11.3.1-rc.1 metadata and operation contracts
+The shared library consumes the **published 11.4.0-rc.1 metadata and operation contracts
 of the Connect and Tensor objects**. The current table below reports that source implementation;
 the historical 11.2.0 inventory after it records why those contracts were needed. Do not substitute
 host-specific forms or a second local metadata model for the provider-owned contracts.
@@ -82,8 +82,8 @@ consumer-specific or UI-library substitute.
 
 ## Summary by capability and implementation
 
-This table describes the current source, including **unpublished** Laya ONNX and model-location/import
-extensions after 11.3.1-rc.1. The published version is unchanged. “Complete” is bounded by the
+This table describes the current 11.4.0-rc.1 release, including Laya ONNX and model-location/import
+extensions. “Complete” is bounded by the
 implemented family policies and qualifications below; host application integration is separate.
 
 | Area | Current library/settings data | Acceptance evidence |
@@ -118,7 +118,7 @@ carries its complete definition; explicit Install registers it through the exist
 [Location/import tests](../Tensor/tests/Common/Darkspyre.Inference.Tensor.Common.Tests/TensorLocationImportTests.cs)
 cover explicit unknown-hash acquisition through the host store, missing license, ambiguity, mismatch,
 cancellation, range rejection and settings commit without a live engine. The source extension is
-specified in [the location/import design](tensor-model-locations.tech-design.md), not yet published.
+specified in [the location/import design](tensor-model-locations.tech-design.md), published in 11.4.0-rc.1.
 
 - Qwen supports the current Qwen3 GGUF schema, not every GGUF architecture. Supra supports its
   current Supra2/Flan-T5/VAE pipeline and matching DiT variants, not arbitrary diffusion families.

@@ -2,7 +2,7 @@
 
 Date: 2026-09-23
 
-Status: implementation complete and verified; selected for the authorized 11.4.0-rc.1 release
+Status: implementation complete, verified and published in the private 11.4.0-rc.1 release
 together with the independently completed Laya ONNX change. Publication evidence is recorded in
 `.roles/project.md`.
 
