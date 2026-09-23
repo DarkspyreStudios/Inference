@@ -1,6 +1,6 @@
 # Darkspyre.Inference.Tensor
 
-In-process, first-class .NET inference built on TensorSharp and Whisper.net and distributed as the
+In-process, first-class .NET inference built on TensorSharp, ONNX Runtime and Whisper.net and distributed as the
 `Darkspyre.Inference.Tensor` NuGet. The current package targets .NET 11 and references the synchronized
 `Darkspyre.Inference.Common` NuGet rather than embedding Common. Model weights are installed
 separately through Tensor's
@@ -8,7 +8,8 @@ model-pack manager into the `IPersistenceStore` supplied by the application; con
 or running inference never downloads weights. The optional `TensorDirectFilePersistStore` is the
 filesystem default and still exposes only `IPersistenceStore`. TensorSharp uses a returned
 `FileStream` in place and temporarily projects non-file store streams when a native loader needs a
-path.
+path. Laya reads its model bytes through the store and passes them to ONNX Runtime, so the host
+alone decides where model files live.
 
 Assemblies included by Tensor **11.3.1-rc.1**:
 
@@ -22,10 +23,11 @@ Assemblies included by Tensor **11.3.1-rc.1**:
   CPU or CUDA. It returns PNG bytes through the shared image result. The current model supports
   256x256 output, deterministic seeds, Euler step counts, and classifier-free guidance; it does not
   support negative prompts.
-- `Darkspyre.Inference.Tensor.Decision.Laya` — Laya-family typed decision inference, including the
-  built-in `convaiinnovations/laya-typed-decisions` safetensors checkpoint. Its BPE tokenizer, ModernBERT
-  encoder, typed decision heads, and calibration execute directly through TensorSharp on CPU or
-  CUDA; neither PyTorch nor a Python runtime is used.
+- `Darkspyre.Inference.Tensor.Decision.Laya` — Laya-family typed decision inference over a
+  host-registered checkpoint exported to ONNX. The ModernBERT encoder and typed decision heads run
+  through ONNX Runtime: the Core ML execution provider on macOS, the CPU provider elsewhere. The BPE
+  tokenizer, sequence framing and calibration run in C#. Neither PyTorch nor a Python runtime is
+  used.
 - `Darkspyre.Inference.Tensor.STT` — interchangeable typed PCM transcription and identified-window
   streaming contracts, separate from capture, VAD and playback.
 - `Darkspyre.Inference.Tensor.STT.Whisper` — resident CPU Whisper inference through the public
@@ -33,8 +35,9 @@ Assemblies included by Tensor **11.3.1-rc.1**:
   dependencies, not third-party DLLs embedded by the Darkspyre package.
 
 Implementation names identify the model family they support, not a particular checkpoint or training
-run. Laya is not a general-purpose ModernBERT engine: a custom checkpoint must retain the supported
-Laya tensor schema, encoder dimensions/layers, typed heads and tokenizer conventions. Its sequence
+run. Laya is not a general-purpose ModernBERT engine: a custom checkpoint must retain the Laya
+architecture, typed heads and tokenizer conventions, and its ONNX export must match the graph
+contract in `docs/laya-onnx-runtime.tech-design.md`. Its sequence
 limits and fitted calibration come from the selected pack's agent configuration. Selecting a
 fine-tuned checkpoint does not independently establish calibration accuracy for a new distribution.
 
@@ -124,8 +127,9 @@ in use by native execution.
 `QwenSetup.Definition` and `SupraSetup.Definition` describe providers without constructing an engine,
 opening a store or loading native libraries. Their `CreateSession` methods bind a typed host
 `ISetupCommitTarget<TensorSetupChanges>` and the existing pack manager to the common setup editor.
-The default setup list contains the built-in pack for each engine. Hosts may supply `offeredModels`
-with their own registered compatible packs. Qwen and Supra validate the pack's capability, family,
+For Qwen and Supra, the default setup list contains the engine's built-in pack, and hosts may supply
+`offeredModels` with their own registered compatible packs. Laya has no built-in pack, so its
+`offeredModels` is required. Qwen and Supra validate the pack's capability, family,
 roles and declared backends before offering it. Supply an `ITensorModelSource` through the optional
 `source` argument to enable remote discovery and the engine's real metadata-only resolver.
 
@@ -135,9 +139,10 @@ actions with declared side effects. The supplied instance is optional and remain
 Without an instance, Loaded/Ready remain unknown. A backend name is a supported selection, not proof
 that the backend is available. The explicit **Check backend prerequisites** action records available,
 unavailable or unknown runtime/device prerequisites without installing or loading a model. Qwen uses
-the loader's same Auto policy (GGML Metal on macOS, GGML CUDA elsewhere); Supra/Laya Auto can fall
-back to managed CPU. MLX checks its GPU device, GGML checks its chosen native backend, and direct CUDA
-checks its device/driver. These observations do not guarantee memory allocation or successful model
+the loader's same Auto policy (GGML Metal on macOS, GGML CUDA elsewhere); Supra Auto can fall back
+to managed CPU. Laya Auto selects Core ML on macOS and CPU elsewhere. MLX checks its GPU device, GGML
+checks its chosen native backend, direct CUDA checks its device/driver, and Core ML checks that ONNX
+Runtime offers its Core ML execution provider. These observations do not guarantee memory allocation or successful model
 loading. Edits invalidate the observation, and constructing/browsing a session never runs a probe.
 Loading requires an instance configured for the selected backend;
 the editor does not silently replace instances or interrupt application work.
@@ -245,16 +250,21 @@ for content verification; use `VerifyAsync` before treating weights as verified.
 Laya follows the same lifecycle: construct the engine with the pack manager, choose the model in
 `LoadAsync(key)`, run typed requests, and `UnloadAsync` before loading another compatible pack on
 the **same instance**. Stop is still terminal. The constructor does not pin a checkpoint, and neither
-construction nor a request downloads or loads one implicitly. The built-in pack remains available;
-no source copy or additional engine implementation is required for a compatible fine-tune.
+construction nor a request downloads or loads one implicitly. Tensor ships no built-in Laya pack;
+the host registers the packs it offers. No source copy or additional engine implementation is
+required for a compatible fine-tune.
 
 The host constructs `TensorModelPackDefinition` values using
-`TensorDecisionModels.LayaRuntimeArchitecture`, capability `Decision`, CPU/CUDA backend declarations,
-and the correct per-artifact lengths/hashes. The runtime requires `model`, `tokenizer`, and
-`agent-config` artifact roles. `agent-config` identifies the selected checkpoint's
-`rl_agent_config.json`, read before native allocation. Missing configuration fails compatibility;
-malformed configuration fails Load without retaining model resources. It continues to validate actual tensors/tokenizer data during native loading; the architecture
-label alone is not proof that arbitrary weights will work. `TensorModelDefinitionValidator.Validate`
+`TensorDecisionModels.LayaRuntimeArchitecture`, capability `Decision`, `CoreMl` and/or `Cpu` backend
+declarations, and the correct per-artifact lengths/hashes. A pack that declares `Cuda` fails
+compatibility: ONNX CUDA execution is not yet available. The runtime requires `model` (the ONNX
+graph), `tokenizer`, and `agent-config` artifact roles. `agent-config` identifies the selected
+checkpoint's `rl_agent_config.json`, read before native allocation. Missing configuration fails
+compatibility; malformed configuration fails Load without retaining model resources. Load then
+checks the graph's `laya.*` metadata and fixed input shapes against the configuration's `max_len`
+and fails with `ModelCorrupt` on a mismatch. A request with more options than the graph's option
+slots fails with `InvalidRequest`. The architecture label alone is not proof that arbitrary weights
+will work. `TensorModelDefinitionValidator.Validate`
 is the common metadata validator, also used by the catalog and Laya's family policy.
 
 `max_len` and `head_max_len` control sequence truncation and the head/option budget.
@@ -269,11 +279,11 @@ checkpoint probability parity remains an external acceptance check, not a claim 
 
 ```csharp
 // customPack describes the host's compatible trained checkpoint and its actual artifact sources.
-var catalog = new TensorModelCatalog([TensorDecisionModels.LayaTypedDecisions, customPack]);
+var catalog = new TensorModelCatalog([customPack]);
 using var packs = new TensorModelPackManager(catalog, applicationStore, hostHttpClient);
 await packs.InstallAsync(customPack.Key, cancellationToken: cancellationToken); // Explicit download.
 
-await using var laya = new LayaDecisionInference(packs, TensorBackendKind.Cpu);
+await using var laya = new LayaDecisionInference(packs); // Auto: Core ML on macOS, CPU elsewhere.
 await laya.StartAsync(cancellationToken);
 await laya.LoadAsync(customPack.Key, cancellationToken);
 DecisionInferenceResult result = await laya.DecideAsync(
@@ -285,13 +295,13 @@ The manager must use a catalog containing the selected definition. An unknown ke
 `ModelUnavailable`; wrong family/capability or malformed pack metadata fails before native work.
 Missing/corrupt weights do not produce a resident model. The request's model ID is checked against
 the resident pack while holding its execution lease. Observation, execution coordination and result
-provenance use that pack's actual key, not the built-in key. Unloaded capabilities describe the family;
+provenance use that pack's actual key. Unloaded capabilities describe the family;
 they do not assert that a named pack is registered, installed or verified.
 
 `LayaSetup.Definition` advertises the Decision task without activating the engine.
 `LayaSetup.CreateSession(identity, target, packs, offeredModels, existing, instance)` feeds the host's
-compatible definitions to the existing shared editor. Omit `offeredModels` to offer the built-in
-pack; pass an empty list to offer none. Validate/register the same definitions in the manager's
+compatible definitions to the existing shared editor. `offeredModels` is required; an empty list
+offers none. Validate/register the same definitions in the manager's
 catalog. The editor saves the selected key/backend in `TensorSetupConfiguration`, not raw weight
 bytes or a provider-specific UI payload. Selection and Save never unload an active model. The usual
 explicit install/verify/load/unload/stop actions apply; changing the saved selection reports
@@ -362,11 +372,12 @@ validated at fork commit `9b248715`, through the existing GGUF, safetensors and 
 readers. The local-only validation version is no longer a product dependency.
 
 Use the root `NuGet.Config` and process-scoped private-feed credentials for normal restores.
-Darkspyre dependencies come from the private feed; Whisper.net, its runtime and NAudio.Core come
-from public NuGet. Their own packages own their assemblies/native runtime assets. Tensor contains
+Darkspyre dependencies come from the private feed; Microsoft.ML.OnnxRuntime, Whisper.net, its
+runtime and NAudio.Core come from public NuGet. Their own packages own their assemblies/native runtime assets. Tensor contains
 only its capability assemblies and their XML documentation, README and license.
 
 TensorSharp's managed package build does not embed GGML/MLX native libraries or certify native
 device availability. Explicit backend observations retain the documented available/unknown states;
 host native-runtime provisioning and full-weight/device validation are not inferred from package
-installation. Whisper's advertised CPU runtime is supplied by its public runtime dependency.
+installation. Whisper's advertised CPU runtime and ONNX Runtime's native library, including its
+Core ML execution provider, are supplied by their public package dependencies.

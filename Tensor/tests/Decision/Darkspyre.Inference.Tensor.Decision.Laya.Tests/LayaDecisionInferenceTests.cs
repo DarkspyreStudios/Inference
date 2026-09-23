@@ -14,7 +14,7 @@ public sealed class LayaDecisionInferenceTests
         await inference.StartAsync();
         var request = new DecisionInferenceRequest
         {
-            ModelId = TensorDecisionModels.LayaTypedDecisions.Key.ModelId,
+            ModelId = Pack.Key.ModelId,
             State = JsonElement.Parse("{}"),
             Questions = [new BooleanDecisionQuestion { Id = "ready", Instructions = "Is the system ready?" }]
         };
@@ -32,7 +32,7 @@ public sealed class LayaDecisionInferenceTests
         await using var inference = new LayaDecisionInference(new MissingPackManager());
 
         DecisionCapabilities capabilities = await inference.GetCapabilitiesAsync(
-            TensorDecisionModels.LayaTypedDecisions.Key.ModelId);
+            Pack.Key.ModelId);
 
         Assert.Equal(3, capabilities.SupportedQuestionKinds.Count);
         Assert.Contains(DecisionQuestionKind.Choice, capabilities.SupportedQuestionKinds);
@@ -49,7 +49,7 @@ public sealed class LayaDecisionInferenceTests
         await using var inference = new LayaDecisionInference(new MissingPackManager());
         var request = new DecisionInferenceRequest
         {
-            ModelId = TensorDecisionModels.LayaTypedDecisions.Key.ModelId,
+            ModelId = Pack.Key.ModelId,
             State = JsonElement.Parse("{}"),
             Questions =
             [
@@ -74,7 +74,7 @@ public sealed class LayaDecisionInferenceTests
         await using var inference = new LayaDecisionInference(new MissingPackManager());
         var request = new DecisionInferenceRequest
         {
-            ModelId = TensorDecisionModels.LayaTypedDecisions.Key.ModelId,
+            ModelId = Pack.Key.ModelId,
             State = JsonElement.Parse("{\"status\":\"ready\"}"),
             Questions =
             [
@@ -87,32 +87,33 @@ public sealed class LayaDecisionInferenceTests
         };
 
         InferenceException exception = await Assert.ThrowsAsync<InferenceException>(
-            () => inference.LoadAsync(TensorDecisionModels.LayaTypedDecisions.Key));
+            () => inference.LoadAsync(Pack.Key));
 
         Assert.Equal(InferenceFailureCode.ModelUnavailable, exception.Code);
     }
 
-    [Fact]
-    public void ModelPackPinsEveryArtifact()
+    private static readonly TensorModelPackDefinition Pack = new()
     {
-        TensorModelPackDefinition pack = TensorDecisionModels.LayaTypedDecisions;
-
-        Assert.Equal(TensorCapability.Decision, pack.Capability);
-        Assert.Equal(5, pack.Artifacts.Count);
-        Assert.All(pack.Artifacts, artifact =>
+        Key = new("host/laya", "1"),
+        Capability = TensorCapability.Decision,
+        RuntimeArchitecture = TensorDecisionModels.LayaRuntimeArchitecture,
+        License = "test-only",
+        SupportedBackends = new HashSet<TensorBackendKind> { TensorBackendKind.CoreMl, TensorBackendKind.Cpu },
+        Artifacts = new[] { "model", "tokenizer", "agent-config" }.Select(static role => new TensorModelArtifactDefinition
         {
-            Assert.True(artifact.Length > 0);
-            Assert.Equal(64, artifact.Sha256.Length);
-            Assert.Single(artifact.Sources);
-            Assert.Contains(pack.Key.Revision, artifact.Sources[0].AbsoluteUri, StringComparison.Ordinal);
-        });
-    }
+            Role = role,
+            RelativePath = role + ".bin",
+            Length = 1,
+            Sha256 = new string('0', 64),
+            Sources = [new Uri($"https://example.test/{role}")]
+        }).ToArray()
+    };
 
     private sealed class MissingPackManager : ITensorModelPackManager
     {
-        public IReadOnlyList<TensorModelPackDefinition> Definitions => [TensorDecisionModels.LayaTypedDecisions];
+        public IReadOnlyList<TensorModelPackDefinition> Definitions => [Pack];
         public TensorModelPackDefinition Register(TensorModelPackDefinition definition) => throw new NotSupportedException();
-        public TensorModelPackDefinition GetRequiredDefinition(TensorModelKey key) => TensorDecisionModels.LayaTypedDecisions;
+        public TensorModelPackDefinition GetRequiredDefinition(TensorModelKey key) => Pack;
 
         public Task<TensorModelPackStatus> GetStatusAsync(
             TensorModelKey key,

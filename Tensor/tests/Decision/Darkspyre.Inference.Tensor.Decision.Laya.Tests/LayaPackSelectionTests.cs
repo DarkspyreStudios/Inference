@@ -233,19 +233,20 @@ public sealed class LayaPackSelectionTests : IDisposable
     }
 
     [Fact]
-    public async Task DefaultSettingsStillOfferTheBuiltInPackAndSaveHasNoLoadSideEffects()
+    public async Task SetupOffersOnlyHostPacksAndSaveHasNoLoadSideEffects()
     {
+        TensorModelPackDefinition offered = Pack("host/custom", "1");
         using var http = new HttpClient(new ArtifactHandler());
-        using var packs = Manager(http, TensorDecisionModels.LayaTypedDecisions);
+        using var packs = Manager(http, offered);
         var target = new Target();
-        await using TensorSetupSession setup = LayaSetup.CreateSession(new(SetupChangeIntent.Create, "laya", null), target, packs);
+        await using TensorSetupSession setup = LayaSetup.CreateSession(new(SetupChangeIntent.Create, "laya", null), target, packs, [offered]);
         SetupChoiceField choice = Assert.IsType<SetupChoiceField>(setup.Snapshot.Steps[0].Sections[0].Fields[0]);
         SetupChoice pack = Assert.Single((await choice.GetChoicesAsync(new(setup.Snapshot.Revision))).Choices);
-        Assert.Equal(TensorDecisionModels.LayaTypedDecisions.Key.ToString(), pack.Value);
+        Assert.Equal(offered.Key.ToString(), pack.Value);
         choice.SetValue(pack.Value);
         Assert.Equal(SetupCommitState.Committed, (await setup.CommitAsync()).State);
-        Assert.Equal(TensorDecisionModels.LayaTypedDecisions.Key, target.Changes!.Configuration.Model);
-        Assert.Equal(TensorModelPackState.NotInstalled, (await packs.GetStatusAsync(TensorDecisionModels.LayaTypedDecisions.Key)).State);
+        Assert.Equal(offered.Key, target.Changes!.Configuration.Model);
+        Assert.Equal(TensorModelPackState.NotInstalled, (await packs.GetStatusAsync(offered.Key)).State);
     }
 
     [Fact]
@@ -260,7 +261,10 @@ public sealed class LayaPackSelectionTests : IDisposable
             pack with { RuntimeArchitecture = "other" },
             pack with { Artifacts = [] },
             pack with { Artifacts = pack.Artifacts.Where(artifact => artifact.Role != "tokenizer").ToArray() },
-            pack with { Artifacts = pack.Artifacts.Where(artifact => artifact.Role != "agent-config").ToArray() }
+            pack with { Artifacts = pack.Artifacts.Where(artifact => artifact.Role != "agent-config").ToArray() },
+            pack with { SupportedBackends = new HashSet<TensorBackendKind> { TensorBackendKind.Cpu, TensorBackendKind.Cuda } },
+            pack with { SupportedBackends = new HashSet<TensorBackendKind> { TensorBackendKind.GgmlMetal } },
+            pack with { SupportedBackends = new HashSet<TensorBackendKind>() }
         })
         {
             Assert.Throws<ArgumentException>(() => LayaSetup.CreateSession(new(SetupChangeIntent.Create, "laya", null), new Target(), packs, [invalid]));
@@ -316,7 +320,8 @@ public sealed class LayaPackSelectionTests : IDisposable
         public Exception? Failure { get; set; }
         public Action? AfterLoad { get; init; }
         public Action? Forward { get; init; }
-        public async Task<LayaModelResources> LoadAsync(TensorModelPackLease lease, TensorBackendKind backend, CancellationToken cancellationToken)
+        public async Task<LayaModelResources> LoadAsync(TensorModelPackLease lease, TensorBackendKind backend,
+            LayaAgentConfiguration configuration, CancellationToken cancellationToken)
         {
             Loaded.Add(lease.Key);
             Assert.Equal(TensorBackendKind.Cpu, backend);
@@ -336,7 +341,8 @@ public sealed class LayaPackSelectionTests : IDisposable
     {
         public bool Disposed { get; private set; }
         public List<LayaSequence> Sequences { get; } = [];
-        public LayaModelOutput Forward(LayaSequence sequence)
+        public int MaximumOptions => 32;
+        public LayaModelOutput Forward(LayaSequence sequence, CancellationToken cancellationToken)
         { Assert.False(Disposed); Sequences.Add(sequence); forward?.Invoke(); Assert.False(Disposed); return new([0, 2], .75f); }
         public void Dispose() => Disposed = true;
     }

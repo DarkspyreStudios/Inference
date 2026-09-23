@@ -22,9 +22,13 @@ internal static class LayaModelCompatibility
                 throw new ArgumentException($"Laya pack '{definition.Key}' requires artifact role '{role}'.", nameof(definition));
             }
         }
-        if (definition.SupportedBackends.Count == 0 || definition.SupportedBackends.Any(backend => backend is not (TensorBackendKind.Cpu or TensorBackendKind.Cuda)))
+        if (definition.SupportedBackends.Contains(TensorBackendKind.Cuda))
         {
-            throw new ArgumentException("Laya pack backends must be CPU and/or CUDA.", nameof(definition));
+            throw new ArgumentException("Laya pack backends cannot include CUDA: ONNX CUDA execution is not yet available.", nameof(definition));
+        }
+        if (definition.SupportedBackends.Count == 0 || definition.SupportedBackends.Any(backend => backend is not (TensorBackendKind.CoreMl or TensorBackendKind.Cpu)))
+        {
+            throw new ArgumentException("Laya pack backends must be Core ML and/or CPU.", nameof(definition));
         }
     }
 }

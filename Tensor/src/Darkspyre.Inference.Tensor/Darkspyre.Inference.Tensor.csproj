@@ -26,6 +26,7 @@
     <PackageReference Include="Darkspyre.TensorSharp.Chat" />
     <PackageReference Include="Darkspyre.TensorSharp.Models" />
     <PackageReference Include="Darkspyre.TensorSharp.Runtime" />
+    <PackageReference Include="Microsoft.ML.OnnxRuntime" PrivateAssets="none" />
     <PackageReference Include="Whisper.net" />
     <PackageReference Include="Whisper.net.Runtime" PrivateAssets="none" />
     <PackageReference Include="NAudio.Core" />

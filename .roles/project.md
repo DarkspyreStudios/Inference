@@ -331,6 +331,7 @@ was created because this repository has no configured Git remote.
 | Shared CE / Agent-DS Settings UI requirements and provider contract gaps (not an approved API design) | `docs/provider-settings-contract-support-and-gaps.md` |
 | Host-placed Settings editor technical design and release validation | `docs/settings.ui.tech-design.md` |
 | Completed provider setup and audio technical design | `docs/provider-setup-and-audio-technical-design.md` |
+| Laya decision engine on ONNX Runtime: design, artifact contract and implementation record | `docs/laya-onnx-runtime.tech-design.md` |
 | Detailed implementation work | Jira tickets; project and parent TBD |
 
 If this document conflicts with an approved design bible or Jira technical specification, stop and

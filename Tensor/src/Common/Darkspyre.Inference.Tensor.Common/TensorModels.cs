@@ -19,7 +19,8 @@ public enum TensorBackendKind
     GgmlCuda,
     GgmlVulkan,
     Cuda,
-    Mlx
+    Mlx,
+    CoreMl
 }
 
 public sealed record TensorModelKey(string ModelId, string Revision)

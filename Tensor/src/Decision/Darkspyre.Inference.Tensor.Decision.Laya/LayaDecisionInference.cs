@@ -5,9 +5,7 @@ using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Common.Decision;
 using Darkspyre.Inference.Tensor.Common;
 using Darkspyre.Inference.Tensor.Decision;
-using TensorSharp.Cuda;
-using TensorSharp.Models.Direct;
-using TensorSharp.Runtime;
+using Microsoft.ML.OnnxRuntime;
 
 namespace Darkspyre.Inference.Tensor.Decision.Laya;
 
@@ -102,7 +100,8 @@ public sealed class LayaDecisionInference : ITensorDecisionInference
             executionToken.ThrowIfCancellationRequested();
             LayaSequence sequence = LayaSequenceBuilder.Build(resources.Tokenizer, request.State, question,
                 configuration.MaximumLength, configuration.MaximumHeadLength);
-            if (sequence.MarkerPositions.Length != sequence.OptionIds.Length)
+            if (sequence.MarkerPositions.Length != sequence.OptionIds.Length
+                || sequence.OptionIds.Length > resources.Model.MaximumOptions)
             {
                 throw new InferenceException(
                     InferenceFailureCode.InvalidRequest,
@@ -113,7 +112,7 @@ public sealed class LayaDecisionInference : ITensorDecisionInference
             LayaModelOutput output;
             try
             {
-                output = resources.Model.Forward(sequence);
+                output = resources.Model.Forward(sequence, executionToken);
                 executionToken.ThrowIfCancellationRequested();
             }
             catch (Exception exception) when (exception is not OperationCanceledException and not InferenceException)
@@ -126,7 +125,7 @@ public sealed class LayaDecisionInference : ITensorDecisionInference
 
             double temperature = configuration.Temperature(sequence.QuestionType, sequence.OptionIds.Length);
             float[] scaled = output.Logits.Select(logit => checked((float)(logit / temperature))).ToArray();
-            float[] probabilities = LayaDecisionModel.Softmax(scaled);
+            float[] probabilities = LayaOnnxModel.Softmax(scaled);
             answers.Add(question.Id, CreateAnswer(question, sequence.OptionIds, probabilities, output.ActionProbability));
         }
 
@@ -139,7 +138,7 @@ public sealed class LayaDecisionInference : ITensorDecisionInference
                 ImplementationId = Descriptor.Id,
                 ModelId = selected.ModelId,
                 ModelRevision = selected.Revision,
-                Runtime = "TensorSharp",
+                Runtime = "OnnxRuntime",
                 RuntimeVersion = RuntimeVersion(),
                 Backend = backend.ToString(),
                 Elapsed = Stopwatch.GetElapsedTime(started)
@@ -212,7 +211,7 @@ public sealed class LayaDecisionInference : ITensorDecisionInference
         using IDisposable loading = await _lifetime.EnterLoadAsync(cancellationToken).ConfigureAwait(false);
 
         TensorBackendKind backend = ResolveBackend(_requestedBackend);
-        if (backend is not (TensorBackendKind.Cpu or TensorBackendKind.Cuda) || !definition.SupportedBackends.Contains(backend))
+        if (backend is not (TensorBackendKind.CoreMl or TensorBackendKind.Cpu) || !definition.SupportedBackends.Contains(backend))
         {
             throw new InferenceException(
                 InferenceFailureCode.BackendUnavailable,
@@ -236,7 +235,7 @@ public sealed class LayaDecisionInference : ITensorDecisionInference
             { throw new InferenceException(InferenceFailureCode.ModelUnavailable, "The pack lease identifies a different model."); }
             LayaAgentConfiguration configuration = await LayaAgentConfiguration.LoadAsync(
                 lease.GetRequiredArtifact("agent-config"), cancellationToken).ConfigureAwait(false);
-            loadedResources = await _loader.LoadAsync(lease, backend, cancellationToken).ConfigureAwait(false);
+            loadedResources = await _loader.LoadAsync(lease, backend, configuration, cancellationToken).ConfigureAwait(false);
             cancellationToken.ThrowIfCancellationRequested();
             _lifetime.MarkLoaded(model, backend);
             _resources = loadedResources;
@@ -257,7 +256,7 @@ public sealed class LayaDecisionInference : ITensorDecisionInference
                     InvalidDataException or JsonException => InferenceFailureCode.ModelCorrupt,
                     _ => InferenceFailureCode.BackendUnavailable
                 },
-                $"TensorSharp could not load Laya on backend '{backend}'.",
+                $"ONNX Runtime could not load Laya on backend '{backend}'.",
                 exception);
         }
     }
@@ -395,9 +394,9 @@ public sealed class LayaDecisionInference : ITensorDecisionInference
         }
     }
 
-    private static TensorBackendKind ResolveBackend(TensorBackendKind backend) => backend switch
+    internal static TensorBackendKind ResolveBackend(TensorBackendKind backend) => backend switch
     {
-        TensorBackendKind.Auto when CudaBackend.IsAvailable() => TensorBackendKind.Cuda,
+        TensorBackendKind.Auto when OperatingSystem.IsMacOS() => TensorBackendKind.CoreMl,
         TensorBackendKind.Auto => TensorBackendKind.Cpu,
         _ => backend
     };
@@ -435,10 +434,10 @@ public sealed class LayaDecisionInference : ITensorDecisionInference
     private static double Round(double value) => Math.Round(value, 4, MidpointRounding.ToEven);
 
     private static string RuntimeVersion() =>
-        typeof(DirectContext).Assembly
+        typeof(InferenceSession).Assembly
             .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?
             .InformationalVersion
-        ?? typeof(DirectContext).Assembly.GetName().Version?.ToString()
+        ?? typeof(InferenceSession).Assembly.GetName().Version?.ToString()
         ?? "unknown";
 
     private void ThrowIfDisposed() => ObjectDisposedException.ThrowIf(_disposed, this);

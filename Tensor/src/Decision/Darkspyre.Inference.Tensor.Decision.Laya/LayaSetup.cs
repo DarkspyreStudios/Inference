@@ -13,17 +13,16 @@ public static class LayaSetup
     /// <summary>
     /// Creates an editor over the host's offered Laya packs. Register these same definitions in the
     /// catalog used by packs. Saving selects a key; installation and loading remain explicit actions.
-    /// Passing no offered list uses the built-in pack. An empty list offers no models.
+    /// An empty list offers no models.
     /// </summary>
     public static TensorSetupSession CreateSession(SetupConfigurationIdentity identity,
         ISetupCommitTarget<TensorSetupChanges> target, ITensorModelPackManager packs,
-        IReadOnlyList<TensorModelPackDefinition>? offeredModels = null,
+        IReadOnlyList<TensorModelPackDefinition> offeredModels,
         TensorSetupConfiguration? existing = null, ITensorDecisionInference? instance = null)
     {
         ArgumentNullException.ThrowIfNull(packs);
-        IReadOnlyList<TensorModelPackDefinition> models = offeredModels ?? [TensorDecisionModels.LayaTypedDecisions];
-        foreach (TensorModelPackDefinition definition in models) { LayaModelCompatibility.Validate(definition); }
-        return new(Definition, identity, target, models, packs, existing, instance,
-            TensorBackendProbes.CpuCuda(global::TensorSharp.Cuda.CudaBackend.IsAvailable));
+        ArgumentNullException.ThrowIfNull(offeredModels);
+        foreach (TensorModelPackDefinition definition in offeredModels) { LayaModelCompatibility.Validate(definition); }
+        return new(Definition, identity, target, offeredModels, packs, existing, instance, new LayaBackendProbe());
     }
 }
