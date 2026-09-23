@@ -22,6 +22,12 @@
   <Folder Name="/src/TTS/">
     <Project Path="src/TTS/Darkspyre.Inference.Connect.TTS/Darkspyre.Inference.Connect.TTS.csproj" />
   </Folder>
+  <Folder Name="/src/Audio/">
+    <Project Path="src/Audio/Darkspyre.Inference.Connect.Audio/Darkspyre.Inference.Connect.Audio.csproj" />
+  </Folder>
+  <Folder Name="/tests/Audio/">
+    <Project Path="tests/Audio/Darkspyre.Inference.Connect.Audio.Tests/Darkspyre.Inference.Connect.Audio.Tests.csproj" />
+  </Folder>
   <Folder Name="/tests/TTS/">
     <Project Path="tests/TTS/Darkspyre.Inference.Connect.TTS.Tests/Darkspyre.Inference.Connect.TTS.Tests.csproj" />
   </Folder>

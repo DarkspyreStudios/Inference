@@ -32,13 +32,15 @@ machine-diagnostics library, and new facade NuGets. A Whisper bridge is buildabl
 
 The gap assessment now also records a separate `Darkspyre.Inference.UI.Settings` Blazor/Lumeo
 library for CE and Agent-DS, in the separately scoped UI project. It is a consumer of these forthcoming
-contracts, not part of this runtime implementation or its synchronized three-package release.
+contracts, not part of this runtime implementation.
 This design adds no UI-framework dependency; that library's theming, extension points and packaging
-remain its own technical-design work.
+remain its own technical-design work. Its separately approved design now places UI.Settings in the
+same repository as a fourth synchronized package; this runtime work does not implement or publish it.
 
 ## 2. Assembly ownership
 
-Exactly three NuGets remain, with their one shared version and exact Common dependency.
+This runtime work owns three NuGets, with their one shared version and exact Common dependency.
+The separately approved UI.Settings package is outside this implementation scope.
 
 | Location | Owned types and behavior |
 |---|---|
@@ -530,3 +532,35 @@ zero-warning Debug/Release builds and tests (Tensor 66, including 17 Laya tests;
 Formatting verification and the Tensor transitive vulnerability audit pass. The ten new Laya tests
 use controlled native execution, not a new full-weight run. The generic model-selection example
 compiles in both solutions. No packages were created or published and the shared version is unchanged.
+
+### Unit 2b — external TangoFlux and audio settings (2026-09-22)
+
+Implementation resumed after the completed Laya amendment. `Connect.Audio` now supplies the typed
+generation client, connection/request/result/capability contracts, adapter registration and shared
+settings session. The HTTP mapper preserves the donor's `/generate` protocol without application
+cache, cue or playback ownership. Duration/steps/guidance are validated, not clamped; optional seeds
+and cache preference are preserved without generating a seed. WAV framing and content type are
+validated, and unmeasured duration stays null. Failures are typed and sanitized, HTTP resources are
+disposed, caller cancellation remains cancellation, and potentially accepted work is never retried.
+
+Settings expose the real connection and generation fields, optional values, paged cache choices,
+protected-header Keep/Replace/Clear and explicit removal/rename mutations. Saving only calls the
+typed, versioned host commit target. There is no invented health/model-list action; the real generation
+test declares network/potential-billing effects. Editing invalidates readiness. Session disposal
+cancels and waits for an active test, not for an externally hosted provider process.
+
+The Connect product includes its Audio assembly/XML; no new NuGet or third-party dependency was
+introduced. A compiled host-composition example offers both PocketTTS and TangoFlux to the same
+generic renderer and maps saved typed audio defaults plus separately resolved secrets to a request.
+The separate UI implementation and consumer applications are unchanged by this unit.
+
+Phase exit: the Connect audio implementation unit is complete. Both focused solutions pass
+zero-warning Debug/Release builds and tests (Connect 291, including 51 new TangoFlux protocol/setup
+tests; Tensor 66). Both formatting checks and transitive dependency vulnerability audits pass.
+One intermediate Release run failed the existing LLM test
+`InterruptSettlesIssuedToolsAndRejectsConcurrentOwnership`; it passed an isolated rerun and then
+the full Release suite. This intermittent failure is recorded, not suppressed or claimed fixed;
+no LLM implementation/test or shared runtime code changed in this unit.
+
+Implementation remains active for remote Qwen/Supra discovery/selection, Whisper and final
+cross-row acceptance. No version bump, package creation, publication or live model call occurred.

@@ -29,3 +29,10 @@ Load/request/Unload/Load on one Laya instance. Construct the manager with that s
 the chosen packs explicitly, and save the selected `TensorModelKey` through the typed host target.
 The implementation name identifies the Laya model family, not its original checkpoint.
 No package/version change or paid/native inference run is needed to build this example.
+
+`AudioSetupExample.CreateDrafts` composes PocketTTS speech and TangoFlux generated audio for the same
+renderer. The host supplies separate typed commit targets; protected-header mutations are committed
+atomically with settings. Both endpoints are external, including on localhost. Tests declare network
+and potential billing effects. TangoFlux has no independent health/model-list protocol; its one test
+actually generates audio. `GenerateAsync` demonstrates mapping saved typed defaults and separately
+resolved protected headers to a request; the host owns playback, storage and application caching.

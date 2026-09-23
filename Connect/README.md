@@ -16,8 +16,10 @@ isolated in the `Darkspyre.Inference.Connect.LLM.Bedrock` assembly. All three as
 one Connect NuGet.
 
 Unreleased source development also includes `Darkspyre.Inference.Connect.TTS` for external
-PocketTTS HTTP synthesis. It is included in the Connect product project, not a separate NuGet.
-See [PocketTTS integration](#pockettts-speech-unreleased-development); this addition is not in the
+PocketTTS HTTP synthesis and `Darkspyre.Inference.Connect.Audio` for external TangoFlux generation.
+They are included in the Connect product project, not separate NuGets. See
+[PocketTTS integration](#pockettts-speech-unreleased-development) and
+[TangoFlux integration](#tangoflux-audio-unreleased-development); these additions are not in the
 published 11.2.0 package.
 
 The packages target .NET 11. Credentials
@@ -115,6 +117,59 @@ or copied into errors. Registration disables automatic redirects and gives each 
 connection timeout. If constructing `PocketTtsHttpProvider` with your own `HttpClient`, disable
 automatic redirects yourself so custom secret headers cannot follow a redirect to another origin;
 the host owns that client's lifetime. Endpoint paths cannot select a different origin.
+
+## TangoFlux audio (unreleased development)
+
+`IAudioGenerationClient` accepts typed generation requests and returns WAV bytes and provenance.
+Register `services.AddAudioConnect()`, then bind a host-supplied `AudioConnection` with
+`AudioProviderService`:
+
+```csharp
+IAudioGenerationClient audio = audioProviders.Bind(new AudioConnection
+{
+    Endpoint = new Uri("http://127.0.0.1:8769"),
+    RequestTimeout = TimeSpan.FromMinutes(2)
+});
+AudioGenerationResult clip = await audio.GenerateAsync(new AudioGenerationRequest
+{
+    Prompt = "Rain tapping on a wooden roof.",
+    Duration = TimeSpan.FromSeconds(5),
+    Steps = 20,
+    GuidanceScale = 4.5,
+    Seed = 42,
+    UseCache = false
+}, cancellationToken);
+// The host owns playback, storage and its own cache. MeasuredDuration may be null.
+```
+
+The adapter sends the donor `/generate` protocol: `prompt`, duration in seconds, `steps`,
+`guidanceScale`, and optional `seed`/`useCache`. Duration must be 1–30 seconds, steps 10–100 and
+finite guidance 0.1–20. Invalid values fail before HTTP; they are not clamped. Omitted steps/guidance
+use 10/4.5. An omitted seed remains omitted, including when `UseCache` is false. No application cache
+policy, random seed, model installation, provider process, playback or soundscape logic is included.
+WAV framing is validated; decoding and duration measurement are not performed, so `MeasuredDuration`
+is null rather than copied from the requested duration. An absent content type is accepted only
+with valid WAV bytes; an explicitly unsupported content type fails.
+
+`SetupDefinitions` and `CreateSetupSession` expose typed endpoint, fractional timeout, relative
+generation path, protected headers, duration, steps, guidance, optional seed and a three-state
+provider-cache choice. `AudioSetupChanges` carries create/edit identity and expected version, typed
+settings without header values, and explicit protected-header sets/removals. Keep and omission do
+not delete existing headers. The host owns the atomic configuration/secret commit. Save performs no
+network request; tests use the draft's current settings and invalidate when those settings change.
+
+TangoFlux advertises no model listing or independent health check. Its explicit test sends a real
+generation request and declares network/potential-billing effects. Listing implementations and
+reading capabilities do not contact the server. Audio generation and PocketTTS speech synthesis
+remain distinct typed contracts grouped under the shared Audio capability. The compiled
+`Common/examples/Darkspyre.Inference.Setup.Examples/AudioSetupExample.cs` demonstrates both with the
+same generic settings renderer and a host mapping saved audio defaults into a request.
+
+Authentication/access errors, timeout, caller cancellation, HTTP failures and malformed results
+remain distinct. No potentially accepted generation is retried, and errors contain neither prompts,
+protected headers nor raw provider bodies. Registration disables automatic redirects. Hosts passing
+their own `HttpClient` to `TangoFluxHttpProvider` must also disable redirects so protected custom
+headers cannot follow them across origins; the host owns that client's lifetime.
 
 ## Restore from GitHub Packages
 

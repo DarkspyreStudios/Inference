@@ -2,7 +2,7 @@
   <PropertyGroup>
     <PackageId>Darkspyre.Inference.Connect</PackageId>
     <IncludeBuildOutput>false</IncludeBuildOutput>
-    <Description>Out-of-process LLM, image and speech inference connectors for Darkspyre applications.</Description>
+    <Description>Out-of-process LLM, image, speech and audio inference connectors for Darkspyre applications.</Description>
     <PackageTags>ai;inference;llm;image-generation;openai;anthropic;bedrock;comfyui</PackageTags>
   </PropertyGroup>
 
@@ -10,6 +10,7 @@
     <ProjectReference Include="..\..\..\Common\src\Darkspyre.Inference.Common\Darkspyre.Inference.Common.csproj" />
     <ProjectReference Include="..\Image\Darkspyre.Inference.Connect.Image\Darkspyre.Inference.Connect.Image.csproj" PrivateAssets="all" />
     <ProjectReference Include="..\TTS\Darkspyre.Inference.Connect.TTS\Darkspyre.Inference.Connect.TTS.csproj" PrivateAssets="all" />
+    <ProjectReference Include="..\Audio\Darkspyre.Inference.Connect.Audio\Darkspyre.Inference.Connect.Audio.csproj" PrivateAssets="all" />
     <ProjectReference Include="..\LLM\Darkspyre.Inference.Connect.LLM\Darkspyre.Inference.Connect.LLM.csproj" PrivateAssets="all" />
     <ProjectReference Include="..\LLM\Darkspyre.Inference.Connect.LLM.Bedrock\Darkspyre.Inference.Connect.LLM.Bedrock.csproj" PrivateAssets="all" />
   </ItemGroup>
@@ -29,6 +30,8 @@
 
   <ItemGroup>
     <None Include="..\..\README.md" Pack="true" PackagePath="README.md" />
+    <None Include="..\Audio\Darkspyre.Inference.Connect.Audio\bin\$(Configuration)\$(TargetFramework)\Darkspyre.Inference.Connect.Audio.dll" Pack="true" PackagePath="lib\$(TargetFramework)" />
+    <None Include="..\Audio\Darkspyre.Inference.Connect.Audio\bin\$(Configuration)\$(TargetFramework)\Darkspyre.Inference.Connect.Audio.xml" Pack="true" PackagePath="lib\$(TargetFramework)" />
     <None Include="..\TTS\Darkspyre.Inference.Connect.TTS\bin\$(Configuration)\$(TargetFramework)\Darkspyre.Inference.Connect.TTS.dll" Pack="true" PackagePath="lib\$(TargetFramework)" />
     <None Include="..\TTS\Darkspyre.Inference.Connect.TTS\bin\$(Configuration)\$(TargetFramework)\Darkspyre.Inference.Connect.TTS.xml" Pack="true" PackagePath="lib\$(TargetFramework)" />
     <None Include="..\Image\Darkspyre.Inference.Connect.Image\bin\$(Configuration)\$(TargetFramework)\Darkspyre.Inference.Connect.Image.dll" Pack="true" PackagePath="lib\$(TargetFramework)" />
