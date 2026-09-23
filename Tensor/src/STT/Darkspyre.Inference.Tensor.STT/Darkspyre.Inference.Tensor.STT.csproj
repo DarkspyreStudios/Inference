@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <Description>Provider-neutral in-process speech transcription contracts.</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../Common/Darkspyre.Inference.Tensor.Common/Darkspyre.Inference.Tensor.Common.csproj" />
+  </ItemGroup>
+</Project>

@@ -2,8 +2,8 @@
   <PropertyGroup>
     <PackageId>Darkspyre.Inference.Tensor</PackageId>
     <IncludeBuildOutput>false</IncludeBuildOutput>
-    <Description>In-process LLM, image, and typed-decision contracts and engines for Darkspyre applications.</Description>
-    <PackageTags>ai;inference;llm;image-generation;decision;tensorsharp</PackageTags>
+    <Description>In-process LLM, image, speech transcription, and typed-decision contracts and engines for Darkspyre applications.</Description>
+    <PackageTags>ai;inference;llm;image-generation;decision;whisper;speech;tensorsharp</PackageTags>
   </PropertyGroup>
 
   <ItemGroup>
@@ -15,6 +15,8 @@
     <ProjectReference Include="..\Image\Darkspyre.Inference.Tensor.Image.Supra\Darkspyre.Inference.Tensor.Image.Supra.csproj" PrivateAssets="all" />
     <ProjectReference Include="..\LLM\Darkspyre.Inference.Tensor.LLM\Darkspyre.Inference.Tensor.LLM.csproj" PrivateAssets="all" />
     <ProjectReference Include="..\LLM\Darkspyre.Inference.Tensor.LLM.Qwen\Darkspyre.Inference.Tensor.LLM.Qwen.csproj" PrivateAssets="all" />
+    <ProjectReference Include="../STT/Darkspyre.Inference.Tensor.STT/Darkspyre.Inference.Tensor.STT.csproj" PrivateAssets="all" />
+    <ProjectReference Include="../STT/Darkspyre.Inference.Tensor.STT.Whisper/Darkspyre.Inference.Tensor.STT.Whisper.csproj" PrivateAssets="all" />
   </ItemGroup>
 
   <ItemGroup>
@@ -24,6 +26,9 @@
     <PackageReference Include="Darkspyre.TensorSharp.Chat" />
     <PackageReference Include="Darkspyre.TensorSharp.Models" />
     <PackageReference Include="Darkspyre.TensorSharp.Runtime" />
+    <PackageReference Include="Whisper.net" />
+    <PackageReference Include="Whisper.net.Runtime" />
+    <PackageReference Include="NAudio.Core" />
   </ItemGroup>
 
   <ItemGroup>
@@ -42,5 +47,9 @@
     <None Include="..\LLM\Darkspyre.Inference.Tensor.LLM\bin\$(Configuration)\$(TargetFramework)\Darkspyre.Inference.Tensor.LLM.xml" Pack="true" PackagePath="lib\$(TargetFramework)" />
     <None Include="..\LLM\Darkspyre.Inference.Tensor.LLM.Qwen\bin\$(Configuration)\$(TargetFramework)\Darkspyre.Inference.Tensor.LLM.Qwen.dll" Pack="true" PackagePath="lib\$(TargetFramework)" />
     <None Include="..\LLM\Darkspyre.Inference.Tensor.LLM.Qwen\bin\$(Configuration)\$(TargetFramework)\Darkspyre.Inference.Tensor.LLM.Qwen.xml" Pack="true" PackagePath="lib\$(TargetFramework)" />
+    <None Include="../STT/Darkspyre.Inference.Tensor.STT/bin/$(Configuration)/$(TargetFramework)/Darkspyre.Inference.Tensor.STT.dll" Pack="true" PackagePath="lib/$(TargetFramework)" />
+    <None Include="../STT/Darkspyre.Inference.Tensor.STT/bin/$(Configuration)/$(TargetFramework)/Darkspyre.Inference.Tensor.STT.xml" Pack="true" PackagePath="lib/$(TargetFramework)" />
+    <None Include="../STT/Darkspyre.Inference.Tensor.STT.Whisper/bin/$(Configuration)/$(TargetFramework)/Darkspyre.Inference.Tensor.STT.Whisper.dll" Pack="true" PackagePath="lib/$(TargetFramework)" />
+    <None Include="../STT/Darkspyre.Inference.Tensor.STT.Whisper/bin/$(Configuration)/$(TargetFramework)/Darkspyre.Inference.Tensor.STT.Whisper.xml" Pack="true" PackagePath="lib/$(TargetFramework)" />
   </ItemGroup>
 </Project>

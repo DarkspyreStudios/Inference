@@ -6,6 +6,9 @@
   <Folder Name="/Common/examples/">
     <Project Path="../Common/examples/Darkspyre.Inference.Setup.Examples/Darkspyre.Inference.Setup.Examples.csproj" />
   </Folder>
+  <Folder Name="/examples/">
+    <Project Path="examples/Darkspyre.Inference.Tensor.STT.Bridge/Darkspyre.Inference.Tensor.STT.Bridge.csproj" />
+  </Folder>
   <Folder Name="/src/Common/">
     <Project Path="src/Common/Darkspyre.Inference.Tensor.Common/Darkspyre.Inference.Tensor.Common.csproj" />
   </Folder>
@@ -27,6 +30,10 @@
   <Folder Name="/tests/Common/">
     <Project Path="tests/Common/Darkspyre.Inference.Tensor.Common.Tests/Darkspyre.Inference.Tensor.Common.Tests.csproj" />
   </Folder>
+  <Folder Name="/src/STT/">
+    <Project Path="src/STT/Darkspyre.Inference.Tensor.STT/Darkspyre.Inference.Tensor.STT.csproj" />
+    <Project Path="src/STT/Darkspyre.Inference.Tensor.STT.Whisper/Darkspyre.Inference.Tensor.STT.Whisper.csproj" />
+  </Folder>
   <Folder Name="/tests/Decision/">
     <Project Path="tests/Decision/Darkspyre.Inference.Tensor.Decision.Laya.Tests/Darkspyre.Inference.Tensor.Decision.Laya.Tests.csproj" />
   </Folder>
@@ -35,5 +42,8 @@
   </Folder>
   <Folder Name="/tests/LLM/">
     <Project Path="tests/LLM/Darkspyre.Inference.Tensor.LLM.Qwen.Tests/Darkspyre.Inference.Tensor.LLM.Qwen.Tests.csproj" />
+  </Folder>
+  <Folder Name="/tests/STT/">
+    <Project Path="tests/STT/Darkspyre.Inference.Tensor.STT.Whisper.Tests/Darkspyre.Inference.Tensor.STT.Whisper.Tests.csproj" />
   </Folder>
 </Solution>

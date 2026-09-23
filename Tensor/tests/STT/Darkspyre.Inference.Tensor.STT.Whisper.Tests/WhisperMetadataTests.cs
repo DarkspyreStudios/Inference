@@ -1,0 +1,133 @@
+using Darkspyre.Inference.Common;
+using Darkspyre.Inference.Common.Setup;
+using Darkspyre.Inference.Tensor.Common;
+
+namespace Darkspyre.Inference.Tensor.STT.Whisper.Tests;
+
+public sealed class WhisperMetadataTests
+{
+    [Fact]
+    public void AllTwelveVariantsDeclareImmutableIntegrityAndHonestCapabilities()
+    {
+        Assert.Equal(12, TensorSpeechModels.Whisper.Count);
+        Assert.Equal(12, TensorSpeechModels.Whisper.Select(pack => pack.Key).Distinct().Count());
+        foreach (TensorModelPackDefinition pack in TensorSpeechModels.Whisper)
+        {
+            WhisperCompatibility.Validate(pack);
+            Assert.Equal(40, pack.Key.Revision.Length);
+            Assert.Equal(TensorSpeechModels.Revision, pack.Artifacts.Single().Provenance!.Revision);
+            Assert.Equal(64, pack.Artifacts[0].Sha256.Length);
+            Assert.True(pack.Artifacts[0].Length > 77_000_000);
+            Assert.True(pack.SupportedBackends.SetEquals([TensorBackendKind.Cpu]));
+            SpeechModelInfo info = TensorSpeechModels.Info(pack);
+            Assert.Equal(pack.Key.ModelId.EndsWith(".en", StringComparison.Ordinal), info.EnglishOnly);
+            Assert.Equal(info.EnglishOnly == false && !pack.Key.ModelId.EndsWith("-turbo", StringComparison.Ordinal), info.SupportsTranslationToEnglish);
+        }
+        Assert.Contains(InferenceTask.SpeechTranscription, WhisperSetup.Definition.Implementation.Tasks);
+    }
+
+    [Fact]
+    public async Task SetupSelectionUsesExistingGenericContractAndSavingDoesNotInstall()
+    {
+        using var packs = new TensorModelPackManager(new(TensorSpeechModels.Whisper), new WhisperFixture.Store());
+        var target = new Target();
+        await using TensorSetupSession session = WhisperSetup.CreateSession(new(SetupChangeIntent.Create, "speech", null), target, packs);
+        Assert.False((await session.ValidateAsync()).IsValid);
+        SetupChoiceField model = Field(session, "model");
+        Assert.Equal(12, (await model.GetChoicesAsync(new(session.Snapshot.Revision))).Choices.Count);
+        TensorModelPackDefinition selected = TensorSpeechModels.Whisper.Single(pack => pack.Key.ModelId == "whisper/large-v3-turbo");
+        Assert.Equal(SetupEditState.Applied, model.SetValue(selected.Key.ToString()).State);
+        Assert.Equal(SetupEditState.Applied, Field(session, "backend").SetValue("Cpu").State);
+        Assert.Equal(SetupCommitState.Committed, (await session.CommitAsync()).State);
+        Assert.Equal(selected.Key, target.Changes!.Configuration.Model);
+        Assert.Equal(TensorModelPackState.NotInstalled, (await packs.GetStatusAsync(selected.Key)).State);
+        Assert.Null(session.Snapshot.Status.Loaded.Value);
+    }
+
+    [Fact]
+    public async Task RemoteResolutionBindsSetupAndRetainsBuiltInIdentityWithoutRegistration()
+    {
+        var source = new Source();
+        using var packs = new TensorModelPackManager(new([]), new WhisperFixture.Store());
+        var target = new Target();
+        await using TensorSetupSession session = WhisperSetup.CreateSession(new(SetupChangeIntent.Create, "speech", null), target, packs, source: source);
+        foreach ((string field, string value) in new[] { ("repository", TensorSpeechModels.Repository), ("source-revision", "main"), ("variant", "ggml-tiny.bin") })
+            Assert.Equal(SetupEditState.Applied, Field(session, field).SetValue(value).State);
+        Assert.Equal(SetupActionState.Completed, (await session.Snapshot.Actions.Single(action => action.Descriptor.Id == "resolve").ExecuteAsync()).State);
+        Assert.Equal(SetupCommitState.Committed, (await session.CommitAsync()).State);
+        Assert.Equal(source.Pack.Key, target.Changes!.Definition.Key);
+        Assert.Empty(packs.Definitions);
+        Assert.Single(source.Reads);
+        Assert.Equal(TensorMetadataReadKind.HeaderRange, source.Reads[0].Kind);
+        Assert.Equal(65536, source.Reads[0].Length);
+    }
+
+    [Fact]
+    public async Task UnknownIntegrityGatedAccessWrongHeaderAndBackendNeverBecomeSupported()
+    {
+        var source = new Source();
+        var resolver = new WhisperModelResolver(source);
+        Assert.Equal(TensorCompatibilityState.Unsupported, (await resolver.EvaluateAsync(source.Candidate, TensorBackendKind.Cuda)).State);
+        Assert.Equal(TensorCompatibilityState.Unverified, (await resolver.EvaluateAsync(source.Candidate with
+        { Artifacts = [source.Candidate.Artifacts[0] with { Sha256 = new('a', 64) }] }, TensorBackendKind.Cpu)).State);
+        Assert.Empty(source.Reads);
+        source.State = TensorSourceState.Gated;
+        Assert.Equal(TensorSourceState.Gated, (await resolver.ResolveAsync(new(source.Candidate.Selection))).Evaluation.SourceState);
+        source.State = TensorSourceState.Available;
+        source.Header = WhisperFixture.Header(english: true);
+        Assert.Equal(TensorCompatibilityState.Unsupported, (await resolver.ResolveAsync(new(source.Candidate.Selection))).Evaluation.State);
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => resolver.ResolveAsync(new(source.Candidate.Selection), new(true)));
+    }
+
+    [Fact]
+    public async Task RuntimeChecksAreExplicitAndBackendSpecific()
+    {
+        int calls = 0;
+        var probe = new WhisperBackendProbe(() => { calls++; return "runtime is callable"; });
+        Assert.Equal(0, calls);
+        Assert.True((await probe.CheckAsync(TensorBackendKind.Cpu)).IsAvailable);
+        Assert.True((await probe.CheckAsync(TensorBackendKind.Auto)).IsAvailable);
+        Assert.False((await probe.CheckAsync(TensorBackendKind.Cuda)).IsAvailable);
+        Assert.Equal(2, calls);
+        Assert.False((await new WhisperBackendProbe(() => throw new DllNotFoundException()).CheckAsync(TensorBackendKind.Cpu)).IsAvailable);
+        Assert.Null((await new WhisperBackendProbe(() => null).CheckAsync(TensorBackendKind.Cpu)).IsAvailable);
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => probe.CheckAsync(TensorBackendKind.Cpu, new(true)));
+    }
+
+    private static SetupChoiceField Field(TensorSetupSession session, string id) => Assert.IsType<SetupChoiceField>(
+        session.Snapshot.Steps.SelectMany(step => step.Sections).SelectMany(section => section.Fields).Single(field => field.Description.Id == id));
+    private sealed class Target : ISetupCommitTarget<TensorSetupChanges>
+    {
+        public TensorSetupChanges? Changes { get; private set; }
+        public Task<SetupCommitResult> CommitAsync(TensorSetupChanges changes, CancellationToken cancellationToken = default)
+        { Changes = changes; return Task.FromResult(new SetupCommitResult(SetupCommitState.Committed, "v1")); }
+    }
+
+    private sealed class Source : ITensorModelSource
+    {
+        public string Id => "hugging-face";
+        public TensorModelPackDefinition Pack { get; } = TensorSpeechModels.Whisper.Single(pack => pack.Key.ModelId == "whisper/tiny");
+        public TensorModelCandidate Candidate { get; }
+        public TensorSourceState State { get; set; } = TensorSourceState.Available;
+        public byte[] Header { get; set; } = WhisperFixture.Header();
+        public List<TensorMetadataRead> Reads { get; } = [];
+        public Source()
+        {
+            TensorModelArtifactDefinition artifact = Pack.Artifacts[0];
+            Candidate = new(Id, new(TensorSpeechModels.Repository, TensorSpeechModels.Revision, artifact.RelativePath),
+                new("whisper", null, null), "MIT", false, false,
+                [new(artifact.RelativePath, artifact.Length, artifact.Sha256, artifact.Provenance!, artifact.Sources[0])]);
+        }
+        public Task<TensorSourceResult<TensorModelCandidate>> GetCandidateAsync(TensorCandidateSelection selection, CancellationToken cancellationToken = default)
+        { cancellationToken.ThrowIfCancellationRequested(); return Task.FromResult(new TensorSourceResult<TensorModelCandidate>(State, State == TensorSourceState.Available ? Candidate : null)); }
+        public Task<TensorSourceResult<TensorMetadataContent>> ReadMetadataAsync(TensorSourceArtifact artifact, TensorMetadataRead read, CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested(); Reads.Add(read);
+            byte[] bytes = new byte[read.Length]; Header.CopyTo(bytes, 0);
+            return Task.FromResult(new TensorSourceResult<TensorMetadataContent>(State, new(bytes, read.Offset, artifact.Length!.Value)));
+        }
+        public Task<TensorSourceResult<TensorSourcePage<TensorSourceModel>>> SearchAsync(TensorSourceQuery query, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<TensorSourceResult<TensorSourcePage<TensorSourceRevision>>> ListRevisionsAsync(TensorRepositoryQuery query, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<TensorSourceResult<TensorSourcePage<TensorSourceArtifact>>> ListVariantsAsync(TensorVariantQuery query, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+    }
+}

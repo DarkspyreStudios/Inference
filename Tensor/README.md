@@ -1,6 +1,6 @@
 # Darkspyre.Inference.Tensor
 
-In-process, first-class .NET inference built on TensorSharp and distributed as the
+In-process, first-class .NET inference built on TensorSharp and Whisper.net and distributed as the
 `Darkspyre.Inference.Tensor` NuGet. The current package targets .NET 11 and references the synchronized
 `Darkspyre.Inference.Common` NuGet rather than embedding Common. Model weights are installed
 separately through Tensor's
@@ -10,7 +10,7 @@ filesystem default and still exposes only `IPersistenceStore`. TensorSharp uses 
 `FileStream` in place and temporarily projects non-file store streams when a native loader needs a
 path.
 
-Assemblies included in the Tensor NuGet:
+Assemblies included by the Tensor package project (STT is unreleased development):
 
 - `Darkspyre.Inference.Tensor.Common` — the host-controlled model lifecycle, model packs,
   verification, direct-file persistence, and execution coordination.
@@ -26,6 +26,11 @@ Assemblies included in the Tensor NuGet:
   built-in `convaiinnovations/laya-typed-decisions` safetensors checkpoint. Its BPE tokenizer, ModernBERT
   encoder, typed decision heads, and calibration execute directly through TensorSharp on CPU or
   CUDA; neither PyTorch nor a Python runtime is used.
+- `Darkspyre.Inference.Tensor.STT` — interchangeable typed PCM transcription and identified-window
+  streaming contracts, separate from capture, VAD and playback.
+- `Darkspyre.Inference.Tensor.STT.Whisper` — resident CPU Whisper inference through the public
+  Whisper.net runtime. Whisper.net, Whisper.net.Runtime and NAudio.Core remain declared NuGet
+  dependencies, not third-party DLLs embedded by the Darkspyre package.
 
 Implementation names identify the model family they support, not a particular checkpoint or training
 run. Laya is not a general-purpose ModernBERT engine: a custom checkpoint must retain the supported
@@ -291,6 +296,61 @@ bytes or a provider-specific UI payload. Selection and Save never unload an acti
 explicit install/verify/load/unload/stop actions apply; changing the saved selection reports
 `RequiresUnload`, and session disposal does not stop the host's engine. See the compile-checked
 `LayaModelSelectionExample` in the shared examples.
+
+## Speech transcription / Whisper (unreleased development)
+
+`WhisperSpeechToTextInference` implements `ITensorSpeechToTextInference`. Create its pack manager
+with `TensorSpeechModels.Whisper` (or supported host definitions), explicitly install the chosen
+pack, then Start / Load / Transcribe / Unload / Stop. The model factory is created during Load and
+stays resident across prompts; per-request processors are disposed before the request completes.
+One instance serializes processing, including a whole window-stream enumeration. Start is a no-op;
+no host process, microphone service or model-per-request cache is created.
+
+`SpeechAudio` is interleaved float PCM, with a declared sample rate and channel count. Finite samples,
+complete frames, 8–192 kHz and 1–8 channels are accepted and normalized to mono 16 kHz using NAudio's
+managed WDL resampler. Inputs are not mutated. Empty clips produce empty results, not fabricated text.
+`SpeechToTextOptions` carries an optional language code and TranslateToEnglish; null means automatic
+detection for multilingual packs or English for English-only packs. Invalid languages and translation
+on English-only/turbo packs are rejected before processing. Capabilities distinguish known per-pack
+support from unknown custom-pack metadata; the loaded header supplies actual vocabulary capabilities.
+
+Batch results contain text, timestamped segments, nullable detected language and selected-pack
+provenance. `TranscribeStreamAsync` accepts caller-identified `SpeechAudioWindow` values and yields
+one completed result per window, including empty results. Timestamps stay relative to that window.
+There is no overlapping-window deduplication, speaker diarization or continuous partial recognition.
+Hosts must dispose abandoned enumerators and their input enumerable must honor cancellation.
+Graceful teardown waits for the entire stream; urgent teardown requests cancellation but never
+releases a factory/storage lease while native processing still uses it.
+
+All twelve initial variants are declared: tiny/tiny.en, base/base.en, small/small.en,
+medium/medium.en, large-v1/v2/v3 and large-v3-turbo. Artifact lengths and SHA-256 values come from
+the [publisher's immutable revision](https://huggingface.co/ggerganov/whisper.cpp/tree/5359861c739e955e79d9a303bcbc70fb988958b1).
+Only CPU is supplied/advertised. Auto selects CPU; other backend values fail explicitly. The setup's
+backend check invokes the real native runtime without loading a model. Definition/model listing
+does not load native libraries, probe hardware, select a default pack or download anything.
+
+`WhisperSetup.CreateSession` uses the existing generic Tensor editor, with all twelve definitions,
+explicit install/verify/lifecycle actions and typed `TensorSetupChanges`. Its optional source binds
+`WhisperModelResolver`: the initial remote policy verifies published weight identities plus actual
+GGML architecture/vocabulary headers. Unknown hashes remain Unverified; tags or filenames alone
+cannot produce a compatible pack. The native loader rechecks installed headers and validates the
+checkpoint. The initial supported loading formats are standard Whisper F32/F16 GGML; arbitrary
+quantized variants or modified architecture dimensions are not advertised. No alternate downloader
+is introduced. Language/translation are typed request options, not a library-owned application
+settings store.
+
+Whisper.net 1.9.1 requires a path or whole-model buffer, not a stream. Its adapter reads the pack's
+persistence reference: it retains a FileStream's real path, or bounded-copies other store streams
+into a private temporary file. It holds that resource until factory disposal and cleans it on failed
+or cancelled loads. This is an internal native-loader projection, not another durable model cache;
+the application still supplies only `IPersistenceStore`. Native processing is not crash-isolated and
+teardown has no guaranteed deadline.
+
+The [source-only bridge](examples/Darkspyre.Inference.Tensor.STT.Bridge/README.md) is a non-packable
+ASP.NET example showing a host's explicit startup/load, PCM request mapping and terminal shutdown.
+It binds loopback, requires an already-installed model, and is not an authenticated hosted product
+or an OpenAI-compatible API. The generic editor composition example also includes Whisper under
+the Audio / SpeechTranscription task without provider-name renderer branches.
 
 ## Local-only GGUF dependency build
 

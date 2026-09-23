@@ -777,3 +777,60 @@ with process-scoped private-feed credentials; subsequent checks used the restore
 UI/rules changes and the consumer-gap document remain outside this commit; no untracked files remain.
 No UI work, Inference package creation, family version change or publication occurred. Whisper/STT
 and the final capability-table acceptance pass remain required; implementation continues for those.
+
+### Unit 4 — resident Whisper STT, model metadata and generic settings (2026-09-22)
+
+Implementation phase: `.Tensor.STT` owns the typed PCM/request/result/window contracts and
+`.Tensor.STT.Whisper` implements them using public Whisper.net/Whisper.net.Runtime 1.9.1 and
+NAudio.Core 2.2.1. Dependencies are centrally pinned and declared by the Tensor package project;
+third-party DLLs are not added as embedded package contents. STT assemblies and XML documentation
+are included in that project's existing product layout. There is no new product NuGet or host runtime
+inside the library. The non-packable loopback bridge is separate source in the Tensor solution.
+
+Load obtains a verified pack lease, validates the standard Whisper F32/F16 GGML header, and eagerly
+constructs/validates one factory. Requests normalize finite complete-frame PCM (8–192 kHz, 1–8
+channels) to mono 16 kHz, use one processor, then await its disposal before releasing model use.
+The factory remains resident. Empty clips return an explicit empty result. Options use language
+codes or null for automatic detection; English-only and turbo models reject translation requests.
+Batch/window results carry actual selected-pack provenance and window-relative segment times.
+
+`TensorModelLifetime` remains the request/teardown authority. Window enumeration holds its lease
+until completion/disposal; the host's input enumeration must honor cancellation. Unload and Stop
+protect normal work or request urgent cancellation, then await safe native completion. Native
+load is also awaited on cancellation before cleanup. Stop is terminal and Start remains a no-op.
+Whisper's adapter retains a FileStream or private bounded-copy projection until factory disposal;
+failed/cancelled loads release the source, temporary file and pack lease. No independent durable
+cache, implicit download, process supervisor, capture, VAD or partial-token stream is introduced.
+
+`TensorSpeechModels.Whisper` contains all twelve required variants, using actual publisher lengths
+and SHA-256 values at immutable `ggerganov/whisper.cpp` revision
+`5359861c739e955e79d9a303bcbc70fb988958b1`. CPU is the only advertised runtime; Auto maps to CPU.
+`WhisperSetup` uses the shared Tensor session and typed host commit. `WhisperModelResolver` combines
+the initial catalog's known weight identities with bounded GGML header inspection. Unknown remote
+content remains Unverified rather than trusting a name/tag. Custom host packs may use the declared
+standard loading schema; modified architectures/quantized variants are not claimed supported.
+The explicit backend action invokes the native runtime; listing/composition never initializes it.
+The generic example offers Whisper without provider-specific renderer logic. Request language and
+translation defaults remain a host policy over the typed request, not a new generic settings bag.
+
+Source evidence: the [1.9.1 factory](https://github.com/sandrohanea/whisper.net/blob/1.9.1/Whisper.net/WhisperFactory.cs)
+and [processor](https://github.com/sandrohanea/whisper.net/blob/1.9.1/Whisper.net/WhisperProcessor.cs)
+confirm eager loading, per-request processing and asynchronous disposal; the
+[Whisper model documentation](https://github.com/openai/whisper#available-models-and-languages)
+identifies turbo's translation limitation. Optional live metadata-only resolution verified all twelve
+published definitions as Supported and preserved every built-in key. No full weights or inference
+were needed for that check.
+
+Phase exit: the Whisper implementation unit is complete. Tensor passes **257 tests** (36 new
+Whisper cases) and Connect **291 tests**, in Debug and Release, with zero build warnings/errors.
+Both focused solutions pass formatting verification and transitive dependency vulnerability audits.
+The new tests exercise actual PCM resampling, pack persistence/projection, metadata resolution and
+settings commit, with a controlled native boundary for repeated resident requests, model switching,
+language/translation rejection, failed/cancelled loads, serialized execution, empty results, identified
+window streams and graceful/urgent Unload and Stop. They do not claim full-weight/native transcription
+accuracy. The bridge and generic host composition compile in their solutions.
+
+No UI source, shared version or released packages changed; no Inference archives or full model weights
+were downloaded/created. All new source/test/example files are tracked. Other-worker UI/rules and
+consumer-gap-document edits remain outside this commit. Implementation remains active for the final
+capability-table acceptance pass and completion report; this checkpoint does not mark the goal done.

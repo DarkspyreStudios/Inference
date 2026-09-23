@@ -6,7 +6,8 @@ public enum TensorCapability
 {
     Llm,
     Image,
-    Decision
+    Decision,
+    SpeechTranscription
 }
 
 public enum TensorBackendKind

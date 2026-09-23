@@ -3,6 +3,7 @@ using Darkspyre.Inference.Connect.Image;
 using Darkspyre.Inference.Connect.LLM;
 using Darkspyre.Inference.Tensor.Common;
 using Darkspyre.Inference.Tensor.Image.Supra;
+using Darkspyre.Inference.Tensor.STT.Whisper;
 using Darkspyre.Inference.Tensor.LLM.Qwen;
 
 namespace Darkspyre.Inference.Setup.Examples;
@@ -31,6 +32,8 @@ public static class SetupCompositionExample
         sessions.Add(SupraSetup.CreateSession(new(SetupChangeIntent.Create, Guid.NewGuid().ToString("N"), null), tensorTarget, packs,
             offeredModels: packs.Definitions.Where(pack => pack.Capability == TensorCapability.Image
                 && pack.RuntimeArchitecture == TensorImageModels.SupraRuntimeArchitecture).ToArray(), source: modelSource));
+        sessions.Add(WhisperSetup.CreateSession(new(SetupChangeIntent.Create, Guid.NewGuid().ToString("N"), null), tensorTarget, packs,
+            source: modelSource));
         return sessions.AsReadOnly();
     }
 }

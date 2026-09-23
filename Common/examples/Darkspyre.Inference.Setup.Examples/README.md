@@ -38,6 +38,12 @@ the chosen packs explicitly, and save the selected `TensorModelKey` through the 
 The implementation name identifies the Laya model family, not its original checkpoint.
 No package/version change or paid/native inference run is needed to build this example.
 
+The same composition includes `WhisperSetup` for Audio / SpeechTranscription, with the twelve pinned
+Whisper packs and an optional metadata source. It uses `TensorSetupChanges`, the existing manager
+and the same renderer; selection is not installation. Pass a host-owned live engine when composing
+a session that should expose explicit model lifecycle actions. Language and translation are typed
+per-request options; hosts decide whether and how to persist their preferred request defaults.
+
 `AudioSetupExample.CreateDrafts` composes PocketTTS speech and TangoFlux generated audio for the same
 renderer. The host supplies separate typed commit targets; protected-header mutations are committed
 atomically with settings. Both endpoints are external, including on localhost. Tests declare network
