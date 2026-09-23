@@ -13,13 +13,6 @@ namespace Darkspyre.Inference.Tensor.Decision.Laya;
 
 public sealed class LayaDecisionInference : ITensorDecisionInference
 {
-    private static readonly double[] Temperatures =
-    [
-        1.0148024559020996,
-        1.0374259948730469,
-        1.0575125217437744
-    ];
-
     private readonly ITensorModelPackManager _packs;
     private readonly ILayaModelLoader _loader;
     private readonly TensorBackendKind _requestedBackend;
@@ -28,6 +21,7 @@ public sealed class LayaDecisionInference : ITensorDecisionInference
     private readonly TensorModelLifetime _lifetime = new();
     private TensorModelPackLease? _modelLease;
     private LayaModelResources? _resources;
+    private LayaAgentConfiguration? _configuration;
     private TensorBackendKind? _loadedBackend;
     private bool _disposed;
 
@@ -70,7 +64,7 @@ public sealed class LayaDecisionInference : ITensorDecisionInference
                 DecisionQuestionKind.Score,
                 DecisionQuestionKind.Boolean
             },
-            MaximumInputTokens = LayaSequenceBuilder.MaximumLength,
+            MaximumInputTokens = _configuration?.MaximumLength,
             SupportsCalibratedConfidence = true,
             SupportsActionProbability = true
         });
@@ -88,6 +82,8 @@ public sealed class LayaDecisionInference : ITensorDecisionInference
         CancellationToken executionToken = modelUse.CancellationToken;
         LayaModelResources resources = _resources
             ?? throw new InferenceException(InferenceFailureCode.ModelUnavailable, "The Laya model was not loaded.");
+        LayaAgentConfiguration configuration = _configuration
+            ?? throw new InferenceException(InferenceFailureCode.ModelUnavailable, "The Laya agent configuration was not loaded.");
         TensorModelKey selected = _modelLease?.Key
             ?? throw new InferenceException(InferenceFailureCode.ModelUnavailable, "The Laya model pack was not loaded.");
         ValidateModelId(request.ModelId, selected);
@@ -104,7 +100,8 @@ public sealed class LayaDecisionInference : ITensorDecisionInference
         foreach (DecisionQuestion question in request.Questions)
         {
             executionToken.ThrowIfCancellationRequested();
-            LayaSequence sequence = LayaSequenceBuilder.Build(resources.Tokenizer, request.State, question);
+            LayaSequence sequence = LayaSequenceBuilder.Build(resources.Tokenizer, request.State, question,
+                configuration.MaximumLength, configuration.MaximumHeadLength);
             if (sequence.MarkerPositions.Length != sequence.OptionIds.Length)
             {
                 throw new InferenceException(
@@ -127,7 +124,7 @@ public sealed class LayaDecisionInference : ITensorDecisionInference
                     exception);
             }
 
-            double temperature = Temperature(sequence.QuestionType, sequence.OptionIds.Length);
+            double temperature = configuration.Temperature(sequence.QuestionType, sequence.OptionIds.Length);
             float[] scaled = output.Logits.Select(logit => checked((float)(logit / temperature))).ToArray();
             float[] probabilities = LayaDecisionModel.Softmax(scaled);
             answers.Add(question.Id, CreateAnswer(question, sequence.OptionIds, probabilities, output.ActionProbability));
@@ -160,6 +157,7 @@ public sealed class LayaDecisionInference : ITensorDecisionInference
         using IDisposable unloading = await _lifetime.EnterUnloadAsync(cancellationToken).ConfigureAwait(false);
         _resources?.Dispose();
         _resources = null;
+        _configuration = null;
         if (_modelLease is not null)
         {
             await _modelLease.DisposeAsync().ConfigureAwait(false);
@@ -236,10 +234,13 @@ public sealed class LayaDecisionInference : ITensorDecisionInference
         {
             if (lease.Key != model)
             { throw new InferenceException(InferenceFailureCode.ModelUnavailable, "The pack lease identifies a different model."); }
+            LayaAgentConfiguration configuration = await LayaAgentConfiguration.LoadAsync(
+                lease.GetRequiredArtifact("agent-config"), cancellationToken).ConfigureAwait(false);
             loadedResources = await _loader.LoadAsync(lease, backend, cancellationToken).ConfigureAwait(false);
             cancellationToken.ThrowIfCancellationRequested();
             _lifetime.MarkLoaded(model, backend);
             _resources = loadedResources;
+            _configuration = configuration;
             _modelLease = lease;
             _loadedBackend = backend;
             loadedResources = null;
@@ -400,22 +401,6 @@ public sealed class LayaDecisionInference : ITensorDecisionInference
         TensorBackendKind.Auto => TensorBackendKind.Cpu,
         _ => backend
     };
-
-    private static double Temperature(int questionType, int optionCount)
-    {
-        double temperature = questionType switch
-        {
-            0 when optionCount <= 2 => 1.9063563346862793,
-            0 when optionCount <= 5 => 1.7601518630981445,
-            0 when optionCount <= 10 => 1.0000158548355103,
-            0 => 0.10058280825614929,
-            1 when optionCount is >= 3 and <= 5 => 1.2514300346374512,
-            2 when optionCount <= 2 => 1.983399510383606,
-            >= 0 and < 3 => Temperatures[questionType],
-            _ => 1d
-        };
-        return Math.Clamp(temperature, 0.5d, 5d);
-    }
 
     private static double Confidence(ReadOnlySpan<float> probabilities)
     {

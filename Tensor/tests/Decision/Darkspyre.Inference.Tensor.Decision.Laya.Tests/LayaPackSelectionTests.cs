@@ -11,8 +11,63 @@ namespace Darkspyre.Inference.Tensor.Decision.Laya.Tests;
 
 public sealed class LayaPackSelectionTests : IDisposable
 {
-    private static readonly string[] ArtifactRoles = ["model", "tokenizer"];
+    private static readonly string[] ArtifactRoles = ["model", "tokenizer", "agent-config"];
+    private const string AgentConfiguration = """
+        {"max_len":384,"head_max_len":128,"temperature":[2,3,4],"temperature_by_options":{"noul:2":1.006}}
+        """;
     private readonly string _root = Path.Combine(Path.GetTempPath(), $"darkspyre-laya-selection-{Guid.NewGuid():N}");
+
+    [Fact]
+    public async Task LoadedPackControlsTheSequenceWindowAndHeadBudget()
+    {
+        TensorModelPackDefinition pack = Pack("host/custom", "1");
+        using var http = new HttpClient(new ArtifactHandler());
+        using var packs = Manager(http, pack);
+        await packs.InstallAsync(pack.Key);
+        var loader = new Loader();
+        await using var engine = new LayaDecisionInference(packs, loader, TensorBackendKind.Cpu);
+        await engine.LoadAsync(pack.Key);
+        await engine.DecideAsync(new DecisionInferenceRequest
+        {
+            ModelId = pack.Key.ModelId,
+            State = JsonSerializer.SerializeToElement(new string('x', 2000)),
+            Questions = [new BooleanDecisionQuestion { Id = "ready", Instructions = new string('y', 500) }]
+        });
+        LayaSequence sequence = Assert.Single(Assert.Single(loader.Models).Sequences);
+        Assert.Equal(384, sequence.TokenIds.Length);
+        Assert.Equal(130, Array.LastIndexOf(sequence.TokenIds, LayaTokenizer.SeparatorTokenId, sequence.TokenIds.Length - 2));
+    }
+
+    [Fact]
+    public async Task MissingAgentConfigurationFailsCompatibilityBeforeLoading()
+    {
+        TensorModelPackDefinition pack = Pack("host/custom", "1");
+        pack = pack with { Artifacts = pack.Artifacts.Where(artifact => artifact.Role != "agent-config").ToArray() };
+        using var http = new HttpClient(new ArtifactHandler());
+        using var packs = Manager(http, pack);
+        var loader = new Loader();
+        await using var engine = new LayaDecisionInference(packs, loader, TensorBackendKind.Cpu);
+        InferenceException error = await Assert.ThrowsAsync<InferenceException>(() => engine.LoadAsync(pack.Key));
+        Assert.Equal(InferenceFailureCode.UnsupportedFeature, error.Code);
+        Assert.Empty(loader.Loaded);
+    }
+
+    [Fact]
+    public async Task InvalidAgentConfigurationFailsLoadWithoutNativeWorkOrLeakingThePackLease()
+    {
+        TensorModelPackDefinition pack = Pack("host/custom", "1", "{}");
+        using var http = new HttpClient(new ArtifactHandler("{}"));
+        using var packs = Manager(http, pack);
+        await packs.InstallAsync(pack.Key);
+        var loader = new Loader();
+        await using var engine = new LayaDecisionInference(packs, loader, TensorBackendKind.Cpu);
+        InferenceException error = await Assert.ThrowsAsync<InferenceException>(() => engine.LoadAsync(pack.Key));
+        Assert.Equal(InferenceFailureCode.ModelCorrupt, error.Code);
+        Assert.Empty(loader.Loaded);
+        Assert.Null(engine.Observation.Model);
+        Assert.Null((await engine.GetCapabilitiesAsync()).MaximumInputTokens);
+        await packs.RemoveAsync(pack.Key);
+    }
 
     [Fact]
     public async Task OneInstanceLoadsRunsUnloadsAndSwitchesBetweenHostPacks()
@@ -27,23 +82,28 @@ public sealed class LayaPackSelectionTests : IDisposable
         await using var engine = new LayaDecisionInference(packs, loader, TensorBackendKind.Cpu);
         await engine.StartAsync();
         Assert.Null(engine.Observation.Model);
+        Assert.Null((await engine.GetCapabilitiesAsync()).MaximumInputTokens);
         foreach (TensorModelPackDefinition selected in new[] { first, second })
         {
             await engine.LoadAsync(selected.Key);
             Assert.Equal(selected.Key, engine.Observation.Model);
             Assert.Equal(selected.Key, loader.Loaded[^1]);
             Assert.Equal(3, (await engine.GetCapabilitiesAsync(selected.Key.ModelId)).SupportedQuestionKinds.Count);
+            Assert.Equal(384, (await engine.GetCapabilitiesAsync()).MaximumInputTokens);
             InferenceException wrongModel = await Assert.ThrowsAsync<InferenceException>(() => engine.DecideAsync(Request("not-loaded")));
             Assert.Equal(InferenceFailureCode.ModelUnavailable, wrongModel.Code);
             DecisionInferenceResult result = await engine.DecideAsync(Request(selected.Key.ModelId));
             Assert.Equal(selected.Key.ModelId, result.Provenance.ModelId);
             Assert.Equal(selected.Key.Revision, result.Provenance.ModelRevision);
             Assert.True(Assert.IsType<BooleanDecisionAnswer>(result.Answers["ready"]).Value);
+            Assert.Equal(Math.Round(1 / (1 + Math.Exp(-2 / 1.006)), 4),
+                Assert.IsType<BooleanDecisionAnswer>(result.Answers["ready"]).TrueProbability);
             await Assert.ThrowsAsync<InvalidOperationException>(() => engine.LoadAsync(selected.Key));
             await Assert.ThrowsAsync<TensorModelPackException>(() => packs.RemoveAsync(selected.Key));
             await engine.UnloadAsync();
             Assert.True(loader.Models[^1].Disposed);
             Assert.Null(engine.Observation.Model);
+            Assert.Null((await engine.GetCapabilitiesAsync()).MaximumInputTokens);
             await packs.RemoveAsync(selected.Key); // Unload releases the storage lease too.
         }
         Assert.Equal(2, loader.Loaded.Count);
@@ -199,7 +259,8 @@ public sealed class LayaPackSelectionTests : IDisposable
             pack with { Capability = TensorCapability.Llm },
             pack with { RuntimeArchitecture = "other" },
             pack with { Artifacts = [] },
-            pack with { Artifacts = pack.Artifacts.Where(artifact => artifact.Role != "tokenizer").ToArray() }
+            pack with { Artifacts = pack.Artifacts.Where(artifact => artifact.Role != "tokenizer").ToArray() },
+            pack with { Artifacts = pack.Artifacts.Where(artifact => artifact.Role != "agent-config").ToArray() }
         })
         {
             Assert.Throws<ArgumentException>(() => LayaSetup.CreateSession(new(SetupChangeIntent.Create, "laya", null), new Target(), packs, [invalid]));
@@ -216,7 +277,7 @@ public sealed class LayaPackSelectionTests : IDisposable
         State = JsonElement.Parse("{}"),
         Questions = [new BooleanDecisionQuestion { Id = "ready", Instructions = "Is the system ready?" }]
     };
-    private static TensorModelPackDefinition Pack(string id, string revision) => new()
+    private static TensorModelPackDefinition Pack(string id, string revision, string configuration = AgentConfiguration) => new()
     {
         Key = new(id, revision),
         Capability = TensorCapability.Decision,
@@ -226,7 +287,7 @@ public sealed class LayaPackSelectionTests : IDisposable
         Artifacts = ArtifactRoles.Select(role =>
         {
             var uri = new Uri($"https://example.test/{id}/{revision}/{role}");
-            byte[] content = Encoding.UTF8.GetBytes(uri.AbsolutePath);
+            byte[] content = ArtifactContent(uri, configuration);
             return new TensorModelArtifactDefinition
             {
                 Role = role,
@@ -241,10 +302,12 @@ public sealed class LayaPackSelectionTests : IDisposable
     {
         if (Directory.Exists(_root)) { Directory.Delete(_root, recursive: true); }
     }
-    private sealed class ArtifactHandler : HttpMessageHandler
+    private static byte[] ArtifactContent(Uri uri, string configuration) => Encoding.UTF8.GetBytes(
+        uri.AbsolutePath.EndsWith("/agent-config", StringComparison.Ordinal) ? configuration : uri.AbsolutePath);
+    private sealed class ArtifactHandler(string configuration = AgentConfiguration) : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
-            Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(Encoding.UTF8.GetBytes(request.RequestUri!.AbsolutePath)) });
+            Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(ArtifactContent(request.RequestUri!, configuration)) });
     }
     private sealed class Loader : ILayaModelLoader
     {
@@ -272,13 +335,14 @@ public sealed class LayaPackSelectionTests : IDisposable
     private sealed class Model(Action? forward) : ILayaDecisionModel
     {
         public bool Disposed { get; private set; }
+        public List<LayaSequence> Sequences { get; } = [];
         public LayaModelOutput Forward(LayaSequence sequence)
-        { Assert.False(Disposed); forward?.Invoke(); Assert.False(Disposed); return new([0, 2], .75f); }
+        { Assert.False(Disposed); Sequences.Add(sequence); forward?.Invoke(); Assert.False(Disposed); return new([0, 2], .75f); }
         public void Dispose() => Disposed = true;
     }
     private sealed class Tokenizer : ILayaTokenizer
     {
-        public IReadOnlyList<int> Encode(string text) => [1];
+        public IReadOnlyList<int> Encode(string text) => Enumerable.Repeat(1, text.Length).ToArray();
     }
     private sealed class Target : ISetupCommitTarget<TensorSetupChanges>
     {

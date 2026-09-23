@@ -1,0 +1,24 @@
+{"text": "Explain how the retry logic in `OrderDispatcher.SendAsync` decides to stop retrying.", "ids": [1672, 19104, 849, 253, 47327, 9317, 275, 2634, 13921, 46453, 15, 19907, 19168, 65, 21936, 281, 3523, 851, 11729, 15]}
+{"text": "Why did Friday's deployment fail?", "ids": [4967, 858, 6794, 434, 19007, 1891, 32]}
+{"text": " false: no, the statement does not hold", "ids": [3221, 27, 642, 13, 253, 3908, 1057, 417, 2186]}
+{"text": " true: yes, the statement holds", "ids": [2032, 27, 4754, 13, 253, 3908, 6556]}
+{"text": "noul question: Does finishing the task in `content` require committed changes to source-controlled files?", "ids": [79, 3941, 1953, 27, 9876, 19083, 253, 4836, 275, 2634, 6071, 65, 2430, 7730, 2544, 281, 2603, 14, 16894, 4367, 32]}
+{"text": "line one\nline two\n\nline four", "ids": [1282, 581, 187, 1282, 767, 187, 187, 1282, 1740]}
+{"text": "two  spaces   three    four", "ids": [9389, 50276, 31748, 50275, 13524, 50274, 12496]}
+{"text": "tab\there\t\tdone", "ids": [8476, 186, 1568, 186, 186, 17506]}
+{"text": "trailing space ", "ids": [7604, 4837, 2317, 209]}
+{"text": " leading space", "ids": [4283, 2317]}
+{"text": "def f(x):\n    return x**2  # square", "ids": [1545, 269, 9, 89, 2262, 187, 50274, 2309, 1269, 424, 19, 50276, 4, 6278]}
+{"text": "Call `Foo.Bar()` then {\"a\": [1, 2.5e-3]}", "ids": [7865, 2634, 34296, 15, 7912, 42702, 840, 17579, 66, 1381, 544, 18, 13, 374, 15, 22, 70, 14, 20, 18095]}
+{"text": "café naïve résumé Zürich", "ids": [68, 2320, 860, 36060, 9568, 2204, 860, 1503, 3090, 5969]}
+{"text": "日本語のテキスト and 中文", "ids": [49868, 19119, 241, 3917, 28656, 33548, 38206, 285, 209, 13609, 20855]}
+{"text": "emoji 🚀 test 👍🏽", "ids": [43208, 8020, 22692, 237, 211, 1071, 22692, 228, 224, 14931, 226, 123]}
+{"text": "IDs 12345 and 3.14159 and 1,000,000", "ids": [31724, 1249, 16767, 285, 495, 15, 1047, 17220, 285, 337, 13, 933, 13, 933]}
+{"text": "DON'T I'M WE'LL they're it's", "ids": [39153, 8, 53, 309, 8, 46, 13573, 8, 2293, 597, 1472, 352, 434]}
+{"text": " nbsp thin　ideographic", "ids": [575, 6732, 1186, 35275, 19409, 504, 5576]}
+{"text": "CR\r\nLF", "ids": [1311, 190, 187, 19546]}
+{"text": "mixed​zero-width", "ids": [37340, 12882, 10528, 14, 3429]}
+{"text": "ﬁ ligature and Å decomposed", "ids": [46992, 212, 8405, 1177, 285, 17732, 45765]}
+{"text": "--flag=value && ./run.sh | grep -v x", "ids": [283, 17101, 30, 2877, 3857, 27479, 6321, 15, 1200, 1040, 34096, 428, 87, 1269]}
+{"text": "   ", "ids": [50275]}
+{"text": "email |||EMAIL_ADDRESS||| and |||PHONE_NUMBER||| at |||IP_ADDRESS|||", "ids": [12812, 209, 50277, 285, 209, 50278, 387, 209, 0]}

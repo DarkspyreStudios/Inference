@@ -15,7 +15,7 @@ internal static class LayaModelCompatibility
         {
             throw new ArgumentException($"Laya requires architecture '{TensorDecisionModels.LayaRuntimeArchitecture}', not '{definition.RuntimeArchitecture}'.", nameof(definition));
         }
-        foreach (string role in new[] { "model", "tokenizer" })
+        foreach (string role in new[] { "model", "tokenizer", "agent-config" })
         {
             if (!definition.Artifacts.Any(artifact => artifact.Role == role))
             {

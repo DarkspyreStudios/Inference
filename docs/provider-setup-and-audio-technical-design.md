@@ -507,7 +507,7 @@ single-pack proposal. General and technical direction are settled; this amendmen
 - Keep the Laya family implementation and current constructor. No checkpoint parameter or alternate
   inference path: `LoadAsync(key)` obtains the host-registered definition from the existing manager.
 - Expose `TensorDecisionModels.LayaRuntimeArchitecture`. A single engine-owned policy validates common
-  metadata, Decision capability, the Laya family, required model/tokenizer roles and CPU/CUDA declarations
+  metadata, Decision capability, the Laya family, required artifact roles and CPU/CUDA declarations
   for both offered setup definitions and Load. The native loader retains its tensor-schema checks.
 - Use the acquired pack key for execution coordination, model-ID checks and provenance. Acquire the
   request lifetime before checking the resident model identity so a model switch cannot race a request.
@@ -522,7 +522,8 @@ single-pack proposal. General and technical direction are settled; this amendmen
   boundaries; fixtures exercise two distinct custom packs, provenance, wrong-family rejection,
   failure/cancellation cleanup, graceful/urgent unload and the generic selection/save flow. They do
   not claim a new full-weight accuracy or calibration experiment. Formatting/calibration algorithms
-  and architecture support do not change.
+  and architecture support did not change at this historical checkpoint; the serving-parity unit
+  below supersedes the tokenization, calibration and sequence-limit behavior and requires agent-config.
 
 No version change, package creation/publication, UI implementation or consumer migration is authorized
 by this amendment. TangoFlux, remote Qwen/Supra discovery and Whisper remain pending.
@@ -623,7 +624,7 @@ solutions (Tensor 111, including 23 new selection/metadata cases; Connect 291) a
 The dependency audits already passed in unit 3a; no dependency version changed here. No full-weight
 run is claimed. No packages, version changes, UI changes, model downloads or publication occurred.
 
-**Remaining dependency gate:** the current TensorSharp 2.8.6.3 `PersistenceFileLease.AcquireAsync`
+**Historical dependency gate (resolved by the following unit):** TensorSharp 2.8.6.3 `PersistenceFileLease.AcquireAsync`
 projects a non-FileStream artifact to one generated filename. `GgufFile.OpenSiblingShards` resolves
 the rest of a split checkpoint from filenames beside that file. `ModelService.LoadModelAsync`
 accepts only the model reference (plus an optional vision projector), not a complete shard set.
@@ -638,3 +639,50 @@ requires building local-only fork dependency packages, an exception to the prese
 creation development rule; no publication or Inference version bump is proposed. Implementation
 pauses at this committed checkpoint for that direction. Remote engine resolution/setup binding,
 Whisper and final cross-row acceptance are still outstanding, not reported as complete.
+
+### GGUF persistence and Laya serving-parity corrections (2026-09-22)
+
+Implementation phase: the user authorized the focused GGUF fork fix, including local-only
+dependency packages, and supplied the Laya serving-parity handoff plus golden cases. No UI work,
+Inference version bump, publication or new model architecture is included.
+
+- TensorSharp's `darkspyre` commit `a1ce7780` adds a named immutable `PersistenceFileSet`, consumed
+  by both its GGUF reader and model service. One lease implementation retains an in-place file set
+  or projects the complete named set to a private temporary directory. Unlisted siblings are never
+  read by persistence loading. Failure/cancellation/unload clean up projections and source handles.
+  Shard counts, filenames, numbering and duplicate tensor names are validated before allocation.
+- Qwen maps the selected definition's relative paths to every acquired pack artifact and passes the
+  same complete set to compatibility validation and model loading. The locally built nine-package
+  dependency closure is pinned as `2.8.6.4-local.gguf.a1ce7780`; build/restore instructions are in
+  `Tensor/README.md`. This is the explicitly authorized package-creation exception, not a release.
+- Laya requires the selected pack's `agent-config` artifact in setup and load compatibility. Load
+  parses `max_len`, `head_max_len`, `temperature` and `temperature_by_options` before native work.
+  Configured option buckets take precedence; absent buckets use the configured question-type
+  temperature. Values must be finite and positive and are not clamped. No upstream defaults remain.
+  Invalid configuration is `ModelCorrupt`; absent required roles fail compatibility. Failed loads
+  release their acquired pack lease. Capabilities expose loaded `max_len`, otherwise null.
+- Laya explicitly validates the supported ByteLevel pre-tokenizer configuration and supplies its
+  GPT-2 regex. Every added token is registered, including ordinary whitespace runs and placeholders.
+  Sequence framing remains unchanged but truncation/head budgeting use the loaded parameters.
+  All three Laya corrections form one completed unit, with no host API/lifecycle redesign.
+- The supplied 24 HF reference rows and pinned, Apache-2.0 tokenizer fixture are offline regression
+  inputs. Controlled-model tests verify a custom pack's served probability, head budget/window,
+  missing/invalid configuration and resource cleanup. They do not claim the RightSize full-weight
+  `coding-v7-s42` probability comparison; that acceptance run belongs to RightSize.
+
+Remote engine resolution/setup binding, Whisper and final settings cross-row acceptance remain
+outstanding. These fixes do not mark that broader work complete.
+
+The pinned built-in `laya-typed-decisions` agent configuration actually declares 1024/256, unlike
+the handoff's `laya` reference configuration (512/192). Both are retained as offline regression
+fixtures. Reading the selected pack resolves this distinction without imposing new fixed limits.
+
+Phase exit: these fixes pass zero-warning Debug/Release builds and deterministic tests
+(Tensor 165, Connect 291, TensorSharp persistence 22). All 24 tokenizer golden rows pass.
+Both Inference solution format checks and transitive vulnerability audits pass; the fork's
+changed-file formatting and Chat dependency audit pass. The nine local dependency archives have
+matching local-version references and were consumed through NuGet by the Inference verification.
+There was no full-weight/native-device experiment, Inference package build, publication or version
+bump. UI source and the other worker's pending documentation remain untouched. The shared
+`Directory.Packages.props` whole-file commit preserves that worker's already-staged Lumeo,
+ASP.NET Components and bunit declarations alongside this unit's TensorSharp dependency pin.

@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Microsoft.ML.Tokenizers;
 using TensorSharp.Runtime;
 using MlBpeTokenizer = Microsoft.ML.Tokenizers.BpeTokenizer;
@@ -42,6 +43,16 @@ internal sealed class LayaTokenizer : ILayaTokenizer
         using JsonDocument document = await JsonDocument.ParseAsync(
             content,
             cancellationToken: cancellationToken).ConfigureAwait(false);
+        if (!document.RootElement.TryGetProperty("pre_tokenizer", out JsonElement preTokenizer)
+            || preTokenizer.ValueKind != JsonValueKind.Object
+            || preTokenizer.EnumerateObject().Count() != 4
+            || !preTokenizer.TryGetProperty("type", out JsonElement type) || type.ValueKind != JsonValueKind.String || type.GetString() != "ByteLevel"
+            || !preTokenizer.TryGetProperty("add_prefix_space", out JsonElement prefix) || prefix.ValueKind != JsonValueKind.False
+            || !preTokenizer.TryGetProperty("trim_offsets", out JsonElement trim) || trim.ValueKind != JsonValueKind.True
+            || !preTokenizer.TryGetProperty("use_regex", out JsonElement regex) || regex.ValueKind != JsonValueKind.True)
+        {
+            throw new InvalidDataException("Laya requires the ByteLevel GPT-2 pre-tokenizer without an added prefix space.");
+        }
         JsonElement model = document.RootElement.GetProperty("model");
         Dictionary<string, int> vocabulary = model.GetProperty("vocab")
             .EnumerateObject()
@@ -55,16 +66,17 @@ internal sealed class LayaTokenizer : ILayaTokenizer
         var specialTokens = new Dictionary<string, int>(StringComparer.Ordinal);
         foreach (JsonElement item in document.RootElement.GetProperty("added_tokens").EnumerateArray())
         {
-            if (item.GetProperty("special").GetBoolean())
-            {
-                specialTokens[item.GetProperty("content").GetString()!] = item.GetProperty("id").GetInt32();
-            }
+            // HF matches all added tokens before BPE, including ordinary whitespace runs.
+            specialTokens.Add(item.GetProperty("content").GetString()!, item.GetProperty("id").GetInt32());
         }
 
         var options = new BpeOptions(vocabulary)
         {
             Merges = merges,
             SpecialTokens = specialTokens,
+            PreTokenizer = new RegexPreTokenizer(
+                new Regex(@"'s|'t|'re|'ve|'m|'ll|'d| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+", RegexOptions.Compiled),
+                specialTokens),
             ByteLevel = true,
             FuseUnknownTokens = false
         };

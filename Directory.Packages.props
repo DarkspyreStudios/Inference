@@ -13,18 +13,22 @@
     <PackageVersion Include="Darkspyre.Persistence" Version="1.0.0" />
     <PackageVersion Include="Darkspyre.SecureStore" Version="1.0.0" />
     <PackageVersion Include="Darkspyre.ML.Tokenizers" Version="2.0.0.1" />
-    <PackageVersion Include="Darkspyre.TensorSharp.Backends.Cuda" Version="2.8.6.3" />
-    <PackageVersion Include="Darkspyre.TensorSharp.Chat" Version="2.8.6.3" />
-    <PackageVersion Include="Darkspyre.TensorSharp.Models" Version="2.8.6.3" />
-    <PackageVersion Include="Darkspyre.TensorSharp.Runtime" Version="2.8.6.3" />
-    <PackageVersion Include="Darkspyre.TensorSharp.Tensors" Version="2.8.6.3" />
+    <!-- Local-only fork validation build; see Tensor/README.md. Not a published release. -->
+    <PackageVersion Include="Darkspyre.TensorSharp.Backends.Cuda" Version="2.8.6.4-local.gguf.a1ce7780" />
+    <PackageVersion Include="Darkspyre.TensorSharp.Chat" Version="2.8.6.4-local.gguf.a1ce7780" />
+    <PackageVersion Include="Darkspyre.TensorSharp.Models" Version="2.8.6.4-local.gguf.a1ce7780" />
+    <PackageVersion Include="Darkspyre.TensorSharp.Runtime" Version="2.8.6.4-local.gguf.a1ce7780" />
+    <PackageVersion Include="Darkspyre.TensorSharp.Tensors" Version="2.8.6.4-local.gguf.a1ce7780" />
     <PackageVersion Include="JsonSchema.Net" Version="9.4.0" />
+    <PackageVersion Include="Lumeo" Version="5.9.1" />
     <PackageVersion Include="Microsoft.Bcl.Memory" Version="10.0.9" />
+    <PackageVersion Include="Microsoft.AspNetCore.Components.Web" Version="11.0.0-rc.1.26425.128" />
     <PackageVersion Include="Microsoft.Extensions.Http" Version="10.0.9" />
     <PackageVersion Include="Microsoft.ML.Tokenizers" Version="2.0.0" />
     <PackageVersion Include="Microsoft.ML.Tokenizers.Data.O200kBase" Version="2.0.0" />
     <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.4.0" />
     <PackageVersion Include="xunit" Version="2.9.3" />
     <PackageVersion Include="xunit.runner.visualstudio" Version="3.1.5" />
+    <PackageVersion Include="bunit" Version="2.11.3" />
   </ItemGroup>
 </Project>

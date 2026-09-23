@@ -38,7 +38,7 @@ public sealed class LayaDecisionInferenceTests
         Assert.Contains(DecisionQuestionKind.Choice, capabilities.SupportedQuestionKinds);
         Assert.Contains(DecisionQuestionKind.Score, capabilities.SupportedQuestionKinds);
         Assert.Contains(DecisionQuestionKind.Boolean, capabilities.SupportedQuestionKinds);
-        Assert.Equal(1_024, capabilities.MaximumInputTokens);
+        Assert.Null(capabilities.MaximumInputTokens);
         Assert.True(capabilities.SupportsCalibratedConfidence);
         Assert.True(capabilities.SupportsActionProbability);
     }

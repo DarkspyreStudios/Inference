@@ -11,14 +11,14 @@ internal readonly record struct LayaSequence(
 
 internal static class LayaSequenceBuilder
 {
-    internal const int MaximumLength = 1_024;
-    internal const int MaximumHeadLength = 256;
     private const int MaximumOptionLength = 48;
 
     public static LayaSequence Build(
         ILayaTokenizer tokenizer,
         JsonElement state,
-        DecisionQuestion question)
+        DecisionQuestion question,
+        int maximumLength,
+        int maximumHeadLength)
     {
         ArgumentNullException.ThrowIfNull(tokenizer);
         ArgumentNullException.ThrowIfNull(question);
@@ -37,20 +37,20 @@ internal static class LayaSequenceBuilder
             })
             .ToArray();
 
-        int optionBudget = MaximumHeadLength - options.Sum(static item => item.Count);
+        int optionBudget = maximumHeadLength - options.Sum(static item => item.Count);
         if (optionBudget < 16)
         {
-            int perOption = Math.Max(4, (MaximumHeadLength - 16) / Math.Max(1, options.Length));
+            int perOption = Math.Max(4, (maximumHeadLength - 16) / Math.Max(1, options.Length));
             for (int index = 0; index < options.Length; index++)
             {
                 options[index] = [.. options[index].Take(perOption)];
             }
 
-            optionBudget = MaximumHeadLength - options.Sum(static item => item.Count);
+            optionBudget = maximumHeadLength - options.Sum(static item => item.Count);
         }
 
         head = [.. head.Take(Math.Max(8, optionBudget))];
-        var tokenIds = new List<int>(MaximumLength) { LayaTokenizer.ClassTokenId };
+        var tokenIds = new List<int>(maximumLength) { LayaTokenizer.ClassTokenId };
         tokenIds.AddRange(head);
         tokenIds.Add(LayaTokenizer.SeparatorTokenId);
         var markers = new List<int>(options.Length);
@@ -61,7 +61,7 @@ internal static class LayaSequenceBuilder
         }
 
         tokenIds.Add(LayaTokenizer.SeparatorTokenId);
-        int room = Math.Max(0, MaximumLength - tokenIds.Count - 1);
+        int room = Math.Max(0, maximumLength - tokenIds.Count - 1);
         string serializedState = state.ValueKind == JsonValueKind.String
             ? state.GetString() ?? string.Empty
             : state.GetRawText();
@@ -72,8 +72,8 @@ internal static class LayaSequenceBuilder
         tokenIds.Add(LayaTokenizer.SeparatorTokenId);
 
         return new LayaSequence(
-            [.. tokenIds.Take(MaximumLength)],
-            [.. markers.Where(marker => marker < MaximumLength)],
+            [.. tokenIds.Take(maximumLength)],
+            [.. markers.Where(marker => marker < maximumLength)],
             optionIds,
             questionType);
     }

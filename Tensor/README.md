@@ -29,9 +29,9 @@ Assemblies included in the Tensor NuGet:
 
 Implementation names identify the model family they support, not a particular checkpoint or training
 run. Laya is not a general-purpose ModernBERT engine: a custom checkpoint must retain the supported
-Laya tensor schema, encoder dimensions/layers, typed heads and tokenizer conventions. Its existing
-input formatting and confidence calibration remain unchanged. Selecting a fine-tuned checkpoint
-does not independently establish that calibration is accurate for the new training distribution.
+Laya tensor schema, encoder dimensions/layers, typed heads and tokenizer conventions. Its sequence
+limits and fitted calibration come from the selected pack's agent configuration. Selecting a
+fine-tuned checkpoint does not independently establish calibration accuracy for a new distribution.
 
 Supra's publisher supplies the DiT as a PyTorch ZIP state dictionary rather than safetensors. The
 Darkspyre TensorSharp fork reads that file as data through a whitelist-only checkpoint reader. It
@@ -40,8 +40,9 @@ rejects arbitrary pickle globals and reducers. Flan-T5 and the VAE use their pin
 artifacts. No Python or PyTorch component is loaded or executed.
 
 Tensor uses `Darkspyre.ML.Tokenizers` for the focused SentencePiece correction needed by Flan-T5
-models whose BOS token is intentionally disabled. TensorSharp 2.8.6.3 supplies the direct runtime,
-including rank-four channels-last image group normalization. These fork packages retain the upstream
+models whose BOS token is intentionally disabled. The published baseline uses TensorSharp 2.8.6.3;
+this development checkout uses the local-only GGUF fix described below. Both include rank-four
+channels-last image group normalization. These fork packages retain the upstream
 assemblies and namespaces; consuming code remains first-class C# and does not load Python or PyTorch.
 
 Each capability assembly publishes its pack definition separately from installation. A desktop
@@ -146,9 +147,13 @@ Qwen currently targets `TensorLlmModels.QwenRuntimeArchitecture` (Qwen3 GGUF), n
 implemented by TensorSharp. Its loader checks the installed GGUF architecture/version, tokenizer
 and chat metadata, layer dimensions/tensor shapes, storage encoding and complete shard declarations
 before native allocation. Listed context/output limits remain unknown until validated loaded-runtime
-metadata is available; the built-in 4B limits are not copied onto other models. **Split GGUF loading
-from non-file persistence stores is still pending:** the current TensorSharp dependency's individual
-temporary-file projection does not preserve the sibling paths required by its split-file reader.
+metadata is available; the built-in 4B limits are not copied onto other models. Split GGUF loading
+passes every declared artifact and relative filename to TensorSharp's `PersistenceFileSet`. The
+fork retains an in-place file layout or projects the complete set together for other stores,
+including mixed stores. Shard count/names/numbering and duplicate tensors are checked before native
+allocation. No unlisted persistence artifacts are discovered through adjacent filesystem paths.
+Inference still owns no path-materialization implementation; the fork owns cleanup on failure,
+cancellation and unload. The host continues to use only the pack manager and `IPersistenceStore`.
 
 Supra uses `TensorImageModels.SupraRuntimeArchitecture` and requires all four roles: `supra-model`,
 `text-model`, `text-tokenizer`, `vae-model`. Its existing restricted checkpoint reader and native
@@ -194,10 +199,22 @@ no source copy or additional engine implementation is required for a compatible 
 
 The host constructs `TensorModelPackDefinition` values using
 `TensorDecisionModels.LayaRuntimeArchitecture`, capability `Decision`, CPU/CUDA backend declarations,
-and the correct per-artifact lengths/hashes. The runtime requires `model` and `tokenizer` artifact
-roles. It continues to validate actual tensors/tokenizer data during native loading; the architecture
+and the correct per-artifact lengths/hashes. The runtime requires `model`, `tokenizer`, and
+`agent-config` artifact roles. `agent-config` identifies the selected checkpoint's
+`rl_agent_config.json`, read before native allocation. Missing configuration fails compatibility;
+malformed configuration fails Load without retaining model resources. It continues to validate actual tensors/tokenizer data during native loading; the architecture
 label alone is not proof that arbitrary weights will work. `TensorModelDefinitionValidator.Validate`
 is the common metadata validator, also used by the catalog and Laya's family policy.
+
+`max_len` and `head_max_len` control sequence truncation and the head/option budget.
+`temperature_by_options` supplies the supported option-count buckets, falling back to that pack's
+`temperature[questionType]` when a bucket is absent. Temperatures must be positive and finite;
+they are not silently clamped or replaced with another checkpoint's values. Capabilities report
+the loaded `max_len`, or null before Load/after Unload. Tokenization explicitly requires ByteLevel
+(`add_prefix_space:false`, `trim_offsets:true`, `use_regex:true`), uses the GPT-2 splitting pattern,
+and recognizes every added token, including non-special whitespace/placeholder tokens.
+The 24 supplied HF golden cases run offline against a pinned tokenizer fixture. Full RightSize
+checkpoint probability parity remains an external acceptance check, not a claim made by these tests.
 
 ```csharp
 // customPack describes the host's compatible trained checkpoint and its actual artifact sources.
@@ -229,3 +246,29 @@ bytes or a provider-specific UI payload. Selection and Save never unload an acti
 explicit install/verify/load/unload/stop actions apply; changing the saved selection reports
 `RequiresUnload`, and session disposal does not stop the host's engine. See the compile-checked
 `LayaModelSelectionExample` in the shared examples.
+
+## Local-only GGUF dependency build
+
+This checkout pins `Darkspyre.TensorSharp.*` **2.8.6.4-local.gguf.a1ce7780**, built from TensorSharp
+`darkspyre` commit `a1ce778010cb6b9fb275edec5907e84759f76381`. It is not published. The Inference
+family version remains 11.2.0 and no Inference NuGet archives were created for this fix.
+
+Local archives live in the sibling TensorSharp repository at `artifacts/gguf-local-feed`.
+Build that commit's Core (Tensors), Runtime.Logging, Runtime, AgentHost, Backends.Cuda,
+Backends.GGML, Backends.MLX, Models and Chat projects with `dotnet pack -c Release`, using both
+`-p:Version=2.8.6.4-local.gguf.a1ce7780` and `-p:PackageVersion=2.8.6.4-local.gguf.a1ce7780`.
+The managed-only validation build uses `-p:TensorSharpSkipGgmlNative=true` and
+`-p:TensorSharpSkipMlxNative=true`; it does not claim native library/device validation.
+
+For a fresh restore, copy the root `NuGet.Config` to an ignored local config, add that directory as
+source `TensorSharpLocal`, and map `Darkspyre.TensorSharp.*` to it (more specific than the private
+feed's `Darkspyre.*` mapping). Retain the existing public/private sources, audit source and scoped
+GitHub authentication. On this workstation the generated config is
+`artifacts/gguf-local.NuGet.Config`; restore from the repository root with:
+
+```sh
+dotnet restore Tensor/Darkspyre.Inference.Tensor.slnx --configfile artifacts/gguf-local.NuGet.Config
+```
+
+After restore, ordinary `--no-restore` builds/tests use the installed local packages. Publishing
+these dependencies or replacing this local-only pin with a release requires separate authorization.

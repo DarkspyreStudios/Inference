@@ -25,13 +25,19 @@ internal sealed class QwenModelRuntime : IQwenModelRuntime
 
     public async Task LoadAsync(TensorModelPackDefinition definition, TensorModelPackLease lease, string backend, CancellationToken cancellationToken)
     {
-        using (GgufFile file = await GgufFile.OpenAsync(lease.GetRequiredArtifact("model"), cancellationToken).ConfigureAwait(false))
+        PersistenceFileSet files = CreateFileSet(definition, lease);
+        using (GgufFile file = await GgufFile.OpenAsync(files, cancellationToken).ConfigureAwait(false))
         {
             QwenModelCompatibility.ValidateCheckpoint(file, definition);
             file.ThrowIfTruncated();
         }
-        await _service.LoadModelAsync(lease.GetRequiredArtifact("model"), null, backend, cancellationToken).ConfigureAwait(false);
+        await _service.LoadModelAsync(files, null, backend, cancellationToken).ConfigureAwait(false);
     }
+
+    internal static PersistenceFileSet CreateFileSet(TensorModelPackDefinition definition, TensorModelPackLease lease) =>
+        new(definition.Artifacts.Single(artifact => artifact.Role == "model").RelativePath,
+            definition.Artifacts.ToDictionary(artifact => artifact.RelativePath,
+                artifact => lease.GetRequiredArtifact(artifact.Role), StringComparer.Ordinal));
 
     public void ApplyGrammar(SamplingConfig sampling, StructuredOutputFormat format)
     {
@@ -82,11 +88,7 @@ internal static class QwenModelCompatibility
         if (shards != definition.Artifacts.Count || file.FilePaths.Count != shards
             || !file.FilePaths.Select(Path.GetFileName).Order(StringComparer.Ordinal).SequenceEqual(
                 definition.Artifacts.Select(artifact => Path.GetFileName(artifact.RelativePath)).Order(StringComparer.Ordinal), StringComparer.Ordinal))
-        {
-            // Non-file stores may project a single artifact to a generated filename. Sharded packs must retain names.
-            if (shards != 1 || definition.Artifacts.Count != 1 || file.FilePaths.Count != 1)
-            { throw new InvalidDataException("The Qwen pack does not contain the complete declared shard set."); }
-        }
+        { throw new InvalidDataException("The Qwen pack does not contain the complete declared shard set."); }
         foreach (GgufTensorInfo tensor in file.Tensors.Values)
         {
             if (!Enum.IsDefined(tensor.Type) || tensor.Shape.Length is < 1 or > 4 || tensor.Shape.Any(dimension => dimension is 0 or > int.MaxValue)

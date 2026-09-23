@@ -22,7 +22,7 @@ public sealed class LayaSequenceBuilderTests
         LayaSequence sequence = LayaSequenceBuilder.Build(
             new CharacterTokenizer(),
             JsonElement.Parse("{\"turn\":1}"),
-            question);
+            question, 512, 192);
 
         Assert.Equal(LayaTokenizer.ClassTokenId, sequence.TokenIds[0]);
         Assert.Equal(LayaTokenizer.SeparatorTokenId, sequence.TokenIds[^1]);
@@ -46,9 +46,9 @@ public sealed class LayaSequenceBuilderTests
         LayaSequence sequence = LayaSequenceBuilder.Build(
             new CharacterTokenizer(),
             JsonElement.Parse(state),
-            question);
+            question, 512, 192);
 
-        Assert.Equal(LayaSequenceBuilder.MaximumLength, sequence.TokenIds.Length);
+        Assert.Equal(512, sequence.TokenIds.Length);
         Assert.Equal(2, sequence.MarkerPositions.Length);
         Assert.Equal(2, sequence.QuestionType);
     }
