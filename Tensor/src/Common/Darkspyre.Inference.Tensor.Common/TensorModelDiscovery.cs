@@ -41,16 +41,43 @@ public interface ITensorModelSource : ITensorArtifactReader
     Task<TensorSourceResult<TensorModelCandidate>> GetCandidateAsync(TensorCandidateSelection selection, CancellationToken cancellationToken = default);
 }
 
-/// <summary>One-way, short-lived host credential. Never persist in model metadata or display in settings.</summary>
+/// <summary>
+/// One-way, short-lived host credential. Never persist in model metadata or display in settings. It
+/// exposes no secret through a public member; only the source HTTP boundary reads its header value.
+/// </summary>
 public sealed class TensorSourceCredential
 {
-    public TensorSourceCredential(string bearerToken)
+    private TensorSourceCredential(string scheme, string parameter)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(bearerToken);
-        if (bearerToken.Any(char.IsWhiteSpace) || bearerToken.Any(char.IsControl)) { throw new ArgumentException("Invalid bearer credential.", nameof(bearerToken)); }
-        BearerToken = bearerToken;
+        Scheme = scheme;
+        Parameter = parameter;
     }
-    public string BearerToken { get; }
+
+    internal string Scheme { get; }
+
+    internal string Parameter { get; }
+
+    /// <summary>A bearer token, sent as <c>Authorization: Bearer</c>.</summary>
+    public static TensorSourceCredential Bearer(string token)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(token);
+        if (token.Any(char.IsWhiteSpace) || token.Any(char.IsControl)) { throw new ArgumentException("Invalid bearer credential.", nameof(token)); }
+        return new("Bearer", token);
+    }
+
+    /// <summary>A username and password, sent as <c>Authorization: Basic</c>.</summary>
+    public static TensorSourceCredential Basic(string username, string password)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(username);
+        ArgumentNullException.ThrowIfNull(password);
+        if (username.Contains(':', StringComparison.Ordinal) || username.Any(char.IsControl))
+        {
+            throw new ArgumentException("Invalid Basic username.", nameof(username));
+        }
+        if (password.Any(char.IsControl)) { throw new ArgumentException("Invalid Basic password.", nameof(password)); }
+        return new("Basic", Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes($"{username}:{password}")));
+    }
+
     public override string ToString() => "[protected source credential]";
 }
 

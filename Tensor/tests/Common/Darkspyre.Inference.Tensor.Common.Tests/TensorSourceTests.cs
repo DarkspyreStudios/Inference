@@ -44,7 +44,7 @@ public sealed class TensorSourceTests
             Assert.Null(request.Headers.Authorization);
             return Task.FromResult(Range([1, 2, 3, 4], 10, 13, 100));
         });
-        using var source = new HuggingFaceModelSource(http, (_, _) => ValueTask.FromResult<TensorSourceCredential?>(new("secret")));
+        using var source = new HuggingFaceModelSource(http, (_, _) => ValueTask.FromResult<TensorSourceCredential?>(TensorSourceCredential.Bearer("secret")));
         var result = await source.ReadMetadataAsync(Artifact(100), new(10, 4));
         Assert.Equal(TensorSourceState.Available, result.State);
         Assert.Equal(10, result.Value!.Offset);
@@ -229,12 +229,12 @@ public sealed class TensorSourceTests
         using var source = new HuggingFaceModelSource(http, (origin, _) =>
         {
             origins.Add(origin);
-            return ValueTask.FromResult<TensorSourceCredential?>(new("sensitive-token"));
+            return ValueTask.FromResult<TensorSourceCredential?>(TensorSourceCredential.Bearer("sensitive-token"));
         });
         Assert.Equal(TensorSourceState.Available, (await source.SearchAsync(new())).State);
         Assert.Equal(new string?[] { "sensitive-token", "sensitive-token", null, null }, auth);
         Assert.Equal(new Uri("https://huggingface.co/"), Assert.Single(origins));
-        Assert.DoesNotContain("sensitive-token", new TensorSourceCredential("sensitive-token").ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain("sensitive-token", TensorSourceCredential.Bearer("sensitive-token").ToString(), StringComparison.Ordinal);
     }
 
     [Theory]

@@ -114,10 +114,56 @@ public sealed class TensorModelPackManagerTests : IDisposable
             sourceAccess: (origin, _) =>
             {
                 Assert.Equal(new Uri("http://127.0.0.1/"), origin);
-                return ValueTask.FromResult<TensorSourceCredential?>(new("protected-token"));
+                return ValueTask.FromResult<TensorSourceCredential?>(TensorSourceCredential.Bearer("protected-token"));
             });
         await Task.WhenAll(manager.InstallAsync(definition.Key), manager.InstallAsync(definition.Key));
         Assert.Equal(2, calls); // The second installation verifies the first, without downloading again.
+    }
+
+    [Fact]
+    public async Task ProtectedInstallSendsBasicCredentialsOnlyToTheSourceOrigin()
+    {
+        byte[] weights = "weights"u8.ToArray();
+        TensorModelPackDefinition definition = Definition(weights);
+        var schemes = new List<string?>();
+        var parameters = new List<string?>();
+        int calls = 0;
+        using var http = new HttpClient(new CallbackHandler((request, _) =>
+        {
+            schemes.Add(request.Headers.Authorization?.Scheme);
+            parameters.Add(request.Headers.Authorization?.Parameter);
+            return Task.FromResult(++calls == 1
+                ? new HttpResponseMessage(HttpStatusCode.Redirect) { Headers = { Location = new("https://cdn.example.test/weights") } }
+                : new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(weights) });
+        }));
+        using var manager = new TensorModelPackManager(new([definition]), new MemoryPersistenceStore(), http,
+            sourceAccess: (_, _) => ValueTask.FromResult<TensorSourceCredential?>(TensorSourceCredential.Basic("stonks", "p:ss wörd")));
+
+        await manager.InstallAsync(definition.Key);
+
+        Assert.Equal(["Basic", null], schemes);
+        Assert.Equal(Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes("stonks:p:ss wörd")), parameters[0]);
+        Assert.Null(parameters[1]);
+    }
+
+    [Theory]
+    [InlineData("", "password")]
+    [InlineData("user:name", "password")]
+    [InlineData("user\n", "password")]
+    [InlineData("user", "pass\u0000word")]
+    public void BasicCredentialsRejectValuesThatCannotFormAHeader(string username, string password)
+    {
+        Assert.ThrowsAny<ArgumentException>(() => TensorSourceCredential.Basic(
+            System.Text.RegularExpressions.Regex.Unescape(username), System.Text.RegularExpressions.Regex.Unescape(password)));
+    }
+
+    [Fact]
+    public void BasicCredentialsAreRedacted()
+    {
+        string text = TensorSourceCredential.Basic("stonks", "secret-password").ToString();
+
+        Assert.DoesNotContain("secret-password", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("stonks", text, StringComparison.Ordinal);
     }
 
     [Fact]

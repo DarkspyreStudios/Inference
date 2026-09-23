@@ -127,3 +127,52 @@ subset total. All three formatting verifications and transitive vulnerability au
 inputs were unchanged, so existing restored assets were reused with `--no-restore`. No package
 archives were created. Laya's validator and loader are unchanged from the approved ONNX unit.
 Native picker rendering has component-test coverage, not consuming Desktop application certification.
+
+## Amendment: Basic source credentials
+
+Date: 2026-09-23
+
+Status: **Implementation authorized on 2026-09-23.**
+
+`TensorSourceCredential` carries only a bearer token, and `TensorSourceHttp` always sends
+`Authorization: Bearer`. A protected source that demands HTTP Basic authentication, such as the
+RightSize checkpoint host, cannot be reached. A host cannot work around it with a pre-authorised
+client either, because the source boundary rejects a client with default headers. That rejection is
+correct and stays.
+
+- `TensorSourceCredential` gets two factories, `Bearer(string token)` and
+  `Basic(string username, string password)`, and its public constructor and `BearerToken` property are
+  removed. The credential exposes no secret through a public member. `TensorSourceHttp` reads the
+  scheme and value internally.
+- `Basic` rejects an empty username, a colon in the username, and control characters in either
+  value. The header value is the Base64 of the UTF-8 `username:password`.
+- The existing boundary applies to both schemes unchanged: the callback receives the exact origin,
+  the credential is attached per request, it is not forwarded across a redirect to another origin,
+  `ToString` reveals nothing, and the host's `HttpClient` must carry no default headers.
+- Source URLs already must be durable HTTPS, or numeric loopback HTTP, so Basic credentials never
+  travel over a non-loopback plain-text connection.
+- The three tests and the Tensor README that construct a bearer credential move to
+  `TensorSourceCredential.Bearer`. New tests cover the Basic header value, rejection of invalid
+  Basic values, redaction, and non-forwarding across a redirect origin.
+
+Release: the removed constructor is a public contract change. Nothing outside this repository
+constructs `TensorSourceCredential`, and the family is pre-release (L16), so the change ships as a
+coordinated 11.5.1-rc.1 compatible tweak with every caller migrated in the same unit.
+
+Consumer: `Darkspyre.RightSize` replaces `RightSizeModelAccess.CreateClientAsync`, which returns a
+pre-authorised client, with a method returning a `TensorSourceAccess` that answers `Basic` for the
+checkpoint host's origin only, plus a plain client with the long download timeout. That change ships
+as RightSize 1.7.2-rc.1.
+
+### Implementation record (2026-09-23)
+
+`TensorSourceCredential` has the `Bearer` and `Basic` factories and internal scheme and header
+values; its public constructor and `BearerToken` are removed. `TensorSourceHttp` sends the
+credential's own scheme. The existing tests use `Bearer`. New tests cover a Basic install whose
+header carries the Base64 of `username:password` and is not forwarded after a redirect to another
+origin, rejection of an empty username, a colon in the username and control characters, and
+redaction. The Tensor README describes both schemes.
+
+Phase exit: the Tensor solution builds with zero warnings in Debug and Release and passes its tests
+(Tensor.Common 79, 6 new). Format verification and the transitive vulnerability audit pass. No version
+change, package or publication is part of this unit.

@@ -154,6 +154,14 @@ build to .NET 11 advances the first component and resets the later components fo
 release (`11.<release>.<minor>`). Immutable releases are never overwritten. The family tag is
 created only after all three packages have passed their gates.
 
+## 11.5.1-rc.1 release preparation (2026-09-23)
+
+The user authorized the coordinated `11.5.1-rc.1` release, including the staged Basic source
+authentication implementation and its tests/documentation from another worker. Both Bearer and
+Basic credentials retain the existing exact-origin request boundary and cross-origin redirect
+protection. All in-repository callers migrate to the credential factories. The source-credential
+amendment in `docs/tensor-model-locations.tech-design.md` records the release scope.
+
 ## Published 11.5.0-rc.1 reasoning contract release (2026-09-23)
 
 The shared version advances to `11.5.0-rc.1` for the provider-neutral reasoning-level contract

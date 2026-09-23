@@ -1,6 +1,6 @@
 # Darkspyre.Inference.Tensor
 
-Version **11.5.0-rc.1** adopts the shared typed reasoning-level contract; Qwen supports only `None`.
+Version **11.5.1-rc.1** adopts the shared typed reasoning-level contract; Qwen supports only `None`.
 It includes Laya's CPU/GPU-only Core ML update and retains the ONNX and user-selected
 model-location/import contracts introduced in 11.4.0-rc.1.
 
@@ -15,7 +15,7 @@ filesystem default and still exposes only `IPersistenceStore`. TensorSharp uses 
 path. Laya reads its model bytes through the store and passes them to ONNX Runtime, so the host
 alone decides where model files live.
 
-Assemblies included by Tensor **11.5.0-rc.1**:
+Assemblies included by Tensor **11.5.1-rc.1**:
 
 - `Darkspyre.Inference.Tensor.Common` — the host-controlled model lifecycle, model packs,
   verification, direct-file persistence, and execution coordination.
@@ -159,7 +159,7 @@ the configuration and reconstruct registrations when composing the manager after
 does not perform that unload. Stop remains terminal, and an
 already-cancelled teardown action token reaches the engine as urgency rather than skipping cleanup.
 See the [shared editor example](../Common/examples/Darkspyre.Inference.Setup.Examples/README.md).
-These setup contracts are included in the synchronized 11.5.0-rc.1 package family, including
+These setup contracts are included in the synchronized 11.5.1-rc.1 package family, including
 provider-owned dirty state and explicit choice capabilities for the shared Settings editor.
 
 Qwen and Supra now load the definition selected by `LoadAsync(key)`, rather than requiring the
@@ -270,7 +270,9 @@ identity. Exact built-in matches retain their established keys and provenance; d
 or revision manifests do not reuse those keys. Resolved manifests snapshot their input collections.
 
 The host may supply `TensorSourceAccess` to the source and pack manager. It returns a short-lived
-bearer credential for the exact requested origin. No credential is stored in a pack definition.
+credential for the exact requested origin: `TensorSourceCredential.Bearer(token)` or
+`TensorSourceCredential.Basic(username, password)`. The credential exposes no secret through a public
+member and is attached per request. No credential is stored in a pack definition.
 Authentication required, gated access, denied access, not found (possibly private), transient failure
 and unverified metadata are distinct source results. Redirects are bounded and authorization is
 never forwarded to another origin or reattached after leaving the original origin. Caller-supplied
@@ -416,7 +418,7 @@ the Audio / SpeechTranscription task without provider-name renderer branches.
 
 ## Package dependency boundary
 
-Tensor depends on **Darkspyre.Inference.Common [11.5.0-rc.1]** and the **Darkspyre.TensorSharp.*
+Tensor depends on **Darkspyre.Inference.Common [11.5.1-rc.1]** and the **Darkspyre.TensorSharp.*
 2.8.6.4** dependency closure through NuGet. None of their DLLs is embedded in Tensor. The TensorSharp
 release includes the named GGUF persistence and bounded metadata inspection changes previously
 validated at fork commit `9b248715`, through the existing GGUF, safetensors and restricted PyTorch

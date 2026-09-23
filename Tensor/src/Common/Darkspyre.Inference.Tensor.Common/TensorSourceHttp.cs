@@ -33,7 +33,7 @@ internal sealed class TensorSourceHttp(HttpClient client, TensorSourceAccess? ac
             request.Headers.Range = range;
             if (mayAuthorize && credential is not null)
             {
-                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", credential.BearerToken);
+                request.Headers.Authorization = new AuthenticationHeaderValue(credential.Scheme, credential.Parameter);
             }
             HttpResponseMessage response;
             try { response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token).ConfigureAwait(false); }
