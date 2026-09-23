@@ -17,6 +17,6 @@ public static class QwenSetup
     {
         IReadOnlyList<TensorModelPackDefinition> models = offeredModels ?? [TensorLlmModels.Qwen3FourBillionQ4Km];
         foreach (TensorModelPackDefinition model in models) { QwenModelCompatibility.Validate(model); }
-        return new(Definition, identity, target, models, packs, existing, instance);
+        return new(Definition, identity, target, models, packs, existing, instance, new QwenBackendProbe());
     }
 }

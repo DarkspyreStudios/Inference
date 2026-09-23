@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Http.Headers;
 using System.Text.Json;
 
 namespace Darkspyre.Inference.Tensor.Common.Tests;
@@ -7,6 +8,113 @@ public sealed class TensorSourceTests
 {
     private const string Commit = "1111111111111111111111111111111111111111";
     private const string Hash = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
+    [Fact]
+    public async Task VariantsListMetadataWithoutSelectingOrOpeningAWeightFile()
+    {
+        int calls = 0;
+        using var http = Client((request, _) =>
+        {
+            calls++;
+            Assert.StartsWith("/api/models/owner/model/revision/", request.RequestUri!.AbsolutePath, StringComparison.Ordinal);
+            return Task.FromResult(Json(new
+            {
+                id = "owner/model",
+                sha = Commit,
+                siblings = new[] { new { rfilename = "first.gguf", size = 11 }, new { rfilename = "second.gguf", size = 17 } }
+            }));
+        });
+        using var source = new HuggingFaceModelSource(http);
+        var result = await source.ListVariantsAsync(new("owner/model", "main"));
+        Assert.Equal(TensorSourceState.Available, result.State);
+        Assert.Equal(2, result.Value!.Items.Count);
+        Assert.All(result.Value.Items, item => Assert.Equal(Commit, item.Provenance.Revision));
+        Assert.Equal(1, calls);
+    }
+
+    [Fact]
+    public async Task BoundedHeaderRequestRetainsTheRangeButNotCredentialsAcrossRedirects()
+    {
+        int calls = 0;
+        using var http = Client((request, _) =>
+        {
+            calls++;
+            Assert.Equal("bytes=10-13", request.Headers.Range!.ToString());
+            if (calls == 1) { Assert.Equal("secret", request.Headers.Authorization!.Parameter); return Task.FromResult(Redirect("https://cdn.example/header")); }
+            Assert.Null(request.Headers.Authorization);
+            return Task.FromResult(Range([1, 2, 3, 4], 10, 13, 100));
+        });
+        using var source = new HuggingFaceModelSource(http, (_, _) => ValueTask.FromResult<TensorSourceCredential?>(new("secret")));
+        var result = await source.ReadMetadataAsync(Artifact(100), new(10, 4));
+        Assert.Equal(TensorSourceState.Available, result.State);
+        Assert.Equal(10, result.Value!.Offset);
+        Assert.Equal(100, result.Value.TotalLength);
+        Assert.Equal(new byte[] { 1, 2, 3, 4 }, result.Value.Bytes.ToArray());
+        Assert.Equal(2, calls);
+    }
+
+    [Fact]
+    public async Task IgnoredRangeNeverFallsBackToReadingTheWholeWeightBody()
+    {
+        int calls = 0;
+        using var http = Client((_, _) =>
+        {
+            calls++;
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new UnreadableContent() });
+        });
+        using var source = new HuggingFaceModelSource(http);
+        var result = await source.ReadMetadataAsync(Artifact(100), new(0, 8));
+        Assert.Equal(TensorSourceState.Unverified, result.State);
+        Assert.Equal("metadata-range", Assert.Single(result.Issues!).Code);
+        Assert.Equal(1, calls);
+    }
+
+    [Theory]
+    [InlineData(1, 4, 100, 4)] // Wrong starting offset.
+    [InlineData(0, 7, 100, 4)] // Server sends beyond the requested range.
+    [InlineData(0, 3, 101, 4)] // Known file size changed.
+    [InlineData(0, 3, 100, 3)] // Truncated body.
+    public async Task InconsistentRangeResponsesAreNotCompatibilityEvidence(long from, long to, long total, int bodyLength)
+    {
+        using var http = Client((_, _) => Task.FromResult(Range(new byte[bodyLength], from, to, total)));
+        using var source = new HuggingFaceModelSource(http);
+        Assert.Equal(TensorSourceState.Unverified, (await source.ReadMetadataAsync(Artifact(100), new(0, 4))).State);
+    }
+
+    [Fact]
+    public async Task CompleteSmallMetadataFileRequiresExplicitIntentAndCompleteResponse()
+    {
+        using var http = Client((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent([1, 2, 3, 4]) }));
+        using var source = new HuggingFaceModelSource(http);
+        var result = await source.ReadMetadataAsync(Artifact(4), new(0, 4, TensorMetadataReadKind.CompleteMetadataFile));
+        Assert.Equal(TensorSourceState.Available, result.State);
+        Assert.Equal(4, result.Value!.Bytes.Length);
+        using var partialHttp = Client((_, _) => Task.FromResult(Range([1, 2, 3, 4], 0, 3, 10)));
+        using var partial = new HuggingFaceModelSource(partialHttp);
+        Assert.Equal(TensorSourceState.Unverified, (await partial.ReadMetadataAsync(Artifact(10), new(0, 4, TensorMetadataReadKind.CompleteMetadataFile))).State);
+    }
+
+    [Fact]
+    public async Task MetadataBoundAndPinnedProvenanceAreValidatedBeforeNetworkAccess()
+    {
+        using var http = Client((_, _) => throw new InvalidOperationException("Must not send."));
+        using var source = new HuggingFaceModelSource(http);
+        Assert.Equal(TensorSourceState.InvalidRequest, (await source.ReadMetadataAsync(Artifact(100), new(0, 16 * 1024 * 1024 + 1))).State);
+        Assert.Equal(TensorSourceState.InvalidRequest, (await source.ReadMetadataAsync(Artifact(100) with { DownloadUri = new("https://elsewhere.example/weight") }, new(0, 4))).State);
+        Assert.Equal(TensorSourceState.InvalidRequest, (await source.ReadMetadataAsync(Artifact(100), new(0, 4 * 1024 * 1024 + 1, TensorMetadataReadKind.CompleteMetadataFile))).State);
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => source.ReadMetadataAsync(Artifact(100), new(0, 4), new(true)));
+    }
+
+    private static TensorSourceArtifact Artifact(long length) => new("model.gguf", length, Hash,
+        new(new("https://huggingface.co/"), "owner/model", Commit, "model.gguf", "test"),
+        new($"https://huggingface.co/owner/model/resolve/{Commit}/model.gguf"));
+    private static HttpResponseMessage Range(byte[] body, long from, long to, long total) => new(HttpStatusCode.PartialContent)
+    { Content = new ByteArrayContent(body) { Headers = { ContentRange = new ContentRangeHeaderValue(from, to, total) } } };
+    private sealed class UnreadableContent : HttpContent
+    {
+        protected override Task SerializeToStreamAsync(Stream stream, TransportContext? context) => throw new InvalidOperationException("Must not read a whole weight response.");
+        protected override bool TryComputeLength(out long length) { length = 0; return false; }
+    }
 
     [Fact]
     public async Task CandidatePinsRevisionPreservesUnknownsAndDoesNotReadWeights()

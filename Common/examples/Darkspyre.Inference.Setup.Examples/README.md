@@ -22,6 +22,11 @@ Image header removals are explicit; omitted headers are untouched. LLM changes c
 credential mutation; never put it into ordinary connection settings. Save does not run provider
 tests, authenticate, install or load weights.
 
+Tensor changes also include `Definition`, the immutable manifest belonging to the selected key.
+Persist it with `Configuration` and reconstruct catalog registrations on restart. That host commit
+does not install the pack. The explicit Tensor Install action owns registration and download.
+Backend prerequisite checks are likewise explicit, and available does not guarantee model allocation.
+
 Qwen/Supra examples currently list their built-in supported packs; remote source discovery is a
 later unit of the approved implementation, not yet claimed here. `LayaModelSelectionExample`
 instead offers compatible packs from the host's catalog to the same generic editor and demonstrates

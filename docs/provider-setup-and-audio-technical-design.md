@@ -673,6 +673,51 @@ Inference version bump, publication or new model architecture is included.
 Remote engine resolution/setup binding, Whisper and final settings cross-row acceptance remain
 outstanding. These fixes do not mark that broader work complete.
 
+### Unit 3c — bounded source inspection, generic resolution editing and backend observations (2026-09-22)
+
+Implementation continues under section 5. The shared source contract now lists artifact variants and
+supports explicit bounded metadata reads: maximum 16 MiB per header range or 4 MiB for a complete
+small metadata file. The Hugging Face adapter validates pinned provenance, range/content lengths and
+body bounds, rejects an ignored weight range without reading the whole body, and retains the existing
+origin-scoped credential rules through redirects. Repository contents are never executed.
+
+`ITensorModelResolver` exposes the approved evaluation/resolution contract with Supported,
+Unsupported and Unverified states, structured issues, evidence and source-access state.
+`TensorResolvedPack` snapshots canonical complete manifests and fingerprints variant, capability,
+backend set, artifact integrity and per-artifact provenance. Source/artifact ordering is immaterial;
+changed companions or pinned provenance change identity. Qwen/Supra built-ins now carry their
+per-artifact provenance/license declarations while retaining established keys and content hashes.
+
+The existing `TensorSetupSession`, not a second editor, optionally binds an engine resolver to
+repository/revision/variant choices and an explicit Resolve action. Supported complete results become
+the draft selection. Unsupported, unverified and cancelled resolution cannot enable Install or Save.
+Edits invalidate dependent selection/evidence; old query completions return Stale. Save carries the
+selected immutable `Definition` with the typed configuration for host persistence/re-registration.
+Only explicit Install registers a resolved definition and calls the existing downloader; selection,
+browsing, resolution and Save never download/load/register. Unregistered selections report not installed.
+
+Qwen, Supra and Laya setup now bind explicit backend prerequisite probes. Qwen uses its loader's Auto
+policy and checks native GGML/MLX device availability; direct CUDA checks its driver/device. Supra/Laya
+CPU and Auto report the managed fallback. Missing native support is unavailable; inconclusive checks
+remain unknown. The read-only observation is invalidated on edits. No model allocation guarantee,
+mandatory probe gate before Load, native initialization during definition discovery, or general
+machine-diagnostics facility is added.
+
+The **concrete Qwen/Supra resolver policies and composition remain unwired and are the next section-5
+work item**. The shared resolver seam is tracked here deliberately; it is not reported as an engine
+compatibility implementation. Whisper/STT and final cross-row acceptance also remain outstanding.
+No UI files, family/dependency versions or package archives are changed by this unit.
+
+Verification: Tensor passes **192 tests** and Connect passes **291 tests**, in both Debug and Release,
+with zero build warnings/errors. Tensor/Connect formatting and transitive vulnerability audits pass.
+The new tests cover exact bounded ranges, ignored ranges without body reads, pinned source identity,
+protected redirects, variant listing, manifest identity/provenance/snapshots, explicit registration,
+save-without-install, unresolved/cancelled candidate rejection, stale choice results, gated failures,
+backend invalidation, CPU checks and controlled CUDA unavailable/unknown states. These are deterministic
+boundary tests; no live GPU or native model allocation is claimed. No dependency restore was necessary
+because dependency inputs were unchanged. The independently staged UI/rules edits and consumer-gap
+document changes remain outside this commit; there are no remaining untracked files.
+
 The pinned built-in `laya-typed-decisions` agent configuration actually declares 1024/256, unlike
 the handoff's `laya` reference configuration (512/192). Both are retained as offline regression
 fixtures. Reading the selected pack resolves this distinction without imposing new fixed limits.

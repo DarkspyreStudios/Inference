@@ -16,7 +16,7 @@ internal sealed class TensorSourceHttp(HttpClient client, TensorSourceAccess? ac
 {
     internal static HttpClient CreateClient() => new(new HttpClientHandler { AllowAutoRedirect = false, UseCookies = false });
 
-    internal async Task<HttpResponseMessage> GetAsync(Uri uri, CancellationToken token)
+    internal async Task<HttpResponseMessage> GetAsync(Uri uri, CancellationToken token, RangeHeaderValue? range = null)
     {
         ValidateUri(uri);
         if (client.DefaultRequestHeaders.Any())
@@ -30,6 +30,7 @@ internal sealed class TensorSourceHttp(HttpClient client, TensorSourceAccess? ac
         for (int redirects = 0; redirects <= 5; redirects++)
         {
             using var request = new HttpRequestMessage(HttpMethod.Get, uri);
+            request.Headers.Range = range;
             if (mayAuthorize && credential is not null)
             {
                 request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", credential.BearerToken);

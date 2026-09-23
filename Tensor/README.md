@@ -128,11 +128,19 @@ Selection/Save does not install or load. Install, verify, load, unload and stop 
 actions with declared side effects. The supplied instance is optional and remains host-owned. Its
 `Observation` is a read-only view published by `TensorModelLifetime`, not a parallel setup cache.
 Without an instance, Loaded/Ready remain unknown. A backend name is a supported selection, not proof
-that the backend is available. Loading requires an instance configured for the selected backend;
+that the backend is available. The explicit **Check backend prerequisites** action records available,
+unavailable or unknown runtime/device prerequisites without installing or loading a model. Qwen uses
+the loader's same Auto policy (GGML Metal on macOS, GGML CUDA elsewhere); Supra/Laya Auto can fall
+back to managed CPU. MLX checks its GPU device, GGML checks its chosen native backend, and direct CUDA
+checks its device/driver. These observations do not guarantee memory allocation or successful model
+loading. Edits invalidate the observation, and constructing/browsing a session never runs a probe.
+Loading requires an instance configured for the selected backend;
 the editor does not silently replace instances or interrupt application work.
 
 `TensorSetupChanges.RequiresUnload` tells the host when a saved model/backend edit changes the
-previous configuration. Saving does not perform that unload. Stop remains terminal, and an
+previous configuration. `Definition` carries the immutable selected pack manifest; persist it with
+the configuration and reconstruct registrations when composing the manager after restart. Saving
+does not perform that unload. Stop remains terminal, and an
 already-cancelled teardown action token reaches the engine as urgency rather than skipping cleanup.
 See the [shared editor example](../Common/examples/Darkspyre.Inference.Setup.Examples/README.md).
 These source changes have not been published and do not change the development version.
@@ -167,7 +175,28 @@ listing and candidate metadata. Candidate lookup pins the returned immutable com
 per-artifact provenance, license, nullable length and nullable SHA-256. A Git blob ID is never used
 as a file hash. These calls read bounded JSON metadata only: they neither install/load weights nor
 execute repository code. A candidate is not evidence that an engine supports it; engine-specific
-resolution and remote setup selection are still pending in the approved implementation.
+resolution is still pending in the approved implementation.
+
+`ListVariantsAsync` lists repository artifact metadata without opening weight bodies.
+`ReadMetadataAsync` is explicit bounded inspection (at most 16 MiB per header range, or 4 MiB for an
+explicitly requested complete small metadata file). It validates the pinned source identity, range,
+total length and response body bounds. A weight server that ignores Range is Unverified: no fallback
+whole-weight read occurs. Protected redirect rules also apply to these reads.
+
+The shared `TensorSetupSession` now accepts an engine-owned `ITensorModelResolver`. When supplied,
+the existing semantic editor presents network-declared repository/revision/variant choices and a
+separate **Resolve compatible model pack** action. Only a Supported result with a validated complete
+definition becomes selectable/saveable. Source/backend changes invalidate resolution; stale query
+completions cannot select a model. Browsing, resolving and Save do not register, install or load.
+Install registers the resolved immutable definition in the supplied manager before downloading and
+verifying it. Unregistered resolved selections report not installed rather than querying an unknown
+manager key. **The concrete Qwen/Supra resolver policies and their composition into this flow remain
+the next implementation unit**; the new interface is not itself a compatibility implementation.
+
+`TensorResolvedPack` owns deterministic manifest identity, including variant, capability, backend
+set, integrity and per-artifact source/license provenance. Artifact/source ordering does not change
+identity. Exact built-in matches retain their established keys and provenance; different companion
+or revision manifests do not reuse those keys. Resolved manifests snapshot their input collections.
 
 The host may supply `TensorSourceAccess` to the source and pack manager. It returns a short-lived
 bearer credential for the exact requested origin. No credential is stored in a pack definition.

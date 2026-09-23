@@ -405,7 +405,7 @@ public sealed class QwenLlmInference : ITensorLlmInference
         }
     }
 
-    private static TensorBackendKind ResolveBackend(TensorBackendKind backend) => backend switch
+    internal static TensorBackendKind ResolveBackend(TensorBackendKind backend) => backend switch
     {
         TensorBackendKind.Auto when OperatingSystem.IsMacOS() => TensorBackendKind.GgmlMetal,
         TensorBackendKind.Auto => TensorBackendKind.GgmlCuda,

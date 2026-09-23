@@ -30,6 +30,8 @@ public static class TensorLlmModels
                 RelativePath = "Qwen3-4B-Q4_K_M.gguf",
                 Length = 2_497_280_256,
                 Sha256 = "7485fe6f11af29433bc51cab58009521f205840f5b4ae3a32fa7f92e8534fdf5",
+                Provenance = new(new("https://huggingface.co/"), "Qwen/Qwen3-4B-GGUF",
+                    "bc640142c66e1fdd12af0bd68f40445458f3869b", "Qwen3-4B-Q4_K_M.gguf", "Apache-2.0"),
                 Sources =
                 [
                     new Uri(

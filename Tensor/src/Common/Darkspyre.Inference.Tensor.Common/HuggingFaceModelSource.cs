@@ -1,4 +1,6 @@
 using System.Globalization;
+using System.Net;
+using System.Net.Http.Headers;
 using System.Text.Json;
 
 namespace Darkspyre.Inference.Tensor.Common;
@@ -60,17 +62,28 @@ public sealed class HuggingFaceModelSource : ITensorModelSource, IDisposable
         }, cancellationToken);
 
     public Task<TensorSourceResult<TensorModelCandidate>> GetCandidateAsync(TensorCandidateSelection selection, CancellationToken cancellationToken = default) =>
+        FetchCandidateAsync(selection, true, cancellationToken);
+
+    public async Task<TensorSourceResult<TensorSourcePage<TensorSourceArtifact>>> ListVariantsAsync(TensorVariantQuery query, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+        TensorSourceResult<TensorModelCandidate> candidate = await FetchCandidateAsync(new(query.Repository, query.Revision, string.Empty), false, cancellationToken).ConfigureAwait(false);
+        return new(candidate.State, candidate.Value is null ? null : new(candidate.Value.Artifacts), candidate.Issues);
+    }
+
+    private Task<TensorSourceResult<TensorModelCandidate>> FetchCandidateAsync(TensorCandidateSelection selection, bool requireVariant, CancellationToken cancellationToken) =>
         ExecuteAsync(async () =>
         {
             ArgumentNullException.ThrowIfNull(selection);
             ValidateRepository(selection.Repository);
             if (string.IsNullOrWhiteSpace(selection.Revision) || selection.Revision.Length > 256 || selection.Revision.Any(char.IsControl)) { throw new ArgumentException("Invalid revision."); }
-            TensorModelDefinitionValidator.ValidateRelativePath(selection.Variant);
+            if (requireVariant) { TensorModelDefinitionValidator.ValidateRelativePath(selection.Variant); }
             var uri = new Uri(Hub, "api/models/" + EscapePath(selection.Repository) + "/revision/" + Uri.EscapeDataString(selection.Revision) + "?blobs=true");
             using HttpResponseMessage response = await _http.GetAsync(uri, cancellationToken).ConfigureAwait(false);
             using JsonDocument json = await ReadJsonAsync(response, cancellationToken).ConfigureAwait(false);
             JsonElement root = json.RootElement;
             string repository = RequiredRepository(root, "id");
+            if (!string.Equals(repository, selection.Repository, StringComparison.OrdinalIgnoreCase)) { throw new JsonException(); }
             string revision = Text(root, "sha") ?? throw new JsonException();
             if (!IsCommit(revision) || (IsCommit(selection.Revision) && !string.Equals(selection.Revision, revision, StringComparison.OrdinalIgnoreCase))) { throw new JsonException(); }
             string? license = License(root);
@@ -88,7 +101,7 @@ public sealed class HuggingFaceModelSource : ITensorModelSource, IDisposable
                 artifacts.Add(new(path, length, sha?.ToLowerInvariant(), new(Hub, repository, revision, path, license),
                     new Uri(Hub, EscapePath(repository) + "/resolve/" + revision + "/" + EscapePath(path))));
             }
-            if (!artifacts.Any(item => item.Path == selection.Variant))
+            if (requireVariant && !artifacts.Any(item => item.Path == selection.Variant))
             {
                 throw new TensorSourceException(TensorSourceState.NotFound, "variant-not-found", "The selected artifact is not listed at this revision.");
             }
@@ -99,6 +112,39 @@ public sealed class HuggingFaceModelSource : ITensorModelSource, IDisposable
             bool? chat = Text(gguf, "chat_template") is string template ? !string.IsNullOrWhiteSpace(template) : null;
             return new TensorModelCandidate(Id, new(repository, revision, selection.Variant), new(architecture, context, chat),
                 license, Boolean(root, "private"), Gated(root), artifacts.AsReadOnly());
+        }, cancellationToken);
+
+    public Task<TensorSourceResult<TensorMetadataContent>> ReadMetadataAsync(TensorSourceArtifact artifact, TensorMetadataRead read, CancellationToken cancellationToken = default) =>
+        ExecuteAsync(async () =>
+        {
+            ArgumentNullException.ThrowIfNull(artifact);
+            ArgumentNullException.ThrowIfNull(read);
+            ValidateRepository(artifact.Provenance.Repository);
+            TensorModelDefinitionValidator.ValidateRelativePath(artifact.Path);
+            if (artifact.Provenance.Origin != Hub || !IsCommit(artifact.Provenance.Revision)
+                || artifact.Provenance.Path != artifact.Path || read.Offset < 0 || read.Length is < 1 or > 16 * 1024 * 1024
+                || read.Offset > long.MaxValue - read.Length || !Enum.IsDefined(read.Kind)
+                || (read.Kind == TensorMetadataReadKind.CompleteMetadataFile && (read.Offset != 0 || read.Length > MaximumMetadataBytes)))
+            { throw new ArgumentException("Invalid metadata inspection request."); }
+            var uri = new Uri(Hub, EscapePath(artifact.Provenance.Repository) + "/resolve/" + artifact.Provenance.Revision + "/" + EscapePath(artifact.Path));
+            if (artifact.DownloadUri != uri) { throw new ArgumentException("Artifact provenance does not match its source URI."); }
+            using HttpResponseMessage response = await _http.GetAsync(uri, cancellationToken,
+                new RangeHeaderValue(read.Offset, read.Offset + read.Length - 1)).ConfigureAwait(false);
+            ContentRangeHeaderValue? range = response.Content.Headers.ContentRange;
+            bool whole = response.StatusCode == HttpStatusCode.OK && read.Kind == TensorMetadataReadKind.CompleteMetadataFile;
+            if (response.Content.Headers.ContentEncoding.Count != 0
+                || (!whole && (response.StatusCode != HttpStatusCode.PartialContent || range?.Unit != "bytes"
+                    || range.From != read.Offset || range.To is null || range.To < range.From || range.To >= read.Offset + read.Length
+                    || range.Length is null || range.Length <= range.To))
+                || response.Content.Headers.ContentLength > read.Length)
+            { throw new TensorSourceException(TensorSourceState.Unverified, "metadata-range", "The source did not honor the bounded metadata request."); }
+            byte[] bytes = await ReadBoundedAsync(response, read.Length, cancellationToken).ConfigureAwait(false);
+            long total = whole ? bytes.LongLength : range!.Length!.Value;
+            if ((!whole && bytes.LongLength != range!.To - range.From + 1)
+                || (artifact.Length is long expected && expected != total)
+                || (read.Kind == TensorMetadataReadKind.CompleteMetadataFile && bytes.LongLength != total))
+            { throw new TensorSourceException(TensorSourceState.Unverified, "metadata-length", "The metadata response length is inconsistent or incomplete."); }
+            return new TensorMetadataContent(bytes, read.Offset, total);
         }, cancellationToken);
 
     private async Task<TensorSourceResult<T>> ExecuteAsync<T>(Func<Task<T>> action, CancellationToken token) where T : class
@@ -118,18 +164,23 @@ public sealed class HuggingFaceModelSource : ITensorModelSource, IDisposable
 
     private static async Task<JsonDocument> ReadJsonAsync(HttpResponseMessage response, CancellationToken token)
     {
-        if (response.Content.Headers.ContentLength > MaximumMetadataBytes) { throw new JsonException(); }
+        return JsonDocument.Parse(await ReadBoundedAsync(response, MaximumMetadataBytes, token).ConfigureAwait(false), new JsonDocumentOptions { MaxDepth = 32 });
+    }
+
+    private static async Task<byte[]> ReadBoundedAsync(HttpResponseMessage response, int maximumBytes, CancellationToken token)
+    {
+        if (response.Content.Headers.ContentLength > maximumBytes) { throw new JsonException(); }
         await using Stream input = await response.Content.ReadAsStreamAsync(token).ConfigureAwait(false);
         using var bytes = new MemoryStream();
         byte[] buffer = new byte[16 * 1024];
         while (true)
         {
-            int read = await input.ReadAsync(buffer, token).ConfigureAwait(false);
+            int read = await input.ReadAsync(buffer.AsMemory(0, (int)Math.Min(buffer.Length, maximumBytes - bytes.Length + 1)), token).ConfigureAwait(false);
             if (read == 0) { break; }
-            if (bytes.Length + read > MaximumMetadataBytes) { throw new JsonException(); }
+            if (bytes.Length + read > maximumBytes) { throw new JsonException(); }
             bytes.Write(buffer, 0, read);
         }
-        return JsonDocument.Parse(bytes.ToArray(), new JsonDocumentOptions { MaxDepth = 32 });
+        return bytes.ToArray();
     }
 
     private static string? NextCursor(HttpResponseMessage response, Uri requested)

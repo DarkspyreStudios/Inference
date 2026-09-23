@@ -23,6 +23,7 @@ public static class LayaSetup
         ArgumentNullException.ThrowIfNull(packs);
         IReadOnlyList<TensorModelPackDefinition> models = offeredModels ?? [TensorDecisionModels.LayaTypedDecisions];
         foreach (TensorModelPackDefinition definition in models) { LayaModelCompatibility.Validate(definition); }
-        return new(Definition, identity, target, models, packs, existing, instance);
+        return new(Definition, identity, target, models, packs, existing, instance,
+            TensorBackendProbes.CpuCuda(global::TensorSharp.Cuda.CudaBackend.IsAvailable));
     }
 }

@@ -17,6 +17,7 @@ public static class SupraSetup
     {
         IReadOnlyList<TensorModelPackDefinition> models = offeredModels ?? [TensorImageModels.Supra2Image];
         foreach (TensorModelPackDefinition model in models) { SupraModelCompatibility.Validate(model); }
-        return new(Definition, identity, target, models, packs, existing, instance);
+        return new(Definition, identity, target, models, packs, existing, instance,
+            TensorBackendProbes.CpuCuda(global::TensorSharp.Cuda.CudaBackend.IsAvailable));
     }
 }

@@ -72,6 +72,8 @@ public static class TensorImageModels
             RelativePath = relativePath,
             Length = length,
             Sha256 = sha256,
+            Provenance = new(new("https://huggingface.co/"), repository, revision, remotePath,
+                role == "vae-model" ? "MIT" : "Apache-2.0"),
             Sources =
             [
                 new Uri($"https://huggingface.co/{repository}/resolve/{revision}/{remotePath}?download=true")
