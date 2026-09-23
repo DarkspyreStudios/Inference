@@ -113,8 +113,8 @@ The engine reaches the model only through `ILayaModelLoader` and
   bytes are released once the session exists, so the load briefly holds one extra copy of the model.
 - Metadata properties: `laya.max_len`, `laya.max_markers`, `laya.export_version`, and
   `laya.source_sha256` (the SHA-256 of the source `model.safetensors`).
-- Pack artifact roles: `model` (`laya.onnx`), `agent-config`, `tokenizer` and `tokenizer-config`.
-  `encoder-config` is no longer a Laya artifact, because nothing reads it.
+- Pack artifact roles: `model` (`laya.onnx`), `tokenizer` and `agent-config`.
+  `tokenizer-config` and `encoder-config` are no longer Laya artifacts, because nothing reads them.
 
 ## 7. Windows CUDA seam
 
