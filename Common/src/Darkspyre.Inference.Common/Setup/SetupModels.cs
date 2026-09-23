@@ -159,6 +159,11 @@ public sealed record SetupSnapshot(
     IReadOnlyList<ISetupAction> Actions, SetupValidation Validation, SetupStatus Status,
     bool IsBusy, bool IsClosed)
 {
+    /// <summary>Editable draft changes, excluding checks, progress and other observations.</summary>
+    public bool IsDirty { get; init; }
+    /// <summary>A host write may have occurred; read back before creating another save attempt.</summary>
+    public bool CommitOutcomeUncertain { get; init; }
+    /// <summary>The current interaction, with controls bound to this snapshot's revision.</summary>
     public SetupInteraction? Interaction { get; init; }
 }
 

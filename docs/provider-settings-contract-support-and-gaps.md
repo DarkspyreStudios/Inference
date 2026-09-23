@@ -13,6 +13,14 @@ These changes are not in the historical 11.2.0 packages.** The approved authorit
 [the provider setup and audio technical design](provider-setup-and-audio-technical-design.md).
 UI surfaces and consumer integration belong to their separate work; this report does not certify them.
 
+Post-release corrections are implemented in source, **not in the published 11.3.0-rc.1 archives**:
+provider-owned dirty state and uncertain-commit state, snapshot-owned authentication interactions,
+attempt-scoped one-way callback input, explicit choice capabilities and decimal step metadata.
+UI.Settings consumes these with a local-input Save gate, latest-request choice loading, compact
+bounded selects and an owned exact numeric control. All Connect/Tensor setup implementations are
+updated together; no application integration or package publication is included. See
+[the UI correction record](settings.ui.tech-design.md#12-post-release-settings-corrections-2026-09-23).
+
 ## Shared UI workspace and library
 
 The configuration editor belongs to the Blazor library
@@ -116,9 +124,9 @@ carries its complete definition; explicit Install registers it through the exist
   Optional bounded live metadata checks resolved Qwen, Supra and all twelve Whisper definitions
   without loading models or downloading full weights. The prior full-weight Supra run remains
   historical evidence, not a new experiment in this acceptance pass.
-- The TensorSharp fork dependency is locally verified as `2.8.6.4-local.gguf.9b248715`. Its release
-  remains separate work before these source changes can be distributed. No new Inference package
-  artifacts, version bump or publication are part of this completion.
+- The original source acceptance used the local TensorSharp validation pin. The later 11.3.0-rc.1
+  release uses the privately published TensorSharp 2.8.6.4 package closure, as recorded in
+  [the release record](../.roles/project.md#published-1130-rc1-2026-09-23).
 - UI rendering/accessibility/themes and CE/Agent-DS integration are outside this runtime report.
 
 Final verification results are recorded in

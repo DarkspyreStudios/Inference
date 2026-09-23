@@ -1,5 +1,6 @@
 @implements IDisposable
 
+<CascadingValue Value="_inputs" IsFixed="true">
 <section class="inference-settings-editor" aria-label="@($"{Snapshot.Definition.Implementation.DisplayName} settings")">
     <header class="inference-settings-editor__heading">
         <h2>@Snapshot.Definition.Implementation.DisplayName</h2>
@@ -42,7 +43,7 @@
                             @foreach (var field in section.Fields.Where(value => value.Description.IsVisible))
                             {
                                 <SetupFieldInput @key="(Session, field.Description.Id)" Field="field" Revision="Snapshot.Revision"
-                                                 Host="Host" Issues="Snapshot.Validation.Issues"
+                                                 Host="Host" Issues="AllIssues" Disabled="@(Snapshot.IsBusy || Snapshot.IsClosed || _saving)"
                                                  Edited="OnFieldEditedAsync" />
                             }
                         </div>
@@ -56,7 +57,7 @@
                             @foreach (var field in section.Fields.Where(value => value.Description.IsVisible))
                             {
                                 <SetupFieldInput @key="(Session, field.Description.Id)" Field="field" Revision="Snapshot.Revision"
-                                                 Host="Host" Issues="Snapshot.Validation.Issues"
+                                                 Host="Host" Issues="AllIssues" Disabled="@(Snapshot.IsBusy || Snapshot.IsClosed || _saving)"
                                                  Edited="OnFieldEditedAsync" />
                             }
                         </div>
@@ -84,19 +85,19 @@
                 case SetupDeviceAuthorization device:
                     <p>Use code <strong>@device.UserCode</strong> to finish connecting.</p>
                     <Button OnClick="() => OpenBrowserAsync(device.VerificationUri)">Open authorization page</Button>
-                    <Button OnClick="() => RunActionAsync(device.Continue)">Continue</Button>
-                    <Button Variant="Button.ButtonVariant.Outline" OnClick="() => RunActionAsync(device.Cancel)">Cancel connection</Button>
+                    <Button Disabled="@(Snapshot.IsBusy || Snapshot.IsClosed)" OnClick="() => RunActionAsync(device.Continue)">Continue</Button>
+                    <Button Disabled="@(Snapshot.IsBusy || Snapshot.IsClosed)" Variant="Button.ButtonVariant.Outline" OnClick="() => RunActionAsync(device.Cancel)">Cancel connection</Button>
                     break;
                 case SetupBrowserAuthorization browser:
                     <Button OnClick="() => OpenBrowserAsync(browser.AuthorizationUri)">Open authorization page</Button>
                     <SetupFieldInput @key="(Session, browser.Callback.Description.Id)" Field="browser.Callback" Revision="Snapshot.Revision" Host="Host"
-                                     Issues="Snapshot.Validation.Issues" Edited="OnFieldEditedAsync" />
-                    <Button OnClick="() => RunActionAsync(browser.Continue)">Continue</Button>
-                    <Button Variant="Button.ButtonVariant.Outline" OnClick="() => RunActionAsync(browser.Cancel)">Cancel connection</Button>
+                                     Issues="AllIssues" Edited="OnFieldEditedAsync" SensitiveInput="true" Disabled="@(Snapshot.IsBusy || Snapshot.IsClosed || _saving)" />
+                    <Button Disabled="@(Snapshot.IsBusy || Snapshot.IsClosed)" OnClick="() => RunActionAsync(browser.Continue)">Continue</Button>
+                    <Button Disabled="@(Snapshot.IsBusy || Snapshot.IsClosed)" Variant="Button.ButtonVariant.Outline" OnClick="() => RunActionAsync(browser.Cancel)">Cancel connection</Button>
                     break;
                 case SetupExternalPrerequisite prerequisite:
                     <p>@prerequisite.Instructions</p>
-                    <Button OnClick="() => RunActionAsync(prerequisite.Recheck)">Check again</Button>
+                    <Button Disabled="@(Snapshot.IsBusy || Snapshot.IsClosed)" OnClick="() => RunActionAsync(prerequisite.Recheck)">Check again</Button>
                     break;
             }
         </section>
@@ -108,7 +109,7 @@
             @foreach (var action in Snapshot.Actions)
             {
                 <div class="inference-settings-editor__action">
-                    <Button Variant="Button.ButtonVariant.Outline" Disabled="@(Snapshot.IsBusy || !action.Descriptor.IsEnabled)"
+                    <Button Variant="Button.ButtonVariant.Outline" Disabled="@(Snapshot.IsBusy || Snapshot.IsClosed || !action.Descriptor.IsEnabled)"
                             OnClick="() => RunActionAsync(action)">@action.Descriptor.DisplayName</Button>
                     @if (!action.Descriptor.IsEnabled && !string.IsNullOrWhiteSpace(action.Descriptor.UnavailableReason))
                     { <span>@action.Descriptor.UnavailableReason</span> }
@@ -138,9 +139,10 @@
         @if (_stepIndex < Snapshot.Steps.Count - 1)
         { <Button Disabled="@Snapshot.IsBusy" OnClick="NextStepAsync">Next</Button> }
         @if (ShowSaveButton && _stepIndex >= Snapshot.Steps.Count - 1)
-        { <Button Disabled="@(Snapshot.IsBusy || Snapshot.IsClosed)" OnClick="SaveFromButtonAsync">Save settings</Button> }
+        { <Button Disabled="@(!State.CanSave)" OnClick="SaveFromButtonAsync">Save settings</Button> }
     </div>
 </section>
+</CascadingValue>
 
 @code {
     [Parameter, EditorRequired] public IInferenceSetupSession Session { get; set; } = default!;
@@ -150,9 +152,14 @@
     [Parameter] public RenderFragment? SupplementaryContent { get; set; }
     [Parameter] public EventCallback<SetupCommitResult> CommitCompleted { get; set; }
     [Parameter] public EventCallback<SetupSnapshot> SnapshotChanged { get; set; }
+    [Parameter] public EventCallback<SetupEditorState> StateChanged { get; set; }
 
     private IInferenceSetupSession? _subscribed;
-    private SetupSnapshot Snapshot => Session.Snapshot;
+    private SetupSnapshot _snapshot = default!;
+    private SetupSnapshot Snapshot => _snapshot;
+    private readonly SetupEditorInputState _inputs = new();
+    private SetupEditorState? _lastPublishedState;
+    private bool _saving;
     private SetupStep? CurrentStep => _stepIndex < Snapshot.Steps.Count ? Snapshot.Steps[_stepIndex] : null;
     private int _stepIndex;
     private SetupProgress? _progress;
@@ -160,12 +167,15 @@
     private SetupCommitResult? _commitResult;
     private CancellationTokenSource? _actionCancellation;
     private bool _disposed;
-    private IReadOnlyList<SetupIssue> _editIssues = [];
+    public SetupEditorState State => new(Snapshot.IsDirty || _inputs.HasPendingInput || Snapshot.CommitOutcomeUncertain,
+        _inputs.HasPendingInput, _inputs.Issues.Any(issue => issue.Severity == SetupIssueSeverity.Error),
+        !_saving && !Snapshot.IsBusy && !Snapshot.IsClosed && !_inputs.HasPendingInput
+            && !AllIssues.Any(issue => issue.Severity == SetupIssueSeverity.Error), Snapshot.CommitOutcomeUncertain);
 
-    private IReadOnlyList<SetupIssue> VisibleIssues => Snapshot.Validation.Issues.Concat(_editIssues)
-        .Where(issue => issue.StepId is null || issue.StepId == CurrentStep?.Id).ToArray();
+    private IReadOnlyList<SetupIssue> AllIssues => Snapshot.Validation.Issues.Concat(_inputs.Issues).Distinct().ToArray();
+    private IReadOnlyList<SetupIssue> VisibleIssues => AllIssues.Where(issue => issue.StepId is null || issue.StepId == CurrentStep?.Id).ToArray();
 
-    protected override void OnParametersSet()
+    protected override async Task OnParametersSetAsync()
     {
         if (ReferenceEquals(_subscribed, Session)) { return; }
         if (_subscribed is not null) { _subscribed.Changed -= OnSessionChanged; }
@@ -176,7 +186,11 @@
         _actionResult = null;
         _commitResult = null;
         _actionCancellation = null;
-        _editIssues = [];
+        _inputs.Clear();
+        _saving = false;
+        _lastPublishedState = null;
+        RefreshSnapshot();
+        await PublishStateAsync();
     }
 
     private void OnSessionChanged(object? sender, EventArgs args)
@@ -185,41 +199,80 @@
         _ = InvokeAsync(async () =>
         {
             if (_disposed || !ReferenceEquals(sender, Session)) { return; }
+            RefreshSnapshot();
             SetupSnapshot snapshot = Snapshot;
             _stepIndex = Math.Clamp(_stepIndex, 0, Math.Max(0, snapshot.Steps.Count - 1));
             StateHasChanged();
             await SnapshotChanged.InvokeAsync(snapshot);
+            await PublishStateAsync();
         });
     }
 
-    private Task OnFieldEditedAsync(SetupEditResult result)
+    private async Task OnFieldEditedAsync(SetupEditResult result)
     {
-        _editIssues = result.Issues;
-        return Task.CompletedTask;
+        _commitResult = null;
+        RefreshSnapshot();
+        await PublishStateAsync();
     }
 
-    private bool HasErrors(SetupSection section) => Snapshot.Validation.Issues.Any(issue =>
-        issue.Severity == SetupIssueSeverity.Error && section.Fields.Any(field => field.Description.Id == issue.FieldId));
+    private void RefreshSnapshot() { _snapshot = Session.Snapshot; _inputs.Reconcile(_snapshot); }
+    private async Task PublishStateAsync()
+    {
+        SetupEditorState state = State;
+        if (_disposed || state == _lastPublishedState) { return; }
+        _lastPublishedState = state;
+        await StateChanged.InvokeAsync(state);
+    }
 
-    private void SelectStep(int index) { _stepIndex = index; _editIssues = []; }
+    private bool HasErrors(SetupSection section) => AllIssues.Any(issue =>
+        issue.Severity == SetupIssueSeverity.Error && section.Fields.SelectMany(SetupEditorInputState.Flatten)
+            .Any(field => field.Description.Id == issue.FieldId));
+
+    private void SelectStep(int index) => _stepIndex = index;
     private void PreviousStep() => SelectStep(_stepIndex - 1);
 
     private async Task NextStepAsync()
     {
+        if (_inputs.Issues.Any(IsCurrentStepError)) { return; }
         SetupValidation validation = await Session.ValidateAsync();
-        if (validation.Issues.Any(issue => issue.Severity == SetupIssueSeverity.Error
-            && ((issue.StepId is null && issue.FieldId is null) || issue.StepId == CurrentStep?.Id || CurrentStep?.Sections.Any(section =>
-                section.Fields.Any(field => field.Description.Id == issue.FieldId)) == true))) { return; }
+        RefreshSnapshot();
+        if (validation.Issues.Any(IsCurrentStepError)) { return; }
         SelectStep(_stepIndex + 1);
     }
+
+    private bool IsCurrentStepError(SetupIssue issue) => issue.Severity == SetupIssueSeverity.Error
+        && ((issue.StepId is null && issue.FieldId is null) || issue.StepId == CurrentStep?.Id || CurrentStep?.Sections.Any(section =>
+            section.Fields.SelectMany(SetupEditorInputState.Flatten).Any(field => field.Description.Id == issue.FieldId)) == true);
 
     public async Task<SetupCommitResult> SaveAsync()
     {
         IInferenceSetupSession session = Session;
-        SetupCommitResult result = await session.CommitAsync();
+        if (_saving) { return new(SetupCommitState.Busy); }
+        IReadOnlyList<SetupIssue> inputIssues = _inputs.Issues;
+        SetupCommitResult result;
+        if (inputIssues.Any(issue => issue.Severity == SetupIssueSeverity.Error))
+        { result = new(SetupCommitState.Invalid, Issues: inputIssues); }
+        else
+        {
+            _saving = true;
+            await PublishStateAsync();
+            StateHasChanged();
+            try { result = await session.CommitAsync(); }
+            finally { if (ReferenceEquals(session, Session)) { _saving = false; } }
+        }
         if (!_disposed && ReferenceEquals(session, Session))
         {
             _commitResult = result;
+            if (result.State == SetupCommitState.Committed) { _inputs.Clear(); }
+            RefreshSnapshot();
+            if (result.State == SetupCommitState.Invalid)
+            {
+                int step = Snapshot.Steps.ToList().FindIndex(item => (result.Issues ?? []).Any(issue =>
+                    issue.StepId == item.Id || item.Sections.SelectMany(section => section.Fields).SelectMany(SetupEditorInputState.Flatten)
+                        .Any(field => field.Description.Id == issue.FieldId)));
+                if (step >= 0) { _stepIndex = step; }
+            }
+            await PublishStateAsync();
             await CommitCompleted.InvokeAsync(result);
             StateHasChanged();
         }
@@ -296,6 +349,7 @@
     public void Dispose()
     {
         _disposed = true;
+        _inputs.Clear();
         if (_subscribed is not null) { _subscribed.Changed -= OnSessionChanged; }
         GC.SuppressFinalize(this);
     }

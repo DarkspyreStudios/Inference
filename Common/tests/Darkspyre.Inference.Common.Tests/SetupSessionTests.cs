@@ -189,6 +189,36 @@ public sealed class SetupSessionTests
 
     private sealed record Changes(string Name, string? Secret);
 
+    [Fact]
+    public async Task DirtyTracksDraftAndRevertsButNotValidationOrActions()
+    {
+        await using var session = new TestSession(new Target());
+        Assert.False(session.Snapshot.IsDirty);
+        await session.ValidateAsync();
+        await session.Snapshot.Actions[0].ExecuteAsync();
+        Assert.False(session.Snapshot.IsDirty);
+        SetupTextField Name() => (SetupTextField)session.Snapshot.Steps[0].Sections[0].Fields[0];
+        Name().SetValue("changed");
+        Assert.True(session.Snapshot.IsDirty);
+        Name().SetValue("original");
+        Assert.False(session.Snapshot.IsDirty);
+        Name().SetValue("saved");
+        Assert.Equal(SetupCommitState.Committed, (await session.CommitAsync()).State);
+        Assert.False(session.Snapshot.IsDirty);
+        Assert.False(session.Snapshot.CommitOutcomeUncertain);
+    }
+
+    [Fact]
+    public async Task UncertainCommitIsExplicitEvenWhenNoFieldsChanged()
+    {
+        await using var session = new TestSession(new Target { Commit = _ => Task.FromResult(new SetupCommitResult(SetupCommitState.Uncertain)) });
+        Assert.False(session.Snapshot.IsDirty);
+        await session.CommitAsync();
+        Assert.True(session.Snapshot.IsClosed);
+        Assert.True(session.Snapshot.CommitOutcomeUncertain);
+        Assert.Equal(SetupCommitState.Closed, (await session.CommitAsync()).State);
+    }
+
     private sealed class Target : ISetupCommitTarget<Changes>
     {
         public Changes? Changes { get; private set; }
@@ -234,6 +264,7 @@ public sealed class SetupSessionTests
         protected override SetupValidation ValidateDraft() => string.IsNullOrWhiteSpace(_name)
             ? new([new("required", "Name is required.", "name")]) : SetupValidation.Valid;
         protected override Changes CreateChanges() => new(_name, _secret);
+        protected override bool IsDraftDirty => _name != "original" || _secretChange != SetupSecretEditKind.Keep;
         protected override void ClearSensitiveState() { _secret = null; Cleared = true; }
     }
 }

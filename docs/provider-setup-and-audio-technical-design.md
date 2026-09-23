@@ -98,6 +98,12 @@ Each provider owns a typed draft. A setup session exposes a safe, read-only proj
   search text, an opaque continuation token, bounded page size and expected draft revision. Results
   contain stable value/label pairs, continuation and the revision they describe. Manual entry is
   explicitly enabled or disabled by the field, never guessed by the host.
+- `SetupChoiceCapabilities` explicitly declares search, paging and refresh independently of manual
+  entry. Bounded local lists (protocol, format, capability overrides, backend and cache policy) do
+  not request search/refresh chrome. Catalog/discovery fields opt in to the supported operations.
+- Decimal fields expose a positive `Step` alongside nullable bounds. UI numeric controls must keep
+  `long`/`decimal` precision and report invalid visible input rather than silently rounding or
+  clamping it into a different typed value.
 
 The renderer branches on these shared field types only. The provider binds each edit method to its
 typed draft property. A field edit advances the session revision and invalidates dependent choices,
@@ -136,6 +142,14 @@ public interface ISetupCommitTarget<TChanges>
 status observations. Fields/actions are bound to their originating session and recheck availability
 and revision when invoked. They are not string commands for the host to dispatch.
 
+`SetupSnapshot.IsDirty` is a provider-owned comparison against the starting editable draft, not a
+revision counter. Every concrete session implements `IsDraftDirty`: changes to editable settings,
+selected models and explicit secret mutations count; checks, validation, progress and runtime
+observations alone do not. Reverting editable values restores clean state. The successful commit
+closes the session and clears its dirty signal. `CommitOutcomeUncertain` is separate and remains
+explicit even if the draft had no edits. The UI combines these signals with transient invalid or
+unapplied input for host dirty-close behavior; that transient text is not a second provider draft.
+
 Actions declare their semantic purpose and side effects: network access, potential billing,
 browser interaction, CLI execution, download, local verification, model load/unload or terminal stop.
 Execution returns Completed, NeedsInteraction, Failed or Cancelled, with structured issues and
@@ -147,6 +161,14 @@ or external prerequisite instructions followed by a bound recheck action. Contin
 actions remain provider-owned. Authentication protocol fields such as OAuth verifier/state remain
 inside the provider, not a host-interpreted payload. The host opens a browser or presents instructions
 only after its own consent checks. A provider cannot execute shell text from remote metadata.
+
+`Snapshot.Interaction` is authoritative for the current interaction. An action may also return its
+interaction as an immediate result, but renderers read fresh controls from the current snapshot.
+Failed CLI authentication publishes prerequisite instructions with a revision-bound recheck; a
+successful recheck clears them. Browser callback text remains one-way: the session accepts it but
+never echoes it in a snapshot. Each authorization attempt owns a unique callback field identity,
+stable across callback edits/status updates and replaced on restart. Renderers retain the transient
+masked text for that identity and clear it when the interaction ends or the editor is replaced.
 
 ### Commit, cancellation and concurrency
 

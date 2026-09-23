@@ -14,6 +14,8 @@ public abstract class InferenceSetupSession<TChanges> : IInferenceSetupSession
     private Task? _disposal;
     private long _revision;
     private bool _closed;
+    private bool _committed;
+    private bool _commitOutcomeUncertain;
     private SetupValidation _validation = SetupValidation.Valid;
 
     protected InferenceSetupSession(InferenceSetupDefinition definition, ISetupCommitTarget<TChanges> target)
@@ -37,7 +39,7 @@ public abstract class InferenceSetupSession<TChanges> : IInferenceSetupSession
             {
                 return new(_revision, Definition, CreateSteps(_revision), CreateActions(_revision),
                     _validation, GetStatus(), _operation is not null, _closed)
-                { Interaction = GetInteraction() };
+                { Interaction = GetInteraction(), IsDirty = !_committed && IsDraftDirty, CommitOutcomeUncertain = _commitOutcomeUncertain };
             }
         }
     }
@@ -46,6 +48,7 @@ public abstract class InferenceSetupSession<TChanges> : IInferenceSetupSession
     protected abstract IReadOnlyList<ISetupAction> CreateActions(long revision);
     protected abstract SetupValidation ValidateDraft();
     protected abstract TChanges CreateChanges();
+    protected abstract bool IsDraftDirty { get; }
     protected abstract void ClearSensitiveState();
     protected virtual SetupStatus GetStatus() => Status;
     protected virtual SetupInteraction? GetInteraction() => null;
@@ -201,8 +204,10 @@ public abstract class InferenceSetupSession<TChanges> : IInferenceSetupSession
                 {
                     // One draft commits once; a fresh edit must capture the new saved version.
                     _closed = true;
+                    _commitOutcomeUncertain = result.State == SetupCommitState.Uncertain;
                     if (result.State == SetupCommitState.Committed)
                     {
+                        _committed = true;
                         Status = Status with { Configured = SetupObservation.Known(true) };
                     }
                 }
@@ -211,13 +216,13 @@ public abstract class InferenceSetupSession<TChanges> : IInferenceSetupSession
         }
         catch (OperationCanceledException) when (linked.IsCancellationRequested)
         {
-            if (invoked) { lock (_sync) { _closed = true; } }
+            if (invoked) { lock (_sync) { _closed = true; _commitOutcomeUncertain = true; } }
             return new(invoked ? SetupCommitState.Uncertain : SetupCommitState.Cancelled);
         }
         catch (Exception)
         {
             // Host exceptions may contain secrets and do not prove that no write occurred.
-            lock (_sync) { _closed = true; }
+            lock (_sync) { _closed = true; _commitOutcomeUncertain = true; }
             return new(SetupCommitState.Uncertain, Issues: [new("commit-outcome-unknown", "Read the saved configuration before retrying.")]);
         }
         finally

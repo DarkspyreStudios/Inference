@@ -154,6 +154,29 @@ build to .NET 11 advances the first component and resets the later components fo
 release (`11.<release>.<minor>`). Immutable releases are never overwritten. The family tag is
 created only after all three packages have passed their gates.
 
+## Settings corrections in source (2026-09-23; not published)
+
+The approved five-defect Settings unit adds a local-input Save/Next gate, authoritative snapshot
+authentication interactions, provider-owned draft dirty state, latest-request-wins choice loading,
+explicit choice capabilities and exact typed numeric controls. Common, all Connect/Tensor setup
+implementations and UI.Settings are updated together. Hosts receive `SetupEditorState` for dirty
+close, Save availability and uncertain-commit readback; they still own placement and operation lifetime.
+
+The numeric component is owned by UI.Settings and adapts Lumeo's MIT-licensed layout/accessibility,
+not its double-based parsing. Lumeo remains an unmodified dependency. Its attribution is included
+in source and required by the future archive-verification gate. No consumer application is changed.
+
+Debug/Release builds have zero warnings/errors. In each configuration, Connect passes 301 tests,
+Tensor 260 and UI 45 (24 Common plus 21 component tests); Common is included in all three totals.
+Formatting verification and transitive vulnerability audits pass for all three solutions. Browser
+layout review uses rendered component fixtures under light inline and dark framed Lumeo themes at
+1440×1000 and 390×844, including errors, labels and keyboard focus. This is not CE/Agent-DS live
+application certification. Verification requires no live provider calls or model weights.
+
+The shared version remains `11.3.0-rc.1`. No package artifacts or publications are created; the
+published archives below do not contain these fixes. See
+[`docs/settings.ui.tech-design.md`](../docs/settings.ui.tech-design.md#12-post-release-settings-corrections-2026-09-23).
+
 ## Published 11.3.0-rc.1 (2026-09-23)
 
 The user authorized the coordinated four-package private-feed release and the prerelease suffix.

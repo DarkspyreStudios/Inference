@@ -30,6 +30,7 @@ public sealed class ImageSetupSession : InferenceSetupSession<ImageSetupChanges>
     private long? _timeoutSeconds;
     private string _workflowId;
     private ImageWorkflow? _workflow;
+    private readonly (Uri? Endpoint, long? Timeout, string Workflow) _baseline;
 
     internal ImageSetupSession(ImageProviderService service, ImageTransport transport,
         SetupConfigurationIdentity identity, ISetupCommitTarget<ImageSetupChanges> target,
@@ -49,6 +50,7 @@ public sealed class ImageSetupSession : InferenceSetupSession<ImageSetupChanges>
         _endpoint = Uri.TryCreate(existing?.Endpoint ?? "http://127.0.0.1:8188", UriKind.Absolute, out Uri? endpoint) ? endpoint : null;
         _timeoutSeconds = (long)(existing?.RequestTimeout ?? TimeSpan.FromMinutes(10)).TotalSeconds;
         _workflowId = workflowId ?? string.Empty;
+        _baseline = (_endpoint, _timeoutSeconds, _workflowId);
         foreach ((string name, string value) in existing?.AdditionalHeaders ?? new Dictionary<string, string>())
         {
             _headers.Add(new(name, value));
@@ -80,7 +82,8 @@ public sealed class ImageSetupSession : InferenceSetupSession<ImageSetupChanges>
             _workflowId, string.Empty, value => Edit(revision, () => { _workflowId = value; _workflow = null; }), false,
             (query, token) => _workflows is null
                 ? Task.FromResult(new SetupChoicePage(query.ExpectedRevision, [], State: SetupChoiceState.Unavailable))
-                : QueryChoicesAsync(query, ct => _workflows.GetChoicesAsync(_transport.Descriptor.Transport, query, ct), token), revision)])]),
+                : QueryChoicesAsync(query, ct => _workflows.GetChoicesAsync(_transport.Descriptor.Transport, query, ct), token), revision,
+            capabilities: SetupChoiceCapabilities.Searchable)])]),
         new("verify", "Check and test", "Checking health does not generate an image. The separate generation test can consume provider resources.", [])
     ];
 
@@ -195,6 +198,10 @@ public sealed class ImageSetupSession : InferenceSetupSession<ImageSetupChanges>
         AdditionalHeaders = _headers.Where(header => header.Value is not null)
             .ToDictionary(header => header.Name, header => header.Value!, StringComparer.OrdinalIgnoreCase)
     };
+
+    protected override bool IsDraftDirty => (_endpoint, _timeoutSeconds, _workflowId) != _baseline
+        || _removedHeaders.Count != 0 || _headers.Any(header => header.OriginalName.Length == 0
+            || header.Name != header.OriginalName || header.Change.Kind != SetupSecretEditKind.Keep);
 
     protected override ImageSetupChanges CreateChanges()
     {

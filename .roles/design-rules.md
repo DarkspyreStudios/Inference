@@ -83,7 +83,10 @@ must not describe one capability as the whole Connect family once another capabi
 Every package includes a readable package README and the repository license. Pack verification must
 confirm that the Common assembly appears only in the Common package, Connect, Tensor, and UI.Settings
 declare an exact synchronized dependency on Common, and each product package contains every owned
-assembly plus its XML documentation. UI.Settings also includes its static web assets.
+assembly plus its XML documentation. UI.Settings also includes its static web assets and
+`THIRD-PARTY-NOTICES.md` for its owned numeric control's Lumeo-derived layout/accessibility. Lumeo is
+an unmodified package dependency, not a fork; exact typed parsing and input validation belong to
+UI.Settings.
 
 Source builds use project references. `Directory.Build.targets` pins the package dependency on
 Common to `[$(Version)]` when generating each consumer product's NuGet manifest. This does not

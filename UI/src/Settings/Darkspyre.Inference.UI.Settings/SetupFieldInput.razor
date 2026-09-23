@@ -12,7 +12,7 @@
                     @foreach (var child in row.Fields.Where(item => item.Description.IsVisible))
                     {
                         <SetupFieldInput @key="child.Description.Id" Field="child" Revision="Revision" Host="Host"
-                                         Issues="Issues" Edited="Edited" />
+                                         Issues="Issues" Edited="Edited" Disabled="Disabled" />
                     }
                     <Button Variant="Button.ButtonVariant.Ghost" Disabled="@Unavailable"
                             OnClick="() => ApplyAsync(group.Remove(row.Id))">Remove row</Button>
@@ -39,7 +39,7 @@
             @switch (Field)
             {
                 case SetupTextField text:
-                    <Input Value="@_value" ValueChanged="@(value => SetTextAsync(text, value))"
+                    <Input Type="@(SensitiveInput ? "password" : "text")" Value="@_value" ValueChanged="@(value => SetTextAsync(text, value))"
                            Disabled="@Unavailable" MaxLength="@text.MaximumLength" />
                     break;
                 case SetupUriField uri:
@@ -51,23 +51,38 @@
                            Disabled="@Unavailable" />
                     break;
                 case SetupIntegerField integer:
-                    <Input Type="number" Value="@_value" ValueChanged="@(value => SetIntegerAsync(integer, value))"
-                           Disabled="@Unavailable" />
+                    <SetupNumberInput T="long" Text="@_value" Minimum="integer.Minimum" Maximum="integer.Maximum"
+                                      Required="integer.Description.IsRequired" Label="@integer.Description.DisplayName"
+                                      Invalid="@(FieldError is not null)" Disabled="@Unavailable" Edited="@(edit => SetNumberAsync(integer, edit))" />
                     break;
                 case SetupDecimalField number:
-                    <Input Type="number" Value="@_value" ValueChanged="@(value => SetDecimalAsync(number, value))"
-                           Disabled="@Unavailable" />
+                    <SetupNumberInput T="decimal" Text="@_value" Minimum="number.Minimum" Maximum="number.Maximum" Step="number.Step"
+                                      Required="number.Description.IsRequired" Label="@number.Description.DisplayName"
+                                      Invalid="@(FieldError is not null)" Disabled="@Unavailable" Edited="@(edit => SetNumberAsync(number, edit))" />
                     break;
                 case SetupChoiceField choice:
+                    @if (choice.Capabilities.SupportsSearch)
+                    {
                     <div class="inference-settings-editor__choice-actions">
                         <Input @bind-Value="_search" Placeholder="Search choices" Disabled="@Unavailable" />
                         <Button Variant="Button.ButtonVariant.Ghost" Disabled="@(_loading || Unavailable)"
                                 OnClick="SearchChoicesAsync">Search</Button>
                     </div>
-                    @if (_choices.Count > 0 || !choice.AllowsManualEntry)
+                    }
+                    @if (!choice.Capabilities.SupportsSearch && !choice.Capabilities.SupportsPaging && !choice.AllowsManualEntry)
+                    {
+                        <Select Value="@_value" ValueChanged="@(value => SetChoiceAsync(choice, value))" Disabled="@Unavailable" @bind-Open="_choiceOpen">
+                            <SelectTrigger />
+                            <SelectContent>
+                                @foreach (var option in _choices)
+                                { <SelectItem Value="@option.Value">@option.DisplayName</SelectItem> }
+                            </SelectContent>
+                        </Select>
+                    }
+                    else if (_choices.Count > 0 || !choice.AllowsManualEntry)
                     {
                         <Combobox Value="@_value" ValueChanged="@(value => SetChoiceAsync(choice, value))"
-                                  @bind-Open="_choiceOpen" Creatable="@choice.AllowsManualEntry">
+                                  @bind-Open="_choiceOpen" Creatable="@choice.AllowsManualEntry" Disabled="@Unavailable">
                             <ComboboxInput Placeholder="Choose or search" />
                             <ComboboxContent>
                                 @foreach (var option in _choices)
@@ -79,11 +94,13 @@
                     @if (_choices.Count == 0 && choice.AllowsManualEntry)
                     { <Input Value="@_value" ValueChanged="@(value => SetChoiceAsync(choice, value))" Disabled="@Unavailable" /> }
                     <div class="inference-settings-editor__choice-actions">
-                        <Button Variant="Button.ButtonVariant.Ghost" Disabled="@(_loading || Unavailable)"
-                                OnClick="RefreshChoicesAsync">@(_loading ? "Loading…" : "Refresh choices")</Button>
-                        @if (_continuation is not null)
-                        { <Button Variant="Button.ButtonVariant.Ghost" Disabled="@_loading" OnClick="LoadMoreAsync">Load more</Button> }
+                        @if (choice.Capabilities.SupportsRefresh)
+                        { <Button Variant="Button.ButtonVariant.Ghost" Disabled="@(_loading || Unavailable)"
+                                  OnClick="RefreshChoicesAsync">Refresh choices</Button> }
+                        @if (_continuation is not null && choice.Capabilities.SupportsPaging)
+                        { <Button Variant="Button.ButtonVariant.Ghost" Disabled="@(_loading || Unavailable)" OnClick="LoadMoreAsync">Load more</Button> }
                     </div>
+                    @if (_loading) { <p role="status">Loading choices…</p> }
                     @if (_choiceIssue is not null) { <p role="status">@_choiceIssue</p> }
                     break;
                 case SetupSecretField secret:
@@ -94,7 +111,7 @@
                         <Button Variant="Button.ButtonVariant.Ghost" Disabled="@Unavailable"
                                 OnClick="() => SetSecretAsync(secret, SetupSecretEdit.Clear)">Clear</Button>
                     </div>
-                    <Input Type="password" Value="@_secret" ValueChanged="@(value => _secret = value ?? string.Empty)"
+                    <Input Type="password" Value="@_secret" ValueChanged="SetPendingSecretAsync"
                            Disabled="@Unavailable" Placeholder="New secret" />
                     <Button Variant="Button.ButtonVariant.Outline" Disabled="@(Unavailable || string.IsNullOrEmpty(_secret))"
                             OnClick="() => ReplaceSecretAsync(secret)">Replace secret</Button>
@@ -110,10 +127,14 @@
     [Parameter] public long Revision { get; set; }
     [Parameter] public IReadOnlyList<SetupIssue> Issues { get; set; } = [];
     [Parameter] public EventCallback<SetupEditResult> Edited { get; set; }
+    [Parameter] public bool Disabled { get; set; }
+    [Parameter] public bool SensitiveInput { get; set; }
+    [CascadingParameter] private SetupEditorInputState? EditorInputs { get; set; }
 
-    private string _value = string.Empty;
-    private string _secret = string.Empty;
-    private string? _localError;
+    private readonly SetupEditorInputState _standaloneInputs = new();
+    private SetupEditorInputState.Input Input => (EditorInputs ?? _standaloneInputs).Get(Field.Description.Id);
+    private string _value { get => Input.Text; set { Input.Text = value; Input.Pending = true; } }
+    private string _secret { get => Input.Secret; set => Input.Secret = value; }
     private string? _choiceIssue;
     private List<SetupChoice> _choices = [];
     private string? _continuation;
@@ -121,10 +142,14 @@
     private bool _loading, _choiceOpen;
     private bool _disposed;
     private readonly CancellationTokenSource _lifetime = new();
+    private CancellationTokenSource? _choiceCancellation;
+    private long _choiceGeneration;
+    private long _requestedRevision = -1;
     private long _loadedRevision = -1;
-    private SetupField? _lastField;
-    private bool Unavailable => Field.Description.IsReadOnly || !Field.Description.IsEnabled;
-    private string? FieldError => _localError ?? Issues.FirstOrDefault(issue => issue.FieldId == Field.Description.Id)?.Message;
+    private bool _wasUnavailable;
+    private bool Unavailable => Disabled || Field.Description.IsReadOnly || !Field.Description.IsEnabled || !Field.Description.IsVisible;
+    private string? FieldError => Input.Issues.FirstOrDefault(issue => issue.Severity == SetupIssueSeverity.Error)?.Message
+        ?? Issues.FirstOrDefault(issue => issue.FieldId == Field.Description.Id && issue.Severity == SetupIssueSeverity.Error)?.Message;
 
     private static string SecretState(SetupSecretField field) => field.Change switch
     {
@@ -135,32 +160,35 @@
 
     protected override async Task OnParametersSetAsync()
     {
-        if (ReferenceEquals(_lastField, Field)) { return; }
-        _lastField = Field;
-        _secret = string.Empty;
-        _localError = null;
-        _value = Field switch
+        if (!Input.Initialized || !Input.Pending && !SensitiveInput)
         {
-            SetupTextField value => value.Value,
-            SetupUriField value => value.Value?.ToString() ?? string.Empty,
-            SetupExecutableField value => value.Value.Value,
-            SetupIntegerField value => value.Value?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty,
-            SetupDecimalField value => value.Value?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty,
-            SetupChoiceField value => value.Value,
-            _ => string.Empty
-        };
-        if (Field is SetupChoiceField choice && _loadedRevision != Revision && choice.Description.IsEnabled)
+            Input.Text = Field switch
+            {
+                SetupTextField value => value.Value,
+                SetupUriField value => value.Value?.ToString() ?? string.Empty,
+                SetupExecutableField value => value.Value.Value,
+                SetupIntegerField value => value.Value?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty,
+                SetupDecimalField value => value.Value?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty,
+                SetupChoiceField value => value.Value,
+                _ => string.Empty
+            };
+            Input.Initialized = true;
+        }
+        bool becameAvailable = _wasUnavailable && !Unavailable;
+        _wasUnavailable = Unavailable;
+        if (Field is SetupChoiceField && (_requestedRevision != Revision || becameAvailable))
         {
-            _choices = [];
-            _continuation = null;
-            _loadedRevision = Revision;
-            await LoadChoicesAsync();
+            _requestedRevision = Revision;
+            await LoadChoicesAsync(reset: true);
         }
     }
 
     private async Task ApplyAsync(SetupEditResult result)
     {
-        _localError = result.Issues.FirstOrDefault()?.Message;
+        if (_disposed) { return; }
+        Input.Pending = result.State != SetupEditState.Applied;
+        Input.Issues = result.Issues.Count > 0 ? result.Issues : Input.Pending
+            ? [new("input-" + result.State.ToString().ToLowerInvariant(), "The edit was not applied. Review the current settings and try again.", Field.Description.Id)] : [];
         await Edited.InvokeAsync(result);
     }
 
@@ -187,30 +215,25 @@
         value ??= string.Empty;
         _value = value;
         if (value.Length > 0 && !Uri.TryCreate(value, UriKind.Absolute, out _))
-        { _localError = "Enter an absolute URL."; return Task.CompletedTask; }
+        { return InvalidAsync("Enter an absolute URL."); }
         return ApplyAsync(field.SetValue(value.Length == 0 ? null : new Uri(value, UriKind.Absolute)));
     }
 
-    private Task SetIntegerAsync(SetupIntegerField field, string? value)
+    private Task SetNumberAsync<T>(SetupValueField<T?> field, SetupNumberEdit<T> edit) where T : struct
     {
-        value ??= string.Empty;
-        _value = value;
-        if (value.Length > 0 && !long.TryParse(value, System.Globalization.NumberStyles.Integer,
-            System.Globalization.CultureInfo.InvariantCulture, out _))
-        { _localError = "Enter a whole number."; return Task.CompletedTask; }
-        long? parsed = value.Length == 0 ? null : long.Parse(value, System.Globalization.CultureInfo.InvariantCulture);
-        return ApplyAsync(field.SetValue(parsed));
+        _value = edit.Text;
+        return edit.Error is null ? ApplyAsync(field.SetValue(edit.Value)) : InvalidAsync(edit.Error);
     }
 
-    private Task SetDecimalAsync(SetupDecimalField field, string? value)
+    private Task InvalidAsync(string message) => ApplyAsync(new(SetupEditState.Invalid,
+        [new("input-invalid", message, Field.Description.Id)]));
+
+    private Task SetPendingSecretAsync(string? value)
     {
-        value ??= string.Empty;
-        _value = value;
-        if (value.Length > 0 && !decimal.TryParse(value, System.Globalization.NumberStyles.Number,
-            System.Globalization.CultureInfo.InvariantCulture, out _))
-        { _localError = "Enter a number."; return Task.CompletedTask; }
-        decimal? parsed = value.Length == 0 ? null : decimal.Parse(value, System.Globalization.CultureInfo.InvariantCulture);
-        return ApplyAsync(field.SetValue(parsed));
+        _secret = value ?? string.Empty;
+        Input.Pending = _secret.Length != 0;
+        Input.Issues = [];
+        return Edited.InvokeAsync(new(SetupEditState.Applied, []));
     }
 
     private async Task ReplaceSecretAsync(SetupSecretField field)
@@ -226,37 +249,53 @@
         await ApplyAsync(field.SetValue(change));
     }
 
-    private Task LoadMoreAsync() => LoadChoicesAsync();
+    private Task LoadMoreAsync() => _loading || _loadedRevision != Revision ? Task.CompletedTask : LoadChoicesAsync(reset: false);
 
     private Task SearchChoicesAsync() => RefreshChoicesAsync();
 
-    private Task RefreshChoicesAsync()
-    {
-        _choices = [];
-        _continuation = null;
-        return LoadChoicesAsync();
-    }
+    private Task RefreshChoicesAsync() => LoadChoicesAsync(reset: true);
 
-    private async Task LoadChoicesAsync()
+    private async Task LoadChoicesAsync(bool reset)
     {
-        if (Field is not SetupChoiceField choice || _loading || Unavailable) { return; }
-        if (choice.ChoiceSideEffects != SetupSideEffect.None
-            && !await Host.AuthorizeAsync("Load " + Field.Description.DisplayName, choice.ChoiceSideEffects)) { return; }
+        long generation = ++_choiceGeneration;
+        _choiceCancellation?.Cancel();
+        if (reset) { _choices = []; _continuation = null; _loadedRevision = -1; }
+        _loading = false;
+        if (Field is not SetupChoiceField choice || Unavailable || _disposed) { return; }
+        long revision = Revision;
+        string search = _search;
+        string? continuation = _continuation;
+        using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
+        _choiceCancellation = cancellation;
         _loading = true;
         _choiceIssue = null;
         try
         {
-            SetupChoicePage page = await choice.GetChoicesAsync(new(Revision, _search, _continuation), _lifetime.Token);
-            if (!_disposed && page.State == SetupChoiceState.Completed && page.Revision == Revision)
+            if (choice.ChoiceSideEffects != SetupSideEffect.None
+                && !await Host.AuthorizeAsync("Load " + choice.Description.DisplayName, choice.ChoiceSideEffects, cancellation.Token))
+            { if (IsCurrent()) { _choiceIssue = "Choice loading was not authorized."; } return; }
+            if (!IsCurrent()) { return; }
+            SetupChoicePage page = await choice.GetChoicesAsync(new(revision, search, continuation,
+                choice.Capabilities.SupportsPaging ? 50 : 200), cancellation.Token);
+            if (!IsCurrent()) { return; }
+            if (page.State == SetupChoiceState.Completed && page.Revision == revision)
             {
-                _choices.AddRange(page.Choices);
+                _choices = _choices.Concat(page.Choices).DistinctBy(item => item.Value).ToList();
                 _continuation = page.Continuation;
+                _loadedRevision = revision;
+                if (page.Continuation is not null && !choice.Capabilities.SupportsPaging)
+                { _choiceIssue = "The provider returned an incomplete bounded list."; }
             }
-            else if (!_disposed) { _choiceIssue = page.Issues?.FirstOrDefault()?.Message ?? page.State.ToString(); }
+            else { _choiceIssue = page.Issues?.FirstOrDefault()?.Message ?? page.State.ToString(); }
         }
-        catch (OperationCanceledException) when (_lifetime.IsCancellationRequested) { }
-        catch (Exception) { if (!_disposed) { _choiceIssue = "Choices could not be loaded."; } }
-        finally { _loading = false; }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
+        catch (Exception) { if (IsCurrent()) { _choiceIssue = "Choices could not be loaded."; } }
+        finally
+        {
+            if (generation == _choiceGeneration) { _loading = false; }
+            if (ReferenceEquals(_choiceCancellation, cancellation)) { _choiceCancellation = null; }
+        }
+        bool IsCurrent() => !_disposed && !cancellation.IsCancellationRequested && generation == _choiceGeneration && revision == Revision;
     }
 
     public void Dispose()
@@ -264,7 +303,7 @@
         _disposed = true;
         _lifetime.Cancel();
         _lifetime.Dispose();
-        _secret = string.Empty;
+        _standaloneInputs.Clear();
         GC.SuppressFinalize(this);
     }
 }

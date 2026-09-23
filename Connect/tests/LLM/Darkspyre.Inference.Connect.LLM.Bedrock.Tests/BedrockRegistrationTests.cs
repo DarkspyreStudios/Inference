@@ -130,8 +130,14 @@ public sealed class BedrockRegistrationTests
         Assert.False((await session.ValidateAsync()).IsValid);
         SetupChoiceField Choice(string id) => Assert.Single(session.Snapshot.Steps.SelectMany(step => step.Sections)
             .SelectMany(section => section.Fields).OfType<SetupChoiceField>(), field => field.Description.Id == id);
+        Assert.False(session.Snapshot.IsDirty);
+        Choice("aws-profile").SetValue("temporary-profile");
+        Assert.True(session.Snapshot.IsDirty);
+        Choice("aws-profile").SetValue(string.Empty);
+        Assert.False(session.Snapshot.IsDirty);
         Assert.Equal(SetupEditState.Applied, Choice("aws-profile").SetValue("fixture-profile").State);
         Assert.Equal(SetupEditState.Applied, Choice("aws-region").SetValue("us-east-1").State);
+        Assert.True(session.Snapshot.IsDirty);
         if (transport == LlmTransport.AwsBedrockAgentCore)
         {
             SetupTextField arn = Assert.Single(session.Snapshot.Steps.SelectMany(step => step.Sections)
@@ -141,6 +147,7 @@ public sealed class BedrockRegistrationTests
         Assert.True((await session.ValidateAsync()).IsValid);
         Assert.Equal(SetupCommitState.Committed, (await session.CommitAsync()).State);
         LlmAwsCredentials aws = LlmCredential.Parse(target.Changes!.Credential.Value)!.Aws!;
+        Assert.False(session.Snapshot.IsDirty);
         Assert.Equal("fixture-profile", aws.Profile);
         Assert.Equal("us-east-1", aws.Region);
         Assert.Null(session.Snapshot.Status.Ready.Value);

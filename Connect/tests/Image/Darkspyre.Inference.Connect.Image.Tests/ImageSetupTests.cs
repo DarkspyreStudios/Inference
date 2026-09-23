@@ -70,6 +70,26 @@ public sealed class ImageSetupTests
         Assert.Equal("saved-secret", existing.AdditionalHeaders["Authorization"]);
     }
 
+    [Fact]
+    public async Task DirtyTracksEditableFieldsAndHeaderRowsButNotHealth()
+    {
+        await using ImageSetupSession session = New(new Transport(), new Target());
+        Assert.False(session.Snapshot.IsDirty);
+        await Action(session, SetupActionPurpose.CheckReadiness).ExecuteAsync();
+        Assert.False(session.Snapshot.IsDirty);
+        SetupIntegerField Timeout() => Assert.Single(Fields(session).OfType<SetupIntegerField>());
+        long? baseline = Timeout().Value;
+        Timeout().SetValue(123);
+        Assert.True(session.Snapshot.IsDirty);
+        Timeout().SetValue(baseline);
+        Assert.False(session.Snapshot.IsDirty);
+        Assert.Single(Fields(session).OfType<SetupRepeatableGroupField>()).Add();
+        Assert.True(session.Snapshot.IsDirty);
+        SetupRepeatableGroupField group = Assert.Single(Fields(session).OfType<SetupRepeatableGroupField>());
+        group.Remove(Assert.Single(group.Rows).Id);
+        Assert.False(session.Snapshot.IsDirty);
+    }
+
     private static ImageSetupSession New(Transport transport, Target target) => new ImageProviderService([transport])
         .CreateSetupSession(ImageTransport.ComfyUi, new(SetupChangeIntent.Create, "id", null), target, new Workflows());
     private static IEnumerable<SetupField> Fields(ImageSetupSession session) => session.Snapshot.Steps.SelectMany(step => step.Sections).SelectMany(section => section.Fields);

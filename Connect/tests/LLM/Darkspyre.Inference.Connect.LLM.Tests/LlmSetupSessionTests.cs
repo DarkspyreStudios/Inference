@@ -1,5 +1,6 @@
 using System.Runtime.CompilerServices;
 using Darkspyre.Inference.Common.Setup;
+using Darkspyre.Inference.Connect.LLM.Internal;
 using Darkspyre.Inference.Connect.LLM.Providers;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -57,8 +58,10 @@ public sealed class LlmSetupSessionTests
         await using LlmSetupSession session = provider.CreateSetupSession(LlmTransport.OpenAiResponses,
             new(SetupChangeIntent.Edit, "id", "v1"), target, Connection(LlmTransport.OpenAiResponses, "saved-key"), "model");
         Assert.Single(Fields(session).OfType<SetupSecretField>()).SetValue(SetupSecretEdit.Clear);
+        Assert.True(session.Snapshot.IsDirty);
         Assert.False((await session.ValidateAsync()).IsValid);
         Assert.Single(Fields(session).OfType<SetupSecretField>()).SetValue(SetupSecretEdit.Keep);
+        Assert.False(session.Snapshot.IsDirty);
         Assert.True((await session.ValidateAsync()).IsValid);
         await session.CommitAsync();
         Assert.Equal(SetupSecretEditKind.Keep, target.Changes!.Credential.Kind);
@@ -76,6 +79,7 @@ public sealed class LlmSetupSessionTests
         SetupActionResult result = await Action(session, SetupActionPurpose.Test).ExecuteAsync();
         Assert.Equal(SetupActionState.Completed, result.State);
         Assert.True(session.Snapshot.Status.Ready.Value);
+        Assert.False(session.Snapshot.IsDirty);
         Assert.Equal(0, target.Calls);
     }
 
@@ -92,9 +96,13 @@ public sealed class LlmSetupSessionTests
         Assert.Equal(SetupEditState.Applied, interaction.Callback.SetValue("code#state").State);
         Assert.Equal(SetupActionState.Stale, (await interaction.Continue.ExecuteAsync()).State);
         SetupBrowserAuthorization current = Assert.IsType<SetupBrowserAuthorization>(session.Snapshot.Interaction);
+        Assert.Equal(interaction.Callback.Description.Id, current.Callback.Description.Id);
+        Assert.Empty(current.Callback.Value);
+        Assert.True(session.Snapshot.IsDirty);
         Assert.Equal(SetupActionState.Completed, (await current.Continue.ExecuteAsync()).State);
         Assert.Equal(1, auth.Completed);
         Assert.Null(session.Snapshot.Interaction);
+        Assert.True(session.Snapshot.IsDirty); // The acquired credential is still an unsaved draft mutation.
         Assert.Null(session.Snapshot.Status.Authenticated.Value); // Catalog OAuth is not CLI login.
         Assert.Equal(0, target.Calls);
         await session.CommitAsync();
@@ -193,8 +201,60 @@ public sealed class LlmSetupSessionTests
         public Task SaveCredentialAsync(string connectionId, string credentialJson, string expectedVersion, CancellationToken cancellationToken = default) => throw new InvalidOperationException("Setup must not overwrite saved credentials.");
     }
 
-    private sealed class Client(LlmProviderDefinition definition) : ILlmClient
+    [Fact]
+    public async Task CliPrerequisiteIsPublishedAndReboundAfterOtherDraftRevisions()
     {
+        var client = new Client(ProviderDefinitions.ClaudeSubscription) { Authenticated = false };
+        var provider = new LlmProviderService(new UnusedSource(), [client]);
+        await using LlmSetupSession session = provider.CreateSetupSession(client.Transport,
+            new(SetupChangeIntent.Create, "id", null), new Target(), modelId: "model");
+        Assert.Equal(SetupActionState.NeedsInteraction, (await Action(session, SetupActionPurpose.CheckPrerequisites).ExecuteAsync()).State);
+        SetupExternalPrerequisite first = Assert.IsType<SetupExternalPrerequisite>(session.Snapshot.Interaction);
+        Assert.False(string.IsNullOrWhiteSpace(first.Instructions));
+        Assert.False(session.Snapshot.IsDirty);
+        await first.Recheck.ExecuteAsync();
+        Assert.Equal(SetupActionState.Stale, (await first.Recheck.ExecuteAsync()).State);
+        client.Authenticated = true;
+        SetupExternalPrerequisite current = Assert.IsType<SetupExternalPrerequisite>(session.Snapshot.Interaction);
+        Assert.Equal(SetupActionState.Completed, (await current.Recheck.ExecuteAsync()).State);
+        Assert.Null(session.Snapshot.Interaction);
+        Assert.False(session.Snapshot.IsDirty);
+    }
+
+    [Fact]
+    public async Task CallbackRestartChangesIdentityAndNeverEchoesEnteredCode()
+    {
+        var provider = new LlmProviderService(new UnusedSource(), [new Client(ProviderDefinitions.ClaudeSubscription)], [new BrowserAuth()]);
+        await using LlmSetupSession session = provider.CreateSetupSession(LlmTransport.AnthropicClaudeCli,
+            new(SetupChangeIntent.Create, "id", null), new Target(), modelId: "model");
+        await Action(session, SetupActionPurpose.Authenticate).ExecuteAsync();
+        SetupBrowserAuthorization first = Assert.IsType<SetupBrowserAuthorization>(session.Snapshot.Interaction);
+        first.Callback.SetValue("sensitive-code");
+        Assert.Empty(Assert.IsType<SetupBrowserAuthorization>(session.Snapshot.Interaction).Callback.Value);
+        await Action(session, SetupActionPurpose.CancelAuthentication).ExecuteAsync();
+        Assert.False(session.Snapshot.IsDirty);
+        await Action(session, SetupActionPurpose.Authenticate).ExecuteAsync();
+        Assert.NotEqual(first.Callback.Description.Id, Assert.IsType<SetupBrowserAuthorization>(session.Snapshot.Interaction).Callback.Description.Id);
+    }
+
+    [Fact]
+    public async Task ReturningCapabilityOverrideToDefaultRestoresCleanDraft()
+    {
+        var provider = new LlmProviderService(new UnusedSource(), [new Client(ProviderDefinitions.OpenAiCompatible)]);
+        await using LlmSetupSession session = provider.CreateSetupSession(LlmTransport.OpenAiCompatibleChat,
+            new(SetupChangeIntent.Create, "id", null), new Target());
+        SetupChoiceField Field() => Assert.Single(Fields(session).OfType<SetupChoiceField>(), field => field.Description.Id == "streaming");
+        Field().SetValue("enabled");
+        Assert.True(session.Snapshot.IsDirty);
+        Field().SetValue("default");
+        Assert.False(session.Snapshot.IsDirty);
+        Assert.Equal(SetupChoiceCapabilities.Bounded, Field().Capabilities);
+    }
+
+    private sealed class Client(LlmProviderDefinition definition) : ILlmClient, IExternalLlmAuthenticationProbe
+    {
+        public bool Authenticated { get; set; } = true;
+        public Task<bool> IsAuthenticatedAsync(LlmConnection connection, CancellationToken cancellationToken = default) => Task.FromResult(Authenticated);
         public int Calls { get; private set; }
         public LlmTransport Transport => definition.Transport;
         public LlmProviderDefinition ProviderDefinition => definition;

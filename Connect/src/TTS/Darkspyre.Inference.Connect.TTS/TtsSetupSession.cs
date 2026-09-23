@@ -14,6 +14,7 @@ public sealed class TtsSetupSession : InferenceSetupSession<TtsSetupChanges>
     private readonly ITtsProvider _provider;
     private readonly SetupConfigurationIdentity _identity;
     private TtsSetupConfiguration _draft;
+    private readonly TtsSetupConfiguration _baseline;
     private Uri? _endpoint;
     private long? _timeout;
     private readonly List<Header> _headers = [];
@@ -34,6 +35,7 @@ public sealed class TtsSetupSession : InferenceSetupSession<TtsSetupChanges>
         _timeout = (long)_draft.Connection.RequestTimeout.TotalSeconds;
         foreach ((string name, string value) in _draft.Connection.Headers) { _headers.Add(new(name, value)); }
         _draft = _draft with { Connection = _draft.Connection with { Headers = new Dictionary<string, string>() } };
+        _baseline = _draft;
         Status = new() { Configured = SetupObservation.Known(existing is not null) };
     }
 
@@ -69,12 +71,12 @@ public sealed class TtsSetupSession : InferenceSetupSession<TtsSetupChanges>
             [
                 new SetupChoiceField(new("voice", "Voice") { HelpText = "Use a listed voice or enter the exact server voice ID; blank uses the server default." },
                     _draft.VoiceId ?? string.Empty, string.Empty, value => Edit(revision, () => _draft = _draft with { VoiceId = value }), true,
-                    VoicesAsync, revision, SetupSideEffect.Network),
+                    VoicesAsync, revision, SetupSideEffect.Network, SetupChoiceCapabilities.Searchable),
                 new SetupDecimalField(new("speed", "Speed") { HelpText = options.Protocol == PocketTtsProtocol.Multipart
                     ? "Multipart supports only default speed (1)." : "A positive speed is passed to the configured bridge." },
                     _draft.Speed is { } speed && double.IsFinite(speed) && speed <= (double)decimal.MaxValue && speed >= (double)decimal.MinValue ? (decimal)speed : null,
                     null, value => Edit(revision, () => _draft = _draft with { Speed = value is null ? null : (double)value }),
-                    options.Protocol == PocketTtsProtocol.Multipart ? 1 : 0, options.Protocol == PocketTtsProtocol.Multipart ? 1 : null),
+                    options.Protocol == PocketTtsProtocol.Multipart ? 1 : 0, options.Protocol == PocketTtsProtocol.Multipart ? 1 : null, 0.1m),
                 new SetupChoiceField(new("format", "Audio format"), _draft.Format.ToString(), TtsAudioFormat.Wav.ToString(),
                     value => value == nameof(TtsAudioFormat.Wav) ? Edit(revision, () => _draft = _draft with { Format = TtsAudioFormat.Wav })
                         : new(SetupEditState.Invalid, [new("format-unsupported", "Only WAV is supported.", "format")]), false,
@@ -156,6 +158,13 @@ public sealed class TtsSetupSession : InferenceSetupSession<TtsSetupChanges>
         if (_draft.Format != TtsAudioFormat.Wav) { issues.Add(new("format-unsupported", "Only WAV is supported.", "format")); }
         return new(issues.AsReadOnly());
     }
+
+    protected override bool IsDraftDirty => _draft.Connection != _baseline.Connection
+        || (_draft.VoiceId ?? string.Empty) != (_baseline.VoiceId ?? string.Empty)
+        || _draft.Speed != _baseline.Speed || _draft.Format != _baseline.Format || _endpoint != _baseline.Connection.Endpoint
+        || _timeout != (long)_baseline.Connection.RequestTimeout.TotalSeconds || _removed.Count != 0
+        || _headers.Any(header => header.OriginalName.Length == 0 || header.Name != header.OriginalName
+            || header.Edit.Kind != SetupSecretEditKind.Keep);
 
     protected override TtsSetupChanges CreateChanges()
     {

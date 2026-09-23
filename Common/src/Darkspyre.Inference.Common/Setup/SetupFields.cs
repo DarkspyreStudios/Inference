@@ -55,11 +55,12 @@ public sealed class SetupIntegerField(
 
 public sealed class SetupDecimalField(
     SetupFieldDescription description, decimal? value, decimal? defaultValue, Func<decimal?, SetupEditResult> edit,
-    decimal? minimum = null, decimal? maximum = null)
+    decimal? minimum = null, decimal? maximum = null, decimal step = 1)
     : SetupValueField<decimal?>(description, value, defaultValue, edit)
 {
     public decimal? Minimum { get; } = minimum;
     public decimal? Maximum { get; } = maximum;
+    public decimal Step { get; } = step;
 }
 
 public sealed class SetupBooleanField(
@@ -107,15 +108,24 @@ public sealed record SetupChoicePage(
     long Revision, IReadOnlyList<SetupChoice> Choices, string? Continuation = null,
     SetupChoiceState State = SetupChoiceState.Completed, IReadOnlyList<SetupIssue>? Issues = null);
 
+/// <summary>Choice-source behavior, independent of any UI framework or manual-entry permission.</summary>
+public sealed record SetupChoiceCapabilities(bool SupportsSearch = false, bool SupportsPaging = false, bool SupportsRefresh = false)
+{
+    public static SetupChoiceCapabilities Bounded { get; } = new();
+    public static SetupChoiceCapabilities Searchable { get; } = new(true, true, true);
+}
+
 public sealed class SetupChoiceField(
     SetupFieldDescription description, string value, string defaultValue, Func<string, SetupEditResult> edit,
     bool allowsManualEntry, Func<SetupChoiceQuery, CancellationToken, Task<SetupChoicePage>> getChoices,
     long revision,
-    SetupSideEffect choiceSideEffects = SetupSideEffect.None)
+    SetupSideEffect choiceSideEffects = SetupSideEffect.None,
+    SetupChoiceCapabilities? capabilities = null)
     : SetupValueField<string>(description, value, defaultValue, edit)
 {
     public bool AllowsManualEntry { get; } = allowsManualEntry;
     public SetupSideEffect ChoiceSideEffects { get; } = choiceSideEffects;
+    public SetupChoiceCapabilities Capabilities { get; } = capabilities ?? SetupChoiceCapabilities.Bounded;
     public Task<SetupChoicePage> GetChoicesAsync(SetupChoiceQuery query, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(query);

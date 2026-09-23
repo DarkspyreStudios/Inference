@@ -21,6 +21,7 @@ public sealed class AudioSetupSession : InferenceSetupSession<AudioSetupChanges>
     private readonly IAudioProvider _provider;
     private readonly SetupConfigurationIdentity _identity;
     private AudioSetupConfiguration _draft;
+    private readonly AudioSetupConfiguration _baseline;
     private Uri? _endpoint;
     private decimal? _timeout;
     private decimal? _duration;
@@ -47,6 +48,7 @@ public sealed class AudioSetupSession : InferenceSetupSession<AudioSetupChanges>
         _seed = _draft.Seed;
         foreach ((string name, string value) in _draft.Connection.Headers) { _headers.Add(new(name, value)); }
         _draft = _draft with { Connection = _draft.Connection with { Headers = new Dictionary<string, string>() } };
+        _baseline = _draft;
         Status = new() { Configured = SetupObservation.Known(existing is not null) };
     }
 
@@ -57,7 +59,7 @@ public sealed class AudioSetupSession : InferenceSetupSession<AudioSetupChanges>
         [
             new SetupUriField(new("endpoint", "Endpoint") { IsRequired = true }, _endpoint, new("http://127.0.0.1:8769"), value => Edit(revision, () => _endpoint = value)),
             new SetupDecimalField(new("timeout", "Timeout (seconds)") { IsRequired = true, HelpText = "A positive per-request timeout of at most one day." },
-                _timeout, 12, value => Edit(revision, () => _timeout = value), 0, 86400)
+                _timeout, 12, value => Edit(revision, () => _timeout = value), 0, 86400, 0.1m)
         ]), new("options", "Endpoint options",
         [
             new SetupTextField(new("generate-path", "Generation path") { IsRequired = true }, _draft.Connection.TangoFlux.GeneratePath, "/generate",
@@ -67,13 +69,13 @@ public sealed class AudioSetupSession : InferenceSetupSession<AudioSetupChanges>
         new("audio", "Audio defaults", "Saving does not generate audio. The explicit generation test can incur usage charges.",
         [new("generation", "Generation",
         [
-            new SetupDecimalField(new("duration", "Duration (seconds)") { IsRequired = true }, _duration, 5, value => Edit(revision, () => _duration = value), 1, 30),
+            new SetupDecimalField(new("duration", "Duration (seconds)") { IsRequired = true }, _duration, 5, value => Edit(revision, () => _duration = value), 1, 30, 0.1m),
             new SetupIntegerField(new("steps", "Steps") { HelpText = "Blank uses the adapter default of 10." }, _steps, null,
                 value => Edit(revision, () => _steps = value), 10, 100),
             new SetupDecimalField(new("guidance", "Guidance scale") { HelpText = "Blank uses the adapter default of 4.5." },
                 _draft.GuidanceScale is { } guidance && double.IsFinite(guidance) && guidance > (double)decimal.MinValue && guidance < (double)decimal.MaxValue
                     ? (decimal)guidance : null, null,
-                value => Edit(revision, () => _draft = _draft with { GuidanceScale = value is null ? null : (double)value }), 0.1m, 20),
+                value => Edit(revision, () => _draft = _draft with { GuidanceScale = value is null ? null : (double)value }), 0.1m, 20, 0.1m),
             new SetupIntegerField(new("seed", "Seed") { HelpText = "Blank leaves seed selection to the server. Cache preference never changes the seed." },
                 _seed, null, value => Edit(revision, () => _seed = value), int.MinValue, int.MaxValue),
             new SetupChoiceField(new("cache", "Provider cache") { HelpText = "Controls only the provider's cache, not an application cache." },
@@ -162,6 +164,12 @@ public sealed class AudioSetupSession : InferenceSetupSession<AudioSetupChanges>
         if (_seed is < int.MinValue or > int.MaxValue) { issues.Add(new("seed-invalid", "Use a 32-bit seed or leave blank for server selection.", "seed")); }
         return new(issues.AsReadOnly());
     }
+
+    protected override bool IsDraftDirty => _draft != _baseline || _endpoint != _baseline.Connection.Endpoint
+        || _timeout != (decimal)_baseline.Connection.RequestTimeout.TotalSeconds
+        || _duration != (decimal)_baseline.Duration.TotalSeconds || _steps != _baseline.Steps || _seed != _baseline.Seed
+        || _removed.Count != 0 || _headers.Any(header => header.OriginalName.Length == 0
+            || header.Name != header.OriginalName || header.Edit.Kind != SetupSecretEditKind.Keep);
 
     protected override AudioSetupChanges CreateChanges()
     {

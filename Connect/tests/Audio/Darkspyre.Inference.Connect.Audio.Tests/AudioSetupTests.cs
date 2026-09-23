@@ -263,6 +263,24 @@ public sealed class AudioSetupTests
         Assert.Null(session.Snapshot.Status.Ready.Value);
     }
 
+    [Fact]
+    public async Task DirtyTracksRevertsForNumericDefaultsAndProtectedHeaderEdits()
+    {
+        using var http = new HttpClient();
+        await using AudioSetupSession session = EditSession(http, new Target());
+        Assert.False(session.Snapshot.IsDirty);
+        Field<SetupDecimalField>(session, "timeout").SetValue(13.5m);
+        Assert.True(session.Snapshot.IsDirty);
+        Field<SetupDecimalField>(session, "timeout").SetValue(12.5m);
+        Assert.False(session.Snapshot.IsDirty);
+        SetupSecretField Secret() => Assert.Single(Assert.Single(Headers(session).Rows).Fields.OfType<SetupSecretField>());
+        Secret().SetValue(SetupSecretEdit.Clear);
+        Assert.True(session.Snapshot.IsDirty);
+        Secret().SetValue(SetupSecretEdit.Keep);
+        Assert.False(session.Snapshot.IsDirty);
+        Assert.Equal(SetupChoiceCapabilities.Bounded, Field<SetupChoiceField>(session, "cache").Capabilities);
+    }
+
     private static AudioProviderService Service(HttpClient http) => new([new TangoFluxHttpProvider(http)]);
     private static AudioSetupSession CreateSession(HttpClient http, Target target) => Service(http).CreateSetupSession(AudioTransport.TangoFluxHttp,
         new(SetupChangeIntent.Create, "new", null), target);

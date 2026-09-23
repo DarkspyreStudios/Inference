@@ -82,6 +82,21 @@ public sealed class TensorSetupTests
     private static TensorSetupSession Edit(Packs packs, Runtime? runtime = null) =>
         new(Definition, new(SetupChangeIntent.Edit, "id", "v1"), new Target(), [Pack], packs,
             new(Definition.Implementation.Id, Pack.Key, TensorBackendKind.Cpu), runtime);
+
+    [Fact]
+    public async Task DirtyTracksBackendRevertsAndNotReadinessChecks()
+    {
+        await using TensorSetupSession session = Edit(new Packs());
+        Assert.False(session.Snapshot.IsDirty);
+        await Action(session, SetupActionPurpose.CheckReadiness).ExecuteAsync();
+        Assert.False(session.Snapshot.IsDirty);
+        SetupChoiceField Backend() => Assert.Single(session.Snapshot.Steps[0].Sections[0].Fields.OfType<SetupChoiceField>(), field => field.Description.Id == "backend");
+        Assert.Equal(SetupChoiceCapabilities.Bounded, Backend().Capabilities);
+        Backend().SetValue(nameof(TensorBackendKind.Auto));
+        Assert.True(session.Snapshot.IsDirty);
+        Backend().SetValue(nameof(TensorBackendKind.Cpu));
+        Assert.False(session.Snapshot.IsDirty);
+    }
     private static ISetupAction Action(TensorSetupSession session, SetupActionPurpose purpose) =>
         Assert.Single(session.Snapshot.Actions, action => action.Descriptor.Purpose == purpose);
 

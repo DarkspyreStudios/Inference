@@ -221,6 +221,28 @@ public sealed class PocketTtsTests
         Assert.Equal(InferenceCapability.Audio, Assert.Single(definition.Implementation.Tasks).GetCapability());
     }
 
+    [Fact]
+    public async Task SetupDirtyStateReturnsToCleanAfterProtocolAndHeaderRowReverts()
+    {
+        using var handler = new Handler((_, _) => throw new InvalidOperationException("No requests expected."));
+        using var http = new HttpClient(handler);
+        var service = new TtsProviderService([new PocketTtsHttpProvider(http)]);
+        await using TtsSetupSession session = service.CreateSetupSession(TtsTransport.PocketTtsHttp,
+            new(SetupChangeIntent.Edit, "id", "v1"), new Target(), new(Connection()));
+        SetupChoiceField Protocol() => Assert.Single(Fields(session).OfType<SetupChoiceField>(), field => field.Description.Id == "protocol");
+        Assert.False(session.Snapshot.IsDirty);
+        Assert.Equal(SetupChoiceCapabilities.Bounded, Protocol().Capabilities);
+        Protocol().SetValue(nameof(PocketTtsProtocol.BridgeJson));
+        Assert.True(session.Snapshot.IsDirty);
+        Protocol().SetValue(nameof(PocketTtsProtocol.Multipart));
+        Assert.False(session.Snapshot.IsDirty);
+        Assert.Single(Fields(session).OfType<SetupRepeatableGroupField>()).Add();
+        Assert.True(session.Snapshot.IsDirty);
+        SetupRepeatableGroupField group = Assert.Single(Fields(session).OfType<SetupRepeatableGroupField>());
+        group.Remove(Assert.Single(group.Rows).Id);
+        Assert.False(session.Snapshot.IsDirty);
+    }
+
     private static IEnumerable<SetupField> Fields(TtsSetupSession session) => session.Snapshot.Steps.SelectMany(step => step.Sections).SelectMany(section => section.Fields);
     private static TtsConnection Connection() => new() { Endpoint = new("https://example.test/api") };
     private static HttpResponseMessage Json<T>(T value) => new(HttpStatusCode.OK) { Content = JsonContent.Create(value) };

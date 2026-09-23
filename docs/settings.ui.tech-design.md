@@ -89,9 +89,11 @@ Common API:
 
 - **Session input:** one `IInferenceSetupSession`; its snapshot provides definition, sections,
   fields, actions, validation, busy state, and status. The UI does not accept a configuration bag.
-- **State output:** current step, provider status observations, validation summary, action
-  progress, and save availability for a host-owned frame. The editor exposes no assertion of
-  dirty state based only on revision.
+- **State output:** `SnapshotChanged` supplies provider status and `StateChanged` supplies a safe
+  `SetupEditorState`, also readable through `State`. `HasUnsavedChanges` combines provider
+  `Snapshot.IsDirty`, transient pending input and uncertain commit state. `HasPendingInput`,
+  `HasInputErrors`, `CanSave` and `CommitOutcomeUncertain` support the host-owned frame. Revision
+  is never used as a dirty-state heuristic; state callbacks contain no input or secret values.
 - **Save command and result:** a host control may ask the editor to validate and commit; an editor
   embedded without a host save control may render its own Lumeo Save/Finish button. Both paths call
   the same controller method and report the exact `SetupCommitResult`.
@@ -115,13 +117,30 @@ enterable choices to combobox; secret to masked input plus Keep/Replace/Clear; a
 to ordered rows with Add/Remove controls. The actual Lumeo API is verified against the centrally
 pinned version during implementation. Labels, help, defaults, constraints, required/read-only
 state, visibility, and enablement come from each fresh snapshot. The UI never invents provider
-fields, evaluates scripts, or dispatches by provider name or transport ID.
+fields, evaluates scripts, or dispatches by provider name or transport ID. `SetupChoiceCapabilities`
+declares search/paging/refresh separately from manual entry. Bounded lists use Select without
+search/refresh controls; discovery fields render only their advertised controls.
+
+Numeric controls are owned by UI.Settings, with Lumeo NumberInput's themed layout/accessibility
+adapted under MIT attribution. Lumeo remains an unmodified dependency. Its double-based parsing and
+automatic clamping cannot preserve these typed contracts, so a wrapper around that parser is not
+used. Integer and decimal controls accept nullable `long` and `decimal`, expose declared bounds and
+decimal step, preserve invalid/out-of-range text, and reject decimal precision loss. Explicit
+buttons/arrow keys step and clamp to declared or type bounds; typed input is never silently clamped.
+Labels, error associations, disabled state, density and spinbutton semantics are retained.
 
 An edit calls the field's bound method from the displayed snapshot. Applied reloads the snapshot
 and invalidates dependent choices, validation, actions, and status in the view. Stale reloads
 without replaying the edit. Busy and Invalid retain the user's visible draft and show the returned
 issue. Bound controls from older snapshots are discarded. The provider remains the draft-state
 owner; the component keeps only ephemeral control input and view state.
+
+One editor-owned input scope retains pending text, secret replacement input and per-field errors
+across snapshots and wizard steps. Successful edits clear only that field's pending/error state.
+Correcting a different field never clears its errors. Explicitly removed fields, completed callback
+attempts, session replacement, successful commit and editor disposal release their transient input.
+Provider snapshots still own accepted draft values; no configuration or saved-secret copy is kept
+by the renderer.
 
 Choices use `SetupChoiceQuery` with the current revision and support search, bounded paging,
 continuation, loading, empty, failed, and stale outcomes. The UI drops old pages after a revision
@@ -131,6 +150,12 @@ source fails or returns no choices, manual entry remains available only when the
 it. Natural-prerequisite loading occurs automatically only when declared side effects and the
 host's consent policy permit it.
 
+Every choice request captures its field, revision, search and continuation before awaiting consent
+or the source. A newer generation cancels the older request and starts the newest load; an old
+completion (including an error) cannot publish. Requested revision and successfully loaded revision
+are separate, so an in-flight older query cannot mark a newer revision loaded. Only current pages
+are appended. Session replacement/removal cancels view-owned queries, not host-retained actions.
+
 The editor follows the provider's ordered steps and sections. Advanced sections remain
 discoverable and expand when they contain a blocking issue. Next validates the current draft and
 shows current-step issues before advancing. Back preserves draft edits. Save/Finish validates the
@@ -139,6 +164,11 @@ not proof of a committed configuration. Field and step issues have accessible su
 their targets; warnings remain warnings. If final Common validation cannot identify current-step
 blocking issues, resolve that contract gap with the SetupSession owner instead of deriving logic
 from IDs, labels, or prose.
+
+Next first checks local current-step input errors, then provider validation. Built-in Save and public
+`SaveAsync` share one whole-editor gate: invalid/unapplied input returns Invalid without calling
+`CommitAsync`. A host cannot bypass that gate by drawing its own button. Invalid Save selects the
+first affected step, including errors retained on a previously visited step.
 
 ## 5. Connect, test, and other bound actions
 
@@ -166,6 +196,11 @@ distinct visible outcomes. No paid test or installation is retried automatically
 
 Typed browser/device authorization, callback, and external-prerequisite interactions render from
 Common. Provider OAuth verifier/state and protocol payloads remain inside the provider session.
+`Snapshot.Interaction` is the sole current interaction source, with fresh revision-bound controls.
+CLI prerequisite instructions survive snapshot reads until cleared by the provider. Browser
+callback text is retained as masked one-way input under its attempt-scoped field ID; the provider
+never needs to echo the code to keep the field stable. Completion, cancellation or restarting the
+attempt clears its transient input.
 The host performs browser opening or another external interaction; the UI does not execute remote
 shell text. Only structured, safe issues are shown. Raw provider responses and exceptions are
 never logged or displayed as diagnostic detail by default.
@@ -218,8 +253,10 @@ controls, announced progress and status changes, and reduced-motion-safe transit
 chooses a dialog, that host owns the focus trap, initial focus, Escape/backdrop behavior, dirty
 close confirmation, and focus restoration. UI.Settings exposes the state needed for those host
 decisions but does not impose a dialog lifecycle. Common currently has no reliable draft-dirty
-flag; a host needing dirty-close behavior must obtain a provider-owned signal rather than infer
-dirty state from session revision or action completion.
+flag in the published 11.3.0-rc.1 archive; the approved source correction adds `Snapshot.IsDirty`.
+Hosts using the corrected editor use `State.HasUnsavedChanges` for close confirmation, and
+`State.CommitOutcomeUncertain` to require readback. Status-only updates do not trigger discard
+prompts, and invalid visible input cannot be lost merely because it never entered the typed draft.
 
 Presentation extension slots may add host guidance or surrounding context without replacing
 provider-owned fields, validation, action availability, status, or commit logic. The same shared
@@ -230,7 +267,8 @@ renderer and session controller serve both hosts under their distinct themes.
 The completed Common contract has setup records, bound fields/actions, session snapshots, status,
 and typed commit targets. Connect and Tensor sessions now cover the approved provider capabilities,
 including Audio. The editor source is reconciled against these contracts. Debug/Release compilation
-and the current three component tests pass; the former build hold was lifted by the release request.
+and its regression suite passes; the former build hold was lifted by the release request. The initial
+published archive had three component tests; the source correction coverage is recorded below.
 
 Required gates:
 
@@ -243,9 +281,8 @@ Required gates:
    with Common action/interaction types alone.
 4. Text, Image, and Audio provider sessions are real and accurately report unavailable actions;
    no family or modality is represented by a placeholder success.
-5. A host that requires dirty-close behavior can obtain reliable draft-dirty state from the
-   provider contract or an explicitly approved host-owned edit baseline. Revision counts alone
-   are insufficient.
+5. A host that requires dirty-close behavior obtains `SetupEditorState.HasUnsavedChanges`, combining
+   provider-owned dirty state and pending UI input. Revision counts are never substituted.
 
 If any required editor flow truly needs a Connect- or Tensor-specific UI interface, stop and
 redesign as family-specific UI libraries before implementation. The requirement cannot be met by
@@ -298,3 +335,31 @@ GitHub API readback confirms private visibility; a fresh feed-only consumer rest
 archive and loads the component at that source identity.
 This package verification does not certify the CE/Agent-DS themed host/browser matrix or migrate
 either application; those integration checks remain separately scoped.
+
+## 12. Post-release Settings corrections (2026-09-23)
+
+The user approved implementation of the five reported defects: local-input Save validation,
+authentication interactions/callback retention, reliable dirty-close state, dependent-choice races
+and metadata-driven control selection. The numeric control is library-owned; no Lumeo source or
+fork is changed. This is a source-only unit: the synchronized version stays 11.3.0-rc.1, published
+archives are immutable, and no packages are built or published.
+
+Common now supplies dirty/uncertain-commit state, choice capabilities and decimal step. Every
+Connect/Tensor setup implementation supplies the new semantics. UI.Settings owns transient input
+and request generations while provider sessions remain the only draft owners. The shipped notice
+and future package-verification gate retain Lumeo's MIT attribution.
+
+Deterministic regression tests exercise invalid URL/integer/decimal Save prevention, exact numeric
+precision and bounds, keyboard/disabled/accessibility state, per-field errors, navigation retention,
+secret pending/apply/revert behavior, provider dirty/revert checks, uncertain commits, fresh CLI
+recheck controls, callback attempt retention, session replacement, overlapping choice requests and
+bounded-select rendering. Browser review uses generated component markup and the pinned Lumeo and
+library scoped styles; this checks shared renderer layout, not a live CE/Agent-DS application or
+interactive end-to-end host integration.
+
+Final gates: zero-warning Debug/Release builds and passing tests for Connect (301), Tensor (260)
+and UI (45, including 24 shared Common tests and 21 component tests) in each configuration.
+All three format checks and transitive vulnerability audits pass. Browser fixtures were reviewed
+at 1440×1000 and 390×844 using light inline and dark host-framed layouts; no horizontal overflow
+was observed and numeric labels/error presentation and keyboard focus were checked. The package
+verifier compiles, but archive creation/inspection is deliberately deferred to an authorized release.

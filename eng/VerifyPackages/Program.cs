@@ -61,6 +61,7 @@ foreach ((string id, string[] assemblies) in owned)
     Require(metadata.Descendants(ns + "group").All(group => (string?)group.Attribute("targetFramework") == "net11.0"), $"{id}: unexpected target framework");
     if (id == "Darkspyre.Inference.UI.Settings")
     {
+        Require(entries.Contains("THIRD-PARTY-NOTICES.md", StringComparer.Ordinal), $"{id}: missing numeric-control attribution");
         Require(entries.Any(path => path.StartsWith("staticwebassets/", StringComparison.Ordinal) && path.EndsWith(".css", StringComparison.Ordinal)), $"{id}: missing scoped CSS");
         Require(entries.Contains("buildTransitive/" + id + ".targets", StringComparer.Ordinal), $"{id}: missing static asset import");
     }

@@ -28,6 +28,7 @@ public sealed class LlmSetupSession : InferenceSetupSession<LlmSetupChanges>
     private readonly LlmProviderService _service;
     private LlmConnection _draft;
     private LlmConnection? _original;
+    private LlmConnection? _baseline;
     private string _model;
     private readonly string _originalModel;
     private SetupSecretEditKind _credentialChange;
@@ -35,6 +36,8 @@ public sealed class LlmSetupSession : InferenceSetupSession<LlmSetupChanges>
     private LlmAuthorizationSession? _browserAuthorization;
     private string _callback = string.Empty;
     private bool _editingCallback;
+    private bool _cliPrerequisite;
+    private string _callbackFieldId = string.Empty;
 
     internal LlmSetupSession(ILlmClient client, IEnumerable<ILlmAuthenticator> authenticators,
         SetupConfigurationIdentity identity, ISetupCommitTarget<LlmSetupChanges> target,
@@ -60,6 +63,7 @@ public sealed class LlmSetupSession : InferenceSetupSession<LlmSetupChanges>
                 ModelCapabilityOverrides = new Dictionary<string, LlmCapabilityOverrides>(existing.ModelCapabilityOverrides, StringComparer.Ordinal)
             };
         _model = _originalModel = modelId ?? _definition.DefaultModelId;
+        _baseline = _draft;
         _service = new(new DraftSource(this), [client], authenticators);
         Status = new() { Configured = SetupObservation.Known(existing is not null), Authenticated = SetupObservation.Unknown };
     }
@@ -68,6 +72,15 @@ public sealed class LlmSetupSession : InferenceSetupSession<LlmSetupChanges>
     private bool UsesAws => _draft.Transport is LlmTransport.AwsBedrockConverse or LlmTransport.AwsBedrockAgentCore;
     private bool UsesApiKey => _draft.Transport is LlmTransport.OpenAiResponses or LlmTransport.OpenAiCompatibleChat or LlmTransport.AnthropicMessages;
     private LlmCredential Credential => LlmCredential.Parse(_draft.Credential) ?? new();
+
+    protected override bool IsDraftDirty => _baseline is not null &&
+        (_draft.Endpoint != _baseline.Endpoint || _model != _originalModel
+            || (_draft.CapabilityOverrides ?? new()) != (_baseline.CapabilityOverrides ?? new()) || _callback.Length != 0
+            || (UsesAws ? NormalizeAws(Credential.Aws) != NormalizeAws(LlmCredential.Parse(_baseline.Credential)?.Aws)
+                : _credentialChange != SetupSecretEditKind.Keep));
+
+    private static LlmAwsCredentials NormalizeAws(LlmAwsCredentials? value) => (value ?? new()) with
+    { Profile = value?.Profile ?? string.Empty, Region = value?.Region ?? string.Empty };
 
     protected override IReadOnlyList<SetupStep> CreateSteps(long revision)
     {
@@ -113,10 +126,10 @@ public sealed class LlmSetupSession : InferenceSetupSession<LlmSetupChanges>
             LlmAwsCredentials aws = Credential.Aws ?? new();
             fields.Add(new SetupChoiceField(new("aws-profile", "AWS profile") { IsRequired = true }, aws.Profile ?? string.Empty,
                 string.Empty, value => Edit(revision, () => SetAws((Credential.Aws ?? new()) with { Profile = value })), true,
-                (query, token) => EnvironmentChoices(query, ct => _environment!.GetProfilesAsync(ct), token), revision, SetupSideEffect.LocalVerification));
+                (query, token) => EnvironmentChoices(query, ct => _environment!.GetProfilesAsync(ct), token), revision, SetupSideEffect.LocalVerification, SetupChoiceCapabilities.Searchable));
             fields.Add(new SetupChoiceField(new("aws-region", "AWS region") { IsRequired = true }, aws.Region ?? string.Empty,
                 string.Empty, value => Edit(revision, () => SetAws((Credential.Aws ?? new()) with { Region = value })), true,
-                (query, token) => EnvironmentChoices(query, ct => _environment!.GetRegionsAsync(aws.Profile, ct), token), revision, SetupSideEffect.LocalVerification));
+                (query, token) => EnvironmentChoices(query, ct => _environment!.GetRegionsAsync(aws.Profile, ct), token), revision, SetupSideEffect.LocalVerification, SetupChoiceCapabilities.Searchable));
         }
         SetupStep connectionStep = _definition.SetupSteps.Count > 0 ? _definition.SetupSteps[0] : new("connection", "Connection", "Configure the provider.", []);
         SetupStep modelStep = _definition.SetupSteps.Count > 1 ? _definition.SetupSteps[^2] : new("model", "Model", "Select a model.", []);
@@ -130,7 +143,7 @@ public sealed class LlmSetupSession : InferenceSetupSession<LlmSetupChanges>
             [new SetupChoiceField(new("model", "Model") { IsRequired = true,
                 HelpText = "Discover available models where supported, or enter an exact model ID." }, _model,
                 _definition.DefaultModelId, value => Edit(revision, () => _model = value), true, ListModelsAsync, revision,
-                SetupSideEffect.Network | (UsesCli ? SetupSideEffect.ExternalCli : SetupSideEffect.None))])] },
+                SetupSideEffect.Network | (UsesCli ? SetupSideEffect.ExternalCli : SetupSideEffect.None), SetupChoiceCapabilities.Searchable)])] },
             testStep
         ];
     }
@@ -249,7 +262,7 @@ public sealed class LlmSetupSession : InferenceSetupSession<LlmSetupChanges>
     {
         token.ThrowIfCancellationRequested();
         LlmAuthorizationSession authorization = _service.StartClaudeLogin();
-        Publish(() => { ClearAuthorization(); _browserAuthorization = authorization; });
+        Publish(() => { ClearAuthorization(); _browserAuthorization = authorization; _callbackFieldId = "authorization-callback-" + Guid.NewGuid().ToString("N"); });
         return Task.FromResult(Interaction());
     }
 
@@ -259,13 +272,21 @@ public sealed class LlmSetupSession : InferenceSetupSession<LlmSetupChanges>
     protected override SetupInteraction? GetInteraction()
     {
         long revision = Revision;
+        if (_cliPrerequisite)
+        {
+            return new SetupExternalPrerequisite(_definition.SetupSteps.Count > 0
+                ? _definition.SetupSteps[0].Instructions : "Install and authenticate the provider's CLI, then recheck.",
+                BindAction(revision, new("check", "Recheck authentication", SetupActionPurpose.CheckPrerequisites,
+                    SetupSideEffect.ExternalCli | SetupSideEffect.Network), CheckAsync));
+        }
         if (_deviceCode is not null)
         {
             return new SetupDeviceAuthorization(
                 new(_deviceCode.VerificationUrl), _deviceCode.UserCode, null, ContinueAction(revision), CancelAction(revision));
         }
         if (_browserAuthorization is null) { return null; }
-        var callback = new SetupTextField(new("authorization-callback", "Complete authorization code") { IsRequired = true },
+        // The attempt-scoped ID lets a renderer retain one-way input without exposing it in snapshots.
+        var callback = new SetupTextField(new(_callbackFieldId, "Complete authorization code") { IsRequired = true },
             string.Empty, string.Empty, value => Edit(revision, () => { _callback = value; _editingCallback = true; }));
         return new SetupBrowserAuthorization(
             new(_browserAuthorization.AuthorizeUrl), callback, ContinueAction(revision), CancelAction(revision));
@@ -318,12 +339,12 @@ public sealed class LlmSetupSession : InferenceSetupSession<LlmSetupChanges>
             await _service.ListModelsAsync(_identity.Id, token).ConfigureAwait(false);
             authenticated = true;
         }
-        Publish(() => Status = Status with { Authenticated = SetupObservation.Known(authenticated), Verified = SetupObservation.Known(authenticated) });
-        return authenticated ? SetupActionResult.Completed : new(SetupActionState.NeedsInteraction,
-            Interaction: new SetupExternalPrerequisite(_definition.SetupSteps.Count > 0
-                ? _definition.SetupSteps[0].Instructions : "Install and authenticate the provider's CLI, then recheck.",
-                BindAction(Revision, new("check", "Recheck authentication", SetupActionPurpose.CheckPrerequisites,
-                    SetupSideEffect.ExternalCli | SetupSideEffect.Network), CheckAsync)));
+        Publish(() =>
+        {
+            Status = Status with { Authenticated = SetupObservation.Known(authenticated), Verified = SetupObservation.Known(authenticated) };
+            _cliPrerequisite = !authenticated;
+        });
+        return authenticated ? SetupActionResult.Completed : Interaction();
     }
 
     private async Task<SetupActionResult> TestAsync(IProgress<SetupProgress>? progress, CancellationToken token)
@@ -404,11 +425,16 @@ public sealed class LlmSetupSession : InferenceSetupSession<LlmSetupChanges>
         _original is null || _original.Endpoint != _draft.Endpoint || _originalModel != _model
             || _original.CapabilityOverrides != _draft.CapabilityOverrides || _credentialChange != SetupSecretEditKind.Keep);
 
-    private void ClearAuthorization() { _deviceCode = null; _browserAuthorization = null; _callback = string.Empty; }
+    private void ClearAuthorization()
+    {
+        _deviceCode = null; _browserAuthorization = null; _callback = string.Empty;
+        _callbackFieldId = string.Empty; _cliPrerequisite = false;
+    }
 
     protected override void ClearSensitiveState()
     {
         _original = null;
+        _baseline = null;
         _draft = _draft with { Credential = null, AdditionalHeaders = new Dictionary<string, string>() };
         ClearAuthorization();
     }

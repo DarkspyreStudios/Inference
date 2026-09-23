@@ -33,3 +33,29 @@ this view disappears and disposes it when that work is finished.
 provider-owned fields or actions.
 
 The canonical technical design is [the Settings UI design](../docs/settings.ui.tech-design.md).
+
+## Settings corrections in source (not yet published)
+
+Subscribe to `StateChanged` for a safe `SetupEditorState` (also available as `editor.State`).
+`HasUnsavedChanges` combines provider draft changes with locally invalid/unapplied input and an
+uncertain commit. Use this signal for host-owned discard confirmation, not snapshot revision.
+`HasPendingInput` and `HasInputErrors` explain local blockers; `CanSave` includes provider validation,
+busy and closed state. `CommitOutcomeUncertain` requires host readback, not an automatic save retry.
+
+```razor
+<InferenceSettingsEditor @ref="editor" Session="@selectedSession" Host="@interactionHost"
+                         ShowSaveButton="false" StateChanged="@(state => editorState = state)"
+                         CommitCompleted="OnCommitCompletedAsync" />
+```
+
+The host may enable its Save control from `editorState.CanSave` and invoke `editor.SaveAsync()`.
+That method and the built-in Save share the same validation gate. Invalid URL/number text and
+unapplied secret text cannot silently save a previous valid provider value. Back preserves pending
+input; replacing/removing the editor clears it. The host must ask about discarding edits before
+replacing the session. A committed session is closed; start a fresh session for a subsequent edit.
+
+Bounded choices use Select without search/refresh chrome. Choice capabilities opt into discovery
+controls. Numeric fields use UI.Settings-owned exact `long`/`decimal` parsing and stepping, with
+Lumeo-themed layout/accessibility adapted under its MIT license. Invalid/out-of-range typed text is
+preserved and blocks Save; only explicit stepping clamps to bounds. Lumeo source is neither modified
+nor forked. Attribution ships in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).

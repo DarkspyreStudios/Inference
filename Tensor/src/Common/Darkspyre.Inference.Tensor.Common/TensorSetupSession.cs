@@ -66,7 +66,8 @@ public sealed class TensorSetupSession : InferenceSetupSession<TensorSetupChange
         new SetupChoiceField(new("model", "Model pack") { IsRequired = true }, _model?.ToString() ?? string.Empty,
             string.Empty, value => SelectModel(revision, value), false,
             (query, token) => QueryChoicesAsync(query, _ => Task.FromResult(Page(query,
-                Choices().Select(model => new SetupChoice(model.Key.ToString(), model.Key.ModelId, model.Key.Revision)))), token), revision),
+                Choices().Select(model => new SetupChoice(model.Key.ToString(), model.Key.ModelId, model.Key.Revision)))), token), revision,
+            capabilities: new(true, true)),
         new SetupChoiceField(new("backend", "Execution backend") { IsRequired = true,
             HelpText = "Supported backend names are not a hardware availability guarantee. Load confirms actual runtime availability." },
             _backend.ToString(), TensorBackendKind.Auto.ToString(), value => SelectBackend(revision, value), false,
@@ -89,7 +90,7 @@ public sealed class TensorSetupSession : InferenceSetupSession<TensorSetupChange
                     {
                         var result = await _resolver.Source.SearchAsync(new(query.Search, query.Continuation, Math.Min(query.PageSize, 100)), ct).ConfigureAwait(false);
                         return SourcePage(query, result, model => new(model.Repository, model.Repository, model.License), "repository");
-                    }, token), revision, SetupSideEffect.Network),
+                    }, token), revision, SetupSideEffect.Network, SetupChoiceCapabilities.Searchable),
                 new SetupChoiceField(new("source-revision", "Revision") { IsEnabled = repository.Length != 0,
                     HelpText = "A branch or tag is pinned to an immutable revision during resolution." }, sourceRevision, string.Empty,
                     value => EditSource(revision, "source-revision", value), true,
@@ -98,7 +99,7 @@ public sealed class TensorSetupSession : InferenceSetupSession<TensorSetupChange
                         var result = await _resolver.Source.ListRevisionsAsync(new(repository, query.Continuation, Math.Min(query.PageSize, 100)), ct).ConfigureAwait(false);
                         // Source paging remains authoritative; filtering must not invent a replacement cursor.
                         return SourcePage(query, result, item => new(item.Revision, item.Revision), "source-revision");
-                    }, token), revision, SetupSideEffect.Network),
+                    }, token), revision, SetupSideEffect.Network, SetupChoiceCapabilities.Searchable),
                 new SetupChoiceField(new("variant", "Primary artifact / variant") { IsEnabled = repository.Length != 0 && sourceRevision.Length != 0,
                     HelpText = "A repository file is only a candidate. Resolve compatibility to identify the complete pack." }, _variant, string.Empty,
                     value => EditSource(revision, "variant", value), true,
@@ -109,7 +110,7 @@ public sealed class TensorSetupSession : InferenceSetupSession<TensorSetupChange
                             ? Page(query, result.Value.Items.Select(item => new SetupChoice(item.Path, item.Path,
                                 item.Length is long length ? $"{length} bytes" : "Size unknown")))
                             : SourcePage(query, result, item => new(item.Path, item.Path), "variant");
-                    }, token), revision, SetupSideEffect.Network),
+                    }, token), revision, SetupSideEffect.Network, SetupChoiceCapabilities.Searchable),
                 Observation("compatibility", "Compatibility", _evaluation is null ? "Not evaluated."
                     : $"{_evaluation.State} ({_evaluation.SourceState}). " + string.Join(" ", _evaluation.Issues.Select(issue => issue.Message))),
                 Observation("compatibility-evidence", "Compatibility evidence", _evaluation is null ? "Not evaluated."
@@ -308,6 +309,10 @@ public sealed class TensorSetupSession : InferenceSetupSession<TensorSetupChange
         ? new([new("model-required", "Select a supported model pack.", "model")])
         : !Backends().Contains(_backend) ? new([new("backend-unsupported", "The pack does not support this backend.", "backend")])
         : SetupValidation.Valid;
+
+    protected override bool IsDraftDirty => _model != _original?.Model
+        || _backend != (_original?.Backend ?? TensorBackendKind.Auto)
+        || _repository.Length != 0 || _sourceRevision.Length != 0 || _variant.Length != 0;
 
     protected override TensorSetupChanges CreateChanges() => new(_identity,
         new(Definition.Implementation.Id, _model!, _backend),

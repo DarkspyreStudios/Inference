@@ -1,0 +1,96 @@
+@using System.Globalization
+@using System.Numerics
+@using Microsoft.AspNetCore.Components.Web
+@typeparam T where T : struct, INumber<T>, IMinMaxValue<T>
+
+@* Layout/accessibility adapted from Lumeo 5.9.1 NumberInput; see THIRD-PARTY-NOTICES.md.
+   Parsing and stepping are owned here: never narrow long/decimal through double or coerce typed input. *@
+<div data-slot="number-input" class="flex w-full items-center">
+    <button type="button" class="@ButtonClass" disabled="@(Disabled || !CanStep(false))"
+            @onclick="() => StepAsync(false)" aria-label="@($"Decrease {Label}")">−</button>
+    <input data-slot="number-input-control" type="text" inputmode="@(typeof(T) == typeof(long) ? "numeric" : "decimal")"
+           role="spinbutton" id="@FormField?.ControlId" aria-label="@Label" aria-describedby="@FormField?.DescribedBy"
+           aria-required="@Required.ToString().ToLowerInvariant()" aria-invalid="@((Invalid || FormField?.HasError == true).ToString().ToLowerInvariant())"
+           aria-valuemin="@Format(Minimum)" aria-valuemax="@Format(Maximum)" aria-valuenow="@CurrentValue"
+           class="@InputClass" value="@Text" disabled="@Disabled" @oninput="OnInputAsync" @onkeydown="OnKeyDownAsync" />
+    <button type="button" class="@ButtonClass" disabled="@(Disabled || !CanStep(true))"
+            @onclick="() => StepAsync(true)" aria-label="@($"Increase {Label}")">+</button>
+</div>
+
+@code {
+    [CascadingParameter] private FormField.FormFieldContext? FormField { get; set; }
+    [CascadingParameter] private Density? InheritedDensity { get; set; }
+    [Parameter] public string Text { get; set; } = string.Empty;
+    [Parameter] public T? Minimum { get; set; }
+    [Parameter] public T? Maximum { get; set; }
+    [Parameter] public T Step { get; set; } = T.One;
+    [Parameter] public bool Required { get; set; }
+    [Parameter] public bool Disabled { get; set; }
+    [Parameter] public bool Invalid { get; set; }
+    [Parameter] public string Label { get; set; } = string.Empty;
+    [Parameter] public EventCallback<SetupNumberEdit<T>> Edited { get; set; }
+
+    private string Height => InheritedDensity switch { Density.Compact => "h-7", Density.Spacious => "h-9", _ => "h-[var(--lumeo-control-h,calc(var(--spacing,0.25rem)*8))]" };
+    private string Border => Invalid || FormField?.HasError == true ? "border-destructive" : "border-border/60";
+    private string ButtonClass => $"{Height} px-2.5 border {Border} rounded-md bg-muted text-muted-foreground hover:bg-muted/80 focus-visible:outline-none focus-visible:ring-[1.5px] focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50";
+    private string InputClass => $"{Height} w-full min-w-0 px-2.5 border {Border} rounded-md bg-background text-sm text-foreground focus-visible:outline-none focus-visible:ring-[1.5px] focus-visible:ring-ring disabled:opacity-50";
+    private string? CurrentValue => Parse(Text) is { Error: null, Value: { } value } ? Format(value) : null;
+    private static string? Format(T? value) => value?.ToString(null, CultureInfo.InvariantCulture);
+
+    protected override void OnParametersSet()
+    {
+        if (Step <= T.Zero || Minimum is { } min && Maximum is { } max && min > max)
+        { throw new InvalidOperationException("Numeric metadata requires a positive step and ordered bounds."); }
+    }
+
+    private SetupNumberEdit<T> Parse(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) { return new(text, null, Required ? "A value is required." : null); }
+        NumberStyles styles = NumberStyles.AllowLeadingSign | NumberStyles.AllowLeadingWhite | NumberStyles.AllowTrailingWhite;
+        if (typeof(T) != typeof(long)) { styles |= NumberStyles.AllowDecimalPoint; }
+        if (!T.TryParse(text, styles, CultureInfo.InvariantCulture, out T value))
+        { return new(text, null, typeof(T) == typeof(long) ? "Enter a whole number within the supported range." : "Enter a decimal number within the supported range."); }
+        if (typeof(T) == typeof(decimal) && NormalizeDecimal(text) != NormalizeDecimal(Format(value)!))
+        { return new(text, null, "The number has more precision than the supported decimal range."); }
+        if (Minimum is { } min && value < min || Maximum is { } max && value > max)
+        { return new(text, value, $"Enter a value between {Format(Minimum) ?? "the supported minimum"} and {Format(Maximum) ?? "the supported maximum"}."); }
+        return new(text, value, null);
+    }
+
+    private static string NormalizeDecimal(string text)
+    {
+        text = text.Trim();
+        bool negative = text.StartsWith('-');
+        text = text.TrimStart('+', '-');
+        string[] parts = text.Split('.');
+        string whole = parts[0].TrimStart('0');
+        string fraction = parts.Length > 1 ? parts[1].TrimEnd('0') : string.Empty;
+        if (whole.Length == 0) { whole = "0"; }
+        return (negative && (whole != "0" || fraction.Length > 0) ? "-" : string.Empty)
+            + whole + (fraction.Length > 0 ? "." + fraction : string.Empty);
+    }
+
+    private Task OnInputAsync(ChangeEventArgs args) => Disabled ? Task.CompletedTask : Edited.InvokeAsync(Parse(args.Value?.ToString() ?? string.Empty));
+    private bool CanStep(bool up)
+    {
+        SetupNumberEdit<T> parsed = Parse(Text);
+        if (!string.IsNullOrWhiteSpace(Text) && parsed.Error is not null) { return false; }
+        return parsed.Value is not { } value || (up ? value < (Maximum ?? T.MaxValue) : value > (Minimum ?? T.MinValue));
+    }
+
+    private Task StepAsync(bool up)
+    {
+        if (Disabled || !CanStep(up)) { return Task.CompletedTask; }
+        T current = Parse(Text).Value ?? T.Zero;
+        T next;
+        try { next = up ? checked(current + Step) : checked(current - Step); }
+        catch (OverflowException) { next = up ? T.MaxValue : T.MinValue; }
+        next = T.Clamp(next, Minimum ?? T.MinValue, Maximum ?? T.MaxValue);
+        return Edited.InvokeAsync(Parse(Format(next)!));
+    }
+
+    private Task OnKeyDownAsync(KeyboardEventArgs args) => args.Key switch
+    {
+        "ArrowUp" => StepAsync(true), "ArrowDown" => StepAsync(false), _ => Task.CompletedTask
+    };
+}
