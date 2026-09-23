@@ -1,0 +1,15 @@
+<Solution>
+  <Folder Name="/Common/">
+    <Project Path="../Common/src/Darkspyre.Inference.Common/Darkspyre.Inference.Common.csproj" />
+    <Project Path="../Common/tests/Darkspyre.Inference.Common.Tests/Darkspyre.Inference.Common.Tests.csproj" />
+  </Folder>
+  <Folder Name="/src/Settings/">
+    <Project Path="src/Settings/Darkspyre.Inference.UI.Settings/Darkspyre.Inference.UI.Settings.csproj" />
+  </Folder>
+  <Folder Name="/examples/">
+    <Project Path="examples/Darkspyre.Inference.UI.Settings.Example/Darkspyre.Inference.UI.Settings.Example.csproj" />
+  </Folder>
+  <Folder Name="/tests/Settings/">
+    <Project Path="tests/Settings/Darkspyre.Inference.UI.Settings.Tests/Darkspyre.Inference.UI.Settings.Tests.csproj" />
+  </Folder>
+</Solution>

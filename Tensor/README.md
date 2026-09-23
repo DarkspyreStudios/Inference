@@ -10,7 +10,7 @@ filesystem default and still exposes only `IPersistenceStore`. TensorSharp uses 
 `FileStream` in place and temporarily projects non-file store streams when a native loader needs a
 path.
 
-Assemblies included by the Tensor package project (STT is unreleased development):
+Assemblies included by Tensor **11.3.0-rc.1**:
 
 - `Darkspyre.Inference.Tensor.Common` — the host-controlled model lifecycle, model packs,
   verification, direct-file persistence, and execution coordination.
@@ -45,7 +45,7 @@ rejects arbitrary pickle globals and reducers. Flan-T5 and the VAE use their pin
 artifacts. No Python or PyTorch component is loaded or executed.
 
 Tensor uses `Darkspyre.ML.Tokenizers` for the focused SentencePiece correction needed by Flan-T5
-models whose BOS token is intentionally disabled. The published baseline uses TensorSharp 2.8.6.3;
+models whose BOS token is intentionally disabled. This release uses TensorSharp 2.8.6.4;
 this development checkout uses the local-only GGUF fix described below. Both include rank-four
 channels-last image group normalization. These fork packages retain the upstream
 assemblies and namespaces; consuming code remains first-class C# and does not load Python or PyTorch.
@@ -119,7 +119,7 @@ host must not expect a fixed shutdown deadline. A host that abandons an LLM stre
 enumerator so model teardown can complete. Cancellation does not authorize releasing memory still
 in use by native execution.
 
-## Provider setup (unreleased development)
+## Provider setup
 
 `QwenSetup.Definition` and `SupraSetup.Definition` describe providers without constructing an engine,
 opening a store or loading native libraries. Their `CreateSession` methods bind a typed host
@@ -148,7 +148,7 @@ the configuration and reconstruct registrations when composing the manager after
 does not perform that unload. Stop remains terminal, and an
 already-cancelled teardown action token reaches the engine as urgency rather than skipping cleanup.
 See the [shared editor example](../Common/examples/Darkspyre.Inference.Setup.Examples/README.md).
-These source changes have not been published and do not change the development version.
+These setup contracts are included in the synchronized 11.3.0-rc.1 package family.
 
 Qwen and Supra now load the definition selected by `LoadAsync(key)`, rather than requiring the
 built-in key. Register complete, immutable definitions in the same manager used by the engine.
@@ -174,7 +174,7 @@ encoder and VAE tensor schema, checked before native allocation. The restricted 
 and native component constructors still validate actual data. A pack label is not proof of compatibility.
 The 256x256 output, prompt/sampler constraints and generation algorithm are unchanged.
 
-## Model source metadata and registration (unreleased development)
+## Model source metadata and registration
 
 `HuggingFaceModelSource` implements `ITensorModelSource` for paged repository search, revision
 listing and candidate metadata. Candidate lookup pins the returned immutable commit and retains
@@ -239,7 +239,7 @@ Active leases prevent removal or repair; interrupted repair invalidates its old 
 Progress observers cannot change the installation outcome. An installed manifest is not a substitute
 for content verification; use `VerifyAsync` before treating weights as verified.
 
-## Host-selected Laya packs (unreleased development)
+## Host-selected Laya packs
 
 Laya follows the same lifecycle: construct the engine with the pack manager, choose the model in
 `LoadAsync(key)`, run typed requests, and `UnloadAsync` before loading another compatible pack on
@@ -297,7 +297,7 @@ explicit install/verify/load/unload/stop actions apply; changing the saved selec
 `RequiresUnload`, and session disposal does not stop the host's engine. See the compile-checked
 `LayaModelSelectionExample` in the shared examples.
 
-## Speech transcription / Whisper (unreleased development)
+## Speech transcription / Whisper
 
 `WhisperSpeechToTextInference` implements `ITensorSpeechToTextInference`. Create its pack manager
 with `TensorSpeechModels.Whisper` (or supported host definitions), explicitly install the chosen
@@ -352,29 +352,20 @@ It binds loopback, requires an already-installed model, and is not an authentica
 or an OpenAI-compatible API. The generic editor composition example also includes Whisper under
 the Audio / SpeechTranscription task without provider-name renderer branches.
 
-## Local-only GGUF dependency build
+## Package dependency boundary
 
-This checkout pins `Darkspyre.TensorSharp.*` **2.8.6.4-local.gguf.9b248715**, built from TensorSharp
-`darkspyre` commit `9b248715`. It includes named GGUF persistence and bounded metadata inspection
-through the existing GGUF, safetensors and restricted PyTorch readers. It is not published. The Inference
-family version remains 11.2.0 and no Inference NuGet archives were created for this fix.
+Tensor depends on **Darkspyre.Inference.Common [11.3.0-rc.1]** and the **Darkspyre.TensorSharp.*
+2.8.6.4** dependency closure through NuGet. None of their DLLs is embedded in Tensor. The TensorSharp
+release includes the named GGUF persistence and bounded metadata inspection changes previously
+validated at fork commit `9b248715`, through the existing GGUF, safetensors and restricted PyTorch
+readers. The local-only validation version is no longer a product dependency.
 
-Local archives live in the sibling TensorSharp repository at `artifacts/gguf-local-feed`.
-Build that commit's Core (Tensors), Runtime.Logging, Runtime, AgentHost, Backends.Cuda,
-Backends.GGML, Backends.MLX, Models and Chat projects with `dotnet pack -c Release`, using both
-`-p:Version=2.8.6.4-local.gguf.9b248715` and `-p:PackageVersion=2.8.6.4-local.gguf.9b248715`.
-The managed-only validation build uses `-p:TensorSharpSkipGgmlNative=true` and
-`-p:TensorSharpSkipMlxNative=true`; it does not claim native library/device validation.
+Use the root `NuGet.Config` and process-scoped private-feed credentials for normal restores.
+Darkspyre dependencies come from the private feed; Whisper.net, its runtime and NAudio.Core come
+from public NuGet. Their own packages own their assemblies/native runtime assets. Tensor contains
+only its capability assemblies and their XML documentation, README and license.
 
-For a fresh restore, copy the root `NuGet.Config` to an ignored local config, add that directory as
-source `TensorSharpLocal`, and map `Darkspyre.TensorSharp.*` to it (more specific than the private
-feed's `Darkspyre.*` mapping). Retain the existing public/private sources, audit source and scoped
-GitHub authentication. On this workstation the generated config is
-`artifacts/gguf-local.NuGet.Config`; restore from the repository root with:
-
-```sh
-dotnet restore Tensor/Darkspyre.Inference.Tensor.slnx --configfile artifacts/gguf-local.NuGet.Config
-```
-
-After restore, ordinary `--no-restore` builds/tests use the installed local packages. Publishing
-these dependencies or replacing this local-only pin with a release requires separate authorization.
+TensorSharp's managed package build does not embed GGML/MLX native libraries or certify native
+device availability. Explicit backend observations retain the documented available/unknown states;
+host native-runtime provisioning and full-weight/device validation are not inferred from package
+installation. Whisper's advertised CPU runtime is supplied by its public runtime dependency.

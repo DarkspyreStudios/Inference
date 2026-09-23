@@ -23,7 +23,7 @@ service without falling back to untyped dictionaries. Rich provider-specific ope
 their owning packages; Common is the portable inference lane, not a least-common-denominator
 replacement for implementation management.
 
-## Provider setup (unreleased development)
+## Provider setup
 
 `Darkspyre.Inference.Common.Setup` supplies UI-neutral definitions, typed fields, callable actions,
 validation, safe status observations and a version-checked host commit boundary. It does not store
@@ -32,7 +32,10 @@ Text, Image, Audio and Decision grouping comes from the implementation's declare
 values; the three Audio tasks remain distinct.
 
 The [compile-checked generic editor example](examples/Darkspyre.Inference.Setup.Examples/README.md)
-uses one field/action driver for real Connect LLM/Image and Tensor Qwen/Supra sessions. Hosts retain
+uses one field/action driver for real Connect and Tensor sessions, including speech/audio. Hosts retain
 operation lifetime, user consent, storage and rendering. Field edits are revision-checked; cancelled
 edits never commit. Unknown observations are nullable, separate from false, stale and not applicable.
-The version remains 11.2.0 during development; these additions are not in the published 11.2.0 package.
+These contracts are included in the synchronized **11.3.0-rc.1** package family. Connect, Tensor and
+UI.Settings declare exact Common NuGet dependencies; none embeds the Common DLL. This release
+targets .NET 11 RC; the shared version retains a prerelease suffix while the UI's ASP.NET dependency
+is a release candidate.

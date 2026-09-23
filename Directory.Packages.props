@@ -13,12 +13,11 @@
     <PackageVersion Include="Darkspyre.Persistence" Version="1.0.0" />
     <PackageVersion Include="Darkspyre.SecureStore" Version="1.0.0" />
     <PackageVersion Include="Darkspyre.ML.Tokenizers" Version="2.0.0.1" />
-    <!-- Local-only fork validation build; see Tensor/README.md. Not a published release. -->
-    <PackageVersion Include="Darkspyre.TensorSharp.Backends.Cuda" Version="2.8.6.4-local.gguf.9b248715" />
-    <PackageVersion Include="Darkspyre.TensorSharp.Chat" Version="2.8.6.4-local.gguf.9b248715" />
-    <PackageVersion Include="Darkspyre.TensorSharp.Models" Version="2.8.6.4-local.gguf.9b248715" />
-    <PackageVersion Include="Darkspyre.TensorSharp.Runtime" Version="2.8.6.4-local.gguf.9b248715" />
-    <PackageVersion Include="Darkspyre.TensorSharp.Tensors" Version="2.8.6.4-local.gguf.9b248715" />
+    <PackageVersion Include="Darkspyre.TensorSharp.Backends.Cuda" Version="2.8.6.4" />
+    <PackageVersion Include="Darkspyre.TensorSharp.Chat" Version="2.8.6.4" />
+    <PackageVersion Include="Darkspyre.TensorSharp.Models" Version="2.8.6.4" />
+    <PackageVersion Include="Darkspyre.TensorSharp.Runtime" Version="2.8.6.4" />
+    <PackageVersion Include="Darkspyre.TensorSharp.Tensors" Version="2.8.6.4" />
     <PackageVersion Include="JsonSchema.Net" Version="9.4.0" />
     <PackageVersion Include="Lumeo" Version="5.9.1" />
     <PackageVersion Include="Microsoft.Bcl.Memory" Version="10.0.9" />

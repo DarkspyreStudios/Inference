@@ -2,8 +2,9 @@
 
 Date: 2026-09-22
 
-Status: **Revised proposal — awaiting explicit technical-design approval.** This document
-authorizes no implementation, package publication, version change, or consuming-host migration.
+Status: **Implementation authorized on 2026-09-22; build, test and coordinated private publication
+authorized on 2026-09-23.** The shared family version is 11.3.0-rc.1, retaining the .NET 11 RC
+dependency. Consuming-host migration remains separate.
 
 ## 1. Scope and ownership
 
@@ -56,7 +57,7 @@ needs a Connect- or Tensor-specific interface, return to design and split the UI
 libraries; do not add either dependency or provider-name dispatch to this shared package.
 
 This package decision supersedes older Settings assessment text that calls `UI/` a sibling
-repository or says the package remains outside the synchronized family. On approval, reconcile
+repository or says the package remains outside the synchronized family. In this implementation unit, reconcile
 `.roles/project.md`, `.roles/design-rules.md`, package verification, and that assessment. The
 approved runtime design's three-package wording described its own earlier implementation scope;
 it did not authorize this UI unit.
@@ -226,12 +227,10 @@ renderer and session controller serve both hosts under their distinct themes.
 
 ## 8. Contract readiness and implementation gates
 
-The 2026-09-22 working tree has Common setup records, bound fields/actions, session snapshots,
-status, and typed commit target, plus representative Connect Image and Tensor Qwen/Supra sessions.
-That is enough for this technical design, but the code is in progress and uncommitted. Connect LLM
-currently has setup definitions without a completed session; Audio sessions and broader Tensor
-model discovery remain pending. This design must be reconciled with the finished Common contract
-before implementation.
+The completed Common contract has setup records, bound fields/actions, session snapshots, status,
+and typed commit targets. Connect and Tensor sessions now cover the approved provider capabilities,
+including Audio. The editor source is reconciled against these contracts. Debug/Release compilation
+and the current three component tests pass; the former build hold was lifted by the release request.
 
 Required gates:
 
@@ -269,16 +268,30 @@ keyboard flow, focus visibility, contrast under each host theme, and reduced-mot
 CE-specific placement is checked against `DarkspyreCE/docs/ui-design-language.md` when CE
 integration is separately approved; this package itself does not define a CE Settings page.
 
-After design approval and implementation, run authenticated restore, zero-warning Debug/Release
+After the user's build hold is lifted, run authenticated restore, zero-warning Debug/Release
 builds, deterministic tests, format verification, and the transitive dependency vulnerability
 audit for the UI subset and synchronized family. Verify package contents and exact Common
 dependency before a separately authorized four-package publication. Commit whole files with
 explicit pathspecs and update affected canonical documents in the same implementation unit.
 Normal gates require no paid calls, full model downloads, or stored production credentials.
 
-## 10. Approval boundary
+## 10. Authorization boundary
 
-Approval of this technical design authorizes building the host-neutral editor library and its
-example against the completed setup contract. It does not authorize package publication, CE or
-Agent-DS migration, a particular host placement, changes to a user's configured providers, model
-downloads, or paid provider actions. Host integrations and release remain separate reviewed units.
+The original implementation authorization deferred builds. On 2026-09-23 the user authorized the
+coordinated four-package release, including builds and a version correction for prerelease framework
+dependencies. CE/Agent-DS migration, a particular host placement, changes to configured providers,
+model downloads and paid provider actions remain excluded.
+
+## 11. Release validation (2026-09-23)
+
+UI.Settings 11.3.0-rc.1 builds without warnings in Debug and Release. Its three current component
+tests pass (provider status, explicit action/consent and save through the session), alongside 22
+Common tests. bUnit's current context and the actual Lumeo registration namespace are used, and a
+redundant event-callback render was removed. Formatting and the transitive vulnerability audit pass.
+
+The archive contains only UI.Settings' DLL/XML, scoped CSS/static-web-asset imports, README and
+license. Common is an exact `[11.3.0-rc.1]` NuGet dependency; Connect/Tensor are neither dependencies
+nor embedded assemblies. The prerelease suffix keeps NuGet validation enabled for the required
+ASP.NET 11 RC package. A clean four-package consumer compiles and loads the component type.
+This package verification does not certify the CE/Agent-DS themed host/browser matrix or migrate
+either application; those integration checks remain separately scoped.

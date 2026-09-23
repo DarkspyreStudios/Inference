@@ -1,0 +1,21 @@
+.inference-settings-editor__repeatable {
+    display: grid;
+    gap: var(--inference-settings-field-gap, .875rem);
+    min-width: 0;
+}
+
+.inference-settings-editor__row {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr));
+    align-items: end;
+    gap: var(--inference-settings-field-gap, .875rem);
+}
+
+.inference-settings-editor__boolean,
+.inference-settings-editor__choice-actions,
+.inference-settings-editor__secret-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--inference-settings-action-gap, .75rem);
+}

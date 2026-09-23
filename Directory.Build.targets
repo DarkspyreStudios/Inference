@@ -1,0 +1,12 @@
+<Project>
+  <!-- Source builds use project references; package consumers use the exact synchronized Common NuGet. -->
+  <Target Name="PinInferenceCommonPackageDependency" AfterTargets="_GetProjectReferenceVersions"
+          Condition="'$(IsPackable)' == 'true'">
+    <ItemGroup>
+      <_ProjectReferencesWithVersions Update="@(_ProjectReferencesWithVersions)"
+                                      Condition="'%(_ProjectReferencesWithVersions.Filename)' == 'Darkspyre.Inference.Common'">
+        <ProjectVersion>[$(Version)]</ProjectVersion>
+      </_ProjectReferencesWithVersions>
+    </ItemGroup>
+  </Target>
+</Project>

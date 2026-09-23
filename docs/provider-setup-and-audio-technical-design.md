@@ -3,8 +3,9 @@
 Date: 2026-09-22
 
 Phase: **Implementation complete — technical design approved and source verified on 2026-09-22.**
-All eight runtime/settings rows are complete; see the final unit 5 acceptance record. UI integration
-and a coordinated release are separate work, not implied by source completion.
+All eight runtime/settings rows are complete; see the final unit 5 acceptance record. The user
+separately authorized coordinated 11.3.0-rc.1 publication on 2026-09-23; see the release record in
+`.roles/project.md`. Consuming-application integration remains separate.
 
 Baseline: Common / Connect / Tensor 11.2.0. No version change, package creation, publication,
 consumer-application migration, or model download is part of this design unit.

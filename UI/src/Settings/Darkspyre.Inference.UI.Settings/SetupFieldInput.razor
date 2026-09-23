@@ -1,0 +1,270 @@
+@implements IDisposable
+
+@if (Field.Description.IsVisible)
+{
+    @if (Field is SetupRepeatableGroupField group)
+    {
+        <fieldset class="inference-settings-editor__repeatable" disabled="@Unavailable">
+            <legend>@Field.Description.DisplayName</legend>
+            @foreach (var row in group.Rows)
+            {
+                <div class="inference-settings-editor__row" @key="row.Id">
+                    @foreach (var child in row.Fields.Where(item => item.Description.IsVisible))
+                    {
+                        <SetupFieldInput @key="child.Description.Id" Field="child" Revision="Revision" Host="Host"
+                                         Issues="Issues" Edited="Edited" />
+                    }
+                    <Button Variant="Button.ButtonVariant.Ghost" Disabled="@Unavailable"
+                            OnClick="() => ApplyAsync(group.Remove(row.Id))">Remove row</Button>
+                </div>
+            }
+            <Button Variant="Button.ButtonVariant.Outline" Disabled="@Unavailable"
+                    OnClick="() => ApplyAsync(group.Add())">Add row</Button>
+        </fieldset>
+    }
+    else if (Field is SetupBooleanField boolean)
+    {
+        <label class="inference-settings-editor__boolean">
+            <Checkbox Checked="@boolean.Value" CheckedChanged="@(value => ApplyAsync(boolean.SetValue(value)))"
+                      Disabled="@Unavailable" />
+            <span>@Field.Description.DisplayName</span>
+        </label>
+        @if (!string.IsNullOrWhiteSpace(Field.Description.HelpText)) { <p>@Field.Description.HelpText</p> }
+        @if (FieldError is not null) { <p role="alert">@FieldError</p> }
+    }
+    else
+    {
+        <FormField Label="@Field.Description.DisplayName" HelpText="@Field.Description.HelpText"
+                   Required="@Field.Description.IsRequired" Error="@FieldError">
+            @switch (Field)
+            {
+                case SetupTextField text:
+                    <Input Value="@_value" ValueChanged="@(value => SetTextAsync(text, value))"
+                           Disabled="@Unavailable" MaxLength="@text.MaximumLength" />
+                    break;
+                case SetupUriField uri:
+                    <Input Value="@_value" ValueChanged="@(value => SetUriAsync(uri, value))"
+                           Disabled="@Unavailable" />
+                    break;
+                case SetupExecutableField executable:
+                    <Input Value="@_value" ValueChanged="@(value => SetExecutableAsync(executable, value))"
+                           Disabled="@Unavailable" />
+                    break;
+                case SetupIntegerField integer:
+                    <Input Type="number" Value="@_value" ValueChanged="@(value => SetIntegerAsync(integer, value))"
+                           Disabled="@Unavailable" />
+                    break;
+                case SetupDecimalField number:
+                    <Input Type="number" Value="@_value" ValueChanged="@(value => SetDecimalAsync(number, value))"
+                           Disabled="@Unavailable" />
+                    break;
+                case SetupChoiceField choice:
+                    <div class="inference-settings-editor__choice-actions">
+                        <Input @bind-Value="_search" Placeholder="Search choices" Disabled="@Unavailable" />
+                        <Button Variant="Button.ButtonVariant.Ghost" Disabled="@(_loading || Unavailable)"
+                                OnClick="SearchChoicesAsync">Search</Button>
+                    </div>
+                    @if (_choices.Count > 0 || !choice.AllowsManualEntry)
+                    {
+                        <Combobox Value="@_value" ValueChanged="@(value => SetChoiceAsync(choice, value))"
+                                  @bind-Open="_choiceOpen" Creatable="@choice.AllowsManualEntry">
+                            <ComboboxInput Placeholder="Choose or search" />
+                            <ComboboxContent>
+                                @foreach (var option in _choices)
+                                { <ComboboxItem Value="@option.Value" SearchValue="@option.DisplayName">@option.DisplayName</ComboboxItem> }
+                                @if (choice.AllowsManualEntry) { <ComboboxCreate /> }
+                            </ComboboxContent>
+                        </Combobox>
+                    }
+                    @if (_choices.Count == 0 && choice.AllowsManualEntry)
+                    { <Input Value="@_value" ValueChanged="@(value => SetChoiceAsync(choice, value))" Disabled="@Unavailable" /> }
+                    <div class="inference-settings-editor__choice-actions">
+                        <Button Variant="Button.ButtonVariant.Ghost" Disabled="@(_loading || Unavailable)"
+                                OnClick="RefreshChoicesAsync">@(_loading ? "Loading…" : "Refresh choices")</Button>
+                        @if (_continuation is not null)
+                        { <Button Variant="Button.ButtonVariant.Ghost" Disabled="@_loading" OnClick="LoadMoreAsync">Load more</Button> }
+                    </div>
+                    @if (_choiceIssue is not null) { <p role="status">@_choiceIssue</p> }
+                    break;
+                case SetupSecretField secret:
+                    <p>@SecretState(secret)</p>
+                    <div class="inference-settings-editor__secret-actions">
+                        <Button Variant="Button.ButtonVariant.Ghost" Disabled="@Unavailable"
+                                OnClick="() => SetSecretAsync(secret, SetupSecretEdit.Keep)">Keep</Button>
+                        <Button Variant="Button.ButtonVariant.Ghost" Disabled="@Unavailable"
+                                OnClick="() => SetSecretAsync(secret, SetupSecretEdit.Clear)">Clear</Button>
+                    </div>
+                    <Input Type="password" Value="@_secret" ValueChanged="@(value => _secret = value ?? string.Empty)"
+                           Disabled="@Unavailable" Placeholder="New secret" />
+                    <Button Variant="Button.ButtonVariant.Outline" Disabled="@(Unavailable || string.IsNullOrEmpty(_secret))"
+                            OnClick="() => ReplaceSecretAsync(secret)">Replace secret</Button>
+                    break;
+            }
+        </FormField>
+    }
+}
+
+@code {
+    [Parameter, EditorRequired] public SetupField Field { get; set; } = default!;
+    [Parameter, EditorRequired] public IInferenceSettingsInteractionHost Host { get; set; } = default!;
+    [Parameter] public long Revision { get; set; }
+    [Parameter] public IReadOnlyList<SetupIssue> Issues { get; set; } = [];
+    [Parameter] public EventCallback<SetupEditResult> Edited { get; set; }
+
+    private string _value = string.Empty;
+    private string _secret = string.Empty;
+    private string? _localError;
+    private string? _choiceIssue;
+    private List<SetupChoice> _choices = [];
+    private string? _continuation;
+    private string _search = string.Empty;
+    private bool _loading, _choiceOpen;
+    private bool _disposed;
+    private readonly CancellationTokenSource _lifetime = new();
+    private long _loadedRevision = -1;
+    private SetupField? _lastField;
+    private bool Unavailable => Field.Description.IsReadOnly || !Field.Description.IsEnabled;
+    private string? FieldError => _localError ?? Issues.FirstOrDefault(issue => issue.FieldId == Field.Description.Id)?.Message;
+
+    private static string SecretState(SetupSecretField field) => field.Change switch
+    {
+        SetupSecretEditKind.Clear => "The saved secret will be cleared when settings are saved.",
+        SetupSecretEditKind.Replace => "The secret will be replaced when settings are saved.",
+        _ => field.HasValue ? "A secret is saved." : "No secret is saved."
+    };
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (ReferenceEquals(_lastField, Field)) { return; }
+        _lastField = Field;
+        _secret = string.Empty;
+        _localError = null;
+        _value = Field switch
+        {
+            SetupTextField value => value.Value,
+            SetupUriField value => value.Value?.ToString() ?? string.Empty,
+            SetupExecutableField value => value.Value.Value,
+            SetupIntegerField value => value.Value?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty,
+            SetupDecimalField value => value.Value?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty,
+            SetupChoiceField value => value.Value,
+            _ => string.Empty
+        };
+        if (Field is SetupChoiceField choice && _loadedRevision != Revision && choice.Description.IsEnabled)
+        {
+            _choices = [];
+            _continuation = null;
+            _loadedRevision = Revision;
+            await LoadChoicesAsync();
+        }
+    }
+
+    private async Task ApplyAsync(SetupEditResult result)
+    {
+        _localError = result.Issues.FirstOrDefault()?.Message;
+        await Edited.InvokeAsync(result);
+    }
+
+    private Task SetTextAsync(SetupTextField field, string? value)
+    {
+        _value = value ?? string.Empty;
+        return ApplyAsync(field.SetValue(_value));
+    }
+
+    private Task SetExecutableAsync(SetupExecutableField field, string? value)
+    {
+        _value = value ?? string.Empty;
+        return ApplyAsync(field.SetValue(new(_value)));
+    }
+
+    private Task SetChoiceAsync(SetupChoiceField field, string? value)
+    {
+        _value = value ?? string.Empty;
+        return ApplyAsync(field.SetValue(_value));
+    }
+
+    private Task SetUriAsync(SetupUriField field, string? value)
+    {
+        value ??= string.Empty;
+        _value = value;
+        if (value.Length > 0 && !Uri.TryCreate(value, UriKind.Absolute, out _))
+        { _localError = "Enter an absolute URL."; return Task.CompletedTask; }
+        return ApplyAsync(field.SetValue(value.Length == 0 ? null : new Uri(value, UriKind.Absolute)));
+    }
+
+    private Task SetIntegerAsync(SetupIntegerField field, string? value)
+    {
+        value ??= string.Empty;
+        _value = value;
+        if (value.Length > 0 && !long.TryParse(value, System.Globalization.NumberStyles.Integer,
+            System.Globalization.CultureInfo.InvariantCulture, out _))
+        { _localError = "Enter a whole number."; return Task.CompletedTask; }
+        long? parsed = value.Length == 0 ? null : long.Parse(value, System.Globalization.CultureInfo.InvariantCulture);
+        return ApplyAsync(field.SetValue(parsed));
+    }
+
+    private Task SetDecimalAsync(SetupDecimalField field, string? value)
+    {
+        value ??= string.Empty;
+        _value = value;
+        if (value.Length > 0 && !decimal.TryParse(value, System.Globalization.NumberStyles.Number,
+            System.Globalization.CultureInfo.InvariantCulture, out _))
+        { _localError = "Enter a number."; return Task.CompletedTask; }
+        decimal? parsed = value.Length == 0 ? null : decimal.Parse(value, System.Globalization.CultureInfo.InvariantCulture);
+        return ApplyAsync(field.SetValue(parsed));
+    }
+
+    private async Task ReplaceSecretAsync(SetupSecretField field)
+    {
+        SetupEditResult result = field.SetValue(SetupSecretEdit.Replace(_secret));
+        if (result.State == SetupEditState.Applied) { _secret = string.Empty; }
+        await ApplyAsync(result);
+    }
+
+    private async Task SetSecretAsync(SetupSecretField field, SetupSecretEdit change)
+    {
+        _secret = string.Empty;
+        await ApplyAsync(field.SetValue(change));
+    }
+
+    private Task LoadMoreAsync() => LoadChoicesAsync();
+
+    private Task SearchChoicesAsync() => RefreshChoicesAsync();
+
+    private Task RefreshChoicesAsync()
+    {
+        _choices = [];
+        _continuation = null;
+        return LoadChoicesAsync();
+    }
+
+    private async Task LoadChoicesAsync()
+    {
+        if (Field is not SetupChoiceField choice || _loading || Unavailable) { return; }
+        if (choice.ChoiceSideEffects != SetupSideEffect.None
+            && !await Host.AuthorizeAsync("Load " + Field.Description.DisplayName, choice.ChoiceSideEffects)) { return; }
+        _loading = true;
+        _choiceIssue = null;
+        try
+        {
+            SetupChoicePage page = await choice.GetChoicesAsync(new(Revision, _search, _continuation), _lifetime.Token);
+            if (!_disposed && page.State == SetupChoiceState.Completed && page.Revision == Revision)
+            {
+                _choices.AddRange(page.Choices);
+                _continuation = page.Continuation;
+            }
+            else if (!_disposed) { _choiceIssue = page.Issues?.FirstOrDefault()?.Message ?? page.State.ToString(); }
+        }
+        catch (OperationCanceledException) when (_lifetime.IsCancellationRequested) { }
+        catch (Exception) { if (!_disposed) { _choiceIssue = "Choices could not be loaded."; } }
+        finally { _loading = false; }
+    }
+
+    public void Dispose()
+    {
+        _disposed = true;
+        _lifetime.Cancel();
+        _lifetime.Dispose();
+        _secret = string.Empty;
+        GC.SuppressFinalize(this);
+    }
+}

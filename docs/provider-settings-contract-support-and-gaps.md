@@ -1,20 +1,20 @@
 # Provider settings contracts: completion and baseline gaps
 
-Date: 2026-09-22
+Date: 2026-09-23
 
 Consumers: DarkspyreCE Desktop and Agent-DS, through the shared `Darkspyre.Inference.UI.Settings` library
 
 Published baseline: synchronized Common / Connect / Tensor NuGet **11.2.0**, release source `83c1ac3`
 
-Status: **All eight approved runtime/library rows are implemented in source. These changes are not
-in the published 11.2.0 packages.** The approved authority and implementation record are in
+Status: **All eight approved runtime/library rows are implemented in the 11.3.0-rc.1 release
+candidate. These changes are not in the published 11.2.0 packages.** The approved authority and implementation record are in
 [the provider setup and audio technical design](provider-setup-and-audio-technical-design.md).
 UI surfaces and consumer integration belong to their separate work; this report does not certify them.
 
-## Shared UI repository and library
+## Shared UI workspace and library
 
-The configuration components will belong to a standalone Blazor library named
-**`Darkspyre.Inference.UI.Settings`**, built with **Lumeo**, in the separate product workspace:
+The configuration editor belongs to the Blazor library
+**`Darkspyre.Inference.UI.Settings`**, built with **Lumeo**, in this repository's UI product workspace:
 
 `/Volumes/Data/Development/DarkspyreStudios/Inference/UI/`
 
@@ -27,9 +27,10 @@ of the Connect and Tensor objects**. The current table below reports that source
 the historical 11.2.0 inventory after it records why those contracts were needed. Do not substitute
 host-specific forms or a second local metadata model for the provider-owned contracts.
 
-`Darkspyre.Inference.UI.Settings` provides the reusable groups, dense wrapping configuration cards,
-Add/edit surfaces, dialog editors, wizard rendering, model selection and installation-progress
-surfaces. Provider definitions drive their content and behavior. Lumeo supplies the shared controls;
+`Darkspyre.Inference.UI.Settings` provides one reusable, host-placed editor surface for a provider
+setup session. It renders the provider's fields, steps, validation, status, actions, and progress.
+Provider definitions drive its content and behavior. It does not own connection lists, cards, Add
+entry points, dialogs, drawers, routes, or the editor's placement. Lumeo supplies the controls;
 presentation remains separate from provider protocol, compatibility and lifecycle implementations.
 
 DarkspyreCE and Agent-DS each compose the shared components and layer their own themes on them.
@@ -40,23 +41,22 @@ Each host retains local persistence, protected credential storage, user consent 
 operation ownership through the appropriate seams.
 
 The new UI library does not introduce a Blazor or Lumeo dependency into Common, Connect or Tensor.
-Its packaging, compatible dependency versions and release policy belong to
-[its separately approved design](settings.ui.tech-design.md), not this runtime acceptance pass.
+It is the fourth synchronized Inference package and references Common only among Inference
+products. Its packaging, dependency versions and release policy belong to
+[its approved design](settings.ui.tech-design.md), not this runtime acceptance pass.
 
 ## Required consumer experience
 
-DarkspyreCE needs Settings grouped by **Text, Image, Audio**. Every group must support both
-**Connect** (out-of-process) and **Tensor** (in-process) implementations. Configured providers appear
-as compact cards in a dense horizontal grid that wraps to the next row. Each group has an Add
-action; selecting a card opens its configuration in the shared dialog editor. No editable forms
-are open on the collection landing page. Existing design-PDF typography, spacing, colors, and
-surface treatment remain the visual authority, with the explicitly requested collection-first
-interaction taking precedence over the older inline Settings forms.
+DarkspyreCE needs Settings grouped by **Text, Image, Audio**, each supporting both **Connect**
+(out-of-process) and **Tensor** (in-process) implementations. Each host decides how to list existing
+connections, start Add/Edit, and place the shared editor. The shared library does not impose a
+collection layout or display container. Its own CSS supplies layout only; the host supplies colors
+and theme through Lumeo.
 
 The panels and setup wizards must be driven by **contract properties and callable methods**.
 The provider supplies its configuration semantics, field/section/step descriptions, available
 choices, validation, actions, and status. The shared UI library supplies reusable Lumeo controls,
-layout, dialogs and accessible interaction. Each consuming application supplies its theme, local
+editor layout and accessible interaction. Each consuming application supplies its theme, local
 persistence, protected credential storage and explicit user authorization.
 
 The UI may map semantic field kinds to shared controls. It must not switch on provider names or
@@ -326,8 +326,9 @@ provider source belongs in the shared UI library.
 
 Before delivering the shared settings surface to CE and Agent-DS, the library work should demonstrate:
 
-1. A single reusable renderer can list, add, configure and edit each supported Text/Image/Audio
-   Connect/Tensor provider without provider-name/transport-specific UI branches.
+1. A single reusable editor can configure and edit each supported Text/Image/Audio Connect/Tensor
+   provider session without provider-name/transport-specific UI branches. Each host owns listing,
+   Add/Edit entry points and placement.
 2. Typed descriptors and methods cover dependent fields, dynamic choices, validation, authentication,
    tests and asynchronous progress. Existing configuration and secrets survive cancelled edits and
    stale concurrent completions cannot overwrite newer credentials/configuration.
@@ -340,9 +341,9 @@ Before delivering the shared settings surface to CE and Agent-DS, the library wo
    blocker, not invented UI support or an undocumented reduction of the requirement.
 6. Deterministic tests use controlled provider/model-host responses and small fixtures. Paid calls,
    full model downloads and native inference are not mandatory development gates.
-7. CE and Agent-DS consume the same Settings library with distinct themes and supported extensions.
-   Neither host duplicates provider forms or wizard behavior. Shared accessibility, dialog behavior,
-   density and responsive wrapping remain intact under both themes.
+7. CE and Agent-DS consume the same Settings editor with distinct themes and supported extensions.
+   Neither host duplicates provider forms or wizard behavior. The host controls any surrounding
+   dialog, page or inline layout; the editor remains accessible and responsive in each placement.
 
 The runtime contract design was subsequently approved and implemented; the current summary above
 and canonical technical design supersede this baseline's missing-capability assessment. Acceptance

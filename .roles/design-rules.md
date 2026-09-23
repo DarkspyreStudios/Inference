@@ -5,21 +5,21 @@ the applicable technical design rather than in this file.
 
 ## Product roots
 
-The repository root is `Darkspyre.Inference`. `Connect/`, `Console/`, and `Tensor/` are sibling
+The repository root is `Darkspyre.Inference`. `Connect/`, `Console/`, `Tensor/`, and `UI/` are sibling
 product workspaces with separate responsibilities. A product workspace owns its solution, build
 configuration, package versions, documentation, tests, examples, and tools.
 
-`Connect` and `Tensor` are active workspaces in the unified 11.x family. Empty product roots do not
+`Connect`, `Tensor`, and `UI` are active workspaces in the unified 11.x family. Empty product roots do not
 justify placeholder projects or packages.
 
 ## Capability layout
 
-Connect and Tensor group source assemblies and tests by capability:
+Connect, Tensor, and UI group source assemblies and tests by capability:
 
 ```text
 <Product>/
   src/<Capability>/<AssemblyName>/
-  src/<ProductPackageId>/
+  src/<ProductPackageId>/                 # Connect and Tensor packaging projects only
   tests/<Capability>/<TestProject>/
   examples/<ExampleProject>/
   tools/<ToolProject>/
@@ -34,15 +34,21 @@ verifying every reference in the same unit.
 
 ## Package identity
 
-The repository publishes exactly three packages: `Darkspyre.Inference.Common`,
-`Darkspyre.Inference.Connect`, and `Darkspyre.Inference.Tensor`. Common has one matching assembly.
+The repository publishes exactly four packages: `Darkspyre.Inference.Common`,
+`Darkspyre.Inference.Connect`, `Darkspyre.Inference.Tensor`, and
+`Darkspyre.Inference.UI.Settings`. Common and UI.Settings each have one matching assembly.
 Connect and Tensor are product packages containing their capability-specific assemblies; their
 package projects do not create empty facade assemblies. Capability project, assembly, folder, and
 root-namespace names match, but those projects are not independently packable.
 
-The Connect and Tensor packages reference the `Darkspyre.Inference.Common` NuGet at the synchronized
-release version. They do not embed the Common assembly. All three package versions come from the
+The Connect, Tensor, and UI.Settings packages reference the `Darkspyre.Inference.Common` NuGet at the synchronized
+release version. They do not embed the Common assembly. All four package versions come from the
 single repository `/Directory.Build.props`; a project must not override that version.
+
+UI.Settings is a host-placed Blazor editor for provider setup sessions. It references Common and
+Lumeo, not Connect, Tensor, or an application assembly. A host owns its connection list, editor
+placement, persistence, protected credentials, consent, and provider-specific session composition.
+Common, Connect, and Tensor remain UI-framework-neutral.
 
 ## Provider dependencies
 
@@ -75,9 +81,17 @@ Capability-specific detail may live beside its examples or in `Connect/docs/`, b
 must not describe one capability as the whole Connect family once another capability ships.
 
 Every package includes a readable package README and the repository license. Pack verification must
-confirm that the Common assembly appears only in the Common package, Connect and Tensor declare an
-exact synchronized dependency on Common, and each product package contains every owned capability
-assembly plus its XML documentation.
+confirm that the Common assembly appears only in the Common package, Connect, Tensor, and UI.Settings
+declare an exact synchronized dependency on Common, and each product package contains every owned
+assembly plus its XML documentation. UI.Settings also includes its static web assets.
+
+Source builds use project references. `Directory.Build.targets` pins the package dependency on
+Common to `[$(Version)]` when generating each consumer product's NuGet manifest. This does not
+embed Common or introduce dependencies between Connect, Tensor and UI.Settings. Run the compiled
+`eng/VerifyPackages` tool against all four release archives; it rejects foreign DLLs/native binaries,
+local-only dependencies, missing owned assemblies/documentation and mismatched Common versions.
+Whisper runtime build assets flow through its public NuGet dependency (`PrivateAssets="none"`);
+Tensor marks the imported native files non-packable without disabling consumer output copying.
 
 Package creation is a publish-stage action. During refactoring, do not run `dotnet pack` or create
 `.nupkg` artifacts unless the user explicitly says to publish. Ordinary verification stops at

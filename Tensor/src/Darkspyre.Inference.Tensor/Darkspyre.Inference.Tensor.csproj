@@ -27,7 +27,7 @@
     <PackageReference Include="Darkspyre.TensorSharp.Models" />
     <PackageReference Include="Darkspyre.TensorSharp.Runtime" />
     <PackageReference Include="Whisper.net" />
-    <PackageReference Include="Whisper.net.Runtime" />
+    <PackageReference Include="Whisper.net.Runtime" PrivateAssets="none" />
     <PackageReference Include="NAudio.Core" />
   </ItemGroup>
 
@@ -52,4 +52,11 @@
     <None Include="../STT/Darkspyre.Inference.Tensor.STT.Whisper/bin/$(Configuration)/$(TargetFramework)/Darkspyre.Inference.Tensor.STT.Whisper.dll" Pack="true" PackagePath="lib/$(TargetFramework)" />
     <None Include="../STT/Darkspyre.Inference.Tensor.STT.Whisper/bin/$(Configuration)/$(TargetFramework)/Darkspyre.Inference.Tensor.STT.Whisper.xml" Pack="true" PackagePath="lib/$(TargetFramework)" />
   </ItemGroup>
+  <!-- Whisper's imported targets mark native output files Pack=true. They belong to its public
+       runtime NuGet, not this product archive. Preserve build output copying and the dependency. -->
+  <Target Name="DoNotRepackWhisperRuntime" BeforeTargets="_GetPackageFiles">
+    <ItemGroup>
+      <None Update="@(None)" Condition="'%(None.DefiningProjectName)' == 'Whisper.net.Runtime'" Pack="false" />
+    </ItemGroup>
+  </Target>
 </Project>

@@ -11,14 +11,14 @@ specifications.
 | Item | Value |
 |---|---|
 | Product family | `Darkspyre.Inference.*` |
-| Purpose | Consolidate Darkspyre Studios' inference-related implementations into one cohesive family of libraries distributed as three NuGet packages |
+| Purpose | Consolidate Darkspyre Studios' inference-related implementations into one cohesive family of four synchronized NuGet packages |
 | Repository | `/Volumes/Data/Development/DarkspyreStudios/Inference` |
 | Target framework | `net11.0` |
 | Distribution | Private DarkspyreStudios NuGet feed |
 | Version line | `<net>.<release>.<minor>`: .NET generation, breaking-contract release, compatible tweak/fix |
-| Release model | `Common`, `Connect`, and `Tensor` always publish together at the one version declared in `/Directory.Build.props` |
+| Release model | `Common`, `Connect`, `Tensor`, and `UI.Settings` publish together at the one version declared in `/Directory.Build.props` |
 | Primary branch | `master` |
-| Lifecycle stage | Unified `11.2.0` release published; compatible maintenance remains on `11.2.x` |
+| Lifecycle stage | Four-package `11.3.0-rc.1` release candidate; .NET 11 RC dependencies |
 | Jira project and parent | TBD |
 | Jira subject label | TBD |
 
@@ -26,7 +26,7 @@ The technical assembly and namespace prefix is `Darkspyre.Inference`.
 
 ## Package families
 
-The release surface contains exactly three NuGet packages. Capability names remain assembly and
+The planned release surface contains exactly four NuGet packages. Capability names remain assembly and
 namespace boundaries inside their owning product package; they are not independently versioned or
 published NuGets.
 
@@ -34,11 +34,12 @@ published NuGets.
 |---|---|
 | `Darkspyre.Inference.Common` | Interfaces and models genuinely shared by connector-based and in-process tensor inference |
 | `Darkspyre.Inference.Connect` | All implemented out-of-process connectors; contains capability-specific assemblies such as `.Connect.LLM`, `.Connect.LLM.Bedrock`, and `.Connect.Image` |
-| `Darkspyre.Inference.Tensor` | All implemented in-process engines; contains `.Tensor.Common`, the `.Tensor.LLM`, `.Tensor.Image`, and `.Tensor.Decision` capability contracts, and the `.Tensor.LLM.Qwen`, `.Tensor.Image.Supra`, and `.Tensor.Decision.Laya` implementations |
+| `Darkspyre.Inference.Tensor` | All implemented in-process engines; contains `.Tensor.Common`, the `.Tensor.LLM`, `.Tensor.Image`, `.Tensor.STT`, and `.Tensor.Decision` capability contracts, and the `.Tensor.LLM.Qwen`, `.Tensor.Image.Supra`, `.Tensor.STT.Whisper`, and `.Tensor.Decision.Laya` implementations |
+| `Darkspyre.Inference.UI.Settings` | Host-placed Blazor/Lumeo editor for provider setup sessions; references Common but not Connect or Tensor |
 
-LLM and Image are the implemented Connect capabilities in the first unified release. Image initially
-contains the HTTP/WebSocket ComfyUI transport. LLM, Image, and Decision are the implemented Tensor
-capabilities. The implementation state of later capabilities is not defined by this document.
+Connect implements LLM, ComfyUI Image, PocketTTS speech synthesis and TangoFlux audio generation.
+Tensor implements Qwen LLM, Supra Image, Laya Decision and Whisper speech transcription. Audio tasks
+retain their own typed contracts. UI.Settings renders the shared provider-owned setup contract.
 
 ## Execution boundary
 
@@ -56,12 +57,14 @@ The intended shared dependency flow is:
 ```text
 Darkspyre.Inference.Common
 ├── Darkspyre.Inference.Connect
-└── Darkspyre.Inference.Tensor
+├── Darkspyre.Inference.Tensor
+└── Darkspyre.Inference.UI.Settings
 
 Darkspyre.Inference.Tensor package
 └── Darkspyre.Inference.Tensor.Common assembly
     ├── Darkspyre.Inference.Tensor.LLM assembly → .Tensor.LLM.Qwen implementation
     ├── Darkspyre.Inference.Tensor.Image assembly → .Tensor.Image.Supra implementation
+    ├── Darkspyre.Inference.Tensor.STT assembly → .Tensor.STT.Whisper implementation
     └── Darkspyre.Inference.Tensor.Decision assembly → .Tensor.Decision.Laya implementation
 ```
 
@@ -109,12 +112,14 @@ fork adjacent Microsoft packages unless Darkspyre actually needs to change their
 | `Darkspyre.Inference.slnx` | Complete solution containing every library in the package family |
 | `Darkspyre.Inference.Connect.slnx` | Focused subset containing Common plus the `Connect.*` libraries and their tests |
 | `Tensor/Darkspyre.Inference.Tensor.slnx` | Focused subset containing the Tensor libraries and their tests |
+| `UI/Darkspyre.Inference.UI.slnx` | Focused subset containing Common, the UI.Settings editor library, and its tests |
 
 Additional subset solutions are not yet defined by this document.
 
 There is no root `Darkspyre.Inference` package. The root solution is an aggregate build surface, not
 a package or assembly. The product packaging projects are
 `Connect/src/Darkspyre.Inference.Connect` and `Tensor/src/Darkspyre.Inference.Tensor`.
+`UI/src/Settings/Darkspyre.Inference.UI.Settings` is its own Razor Class Library package.
 
 ## Required commands
 
@@ -149,7 +154,35 @@ build to .NET 11 advances the first component and resets the later components fo
 release (`11.<release>.<minor>`). Immutable releases are never overwritten. The family tag is
 created only after all three packages have passed their gates.
 
-## Current published 11.2.0 baseline
+## 11.3.0-rc.1 release candidate (2026-09-23)
+
+The user authorized the coordinated four-package private-feed release and the prerelease suffix.
+The breaking release component changes because the former LLM setup input/action types are replaced
+by the shared Common setup contracts. The `rc.1` suffix is required by UI.Settings' .NET 11 RC
+ASP.NET component dependency; private feeds do not bypass NuGet's stable/prerelease validation.
+
+All four packages use 11.3.0-rc.1: Common, Connect, Tensor and UI.Settings. Connect, Tensor and
+UI.Settings depend on Common at exactly `[11.3.0-rc.1]`; no product embeds another product's DLL.
+UI.Settings has no Connect/Tensor dependency. Provider SDKs and public Whisper/NAudio runtimes remain
+NuGet dependencies. TensorSharp's nine-package managed closure advances to 2.8.6.4 on its existing
+fork, replacing the local-only validation pin.
+
+Debug/Release builds have zero warnings/errors. Tests pass in both configurations: Connect 293,
+Tensor 257, UI 25 (22 shared Common plus three editor component tests). All three solution formatting
+checks and transitive vulnerability audits pass. `eng/VerifyPackages` verifies the exact manifests,
+owned DLL/XML lists, UI static assets and absence of embedded third-party/native binaries. A fresh
+four-PackageReference consumer loads the public contracts and initializes the public Whisper native
+runtime. No model weights, paid inference or consuming-app migration are part of release verification.
+The component suite does not certify the separately planned CE/Agent-DS visual integration matrix.
+
+The initial UI build required removing one redundant event-callback render and updating the test
+harness to the pinned bUnit/Lumeo APIs. The first Tensor pack exposed Whisper's imported `Pack=true`
+native files; Tensor now excludes those files and lets its public runtime dependency's build assets
+reach consumers. No warning was suppressed and no third-party binary was copied into Tensor.
+
+Publication readback and final source identity are recorded after all archive/consumer checks pass.
+
+## Published 11.2.0 baseline
 
 The synchronized three-package release was published to the private DarkspyreStudios GitHub
 Packages feed on 2026-09-22 from release-source commit `83c1ac3`:
@@ -236,7 +269,8 @@ was created because this repository has no configured Git remote.
 | Managed-agent verification | `Connect/docs/managed-agent-verification.md` |
 | Tensor package boundary, persistence, and implemented modalities | `Tensor/README.md` |
 | Shared CE / Agent-DS Settings UI requirements and provider contract gaps (not an approved API design) | `docs/provider-settings-contract-support-and-gaps.md` |
-| Approved provider setup and audio technical design (implementation in progress) | `docs/provider-setup-and-audio-technical-design.md` |
+| Host-placed Settings editor technical design and release validation | `docs/settings.ui.tech-design.md` |
+| Completed provider setup and audio technical design | `docs/provider-setup-and-audio-technical-design.md` |
 | Detailed implementation work | Jira tickets; project and parent TBD |
 
 If this document conflicts with an approved design bible or Jira technical specification, stop and

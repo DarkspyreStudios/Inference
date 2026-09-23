@@ -12,15 +12,13 @@ Anthropic Messages, direct ChatGPT subscription access and the official Claude a
 host-executed tools, managed agents, structured output, streaming, discovery, account usage, and
 embeddings. The `Darkspyre.Inference.Connect.Image` assembly supplies the image-provider contracts
 and built-in ComfyUI HTTP/WebSocket transport. AWS Bedrock Converse and AgentCore Harness remain
-isolated in the `Darkspyre.Inference.Connect.LLM.Bedrock` assembly. All three assemblies ship in the
-one Connect NuGet.
+isolated in the `Darkspyre.Inference.Connect.LLM.Bedrock` assembly.
 
-Unreleased source development also includes `Darkspyre.Inference.Connect.TTS` for external
+The package also includes `Darkspyre.Inference.Connect.TTS` for external
 PocketTTS HTTP synthesis and `Darkspyre.Inference.Connect.Audio` for external TangoFlux generation.
 They are included in the Connect product project, not separate NuGets. See
-[PocketTTS integration](#pockettts-speech-unreleased-development) and
-[TangoFlux integration](#tangoflux-audio-unreleased-development); these additions are not in the
-published 11.2.0 package.
+[PocketTTS integration](#pockettts-speech) and
+[TangoFlux integration](#tangoflux-audio). All five capability assemblies ship in Connect **11.3.0-rc.1**.
 
 The packages target .NET 11. Credentials
 for direct API transports remain owned by the host through `ILlmConnectionSource`; the connector
@@ -37,7 +35,7 @@ change.
 
 ## Packages
 
-The coordinated release contains three NuGets. They always use the same version from the repository
+The coordinated release contains four NuGets. They always use the same version from the repository
 `Directory.Build.props` and publish together. Version numbers use
 `<net>.<release>.<minor>`: .NET generation, breaking-contract release, and compatible tweak/fix.
 The direct Codex and host-owned managed-agent behavior from the former `Mathis.LlmConnect` 3.0.0 is
@@ -48,8 +46,13 @@ See the [Agent DS handoff](docs/agent-ds-contract-handoff.md),
 | Package | Purpose |
 |---|---|
 | `Darkspyre.Inference.Common` | Typed LLM, image, and decision requests, results, capabilities, streaming events, provenance, and failures shared by Connect and Tensor |
-| `Darkspyre.Inference.Connect` | Core LLM transports, Bedrock/AgentCore, and ComfyUI image connection assemblies |
-| `Darkspyre.Inference.Tensor` | In-process LLM, image, and typed-decision inference |
+| `Darkspyre.Inference.Connect` | LLM, Bedrock/AgentCore, ComfyUI, PocketTTS and TangoFlux connections |
+| `Darkspyre.Inference.Tensor` | In-process LLM, image, typed-decision and Whisper speech transcription |
+| `Darkspyre.Inference.UI.Settings` | Host-placed Blazor/Lumeo editor using only Common setup contracts |
+
+Connect, Tensor and UI.Settings depend on the exact synchronized Common NuGet; none carries
+another product's DLLs. UI.Settings does not depend on Connect or Tensor. The release-candidate
+suffix reflects the .NET 11 RC ASP.NET dependency, including on the private package feed.
 
 There is no `Darkspyre.Inference.Connect.Common` package or assembly. Connector-only endpoint,
 authentication, provider-management, and job contracts remain in their capability assemblies. Only
@@ -74,7 +77,7 @@ Image workflows expose the same boundary through `ImageProviderService.Bind(conn
 Binding is explicit and retains exactly one backend. Neither adapter retries through a different
 provider nor falls back from Connect to Tensor.
 
-## PocketTTS speech (unreleased development)
+## PocketTTS speech
 
 `ITtsClient` accepts `TtsRequest` and returns `TtsResult` with WAV bytes and provenance. Register
 `services.AddTtsConnect()`, then bind a host-supplied `TtsConnection` with `TtsProviderService`:
@@ -118,7 +121,7 @@ connection timeout. If constructing `PocketTtsHttpProvider` with your own `HttpC
 automatic redirects yourself so custom secret headers cannot follow a redirect to another origin;
 the host owns that client's lifetime. Endpoint paths cannot select a different origin.
 
-## TangoFlux audio (unreleased development)
+## TangoFlux audio
 
 `IAudioGenerationClient` accepts typed generation requests and returns WAV bytes and provenance.
 Register `services.AddAudioConnect()`, then bind a host-supplied `AudioConnection` with
@@ -444,7 +447,7 @@ Interactive completion methods accept the connection version captured before aut
 The `SignInAsync` convenience method captures that version internally. In both cases, the final save is
 still conditional, so a connection change during the external authentication round trip is rejected.
 
-## Provider setup and editing (unreleased development)
+## Provider setup and editing
 
 `LlmProviderCatalog.SetupDefinitions` describes providers without resolving connections or
 credentials. `LlmProviderService.CreateSetupSession` binds the shared typed editor to actual provider
@@ -497,7 +500,8 @@ an uncertain outcome requires readback before opening a new edit. The
 [generic editor example](../Common/examples/Darkspyre.Inference.Setup.Examples/README.md) compiles the
 same renderer against both Connect and Tensor. No UI framework is shipped in these packages.
 
-These source changes have not been published; the development version remains 11.2.0.
+These contracts are included in the 11.3.0-rc.1 family. The old LLM setup-input/action description
+types have been replaced by Common setup contracts; this is a breaking-contract release.
 
 ## Account usage
 
@@ -972,6 +976,6 @@ dotnet pack Darkspyre.Inference.Connect.slnx -c Release --no-restore
 dotnet list Darkspyre.Inference.Connect.slnx package --vulnerable --include-transitive
 ```
 
-Releases are immutable tags such as `v11.2.0`. `Common`, `Connect`, and `Tensor` are built and
+Releases are immutable tags such as `v11.3.0-rc.1`. `Common`, `Connect`, `Tensor`, and `UI.Settings` are built and
 published in tandem from the approved local release environment to the private GitHub Packages feed;
 GitHub Actions is not the release pipeline.
