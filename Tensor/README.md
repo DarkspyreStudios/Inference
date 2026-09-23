@@ -310,6 +310,12 @@ slots fails with `InvalidRequest`. The architecture label alone is not proof tha
 will work. `TensorModelDefinitionValidator.Validate`
 is the common metadata validator, also used by the catalog and Laya's family policy.
 
+On Core ML, Laya compiles the graph on every `LoadAsync`; Tensor keeps no compiled-model cache.
+For the 1.7 GB fp32 RightSize checkpoint on an M4 Pro, Load takes about 31 s and each question
+about 83 ms. A host that needs decisions shortly after start begins `LoadAsync` in the background
+and keeps the instance loaded. The measurements and the reasons Tensor keeps no compiled-model cache
+are in `docs/laya-onnx-runtime.tech-design.md`.
+
 `max_len` and `head_max_len` control sequence truncation and the head/option budget.
 `temperature_by_options` supplies the supported option-count buckets, falling back to that pack's
 `temperature[questionType]` when a bucket is absent. Temperatures must be positive and finite;

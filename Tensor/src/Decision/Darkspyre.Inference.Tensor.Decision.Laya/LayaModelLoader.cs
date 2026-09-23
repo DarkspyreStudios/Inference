@@ -50,10 +50,12 @@ internal sealed class LayaModelLoader : ILayaModelLoader
             switch (backend)
             {
                 case TensorBackendKind.CoreMl:
+                    // CPUAndGPU excludes the Neural Engine. It decides as fast as ALL on the Laya graph
+                    // and skips the Neural Engine preparation that lengthens every load.
                     options.AppendExecutionProvider("CoreML", new Dictionary<string, string>
                     {
                         ["ModelFormat"] = "MLProgram",
-                        ["MLComputeUnits"] = "ALL",
+                        ["MLComputeUnits"] = "CPUAndGPU",
                         ["RequireStaticInputShapes"] = "1"
                     });
                     break;

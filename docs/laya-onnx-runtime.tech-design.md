@@ -77,8 +77,10 @@ The engine reaches the model only through `ILayaModelLoader` and
   two values.
 - `LayaModelLoader` opens the `model` artifact as an ONNX file. It builds the session options from
   the resolved backend:
-  - `CoreMl`: Core ML execution provider with `ModelFormat=MLProgram`, `MLComputeUnits=ALL` and
-    `RequireStaticInputShapes=1`, with the CPU provider behind it.
+  - `CoreMl`: Core ML execution provider with `ModelFormat=MLProgram`, `MLComputeUnits=CPUAndGPU`
+    and `RequireStaticInputShapes=1`, with the CPU provider behind it. `CPUAndGPU` excludes the
+    Neural Engine: on the Laya graph it decides as fast as `ALL`, and it loads in about half the
+    time (section 11).
   - `Cpu`: CPU execution provider.
 - The loader reads the embedded model metadata (section 6) and compares `laya.max_len` with the
   agent configuration's `max_len`. A mismatch, a missing key, or input dimensions that differ from
@@ -169,9 +171,13 @@ training on gpu-box. Its packaging and release flow are in
    it. Hosts register their own Laya packs, as the RightSize plugin does. `TensorDecisionModels`
    keeps `LayaRuntimeArchitecture`. The tests that used the built-in pack use a test-local pack
    definition, and the pack-selection tests offer only host-registered packs.
-2. **This unit adds no Core ML compiled-model cache.** Core ML compiles the model on first load. The
-   acceptance run records first-load time. If that time needs a cache, the cache is a separate unit,
-   because it needs a host-supplied directory under M-b.
+2. **Laya has no Core ML compiled-model cache.** Core ML compiles the model on every load. The
+   acceptance run (section 11) measured ONNX Runtime's `ModelCacheDirectory` cache. It writes about
+   3.4 GB per checkpoint, and a cached load is fast only when the compiled model sits at the same
+   file path as the load before, because macOS keeps its own per-path preparation cache. The
+   persistence contract gives the engine streams, not paths, so a cache restored from the host's
+   store lands at a new path on each load and saves almost nothing. A host that needs the model
+   ready shortly after start begins `LoadAsync` in the background and keeps the instance loaded.
 3. **`LayaSetup.CreateSession` requires `offeredModels`.** Without a built-in pack, an absent list has
    no meaning. The host passes its registered packs. An empty list offers no models.
 
@@ -203,5 +209,20 @@ with zero warnings and its 301 tests pass. Format verification passes for both s
 Tensor transitive vulnerability audit reports no vulnerable packages. No package was created or
 published, and the shared version is unchanged.
 
-Not yet run: the full-weight acceptance run in section 9, including first-load time. It needs a
-checkpoint exported by the RightSize pipeline, which is a later unit.
+### Acceptance run and Core ML compute units (2026-09-23)
+
+The RightSize `coding-v7-s42` checkpoint was exported on gpu-box as fp32 (1,690,176,102 bytes,
+`max_len` 512). The export gate on 64 held-out items changed no decision; the largest output
+difference from PyTorch was 0.0024. On the M4 Pro, Core ML and CPU returned identical probabilities.
+
+| Configuration | First load | Load from a cache at the same path | Load from a cache at a new path | Per question |
+|---|---|---|---|---|
+| CPU provider | 1.5 s | n/a | n/a | 249 ms |
+| Core ML, `MLComputeUnits=ALL` | 46.6–55.8 s | 20.6 s | not measured | 81–84 ms |
+| Core ML, `MLComputeUnits=CPUAndGPU` | 30.8 s | 6.2–6.6 s | 27–29 s | 83 ms |
+
+The Core ML loads include compiling the 1.7 GB graph. Streaming the 3.4 GB cache into a new
+directory took 3–9 s before the 27–29 s load. `LayaModelLoader` now uses `CPUAndGPU`, and decision 2
+records why Laya keeps no compiled-model cache. The fp16 export remains open: the converter produced
+a graph with mismatched types at the decision tail, and keeping `Softmax` and `Cast` in fp32 made the
+conversion run for hours without finishing.
