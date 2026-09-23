@@ -15,6 +15,11 @@ and built-in ComfyUI HTTP/WebSocket transport. AWS Bedrock Converse and AgentCor
 isolated in the `Darkspyre.Inference.Connect.LLM.Bedrock` assembly. All three assemblies ship in the
 one Connect NuGet.
 
+Unreleased source development also includes `Darkspyre.Inference.Connect.TTS` for external
+PocketTTS HTTP synthesis. It is included in the Connect product project, not a separate NuGet.
+See [PocketTTS integration](#pockettts-speech-unreleased-development); this addition is not in the
+published 11.2.0 package.
+
 The packages target .NET 11. Credentials
 for direct API transports remain owned by the host through `ILlmConnectionSource`; the connector
 never owns an application database or secret store. Wrapped CLI transports instead use the official
@@ -66,6 +71,50 @@ LlmInferenceResult result = await llm.CompleteAsync(new LlmInferenceRequest
 Image workflows expose the same boundary through `ImageProviderService.Bind(connection, workflow)`.
 Binding is explicit and retains exactly one backend. Neither adapter retries through a different
 provider nor falls back from Connect to Tensor.
+
+## PocketTTS speech (unreleased development)
+
+`ITtsClient` accepts `TtsRequest` and returns `TtsResult` with WAV bytes and provenance. Register
+`services.AddTtsConnect()`, then bind a host-supplied `TtsConnection` with `TtsProviderService`:
+
+```csharp
+ITtsClient speech = ttsProviders.Bind(new TtsConnection
+{
+    Endpoint = new Uri("http://127.0.0.1:8020"),
+    PocketTts = new PocketTtsEndpointOptions { Protocol = PocketTtsProtocol.Multipart }
+});
+IReadOnlyList<TtsVoice> voices = await speech.ListVoicesAsync(cancellationToken);
+TtsResult clip = await speech.SpeakAsync(new TtsRequest
+{
+    Text = "The next room is quiet.",
+    VoiceId = selectedVoiceId,
+    Format = TtsAudioFormat.Wav
+}, cancellationToken);
+// The host owns playback or storage of clip.Audio.
+```
+
+The connector never starts a bridge, installs models, bypasses TLS validation or manages playback.
+The endpoint is external even on localhost. Multipart sends `text`, `output_format` and the
+configured voice field (default `voice_url`). It rejects non-default speed. BridgeJson sends `text`,
+`voice`, `speaker`, `speed` and `response_format`. Initially only WAV is advertised and accepted.
+Voice discovery uses `/voices`, falling back to `/health` only after a successful empty list. It
+preserves both voice-option objects and voice-name arrays; it never invents fallback voices.
+
+`SetupDefinitions` and `CreateSetupSession` use the shared typed setup editor. Endpoint, timeout,
+protocol, paths, protected headers, voice and speech defaults are editable. `TtsSetupChanges`
+contains the host's identity/version, the typed configuration with no header values, and explicit
+protected-header sets/removals. Untouched headers are omitted from mutations, not deleted. Save
+does not list voices or synthesize. Endpoint/voice verification and potentially billed synthesis
+are separate actions; protocol changes update the speed constraints and invalidate test evidence.
+The host retains its usual atomic settings/secret commit responsibility.
+
+HTTP authentication/access errors, timeouts and malformed responses have distinct
+`InferenceFailureCode` values; caller cancellation remains `OperationCanceledException`. Requests
+are never automatically retried. Raw response bodies, prompts and protected headers are not logged
+or copied into errors. Registration disables automatic redirects and gives each request its
+connection timeout. If constructing `PocketTtsHttpProvider` with your own `HttpClient`, disable
+automatic redirects yourself so custom secret headers cannot follow a redirect to another origin;
+the host owns that client's lifetime. Endpoint paths cannot select a different origin.
 
 ## Restore from GitHub Packages
 

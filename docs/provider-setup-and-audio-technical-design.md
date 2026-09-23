@@ -472,3 +472,25 @@ Verification: both focused solutions pass zero-warning Debug/Release builds, det
 (Connect 223, Tensor 56; Common's 22 occur in both), formatting verification and transitive
 vulnerability audits. No paid calls, full-weight inference, model downloads, package creation,
 version changes or publication are part of this unit. Implementation remains active for units 2–5.
+
+### Unit 2a — external PocketTTS checkpoint (2026-09-22)
+
+Implemented `Connect.TTS`: request-only client, provider/service registration, typed requests,
+voice/capability discovery, WAV results and host-owned setup. Preserves the donor's multipart and
+bridge-JSON modes and empty-voice-list health fallback. Multipart explicitly rejects non-default
+speed; only WAV is advertised. Protected header changes are explicit and separate from configuration.
+Save has no network effects; voice checks and synthesis tests remain distinct. Timeout, caller
+cancellation, HTTP access errors and malformed responses are not collapsed into null results or
+automatic retries. No native PocketTTS engine or bridge process is included.
+
+This is a separate safe checkpoint at the user's request to discuss host-supplied Laya packs.
+TangoFlux, remote discovery/resolution and Whisper have not been implemented yet. Laya's new request
+adds scope beyond the original classification-only row; its setup/pack-selection mapping will be
+reviewed separately before implementation. The user's custom Laya checkpoint has already run
+successfully through the Tensor engine; no new architecture support is inferred or needed.
+
+Verification for this checkpoint: both focused solutions pass zero-warning Debug/Release builds
+and deterministic tests (Connect 240, including 17 PocketTTS protocol/setup tests; Tensor 56).
+Formatting verification and the Connect transitive dependency vulnerability audit pass. No new
+third-party dependency, package artifact, version bump, publication, live endpoint request or
+model download was required. Audio implementation is paused here for the Laya discussion.

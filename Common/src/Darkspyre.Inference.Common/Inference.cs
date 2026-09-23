@@ -87,7 +87,11 @@ public enum InferenceFailureCode
     ModelCorrupt,
     BackendUnavailable,
     CapacityExhausted,
-    ExecutionFailed
+    ExecutionFailed,
+    AuthenticationRequired,
+    AccessDenied,
+    TimedOut,
+    ProtocolFailure
 }
 
 public sealed class InferenceException : Exception

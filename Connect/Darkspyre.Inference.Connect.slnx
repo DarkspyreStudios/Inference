@@ -19,6 +19,12 @@
   <Folder Name="/src/Image/">
     <Project Path="src/Image/Darkspyre.Inference.Connect.Image/Darkspyre.Inference.Connect.Image.csproj" />
   </Folder>
+  <Folder Name="/src/TTS/">
+    <Project Path="src/TTS/Darkspyre.Inference.Connect.TTS/Darkspyre.Inference.Connect.TTS.csproj" />
+  </Folder>
+  <Folder Name="/tests/TTS/">
+    <Project Path="tests/TTS/Darkspyre.Inference.Connect.TTS.Tests/Darkspyre.Inference.Connect.TTS.Tests.csproj" />
+  </Folder>
   <Folder Name="/tests/LLM/">
     <Project Path="tests/LLM/Darkspyre.Inference.Connect.LLM.Bedrock.Tests/Darkspyre.Inference.Connect.LLM.Bedrock.Tests.csproj" />
     <Project Path="tests/LLM/Darkspyre.Inference.Connect.LLM.Tests/Darkspyre.Inference.Connect.LLM.Tests.csproj" />
