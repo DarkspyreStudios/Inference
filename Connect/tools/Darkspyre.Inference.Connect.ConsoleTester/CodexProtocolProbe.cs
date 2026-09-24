@@ -36,15 +36,15 @@ internal static class CodexProtocolProbe
         messages.Add(new("assistant", result.Text) { ToolCalls = result.ToolCalls, ResponseState = result.ResponseState });
         messages.Add(new("user", "")
         {
-            ToolResults = [new(result.ToolCalls[0].Id, "The document is attached.")
+            ToolResults = [new(result.ToolCalls[0].Id, new LlmToolOutput
             {
-                Attachments = [new()
-                {
-                    Kind = LlmAttachmentKind.Document,
-                    FileName = "probe.txt",
-                    Data = Encoding.UTF8.GetBytes("The verification word is cerulean.")
-                }]
-            }]
+                Parts =
+                [
+                    new LlmToolOutputText("The document follows."),
+                    new LlmToolOutputBinary(
+                        LlmBinaryKind.Document, "text/plain", Encoding.UTF8.GetBytes("The verification word is cerulean."), "probe.txt")
+                ]
+            })]
         });
         request = request with { ToolChoice = new() { Mode = LlmToolChoiceMode.None } };
         result = await llms.CompleteAsync(connectionId, request, cancellationToken);
@@ -57,12 +57,26 @@ internal static class CodexProtocolProbe
         Console.WriteLine("PASS: multiple assistant states replay without server-stored history.");
 
         using var arguments = JsonDocument.Parse("""{"kind":"image"}""");
-        var imageResult = await Program.ExecuteToolAsync(
+        LlmToolOutput imageOutput = await Program.ExecuteToolAsync(
             new("probe", "probe", "probe", null, "darkspyre_inference_connect_attachment", arguments.RootElement), cancellationToken);
         result = await llms.CompleteAsync(connectionId, new()
         {
             ModelId = modelId,
-            Messages = [new("user", "Describe the attached image briefly.") { Attachments = imageResult.Attachments }]
+            Messages =
+            [
+                new("user", "Describe the attached image briefly.")
+                {
+                    Attachments =
+                    [
+                        .. imageOutput.Parts.OfType<LlmToolOutputBinary>().Select(image => new LlmAttachment
+                        {
+                            Kind = LlmAttachmentKind.Image,
+                            FileName = image.FileName ?? "image.png",
+                            Data = image.Data
+                        })
+                    ]
+                }
+            ]
         }, cancellationToken);
         if (result.Status != LlmCompletionStatus.Completed || result.Text.Length == 0)
         {

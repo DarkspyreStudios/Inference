@@ -32,17 +32,32 @@ internal sealed record AgentOpeningContext(string Text, IReadOnlyList<LlmAttachm
         var text = new StringBuilder();
         text.AppendLine(Header);
         TranscriptText.Append(text, context.Entries.Select(entry => entry.Message));
-        LlmAttachment[] attachments = [.. context.Entries.SelectMany(entry => entry.Message.Attachments
-            .Concat(entry.Message.ToolResults.SelectMany(result => result.Attachments)))];
+        // History images and documents travel as first-turn attachments; tool-output audio, other binaries and
+        // resource byte bodies have no attachment form and count as not carried.
+        LlmToolOutputPart[] toolBytes = [.. context.Entries.SelectMany(entry => entry.Message.ToolResults)
+            .SelectMany(result => result.Output.Parts)
+            .Where(part => part is LlmToolOutputBinary or LlmToolOutputResource { Data: not null })];
+        LlmAttachment[] attachments = [.. context.Entries.SelectMany(entry => entry.Message.Attachments),
+            .. toolBytes.OfType<LlmToolOutputBinary>()
+                .Where(binary => binary.Kind is LlmBinaryKind.Image or LlmBinaryKind.Document)
+                .Select(binary => new LlmAttachment
+                {
+                    Kind = binary.Kind == LlmBinaryKind.Image ? LlmAttachmentKind.Image : LlmAttachmentKind.Document,
+                    FileName = binary.FileName ?? "attachment",
+                    Data = binary.Data
+                })];
+        int uncarried = toolBytes.Length - toolBytes.OfType<LlmToolOutputBinary>()
+            .Count(binary => binary.Kind is LlmBinaryKind.Image or LlmBinaryKind.Document);
         if (carriesAttachments)
         {
             LlmAttachments.Validate(attachments, supportsImages: true, supportsDocuments: true, parameterName: nameof(options));
         }
         string notice = "History was carried as opening context in a new provider conversation; "
             + $"response state from {omitted} earlier messages was not carried.";
-        if (!carriesAttachments && attachments.Length > 0)
+        int notCarried = uncarried + (carriesAttachments ? 0 : attachments.Length);
+        if (notCarried > 0)
         {
-            notice += $" {attachments.Length} history attachments could not be carried.";
+            notice += $" {notCarried} history attachments could not be carried.";
         }
         return new(text.ToString(), carriesAttachments ? attachments : [], notice);
     }

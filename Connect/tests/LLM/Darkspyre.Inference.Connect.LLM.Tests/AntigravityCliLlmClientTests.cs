@@ -486,7 +486,7 @@ public sealed class AntigravityCliLlmClientTests
     [
         new LlmChatMessage("user", "Population of Lyon?"),
         new LlmChatMessage("assistant", string.Empty) { ToolCalls = [new LlmToolCall("c1", "lookup", """{"city":"Lyon"}""")] },
-        new LlmChatMessage("user", string.Empty) { ToolResults = [new LlmToolResult("c1", "522,250")] },
+        new LlmChatMessage("user", string.Empty) { ToolResults = [new LlmToolResult("c1", LlmToolOutput.FromText("522,250"))] },
         new LlmChatMessage("user", "Round it."),
     ];
 

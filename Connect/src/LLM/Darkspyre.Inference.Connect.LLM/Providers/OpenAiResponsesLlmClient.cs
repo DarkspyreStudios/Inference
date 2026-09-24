@@ -1,4 +1,5 @@
 using LlmReasoningLevel = Darkspyre.Inference.Common.LLM.LlmReasoningLevel;
+using Darkspyre.Inference.Connect.LLM.Internal;
 
 namespace Darkspyre.Inference.Connect.LLM.Providers;
 
@@ -24,8 +25,7 @@ internal sealed class OpenAiResponsesLlmClient(HttpClient http) : ResponsesLlmCl
         SupportsToolUse = true,
         SupportsPromptImages = true,
         SupportsPromptDocuments = true,
-        SupportsToolResultImages = true,
-        SupportsToolResultDocuments = true
+        RichContentSupported = RichContentRoutes.Responses
     };
 
 }

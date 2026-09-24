@@ -64,11 +64,8 @@ public sealed record LlmProviderCapabilities
     /// <summary>User prompts can include provider-neutral document attachments.</summary>
     public bool SupportsPromptDocuments { get; init; }
 
-    /// <summary>Host tool results can include provider-neutral image attachments.</summary>
-    public bool SupportsToolResultImages { get; init; }
-
-    /// <summary>Host tool results can include provider-neutral document attachments.</summary>
-    public bool SupportsToolResultDocuments { get; init; }
+    /// <summary>How the route carries each kind of tool-output content.</summary>
+    public LlmRichContentSupported RichContentSupported { get; init; } = new();
 
     public LlmProviderCapabilities Apply(LlmCapabilityOverrides? overrides)
     {
@@ -102,12 +99,17 @@ public sealed record LlmProviderCapabilities
                 && Restrict(overrides.SupportsAgentToolUse, SupportsAgentToolUse),
             SupportsAgentTurnInstructions = Restrict(overrides.SupportsAgentSessions, SupportsAgentSessions)
                 && Restrict(overrides.SupportsAgentTurnInstructions, SupportsAgentTurnInstructions),
-            Agent = Restrict(overrides.SupportsAgentSessions, SupportsAgentSessions) ? Agent : new(),
+            Agent = Restrict(overrides.SupportsAgentSessions, SupportsAgentSessions)
+                ? Agent with
+                {
+                    RichContentSupported = Agent.RichContentSupported.Restrict(
+                        overrides.SupportsToolResultImages, overrides.SupportsToolResultDocuments)
+                }
+                : new(),
             SupportsPromptImages = overrides.SupportsPromptImages ?? SupportsPromptImages,
             SupportsPromptDocuments = overrides.SupportsPromptDocuments ?? SupportsPromptDocuments,
-            SupportsToolResultImages = overrides.SupportsToolResultImages ?? SupportsToolResultImages,
-            SupportsToolResultDocuments = overrides.SupportsToolResultDocuments
-                ?? SupportsToolResultDocuments
+            RichContentSupported = RichContentSupported.Restrict(
+                overrides.SupportsToolResultImages, overrides.SupportsToolResultDocuments)
         };
     }
 
@@ -154,7 +156,9 @@ public sealed record LlmCapabilityOverrides
 
     public bool? SupportsPromptDocuments { get; init; }
 
+    /// <summary>False stops sending tool-result images; an override cannot enable them.</summary>
     public bool? SupportsToolResultImages { get; init; }
 
+    /// <summary>False stops sending tool-result documents; an override cannot enable them.</summary>
     public bool? SupportsToolResultDocuments { get; init; }
 }

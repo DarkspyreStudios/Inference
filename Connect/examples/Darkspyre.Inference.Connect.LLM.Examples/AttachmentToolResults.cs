@@ -1,8 +1,8 @@
 namespace Darkspyre.Inference.Connect.LLM.Examples;
 
 /// <summary>
-/// Provider-neutral image and document results. The caller supplies a kind, file name, and bytes;
-/// Darkspyre.Inference.Connect.LLM owns media detection plus the provider-specific encoding and wire representation.
+/// Provider-neutral image and document content. Prompts carry attachments; tool results carry one ordered
+/// output of parts. Darkspyre.Inference.Connect.LLM owns the provider-specific encoding and wire representation.
 /// </summary>
 public static class AttachmentToolResults
 {
@@ -28,17 +28,19 @@ public static class AttachmentToolResults
         string toolCallId,
         ReadOnlyMemory<byte> imageBytes,
         ReadOnlyMemory<byte> documentBytes) =>
-        new(toolCallId, "The generated chart and report are attached.")
-        {
-            Attachments = CreateAttachments(imageBytes, documentBytes)
-        };
+        new(toolCallId, ToolOutput(imageBytes, documentBytes));
 
-    public static LlmAgentToolResult ForAgent(
+    /// <summary>What an agent tool handler returns: text, then the chart, then the report, in that order.</summary>
+    public static LlmToolOutput ToolOutput(
         ReadOnlyMemory<byte> imageBytes,
         ReadOnlyMemory<byte> documentBytes) => new()
         {
-            Content = [new LlmAgentTextContent("The generated chart and report are attached.")],
-            Attachments = CreateAttachments(imageBytes, documentBytes)
+            Parts =
+            [
+                new LlmToolOutputText("The generated chart and report follow."),
+                new LlmToolOutputBinary(LlmBinaryKind.Image, "image/png", imageBytes, "chart.png"),
+                new LlmToolOutputBinary(LlmBinaryKind.Document, "application/pdf", documentBytes, "report.pdf")
+            ]
         };
 
     private static IReadOnlyList<LlmAttachment> CreateAttachments(

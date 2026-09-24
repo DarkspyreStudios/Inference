@@ -35,8 +35,7 @@ internal sealed class OpenAiCodexLlmClient(HttpClient http) : ResponsesLlmClient
         Agent = ManagedAgentPolicy.Capabilities,
         SupportsPromptImages = true,
         SupportsPromptDocuments = true,
-        SupportsToolResultImages = true,
-        SupportsToolResultDocuments = true
+        RichContentSupported = RichContentRoutes.Responses
     };
 
     public override LlmProviderCapabilities GetCapabilities(LlmConnection connection, string? modelId = null)

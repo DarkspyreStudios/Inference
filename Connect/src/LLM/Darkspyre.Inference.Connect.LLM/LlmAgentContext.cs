@@ -24,11 +24,12 @@ public sealed record LlmAgentContextCaptureOptions
 
 /// <summary>
 /// Metadata for unavailable bytes on the containing message. ToolCallId is null for prompt
-/// attachments; otherwise it identifies the owning tool result. Index is zero-based within
-/// that owner's attachment list. This metadata is never substitute model input.
+/// attachments; otherwise it identifies the owning tool result. Index is zero-based within the
+/// message's attachment list, or within the owning tool output's parts. This metadata is never
+/// substitute model input.
 /// </summary>
 public sealed record LlmOmittedAttachment(
-    LlmAttachmentKind Kind,
+    LlmBinaryKind Kind,
     string FileName,
     int Index,
     string? ToolCallId = null);

@@ -19,7 +19,8 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
         JsonObject payload = BuildPayload(connection, request, enforcement);
         RequestJson.ApplyProviderOptions(payload, connection, request);
         if (request.Messages.Any(message => message.Attachments.Count > 0
-            || message.ToolResults.Any(result => result.Attachments.Count > 0)
+            || message.ToolResults.Any(result => result.Output.Parts.Any(part =>
+                part is LlmToolOutputBinary or LlmToolOutputResource { Data: not null }))
             || message.ResponseState?.Payload.Contains("encrypted_content", StringComparison.Ordinal) == true))
         {
             return null;
@@ -224,7 +225,8 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
         JsonArray input = OpenAiResponsesTools.BuildInput(
             request,
             connection,
-            OpenAiResponsesTools.BuildMessage);
+            OpenAiResponsesTools.BuildMessage,
+            output => ProjectToolOutput(connection, request.ModelId, output));
 
         var payload = new JsonObject
         {

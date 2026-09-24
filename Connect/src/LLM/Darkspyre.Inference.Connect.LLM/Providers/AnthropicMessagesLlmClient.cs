@@ -35,8 +35,7 @@ internal sealed class AnthropicMessagesLlmClient : LlmClientBase
         SupportsToolUse = true,
         SupportsPromptImages = true,
         SupportsPromptDocuments = true,
-        SupportsToolResultImages = true,
-        SupportsToolResultDocuments = true
+        RichContentSupported = RichContentRoutes.Anthropic
     };
 
     public override LlmProviderCapabilities GetCapabilities(
@@ -75,7 +74,7 @@ internal sealed class AnthropicMessagesLlmClient : LlmClientBase
             ? null
             : StructuredOutput.ResolveEnforcement(request.StructuredOutput, capabilities);
         LlmCredential? credential = LlmCredential.Parse(connection.Credential);
-        JsonObject payload = BuildPayload(connection, request);
+        JsonObject payload = BuildPayload(connection, request, output => ProjectToolOutput(connection, request.ModelId, output));
         using var httpRequest = new HttpRequestMessage(
             HttpMethod.Post,
             BuildApiUri(connection, "messages"))
@@ -370,7 +369,8 @@ internal sealed class AnthropicMessagesLlmClient : LlmClientBase
 
     private static JsonObject BuildPayload(
         LlmConnection connection,
-        LlmChatRequest request)
+        LlmChatRequest request,
+        Func<LlmToolOutput, ProjectedToolOutput> projectToolOutput)
     {
         var system = new JsonArray();
         if (!string.IsNullOrWhiteSpace(request.Instructions))
@@ -398,12 +398,13 @@ internal sealed class AnthropicMessagesLlmClient : LlmClientBase
                 var content = new JsonArray();
                 foreach (LlmToolResult result in message.ToolResults)
                 {
+                    ProjectedToolOutput projected = projectToolOutput(result.Output);
                     content.Add(new JsonObject
                     {
                         ["type"] = "tool_result",
                         ["tool_use_id"] = result.ToolCallId,
-                        ["content"] = BuildToolResultContent(result),
-                        ["is_error"] = result.IsError
+                        ["content"] = BuildToolResultContent(projected),
+                        ["is_error"] = projected.IsError
                     });
                 }
 
@@ -512,29 +513,21 @@ internal sealed class AnthropicMessagesLlmClient : LlmClientBase
         return payload;
     }
 
-    private static JsonNode BuildToolResultContent(LlmToolResult result)
+    /// <summary>A single text part stays a string; anything richer is the ordered block list.</summary>
+    private static JsonNode BuildToolResultContent(ProjectedToolOutput projected)
     {
-        if (result.Attachments.Count == 0)
+        if (projected.Parts is [SentText only])
         {
-            return JsonValue.Create(result.Content)!;
+            return JsonValue.Create(only.Text);
         }
 
         var content = new JsonArray();
-        if (result.Content.Length > 0)
+        foreach (SentToolPart part in projected.Parts)
         {
-            content.Add(new JsonObject { ["type"] = "text", ["text"] = result.Content });
+            content.Add(part is SentText text
+                ? new JsonObject { ["type"] = "text", ["text"] = text.Text }
+                : AnthropicAttachments.BuildToolPart(part));
         }
-
-        foreach (LlmAttachment attachment in result.Attachments)
-        {
-            content.Add(attachment.Kind switch
-            {
-                LlmAttachmentKind.Image or LlmAttachmentKind.Document =>
-                    AnthropicAttachments.BuildContentBlock(attachment),
-                _ => throw new ArgumentOutOfRangeException(nameof(result))
-            });
-        }
-
         return content;
     }
 

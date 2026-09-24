@@ -86,11 +86,8 @@ public sealed record LlmAttachment
     public required ReadOnlyMemory<byte> Data { get; init; }
 }
 
-/// <summary>The result of a tool invocation executed by the host application.</summary>
-public sealed record LlmToolResult(string ToolCallId, string Content, bool IsError = false)
-{
-    public IReadOnlyList<LlmAttachment> Attachments { get; init; } = [];
-}
+/// <summary>The output of a tool invocation executed by the host application.</summary>
+public sealed record LlmToolResult(string ToolCallId, LlmToolOutput Output);
 
 /// <summary>How far a structured request may fall back when native JSON Schema is unavailable.</summary>
 public enum LlmStructuredOutputFallback

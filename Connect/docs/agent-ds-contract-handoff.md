@@ -1,5 +1,24 @@
 # Agent DS: managed-agent contract handoff
 
+## Rich tool output: 11.7.0-rc.1
+
+`11.7.0-rc.1` is a breaking-contract release. Agent DS floats `11.*-*`, so its tool-result bridge
+must move in the same change that restores this version.
+
+- `LlmToolResult(ToolCallId, LlmToolOutput Output)` replaces the content string, `IsError` and
+  `Attachments`. `LlmAgentToolHandler` returns `LlmToolOutput`; `LlmAgentToolResult` no longer exists.
+- `LlmToolOutput` holds ordered text, binary and resource parts, optional structured JSON, and
+  `IsError`. `LlmToolOutput.FromText(text, isError)` builds the text-only case.
+- `LlmProviderCapabilities.RichContentSupported` (chat lane) and
+  `LlmAgentCapabilities.RichContentSupported` (agent lane) replace `SupportsToolResultImages` and
+  `SupportsToolResultDocuments`. The capability overrides keep those two names; `false` lowers the
+  matching carriages.
+- `LlmProviderService.ProjectToolOutputAsync(connectionId, modelId, output, lane, ct)` reports each
+  part's delivery without a network call. It matches what the adapter sends.
+- `LlmOmittedAttachment.Kind` is an `LlmBinaryKind`. For tool output, `Index` is the part position.
+
+Semantics and route carriages are in the [canonical design](enhancements.md#rich-tool-results).
+
 ## Bounded-compaction accounting extension: 11.6.0-rc.1
 
 The user authorized the coordinated `11.6.0-rc.1` contract release after the initial source-only hold.
@@ -105,11 +124,23 @@ owns sniffing, MIME types, encoding, upload/staging and request projection. No a
 document-to-prompt concatenation is needed.
 
 `LlmAgentContextCaptureOptions.IncludeAttachmentData` defaults false. The managed capture operation
-omits bytes from both prompt and nested tool-result attachments without changing live context.
-`LlmOmittedAttachment(Kind, FileName, Index, ToolCallId)` identifies the unavailable attachment:
-the containing message owns it; null tool ID means prompt attachment, otherwise the matching tool
-result owns it. `Index` is the original zero-based index in that owner's attachment list. Duplicate
-filenames are safe because filename is not identity. Descriptors are notices, never model input.
+omits prompt attachment bytes and tool-output binary parts and resource byte bodies, without changing
+live context. `LlmOmittedAttachment(LlmBinaryKind Kind, FileName, Index, ToolCallId)` identifies the
+unavailable content: the containing message owns it; null tool ID means prompt attachment, otherwise
+the matching tool result owns it. For a prompt attachment, `Index` is the zero-based index in the
+message's attachment list. For tool output, `Index` is the part's position in `LlmToolOutput.Parts`.
+Duplicate filenames are safe because filename is not identity. Descriptors are notices, never model
+input.
+
+### Tool output
+
+A tool result is `LlmToolResult(ToolCallId, LlmToolOutput Output)`, and an agent `ToolHandler`
+returns `LlmToolOutput`. `LlmProviderCapabilities.RichContentSupported` and
+`LlmAgentCapabilities.RichContentSupported` declare each route's carriage per content kind, for the
+chat and agent lanes. `LlmProviderService.ProjectToolOutputAsync(connectionId, modelId, output, lane)`
+reports what each part sends. The adapter serializes through the same projection and omits what the
+route cannot carry, so a tool never fails for unsupported content. The Connect README has the route
+table and the fixed text renderings.
 
 Use `IncludeAttachmentData = true` for live compaction. Agent DS can separately omit bytes from
 its stored projection. Never send that stripped projection back into the live run by accident.

@@ -40,6 +40,8 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             options.Tools,
             options.Handlers,
             options.Ephemeral,
+            connection,
+            NativeAgentContract.Claude.RichContentSupported.For(connection, options.ModelId),
             opening,
             cancellationToken);
     }
@@ -72,6 +74,8 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             options.Tools,
             options.Handlers,
             ephemeral: false,
+            connection,
+            NativeAgentContract.Claude.RichContentSupported.For(connection, options.ModelId),
             opening: null,
             cancellationToken);
     }
@@ -112,6 +116,8 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             options.Tools,
             options.Handlers,
             ephemeral: false,
+            connection,
+            NativeAgentContract.Claude.RichContentSupported.For(connection, options.ModelId),
             opening: null,
             cancellationToken);
     }
@@ -131,6 +137,8 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
         IReadOnlyList<LlmAgentToolDefinition> tools,
         LlmAgentSessionHandlers handlers,
         bool ephemeral,
+        LlmConnection connection,
+        LlmRichContentSupported richContent,
         AgentOpeningContext? opening,
         CancellationToken cancellationToken)
     {
@@ -168,6 +176,8 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             modelId,
             tools,
             handlers,
+            NativeAgentContract.Claude.RichContentSupported.For(connection, null),
+            richContent,
             opening);
         try
         {
@@ -354,6 +364,9 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
         private readonly IReadOnlyList<LlmAgentToolDefinition> _tools;
         private readonly Dictionary<string, LlmAgentToolDefinition> _toolsByName;
         private readonly LlmAgentSessionHandlers _handlers;
+        // The agent lane's tool-output support after the connection's overrides, and after the model's too.
+        private readonly LlmRichContentSupported _richRoute;
+        private readonly LlmRichContentSupported _richContent;
         private readonly SemaphoreSlim _turnGate = new(1, 1);
         private readonly SemaphoreSlim _writeLock = new(1, 1);
         private readonly Queue<string> _deferredLines = new();
@@ -370,9 +383,13 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             string? initialModelId,
             IReadOnlyList<LlmAgentToolDefinition> tools,
             LlmAgentSessionHandlers handlers,
+            LlmRichContentSupported richRoute,
+            LlmRichContentSupported richContent,
             AgentOpeningContext? opening)
         {
             _process = process;
+            _richRoute = richRoute;
+            _richContent = richContent;
             _opening = opening;
             ThreadId = threadId;
             SessionId = sessionId;
@@ -863,10 +880,10 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
                     : JsonSerializer.SerializeToElement(new { });
             PendingToolCall? pending = TakePendingToolCall(name, arguments);
             string callId = pending?.Id ?? ReadJsonRpcId(id) ?? controlRequestId;
-            LlmAgentToolResult result;
+            LlmToolOutput output;
             try
             {
-                result = await _handlers.ToolHandler!(
+                output = await _handlers.ToolHandler!(
                     new LlmAgentToolCall(
                         ThreadId,
                         _activeTurnId ?? string.Empty,
@@ -882,13 +899,11 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             }
             catch
             {
-                result = new LlmAgentToolResult
-                {
-                    Success = false,
-                    Content = [new LlmAgentTextContent("The host tool failed.")]
-                };
+                output = LlmToolOutput.FromText("The host tool failed.", isError: true);
             }
 
+            // Unsupported parts are omitted by the projection; they never fail the tool or the turn.
+            ProjectedToolOutput projected = ToolOutputProjector.Project(output, _richRoute, _richContent);
             var toolEvent = new LlmAgentToolEvent(
                 ThreadId,
                 _activeTurnId ?? string.Empty,
@@ -896,15 +911,15 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
                 McpServerName,
                 name,
                 arguments,
-                result.Success,
-                result.Success ? "completed" : "failed");
+                !output.IsError,
+                output.IsError ? "failed" : "completed");
             return new McpResponse(
                 McpResult(
                     id,
                     new
                     {
-                        content = SerializeToolResult(result),
-                        isError = !result.Success
+                        content = SerializeToolResult(projected),
+                        isError = projected.IsError
                     }),
                 toolEvent);
         }
@@ -1157,69 +1172,43 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             };
         }
 
-        private static IReadOnlyList<object> SerializeToolResult(LlmAgentToolResult result)
-        {
-            LlmAttachments.Validate(
-                result.Attachments,
-                supportsImages: true,
-                supportsDocuments: true,
-                parameterName: nameof(result));
-            return
-            [
-                .. result.Content.Select(item => item switch
-                {
-                    LlmAgentTextContent text => (object)new { type = "text", text = text.Text },
-                    LlmAgentImageContent image => SerializeMediaResult("image", image.ImageUrl),
-                    LlmAgentAudioContent audio => SerializeMediaResult("audio", audio.AudioUrl),
-                    _ => throw new ArgumentException(
-                        $"Unsupported agent tool result type '{item.GetType().Name}'.",
-                        nameof(result))
-                }),
-                .. result.Attachments.Select(SerializeAttachment)
-            ];
-        }
-
-        private static object SerializeAttachment(LlmAttachment attachment) =>
-            attachment.Kind switch
+        private static IReadOnlyList<object> SerializeToolResult(ProjectedToolOutput projected) =>
+        [
+            .. projected.Parts.Select(part => part switch
             {
-                LlmAttachmentKind.Image => new Dictionary<string, object?>
+                SentText text => (object)new { type = "text", text = text.Text },
+                SentImage image => new Dictionary<string, object?>
                 {
                     ["type"] = "image",
-                    ["mimeType"] = LlmAttachments.ResolveMediaType(attachment),
-                    ["data"] = LlmAttachments.ToBase64(attachment)
+                    ["mimeType"] = image.MediaType,
+                    ["data"] = Convert.ToBase64String(image.Data.Span)
                 },
-                LlmAttachmentKind.Document => new Dictionary<string, object?>
+                SentResourceLink { MediaType: null } link => new Dictionary<string, object?>
+                {
+                    ["type"] = "resource_link",
+                    ["uri"] = link.Uri,
+                    ["name"] = link.Name ?? link.Uri
+                },
+                SentResourceLink link => new Dictionary<string, object?>
+                {
+                    ["type"] = "resource_link",
+                    ["uri"] = link.Uri,
+                    ["name"] = link.Name ?? link.Uri,
+                    ["mimeType"] = link.MediaType
+                },
+                SentEmbeddedText embedded => new Dictionary<string, object?>
                 {
                     ["type"] = "resource",
                     ["resource"] = new Dictionary<string, object?>
                     {
-                        ["uri"] = $"darkspyre-inference-connect://tool-result/{Uri.EscapeDataString(attachment.FileName)}",
-                        ["mimeType"] = LlmAttachments.ResolveMediaType(attachment),
-                        ["blob"] = LlmAttachments.ToBase64(attachment)
+                        ["uri"] = embedded.Uri,
+                        ["mimeType"] = embedded.MediaType ?? "text/plain",
+                        ["text"] = embedded.Text
                     }
                 },
-                _ => throw new ArgumentOutOfRangeException(nameof(attachment))
-            };
-
-        private static Dictionary<string, object?> SerializeMediaResult(string type, string url)
-        {
-            if (TryParseDataUrl(url, out string mediaType, out string data))
-            {
-                return new Dictionary<string, object?>
-                {
-                    ["type"] = type,
-                    ["mimeType"] = mediaType,
-                    ["data"] = data
-                };
-            }
-
-            return new Dictionary<string, object?>
-            {
-                ["type"] = "resource_link",
-                ["uri"] = url,
-                ["name"] = $"{type}-result"
-            };
-        }
+                _ => throw new InvalidOperationException("The Claude MCP route does not carry this part natively.")
+            })
+        ];
 
         private static bool TryParseDataUrl(
             string value,

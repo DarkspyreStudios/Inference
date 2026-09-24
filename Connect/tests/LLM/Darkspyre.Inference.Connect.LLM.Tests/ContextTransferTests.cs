@@ -19,8 +19,16 @@ public sealed class ContextTransferTests
             {
                 ToolResults =
                 [
-                    new LlmToolResult("c1", "522,250") { Attachments = [Attachment("chart.png")] },
-                    new LlmToolResult("c2", "timeout", IsError: true)
+                    new LlmToolResult("c1", new LlmToolOutput
+                    {
+                        Parts =
+                        [
+                            new LlmToolOutputText("522,250"),
+                            new LlmToolOutputBinary(LlmBinaryKind.Image, "image/png", new byte[] { 1 }, "chart.png"),
+                            new LlmToolOutputBinary(LlmBinaryKind.Document, "text/plain", "census 2021"u8.ToArray(), "source.txt")
+                        ]
+                    }),
+                    new LlmToolResult("c2", LlmToolOutput.FromText("timeout", isError: true))
                 ]
             },
             new LlmChatMessage("user", "Round it.") { Attachments = [Attachment("note.txt")] },
@@ -38,6 +46,8 @@ public sealed class ContextTransferTests
 
             [TOOL RESULT id=c1 status=ok]
             522,250
+            [File: source.txt]
+            census 2021
             [TOOL RESULT id=c2 status=error]
             timeout
             [ATTACHMENTS: chart.png]

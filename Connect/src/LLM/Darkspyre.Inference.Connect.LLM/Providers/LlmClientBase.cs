@@ -263,21 +263,25 @@ internal abstract class LlmClientBase(HttpClient http) : ILlmClient
 
             foreach (LlmToolResult result in message.ToolResults)
             {
-                if (string.IsNullOrWhiteSpace(result.ToolCallId))
+                // Content a route cannot carry is omitted by projection, not rejected here.
+                if (string.IsNullOrWhiteSpace(result.ToolCallId) || result.Output is null)
                 {
                     throw new ArgumentException(
-                        "Tool results require a tool-call id.",
+                        "Tool results require a tool-call id and an output.",
                         nameof(request));
                 }
-
-                LlmAttachments.Validate(
-                    result.Attachments,
-                    capabilities.SupportsToolResultImages,
-                    capabilities.SupportsToolResultDocuments,
-                    nameof(request));
             }
         }
     }
+
+    /// <summary>
+    /// Projects a tool output with the connection's support as the route and the model's support as the target.
+    /// </summary>
+    internal ProjectedToolOutput ProjectToolOutput(LlmConnection connection, string modelId, LlmToolOutput output) =>
+        ToolOutputProjector.Project(
+            output,
+            GetCapabilities(connection).RichContentSupported,
+            GetCapabilities(connection, modelId).RichContentSupported);
 
     protected LlmProviderException ProtocolException(
         string message,

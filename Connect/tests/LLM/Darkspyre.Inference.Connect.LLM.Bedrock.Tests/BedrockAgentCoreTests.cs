@@ -39,8 +39,12 @@ public sealed class BedrockAgentCoreTests
         Assert.False(capabilities.SupportsModelListing);
         Assert.False(capabilities.SupportsPromptImages);
         Assert.False(capabilities.SupportsPromptDocuments);
-        Assert.False(capabilities.SupportsToolResultImages);
-        Assert.False(capabilities.SupportsToolResultDocuments);
+        Assert.Equal(capabilities.RichContentSupported, capabilities.Agent.RichContentSupported);
+        Assert.Equal(LlmRichContentCarriage.Unsupported, capabilities.RichContentSupported.Images);
+        Assert.Equal(LlmRichContentCarriage.Unsupported, capabilities.RichContentSupported.PdfDocuments);
+        Assert.Equal(LlmRichContentCarriage.Text, capabilities.RichContentSupported.TextDocuments);
+        Assert.Equal(LlmRichContentCarriage.Native, capabilities.RichContentSupported.ErrorFlag);
+        Assert.False(capabilities.RichContentSupported.AllowsEmpty);
     }
 
     [Fact]
@@ -214,9 +218,14 @@ public sealed class BedrockAgentCoreTests
                     ToolHandler = (call, _) =>
                     {
                         calls.Add(call);
-                        return ValueTask.FromResult(new LlmAgentToolResult
+                        // The route carries no images; the image is omitted and the tool still succeeds.
+                        return ValueTask.FromResult(new LlmToolOutput
                         {
-                            Content = [new LlmAgentTextContent("72 F")]
+                            Parts =
+                            [
+                                new LlmToolOutputText("72 F"),
+                                new LlmToolOutputBinary(LlmBinaryKind.Image, "image/png", new byte[] { 0x89 }, "radar.png")
+                            ]
                         });
                     }
                 }

@@ -40,21 +40,17 @@ internal static class WeatherTool
         {
             using JsonDocument arguments = JsonDocument.Parse(call.ArgumentsJson);
             (string content, bool success) = ExecuteValidated(call.Name, arguments.RootElement);
-            return new LlmToolResult(
-                call.Id,
-                content,
-                IsError: !success);
+            return new LlmToolResult(call.Id, LlmToolOutput.FromText(content, isError: !success));
         }
         catch (Exception exception) when (exception is JsonException or ArgumentException)
         {
             return new LlmToolResult(
                 call.Id,
-                JsonSerializer.Serialize(new { error = "Invalid get_weather arguments." }),
-                IsError: true);
+                LlmToolOutput.FromText(JsonSerializer.Serialize(new { error = "Invalid get_weather arguments." }), isError: true));
         }
     }
 
-    public static ValueTask<LlmAgentToolResult> ExecuteAsync(
+    public static ValueTask<LlmToolOutput> ExecuteAsync(
         LlmAgentToolCall call,
         CancellationToken cancellationToken)
     {
@@ -62,19 +58,11 @@ internal static class WeatherTool
         try
         {
             (string content, bool success) = ExecuteValidated(call.Name, call.Arguments);
-            return ValueTask.FromResult(new LlmAgentToolResult
-            {
-                Success = success,
-                Content = [new LlmAgentTextContent(content)]
-            });
+            return ValueTask.FromResult(LlmToolOutput.FromText(content, isError: !success));
         }
         catch (ArgumentException)
         {
-            return ValueTask.FromResult(new LlmAgentToolResult
-            {
-                Success = false,
-                Content = [new LlmAgentTextContent("Invalid get_weather arguments.")]
-            });
+            return ValueTask.FromResult(LlmToolOutput.FromText("Invalid get_weather arguments.", isError: true));
         }
     }
 

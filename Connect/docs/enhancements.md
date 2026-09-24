@@ -1021,7 +1021,7 @@ public enum LlmAgentContextImport
 
 ## Rich tool results
 
-**Status:** Proposed, for review before implementation
+**Status:** Included in this technical design
 
 **Motivating consumer:** Agent DS tool-result projection
 
@@ -1087,12 +1087,18 @@ public sealed record LlmToolOutput
     public JsonElement? StructuredContent { get; init; }
 
     public bool IsError { get; init; }
+
+    public static LlmToolOutput FromText(string text, bool isError = false);
 }
 
 public sealed record LlmToolResult(string ToolCallId, LlmToolOutput Output);
 ```
 
 - `LlmAgentSessionHandlers.ToolHandler` returns `LlmToolOutput`.
+- A captured context serializes each part with a `type` field: `text`, `binary` or `resource`.
+- A capture without attachment bytes drops binary parts and resource byte bodies from tool outputs and
+  records each as an `LlmOmittedAttachment`. Its `Kind` is an `LlmBinaryKind`, its `Index` is the
+  part's position in `Parts`, and its `ToolCallId` names the result.
 - `LlmAgentContent` remains the turn-input vocabulary only.
 - The Common portable lane keeps its own tool-result shape. `ConnectLlmInference` maps its text and
   attachments to text and binary parts in their existing order.
@@ -1139,7 +1145,9 @@ public sealed record LlmRichContentSupported
 ```
 
 - `LlmProviderCapabilities.RichContentSupported` replaces `SupportsToolResultImages` and
-  `SupportsToolResultDocuments`. Model capability overrides can lower a carriage, for example images
+  `SupportsToolResultDocuments`. It describes the chat lane. `LlmAgentCapabilities.RichContentSupported`
+  describes agent-session tool calls. The two differ on the Claude CLI, where agent tool results are MCP
+  results and chat tool history is text. Model capability overrides can lower a carriage, for example images
   for a model without vision, but cannot raise one; an adapter never sends what it cannot serialize.
   The setup editor's two tool-result override rows set `Images` and the two document carriages.
 - A resource with a byte body is classified by its media type as an image, PDF, text document, audio
@@ -1175,11 +1183,14 @@ public sealed record LlmToolOutputProjection(
     LlmToolPartProjection? StructuredContent,
     LlmToolPartProjection ErrorFlag);
 
+public enum LlmToolOutputLane { Chat, AgentSession }
+
 Task<LlmToolOutputProjection> LlmProviderService.ProjectToolOutputAsync(
-    string connectionId, string modelId, LlmToolOutput output, CancellationToken cancellationToken = default);
+    string connectionId, string modelId, LlmToolOutput output,
+    LlmToolOutputLane lane = LlmToolOutputLane.Chat, CancellationToken cancellationToken = default);
 ```
 
-- The projection applies the model's `RichContentSupported` to one output. `Parts` has one entry per
+- The projection applies the model's `RichContentSupported` for the lane to one output. `Parts` has one entry per
   supplied part, in order. It reads the connection and model capabilities and performs no network call.
 - Each adapter serializes tool results through the same internal projection, so the report describes
   exactly what is sent. Omitted parts are not sent. Connect adds no notice text; the host adds any

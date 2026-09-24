@@ -30,8 +30,7 @@ internal sealed class OpenAiCompatibleChatLlmClient(HttpClient http) : LlmClient
         {
             SupportsPromptImages = false,
             SupportsPromptDocuments = false,
-            SupportsToolResultImages = false,
-            SupportsToolResultDocuments = false
+            RichContentSupported = RichContentRoutes.TextOnly
         };
 
     public override async IAsyncEnumerable<LlmStreamEvent> StreamAsync(
@@ -276,7 +275,9 @@ internal sealed class OpenAiCompatibleChatLlmClient(HttpClient http) : LlmClient
                     {
                         ["role"] = "tool",
                         ["tool_call_id"] = result.ToolCallId,
-                        ["content"] = result.Content
+                        // The protocol carries a string: every carried part is rendered as text.
+                        ["content"] = ToolOutputProjector.Project(
+                            result.Output, capabilities.RichContentSupported, capabilities.RichContentSupported).Text
                     });
                 }
 

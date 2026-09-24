@@ -61,27 +61,22 @@ public sealed class ClaudeAgentClientTests
                     ToolHandler = (call, _) =>
                     {
                         observedCall = call;
-                        return ValueTask.FromResult(new LlmAgentToolResult
+                        return ValueTask.FromResult(new LlmToolOutput
                         {
-                            Content = [new LlmAgentTextContent("echo: hello")],
-                            Attachments =
+                            Parts =
                             [
-                                new LlmAttachment
-                                {
-                                    Kind = LlmAttachmentKind.Image,
-                                    FileName = "chart.png",
-                                    Data = new byte[]
-                                    {
-                                        0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a
-                                    }
-                                },
-                                new LlmAttachment
-                                {
-                                    Kind = LlmAttachmentKind.Document,
-                                    FileName = "report.pdf",
-                                    Data = "%PDF-"u8.ToArray()
-                                }
-                            ]
+                                new LlmToolOutputText("echo: hello"),
+                                new LlmToolOutputBinary(
+                                    LlmBinaryKind.Image,
+                                    "image/png",
+                                    new byte[] { 0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a },
+                                    "chart.png"),
+                                new LlmToolOutputBinary(LlmBinaryKind.Document, "application/pdf", "%PDF-"u8.ToArray(), "report.pdf"),
+                                new LlmToolOutputBinary(LlmBinaryKind.Audio, "audio/wav", new byte[] { 1 }, "clip.wav"),
+                                new LlmToolOutputBinary(LlmBinaryKind.Document, "text/plain", "notes"u8.ToArray(), "notes.txt"),
+                                new LlmToolOutputResource("https://example.test/spec") { Name = "spec" }
+                            ],
+                            StructuredContent = JsonSerializer.SerializeToElement(new { n = 1 })
                         });
                     }
                 }
@@ -156,16 +151,21 @@ public sealed class ClaudeAgentClientTests
             "echo: hello",
             mcpResponse.GetProperty("result").GetProperty("content")[0].GetProperty("text").GetString());
         JsonElement toolContent = mcpResponse.GetProperty("result").GetProperty("content");
-        Assert.Equal("image", toolContent[1].GetProperty("type").GetString());
+        Assert.False(mcpResponse.GetProperty("result").GetProperty("isError").GetBoolean());
+        Assert.Equal(
+            ["text", "image", "resource", "resource_link", "text"],
+            toolContent.EnumerateArray().Select(item => item.GetProperty("type").GetString()));
         Assert.Equal("image/png", toolContent[1].GetProperty("mimeType").GetString());
         Assert.Equal("iVBORw0KGgo=", toolContent[1].GetProperty("data").GetString());
-        Assert.Equal("resource", toolContent[2].GetProperty("type").GetString());
-        Assert.Equal(
-            "application/pdf",
-            toolContent[2].GetProperty("resource").GetProperty("mimeType").GetString());
-        Assert.Equal(
-            "JVBERi0=",
-            toolContent[2].GetProperty("resource").GetProperty("blob").GetString());
+        JsonElement embedded = toolContent[2].GetProperty("resource");
+        Assert.Equal(("file:///notes.txt", "text/plain", "notes"), (
+            embedded.GetProperty("uri").GetString(),
+            embedded.GetProperty("mimeType").GetString(),
+            embedded.GetProperty("text").GetString()));
+        Assert.Equal("https://example.test/spec", toolContent[3].GetProperty("uri").GetString());
+        Assert.Equal("spec", toolContent[3].GetProperty("name").GetString());
+        Assert.False(toolContent[3].TryGetProperty("mimeType", out _));
+        Assert.Equal("{\"n\":1}", toolContent[4].GetProperty("text").GetString());
 
         JsonElement userContent = process.Writes
             .Select(Parse)
@@ -261,7 +261,7 @@ public sealed class ClaudeAgentClientTests
                     ],
                     Handlers = new LlmAgentSessionHandlers
                     {
-                        ToolHandler = (_, _) => ValueTask.FromResult(new LlmAgentToolResult())
+                        ToolHandler = (_, _) => ValueTask.FromResult(new LlmToolOutput())
                     }
                 }));
 
@@ -294,7 +294,7 @@ public sealed class ClaudeAgentClientTests
             Tools = [new LlmAgentToolDefinition { Name = "echo", Description = "Echo text.", InputSchema = schema.RootElement.Clone() }],
             Handlers = new LlmAgentSessionHandlers
             {
-                ToolHandler = (_, _) => ValueTask.FromResult(new LlmAgentToolResult { Content = [new LlmAgentTextContent("echo")] })
+                ToolHandler = (_, _) => ValueTask.FromResult(LlmToolOutput.FromText("echo"))
             }
         });
 

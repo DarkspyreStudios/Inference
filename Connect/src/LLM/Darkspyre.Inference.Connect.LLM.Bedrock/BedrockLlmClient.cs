@@ -29,8 +29,7 @@ internal sealed class BedrockLlmClient(
         SupportsToolUse = true,
         SupportsPromptImages = true,
         SupportsPromptDocuments = true,
-        SupportsToolResultImages = true,
-        SupportsToolResultDocuments = true
+        RichContentSupported = RichContentRoutes.BedrockConverse
     };
 
     public LlmTransport Transport => LlmTransport.AwsBedrockConverse;
@@ -226,10 +225,13 @@ internal sealed class BedrockLlmClient(
                         ToolResult = new ToolResultBlock
                         {
                             ToolUseId = toolResult.ToolCallId,
-                            Status = toolResult.IsError
+                            Status = toolResult.Output.IsError
                                 ? ToolResultStatus.Error
                                 : ToolResultStatus.Success,
-                            Content = BuildToolResultContent(toolResult)
+                            Content = BuildToolResultContent(ToolOutputProjector.Project(
+                                toolResult.Output,
+                                RichContentRoutes.BedrockConverse.For(connection, null),
+                                RichContentRoutes.BedrockConverse.For(connection, modelId)))
                         }
                     });
                 }
@@ -383,53 +385,54 @@ internal sealed class BedrockLlmClient(
         };
     }
 
-    private static List<ToolResultContentBlock> BuildToolResultContent(LlmToolResult result)
+    /// <summary>The ordered Converse blocks; an empty result still sends one empty text block.</summary>
+    private static List<ToolResultContentBlock> BuildToolResultContent(ProjectedToolOutput projected)
     {
-        LlmAttachments.Validate(
-            result.Attachments,
-            supportsImages: true,
-            supportsDocuments: true,
-            parameterName: nameof(result));
         var content = new List<ToolResultContentBlock>();
-        if (result.Content.Length > 0 || result.Attachments.Count == 0)
+        int documents = 0;
+        foreach (SentToolPart part in projected.Parts)
         {
-            content.Add(new ToolResultContentBlock { Text = result.Content });
-        }
-
-        foreach (LlmAttachment attachment in result.Attachments)
-        {
-            string mediaType = LlmAttachments.ResolveMediaType(attachment);
-            content.Add(attachment.Kind switch
+            content.Add(part switch
             {
-                LlmAttachmentKind.Image => new ToolResultContentBlock
+                SentText text => new ToolResultContentBlock { Text = text.Text },
+                SentImage image => new ToolResultContentBlock
                 {
                     Image = new ImageBlock
                     {
-                        Format = BedrockImageFormat(mediaType),
-                        Source = new ImageSource
-                        {
-                            Bytes = new MemoryStream(attachment.Data.ToArray(), writable: false)
-                        }
+                        Format = BedrockImageFormat(image.MediaType),
+                        Source = new ImageSource { Bytes = new MemoryStream(image.Data.ToArray(), writable: false) }
                     }
                 },
-                LlmAttachmentKind.Document => new ToolResultContentBlock
+                // Converse document names must be unique within a request and use a restricted character set.
+                SentFile file => new ToolResultContentBlock
                 {
                     Document = new DocumentBlock
                     {
-                        Format = BedrockDocumentFormat(mediaType),
-                        Name = "tool-result-document",
-                        Source = new DocumentSource
-                        {
-                            Bytes = new MemoryStream(attachment.Data.ToArray(), writable: false)
-                        }
+                        Format = ToolDocumentFormat(file.MediaType),
+                        Name = $"tool-result-document-{++documents}",
+                        Source = new DocumentSource { Bytes = new MemoryStream(file.Data.ToArray(), writable: false) }
                     }
                 },
-                _ => throw new ArgumentOutOfRangeException(nameof(result))
+                SentStructured structured => new ToolResultContentBlock { Json = DeserializeDocument(structured.Value.GetRawText()) },
+                _ => throw new InvalidOperationException("Converse tool results do not carry this part natively.")
             });
         }
-
+        if (content.Count == 0)
+        {
+            content.Add(new ToolResultContentBlock { Text = string.Empty });
+        }
         return content;
     }
+
+    /// <summary>A projected document is a PDF or UTF-8 text; text without a named Converse format goes as txt.</summary>
+    private static DocumentFormat ToolDocumentFormat(string mediaType) => mediaType.ToLowerInvariant() switch
+    {
+        "application/pdf" => DocumentFormat.Pdf,
+        "text/csv" => DocumentFormat.Csv,
+        "text/html" => DocumentFormat.Html,
+        "text/markdown" => DocumentFormat.Md,
+        _ => DocumentFormat.Txt
+    };
 
     private static ImageFormat BedrockImageFormat(string mediaType) =>
         mediaType.ToLowerInvariant() switch

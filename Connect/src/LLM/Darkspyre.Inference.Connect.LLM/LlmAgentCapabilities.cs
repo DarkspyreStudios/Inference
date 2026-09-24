@@ -87,6 +87,9 @@ public sealed record LlmAgentCapabilities
 
     public LlmAgentToolExecutionOwnership ToolExecutionOwnership { get; init; }
 
+    /// <summary>How host tool output reaches the model in this runtime's sessions.</summary>
+    public LlmRichContentSupported RichContentSupported { get; init; } = new();
+
     internal void Validate()
     {
         if (!Enum.IsDefined(ContextOwnership) || !Enum.IsDefined(ContextImport) || !Enum.IsDefined(CompactionOwnership)

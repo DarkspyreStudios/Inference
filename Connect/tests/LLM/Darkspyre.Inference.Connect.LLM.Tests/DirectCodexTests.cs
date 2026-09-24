@@ -82,7 +82,7 @@ public sealed class DirectCodexTests
         {
             Messages = [new("user", "first"),
             new("assistant", result.Text) { ToolCalls = result.ToolCalls, ResponseState = result.ResponseState },
-            new("user", "") { ToolResults = [new("call", "answer")] }]
+            new("user", "") { ToolResults = [new("call", LlmToolOutput.FromText("answer"))] }]
         });
         using var replay = JsonDocument.Parse(handler.Body!);
         var input = replay.RootElement.GetProperty("input");
@@ -109,30 +109,56 @@ public sealed class DirectCodexTests
     }
 
     [Fact]
-    public async Task ImagesDocumentsAndToolAttachmentsUseAdapterOwnedWireBlocks()
+    public async Task ImagesDocumentsAndToolOutputPartsUseAdapterOwnedWireBlocks()
     {
         using var handler = new Handler(_ => Sse(Completed));
         using var http = new HttpClient(handler);
         var client = new OpenAiCodexLlmClient(http);
-        var image = new LlmAttachment
-        {
-            Kind = LlmAttachmentKind.Image,
-            FileName = "x.png",
-            Data = Convert.FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jG9sAAAAASUVORK5CYII=")
-        };
+        byte[] png = Convert.FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jG9sAAAAASUVORK5CYII=");
+        var image = new LlmAttachment { Kind = LlmAttachmentKind.Image, FileName = "x.png", Data = png };
         var document = new LlmAttachment { Kind = LlmAttachmentKind.Document, FileName = "x.txt", Data = "word"u8.ToArray() };
+        var output = new LlmToolOutput
+        {
+            Parts =
+            [
+                new LlmToolOutputText("read"),
+                new LlmToolOutputBinary(LlmBinaryKind.Image, "image/png", png, "x.png"),
+                new LlmToolOutputBinary(LlmBinaryKind.Audio, "audio/wav", new byte[] { 1 }, "x.wav"),
+                new LlmToolOutputBinary(LlmBinaryKind.Document, "text/plain", "word"u8.ToArray(), "x.txt"),
+                new LlmToolOutputResource("https://example.test/r") { Name = "r" }
+            ],
+            StructuredContent = JsonSerializer.SerializeToElement(new { ok = true }),
+            IsError = true
+        };
         await Complete(client, Connection(), Request() with
         {
             Messages = [new("user", "see") { Attachments = [image, document] },
             new("assistant", "") { ToolCalls = [new("call", "echo", "{}")] },
-            new("user", "") { ToolResults = [new("call", "read") { Attachments = [image, document] }] }]
+            new("user", "") { ToolResults = [new("call", output)] }]
         });
         using var sent = JsonDocument.Parse(handler.Body!);
-        string payload = sent.RootElement.GetRawText();
-        Assert.Contains("data:image/png;base64,", payload);
-        Assert.Contains(Convert.ToBase64String("word"u8), payload);
-        Assert.Contains("function_call_output", payload);
-        Assert.DoesNotContain("OmittedAttachments", payload);
+        JsonElement items = sent.RootElement.GetProperty("input")[2].GetProperty("output");
+        Assert.Equal(
+            ["input_text", "input_text", "input_image", "input_file", "input_text", "input_text"],
+            items.EnumerateArray().Select(item => item.GetProperty("type").GetString()));
+        Assert.Equal(ToolOutputProjector.ErrorMarker, items[0].GetProperty("text").GetString());
+        Assert.Equal("read", items[1].GetProperty("text").GetString());
+        Assert.Equal($"data:image/png;base64,{Convert.ToBase64String(png)}", items[2].GetProperty("image_url").GetString());
+        Assert.Equal("x.txt", items[3].GetProperty("filename").GetString());
+        Assert.Equal($"data:text/plain;base64,{Convert.ToBase64String("word"u8)}", items[3].GetProperty("file_data").GetString());
+        Assert.Equal("[Resource link: r] https://example.test/r", items[4].GetProperty("text").GetString());
+        Assert.Equal("{\"ok\":true}", items[5].GetProperty("text").GetString());
+        Assert.DoesNotContain("OmittedAttachments", sent.RootElement.GetRawText());
+
+        var providers = new LlmProviderService(new Source(Connection()), [client]);
+        LlmToolOutputProjection report = await providers.ProjectToolOutputAsync("codex", "model", output);
+        Assert.Equal(
+            [LlmToolPartDelivery.Delivered, LlmToolPartDelivery.Delivered, LlmToolPartDelivery.Omitted, LlmToolPartDelivery.Delivered,
+                LlmToolPartDelivery.Converted],
+            report.Parts.Select(part => part.Delivery));
+        Assert.Equal(LlmToolPartOmission.UnsupportedByRoute, report.Parts[2].Omission);
+        Assert.Equal(LlmToolPartDelivery.Converted, report.StructuredContent!.Delivery);
+        Assert.Equal(LlmToolPartDelivery.Converted, report.ErrorFlag.Delivery);
     }
 
     [Fact]
@@ -268,7 +294,7 @@ public sealed class DirectCodexTests
             {
                 source.Connection = source.Connection with { Credential = Credential(switchAccount ? "other" : "account") };
                 if (disableAgent) { source.Connection = source.Connection with { CapabilityOverrides = new() { SupportsAgentSessions = false } }; }
-                return ValueTask.FromResult(new LlmAgentToolResult());
+                return ValueTask.FromResult(new LlmToolOutput());
             }
             }
         };
@@ -376,7 +402,7 @@ public sealed class DirectCodexTests
             UnboundResponseState = LlmUnboundResponseState.Omit,
             Messages = [new("user", "first"),
                 new("assistant", first.Text) { ToolCalls = first.ToolCalls, ResponseState = first.ResponseState },
-                new("user", "") { ToolResults = [new("call", "answer")] }]
+                new("user", "") { ToolResults = [new("call", LlmToolOutput.FromText("answer"))] }]
         };
         return (handler, providers, followup);
     }

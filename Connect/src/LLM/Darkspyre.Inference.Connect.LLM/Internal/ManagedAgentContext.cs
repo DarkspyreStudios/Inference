@@ -146,14 +146,36 @@ internal static class ManagedAgentContext
             for (int i = 0; i < attachments.Count; i++)
             {
                 while (omitted.Any(item => item.ToolCallId == toolId && item.Index == index)) { index++; }
-                omitted.Add(new(attachments[i].Kind, attachments[i].FileName, index++, toolId));
+                LlmBinaryKind kind = attachments[i].Kind == LlmAttachmentKind.Image ? LlmBinaryKind.Image : LlmBinaryKind.Document;
+                omitted.Add(new(kind, attachments[i].FileName, index++, toolId));
             }
             return [];
+        }
+        // Without attachment data, byte-bearing parts leave the output and are recorded by their position.
+        LlmToolOutput StripOutput(LlmToolOutput output, string toolCallId)
+        {
+            var parts = new List<LlmToolOutputPart>(output.Parts.Count);
+            for (int index = 0; index < output.Parts.Count; index++)
+            {
+                switch (output.Parts[index])
+                {
+                    case LlmToolOutputBinary binary:
+                        omitted.Add(new(binary.Kind, binary.FileName ?? "attachment", index, toolCallId));
+                        break;
+                    case LlmToolOutputResource { Data: not null } resource:
+                        omitted.Add(new(ToolOutputProjector.Classify(resource.MediaType), resource.Name ?? resource.Uri, index, toolCallId));
+                        break;
+                    case var part:
+                        parts.Add(part);
+                        break;
+                }
+            }
+            return output with { Parts = Array.AsReadOnly(parts.ToArray()), StructuredContent = output.StructuredContent?.Clone() };
         }
         var attachments = CopyAttachments(message.Attachments, null);
         var results = message.ToolResults.Select(result => result with
         {
-            Attachments = CopyAttachments(result.Attachments, result.ToolCallId)
+            Output = includeAttachmentData ? CopyOutput(result.Output) : StripOutput(result.Output, result.ToolCallId)
         }).ToArray();
         return message with
         {
@@ -163,6 +185,18 @@ internal static class ManagedAgentContext
             OmittedAttachments = Array.AsReadOnly(omitted.ToArray())
         };
     }
+
+    /// <summary>A copy that shares no byte buffer or JSON value with the caller's output.</summary>
+    public static LlmToolOutput CopyOutput(LlmToolOutput output) => output with
+    {
+        Parts = Array.AsReadOnly(output.Parts.Select(part => part switch
+        {
+            LlmToolOutputBinary binary => binary with { Data = binary.Data.ToArray() },
+            LlmToolOutputResource { Data: { } data } resource => resource with { Data = data.ToArray() },
+            _ => part
+        }).ToArray()),
+        StructuredContent = output.StructuredContent?.Clone()
+    };
 
     public static bool Equivalent(LlmAgentContextEntry left, LlmAgentContextEntry right) =>
         JsonElement.DeepEquals(JsonSerializer.SerializeToElement(left), JsonSerializer.SerializeToElement(right));

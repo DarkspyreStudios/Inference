@@ -57,7 +57,7 @@ public sealed class ManagedAgentTests
         var omitted = proposal with
         {
             Entries = [proposal.Entries[0] with
-        { Message = new("user", "replacement") { OmittedAttachments = [new(LlmAttachmentKind.Document, "missing.txt", 0)] } }]
+        { Message = new("user", "replacement") { OmittedAttachments = [new(LlmBinaryKind.Document, "missing.txt", 0)] } }]
         };
         var unknown = await session.MeasureContextAsync(omitted);
         Assert.Null(unknown.UsedContextTokens);
@@ -81,7 +81,7 @@ public sealed class ManagedAgentTests
         await using var session = harness.Create(ToolsOptions(call =>
         {
             executed.Add(call.CallId);
-            return new() { Content = [new LlmAgentTextContent(call.CallId)] };
+            return LlmToolOutput.FromText(call.CallId);
         }) with
         { Instructions = "base" });
         var events = await Read(session.RunTurnAsync(Turn("hello") with { Instructions = "override", ReasoningLevel = LlmReasoningLevel.High }));
@@ -305,11 +305,67 @@ public sealed class ManagedAgentTests
         await running.WaitAsync(TimeSpan.FromSeconds(5));
         var captured = await session.CaptureContextAsync();
         Assert.Equal(2, captured.Entries[^1].Message.ToolResults.Count);
-        Assert.All(captured.Entries[^1].Message.ToolResults, result => Assert.True(result.IsError));
-        Assert.Contains("unknown", captured.Entries[^1].Message.ToolResults[0].Content);
-        Assert.Contains("not executed", captured.Entries[^1].Message.ToolResults[1].Content);
+        Assert.All(captured.Entries[^1].Message.ToolResults, result => Assert.True(result.Output.IsError));
+        Assert.Contains("unknown", TextOf(captured.Entries[^1].Message.ToolResults[0]));
+        Assert.Contains("not executed", TextOf(captured.Entries[^1].Message.ToolResults[1]));
         await using var restored = harness.Create(options with { Context = captured });
         Assert.Equal(captured.Revision, (await restored.CaptureContextAsync()).Revision);
+    }
+
+    [Fact]
+    public async Task UnsupportedToolContentReachesTheModelRequestWithoutFailingTheTool()
+    {
+        var harness = new Harness();
+        harness.Results.Enqueue(new() { Diagnostics = new(200, null, null), Text = "", Status = LlmCompletionStatus.RequiresAction, ToolCalls = [new("a", "echo", "{}")] });
+        harness.Results.Enqueue(new() { Diagnostics = new(200, null, null), Text = "done", Status = LlmCompletionStatus.Completed });
+        LlmToolOutput output = new()
+        {
+            Parts = [new LlmToolOutputText("heard"), new LlmToolOutputBinary(LlmBinaryKind.Audio, "audio/wav", new byte[] { 1, 2 }, "clip.wav")]
+        };
+        await using var session = harness.Create(ToolsOptions(_ => output));
+
+        var events = await Read(session.RunTurnAsync(Turn("go")));
+
+        Assert.Contains(events.OfType<LlmAgentToolEvent>(), item => item.Status == "completed" && item.Success == true);
+        LlmToolOutput sent = Assert.Single(harness.Requests[1].Messages.SelectMany(message => message.ToolResults)).Output;
+        Assert.False(sent.IsError);
+        Assert.Equal(new byte[] { 1, 2 }, Assert.IsType<LlmToolOutputBinary>(sent.Parts[1]).Data.ToArray());
+    }
+
+    [Fact]
+    public async Task CaptureWithoutBytesRecordsEachToolBinaryByKindAndPartIndex()
+    {
+        var harness = new Harness();
+        harness.Results.Enqueue(new() { Diagnostics = new(200, null, null), Text = "", Status = LlmCompletionStatus.RequiresAction, ToolCalls = [new("a", "echo", "{}")] });
+        harness.Results.Enqueue(new() { Diagnostics = new(200, null, null), Text = "done", Status = LlmCompletionStatus.Completed });
+        byte[] png = [0x89, 0x50];
+        await using var session = harness.Create(ToolsOptions(_ => new()
+        {
+            Parts =
+            [
+                new LlmToolOutputText("see"),
+                new LlmToolOutputBinary(LlmBinaryKind.Image, "image/png", png, "chart.png"),
+                new LlmToolOutputResource("file:///report.pdf") { Name = "report", MediaType = "application/pdf", Data = "%PDF-"u8.ToArray() },
+                new LlmToolOutputResource("file:///notes.md") { Text = "kept" }
+            ]
+        }));
+        await Read(session.RunTurnAsync(Turn("go")));
+        png[0] = 0;
+
+        LlmChatMessage light = (await session.CaptureContextAsync()).Entries[2].Message;
+        LlmChatMessage full = (await session.CaptureContextAsync(new() { IncludeAttachmentData = true })).Entries[2].Message;
+
+        Assert.Equal(
+            [new LlmOmittedAttachment(LlmBinaryKind.Image, "chart.png", 1, "a"), new LlmOmittedAttachment(LlmBinaryKind.Document, "report", 2, "a")],
+            light.OmittedAttachments);
+        Assert.Equal(["see", "kept"], light.ToolResults[0].Output.Parts.Select(part => part switch
+        {
+            LlmToolOutputText text => text.Text,
+            LlmToolOutputResource resource => resource.Text,
+            _ => null
+        }));
+        Assert.Empty(full.OmittedAttachments);
+        Assert.Equal(0x89, Assert.IsType<LlmToolOutputBinary>(full.ToolResults[0].Output.Parts[1]).Data.Span[0]);
     }
 
     [Theory]
@@ -325,7 +381,7 @@ public sealed class ManagedAgentTests
         var events = await Read(session.RunTurnAsync(Turn("go")));
         Assert.Equal(0, executions);
         Assert.Contains(events.OfType<LlmAgentToolEvent>(), item => item.Status == "failed");
-        Assert.True((await session.CaptureContextAsync()).Entries[2].Message.ToolResults[0].IsError);
+        Assert.True((await session.CaptureContextAsync()).Entries[2].Message.ToolResults[0].Output.IsError);
     }
 
     [Theory]
@@ -444,7 +500,7 @@ public sealed class ManagedAgentTests
         Assert.Throws<ArgumentException>(() => harness.Create(Options() with
         {
             Context = new()
-            { Entries = [entry with { Message = new("user", "") { ToolResults = [new("orphan", "result")] } }] }
+            { Entries = [entry with { Message = new("user", "") { ToolResults = [new("orphan", LlmToolOutput.FromText("result"))] } }] }
         }));
     }
 
@@ -477,12 +533,14 @@ public sealed class ManagedAgentTests
     private static LlmAgentContext History(string text) => new() { Entries = [new("old", "previous", new("user", text))] };
     private static LlmAgentExecutionOptions SmallPolicy() => new()
     { ContextPolicy = new() { MaxContextTokens = 100, ReservedOutputTokens = 10, SafetyMarginTokens = 0, CompactionThresholdRatio = .8 } };
-    private static LlmAgentSessionOptions ToolsOptions(Func<LlmAgentToolCall, LlmAgentToolResult> handler) => Options() with
+    private static LlmAgentSessionOptions ToolsOptions(Func<LlmAgentToolCall, LlmToolOutput> handler) => Options() with
     {
         Tools = [new() { Name = "echo", InputSchema = JsonSerializer.SerializeToElement(new
         { type = "object", properties = new { }, additionalProperties = false }) }],
         Handlers = new() { ToolHandler = (call, _) => ValueTask.FromResult(handler(call)) }
     };
+    private static string TextOf(LlmToolResult result) =>
+        Assert.IsType<LlmToolOutputText>(Assert.Single(result.Output.Parts)).Text;
     private static async Task<List<LlmAgentEvent>> Read(IAsyncEnumerable<LlmAgentEvent> source)
     {
         var events = new List<LlmAgentEvent>();
@@ -506,8 +564,7 @@ public sealed class ManagedAgentTests
                 SupportsAgentSessions = true,
                 SupportsAgentToolUse = true,
                 SupportsAgentTurnInstructions = true,
-                SupportsToolResultImages = true,
-                SupportsToolResultDocuments = true,
+                RichContentSupported = RichContentRoutes.Responses,
                 Agent = ManagedAgentPolicy.Capabilities
             });
         public string? EstimateDiagnostic => null;

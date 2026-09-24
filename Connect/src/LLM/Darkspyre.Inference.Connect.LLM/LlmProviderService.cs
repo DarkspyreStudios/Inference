@@ -499,6 +499,32 @@ public sealed class LlmProviderService
         return ClientFor(connection.Transport).GetCapabilities(connection);
     }
 
+    /// <summary>
+    /// What one tool output sends on this connection, model and lane: one entry per part, in order. Reads the
+    /// connection and its capabilities only; it performs no network call and refreshes no credential.
+    /// </summary>
+    public async Task<LlmToolOutputProjection> ProjectToolOutputAsync(
+        string connectionId,
+        string modelId,
+        LlmToolOutput output,
+        LlmToolOutputLane lane = LlmToolOutputLane.Chat,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(modelId);
+        ArgumentNullException.ThrowIfNull(output);
+        if (!Enum.IsDefined(lane))
+        {
+            throw new ArgumentOutOfRangeException(nameof(lane));
+        }
+        LlmConnection connection = await LlmConnectionResolver.ResolveAsync(_connections, connectionId, cancellationToken);
+        ILlmClient client = ClientFor(connection.Transport);
+        LlmProviderCapabilities route = client.GetCapabilities(connection);
+        LlmProviderCapabilities model = client.GetCapabilities(connection, modelId);
+        return lane == LlmToolOutputLane.Chat
+            ? ToolOutputProjector.Project(output, route.RichContentSupported, model.RichContentSupported).Report
+            : ToolOutputProjector.Project(output, route.Agent.RichContentSupported, model.Agent.RichContentSupported).Report;
+    }
+
     public async Task<LlmProviderCapabilities> GetModelCapabilitiesAsync(
         string connectionId,
         string modelId,

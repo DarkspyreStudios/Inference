@@ -2,6 +2,7 @@ using System.Net;
 using System.Runtime.CompilerServices;
 using Common = Darkspyre.Inference.Common;
 using CommonLlm = Darkspyre.Inference.Common.LLM;
+using Darkspyre.Inference.Connect.LLM.Internal;
 
 namespace Darkspyre.Inference.Connect.LLM;
 
@@ -169,23 +170,36 @@ internal sealed class ConnectLlmInference(
                 call.Id,
                 call.Name,
                 call.ArgumentsJson)).ToArray(),
+            // The portable result's text comes first, then its attachments in their order.
             ToolResults = message.ToolResults.Select(static result => new LlmToolResult(
                 result.ToolCallId,
-                result.Content,
-                result.IsError)
-            {
-                Attachments = result.Attachments.Select(static attachment => new LlmAttachment
+                new LlmToolOutput
                 {
-                    Kind = attachment.Kind switch
-                    {
-                        CommonLlm.LlmAttachmentKind.Image => LlmAttachmentKind.Image,
-                        CommonLlm.LlmAttachmentKind.Document => LlmAttachmentKind.Document,
-                        _ => throw new ArgumentOutOfRangeException(nameof(attachment))
-                    },
-                    FileName = attachment.FileName,
-                    Data = attachment.Data
-                }).ToArray()
-            }).ToArray()
+                    IsError = result.IsError,
+                    Parts =
+                    [
+                        new LlmToolOutputText(result.Content),
+                        .. result.Attachments.Select(static attachment =>
+                        {
+                            var converted = new LlmAttachment
+                            {
+                                Kind = attachment.Kind switch
+                                {
+                                    CommonLlm.LlmAttachmentKind.Image => LlmAttachmentKind.Image,
+                                    CommonLlm.LlmAttachmentKind.Document => LlmAttachmentKind.Document,
+                                    _ => throw new ArgumentOutOfRangeException(nameof(attachment))
+                                },
+                                FileName = attachment.FileName,
+                                Data = attachment.Data
+                            };
+                            return new LlmToolOutputBinary(
+                                converted.Kind == LlmAttachmentKind.Image ? LlmBinaryKind.Image : LlmBinaryKind.Document,
+                                LlmAttachments.ResolveMediaType(converted),
+                                converted.Data,
+                                converted.FileName);
+                        })
+                    ]
+                })).ToArray()
         }).ToArray(),
         Temperature = request.Temperature,
         MaxOutputTokens = request.MaxOutputTokens,

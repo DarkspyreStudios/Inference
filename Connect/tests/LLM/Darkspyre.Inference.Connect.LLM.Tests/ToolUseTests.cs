@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text;
 using System.Text.Json;
+using Darkspyre.Inference.Connect.LLM.Internal;
 using Darkspyre.Inference.Connect.LLM.Providers;
 
 namespace Darkspyre.Inference.Connect.LLM.Tests;
@@ -16,8 +17,7 @@ public sealed class ToolUseTests
         Assert.True(responses.SupportsToolUse);
         Assert.True(responses.SupportsPromptImages);
         Assert.True(responses.SupportsPromptDocuments);
-        Assert.True(responses.SupportsToolResultImages);
-        Assert.True(responses.SupportsToolResultDocuments);
+        Assert.Equal(RichContentRoutes.Responses, responses.RichContentSupported);
         Assert.True(new OpenAiCompatibleChatLlmClient(http).GetCapabilities(CompatibleConnection()).SupportsToolUse);
         LlmProviderCapabilities codex =
             new OpenAiCodexLlmClient(http).GetCapabilities(CodexConnection());
@@ -25,15 +25,14 @@ public sealed class ToolUseTests
         Assert.True(codex.SupportsAgentToolUse);
         Assert.True(codex.SupportsPromptImages);
         Assert.True(codex.SupportsPromptDocuments);
-        Assert.True(codex.SupportsToolResultImages);
-        Assert.True(codex.SupportsToolResultDocuments);
+        Assert.Equal(RichContentRoutes.Responses, codex.RichContentSupported);
+        Assert.Equal(RichContentRoutes.Responses, codex.Agent.RichContentSupported);
 
         var anthropic = new AnthropicMessagesLlmClient(http);
         Assert.True(anthropic.GetCapabilities(AnthropicConnection()).SupportsToolUse);
         Assert.True(anthropic.GetCapabilities(AnthropicConnection()).SupportsPromptImages);
         Assert.True(anthropic.GetCapabilities(AnthropicConnection()).SupportsPromptDocuments);
-        Assert.True(anthropic.GetCapabilities(AnthropicConnection()).SupportsToolResultImages);
-        Assert.True(anthropic.GetCapabilities(AnthropicConnection()).SupportsToolResultDocuments);
+        Assert.Equal(RichContentRoutes.Anthropic, anthropic.GetCapabilities(AnthropicConnection()).RichContentSupported);
         Assert.False(anthropic.GetCapabilities(AnthropicConnection()).SupportsAgentToolUse);
         Assert.Throws<NotSupportedException>(() => anthropic.GetCapabilities(
             AnthropicConnection() with
@@ -58,8 +57,8 @@ public sealed class ToolUseTests
         Assert.True(cliOnly.SupportsAgentToolUse);
         Assert.True(cliOnly.SupportsPromptImages);
         Assert.True(cliOnly.SupportsPromptDocuments);
-        Assert.True(cliOnly.SupportsToolResultImages);
-        Assert.True(cliOnly.SupportsToolResultDocuments);
+        Assert.Equal(RichContentRoutes.TextOnly, cliOnly.RichContentSupported);
+        Assert.Equal(RichContentRoutes.ClaudeMcp, cliOnly.Agent.RichContentSupported);
         Assert.False(cliOnly.SupportsModelListing);
         Assert.True(withCatalog.SupportsAgentToolUse);
         Assert.True(withCatalog.SupportsModelListing);
@@ -167,7 +166,7 @@ public sealed class ToolUseTests
                 },
                 new LlmChatMessage("user", string.Empty)
                 {
-                    ToolResults = [new LlmToolResult("old_call", "55 F")]
+                    ToolResults = [new LlmToolResult("old_call", LlmToolOutput.FromText("55 F"))]
                 },
                 new LlmChatMessage("user", "Weather in Chicago?"),
                 new LlmChatMessage("assistant", string.Empty)
@@ -179,10 +178,7 @@ public sealed class ToolUseTests
                 {
                     ToolResults =
                     [
-                        new LlmToolResult(call.Id, "{\"temperature_f\":72}")
-                        {
-                            Attachments = [ImageAttachment(), PdfAttachment()]
-                        }
+                        new LlmToolResult(call.Id, Output("{\"temperature_f\":72}", ImagePart(), PdfPart()))
                     ]
                 }
             ],
@@ -248,7 +244,7 @@ public sealed class ToolUseTests
                 },
                 new LlmChatMessage("user", string.Empty)
                 {
-                    ToolResults = [new LlmToolResult("old_call", "old result")]
+                    ToolResults = [new LlmToolResult("old_call", LlmToolOutput.FromText("old result"))]
                 },
                 new LlmChatMessage("user", "Again")
             ],
@@ -338,7 +334,7 @@ public sealed class ToolUseTests
                 },
                 new LlmChatMessage("user", string.Empty)
                 {
-                    ToolResults = [new LlmToolResult("old_tool", "55 F")]
+                    ToolResults = [new LlmToolResult("old_tool", LlmToolOutput.FromText("55 F"))]
                 },
                 new LlmChatMessage("user", "Now Chicago")
                 {
@@ -389,10 +385,7 @@ public sealed class ToolUseTests
                 {
                     ToolResults =
                     [
-                        new LlmToolResult("toolu_1", "72 F")
-                        {
-                            Attachments = [ImageAttachment(), PdfAttachment(), TextAttachment()]
-                        }
+                        new LlmToolResult("toolu_1", Output("72 F", ImagePart(), PdfPart(), TextPart()))
                     ]
                 }
             ]
@@ -454,56 +447,59 @@ public sealed class ToolUseTests
     }
 
     [Fact]
-    public async Task ToolAttachmentsRejectInvalidMetadataAndUnsupportedProvidersBeforeSending()
+    public async Task UnsupportedToolOutputPartsAreOmittedAndReportedWithoutThrowing()
     {
-        var handler = new SequenceHttpMessageHandler([]);
+        const string events = """
+            data: {"id":"chat_ok","choices":[{"delta":{"content":"ok"},"finish_reason":"stop"}]}
+
+            data: [DONE]
+
+            """;
+        var handler = new SequenceHttpMessageHandler([_ => SseResponse(events)]);
         using var http = new HttpClient(handler);
         var client = new OpenAiCompatibleChatLlmClient(http);
+        LlmToolOutput output = Output(
+            "result",
+            ImagePart(),
+            TextPart(),
+            new LlmToolOutputBinary(LlmBinaryKind.Image, "image/png", ReadOnlyMemory<byte>.Empty, "empty.png"));
         var request = new LlmChatRequest
         {
             ModelId = "chat-tool-test",
             Messages =
             [
-                new LlmChatMessage("user", string.Empty)
-                {
-                    ToolResults =
-                    [
-                        new LlmToolResult("call-1", "result")
-                        {
-                            Attachments = [ImageAttachment()]
-                        }
-                    ]
-                }
+                new LlmChatMessage("assistant", string.Empty) { ToolCalls = [new LlmToolCall("call-1", "lookup", "{}")] },
+                new LlmChatMessage("user", string.Empty) { ToolResults = [new LlmToolResult("call-1", output)] }
             ]
         };
 
-        NotSupportedException unsupported = await Assert.ThrowsAsync<NotSupportedException>(() =>
-            ReadAllAsync(client.StreamAsync(CompatibleConnection(), request)));
-        Assert.Contains("image attachments on this lane", unsupported.Message, StringComparison.Ordinal);
-        Assert.Empty(handler.Bodies);
+        await ReadAllAsync(client.StreamAsync(CompatibleConnection(), request));
 
-        LlmAttachment invalid = ImageAttachment() with { Data = "%PDF-1.7"u8.ToArray() };
-        NotSupportedException malformed = await Assert.ThrowsAsync<NotSupportedException>(() =>
-            ReadAllAsync(new OpenAiResponsesLlmClient(http).StreamAsync(
-                ResponsesConnection(),
-                request with
-                {
-                    Messages =
-                    [
-                        new LlmChatMessage("user", string.Empty)
-                        {
-                            ToolResults =
-                            [
-                                new LlmToolResult("call-1", "result")
-                                {
-                                    Attachments = [invalid]
-                                }
-                            ]
-                        }
-                    ]
-                })));
-        Assert.Contains("supported PNG", malformed.Message, StringComparison.Ordinal);
-        Assert.Empty(handler.Bodies);
+        using JsonDocument sent = JsonDocument.Parse(Assert.Single(handler.Bodies));
+        Assert.Equal(
+            "result\n[File: notes.txt]\nplain text",
+            sent.RootElement.GetProperty("messages")[1].GetProperty("content").GetString());
+        LlmRichContentSupported support = client.GetCapabilities(CompatibleConnection()).RichContentSupported;
+        LlmToolOutputProjection report = ToolOutputProjector.Project(output, support, support).Report;
+        Assert.Equal(
+            [
+                new LlmToolPartProjection(LlmToolPartDelivery.Delivered),
+                new LlmToolPartProjection(LlmToolPartDelivery.Omitted, LlmToolPartOmission.UnsupportedByRoute),
+                new LlmToolPartProjection(LlmToolPartDelivery.Converted),
+                new LlmToolPartProjection(LlmToolPartDelivery.Omitted, LlmToolPartOmission.Empty)
+            ],
+            report.Parts);
+    }
+
+    [Fact]
+    public void ImageMediaTypesOutsideTheRouteSetAreOmittedAsUnsupported()
+    {
+        LlmToolOutput output = Output("see", new LlmToolOutputBinary(LlmBinaryKind.Image, "image/bmp", new byte[] { 1 }, "x.bmp"));
+
+        ProjectedToolOutput projected = ToolOutputProjector.Project(output, RichContentRoutes.Responses, RichContentRoutes.Responses);
+
+        Assert.Equal([new SentText("see")], projected.Parts);
+        Assert.Equal(LlmToolPartOmission.UnsupportedByRoute, projected.Report.Parts[1].Omission);
     }
 
     private static LlmToolDefinition WeatherTool() => new()
@@ -533,6 +529,18 @@ public sealed class ToolUseTests
         FileName = "notes.txt",
         Data = "plain text"u8.ToArray()
     };
+
+    private static LlmToolOutput Output(string text, params LlmToolOutputPart[] parts) =>
+        new() { Parts = [new LlmToolOutputText(text), .. parts] };
+
+    private static LlmToolOutputBinary ImagePart() =>
+        new(LlmBinaryKind.Image, "image/png", ImageAttachment().Data, "chart.png");
+
+    private static LlmToolOutputBinary PdfPart() =>
+        new(LlmBinaryKind.Document, "application/pdf", PdfAttachment().Data, "report.pdf");
+
+    private static LlmToolOutputBinary TextPart() =>
+        new(LlmBinaryKind.Document, "text/plain", TextAttachment().Data, "notes.txt");
 
     private static LlmConnection ResponsesConnection() => new()
     {

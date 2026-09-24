@@ -28,8 +28,18 @@ public sealed class AgentContractTests
                 }),
                 new("result-1", "turn-1", new LlmChatMessage("user", "")
                 {
-                    ToolResults = [new LlmToolResult("call-1", "done") { Attachments = [attachment] }],
-                    OmittedAttachments = [new(LlmAttachmentKind.Image, "report.txt", 1, "call-1")]
+                    ToolResults = [new LlmToolResult("call-1", new LlmToolOutput
+                    {
+                        Parts =
+                        [
+                            new LlmToolOutputText("done"),
+                            new LlmToolOutputBinary(LlmBinaryKind.Document, "text/plain", "hello"u8.ToArray(), "hello.txt"),
+                            new LlmToolOutputResource("file:///notes.md") { Name = "notes", MediaType = "text/markdown", Text = "# notes" }
+                        ],
+                        StructuredContent = JsonSerializer.SerializeToElement(new { rows = 2 }),
+                        IsError = true
+                    })],
+                    OmittedAttachments = [new(LlmBinaryKind.Image, "report.png", 3, "call-1")]
                 })
             ]
         };
@@ -39,7 +49,14 @@ public sealed class AgentContractTests
         Assert.Equal(context.Entries.Select(entry => entry.Id), copy.Entries.Select(entry => entry.Id));
         Assert.Equal(State(), copy.Entries[1].Message.ResponseState);
         Assert.Equal("hello"u8.ToArray(), copy.Entries[0].Message.Attachments[0].Data.ToArray());
-        Assert.Equal("hello"u8.ToArray(), copy.Entries[2].Message.ToolResults[0].Attachments[0].Data.ToArray());
+        LlmToolOutput output = copy.Entries[2].Message.ToolResults[0].Output;
+        Assert.Equal("done", Assert.IsType<LlmToolOutputText>(output.Parts[0]).Text);
+        var binary = Assert.IsType<LlmToolOutputBinary>(output.Parts[1]);
+        Assert.Equal((LlmBinaryKind.Document, "text/plain", "hello.txt"), (binary.Kind, binary.MediaType, binary.FileName));
+        Assert.Equal("hello"u8.ToArray(), binary.Data.ToArray());
+        Assert.Equal("# notes", Assert.IsType<LlmToolOutputResource>(output.Parts[2]).Text);
+        Assert.Equal(2, output.StructuredContent!.Value.GetProperty("rows").GetInt32());
+        Assert.True(output.IsError);
         Assert.Equal(context.Entries[2].Message.OmittedAttachments, copy.Entries[2].Message.OmittedAttachments);
         Assert.Equal("call-1", copy.Entries[1].Message.ToolCalls[0].Id);
     }
@@ -195,7 +212,7 @@ public sealed class AgentContractTests
                 new("user", "third")
             ]
         };
-        var input = OpenAiResponsesTools.BuildInput(request, Connection(), OpenAiResponsesTools.BuildMessage);
+        var input = OpenAiResponsesTools.BuildInput(request, Connection(), OpenAiResponsesTools.BuildMessage, Project);
         Assert.Equal(7, input.Count);
         Assert.Equal("reasoning", input[1]!["type"]!.GetValue<string>());
         Assert.Equal("message", input[2]!["type"]!.GetValue<string>());
@@ -204,7 +221,36 @@ public sealed class AgentContractTests
         Assert.Throws<ArgumentException>(() => OpenAiResponsesTools.BuildInput(request with
         {
             Messages = [new("user", "bad") { ResponseState = State() }]
-        }, Connection(), OpenAiResponsesTools.BuildMessage));
+        }, Connection(), OpenAiResponsesTools.BuildMessage, Project));
+    }
+
+    [Fact]
+    public void ResponsesToolOutputIsAStringWhenEmptyOrSingleTextAndAnItemListOtherwise()
+    {
+        LlmChatRequest request = new()
+        {
+            ModelId = "model",
+            Messages =
+            [
+                new("assistant", "") { ToolCalls = [new LlmToolCall("a", "t", "{}"), new LlmToolCall("b", "t", "{}"), new LlmToolCall("c", "t", "{}")] },
+                new("user", "")
+                {
+                    ToolResults =
+                    [
+                        new LlmToolResult("a", new LlmToolOutput()),
+                        new LlmToolResult("b", LlmToolOutput.FromText("one")),
+                        new LlmToolResult("c", new LlmToolOutput { Parts = [new LlmToolOutputText("x"), new LlmToolOutputText("y")] })
+                    ]
+                }
+            ]
+        };
+
+        JsonArray input = OpenAiResponsesTools.BuildInput(request, Connection(), OpenAiResponsesTools.BuildMessage, Project);
+
+        JsonNode?[] outputs = [.. input.Where(item => item!["type"]!.GetValue<string>() == "function_call_output").Select(item => item!["output"])];
+        Assert.Equal("", outputs[0]!.GetValue<string>());
+        Assert.Equal("one", outputs[1]!.GetValue<string>());
+        Assert.Equal(["x", "y"], outputs[2]!.AsArray().Select(item => item!["text"]!.GetValue<string>()));
     }
 
     [Fact]
@@ -246,6 +292,8 @@ public sealed class AgentContractTests
         Assert.Throws<NotSupportedException>(() => NativeAgentContract.ValidateStart(options));
     }
 
+    private static ProjectedToolOutput Project(LlmToolOutput output) =>
+        ToolOutputProjector.Project(output, RichContentRoutes.Responses, RichContentRoutes.Responses);
     private static T RoundTrip<T>(T value) => JsonSerializer.Deserialize<T>(JsonSerializer.Serialize(value))!;
 
     internal static async Task AssertNativeOperationsAsync(ILlmAgentSession session)

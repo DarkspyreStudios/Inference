@@ -45,8 +45,7 @@ internal sealed class AntigravityCliLlmClient(IAntigravityCliRunner runner)
             SupportsToolUse = false,
             SupportsPromptImages = false,
             SupportsPromptDocuments = false,
-            SupportsToolResultImages = false,
-            SupportsToolResultDocuments = false
+            RichContentSupported = RichContentRoutes.TextOnly
         };
     }
 

@@ -25,6 +25,9 @@ internal sealed class BedrockAgentCoreSession : ILlmAgentSession
     private readonly SemaphoreSlim _turnGate = new(1, 1);
     // Sent with the first turn, then cleared once the harness streams a response to it.
     private AgentOpeningContext? _opening;
+    // The runtime's tool-output support after the connection's overrides, and after the model's too.
+    private readonly LlmRichContentSupported _richRoute;
+    private readonly LlmRichContentSupported _richContent;
     private bool _disposed;
 
     public BedrockAgentCoreSession(
@@ -38,10 +41,14 @@ internal sealed class BedrockAgentCoreSession : ILlmAgentSession
         LlmAgentSandboxMode sandbox,
         LlmAgentApprovalPolicy approvalPolicy,
         LlmAgentSessionHandlers handlers,
+        LlmRichContentSupported richRoute,
+        LlmRichContentSupported richContent,
         AgentOpeningContext? opening = null)
     {
         _invoker = invoker;
         _opening = opening;
+        _richRoute = richRoute;
+        _richContent = richContent;
         _aws = aws;
         _harnessArn = harnessArn;
         _initialModelId = initialModelId;
@@ -264,7 +271,7 @@ internal sealed class BedrockAgentCoreSession : ILlmAgentSession
                         null,
                         "inProgress");
 
-                    LlmAgentToolResult result = await ExecuteToolAsync(
+                    LlmToolOutput result = await ExecuteToolAsync(
                         turnId,
                         callId,
                         pending,
@@ -277,8 +284,8 @@ internal sealed class BedrockAgentCoreSession : ILlmAgentSession
                         pending.ServerName,
                         pending.Name,
                         arguments,
-                        result.Success,
-                        result.Success ? "completed" : "failed");
+                        !result.IsError,
+                        result.IsError ? "failed" : "completed");
                     results.Add(new CompletedToolUse(
                         callId,
                         pending.Name,
@@ -408,7 +415,7 @@ internal sealed class BedrockAgentCoreSession : ILlmAgentSession
         ];
     }
 
-    private async Task<LlmAgentToolResult> ExecuteToolAsync(
+    private async Task<LlmToolOutput> ExecuteToolAsync(
         string turnId,
         string callId,
         PendingToolUse pending,
@@ -421,7 +428,8 @@ internal sealed class BedrockAgentCoreSession : ILlmAgentSession
         }
         try
         {
-            LlmAgentToolResult result = await _handlers.ToolHandler(
+            // Content the harness cannot carry is omitted when the result is built; it never fails the tool.
+            return await _handlers.ToolHandler(
                 new LlmAgentToolCall(
                     ThreadId,
                     turnId,
@@ -430,8 +438,6 @@ internal sealed class BedrockAgentCoreSession : ILlmAgentSession
                     pending.Name,
                     arguments),
                 cancellationToken);
-            ValidateToolResult(result);
-            return result;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -443,7 +449,7 @@ internal sealed class BedrockAgentCoreSession : ILlmAgentSession
         }
     }
 
-    private static List<HarnessMessage> BuildToolResultMessages(
+    private List<HarnessMessage> BuildToolResultMessages(
         IReadOnlyList<CompletedToolUse> results)
     {
         var assistantContent = new List<HarnessContentBlock>();
@@ -468,10 +474,11 @@ internal sealed class BedrockAgentCoreSession : ILlmAgentSession
                 {
                     ToolUseId = completed.Id,
                     Type = completed.Type ?? HarnessToolUseType.Tool_use,
-                    Status = completed.Result.Success
-                        ? HarnessToolUseStatus.Success
-                        : HarnessToolUseStatus.Error,
-                    Content = BuildToolResultContent(completed.Result)
+                    Status = completed.Result.IsError
+                        ? HarnessToolUseStatus.Error
+                        : HarnessToolUseStatus.Success,
+                    Content = BuildToolResultContent(ToolOutputProjector.Project(
+                        completed.Result, _richRoute, _richContent))
                 }
             });
         }
@@ -490,50 +497,17 @@ internal sealed class BedrockAgentCoreSession : ILlmAgentSession
         ];
     }
 
-    private static List<HarnessToolResultContentBlock> BuildToolResultContent(
-        LlmAgentToolResult result)
+    /// <summary>The harness carries text blocks; an empty result still sends one empty block.</summary>
+    private static List<HarnessToolResultContentBlock> BuildToolResultContent(ProjectedToolOutput projected)
     {
-        var content = new List<HarnessToolResultContentBlock>();
-        foreach (LlmAgentContent item in result.Content)
-        {
-            switch (item)
-            {
-                case LlmAgentTextContent text:
-                    content.Add(new HarnessToolResultContentBlock { Text = text.Text });
-                    break;
-                case LlmAgentImageContent:
-                    throw new NotSupportedException(
-                        "AgentCore Harness tool results do not accept image content.");
-                case LlmAgentAudioContent:
-                    throw new NotSupportedException(
-                        "AgentCore Harness tool results do not accept audio content.");
-                default:
-                    throw new ArgumentOutOfRangeException(nameof(result));
-            }
-        }
+        List<HarnessToolResultContentBlock> content = [.. projected.Parts.Select(part => part is SentText text
+            ? new HarnessToolResultContentBlock { Text = text.Text }
+            : throw new InvalidOperationException("AgentCore tool results carry text only."))];
         if (content.Count == 0)
         {
             content.Add(new HarnessToolResultContentBlock { Text = string.Empty });
         }
         return content;
-    }
-
-    private static void ValidateToolResult(LlmAgentToolResult result)
-    {
-        ArgumentNullException.ThrowIfNull(result);
-        LlmAttachments.Validate(
-            result.Attachments,
-            supportsImages: false,
-            supportsDocuments: false,
-            nameof(result));
-        foreach (LlmAgentContent item in result.Content)
-        {
-            if (item is not LlmAgentTextContent)
-            {
-                throw new NotSupportedException(
-                    "AgentCore Harness accepts only text in host tool results.");
-            }
-        }
     }
 
     private static JsonElement? TryParseArguments(StringBuilder input)
@@ -569,11 +543,7 @@ internal sealed class BedrockAgentCoreSession : ILlmAgentSession
         }
     }
 
-    private static LlmAgentToolResult FailedToolResult(string message) => new()
-    {
-        Success = false,
-        Content = [new LlmAgentTextContent(message)]
-    };
+    private static LlmToolOutput FailedToolResult(string message) => LlmToolOutput.FromText(message, isError: true);
 
     private static (LlmAgentTurnStatus Status, string? Error) Completion(string? stopReason) =>
         stopReason switch
@@ -607,5 +577,5 @@ internal sealed class BedrockAgentCoreSession : ILlmAgentSession
         string? ServerName,
         HarnessToolUseType? Type,
         JsonElement Arguments,
-        LlmAgentToolResult Result);
+        LlmToolOutput Result);
 }

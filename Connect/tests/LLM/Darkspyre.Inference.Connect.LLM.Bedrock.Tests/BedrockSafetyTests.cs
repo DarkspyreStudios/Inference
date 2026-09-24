@@ -21,8 +21,14 @@ public sealed class BedrockSafetyTests
         Assert.Equal(Common.LLM.LlmOutputLimitEnforcement.ProviderEnforced, capabilities.OutputLimitEnforcement);
         Assert.True(capabilities.SupportsPromptImages);
         Assert.True(capabilities.SupportsPromptDocuments);
-        Assert.True(capabilities.SupportsToolResultImages);
-        Assert.True(capabilities.SupportsToolResultDocuments);
+        LlmRichContentSupported rich = capabilities.RichContentSupported;
+        Assert.Equal(LlmRichContentCarriage.Native, rich.Images);
+        Assert.Equal(LlmRichContentCarriage.Native, rich.PdfDocuments);
+        Assert.Equal(LlmRichContentCarriage.Native, rich.TextDocuments);
+        Assert.Equal(LlmRichContentCarriage.Native, rich.StructuredContent);
+        Assert.Equal(LlmRichContentCarriage.Native, rich.ErrorFlag);
+        Assert.Equal(LlmRichContentCarriage.Unsupported, rich.Audio);
+        Assert.False(rich.AllowsEmpty);
     }
 
     [Fact]
@@ -113,27 +119,23 @@ public sealed class BedrockSafetyTests
                 {
                     ToolResults =
                     [
-                        new LlmToolResult("tool-1", "72 F")
+                        new LlmToolResult("tool-1", new LlmToolOutput
                         {
-                            Attachments =
+                            Parts =
                             [
-                                new LlmAttachment
-                                {
-                                    Kind = LlmAttachmentKind.Image,
-                                    FileName = "chart.png",
-                                    Data = new byte[]
-                                    {
-                                        0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a
-                                    }
-                                },
-                                new LlmAttachment
-                                {
-                                    Kind = LlmAttachmentKind.Document,
-                                    FileName = "report.pdf",
-                                    Data = "%PDF-"u8.ToArray()
-                                }
-                            ]
-                        }
+                                new LlmToolOutputText("72 F"),
+                                new LlmToolOutputBinary(
+                                    LlmBinaryKind.Image,
+                                    "image/png",
+                                    new byte[] { 0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a },
+                                    "chart.png"),
+                                new LlmToolOutputBinary(LlmBinaryKind.Audio, "audio/wav", new byte[] { 1 }, "wind.wav"),
+                                new LlmToolOutputBinary(LlmBinaryKind.Document, "application/pdf", "%PDF-"u8.ToArray(), "report.pdf"),
+                                new LlmToolOutputBinary(LlmBinaryKind.Document, "text/csv", "hour,f\n1,72"u8.ToArray(), "hours.csv")
+                            ],
+                            StructuredContent = JsonSerializer.SerializeToElement(new { temperature_f = 72 }),
+                            IsError = true
+                        })
                     ]
                 }
             ]) with
@@ -162,7 +164,8 @@ public sealed class BedrockSafetyTests
         Assert.Equal("tool-1", request.Messages[1].Content[0].ToolUse.ToolUseId);
         Assert.Equal("Chicago", request.Messages[1].Content[0].ToolUse.Input.AsDictionary()["city"].AsString());
         Assert.Equal("tool-1", request.Messages[2].Content[0].ToolResult.ToolUseId);
-        Assert.Equal(ToolResultStatus.Success, request.Messages[2].Content[0].ToolResult.Status);
+        Assert.Equal(ToolResultStatus.Error, request.Messages[2].Content[0].ToolResult.Status);
+        Assert.Equal(5, request.Messages[2].Content[0].ToolResult.Content.Count);
         Assert.Equal("72 F", request.Messages[2].Content[0].ToolResult.Content[0].Text);
         Assert.Equal(ImageFormat.Png, request.Messages[2].Content[0].ToolResult.Content[1].Image.Format);
         Assert.Equal(
@@ -172,7 +175,27 @@ public sealed class BedrockSafetyTests
         Assert.Equal(
             "%PDF-"u8.ToArray(),
             request.Messages[2].Content[0].ToolResult.Content[2].Document.Source.Bytes.ToArray());
+        DocumentBlock csv = request.Messages[2].Content[0].ToolResult.Content[3].Document;
+        Assert.Equal((DocumentFormat.Csv, "tool-result-document-2"), (csv.Format, csv.Name));
+        Assert.Equal(72, request.Messages[2].Content[0].ToolResult.Content[4].Json.AsDictionary()["temperature_f"].AsInt());
         Assert.Equal("Details attached.", request.Messages[2].Content[1].Text);
+    }
+
+    [Fact]
+    public void AnEmptyToolOutputSendsOneEmptyTextBlock()
+    {
+        ConverseRequest request = BedrockLlmClient.BuildRequest(
+            Connection(),
+            Request(messages:
+            [
+                new LlmChatMessage("assistant", string.Empty) { ToolCalls = [new LlmToolCall("tool-1", "weather", "{}")] },
+                new LlmChatMessage("user", string.Empty) { ToolResults = [new LlmToolResult("tool-1", new LlmToolOutput())] }
+            ]),
+            "model-x");
+
+        ToolResultBlock result = request.Messages[1].Content[0].ToolResult;
+        Assert.Equal(string.Empty, Assert.Single(result.Content).Text);
+        Assert.Equal(ToolResultStatus.Success, result.Status);
     }
 
     [Fact]

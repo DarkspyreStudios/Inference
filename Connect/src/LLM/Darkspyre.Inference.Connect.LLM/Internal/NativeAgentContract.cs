@@ -11,7 +11,8 @@ internal static class NativeAgentContract
         NativeFork = LlmAgentNativeFork.CurrentPosition,
         CompactionOwnership = LlmAgentCompactionOwnership.Provider,
         SupportsInterrupt = true,
-        ToolExecutionOwnership = LlmAgentToolExecutionOwnership.Mixed
+        ToolExecutionOwnership = LlmAgentToolExecutionOwnership.Mixed,
+        RichContentSupported = RichContentRoutes.ClaudeMcp
     };
 
     public static LlmAgentCapabilities AgentCore { get; } = new()
@@ -20,7 +21,8 @@ internal static class NativeAgentContract
         ContextImport = LlmAgentContextImport.OpeningContext,
         SupportsNativeResume = true,
         CompactionOwnership = LlmAgentCompactionOwnership.Provider,
-        ToolExecutionOwnership = LlmAgentToolExecutionOwnership.Mixed
+        ToolExecutionOwnership = LlmAgentToolExecutionOwnership.Mixed,
+        RichContentSupported = RichContentRoutes.AgentCore
     };
 
     public static void ValidateStart(LlmAgentSessionOptions options)

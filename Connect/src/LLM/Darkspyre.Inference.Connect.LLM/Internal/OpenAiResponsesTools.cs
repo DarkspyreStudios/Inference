@@ -5,10 +5,12 @@ namespace Darkspyre.Inference.Connect.LLM.Internal;
 
 internal static class OpenAiResponsesTools
 {
+    /// <summary>Builds the input items; each tool output goes through the route's projection.</summary>
     public static JsonArray BuildInput(
         LlmChatRequest request,
         LlmConnection connection,
-        Func<LlmChatMessage, JsonObject> mapTextMessage)
+        Func<LlmChatMessage, JsonObject> mapTextMessage,
+        Func<LlmToolOutput, ProjectedToolOutput> projectToolOutput)
     {
         var input = new JsonArray();
 
@@ -28,7 +30,7 @@ internal static class OpenAiResponsesTools
                     {
                         ["type"] = "function_call_output",
                         ["call_id"] = result.ToolCallId,
-                        ["output"] = BuildToolOutput(result)
+                        ["output"] = BuildToolOutput(projectToolOutput(result.Output))
                     });
                 }
 
@@ -93,30 +95,43 @@ internal static class OpenAiResponsesTools
         };
     }
 
-    private static JsonNode BuildToolOutput(LlmToolResult result)
+    /// <summary>No parts or a single text part stays a string; anything richer is the ordered output-item list.</summary>
+    private static JsonNode BuildToolOutput(ProjectedToolOutput projected)
     {
-        if (result.Attachments.Count == 0)
+        if (projected.Parts is [])
         {
-            return JsonValue.Create(result.Content)!;
+            return JsonValue.Create(string.Empty);
+        }
+        if (projected.Parts is [SentText only])
+        {
+            return JsonValue.Create(only.Text);
         }
 
         var output = new JsonArray();
-        if (result.Content.Length > 0)
+        foreach (SentToolPart part in projected.Parts)
         {
-            output.Add(new JsonObject
+            output.Add(part switch
             {
-                ["type"] = "input_text",
-                ["text"] = result.Content
+                SentText text => new JsonObject { ["type"] = "input_text", ["text"] = text.Text },
+                SentImage image => new JsonObject
+                {
+                    ["type"] = "input_image",
+                    ["image_url"] = DataUrl(image.MediaType, image.Data)
+                },
+                SentFile file => new JsonObject
+                {
+                    ["type"] = "input_file",
+                    ["filename"] = file.FileName,
+                    ["file_data"] = DataUrl(file.MediaType, file.Data)
+                },
+                _ => throw new InvalidOperationException("Responses tool output does not carry this part natively.")
             });
         }
-
-        foreach (LlmAttachment attachment in result.Attachments)
-        {
-            output.Add(BuildAttachment(attachment));
-        }
-
         return output;
     }
+
+    private static string DataUrl(string mediaType, ReadOnlyMemory<byte> data) =>
+        $"data:{mediaType};base64,{Convert.ToBase64String(data.Span)}";
 
     private static JsonObject BuildAttachment(LlmAttachment attachment) => attachment.Kind switch
     {

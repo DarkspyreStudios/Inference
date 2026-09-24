@@ -289,16 +289,18 @@ provider invokes an `LlmAgentToolHandler` and receives its result during the sam
 never grants a model direct access to host resources. The host must validate every call and apply its
 own authorization and side-effect policy.
 
-| Transport | Chat tools | Agent tools | Prompt images | Prompt documents | Result images | Result documents |
-|---|---:|---:|---:|---:|---:|---:|
-| OpenAI Responses | Yes | No | Yes | Yes | Yes | Yes |
-| OpenAI-compatible Chat Completions | Yes | No | No | No | No | No |
-| ChatGPT Codex subscription | Yes | Yes | Yes | Yes | Yes | Yes |
-| Anthropic Messages with API key | Yes | No | Yes | Yes | Yes | Yes |
-| Claude subscription via official CLI | No | Yes | Yes | Yes | Yes | Yes |
-| AWS Bedrock Converse | Yes | No | Yes | Yes | Yes | Yes |
-| AWS Bedrock AgentCore Harness | No | Yes | No | No | No | No |
-| Antigravity CLI | No | No | No | No | No | No |
+| Transport | Chat tools | Agent tools | Prompt images | Prompt documents |
+|---|---:|---:|---:|---:|
+| OpenAI Responses | Yes | No | Yes | Yes |
+| OpenAI-compatible Chat Completions | Yes | No | No | No |
+| ChatGPT Codex subscription | Yes | Yes | Yes | Yes |
+| Anthropic Messages with API key | Yes | No | Yes | Yes |
+| Claude subscription via official CLI | No | Yes | Yes | Yes |
+| AWS Bedrock Converse | Yes | No | Yes | Yes |
+| AWS Bedrock AgentCore Harness | No | Yes | No | No |
+| Antigravity CLI | No | No | No | No |
+
+Tool-result content support is declared per route and lane; see [Tool output](#tool-output).
 
 Define tools on the request and branch on `RequiresAction`:
 
@@ -349,7 +351,7 @@ if (result.Status == LlmCompletionStatus.RequiresAction)
                 },
                 new LlmChatMessage("user", string.Empty)
                 {
-                    ToolResults = [new LlmToolResult(call.Id, toolOutput)]
+                    ToolResults = [new LlmToolResult(call.Id, LlmToolOutput.FromText(toolOutput))]
                 }
             ],
             Tools = [weatherTool]
@@ -365,14 +367,14 @@ During streaming, tool calls arrive as `LlmToolCallStartedEvent`, one or more `L
 Version 2.0 replaces `LlmToolAttachment` with `LlmAttachment`, removes caller-supplied
 `MediaType`, and adds `Attachments` to `LlmChatMessage` and `LlmAgentTurnRequest`. Replace the old
 type name, delete `MediaType` initializers, and gate prompt inputs with `SupportsPromptImages` or
-`SupportsPromptDocuments`. Tool-result capability checks are unchanged.
+`SupportsPromptDocuments`.
 
-Prompt messages and tool results use the same provider-neutral binary value. The host supplies only
-the high-level kind, filename, and bytes; Darkspyre.Inference.Connect.LLM detects the media type and owns base64 encoding,
+Prompt messages carry attachments as a provider-neutral binary value. The host supplies only the
+high-level kind, filename, and bytes; Darkspyre.Inference.Connect.LLM detects the media type and owns base64 encoding,
 temporary-file staging, sandbox roots, and every provider wire shape:
 
 ```csharp
-var resultWithFiles = new LlmToolResult(call.Id, "The chart and report are attached.")
+var promptWithFiles = new LlmChatMessage("user", "Compare the chart with the report.")
 {
     Attachments =
     [
@@ -390,22 +392,73 @@ var resultWithFiles = new LlmToolResult(call.Id, "The chart and report are attac
         }
     ]
 };
-
-var promptWithFiles = new LlmChatMessage("user", "Compare the chart with the report.")
-{
-    Attachments = resultWithFiles.Attachments
-};
 ```
 
-Check `SupportsPromptImages` and `SupportsPromptDocuments` before attaching prompt input, and check
-`SupportsToolResultImages` and `SupportsToolResultDocuments` before returning an attachment. Prompt
+Check `SupportsPromptImages` and `SupportsPromptDocuments` before attaching prompt input. Prompt
 attachments belong on user messages only. Adapters reject an unsupported kind, unrecognized content,
 path-bearing filename, or empty payload instead of silently turning it into text.
 
 OpenAI Responses, direct Codex, Anthropic Messages, Claude CLI, and Bedrock use native
-image/document content blocks. Direct Codex sends binary prompt and tool-result attachments
-inline through Responses, with no CLI staging directory. The caller supplies kind, filename,
-and bytes; adapters own MIME detection, encoding, and wire representation.
+image/document content blocks for prompt attachments. Direct Codex sends prompt attachments and
+tool-output binaries inline through Responses, with no CLI staging directory. The caller supplies kind,
+filename, and bytes; adapters own MIME detection, encoding, and wire representation.
+
+### Tool output
+
+A tool result carries one `LlmToolOutput`: ordered parts, optional structured JSON, and an error flag.
+A chat request sends it as `new LlmToolResult(call.Id, output)`, and an agent `ToolHandler` returns it.
+
+```csharp
+var output = new LlmToolOutput
+{
+    Parts =
+    [
+        new LlmToolOutputText("The chart and report follow."),
+        new LlmToolOutputBinary(LlmBinaryKind.Image, "image/png", chartBytes, "chart.png"),
+        new LlmToolOutputBinary(LlmBinaryKind.Document, "application/pdf", reportBytes, "report.pdf"),
+        new LlmToolOutputResource("https://example.test/spec") { Name = "spec" }
+    ],
+    StructuredContent = JsonSerializer.SerializeToElement(new { rows = 42 })
+};
+```
+
+The host supplies each binary part's media type. A resource with neither `Text` nor `Data` is a link,
+and Connect never fetches it. A resource with a byte body follows the carriage its media type selects.
+A text document is UTF-8 text with a `text/*` or `application/json` media type.
+
+`LlmRichContentSupported` declares how a route carries each kind of content. `Native` sends the
+provider's own content item, `Text` sends a text part that renders it, and `Unsupported` omits it.
+`LlmProviderCapabilities.RichContentSupported` describes the chat lane, and
+`LlmProviderCapabilities.Agent.RichContentSupported` describes agent-session tool calls. An override
+with `SupportsToolResultImages` or `SupportsToolResultDocuments` set to `false` lowers those carriages.
+An override never raises a carriage.
+
+| Route and lane | Images | PDF | Text docs | Audio | Links | Embedded text | Structured | Error flag |
+|---|---|---|---|---|---|---|---|---|
+| Direct Codex (chat and agent), OpenAI Responses | Native | Native | Native | Unsupported | Text | Text | Text | Text |
+| Anthropic Messages | Native | Native | Native | Unsupported | Text | Text | Text | Native |
+| Bedrock Converse | Native | Native | Native | Unsupported | Text | Text | Native | Native |
+| Claude CLI agent | Native | Unsupported | Text | Unsupported | Native | Native | Text | Native |
+| AgentCore Harness | Unsupported | Unsupported | Text | Unsupported | Text | Text | Text | Native |
+| OpenAI-compatible, Claude CLI chat, Antigravity CLI | Unsupported | Unsupported | Text | Unsupported | Text | Text | Text | Text |
+
+Every route omits other binary content and keeps the supplied order. Direct Codex and the Claude CLI
+agent rows are measured; the other rows follow each provider's protocol and are not live-verified.
+
+The text renderings are fixed. A resource link becomes `[Resource link: name] uri`. An embedded text
+resource becomes `[Resource: uri]` followed by its text. A text document becomes `[File: name]`
+followed by its text, or an embedded text resource where the route carries those natively. Structured
+content becomes its JSON as the final text part. A converted error flag becomes a leading
+`[Tool error]` text part.
+
+`LlmProviderService.ProjectToolOutputAsync` reports what one output sends for a connection, model and
+lane, without a network call. Each part is `Delivered`, `Converted` to text, or `Omitted` with a
+reason: `UnsupportedByRoute`, `UnsupportedByModel`, `InvalidContent` or `Empty`. Invalid content is
+structured content that is not a JSON object, a resource with both a text and a byte body, text that is
+not UTF-8, or a part over `MaxBinaryBytes`. Adapters serialize through the same projection, so the
+report matches the request. An omitted part never fails the request, the turn or the tool, and never
+changes `IsError`. Connect adds no notice for an omitted part. A host that wants one adds a text part
+and projects again.
 
 `LlmChatResult.ResponseState` is opaque, versioned adapter state. Preserve it unchanged on that
 response's `LlmChatMessage.ResponseState`, alongside its visible text and tool calls, on ordinary
@@ -487,7 +540,9 @@ account quota. A `LlmAgentCompactionRequiredEvent` ends an execution segment, **
 After host compaction, `ContinueTurnAsync` uses the same turn ID, pause ID and expected revision,
 without resubmitting the prompt or re-executing settled tools. Only direct Codex currently enables this engine.
 
-Capture defaults to omitting attachment bytes and recording `OmittedAttachments` metadata. Live
+Capture defaults to omitting attachment bytes and recording `OmittedAttachments` metadata. For a
+tool-output part, the entry's `Index` is the part's position in `Parts` and `ToolCallId` names the
+result; the capture drops the binary part or the resource's byte body. Live
 compaction must capture with `IncludeAttachmentData = true`; the host may strip bytes only from its
 separate persistence projection. Omitted metadata cannot recreate an attachment or become model input.
 See the [compiled host-context example](examples/Darkspyre.Inference.Connect.LLM.Examples/HostOwnedAgentContext.cs).

@@ -77,7 +77,7 @@ public sealed class RequestAccountingTests
         using var http = new HttpClient(handler);
         var service = new LlmProviderService(new Source(Connection()), [new KnownModelResponsesClient(http)]);
         var message = omitted
-            ? new LlmChatMessage("user", "read") { OmittedAttachments = [new(LlmAttachmentKind.Document, "doc.txt", 0)] }
+            ? new LlmChatMessage("user", "read") { OmittedAttachments = [new(LlmBinaryKind.Document, "doc.txt", 0)] }
             : new LlmChatMessage("user", "read") { Attachments = [new() { Kind = LlmAttachmentKind.Document, FileName = "doc.txt", Data = Encoding.UTF8.GetBytes("text") }] };
         var result = await service.MeasureRequestAsync("selected", Request() with { Messages = [message] });
         Assert.True(result.IsSupported);

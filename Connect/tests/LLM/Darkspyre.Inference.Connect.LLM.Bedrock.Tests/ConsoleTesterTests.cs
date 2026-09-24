@@ -20,11 +20,11 @@ public sealed class ConsoleTesterTests
                 .Select(value => value.GetString()));
 
         using JsonDocument imageArguments = JsonDocument.Parse("""{"kind":"image"}""");
-        LlmAgentToolResult imageResult = await Program.ExecuteToolAsync(
+        LlmToolOutput imageResult = await Program.ExecuteToolAsync(
             CreateToolCall("darkspyre_inference_connect_attachment", imageArguments.RootElement),
             CancellationToken.None);
-        LlmAttachment image = Assert.Single(imageResult.Attachments);
-        Assert.Equal(LlmAttachmentKind.Image, image.Kind);
+        LlmToolOutputBinary image = Assert.Single(imageResult.Parts.OfType<LlmToolOutputBinary>());
+        Assert.Equal((LlmBinaryKind.Image, "image/png"), (image.Kind, image.MediaType));
         Assert.Equal("smoke-test.png", image.FileName);
         Assert.Equal(0x89, image.Data.Span[0]);
 
@@ -38,11 +38,11 @@ public sealed class ConsoleTesterTests
                 .Select(value => value.GetString()));
 
         using JsonDocument documentArguments = JsonDocument.Parse("""{"kind":"document"}""");
-        LlmAgentToolResult documentResult = await Program.ExecuteToolAsync(
+        LlmToolOutput documentResult = await Program.ExecuteToolAsync(
             CreateToolCall("darkspyre_inference_connect_attachment", documentArguments.RootElement),
             CancellationToken.None);
-        LlmAttachment document = Assert.Single(documentResult.Attachments);
-        Assert.Equal(LlmAttachmentKind.Document, document.Kind);
+        LlmToolOutputBinary document = Assert.Single(documentResult.Parts.OfType<LlmToolOutputBinary>());
+        Assert.Equal((LlmBinaryKind.Document, "text/plain"), (document.Kind, document.MediaType));
         Assert.Equal("smoke-test.txt", document.FileName);
         Assert.Equal(
             "Darkspyre.Inference.Connect.LLM attachment smoke test document.",

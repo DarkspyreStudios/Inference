@@ -533,3 +533,25 @@ Authenticated restores, Debug/Release builds and tests, formatting, vulnerabilit
 archive boundaries and local/fresh-feed consumer checks passed. Downloaded archives match
 the verified local archives; feed readback confirms private visibility. Source is tagged
 `v11.6.1-rc.1`. No model weights or paid inference were used as verification gates.
+
+## Rich tool results implementation
+
+The design is the "Rich tool results" section of `Connect/docs/enhancements.md`. It is a breaking
+contract change for `11.7.0-rc.1`.
+
+- `LlmToolOutput` holds ordered text, binary and resource parts, optional structured JSON and
+  `IsError`. `LlmToolResult` carries one, and `LlmAgentToolHandler` returns one. Each part serializes
+  with a `type` discriminator, so captured contexts round-trip.
+- `LlmRichContentSupported` declares each route's carriage per content kind. The records live in
+  `RichContentRoutes`. `LlmProviderCapabilities.RichContentSupported` covers the chat lane and
+  `LlmAgentCapabilities.RichContentSupported` the agent lane. Capability overrides only lower a carriage.
+- `ToolOutputProjector` is the one projection. Responses, Anthropic, Bedrock Converse, the compatible
+  chat client, `TranscriptText`, the Claude MCP bridge and AgentCore serialize its `SentToolPart`s,
+  and `LlmProviderService.ProjectToolOutputAsync` returns its report.
+- Managed Codex, AgentCore and the Claude agent client no longer fail a tool for unsupported content.
+- Agent opening context carries tool-output images and documents as first-turn attachments.
+- A capture without bytes records tool-output binaries as `LlmOmittedAttachment` with an
+  `LlmBinaryKind` and the part index.
+
+Verification: Debug build with zero warnings, `dotnet format --verify-no-changes`, and 377 Connect and
+Common tests.

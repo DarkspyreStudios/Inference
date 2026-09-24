@@ -72,15 +72,6 @@ public sealed record LlmAgentToolCall(
     string Name,
     JsonElement Arguments);
 
-/// <summary>Host result returned to a dynamic agent tool invocation.</summary>
-public sealed record LlmAgentToolResult
-{
-    public bool Success { get; init; } = true;
-
-    public IReadOnlyList<LlmAgentContent> Content { get; init; } = [];
-
-    public IReadOnlyList<LlmAttachment> Attachments { get; init; } = [];
-}
 
 public sealed record LlmAgentApprovalRequest
 {
@@ -106,7 +97,7 @@ public sealed record LlmAgentApprovalRequest
     public IReadOnlyList<LlmAgentApprovalDecision> AvailableDecisions { get; init; } = [];
 }
 
-public delegate ValueTask<LlmAgentToolResult> LlmAgentToolHandler(
+public delegate ValueTask<LlmToolOutput> LlmAgentToolHandler(
     LlmAgentToolCall call,
     CancellationToken cancellationToken);
 

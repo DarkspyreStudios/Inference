@@ -53,8 +53,7 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
         SupportsAgentToolUse = true,
         SupportsPromptImages = true,
         SupportsPromptDocuments = true,
-        SupportsToolResultImages = true,
-        SupportsToolResultDocuments = true
+        RichContentSupported = RichContentRoutes.TextOnly
     };
 
     public override LlmProviderCapabilities GetCapabilities(
@@ -70,9 +69,7 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
             SupportsTemperature = false,
             SupportsToolUse = false,
             SupportsPromptImages = true,
-            SupportsPromptDocuments = true,
-            SupportsToolResultImages = true,
-            SupportsToolResultDocuments = true
+            SupportsPromptDocuments = true
         };
     }
 

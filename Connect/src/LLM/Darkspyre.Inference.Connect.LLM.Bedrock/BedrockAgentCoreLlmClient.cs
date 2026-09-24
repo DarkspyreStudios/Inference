@@ -30,8 +30,7 @@ internal sealed class BedrockAgentCoreLlmClient(IBedrockAgentCoreInvoker invoker
         SupportsAgentToolUse = true,
         SupportsPromptImages = false,
         SupportsPromptDocuments = false,
-        SupportsToolResultImages = false,
-        SupportsToolResultDocuments = false
+        RichContentSupported = RichContentRoutes.AgentCore
     };
 
     public LlmTransport Transport => LlmTransport.AwsBedrockAgentCore;
@@ -186,6 +185,8 @@ internal sealed class BedrockAgentCoreLlmClient(IBedrockAgentCoreInvoker invoker
             options.Sandbox,
             options.ApprovalPolicy,
             options.Handlers,
+            NativeAgentContract.AgentCore.RichContentSupported.For(connection, null),
+            NativeAgentContract.AgentCore.RichContentSupported.For(connection, options.ModelId),
             AgentOpeningContext.For(options, carriesAttachments: false)));
     }
 
@@ -221,7 +222,9 @@ internal sealed class BedrockAgentCoreLlmClient(IBedrockAgentCoreInvoker invoker
             options.Tools,
             options.Sandbox ?? LlmAgentSandboxMode.WorkspaceWrite,
             options.ApprovalPolicy ?? LlmAgentApprovalPolicy.OnRequest,
-            options.Handlers));
+            options.Handlers,
+            NativeAgentContract.AgentCore.RichContentSupported.For(connection, null),
+            NativeAgentContract.AgentCore.RichContentSupported.For(connection, modelId)));
     }
 
     public Task<ILlmAgentSession> ForkSessionAsync(

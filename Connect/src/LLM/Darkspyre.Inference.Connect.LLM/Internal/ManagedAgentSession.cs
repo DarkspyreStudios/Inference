@@ -479,7 +479,7 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
                     }
                     catch (OperationCanceledException) when (token.IsCancellationRequested) { }
                 }
-                return new(call.Id, message, true);
+                return new(call.Id, LlmToolOutput.FromText(message, isError: true));
             }
             try
             {
@@ -494,22 +494,17 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
                     arguments.RootElement.Clone(), null, "started"), token);
                 token.ThrowIfCancellationRequested();
                 started = true;
-                var result = await _options.Handlers.ToolHandler!(new(ThreadId, run.Id, call.Id, null, call.Name,
+                var output = await _options.Handlers.ToolHandler!(new(ThreadId, run.Id, call.Id, null, call.Name,
                     arguments.RootElement.Clone()), token);
-                var capabilities = _capabilities(run.Turn.ModelId!);
-                LlmAttachments.Validate(result.Attachments, capabilities.SupportsToolResultImages,
-                    capabilities.SupportsToolResultDocuments, nameof(result));
-                var mapped = new LlmToolResult(call.Id, TextContent(result.Content), !result.Success)
-                {
-                    Attachments = result.Attachments.Select(attachment => attachment with { Data = attachment.Data.ToArray() }).ToArray()
-                };
+                // The output is kept whole; the route's projection decides what reaches the model when it is sent.
+                var mapped = new LlmToolResult(call.Id, ManagedAgentContext.CopyOutput(output));
                 // A completed external effect is retained even if cancellation prevents its event.
                 if (!token.IsCancellationRequested)
                 {
                     try
                     {
                         await writer.WriteAsync(new LlmAgentToolEvent(ThreadId, run.Id, call.Id, null, call.Name,
-                            arguments.RootElement.Clone(), result.Success, "completed"), token);
+                            arguments.RootElement.Clone(), !output.IsError, "completed"), token);
                     }
                     catch (OperationCanceledException) when (token.IsCancellationRequested) { }
                 }
@@ -517,12 +512,12 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
             }
             catch (OperationCanceledException) when (token.IsCancellationRequested)
             {
-                return new(call.Id, started ? "Tool interrupted; external outcome is unknown. Do not automatically replay."
-                    : "Tool was not executed because the run was cancelled.", true);
+                return new(call.Id, LlmToolOutput.FromText(started ? "Tool interrupted; external outcome is unknown. Do not automatically replay."
+                    : "Tool was not executed because the run was cancelled.", isError: true));
             }
             catch (Exception)
             {
-                return await FailedAsync("Tool handler failed or returned unsupported content; do not automatically replay.");
+                return await FailedAsync("Tool handler failed; do not automatically replay.");
             }
             finally { if (entered) { concurrency.Release(); } }
         }

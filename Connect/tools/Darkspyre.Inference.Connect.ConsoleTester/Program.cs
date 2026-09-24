@@ -341,9 +341,10 @@ internal static class Program
             options.Model,
             cancellationToken);
         var tools = new List<LlmAgentToolDefinition> { CreateEchoTool() };
-        if (capabilities.SupportsToolResultImages || capabilities.SupportsToolResultDocuments)
+        LlmRichContentSupported richContent = capabilities.Agent.RichContentSupported;
+        if (richContent.Images == LlmRichContentCarriage.Native)
         {
-            tools.Add(CreateAttachmentTool(capabilities.SupportsToolResultDocuments));
+            tools.Add(CreateAttachmentTool(richContent.TextDocuments != LlmRichContentCarriage.Unsupported));
         }
         await using ILlmAgentSession session = await agent.StartSessionAsync(
             invocation.Provider.ConnectionId,
@@ -433,20 +434,16 @@ internal static class Program
         };
     }
 
-    internal static ValueTask<LlmAgentToolResult> ExecuteToolAsync(
+    internal static ValueTask<LlmToolOutput> ExecuteToolAsync(
         LlmAgentToolCall call,
         CancellationToken cancellationToken) => call.Name switch
         {
             "darkspyre_inference_connect_echo" => ExecuteEchoToolAsync(call, cancellationToken),
             "darkspyre_inference_connect_attachment" => ExecuteAttachmentToolAsync(call, cancellationToken),
-            _ => ValueTask.FromResult(new LlmAgentToolResult
-            {
-                Success = false,
-                Content = [new LlmAgentTextContent($"Unknown tool '{call.Name}'.")]
-            })
+            _ => ValueTask.FromResult(LlmToolOutput.FromText($"Unknown tool '{call.Name}'.", isError: true))
         };
 
-    private static ValueTask<LlmAgentToolResult> ExecuteEchoToolAsync(
+    private static ValueTask<LlmToolOutput> ExecuteEchoToolAsync(
         LlmAgentToolCall call,
         CancellationToken cancellationToken)
     {
@@ -455,14 +452,10 @@ internal static class Program
             && textElement.ValueKind == JsonValueKind.String
                 ? textElement.GetString() ?? string.Empty
                 : string.Empty;
-        return ValueTask.FromResult(new LlmAgentToolResult
-        {
-            Success = true,
-            Content = [new LlmAgentTextContent(text)]
-        });
+        return ValueTask.FromResult(LlmToolOutput.FromText(text));
     }
 
-    private static ValueTask<LlmAgentToolResult> ExecuteAttachmentToolAsync(
+    private static ValueTask<LlmToolOutput> ExecuteAttachmentToolAsync(
         LlmAgentToolCall call,
         CancellationToken cancellationToken)
     {
@@ -471,13 +464,12 @@ internal static class Program
             && kindElement.ValueKind == JsonValueKind.String
                 ? kindElement.GetString()
                 : null;
-        LlmAttachment attachment = kind switch
+        LlmToolOutputBinary attachment = kind switch
         {
-            "image" => new LlmAttachment
-            {
-                Kind = LlmAttachmentKind.Image,
-                FileName = "smoke-test.png",
-                Data = new byte[]
+            "image" => new LlmToolOutputBinary(
+                LlmBinaryKind.Image,
+                "image/png",
+                new byte[]
                 {
                     0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d,
                     0x49, 0x48, 0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
@@ -485,22 +477,19 @@ internal static class Program
                     0x0b, 0x49, 0x44, 0x41, 0x54, 0x78, 0xda, 0x63, 0x64, 0xf8, 0x0f, 0x00,
                     0x01, 0x05, 0x01, 0x01, 0x27, 0x18, 0xe3, 0x66, 0x00, 0x00, 0x00, 0x00,
                     0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82
-                }
-            },
-            "document" => new LlmAttachment
-            {
-                Kind = LlmAttachmentKind.Document,
-                FileName = "smoke-test.txt",
-                Data = Encoding.UTF8.GetBytes("Darkspyre.Inference.Connect.LLM attachment smoke test document.")
-            },
+                },
+                "smoke-test.png"),
+            "document" => new LlmToolOutputBinary(
+                LlmBinaryKind.Document,
+                "text/plain",
+                Encoding.UTF8.GetBytes("Darkspyre.Inference.Connect.LLM attachment smoke test document."),
+                "smoke-test.txt"),
             _ => throw new ArgumentException("Attachment tool kind must be 'image' or 'document'.")
         };
 
-        return ValueTask.FromResult(new LlmAgentToolResult
+        return ValueTask.FromResult(new LlmToolOutput
         {
-            Success = true,
-            Content = [new LlmAgentTextContent($"Attached {attachment.FileName}.")],
-            Attachments = [attachment]
+            Parts = [new LlmToolOutputText($"Attached {attachment.FileName}."), attachment]
         });
     }
 

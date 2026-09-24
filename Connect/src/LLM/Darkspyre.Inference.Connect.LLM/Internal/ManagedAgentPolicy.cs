@@ -13,7 +13,9 @@ internal static class ManagedAgentPolicy
         CompactionOwnership = LlmAgentCompactionOwnership.Host,
         Steering = LlmAgentSteering.SafeBoundary,
         SupportsInterrupt = true,
-        ToolExecutionOwnership = LlmAgentToolExecutionOwnership.Host
+        ToolExecutionOwnership = LlmAgentToolExecutionOwnership.Host,
+        // The managed runtime sends tool output through Direct Codex Responses.
+        RichContentSupported = RichContentRoutes.Responses
     };
 
     public static void Validate(LlmAgentExecutionOptions options, LlmModel? model)

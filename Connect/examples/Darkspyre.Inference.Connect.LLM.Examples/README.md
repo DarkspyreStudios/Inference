@@ -183,37 +183,34 @@ Keep protected entries unchanged. A rejected replacement does not consume the pa
 context. Queued steering is added atomically to the accepted replacement and participates in its
 budget check. A pause is live process state, not a durable executable checkpoint.
 
-## Tool-result attachments
+## Tool output
 
-Chat and agent tool results use the same provider-neutral value:
+Chat and agent tool results carry the same ordered `LlmToolOutput`:
 
 ```csharp
-LlmAttachment report = new()
+LlmToolOutput output = new()
 {
-    Kind = LlmAttachmentKind.Document,
-    FileName = "report.pdf",
-    Data = await File.ReadAllBytesAsync(reportPath, cancellationToken)
+    Parts =
+    [
+        new LlmToolOutputText("The report follows."),
+        new LlmToolOutputBinary(
+            LlmBinaryKind.Document,
+            "application/pdf",
+            await File.ReadAllBytesAsync(reportPath, cancellationToken),
+            "report.pdf")
+    ]
 };
 
-LlmToolResult chatResult = new(call.Id, "Report attached.")
-{
-    Attachments = [report]
-};
-
-LlmAgentToolResult agentResult = new()
-{
-    Content = [new LlmAgentTextContent("Report attached.")],
-    Attachments = [report]
-};
+LlmToolResult chatResult = new(call.Id, output);
+// An agent ToolHandler returns the output itself.
 ```
 
-Use `SupportsToolResultImages` and `SupportsToolResultDocuments` to gate tool behavior. OpenAI
-Responses, Anthropic Messages, Codex and Claude agent sessions, and Bedrock Converse accept both
-kinds. AgentCore Harness host-tool results are text-only because the Harness tool-result wire shape
-does not accept image or document blocks.
-OpenAI-compatible Chat Completions remains text-only because no portable attachment result shape
-exists across compatible endpoints. Claude uses MCP embedded resources. Direct Codex uses native
-Responses image/file blocks in both prompt and tool output. Unsupported content fails explicitly.
+`LlmProviderCapabilities.RichContentSupported` describes the chat lane and
+`LlmProviderCapabilities.Agent.RichContentSupported` describes agent sessions. Each carriage is
+`Native`, `Text` or `Unsupported`. Adapters omit content a route cannot carry; they never fail the
+request or the tool for it. `LlmProviderService.ProjectToolOutputAsync` reports each part's delivery
+before the host sends it. [`AttachmentToolResults`](AttachmentToolResults.cs) builds one output of
+text, an image and a PDF.
 
 ## Prompt attachments
 
