@@ -231,16 +231,14 @@ public sealed class AgentContractTests
     }
 
     [Theory]
-    [InlineData(0)]
     [InlineData(1)]
     [InlineData(2)]
     [InlineData(3)]
-    public void NativeStartRejectsEveryManagedOnlyOption(int field)
+    public void NativeStartRejectsHostIdentitiesAndManagedExecutionOptions(int field)
     {
         var options = new LlmAgentSessionOptions { ModelId = "model", WorkingDirectory = "." };
         options = field switch
         {
-            0 => options with { Context = new() },
             1 => options with { ThreadId = "thread" },
             2 => options with { SessionId = "session" },
             _ => options with { ExecutionOptions = new() }
@@ -254,6 +252,7 @@ public sealed class AgentContractTests
     {
         var caps = await session.GetCapabilitiesAsync();
         Assert.Equal(LlmAgentContextOwnership.Provider, caps.ContextOwnership);
+        Assert.Equal(LlmAgentContextImport.OpeningContext, caps.ContextImport);
         Assert.False(caps.SupportsContextCapture);
         Assert.False(caps.SupportsContextReplacement);
         Assert.False(caps.SupportsContextStatus);

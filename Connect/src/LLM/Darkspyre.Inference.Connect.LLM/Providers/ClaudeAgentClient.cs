@@ -23,6 +23,7 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             options.ModelId, options.Tools, options.Handlers);
         ClaudeCliConfiguration.ValidateConnection(connection);
         ValidateOptions(options.ModelId, options.WorkingDirectory, options.Tools, options.Handlers);
+        AgentOpeningContext? opening = AgentOpeningContext.For(options, carriesAttachments: true);
         string threadId = Guid.NewGuid().ToString();
         return await CreateSessionAsync(
             threadId,
@@ -39,6 +40,7 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             options.Tools,
             options.Handlers,
             options.Ephemeral,
+            opening,
             cancellationToken);
     }
 
@@ -70,6 +72,7 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             options.Tools,
             options.Handlers,
             ephemeral: false,
+            opening: null,
             cancellationToken);
     }
 
@@ -109,6 +112,7 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             options.Tools,
             options.Handlers,
             ephemeral: false,
+            opening: null,
             cancellationToken);
     }
 
@@ -127,6 +131,7 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
         IReadOnlyList<LlmAgentToolDefinition> tools,
         LlmAgentSessionHandlers handlers,
         bool ephemeral,
+        AgentOpeningContext? opening,
         CancellationToken cancellationToken)
     {
         string normalizedDirectory = CliInfrastructure.NormalizeWorkingDirectory(workingDirectory);
@@ -162,7 +167,8 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             sessionId,
             modelId,
             tools,
-            handlers);
+            handlers,
+            opening);
         try
         {
             await session.InitializeAsync(instructions, cancellationToken);
@@ -352,6 +358,8 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
         private readonly SemaphoreSlim _writeLock = new(1, 1);
         private readonly Queue<string> _deferredLines = new();
         private readonly List<PendingToolCall> _pendingToolCalls = [];
+        // Sent with the first turn, then cleared once the provider has received it.
+        private AgentOpeningContext? _opening;
         private string? _activeTurnId;
         private bool _disposed;
 
@@ -361,9 +369,11 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             string sessionId,
             string? initialModelId,
             IReadOnlyList<LlmAgentToolDefinition> tools,
-            LlmAgentSessionHandlers handlers)
+            LlmAgentSessionHandlers handlers,
+            AgentOpeningContext? opening)
         {
             _process = process;
+            _opening = opening;
             ThreadId = threadId;
             SessionId = sessionId;
             _initialModelId = initialModelId;
@@ -497,6 +507,11 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
                 }
 
                 yield return new LlmAgentTurnStartedEvent(ThreadId, turnId);
+                AgentOpeningContext? opening = _opening;
+                if (opening is not null)
+                {
+                    yield return new LlmAgentWarningEvent(ThreadId, turnId, opening.Notice);
+                }
                 await WriteJsonLineAsync(
                     new
                     {
@@ -506,11 +521,16 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
                         message = new
                         {
                             role = "user",
-                            content = SerializeInput(request.Input, request.Attachments)
+                            content = opening is null
+                                ? SerializeInput(request.Input, request.Attachments)
+                                : SerializeInput(
+                                    [new LlmAgentTextContent(opening.Text), .. request.Input],
+                                    [.. opening.Attachments, .. request.Attachments])
                         },
                         parent_tool_use_id = (string?)null
                     },
                     cancellationToken);
+                _opening = null;
 
                 var completedMessages = new HashSet<string>(StringComparer.Ordinal);
                 while (true)

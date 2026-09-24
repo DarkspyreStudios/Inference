@@ -123,8 +123,17 @@ public sealed record LlmAgentSessionHandlers
 
 public sealed record LlmAgentSessionOptions
 {
-    /// <summary>Host-owned settled context. Unsupported by provider-owned sessions.</summary>
+    /// <summary>
+    /// Settled context to start from. <see cref="LlmAgentCapabilities.ContextImport"/> reports how the runtime
+    /// takes it.
+    /// </summary>
     public LlmAgentContext? Context { get; init; }
+
+    /// <summary>
+    /// Set to <see cref="LlmUnboundResponseState.Omit"/> when <see cref="Context"/> carries retained history
+    /// from another model or provider. An opening-context start carries no state, so it requires Omit.
+    /// </summary>
+    public LlmUnboundResponseState UnboundResponseState { get; init; } = LlmUnboundResponseState.Reject;
 
     public string? ThreadId { get; init; }
 

@@ -175,10 +175,11 @@ internal abstract class LlmClientBase(HttpClient http) : ILlmClient
     {
         bool hasToolHistory = request.Messages.Any(message =>
             message.ToolCalls.Count > 0 || message.ToolResults.Count > 0);
+        // A text transcript carries tool history without asking the provider to run host tools.
         bool requestsToolUse = request.Tools.Count > 0
             || request.ToolChoice is not null
             || request.AllowParallelToolCalls is not null
-            || hasToolHistory;
+            || (hasToolHistory && capabilities.ToolHistory == LlmToolHistory.Structured);
 
         if (requestsToolUse && !capabilities.SupportsToolUse)
         {

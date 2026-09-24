@@ -337,13 +337,17 @@ public sealed class LlmProviderService
                 throw new LlmProviderException("The connection now disables the requested agent operation.", connection.Transport);
             }
         }
+        (request, int omitted) = ResponseStateProjection.Project(request, connection);
         await foreach (LlmStreamEvent streamEvent in client.StreamAsync(
                            connection,
                            request,
                            cancellationToken))
         {
             yield return streamEvent is LlmCompletionEvent completion
-                ? new LlmCompletionEvent(SanitizeDiagnostics(completion.Result, connection))
+                ? new LlmCompletionEvent(SanitizeDiagnostics(completion.Result, connection) with
+                {
+                    OmittedResponseStateCount = omitted
+                })
                 : streamEvent;
         }
     }
@@ -366,6 +370,8 @@ public sealed class LlmProviderService
         ManagedAgentPolicy.Validate(new() { ContextPolicy = policy }, null);
         var connection = await LlmConnectionResolver.ResolveAsync(_connections, connectionId, cancellationToken);
         var client = ClientFor(connection.Transport);
+        // Measure what would be sent: the same projection as the request path.
+        request = ResponseStateProjection.Project(request, connection).Request;
         var capabilities = client.GetCapabilities(connection, request.ModelId);
         LlmRequestAccounting Unsupported(string diagnostic) => new()
         {
@@ -415,10 +421,11 @@ public sealed class LlmProviderService
             policy = policy with { ReservedOutputTokens = Math.Max(policy.ReservedOutputTokens ?? 0, cap) };
         }
         var accounting = ManagedAgentPolicy.Account(request.ModelId, used, policy, model);
+        string[] diagnostics = [.. new[] { accounting.Diagnostic, used is null ? null : estimator.EstimateDiagnostic, metadataDiagnostic }
+            .OfType<string>()];
         return accounting with
         {
-            Diagnostic = metadataDiagnostic is null ? accounting.Diagnostic
-                : string.Join(" ", new[] { accounting.Diagnostic, metadataDiagnostic }.Where(value => value is not null)),
+            Diagnostic = diagnostics.Length == 0 ? null : string.Join(" ", diagnostics),
             OutputLimitEnforcement = capabilities.OutputLimitEnforcement
         };
     }

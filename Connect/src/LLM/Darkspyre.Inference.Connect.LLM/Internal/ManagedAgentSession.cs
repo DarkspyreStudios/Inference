@@ -18,6 +18,8 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
     private readonly Func<LlmChatRequest, CancellationToken, IAsyncEnumerable<LlmStreamEvent>> _stream;
     private readonly Dictionary<string, LlmAgentToolDefinition> _tools;
     private LlmAgentContext _context;
+    // Messages whose response state was left out at start; reported once, on the first turn.
+    private int _startOmittedResponseStates;
     private LiveRun? _run;
     private bool _segmentActive;
     private bool _disposed;
@@ -51,7 +53,8 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
             Context = null
         };
         _tools = _options.Tools.ToDictionary(tool => tool.Name, StringComparer.Ordinal);
-        _context = ManagedAgentContext.Import(options.Context ?? new(), connection, options.ModelId);
+        (_context, _startOmittedResponseStates) = ManagedAgentContext.Import(
+            options.Context ?? new(), connection, options.ModelId, options.UnboundResponseState);
         ThreadId = options.ThreadId ?? Guid.NewGuid().ToString();
         SessionId = options.SessionId ?? ThreadId;
         ArgumentException.ThrowIfNullOrWhiteSpace(ThreadId);
@@ -330,6 +333,11 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
             {
                 await writer.WriteAsync(new LlmAgentWarningEvent(ThreadId, run.Id,
                     "Some restored attachments are unavailable; omission descriptors are not sent to the model."), token);
+            }
+            if (continuedPause is null && Interlocked.Exchange(ref _startOmittedResponseStates, 0) is int omitted and > 0)
+            {
+                await writer.WriteAsync(new LlmAgentWarningEvent(ThreadId, run.Id,
+                    $"Response state from {omitted} earlier messages was not carried to this model."), token);
             }
             while (run.Iterations < _execution.MaxModelIterations)
             {

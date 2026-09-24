@@ -1,3 +1,4 @@
+using Darkspyre.Inference.Connect.LLM.Internal;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 using Darkspyre.Inference.Connect.LLM;
@@ -418,6 +419,76 @@ public sealed class AntigravityCliLlmClientTests
         Assert.Equal("antigravity_cli_not_found", exception.ProviderCode);
         Assert.Contains("Install agy", exception.Message, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task ToolHistoryReachesThePromptAsLabelledBlocks()
+    {
+        var runner = new RecordingRunner(new AntigravityCliProcessResult(
+            0,
+            """
+            {"event":"init","conversation_id":"conversation-1","init":{}}
+            {"event":"result","result":{"conversation_id":"conversation-1","status":"SUCCESS","response":"522,000","usage":{"input_tokens":12,"output_tokens":2,"total_tokens":14}}}
+            """,
+            string.Empty));
+        var client = new AntigravityCliLlmClient(runner);
+
+        IReadOnlyList<LlmStreamEvent> events = await ReadAllAsync(client.StreamAsync(
+            Connection(), new LlmChatRequest { ModelId = "auto", Messages = ToolHistory() }));
+
+        Assert.Equal("522,000", Assert.Single(events.OfType<LlmCompletionEvent>()).Result.Text);
+        string input = Assert.Single(runner.Invocations).StandardInput!;
+        Assert.Contains("[TOOL CALL id=c1 name=lookup]", input, StringComparison.Ordinal);
+        Assert.Contains("[TOOL RESULT id=c1 status=ok]", input, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ResponseStateIsRejectedByNameAndOfferedToolsStillFail()
+    {
+        var client = new AntigravityCliLlmClient(new RecordingRunner(new AntigravityCliProcessResult(0, string.Empty, string.Empty)));
+        var state = new LlmProviderResponseState
+        {
+            Transport = LlmTransport.OpenAiCodex,
+            ModelId = "model",
+            ScopeId = "scope",
+            Payload = "[]"
+        };
+
+        var error = await Assert.ThrowsAsync<NotSupportedException>(() => ReadAllAsync(client.StreamAsync(Connection(), new LlmChatRequest
+        {
+            ModelId = "auto",
+            Messages = [new LlmChatMessage("user", "Hi"), new LlmChatMessage("assistant", "Hello") { ResponseState = state }]
+        })));
+        Assert.Contains("response state", error.Message, StringComparison.Ordinal);
+        await Assert.ThrowsAsync<NotSupportedException>(() => ReadAllAsync(client.StreamAsync(Connection(), new LlmChatRequest
+        {
+            ModelId = "auto",
+            Messages = ToolHistory(),
+            Tools = [new() { Name = "lookup", InputSchema = System.Text.Json.JsonSerializer.SerializeToElement(new { type = "object" }) }]
+        })));
+    }
+
+    [Fact]
+    public async Task MeasuringThroughTheServiceEstimatesTheProjectedPromptWithItsQualification()
+    {
+        var runner = new RecordingRunner(new AntigravityCliProcessResult(0, "auto Auto", string.Empty));
+        var service = new LlmProviderService(new StubConnectionSource(Connection()), [new AntigravityCliLlmClient(runner)]);
+
+        LlmRequestAccounting accounting = await service.MeasureRequestAsync(
+            "antigravity", new LlmChatRequest { ModelId = "auto", Messages = ToolHistory() });
+
+        Assert.True(accounting.IsSupported);
+        Assert.True(accounting.UsedContextTokens > 0);
+        Assert.Equal(LlmContextMeasurementSource.Estimated, accounting.Source);
+        Assert.Contains(LocalTokenCount.CliDiagnostic, accounting.Diagnostic, StringComparison.Ordinal);
+    }
+
+    private static LlmChatMessage[] ToolHistory() =>
+    [
+        new LlmChatMessage("user", "Population of Lyon?"),
+        new LlmChatMessage("assistant", string.Empty) { ToolCalls = [new LlmToolCall("c1", "lookup", """{"city":"Lyon"}""")] },
+        new LlmChatMessage("user", string.Empty) { ToolResults = [new LlmToolResult("c1", "522,250")] },
+        new LlmChatMessage("user", "Round it."),
+    ];
 
     private static LlmConnection Connection() => new()
     {

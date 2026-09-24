@@ -5,6 +5,7 @@ internal static class ManagedAgentPolicy
     public static LlmAgentCapabilities Capabilities { get; } = new()
     {
         ContextOwnership = LlmAgentContextOwnership.Host,
+        ContextImport = LlmAgentContextImport.Structured,
         SupportsContextCapture = true,
         SupportsContextReplacement = true,
         SupportsContextStatus = true,

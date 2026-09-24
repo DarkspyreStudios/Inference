@@ -8,11 +8,12 @@ using LlmReasoningLevel = Darkspyre.Inference.Common.LLM.LlmReasoningLevel;
 namespace Darkspyre.Inference.Connect.LLM.Providers;
 
 internal sealed class AntigravityCliLlmClient(IAntigravityCliRunner runner)
-    : ILlmClient, ILlmAccountUsageClient, IExternalLlmAuthenticationProbe
+    : ILlmClient, ILlmAccountUsageClient, IExternalLlmAuthenticationProbe, ILlmContextEstimator
 {
     private static readonly LlmProviderCapabilities Capabilities = new()
     {
         OutputLimitEnforcement = Common.LLM.LlmOutputLimitEnforcement.Unsupported,
+        ToolHistory = LlmToolHistory.Text,
         SupportsStreaming = true,
         SupportsStreamingUsage = true,
         SupportsModelListing = true,
@@ -77,13 +78,14 @@ internal sealed class AntigravityCliLlmClient(IAntigravityCliRunner runner)
 
         if (request.Tools.Count > 0
             || request.ToolChoice is not null
-            || request.AllowParallelToolCalls is not null
-            || request.Messages.Any(message => message.ResponseState is not null)
-            || request.Messages.Any(message =>
-                message.ToolCalls.Count > 0 || message.ToolResults.Count > 0))
+            || request.AllowParallelToolCalls is not null)
         {
             throw new NotSupportedException(
                 "Antigravity CLI does not expose host-executed tool calls.");
+        }
+        if (request.Messages.Any(message => message.ResponseState is not null))
+        {
+            throw new NotSupportedException("Antigravity CLI chat cannot import adapter response state.");
         }
 
         JsonElement? providerSchema = enforcement == LlmStructuredOutputEnforcement.ProviderJsonSchema
@@ -464,6 +466,24 @@ internal sealed class AntigravityCliLlmClient(IAntigravityCliRunner runner)
         return StructuredOutput.ResolveEnforcement(structured, capabilities);
     }
 
+    public string? EstimateDiagnostic => LocalTokenCount.CliDiagnostic;
+
+    /// <summary>Counts the prompt this client would send.</summary>
+    public long? EstimateInputTokens(LlmConnection connection, LlmChatRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        LlmStructuredOutputEnforcement? enforcement = ValidateRequest(request, GetCapabilities(connection, request.ModelId));
+        if (request.Tools.Count > 0 || request.ToolChoice is not null || request.AllowParallelToolCalls is not null)
+        {
+            throw new NotSupportedException("Antigravity CLI does not expose host-executed tool calls.");
+        }
+        if (request.Messages.Any(message => message.ResponseState is not null))
+        {
+            throw new NotSupportedException("Antigravity CLI chat cannot import adapter response state.");
+        }
+        return LocalTokenCount.Count(BuildPrompt(request, enforcement));
+    }
+
     private static string BuildPrompt(
         LlmChatRequest request,
         LlmStructuredOutputEnforcement? enforcement)
@@ -488,11 +508,7 @@ internal sealed class AntigravityCliLlmClient(IAntigravityCliRunner runner)
         if (request.Messages.Count > 0)
         {
             prompt.AppendLine("CONVERSATION");
-            foreach (LlmChatMessage message in request.Messages)
-            {
-                prompt.Append('[').Append(message.Role.Trim().ToUpperInvariant()).AppendLine("]");
-                prompt.AppendLine(message.Content);
-            }
+            TranscriptText.Append(prompt, request.Messages);
         }
 
         if (request.StructuredOutput is { } structured)

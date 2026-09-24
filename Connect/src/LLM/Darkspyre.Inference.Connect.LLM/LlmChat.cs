@@ -39,6 +39,21 @@ public enum LlmToolChoiceMode
     Specific
 }
 
+/// <summary>
+/// What happens to message response state that the target transport, model or account cannot replay.
+/// </summary>
+public enum LlmUnboundResponseState
+{
+    /// <summary>The request fails before any provider call.</summary>
+    Reject,
+
+    /// <summary>
+    /// The sent request carries the message without its state; visible content, tool calls, tool results
+    /// and attachments are kept. The caller's messages are not modified.
+    /// </summary>
+    Omit
+}
+
 /// <summary>Controls whether, and which, tool the model may request.</summary>
 public sealed record LlmToolChoice
 {
@@ -138,6 +153,12 @@ public sealed record LlmChatRequest
     /// <summary>Per-operation provider JSON properties; standard request fields cannot be replaced.</summary>
     public IReadOnlyDictionary<string, JsonElement> ProviderOptions { get; init; } =
         new Dictionary<string, JsonElement>(StringComparer.Ordinal);
+
+    /// <summary>
+    /// Set to <see cref="LlmUnboundResponseState.Omit"/> when carrying retained history to a new conversation
+    /// on another model or provider.
+    /// </summary>
+    public LlmUnboundResponseState UnboundResponseState { get; init; } = LlmUnboundResponseState.Reject;
 }
 
 public sealed record LlmChatUsage(int? InputTokens, int? OutputTokens, int? TotalTokens);
@@ -189,4 +210,7 @@ public sealed record LlmChatResult
     public LlmStructuredOutputValidation? StructuredOutput { get; init; }
 
     public required LlmProviderDiagnostics Diagnostics { get; init; }
+
+    /// <summary>How many request messages were sent without their response state.</summary>
+    public int OmittedResponseStateCount { get; init; }
 }

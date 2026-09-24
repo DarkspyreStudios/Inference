@@ -192,9 +192,11 @@ the host's chosen thread identity. Context revisions are local mutation counters
 The host never parses encrypted reasoning; compaction drops summarized records as whole records,
 preserving complete unsummarized assistant/tool groups.
 
-No cross-provider/model conversion of opaque state is implicit. Model changes that cannot reuse
-state fail before mutation. The host can explicitly compact to neutral summary text and start with
-the new model; raw old state must not be silently discarded to make the request succeed.
+No cross-provider/model conversion of opaque state is implicit. By default, model changes that
+cannot reuse state fail before mutation. A host carrying retained history to a new conversation opts
+in with `LlmUnboundResponseState.Omit`: unbound state is left out of the sent request and the
+omission is reported. Raw old state is never discarded without that opt-in. See "Host-supplied
+history on a new target".
 
 ### Attachment lifetime
 
@@ -321,7 +323,10 @@ another model. Catalog/network/provider discovery failure leaves model limits nu
 diagnostic; cancellation and invalid input still fail the operation. No raw provider exception is
 copied into the accounting diagnostic. Unsupported projection/features or an unimplemented estimator
 return `IsSupported = false`. Unknown occupancy on a supported projection keeps `IsSupported = true`
-with null count and `Source = Unknown`. There is no tokenizer/character-ratio fallback.
+with null count and `Source = Unknown`. There is no tokenizer/character-ratio fallback. Claude CLI
+chat and Antigravity CLI chat implement an estimator over their projected transcript with the bundled
+`o200k_base` tokenizer, and their diagnostic states that the tokenizer is not the model's and that the
+CLI's own framing is not counted.
 
 The session method runs under the existing session lock, only while idle or after a paused segment
 has settled. It imports/validates a private proposal copy (including complete tool groups and bound
@@ -842,7 +847,7 @@ This enhancement does not define:
 
 ## Host-supplied history on a new target
 
-**Status:** Proposed, for review before implementation
+**Status:** Included in this technical design
 
 **Motivating consumer:** Agent DS model and provider switching
 
@@ -875,7 +880,7 @@ throws for the Claude CLI agent client and the AgentCore session.
 Section 5 currently makes a model change that cannot reuse state fail before mutation, and forbids
 silently discarding old state to make a request succeed. This design keeps that as the default. A
 host that is deliberately carrying history to a new conversation opts in to omission, and every
-omission is reported. Section 5's final paragraph changes to match when this design is implemented.
+omission is reported. Section 5's final paragraph reflects this.
 
 ### Proposed provider-neutral contract
 

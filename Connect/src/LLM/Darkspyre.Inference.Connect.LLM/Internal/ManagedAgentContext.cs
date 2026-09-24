@@ -5,7 +5,59 @@ namespace Darkspyre.Inference.Connect.LLM.Internal;
 /// <summary>Single snapshot validation/copy boundary, used for import, capture and replacement.</summary>
 internal static class ManagedAgentContext
 {
-    public static LlmAgentContext Import(LlmAgentContext context, LlmConnection connection, string modelId)
+    public static LlmAgentContext Import(LlmAgentContext context, LlmConnection connection, string modelId) =>
+        Validate(context, message =>
+        {
+            _ = ProviderResponseStateCodec.DecodeMessage(message, connection, modelId);
+            return message;
+        });
+
+    /// <summary>Imports a start context; with Omit, state this target cannot replay is removed and counted.</summary>
+    public static (LlmAgentContext Context, int Omitted) Import(
+        LlmAgentContext context, LlmConnection connection, string modelId, LlmUnboundResponseState unbound)
+    {
+        if (!Enum.IsDefined(unbound))
+        {
+            throw new ArgumentOutOfRangeException(nameof(unbound), "Unknown unbound response state handling.");
+        }
+        if (unbound == LlmUnboundResponseState.Reject)
+        {
+            return (Import(context, connection, modelId), 0);
+        }
+        int omitted = 0;
+        LlmAgentContext imported = Validate(context, message =>
+        {
+            if (ProviderResponseStateCodec.IsBound(message.ResponseState!, connection, modelId))
+            {
+                _ = ProviderResponseStateCodec.DecodeMessage(message, connection, modelId);
+                return message;
+            }
+            omitted++;
+            return message with { ResponseState = null };
+        });
+        return (imported, omitted);
+    }
+
+    /// <summary>
+    /// Validates a context for a new provider-side conversation, which carries no response state. Every
+    /// entry's state is removed and counted.
+    /// </summary>
+    public static (LlmAgentContext Context, int Omitted) WithoutResponseState(LlmAgentContext context)
+    {
+        int omitted = 0;
+        LlmAgentContext validated = Validate(context, message =>
+        {
+            omitted++;
+            return message with { ResponseState = null };
+        });
+        return (validated, omitted);
+    }
+
+    /// <summary>
+    /// One structural pass over a context. <paramref name="responseState"/> validates or rewrites each message
+    /// that carries response state.
+    /// </summary>
+    private static LlmAgentContext Validate(LlmAgentContext context, Func<LlmChatMessage, LlmChatMessage> responseState)
     {
         ArgumentNullException.ThrowIfNull(context);
         if (context.FormatVersion != 1 || context.Revision < 0)
@@ -15,6 +67,7 @@ internal static class ManagedAgentContext
         var ids = new HashSet<string>(StringComparer.Ordinal);
         var calls = new HashSet<string>(StringComparer.Ordinal);
         var pending = new HashSet<string>(StringComparer.Ordinal);
+        var entries = new List<LlmAgentContextEntry>(context.Entries.Count);
         foreach (var entry in context.Entries)
         {
             if (string.IsNullOrWhiteSpace(entry.Id) || !ids.Add(entry.Id) || string.IsNullOrWhiteSpace(entry.TurnId))
@@ -31,8 +84,9 @@ internal static class ManagedAgentContext
             }
             if (message.ResponseState is not null)
             {
-                _ = ProviderResponseStateCodec.DecodeMessage(message, connection, modelId);
+                message = responseState(message);
             }
+            entries.Add(entry with { Message = message });
             foreach (var call in message.ToolCalls)
             {
                 if (string.IsNullOrWhiteSpace(call.Id) || string.IsNullOrWhiteSpace(call.Name) || !calls.Add(call.Id))
@@ -68,7 +122,7 @@ internal static class ManagedAgentContext
         {
             throw new ArgumentException("Context must end at a settled tool-group boundary.");
         }
-        return Copy(context, includeAttachmentData: true);
+        return Copy(context with { Entries = entries }, includeAttachmentData: true);
     }
 
     public static LlmAgentContext Copy(LlmAgentContext context, bool includeAttachmentData) => context with

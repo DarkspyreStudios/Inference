@@ -494,3 +494,26 @@ Authenticated restores, Debug/Release builds and tests, formatting, vulnerabilit
 archive boundaries and local/fresh-feed consumer checks passed. Downloaded archives match
 the verified local archives; feed readback confirms private visibility. Source is tagged
 `v11.6.0-rc.1`. No model weights or paid inference were used as verification gates.
+
+## Host-supplied history on a new target implementation
+
+The design is the "Host-supplied history on a new target" section of `Connect/docs/enhancements.md`.
+Live runs on 2026-09-24 motivated it: Codex response state failed every switch to another Codex model,
+Claude CLI chat and Antigravity CLI chat, and both CLI chat routes rejected tool history.
+
+- `LlmChatRequest.UnboundResponseState` and `LlmAgentSessionOptions.UnboundResponseState` default to
+  `Reject`. With `Omit`, `LlmProviderService` projects a copy of the request that leaves out state not
+  bound to the target (`ProviderResponseStateCodec.IsBound`), for sending and for `MeasureRequestAsync`,
+  and reports `LlmChatResult.OmittedResponseStateCount`. Managed session import follows the same rule
+  and warns once on the first turn.
+- One `TranscriptText` projection writes history for Claude CLI chat, Antigravity CLI chat and agent
+  opening context; tool calls and results become labelled blocks. `LlmProviderCapabilities.ToolHistory`
+  is `Text` for both CLI chat routes.
+- Claude CLI and AgentCore sessions accept a start `Context` with `Omit` as opening context in the first
+  turn, and report `LlmAgentCapabilities.ContextImport = OpeningContext`. Managed Codex reports
+  `Structured`.
+- Claude CLI chat and Antigravity CLI chat estimate the projected transcript with the shared
+  `LocalTokenCount` (`o200k_base`), which the Responses estimator also uses.
+
+The public additions are additive; the default keeps the previous rejection. Live acceptance of the
+switches is recorded separately once run.

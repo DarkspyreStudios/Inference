@@ -449,6 +449,30 @@ public sealed class ManagedAgentTests
     }
 
     private static LlmAgentTurnRequest Turn(string text) => new() { Input = [new LlmAgentTextContent(text)] };
+    [Fact]
+    public async Task AStartContextFromAnotherModelImportsWithoutItsStateAndWarnsOnce()
+    {
+        var harness = new Harness();
+        var foreign = new LlmProviderResponseState { Transport = LlmTransport.OpenAiCodex, ModelId = "other", ScopeId = "scope", Payload = "[]" };
+        LlmAgentContext history = new()
+        {
+            Entries = [new("q", "t1", new("user", "What is 17 times 23?")), new("a", "t1", new("assistant", "391") { ResponseState = foreign })]
+        };
+        Assert.Throws<ArgumentException>(() => harness.Create(Options() with { Context = history }));
+        await using var session = harness.Create(Options() with { Context = history, UnboundResponseState = LlmUnboundResponseState.Omit });
+        harness.Results.Enqueue(new() { Diagnostics = new(200, null, null), Text = "396", Status = LlmCompletionStatus.Completed });
+        harness.Results.Enqueue(new() { Diagnostics = new(200, null, null), Text = "401", Status = LlmCompletionStatus.Completed });
+
+        var first = await Read(session.RunTurnAsync(Turn("Add 5.")));
+        var second = await Read(session.RunTurnAsync(Turn("Again.")));
+
+        Assert.Contains("from 1 earlier messages", Assert.Single(first.OfType<LlmAgentWarningEvent>()).Message, StringComparison.Ordinal);
+        Assert.Empty(second.OfType<LlmAgentWarningEvent>());
+        Assert.Null(harness.Requests[0].Messages[1].ResponseState);
+        Assert.Equal("391", harness.Requests[0].Messages[1].Content);
+        Assert.All((await session.CaptureContextAsync()).Entries, entry => Assert.Null(entry.Message.ResponseState));
+    }
+
     private static LlmAgentSessionOptions Options() => new() { ModelId = "test", WorkingDirectory = Environment.CurrentDirectory };
     private static LlmAgentContext History(string text) => new() { Entries = [new("old", "previous", new("user", text))] };
     private static LlmAgentExecutionOptions SmallPolicy() => new()
@@ -486,6 +510,8 @@ public sealed class ManagedAgentTests
                 SupportsToolResultDocuments = true,
                 Agent = ManagedAgentPolicy.Capabilities
             });
+        public string? EstimateDiagnostic => null;
+
         public long? EstimateInputTokens(LlmConnection connection, LlmChatRequest request)
         {
             Estimates.Add(request);

@@ -6,6 +6,7 @@ internal static class NativeAgentContract
     public static LlmAgentCapabilities Claude { get; } = new()
     {
         ContextOwnership = LlmAgentContextOwnership.Provider,
+        ContextImport = LlmAgentContextImport.OpeningContext,
         SupportsNativeResume = true,
         NativeFork = LlmAgentNativeFork.CurrentPosition,
         CompactionOwnership = LlmAgentCompactionOwnership.Provider,
@@ -16,6 +17,7 @@ internal static class NativeAgentContract
     public static LlmAgentCapabilities AgentCore { get; } = new()
     {
         ContextOwnership = LlmAgentContextOwnership.Provider,
+        ContextImport = LlmAgentContextImport.OpeningContext,
         SupportsNativeResume = true,
         CompactionOwnership = LlmAgentCompactionOwnership.Provider,
         ToolExecutionOwnership = LlmAgentToolExecutionOwnership.Mixed
@@ -23,11 +25,11 @@ internal static class NativeAgentContract
 
     public static void ValidateStart(LlmAgentSessionOptions options)
     {
-        if (options.Context is not null || options.ThreadId is not null || options.SessionId is not null
-            || options.ExecutionOptions is not null)
+        // A supplied context becomes opening context; see AgentOpeningContext.
+        if (options.ThreadId is not null || options.SessionId is not null || options.ExecutionOptions is not null)
         {
             throw new NotSupportedException(
-                "This native runtime does not accept host context, host identities, or managed execution options. "
+                "This native runtime does not accept host identities or managed execution options. "
                 + "Use native resume/fork for provider-owned conversations.");
         }
 

@@ -3,14 +3,13 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Darkspyre.Inference.Connect.LLM.Internal;
-using Microsoft.ML.Tokenizers;
 
 namespace Darkspyre.Inference.Connect.LLM.Providers;
 
 /// <summary>Shared Responses projection, streaming and retained-output mapping.</summary>
 internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(http), ILlmContextEstimator
 {
-    private static readonly Lazy<TiktokenTokenizer> Tokenizer = new(() => TiktokenTokenizer.CreateForEncoding("o200k_base"));
+    public string? EstimateDiagnostic => null;
 
     public long? EstimateInputTokens(LlmConnection connection, LlmChatRequest request)
     {
@@ -34,7 +33,7 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
             ["tools"] = payload["tools"]?.DeepClone(),
             ["text"] = payload["text"]?.DeepClone()
         };
-        return Tokenizer.Value.CountTokens(input.ToJsonString());
+        return LocalTokenCount.Count(input.ToJsonString());
     }
 
     public override async IAsyncEnumerable<LlmStreamEvent> StreamAsync(

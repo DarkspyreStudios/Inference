@@ -185,7 +185,8 @@ internal sealed class BedrockAgentCoreLlmClient(IBedrockAgentCoreInvoker invoker
             options.Tools,
             options.Sandbox,
             options.ApprovalPolicy,
-            options.Handlers));
+            options.Handlers,
+            AgentOpeningContext.For(options, carriesAttachments: false)));
     }
 
     public Task<ILlmAgentSession> ResumeSessionAsync(

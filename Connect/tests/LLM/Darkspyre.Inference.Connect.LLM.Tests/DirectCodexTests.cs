@@ -294,6 +294,93 @@ public sealed class DirectCodexTests
         }
     }
 
+    private const string ReasonedToolCall = """
+        data: {"type":"response.output_item.done","output_index":1,"item":{"type":"function_call","id":"fc","call_id":"call","name":"echo","arguments":"{}"}}
+
+        data: {"type":"response.output_item.done","output_index":0,"item":{"type":"reasoning","id":"reason","encrypted_content":"opaque","summary":[{"type":"summary_text","text":"Thinking"}]}}
+
+        data: {"type":"response.completed","response":{"status":"completed","output":[],"id":"r"}}
+
+        """;
+
+    [Fact]
+    public async Task OmitCarriesAnotherModelsToolHistoryWithoutItsStateAndReportsTheCount()
+    {
+        (Handler handler, LlmProviderService providers, LlmChatRequest followup) = await OtherModelFollowupAsync();
+        using (handler)
+        {
+            LlmChatResult result = await providers.CompleteAsync("codex", followup);
+
+            using var sent = JsonDocument.Parse(handler.Body!);
+            string?[] types = [.. sent.RootElement.GetProperty("input").EnumerateArray()
+                .Select(item => item.TryGetProperty("type", out JsonElement type) ? type.GetString() : "message")];
+            Assert.DoesNotContain("reasoning", types);
+            Assert.Contains("function_call", types);
+            Assert.Contains("function_call_output", types);
+            Assert.DoesNotContain("opaque", handler.Body!, StringComparison.Ordinal);
+            Assert.Equal(1, result.OmittedResponseStateCount);
+            Assert.NotNull(followup.Messages[1].ResponseState);
+        }
+    }
+
+    [Fact]
+    public async Task RejectStillFailsAnotherModelsStateBeforeAnyRequest()
+    {
+        (Handler handler, LlmProviderService providers, LlmChatRequest followup) = await OtherModelFollowupAsync();
+        using (handler)
+        {
+            int before = handler.Calls;
+
+            await Assert.ThrowsAsync<ArgumentException>(() => providers.CompleteAsync(
+                "codex", followup with { UnboundResponseState = LlmUnboundResponseState.Reject }));
+
+            Assert.Equal(before, handler.Calls);
+        }
+    }
+
+    [Fact]
+    public async Task MeasuringWithOmitCountsTheRequestThatWouldBeSent()
+    {
+        (Handler handler, LlmProviderService providers, LlmChatRequest followup) = await OtherModelFollowupAsync();
+        using (handler)
+        {
+            LlmChatRequest stripped = followup with
+            {
+                UnboundResponseState = LlmUnboundResponseState.Reject,
+                Messages = [.. followup.Messages.Select(message => message with { ResponseState = null })]
+            };
+
+            LlmRequestAccounting omitted = await providers.MeasureRequestAsync("codex", followup);
+            LlmRequestAccounting expected = await providers.MeasureRequestAsync("codex", stripped);
+
+            Assert.NotNull(omitted.UsedContextTokens);
+            Assert.Equal(expected.UsedContextTokens, omitted.UsedContextTokens);
+        }
+    }
+
+    /// <summary>A model reply with reasoning state and a tool call, then a follow-up history for another model.</summary>
+    private static async Task<(Handler Handler, LlmProviderService Providers, LlmChatRequest Followup)> OtherModelFollowupAsync()
+    {
+        var handler = new Handler(request => request.Method == HttpMethod.Get
+            ? Json("{\"models\":[{\"slug\":\"model\",\"context_window\":100000},{\"slug\":\"other\",\"context_window\":100000}]}")
+            : Sse(ReasonedToolCall));
+        var client = new OpenAiCodexLlmClient(new HttpClient(handler));
+        var providers = new LlmProviderService(new Source(Connection()), [client], [new RefreshAuthenticator()]);
+        LlmChatResult first = await providers.CompleteAsync("codex", Request());
+        handler.Response = request => request.Method == HttpMethod.Get
+            ? Json("{\"models\":[{\"slug\":\"other\",\"context_window\":100000}]}")
+            : Sse(Completed);
+        LlmChatRequest followup = Request() with
+        {
+            ModelId = "other",
+            UnboundResponseState = LlmUnboundResponseState.Omit,
+            Messages = [new("user", "first"),
+                new("assistant", first.Text) { ToolCalls = first.ToolCalls, ResponseState = first.ResponseState },
+                new("user", "") { ToolResults = [new("call", "answer")] }]
+        };
+        return (handler, providers, followup);
+    }
+
     private sealed class Source(LlmConnection connection) : ILlmConnectionSource
     {
         public LlmConnection Connection { get; set; } = connection;

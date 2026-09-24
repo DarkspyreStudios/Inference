@@ -402,6 +402,44 @@ public sealed class BedrockAgentCoreTests
         return [.. results];
     }
 
+    [Fact]
+    public async Task AStartContextOpensTheFirstTurnAsTextAndReportsUncarriedAttachments()
+    {
+        var invoker = new StubInvoker(
+        [
+            new HarnessContentBlockDeltaEvent { ContentBlockIndex = 0, Delta = new HarnessContentBlockDelta { Text = "396" } },
+            new HarnessMessageStopEvent { StopReason = HarnessStopReason.End_turn }
+        ]);
+        var client = new BedrockAgentCoreLlmClient(invoker);
+        await using ILlmAgentSession session = await client.StartSessionAsync(Connection(), new LlmAgentSessionOptions
+        {
+            ModelId = BedrockAgentCoreLlmClient.DefaultModelId,
+            WorkingDirectory = "/not-sent-to-agentcore",
+            UnboundResponseState = LlmUnboundResponseState.Omit,
+            Context = new LlmAgentContext
+            {
+                Entries =
+                [
+                    new("e1", "t1", new LlmChatMessage("user", "What is 17 times 23?")
+                    {
+                        Attachments = [new LlmAttachment { Kind = LlmAttachmentKind.Document, FileName = "note.txt", Data = "hi"u8.ToArray() }]
+                    }),
+                    new("e2", "t1", new LlmChatMessage("assistant", "391"))
+                ]
+            }
+        });
+
+        LlmAgentEvent[] events = await ToArrayAsync(session.RunTurnAsync(
+            new LlmAgentTurnRequest { Input = [new LlmAgentTextContent("Add 5.")] }));
+
+        string sent = string.Join("\n", invoker.Requests[0].Messages[0].Content.Select(block => block.Text));
+        Assert.StartsWith("CONVERSATION SO FAR", sent, StringComparison.Ordinal);
+        Assert.Contains("391", sent, StringComparison.Ordinal);
+        Assert.EndsWith("Add 5.", sent, StringComparison.Ordinal);
+        LlmAgentWarningEvent warning = Assert.Single(events.OfType<LlmAgentWarningEvent>());
+        Assert.EndsWith("1 history attachments could not be carried.", warning.Message, StringComparison.Ordinal);
+    }
+
     private sealed class StubInvoker : IBedrockAgentCoreInvoker
     {
         private readonly Queue<IReadOnlyList<IEventStreamEvent>> _responses;

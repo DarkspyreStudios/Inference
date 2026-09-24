@@ -1,3 +1,4 @@
+using Darkspyre.Inference.Connect.LLM.Internal;
 using System.Collections.Concurrent;
 using System.Text.Json;
 using System.Threading.Channels;
@@ -265,6 +266,56 @@ public sealed class ClaudeAgentClientTests
                 }));
 
         Assert.Contains("valid MCP name", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AStartContextOpensOnlyTheFirstTurnAndIsReported()
+    {
+        var process = new ScriptedSessionProcess();
+        var client = new ClaudeAgentClient(new RecordingSessionProcessFactory(process));
+        using JsonDocument schema = JsonDocument.Parse(
+            """{"type":"object","properties":{"text":{"type":"string"}},"required":["text"]}""");
+        await using ILlmAgentSession session = await client.StartSessionAsync(Connection(), new LlmAgentSessionOptions
+        {
+            ModelId = "claude-test",
+            WorkingDirectory = Environment.CurrentDirectory,
+            UnboundResponseState = LlmUnboundResponseState.Omit,
+            Context = new LlmAgentContext
+            {
+                Entries =
+                [
+                    new("e1", "t1", new LlmChatMessage("user", "What is 17 times 23?")),
+                    new("e2", "t1", new LlmChatMessage("assistant", "391")
+                    {
+                        ResponseState = new() { Transport = LlmTransport.OpenAiCodex, ModelId = "gpt", ScopeId = "scope", Payload = "[]" }
+                    })
+                ]
+            },
+            Tools = [new LlmAgentToolDefinition { Name = "echo", Description = "Echo text.", InputSchema = schema.RootElement.Clone() }],
+            Handlers = new LlmAgentSessionHandlers
+            {
+                ToolHandler = (_, _) => ValueTask.FromResult(new LlmAgentToolResult { Content = [new LlmAgentTextContent("echo")] })
+            }
+        });
+
+        IReadOnlyList<LlmAgentEvent> first = await ReadAllAsync(session.RunTurnAsync(
+            new LlmAgentTurnRequest { Input = [new LlmAgentTextContent("Add 5.")] }));
+        IReadOnlyList<LlmAgentEvent> second = await ReadAllAsync(session.RunTurnAsync(
+            new LlmAgentTurnRequest { Input = [new LlmAgentTextContent("Again.")] }));
+
+        JsonElement[] turns = [.. process.Writes.Select(Parse)
+            .Where(line => line.GetProperty("type").GetString() == "user" && line.TryGetProperty("uuid", out _))
+            .Select(line => line.GetProperty("message").GetProperty("content"))];
+        Assert.Equal(2, turns.Length);
+        string opening = turns[0][0].GetProperty("text").GetString()!;
+        Assert.StartsWith(AgentOpeningContext.Header, opening, StringComparison.Ordinal);
+        Assert.Contains("[ASSISTANT]" + Environment.NewLine + "391", opening, StringComparison.Ordinal);
+        Assert.Equal("Add 5.", turns[0][1].GetProperty("text").GetString());
+        Assert.Equal(1, turns[1].GetArrayLength());
+        Assert.Equal("Again.", turns[1][0].GetProperty("text").GetString());
+        LlmAgentWarningEvent warning = Assert.Single(first.OfType<LlmAgentWarningEvent>());
+        Assert.Contains("response state from 1 earlier messages", warning.Message, StringComparison.Ordinal);
+        Assert.Empty(second.OfType<LlmAgentWarningEvent>());
     }
 
     private static LlmConnection Connection() => new()

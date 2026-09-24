@@ -7,6 +7,22 @@ public enum LlmAgentContextOwnership
     Provider
 }
 
+/// <summary>How a session start takes a host-supplied context.</summary>
+public enum LlmAgentContextImport
+{
+    /// <summary>A supplied context is rejected.</summary>
+    None,
+
+    /// <summary>The entries become the session's host-owned context.</summary>
+    Structured,
+
+    /// <summary>
+    /// A new provider-side conversation starts with the entries as a text transcript in its first turn.
+    /// No response state is carried.
+    /// </summary>
+    OpeningContext
+}
+
 public enum LlmAgentCompactionOwnership
 {
     None,
@@ -44,6 +60,9 @@ public sealed record LlmAgentCapabilities
 {
     public LlmAgentContextOwnership ContextOwnership { get; init; }
 
+    /// <summary>How a session start accepts <see cref="LlmAgentSessionOptions.Context"/>.</summary>
+    public LlmAgentContextImport ContextImport { get; init; }
+
     public bool SupportsContextCapture { get; init; }
 
     public bool SupportsContextReplacement { get; init; }
@@ -70,7 +89,7 @@ public sealed record LlmAgentCapabilities
 
     internal void Validate()
     {
-        if (!Enum.IsDefined(ContextOwnership) || !Enum.IsDefined(CompactionOwnership)
+        if (!Enum.IsDefined(ContextOwnership) || !Enum.IsDefined(ContextImport) || !Enum.IsDefined(CompactionOwnership)
             || !Enum.IsDefined(NativeFork) || !Enum.IsDefined(Steering)
             || !Enum.IsDefined(ToolExecutionOwnership)
             || (ContextOwnership == LlmAgentContextOwnership.None && this != new LlmAgentCapabilities())
@@ -79,6 +98,8 @@ public sealed record LlmAgentCapabilities
                 || !SupportsContextCapture || !SupportsContextReplacement || !SupportsContextStatus))
             || (SupportsNativeCompaction && CompactionOwnership != LlmAgentCompactionOwnership.Provider)
             || (NativeFork != LlmAgentNativeFork.None && !SupportsNativeResume)
+            || (ContextImport == LlmAgentContextImport.Structured && ContextOwnership != LlmAgentContextOwnership.Host)
+            || (ContextImport == LlmAgentContextImport.OpeningContext && ContextOwnership != LlmAgentContextOwnership.Provider)
             || (ContextOwnership == LlmAgentContextOwnership.Host
                 && (SupportsNativeResume || NativeFork != LlmAgentNativeFork.None)))
         {

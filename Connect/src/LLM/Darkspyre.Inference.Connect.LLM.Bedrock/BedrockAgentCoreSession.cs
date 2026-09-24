@@ -23,6 +23,8 @@ internal sealed class BedrockAgentCoreSession : ILlmAgentSession
     private readonly LlmAgentApprovalPolicy _approvalPolicy;
     private readonly LlmAgentSessionHandlers _handlers;
     private readonly SemaphoreSlim _turnGate = new(1, 1);
+    // Sent with the first turn, then cleared once the harness streams a response to it.
+    private AgentOpeningContext? _opening;
     private bool _disposed;
 
     public BedrockAgentCoreSession(
@@ -35,9 +37,11 @@ internal sealed class BedrockAgentCoreSession : ILlmAgentSession
         IReadOnlyList<LlmAgentToolDefinition> tools,
         LlmAgentSandboxMode sandbox,
         LlmAgentApprovalPolicy approvalPolicy,
-        LlmAgentSessionHandlers handlers)
+        LlmAgentSessionHandlers handlers,
+        AgentOpeningContext? opening = null)
     {
         _invoker = invoker;
+        _opening = opening;
         _aws = aws;
         _harnessArn = harnessArn;
         _initialModelId = initialModelId;
@@ -110,7 +114,14 @@ internal sealed class BedrockAgentCoreSession : ILlmAgentSession
         try
         {
             yield return new LlmAgentTurnStartedEvent(ThreadId, turnId);
-            List<HarnessMessage> messages = BuildInitialMessages(request.Input);
+            AgentOpeningContext? opening = _opening;
+            if (opening is not null)
+            {
+                yield return new LlmAgentWarningEvent(ThreadId, turnId, opening.Notice);
+            }
+            List<HarnessMessage> messages = BuildInitialMessages(opening is null
+                ? request.Input
+                : [new LlmAgentTextContent(opening.Text), .. request.Input]);
             string modelId = request.ModelId ?? _initialModelId;
 
             for (int round = 0; round < MaximumInlineToolRounds; round++)
@@ -125,6 +136,7 @@ internal sealed class BedrockAgentCoreSession : ILlmAgentSession
                                    invokeRequest,
                                    cancellationToken))
                 {
+                    _opening = null;
                     switch (streamEvent)
                     {
                         case HarnessContentBlockStartEvent

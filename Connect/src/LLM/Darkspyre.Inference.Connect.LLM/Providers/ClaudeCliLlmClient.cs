@@ -11,6 +11,7 @@ namespace Darkspyre.Inference.Connect.LLM.Providers;
 /// <summary>Chat-style adapter over the separately authenticated official Claude CLI.</summary>
 internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runner)
     : LlmClientBase(http),
+        ILlmContextEstimator,
         ILlmAccountUsageClient,
         IExternalLlmAuthenticationProbe,
         IStreamingCredentialRefreshPolicy
@@ -37,6 +38,7 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
     protected override LlmProviderCapabilities DefaultCapabilities { get; } = new()
     {
         OutputLimitEnforcement = Common.LLM.LlmOutputLimitEnforcement.Unsupported,
+        ToolHistory = LlmToolHistory.Text,
         SupportsStreaming = true,
         SupportsStreamingUsage = true,
         SupportsModelListing = false,
@@ -440,6 +442,22 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
         }
     }
 
+    public string? EstimateDiagnostic => LocalTokenCount.CliDiagnostic;
+
+    /// <summary>Counts the prompt this client would send. Attachment content is not countable here.</summary>
+    public long? EstimateInputTokens(LlmConnection connection, LlmChatRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ValidateRequest(connection, request, GetCapabilities(connection, request.ModelId));
+        if (request.Messages.Any(message => message.ResponseState is not null))
+        {
+            throw new NotSupportedException("Claude CLI chat cannot import adapter response state.");
+        }
+        return request.Messages.Any(message => message.Attachments.Count > 0)
+            ? null
+            : LocalTokenCount.Count(BuildClaudePrompt(request));
+    }
+
     private static string BuildClaudePrompt(LlmChatRequest request)
     {
         if (string.IsNullOrWhiteSpace(request.Instructions) && request.Messages.Count == 0)
@@ -459,17 +477,7 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
         if (request.Messages.Count > 0)
         {
             prompt.AppendLine("CONVERSATION");
-            foreach (LlmChatMessage message in request.Messages)
-            {
-                prompt.Append('[').Append(message.Role.Trim().ToUpperInvariant()).AppendLine("]");
-                prompt.AppendLine(message.Content);
-                if (message.Attachments.Count > 0)
-                {
-                    prompt.Append("[ATTACHMENTS: ")
-                        .Append(string.Join(", ", message.Attachments.Select(item => item.FileName)))
-                        .AppendLine("]");
-                }
-            }
+            TranscriptText.Append(prompt, request.Messages);
         }
         if (request.StructuredOutput is { } structured)
         {

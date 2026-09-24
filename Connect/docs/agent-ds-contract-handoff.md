@@ -77,8 +77,16 @@ Responses and Anthropic currently implement this state mapping. The codec allows
 fields, validates version/transport/model/account binding and assistant roles, and checks that
 visible tool calls match the encoded calls. Unknown state fields cannot become request options,
 instructions or credentials. API-key state is conservatively bound to the configured credential and
-endpoint/header scope; key rotation requires explicit neutralization of old opaque records. OAuth
-account identity, when available, survives token refresh. Scope is compatibility, not authenticity.
+endpoint/header scope; after key rotation, old state is unbound and a request that carries it must
+opt in with `UnboundResponseState.Omit`. OAuth account identity, when available, survives token
+refresh. Scope is compatibility, not authenticity.
+
+To switch a session to another model or provider, Agent DS sends its retained history, or a compacted
+summary, to the target with `UnboundResponseState.Omit`. `MeasureRequestAsync` on the target connection
+and model estimates the history before sending. The result's `OmittedResponseStateCount`, or the
+first-turn `LlmAgentWarningEvent` on an agent session, reports what the target did not receive. Agent
+DS keeps the original state in its storage. Claude CLI chat and Antigravity CLI chat carry tool history
+as text; Claude CLI and AgentCore sessions carry a start context as opening context.
 
 The managed engine validates imports/tool groups and makes private copies of live data. Public records
 are serialization DTOs: `IReadOnlyList` does not make a caller's underlying list immutable. Do not
@@ -191,8 +199,9 @@ recovery policy. No durable harness, scheduler, journal or automatic tool replay
 | Antigravity CLI | No agent session | Unsupported | Neither | Neither |
 | Direct Codex managed engine | Host | Supported | Host snapshot instead | Host compaction; explicit interrupt supported |
 
-Native adapters reject `Context`, host IDs, managed `ExecutionOptions`, managed tool scheduling
-flags, and non-null per-run `Instructions` before effects. Overrides cannot enable unimplemented
+Native adapters take `Context` only as opening context, which requires `UnboundResponseState.Omit`.
+They reject host IDs, managed `ExecutionOptions`, managed tool scheduling flags, and non-null per-run
+`Instructions` before effects. Overrides cannot enable unimplemented
 agent features. Direct Codex uses the existing device-OAuth flow and protected host connection store;
 it never scrapes CLI credentials. Replace executable endpoints with the direct HTTPS endpoint.
 Native Codex shell/file/web/MCP/subagent execution is not implicitly registered in the managed

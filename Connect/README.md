@@ -412,9 +412,37 @@ response's `LlmChatMessage.ResponseState`, alongside its visible text and tool c
 turns as well as tool turns. Keep every assistant record, not just the latest one. Responses adapters
 retain ordered reasoning/text/calls; Anthropic retains thinking/signatures/content. The adapter
 replays state instead of duplicating the message's visible text/calls. State is bound to transport,
-model and account/connection scope; incompatible state fails before sending. The former
-request-level `ContinuationToken` has been removed, with no compatibility shim. Chat Completions,
-Bedrock, AgentCore and CLI chat do not import this opaque state.
+model and account/connection scope; incompatible state fails before sending unless the request opts
+in to omission, as described below. The former request-level `ContinuationToken` has been removed,
+with no compatibility shim. Chat Completions, Bedrock, AgentCore and CLI chat do not import this
+opaque state.
+
+### Carrying history to another model or provider
+
+A conversation that moves to another model or provider starts a new provider-side conversation from
+the host's retained history. Set `UnboundResponseState = LlmUnboundResponseState.Omit` on those
+requests. Each message whose state does not bind to the target transport, model and account is sent
+without it; its visible text, tool calls, tool results and attachments are kept. The result's
+`OmittedResponseStateCount` reports how many messages were sent without state. The default,
+`Reject`, fails before any request. The caller's messages are not modified, so the original state
+stays in host storage.
+
+Claude CLI chat and Antigravity CLI chat report `LlmProviderCapabilities.ToolHistory = Text`. Tool
+calls and results already in the history reach their prompt as `[TOOL CALL id=… name=…]` and
+`[TOOL RESULT id=… status=ok|error]` blocks. Offering tools to these routes still fails.
+
+`LlmAgentCapabilities.ContextImport` reports how a session start takes `LlmAgentSessionOptions.Context`:
+
+- Managed Codex imports it as host-owned context (`Structured`). With `Omit`, unbound state is removed
+  and the first turn emits one `LlmAgentWarningEvent` with the count.
+- Claude CLI and AgentCore sessions report `OpeningContext`. A start with `Omit` begins a new provider
+  conversation and sends the history once, as a `CONVERSATION SO FAR` transcript ahead of the first
+  turn's input. The first turn emits one warning that names what was not carried; AgentCore carries
+  no history attachments. A start context with `Reject` fails on these runtimes.
+
+`MeasureRequestAsync` measures the request as it would be sent. Claude CLI chat and Antigravity CLI
+chat estimate it with the bundled `o200k_base` tokenizer and say so in the diagnostic; the estimate
+excludes each CLI's own framing.
 
 ### Host-owned managed agent runtime
 
@@ -822,6 +850,7 @@ Anthropic does not expose the subscription report through the Messages API.
 
 Native chat-style tools are enabled for API-key connections. Claude subscription chat requests remain
 isolated one-shot generations, report `SupportsToolUse = false`, and launch the CLI with tools disabled.
+Tool history in those requests is carried as text blocks (`ToolHistory = Text`).
 For host tools, use `LlmAgentProviderService`: it registers the supplied schemas as an SDK-hosted MCP
 server over Claude's streaming stdin/stdout control protocol. MCP `tools/call` requests are converted
 to `LlmAgentToolCall`, executed only by the host's `ToolHandler`, and returned to Claude as MCP results.

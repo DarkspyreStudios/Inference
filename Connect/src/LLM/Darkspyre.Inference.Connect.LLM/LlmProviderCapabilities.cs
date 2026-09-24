@@ -3,6 +3,16 @@ using Darkspyre.Inference.Common.LLM;
 
 namespace Darkspyre.Inference.Connect.LLM;
 
+/// <summary>How a transport carries tool calls and tool results that are already in the history.</summary>
+public enum LlmToolHistory
+{
+    /// <summary>As the provider's own tool-call and tool-result items.</summary>
+    Structured,
+
+    /// <summary>As labelled text blocks in a flattened transcript; the provider runs no host tools.</summary>
+    Text
+}
+
 /// <summary>Features a transport/model combination can accept without silent degradation.</summary>
 public sealed record LlmProviderCapabilities
 {
@@ -34,6 +44,9 @@ public sealed record LlmProviderCapabilities
     /// on a subsequent chat request. The chat caller executes tools; managed agent loops invoke handlers.
     /// </summary>
     public bool SupportsToolUse { get; init; }
+
+    /// <summary>How tool calls and results already in the history reach the provider.</summary>
+    public LlmToolHistory ToolHistory { get; init; }
 
     /// <summary>Supports the session-oriented <see cref="ILlmAgentClient"/> contract.</summary>
     public bool SupportsAgentSessions { get; init; }

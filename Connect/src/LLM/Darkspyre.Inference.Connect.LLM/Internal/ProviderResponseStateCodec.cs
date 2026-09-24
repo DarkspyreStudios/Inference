@@ -19,13 +19,21 @@ internal static class ProviderResponseStateCodec
             Payload = Project(output, connection.Transport).ToJsonString()
         };
 
+    /// <summary>Transports whose adapters replay response state.</summary>
+    public static bool Retains(LlmTransport transport) =>
+        transport is LlmTransport.OpenAiResponses or LlmTransport.OpenAiCodex or LlmTransport.AnthropicMessages;
+
+    /// <summary>Whether this state can be replayed on the connection and model.</summary>
+    public static bool IsBound(LlmProviderResponseState state, LlmConnection connection, string modelId) =>
+        Retains(connection.Transport) && state.FormatVersion == 1 && state.Transport == connection.Transport
+        && state.ModelId == modelId && state.ScopeId == Scope(connection);
+
     public static JsonArray Decode(
         LlmProviderResponseState state,
         LlmConnection connection,
         string modelId)
     {
-        if (state.FormatVersion != 1 || state.Transport != connection.Transport
-            || state.ModelId != modelId || state.ScopeId != Scope(connection))
+        if (!IsBound(state, connection, modelId))
         {
             throw new ArgumentException("Response state does not match this version, transport, model, or account scope.");
         }

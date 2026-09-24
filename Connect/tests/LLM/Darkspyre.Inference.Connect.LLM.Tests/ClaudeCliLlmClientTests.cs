@@ -1,3 +1,4 @@
+using Darkspyre.Inference.Connect.LLM.Internal;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 using Darkspyre.Inference.Connect.LLM;
@@ -383,6 +384,72 @@ public sealed class ClaudeCliLlmClientTests
         Assert.Equal(Darkspyre.Inference.Common.InferenceFailureCode.InvalidRequest, error.Code);
         Assert.Empty(runner.Invocations);
     }
+
+    [Fact]
+    public async Task ToolHistoryReachesThePromptAsLabelledBlocks()
+    {
+        var runner = new RecordingRunner(new ClaudeCliProcessResult(
+            0,
+            """
+            {"type":"system","subtype":"init","session_id":"session-1"}
+            {"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"522,000"}}}
+            {"type":"result","subtype":"success","is_error":false,"result":"522,000","session_id":"session-1","stop_reason":"end_turn","terminal_reason":"completed","usage":{"input_tokens":7,"output_tokens":2}}
+            """,
+            string.Empty));
+        using var http = new HttpClient(new UnexpectedHttpHandler());
+        var client = new ClaudeCliLlmClient(http, runner);
+
+        IReadOnlyList<LlmStreamEvent> events = await ReadAllAsync(client.StreamAsync(
+            CliConnection(), new LlmChatRequest { ModelId = "claude-test", Messages = ToolHistory() }));
+
+        Assert.Equal("522,000", Assert.Single(events.OfType<LlmCompletionEvent>()).Result.Text);
+        string input = Assert.Single(runner.Invocations).StandardInput!;
+        Assert.Contains("[TOOL CALL id=c1 name=lookup]", input, StringComparison.Ordinal);
+        Assert.Contains("[TOOL RESULT id=c1 status=ok]", input, StringComparison.Ordinal);
+        Assert.Equal(LlmToolHistory.Text, client.GetCapabilities(CliConnection()).ToolHistory);
+    }
+
+    [Fact]
+    public async Task OfferedToolsAreStillRejectedBeforeStartingProcess()
+    {
+        var runner = new RecordingRunner(new ClaudeCliProcessResult(0, string.Empty, string.Empty));
+        using var http = new HttpClient(new UnexpectedHttpHandler());
+        var client = new ClaudeCliLlmClient(http, runner);
+
+        await Assert.ThrowsAsync<NotSupportedException>(() => ReadAllAsync(client.StreamAsync(CliConnection(), new LlmChatRequest
+        {
+            ModelId = "claude-test",
+            Messages = ToolHistory(),
+            Tools = [new() { Name = "lookup", InputSchema = JsonSerializer.SerializeToElement(new { type = "object" }) }]
+        })));
+        Assert.Empty(runner.Invocations);
+    }
+
+    [Fact]
+    public void EstimateCountsTheProjectedPromptAndQualifiesIt()
+    {
+        using var http = new HttpClient(new UnexpectedHttpHandler());
+        var client = new ClaudeCliLlmClient(http, new RecordingRunner(new ClaudeCliProcessResult(0, string.Empty, string.Empty)));
+        var request = new LlmChatRequest { ModelId = "claude-test", Messages = ToolHistory() };
+
+        Assert.True(client.EstimateInputTokens(CliConnection(), request) > 0);
+        Assert.Equal(LocalTokenCount.CliDiagnostic, client.EstimateDiagnostic);
+        Assert.Null(client.EstimateInputTokens(CliConnection(), request with
+        {
+            Messages = [new LlmChatMessage("user", "See this.") { Attachments = [new LlmAttachment
+            {
+                Kind = LlmAttachmentKind.Document, FileName = "note.txt", Data = "hello"u8.ToArray()
+            }] }]
+        }));
+    }
+
+    private static LlmChatMessage[] ToolHistory() =>
+    [
+        new LlmChatMessage("user", "Population of Lyon?"),
+        new LlmChatMessage("assistant", string.Empty) { ToolCalls = [new LlmToolCall("c1", "lookup", """{"city":"Lyon"}""")] },
+        new LlmChatMessage("user", string.Empty) { ToolResults = [new LlmToolResult("c1", "522,250")] },
+        new LlmChatMessage("user", "Round it."),
+    ];
 
     private static LlmConnection CliConnection() => new()
     {
