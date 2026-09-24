@@ -131,7 +131,7 @@ internal static class ProviderDefinitions
                 Title = "Sign in with ChatGPT",
                 Instructions = "Run the sign-in action, open the displayed authorization link, and continue after entering the device code. Authorization updates this draft; Save commits it through the host.",
                 CompletionRequirement = "The draft contains a ChatGPT OAuth access token and account ID before saving an authenticated connection.",
-                Troubleshooting = "CLI login is separate. Run the host's ChatGPT sign-in flow; a CLI executable is not a direct endpoint."
+                Troubleshooting = "An existing Codex CLI login is separate and is not used. Run the ChatGPT sign-in action here."
             },
             SelectModel,
             TestConnection

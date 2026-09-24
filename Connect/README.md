@@ -553,7 +553,9 @@ await llms.SignInAsync(connectionId, authPrompt, cancellationToken: cancellation
 
 The host owns this OAuth credential. An existing Codex CLI login is separate and is never read,
 copied, or used as a fallback. Former executable endpoints (`codex`, `local://codex-cli`, executable
-paths) now fail with migration guidance. Model discovery uses the direct authenticated catalog.
+paths) now fail with migration guidance. The setup session has no endpoint field for Direct Codex:
+its draft always uses the official endpoint, so saving an edit replaces a former value. Model
+discovery uses the direct authenticated catalog.
 
 Chat and managed agents share SSE request mapping, attachments, tool definitions, reasoning level,
 JSON Schema, and ordered opaque response-state replay. Requests use `store: false`; the library

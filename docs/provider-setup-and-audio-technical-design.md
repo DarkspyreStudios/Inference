@@ -230,7 +230,7 @@ services stay first-class and callable independently of a wizard.
 | OpenAI Responses | Endpoint, secret API key, model | Validate, discover models, explicit potentially billed test |
 | OpenAI-compatible | Endpoint, optional key, model, supported advanced options | Remains advanced; explicit discovery/manual-entry policy |
 | Anthropic Messages | Endpoint, secret API key, model | Preserve API-key-only credential policy; discover and explicit test |
-| Direct Codex | Endpoint, device authorization, model | Start/poll/cancel device auth with expiry; draft-local credential completion |
+| Direct Codex | Device authorization, model | Start/poll/cancel device auth with expiry; draft-local credential completion. No endpoint field: the official endpoint is fixed (owner decision, 2026-09-23), and a saved former value is replaced on the next save |
 | Claude CLI | Executable, model; separate optional catalog authorization | Verify CLI/auth without copying CLI tokens; manual model entry without catalog OAuth |
 | Antigravity CLI | Executable, model | Verify installed/authenticated CLI; discover via current adapter; no token scraping |
 | Bedrock Converse | AWS profile and region choices, model | SDK-owned choices/checks in Bedrock assembly; standard credential chain remains owner |

@@ -158,6 +158,39 @@ public sealed class LlmSetupSessionTests
         Assert.Equal("device-token", LlmCredential.Parse(target.Changes!.Credential.Value)!.OAuth!.AccessToken);
     }
 
+    [Fact]
+    public async Task DirectCodexHasNoEndpointFieldAndReplacesAFormerEndpointOnSave()
+    {
+        var provider = new LlmProviderService(new UnusedSource(), [new Client(ProviderDefinitions.ChatGptSubscription)], [new DeviceAuth()]);
+        string official = ProviderDefinitions.ChatGptSubscription.DefaultEndpoint;
+        var created = new Target();
+        await using (LlmSetupSession session = provider.CreateSetupSession(LlmTransport.OpenAiCodex,
+            new(SetupChangeIntent.Create, "id", null), created, modelId: "model"))
+        {
+            Assert.Equal(["model"], Fields(session).Select(field => field.Description.Id));
+            Assert.Empty(session.Snapshot.Steps[0].Sections); // Sign-in has instructions and actions, no empty field group.
+            Assert.Equal(SetupCommitState.Committed, (await session.CommitAsync()).State);
+            Assert.Equal(official, created.Changes!.Configuration.Connection.Endpoint);
+        }
+
+        LlmConnection former = new() { Version = "v1", Transport = LlmTransport.OpenAiCodex, Endpoint = "codex" };
+        var edited = new Target();
+        await using (LlmSetupSession session = provider.CreateSetupSession(LlmTransport.OpenAiCodex,
+            new(SetupChangeIntent.Edit, "id", "v1"), edited, former, "model"))
+        {
+            Assert.True(session.Snapshot.IsDirty);
+            Assert.Equal(SetupCommitState.Committed, (await session.CommitAsync()).State);
+            Assert.Equal(official, edited.Changes!.Configuration.Connection.Endpoint);
+            Assert.True(edited.Changes.RequiresReauthentication);
+        }
+
+        await using (LlmSetupSession session = provider.CreateSetupSession(LlmTransport.OpenAiCodex,
+            new(SetupChangeIntent.Edit, "id", "v1"), new Target(), former with { Endpoint = official }, "model"))
+        {
+            Assert.False(session.Snapshot.IsDirty);
+        }
+    }
+
     private static LlmConnection Connection(LlmTransport transport, string key) => new()
     { Version = "v1", Transport = transport, Endpoint = "https://example.test/v1", Credential = new LlmCredential { ApiKey = key }.Serialize() };
 

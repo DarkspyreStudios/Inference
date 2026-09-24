@@ -32,6 +32,25 @@ public sealed class InferenceSettingsEditorTests : BunitContext
     }
 
     [Fact]
+    public void HostsWithTheirOwnFrameCanHideTheHeadingAndEffectLabels()
+    {
+        var session = new FakeSession();
+        IRenderedComponent<InferenceSettingsEditor> shown = Render<InferenceSettingsEditor>(parameters => parameters
+            .Add(value => value.Session, session).Add(value => value.Host, new FakeHost()));
+        Assert.Equal("Example provider", shown.Find(".inference-settings-editor__heading h2").TextContent);
+        Assert.Equal("Network", shown.Find(".inference-settings-editor__action small").TextContent);
+        Assert.Equal("Connect", shown.Find(".inference-settings-editor__step h3").TextContent); // One step has no step list.
+
+        IRenderedComponent<InferenceSettingsEditor> framed = Render<InferenceSettingsEditor>(parameters => parameters
+            .Add(value => value.Session, session).Add(value => value.Host, new FakeHost())
+            .Add(value => value.ShowHeading, false).Add(value => value.ShowActionEffects, false));
+        Assert.Empty(framed.FindAll(".inference-settings-editor__heading"));
+        Assert.Empty(framed.FindAll(".inference-settings-editor__action small"));
+        Assert.Contains("Check connection", framed.Markup, StringComparison.Ordinal);
+        Assert.Contains("Configured: Yes", framed.Markup, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task SaveUsesProviderSessionCommit()
     {
         var session = new FakeSession();

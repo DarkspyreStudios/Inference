@@ -1,11 +1,16 @@
 @implements IDisposable
+@using Microsoft.JSInterop
+@inject IJSRuntime JS
 
 <CascadingValue Value="_inputs" IsFixed="true">
 <section class="inference-settings-editor" aria-label="@($"{Snapshot.Definition.Implementation.DisplayName} settings")">
-    <header class="inference-settings-editor__heading">
-        <h2>@Snapshot.Definition.Implementation.DisplayName</h2>
-        <p>@Snapshot.Definition.Description</p>
-    </header>
+    @if (ShowHeading)
+    {
+        <header class="inference-settings-editor__heading">
+            <h2>@Snapshot.Definition.Implementation.DisplayName</h2>
+            <p>@Snapshot.Definition.Description</p>
+        </header>
+    }
     @IntroContent
 
     <div class="inference-settings-editor__status" aria-live="polite">
@@ -30,7 +35,8 @@
     @if (CurrentStep is { } step)
     {
         <div class="inference-settings-editor__step">
-            <h3>@step.Title</h3>
+            @* The step list above names and marks the current step; a single step has no list. *@
+            @if (Snapshot.Steps.Count <= 1) { <h3>@step.Title</h3> }
             @if (!string.IsNullOrWhiteSpace(step.Instructions)) { <p>@step.Instructions</p> }
             @if (step.HasPlatformInstructions) { <p>@step.PlatformInstructions</p> }
             @foreach (var section in step.Sections)
@@ -83,10 +89,12 @@
             @switch (interaction)
             {
                 case SetupDeviceAuthorization device:
-                    <p>Use code <strong>@device.UserCode</strong> to finish connecting.</p>
+                    <p>Use code <strong class="inference-settings-editor__user-code">@device.UserCode</strong> to finish connecting.</p>
+                    <Button Variant="Button.ButtonVariant.Outline" OnClick="() => CopyCodeAsync(device.UserCode)">Copy code</Button>
                     <Button OnClick="() => OpenBrowserAsync(device.VerificationUri)">Open authorization page</Button>
                     <Button Disabled="@(Snapshot.IsBusy || Snapshot.IsClosed)" OnClick="() => RunActionAsync(device.Continue)">Continue</Button>
                     <Button Disabled="@(Snapshot.IsBusy || Snapshot.IsClosed)" Variant="Button.ButtonVariant.Outline" OnClick="() => RunActionAsync(device.Cancel)">Cancel connection</Button>
+                    @if (_copiedCode == device.UserCode && _copyStatus is not null) { <p role="status">@_copyStatus</p> }
                     break;
                 case SetupBrowserAuthorization browser:
                     <Button OnClick="() => OpenBrowserAsync(browser.AuthorizationUri)">Open authorization page</Button>
@@ -113,7 +121,7 @@
                             OnClick="() => RunActionAsync(action)">@action.Descriptor.DisplayName</Button>
                     @if (!action.Descriptor.IsEnabled && !string.IsNullOrWhiteSpace(action.Descriptor.UnavailableReason))
                     { <span>@action.Descriptor.UnavailableReason</span> }
-                    @if (action.Descriptor.SideEffects != SetupSideEffect.None)
+                    @if (ShowActionEffects && action.Descriptor.SideEffects != SetupSideEffect.None)
                     { <small>@DescribeEffects(action.Descriptor.SideEffects)</small> }
                 </div>
             }
@@ -148,6 +156,10 @@
     [Parameter, EditorRequired] public IInferenceSetupSession Session { get; set; } = default!;
     [Parameter, EditorRequired] public IInferenceSettingsInteractionHost Host { get; set; } = default!;
     [Parameter] public bool ShowSaveButton { get; set; } = true;
+    /// <summary>False when the host already shows the provider's name and description in its own frame.</summary>
+    [Parameter] public bool ShowHeading { get; set; } = true;
+    /// <summary>False when the host treats the person's click as consent, so declared side effects need no label.</summary>
+    [Parameter] public bool ShowActionEffects { get; set; } = true;
     [Parameter] public RenderFragment? IntroContent { get; set; }
     [Parameter] public RenderFragment? SupplementaryContent { get; set; }
     [Parameter] public EventCallback<SetupCommitResult> CommitCompleted { get; set; }
@@ -163,6 +175,8 @@
     private SetupStep? CurrentStep => _stepIndex < Snapshot.Steps.Count ? Snapshot.Steps[_stepIndex] : null;
     private int _stepIndex;
     private SetupProgress? _progress;
+    private string? _copiedCode;
+    private string? _copyStatus;
     private SetupActionResult? _actionResult;
     private SetupCommitResult? _commitResult;
     private CancellationTokenSource? _actionCancellation;
@@ -323,6 +337,21 @@
         {
             if (!_disposed && ReferenceEquals(session, Session))
             { _actionResult = new(SetupActionState.Failed); }
+        }
+    }
+
+    // The clipboard write needs no provider effect or host consent; the code is shown on screen already.
+    private async Task CopyCodeAsync(string code)
+    {
+        _copiedCode = code;
+        try
+        {
+            await JS.InvokeVoidAsync("navigator.clipboard.writeText", code);
+            _copyStatus = "Code copied.";
+        }
+        catch (Exception error) when (error is JSException or InvalidOperationException or TaskCanceledException)
+        {
+            _copyStatus = "The code could not be copied. Select it and copy it instead.";
         }
     }
 

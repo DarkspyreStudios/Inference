@@ -62,3 +62,12 @@
         flex-grow: 1;
     }
 }
+
+.inference-settings-editor__steps li[aria-current="step"] {
+    font-weight: 600;
+}
+
+.inference-settings-editor__user-code {
+    -webkit-user-select: all;
+    user-select: all;
+}

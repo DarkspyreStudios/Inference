@@ -388,3 +388,35 @@ feeds with an empty package cache and no HTTP cache. It loads the new Settings t
 surfaces, initializes Whisper through its transitive public runtime dependency, and verifies the
 release source identity. All four downloaded archives match the local release files byte-for-byte;
 GitHub readback confirms private visibility. No application was migrated and Lumeo remains unmodified.
+
+## 14. Host-framed presentation corrections (2026-09-23)
+
+Agent DS is the first application to place the editor in a live host, and its dialog exposed
+presentation defects the component tests did not show. The user approved these corrections as
+unpublished source, consumed by Agent DS through project references until a coordinated release.
+
+- `ShowHeading` (default `true`) lets a host that already titles its frame omit the editor's
+  provider name and description. Section 3 assigns the title to the host; the always-rendered
+  heading duplicated it.
+- `ShowActionEffects` (default `true`) lets a host whose click is consent omit the declared
+  side-effect labels. The labels remain the default for hosts that ask separately.
+- A multi-step session names the current step once: the step list marks it with `aria-current`
+  and the scoped CSS sets it in bold, and the step title is shown only when there is no list.
+- A device authorization offers **Copy code**. The clipboard write needs no provider effect or host
+  consent, because the code is already on screen; a refused write reports that the code can be
+  selected and copied instead, and the code selects in one click.
+- A searchable choice field shows its separate provider-search box only while the loaded list is
+  incomplete (a continuation exists) or a search is active. The combobox already filters loaded
+  choices, so a complete list needs no second search control.
+
+Connect's `LlmSetupSession` no longer exposes an endpoint field for Direct Codex (owner decision:
+there is only the official endpoint). The draft always carries it, and an edit of a connection
+holding a former value is dirty so the next save replaces it; a connection step with no fields
+has no empty section. A real device sign-in through the setup session and through the Agent DS
+host listed the provider's models and saved an authenticated connection.
+
+Verification: zero-warning Connect and UI subset builds; Connect tests pass (LLM 166 with the new
+Codex setup test) and UI tests pass (29 component tests, 24 Common tests), including new tests
+for the heading and effect options, single-step titles, the current-step list, copy success and
+refusal, and the search-box condition. No package was built or published.
+

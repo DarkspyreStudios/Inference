@@ -206,6 +206,55 @@ public sealed class SetupEditorRegressionTests : BunitContext
     }
 
     [Fact]
+    public async Task MultiStepSessionsNameTheCurrentStepOnceInTheStepList()
+    {
+        await using var session = new Session(new Target());
+        IRenderedComponent<InferenceSettingsEditor> editor = Editor(session);
+        Assert.Empty(editor.FindAll(".inference-settings-editor__step h3"));
+        Assert.Equal(["First step", "Second step"], editor.FindAll(".inference-settings-editor__steps li").Select(item => item.TextContent));
+        Assert.Equal("First step", editor.Find(".inference-settings-editor__steps li[aria-current=step]").TextContent);
+        Click(editor, "Next");
+        Assert.Equal("Second step", editor.Find(".inference-settings-editor__steps li[aria-current=step]").TextContent);
+        Assert.Empty(editor.FindAll(".inference-settings-editor__step h3"));
+    }
+
+    [Fact]
+    public async Task DeviceCodeCanBeCopiedAndReportsWhenTheClipboardRefuses()
+    {
+        await using var session = new Session(new Target());
+        IRenderedComponent<InferenceSettingsEditor> editor = Editor(session);
+        session.StartDevice("ABCD-1234");
+        editor.WaitForAssertion(() => Assert.Equal("ABCD-1234", editor.Find(".inference-settings-editor__user-code").TextContent));
+        Click(editor, "Copy code");
+        editor.WaitForAssertion(() => Assert.Contains("Code copied.", editor.Markup, StringComparison.Ordinal));
+        Assert.Equal(["ABCD-1234"], JSInterop.VerifyInvoke("navigator.clipboard.writeText").Arguments);
+
+        JSInterop.SetupVoid("navigator.clipboard.writeText", "WXYZ-9876").SetException(new Microsoft.JSInterop.JSException("denied"));
+        session.StartDevice("WXYZ-9876");
+        editor.WaitForAssertion(() => Assert.DoesNotContain("Code copied.", editor.Markup, StringComparison.Ordinal));
+        Click(editor, "Copy code");
+        editor.WaitForAssertion(() => Assert.Contains("The code could not be copied. Select it and copy it instead.", editor.Markup, StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task ProviderSearchAppearsOnlyWhileMoreChoicesRemain()
+    {
+        await using var complete = new Session(new Target()) { ChoiceCapabilities = SetupChoiceCapabilities.Searchable };
+        IRenderedComponent<SetupFieldInput> choice = Field(Editor(complete), "choice");
+        choice.WaitForAssertion(() => Assert.Single(choice.FindComponents<Combobox>()));
+        Assert.DoesNotContain("Search choices", choice.Markup, StringComparison.Ordinal);
+
+        await using var paged = new Session(new Target())
+        {
+            ChoiceCapabilities = SetupChoiceCapabilities.Searchable,
+            Loader = (query, _) => Task.FromResult(new SetupChoicePage(query.ExpectedRevision, [new("a", "A")], "1")),
+        };
+        IRenderedComponent<SetupFieldInput> more = Field(Editor(paged), "choice");
+        more.WaitForAssertion(() => Assert.Contains("Search choices", more.Markup, StringComparison.Ordinal));
+        Assert.Contains("Load more", more.Markup, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void NumericKeyboardBoundsAndDisabledStateAreAccessible()
     {
         SetupNumberEdit<decimal>? lastEdit = null;
@@ -307,7 +356,7 @@ public sealed class SetupEditorRegressionTests : BunitContext
         private long? _count = 2;
         private decimal? _amount = 1.5m;
         private string _name = string.Empty, _choice = "a", _callback = string.Empty;
-        private string? _callbackId;
+        private string? _callbackId, _deviceCode;
         private bool _prerequisite;
         private SetupSecretEditKind _secret;
         public Target Target { get; } = target;
@@ -321,6 +370,7 @@ public sealed class SetupEditorRegressionTests : BunitContext
         public void RefreshStatus() => Publish(() => Status = Status with { Verified = SetupObservation.Known(true) });
         public void ShowPrerequisite() => Publish(() => _prerequisite = true);
         public void StartCallback() => Publish(() => { _callbackId = Guid.NewGuid().ToString("N"); _callback = string.Empty; });
+        public void StartDevice(string code) => Publish(() => _deviceCode = code);
         protected override bool IsDraftDirty => _endpoint != new Uri("https://original.test/") || _secondEndpoint != new Uri("https://second.test/")
             || _count != 2 || _amount != 1.5m || _name.Length != 0 || _choice != "a" || _secret != SetupSecretEditKind.Keep || _callback.Length != 0;
         protected override IReadOnlyList<SetupStep> CreateSteps(long revision) =>
@@ -345,6 +395,14 @@ public sealed class SetupEditorRegressionTests : BunitContext
                 return new SetupExternalPrerequisite("Authenticate the external CLI", BindAction(revision,
                 new("recheck", "Check again", SetupActionPurpose.CheckPrerequisites, SetupSideEffect.None), (_, _) =>
                 { Publish(() => { _prerequisite = false; Rechecks++; }); return Task.FromResult(SetupActionResult.Completed); }));
+            }
+            if (_deviceCode is not null)
+            {
+                return new SetupDeviceAuthorization(new("https://device.test/"), _deviceCode, null,
+                    BindAction(revision, new("continue", "Continue", SetupActionPurpose.ContinueAuthentication, SetupSideEffect.Network),
+                        (_, _) => Task.FromResult(SetupActionResult.Completed)),
+                    BindAction(revision, new("cancel", "Cancel", SetupActionPurpose.CancelAuthentication, SetupSideEffect.None),
+                        (_, _) => { Publish(() => _deviceCode = null); return Task.FromResult(SetupActionResult.Completed); }));
             }
             if (_callbackId is null) { return null; }
             return new SetupBrowserAuthorization(new("https://auth.test/"), new(new(_callbackId, "Callback"), string.Empty, string.Empty,

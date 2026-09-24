@@ -65,7 +65,8 @@
                                       Invalid="@(FieldError is not null)" Disabled="@Unavailable" Edited="@(edit => SetNumberAsync(number, edit))" />
                     break;
                 case SetupChoiceField choice:
-                    @if (choice.Capabilities.SupportsSearch)
+                    @* The combobox filters loaded choices itself; provider search matters only while more remain. *@
+                    @if (choice.Capabilities.SupportsSearch && (_continuation is not null || _search.Length > 0))
                     {
                     <div class="inference-settings-editor__choice-actions">
                         <Input @bind-Value="_search" Placeholder="Search choices" Disabled="@Unavailable" />

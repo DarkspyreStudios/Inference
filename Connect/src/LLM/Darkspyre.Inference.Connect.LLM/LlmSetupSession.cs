@@ -55,19 +55,23 @@ public sealed class LlmSetupSession : InferenceSetupSession<LlmSetupChanges>
         _definition = client.ProviderDefinition;
         _environment = environment;
         _original = existing;
-        _draft = existing is null ? new() { Version = "0", Transport = client.Transport, Endpoint = _definition.DefaultEndpoint }
+        LlmConnection opened = existing is null ? new() { Version = "0", Transport = client.Transport, Endpoint = _definition.DefaultEndpoint }
             : existing with
             {
                 AdditionalHeaders = new Dictionary<string, string>(existing.AdditionalHeaders, StringComparer.OrdinalIgnoreCase),
                 ProviderOptions = existing.ProviderOptions.ToDictionary(pair => pair.Key, pair => pair.Value.Clone(), StringComparer.Ordinal),
                 ModelCapabilityOverrides = new Dictionary<string, LlmCapabilityOverrides>(existing.ModelCapabilityOverrides, StringComparer.Ordinal)
             };
+        // Direct Codex has one official endpoint and no endpoint field. A saved former value, such as a
+        // CLI executable, differs from the baseline, so the next save replaces it.
+        _draft = UsesFixedEndpoint(client.Transport) ? opened with { Endpoint = _definition.DefaultEndpoint } : opened;
         _model = _originalModel = modelId ?? _definition.DefaultModelId;
-        _baseline = _draft;
+        _baseline = opened;
         _service = new(new DraftSource(this), [client], authenticators);
         Status = new() { Configured = SetupObservation.Known(existing is not null), Authenticated = SetupObservation.Unknown };
     }
 
+    private static bool UsesFixedEndpoint(LlmTransport transport) => transport == LlmTransport.OpenAiCodex;
     private bool UsesCli => _draft.Transport is LlmTransport.AnthropicClaudeCli or LlmTransport.GoogleAntigravityCli;
     private bool UsesAws => _draft.Transport is LlmTransport.AwsBedrockConverse or LlmTransport.AwsBedrockAgentCore;
     private bool UsesApiKey => _draft.Transport is LlmTransport.OpenAiResponses or LlmTransport.OpenAiCompatibleChat or LlmTransport.AnthropicMessages;
@@ -95,7 +99,7 @@ public sealed class LlmSetupSession : InferenceSetupSession<LlmSetupChanges>
             fields.Add(new SetupTextField(new("harness-arn", "Harness ARN") { IsRequired = true }, _draft.Endpoint,
                 _definition.DefaultEndpoint, value => Edit(revision, () => _draft = _draft with { Endpoint = value })));
         }
-        else
+        else if (!UsesFixedEndpoint(_draft.Transport))
         {
             fields.Add(new SetupUriField(new("endpoint", "Endpoint") { IsRequired = true },
                 Uri.TryCreate(_draft.Endpoint, UriKind.Absolute, out Uri? uri) ? uri : null,
@@ -138,7 +142,7 @@ public sealed class LlmSetupSession : InferenceSetupSession<LlmSetupChanges>
         [
             connectionStep with { Sections = _draft.Transport == LlmTransport.OpenAiCompatibleChat
                 ? [new("connection", "Connection", fields.AsReadOnly()), AdvancedCapabilities(revision)]
-                : [new("connection", "Connection", fields.AsReadOnly())] },
+                : fields.Count == 0 ? [] : [new("connection", "Connection", fields.AsReadOnly())] },
             modelStep with { Sections = [new("model", "Model",
             [new SetupChoiceField(new("model", "Model") { IsRequired = true,
                 HelpText = "Discover available models where supported, or enter an exact model ID." }, _model,

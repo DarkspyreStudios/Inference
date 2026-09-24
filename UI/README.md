@@ -42,6 +42,20 @@ Return an absolute path or null for cancellation. The host owns the native dialo
 manual entry remains available when no picker is supplied. Stale completions cannot overwrite a
 newer field or edit. This capability is included starting with 11.4.0-rc.1.
 
+## Unpublished source: host-framed presentation
+
+A host that frames the editor with its own title sets `ShowHeading="false"`; the editor then omits
+its provider name and description. A host that treats the person's click as consent for declared
+side effects sets `ShowActionEffects="false"` to omit the effect labels beside each action. Both
+default to `true`.
+
+When a session has several steps, the step list names and marks the current step (`aria-current`),
+and the step's own title is not repeated; a single-step session keeps its title. A device
+authorization shows a **Copy code** button that writes the user code to the clipboard and reports
+the outcome; the code itself selects in one click. A searchable choice list shows its separate
+provider-search box only while the loaded list is incomplete or a search is active; otherwise the
+combobox filters the loaded choices.
+
 ## Settings corrections in 11.3.1-rc.1
 
 Subscribe to `StateChanged` for a safe `SetupEditorState` (also available as `editor.State`).
