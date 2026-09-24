@@ -11,4 +11,5 @@
     <PackageReference Include="Darkspyre.Inference.Tensor" Version="[$(Version)]" />
     <PackageReference Include="Darkspyre.Inference.UI.Settings" Version="[$(Version)]" />
   </ItemGroup>
+  <Import Project="VerifyOutputPaths.targets" />
 </Project>

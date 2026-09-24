@@ -1,0 +1,18 @@
+<Project>
+  <!-- Inspect copy inputs before MSBuild silently overwrites one source with another. This is a
+       release-consumer check, not a consumer workaround that drops either runtime's assets. -->
+  <Target Name="VerifyConsumerOutputPaths" BeforeTargets="CoreCompile" DependsOnTargets="AssignTargetPaths">
+    <ItemGroup>
+      <_InferenceCopyInput Include="@(_NoneWithTargetPath)"
+                           Condition="'%(_NoneWithTargetPath.CopyToOutputDirectory)' != '' And '%(_NoneWithTargetPath.CopyToOutputDirectory)' != 'Never'" />
+      <_InferenceCopyInput Include="@(ContentWithTargetPath)"
+                           Condition="'%(ContentWithTargetPath.CopyToOutputDirectory)' != '' And '%(ContentWithTargetPath.CopyToOutputDirectory)' != 'Never'" />
+    </ItemGroup>
+    <CheckForDuplicateItemMetadata Items="@(_InferenceCopyInput->Distinct())" MetadataName="TargetPath">
+      <Output TaskParameter="DuplicatesExist" PropertyName="_InferenceDuplicateOutputPaths" />
+      <Output TaskParameter="DuplicateItems" ItemName="_InferenceConflictingCopyInput" />
+    </CheckForDuplicateItemMetadata>
+    <Error Code="INFERENCEPKG001" Condition="'$(_InferenceDuplicateOutputPaths)' == 'true'"
+           Text="Distinct package assets target the same consumer output path: @(_InferenceConflictingCopyInput->'%(Identity) -> %(TargetPath)', ', ')" />
+  </Target>
+</Project>

@@ -91,10 +91,12 @@ UI.Settings.
 Source builds use project references. `Directory.Build.targets` pins the package dependency on
 Common to `[$(Version)]` when generating each consumer product's NuGet manifest. This does not
 embed Common or introduce dependencies between Connect, Tensor and UI.Settings. Run the compiled
-`eng/VerifyPackages` tool against all four release archives; it rejects foreign DLLs/native binaries,
+`eng/VerifyPackages` tool against all four release archives; it rejects foreign DLLs/native binaries/shader sources,
 local-only dependencies, missing owned assemblies/documentation and mismatched Common versions.
 Whisper runtime build assets flow through its public NuGet dependency (`PrivateAssets="none"`);
-Tensor marks the imported native files non-packable without disabling consumer output copying.
+Tensor marks assets imported from both `Whisper.net.Runtime` and `Whisper.net.Runtime.Metal`
+non-packable without disabling consumer output copying. In particular, `ggml-metal.metal` must come
+only from the public runtime dependency, never Tensor's `content` or `contentFiles`.
 
 `eng/VerifyConsumer` is a non-packable release smoke test with four PackageReferences and no source
 project references. It inherits the shared release version and checks loaded assembly source identities,
@@ -103,6 +105,9 @@ against `eng/VerifyConsumer/NuGet.Preflight.Config` (local Inference archives pl
 feeds). After publication, restore against root `NuGet.Config` with a new empty package cache and
 `--no-http-cache`; build/run with `--no-restore` and pass the family version and release source commit.
 Private-feed credentials remain process-scoped. This check does not load weights or call providers.
+The consumer build also rejects distinct None/Content copy inputs targeting the same output path,
+before MSBuild can overwrite one with the other. `eng/package-assets.tests.sh` verifies the pack
+inputs and collision checks without creating archives; it requires existing restored assets.
 
 Package creation is a publish-stage action. During refactoring, do not run `dotnet pack` or create
 `.nupkg` artifacts unless the user explicitly says to publish. Ordinary verification stops at

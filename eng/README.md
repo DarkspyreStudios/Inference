@@ -40,7 +40,8 @@ requirements for the existing consumer smoke test still apply to the deployment 
    reject vulnerability findings from the transitive JSON audits.
 4. Pack exactly Common, Connect, Tensor and UI.Settings. `eng/VerifyPackages` checks owned assembly
    boundaries, exact Common dependencies and release-source identity.
-5. Restore/run `eng/VerifyConsumer` against the local archives. Reject concurrent source changes.
+5. Restore/run `eng/VerifyConsumer` against the local archives. Its build rejects distinct package
+   assets targeting the same copy-output path. Reject concurrent source changes.
 6. Push all four packages without overwrite/skip-duplicate switches.
 7. Use a new empty package cache and no HTTP cache to restore/run the consumer from normal feeds.
    Compare all four downloaded archives byte-for-byte and check feed versions/private visibility.
@@ -66,6 +67,7 @@ local version commit that has not been pushed.
 ```bash
 bash -n deploy-major.sh deploy-minor.sh eng/deploy.sh eng/deploy.tests.sh
 bash eng/deploy.tests.sh
+bash eng/package-assets.tests.sh # Requires restored Tensor dependency assets; no archives created.
 ```
 
 Tests exercise stable/prerelease version arithmetic, both bump modes, dry-run, dirty checkouts,
@@ -73,3 +75,13 @@ existing versions, build failure, vulnerability failure and the successful four-
 Integration cases use disposable local Git repositories plus fake `gh` and `dotnet` commands; they
 do not contact GitHub, publish a package or modify this repository. Fixtures are retained under the
 printed temporary path for inspection. They test orchestration, not native runtime availability.
+
+The separate package-asset checks evaluate real Tensor pack inputs and synthetic copy-path fixtures.
+They verify that Whisper's shader remains a copy-to-output asset but is excluded from Tensor's own
+archive inputs. Duplicate None/None and None/Content destinations fail; unique paths and noncopied
+files pass. The archive verifier also rejects `.metal` shader sources alongside native binaries.
+
+The published `11.5.2-rc.1` Tensor archive (and earlier affected archives) contains the duplicate
+shader and intentionally fails the strengthened checks. Corrected releases must leave the shader
+owned by the Whisper runtime dependency; do not overwrite old versions. Fresh local/feed consumer
+checks verify this boundary on each deployment after the corrected archive is available.

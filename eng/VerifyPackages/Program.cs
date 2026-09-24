@@ -36,7 +36,8 @@ foreach ((string id, string[] assemblies) in owned)
     Require(dlls.SequenceEqual(expected, StringComparer.Ordinal), $"{id}: unexpected, missing, or embedded foreign DLLs: {string.Join(", ", dlls)}");
     Require(!entries.Any(path => path.EndsWith(".so", StringComparison.OrdinalIgnoreCase)
         || path.EndsWith(".dylib", StringComparison.OrdinalIgnoreCase) || path.EndsWith(".a", StringComparison.OrdinalIgnoreCase)
-        || path.EndsWith(".metallib", StringComparison.OrdinalIgnoreCase)), $"{id}: third-party native binaries must come from dependency packages");
+        || path.EndsWith(".metallib", StringComparison.OrdinalIgnoreCase)
+        || path.EndsWith(".metal", StringComparison.OrdinalIgnoreCase)), $"{id}: third-party native binaries and shaders must come from dependency packages");
     foreach (string assembly in assemblies)
     {
         Require(entries.Contains($"lib/net11.0/{assembly}.xml", StringComparer.Ordinal), $"{id}: missing XML documentation for {assembly}");

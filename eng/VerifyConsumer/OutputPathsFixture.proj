@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <EnableDefaultItems>false</EnableDefaultItems>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- AssignTargetPaths does not need these source files to exist. -->
+    <None Include="dependency/ggml-metal.metal" TargetPath="ggml-metal.metal" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="inference/ggml-metal.metal" TargetPath="ggml-metal.metal" CopyToOutputDirectory="PreserveNewest" Condition="'$(Fixture)' == 'Duplicate'" />
+    <Content Include="inference/ggml-metal.metal" TargetPath="ggml-metal.metal" CopyToOutputDirectory="Always" Condition="'$(Fixture)' == 'MixedDuplicate'" />
+    <None Include="inference/ggml-metal.metal" TargetPath="ggml-metal.metal" CopyToOutputDirectory="Never" Condition="'$(Fixture)' == 'NotCopied'" />
+    <None Include="other/ggml-metal.metal" TargetPath="other/ggml-metal.metal" CopyToOutputDirectory="PreserveNewest" Condition="'$(Fixture)' == 'SeparatePaths'" />
+  </ItemGroup>
+  <Import Project="VerifyOutputPaths.targets" />
+</Project>
