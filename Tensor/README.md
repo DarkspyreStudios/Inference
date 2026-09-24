@@ -1,6 +1,6 @@
 # Darkspyre.Inference.Tensor
 
-Version **11.7.1-rc.1** adopts the shared typed reasoning-level contract; Qwen supports only `None`.
+Version **11.8.0-rc.1** adopts the shared typed reasoning-level contract; Qwen supports only `None`.
 It includes Laya's CPU/GPU-only Core ML update and retains the ONNX and user-selected
 model-location/import contracts introduced in 11.4.0-rc.1.
 
@@ -15,7 +15,7 @@ filesystem default and still exposes only `IPersistenceStore`. TensorSharp uses 
 path. Laya reads its model bytes through the store and passes them to ONNX Runtime, so the host
 alone decides where model files live.
 
-Assemblies included by Tensor **11.7.1-rc.1**:
+Assemblies included by Tensor **11.8.0-rc.1**:
 
 - `Darkspyre.Inference.Tensor.Common` — the host-controlled model lifecycle, model packs,
   verification, direct-file persistence, and execution coordination.
@@ -159,7 +159,7 @@ the configuration and reconstruct registrations when composing the manager after
 does not perform that unload. Stop remains terminal, and an
 already-cancelled teardown action token reaches the engine as urgency rather than skipping cleanup.
 See the [shared editor example](../Common/examples/Darkspyre.Inference.Setup.Examples/README.md).
-These setup contracts are included in the synchronized 11.7.1-rc.1 package family, including
+These setup contracts are included in the synchronized 11.8.0-rc.1 package family, including
 provider-owned dirty state and explicit choice capabilities for the shared Settings editor.
 
 Qwen and Supra now load the definition selected by `LoadAsync(key)`, rather than requiring the
@@ -180,7 +180,7 @@ allocation. No unlisted persistence artifacts are discovered through adjacent fi
 Inference still owns no path-materialization implementation; the fork owns cleanup on failure,
 cancellation and unload. The host continues to use only the pack manager and `IPersistenceStore`.
 
-**Capability addition (11.7.1-rc.1):** Qwen's Common `LlmCapabilities.OutputLimitEnforcement` is
+**Capability addition (11.8.0-rc.1):** Qwen's Common `LlmCapabilities.OutputLimitEnforcement` is
 `EngineEnforced`, describing its existing `MaxOutputTokens` runtime limit. This is separate from
 nullable discovered model limits and does not add a Tensor accounting/compaction service.
 
@@ -422,7 +422,7 @@ the Audio / SpeechTranscription task without provider-name renderer branches.
 
 ## Package dependency boundary
 
-Tensor depends on **Darkspyre.Inference.Common [11.7.1-rc.1]** and the **Darkspyre.TensorSharp.*
+Tensor depends on **Darkspyre.Inference.Common [11.8.0-rc.1]** and the **Darkspyre.TensorSharp.*
 2.8.6.4** dependency closure through NuGet. None of their DLLs is embedded in Tensor. The TensorSharp
 release includes the named GGUF persistence and bounded metadata inspection changes previously
 validated at fork commit `9b248715`, through the existing GGUF, safetensors and restricted PyTorch
