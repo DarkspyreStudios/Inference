@@ -41,6 +41,26 @@ public sealed class ManagedAgentTests
         Assert.Null(harness.Requests.Last().ReasoningLevel);
     }
 
+    private static readonly string[] CommandOnly = ["command"];
+
+    [Fact]
+    public async Task HostToolsAreSentNonStrictUnlessTheHostRequestsStrictness()
+    {
+        // An optional property without additionalProperties is a valid host schema but not a strict one.
+        JsonElement loose = JsonSerializer.SerializeToElement(new
+        { type = "object", properties = new { command = new { type = "string" }, timeout = new { type = "integer" } }, required = CommandOnly });
+        var harness = new Harness();
+        harness.Results.Enqueue(new() { Diagnostics = new(200, null, null), Text = "done", Status = LlmCompletionStatus.Completed });
+        await using var session = harness.Create(ToolsOptions(_ => new()) with
+        {
+            Tools = [new() { Name = "bash", InputSchema = loose }, new() { Name = "echo", InputSchema = loose, Strict = true }]
+        });
+        await Read(session.RunTurnAsync(Turn("hello")));
+        LlmToolDefinition[] sent = [.. harness.Requests.Single().Tools];
+        Assert.Equal([("bash", false), ("echo", true)], sent.Select(tool => (tool.Name, tool.Strict)));
+        Assert.Equal(loose.GetRawText(), sent[0].InputSchema.GetRawText()); // The schema itself is sent unchanged.
+    }
+
     [Fact]
     public async Task CompactionUsesAtomicSingleUseContinuationWithoutDuplicatingInput()
     {

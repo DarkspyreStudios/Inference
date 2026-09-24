@@ -587,6 +587,11 @@ and never consumes credits. The upstream route is evidenced in
 The old Codex process/App Server implementation is removed, not retained as a second lane.
 Claude and AgentCore still use their native session adapters.
 
+Managed agent tools are sent non-strict unless `LlmAgentToolDefinition.Strict` is set. A strict
+tool's schema must meet the provider's strict rules; for OpenAI, every object closes
+`additionalProperties` and lists every property as required, and any other schema fails the whole
+request.
+
 ```csharp
 LlmAgentProviderService agents = services.GetRequiredService<LlmAgentProviderService>();
 var agentWeatherTool = new LlmAgentToolDefinition

@@ -549,7 +549,8 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
         {
             Name = tool.Name,
             Description = tool.Description,
-            InputSchema = tool.InputSchema
+            InputSchema = tool.InputSchema,
+            Strict = tool.Strict
         }).ToArray()
     };
 

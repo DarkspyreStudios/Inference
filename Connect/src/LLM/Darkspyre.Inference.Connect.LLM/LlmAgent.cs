@@ -42,6 +42,13 @@ public sealed record LlmAgentToolDefinition
 
     public required JsonElement InputSchema { get; init; }
 
+    /// <summary>
+    /// Requests provider-enforced schema adherence. The schema must then meet the provider's strict
+    /// rules; for OpenAI that means every object closes <c>additionalProperties</c> and lists every
+    /// property as required. A host schema describes what the tool accepts, so the default is false.
+    /// </summary>
+    public bool Strict { get; init; }
+
     public bool DeferLoading { get; init; }
 
     /// <summary>Forces an entire managed tool batch to execute sequentially.</summary>
