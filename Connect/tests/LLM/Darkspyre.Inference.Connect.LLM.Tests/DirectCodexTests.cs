@@ -166,10 +166,10 @@ public sealed class DirectCodexTests
     {
         using var http = new HttpClient();
         var client = new OpenAiCodexLlmClient(http);
-        long baseline = Assert.IsType<long>(client.EstimateInputTokens(Connection(), Request()));
+        long baseline = client.EstimateInputTokens(Connection(), Request())!.Value.Tokens;
         Assert.True(baseline > 0);
-        long expanded = Assert.IsType<long>(client.EstimateInputTokens(Connection(), Request() with
-        { Instructions = string.Join(' ', Enumerable.Repeat("instruction", 100)) }));
+        long expanded = client.EstimateInputTokens(Connection(), Request() with
+        { Instructions = string.Join(' ', Enumerable.Repeat("instruction", 100)) })!.Value.Tokens;
         Assert.True(expanded > baseline);
         Assert.Null(client.EstimateInputTokens(Connection(), Request() with
         {
@@ -318,6 +318,44 @@ public sealed class DirectCodexTests
             Assert.Equal(4, auth.Calls);
             Assert.Equal(4, handler.AuthorizationHistory.Distinct().Count());
         }
+    }
+
+    [Fact]
+    public async Task ReportedTokensTravelWithTheStateAndCountTheEncryptedHistory()
+    {
+        using var handler = new Handler(request => request.Method == HttpMethod.Get
+            ? Json("{\"models\":[{\"slug\":\"model\",\"context_window\":100000}]}")
+            : Sse(ReasonedToolCall.Replace("\"id\":\"r\"}", "\"id\":\"r\",\"usage\":{\"input_tokens\":1200,\"output_tokens\":80,\"total_tokens\":1280}}",
+                StringComparison.Ordinal)));
+        var client = new OpenAiCodexLlmClient(new HttpClient(handler));
+        LlmChatResult first = await Complete(client, Connection(), Request());
+        Assert.Equal((1200L, 80L), (first.ResponseState!.InputTokens, first.ResponseState.OutputTokens));
+        LlmChatRequest followup = Request() with
+        {
+            Messages = [new("user", "first"),
+                new("assistant", first.Text) { ToolCalls = first.ToolCalls, ResponseState = first.ResponseState },
+                new("user", "") { ToolResults = [new("call", LlmToolOutput.FromText("answer"))] }]
+        };
+
+        ContextEstimate estimate = client.EstimateInputTokens(Connection(), followup)!.Value;
+        LlmRequestAccounting accounting = await new LlmProviderService(new Source(Connection()), [client], [new RefreshAuthenticator()])
+            .MeasureRequestAsync("codex", followup);
+
+        Assert.True(estimate.IncludesProviderReport);
+        Assert.InRange(estimate.Tokens, 1281, 1400); // The report, plus the tokenized tool result after it.
+        Assert.Equal(estimate.Tokens, accounting.UsedContextTokens);
+        Assert.Equal(LlmContextMeasurementSource.Mixed, accounting.Source);
+        // Encrypted reasoning without a report stays unknown, as does encrypted state after the last report.
+        var unreported = first.ResponseState with { InputTokens = null, OutputTokens = null };
+        Assert.Null(client.EstimateInputTokens(Connection(), followup with
+        {
+            Messages = [followup.Messages[0], followup.Messages[1] with { ResponseState = unreported }, followup.Messages[2]]
+        }));
+        Assert.Null(client.EstimateInputTokens(Connection(), followup with
+        {
+            Messages = [.. followup.Messages, new("assistant", "") { ToolCalls = first.ToolCalls, ResponseState = unreported },
+                new("user", "") { ToolResults = [new("call", LlmToolOutput.FromText("again"))] }]
+        }));
     }
 
     private const string ReasonedToolCall = """

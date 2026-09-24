@@ -573,3 +573,23 @@ Authenticated restores, Debug/Release builds and tests, formatting, vulnerabilit
 archive boundaries and local/fresh-feed consumer checks passed. Downloaded archives match
 the verified local archives; feed readback confirms private visibility. Source is tagged
 `v11.7.0-rc.1`. No model weights or paid inference were used as verification gates.
+
+## Provider-reported counts for encrypted history
+
+Compaction accounting refused Codex sessions: the Responses estimator returned unknown for any history
+carrying encrypted reasoning state, which Codex attaches to most turns. The owner chose to use the
+provider's reported input tokens.
+
+- `LlmProviderResponseState` gains `InputTokens` and `OutputTokens`, the provider's reported counts for
+  the response that produced the state. `ResponsesLlmClientBase` sets them from the response's usage.
+- `ILlmContextEstimator` returns a `ContextEstimate` (tokens, and whether they include a provider
+  report). The Responses estimator counts the history up to the last state with both counts as their
+  sum, and tokenizes only the input items after it. `ManagedAgentPolicy` labels such an estimate
+  `Mixed`.
+- Content after that state that the tokenizer cannot count, and opaque state without counts, still
+  give unknown.
+
+Verification: Debug build with zero warnings, `dotnet format --verify-no-changes`, and 379 Connect and
+Common tests. Live, through Agent DS against this source: three real `gpt-6-luna` turns with encrypted
+reasoning were compacted (previously refused), and `gpt-6-sol`, a Claude CLI session and `gpt-6-luna`
+again then answered from the compacted history.

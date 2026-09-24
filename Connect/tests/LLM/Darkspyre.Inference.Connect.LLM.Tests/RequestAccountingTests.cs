@@ -29,7 +29,7 @@ public sealed class RequestAccountingTests
         var before = JsonSerializer.Serialize(request);
         var accounting = await service.MeasureRequestAsync("selected", request, policy);
         Assert.True(accounting.IsSupported);
-        Assert.Equal(client.EstimateInputTokens(connection, request), accounting.UsedContextTokens);
+        Assert.Equal(client.EstimateInputTokens(connection, request)?.Tokens, accounting.UsedContextTokens);
         Assert.Equal(1000, accounting.ModelMaxContextTokens);
         Assert.Equal(200, accounting.ModelMaxOutputTokens);
         Assert.Equal(800, accounting.MaxContextTokens);
@@ -160,9 +160,19 @@ public sealed class RequestAccountingTests
     }
 
     [Fact]
+    public void AnEstimateThatIncludesAProviderReportIsMixed()
+    {
+        var policy = new LlmAgentContextPolicy { MaxContextTokens = 1000, ReservedOutputTokens = 100, SafetyMarginTokens = 0 };
+
+        Assert.Equal(LlmContextMeasurementSource.Mixed, ManagedAgentPolicy.Account("model", new ContextEstimate(10, true), policy, null).Source);
+        Assert.Equal(LlmContextMeasurementSource.Estimated, ManagedAgentPolicy.Account("model", new ContextEstimate(10), policy, null).Source);
+        Assert.Equal(LlmContextMeasurementSource.Unknown, ManagedAgentPolicy.Account("model", null, policy, null).Source);
+    }
+
+    [Fact]
     public void BudgetArithmeticHandlesExtremeFiniteValuesWithoutOverflow()
     {
-        var accounting = ManagedAgentPolicy.Account("model", long.MaxValue,
+        var accounting = ManagedAgentPolicy.Account("model", new ContextEstimate(long.MaxValue),
             new() { MaxContextTokens = long.MaxValue, ReservedOutputTokens = long.MaxValue, SafetyMarginTokens = long.MaxValue }, null);
         Assert.Equal(0, accounting.InputBudgetTokens);
         Assert.Equal(0, accounting.AvailableInputTokens);

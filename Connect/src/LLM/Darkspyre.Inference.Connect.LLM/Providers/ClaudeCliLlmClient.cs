@@ -442,7 +442,7 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
     public string? EstimateDiagnostic => LocalTokenCount.CliDiagnostic;
 
     /// <summary>Counts the prompt this client would send. Attachment content is not countable here.</summary>
-    public long? EstimateInputTokens(LlmConnection connection, LlmChatRequest request)
+    public ContextEstimate? EstimateInputTokens(LlmConnection connection, LlmChatRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
         ValidateRequest(connection, request, GetCapabilities(connection, request.ModelId));
@@ -452,7 +452,7 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
         }
         return request.Messages.Any(message => message.Attachments.Count > 0)
             ? null
-            : LocalTokenCount.Count(BuildClaudePrompt(request));
+            : new ContextEstimate(LocalTokenCount.Count(BuildClaudePrompt(request)));
     }
 
     private static string BuildClaudePrompt(LlmChatRequest request)

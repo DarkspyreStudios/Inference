@@ -441,6 +441,13 @@ measurements and documented multimodal costs. It must not count encrypted bytes 
 tokens. Where attachments or opaque state prevent credible measurement, report unknown rather than
 a falsely precise total. Estimates and overflow handling both require tests.
 
+Responses-family adapters record the provider's reported input and output tokens on the
+`LlmProviderResponseState` they produce (`InputTokens`, `OutputTokens`). The estimate for a request
+then takes the last message whose state carries both counts: that history counts as their sum, which
+covers the encrypted reasoning and attachments it contained, and only the input items after it are
+tokenized. Such an estimate reports `Source = Mixed`. Content after that message that the tokenizer
+cannot count still makes occupancy unknown, as does opaque state without reported counts.
+
 A proactive warning is best effort when measurements are unknown. Emit a context-status event so
 Agent DS can display that condition; continue unless the provider reports overflow or a known hard
 limit is exceeded. Do not request compaction solely because telemetry is unavailable.

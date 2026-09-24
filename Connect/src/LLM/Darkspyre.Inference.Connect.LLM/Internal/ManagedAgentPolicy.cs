@@ -33,7 +33,7 @@ internal static class ManagedAgentPolicy
     }
 
     public static LlmAgentContextStatus Status(
-        string modelId, long revision, long? used, LlmAgentContextPolicy policy, LlmModel? model)
+        string modelId, long revision, ContextEstimate? used, LlmAgentContextPolicy policy, LlmModel? model)
     {
         var accounting = Account(modelId, used, policy, model);
         return new()
@@ -51,8 +51,9 @@ internal static class ManagedAgentPolicy
     }
 
     public static LlmRequestAccounting Account(
-        string modelId, long? used, LlmAgentContextPolicy policy, LlmModel? model)
+        string modelId, ContextEstimate? estimate, LlmAgentContextPolicy policy, LlmModel? model)
     {
+        long? used = estimate?.Tokens;
         Validate(new() { ContextPolicy = policy }, model);
         long? maximum = policy.MaxContextTokens ?? model?.MaxContextTokens;
         long? reserve = policy.ReservedOutputTokens ?? model?.MaxOutputTokens;
@@ -74,7 +75,8 @@ internal static class ManagedAgentPolicy
             NeedsCompaction = budget is long input && used is long count
                 ? count >= Math.Floor(input * policy.CompactionThresholdRatio) : null,
             IsEstimated = used is not null,
-            Source = used is null ? LlmContextMeasurementSource.Unknown : LlmContextMeasurementSource.Estimated
+            Source = estimate is not { } known ? LlmContextMeasurementSource.Unknown
+                : known.IncludesProviderReport ? LlmContextMeasurementSource.Mixed : LlmContextMeasurementSource.Estimated
         };
     }
 }

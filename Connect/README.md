@@ -551,7 +551,10 @@ See the [compiled host-context example](examples/Darkspyre.Inference.Connect.LLM
 Text-only occupancy is estimated from the actual projected request using the bundled o200k
 tokenizer, including instructions and schemas. It is not an exact current-model token count.
 Binary attachments and encrypted reasoning make occupancy unknown; these return null rather than
-a fabricated count. Provider context-overflow errors still trigger a host handoff. Catalog limits
+a fabricated count, with one exception. Responses and direct Codex record the provider's reported input
+and output tokens on the response state (`LlmProviderResponseState.InputTokens` and `OutputTokens`), and
+the estimate counts the history up to the last such state as their sum, tokenizing only what follows.
+That estimate reports `Source = Mixed`. Hosts that keep response state keep the counts with it. Provider context-overflow errors still trigger a host handoff. Catalog limits
 are optional. Configure an explicit output reserve when the catalog provides none; without a
 known limit, reserve and occupancy, `NeedsCompaction` stays null.
 

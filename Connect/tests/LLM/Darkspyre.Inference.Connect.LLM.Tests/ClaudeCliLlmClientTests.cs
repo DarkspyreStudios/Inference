@@ -432,7 +432,7 @@ public sealed class ClaudeCliLlmClientTests
         var client = new ClaudeCliLlmClient(http, new RecordingRunner(new ClaudeCliProcessResult(0, string.Empty, string.Empty)));
         var request = new LlmChatRequest { ModelId = "claude-test", Messages = ToolHistory() };
 
-        Assert.True(client.EstimateInputTokens(CliConnection(), request) > 0);
+        Assert.True(client.EstimateInputTokens(CliConnection(), request)?.Tokens > 0);
         Assert.Equal(LocalTokenCount.CliDiagnostic, client.EstimateDiagnostic);
         Assert.Null(client.EstimateInputTokens(CliConnection(), request with
         {

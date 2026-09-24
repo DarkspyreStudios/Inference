@@ -388,7 +388,7 @@ public sealed class LlmProviderService
         {
             return Unsupported("This route does not implement nonmutating request accounting.");
         }
-        long? used;
+        ContextEstimate? used;
         try { used = estimator.EstimateInputTokens(connection, request); }
         catch (NotSupportedException)
         {

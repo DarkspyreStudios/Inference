@@ -11,31 +11,54 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
 {
     public string? EstimateDiagnostic => null;
 
-    public long? EstimateInputTokens(LlmConnection connection, LlmChatRequest request)
+    public ContextEstimate? EstimateInputTokens(LlmConnection connection, LlmChatRequest request)
     {
         ValidateRequest(connection, request, GetCapabilities(connection, request.ModelId));
         var enforcement = request.StructuredOutput is null ? (LlmStructuredOutputEnforcement?)null
             : StructuredOutput.ResolveEnforcement(request.StructuredOutput, GetCapabilities(connection, request.ModelId));
         JsonObject payload = BuildPayload(connection, request, enforcement);
         RequestJson.ApplyProviderOptions(payload, connection, request);
-        if (request.Messages.Any(message => message.Attachments.Count > 0
-            || message.ToolResults.Any(result => result.Output.Parts.Any(part =>
-                part is LlmToolOutputBinary or LlmToolOutputResource { Data: not null }))
-            || message.ResponseState?.Payload.Contains("encrypted_content", StringComparison.Ordinal) == true))
+
+        // The provider's own count covers the history up to the last response that reported one, including
+        // encrypted reasoning and attachments the local tokenizer cannot count. Only what follows is tokenized.
+        int reported = -1;
+        for (int index = request.Messages.Count - 1; index >= 0 && reported < 0; index--)
+        {
+            if (request.Messages[index].ResponseState is { InputTokens: not null, OutputTokens: not null }) { reported = index; }
+        }
+        if (request.Messages.Skip(reported + 1).Any(Uncountable))
         {
             return null;
         }
-        // Tokenize the actual textual projection, including schemas/framing. This is an estimate:
-        // server framing/current-model tokenization can differ from the bundled o200k encoding.
-        var input = new JsonObject
+        if (reported < 0)
         {
-            ["input"] = payload["input"]?.DeepClone(),
-            ["instructions"] = payload["instructions"]?.DeepClone(),
-            ["tools"] = payload["tools"]?.DeepClone(),
-            ["text"] = payload["text"]?.DeepClone()
-        };
-        return LocalTokenCount.Count(input.ToJsonString());
+            // Tokenize the actual textual projection, including schemas/framing. This is an estimate:
+            // server framing/current-model tokenization can differ from the bundled o200k encoding.
+            var input = new JsonObject
+            {
+                ["input"] = payload["input"]?.DeepClone(),
+                ["instructions"] = payload["instructions"]?.DeepClone(),
+                ["tools"] = payload["tools"]?.DeepClone(),
+                ["text"] = payload["text"]?.DeepClone()
+            };
+            return new ContextEstimate(LocalTokenCount.Count(input.ToJsonString()));
+        }
+
+        // Input items are built message by message, so the prefix's own projection marks where the rest begins.
+        // The reported input already includes that request's instructions and tools.
+        JsonArray full = (JsonArray)payload["input"]!;
+        int prefixItems = ((JsonArray)BuildPayload(connection,
+            request with { Messages = [.. request.Messages.Take(reported + 1)] }, enforcement)["input"]!).Count;
+        var tail = new JsonArray([.. full.Skip(prefixItems).Select(item => item?.DeepClone())]);
+        LlmProviderResponseState state = request.Messages[reported].ResponseState!;
+        return new ContextEstimate(state.InputTokens!.Value + state.OutputTokens!.Value
+            + (tail.Count == 0 ? 0 : LocalTokenCount.Count(tail.ToJsonString())), IncludesProviderReport: true);
     }
+
+    /// <summary>Content the local tokenizer cannot count: bytes, and encrypted reasoning.</summary>
+    private static bool Uncountable(LlmChatMessage message) => message.Attachments.Count > 0
+        || message.ToolResults.Any(result => result.Output.Parts.Any(part => part is LlmToolOutputBinary or LlmToolOutputResource { Data: not null }))
+        || message.ResponseState?.Payload.Contains("encrypted_content", StringComparison.Ordinal) == true;
 
     public override async IAsyncEnumerable<LlmStreamEvent> StreamAsync(
         LlmConnection connection,
@@ -389,6 +412,7 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
                 : StructuredOutput.Validate(finalText, structuredRequest, enforcement.Value);
         }
 
+        LlmChatUsage? usage = ReadUsage(responseRoot);
         return new LlmChatResult
         {
             Text = finalText,
@@ -396,15 +420,15 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
             Status = status,
             FinishReason = status == LlmCompletionStatus.RequiresAction ? "tool_calls" : providerStatus,
             IncompleteReason = incompleteReason,
-            Usage = ReadUsage(responseRoot),
+            Usage = usage,
             ProviderResponseId = LlmJson.GetString(responseRoot, "id"),
             ToolCalls = toolCalls,
+            // The reported counts travel with the state, so later accounting can use them for this history.
             ResponseState = status is LlmCompletionStatus.Failed or LlmCompletionStatus.Incomplete
                 ? null
-                : OpenAiResponsesTools.EncodeResponseState(
-                    responseRoot,
-                    connection,
-                    modelId),
+                : OpenAiResponsesTools.EncodeResponseState(responseRoot, connection, modelId) is { } state
+                    ? state with { InputTokens = usage?.InputTokens, OutputTokens = usage?.OutputTokens }
+                    : null,
             StructuredOutput = validation,
             Diagnostics = new LlmProviderDiagnostics(
                 (int)response.StatusCode,

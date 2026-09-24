@@ -161,7 +161,10 @@ the pending run. Prospective-turn preview is idle-only.
 `LlmModel.MaxContextTokens` and `MaxOutputTokens` are nullable discovery metadata. Session policy
 can set a smaller/manual limit; it cannot increase a known hard limit. No model catalog limits are
 invented. Text occupancy is estimated using the bundled o200k tokenizer over the actual request
-projection. It remains unknown when attachments or encrypted reasoning cannot be counted. If the
+projection. History up to the last response state that carries the provider's reported counts
+(`LlmProviderResponseState.InputTokens` and `OutputTokens`) counts as their sum, reported as
+`Source = Mixed`; content after it that cannot be counted, or opaque state without counts, still makes
+occupancy unknown. If the
 catalog lacks an output limit, configure a host output reserve for threshold admission.
 
 `LlmAgentExecutionOptions` defaults: 32 model iterations, sequential tools, maximum 4 concurrent

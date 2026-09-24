@@ -468,7 +468,7 @@ internal sealed class AntigravityCliLlmClient(IAntigravityCliRunner runner)
     public string? EstimateDiagnostic => LocalTokenCount.CliDiagnostic;
 
     /// <summary>Counts the prompt this client would send.</summary>
-    public long? EstimateInputTokens(LlmConnection connection, LlmChatRequest request)
+    public ContextEstimate? EstimateInputTokens(LlmConnection connection, LlmChatRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
         LlmStructuredOutputEnforcement? enforcement = ValidateRequest(request, GetCapabilities(connection, request.ModelId));
@@ -480,7 +480,7 @@ internal sealed class AntigravityCliLlmClient(IAntigravityCliRunner runner)
         {
             throw new NotSupportedException("Antigravity CLI chat cannot import adapter response state.");
         }
-        return LocalTokenCount.Count(BuildPrompt(request, enforcement));
+        return new ContextEstimate(LocalTokenCount.Count(BuildPrompt(request, enforcement)));
     }
 
     private static string BuildPrompt(

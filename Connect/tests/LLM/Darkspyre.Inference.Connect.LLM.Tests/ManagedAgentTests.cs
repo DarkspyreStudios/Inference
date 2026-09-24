@@ -569,11 +569,11 @@ public sealed class ManagedAgentTests
             });
         public string? EstimateDiagnostic => null;
 
-        public long? EstimateInputTokens(LlmConnection connection, LlmChatRequest request)
+        public ContextEstimate? EstimateInputTokens(LlmConnection connection, LlmChatRequest request)
         {
             Estimates.Add(request);
             return UnknownEstimate ? null
-                : request.Messages.Sum(message => message.Content.Length) + (request.Instructions?.Length ?? 0);
+                : new ContextEstimate(request.Messages.Sum(message => message.Content.Length) + (request.Instructions?.Length ?? 0));
         }
         private async IAsyncEnumerable<LlmStreamEvent> Stream(LlmChatRequest request,
             [EnumeratorCancellation] CancellationToken cancellationToken)

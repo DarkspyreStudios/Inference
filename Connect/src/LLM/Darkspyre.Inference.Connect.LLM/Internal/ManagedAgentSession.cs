@@ -107,7 +107,7 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
             var turn = _run?.Turn ?? BaseTurn();
             var proposal = ManagedAgentContext.Import(proposedContext, _connection, turn.ModelId!);
             if (_run is not null) { proposal = WithQueuedSteering(proposal, _run); }
-            long? used = EstimateInputTokens(proposal, turn);
+            ContextEstimate? used = EstimateInputTokens(proposal, turn);
             cancellationToken.ThrowIfCancellationRequested();
             return Task.FromResult(ManagedAgentPolicy.Account(turn.ModelId!, used,
                 _execution.ContextPolicy, Model(turn.ModelId!)) with
@@ -583,13 +583,13 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
     private LlmAgentContextStatus Measure(LlmAgentContext context, LlmAgentTurnRequest turn)
     {
         ManagedAgentPolicy.Validate(_execution, Model(turn.ModelId!));
-        long? used = EstimateInputTokens(context, turn);
+        ContextEstimate? used = EstimateInputTokens(context, turn);
         return ManagedAgentPolicy.Status(turn.ModelId!, context.Revision, used, _execution.ContextPolicy, Model(turn.ModelId!));
     }
 
-    private long? EstimateInputTokens(LlmAgentContext context, LlmAgentTurnRequest turn)
+    private ContextEstimate? EstimateInputTokens(LlmAgentContext context, LlmAgentTurnRequest turn)
     {
-        long? used = _estimator.EstimateInputTokens(_connection, Request(context, turn));
+        ContextEstimate? used = _estimator.EstimateInputTokens(_connection, Request(context, turn));
         // Validate the real projection first, but never count unavailable attachment bytes as free input.
         return context.Entries.Any(entry => entry.Message.OmittedAttachments.Count > 0) ? null : used;
     }

@@ -50,6 +50,15 @@ public sealed record LlmProviderResponseState
     public required string ScopeId { get; init; }
 
     public required string Payload { get; init; }
+
+    /// <summary>
+    /// Input tokens the provider reported for the request that produced this state; null when the adapter
+    /// did not record them. Accounting uses them for the history this state closes.
+    /// </summary>
+    public long? InputTokens { get; init; }
+
+    /// <summary>Output tokens, including reasoning, the provider reported for that response; null when not recorded.</summary>
+    public long? OutputTokens { get; init; }
 }
 
 public enum LlmContextMeasurementSource
