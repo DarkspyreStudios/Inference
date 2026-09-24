@@ -1018,3 +1018,209 @@ public enum LlmAgentContextImport
 - Native resume or fork across providers.
 - Re-executing any tool from history.
 - Host history selection, compaction and summaries, which stay with the host.
+
+## Rich tool results
+
+**Status:** Proposed, for review before implementation
+
+**Motivating consumer:** Agent DS tool-result projection
+
+### Problem
+
+A chat tool result is `LlmToolResult(ToolCallId, Content, IsError)` with a separate `Attachments` list
+of images and documents. An agent tool result is `LlmAgentToolResult` with ordered text, image-URL and
+audio-URL content and, again, a separate `Attachments` list. Neither keeps the order between content
+and attachments, and neither carries resource references or structured JSON. The capabilities describe
+only tool-result images and documents. A part a route cannot carry fails the whole chat request, becomes
+a tool failure in the managed Codex and AgentCore sessions, or escapes the Claude agent turn.
+
+Live runs on 2026-09-24 measured what reached the model on the two routes available.
+
+| Tool-result content | Direct Codex `function_call_output` | Claude CLI agent, MCP result |
+| --- | --- | --- |
+| Text | Delivered | Delivered |
+| Image | Delivered | Delivered |
+| Text, image, text | Order kept | Order kept |
+| PDF | Read by the model as `input_file` | Saved to disk; the model sees a path note |
+| Plain-text file | Read by the model as `input_file` | As a blob: path note. As an embedded text resource: delivered |
+| Audio | Rejected: `input_audio` is not an accepted output item | Saved to disk; path note |
+| Resource link | No output item; text only | Delivered as `[Resource link: name] uri` text, not fetched |
+| Structured JSON | No output item; text only | `structuredContent` replaces the text parts; as a JSON text part, both are delivered |
+| Error flag | No field | Delivered |
+| Empty result | Accepted | Not measured |
+
+The Claude agent client sends document attachments as MCP binary resources and declares tool-result
+documents supported. The measurements show those documents never reach the model.
+
+### Proposed provider-neutral contract
+
+One ordered output type serves both lanes. It replaces `LlmToolResult.Content`, the tool-result
+`Attachments`, `LlmAgentToolResult`, and the use of `LlmAgentContent` in tool results.
+
+```csharp
+public abstract record LlmToolOutputPart;
+
+public sealed record LlmToolOutputText(string Text) : LlmToolOutputPart;
+
+public enum LlmBinaryKind { Image, Document, Audio, Other }
+
+public sealed record LlmToolOutputBinary(
+    LlmBinaryKind Kind, string MediaType, ReadOnlyMemory<byte> Data, string? FileName = null) : LlmToolOutputPart;
+
+public sealed record LlmToolOutputResource(string Uri) : LlmToolOutputPart
+{
+    public string? Name { get; init; }
+    public string? MediaType { get; init; }
+
+    /// <summary>An embedded text body. Null with a null Data is a link.</summary>
+    public string? Text { get; init; }
+
+    /// <summary>An embedded byte body, classified by MediaType.</summary>
+    public ReadOnlyMemory<byte>? Data { get; init; }
+}
+
+public sealed record LlmToolOutput
+{
+    public IReadOnlyList<LlmToolOutputPart> Parts { get; init; } = [];
+
+    /// <summary>A JSON object, or null.</summary>
+    public JsonElement? StructuredContent { get; init; }
+
+    public bool IsError { get; init; }
+}
+
+public sealed record LlmToolResult(string ToolCallId, LlmToolOutput Output);
+```
+
+- `LlmAgentSessionHandlers.ToolHandler` returns `LlmToolOutput`.
+- `LlmAgentContent` remains the turn-input vocabulary only.
+- The Common portable lane keeps its own tool-result shape. `ConnectLlmInference` maps its text and
+  attachments to text and binary parts in their existing order.
+
+### Rich content support
+
+Each route declares, in one record, how it carries every kind of tool-result content:
+
+```csharp
+public enum LlmRichContentCarriage
+{
+    /// <summary>The route cannot carry it; projection omits it.</summary>
+    Unsupported,
+
+    /// <summary>Carried as the provider's own content item.</summary>
+    Native,
+
+    /// <summary>Carried as a text part that renders it.</summary>
+    Text
+}
+
+public sealed record LlmRichContentSupported
+{
+    public LlmRichContentCarriage Images { get; init; }
+    public IReadOnlySet<string> ImageMediaTypes { get; init; } = FrozenSet<string>.Empty;
+    public LlmRichContentCarriage PdfDocuments { get; init; }
+    public LlmRichContentCarriage TextDocuments { get; init; }
+    public LlmRichContentCarriage Audio { get; init; }
+    public LlmRichContentCarriage OtherBinary { get; init; }
+    public LlmRichContentCarriage ResourceLinks { get; init; }
+    public LlmRichContentCarriage EmbeddedTextResources { get; init; }
+    public LlmRichContentCarriage StructuredContent { get; init; }
+    public LlmRichContentCarriage ErrorFlag { get; init; }
+
+    /// <summary>Parts reach the provider in the order supplied.</summary>
+    public bool PreservesOrder { get; init; }
+
+    /// <summary>An output with no parts is accepted.</summary>
+    public bool AllowsEmpty { get; init; }
+
+    /// <summary>The largest binary part the route accepts, when known.</summary>
+    public long? MaxBinaryBytes { get; init; }
+}
+```
+
+- `LlmProviderCapabilities.RichContentSupported` replaces `SupportsToolResultImages` and
+  `SupportsToolResultDocuments`. Model capability overrides can lower a carriage, for example images
+  for a model without vision, but cannot raise one; an adapter never sends what it cannot serialize.
+  The setup editor's two tool-result override rows set `Images` and the two document carriages.
+- A resource with a byte body is classified by its media type as an image, PDF, text document, audio
+  or other binary, and follows that carriage.
+- A text document is UTF-8 text with a `text/*` or `application/json` media type.
+
+| Route | Images | PDF | Text docs | Audio | Links | Embedded text | Structured | Error flag | Evidence |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Direct Codex | Native | Native | Native | Unsupported | Text | Text | Text | Text | Measured |
+| OpenAI Responses (API key) | Native | Native | Native | Unsupported | Text | Text | Text | Text | Same serializer; not live-verified |
+| Anthropic Messages | Native | Native | Native | Unsupported | Text | Text | Text | Native | Not live-verified |
+| Bedrock Converse | Native | Native | Native | Unsupported | Text | Text | Native | Native | Not live-verified |
+| OpenAI-compatible chat | Unsupported | Unsupported | Text | Unsupported | Text | Text | Text | Text | Protocol carries a string |
+| Claude CLI agent | Native | Unsupported | Text | Unsupported | Native | Native | Text | Native | Measured |
+| AgentCore | Unsupported | Unsupported | Text | Unsupported | Text | Text | Text | Native | Not live-verified |
+| Claude CLI chat, Antigravity CLI chat | Unsupported | Unsupported | Text | Unsupported | Text | Text | Text | Text | Tool history as text |
+
+Every route has `OtherBinary = Unsupported` and `PreservesOrder = true`. Direct Codex has
+`AllowsEmpty = true`, which was measured; the other routes declare it from their protocol.
+
+### Delivery projection
+
+```csharp
+public enum LlmToolPartDelivery { Delivered, Converted, Omitted }
+
+public enum LlmToolPartOmission { UnsupportedByRoute, UnsupportedByModel, InvalidContent, Empty }
+
+public sealed record LlmToolPartProjection(
+    LlmToolPartDelivery Delivery, LlmToolPartOmission? Omission = null);
+
+public sealed record LlmToolOutputProjection(
+    IReadOnlyList<LlmToolPartProjection> Parts,
+    LlmToolPartProjection? StructuredContent,
+    LlmToolPartProjection ErrorFlag);
+
+Task<LlmToolOutputProjection> LlmProviderService.ProjectToolOutputAsync(
+    string connectionId, string modelId, LlmToolOutput output, CancellationToken cancellationToken = default);
+```
+
+- The projection applies the model's `RichContentSupported` to one output. `Parts` has one entry per
+  supplied part, in order. It reads the connection and model capabilities and performs no network call.
+- Each adapter serializes tool results through the same internal projection, so the report describes
+  exactly what is sent. Omitted parts are not sent. Connect adds no notice text; the host adds any
+  notice it wants as a text part and projects again.
+- Text renderings are fixed: a resource link becomes `[Resource link: name] uri`, an embedded text
+  resource becomes `[Resource: uri]` followed by its text, structured content becomes its JSON as the
+  final text part, and a converted error flag becomes a leading `[Tool error]` text part. On the Claude
+  CLI agent, structured content is always sent as that final text part, never as MCP
+  `structuredContent`, because the CLI drops the text parts when `structuredContent` is present.
+- Structured content that is not a JSON object, a resource with both a text and a byte body, and a
+  binary part with no bytes are omitted with `InvalidContent` or `Empty`. None of them fails the
+  request, the turn or the tool.
+
+### Error and concurrency semantics
+
+- Projection holds no shared state and runs on a copy.
+- A delivery limitation never changes `IsError`. The managed Codex and AgentCore sessions stop turning
+  unsupported content into a failed tool result, and the Claude agent client stops throwing for it.
+- A projected output that the provider still rejects surfaces the provider's error unchanged; Connect
+  does not retry with further omission.
+
+### Migration and release
+
+The public tool-result types and two capability properties change, so this is a breaking-contract
+release, `11.7.0-rc.1`. Every adapter, test, example and document moves in the same unit, with no
+compatibility types. Agent DS floats `11.*-*`, so a published `11.7.0-rc.1` reaches every Agent DS
+restore; Agent DS's tool-result bridge must move to `LlmToolOutput` in the same coordinated change.
+
+### Required implementation coverage
+
+- Scripted tests per transport for every part kind and carriage, order, empty output, invalid content,
+  and model overrides that lower a carriage.
+- Projection equality with the serialized request for each transport.
+- Claude CLI agent: text documents as embedded text resources, structured content as a final text part,
+  PDFs and audio omitted, and no exception for unsupported content.
+- Managed Codex and AgentCore: unsupported content omitted without a failed tool result.
+- Live acceptance on Direct Codex and the Claude CLI agent for the measured rows. The other routes stay
+  not live-verified without credentials.
+
+### Non-goals
+
+- Fetching a resource link, by Connect or by instruction to the provider.
+- Transcoding audio or converting binary formats.
+- Choosing notice wording for omitted content, which belongs to the host.
