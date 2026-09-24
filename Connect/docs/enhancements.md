@@ -1223,6 +1223,9 @@ release, `11.7.0-rc.1`. Every adapter, test, example and document moves in the s
 compatibility types. Agent DS floats `11.*-*`, so a published `11.7.0-rc.1` reaches every Agent DS
 restore; Agent DS's tool-result bridge must move to `LlmToolOutput` in the same coordinated change.
 
+Live acceptance on 2026-09-24 confirmed the Direct Codex and Claude CLI agent rows with one output of
+every part kind. Direct Codex also accepted an empty output with the error flag.
+
 ### Required implementation coverage
 
 - Scripted tests per transport for every part kind and carriage, order, empty output, invalid content,

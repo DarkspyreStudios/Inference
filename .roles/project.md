@@ -556,3 +556,12 @@ contract change for `11.7.0-rc.1`.
 
 Verification: Debug build with zero warnings, `dotnet format --verify-no-changes`, and 377 Connect and
 Common tests.
+
+Live acceptance on 2026-09-24 ran Agent DS's stored connections against this source. One tool output
+carried a text part, a red PNG, a PDF, a plain-text file, a WAV, a resource link and structured JSON,
+each with its own verification value. Direct Codex `gpt-6-luna` reported all six text-bearing values;
+the projection reported the audio omitted and the request was accepted. An empty output with
+`IsError` was also accepted. A Claude CLI agent session reported the text, the colour, the text file
+(sent as an embedded text resource), the structured value (sent as the final text part) and the link
+name, and reported the PDF as not received; the tool completed successfully. AgentCore and the
+Anthropic API were not run, for lack of credentials.
