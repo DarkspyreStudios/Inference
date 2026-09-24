@@ -11,5 +11,5 @@
     <None Include="inference/ggml-metal.metal" TargetPath="ggml-metal.metal" CopyToOutputDirectory="Never" Condition="'$(Fixture)' == 'NotCopied'" />
     <None Include="other/ggml-metal.metal" TargetPath="other/ggml-metal.metal" CopyToOutputDirectory="PreserveNewest" Condition="'$(Fixture)' == 'SeparatePaths'" />
   </ItemGroup>
-  <Import Project="VerifyOutputPaths.targets" />
+  <Import Project="../VerifyConsumer/VerifyOutputPaths.targets" />
 </Project>

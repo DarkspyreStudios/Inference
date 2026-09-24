@@ -4,10 +4,10 @@ set -euo pipefail
 root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$root/Connect"
 for fixture in Single NotCopied SeparatePaths; do
-    dotnet msbuild ../eng/VerifyConsumer/OutputPathsFixture.proj -t:VerifyConsumerOutputPaths -p:Fixture="$fixture" -nologo
+    dotnet msbuild ../eng/VerifyConsumer.Tests/OutputPathsFixture.proj -t:VerifyConsumerOutputPaths -p:Fixture="$fixture" -nologo
 done
 for fixture in Duplicate MixedDuplicate; do
-    if result="$(dotnet msbuild ../eng/VerifyConsumer/OutputPathsFixture.proj -t:VerifyConsumerOutputPaths -p:Fixture="$fixture" -nologo 2>&1)"; then
+    if result="$(dotnet msbuild ../eng/VerifyConsumer.Tests/OutputPathsFixture.proj -t:VerifyConsumerOutputPaths -p:Fixture="$fixture" -nologo 2>&1)"; then
         printf 'Expected duplicate-output failure for %s\n' "$fixture" >&2; exit 1
     fi
     [[ "$result" == *INFERENCEPKG001* && "$result" == *ggml-metal.metal* ]]
