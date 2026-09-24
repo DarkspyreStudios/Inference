@@ -18,7 +18,7 @@ specifications.
 | Version line | `<net>.<release>.<minor>`: .NET generation, breaking-contract release, compatible tweak/fix |
 | Release model | `Common`, `Connect`, `Tensor`, and `UI.Settings` publish together at the one version declared in `/Directory.Build.props` |
 | Primary branch | `master` |
-| Lifecycle stage | Four-package `11.5.2-rc.1` published privately |
+| Lifecycle stage | Four-package `11.5.3-rc.1` published privately |
 | Jira project and parent | TBD |
 | Jira subject label | TBD |
 
@@ -439,3 +439,21 @@ Authenticated restores, Debug/Release builds and tests, formatting, vulnerabilit
 archive boundaries and local/fresh-feed consumer checks passed. Downloaded archives match
 the verified local archives; feed readback confirms private visibility. Source is tagged
 `v11.5.2-rc.1`. No model weights or paid inference were used as verification gates.
+
+## Private release 11.5.3-rc.1: Whisper Metal packaging
+
+Published all four packages from `400d18e422852883e5d928e74d5af8a6998d21e2`. Tensor excludes the
+shader imported by `Whisper.net.Runtime.Metal` from its own archive, retaining the runtime
+dependency's output copying. Archive verification now rejects `.metal`; the package-only consumer
+rejects distinct assets targeting the same output path. Regression fixtures verify duplicate,
+mixed None/Content, distinct-path and noncopied inputs, and evaluated pack items preserve the
+dependency shader while excluding it from Tensor's archive.
+
+`deploy-minor.sh` selected 11.5.3-rc.1 and passed Debug/Release builds, tests, formatting and audits.
+An adjacent test project initially made the consumer project selection ambiguous; publication had
+not started. The fixture was moved to its own directory and the same version was resumed without
+another bump. Final-source Release builds/tests, archives and fresh local/feed consumers pass.
+Tests total Connect 329, Tensor 298 and UI 53 per configuration (24 Common tests occur in each).
+All four downloaded archives match the local archives byte-for-byte and are private. Fresh consumer
+evaluation confirms exactly one `ggml-metal.metal`, owned by `Whisper.net.Runtime.Metal`.
+Source, this record and tag `v11.5.3-rc.1` are pushed to origin. No model downloads or paid calls.
