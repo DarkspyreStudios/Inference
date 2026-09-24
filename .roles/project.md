@@ -18,7 +18,7 @@ specifications.
 | Version line | `<net>.<release>.<minor>`: .NET generation, breaking-contract release, compatible tweak/fix |
 | Release model | `Common`, `Connect`, `Tensor`, and `UI.Settings` publish together at the one version declared in `/Directory.Build.props` |
 | Primary branch | `master` |
-| Lifecycle stage | Four-package `11.5.1-rc.1` published privately; .NET 11 RC dependencies |
+| Lifecycle stage | Four-package `11.5.2-rc.1` published privately |
 | Jira project and parent | TBD |
 | Jira subject label | TBD |
 
@@ -431,3 +431,11 @@ Previously published packages remain historical releases on the private feed; th
 design authority for the unified package family. `10.1.0` is the first unified compatibility
 baseline. Provider behavior and stored credential identities are preserved unless an approved design
 explicitly changes them.
+
+## Automated private release 11.5.2-rc.1
+
+Published all four packages from `ac7130fa726c763e7ce42756abd90fd5eac3dc3c` using `deploy-minor.sh`.
+Authenticated restores, Debug/Release builds and tests, formatting, vulnerability audits,
+archive boundaries and local/fresh-feed consumer checks passed. Downloaded archives match
+the verified local archives; feed readback confirms private visibility. Source is tagged
+`v11.5.2-rc.1`. No model weights or paid inference were used as verification gates.
