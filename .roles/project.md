@@ -18,7 +18,7 @@ specifications.
 | Version line | `<net>.<release>.<minor>`: .NET generation, breaking-contract release, compatible tweak/fix |
 | Release model | `Common`, `Connect`, `Tensor`, and `UI.Settings` publish together at the one version declared in `/Directory.Build.props` |
 | Primary branch | `master` |
-| Lifecycle stage | Four-package `11.7.1-rc.1` published privately |
+| Lifecycle stage | Four-package `11.8.0-rc.1` published privately |
 | Jira project and parent | TBD |
 | Jira subject label | TBD |
 
@@ -623,3 +623,11 @@ Verification: Debug build with zero warnings, `dotnet format --verify-no-changes
 Common tests. Agent DS's live suite drives the real Claude CLI through this source: a background command
 listed, read and stopped; a subagent's output and the turn its completion starts; a monitor line's turn; a
 host tool call during a provider-started turn with a host turn queued behind it; and interrupting one.
+
+## Automated private release 11.8.0-rc.1
+
+Published all four packages from `7393dbef23052807fd82c59954121f74d9f55d66` using `deploy-major.sh`.
+Authenticated restores, Debug/Release builds and tests, formatting, vulnerability audits,
+archive boundaries and local/fresh-feed consumer checks passed. Downloaded archives match
+the verified local archives; feed readback confirms private visibility. Source is tagged
+`v11.8.0-rc.1`. No model weights or paid inference were used as verification gates.
