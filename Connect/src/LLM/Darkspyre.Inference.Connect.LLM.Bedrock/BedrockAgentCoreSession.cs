@@ -30,6 +30,9 @@ internal sealed class BedrockAgentCoreSession : ILlmAgentSession
     private readonly LlmRichContentSupported _richContent;
     private bool _disposed;
 
+    // AgentCore's own background work is not measured; nothing is reported and stop is Unknown.
+    private readonly NoAgentResources _resources = new(LlmAgentResourceStopStatus.Unknown);
+
     public BedrockAgentCoreSession(
         IBedrockAgentCoreInvoker invoker,
         LlmAwsCredentials aws,
@@ -343,9 +346,40 @@ internal sealed class BedrockAgentCoreSession : ILlmAgentSession
         throw new NotSupportedException("AgentCore Harness controls its own session memory.");
     }
 
+    public IAsyncEnumerable<LlmAgentEvent> ObserveAsync(CancellationToken cancellationToken = default)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        return _resources.ObserveAsync(cancellationToken);
+    }
+
+    public Task<IReadOnlyList<LlmAgentResource>> GetResourcesAsync(CancellationToken cancellationToken = default)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        cancellationToken.ThrowIfCancellationRequested();
+        return NoAgentResources.GetAsync();
+    }
+
+    public Task<LlmAgentResourceOutput> ReadResourceOutputAsync(string resourceId, string? cursor,
+        CancellationToken cancellationToken = default)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        ArgumentException.ThrowIfNullOrWhiteSpace(resourceId);
+        cancellationToken.ThrowIfCancellationRequested();
+        return NoAgentResources.ReadAsync();
+    }
+
+    public Task<LlmAgentResourceStopStatus> StopResourceAsync(string resourceId, CancellationToken cancellationToken = default)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        ArgumentException.ThrowIfNullOrWhiteSpace(resourceId);
+        cancellationToken.ThrowIfCancellationRequested();
+        return _resources.StopAsync();
+    }
+
     public ValueTask DisposeAsync()
     {
         _disposed = true;
+        _resources.Dispose();
         _turnGate.Dispose();
         return ValueTask.CompletedTask;
     }

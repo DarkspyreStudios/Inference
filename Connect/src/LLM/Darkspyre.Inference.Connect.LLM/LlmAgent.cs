@@ -154,6 +154,15 @@ public sealed record LlmAgentSessionOptions
     public bool Ephemeral { get; init; }
 
     public LlmAgentSessionHandlers Handlers { get; init; } = new();
+
+    /// <summary>
+    /// Lets the runtime start subagents and output monitors of its own. Off by default. Only a runtime whose
+    /// <see cref="LlmAgentCapabilities.ResourceObservation"/> is Supported accepts it.
+    /// </summary>
+    public bool AllowRuntimeBackgroundWork { get; init; }
+
+    /// <summary>Output Connect retains per resource when the runtime keeps none; the earliest cursor advances past it.</summary>
+    public long ResourceOutputRetentionBytes { get; init; } = 1_048_576;
 }
 
 public sealed record LlmAgentResumeOptions
@@ -183,6 +192,15 @@ public sealed record LlmAgentResumeOptions
     public LlmAgentApprovalPolicy? ApprovalPolicy { get; init; }
 
     public LlmAgentSessionHandlers Handlers { get; init; } = new();
+
+    /// <summary>
+    /// Lets the runtime start subagents and output monitors of its own. Off by default. Only a runtime whose
+    /// <see cref="LlmAgentCapabilities.ResourceObservation"/> is Supported accepts it.
+    /// </summary>
+    public bool AllowRuntimeBackgroundWork { get; init; }
+
+    /// <summary>Output Connect retains per resource when the runtime keeps none; the earliest cursor advances past it.</summary>
+    public long ResourceOutputRetentionBytes { get; init; } = 1_048_576;
 }
 
 public sealed record LlmAgentTurnRequest
@@ -453,4 +471,20 @@ public interface ILlmAgentSession : IAsyncDisposable
     Task InterruptAsync(string turnId, CancellationToken cancellationToken = default);
 
     Task CompactAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Session-lifetime events outside host turns: resource changes, output hints and provider-started turns.
+    /// One reader at a time; the sequence ends when the session is disposed.
+    /// </summary>
+    IAsyncEnumerable<LlmAgentEvent> ObserveAsync(CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<LlmAgentResource>> GetResourcesAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>Nondestructive read. A null cursor reads from the earliest retained output.</summary>
+    Task<LlmAgentResourceOutput> ReadResourceOutputAsync(
+        string resourceId,
+        string? cursor,
+        CancellationToken cancellationToken = default);
+
+    Task<LlmAgentResourceStopStatus> StopResourceAsync(string resourceId, CancellationToken cancellationToken = default);
 }

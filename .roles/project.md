@@ -601,3 +601,22 @@ Authenticated restores, Debug/Release builds and tests, formatting, vulnerabilit
 archive boundaries and local/fresh-feed consumer checks passed. Downloaded archives match
 the verified local archives; feed readback confirms private visibility. Source is tagged
 `v11.7.1-rc.1`. No model weights or paid inference were used as verification gates.
+
+## Native background resources implementation
+
+The design is the "Native background resources and provider-started turns" section of
+`Connect/docs/enhancements.md`. It is a breaking contract change for `11.8.0-rc.1`.
+
+- `LlmAgentResources.cs` holds the resource contract. `ILlmAgentSession` gains `ObserveAsync`,
+  `GetResourcesAsync`, `ReadResourceOutputAsync` and `StopResourceAsync`; the session and resume options
+  gain `AllowRuntimeBackgroundWork` and `ResourceOutputRetentionBytes`.
+- `ClaudeAgentSession` reads the CLI for the session's lifetime. It routes output by the
+  `--replay-user-messages` echo: host turns to their `RunTurnAsync` stream, provider-started turns and
+  resource events to the session feed, and subagent messages to the subagent's output.
+- `ClaudeBackgroundTasks` maintains resources from the CLI's task messages, tails command output files,
+  parses the exit-code trailer, and retains subagent output up to the configured limit.
+- `NoAgentResources` serves managed Codex and AgentCore, which report none; `AgentResourceOptions`
+  rejects background work where observation is not Supported.
+
+Verification: Debug build with zero warnings, `dotnet format --verify-no-changes`, and 391 Connect and
+Common tests.

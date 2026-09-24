@@ -26,12 +26,16 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
     private Task _producer = Task.CompletedTask;
     private LlmAgentContextStatus? _latestStatus;
 
+    // Managed runs host-executed tools; their processes belong to the host, not this runtime.
+    private readonly NoAgentResources _resources = new(LlmAgentResourceStopStatus.Unsupported);
+
     public ManagedAgentSession(LlmConnection connection, LlmAgentSessionOptions options,
         IReadOnlyList<LlmModel> models, ILlmContextEstimator estimator,
         Func<LlmChatRequest, CancellationToken, IAsyncEnumerable<LlmStreamEvent>> stream,
         Func<string, LlmProviderCapabilities> capabilities)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(options.ModelId);
+        AgentResourceOptions.Validate(ManagedAgentPolicy.Capabilities, options.AllowRuntimeBackgroundWork, options.ResourceOutputRetentionBytes);
         _connection = connection;
         _execution = options.ExecutionOptions ?? new();
         _models = Array.AsReadOnly(models.ToArray());
@@ -260,6 +264,36 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
     public Task CompactAsync(CancellationToken cancellationToken = default) =>
         throw new NotSupportedException("Agent DS owns compaction. Use context capture/replacement or the pause/continue handoff.");
 
+    public IAsyncEnumerable<LlmAgentEvent> ObserveAsync(CancellationToken cancellationToken = default)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        return _resources.ObserveAsync(cancellationToken);
+    }
+
+    public Task<IReadOnlyList<LlmAgentResource>> GetResourcesAsync(CancellationToken cancellationToken = default)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        cancellationToken.ThrowIfCancellationRequested();
+        return NoAgentResources.GetAsync();
+    }
+
+    public Task<LlmAgentResourceOutput> ReadResourceOutputAsync(string resourceId, string? cursor,
+        CancellationToken cancellationToken = default)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        ArgumentException.ThrowIfNullOrWhiteSpace(resourceId);
+        cancellationToken.ThrowIfCancellationRequested();
+        return NoAgentResources.ReadAsync();
+    }
+
+    public Task<LlmAgentResourceStopStatus> StopResourceAsync(string resourceId, CancellationToken cancellationToken = default)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        ArgumentException.ThrowIfNullOrWhiteSpace(resourceId);
+        cancellationToken.ThrowIfCancellationRequested();
+        return _resources.StopAsync();
+    }
+
     public async ValueTask DisposeAsync()
     {
         LiveRun? run;
@@ -269,6 +303,7 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
         {
             if (_disposed) { return; }
             _disposed = true;
+            _resources.Dispose();
             run = _run;
             producer = _producer;
             cancellation = run?.Cancellation.CancelAsync() ?? Task.CompletedTask;

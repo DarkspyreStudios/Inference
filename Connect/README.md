@@ -917,6 +917,32 @@ The adapter launches in restricted mode, disables built-in tools and settings-ba
 allows only the explicitly registered Darkspyre.Inference.Connect.LLM tools. Claude subscription connections therefore
 report `SupportsAgentSessions = true` and `SupportsAgentToolUse = true`.
 
+### Native background resources
+
+A provider-owned runtime can run background work inside its own process. `ILlmAgentSession` reports it:
+
+- `ObserveAsync` is a session-lifetime feed, separate from each turn's events. It carries
+  `LlmAgentResourceEvent` (Added, Updated, Ended), `LlmAgentResourceOutputEvent` hints, and turns the
+  runtime starts itself: `LlmAgentProviderTurnStartedEvent`, the ordinary message and tool events, then
+  `LlmAgentTurnCompletedEvent`. It has one reader at a time and ends when the session is disposed.
+- `GetResourcesAsync` returns the current set. `ReadResourceOutputAsync` reads output nondestructively by
+  cursor; a null cursor starts at the earliest retained output, and a cursor before it returns Gap.
+  `StopResourceAsync` returns Requested; the resource reports Stopped when the runtime confirms.
+- `LlmAgentCapabilities.ResourceObservation` is Supported for the Claude CLI, Unknown for AgentCore
+  (not measured) and Unsupported for managed Codex, whose tools run in the host.
+- `LlmAgentSessionOptions.AllowRuntimeBackgroundWork` (off by default) lets the Claude CLI start
+  subagents and monitors. A background Bash command is part of the Bash tool and is observed either
+  way. `ResourceOutputRetentionBytes` (1 MiB by default) caps the subagent output Connect retains.
+
+The Claude CLI reports each task's start, status and end. Command output is read from the CLI's output
+file, and the exit code from the trailer it appends. A subagent's output is the text of its own messages,
+which stay out of the main turn. Terminal attach is unsupported.
+
+The Claude CLI starts a turn of its own when background work reports. Connect launches it with
+`--replay-user-messages` and reads it for the session's lifetime: a host turn starts at the CLI's echo of
+its message, and output with no echo before it is a provider-started turn on `ObserveAsync`. A host turn
+sent during a provider turn is queued by the CLI and starts after it.
+
 ### Temperature
 
 `SupportsTemperature` defaults to `false`. Claude Opus 4.7 and later reject any non-default `temperature`, `top_p`, or `top_k` with HTTP 400, so Darkspyre.Inference.Connect.LLM throws `NotSupportedException` before the request leaves the process. An API-key host targeting Claude Opus 4.6, Claude Sonnet 4.6, or an earlier model can opt back in per model:

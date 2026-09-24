@@ -395,6 +395,8 @@ public sealed class ClaudeAgentClientTests
             }
             else if (type == "user")
             {
+                // The CLI echoes each host message when it starts processing it (--replay-user-messages).
+                Enqueue(new { type = "user", isReplay = true, uuid = root.GetProperty("uuid").GetString(), message = new { role = "user", content = "echo" } });
                 Enqueue(new
                 {
                     type = "assistant",

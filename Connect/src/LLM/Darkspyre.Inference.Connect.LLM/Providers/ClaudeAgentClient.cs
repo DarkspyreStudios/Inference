@@ -1,5 +1,6 @@
 using System.Runtime.CompilerServices;
 using System.Text.Json;
+using System.Threading.Channels;
 using Darkspyre.Inference.Connect.LLM.Internal;
 
 namespace Darkspyre.Inference.Connect.LLM.Providers;
@@ -43,6 +44,8 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             connection,
             NativeAgentContract.Claude.RichContentSupported.For(connection, options.ModelId),
             opening,
+            options.AllowRuntimeBackgroundWork,
+            options.ResourceOutputRetentionBytes,
             cancellationToken);
     }
 
@@ -77,6 +80,8 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             connection,
             NativeAgentContract.Claude.RichContentSupported.For(connection, options.ModelId),
             opening: null,
+            options.AllowRuntimeBackgroundWork,
+            options.ResourceOutputRetentionBytes,
             cancellationToken);
     }
 
@@ -119,6 +124,8 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             connection,
             NativeAgentContract.Claude.RichContentSupported.For(connection, options.ModelId),
             opening: null,
+            options.AllowRuntimeBackgroundWork,
+            options.ResourceOutputRetentionBytes,
             cancellationToken);
     }
 
@@ -140,8 +147,11 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
         LlmConnection connection,
         LlmRichContentSupported richContent,
         AgentOpeningContext? opening,
+        bool allowRuntimeBackgroundWork,
+        long retentionBytes,
         CancellationToken cancellationToken)
     {
+        AgentResourceOptions.Validate(NativeAgentContract.Claude, allowRuntimeBackgroundWork, retentionBytes);
         string normalizedDirectory = CliInfrastructure.NormalizeWorkingDirectory(workingDirectory);
         IReadOnlyList<string> arguments = BuildArguments(
             threadId,
@@ -153,7 +163,8 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             normalizedDirectory,
             writableRoots,
             sandbox,
-            networkAllowed);
+            networkAllowed,
+            allowRuntimeBackgroundWork);
         IClaudeCliSessionProcess process;
         try
         {
@@ -178,9 +189,11 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             handlers,
             NativeAgentContract.Claude.RichContentSupported.For(connection, null),
             richContent,
-            opening);
+            opening,
+            retentionBytes);
         try
         {
+            session.Start();
             await session.InitializeAsync(instructions, cancellationToken);
             return session;
         }
@@ -201,17 +214,22 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
         string workingDirectory,
         IReadOnlyList<string> writableRoots,
         LlmAgentSandboxMode sandbox,
-        bool networkAllowed)
+        bool networkAllowed,
+        bool allowRuntimeBackgroundWork)
     {
+        string[] background = allowRuntimeBackgroundWork ? BackgroundTools(sandbox) : [];
+        string builtIn = ClaudeTools(sandbox, networkAllowed);
         var arguments = new List<string>
         {
             "--verbose",
             "--input-format", "stream-json",
             "--output-format", "stream-json",
+            // The echo marks where each host turn starts; output with no echo before it is the runtime's own turn.
+            "--replay-user-messages",
             "--include-partial-messages",
             "--strict-mcp-config",
             "--disable-slash-commands",
-            "--tools", ClaudeTools(sandbox, networkAllowed),
+            "--tools", builtIn == "default" || background.Length == 0 ? builtIn : string.Join(',', [builtIn, .. background]),
             "--permission-mode", PermissionMode(sandbox),
             "--permission-prompts", "none"
         };
@@ -222,6 +240,11 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
         else
         {
             arguments.Add("--dangerously-skip-permissions");
+            if (!allowRuntimeBackgroundWork)
+            {
+                // The default tool set includes both; background work stays off unless the session allows it.
+                arguments.AddRange(["--disallowedTools", "Task,Monitor"]);
+            }
         }
 
         string[] additionalRoots =
@@ -242,12 +265,16 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             arguments.AddRange(["--model", modelId]);
         }
 
-        if (tools.Count > 0)
+        string[] allowed =
+        [
+            .. tools.Select(tool => McpToolName(tool.Name)),
+            .. tools.Count > 0 ? ["Read"] : Array.Empty<string>(),
+            .. background
+        ];
+        if (allowed.Length > 0)
         {
             arguments.Add("--allowedTools");
-            arguments.Add(string.Join(
-                ',',
-                tools.Select(tool => McpToolName(tool.Name)).Append("Read")));
+            arguments.Add(string.Join(',', allowed));
         }
 
         if (resumeThreadId is null)
@@ -287,6 +314,10 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
                     "Claude CLI cannot disable network access in danger-full-access mode."),
             _ => throw new ArgumentOutOfRangeException(nameof(sandbox))
         };
+
+    /// <summary>Subagents in every sandbox; monitors run commands, so not in read-only.</summary>
+    private static string[] BackgroundTools(LlmAgentSandboxMode sandbox) =>
+        sandbox == LlmAgentSandboxMode.ReadOnly ? ["Task"] : ["Task", "Monitor"];
 
     private static string PermissionMode(LlmAgentSandboxMode sandbox) => sandbox switch
     {
@@ -369,8 +400,21 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
         private readonly LlmRichContentSupported _richContent;
         private readonly SemaphoreSlim _turnGate = new(1, 1);
         private readonly SemaphoreSlim _writeLock = new(1, 1);
-        private readonly Queue<string> _deferredLines = new();
         private readonly List<PendingToolCall> _pendingToolCalls = [];
+        // Everything below is read for the session's lifetime by one reader; _route guards turn routing.
+        private readonly Lock _route = new();
+        private readonly Channel<LlmAgentEvent> _sessionEvents = Channel.CreateUnbounded<LlmAgentEvent>(
+            new UnboundedChannelOptions { SingleReader = true });
+        private readonly Dictionary<string, TaskCompletionSource<JsonElement>> _controlWaiters = new(StringComparer.Ordinal);
+        // Host turns written to the CLI and not yet echoed back, in the order written.
+        private readonly List<HostTurn> _written = [];
+        private readonly ClaudeBackgroundTasks _tasks;
+        private readonly CancellationTokenSource _readerStop = new();
+        private Task _reader = Task.CompletedTask;
+        private HostTurn? _host;
+        private ProviderTurn? _provider;
+        private Exception? _failure;
+        private int _observing;
         // Sent with the first turn, then cleared once the provider has received it.
         private AgentOpeningContext? _opening;
         private string? _activeTurnId;
@@ -385,9 +429,12 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             LlmAgentSessionHandlers handlers,
             LlmRichContentSupported richRoute,
             LlmRichContentSupported richContent,
-            AgentOpeningContext? opening)
+            AgentOpeningContext? opening,
+            long retentionBytes)
         {
             _process = process;
+            _tasks = new ClaudeBackgroundTasks(threadId, retentionBytes, item => _sessionEvents.Writer.TryWrite(item),
+                TimeSpan.FromMilliseconds(500));
             _richRoute = richRoute;
             _richContent = richContent;
             _opening = opening;
@@ -445,6 +492,9 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             throw NativeAgentContract.UnsupportedContext(cancellationToken);
 
 
+        /// <summary>Starts reading the CLI for the session's lifetime; control requests need it running.</summary>
+        public void Start() => _reader = Task.Run(() => ReadAsync(_readerStop.Token));
+
         public async Task InitializeAsync(
             string? instructions,
             CancellationToken cancellationToken)
@@ -499,9 +549,8 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
 
             await _turnGate.WaitAsync(cancellationToken);
             string turnId = Guid.NewGuid().ToString();
+            var turn = new HostTurn(turnId);
             bool completed = false;
-            _activeTurnId = turnId;
-            _pendingToolCalls.Clear();
             try
             {
                 if (!string.IsNullOrWhiteSpace(request.ModelId)
@@ -529,6 +578,11 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
                 {
                     yield return new LlmAgentWarningEvent(ThreadId, turnId, opening.Notice);
                 }
+                lock (_route)
+                {
+                    if (_failure is { } failure) { throw failure; }
+                    _written.Add(turn);
+                }
                 await WriteJsonLineAsync(
                     new
                     {
@@ -549,100 +603,24 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
                     cancellationToken);
                 _opening = null;
 
-                var completedMessages = new HashSet<string>(StringComparer.Ordinal);
-                while (true)
+                // The reader routes this turn's events here once the CLI echoes the message back.
+                await foreach (LlmAgentEvent item in turn.Events.Reader.ReadAllAsync(cancellationToken))
                 {
-                    string line = await ReadRequiredLineAsync(cancellationToken);
-                    JsonDocument document;
-                    try
+                    yield return item;
+                    if (item is LlmAgentTurnCompletedEvent)
                     {
-                        document = JsonDocument.Parse(line);
-                    }
-                    catch (JsonException exception)
-                    {
-                        throw ProtocolFailure("Claude CLI returned malformed agent JSON.", exception);
-                    }
-
-                    using (document)
-                    {
-                        JsonElement root = document.RootElement;
-                        string type = OptionalString(root, "type") ?? string.Empty;
-                        switch (type)
-                        {
-                            case "control_request":
-                                {
-                                    LlmAgentToolEvent? toolEvent = await HandleControlRequestAsync(
-                                        root,
-                                        cancellationToken);
-                                    if (toolEvent is not null)
-                                    {
-                                        yield return toolEvent;
-                                    }
-                                    break;
-                                }
-                            case "control_response":
-                                break;
-                            case "stream_event":
-                                foreach (LlmAgentEvent streamEvent in MapStreamEvent(root, turnId))
-                                {
-                                    yield return streamEvent;
-                                }
-                                break;
-                            case "assistant":
-                                foreach (LlmAgentEvent assistantEvent in MapAssistantMessage(
-                                             root,
-                                             turnId,
-                                             completedMessages))
-                                {
-                                    yield return assistantEvent;
-                                }
-                                break;
-                            case "system":
-                                if (MapSystemMessage(root, turnId) is { } systemEvent)
-                                {
-                                    yield return systemEvent;
-                                }
-                                break;
-                            case "result":
-                                {
-                                    string text = OptionalString(root, "result") ?? string.Empty;
-                                    if (text.Length > 0 && completedMessages.Count == 0)
-                                    {
-                                        yield return new LlmAgentMessageCompletedEvent(
-                                            ThreadId,
-                                            turnId,
-                                            $"result-{turnId}",
-                                            text);
-                                    }
-
-                                    bool isError = OptionalBoolean(root, "is_error") == true;
-                                    string subtype = OptionalString(root, "subtype") ?? string.Empty;
-                                    LlmAgentTurnStatus status = subtype.Contains(
-                                        "interrupt",
-                                        StringComparison.OrdinalIgnoreCase)
-                                            ? LlmAgentTurnStatus.Interrupted
-                                            : isError
-                                                ? LlmAgentTurnStatus.Failed
-                                                : LlmAgentTurnStatus.Completed;
-                                    completed = true;
-                                    yield return new LlmAgentTurnCompletedEvent(
-                                        ThreadId,
-                                        turnId,
-                                        status,
-                                        isError ? "Claude CLI reported a turn error." : null);
-                                    yield break;
-                                }
-                        }
+                        completed = true;
+                        yield break;
                     }
                 }
+                throw ProtocolFailure("Claude CLI ended the turn without a result.");
             }
             finally
             {
                 if (!completed && !_disposed)
                 {
-                    await TryInterruptAsync(turnId);
+                    await AbandonAsync(turn);
                 }
-                _activeTurnId = null;
                 _turnGate.Release();
             }
         }
@@ -662,9 +640,18 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             CancellationToken cancellationToken = default)
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
-            if (!string.Equals(turnId, _activeTurnId, StringComparison.Ordinal))
+            lock (_route)
             {
-                throw new ArgumentException("The requested turn is not active.", nameof(turnId));
+                if (_written.FirstOrDefault(turn => turn.Id == turnId) is { } queued)
+                {
+                    // Not started yet: the CLI has it queued. Interrupt it the moment it starts.
+                    queued.InterruptOnStart = true;
+                    return;
+                }
+                if (_host?.Id != turnId && _provider?.Id != turnId)
+                {
+                    throw new ArgumentException("The requested turn is not active.", nameof(turnId));
+                }
             }
 
             await WriteControlRequestWithoutWaitingAsync(
@@ -679,6 +666,70 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
                 "Claude CLI does not expose compaction through the supported streaming control protocol.");
         }
 
+        public async IAsyncEnumerable<LlmAgentEvent> ObserveAsync(
+            [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            if (Interlocked.Exchange(ref _observing, 1) == 1)
+            {
+                throw new InvalidOperationException("The session feed has one reader at a time.");
+            }
+            try
+            {
+                await foreach (LlmAgentEvent item in _sessionEvents.Reader.ReadAllAsync(cancellationToken))
+                {
+                    yield return item;
+                }
+            }
+            finally
+            {
+                Volatile.Write(ref _observing, 0);
+            }
+        }
+
+        public Task<IReadOnlyList<LlmAgentResource>> GetResourcesAsync(CancellationToken cancellationToken = default)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult(_tasks.Snapshot());
+        }
+
+        public Task<LlmAgentResourceOutput> ReadResourceOutputAsync(
+            string resourceId,
+            string? cursor,
+            CancellationToken cancellationToken = default)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            ArgumentException.ThrowIfNullOrWhiteSpace(resourceId);
+            return _tasks.ReadAsync(resourceId, cursor, cancellationToken);
+        }
+
+        public async Task<LlmAgentResourceStopStatus> StopResourceAsync(
+            string resourceId,
+            CancellationToken cancellationToken = default)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            ArgumentException.ThrowIfNullOrWhiteSpace(resourceId);
+            if (!_tasks.TryGet(resourceId, out LlmAgentResource resource))
+            {
+                return LlmAgentResourceStopStatus.Unknown;
+            }
+            if (resource.Ended is not null)
+            {
+                return LlmAgentResourceStopStatus.Exited;
+            }
+            try
+            {
+                await SendControlRequestAsync(new { subtype = "stop_task", task_id = resourceId }, cancellationToken);
+                // The request is not the exit; the resource reports Stopped when the CLI confirms.
+                return LlmAgentResourceStopStatus.Requested;
+            }
+            catch (LlmProviderException)
+            {
+                return LlmAgentResourceStopStatus.Failed;
+            }
+        }
+
         public async ValueTask DisposeAsync()
         {
             if (_disposed)
@@ -687,7 +738,19 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             }
 
             _disposed = true;
+            await _readerStop.CancelAsync();
             await _process.DisposeAsync();
+            try
+            {
+                await _reader;
+            }
+            catch (OperationCanceledException)
+            {
+                // The reader stops with the session.
+            }
+            await _tasks.DisposeAsync();
+            _sessionEvents.Writer.TryComplete();
+            _readerStop.Dispose();
             _turnGate.Dispose();
             _writeLock.Dispose();
         }
@@ -697,64 +760,22 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             CancellationToken cancellationToken)
         {
             string requestId = Guid.NewGuid().ToString("N");
-            await WriteJsonLineAsync(
-                new { type = "control_request", request_id = requestId, request },
-                cancellationToken);
-            var deferred = new List<string>();
+            var waiter = new TaskCompletionSource<JsonElement>(TaskCreationOptions.RunContinuationsAsynchronously);
+            lock (_route)
+            {
+                if (_failure is { } failure) { throw failure; }
+                _controlWaiters[requestId] = waiter;
+            }
             try
             {
-                while (true)
-                {
-                    string line = await ReadProcessLineAsync(cancellationToken);
-                    JsonDocument document;
-                    try
-                    {
-                        document = JsonDocument.Parse(line);
-                    }
-                    catch (JsonException exception)
-                    {
-                        throw ProtocolFailure("Claude CLI returned malformed control JSON.", exception);
-                    }
-
-                    using (document)
-                    {
-                        JsonElement root = document.RootElement;
-                        string type = OptionalString(root, "type") ?? string.Empty;
-                        if (string.Equals(type, "control_request", StringComparison.Ordinal))
-                        {
-                            await HandleControlRequestAsync(root, cancellationToken);
-                            continue;
-                        }
-                        if (string.Equals(type, "control_response", StringComparison.Ordinal)
-                            && root.TryGetProperty("response", out JsonElement response)
-                            && string.Equals(
-                                OptionalString(response, "request_id"),
-                                requestId,
-                                StringComparison.Ordinal))
-                        {
-                            if (string.Equals(
-                                OptionalString(response, "subtype"),
-                                "error",
-                                StringComparison.Ordinal))
-                            {
-                                throw ProtocolFailure("Claude CLI rejected an agent control request.");
-                            }
-
-                            return response.TryGetProperty("response", out JsonElement payload)
-                                ? payload.Clone()
-                                : JsonSerializer.SerializeToElement(new { });
-                        }
-
-                        deferred.Add(line);
-                    }
-                }
+                await WriteJsonLineAsync(
+                    new { type = "control_request", request_id = requestId, request },
+                    cancellationToken);
+                return await waiter.Task.WaitAsync(cancellationToken);
             }
             finally
             {
-                foreach (string line in deferred)
-                {
-                    _deferredLines.Enqueue(line);
-                }
+                lock (_route) { _controlWaiters.Remove(requestId); }
             }
         }
 
@@ -1090,38 +1111,283 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             }
         }
 
-        private async Task<string> ReadRequiredLineAsync(CancellationToken cancellationToken)
+        /// <summary>
+        /// Reads the CLI for the session's lifetime. With <c>--replay-user-messages</c> the CLI echoes each host
+        /// message when it starts processing it: output after the echo belongs to that host turn, and output with
+        /// no echo before it is a turn the runtime started itself.
+        /// </summary>
+        private async Task ReadAsync(CancellationToken cancellationToken)
         {
-            if (_deferredLines.Count > 0)
+            Exception failure;
+            try
             {
-                return _deferredLines.Dequeue();
+                while (await _process.ReadLineAsync(cancellationToken) is { } line)
+                {
+                    await RouteAsync(line, cancellationToken);
+                }
+                ClaudeCliProcessResult result = await _process.WaitForExitAsync(cancellationToken);
+                failure = new LlmProviderException(
+                    $"Claude CLI agent process exited with code {result.ExitCode}.",
+                    LlmTransport.AnthropicClaudeCli,
+                    providerCode: $"claude_cli_exit_{result.ExitCode}");
             }
-
-            return await ReadProcessLineAsync(cancellationToken);
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                failure = new ObjectDisposedException(nameof(ClaudeAgentSession));
+            }
+            catch (Exception exception)
+            {
+                failure = exception;
+            }
+            Fail(failure);
         }
 
-        private async Task<string> ReadProcessLineAsync(CancellationToken cancellationToken)
+        private async Task RouteAsync(string line, CancellationToken cancellationToken)
         {
-            string? line = await _process.ReadLineAsync(cancellationToken);
-            if (line is not null)
+            JsonDocument document;
+            try
             {
-                return line;
+                document = JsonDocument.Parse(line);
+            }
+            catch (JsonException exception)
+            {
+                throw ProtocolFailure("Claude CLI returned malformed agent JSON.", exception);
             }
 
-            ClaudeCliProcessResult result = await _process.WaitForExitAsync(cancellationToken);
-            throw new LlmProviderException(
-                $"Claude CLI agent process exited with code {result.ExitCode}.",
-                LlmTransport.AnthropicClaudeCli,
-                providerCode: $"claude_cli_exit_{result.ExitCode}");
+            using (document)
+            {
+                JsonElement root = document.RootElement;
+                string? parent = OptionalString(root, "parent_tool_use_id");
+                switch (OptionalString(root, "type"))
+                {
+                    case "control_response":
+                        CompleteControlRequest(root);
+                        break;
+                    case "control_request":
+                        if (await HandleControlRequestAsync(root, cancellationToken) is { } toolEvent)
+                        {
+                            Emit(toolEvent);
+                        }
+                        break;
+                    case "user" when OptionalBoolean(root, "isReplay") == true:
+                        await StartHostTurnAsync(OptionalString(root, "uuid"));
+                        break;
+                    case "user" or "assistant" when parent is not null:
+                        // A subagent's messages are its own output, not the main turn's.
+                        if (root.TryGetProperty("message", out JsonElement subagentMessage))
+                        {
+                            _tasks.SubagentMessage(parent, subagentMessage);
+                        }
+                        break;
+                    case "user":
+                        NoteToolResults(root);
+                        break;
+                    case "assistant":
+                        {
+                            TurnTarget target = EnsureTarget();
+                            foreach (LlmAgentEvent item in MapAssistantMessage(root, target.Id, target.Completed))
+                            {
+                                Emit(item);
+                            }
+                            break;
+                        }
+                    case "stream_event" when parent is null:
+                        {
+                            TurnTarget target = EnsureTarget();
+                            foreach (LlmAgentEvent item in MapStreamEvent(root, target.Id))
+                            {
+                                Emit(item);
+                            }
+                            break;
+                        }
+                    case "system":
+                        _tasks.Handle(root);
+                        if (MapSystemMessage(root, CurrentTarget()?.Id ?? string.Empty) is { } warning)
+                        {
+                            Emit(warning);
+                        }
+                        break;
+                    case "result":
+                        EndTurn(root);
+                        break;
+                }
+            }
         }
 
-        private async Task TryInterruptAsync(string turnId)
+        private void CompleteControlRequest(JsonElement root)
         {
-            if (!string.Equals(turnId, _activeTurnId, StringComparison.Ordinal))
+            if (!root.TryGetProperty("response", out JsonElement response)
+                || OptionalString(response, "request_id") is not { } requestId)
             {
                 return;
             }
+            TaskCompletionSource<JsonElement>? waiter;
+            lock (_route) { _controlWaiters.TryGetValue(requestId, out waiter); }
+            if (waiter is null)
+            {
+                return;
+            }
+            if (string.Equals(OptionalString(response, "subtype"), "error", StringComparison.Ordinal))
+            {
+                waiter.TrySetException(ProtocolFailure("Claude CLI rejected an agent control request."));
+                return;
+            }
+            waiter.TrySetResult(response.TryGetProperty("response", out JsonElement payload)
+                ? payload.Clone()
+                : JsonSerializer.SerializeToElement(new { }));
+        }
 
+        private async Task StartHostTurnAsync(string? turnId)
+        {
+            HostTurn? turn;
+            lock (_route)
+            {
+                turn = _written.FirstOrDefault(candidate => candidate.Id == turnId);
+                if (turn is null)
+                {
+                    return;
+                }
+                _written.Remove(turn);
+                _host = turn;
+                _activeTurnId = turn.Id;
+                _pendingToolCalls.Clear();
+            }
+            if (turn.InterruptOnStart || turn.Abandoned)
+            {
+                await TryInterruptAsync();
+            }
+        }
+
+        private void NoteToolResults(JsonElement root)
+        {
+            if (!root.TryGetProperty("message", out JsonElement message)
+                || !message.TryGetProperty("content", out JsonElement content)
+                || content.ValueKind != JsonValueKind.Array)
+            {
+                return;
+            }
+            foreach (JsonElement block in content.EnumerateArray())
+            {
+                if (OptionalString(block, "type") == "tool_result" && OptionalString(block, "tool_use_id") is { } toolUseId)
+                {
+                    string text = block.TryGetProperty("content", out JsonElement value) && value.ValueKind == JsonValueKind.String
+                        ? value.GetString() ?? string.Empty
+                        : value.ValueKind == JsonValueKind.Array
+                            ? string.Join("\n", value.EnumerateArray().Select(item => OptionalString(item, "text")).Where(item => item is not null))
+                            : string.Empty;
+                    _tasks.ToolResult(toolUseId, text);
+                }
+            }
+        }
+
+        private TurnTarget? CurrentTarget()
+        {
+            lock (_route) { return (TurnTarget?)_host ?? _provider; }
+        }
+
+        /// <summary>The running turn, starting a provider turn when output arrives with no turn running.</summary>
+        private TurnTarget EnsureTarget()
+        {
+            lock (_route)
+            {
+                TurnTarget? running = (TurnTarget?)_host ?? _provider;
+                if (running is not null)
+                {
+                    return running;
+                }
+                _provider = new ProviderTurn(Guid.NewGuid().ToString());
+                _activeTurnId = _provider.Id;
+                _pendingToolCalls.Clear();
+                _sessionEvents.Writer.TryWrite(new LlmAgentProviderTurnStartedEvent(ThreadId, _provider.Id, _tasks.TakeLastReported()));
+                return _provider;
+            }
+        }
+
+        private void Emit(LlmAgentEvent item)
+        {
+            lock (_route)
+            {
+                if (_host is { } host)
+                {
+                    host.Events.Writer.TryWrite(item);
+                }
+                else
+                {
+                    _sessionEvents.Writer.TryWrite(item);
+                }
+            }
+        }
+
+        private void EndTurn(JsonElement root)
+        {
+            TurnTarget? target = CurrentTarget();
+            if (target is null)
+            {
+                return;
+            }
+            string text = OptionalString(root, "result") ?? string.Empty;
+            if (text.Length > 0 && target.Completed.Count == 0)
+            {
+                Emit(new LlmAgentMessageCompletedEvent(ThreadId, target.Id, $"result-{target.Id}", text));
+            }
+            bool isError = OptionalBoolean(root, "is_error") == true;
+            string subtype = OptionalString(root, "subtype") ?? string.Empty;
+            LlmAgentTurnStatus status = subtype.Contains("interrupt", StringComparison.OrdinalIgnoreCase)
+                ? LlmAgentTurnStatus.Interrupted
+                : isError ? LlmAgentTurnStatus.Failed : LlmAgentTurnStatus.Completed;
+            Emit(new LlmAgentTurnCompletedEvent(ThreadId, target.Id, status, isError ? "Claude CLI reported a turn error." : null));
+            lock (_route)
+            {
+                if (target is HostTurn host)
+                {
+                    host.Events.Writer.TryComplete();
+                    _host = null;
+                }
+                else
+                {
+                    _provider = null;
+                }
+                _activeTurnId = null;
+            }
+        }
+
+        /// <summary>The CLI's output ended: every waiting caller fails, and unreported work ends as Unknown.</summary>
+        private void Fail(Exception failure)
+        {
+            HostTurn[] turns;
+            TaskCompletionSource<JsonElement>[] waiters;
+            lock (_route)
+            {
+                _failure = failure;
+                turns = [.. _written, .. _host is null ? [] : new[] { _host }];
+                waiters = [.. _controlWaiters.Values];
+                _written.Clear();
+                _host = null;
+                _provider = null;
+            }
+            foreach (HostTurn turn in turns) { turn.Events.Writer.TryComplete(failure); }
+            foreach (TaskCompletionSource<JsonElement> waiter in waiters) { waiter.TrySetException(failure); }
+            _tasks.EndAll();
+            _sessionEvents.Writer.TryComplete();
+        }
+
+        /// <summary>The consumer stopped reading a turn: interrupt it now, or when the CLI starts it.</summary>
+        private async Task AbandonAsync(HostTurn turn)
+        {
+            bool running;
+            lock (_route)
+            {
+                turn.Abandoned = true;
+                running = _host == turn;
+            }
+            if (running)
+            {
+                await TryInterruptAsync();
+            }
+        }
+
+        private async Task TryInterruptAsync()
+        {
             using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
             try
             {
@@ -1135,6 +1401,26 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
                 // Best effort when enumeration ends before the CLI emits a terminal result.
             }
         }
+
+        /// <summary>A turn that receives routed events: a host turn, or one the runtime started.</summary>
+        private abstract class TurnTarget(string id)
+        {
+            public string Id { get; } = id;
+
+            public HashSet<string> Completed { get; } = new(StringComparer.Ordinal);
+        }
+
+        private sealed class HostTurn(string id) : TurnTarget(id)
+        {
+            public Channel<LlmAgentEvent> Events { get; } = Channel.CreateUnbounded<LlmAgentEvent>(
+                new UnboundedChannelOptions { SingleReader = true });
+
+            public bool InterruptOnStart { get; set; }
+
+            public bool Abandoned { get; set; }
+        }
+
+        private sealed class ProviderTurn(string id) : TurnTarget(id);
 
         private static IReadOnlyList<object> SerializeInput(
             IReadOnlyList<LlmAgentContent> content,

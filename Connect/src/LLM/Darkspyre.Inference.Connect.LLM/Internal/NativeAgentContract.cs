@@ -12,7 +12,8 @@ internal static class NativeAgentContract
         CompactionOwnership = LlmAgentCompactionOwnership.Provider,
         SupportsInterrupt = true,
         ToolExecutionOwnership = LlmAgentToolExecutionOwnership.Mixed,
-        RichContentSupported = RichContentRoutes.ClaudeMcp
+        RichContentSupported = RichContentRoutes.ClaudeMcp,
+        ResourceObservation = LlmOperationSupport.Supported
     };
 
     public static LlmAgentCapabilities AgentCore { get; } = new()
@@ -22,7 +23,9 @@ internal static class NativeAgentContract
         SupportsNativeResume = true,
         CompactionOwnership = LlmAgentCompactionOwnership.Provider,
         ToolExecutionOwnership = LlmAgentToolExecutionOwnership.Mixed,
-        RichContentSupported = RichContentRoutes.AgentCore
+        RichContentSupported = RichContentRoutes.AgentCore,
+        // Not measured: no AgentCore credentials were available.
+        ResourceObservation = LlmOperationSupport.Unknown
     };
 
     public static void ValidateStart(LlmAgentSessionOptions options)

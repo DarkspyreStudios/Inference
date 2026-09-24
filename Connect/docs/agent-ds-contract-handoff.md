@@ -1,5 +1,21 @@
 # Agent DS: managed-agent contract handoff
 
+## Native background resources: 11.8.0-rc.1
+
+`11.8.0-rc.1` is a breaking-contract release: `ILlmAgentSession` gains members, so every implementation,
+including test doubles, must add them.
+
+- `ObserveAsync` is a session-lifetime feed of resource events, output hints and provider-started turns.
+  Read it for each live session; it has one reader at a time.
+- `GetResourcesAsync`, `ReadResourceOutputAsync(resourceId, cursor)` and `StopResourceAsync(resourceId)`
+  serve the shared background-resource view. Key a resource by the host's own context plus `ResourceId`.
+- `LlmAgentCapabilities.ResourceObservation` says whether a runtime reports background work.
+- `LlmAgentSessionOptions` and `LlmAgentResumeOptions` gain `AllowRuntimeBackgroundWork` and
+  `ResourceOutputRetentionBytes`. A runtime without resource observation rejects the first.
+- A provider-started turn is interrupted with `InterruptAsync(turnId)` like a host turn.
+
+Semantics and the Claude CLI mapping are in the [canonical design](enhancements.md#native-background-resources-and-provider-started-turns).
+
 ## Rich tool output: 11.7.0-rc.1
 
 `11.7.0-rc.1` is a breaking-contract release. Agent DS floats `11.*-*`, so its tool-result bridge

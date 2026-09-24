@@ -1252,7 +1252,7 @@ every part kind. Direct Codex also accepted an empty output with the error flag.
 
 ## Native background resources and provider-started turns
 
-**Status:** Proposed, for review before implementation
+**Status:** Included in this technical design
 
 **Motivating consumer:** Agent DS shared background-resource view (its technical design 6, §6 and §14)
 
@@ -1332,8 +1332,6 @@ public sealed record LlmAgentResourceEvent(string ThreadId, LlmAgentResourceChan
 public sealed record LlmAgentResourceOutputEvent(string ThreadId, string ResourceId, string LatestCursor)
     : LlmAgentEvent(ThreadId, string.Empty);
 
-public enum LlmAgentTurnOrigin { Host, Provider }
-
 public sealed record LlmAgentProviderTurnStartedEvent(string ThreadId, string TurnId, string? ResourceId)
     : LlmAgentEvent(ThreadId, TurnId);
 
@@ -1387,7 +1385,8 @@ and completes `ObserveAsync` only at disposal.
 - A host turn requested during a provider turn is sent at once. The runtime queues it, and its
   `RunTurnAsync` stream starts when the runtime starts it.
 - A provider-started turn is steered and interrupted like a host turn: `SteerAsync` and `InterruptAsync`
-  accept its `TurnId`.
+  accept its `TurnId`. The Claude CLI adapter does not support steering for either kind of turn.
+  `InterruptAsync` on a host turn the runtime has queued interrupts it when it starts.
 - `ResourceId` on `LlmAgentProviderTurnStartedEvent` names the resource whose end or report immediately
   preceded the turn, and is null when the runtime gives no such signal, as for a monitor's output line.
 - Resource identity is the runtime's own. The host keys it by its own session context; Connect never
@@ -1399,8 +1398,8 @@ and completes `ObserveAsync` only at disposal.
   attributes output by the replay echo: a host turn starts at its echo, and output with no echo before it
   forms a provider-started turn.
 - `task_started`, `task_updated`, `task_notification` and `background_tasks_changed` maintain the
-  resource set. The set message is authoritative: a resource missing from it ends as Unknown unless its
-  end was already reported.
+  resource set. The set message arrives just before a task's own end messages, so a background resource
+  missing from it that has reported no end by the next set message, or by process exit, ends as Unknown.
 - `local_bash` output is the task's `output_file`, read by byte offset; the cursor is the offset. The
   trailer is not output: `[exited with code N]` sets `ExitCode`, `[killed]` leaves it null. Output hints
   come from file growth while the task runs.

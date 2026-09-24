@@ -85,6 +85,9 @@ public sealed record LlmAgentCapabilities
     /// <summary>Explicit InterruptAsync support; enumeration cancellation is separate.</summary>
     public bool SupportsInterrupt { get; init; }
 
+    /// <summary>Whether the session reports the runtime's own background work through its resource members.</summary>
+    public LlmOperationSupport ResourceObservation { get; init; } = LlmOperationSupport.Unsupported;
+
     public LlmAgentToolExecutionOwnership ToolExecutionOwnership { get; init; }
 
     /// <summary>How host tool output reaches the model in this runtime's sessions.</summary>
