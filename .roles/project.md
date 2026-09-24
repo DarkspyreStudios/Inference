@@ -18,7 +18,7 @@ specifications.
 | Version line | `<net>.<release>.<minor>`: .NET generation, breaking-contract release, compatible tweak/fix |
 | Release model | `Common`, `Connect`, `Tensor`, and `UI.Settings` publish together at the one version declared in `/Directory.Build.props` |
 | Primary branch | `master` |
-| Lifecycle stage | Four-package `11.6.0-rc.1` published privately |
+| Lifecycle stage | Four-package `11.6.1-rc.1` published privately |
 | Jira project and parent | TBD |
 | Jira subject label | TBD |
 
@@ -525,3 +525,11 @@ Antigravity CLI chat each answered correctly with `OmittedResponseStateCount = 1
 reported `ContextImport = OpeningContext`, emitted the opening-context warning and answered correctly.
 AgentCore was not run, for lack of credentials. The Direct Codex local estimate for the tool-bearing
 follow-up was 203 tokens against 119 reported input tokens.
+
+## Automated private release 11.6.1-rc.1
+
+Published all four packages from `7ce5fd84788cc8692fece5215249e4f115e7699a` using `deploy-minor.sh`.
+Authenticated restores, Debug/Release builds and tests, formatting, vulnerability audits,
+archive boundaries and local/fresh-feed consumer checks passed. Downloaded archives match
+the verified local archives; feed readback confirms private visibility. Source is tagged
+`v11.6.1-rc.1`. No model weights or paid inference were used as verification gates.
