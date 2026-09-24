@@ -15,7 +15,7 @@
     <Copyright>Copyright © 2026 Brandon Mathis. All rights reserved.</Copyright>
     <RepositoryType>git</RepositoryType>
     <RepositoryUrl>https://github.com/DarkspyreStudios/Inference</RepositoryUrl>
-    <Version>11.5.3-rc.1</Version>
+    <Version>11.6.0-rc.1</Version>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(IsPackable)' != 'false'">
