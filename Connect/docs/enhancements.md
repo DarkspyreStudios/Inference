@@ -1401,8 +1401,12 @@ and completes `ObserveAsync` only at disposal.
   resource set. The set message arrives just before a task's own end messages, so a background resource
   missing from it that has reported no end by the next set message, or by process exit, ends as Unknown.
 - `local_bash` output is the task's `output_file`, read by byte offset; the cursor is the offset. The
-  trailer is not output: `[exited with code N]` sets `ExitCode`, `[killed]` leaves it null. Output hints
-  come from file growth while the task runs.
+  trailer is not output: `[exited with code N]` sets `ExitCode`, `[killed]` leaves it null. The CLI can
+  append the trailer after the messages that end the task, so a later end message or a read after the
+  end parses it. Output hints come from file growth while the task runs.
+- Under workspace-write the CLI runs in `dontAsk` mode, which pre-approves Read, the host's tools, and
+  subagents and monitors when background work is allowed, but not the CLI's own Bash. Background commands
+  therefore come from danger-full-access sessions and from monitors.
 - `local_agent` output is the text of the subagent's messages, attributed by `parent_tool_use_id` and
   kept by Connect up to `ResourceOutputRetentionBytes`. Beyond it the earliest cursor advances and a read
   before it returns Gap. Those messages are the subagent's own; they do not appear in the main turn's

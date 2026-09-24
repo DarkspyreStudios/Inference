@@ -196,12 +196,13 @@ internal sealed partial class ClaudeBackgroundTasks : IAsyncDisposable
         {
             throw new ArgumentException("The output cursor is not one this session issued.", nameof(cursor));
         }
+        Entry? entry;
         string? path;
         long? end;
         bool closed;
         lock (_sync)
         {
-            if (!_tasks.TryGetValue(resourceId, out Entry? entry))
+            if (!_tasks.TryGetValue(resourceId, out entry))
             {
                 return Unavailable();
             }
@@ -216,6 +217,12 @@ internal sealed partial class ClaudeBackgroundTasks : IAsyncDisposable
         if (path is null || !File.Exists(path))
         {
             return closed ? Unavailable() : new(LlmAgentResourceOutputStatus.NoData, ReadOnlyMemory<byte>.Empty, Cursor(offset), "0", false);
+        }
+        if (closed && end is null && ReadTrailer(path).TrailerStart is { } trailer)
+        {
+            // The trailer arrived after every message that ended the task.
+            lock (_sync) { entry.TrailerStart ??= trailer; }
+            end = trailer;
         }
         await using var file = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
         long readable = end ?? file.Length;
@@ -390,13 +397,14 @@ internal sealed partial class ClaudeBackgroundTasks : IAsyncDisposable
         if (ending)
         {
             resource = resource with { Ended = resource.Ended ?? DateTimeOffset.UtcNow };
-            if (entry.OutputFile is { } path && entry.Buffer is null)
-            {
-                (int? exitCode, long? trailer) = ReadTrailer(path);
-                entry.TrailerStart = trailer;
-                resource = resource with { ExitCode = exitCode };
-            }
             _lastReported = resource.ResourceId;
+        }
+        // The CLI can append the trailer after the first message that ends a task; a later one reads it.
+        if (resource.Ended is not null && entry.TrailerStart is null && entry.OutputFile is { } path && entry.Buffer is null)
+        {
+            (int? exitCode, long? trailer) = ReadTrailer(path);
+            entry.TrailerStart = trailer;
+            resource = resource with { ExitCode = exitCode ?? resource.ExitCode };
         }
         Publish(ending ? LlmAgentResourceChange.Ended : LlmAgentResourceChange.Updated, entry, resource);
     }

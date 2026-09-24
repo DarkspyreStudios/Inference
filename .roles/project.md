@@ -614,9 +614,12 @@ The design is the "Native background resources and provider-started turns" secti
   `--replay-user-messages` echo: host turns to their `RunTurnAsync` stream, provider-started turns and
   resource events to the session feed, and subagent messages to the subagent's output.
 - `ClaudeBackgroundTasks` maintains resources from the CLI's task messages, tails command output files,
-  parses the exit-code trailer, and retains subagent output up to the configured limit.
+  parses the exit-code trailer, including one appended after the task's end messages, and retains subagent
+  output up to the configured limit.
 - `NoAgentResources` serves managed Codex and AgentCore, which report none; `AgentResourceOptions`
   rejects background work where observation is not Supported.
 
-Verification: Debug build with zero warnings, `dotnet format --verify-no-changes`, and 391 Connect and
-Common tests.
+Verification: Debug build with zero warnings, `dotnet format --verify-no-changes`, and 392 Connect and
+Common tests. Agent DS's live suite drives the real Claude CLI through this source: a background command
+listed, read and stopped; a subagent's output and the turn its completion starts; a monitor line's turn; a
+host tool call during a provider-started turn with a host turn queued behind it; and interrupting one.

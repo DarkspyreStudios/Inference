@@ -49,6 +49,36 @@ public sealed class ClaudeAgentResourcesTests : IDisposable
     }
 
     [Fact]
+    public async Task ATrailerWrittenAfterTheTaskEndedIsStillExcludedAndGivesTheExitCode()
+    {
+        var events = new ConcurrentQueue<LlmAgentEvent>();
+        await using var tasks = new ClaudeBackgroundTasks("thread", 1_048_576, events.Enqueue, TimeSpan.FromMilliseconds(20));
+        string killed = Path.Combine(_directory, "b1.output");
+        string exited = Path.Combine(_directory, "b2.output");
+        await File.WriteAllTextAsync(killed, "tick-1\n");
+        await File.WriteAllTextAsync(exited, "done\n");
+        foreach ((string id, string path) in new[] { ("b1", killed), ("b2", exited) })
+        {
+            tasks.Handle(Json(new { type = "system", subtype = "task_started", task_id = id, tool_use_id = "tu-" + id, description = id, is_backgrounded = true, task_type = "local_bash" }));
+            tasks.ToolResult("tu-" + id, $"Command running in background with ID: {id}. Output is being written to: {path}. You will be notified.");
+        }
+
+        // The stop and the completion both end their tasks before the CLI appends the trailer.
+        tasks.Handle(Json(new { type = "system", subtype = "task_updated", task_id = "b1", patch = new { status = "killed" } }));
+        tasks.Handle(Json(new { type = "system", subtype = "task_updated", task_id = "b2", patch = new { status = "completed" } }));
+        await File.AppendAllTextAsync(killed, "\n[killed]\n");
+        await File.AppendAllTextAsync(exited, "\n[exited with code 2]");
+
+        LlmAgentResourceOutput read = await tasks.ReadAsync("b1", null, CancellationToken.None);
+        Assert.Equal(("tick-1\n", "7", true), (Encoding.UTF8.GetString(read.Data.Span), read.NextCursor, read.Closed));
+        Assert.Equal((LlmAgentResourceOutputStatus.NoData, true), ((await tasks.ReadAsync("b1", "7", CancellationToken.None)).Status, read.Closed));
+        Assert.Null(tasks.Snapshot().Single(resource => resource.ResourceId == "b2").ExitCode);
+        tasks.Handle(Json(new { type = "system", subtype = "task_notification", task_id = "b2", tool_use_id = "tu-b2", status = "completed", output_file = exited, summary = "done" }));
+        Assert.Equal(2, tasks.Snapshot().Single(resource => resource.ResourceId == "b2").ExitCode);
+        Assert.Equal("done\n", Encoding.UTF8.GetString((await tasks.ReadAsync("b2", null, CancellationToken.None)).Data.Span));
+    }
+
+    [Fact]
     public async Task SubagentOutputIsItsOwnAndRetentionAdvancesTheEarliestCursor()
     {
         var events = new ConcurrentQueue<LlmAgentEvent>();
