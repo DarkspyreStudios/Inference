@@ -839,3 +839,177 @@ This enhancement does not define:
 - arbitrary message-list transformations before each provider request;
 - provider-specific request or wire types in the core contract; or
 - an automatic session restart fallback for unsupported providers.
+
+## Host-supplied history on a new target
+
+**Status:** Proposed, for review before implementation
+
+**Motivating consumer:** Agent DS model and provider switching
+
+### Problem
+
+A host that switches a conversation to another model or provider starts a new conversation on the
+target. The host keeps its own retained history. It sends the target that history up to the target
+model's limit, or compacts it first and sends a starting summary. Selecting the history, measuring
+it and compacting it belong to the host. Connect must accept the history on every target, in a form
+that target supports.
+
+Live runs against Connect 11.6.0-rc.1 on 2026-09-24 show where that fails today. The source history
+was one Direct Codex `gpt-6-luna` reply carrying reasoning response state, plus a follow-up.
+
+| Target | History with the source state | Same history, state removed |
+| --- | --- | --- |
+| Direct Codex, `gpt-6-luna` | Succeeds | Succeeds |
+| Direct Codex, `gpt-6-sol` | `ArgumentException`: the state does not match the version, transport, model, or account scope | Succeeds |
+| Claude CLI chat | `NotSupportedException`: the client cannot import adapter response state | Succeeds |
+| Antigravity CLI chat | `NotSupportedException` with a tool-call message, raised by the response state | Succeeds |
+
+A history holding a host tool call and its result behaved the same way on Direct Codex. A different
+model accepted the function call and output without their reasoning item. Claude CLI chat and
+Antigravity CLI chat rejected the tool history even with no tools offered. Both clients already
+flatten the whole history into one text prompt.
+
+Provider-owned agent sessions reject any supplied `Context`. `NativeAgentContract.ValidateStart`
+throws for the Claude CLI agent client and the AgentCore session.
+
+Section 5 currently makes a model change that cannot reuse state fail before mutation, and forbids
+silently discarding old state to make a request succeed. This design keeps that as the default. A
+host that is deliberately carrying history to a new conversation opts in to omission, and every
+omission is reported. Section 5's final paragraph changes to match when this design is implemented.
+
+### Proposed provider-neutral contract
+
+**Response state omission.** A new request option controls response state that is not bound to
+the target:
+
+```csharp
+public enum LlmUnboundResponseState
+{
+    Reject,
+    Omit
+}
+
+public sealed record LlmChatRequest
+{
+    // Existing properties omitted.
+    public LlmUnboundResponseState UnboundResponseState { get; init; } = LlmUnboundResponseState.Reject;
+}
+
+public sealed record LlmAgentSessionOptions
+{
+    // Existing properties omitted.
+    public LlmUnboundResponseState UnboundResponseState { get; init; } = LlmUnboundResponseState.Reject;
+}
+
+public sealed record LlmChatResult
+{
+    // Existing properties omitted.
+    public int OmittedResponseStateCount { get; init; }
+}
+```
+
+- A message's state is bound to the target when its format version, transport, model and scope all
+  match the resolved target connection and model. Bound state is sent as today.
+- `LlmProviderService` builds one projected copy of the request before it reaches the adapter. With
+  `Omit`, the copy drops every unbound `ResponseState` and keeps the visible content, tool calls,
+  tool results and attachments. A transport that never accepts state receives none. The caller's
+  request and messages are not modified.
+- With `Reject`, behavior is unchanged: unbound state fails before any provider call.
+- `OmittedResponseStateCount` reports how many messages lost their state in the sent request.
+- `MeasureRequestAsync` measures the same projected copy, so the estimate describes what is sent.
+- For a managed session started with `Context`, `Omit` imports each entry with unbound state as an
+  entry without state. The first turn emits one `LlmAgentWarningEvent` that names the count.
+- Adapter codecs keep their binding checks. The projection makes those checks unreachable through
+  the service for opted-in requests.
+
+**Tool history as text.** Claude CLI chat and Antigravity CLI chat carry tool history as text.
+
+- One internal transcript projection serves both clients and the agent opening context below. It
+  writes each message under its role header, as `BuildClaudePrompt` does today. Each tool call
+  becomes a block headed `[TOOL CALL id=<call id> name=<tool name>]` followed by its arguments JSON.
+  Each tool result becomes a block headed `[TOOL RESULT id=<call id> status=ok|error]` followed by
+  its content. Tool-result attachments are listed by file name in the existing attachment line.
+- A request that offers tools to these routes still fails, because they execute no host tools. Only
+  history is projected.
+- The Antigravity client's rejection of response state uses a message about response state.
+
+**Opening context for provider-owned agent sessions.** The Claude CLI agent client and the AgentCore
+session accept `Context` when `UnboundResponseState` is `Omit`.
+
+- The session starts as a new provider-side conversation. Connect writes the context with the shared
+  transcript projection and prepends it to the first turn's input as one text item, under the header
+  `CONVERSATION SO FAR`. No response state is carried, so every entry's state counts as omitted.
+- Where the first turn accepts attachments, history attachments are sent with it; AgentCore sends
+  none. The first turn emits one `LlmAgentWarningEvent` that the history was carried as opening
+  context, with the omitted-state count and any attachment that could not be carried.
+- `ThreadId`, `SessionId` and `ExecutionOptions` remain rejected. Capture, replacement, status and
+  continuation remain unsupported, because the provider owns the context after the start.
+- `Context` with `Reject` still fails, because the state cannot be carried.
+
+### Capability
+
+```csharp
+public enum LlmToolHistory
+{
+    Structured,
+    Text
+}
+
+public enum LlmAgentContextImport
+{
+    None,
+    Structured,
+    OpeningContext
+}
+```
+
+- `LlmProviderCapabilities.ToolHistory` is `Text` for Claude CLI chat and Antigravity CLI chat, and
+  `Structured` for every other transport.
+- `LlmAgentCapabilities.ContextImport` is `Structured` for the managed Codex runtime and
+  `OpeningContext` for the Claude CLI and AgentCore runtimes. `Structured` requires host context
+  ownership, and `OpeningContext` requires provider context ownership. The capability consistency
+  check enforces both.
+
+### Measurement
+
+- The host measures a candidate history on the target with `MeasureRequestAsync`, using the target
+  connection and model. Estimates are sufficient for deciding how much history to send or whether
+  to compact.
+- Claude CLI chat and Antigravity CLI chat gain an estimator. It counts the projected transcript
+  with the bundled `o200k_base` tokenizer and reports `Source = Estimated` with a diagnostic that
+  the tokenizer is not the target model's. This amends the accounting rule that an adapter without
+  its own estimator reports unsupported. The CLI adds its own framing to every call, and the
+  estimate does not include it.
+- An agent session's opening context uses the same transcript, so the host measures it through the
+  same connection's chat route.
+- Model limits that a route does not publish stay null. The host applies its own ceiling.
+
+### Error and concurrency semantics
+
+- Projection runs once per request, on a copy, before any network call. It holds no shared state.
+- Cancellation and invalid input fail the operation as today.
+- A projected request that the provider still rejects surfaces the provider's error unchanged. The
+  service never retries with further omission.
+
+### Required implementation coverage
+
+- Scripted tests for each transport: bound state sent unchanged, unbound state omitted with the
+  correct count, `Reject` still failing before any request, and caller messages unmodified.
+- Transcript projection: tool calls, tool results, error status, attachment names and role order.
+- Claude CLI chat and Antigravity CLI chat accepting tool history, and still rejecting offered tools.
+- Managed session import with `Omit`, and the warning event on the first turn.
+- Claude CLI agent and AgentCore first-turn payloads carrying `CONVERSATION SO FAR`, with and
+  without attachments, and the warning event.
+- Capability values and the new consistency rules.
+- `MeasureRequestAsync` reporting the projected request, and the CLI estimator labelling.
+- Live acceptance: Direct Codex `gpt-6-luna` to `gpt-6-sol` with state and tool history; Direct
+  Codex to Claude CLI chat and Antigravity CLI chat with tool history; Direct Codex history into a
+  Claude CLI agent session. AgentCore stays untested without credentials.
+
+### Non-goals
+
+- Exporting history from provider-owned sessions. The host builds the history from its own thread.
+- Converting opaque state between providers or models.
+- Native resume or fork across providers.
+- Re-executing any tool from history.
+- Host history selection, compaction and summaries, which stay with the host.
