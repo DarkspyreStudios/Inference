@@ -401,6 +401,7 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
         private readonly SemaphoreSlim _turnGate = new(1, 1);
         private readonly SemaphoreSlim _writeLock = new(1, 1);
         private readonly List<PendingToolCall> _pendingToolCalls = [];
+        private readonly Dictionary<string, RunningToolCall> _toolCalls = new(StringComparer.Ordinal);
         // Everything below is read for the session's lifetime by one reader; _route guards turn routing.
         private readonly Lock _route = new();
         private readonly Channel<LlmAgentEvent> _sessionEvents = Channel.CreateUnbounded<LlmAgentEvent>(
@@ -749,6 +750,10 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
                 // The reader stops with the session.
             }
             await _tasks.DisposeAsync();
+            // Stopping the reader cancelled every host tool call; wait for them before releasing the writer.
+            Task[] calls;
+            lock (_route) { calls = [.. _toolCalls.Values.Select(call => call.Completion)]; }
+            await Task.WhenAll(calls);
             _sessionEvents.Writer.TryComplete();
             _readerStop.Dispose();
             _turnGate.Dispose();
@@ -817,10 +822,29 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
                 return null;
             }
 
-            McpResponse response = await HandleMcpMessageAsync(
-                message,
-                requestId,
-                cancellationToken);
+            if (string.Equals(OptionalString(message, "method"), "tools/call", StringComparison.Ordinal))
+            {
+                JsonElement callId = message.TryGetProperty("id", out JsonElement suppliedId)
+                    ? suppliedId.Clone()
+                    : JsonSerializer.SerializeToElement(0);
+                if (PrepareToolCall(message, callId, requestId, out LlmAgentToolCall? call) is { } refusal)
+                {
+                    await WriteMcpResponseAsync(requestId, refusal.Message, cancellationToken);
+                    return null;
+                }
+                // A host tool can run for minutes. The reader keeps routing meanwhile, including the CLI's
+                // cancellation of this call when its turn is interrupted.
+                StartToolCall(call!, callId, requestId, cancellationToken);
+                return null;
+            }
+
+            McpResponse response = HandleMcpMessage(message);
+            await WriteMcpResponseAsync(requestId, response.Message, cancellationToken);
+            return response.ToolEvent;
+        }
+
+        private async Task WriteMcpResponseAsync(string requestId, JsonElement message, CancellationToken cancellationToken)
+        {
             await WriteJsonLineAsync(
                 new
                 {
@@ -829,17 +853,13 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
                     {
                         subtype = "success",
                         request_id = requestId,
-                        response = new { mcp_response = response.Message }
+                        response = new { mcp_response = message }
                     }
                 },
                 cancellationToken);
-            return response.ToolEvent;
         }
 
-        private async Task<McpResponse> HandleMcpMessageAsync(
-            JsonElement message,
-            string controlRequestId,
-            CancellationToken cancellationToken)
+        private McpResponse HandleMcpMessage(JsonElement message)
         {
             JsonElement id = message.TryGetProperty("id", out JsonElement messageId)
                 ? messageId.Clone()
@@ -860,29 +880,30 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
                             null);
                     }
                 case "notifications/initialized":
+                    return new McpResponse(McpResult(id, new { }), null);
                 case "notifications/cancelled":
+                    CancelToolCall(message);
                     return new McpResponse(McpResult(id, new { }), null);
                 case "ping":
                     return new McpResponse(McpResult(id, new { }), null);
                 case "tools/list":
                     return new McpResponse(McpResult(id, McpToolsListResult(_tools)), null);
-                case "tools/call":
-                    return await HandleMcpToolCallAsync(
-                        message,
-                        id,
-                        controlRequestId,
-                        cancellationToken);
                 default:
                     return new McpResponse(McpError(id, -32601, "Method not found."), null);
             }
         }
 
-        private async Task<McpResponse> HandleMcpToolCallAsync(
+        /// <summary>
+        /// Checks a tool call on the reader, in order with the tool uses it matches. Returns the refusal, or null
+        /// with the call to run.
+        /// </summary>
+        private McpResponse? PrepareToolCall(
             JsonElement message,
             JsonElement id,
             string controlRequestId,
-            CancellationToken cancellationToken)
+            out LlmAgentToolCall? call)
         {
+            call = null;
             if (!message.TryGetProperty("params", out JsonElement parameters)
                 || parameters.ValueKind != JsonValueKind.Object)
             {
@@ -901,18 +922,71 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
                     : JsonSerializer.SerializeToElement(new { });
             PendingToolCall? pending = TakePendingToolCall(name, arguments);
             string callId = pending?.Id ?? ReadJsonRpcId(id) ?? controlRequestId;
+            call = new LlmAgentToolCall(ThreadId, _activeTurnId ?? string.Empty, callId, McpServerName, name, arguments);
+            return null;
+        }
+
+        /// <summary>Runs a checked call on its own task, so the reader keeps reading while the host tool works.</summary>
+        private void StartToolCall(LlmAgentToolCall call, JsonElement id, string requestId, CancellationToken cancellationToken)
+        {
+            TurnTarget? origin = CurrentTarget();
+            string key = ReadJsonRpcId(id) ?? requestId;
+            var running = new RunningToolCall(CancellationTokenSource.CreateLinkedTokenSource(cancellationToken));
+            lock (_route)
+            {
+                _toolCalls[key] = running;
+                running.Completion = Task.Run(() => CompleteToolCallAsync(call, id, requestId, key, running, origin), CancellationToken.None);
+            }
+        }
+
+        private async Task CompleteToolCallAsync(LlmAgentToolCall call, JsonElement id, string requestId, string key,
+            RunningToolCall running, TurnTarget? origin)
+        {
+            McpResponse response;
+            try
+            {
+                response = await RunToolCallAsync(call, id, running.Cancellation.Token);
+            }
+            catch (OperationCanceledException) when (running.Cancellation.IsCancellationRequested)
+            {
+                // The CLI cancelled the call, or the session ended. The call's control request is still answered.
+                response = new McpResponse(McpResult(id, new
+                {
+                    content = new[] { new { type = "text", text = "The tool call was cancelled." } },
+                    isError = true
+                }), null);
+            }
+            finally
+            {
+                lock (_route) { _toolCalls.Remove(key); }
+                running.Cancellation.Dispose();
+            }
+            if (response.ToolEvent is { } toolEvent)
+            {
+                // Emitted before the answer: the CLI continues only after it, so the event precedes the turn's later output.
+                EmitFor(origin, toolEvent);
+            }
+            try
+            {
+                await WriteMcpResponseAsync(requestId, response.Message, _readerStop.Token);
+            }
+            catch (Exception failure)
+            {
+                lock (_route)
+                {
+                    // A session that has ended has no process to take the answer.
+                    if (_disposed || _failure is not null) { return; }
+                }
+                Fail(ProtocolFailure("Claude CLI did not accept a host tool result.", failure));
+            }
+        }
+
+        private async Task<McpResponse> RunToolCallAsync(LlmAgentToolCall call, JsonElement id, CancellationToken cancellationToken)
+        {
             LlmToolOutput output;
             try
             {
-                output = await _handlers.ToolHandler!(
-                    new LlmAgentToolCall(
-                        ThreadId,
-                        _activeTurnId ?? string.Empty,
-                        callId,
-                        McpServerName,
-                        name,
-                        arguments),
-                    cancellationToken);
+                output = await _handlers.ToolHandler!(call, cancellationToken);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
@@ -927,11 +1001,11 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             ProjectedToolOutput projected = ToolOutputProjector.Project(output, _richRoute, _richContent);
             var toolEvent = new LlmAgentToolEvent(
                 ThreadId,
-                _activeTurnId ?? string.Empty,
-                callId,
+                call.TurnId,
+                call.CallId,
                 McpServerName,
-                name,
-                arguments,
+                call.Name,
+                call.Arguments,
                 !output.IsError,
                 output.IsError ? "failed" : "completed");
             return new McpResponse(
@@ -943,6 +1017,50 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
                         isError = projected.IsError
                     }),
                 toolEvent);
+        }
+
+        /// <summary>The CLI cancels a call it no longer waits for, as when its turn is interrupted.</summary>
+        private void CancelToolCall(JsonElement message)
+        {
+            if (!message.TryGetProperty("params", out JsonElement parameters)
+                || !parameters.TryGetProperty("requestId", out JsonElement requested)
+                || ReadJsonRpcId(requested) is not { } key)
+            {
+                return;
+            }
+            RunningToolCall? running;
+            lock (_route) { _toolCalls.TryGetValue(key, out running); }
+            Cancel(running);
+        }
+
+        private static void Cancel(RunningToolCall? running)
+        {
+            try { running?.Cancellation.Cancel(); }
+            catch (ObjectDisposedException)
+            {
+                // The call finished as the cancellation arrived.
+            }
+        }
+
+        /// <summary>Emits to the turn that made the call. A turn that has ended takes no more events.</summary>
+        private void EmitFor(TurnTarget? origin, LlmAgentEvent item)
+        {
+            lock (_route)
+            {
+                TurnTarget? running = (TurnTarget?)_host ?? _provider;
+                if (origin is null || !ReferenceEquals(running, origin))
+                {
+                    return;
+                }
+                if (_host is { } host)
+                {
+                    host.Events.Writer.TryWrite(item);
+                }
+                else
+                {
+                    _sessionEvents.Writer.TryWrite(item);
+                }
+            }
         }
 
         private PendingToolCall? TakePendingToolCall(string name, JsonElement arguments)
@@ -1356,17 +1474,21 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
         {
             HostTurn[] turns;
             TaskCompletionSource<JsonElement>[] waiters;
+            RunningToolCall[] calls;
             lock (_route)
             {
                 _failure = failure;
                 turns = [.. _written, .. _host is null ? [] : new[] { _host }];
                 waiters = [.. _controlWaiters.Values];
+                calls = [.. _toolCalls.Values];
                 _written.Clear();
                 _host = null;
                 _provider = null;
             }
             foreach (HostTurn turn in turns) { turn.Events.Writer.TryComplete(failure); }
             foreach (TaskCompletionSource<JsonElement> waiter in waiters) { waiter.TrySetException(failure); }
+            // No CLI remains to take a host tool's result.
+            foreach (RunningToolCall call in calls) { Cancel(call); }
             _tasks.EndAll();
             _sessionEvents.Writer.TryComplete();
         }
@@ -1421,6 +1543,14 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
         }
 
         private sealed class ProviderTurn(string id) : TurnTarget(id);
+
+        /// <summary>A host tool call in flight, keyed by the CLI's JSON-RPC request ID so a cancellation can find it.</summary>
+        private sealed class RunningToolCall(CancellationTokenSource cancellation)
+        {
+            public CancellationTokenSource Cancellation { get; } = cancellation;
+
+            public Task Completion { get; set; } = Task.CompletedTask;
+        }
 
         private static IReadOnlyList<object> SerializeInput(
             IReadOnlyList<LlmAgentContent> content,

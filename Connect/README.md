@@ -913,6 +913,11 @@ Tool history in those requests is carried as text blocks (`ToolHistory = Text`).
 For host tools, use `LlmAgentProviderService`: it registers the supplied schemas as an SDK-hosted MCP
 server over Claude's streaming stdin/stdout control protocol. MCP `tools/call` requests are converted
 to `LlmAgentToolCall`, executed only by the host's `ToolHandler`, and returned to Claude as MCP results.
+Each call runs apart from the adapter's stream reader, so the session keeps routing output while a host
+tool works. Interrupting a turn makes the CLI cancel its call with `notifications/cancelled`; the adapter
+cancels the handler's token and answers the call with an error result. The CLI exiting, or the session
+being disposed, cancels calls in flight too. A result that arrives after its turn ended reaches no later
+turn.
 The adapter launches in restricted mode, disables built-in tools and settings-based MCP servers, and
 allows only the explicitly registered Darkspyre.Inference.Connect.LLM tools. Claude subscription connections therefore
 report `SupportsAgentSessions = true` and `SupportsAgentToolUse = true`.

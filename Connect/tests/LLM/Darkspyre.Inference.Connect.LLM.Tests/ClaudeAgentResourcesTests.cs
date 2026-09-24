@@ -197,6 +197,101 @@ public sealed class ClaudeAgentResourcesTests : IDisposable
         Assert.Equal(LlmAgentResourceState.Stopped, Assert.Single(await session.GetResourcesAsync(limit.Token)).State);
     }
 
+    [Fact]
+    public async Task AHostToolCallRunsOffTheReaderAndTheCliCanCancelIt()
+    {
+        var process = new ManualProcess();
+        var entered = new TaskCompletionSource<CancellationToken>(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using ILlmAgentSession session = await StartWithTool(process, async (_, token) =>
+        {
+            entered.TrySetResult(token);
+            await Task.Delay(Timeout.Infinite, token);
+            return LlmToolOutput.FromText("unreachable");
+        });
+        using var limit = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        await using IAsyncEnumerator<LlmAgentEvent> feed = session.ObserveAsync(limit.Token).GetAsyncEnumerator(limit.Token);
+        process.Push(ToolUse("tu1"));
+        process.Push(ToolCall("c1", 7));
+        CancellationToken token = await entered.Task.WaitAsync(limit.Token);
+
+        // The reader keeps routing while the tool runs: a task starts, and its stop request completes.
+        process.Push(new { type = "system", subtype = "task_started", task_id = "s1", tool_use_id = "tu-s1", description = "server", is_backgrounded = true, task_type = "local_bash" });
+        await ReadUntil(feed, item => item is LlmAgentResourceEvent { Resource.ResourceId: "s1" });
+        Assert.Equal(LlmAgentResourceStopStatus.Requested, await session.StopResourceAsync("s1", limit.Token));
+        Assert.False(token.IsCancellationRequested);
+
+        process.Push(Cancelled("c2", 7));
+        await WaitFor(() => token.IsCancellationRequested);
+        JsonElement answer = await AnswerFor(process, "c1");
+        Assert.Equal(7, answer.GetProperty("id").GetInt32());
+        Assert.True(answer.GetProperty("result").GetProperty("isError").GetBoolean());
+        Assert.Equal("The tool call was cancelled.", answer.GetProperty("result").GetProperty("content")[0].GetProperty("text").GetString());
+        Assert.Equal(JsonValueKind.Object, (await AnswerFor(process, "c2")).GetProperty("result").ValueKind);
+
+        process.Push(new { type = "result", subtype = "success", is_error = false, result = "" });
+        List<LlmAgentEvent> turn = await ReadUntil(feed, item => item is LlmAgentTurnCompletedEvent);
+        Assert.DoesNotContain(turn, item => item is LlmAgentToolEvent { ItemId: "tu1", Status: not "inProgress" });
+    }
+
+    [Fact]
+    public async Task AToolResultAfterItsTurnEndedDoesNotReachTheNextTurn()
+    {
+        var process = new ManualProcess();
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using ILlmAgentSession session = await StartWithTool(process, async (_, _) =>
+        {
+            entered.TrySetResult();
+            await release.Task;
+            return LlmToolOutput.FromText("late");
+        });
+        using var limit = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        await using IAsyncEnumerator<LlmAgentEvent> feed = session.ObserveAsync(limit.Token).GetAsyncEnumerator(limit.Token);
+        process.Push(ToolUse("tu1"));
+        process.Push(ToolCall("c1", 3));
+        await entered.Task.WaitAsync(limit.Token);
+        process.Push(new { type = "result", subtype = "success", is_error = false, result = "" });
+        await ReadUntil(feed, item => item is LlmAgentTurnCompletedEvent);
+
+        Task<List<LlmAgentEvent>> host = Collect(session.RunTurnAsync(new() { Input = [new LlmAgentTextContent("next")] }, limit.Token));
+        string uuid = await process.WaitForUserMessage(limit.Token);
+        process.Push(new { type = "user", isReplay = true, uuid, message = new { role = "user", content = "next" } });
+        await WaitFor(() => process.Writes().Any(root => root.GetProperty("type").GetString() == "user"));
+        release.TrySetResult();
+        JsonElement answer = await AnswerFor(process, "c1");
+        Assert.Equal("late", answer.GetProperty("result").GetProperty("content")[0].GetProperty("text").GetString());
+        process.Push(new { type = "assistant", message = new { id = "m2", content = new object[] { new { type = "text", text = "Next." } } } });
+        process.Push(new { type = "result", subtype = "success", is_error = false, result = "Next." });
+
+        List<LlmAgentEvent> events = await host;
+        Assert.DoesNotContain(events, item => item is LlmAgentToolEvent);
+        Assert.Equal("Next.", Assert.Single(events.OfType<LlmAgentMessageCompletedEvent>()).Text);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ClosingTheSessionOrTheCliCancelsHostToolCalls(bool exit)
+    {
+        var process = new ManualProcess();
+        var entered = new TaskCompletionSource<CancellationToken>(TaskCreationOptions.RunContinuationsAsynchronously);
+        ILlmAgentSession session = await StartWithTool(process, async (_, token) =>
+        {
+            entered.TrySetResult(token);
+            await Task.Delay(Timeout.Infinite, token);
+            return LlmToolOutput.FromText("unreachable");
+        });
+        using var limit = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        process.Push(ToolUse("tu1"));
+        process.Push(ToolCall("c1", 9));
+        CancellationToken token = await entered.Task.WaitAsync(limit.Token);
+
+        if (exit) process.Exit();
+        else await session.DisposeAsync().AsTask().WaitAsync(limit.Token);
+        await WaitFor(() => token.IsCancellationRequested);
+        if (exit) await session.DisposeAsync().AsTask().WaitAsync(limit.Token);
+    }
+
     [Theory]
     [InlineData(LlmAgentSandboxMode.WorkspaceWrite, false, "Read,Write,Edit,Bash,WebFetch,WebSearch", null, false)]
     [InlineData(LlmAgentSandboxMode.WorkspaceWrite, true, "Read,Write,Edit,Bash,WebFetch,WebSearch,Task,Monitor", "Task,Monitor", false)]
@@ -247,6 +342,50 @@ public sealed class ClaudeAgentResourcesTests : IDisposable
 
     private Task<ILlmAgentSession> Start(ManualProcess process) =>
         new ClaudeAgentClient(new Factory(process)).StartSessionAsync(Connection(), new() { ModelId = "claude-test", WorkingDirectory = _directory });
+
+    private Task<ILlmAgentSession> StartWithTool(ManualProcess process, LlmAgentToolHandler handler) =>
+        new ClaudeAgentClient(new Factory(process)).StartSessionAsync(Connection(), new()
+        {
+            ModelId = "claude-test",
+            WorkingDirectory = _directory,
+            Tools = [new LlmAgentToolDefinition { Name = "hold", Description = "Holds.", InputSchema = Json(new { type = "object" }) }],
+            Handlers = new() { ToolHandler = handler },
+        });
+
+    private static object ToolUse(string id) => new
+    {
+        type = "assistant",
+        message = new { id = "m-" + id, content = new object[] { new { type = "tool_use", id, name = "mcp__darkspyre-inference-connect__hold", input = new { } } } },
+    };
+
+    private static object ToolCall(string requestId, int id) => new
+    {
+        type = "control_request",
+        request_id = requestId,
+        request = new { subtype = "mcp_message", server_name = "darkspyre-inference-connect", message = new { method = "tools/call", @params = new { name = "hold", arguments = new { } }, jsonrpc = "2.0", id } },
+    };
+
+    private static object Cancelled(string requestId, int id) => new
+    {
+        type = "control_request",
+        request_id = requestId,
+        request = new { subtype = "mcp_message", server_name = "darkspyre-inference-connect", message = new { jsonrpc = "2.0", method = "notifications/cancelled", @params = new { requestId = id, reason = "AbortError: remote-cancel" } } },
+    };
+
+    /// <summary>The MCP message Connect answered a control request with.</summary>
+    private static async Task<JsonElement> AnswerFor(ManualProcess process, string requestId)
+    {
+        using var limit = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        while (true)
+        {
+            if (process.Writes().FirstOrDefault(root => root.GetProperty("type").GetString() == "control_response"
+                && root.GetProperty("response").GetProperty("request_id").GetString() == requestId) is { ValueKind: JsonValueKind.Object } answer)
+            {
+                return answer.GetProperty("response").GetProperty("response").GetProperty("mcp_response");
+            }
+            await Task.Delay(10, limit.Token);
+        }
+    }
 
     private static LlmConnection Connection() => new() { Version = "v1", Transport = LlmTransport.AnthropicClaudeCli, Endpoint = "claude" };
 
@@ -307,6 +446,11 @@ public sealed class ClaudeAgentResourcesTests : IDisposable
             }
             return ValueTask.CompletedTask;
         }
+
+        public IEnumerable<JsonElement> Writes() => _writes.Select(line => JsonSerializer.Deserialize<JsonElement>(line));
+
+        /// <summary>The CLI exits: its output ends.</summary>
+        public void Exit() => _output.Writer.TryComplete();
 
         public IEnumerable<JsonElement> Requests() => _writes
             .Select(line => JsonSerializer.Deserialize<JsonElement>(line))

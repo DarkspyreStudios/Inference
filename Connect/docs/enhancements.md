@@ -1454,3 +1454,40 @@ coordinated change, built against unpublished Connect source and published when 
 - Starting background work from the host. Resources come from the runtime's own tools.
 - A terminal for background commands.
 - Resources that survive the runtime's process.
+
+## Host tool cancellation on the Claude CLI
+
+**Status:** Included in this technical design
+
+**Motivating consumer:** Agent DS Stop, which interrupts a turn while a host tool runs
+
+### Problem
+
+The Claude adapter answered each MCP `tools/call` on its stream reader, so it read nothing else from the
+CLI while a host tool ran. A request that waits for a control response, such as `stop_task`, hung until
+the tool finished, and resource events arrived late. Interrupting the turn did not reach the tool: the
+CLI's cancellation of the call waited unread, and the adapter ignored `notifications/cancelled` anyway.
+The tool ran to its own timeout.
+
+### Measured behaviour
+
+Claude CLI 2.1.278, stream-json with an SDK MCP server. When a turn is interrupted during a `tools/call`,
+the CLI at once sends an `mcp_message` control request carrying `notifications/cancelled` with the call's
+JSON-RPC ID in `params.requestId`, acknowledges the interrupt, records an error result for the call and
+ends the turn. It does not wait for the tool. An answer that arrives later is accepted and ignored, and
+the next host turn runs normally.
+
+### Design
+
+- The reader checks each `tools/call` in order, matching it to the tool use the CLI announced, then runs
+  the handler on its own task with a cancellation linked to the session's lifetime. The reader keeps
+  reading.
+- `notifications/cancelled` cancels the call with that JSON-RPC ID. The CLI's exit and the session's
+  disposal cancel every call in flight; disposal waits for them to settle.
+- A cancelled call is still answered, with an error tool result, so no control request stays open.
+- A call's tool event goes to the turn that made it, before its answer, so it precedes the turn's later
+  output. A turn that has ended takes no more events; the next turn never receives them.
+
+This is a compatible change for `11.8.1-rc.1`. Scripted stream tests cover a stop request and resource
+events routed while a tool runs, cancellation by the CLI, a result after its turn ended, and
+cancellation by CLI exit and by disposal.

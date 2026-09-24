@@ -631,3 +631,18 @@ Authenticated restores, Debug/Release builds and tests, formatting, vulnerabilit
 archive boundaries and local/fresh-feed consumer checks passed. Downloaded archives match
 the verified local archives; feed readback confirms private visibility. Source is tagged
 `v11.8.0-rc.1`. No model weights or paid inference were used as verification gates.
+
+## Host tool cancellation on the Claude CLI
+
+The design is the "Host tool cancellation on the Claude CLI" section of `Connect/docs/enhancements.md`,
+a compatible change for `11.8.1-rc.1`.
+
+- `ClaudeAgentSession` checks each MCP `tools/call` on the reader and runs it through `StartToolCall` on
+  its own task, keyed by JSON-RPC ID in `_toolCalls`. `notifications/cancelled`, the CLI's exit (`Fail`)
+  and disposal cancel calls in flight; disposal awaits them before releasing the writer.
+- A cancelled call is answered with an error tool result. `EmitFor` delivers a call's tool event only to
+  the turn that made it, before the answer is written.
+
+Verification: Debug build with zero warnings, `dotnet format --verify-no-changes`, and 396 Connect and
+Common tests.
+
