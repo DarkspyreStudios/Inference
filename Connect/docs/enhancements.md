@@ -1249,3 +1249,205 @@ every part kind. Direct Codex also accepted an empty output with the error flag.
 - Fetching a resource link, by Connect or by instruction to the provider.
 - Transcoding audio or converting binary formats.
 - Choosing notice wording for omitted content, which belongs to the host.
+
+## Native background resources and provider-started turns
+
+**Status:** Proposed, for review before implementation
+
+**Motivating consumer:** Agent DS shared background-resource view (its technical design 6, §6 and §14)
+
+### Problem
+
+A provider-owned agent runtime runs background work inside its own process: shell commands, subagents
+and output monitors. Connect exposes none of it. A host cannot list that work, read its output or stop
+it.
+
+The Claude CLI also starts turns of its own. When background work reports, it adds a notification to
+the conversation and the model answers without any host input. Connect frames a turn from the host's
+input to the first `result`, and reads the process only while a host turn runs. A provider-started turn
+is therefore read as the start of the next host turn, and its `result` ends that host turn early.
+
+### Measured behaviour
+
+Claude CLI 2.1.278 in stream-json mode, with the flags Connect launches it with, on 2026-09-24:
+
+| Need | What the CLI provides |
+| --- | --- |
+| Identity | `task_id`, and the `tool_use_id` of the call that started it |
+| Start | `system/task_started`: description, `task_type`, `subagent_type`, `is_backgrounded`, `owned_by_subagent`, `spawn_depth` |
+| Status | `system/task_updated`: a patch with `status` (`pending`, `running`, `completed`, `failed`, `killed`, `paused`), `end_time`, `error`, `is_backgrounded` |
+| End | `system/task_notification`: `status` (`completed`, `failed`, `stopped`), `output_file`, `summary`, optional `reason` |
+| Progress | `system/task_progress` for subagents: token use, tool uses, duration, last tool, summary |
+| Current set | `system/background_tasks_changed`: every live task, with replace semantics |
+| Kinds | `local_bash` for background Bash and `Monitor`; `local_agent` for background subagents; `mcp_task` and others exist |
+| Shell output | No output messages. The output is appended to `output_file`, which persists after the task ends. The CLI appends a trailer: `[exited with code N]` or `[killed]`. |
+| Subagent output | The subagent's own messages, carrying `parent_tool_use_id` equal to the task's `tool_use_id`. Its `output_file` does not persist. |
+| Stop | The `stop_task` control request with the `task_id`; the task then reports `killed` and `stopped` |
+| Provider turns | A task completion, and each `Monitor` output line, starts a turn: assistant output and a `result`, with no host message |
+| Turn attribution | With `--replay-user-messages`, each host message is echoed with `isReplay: true` when the CLI starts processing it. Host input sent during a provider turn is queued and echoed after that turn's `result`. |
+| Lifetime | Tasks end with the CLI process. A resumed process has none. |
+
+`Monitor` is denied under the `dontAsk` permission mode unless it is named in `--allowedTools`. Subagents
+use the `Agent` tool name on the wire and the `Task` name in `--tools`.
+
+AgentCore is not measured, for lack of credentials. Managed Codex runs host-executed tools, so its
+processes are host-owned and it has no native resources.
+
+### Proposed provider-neutral contract
+
+```csharp
+public enum LlmOperationSupport { Supported, Unsupported, Unknown }
+
+public enum LlmAgentResourceState { Pending, Running, Paused, Completed, Failed, Stopped, Unknown }
+
+public sealed record LlmAgentResourceSupport(
+    LlmOperationSupport Output, LlmOperationSupport Stop, LlmOperationSupport Terminal, string? Diagnostic = null);
+
+public sealed record LlmAgentResourceUsage(long TotalTokens, int ToolUses, long DurationMs);
+
+/// <summary>Background work inside the runtime's own process. ResourceId is the runtime's opaque identity.</summary>
+public sealed record LlmAgentResource(string ResourceId, string Kind, string Label, LlmAgentResourceState State)
+{
+    public DateTimeOffset? Started { get; init; }
+    public DateTimeOffset? Ended { get; init; }
+    public int? ExitCode { get; init; }
+    public string? Error { get; init; }
+    /// <summary>The tool call that started it, when the runtime reports one.</summary>
+    public string? OriginToolCallId { get; init; }
+    /// <summary>The resource that owns it, such as the subagent that ran a command.</summary>
+    public string? ParentResourceId { get; init; }
+    public string? AgentType { get; init; }
+    public bool Backgrounded { get; init; }
+    public LlmAgentResourceUsage? Usage { get; init; }
+    public string? Summary { get; init; }
+    public required LlmAgentResourceSupport Support { get; init; }
+}
+
+public enum LlmAgentResourceChange { Added, Updated, Ended }
+
+public sealed record LlmAgentResourceEvent(string ThreadId, LlmAgentResourceChange Change, LlmAgentResource Resource)
+    : LlmAgentEvent(ThreadId, string.Empty);
+
+/// <summary>New output is readable up to LatestCursor. A hint, not the data.</summary>
+public sealed record LlmAgentResourceOutputEvent(string ThreadId, string ResourceId, string LatestCursor)
+    : LlmAgentEvent(ThreadId, string.Empty);
+
+public enum LlmAgentTurnOrigin { Host, Provider }
+
+public sealed record LlmAgentProviderTurnStartedEvent(string ThreadId, string TurnId, string? ResourceId)
+    : LlmAgentEvent(ThreadId, TurnId);
+
+public enum LlmAgentResourceOutputStatus { Data, NoData, Gap, Unavailable }
+
+public sealed record LlmAgentResourceOutput(
+    LlmAgentResourceOutputStatus Status, ReadOnlyMemory<byte> Data, string? NextCursor, string? EarliestCursor, bool Closed);
+
+public enum LlmAgentResourceStopStatus { Requested, Exited, Unsupported, Failed, Unknown }
+
+public sealed record LlmAgentSessionOptions // and LlmAgentResumeOptions
+{
+    // Existing members unchanged.
+
+    /// <summary>Lets the runtime start subagents and output monitors of its own. Off by default.</summary>
+    public bool AllowRuntimeBackgroundWork { get; init; }
+
+    /// <summary>Output Connect retains per resource when the runtime keeps none; the earliest cursor advances past it.</summary>
+    public long ResourceOutputRetentionBytes { get; init; } = 1_048_576;
+}
+
+public interface ILlmAgentSession
+{
+    // Existing members unchanged.
+
+    /// <summary>
+    /// Session-lifetime events outside host turns: resource changes, output hints and provider-started
+    /// turns. One reader at a time; it ends when the session is disposed.
+    /// </summary>
+    IAsyncEnumerable<LlmAgentEvent> ObserveAsync(CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<LlmAgentResource>> GetResourcesAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>Nondestructive read. A null cursor reads from the earliest retained output.</summary>
+    Task<LlmAgentResourceOutput> ReadResourceOutputAsync(
+        string resourceId, string? cursor, CancellationToken cancellationToken = default);
+
+    Task<LlmAgentResourceStopStatus> StopResourceAsync(string resourceId, CancellationToken cancellationToken = default);
+}
+```
+
+`LlmAgentCapabilities.ResourceObservation` is an `LlmOperationSupport`: Supported for the Claude CLI,
+Unknown for AgentCore, Unsupported for managed Codex. A runtime without resources returns an empty set
+and completes `ObserveAsync` only at disposal.
+
+- `ObserveAsync` carries every resource event, including those raised during a host turn; the turn
+  stream carries only turn events. A provider-started turn arrives on it as
+  `LlmAgentProviderTurnStartedEvent`, the ordinary message, tool and usage events, then
+  `LlmAgentTurnCompletedEvent`. `ResourceId` names the task whose report started the turn when the
+  runtime says so, and is null otherwise.
+- A host turn requested during a provider turn is sent at once. The runtime queues it, and its
+  `RunTurnAsync` stream starts when the runtime starts it.
+- A provider-started turn is steered and interrupted like a host turn: `SteerAsync` and `InterruptAsync`
+  accept its `TurnId`.
+- `ResourceId` on `LlmAgentProviderTurnStartedEvent` names the resource whose end or report immediately
+  preceded the turn, and is null when the runtime gives no such signal, as for a monitor's output line.
+- Resource identity is the runtime's own. The host keys it by its own session context; Connect never
+  reuses a resource ID across processes.
+
+### Claude CLI mapping
+
+- Connect launches with `--replay-user-messages`, reads the process for the session's lifetime, and
+  attributes output by the replay echo: a host turn starts at its echo, and output with no echo before it
+  forms a provider-started turn.
+- `task_started`, `task_updated`, `task_notification` and `background_tasks_changed` maintain the
+  resource set. The set message is authoritative: a resource missing from it ends as Unknown unless its
+  end was already reported.
+- `local_bash` output is the task's `output_file`, read by byte offset; the cursor is the offset. The
+  trailer is not output: `[exited with code N]` sets `ExitCode`, `[killed]` leaves it null. Output hints
+  come from file growth while the task runs.
+- `local_agent` output is the text of the subagent's messages, attributed by `parent_tool_use_id` and
+  kept by Connect up to `ResourceOutputRetentionBytes`. Beyond it the earliest cursor advances and a read
+  before it returns Gap. Those messages are the subagent's own; they do not appear in the main turn's
+  events or transcript.
+- A command run by a subagent is a resource with `ParentResourceId` set to the subagent's task.
+- Stop sends `stop_task`: the result is Requested, and the resource reports Stopped when the CLI confirms.
+  Terminal attach is Unsupported: background commands have no terminal.
+- With `AllowRuntimeBackgroundWork`, `Task` and `Monitor` join the enabled tools, with `Monitor` in
+  `--allowedTools`, so the runtime can start subagents and monitors under the session's sandbox. Without
+  it neither is enabled. A background Bash command is part of the Bash tool and is observed either way.
+- Kinds Connect does not map further, such as `mcp_task`, are reported with their CLI kind, Output
+  Unknown and Stop Supported.
+
+### Consumer integration
+
+Agent DS reads `ObserveAsync` for each live native session and projects resources into its shared
+background-resource view as `NativeResourceKey(ExecutionContextId, ResourceId)`, routing output reads and
+stop to Connect. Resources of a session whose process ended are reported ended.
+
+- A provider-started turn appears in the transcript as the runtime's own turn and is recorded as a model
+  response. The retained history gets a line before its output that says why it happened, such as
+  "Background task 'X' completed.", or that the runtime continued on its own when no resource is named.
+- Input during a provider turn follows Agent DS's prompt queue. An enqueued prompt runs after the
+  provider turn ends; an immediate send steers into the provider turn.
+- `AllowRuntimeBackgroundWork` is a per-session setting. `ResourceOutputRetentionBytes` comes from an
+  application setting with a 1 MiB default.
+
+### Migration and release
+
+New members on `ILlmAgentSession` break every implementation, so this is a breaking-contract release,
+`11.8.0-rc.1`. Agent DS floats `11.*-*`, so its integration and its test doubles move in the same
+coordinated change, built against unpublished Connect source and published when both are ready.
+
+### Required implementation coverage
+
+- Scripted stream tests: resource set maintenance from each system message, provider-turn attribution
+  including a host message queued behind a provider turn, steering and interrupting a provider turn,
+  subagent message routing, exit-code trailers, output cursors, retention gaps at the configured limit,
+  stop confirmation, and the tool set with and without `AllowRuntimeBackgroundWork`.
+- Live acceptance on the Claude CLI: a background command read and stopped, a subagent's output, a
+  monitor's provider-started turns, and a host turn sent during a provider turn.
+
+### Non-goals
+
+- Starting background work from the host. Resources come from the runtime's own tools.
+- A terminal for background commands.
+- Resources that survive the runtime's process.
