@@ -99,10 +99,10 @@ internal static class ToolOutputProjector
         {
             return new(LlmToolPartDelivery.Omitted, LlmToolPartOmission.InvalidContent);
         }
-        if (resource.Data is { } data)
+        if (resource is { Data: { } data, BodyKind: { } kind })
         {
             string mediaType = resource.MediaType ?? "application/octet-stream";
-            return Binary(sent, Classify(resource.MediaType), mediaType, data, resource.Name ?? FileNameOf(resource.Uri), route, model);
+            return Binary(sent, kind, mediaType, data, resource.Name ?? FileNameOf(resource.Uri), route, model);
         }
         if (resource.Text is { } text)
         {
@@ -156,7 +156,7 @@ internal static class ToolOutputProjector
                 return model.PdfDocuments == LlmRichContentCarriage.Native
                     ? Add(sent, new SentFile(mediaType, data, fileName ?? "document.pdf"), LlmToolPartDelivery.Delivered)
                     : Omit(route.PdfDocuments);
-            case LlmBinaryKind.Document when IsTextMediaType(mediaType):
+            case LlmBinaryKind.Document when LlmToolOutputResource.IsTextMediaType(mediaType):
                 if (!TryDecode(data, out string text))
                 {
                     return new(LlmToolPartDelivery.Omitted, LlmToolPartOmission.InvalidContent);
@@ -187,16 +187,6 @@ internal static class ToolOutputProjector
 
     private static LlmToolPartProjection Omit(LlmRichContentCarriage routeCarriage) => new(LlmToolPartDelivery.Omitted,
         routeCarriage == LlmRichContentCarriage.Unsupported ? LlmToolPartOmission.UnsupportedByRoute : LlmToolPartOmission.UnsupportedByModel);
-
-    /// <summary>The binary kind a resource byte body takes from its media type.</summary>
-    public static LlmBinaryKind Classify(string? mediaType) => mediaType is null ? LlmBinaryKind.Other
-        : mediaType.StartsWith("image/", StringComparison.OrdinalIgnoreCase) ? LlmBinaryKind.Image
-        : mediaType == "application/pdf" || IsTextMediaType(mediaType) ? LlmBinaryKind.Document
-        : mediaType.StartsWith("audio/", StringComparison.OrdinalIgnoreCase) ? LlmBinaryKind.Audio
-        : LlmBinaryKind.Other;
-
-    private static bool IsTextMediaType(string mediaType) =>
-        mediaType.StartsWith("text/", StringComparison.OrdinalIgnoreCase) || mediaType == "application/json";
 
     private static bool TryDecode(ReadOnlyMemory<byte> data, out string text)
     {

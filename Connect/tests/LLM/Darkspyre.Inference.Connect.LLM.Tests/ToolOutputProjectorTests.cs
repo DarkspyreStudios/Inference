@@ -246,8 +246,10 @@ public sealed class ToolOutputProjectorTests
 
         Assert.Equal("chart.png", Assert.IsType<SentImage>(Assert.Single(projected.Parts)).FileName);
         Assert.Equal(LlmToolPartOmission.UnsupportedByRoute, projected.Report.Parts[1].Omission);
-        Assert.Equal(LlmBinaryKind.Document, ToolOutputProjector.Classify("application/json"));
-        Assert.Equal(LlmBinaryKind.Other, ToolOutputProjector.Classify(null));
+        Assert.Equal(LlmBinaryKind.Image, output.Parts[0] is LlmToolOutputResource { BodyKind: var image } ? image : null);
+        Assert.Equal(LlmBinaryKind.Document, new LlmToolOutputResource("x") { MediaType = "application/json", Data = new byte[] { 1 } }.BodyKind);
+        Assert.Equal(LlmBinaryKind.Other, new LlmToolOutputResource("x") { Data = new byte[] { 1 } }.BodyKind);
+        Assert.Null(new LlmToolOutputResource("x") { Text = "t" }.BodyKind);
     }
 
     [Fact]

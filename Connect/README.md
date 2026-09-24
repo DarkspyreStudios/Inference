@@ -423,7 +423,8 @@ var output = new LlmToolOutput
 ```
 
 The host supplies each binary part's media type. A resource with neither `Text` nor `Data` is a link,
-and Connect never fetches it. A resource with a byte body follows the carriage its media type selects.
+and Connect never fetches it. A resource with a byte body follows the carriage its media type selects,
+and `BodyKind` reports that kind.
 A text document is UTF-8 text with a `text/*` or `application/json` media type.
 
 `LlmRichContentSupported` declares how a route carries each kind of content. `Native` sends the

@@ -39,6 +39,20 @@ public sealed record LlmToolOutputResource(string Uri) : LlmToolOutputPart
 
     /// <summary>An embedded byte body, classified by <see cref="MediaType"/>.</summary>
     public ReadOnlyMemory<byte>? Data { get; init; }
+
+    /// <summary>The binary kind <see cref="Data"/> takes from <see cref="MediaType"/>; null without a byte body.</summary>
+    [JsonIgnore]
+    public LlmBinaryKind? BodyKind => Data is null ? null : KindOf(MediaType);
+
+    internal static LlmBinaryKind KindOf(string? mediaType) => mediaType is null ? LlmBinaryKind.Other
+        : mediaType.StartsWith("image/", StringComparison.OrdinalIgnoreCase) ? LlmBinaryKind.Image
+        : mediaType == "application/pdf" || IsTextMediaType(mediaType) ? LlmBinaryKind.Document
+        : mediaType.StartsWith("audio/", StringComparison.OrdinalIgnoreCase) ? LlmBinaryKind.Audio
+        : LlmBinaryKind.Other;
+
+    /// <summary>A text document's media type: <c>text/*</c> or <c>application/json</c>.</summary>
+    internal static bool IsTextMediaType(string mediaType) =>
+        mediaType.StartsWith("text/", StringComparison.OrdinalIgnoreCase) || mediaType == "application/json";
 }
 
 /// <summary>A tool's output as the host returns it: ordered parts, structured data and an error flag.</summary>

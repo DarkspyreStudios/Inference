@@ -1077,6 +1077,9 @@ public sealed record LlmToolOutputResource(string Uri) : LlmToolOutputPart
 
     /// <summary>An embedded byte body, classified by MediaType.</summary>
     public ReadOnlyMemory<byte>? Data { get; init; }
+
+    /// <summary>The kind Data takes from MediaType; null without a byte body. Not serialized.</summary>
+    public LlmBinaryKind? BodyKind { get; }
 }
 
 public sealed record LlmToolOutput
@@ -1151,7 +1154,8 @@ public sealed record LlmRichContentSupported
   for a model without vision, but cannot raise one; an adapter never sends what it cannot serialize.
   The setup editor's two tool-result override rows set `Images` and the two document carriages.
 - A resource with a byte body is classified by its media type as an image, PDF, text document, audio
-  or other binary, and follows that carriage.
+  or other binary, and follows that carriage. `BodyKind` exposes that classification, so a host that
+  strips bytes records the same kind as Connect's capture.
 - A text document is UTF-8 text with a `text/*` or `application/json` media type.
 
 | Route | Images | PDF | Text docs | Audio | Links | Embedded text | Structured | Error flag | Evidence |

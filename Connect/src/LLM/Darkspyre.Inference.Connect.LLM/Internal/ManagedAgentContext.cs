@@ -162,8 +162,8 @@ internal static class ManagedAgentContext
                     case LlmToolOutputBinary binary:
                         omitted.Add(new(binary.Kind, binary.FileName ?? "attachment", index, toolCallId));
                         break;
-                    case LlmToolOutputResource { Data: not null } resource:
-                        omitted.Add(new(ToolOutputProjector.Classify(resource.MediaType), resource.Name ?? resource.Uri, index, toolCallId));
+                    case LlmToolOutputResource { BodyKind: { } kind } resource:
+                        omitted.Add(new(kind, resource.Name ?? resource.Uri, index, toolCallId));
                         break;
                     case var part:
                         parts.Add(part);

@@ -551,7 +551,8 @@ contract change for `11.7.0-rc.1`.
 - Managed Codex, AgentCore and the Claude agent client no longer fail a tool for unsupported content.
 - Agent opening context carries tool-output images and documents as first-turn attachments.
 - A capture without bytes records tool-output binaries as `LlmOmittedAttachment` with an
-  `LlmBinaryKind` and the part index.
+  `LlmBinaryKind` and the part index. `LlmToolOutputResource.BodyKind` holds the one media-type
+  classification for resource byte bodies.
 
 Verification: Debug build with zero warnings, `dotnet format --verify-no-changes`, and 377 Connect and
 Common tests.
