@@ -515,5 +515,13 @@ Claude CLI chat and Antigravity CLI chat, and both CLI chat routes rejected tool
 - Claude CLI chat and Antigravity CLI chat estimate the projected transcript with the shared
   `LocalTokenCount` (`o200k_base`), which the Responses estimator also uses.
 
-The public additions are additive; the default keeps the previous rejection. Live acceptance of the
-switches is recorded separately once run.
+The public additions are additive; the default keeps the previous rejection.
+
+Live acceptance on 2026-09-24 ran Agent DS's stored connections against this source. A Direct Codex
+`gpt-6-luna` turn made a real tool call with reasoning state; its history, the tool result and a
+follow-up then went to each target with `Omit`. Direct Codex `gpt-6-sol`, Claude CLI chat and
+Antigravity CLI chat each answered correctly with `OmittedResponseStateCount = 1`, and `Reject` on
+`gpt-6-sol` still failed before sending. The same history opened a Claude CLI agent session, which
+reported `ContextImport = OpeningContext`, emitted the opening-context warning and answered correctly.
+AgentCore was not run, for lack of credentials. The Direct Codex local estimate for the tool-bearing
+follow-up was 203 tokens against 119 reported input tokens.
