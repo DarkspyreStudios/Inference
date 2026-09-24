@@ -62,6 +62,19 @@ internal sealed class BedrockAgentCoreSession : ILlmAgentSession
         return Task.FromResult(NativeAgentContract.AgentCore);
     }
 
+    public Task<LlmRequestAccounting> MeasureContextAsync(LlmAgentContext proposedContext,
+        CancellationToken cancellationToken = default)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        cancellationToken.ThrowIfCancellationRequested();
+        ArgumentNullException.ThrowIfNull(proposedContext);
+        return Task.FromResult(new LlmRequestAccounting
+        {
+            ModelId = null, // The harness does not expose the effective context being measured.
+            Diagnostic = "Provider-owned context does not support host replacement accounting."
+        });
+    }
+
     public Task<LlmAgentContextStatus> GetContextStatusAsync(
         LlmAgentTurnRequest? prospectiveTurn = null,
         CancellationToken cancellationToken = default) =>

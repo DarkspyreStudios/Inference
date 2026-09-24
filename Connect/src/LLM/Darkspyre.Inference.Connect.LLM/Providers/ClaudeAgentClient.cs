@@ -383,6 +383,19 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             return Task.FromResult(NativeAgentContract.Claude);
         }
 
+        public Task<LlmRequestAccounting> MeasureContextAsync(LlmAgentContext proposedContext,
+            CancellationToken cancellationToken = default)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            cancellationToken.ThrowIfCancellationRequested();
+            ArgumentNullException.ThrowIfNull(proposedContext);
+            return Task.FromResult(new LlmRequestAccounting
+            {
+                ModelId = null, // The provider owns effective model/run selection; this is not a measurement.
+                Diagnostic = "Provider-owned context does not support host replacement accounting."
+            });
+        }
+
         public Task<LlmAgentContextStatus> GetContextStatusAsync(
             LlmAgentTurnRequest? prospectiveTurn = null,
             CancellationToken cancellationToken = default) =>

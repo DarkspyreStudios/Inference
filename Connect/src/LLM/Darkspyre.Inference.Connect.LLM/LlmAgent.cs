@@ -405,6 +405,15 @@ public interface ILlmAgentClient
 
 public interface ILlmAgentSession : IAsyncDisposable
 {
+    /// <summary>
+    /// Measures an arbitrary replacement without installing it. Uses base configuration when idle,
+    /// frozen run configuration (and queued steering) when paused; rejects active execution.
+    /// Native-owned context returns unsupported. Acceptance remains a separate revision-checked operation.
+    /// </summary>
+    Task<LlmRequestAccounting> MeasureContextAsync(
+        LlmAgentContext proposedContext,
+        CancellationToken cancellationToken = default);
+
     string ThreadId { get; }
 
     /// <summary>Root session identifier shared by a thread and its forks.</summary>

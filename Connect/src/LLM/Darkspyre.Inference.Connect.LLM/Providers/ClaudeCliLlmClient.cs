@@ -36,6 +36,7 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
 
     protected override LlmProviderCapabilities DefaultCapabilities { get; } = new()
     {
+        OutputLimitEnforcement = Common.LLM.LlmOutputLimitEnforcement.Unsupported,
         SupportsStreaming = true,
         SupportsStreamingUsage = true,
         SupportsModelListing = false,

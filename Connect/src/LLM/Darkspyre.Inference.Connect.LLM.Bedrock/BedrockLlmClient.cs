@@ -19,6 +19,7 @@ internal sealed class BedrockLlmClient(
 
     private static readonly LlmProviderCapabilities Defaults = new()
     {
+        OutputLimitEnforcement = Common.LLM.LlmOutputLimitEnforcement.ProviderEnforced,
         SupportsStreaming = true,
         SupportsStreamingUsage = false,
         SupportsModelListing = true,

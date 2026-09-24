@@ -10,6 +10,67 @@ namespace Darkspyre.Inference.Connect.LLM.Tests;
 public sealed class ManagedAgentTests
 {
     [Fact]
+    public async Task ProposalAccountingUsesFrozenProjectionWithoutInstallingOrConsumingPause()
+    {
+        var harness = new Harness();
+        await using var session = harness.Create(ToolsOptions(_ => new()) with
+        {
+            Instructions = "base",
+            Context = History(new string('x', 90)),
+            ExecutionOptions = SmallPolicy()
+        });
+        var pause = Assert.Single((await Read(session.RunTurnAsync(Turn("hello") with
+        { ModelId = "other", Instructions = "run", ReasoningLevel = LlmReasoningLevel.High }))).OfType<LlmAgentCompactionRequiredEvent>());
+        await session.SteerAsync(pause.TurnId, [new LlmAgentTextContent("queued")]);
+        var captured = await session.CaptureContextAsync(new() { IncludeAttachmentData = true });
+        var originalBytes = JsonSerializer.Serialize(captured);
+        var proposal = captured with { Revision = 999, Entries = captured.Entries.Skip(1).ToArray() };
+        var result = await session.MeasureContextAsync(proposal);
+        var projected = harness.Estimates.Last();
+        Assert.True(result.IsSupported);
+        Assert.Equal(captured.Revision, result.ContextRevision);
+        Assert.Equal(14, result.UsedContextTokens); // hello + queued + run
+        Assert.Equal(90, result.InputBudgetTokens);
+        Assert.Equal("other", result.ModelId);
+        Assert.Equal(2000, result.ModelMaxContextTokens);
+        Assert.Equal("run", projected.Instructions);
+        Assert.Equal(LlmReasoningLevel.High, projected.ReasoningLevel);
+        Assert.Single(projected.Tools);
+        Assert.Equal(originalBytes, JsonSerializer.Serialize(await session.CaptureContextAsync(new() { IncludeAttachmentData = true })));
+        Assert.Empty(harness.Requests);
+        Assert.Equal(result, await session.MeasureContextAsync(proposal));
+        harness.Results.Enqueue(new() { Text = "done", Status = LlmCompletionStatus.Completed, Diagnostics = new(200, null, null) });
+        await Read(session.ContinueTurnAsync(new(pause.TurnId, pause.PauseId, captured.Revision, proposal)));
+        Assert.Equal(JsonSerializer.Serialize(projected), JsonSerializer.Serialize(Assert.Single(harness.Requests)));
+    }
+
+    [Fact]
+    public async Task IdleProposalUsesBaseSettingsAndUnknownOmissionsDoNotBecomeFreeInput()
+    {
+        var harness = new Harness();
+        await using var session = harness.Create(Options() with { Instructions = "base", Context = History("original") });
+        var before = JsonSerializer.Serialize(await session.CaptureContextAsync());
+        var proposal = History("replacement");
+        var result = await session.MeasureContextAsync(proposal);
+        Assert.Equal(15, result.UsedContextTokens);
+        Assert.Equal("base", harness.Estimates.Last().Instructions);
+        var omitted = proposal with
+        {
+            Entries = [proposal.Entries[0] with
+        { Message = new("user", "replacement") { OmittedAttachments = [new(LlmAttachmentKind.Document, "missing.txt", 0)] } }]
+        };
+        var unknown = await session.MeasureContextAsync(omitted);
+        Assert.Null(unknown.UsedContextTokens);
+        Assert.Equal(LlmContextMeasurementSource.Unknown, unknown.Source);
+        await Assert.ThrowsAsync<ArgumentException>(() => session.MeasureContextAsync(proposal with { Entries = [proposal.Entries[0], proposal.Entries[0]] }));
+        using var cancelled = new CancellationTokenSource();
+        cancelled.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => session.MeasureContextAsync(proposal, cancelled.Token));
+        Assert.Equal(before, JsonSerializer.Serialize(await session.CaptureContextAsync()));
+        Assert.Empty(harness.Requests);
+    }
+
+    [Fact]
     public async Task ToolsSettleInOrderAndInstructionsReasoningAndStateSpanTheLogicalRun()
     {
         var harness = new Harness();
@@ -238,6 +299,7 @@ public sealed class ManagedAgentTests
         var running = Consume();
         await started.Task.WaitAsync(TimeSpan.FromSeconds(5));
         await Assert.ThrowsAsync<InvalidOperationException>(() => session.CaptureContextAsync());
+        await Assert.ThrowsAsync<InvalidOperationException>(() => session.MeasureContextAsync(History("proposal")));
         await Assert.ThrowsAsync<InvalidOperationException>(() => Read(session.RunTurnAsync(Turn("overlap"))));
         await session.InterruptAsync(turnId!);
         await running.WaitAsync(TimeSpan.FromSeconds(5));
@@ -408,12 +470,13 @@ public sealed class ManagedAgentTests
     {
         public Queue<LlmChatResult> Results { get; } = new();
         public List<LlmChatRequest> Requests { get; } = [];
+        public List<LlmChatRequest> Estimates { get; } = [];
         public Exception? Failure { get; set; }
         public bool UnknownEstimate { get; init; }
         public bool ExposeBeforeFailure { get; init; }
         public ManagedAgentSession Create(LlmAgentSessionOptions? options = null) => new(
             new() { Version = "1", Transport = LlmTransport.OpenAiCodex, Endpoint = "https://provider.test/codex" },
-            options ?? Options(), [new("test", "Test") { MaxContextTokens = 1000 }], this, Stream,
+            options ?? Options(), [new("test", "Test") { MaxContextTokens = 1000 }, new("other", "Other") { MaxContextTokens = 2000 }], this, Stream,
             _ => new()
             {
                 SupportsAgentSessions = true,
@@ -423,8 +486,12 @@ public sealed class ManagedAgentTests
                 SupportsToolResultDocuments = true,
                 Agent = ManagedAgentPolicy.Capabilities
             });
-        public long? EstimateInputTokens(LlmConnection connection, LlmChatRequest request) => UnknownEstimate ? null
-            : request.Messages.Sum(message => message.Content.Length) + (request.Instructions?.Length ?? 0);
+        public long? EstimateInputTokens(LlmConnection connection, LlmChatRequest request)
+        {
+            Estimates.Add(request);
+            return UnknownEstimate ? null
+                : request.Messages.Sum(message => message.Content.Length) + (request.Instructions?.Length ?? 0);
+        }
         private async IAsyncEnumerable<LlmStreamEvent> Stream(LlmChatRequest request,
             [EnumeratorCancellation] CancellationToken cancellationToken)
         {

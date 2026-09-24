@@ -236,6 +236,7 @@ internal sealed class ConnectLlmInference(
 
     private static CommonLlm.LlmCapabilities ToCommon(LlmProviderCapabilities capabilities) => new()
     {
+        OutputLimitEnforcement = capabilities.OutputLimitEnforcement,
         SupportsStreaming = capabilities.SupportsStreaming,
         SupportsModelListing = capabilities.SupportsModelListing,
         SupportsJsonSchema = capabilities.SupportsJsonSchema,

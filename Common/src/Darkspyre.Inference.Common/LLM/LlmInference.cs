@@ -20,8 +20,19 @@ public enum LlmReasoningLevel
     Maximum
 }
 
+/// <summary>Who enforces a requested output-token cap. A planning reserve is not enforcement.</summary>
+public enum LlmOutputLimitEnforcement
+{
+    Unknown,
+    Unsupported,
+    ProviderEnforced,
+    EngineEnforced
+}
+
 public sealed record LlmCapabilities
 {
+    public LlmOutputLimitEnforcement OutputLimitEnforcement { get; init; }
+
     public bool SupportsStreaming { get; init; }
 
     public bool SupportsModelListing { get; init; }

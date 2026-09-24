@@ -8,6 +8,29 @@ namespace Darkspyre.Inference.Connect.LLM.Examples;
 /// </summary>
 public static class HostOwnedAgentContext
 {
+    /// <summary>
+    /// Inspect a tool-free summary request and a proposed destination separately, without running
+    /// inference or replacing context. The host must inspect support, provenance and nullable limits;
+    /// these measurements are not approval to dispatch or install an estimated/unverifiable result.
+    /// </summary>
+    public static async Task<(LlmRequestAccounting Summary, LlmRequestAccounting Destination)> InspectCompactionAsync(
+        LlmProviderService providers,
+        string summaryConnectionId,
+        LlmChatRequest summaryRequest,
+        LlmAgentContextPolicy summaryPolicy,
+        ILlmAgentSession destination,
+        LlmAgentContext proposedContext,
+        CancellationToken cancellationToken = default)
+    {
+        if (summaryRequest.Tools.Count != 0)
+        {
+            throw new ArgumentException("The host must supply a tools-disabled summary request.", nameof(summaryRequest));
+        }
+        var summary = await providers.MeasureRequestAsync(summaryConnectionId, summaryRequest, summaryPolicy, cancellationToken);
+        var replacement = await destination.MeasureContextAsync(proposedContext, cancellationToken);
+        return (summary, replacement);
+    }
+
     /// <summary>Open restored context; use a new thread ID with a copied prefix to fork.</summary>
     public static async Task<ILlmAgentSession> OpenAsync(
         LlmProviderService providers,

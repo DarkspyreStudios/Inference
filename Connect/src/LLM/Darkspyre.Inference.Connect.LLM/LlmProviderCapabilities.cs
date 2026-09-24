@@ -6,6 +6,9 @@ namespace Darkspyre.Inference.Connect.LLM;
 /// <summary>Features a transport/model combination can accept without silent degradation.</summary>
 public sealed record LlmProviderCapabilities
 {
+    /// <summary>Enforcement of MaxOutputTokens, independently of context output reserves.</summary>
+    public LlmOutputLimitEnforcement OutputLimitEnforcement { get; init; }
+
     public bool SupportsStreaming { get; init; }
 
     public bool SupportsStreamingUsage { get; init; }

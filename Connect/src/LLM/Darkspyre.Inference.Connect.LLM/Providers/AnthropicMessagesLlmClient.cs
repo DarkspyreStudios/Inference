@@ -24,6 +24,7 @@ internal sealed class AnthropicMessagesLlmClient : LlmClientBase
 
     protected override LlmProviderCapabilities DefaultCapabilities { get; } = new()
     {
+        OutputLimitEnforcement = Common.LLM.LlmOutputLimitEnforcement.ProviderEnforced,
         SupportsStreaming = true,
         SupportsStreamingUsage = true,
         SupportsModelListing = true,

@@ -418,6 +418,29 @@ Bedrock, AgentCore and CLI chat do not import this opaque state.
 
 ### Host-owned managed agent runtime
 
+**Unpublished accounting extension:** source now includes
+`LlmProviderService.MeasureRequestAsync(connectionId, request, policy, ct)` and
+`ILlmAgentSession.MeasureContextAsync(proposedContext, ct)`, both returning `LlmRequestAccounting`.
+These APIs are not in the published `11.5.3-rc.1` packages; publication is on hold.
+Standalone accounting resolves the selected connection read-only and may read its model catalog,
+but never refreshes/persists credentials or runs inference. Session accounting uses base settings
+while idle and the frozen executing model/instructions/tools while paused, including queued steering
+without consuming it. Active execution is rejected. It never replaces context or consumes a pause.
+
+The result distinguishes `IsSupported = false` from supported-but-unknown measurement, exposes raw
+nullable model limits separately from the effective host ceiling, reserve, safety margin and usable
+input budget, and preserves `LlmContextMeasurementSource`. Neither `IsSupported`, an estimate, nor
+`NeedsCompaction = false` proves fit. Native-owned context accounting is unsupported. See the
+[accounting design](docs/enhancements.md#public-nonmutating-accounting-unpublished) for failure and concurrency semantics.
+
+`OutputLimitEnforcement` is exposed by both `LlmProviderCapabilities` and Common's `LlmCapabilities`.
+OpenAI Responses, Anthropic Messages and Bedrock Converse advertise `ProviderEnforced`; direct Codex,
+Claude CLI and Antigravity advertise `Unsupported`. Generic compatible endpoints and the custom
+AgentCore harness remain `Unknown`: forwarding a field is not evidence of enforcement. A reserve
+does not enforce `MaxOutputTokens`. Bounded summarization must reject an unsupported or unverifiable
+route, not switch models or silently omit its cap. No new inference retries or compaction orchestration
+are introduced by these APIs.
+
 `LlmProviderCapabilities.Agent` declares context and tool-execution ownership, capture/replacement,
 context status, host compaction handoff, native resume/fork/compaction, steering and interruption.
 Check these before selecting a pathway. `SupportsAgentTurnInstructions` separately gates a complete

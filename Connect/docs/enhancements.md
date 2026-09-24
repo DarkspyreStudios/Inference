@@ -300,6 +300,78 @@ contains and protects the new prompt. Failure before admission changes neither c
 
 ## 7. Context pressure and limits
 
+### Public nonmutating accounting (unpublished)
+
+Approved for the Agent DS bounded-Core-compaction handoff. The existing provider service and session
+seams gain these methods; compaction orchestration and persistence stay in the host:
+
+```csharp
+Task<LlmRequestAccounting> LlmProviderService.MeasureRequestAsync(
+    string connectionId, LlmChatRequest request,
+    LlmAgentContextPolicy? policy = null, CancellationToken cancellationToken = default);
+
+Task<LlmRequestAccounting> ILlmAgentSession.MeasureContextAsync(
+    LlmAgentContext proposedContext, CancellationToken cancellationToken = default);
+```
+
+Standalone measurement reads the host connection once, uses the selected adapter's generation
+projection/validation, and optionally reads model discovery metadata without credential refresh or
+credential persistence. It never calls generation, creates a session, writes context or retries with
+another model. Catalog/network/provider discovery failure leaves model limits null with a safe
+diagnostic; cancellation and invalid input still fail the operation. No raw provider exception is
+copied into the accounting diagnostic. Unsupported projection/features or an unimplemented estimator
+return `IsSupported = false`. Unknown occupancy on a supported projection keeps `IsSupported = true`
+with null count and `Source = Unknown`. There is no tokenizer/character-ratio fallback.
+
+The session method runs under the existing session lock, only while idle or after a paused segment
+has settled. It imports/validates a private proposal copy (including complete tool groups and bound
+opaque state), but never installs it, changes IDs/revisions, consumes a pause, emits execution events,
+executes tools or persists data. Idle measurement uses base session configuration; paused measurement
+uses the actual frozen run model, instructions, reasoning, schema and tools. Queued steering is
+included without being consumed. `ContextRevision` is the live revision being compared against, not
+the proposal's supplied revision. It is not a reservation or acceptance token: steering can change
+without a revision increment. Host coordination and final replace/continue validation remain required.
+Native-owned sessions return unsupported; their resolved model may itself be unknown (null).
+
+`LlmRequestAccounting` contains `ModelId`, `IsSupported`, safe `Diagnostic`, nullable `ContextRevision`,
+`ModelMaxContextTokens`, `ModelMaxOutputTokens`, effective `MaxContextTokens`, `UsedContextTokens`,
+`ReservedOutputTokens`, `SafetyMarginTokens`, `InputBudgetTokens`, `AvailableInputTokens`, nullable
+`NeedsCompaction`, `IsEstimated`, `Source`, and `OutputLimitEnforcement`. Token fields are nullable long.
+Counts include full projected instructions/tools/schema/messages, not just summarizable history.
+The existing managed policy calculation is shared by live status and both accounting operations.
+Missing attachment bytes, binary attachments and encrypted state never become free input.
+Supported does not mean exact or safe: no fit guarantee is inferred from an estimate, an unknown,
+or a false threshold recommendation. Protected-record preservation/reduction checks still belong to
+the host and final replacement operation, not a token measurement.
+
+Host context caps cannot enlarge known model context limits. For a standalone enforced output cap,
+the reserve is at least that cap (or a larger explicit host reserve); a cap above a known model output
+limit is invalid. Without a requested enforced cap, the existing policy/model reserve rules apply.
+Absent model limits remain null; a host ceiling is displayed separately from discovered model limits.
+The existing OpenAI public model catalog currently contributes no context/output limits. Direct Codex
+does expose nullable limits when present in its catalog. No model limits are invented to fill gaps.
+
+Common defines `LlmOutputLimitEnforcement`: `Unknown`, `Unsupported`, `ProviderEnforced`,
+`EngineEnforced`. Both existing LLM capability records expose it; Connect's portable adapter maps it.
+Responses/Anthropic/Bedrock Converse advertise provider enforcement; Qwen advertises engine enforcement
+through its existing max-token runtime argument. Codex/Claude CLI/Antigravity reject caps. Generic
+compatible HTTP endpoints and AgentCore harnesses remain unknown, since forwarding a property cannot
+prove the remote implementation honors it. Capability overrides cannot manufacture enforcement.
+Provider-enforced means the supported protocol enforces the accepted request's cap, not local
+containment of a faulty remote endpoint. Truncating visible text/cancelling late is not equivalent.
+
+The host keeps summary and destination accounting separate and owns its shared retry/chunk/deadline
+ledger. The standalone path does not enter the managed-agent retry loop. Estimated or unknown input
+cannot certify strict bounded fit. Direct Codex cannot provide an enforced summary output cap, even
+though its managed context reserve is available; a bounded consumer must report Unsupported with a
+diagnostic rather than use another model automatically. Provider-native compaction is separate.
+
+The session-interface addition requires the next breaking-contract release (planned `11.6.0-rc.1`).
+The user explicitly held publication pending possible Codex Native browser-restriction work. Shared
+package version remains `11.5.3-rc.1` until release preparation; no packages are created for this unit.
+
+### Existing status and policy contract
+
 ```csharp
 public sealed record LlmAgentContextStatus
 {

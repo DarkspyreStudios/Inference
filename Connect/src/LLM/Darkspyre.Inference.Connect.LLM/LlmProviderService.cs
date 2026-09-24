@@ -348,6 +348,81 @@ public sealed class LlmProviderService
         }
     }
 
+    /// <summary>
+    /// Accounts a standalone request without generation, credential refresh, persistence or a session.
+    /// May read model discovery metadata; unavailable limits remain unknown. The host source is read only.
+    /// </summary>
+    public async Task<LlmRequestAccounting> MeasureRequestAsync(
+        string connectionId,
+        LlmChatRequest request,
+        LlmAgentContextPolicy? policy = null,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentException.ThrowIfNullOrWhiteSpace(request.ModelId);
+        if (request.MaxOutputTokens is <= 0) { throw new ArgumentOutOfRangeException(nameof(request)); }
+        policy ??= new();
+        ManagedAgentPolicy.Validate(new() { ContextPolicy = policy }, null);
+        var connection = await LlmConnectionResolver.ResolveAsync(_connections, connectionId, cancellationToken);
+        var client = ClientFor(connection.Transport);
+        var capabilities = client.GetCapabilities(connection, request.ModelId);
+        LlmRequestAccounting Unsupported(string diagnostic) => new()
+        {
+            ModelId = request.ModelId,
+            Diagnostic = diagnostic,
+            OutputLimitEnforcement = capabilities.OutputLimitEnforcement
+        };
+        if (request.MaxOutputTokens is not null
+            && capabilities.OutputLimitEnforcement == LlmOutputLimitEnforcement.Unsupported)
+        {
+            return Unsupported("This route cannot enforce MaxOutputTokens; a context reserve is not an output cap.");
+        }
+        if (client is not ILlmContextEstimator estimator)
+        {
+            return Unsupported("This route does not implement nonmutating request accounting.");
+        }
+        long? used;
+        try { used = estimator.EstimateInputTokens(connection, request); }
+        catch (NotSupportedException)
+        {
+            return Unsupported("This route cannot project the requested features for accounting.");
+        }
+        if (request.Messages.Any(message => message.OmittedAttachments.Count > 0)) { used = null; }
+        LlmModel? model = null;
+        string? metadataDiagnostic = null;
+        if (capabilities.SupportsModelListing)
+        {
+            try
+            {
+                model = (await client.ListModelsAsync(connection, cancellationToken))
+                    .FirstOrDefault(candidate => candidate.Id == request.ModelId);
+            }
+            catch (Exception error) when (error is HttpRequestException or LlmProviderException or NotSupportedException)
+            {
+                metadataDiagnostic = "Model metadata is unavailable; provider limits remain unknown.";
+            }
+        }
+        cancellationToken.ThrowIfCancellationRequested();
+        // An explicit enforced cap budgets at least that much output, even if a smaller reserve was supplied.
+        if (request.MaxOutputTokens is int cap
+            && capabilities.OutputLimitEnforcement is LlmOutputLimitEnforcement.ProviderEnforced or LlmOutputLimitEnforcement.EngineEnforced)
+        {
+            if (model?.MaxOutputTokens is long maximum && cap > maximum)
+            {
+                throw new ArgumentException("Requested output cap exceeds the known model output limit.", nameof(request));
+            }
+            policy = policy with { ReservedOutputTokens = Math.Max(policy.ReservedOutputTokens ?? 0, cap) };
+        }
+        var accounting = ManagedAgentPolicy.Account(request.ModelId, used, policy, model);
+        return accounting with
+        {
+            Diagnostic = metadataDiagnostic is null ? accounting.Diagnostic
+                : string.Join(" ", new[] { accounting.Diagnostic, metadataDiagnostic }.Where(value => value is not null)),
+            OutputLimitEnforcement = capabilities.OutputLimitEnforcement
+        };
+    }
+
     public async Task<LlmChatResult> CompleteAsync(
         string connectionId,
         LlmChatRequest request,

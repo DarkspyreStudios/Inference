@@ -128,6 +128,11 @@ internal abstract class LlmClientBase(HttpClient http) : ILlmClient
         }
 
         LlmReasoningEffort.Validate(request.ReasoningLevel, capabilities);
+        if (request.MaxOutputTokens is not null
+            && capabilities.OutputLimitEnforcement == Common.LLM.LlmOutputLimitEnforcement.Unsupported)
+        {
+            throw new NotSupportedException("This route cannot enforce MaxOutputTokens; an output reserve is budgeting only.");
+        }
 
         if (request.StructuredOutput is { } structured
             && (string.IsNullOrWhiteSpace(structured.Name)

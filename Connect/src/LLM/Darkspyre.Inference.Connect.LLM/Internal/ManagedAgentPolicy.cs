@@ -32,6 +32,25 @@ internal static class ManagedAgentPolicy
     public static LlmAgentContextStatus Status(
         string modelId, long revision, long? used, LlmAgentContextPolicy policy, LlmModel? model)
     {
+        var accounting = Account(modelId, used, policy, model);
+        return new()
+        {
+            ModelId = modelId,
+            ContextRevision = revision,
+            MaxContextTokens = accounting.MaxContextTokens,
+            UsedContextTokens = accounting.UsedContextTokens,
+            ReservedOutputTokens = accounting.ReservedOutputTokens,
+            AvailableInputTokens = accounting.AvailableInputTokens,
+            NeedsCompaction = accounting.NeedsCompaction,
+            IsEstimated = accounting.IsEstimated,
+            Source = accounting.Source
+        };
+    }
+
+    public static LlmRequestAccounting Account(
+        string modelId, long? used, LlmAgentContextPolicy policy, LlmModel? model)
+    {
+        Validate(new() { ContextPolicy = policy }, model);
         long? maximum = policy.MaxContextTokens ?? model?.MaxContextTokens;
         long? reserve = policy.ReservedOutputTokens ?? model?.MaxOutputTokens;
         long? budget = maximum is long limit && reserve is long output
@@ -39,7 +58,12 @@ internal static class ManagedAgentPolicy
         return new()
         {
             ModelId = modelId,
-            ContextRevision = revision,
+            IsSupported = true,
+            Diagnostic = used is null ? "Input occupancy is unknown for this projection." : null,
+            ModelMaxContextTokens = model?.MaxContextTokens,
+            ModelMaxOutputTokens = model?.MaxOutputTokens,
+            SafetyMarginTokens = policy.SafetyMarginTokens,
+            InputBudgetTokens = budget,
             MaxContextTokens = maximum,
             UsedContextTokens = used,
             ReservedOutputTokens = reserve,

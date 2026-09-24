@@ -59,6 +59,7 @@ public sealed class QwenLlmInference : ITensorLlmInference
         ValidateModelId(modelId);
         return Task.FromResult(new LlmCapabilities
         {
+            OutputLimitEnforcement = LlmOutputLimitEnforcement.EngineEnforced,
             SupportsStreaming = true,
             SupportsModelListing = true,
             SupportsJsonSchema = true,

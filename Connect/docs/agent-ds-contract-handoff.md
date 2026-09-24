@@ -1,5 +1,33 @@
 # Agent DS: managed-agent contract handoff
 
+## Pending bounded-compaction accounting extension
+
+**Source only; not published.** `11.5.3-rc.1` remains the latest published family and does not contain
+the methods below. The next breaking-contract line is planned as `11.6.0-rc.1`; release is explicitly
+held for possible Codex Native browser-restriction changes.
+
+- `LlmProviderService.MeasureRequestAsync(connectionId, LlmChatRequest, LlmAgentContextPolicy?, ct)`
+  accounts a standalone summary request without generation, session creation or credential writes.
+  It may read model metadata, but never refreshes credentials solely for measurement.
+- `ILlmAgentSession.MeasureContextAsync(LlmAgentContext, ct)` measures a proposal without replacement,
+  using paused frozen run configuration (including queued steering) or idle base configuration.
+  Active execution is rejected; native-owned context reports unsupported.
+- Both return `LlmRequestAccounting`: nullable counts/limits/reserve/margin/input budget, existing
+  measurement provenance, support plus safe diagnostic, and output-cap enforcement. Proposal accounting
+  records the current live revision; it does not reserve that revision or validate protected-record
+  preservation on behalf of the host.
+- `LlmCapabilities.OutputLimitEnforcement` and `LlmProviderCapabilities.OutputLimitEnforcement` use
+  Common's `LlmOutputLimitEnforcement`. Direct Codex is Unsupported for summary output caps. Unknown
+  endpoint behavior is not promoted to enforced merely because a field can be forwarded.
+
+All existing estimators remain estimates, with unknown occupancy for uncountable content. These APIs
+do not certify strict bounded fit or guarantee an eligible bounded route. Keep `IContextCompactor`,
+its request/deadline ledger and SessionManager replacement coordination in Agent DS. No consumer
+source changes are included. Exact semantics and evidence are in the
+[canonical design](enhancements.md#public-nonmutating-accounting-unpublished).
+
+## Historical initial handoff
+
 Status: **version 10.1.0**, 2026-09-22. Direct Codex and the managed engine retain the behavior
 live-tested for 3.0.0 under the new package and namespace. Version 2.2.0 does not contain these changes.
 Direct Codex now uses host-owned device OAuth; Claude/Antigravity remain CLI-owned.

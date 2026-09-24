@@ -260,6 +260,10 @@ public sealed class AgentContractTests
         Assert.False(caps.SupportsCompactionHandoff);
         await Assert.ThrowsAsync<NotSupportedException>(() => session.CaptureContextAsync());
         await Assert.ThrowsAsync<NotSupportedException>(() => session.GetContextStatusAsync());
+        var accounting = await session.MeasureContextAsync(new());
+        Assert.False(accounting.IsSupported);
+        Assert.Null(accounting.UsedContextTokens);
+        Assert.NotNull(accounting.Diagnostic);
         await Assert.ThrowsAsync<NotSupportedException>(() => session.ReplaceContextAsync(new(), 0));
         await Assert.ThrowsAsync<NotSupportedException>(async () =>
         {

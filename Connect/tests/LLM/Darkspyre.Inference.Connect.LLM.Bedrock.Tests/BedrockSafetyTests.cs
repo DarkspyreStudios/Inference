@@ -18,6 +18,7 @@ public sealed class BedrockSafetyTests
 
         LlmProviderCapabilities capabilities = client.GetCapabilities(Connection());
         Assert.True(capabilities.SupportsToolUse);
+        Assert.Equal(Common.LLM.LlmOutputLimitEnforcement.ProviderEnforced, capabilities.OutputLimitEnforcement);
         Assert.True(capabilities.SupportsPromptImages);
         Assert.True(capabilities.SupportsPromptDocuments);
         Assert.True(capabilities.SupportsToolResultImages);

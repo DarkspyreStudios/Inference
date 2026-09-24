@@ -12,6 +12,7 @@ internal sealed class AntigravityCliLlmClient(IAntigravityCliRunner runner)
 {
     private static readonly LlmProviderCapabilities Capabilities = new()
     {
+        OutputLimitEnforcement = Common.LLM.LlmOutputLimitEnforcement.Unsupported,
         SupportsStreaming = true,
         SupportsStreamingUsage = true,
         SupportsModelListing = true,

@@ -457,3 +457,32 @@ Tests total Connect 329, Tensor 298 and UI 53 per configuration (24 Common tests
 All four downloaded archives match the local archives byte-for-byte and are private. Fresh consumer
 evaluation confirms exactly one `ggml-metal.metal`, owned by `Whisper.net.Runtime.Metal`.
 Source, this record and tag `v11.5.3-rc.1` are pushed to origin. No model downloads or paid calls.
+
+## Unpublished: bounded-compaction accounting and output-cap metadata
+
+Approved source implementation adds `LlmProviderService.MeasureRequestAsync` and
+`ILlmAgentSession.MeasureContextAsync`, returning `LlmRequestAccounting`. Standalone accounting uses
+the existing adapter projection and read-only catalog discovery, without credential refresh/writes
+or inference. Session proposal accounting uses idle/base or paused/frozen run configuration and
+queued steering without installing context or consuming a pause. Live status, proposal and standalone
+accounting share the existing policy calculation; uncountable/omitted content stays unknown.
+Provider-owned native contexts return unsupported. No Agent DS source or compaction ownership changes.
+
+Common's `LlmOutputLimitEnforcement` is mapped through existing LLM capabilities: provider enforcement
+for Responses/Anthropic/Bedrock Converse, engine enforcement for Qwen, unsupported for Codex/Claude
+CLI/Antigravity, unknown for generic compatible endpoints and AgentCore harnesses. A reserve is never
+advertised as a cap. Estimation is not a guarantee of fit; this unit adds no exact-count fallback.
+
+The public session-interface change targets the next breaking-contract line, planned `11.6.0-rc.1`.
+The user explicitly prohibited publication pending possible Codex Native browser-restriction work.
+`Directory.Build.props` remains at the last published `11.5.3-rc.1`; no pack, tag or publication occurs.
+Source-only guidance is in `Connect/docs/agent-ds-contract-handoff.md` and the canonical accounting
+section of `Connect/docs/enhancements.md`; `HostOwnedAgentContext.InspectCompactionAsync` is compiled.
+
+Controlled tests cover projection parity, frozen model/instructions/tools, unchanged history/revision,
+queued steering and reusable pause identity, running rejection, cancellation, expired OAuth without
+refresh, null limits/counts, encrypted state/attachments, limit precedence, unsupported native routes,
+Codex cap rejection before HTTP and portable capability mappings. Zero-warning Debug/Release builds
+and tests pass: Connect 340, Tensor 298, UI 53 in each configuration (Common's 24 tests repeat in each).
+Formatting verification and all three transitive vulnerability audits pass. No model downloads,
+paid inference, package artifacts or consuming-application migrations are required by this unit.

@@ -19,6 +19,7 @@ internal sealed class OpenAiCodexLlmClient(HttpClient http) : ResponsesLlmClient
 
     protected override LlmProviderCapabilities DefaultCapabilities { get; } = new()
     {
+        OutputLimitEnforcement = Common.LLM.LlmOutputLimitEnforcement.Unsupported,
         SupportsStreaming = true,
         SupportsStreamingUsage = true,
         SupportsModelListing = true,

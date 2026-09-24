@@ -37,6 +37,7 @@ public sealed class QwenLlmInferenceTests
             TensorLlmModels.Qwen3FourBillionQ4Km.Key.ModelId);
 
         Assert.True(capabilities.SupportsStreaming);
+        Assert.Equal(LlmOutputLimitEnforcement.EngineEnforced, capabilities.OutputLimitEnforcement);
         Assert.True(capabilities.SupportsJsonSchema);
         Assert.False(capabilities.SupportsToolUse);
         Assert.False(capabilities.SupportsPromptImages);
