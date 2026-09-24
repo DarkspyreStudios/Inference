@@ -180,10 +180,9 @@ allocation. No unlisted persistence artifacts are discovered through adjacent fi
 Inference still owns no path-materialization implementation; the fork owns cleanup on failure,
 cancellation and unload. The host continues to use only the pack manager and `IPersistenceStore`.
 
-**Unpublished capability addition:** Qwen's Common `LlmCapabilities.OutputLimitEnforcement` is
+**Capability addition (11.6.0-rc.1):** Qwen's Common `LlmCapabilities.OutputLimitEnforcement` is
 `EngineEnforced`, describing its existing `MaxOutputTokens` runtime limit. This is separate from
-nullable discovered model limits and does not add a Tensor accounting/compaction service. Publication
-is held; this metadata is not in `11.5.3-rc.1`.
+nullable discovered model limits and does not add a Tensor accounting/compaction service.
 
 Supra uses `TensorImageModels.SupraRuntimeArchitecture` and requires all four roles: `supra-model`,
 `text-model`, `text-tokenizer`, `vae-model`. Its resolver and loader share the required DiT, text

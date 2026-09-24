@@ -1,10 +1,10 @@
 # Agent DS: managed-agent contract handoff
 
-## Pending bounded-compaction accounting extension
+## Bounded-compaction accounting extension: 11.6.0-rc.1
 
-**Source only; not published.** `11.5.3-rc.1` remains the latest published family and does not contain
-the methods below. The next breaking-contract line is planned as `11.6.0-rc.1`; release is explicitly
-held for possible Codex Native browser-restriction changes.
+The user authorized the coordinated `11.6.0-rc.1` contract release after the initial source-only hold.
+Consume `Darkspyre.Inference.Connect` and its exact Common dependency at that version for the APIs
+below. The earlier `11.5.3-rc.1` packages do not contain them.
 
 - `LlmProviderService.MeasureRequestAsync(connectionId, LlmChatRequest, LlmAgentContextPolicy?, ct)`
   accounts a standalone summary request without generation, session creation or credential writes.
@@ -24,7 +24,7 @@ All existing estimators remain estimates, with unknown occupancy for uncountable
 do not certify strict bounded fit or guarantee an eligible bounded route. Keep `IContextCompactor`,
 its request/deadline ledger and SessionManager replacement coordination in Agent DS. No consumer
 source changes are included. Exact semantics and evidence are in the
-[canonical design](enhancements.md#public-nonmutating-accounting-unpublished).
+[canonical design](enhancements.md#public-nonmutating-accounting).
 
 ## Historical initial handoff
 

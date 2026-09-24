@@ -300,7 +300,7 @@ contains and protects the new prompt. Failure before admission changes neither c
 
 ## 7. Context pressure and limits
 
-### Public nonmutating accounting (unpublished)
+### Public nonmutating accounting
 
 Approved for the Agent DS bounded-Core-compaction handoff. The existing provider service and session
 seams gain these methods; compaction orchestration and persistence stay in the host:
@@ -366,9 +366,9 @@ cannot certify strict bounded fit. Direct Codex cannot provide an enforced summa
 though its managed context reserve is available; a bounded consumer must report Unsupported with a
 diagnostic rather than use another model automatically. Provider-native compaction is separate.
 
-The session-interface addition requires the next breaking-contract release (planned `11.6.0-rc.1`).
-The user explicitly held publication pending possible Codex Native browser-restriction work. Shared
-package version remains `11.5.3-rc.1` until release preparation; no packages are created for this unit.
+The session-interface addition is included in the breaking-contract release `11.6.0-rc.1`.
+The initial implementation was source-only; the user subsequently authorized coordinated publication.
+No additional Codex Native browser-restriction changes are included in this accounting unit.
 
 ### Existing status and policy contract
 

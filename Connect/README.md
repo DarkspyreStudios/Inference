@@ -418,10 +418,10 @@ Bedrock, AgentCore and CLI chat do not import this opaque state.
 
 ### Host-owned managed agent runtime
 
-**Unpublished accounting extension:** source now includes
+**Accounting extension (11.6.0-rc.1):** the library includes
 `LlmProviderService.MeasureRequestAsync(connectionId, request, policy, ct)` and
 `ILlmAgentSession.MeasureContextAsync(proposedContext, ct)`, both returning `LlmRequestAccounting`.
-These APIs are not in the published `11.5.3-rc.1` packages; publication is on hold.
+These APIs are introduced in the coordinated `11.6.0-rc.1` contract release.
 Standalone accounting resolves the selected connection read-only and may read its model catalog,
 but never refreshes/persists credentials or runs inference. Session accounting uses base settings
 while idle and the frozen executing model/instructions/tools while paused, including queued steering
@@ -431,7 +431,7 @@ The result distinguishes `IsSupported = false` from supported-but-unknown measur
 nullable model limits separately from the effective host ceiling, reserve, safety margin and usable
 input budget, and preserves `LlmContextMeasurementSource`. Neither `IsSupported`, an estimate, nor
 `NeedsCompaction = false` proves fit. Native-owned context accounting is unsupported. See the
-[accounting design](docs/enhancements.md#public-nonmutating-accounting-unpublished) for failure and concurrency semantics.
+[accounting design](docs/enhancements.md#public-nonmutating-accounting) for failure and concurrency semantics.
 
 `OutputLimitEnforcement` is exposed by both `LlmProviderCapabilities` and Common's `LlmCapabilities`.
 OpenAI Responses, Anthropic Messages and Bedrock Converse advertise `ProviderEnforced`; direct Codex,

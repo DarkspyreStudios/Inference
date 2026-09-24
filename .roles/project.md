@@ -458,7 +458,7 @@ All four downloaded archives match the local archives byte-for-byte and are priv
 evaluation confirms exactly one `ggml-metal.metal`, owned by `Whisper.net.Runtime.Metal`.
 Source, this record and tag `v11.5.3-rc.1` are pushed to origin. No model downloads or paid calls.
 
-## Unpublished: bounded-compaction accounting and output-cap metadata
+## Bounded-compaction accounting and output-cap metadata implementation
 
 Approved source implementation adds `LlmProviderService.MeasureRequestAsync` and
 `ILlmAgentSession.MeasureContextAsync`, returning `LlmRequestAccounting`. Standalone accounting uses
@@ -473,10 +473,10 @@ for Responses/Anthropic/Bedrock Converse, engine enforcement for Qwen, unsupport
 CLI/Antigravity, unknown for generic compatible endpoints and AgentCore harnesses. A reserve is never
 advertised as a cap. Estimation is not a guarantee of fit; this unit adds no exact-count fallback.
 
-The public session-interface change targets the next breaking-contract line, planned `11.6.0-rc.1`.
-The user explicitly prohibited publication pending possible Codex Native browser-restriction work.
-`Directory.Build.props` remains at the last published `11.5.3-rc.1`; no pack, tag or publication occurs.
-Source-only guidance is in `Connect/docs/agent-ds-contract-handoff.md` and the canonical accounting
+The public session-interface change targets the breaking-contract line `11.6.0-rc.1`.
+The initial implementation was held without publication pending possible Codex Native work;
+the user subsequently authorized push and publication of this completed unit. No additional browser
+restriction changes are included. Guidance is in `Connect/docs/agent-ds-contract-handoff.md` and the canonical accounting
 section of `Connect/docs/enhancements.md`; `HostOwnedAgentContext.InspectCompactionAsync` is compiled.
 
 Controlled tests cover projection parity, frozen model/instructions/tools, unchanged history/revision,
