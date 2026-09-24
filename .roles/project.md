@@ -18,7 +18,7 @@ specifications.
 | Version line | `<net>.<release>.<minor>`: .NET generation, breaking-contract release, compatible tweak/fix |
 | Release model | `Common`, `Connect`, `Tensor`, and `UI.Settings` publish together at the one version declared in `/Directory.Build.props` |
 | Primary branch | `master` |
-| Lifecycle stage | Four-package `11.5.3-rc.1` published privately |
+| Lifecycle stage | Four-package `11.6.0-rc.1` published privately |
 | Jira project and parent | TBD |
 | Jira subject label | TBD |
 
@@ -486,3 +486,11 @@ Codex cap rejection before HTTP and portable capability mappings. Zero-warning D
 and tests pass: Connect 340, Tensor 298, UI 53 in each configuration (Common's 24 tests repeat in each).
 Formatting verification and all three transitive vulnerability audits pass. No model downloads,
 paid inference, package artifacts or consuming-application migrations are required by this unit.
+
+## Automated private release 11.6.0-rc.1
+
+Published all four packages from `1f2ce1aa4feafdc5c301a1f3a2a5014f1afbcdc0` using `deploy-major.sh`.
+Authenticated restores, Debug/Release builds and tests, formatting, vulnerability audits,
+archive boundaries and local/fresh-feed consumer checks passed. Downloaded archives match
+the verified local archives; feed readback confirms private visibility. Source is tagged
+`v11.6.0-rc.1`. No model weights or paid inference were used as verification gates.
