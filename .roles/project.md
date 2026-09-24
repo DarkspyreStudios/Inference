@@ -18,7 +18,7 @@ specifications.
 | Version line | `<net>.<release>.<minor>`: .NET generation, breaking-contract release, compatible tweak/fix |
 | Release model | `Common`, `Connect`, `Tensor`, and `UI.Settings` publish together at the one version declared in `/Directory.Build.props` |
 | Primary branch | `master` |
-| Lifecycle stage | Four-package `11.6.1-rc.1` published privately |
+| Lifecycle stage | Four-package `11.7.0-rc.1` published privately |
 | Jira project and parent | TBD |
 | Jira subject label | TBD |
 
@@ -565,3 +565,11 @@ the projection reported the audio omitted and the request was accepted. An empty
 (sent as an embedded text resource), the structured value (sent as the final text part) and the link
 name, and reported the PDF as not received; the tool completed successfully. AgentCore and the
 Anthropic API were not run, for lack of credentials.
+
+## Automated private release 11.7.0-rc.1
+
+Published all four packages from `7eb7671fa3bff32eec22bd3a0c14fcc88c8c81de` using `deploy-major.sh`.
+Authenticated restores, Debug/Release builds and tests, formatting, vulnerability audits,
+archive boundaries and local/fresh-feed consumer checks passed. Downloaded archives match
+the verified local archives; feed readback confirms private visibility. Source is tagged
+`v11.7.0-rc.1`. No model weights or paid inference were used as verification gates.
