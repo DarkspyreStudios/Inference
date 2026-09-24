@@ -11,7 +11,7 @@ directly without an HTTP bridge. A web service can host the same libraries and t
 into their typed contracts. In either case, the application owns startup, configuration, credentials,
 persistence, user consent, and shutdown.
 
-Current release: **11.5.2-rc.1**, targeting **.NET 11**, distributed through the private
+Current release: **11.5.3-rc.1**, targeting **.NET 11**, distributed through the private
 [DarkspyreStudios GitHub Packages feed](https://github.com/orgs/DarkspyreStudios/packages).
 
 ## Goals
@@ -113,10 +113,10 @@ The projects currently use the .NET 11 RC SDK pinned in each product's `global.j
 Install only the products your application needs, keeping their versions synchronized:
 
 ```bash
-dotnet add package Darkspyre.Inference.Connect --version 11.5.2-rc.1
-dotnet add package Darkspyre.Inference.Tensor --version 11.5.2-rc.1
+dotnet add package Darkspyre.Inference.Connect --version 11.5.3-rc.1
+dotnet add package Darkspyre.Inference.Tensor --version 11.5.3-rc.1
 # Optional, for a Blazor host:
-dotnet add package Darkspyre.Inference.UI.Settings --version 11.5.2-rc.1
+dotnet add package Darkspyre.Inference.UI.Settings --version 11.5.3-rc.1
 ```
 
 Common is brought in transitively. An application that only consumes the shared contracts can
