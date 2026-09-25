@@ -676,7 +676,7 @@ the verified local archives; feed readback confirms private visibility. Source i
 ## Strict tool flags on Anthropic Messages and compatible Chat Completions
 
 `AnthropicMessagesLlmClient` and `OpenAiCompatibleChatLlmClient` write `strict` only for a strict tool, as
-Bedrock Converse does. A compatible change for `11.8.3-rc.1`. Neither route has a configured connection
+Bedrock Converse does. Released with the breaking `11.9.0-rc.1`. Neither route has a configured connection
 here, so the change is not live-verified.
 
 Verification: Debug build with zero warnings, `dotnet format --verify-no-changes`, and 396 Connect and
@@ -685,7 +685,7 @@ Common tests.
 ## Model lists kept for the application
 
 The design is the "Model lists kept for the application" section of `Connect/docs/enhancements.md`, a
-breaking change for `12.0.0-rc.1` through the new `ILlmInference.RefreshModelsAsync`.
+breaking change for `11.9.0-rc.1` through the new `ILlmInference.RefreshModelsAsync`.
 
 - `LlmModelListCache` holds one list per connection keyed by `LlmConnection.Version`, shares a listing
   among concurrent callers, and keeps no failed listing. `AddLlmConnect` registers it as a singleton.
@@ -698,7 +698,7 @@ Verification: zero-warning builds and clean formatting for the Connect, Tensor a
 ## One non-strict default for tool definitions
 
 Common's and Connect's `LlmToolDefinition` default to `Strict = false`, matching `LlmAgentToolDefinition`;
-structured output keeps `Strict = true`. Breaking, in `12.0.0-rc.1`. The Bedrock and tool-use tests set
+structured output keeps `Strict = true`. Breaking, in `11.9.0-rc.1`. The Bedrock and tool-use tests set
 `Strict = true` where they test a strict tool.
 
 Verification: zero-warning builds and clean formatting for the Connect, Tensor and UI solutions; Connect

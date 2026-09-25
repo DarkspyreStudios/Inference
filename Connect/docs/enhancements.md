@@ -1521,7 +1521,7 @@ parallel use the Codex discovery endpoint answered 429.
   list. Connect's implementation delegates both to `LlmProviderService`; Qwen reads its local packs on
   every call, so its refresh is the same listing.
 
-Adding an interface member is a breaking change, released as `12.0.0-rc.1`.
+Adding an interface member is a breaking change, released as `11.9.0-rc.1`.
 
 ## One non-strict default for tool definitions
 
@@ -1541,5 +1541,5 @@ All three tool definitions default to `Strict = false`. A host schema describes 
 Structured output keeps `Strict = true`, because its schema describes the reply the host requires.
 
 A host that relied on the old chat default sets `Strict = true`. The change is breaking and ships in
-`12.0.0-rc.1`.
+`11.9.0-rc.1`.
 
