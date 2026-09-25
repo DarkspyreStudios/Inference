@@ -17,14 +17,11 @@ internal static class ManagedAgentProbe
             WorkingDirectory = Environment.CurrentDirectory,
             Instructions = "Follow the user's request.",
             Tools = [Program.CreateAttachmentTool(supportsDocuments: true)],
-            Handlers = new()
-            {
-                ToolHandler = async (call, token) =>
-            {
-                Interlocked.Increment(ref toolCalls);
-                return await Program.ExecuteToolAsync(call, token);
-            }
-            }
+            ToolHandler = async (call, token) =>
+        {
+            Interlocked.Increment(ref toolCalls);
+            return await Program.ExecuteToolAsync(call, token);
+        }
         };
         await using var session = await agents.StartSessionAsync(connectionId, options, cancellationToken);
         var result = await ReadAsync(session.RunTurnAsync(new()

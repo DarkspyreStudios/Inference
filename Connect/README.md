@@ -738,11 +738,7 @@ await using ILlmAgentSession session = await agents.StartSessionAsync(
         WritableRoots = [repositoryPath, artifactDirectory],
         NetworkAllowed = true,
         Tools = [agentWeatherTool],
-        Handlers = new LlmAgentSessionHandlers
-        {
-            ToolHandler = ExecuteToolAsync,
-            ApprovalHandler = ReviewApprovalAsync
-        }
+        ToolHandler = ExecuteToolAsync
     },
     cancellationToken);
 
@@ -812,9 +808,9 @@ attachment access must survive reopen or live compaction. Keep the original file
 cache affinity is not file storage.
 
 Managed sessions expose `ThreadId` and `SessionId`, explicit interrupt, safe-boundary steering,
-and host context operations. Native `ResumeSessionAsync`, `ForkSessionAsync`, and
-`CompactAsync` are unsupported for managed Codex. Claude retains native resume/current-position
-fork and interrupt; its explicit compaction and steering methods are unsupported. Tools return
+and host context operations. Native `ResumeSessionAsync` and `ForkSessionAsync` are unsupported for
+managed Codex. Claude retains native resume/current-position fork and interrupt; its steering method
+is unsupported. Tools return
 text plus provider-neutral image/document attachments. Managed tools reject URL-based image/audio
 content; use `Attachments`. Claude materializes MCP document resources through its read-only
 `Read` tool. Every tool-capable session must receive a host tool handler.
@@ -869,9 +865,8 @@ results are text-only. See `ProviderToolExamples.BedrockAgentCoreAsync` for a co
 The generic `WorkingDirectory` value is not sent to AWS; Harness files and commands run in the remote
 AgentCore environment, never in the caller's local directory. `ReadOnly` sandbox mode, or any
 approval policy other than `Never`, restricts `allowedTools` to the explicitly registered host tools
-because AgentCore cannot route approval requests for its remote built-in tools to
-`LlmAgentApprovalHandler`. With a writable sandbox and `Never`, the deployed Harness tool policy is
-allowed to operate remotely. Supplying an approval handler is rejected rather than ignored.
+because AgentCore cannot route approval requests for its remote built-in tools to the host. With a
+writable sandbox and `Never`, the deployed Harness tool policy is allowed to operate remotely.
 
 The current Harness wire contract has no image or document message block and no binary tool-result
 block. This transport therefore reports all four attachment capabilities as `false`; callers must not

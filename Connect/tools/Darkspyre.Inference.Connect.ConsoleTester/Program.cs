@@ -355,10 +355,7 @@ internal static class Program
                 Sandbox = LlmAgentSandboxMode.ReadOnly,
                 ApprovalPolicy = LlmAgentApprovalPolicy.Never,
                 Tools = tools,
-                Handlers = new LlmAgentSessionHandlers
-                {
-                    ToolHandler = ExecuteToolAsync
-                }
+                ToolHandler = ExecuteToolAsync
             },
             cancellationToken);
         await foreach (LlmAgentEvent agentEvent in session.RunTurnAsync(
@@ -502,32 +499,6 @@ internal static class Program
                 break;
             case LlmAgentReasoningDeltaEvent reasoning:
                 Console.Error.Write(reasoning.Delta);
-                break;
-            case LlmAgentPlanDeltaEvent plan:
-                Console.Error.Write(plan.Delta);
-                break;
-            case LlmAgentCommandEvent command:
-                Console.Error.WriteLine($"[command:{command.Status}] {command.Command}");
-                break;
-            case LlmAgentFileChangeEvent fileChange:
-                Console.Error.WriteLine(
-                    $"[files:{fileChange.Status}] {fileChange.Changes.Count} change(s)");
-                break;
-            case LlmAgentMcpToolEvent mcp:
-                Console.Error.WriteLine($"[mcp:{mcp.Status}] {mcp.Server}/{mcp.Tool}");
-                break;
-            case LlmAgentWebSearchEvent web:
-                Console.Error.WriteLine($"[web] {web.Query}");
-                break;
-            case LlmAgentImageViewEvent image:
-                Console.Error.WriteLine($"[image] {image.Path}");
-                break;
-            case LlmAgentCollaborationEvent collaboration:
-                Console.Error.WriteLine(
-                    $"[agent:{collaboration.Status}] {collaboration.Tool}");
-                break;
-            case LlmAgentSubAgentActivityEvent activity:
-                Console.Error.WriteLine($"[subagent:{activity.Kind}] {activity.AgentThreadId}");
                 break;
             case LlmAgentToolEvent tool:
                 Console.Error.WriteLine($"[tool:{tool.Status}] {tool.Tool}");

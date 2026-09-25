@@ -166,7 +166,7 @@ Darkspyre.Inference.Connect.LLM will not read application paths to reconstruct m
 
 `LlmAgentContextStatus` exposes `ModelId`, `ContextRevision`, `MaxContextTokens`, `UsedContextTokens`,
 `ReservedOutputTokens`, `AvailableInputTokens`, nullable `NeedsCompaction`, `IsEstimated`, and
-`Source` (`Unknown`, `Estimated`, `ProviderReported`, `Mixed`). All token values are nullable `long`.
+`Source` (`Unknown`, `Estimated`, `Mixed`). All token values are nullable `long`.
 
 Unknown is not zero, false, unlimited, or a request to compact. Used context is the projected next
 input (including cached input, tools, instructions, attachments and opaque state), not summed usage

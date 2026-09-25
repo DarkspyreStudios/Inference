@@ -251,19 +251,16 @@ public sealed class ManagedAgentTests
         {
             Tools = [options.Tools[0] with { RequiresSequentialExecution = forceSequential }],
             ExecutionOptions = new() { ToolExecutionMode = LlmAgentToolExecutionMode.Parallel, MaxConcurrentTools = 2 },
-            Handlers = new()
-            {
-                ToolHandler = async (call, token) =>
-            {
-                int count = Interlocked.Increment(ref active);
-                int seen;
-                do { seen = Volatile.Read(ref peak); } while (count > seen && Interlocked.CompareExchange(ref peak, count, seen) != seen);
-                if (count == 2) { firstTwo.TrySetResult(); }
-                if (!forceSequential && int.Parse(call.CallId, System.Globalization.CultureInfo.InvariantCulture) < 2) { await firstTwo.Task.WaitAsync(TimeSpan.FromSeconds(5), token); }
-                Interlocked.Decrement(ref active);
-                return new();
-            }
-            }
+            ToolHandler = async (call, token) =>
+        {
+            int count = Interlocked.Increment(ref active);
+            int seen;
+            do { seen = Volatile.Read(ref peak); } while (count > seen && Interlocked.CompareExchange(ref peak, count, seen) != seen);
+            if (count == 2) { firstTwo.TrySetResult(); }
+            if (!forceSequential && int.Parse(call.CallId, System.Globalization.CultureInfo.InvariantCulture) < 2) { await firstTwo.Task.WaitAsync(TimeSpan.FromSeconds(5), token); }
+            Interlocked.Decrement(ref active);
+            return new();
+        }
         };
         await using var session = harness.Create(options);
         await Read(session.RunTurnAsync(Turn("go")));
@@ -280,15 +277,12 @@ public sealed class ManagedAgentTests
         var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var options = ToolsOptions(_ => new()) with
         {
-            Handlers = new()
-            {
-                ToolHandler = async (_, token) =>
-        {
-            started.TrySetResult();
-            await Task.Delay(Timeout.InfiniteTimeSpan, token);
-            return new();
-        }
-            }
+            ToolHandler = async (_, token) =>
+    {
+        started.TrySetResult();
+        await Task.Delay(Timeout.InfiniteTimeSpan, token);
+        return new();
+    }
         };
         await using var session = harness.Create(options);
         string? turnId = null;
@@ -537,7 +531,7 @@ public sealed class ManagedAgentTests
     {
         Tools = [new() { Name = "echo", InputSchema = JsonSerializer.SerializeToElement(new
         { type = "object", properties = new { }, additionalProperties = false }) }],
-        Handlers = new() { ToolHandler = (call, _) => ValueTask.FromResult(handler(call)) }
+        ToolHandler = (call, _) => ValueTask.FromResult(handler(call))
     };
     private static string TextOf(LlmToolResult result) =>
         Assert.IsType<LlmToolOutputText>(Assert.Single(result.Output.Parts)).Text;

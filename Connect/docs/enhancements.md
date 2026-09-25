@@ -111,10 +111,9 @@ Add `LlmAgentCapabilities Agent` to `LlmProviderCapabilities`. Its fields are:
 | `SupportsContextStatus` | Status operation supported; individual measurements may remain unknown |
 | `SupportsCompactionHandoff` | Same-run pause/continue around host compaction |
 | `SupportsNativeResume` | Persisted provider thread can be reopened by ID |
-| `NativeFork` | `None`, `CurrentPosition`, `TurnBoundary` |
+| `NativeFork` | `None`, `CurrentPosition` |
 | `CompactionOwnership` | `None`, `Host`, `Provider` |
-| `SupportsNativeCompaction` | Explicit `CompactAsync` is available; automatic native memory management alone does not imply this |
-| `Steering` | `None`, `SafeBoundary`, `Immediate` |
+| `Steering` | `None`, `SafeBoundary` |
 | `SupportsInterrupt` | Explicit active-run interrupt, distinct from enumeration cancellation |
 | `ToolExecutionOwnership` | `Host`, `Provider`, `Mixed` where applicable |
 
@@ -248,8 +247,8 @@ IAsyncEnumerable<LlmAgentEvent> ContinueTurnAsync(
 ```
 
 Native implementations reject unsupported context/continuation operations before effects.
-Keep `RunTurnAsync`, `SteerAsync`, `InterruptAsync`, and native `CompactAsync` on this seam.
-Managed `CompactAsync` rejects with guidance to the host handoff; it never silently summarizes.
+Keep `RunTurnAsync`, `SteerAsync` and `InterruptAsync` on this seam. The host compacts through the
+handoff; no runtime summarizes on request.
 
 Add `Context`, optional host-assigned `ThreadId`/`SessionId`, and `ExecutionOptions` to start
 options. A managed session starts empty or from that supplied context. Native start rejects supplied
@@ -392,7 +391,7 @@ public sealed record LlmAgentContextStatus
 }
 ```
 
-`Source` is `Unknown`, `Estimated`, `ProviderReported`, or `Mixed`. Unknown token components
+`Source` is `Unknown`, `Estimated` or `Mixed`. Unknown token components
 remain null. `NeedsCompaction = null` means insufficient evidence, not safe to continue.
 `IsEstimated` is true if any number used in the decision is estimated; `Source` distinguishes
 unknown from exact. Cached input tokens remain included in occupied context.
@@ -536,8 +535,7 @@ and attachments are validated before the next model call; unsupported attachment
 failed tool result with an explanatory event, never a silently dropped payload.
 
 Do not add a second generic approval framework: the host handler enforces its permissions and
-invokes its approval UI if necessary. Native `ApprovalHandler` remains for native command/file
-approvals. Managed sessions do not promise OS sandbox enforcement merely because start options
+invokes its approval UI if necessary. Managed sessions do not promise OS sandbox enforcement merely because start options
 contain `Sandbox`, `WritableRoots` or `NetworkAllowed`. Capabilities identify execution ownership;
 documentation must say those controls govern native runtime tools while host tools need their own
 enforcement. `DeferLoading` is rejected by managed Codex until an actual tool-loading mechanism exists.
@@ -1104,7 +1102,7 @@ public sealed record LlmToolOutput
 public sealed record LlmToolResult(string ToolCallId, LlmToolOutput Output);
 ```
 
-- `LlmAgentSessionHandlers.ToolHandler` returns `LlmToolOutput`.
+- `LlmAgentSessionOptions.ToolHandler` returns `LlmToolOutput`.
 - A captured context serializes each part with a `type` field: `text`, `binary` or `resource`.
 - A capture without attachment bytes drops binary parts and resource byte bodies from tool outputs and
   records each as an `LlmOmittedAttachment`. Its `Kind` is an `LlmBinaryKind`, its `Index` is the
@@ -1584,7 +1582,7 @@ The change ships in `11.9.0-rc.1` with the other breaking changes.
 
 ## Public surface cleanup for 11.9.0-rc.1
 
-**Status:** Proposed
+**Status:** Included in this technical design
 
 ### Problem
 

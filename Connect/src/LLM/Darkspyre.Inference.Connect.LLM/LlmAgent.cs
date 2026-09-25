@@ -19,20 +19,6 @@ public enum LlmAgentApprovalPolicy
     Never
 }
 
-public enum LlmAgentApprovalKind
-{
-    CommandExecution,
-    FileChange
-}
-
-public enum LlmAgentApprovalDecision
-{
-    Accept,
-    AcceptForSession,
-    Decline,
-    Cancel
-}
-
 /// <summary>A host-implemented dynamic tool exposed to an agent session.</summary>
 public sealed record LlmAgentToolDefinition
 {
@@ -61,8 +47,6 @@ public sealed record LlmAgentTextContent(string Text) : LlmAgentContent;
 
 public sealed record LlmAgentImageContent(string ImageUrl) : LlmAgentContent;
 
-public sealed record LlmAgentAudioContent(string AudioUrl) : LlmAgentContent;
-
 /// <summary>A dynamic tool invocation sent from the agent to the host.</summary>
 public sealed record LlmAgentToolCall(
     string ThreadId,
@@ -72,45 +56,9 @@ public sealed record LlmAgentToolCall(
     string Name,
     JsonElement Arguments);
 
-
-public sealed record LlmAgentApprovalRequest
-{
-    public required LlmAgentApprovalKind Kind { get; init; }
-
-    public required string ThreadId { get; init; }
-
-    public required string TurnId { get; init; }
-
-    public required string ItemId { get; init; }
-
-    /// <summary>Provider subtype such as command, network, or stdin when supplied.</summary>
-    public string? ProviderKind { get; init; }
-
-    public string? Reason { get; init; }
-
-    public string? Command { get; init; }
-
-    public string? WorkingDirectory { get; init; }
-
-    public string? GrantRoot { get; init; }
-
-    public IReadOnlyList<LlmAgentApprovalDecision> AvailableDecisions { get; init; } = [];
-}
-
 public delegate ValueTask<LlmToolOutput> LlmAgentToolHandler(
     LlmAgentToolCall call,
     CancellationToken cancellationToken);
-
-public delegate ValueTask<LlmAgentApprovalDecision> LlmAgentApprovalHandler(
-    LlmAgentApprovalRequest request,
-    CancellationToken cancellationToken);
-
-public sealed record LlmAgentSessionHandlers
-{
-    public LlmAgentToolHandler? ToolHandler { get; init; }
-
-    public LlmAgentApprovalHandler? ApprovalHandler { get; init; }
-}
 
 public sealed record LlmAgentSessionOptions
 {
@@ -153,7 +101,7 @@ public sealed record LlmAgentSessionOptions
 
     public bool Ephemeral { get; init; }
 
-    public LlmAgentSessionHandlers Handlers { get; init; } = new();
+    public LlmAgentToolHandler? ToolHandler { get; init; }
 
     /// <summary>
     /// Lets the runtime start subagents and output monitors of its own. Off by default. Only a runtime whose
@@ -191,7 +139,7 @@ public sealed record LlmAgentResumeOptions
 
     public LlmAgentApprovalPolicy? ApprovalPolicy { get; init; }
 
-    public LlmAgentSessionHandlers Handlers { get; init; } = new();
+    public LlmAgentToolHandler? ToolHandler { get; init; }
 
     /// <summary>
     /// Lets the runtime start subagents and output monitors of its own. Off by default. Only a runtime whose
@@ -252,114 +200,11 @@ public sealed record LlmAgentReasoningDeltaEvent(
     bool IsSummary)
     : LlmAgentEvent(ThreadId, TurnId);
 
-public sealed record LlmAgentPlanDeltaEvent(
-    string ThreadId,
-    string TurnId,
-    string ItemId,
-    string Delta)
-    : LlmAgentEvent(ThreadId, TurnId);
-
 public sealed record LlmAgentMessageCompletedEvent(
     string ThreadId,
     string TurnId,
     string ItemId,
     string Text)
-    : LlmAgentEvent(ThreadId, TurnId);
-
-public sealed record LlmAgentCommandEvent
-    : LlmAgentEvent
-{
-    public LlmAgentCommandEvent(string threadId, string turnId)
-        : base(threadId, turnId)
-    {
-    }
-
-    public required string ItemId { get; init; }
-
-    public required string Command { get; init; }
-
-    public required string WorkingDirectory { get; init; }
-
-    public required string Status { get; init; }
-
-    public string? Output { get; init; }
-
-    public int? ExitCode { get; init; }
-}
-
-public sealed record LlmAgentFileChange(string Path, string Kind, string Diff);
-
-public sealed record LlmAgentFileChangeEvent
-    : LlmAgentEvent
-{
-    public LlmAgentFileChangeEvent(string threadId, string turnId)
-        : base(threadId, turnId)
-    {
-    }
-
-    public required string ItemId { get; init; }
-
-    public required string Status { get; init; }
-
-    public IReadOnlyList<LlmAgentFileChange> Changes { get; init; } = [];
-}
-
-public sealed record LlmAgentMcpToolEvent
-    : LlmAgentEvent
-{
-    public LlmAgentMcpToolEvent(string threadId, string turnId)
-        : base(threadId, turnId)
-    {
-    }
-
-    public required string ItemId { get; init; }
-
-    public required string Server { get; init; }
-
-    public required string Tool { get; init; }
-
-    public required string Status { get; init; }
-
-    public required JsonElement Arguments { get; init; }
-
-    public JsonElement? Result { get; init; }
-
-    public string? Error { get; init; }
-}
-
-public sealed record LlmAgentWebSearchEvent(
-    string ThreadId,
-    string TurnId,
-    string ItemId,
-    string Query,
-    IReadOnlyList<JsonElement> Results)
-    : LlmAgentEvent(ThreadId, TurnId);
-
-public sealed record LlmAgentImageViewEvent(
-    string ThreadId,
-    string TurnId,
-    string ItemId,
-    string Path)
-    : LlmAgentEvent(ThreadId, TurnId);
-
-public sealed record LlmAgentCollaborationEvent(
-    string ThreadId,
-    string TurnId,
-    string ItemId,
-    string Tool,
-    string Status,
-    string SenderThreadId,
-    IReadOnlyList<string> ReceiverThreadIds,
-    string? Prompt)
-    : LlmAgentEvent(ThreadId, TurnId);
-
-public sealed record LlmAgentSubAgentActivityEvent(
-    string ThreadId,
-    string TurnId,
-    string ItemId,
-    string Kind,
-    string AgentThreadId,
-    string AgentPath)
     : LlmAgentEvent(ThreadId, TurnId);
 
 public sealed record LlmAgentToolEvent(
@@ -371,9 +216,6 @@ public sealed record LlmAgentToolEvent(
     JsonElement Arguments,
     bool? Success,
     string Status)
-    : LlmAgentEvent(ThreadId, TurnId);
-
-public sealed record LlmAgentCompactedEvent(string ThreadId, string TurnId)
     : LlmAgentEvent(ThreadId, TurnId);
 
 public sealed record LlmAgentWarningEvent(
@@ -469,8 +311,6 @@ public interface ILlmAgentSession : IAsyncDisposable
         CancellationToken cancellationToken = default);
 
     Task InterruptAsync(string turnId, CancellationToken cancellationToken = default);
-
-    Task CompactAsync(CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Session-lifetime events outside host turns: resource changes, output hints and provider-started turns.

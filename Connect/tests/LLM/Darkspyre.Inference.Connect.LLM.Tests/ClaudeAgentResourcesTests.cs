@@ -349,7 +349,7 @@ public sealed class ClaudeAgentResourcesTests : IDisposable
             ModelId = "claude-test",
             WorkingDirectory = _directory,
             Tools = [new LlmAgentToolDefinition { Name = "hold", Description = "Holds.", InputSchema = Json(new { type = "object" }) }],
-            Handlers = new() { ToolHandler = handler },
+            ToolHandler = handler,
         });
 
     private static object ToolUse(string id) => new

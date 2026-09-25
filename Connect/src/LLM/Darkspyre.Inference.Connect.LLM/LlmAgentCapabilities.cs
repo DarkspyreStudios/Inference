@@ -33,15 +33,13 @@ public enum LlmAgentCompactionOwnership
 public enum LlmAgentNativeFork
 {
     None,
-    CurrentPosition,
-    TurnBoundary
+    CurrentPosition
 }
 
 public enum LlmAgentSteering
 {
     None,
-    SafeBoundary,
-    Immediate
+    SafeBoundary
 }
 
 public enum LlmAgentToolExecutionOwnership
@@ -77,9 +75,6 @@ public sealed record LlmAgentCapabilities
 
     public LlmAgentCompactionOwnership CompactionOwnership { get; init; }
 
-    /// <summary>Explicit CompactAsync support, not automatic provider memory management.</summary>
-    public bool SupportsNativeCompaction { get; init; }
-
     public LlmAgentSteering Steering { get; init; }
 
     /// <summary>Explicit InterruptAsync support; enumeration cancellation is separate.</summary>
@@ -102,7 +97,6 @@ public sealed record LlmAgentCapabilities
             || (SupportsCompactionHandoff && (ContextOwnership != LlmAgentContextOwnership.Host
                 || CompactionOwnership != LlmAgentCompactionOwnership.Host
                 || !SupportsContextCapture || !SupportsContextReplacement || !SupportsContextStatus))
-            || (SupportsNativeCompaction && CompactionOwnership != LlmAgentCompactionOwnership.Provider)
             || (NativeFork != LlmAgentNativeFork.None && !SupportsNativeResume)
             || (ContextImport == LlmAgentContextImport.Structured && ContextOwnership != LlmAgentContextOwnership.Host)
             || (ContextImport == LlmAgentContextImport.OpeningContext && ContextOwnership != LlmAgentContextOwnership.Provider)

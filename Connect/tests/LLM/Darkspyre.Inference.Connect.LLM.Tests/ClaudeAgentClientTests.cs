@@ -56,29 +56,26 @@ public sealed class ClaudeAgentClientTests
                         InputSchema = schema.RootElement.Clone()
                     }
                 ],
-                Handlers = new LlmAgentSessionHandlers
+                ToolHandler = (call, _) =>
                 {
-                    ToolHandler = (call, _) =>
+                    observedCall = call;
+                    return ValueTask.FromResult(new LlmToolOutput
                     {
-                        observedCall = call;
-                        return ValueTask.FromResult(new LlmToolOutput
-                        {
-                            Parts =
-                            [
-                                new LlmToolOutputText("echo: hello"),
-                                new LlmToolOutputBinary(
-                                    LlmBinaryKind.Image,
-                                    "image/png",
-                                    new byte[] { 0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a },
-                                    "chart.png"),
-                                new LlmToolOutputBinary(LlmBinaryKind.Document, "application/pdf", "%PDF-"u8.ToArray(), "report.pdf"),
-                                new LlmToolOutputBinary(LlmBinaryKind.Audio, "audio/wav", new byte[] { 1 }, "clip.wav"),
-                                new LlmToolOutputBinary(LlmBinaryKind.Document, "text/plain", "notes"u8.ToArray(), "notes.txt"),
-                                new LlmToolOutputResource("https://example.test/spec") { Name = "spec" }
-                            ],
-                            StructuredContent = JsonSerializer.SerializeToElement(new { n = 1 })
-                        });
-                    }
+                        Parts =
+                        [
+                            new LlmToolOutputText("echo: hello"),
+                            new LlmToolOutputBinary(
+                                LlmBinaryKind.Image,
+                                "image/png",
+                                new byte[] { 0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a },
+                                "chart.png"),
+                            new LlmToolOutputBinary(LlmBinaryKind.Document, "application/pdf", "%PDF-"u8.ToArray(), "report.pdf"),
+                            new LlmToolOutputBinary(LlmBinaryKind.Audio, "audio/wav", new byte[] { 1 }, "clip.wav"),
+                            new LlmToolOutputBinary(LlmBinaryKind.Document, "text/plain", "notes"u8.ToArray(), "notes.txt"),
+                            new LlmToolOutputResource("https://example.test/spec") { Name = "spec" }
+                        ],
+                        StructuredContent = JsonSerializer.SerializeToElement(new { n = 1 })
+                    });
                 }
             });
 
@@ -259,10 +256,7 @@ public sealed class ClaudeAgentClientTests
                             InputSchema = schema.RootElement.Clone()
                         }
                     ],
-                    Handlers = new LlmAgentSessionHandlers
-                    {
-                        ToolHandler = (_, _) => ValueTask.FromResult(new LlmToolOutput())
-                    }
+                    ToolHandler = (_, _) => ValueTask.FromResult(new LlmToolOutput())
                 }));
 
         Assert.Contains("valid MCP name", exception.Message, StringComparison.Ordinal);
@@ -292,10 +286,7 @@ public sealed class ClaudeAgentClientTests
                 ]
             },
             Tools = [new LlmAgentToolDefinition { Name = "echo", Description = "Echo text.", InputSchema = schema.RootElement.Clone() }],
-            Handlers = new LlmAgentSessionHandlers
-            {
-                ToolHandler = (_, _) => ValueTask.FromResult(LlmToolOutput.FromText("echo"))
-            }
+            ToolHandler = (_, _) => ValueTask.FromResult(LlmToolOutput.FromText("echo"))
         });
 
         IReadOnlyList<LlmAgentEvent> first = await ReadAllAsync(session.RunTurnAsync(

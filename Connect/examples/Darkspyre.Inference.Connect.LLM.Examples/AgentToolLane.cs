@@ -29,10 +29,7 @@ public static class AgentToolLane
                 ApprovalPolicy = LlmAgentApprovalPolicy.Never,
                 Ephemeral = ephemeral,
                 Tools = [WeatherTool.AgentDefinition],
-                Handlers = new LlmAgentSessionHandlers
-                {
-                    ToolHandler = WeatherTool.ExecuteAsync
-                }
+                ToolHandler = WeatherTool.ExecuteAsync
             },
             cancellationToken);
 

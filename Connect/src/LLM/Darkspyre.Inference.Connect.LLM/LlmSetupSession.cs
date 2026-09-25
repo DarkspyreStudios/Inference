@@ -381,7 +381,7 @@ public sealed class LlmSetupSession : InferenceSetupSession<LlmSetupChanges>
                 WorkingDirectory = string.Empty,
                 Sandbox = LlmAgentSandboxMode.ReadOnly,
                 ApprovalPolicy = LlmAgentApprovalPolicy.OnRequest,
-                Handlers = new() { ToolHandler = (_, _) => throw new NotSupportedException("Setup tests grant no host tools.") }
+                ToolHandler = (_, _) => throw new NotSupportedException("Setup tests grant no host tools.")
             }, token).ConfigureAwait(false);
             completed = false;
             await foreach (LlmAgentEvent item in session.RunTurnAsync(new()

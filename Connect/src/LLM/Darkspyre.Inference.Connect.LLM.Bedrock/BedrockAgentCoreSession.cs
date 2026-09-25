@@ -21,7 +21,7 @@ internal sealed class BedrockAgentCoreSession : ILlmAgentSession
     private readonly Dictionary<string, LlmAgentToolDefinition> _toolsByName;
     private readonly LlmAgentSandboxMode _sandbox;
     private readonly LlmAgentApprovalPolicy _approvalPolicy;
-    private readonly LlmAgentSessionHandlers _handlers;
+    private readonly LlmAgentToolHandler? _toolHandler;
     private readonly SemaphoreSlim _turnGate = new(1, 1);
     // Sent with the first turn, then cleared once the harness streams a response to it.
     private AgentOpeningContext? _opening;
@@ -43,7 +43,7 @@ internal sealed class BedrockAgentCoreSession : ILlmAgentSession
         IReadOnlyList<LlmAgentToolDefinition> tools,
         LlmAgentSandboxMode sandbox,
         LlmAgentApprovalPolicy approvalPolicy,
-        LlmAgentSessionHandlers handlers,
+        LlmAgentToolHandler? toolHandler,
         LlmRichContentSupported richRoute,
         LlmRichContentSupported richContent,
         AgentOpeningContext? opening = null)
@@ -60,7 +60,7 @@ internal sealed class BedrockAgentCoreSession : ILlmAgentSession
         _toolsByName = tools.ToDictionary(tool => tool.Name, StringComparer.Ordinal);
         _sandbox = sandbox;
         _approvalPolicy = approvalPolicy;
-        _handlers = handlers;
+        _toolHandler = toolHandler;
         ThreadId = sessionId;
         SessionId = sessionId;
     }
@@ -339,13 +339,6 @@ internal sealed class BedrockAgentCoreSession : ILlmAgentSession
             "AgentCore Harness does not expose a remote turn-interrupt operation. Cancel RunTurnAsync instead.");
     }
 
-    public Task CompactAsync(CancellationToken cancellationToken = default)
-    {
-        _ = cancellationToken;
-        ObjectDisposedException.ThrowIf(_disposed, this);
-        throw new NotSupportedException("AgentCore Harness controls its own session memory.");
-    }
-
     public IAsyncEnumerable<LlmAgentEvent> ObserveAsync(CancellationToken cancellationToken = default)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
@@ -428,9 +421,6 @@ internal sealed class BedrockAgentCoreSession : ILlmAgentSession
                 case LlmAgentImageContent:
                     throw new NotSupportedException(
                         "AgentCore Harness does not accept image content blocks.");
-                case LlmAgentAudioContent:
-                    throw new NotSupportedException(
-                        "AgentCore Harness does not accept audio content blocks.");
                 default:
                     throw new ArgumentOutOfRangeException(nameof(input));
             }
@@ -456,14 +446,14 @@ internal sealed class BedrockAgentCoreSession : ILlmAgentSession
         JsonElement arguments,
         CancellationToken cancellationToken)
     {
-        if (!_toolsByName.ContainsKey(pending.Name) || _handlers.ToolHandler is null)
+        if (!_toolsByName.ContainsKey(pending.Name) || _toolHandler is null)
         {
             return FailedToolResult("AgentCore requested a tool the host did not register.");
         }
         try
         {
             // Content the harness cannot carry is omitted when the result is built; it never fails the tool.
-            return await _handlers.ToolHandler(
+            return await _toolHandler(
                 new LlmAgentToolCall(
                     ThreadId,
                     turnId,

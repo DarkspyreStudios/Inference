@@ -47,7 +47,7 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
         {
             throw new NotSupportedException("Managed agents do not implement deferred tool loading.");
         }
-        if (options.Tools.Count > 0 && options.Handlers.ToolHandler is null)
+        if (options.Tools.Count > 0 && options.ToolHandler is null)
         {
             throw new ArgumentException("Managed tools require a host tool handler.");
         }
@@ -260,9 +260,6 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
         await cancellation;
         await producer.WaitAsync(cancellationToken);
     }
-
-    public Task CompactAsync(CancellationToken cancellationToken = default) =>
-        throw new NotSupportedException("Agent DS owns compaction. Use context capture/replacement or the pause/continue handoff.");
 
     public IAsyncEnumerable<LlmAgentEvent> ObserveAsync(CancellationToken cancellationToken = default)
     {
@@ -529,7 +526,7 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
                     arguments.RootElement.Clone(), null, "started"), token);
                 token.ThrowIfCancellationRequested();
                 started = true;
-                var output = await _options.Handlers.ToolHandler!(new(ThreadId, run.Id, call.Id, null, call.Name,
+                var output = await _options.ToolHandler!(new(ThreadId, run.Id, call.Id, null, call.Name,
                     arguments.RootElement.Clone()), token);
                 // The output is kept whole; the route's projection decides what reaches the model when it is sent.
                 var mapped = new LlmToolResult(call.Id, ManagedAgentContext.CopyOutput(output));

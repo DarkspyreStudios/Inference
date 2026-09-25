@@ -21,9 +21,9 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
         ArgumentNullException.ThrowIfNull(options);
         NativeAgentContract.ValidateStart(options);
         NativeAgentContract.ValidateConnection(connection, NativeAgentContract.Claude,
-            options.ModelId, options.Tools, options.Handlers);
+            options.ModelId, options.Tools, options.ToolHandler);
         ClaudeCliConfiguration.ValidateConnection(connection);
-        ValidateOptions(options.ModelId, options.WorkingDirectory, options.Tools, options.Handlers);
+        ValidateOptions(options.ModelId, options.WorkingDirectory, options.Tools, options.ToolHandler);
         AgentOpeningContext? opening = AgentOpeningContext.For(options, carriesAttachments: true);
         string threadId = Guid.NewGuid().ToString();
         return await CreateSessionAsync(
@@ -39,7 +39,7 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             options.Sandbox,
             options.NetworkAllowed,
             options.Tools,
-            options.Handlers,
+            options.ToolHandler,
             options.Ephemeral,
             connection,
             NativeAgentContract.Claude.RichContentSupported.For(connection, options.ModelId),
@@ -59,9 +59,9 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
         CliInfrastructure.ValidateThreadId(threadId);
         options ??= new LlmAgentResumeOptions();
         NativeAgentContract.ValidateConnection(connection, NativeAgentContract.Claude,
-            options.ModelId, options.Tools, options.Handlers);
+            options.ModelId, options.Tools, options.ToolHandler);
         string workingDirectory = options.WorkingDirectory ?? Environment.CurrentDirectory;
-        ValidateOptions(options.ModelId, workingDirectory, options.Tools, options.Handlers, modelOptional: true);
+        ValidateOptions(options.ModelId, workingDirectory, options.Tools, options.ToolHandler, modelOptional: true);
         return await CreateSessionAsync(
             threadId,
             threadId,
@@ -75,7 +75,7 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             options.Sandbox ?? LlmAgentSandboxMode.WorkspaceWrite,
             options.NetworkAllowed ?? true,
             options.Tools,
-            options.Handlers,
+            options.ToolHandler,
             ephemeral: false,
             connection,
             NativeAgentContract.Claude.RichContentSupported.For(connection, options.ModelId),
@@ -102,9 +102,9 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
 
         options ??= new LlmAgentResumeOptions();
         NativeAgentContract.ValidateConnection(connection, NativeAgentContract.Claude,
-            options.ModelId, options.Tools, options.Handlers);
+            options.ModelId, options.Tools, options.ToolHandler);
         string workingDirectory = options.WorkingDirectory ?? Environment.CurrentDirectory;
-        ValidateOptions(options.ModelId, workingDirectory, options.Tools, options.Handlers, modelOptional: true);
+        ValidateOptions(options.ModelId, workingDirectory, options.Tools, options.ToolHandler, modelOptional: true);
         string forkedThreadId = Guid.NewGuid().ToString();
         return await CreateSessionAsync(
             forkedThreadId,
@@ -119,7 +119,7 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             options.Sandbox ?? LlmAgentSandboxMode.WorkspaceWrite,
             options.NetworkAllowed ?? true,
             options.Tools,
-            options.Handlers,
+            options.ToolHandler,
             ephemeral: false,
             connection,
             NativeAgentContract.Claude.RichContentSupported.For(connection, options.ModelId),
@@ -142,7 +142,7 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
         LlmAgentSandboxMode sandbox,
         bool networkAllowed,
         IReadOnlyList<LlmAgentToolDefinition> tools,
-        LlmAgentSessionHandlers handlers,
+        LlmAgentToolHandler? toolHandler,
         bool ephemeral,
         LlmConnection connection,
         LlmRichContentSupported richContent,
@@ -186,7 +186,7 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             sessionId,
             modelId,
             tools,
-            handlers,
+            toolHandler,
             NativeAgentContract.Claude.RichContentSupported.For(connection, null),
             richContent,
             opening,
@@ -331,12 +331,11 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
         string? modelId,
         string workingDirectory,
         IReadOnlyList<LlmAgentToolDefinition> tools,
-        LlmAgentSessionHandlers handlers,
+        LlmAgentToolHandler? toolHandler,
         bool modelOptional = false)
     {
         ArgumentNullException.ThrowIfNull(tools);
         NativeAgentContract.ValidateTools(tools);
-        ArgumentNullException.ThrowIfNull(handlers);
         if (!modelOptional && string.IsNullOrWhiteSpace(modelId))
         {
             throw new ArgumentException("A model id is required.", nameof(modelId));
@@ -364,11 +363,11 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             }
         }
 
-        if (tools.Count > 0 && handlers.ToolHandler is null)
+        if (tools.Count > 0 && toolHandler is null)
         {
             throw new ArgumentException(
                 "Claude agent sessions with tools require a tool handler.",
-                nameof(handlers));
+                nameof(toolHandler));
         }
     }
 
@@ -394,7 +393,7 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
         private readonly string? _initialModelId;
         private readonly IReadOnlyList<LlmAgentToolDefinition> _tools;
         private readonly Dictionary<string, LlmAgentToolDefinition> _toolsByName;
-        private readonly LlmAgentSessionHandlers _handlers;
+        private readonly LlmAgentToolHandler? _toolHandler;
         // The agent lane's tool-output support after the connection's overrides, and after the model's too.
         private readonly LlmRichContentSupported _richRoute;
         private readonly LlmRichContentSupported _richContent;
@@ -427,7 +426,7 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             string sessionId,
             string? initialModelId,
             IReadOnlyList<LlmAgentToolDefinition> tools,
-            LlmAgentSessionHandlers handlers,
+            LlmAgentToolHandler? toolHandler,
             LlmRichContentSupported richRoute,
             LlmRichContentSupported richContent,
             AgentOpeningContext? opening,
@@ -444,7 +443,7 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             _initialModelId = initialModelId;
             _tools = tools;
             _toolsByName = tools.ToDictionary(tool => tool.Name, StringComparer.Ordinal);
-            _handlers = handlers;
+            _toolHandler = toolHandler;
         }
 
         public string ThreadId { get; }
@@ -658,13 +657,6 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             await WriteControlRequestWithoutWaitingAsync(
                 new { subtype = "interrupt", cancel_queued = false },
                 cancellationToken);
-        }
-
-        public Task CompactAsync(CancellationToken cancellationToken = default)
-        {
-            ObjectDisposedException.ThrowIf(_disposed, this);
-            throw new NotSupportedException(
-                "Claude CLI does not expose compaction through the supported streaming control protocol.");
         }
 
         public async IAsyncEnumerable<LlmAgentEvent> ObserveAsync(
@@ -986,7 +978,7 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             LlmToolOutput output;
             try
             {
-                output = await _handlers.ToolHandler!(call, cancellationToken);
+                output = await _toolHandler!(call, cancellationToken);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
@@ -1560,8 +1552,6 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             {
                 LlmAgentTextContent text => (object)new { type = "text", text = text.Text },
                 LlmAgentImageContent image => SerializeImageInput(image.ImageUrl),
-                LlmAgentAudioContent => throw new NotSupportedException(
-                    "Claude CLI agent input does not support audio content."),
                 _ => throw new ArgumentException(
                     $"Unsupported agent content type '{item.GetType().Name}'.",
                     nameof(content))

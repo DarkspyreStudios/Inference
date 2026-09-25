@@ -65,7 +65,6 @@ public enum LlmContextMeasurementSource
 {
     Unknown,
     Estimated,
-    ProviderReported,
     Mixed
 }
 

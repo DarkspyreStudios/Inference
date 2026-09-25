@@ -213,21 +213,18 @@ public sealed class BedrockAgentCoreTests
                         InputSchema = schema.RootElement.Clone()
                     }
                 ],
-                Handlers = new LlmAgentSessionHandlers
+                ToolHandler = (call, _) =>
                 {
-                    ToolHandler = (call, _) =>
+                    calls.Add(call);
+                    // The route carries no images; the image is omitted and the tool still succeeds.
+                    return ValueTask.FromResult(new LlmToolOutput
                     {
-                        calls.Add(call);
-                        // The route carries no images; the image is omitted and the tool still succeeds.
-                        return ValueTask.FromResult(new LlmToolOutput
-                        {
-                            Parts =
-                            [
-                                new LlmToolOutputText("72 F"),
-                                new LlmToolOutputBinary(LlmBinaryKind.Image, "image/png", new byte[] { 0x89 }, "radar.png")
-                            ]
-                        });
-                    }
+                        Parts =
+                        [
+                            new LlmToolOutputText("72 F"),
+                            new LlmToolOutputBinary(LlmBinaryKind.Image, "image/png", new byte[] { 0x89 }, "radar.png")
+                        ]
+                    });
                 }
             });
 
@@ -359,7 +356,6 @@ public sealed class BedrockAgentCoreTests
 
         Assert.Equal(sessionId, session.ThreadId);
         Assert.Equal(sessionId, session.SessionId);
-        await Assert.ThrowsAsync<NotSupportedException>(() => session.CompactAsync());
         await Assert.ThrowsAsync<NotSupportedException>(() =>
             client.ForkSessionAsync(Connection(), sessionId));
     }

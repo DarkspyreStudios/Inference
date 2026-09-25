@@ -46,7 +46,7 @@ internal static class NativeAgentContract
         LlmAgentCapabilities agent,
         string? modelId,
         IReadOnlyList<LlmAgentToolDefinition> tools,
-        LlmAgentSessionHandlers handlers)
+        LlmAgentToolHandler? toolHandler)
     {
         var implemented = new LlmProviderCapabilities
         {
@@ -60,7 +60,7 @@ internal static class NativeAgentContract
             effective = effective.Apply(modelOverrides);
         }
         if (!effective.SupportsAgentSessions || (!effective.SupportsAgentToolUse
-            && (tools.Count > 0 || handlers.ToolHandler is not null)))
+            && (tools.Count > 0 || toolHandler is not null)))
         {
             throw new NotSupportedException("The connection/model configuration disables the requested agent operation.");
         }

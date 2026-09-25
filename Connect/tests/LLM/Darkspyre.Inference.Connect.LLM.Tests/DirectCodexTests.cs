@@ -288,15 +288,12 @@ public sealed class DirectCodexTests
             WorkingDirectory = Environment.CurrentDirectory,
             Tools = [new() { Name = "echo", InputSchema = JsonSerializer.SerializeToElement(new
             { type = "object", properties = new { }, additionalProperties = false }) }],
-            Handlers = new()
-            {
-                ToolHandler = (_, _) =>
-            {
-                source.Connection = source.Connection with { Credential = Credential(switchAccount ? "other" : "account") };
-                if (disableAgent) { source.Connection = source.Connection with { CapabilityOverrides = new() { SupportsAgentSessions = false } }; }
-                return ValueTask.FromResult(new LlmToolOutput());
-            }
-            }
+            ToolHandler = (_, _) =>
+        {
+            source.Connection = source.Connection with { Credential = Credential(switchAccount ? "other" : "account") };
+            if (disableAgent) { source.Connection = source.Connection with { CapabilityOverrides = new() { SupportsAgentSessions = false } }; }
+            return ValueTask.FromResult(new LlmToolOutput());
+        }
         };
         await Assert.ThrowsAsync<NotSupportedException>(() => managed.StartSessionAsync(Connection(), options));
         await Assert.ThrowsAsync<NotSupportedException>(() => agents.ResumeSessionAsync("configured", "old-thread"));

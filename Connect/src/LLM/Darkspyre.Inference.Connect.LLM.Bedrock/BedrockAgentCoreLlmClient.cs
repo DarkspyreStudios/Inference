@@ -164,13 +164,13 @@ internal sealed class BedrockAgentCoreLlmClient(IBedrockAgentCoreInvoker invoker
         NativeAgentContract.ValidateStart(options);
         AgentResourceOptions.Validate(NativeAgentContract.AgentCore, options.AllowRuntimeBackgroundWork, options.ResourceOutputRetentionBytes);
         NativeAgentContract.ValidateConnection(connection, NativeAgentContract.AgentCore,
-            options.ModelId, options.Tools, options.Handlers);
+            options.ModelId, options.Tools, options.ToolHandler);
         ValidateConnection(connection);
         ValidateSessionOptions(
             options.ModelId,
             options.WorkingDirectory,
             options.Tools,
-            options.Handlers,
+            options.ToolHandler,
             options.Ephemeral,
             options.Sandbox,
             options.NetworkAllowed);
@@ -185,7 +185,7 @@ internal sealed class BedrockAgentCoreLlmClient(IBedrockAgentCoreInvoker invoker
             options.Tools,
             options.Sandbox,
             options.ApprovalPolicy,
-            options.Handlers,
+            options.ToolHandler,
             NativeAgentContract.AgentCore.RichContentSupported.For(connection, null),
             NativeAgentContract.AgentCore.RichContentSupported.For(connection, options.ModelId),
             AgentOpeningContext.For(options, carriesAttachments: false)));
@@ -203,14 +203,14 @@ internal sealed class BedrockAgentCoreLlmClient(IBedrockAgentCoreInvoker invoker
         options ??= new LlmAgentResumeOptions();
         AgentResourceOptions.Validate(NativeAgentContract.AgentCore, options.AllowRuntimeBackgroundWork, options.ResourceOutputRetentionBytes);
         NativeAgentContract.ValidateConnection(connection, NativeAgentContract.AgentCore,
-            options.ModelId, options.Tools, options.Handlers);
+            options.ModelId, options.Tools, options.ToolHandler);
         string modelId = options.ModelId ?? DefaultModelId;
         string workingDirectory = options.WorkingDirectory ?? Environment.CurrentDirectory;
         ValidateSessionOptions(
             modelId,
             workingDirectory,
             options.Tools,
-            options.Handlers,
+            options.ToolHandler,
             ephemeral: false,
             sandbox: options.Sandbox ?? LlmAgentSandboxMode.WorkspaceWrite,
             networkAllowed: options.NetworkAllowed ?? true);
@@ -224,7 +224,7 @@ internal sealed class BedrockAgentCoreLlmClient(IBedrockAgentCoreInvoker invoker
             options.Tools,
             options.Sandbox ?? LlmAgentSandboxMode.WorkspaceWrite,
             options.ApprovalPolicy ?? LlmAgentApprovalPolicy.OnRequest,
-            options.Handlers,
+            options.ToolHandler,
             NativeAgentContract.AgentCore.RichContentSupported.For(connection, null),
             NativeAgentContract.AgentCore.RichContentSupported.For(connection, modelId)));
     }
@@ -399,14 +399,13 @@ internal sealed class BedrockAgentCoreLlmClient(IBedrockAgentCoreInvoker invoker
         string modelId,
         string workingDirectory,
         IReadOnlyList<LlmAgentToolDefinition> tools,
-        LlmAgentSessionHandlers handlers,
+        LlmAgentToolHandler? toolHandler,
         bool ephemeral,
         LlmAgentSandboxMode sandbox,
         bool networkAllowed)
     {
         ArgumentNullException.ThrowIfNull(tools);
         NativeAgentContract.ValidateTools(tools);
-        ArgumentNullException.ThrowIfNull(handlers);
         if (string.IsNullOrWhiteSpace(modelId))
         {
             throw new ArgumentException("A model id is required.", nameof(modelId));
@@ -427,16 +426,11 @@ internal sealed class BedrockAgentCoreLlmClient(IBedrockAgentCoreInvoker invoker
             throw new NotSupportedException(
                 "AgentCore cannot disable remote network access in danger-full-access mode.");
         }
-        if (handlers.ApprovalHandler is not null)
-        {
-            throw new NotSupportedException(
-                "AgentCore Harness cannot route its remote command or file approvals to a host approval handler.");
-        }
-        if (tools.Count > 0 && handlers.ToolHandler is null)
+        if (tools.Count > 0 && toolHandler is null)
         {
             throw new ArgumentException(
                 "AgentCore host tools require a tool handler.",
-                nameof(handlers));
+                nameof(toolHandler));
         }
 
         var names = new HashSet<string>(StringComparer.Ordinal);
