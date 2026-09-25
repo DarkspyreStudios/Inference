@@ -11,7 +11,7 @@ namespace Darkspyre.Inference.Connect.LLM.Bedrock;
 
 internal sealed class BedrockLlmClient(
     BedrockClientFactory factory,
-    BedrockLoggingGuard loggingGuard) : ILlmClient
+    BedrockLoggingGuard loggingGuard) : ILlmClient, ILlmContextEstimator
 {
     internal const string RequestIdMetadataKey = "request-id";
 
@@ -29,7 +29,12 @@ internal sealed class BedrockLlmClient(
         SupportsToolUse = true,
         SupportsPromptImages = true,
         SupportsPromptDocuments = true,
-        RichContentSupported = RichContentRoutes.BedrockConverse
+        RichContentSupported = RichContentRoutes.BedrockConverse,
+        SupportsAgentSessions = true,
+        SupportsAgentToolUse = true,
+        SupportsAgentTurnInstructions = true,
+        // The managed engine runs Converse turns; tool output travels the Converse route.
+        Agent = ManagedAgentPolicy.Capabilities with { RichContentSupported = RichContentRoutes.BedrockConverse }
     };
 
     public LlmTransport Transport => LlmTransport.AwsBedrockConverse;
@@ -55,38 +60,7 @@ internal sealed class BedrockLlmClient(
         LlmChatRequest request,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        EnsureTransport(connection);
-        if (string.IsNullOrWhiteSpace(request.ModelId))
-        {
-            throw new ArgumentException("A model id is required.", nameof(request));
-        }
-
-        LlmProviderCapabilities capabilities = GetCapabilities(connection, request.ModelId);
-        if (request.Temperature is not null && !capabilities.SupportsTemperature)
-        {
-            throw new NotSupportedException("This Bedrock connection does not support temperature.");
-        }
-
-        LlmClientBase.ValidatePromptAttachments(request, capabilities);
-        LlmClientBase.ValidateToolUse(request, capabilities);
-        if (request.Messages.Any(message => message.ResponseState is not null))
-        {
-            throw new NotSupportedException("Bedrock Converse cannot import adapter response state.");
-        }
-
-        if (request.AllowParallelToolCalls is not null)
-        {
-            throw new NotSupportedException(
-                "Bedrock Converse does not expose a portable parallel-tool-call control.");
-        }
-
-        if (request.Tools.Count > 0
-            && request.ToolChoice is { Mode: LlmToolChoiceMode.None })
-        {
-            throw new NotSupportedException(
-                "Bedrock Converse does not expose a tool-choice 'none' value.");
-        }
-
+        LlmProviderCapabilities capabilities = ValidateRequest(connection, request);
         LlmStructuredOutputEnforcement? enforcement = request.StructuredOutput is null
             ? null
             : StructuredOutput.ResolveEnforcement(request.StructuredOutput, capabilities);
@@ -103,7 +77,94 @@ internal sealed class BedrockLlmClient(
         ConverseResponse response = await factory.Runtime(aws).ConverseAsync(
             BuildRequest(connection, request, modelId),
             cancellationToken);
+        foreach (LlmStreamEvent item in MapResponse(connection, request, enforcement, response))
+        {
+            yield return item;
+        }
+    }
 
+    /// <summary>
+    /// Estimates the Converse request's input without I/O. The history up to the last reply that recorded
+    /// Bedrock's reported token counts is counted from them; only what follows is tokenized.
+    /// </summary>
+    public ContextEstimate? EstimateInputTokens(LlmConnection connection, LlmChatRequest request)
+    {
+        _ = ValidateRequest(connection, request);
+        int reported = -1;
+        for (int index = request.Messages.Count - 1; index >= 0 && reported < 0; index--)
+        {
+            if (request.Messages[index].ResponseState is { InputTokens: not null, OutputTokens: not null })
+            {
+                reported = index;
+            }
+        }
+        LlmChatMessage[] tail = [.. request.Messages.Skip(reported + 1)];
+        if (tail.Any(Uncountable))
+        {
+            return null;
+        }
+        if (reported < 0)
+        {
+            return new ContextEstimate(LocalTokenCount.Count(Projection(request, tail, framing: true)));
+        }
+        // The reported input already includes that request's instructions and tools.
+        LlmProviderResponseState state = request.Messages[reported].ResponseState!;
+        return new ContextEstimate(state.InputTokens!.Value + state.OutputTokens!.Value
+            + (tail.Length == 0 ? 0 : LocalTokenCount.Count(Projection(request, tail, framing: false))),
+            IncludesProviderReport: true);
+    }
+
+    public string? EstimateDiagnostic =>
+        "Estimated with a general-purpose tokenizer; each Bedrock model counts tokens its own way.";
+
+    private LlmProviderCapabilities ValidateRequest(LlmConnection connection, LlmChatRequest request)
+    {
+        EnsureTransport(connection);
+        if (string.IsNullOrWhiteSpace(request.ModelId))
+        {
+            throw new ArgumentException("A model id is required.", nameof(request));
+        }
+
+        LlmProviderCapabilities capabilities = GetCapabilities(connection, request.ModelId);
+        if (request.Temperature is not null && !capabilities.SupportsTemperature)
+        {
+            throw new NotSupportedException("This Bedrock connection does not support temperature.");
+        }
+
+        LlmClientBase.ValidatePromptAttachments(request, capabilities);
+        LlmClientBase.ValidateToolUse(request, capabilities);
+        foreach (LlmChatMessage message in request.Messages.Where(message => message.ResponseState is not null))
+        {
+            // Only this connection's own counts-only state is accepted; it adds nothing to the request.
+            _ = ProviderResponseStateCodec.DecodeMessage(message, connection, request.ModelId);
+        }
+
+        if (request.AllowParallelToolCalls is not null)
+        {
+            throw new NotSupportedException(
+                "Bedrock Converse does not expose a portable parallel-tool-call control.");
+        }
+
+        if (request.Tools.Count > 0
+            && request.ToolChoice is { Mode: LlmToolChoiceMode.None })
+        {
+            throw new NotSupportedException(
+                "Bedrock Converse does not expose a tool-choice 'none' value.");
+        }
+
+        return capabilities;
+    }
+
+    /// <summary>
+    /// Maps a Converse reply to stream events. A reply that reports both token counts carries them as
+    /// counts-only response state, so accounting can count the history it closes.
+    /// </summary>
+    internal static IEnumerable<LlmStreamEvent> MapResponse(
+        LlmConnection connection,
+        LlmChatRequest request,
+        LlmStructuredOutputEnforcement? enforcement,
+        ConverseResponse response)
+    {
         var text = new StringBuilder();
         var toolCalls = new List<LlmToolCall>();
         foreach (ContentBlock block in response.Output?.Message?.Content ?? [])
@@ -168,6 +229,9 @@ internal sealed class BedrockLlmClient(
                     response.Usage.InputTokens,
                     response.Usage.OutputTokens,
                     response.Usage.TotalTokens),
+            ResponseState = response.Usage is { InputTokens: { } input, OutputTokens: { } output }
+                ? ProviderResponseStateCodec.EncodeCounts(connection, request.ModelId, input, output)
+                : null,
             ToolCalls = toolCalls,
             StructuredOutput = validation,
             Diagnostics = new LlmProviderDiagnostics(
@@ -175,6 +239,42 @@ internal sealed class BedrockLlmClient(
                 response.ResponseMetadata?.RequestId,
                 RawFinalResponseJson: null)
         });
+    }
+
+    /// <summary>Content the local tokenizer cannot count: attachments and binary tool output.</summary>
+    private static bool Uncountable(LlmChatMessage message) => message.Attachments.Count > 0
+        || message.ToolResults.Any(result => result.Output.Parts.Any(part => part is not LlmToolOutputText));
+
+    /// <summary>The textual projection a Converse request carries, for local token counting.</summary>
+    private static string Projection(LlmChatRequest request, IEnumerable<LlmChatMessage> messages, bool framing)
+    {
+        var projection = new System.Text.Json.Nodes.JsonObject
+        {
+            ["messages"] = new System.Text.Json.Nodes.JsonArray([.. messages.Select(message => new System.Text.Json.Nodes.JsonObject
+            {
+                ["role"] = message.Role,
+                ["content"] = message.Content,
+                ["tool_calls"] = new System.Text.Json.Nodes.JsonArray([.. message.ToolCalls.Select(call =>
+                    (System.Text.Json.Nodes.JsonNode)new System.Text.Json.Nodes.JsonObject { ["name"] = call.Name, ["input"] = call.ArgumentsJson })]),
+                ["tool_results"] = new System.Text.Json.Nodes.JsonArray([.. message.ToolResults.SelectMany(result => result.Output.Parts)
+                    .OfType<LlmToolOutputText>().Select(part => (System.Text.Json.Nodes.JsonNode)part.Text)])
+            })])
+        };
+        if (framing)
+        {
+            projection["system"] = request.Instructions;
+            projection["tools"] = new System.Text.Json.Nodes.JsonArray([.. request.Tools.Select(tool =>
+                (System.Text.Json.Nodes.JsonNode)new System.Text.Json.Nodes.JsonObject
+                {
+                    ["name"] = tool.Name,
+                    ["description"] = tool.Description,
+                    ["schema"] = System.Text.Json.Nodes.JsonNode.Parse(tool.InputSchema.GetRawText())
+                })]);
+            projection["output_schema"] = request.StructuredOutput is { } structured
+                ? System.Text.Json.Nodes.JsonNode.Parse(structured.Schema.GetRawText())
+                : null;
+        }
+        return projection.ToJsonString();
     }
 
     public async Task<IReadOnlyList<LlmModel>> ListModelsAsync(

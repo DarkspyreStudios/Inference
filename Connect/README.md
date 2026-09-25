@@ -306,7 +306,7 @@ own authorization and side-effect policy.
 | ChatGPT Codex subscription | Yes | Yes | Yes | Yes |
 | Anthropic Messages with API key | Yes | No | Yes | Yes |
 | Claude subscription via official CLI | No | Yes | Yes | Yes |
-| AWS Bedrock Converse | Yes | No | Yes | Yes |
+| AWS Bedrock Converse | Yes | Yes | Yes | Yes |
 | AWS Bedrock AgentCore Harness | No | Yes | No | No |
 | Antigravity CLI | No | No | No | No |
 
@@ -478,8 +478,9 @@ retain ordered reasoning/text/calls; Anthropic retains thinking/signatures/conte
 replays state instead of duplicating the message's visible text/calls. State is bound to transport,
 model and account/connection scope; incompatible state fails before sending unless the request opts
 in to omission, as described below. The former request-level `ContinuationToken` has been removed,
-with no compatibility shim. Chat Completions, Bedrock, AgentCore and CLI chat do not import this
-opaque state.
+with no compatibility shim. Bedrock Converse state carries only the reply's reported token counts and
+no replayable output; a Converse request accepts only state bound to its own connection and model.
+Chat Completions, AgentCore and CLI chat do not import this opaque state.
 
 ### Carrying history to another model or provider
 
@@ -497,7 +498,7 @@ calls and results already in the history reach their prompt as `[TOOL CALL id=â€
 
 `LlmAgentCapabilities.ContextImport` reports how a session start takes `LlmAgentSessionOptions.Context`:
 
-- Managed Codex imports it as host-owned context (`Structured`). With `Omit`, unbound state is removed
+- Managed Codex and managed Bedrock Converse import it as host-owned context (`Structured`). With `Omit`, unbound state is removed
   and the first turn emits one `LlmAgentWarningEvent` with the count.
 - Claude CLI and AgentCore sessions report `OpeningContext`. A start with `Omit` begins a new provider
   conversation and sends the history once, as a `CONVERSATION SO FAR` transcript ahead of the first
@@ -561,10 +562,12 @@ See the [compiled host-context example](examples/Darkspyre.Inference.Connect.LLM
 Text-only occupancy is estimated from the actual projected request using the bundled o200k
 tokenizer, including instructions and schemas. It is not an exact current-model token count.
 Binary attachments and encrypted reasoning make occupancy unknown; these return null rather than
-a fabricated count, with one exception. Responses and direct Codex record the provider's reported input
+a fabricated count, with one exception. Responses, direct Codex and Bedrock Converse record the provider's reported input
 and output tokens on the response state (`LlmProviderResponseState.InputTokens` and `OutputTokens`), and
 the estimate counts the history up to the last such state as their sum, tokenizing only what follows.
-That estimate reports `Source = Mixed`. Hosts that keep response state keep the counts with it. Provider context-overflow errors still trigger a host handoff. Catalog limits
+That estimate reports `Source = Mixed`. Hosts that keep response state keep the counts with it. Each
+Bedrock model has its own tokenizer, so a Bedrock estimate of the unreported tail is approximate and its
+diagnostic says so. Provider context-overflow errors still trigger a host handoff. Catalog limits
 are optional. Configure an explicit output reserve when the catalog provides none; without a
 known limit, reserve and occupancy, `NeedsCompaction` stays null.
 
@@ -821,6 +824,11 @@ content; use `Attachments`. Claude materializes MCP document resources through i
 Converse sends a tool's `strict` flag only when `LlmToolDefinition.Strict` is true. Models without
 strict schemas, such as Amazon Nova, reject the field even when it is false; a strict tool on such a
 model fails with Bedrock's own error.
+
+Converse also runs on the host-owned managed agent runtime. `AddLlmConnectBedrock()` registers an
+`ILlmAgentClient` for `AwsBedrockConverse`; each model step is one Converse request, and the host runs
+every tool. Managed Converse sessions take the same options, context and tool output as managed Codex,
+with tool output carried on the Converse route.
 
 `AwsBedrockAgentCore` is a separate transport from `AwsBedrockConverse`. Converse is a stateless chat
 API with a host-managed tool loop; AgentCore invokes a deployed

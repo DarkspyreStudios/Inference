@@ -704,3 +704,21 @@ structured output keeps `Strict = true`. Breaking, in `11.9.0-rc.1`. The Bedrock
 Verification: zero-warning builds and clean formatting for the Connect, Tensor and UI solutions; Connect
 403, Tensor 298 and UI 53 tests.
 
+## Bedrock Converse on the managed agent engine
+
+The design is the "Bedrock Converse on the managed agent engine" section of `Connect/docs/enhancements.md`,
+released with `11.9.0-rc.1`.
+
+- `ManagedBedrockAgentClient` opens `ManagedAgentSession` on `AwsBedrockConverse`; `AddLlmConnectBedrock`
+  registers it.
+- Each Converse reply that reports usage carries counts-only response state
+  (`ProviderResponseStateCodec.EncodeCounts`); Converse requests accept only bound state.
+- `BedrockLlmClient` estimates requests from the last reported counts plus the tokenized tail.
+- The core assembly grants internals to `Darkspyre.Inference.Connect.LLM.Bedrock.Tests` for the estimator
+  tests.
+
+No live Bedrock session has run on the managed lane yet.
+
+Verification: zero-warning builds and clean formatting for the Connect, Tensor and UI solutions; Connect
+410, Tensor 298 and UI 53 tests.
+

@@ -24,6 +24,7 @@ public sealed class BedrockRegistrationTests
         Assert.Equal(
             [
                 LlmTransport.OpenAiCodex,
+                LlmTransport.AwsBedrockConverse,
                 LlmTransport.AnthropicClaudeCli,
                 LlmTransport.AwsBedrockAgentCore
             ],
@@ -33,6 +34,7 @@ public sealed class BedrockRegistrationTests
         Assert.Equal(
             [
                 LlmTransport.OpenAiCodex,
+                LlmTransport.AwsBedrockConverse,
                 LlmTransport.AnthropicClaudeCli,
                 LlmTransport.AwsBedrockAgentCore
             ],

@@ -1543,3 +1543,41 @@ Structured output keeps `Strict = true`, because its schema describes the reply 
 A host that relied on the old chat default sets `Strict = true`. The change is breaking and ships in
 `11.9.0-rc.1`.
 
+
+## Bedrock Converse on the managed agent engine
+
+**Status:** Included in this technical design
+
+### Problem
+
+The managed agent engine ran only on direct Codex. Bedrock Converse already had a host-executed tool loop
+on the chat lane, but no agent client, so a host could not open a managed session on a Bedrock model.
+Converse also had no context estimator: request accounting could not measure a Bedrock request, and a
+request carrying any response state failed.
+
+### Design
+
+`ManagedBedrockAgentClient` registers the provider-neutral `ManagedAgentSession` for
+`AwsBedrockConverse`, as `ManagedCodexAgentClient` does for Codex. `BedrockLlmClient` advertises
+`SupportsAgentSessions`, `SupportsAgentToolUse` and `SupportsAgentTurnInstructions`, with
+`ManagedAgentPolicy.Capabilities` on the Converse rich-content route.
+
+Converse is stateless, so its response state carries no output. A reply that reports both token counts
+carries counts-only state: `Payload` is an empty array, and `InputTokens` and `OutputTokens` hold
+Converse's counts. `ProviderResponseStateCodec` retains Converse state, binds it to transport, model and
+scope like any other state, and decodes it to no output. A Converse request accepts bound counts-only
+state and rejects anything else before sending.
+
+`BedrockLlmClient` implements `ILlmContextEstimator`:
+
+- Without a reported count, the whole request is tokenized with the bundled `o200k_base` tokenizer:
+  instructions, messages, tool calls, text tool results, tool schemas and the structured-output schema.
+- With one, the history up to the last reporting reply counts as its input plus output tokens, and only
+  the messages after it are tokenized. The estimate reports the provider count.
+- An attachment or a non-text tool result in the tokenized part makes the estimate unknown.
+- The diagnostic says each Bedrock model tokenizes its own way.
+
+A host moving a conversation off Bedrock with `Omit` counts each counts-only state as omitted. The
+message's text, tool calls and results are still sent, so nothing visible is lost.
+
+The change ships in `11.9.0-rc.1` with the other breaking changes.

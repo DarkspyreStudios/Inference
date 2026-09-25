@@ -19,9 +19,32 @@ internal static class ProviderResponseStateCodec
             Payload = Project(output, connection.Transport).ToJsonString()
         };
 
-    /// <summary>Transports whose adapters replay response state.</summary>
+    /// <summary>Transports whose adapters keep response state.</summary>
     public static bool Retains(LlmTransport transport) =>
-        transport is LlmTransport.OpenAiResponses or LlmTransport.OpenAiCodex or LlmTransport.AnthropicMessages;
+        transport is LlmTransport.OpenAiResponses or LlmTransport.OpenAiCodex or LlmTransport.AnthropicMessages
+            or LlmTransport.AwsBedrockConverse;
+
+    /// <summary>
+    /// Bedrock Converse replays no adapter output. Its state carries only the token counts the provider reported,
+    /// so accounting can count the history it closes.
+    /// </summary>
+    public static bool CountsOnly(LlmTransport transport) => transport == LlmTransport.AwsBedrockConverse;
+
+    private const string NoOutput = "[]";
+
+    public static LlmProviderResponseState EncodeCounts(
+        LlmConnection connection,
+        string modelId,
+        long inputTokens,
+        long outputTokens) => new()
+        {
+            Transport = connection.Transport,
+            ModelId = modelId,
+            ScopeId = Scope(connection),
+            Payload = NoOutput,
+            InputTokens = inputTokens,
+            OutputTokens = outputTokens
+        };
 
     /// <summary>Whether this state can be replayed on the connection and model.</summary>
     public static bool IsBound(LlmProviderResponseState state, LlmConnection connection, string modelId) =>
@@ -36,6 +59,12 @@ internal static class ProviderResponseStateCodec
         if (!IsBound(state, connection, modelId))
         {
             throw new ArgumentException("Response state does not match this version, transport, model, or account scope.");
+        }
+        if (CountsOnly(connection.Transport))
+        {
+            return state.Payload == NoOutput
+                ? []
+                : throw new ArgumentException("Response state for this transport carries only reported token counts.");
         }
 
         try
@@ -72,6 +101,10 @@ internal static class ProviderResponseStateCodec
     {
         ValidateMessage(message);
         JsonArray output = Decode(message.ResponseState!, connection, modelId);
+        if (CountsOnly(connection.Transport))
+        {
+            return output;
+        }
         var calls = output.OfType<JsonObject>()
             .Where(item => item["type"]?.GetValue<string>() is "function_call" or "tool_use").ToArray();
         if (calls.Length != message.ToolCalls.Count)

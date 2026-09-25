@@ -181,6 +181,21 @@ public sealed class AgentContractTests
     }
 
     [Fact]
+    public void CountsOnlyStateCarriesNoOutputAndBindsToItsConnection()
+    {
+        LlmConnection bedrock = new() { Version = "v1", Transport = LlmTransport.AwsBedrockConverse, Endpoint = "aws://bedrock" };
+        var state = ProviderResponseStateCodec.EncodeCounts(bedrock, "model", 1200, 80);
+        Assert.Equal((1200L, 80L), (state.InputTokens, state.OutputTokens));
+        Assert.Empty(ProviderResponseStateCodec.Decode(state, bedrock with { Version = "v2" }, "model"));
+        var message = new LlmChatMessage("assistant", "done") { ResponseState = state, ToolCalls = [new("call-1", "tool", "{}")] };
+        Assert.Empty(ProviderResponseStateCodec.DecodeMessage(message, bedrock, "model"));
+        Assert.Throws<ArgumentException>(() => ProviderResponseStateCodec.Decode(state, bedrock, "another-model"));
+        Assert.Throws<ArgumentException>(() => ProviderResponseStateCodec.Decode(state, bedrock with { Endpoint = "aws://other" }, "model"));
+        Assert.Throws<ArgumentException>(() => ProviderResponseStateCodec.Decode(
+            state with { Payload = Output().ToJsonString() }, bedrock, "model"));
+    }
+
+    [Fact]
     public void OutputProjectionDropsMetadataAndRejectsUntrustedInstructions()
     {
         JsonArray output = Output();
