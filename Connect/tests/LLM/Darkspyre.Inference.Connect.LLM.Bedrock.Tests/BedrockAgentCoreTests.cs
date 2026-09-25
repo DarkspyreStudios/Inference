@@ -17,8 +17,8 @@ public sealed class BedrockAgentCoreTests
         var client = new BedrockAgentCoreLlmClient(invoker);
         var options = Options(LlmAgentSandboxMode.WorkspaceWrite, LlmAgentApprovalPolicy.OnRequest);
         await Assert.ThrowsAsync<NotSupportedException>(() =>
-            client.StartSessionAsync(Connection(), options with { ThreadId = "host-id" }));
-        await using var session = await client.StartSessionAsync(Connection(), options);
+            client.StartSessionAsync("connection", Connection(), options with { ThreadId = "host-id" }));
+        await using var session = await client.StartSessionAsync("connection", Connection(), options);
         await AgentContractTests.AssertNativeOperationsAsync(session);
         Assert.Empty(invoker.Requests);
         Assert.False((await session.GetCapabilitiesAsync()).SupportsInterrupt);
@@ -196,7 +196,7 @@ public sealed class BedrockAgentCoreTests
         var calls = new List<LlmAgentToolCall>();
         var client = new BedrockAgentCoreLlmClient(invoker);
         await using ILlmAgentSession session = await client.StartSessionAsync(
-            Connection(),
+            "connection", Connection(),
             new LlmAgentSessionOptions
             {
                 ModelId = BedrockAgentCoreLlmClient.DefaultModelId,
@@ -274,17 +274,17 @@ public sealed class BedrockAgentCoreTests
     {
         var client = new BedrockAgentCoreLlmClient(new StubInvoker());
         await using ILlmAgentSession restricted = await client.StartSessionAsync(
-            Connection(),
+            "connection", Connection(),
             Options(
                 LlmAgentSandboxMode.ReadOnly,
                 LlmAgentApprovalPolicy.Never));
         await using ILlmAgentSession workspace = await client.StartSessionAsync(
-            Connection(),
+            "connection", Connection(),
             Options(
                 LlmAgentSandboxMode.WorkspaceWrite,
                 LlmAgentApprovalPolicy.Never));
         await using ILlmAgentSession unrestricted = await client.StartSessionAsync(
-            Connection(),
+            "connection", Connection(),
             Options(
                 LlmAgentSandboxMode.DangerFullAccess,
                 LlmAgentApprovalPolicy.Never));
@@ -309,7 +309,7 @@ public sealed class BedrockAgentCoreTests
         var client = new BedrockAgentCoreLlmClient(new StubInvoker());
 
         await Assert.ThrowsAsync<NotSupportedException>(() => client.StartSessionAsync(
-            Connection(),
+            "connection", Connection(),
             Options(
                 LlmAgentSandboxMode.DangerFullAccess,
                 LlmAgentApprovalPolicy.Never) with
@@ -324,7 +324,7 @@ public sealed class BedrockAgentCoreTests
         var invoker = new StubInvoker();
         var client = new BedrockAgentCoreLlmClient(invoker);
         await using ILlmAgentSession session = await client.StartSessionAsync(
-            Connection(),
+            "connection", Connection(),
             Options(LlmAgentSandboxMode.ReadOnly, LlmAgentApprovalPolicy.Never));
 
         await Assert.ThrowsAsync<NotSupportedException>(async () =>
@@ -351,13 +351,12 @@ public sealed class BedrockAgentCoreTests
         var client = new BedrockAgentCoreLlmClient(new StubInvoker());
 
         await using ILlmAgentSession session = await client.ResumeSessionAsync(
-            Connection(),
+            "connection", Connection(),
             sessionId);
 
         Assert.Equal(sessionId, session.ThreadId);
         Assert.Equal(sessionId, session.SessionId);
-        await Assert.ThrowsAsync<NotSupportedException>(() =>
-            client.ForkSessionAsync(Connection(), sessionId));
+        Assert.IsNotAssignableFrom<ILlmAgentForkClient>(client);
     }
 
     private const string HarnessArn =
@@ -416,7 +415,7 @@ public sealed class BedrockAgentCoreTests
             new HarnessMessageStopEvent { StopReason = HarnessStopReason.End_turn }
         ]);
         var client = new BedrockAgentCoreLlmClient(invoker);
-        await using ILlmAgentSession session = await client.StartSessionAsync(Connection(), new LlmAgentSessionOptions
+        await using ILlmAgentSession session = await client.StartSessionAsync("connection", Connection(), new LlmAgentSessionOptions
         {
             ModelId = BedrockAgentCoreLlmClient.DefaultModelId,
             WorkingDirectory = "/not-sent-to-agentcore",

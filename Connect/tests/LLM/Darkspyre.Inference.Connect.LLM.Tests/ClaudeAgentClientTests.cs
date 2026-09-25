@@ -20,9 +20,9 @@ public sealed class ClaudeAgentClientTests
             WorkingDirectory = Environment.CurrentDirectory
         };
         await Assert.ThrowsAsync<NotSupportedException>(() =>
-            client.StartSessionAsync(Connection(), options with { Context = new() }));
+            client.StartSessionAsync("connection", Connection(), options with { Context = new() }));
         Assert.Null(factory.Invocation);
-        await using var session = await client.StartSessionAsync(Connection(), options);
+        await using var session = await client.StartSessionAsync("connection", Connection(), options);
         int before = process.Writes.Count;
         await AgentContractTests.AssertNativeOperationsAsync(session);
         Assert.Equal(before, process.Writes.Count);
@@ -40,7 +40,7 @@ public sealed class ClaudeAgentClientTests
             """{"type":"object","properties":{"text":{"type":"string"}},"required":["text"]}""");
 
         await using ILlmAgentSession session = await client.StartSessionAsync(
-            Connection(),
+            "connection", Connection(),
             new LlmAgentSessionOptions
             {
                 ModelId = "claude-test",
@@ -189,6 +189,7 @@ public sealed class ClaudeAgentClientTests
         };
 
         await Assert.ThrowsAsync<NotSupportedException>(() => client.StartSessionAsync(
+            "connection",
             apiKey,
             new LlmAgentSessionOptions
             {
@@ -198,7 +199,7 @@ public sealed class ClaudeAgentClientTests
 
         using JsonDocument schema = JsonDocument.Parse("""{"type":"object"}""");
         await Assert.ThrowsAsync<ArgumentException>(() => client.StartSessionAsync(
-            Connection(),
+            "connection", Connection(),
             new LlmAgentSessionOptions
             {
                 ModelId = "claude-test",
@@ -224,7 +225,7 @@ public sealed class ClaudeAgentClientTests
             new RecordingSessionProcessFactory(new ScriptedSessionProcess()));
 
         await Assert.ThrowsAsync<NotSupportedException>(() => client.StartSessionAsync(
-            Connection(),
+            "connection", Connection(),
             new LlmAgentSessionOptions
             {
                 ModelId = "claude-test",
@@ -243,7 +244,7 @@ public sealed class ClaudeAgentClientTests
 
         ArgumentException exception = await Assert.ThrowsAsync<ArgumentException>(() =>
             client.StartSessionAsync(
-                Connection(),
+                "connection", Connection(),
                 new LlmAgentSessionOptions
                 {
                     ModelId = "claude-test",
@@ -269,7 +270,7 @@ public sealed class ClaudeAgentClientTests
         var client = new ClaudeAgentClient(new RecordingSessionProcessFactory(process));
         using JsonDocument schema = JsonDocument.Parse(
             """{"type":"object","properties":{"text":{"type":"string"}},"required":["text"]}""");
-        await using ILlmAgentSession session = await client.StartSessionAsync(Connection(), new LlmAgentSessionOptions
+        await using ILlmAgentSession session = await client.StartSessionAsync("connection", Connection(), new LlmAgentSessionOptions
         {
             ModelId = "claude-test",
             WorkingDirectory = Environment.CurrentDirectory,

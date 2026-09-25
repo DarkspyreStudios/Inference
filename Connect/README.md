@@ -808,8 +808,10 @@ attachment access must survive reopen or live compaction. Keep the original file
 cache affinity is not file storage.
 
 Managed sessions expose `ThreadId` and `SessionId`, explicit interrupt, safe-boundary steering,
-and host context operations. Native `ResumeSessionAsync` and `ForkSessionAsync` are unsupported for
-managed Codex. Claude retains native resume/current-position fork and interrupt; its steering method
+and host context operations. Resume and fork are optional: a client that implements
+`ILlmAgentResumeClient` or `ILlmAgentForkClient` supports them, and `LlmAgentProviderService` throws
+`NotSupportedException` for one that does not. Native `ResumeSessionAsync` and `ForkSessionAsync` are
+unsupported for managed Codex and managed Bedrock Converse; AgentCore resumes but does not fork. Claude retains native resume/current-position fork and interrupt; its steering method
 is unsupported. Tools return
 text plus provider-neutral image/document attachments. Managed tools reject URL-based image/audio
 content; use `Attachments`. Claude materializes MCP document resources through its read-only

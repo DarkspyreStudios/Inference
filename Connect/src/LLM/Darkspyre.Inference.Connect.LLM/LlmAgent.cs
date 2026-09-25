@@ -239,23 +239,37 @@ public sealed record LlmAgentTurnCompletedEvent(
     };
 }
 
-/// <summary>A transport-specific agent client exposed through provider-neutral session semantics.</summary>
+/// <summary>
+/// A transport-specific agent client exposed through provider-neutral session semantics. Hosts open
+/// sessions through <see cref="LlmAgentProviderService"/>, which resolves the connection by its ID.
+/// </summary>
 public interface ILlmAgentClient
 {
     LlmTransport Transport { get; }
 
     Task<ILlmAgentSession> StartSessionAsync(
+        string connectionId,
         LlmConnection connection,
         LlmAgentSessionOptions options,
         CancellationToken cancellationToken = default);
+}
 
+/// <summary>An agent client whose runtime can reopen a persisted provider thread by its ID.</summary>
+public interface ILlmAgentResumeClient : ILlmAgentClient
+{
     Task<ILlmAgentSession> ResumeSessionAsync(
+        string connectionId,
         LlmConnection connection,
         string threadId,
         LlmAgentResumeOptions? options = null,
         CancellationToken cancellationToken = default);
+}
 
+/// <summary>An agent client whose runtime can fork a persisted provider thread.</summary>
+public interface ILlmAgentForkClient : ILlmAgentClient
+{
     Task<ILlmAgentSession> ForkSessionAsync(
+        string connectionId,
         LlmConnection connection,
         string threadId,
         string? lastTurnId = null,

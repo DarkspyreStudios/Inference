@@ -375,7 +375,7 @@ public sealed class LlmSetupSession : InferenceSetupSession<LlmSetupChanges>
         bool completed;
         if (_draft.Transport == LlmTransport.AwsBedrockAgentCore && _client is ILlmAgentClient agent)
         {
-            await using ILlmAgentSession session = await agent.StartSessionAsync(CurrentConnection(), new()
+            await using ILlmAgentSession session = await agent.StartSessionAsync(_identity.Id, CurrentConnection(), new()
             {
                 ModelId = _model,
                 WorkingDirectory = string.Empty,

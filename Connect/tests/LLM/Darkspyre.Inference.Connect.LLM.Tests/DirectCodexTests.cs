@@ -295,7 +295,8 @@ public sealed class DirectCodexTests
             return ValueTask.FromResult(new LlmToolOutput());
         }
         };
-        await Assert.ThrowsAsync<NotSupportedException>(() => managed.StartSessionAsync(Connection(), options));
+        Assert.IsNotAssignableFrom<ILlmAgentResumeClient>(managed);
+        Assert.IsNotAssignableFrom<ILlmAgentForkClient>(managed);
         await Assert.ThrowsAsync<NotSupportedException>(() => agents.ResumeSessionAsync("configured", "old-thread"));
         await Assert.ThrowsAsync<NotSupportedException>(() => agents.ForkSessionAsync("configured", "old-thread"));
         Assert.Equal(0, handler.Calls);

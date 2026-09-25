@@ -12,7 +12,7 @@ namespace Darkspyre.Inference.Connect.LLM.Bedrock;
 
 /// <summary>Amazon Bedrock AgentCore Harness adapter.</summary>
 internal sealed class BedrockAgentCoreLlmClient(IBedrockAgentCoreInvoker invoker)
-    : ILlmClient, ILlmAgentClient
+    : ILlmClient, ILlmAgentResumeClient
 {
     internal const string DefaultModelId = "default";
 
@@ -155,6 +155,7 @@ internal sealed class BedrockAgentCoreLlmClient(IBedrockAgentCoreInvoker invoker
     }
 
     public Task<ILlmAgentSession> StartSessionAsync(
+        string connectionId,
         LlmConnection connection,
         LlmAgentSessionOptions options,
         CancellationToken cancellationToken = default)
@@ -192,6 +193,7 @@ internal sealed class BedrockAgentCoreLlmClient(IBedrockAgentCoreInvoker invoker
     }
 
     public Task<ILlmAgentSession> ResumeSessionAsync(
+        string connectionId,
         LlmConnection connection,
         string threadId,
         LlmAgentResumeOptions? options = null,
@@ -227,21 +229,6 @@ internal sealed class BedrockAgentCoreLlmClient(IBedrockAgentCoreInvoker invoker
             options.ToolHandler,
             NativeAgentContract.AgentCore.RichContentSupported.For(connection, null),
             NativeAgentContract.AgentCore.RichContentSupported.For(connection, modelId)));
-    }
-
-    public Task<ILlmAgentSession> ForkSessionAsync(
-        LlmConnection connection,
-        string threadId,
-        string? lastTurnId = null,
-        LlmAgentResumeOptions? options = null,
-        CancellationToken cancellationToken = default)
-    {
-        _ = lastTurnId;
-        _ = options;
-        cancellationToken.ThrowIfCancellationRequested();
-        ValidateConnection(connection);
-        ValidateRuntimeSessionId(threadId);
-        throw new NotSupportedException("AgentCore Harness sessions cannot be forked.");
     }
 
     internal static InvokeHarnessRequest BuildChatRequest(

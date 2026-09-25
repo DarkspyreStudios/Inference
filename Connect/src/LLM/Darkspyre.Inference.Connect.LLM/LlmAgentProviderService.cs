@@ -40,12 +40,8 @@ public sealed class LlmAgentProviderService
             _connections,
             connectionId,
             cancellationToken);
-        ILlmAgentClient client = ClientFor(connection.Transport);
-        if (client is IConnectionBoundAgentClient bound)
-        {
-            return await bound.StartSessionAsync(connectionId, connection, options, cancellationToken);
-        }
-        return await client.StartSessionAsync(
+        return await ClientFor(connection.Transport).StartSessionAsync(
+            connectionId,
             connection,
             options,
             cancellationToken);
@@ -61,7 +57,8 @@ public sealed class LlmAgentProviderService
             _connections,
             connectionId,
             cancellationToken);
-        return await ClientFor(connection.Transport).ResumeSessionAsync(
+        return await ClientFor<ILlmAgentResumeClient>(connection.Transport, "resume").ResumeSessionAsync(
+            connectionId,
             connection,
             threadId,
             options,
@@ -79,7 +76,8 @@ public sealed class LlmAgentProviderService
             _connections,
             connectionId,
             cancellationToken);
-        return await ClientFor(connection.Transport).ForkSessionAsync(
+        return await ClientFor<ILlmAgentForkClient>(connection.Transport, "fork").ForkSessionAsync(
+            connectionId,
             connection,
             threadId,
             lastTurnId,
@@ -92,4 +90,9 @@ public sealed class LlmAgentProviderService
             ? client
             : throw new NotSupportedException(
                 $"No LLM agent client is registered for transport {transport}.");
+
+    private T ClientFor<T>(LlmTransport transport, string operation) where T : ILlmAgentClient =>
+        ClientFor(transport) is T client
+            ? client
+            : throw new NotSupportedException($"{transport} agent sessions cannot {operation} a provider thread.");
 }

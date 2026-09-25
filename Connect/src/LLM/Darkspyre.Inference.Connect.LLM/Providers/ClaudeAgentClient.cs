@@ -7,13 +7,14 @@ namespace Darkspyre.Inference.Connect.LLM.Providers;
 
 /// <summary>Session-oriented agent adapter over the official Claude CLI SDK protocol.</summary>
 internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processFactory)
-    : ILlmAgentClient
+    : ILlmAgentResumeClient, ILlmAgentForkClient
 {
     private const string McpServerName = "darkspyre-inference-connect";
 
     public LlmTransport Transport => LlmTransport.AnthropicClaudeCli;
 
     public async Task<ILlmAgentSession> StartSessionAsync(
+        string connectionId,
         LlmConnection connection,
         LlmAgentSessionOptions options,
         CancellationToken cancellationToken = default)
@@ -50,6 +51,7 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
     }
 
     public async Task<ILlmAgentSession> ResumeSessionAsync(
+        string connectionId,
         LlmConnection connection,
         string threadId,
         LlmAgentResumeOptions? options = null,
@@ -86,6 +88,7 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
     }
 
     public async Task<ILlmAgentSession> ForkSessionAsync(
+        string connectionId,
         LlmConnection connection,
         string threadId,
         string? lastTurnId = null,
