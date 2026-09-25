@@ -1581,3 +1581,140 @@ A host moving a conversation off Bedrock with `Omit` counts each counts-only sta
 message's text, tool calls and results are still sent, so nothing visible is lost.
 
 The change ships in `11.9.0-rc.1` with the other breaking changes.
+
+## Public surface cleanup for 11.9.0-rc.1
+
+**Status:** Proposed
+
+### Problem
+
+Parts of the public surface claim support that no implementation provides, repeat one concept under two
+shapes, or accept input that has no effect. Each item below is breaking, so it fits only a release that
+already breaks the contract. No item removes working behaviour.
+
+### 1. Agent members no runtime implements
+
+Removed:
+
+- `LlmAgentCommandEvent`, `LlmAgentFileChangeEvent` with `LlmAgentFileChange`, `LlmAgentMcpToolEvent`,
+  `LlmAgentPlanDeltaEvent`, `LlmAgentWebSearchEvent`, `LlmAgentImageViewEvent`,
+  `LlmAgentCollaborationEvent`, `LlmAgentSubAgentActivityEvent` and `LlmAgentCompactedEvent`. No runtime
+  constructs them.
+- `LlmAgentApprovalRequest`, `LlmAgentApprovalHandler`, `LlmAgentApprovalKind` and
+  `LlmAgentApprovalDecision`. No runtime asks the host for approval. `LlmAgentSessionHandlers` then holds
+  only the tool handler, so it is removed and the options carry `ToolHandler` directly.
+- `ILlmAgentSession.CompactAsync` and `LlmAgentCapabilities.SupportsNativeCompaction`. Every runtime
+  throws from `CompactAsync`. Host compaction through context replacement is unchanged.
+- `LlmAgentAudioContent`. Every runtime rejects it.
+- `LlmAgentSteering.Immediate`, `LlmAgentNativeFork.TurnBoundary` and
+  `LlmContextMeasurementSource.ProviderReported`. No runtime reports them.
+
+`LlmAgentApprovalPolicy` stays. AgentCore allows remote Harness tools only with `DangerFullAccess` and
+`Never`, so the policy is half of that gate.
+
+### 2. Agent clients without mandatory throwing members
+
+`ILlmAgentClient` keeps `Transport` and one start member that receives the connection ID:
+
+```csharp
+Task<ILlmAgentSession> StartSessionAsync(
+    string connectionId, LlmConnection connection, LlmAgentSessionOptions options, CancellationToken cancellationToken);
+```
+
+Resume and fork move to optional interfaces, `ILlmAgentResumeClient` and `ILlmAgentForkClient`, with the
+same connection ID and connection parameters. The Claude CLI client implements both. AgentCore implements
+resume only. The managed Codex and Bedrock clients implement neither. The internal
+`IConnectionBoundAgentClient` is removed. `LlmAgentProviderService` keeps its members and throws
+`NotSupportedException` naming the transport when the client lacks the interface.
+
+### 3. Native runtime options apart from managed options
+
+`LlmAgentNativeRuntimeOptions` holds the settings only a provider-owned runtime reads: `WorkingDirectory`
+(required), `WritableRoots`, `NetworkAllowed`, `Sandbox`, `ApprovalPolicy` and `Ephemeral`, with today's
+start defaults. `LlmAgentSessionOptions.Runtime` carries it. The Claude CLI and AgentCore require it. The
+managed engine rejects it, as it already rejects native-only settings through `ExecutionOptions`.
+
+`LlmAgentResumeOptions` keeps `ModelId`, `Instructions`, `Tools`, `ToolHandler`,
+`AllowRuntimeBackgroundWork`, `ResourceOutputRetentionBytes` and a nullable `Runtime`. A null `Runtime`
+resumes with today's resume defaults: the current directory, that directory as the only writable root,
+`WorkspaceWrite`, network allowed and `OnRequest`. A supplied `Runtime` is used whole.
+
+### 4. Fields that can disagree
+
+- `LlmRequestAccounting.IsEstimated` and `LlmAgentContextStatus.IsEstimated` are removed. Both equal
+  `Source != Unknown`.
+- `LlmAgentTurnCompletedEvent` takes `Reason` as a constructor parameter. `Status` becomes a derived
+  property: `Completed` gives `Completed`, `Interruption` gives `Interrupted`, and every other reason gives
+  `Failed`. An AgentCore refusal then reports `Failed`, as the managed engine already does.
+
+### 5. Implementation types off the public surface
+
+`Darkspyre.Inference.Connect.LLM.Internal.StructuredOutput` becomes internal. Only Connect's own
+adapters call it, and the Bedrock assembly already has internal access.
+
+`LlmModelListCache` stays public. `LlmProviderService` takes it through its public constructor so that a
+host can share one cache across containers.
+
+### 6. Bedrock Converse rejects a reasoning level
+
+Converse sends no reasoning setting. `BedrockLlmClient` validates `ReasoningLevel` with
+`LlmReasoningEffort.Validate`, as the other adapters do, so a requested level fails before the call.
+Converse reports no reasoning levels, and a capability override cannot add any.
+
+### 7. One shape per concept across chat and agent
+
+- `LlmAgentToolDefinition.Description` becomes `string?`, matching `LlmToolDefinition`.
+- `LlmAttachmentKind` is removed. `LlmAttachment.Kind` is `LlmBinaryKind`. A prompt attachment of kind
+  `Audio` or `Other` fails validation, as an unsupported attachment does today.
+- `LlmAgentContextOwnership` and `LlmAgentCompactionOwnership` become one `LlmAgentOwnership` with
+  `None`, `Host` and `Provider`.
+
+Tool call arguments keep two shapes. `LlmToolCall.ArgumentsJson` is the provider's raw text: history
+replays it verbatim, and it can be malformed. `LlmAgentToolCall.Arguments` is the parsed value the engine
+hands to a tool handler.
+
+### 8. Connect reuses Common's LLM primitives
+
+Connect deletes its copies of types that Common already defines, and uses Common's:
+
+- `LlmStreamEvent`, `LlmTextDeltaEvent`, `LlmReasoningDeltaEvent`, `LlmRefusalDeltaEvent`,
+  `LlmActivityEvent` and the three tool-call events.
+- `LlmToolDefinition`, `LlmToolChoiceMode`, `LlmToolChoice` and `LlmToolCall`.
+- `LlmStructuredOutputFallback`, `LlmStructuredOutputEnforcement`, `LlmStructuredOutputRequest`,
+  `LlmStructuredOutputValidation` and `LlmCompletionStatus`. Common's enforcement values are renamed
+  `ProviderJsonSchema` and `ProviderJsonObject`, matching `ProviderEnforced`.
+- `LlmUsage`, which replaces `LlmChatUsage`.
+- `LlmAttachment`. Common's `ContentType` is renamed `MediaType`, matching `LlmToolOutputBinary`. An
+  adapter uses `MediaType` when it is set and detects the type from the bytes otherwise.
+  `ConnectLlmInference` passes it through; today it drops it.
+
+`LlmBinaryKind`, `LlmToolOutput` and its part records move to Common. Common's `LlmToolResult` becomes
+`(string ToolCallId, LlmToolOutput Output)`, and Connect uses it. The delivery projection and
+`LlmRichContentSupported` stay in Connect, because they depend on connections and capabilities.
+
+Connect's completion event carries `LlmChatResult`, which has no Common equivalent, so it is renamed
+`LlmChatCompletionEvent`. `LlmChatMessage`, `LlmChatResult` and `LlmModel` stay in Connect. Each carries
+Connect-only data: response state, diagnostics, or provider capabilities.
+
+`QwenLlmInference` moves to the new tool result shape.
+
+### 9. Credential and sign-in members
+
+- `SignInAsync` loses its unused `redirectUri` parameter.
+- `ILlmAuthPrompt.GetAuthorizationCodeAsync` and `LlmRedirectResult` are removed if nothing else uses
+  them. Sign-in never calls the member; Claude sign-in goes through the CLI.
+- `SetApiKeyAsync` and `SetBedrockCredentialsAsync` take `expectedVersion`, like the Codex and Claude
+  login members, so a credential cannot overwrite a connection the host changed in between.
+
+### Release
+
+All nine items ship in `11.9.0-rc.1` with the earlier breaking items. Agent DS is migrated on
+`agent-integration-2` against the unpublished source, and both are published together. The Agent DS
+changes are mechanical except the removed command-event and approval-handler handling and its
+`CompactAsync` pass-through.
+
+### Not included
+
+These are compatible and can ship later: mapping Nova's `<thinking>` text, `ConverseStream`, Converse
+reasoning output, one setup-header record for the Image, Audio and TTS setups, and a single integer type
+for token counts.
