@@ -1,6 +1,7 @@
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
+using Darkspyre.Inference.Common.LLM;
 using Amazon.BedrockAgentCore;
 using Amazon.BedrockAgentCore.Model;
 using Amazon.Runtime.EventStreams;

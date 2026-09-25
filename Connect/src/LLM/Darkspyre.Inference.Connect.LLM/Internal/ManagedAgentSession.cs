@@ -1,6 +1,7 @@
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Threading.Channels;
+using Darkspyre.Inference.Common.LLM;
 using Darkspyre.Inference.Connect.LLM.Providers;
 
 namespace Darkspyre.Inference.Connect.LLM.Internal;
@@ -407,7 +408,7 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
                                 await writer.WriteAsync(new LlmAgentReasoningDeltaEvent(ThreadId, run.Id, stepId,
                                     reasoning.Delta, reasoning.IsSummary), token);
                                 break;
-                            case LlmCompletionEvent completion:
+                            case LlmChatCompletionEvent completion:
                                 if (result is not null) { throw new InvalidOperationException("Duplicate model completion."); }
                                 result = completion.Result;
                                 break;
@@ -691,7 +692,7 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
     {
         if (_context.Revision != revision) { throw new InvalidOperationException("The context revision is stale."); }
     }
-    private static LlmChatUsage? AddUsage(LlmChatUsage? total, LlmChatUsage? usage, bool first) => first ? usage
+    private static LlmUsage? AddUsage(LlmUsage? total, LlmUsage? usage, bool first) => first ? usage
         : total is null || usage is null ? null : new(
             SumTokens(total.InputTokens, usage.InputTokens), SumTokens(total.OutputTokens, usage.OutputTokens),
             SumTokens(total.TotalTokens, usage.TotalTokens));
@@ -767,7 +768,7 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
         public Queue<string> Steering { get; } = new();
         public string? PauseId { get; set; }
         public int Iterations { get; set; }
-        public LlmChatUsage? Usage { get; set; }
+        public LlmUsage? Usage { get; set; }
         public bool UsageUnknown { get; set; }
         public bool Terminal { get; set; }
         public void Dispose() => Cancellation.Dispose();

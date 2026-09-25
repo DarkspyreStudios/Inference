@@ -1,5 +1,6 @@
 using System.Runtime.CompilerServices;
 using System.Text.Json;
+using Darkspyre.Inference.Common.LLM;
 
 namespace Darkspyre.Inference.Connect.LLM;
 

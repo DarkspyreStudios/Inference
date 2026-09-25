@@ -221,7 +221,7 @@ internal sealed class BedrockLlmClient(
                         ["Structured output was not evaluated because the provider refused the request."])
                     : StructuredOutput.Validate(finalText, structured, enforcement.Value)
                 : null;
-        yield return new LlmCompletionEvent(new LlmChatResult
+        yield return new LlmChatCompletionEvent(new LlmChatResult
         {
             Text = finalText,
             Refusal = refused ? finalText : null,
@@ -230,7 +230,7 @@ internal sealed class BedrockLlmClient(
             IncompleteReason = incomplete ? stopReason : null,
             Usage = response.Usage is null
                 ? null
-                : new LlmChatUsage(
+                : new LlmUsage(
                     response.Usage.InputTokens,
                     response.Usage.OutputTokens,
                     response.Usage.TotalTokens),
@@ -464,7 +464,7 @@ internal sealed class BedrockLlmClient(
         string mediaType = LlmAttachments.ResolveMediaType(attachment);
         return attachment.Kind switch
         {
-            LlmAttachmentKind.Image => new ContentBlock
+            LlmBinaryKind.Image => new ContentBlock
             {
                 Image = new ImageBlock
                 {
@@ -475,7 +475,7 @@ internal sealed class BedrockLlmClient(
                     }
                 }
             },
-            LlmAttachmentKind.Document => new ContentBlock
+            LlmBinaryKind.Document => new ContentBlock
             {
                 Document = new DocumentBlock
                 {

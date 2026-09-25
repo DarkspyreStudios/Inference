@@ -59,6 +59,13 @@ authentication, provider-management, and job contracts remain in their capabilit
 semantic inference contracts that are also implemented by Tensor belong in
 `Darkspyre.Inference.Common`.
 
+Connect's chat lane uses Common's LLM primitives directly: the stream events, tool definitions, tool
+choice, tool calls, tool results with `LlmToolOutput`, attachments, structured-output types, completion
+status and `LlmUsage`, all in `Darkspyre.Inference.Common.LLM`. Connect adds only what carries
+Connect-only data: `LlmChatMessage` and `LlmChatResult` with response state and diagnostics,
+`LlmChatCompletionEvent` for the final result, and `LlmModel` with provider capabilities. An attachment's
+`MediaType` is used as given; without one, the adapter detects the type from the bytes.
+
 ## Portable inference lane
 
 Bind a configured Connect implementation when an application wants to select Connect or Tensor
@@ -370,7 +377,7 @@ if (result.Status == LlmCompletionStatus.RequiresAction)
 }
 ```
 
-During streaming, tool calls arrive as `LlmToolCallStartedEvent`, one or more `LlmToolCallArgumentsDeltaEvent` values, and `LlmToolCallCompletedEvent`. The terminal `LlmCompletionEvent` repeats the complete calls in `LlmChatResult.ToolCalls`. `ArgumentsJson` is deliberately raw JSON; the host should deserialize it into its own validated input type before execution.
+During streaming, tool calls arrive as `LlmToolCallStartedEvent`, one or more `LlmToolCallArgumentsDeltaEvent` values, and `LlmToolCallCompletedEvent`. The terminal `LlmChatCompletionEvent` repeats the complete calls in `LlmChatResult.ToolCalls`. `ArgumentsJson` is deliberately raw JSON; the host should deserialize it into its own validated input type before execution.
 
 ### 2.0 attachment migration
 
@@ -390,13 +397,13 @@ var promptWithFiles = new LlmChatMessage("user", "Compare the chart with the rep
     [
         new LlmAttachment
         {
-            Kind = LlmAttachmentKind.Image,
+            Kind = LlmBinaryKind.Image,
             FileName = "chart.png",
             Data = chartBytes
         },
         new LlmAttachment
         {
-            Kind = LlmAttachmentKind.Document,
+            Kind = LlmBinaryKind.Document,
             FileName = "report.pdf",
             Data = reportBytes
         }
@@ -710,8 +717,8 @@ and never consumes credits. The upstream route is evidenced in
 The old Codex process/App Server implementation is removed, not retained as a second lane.
 Claude and AgentCore still use their native session adapters.
 
-Tools are sent non-strict unless their definition sets `Strict`: Common's and Connect's `LlmToolDefinition`
-and `LlmAgentToolDefinition` all default to false, because a host schema describes what the tool accepts.
+Tools are sent non-strict unless their definition sets `Strict`: `LlmToolDefinition` and
+`LlmAgentToolDefinition` both default to false, because a host schema describes what the tool accepts.
 Structured output keeps `Strict = true`, because its schema describes the reply the host requires. A strict
 tool's schema must meet the provider's strict rules; for OpenAI, every object closes
 `additionalProperties` and lists every property as required, and any other schema fails the whole
@@ -746,7 +753,7 @@ await foreach (LlmAgentEvent agentEvent in session.RunTurnAsync(
                        [
                            new LlmAttachment
                            {
-                               Kind = LlmAttachmentKind.Document,
+                               Kind = LlmBinaryKind.Document,
                                FileName = "report.pdf",
                                Data = reportBytes
                            }

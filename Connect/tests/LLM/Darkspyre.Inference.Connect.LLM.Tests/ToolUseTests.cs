@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text;
 using System.Text.Json;
+using Darkspyre.Inference.Common.LLM;
 using Darkspyre.Inference.Connect.LLM.Internal;
 using Darkspyre.Inference.Connect.LLM.Providers;
 
@@ -132,7 +133,7 @@ public sealed class ToolUseTests
             string.Concat(firstStream.OfType<LlmToolCallArgumentsDeltaEvent>().Select(item => item.Delta)));
         Assert.Equal("call_1", Assert.Single(firstStream.OfType<LlmToolCallCompletedEvent>()).ToolCall.Id);
 
-        LlmChatResult firstResult = Assert.Single(firstStream.OfType<LlmCompletionEvent>()).Result;
+        LlmChatResult firstResult = Assert.Single(firstStream.OfType<LlmChatCompletionEvent>()).Result;
         Assert.Equal(LlmCompletionStatus.RequiresAction, firstResult.Status);
         Assert.Equal("tool_calls", firstResult.FinishReason);
         LlmToolCall call = Assert.Single(firstResult.ToolCalls);
@@ -190,7 +191,7 @@ public sealed class ToolUseTests
 
         Assert.Equal(
             "72 F",
-            Assert.Single(secondStream.OfType<LlmCompletionEvent>()).Result.Text);
+            Assert.Single(secondStream.OfType<LlmChatCompletionEvent>()).Result.Text);
         using JsonDocument continued = JsonDocument.Parse(handler.Bodies[1]);
         JsonElement input = continued.RootElement.GetProperty("input");
         Assert.Equal(7, input.GetArrayLength());
@@ -260,7 +261,7 @@ public sealed class ToolUseTests
         Assert.Equal(
             "{\"id\":7}",
             Assert.Single(stream.OfType<LlmToolCallCompletedEvent>()).ToolCall.ArgumentsJson);
-        LlmChatResult result = Assert.Single(stream.OfType<LlmCompletionEvent>()).Result;
+        LlmChatResult result = Assert.Single(stream.OfType<LlmChatCompletionEvent>()).Result;
         Assert.Equal(LlmCompletionStatus.RequiresAction, result.Status);
         Assert.Equal("call_2", Assert.Single(result.ToolCalls).Id);
 
@@ -354,7 +355,7 @@ public sealed class ToolUseTests
         Assert.Equal("toolu_1", Assert.Single(stream.OfType<LlmToolCallStartedEvent>()).ToolCallId);
         LlmToolCall completed = Assert.Single(stream.OfType<LlmToolCallCompletedEvent>()).ToolCall;
         Assert.Equal("{\"city\":\"Chicago\"}", completed.ArgumentsJson);
-        LlmChatResult result = Assert.Single(stream.OfType<LlmCompletionEvent>()).Result;
+        LlmChatResult result = Assert.Single(stream.OfType<LlmChatCompletionEvent>()).Result;
         Assert.Equal(LlmCompletionStatus.RequiresAction, result.Status);
         Assert.Equal("toolu_1", Assert.Single(result.ToolCalls).Id);
         Assert.NotNull(result.ResponseState);
@@ -399,7 +400,7 @@ public sealed class ToolUseTests
 
         Assert.Equal(
             "72 F",
-            Assert.Single(continuedStream.OfType<LlmCompletionEvent>()).Result.Text);
+            Assert.Single(continuedStream.OfType<LlmChatCompletionEvent>()).Result.Text);
         using JsonDocument continued = JsonDocument.Parse(handler.Bodies[1]);
         JsonElement continuedMessages = continued.RootElement.GetProperty("messages");
         Assert.Equal(5, continuedMessages.GetArrayLength());
@@ -515,21 +516,21 @@ public sealed class ToolUseTests
 
     private static LlmAttachment ImageAttachment() => new()
     {
-        Kind = LlmAttachmentKind.Image,
+        Kind = LlmBinaryKind.Image,
         FileName = "chart.png",
         Data = new byte[] { 0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a }
     };
 
     private static LlmAttachment PdfAttachment() => new()
     {
-        Kind = LlmAttachmentKind.Document,
+        Kind = LlmBinaryKind.Document,
         FileName = "report.pdf",
         Data = "%PDF-1.7"u8.ToArray()
     };
 
     private static LlmAttachment TextAttachment() => new()
     {
-        Kind = LlmAttachmentKind.Document,
+        Kind = LlmBinaryKind.Document,
         FileName = "notes.txt",
         Data = "plain text"u8.ToArray()
     };

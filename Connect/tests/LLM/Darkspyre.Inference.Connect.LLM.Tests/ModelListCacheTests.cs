@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using Darkspyre.Inference.Common.LLM;
 using Darkspyre.Inference.Connect.LLM.Internal;
 using Microsoft.Extensions.DependencyInjection;
 

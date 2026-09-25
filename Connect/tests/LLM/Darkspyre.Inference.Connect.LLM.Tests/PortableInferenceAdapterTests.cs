@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using Darkspyre.Inference.Common.LLM;
 using Common = Darkspyre.Inference.Common;
 using CommonLlm = Darkspyre.Inference.Common.LLM;
 
@@ -30,6 +31,34 @@ public sealed class PortableInferenceAdapterTests
         Assert.Equal("model-a", client.Request?.ModelId);
         Assert.Equal("Be concise.", client.Request?.Instructions);
         Assert.Equal("Hello", Assert.Single(client.Request!.Messages).Content);
+    }
+
+    [Fact]
+    public async Task BoundInferenceKeepsAttachmentMediaTypesAndToolOutputs()
+    {
+        var client = new RecordingClient();
+        var service = new LlmProviderService(new ConnectionSource(), [client]);
+        var image = new LlmAttachment
+        {
+            Kind = LlmBinaryKind.Image,
+            FileName = "chart",
+            MediaType = "image/webp",
+            Data = new byte[] { 0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a }
+        };
+        var result = new LlmToolResult("call-1", LlmToolOutput.FromText("done"));
+
+        await LlmInferenceExtensions.CompleteAsync(service.Bind("primary"), new LlmInferenceRequest
+        {
+            ModelId = "model-a",
+            Messages = [new LlmMessage("user", "Look") { Attachments = [image] }, new LlmMessage("tool", "") { ToolResults = [result] }]
+        });
+
+        Assert.Same(image, Assert.Single(client.Request!.Messages[0].Attachments));
+        Assert.Same(result, Assert.Single(client.Request.Messages[1].ToolResults));
+        Assert.Equal("image/webp", Internal.LlmAttachments.ResolveMediaType(image));
+        Assert.Equal("image/png", Internal.LlmAttachments.ResolveMediaType(image with { MediaType = null }));
+        Assert.Throws<ArgumentException>(() => Internal.LlmAttachments.Validate(
+            [image with { Kind = LlmBinaryKind.Audio }], supportsImages: true, supportsDocuments: true, "attachments"));
     }
 
     [Fact]
@@ -99,7 +128,7 @@ public sealed class PortableInferenceAdapterTests
                 throw Failure;
 
             yield return new LlmTextDeltaEvent("Hello back");
-            yield return new LlmCompletionEvent(new LlmChatResult
+            yield return new LlmChatCompletionEvent(new LlmChatResult
             {
                 Text = "Hello back",
                 Status = LlmCompletionStatus.Completed,

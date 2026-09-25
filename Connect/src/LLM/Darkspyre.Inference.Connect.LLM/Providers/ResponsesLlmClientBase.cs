@@ -2,6 +2,7 @@ using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Darkspyre.Inference.Common.LLM;
 using Darkspyre.Inference.Connect.LLM.Internal;
 
 namespace Darkspyre.Inference.Connect.LLM.Providers;
@@ -218,7 +219,7 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
                             }
 
                             completed = true;
-                            yield return new LlmCompletionEvent(result);
+                            yield return new LlmChatCompletionEvent(result);
                             break;
                         }
 
@@ -412,7 +413,7 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
                 : StructuredOutput.Validate(finalText, structuredRequest, enforcement.Value);
         }
 
-        LlmChatUsage? usage = ReadUsage(responseRoot);
+        LlmUsage? usage = ReadUsage(responseRoot);
         return new LlmChatResult
         {
             Text = finalText,
@@ -472,14 +473,14 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
         return (text.ToString(), refusal.ToString());
     }
 
-    private static LlmChatUsage? ReadUsage(JsonElement root)
+    private static LlmUsage? ReadUsage(JsonElement root)
     {
         if (LlmJson.GetObject(root, "usage") is not { } usage)
         {
             return null;
         }
 
-        return new LlmChatUsage(
+        return new LlmUsage(
             LlmJson.GetInt(usage, "input_tokens"),
             LlmJson.GetInt(usage, "output_tokens"),
             LlmJson.GetInt(usage, "total_tokens"));

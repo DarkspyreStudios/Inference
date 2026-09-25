@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
+using Darkspyre.Inference.Common.LLM;
 using Darkspyre.Inference.Connect.LLM;
 using Darkspyre.Inference.Connect.LLM.Providers;
 using LlmReasoningLevel = Darkspyre.Inference.Common.LLM.LlmReasoningLevel;
@@ -83,7 +84,7 @@ public sealed class LlmTransportTests
         IReadOnlyList<LlmStreamEvent> stream = await ReadAllAsync(client.StreamAsync(connection, request));
 
         Assert.Equal(["{\"answer\":", "\"yes\"}"], stream.OfType<LlmTextDeltaEvent>().Select(item => item.Delta));
-        LlmChatResult result = Assert.Single(stream.OfType<LlmCompletionEvent>()).Result;
+        LlmChatResult result = Assert.Single(stream.OfType<LlmChatCompletionEvent>()).Result;
         Assert.Equal("{\"answer\":\"yes\"}", result.Text);
         Assert.Equal(LlmCompletionStatus.Completed, result.Status);
         Assert.Equal("resp_123", result.ProviderResponseId);
@@ -137,7 +138,7 @@ public sealed class LlmTransportTests
             client.StreamAsync(ResponsesConnection(), request));
 
         Assert.Equal("I cannot help.", Assert.Single(stream.OfType<LlmRefusalDeltaEvent>()).Delta);
-        LlmChatResult result = Assert.Single(stream.OfType<LlmCompletionEvent>()).Result;
+        LlmChatResult result = Assert.Single(stream.OfType<LlmChatCompletionEvent>()).Result;
         Assert.Equal(LlmCompletionStatus.Refused, result.Status);
         Assert.Equal("I cannot help.", result.Refusal);
         Assert.False(result.StructuredOutput?.WasEvaluated);
@@ -243,7 +244,7 @@ public sealed class LlmTransportTests
 
         IReadOnlyList<LlmStreamEvent> stream = await ReadAllAsync(client.StreamAsync(connection, request));
 
-        LlmChatResult result = Assert.Single(stream.OfType<LlmCompletionEvent>()).Result;
+        LlmChatResult result = Assert.Single(stream.OfType<LlmChatCompletionEvent>()).Result;
         Assert.Equal("{\"value\":3}", result.Text);
         Assert.Equal(12, result.Usage?.TotalTokens);
         Assert.True(result.StructuredOutput?.IsValid);
@@ -285,7 +286,7 @@ public sealed class LlmTransportTests
         IReadOnlyList<LlmStreamEvent> stream = await ReadAllAsync(
             client.StreamAsync(CompatibleConnection(), request));
 
-        LlmChatResult result = Assert.Single(stream.OfType<LlmCompletionEvent>()).Result;
+        LlmChatResult result = Assert.Single(stream.OfType<LlmChatCompletionEvent>()).Result;
         Assert.False(result.StructuredOutput?.IsValid);
         Assert.Equal(LlmStructuredOutputEnforcement.LocalValidationOnly, result.StructuredOutput?.Enforcement);
         using JsonDocument sent = JsonDocument.Parse(Assert.IsType<string>(handler.Body));
@@ -407,7 +408,7 @@ public sealed class LlmTransportTests
         Assert.Equal(
             "This request was declined because it could enable cyber harm.",
             Assert.Single(stream.OfType<LlmRefusalDeltaEvent>()).Delta);
-        LlmChatResult result = Assert.Single(stream.OfType<LlmCompletionEvent>()).Result;
+        LlmChatResult result = Assert.Single(stream.OfType<LlmChatCompletionEvent>()).Result;
         Assert.Equal(LlmCompletionStatus.Refused, result.Status);
         Assert.Equal(
             "This request was declined because it could enable cyber harm.",
@@ -434,7 +435,7 @@ public sealed class LlmTransportTests
         IReadOnlyList<LlmStreamEvent> stream = await ReadAllAsync(
             client.StreamAsync(AnthropicConnection(), AnthropicRequest()));
 
-        LlmChatResult result = Assert.Single(stream.OfType<LlmCompletionEvent>()).Result;
+        LlmChatResult result = Assert.Single(stream.OfType<LlmChatCompletionEvent>()).Result;
         Assert.Equal("This request was declined.", result.Refusal);
         Assert.Null(result.RefusalCategory);
         Assert.Empty(result.Text);

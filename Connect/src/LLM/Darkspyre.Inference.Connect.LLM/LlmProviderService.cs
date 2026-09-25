@@ -348,8 +348,8 @@ public sealed class LlmProviderService
                            request,
                            cancellationToken))
         {
-            yield return streamEvent is LlmCompletionEvent completion
-                ? new LlmCompletionEvent(SanitizeDiagnostics(completion.Result, connection) with
+            yield return streamEvent is LlmChatCompletionEvent completion
+                ? new LlmChatCompletionEvent(SanitizeDiagnostics(completion.Result, connection) with
                 {
                     OmittedResponseStateCount = omitted
                 })
@@ -447,7 +447,7 @@ public sealed class LlmProviderService
                            request,
                            cancellationToken))
         {
-            if (streamEvent is not LlmCompletionEvent completion)
+            if (streamEvent is not LlmChatCompletionEvent completion)
             {
                 continue;
             }

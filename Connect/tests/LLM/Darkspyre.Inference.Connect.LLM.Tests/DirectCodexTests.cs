@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text;
 using System.Text.Json;
+using Darkspyre.Inference.Common.LLM;
 using Darkspyre.Inference.Connect.LLM.Internal;
 using Darkspyre.Inference.Connect.LLM.Providers;
 using LlmReasoningLevel = Darkspyre.Inference.Common.LLM.LlmReasoningLevel;
@@ -71,7 +72,7 @@ public sealed class DirectCodexTests
         var client = new OpenAiCodexLlmClient(http);
         var stream = await Read(client.StreamAsync(Connection(), Request()));
         Assert.Equal("Thinking", Assert.Single(stream.OfType<LlmReasoningDeltaEvent>()).Delta);
-        var result = Assert.Single(stream.OfType<LlmCompletionEvent>()).Result;
+        var result = Assert.Single(stream.OfType<LlmChatCompletionEvent>()).Result;
         Assert.Equal(LlmCompletionStatus.RequiresAction, result.Status);
         Assert.Equal("call", Assert.Single(result.ToolCalls).Id);
         var state = ProviderResponseStateCodec.Decode(result.ResponseState!, Connection(), "model");
@@ -115,8 +116,8 @@ public sealed class DirectCodexTests
         using var http = new HttpClient(handler);
         var client = new OpenAiCodexLlmClient(http);
         byte[] png = Convert.FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jG9sAAAAASUVORK5CYII=");
-        var image = new LlmAttachment { Kind = LlmAttachmentKind.Image, FileName = "x.png", Data = png };
-        var document = new LlmAttachment { Kind = LlmAttachmentKind.Document, FileName = "x.txt", Data = "word"u8.ToArray() };
+        var image = new LlmAttachment { Kind = LlmBinaryKind.Image, FileName = "x.png", Data = png };
+        var document = new LlmAttachment { Kind = LlmBinaryKind.Document, FileName = "x.txt", Data = "word"u8.ToArray() };
         var output = new LlmToolOutput
         {
             Parts =
@@ -174,7 +175,7 @@ public sealed class DirectCodexTests
         Assert.Null(client.EstimateInputTokens(Connection(), Request() with
         {
             Messages = [new("user", "read")
-        { Attachments = [new() { Kind = LlmAttachmentKind.Document, FileName = "x.txt", Data = "text"u8.ToArray() }] }]
+        { Attachments = [new() { Kind = LlmBinaryKind.Document, FileName = "x.txt", Data = "text"u8.ToArray() }] }]
         }));
     }
 
@@ -481,7 +482,7 @@ public sealed class DirectCodexTests
     private static HttpResponseMessage Json(string text) => new(HttpStatusCode.OK)
     { Content = new StringContent(text, Encoding.UTF8, "application/json") };
     private static async Task<LlmChatResult> Complete(OpenAiCodexLlmClient client, LlmConnection connection, LlmChatRequest request) =>
-        Assert.Single((await Read(client.StreamAsync(connection, request))).OfType<LlmCompletionEvent>()).Result;
+        Assert.Single((await Read(client.StreamAsync(connection, request))).OfType<LlmChatCompletionEvent>()).Result;
     private static async Task<List<LlmStreamEvent>> Read(IAsyncEnumerable<LlmStreamEvent> source)
     {
         var result = new List<LlmStreamEvent>();

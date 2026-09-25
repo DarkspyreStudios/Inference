@@ -1,3 +1,5 @@
+using Darkspyre.Inference.Common.LLM;
+
 namespace Darkspyre.Inference.Connect.LLM;
 
 /// <summary>One stable record in model context, distinct from a display transcript.</summary>
@@ -161,8 +163,8 @@ public sealed record LlmAgentUsageEvent(
     string ThreadId,
     string TurnId,
     string RequestId,
-    LlmChatUsage? Usage,
-    LlmChatUsage? RunTotals) : LlmAgentEvent(ThreadId, TurnId);
+    LlmUsage? Usage,
+    LlmUsage? RunTotals) : LlmAgentEvent(ThreadId, TurnId);
 
 public enum LlmAgentCompletionReason
 {

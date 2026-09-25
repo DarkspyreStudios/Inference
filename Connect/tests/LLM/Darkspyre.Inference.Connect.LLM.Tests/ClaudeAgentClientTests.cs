@@ -2,6 +2,7 @@ using Darkspyre.Inference.Connect.LLM.Internal;
 using System.Collections.Concurrent;
 using System.Text.Json;
 using System.Threading.Channels;
+using Darkspyre.Inference.Common.LLM;
 using Darkspyre.Inference.Connect.LLM.Providers;
 
 namespace Darkspyre.Inference.Connect.LLM.Tests;
@@ -85,7 +86,7 @@ public sealed class ClaudeAgentClientTests
                 [
                     new LlmAttachment
                     {
-                        Kind = LlmAttachmentKind.Image,
+                        Kind = LlmBinaryKind.Image,
                         FileName = "prompt.png",
                         Data = new byte[]
                         {
@@ -94,7 +95,7 @@ public sealed class ClaudeAgentClientTests
                     },
                     new LlmAttachment
                     {
-                        Kind = LlmAttachmentKind.Document,
+                        Kind = LlmBinaryKind.Document,
                         FileName = "prompt.txt",
                         Data = "prompt document"u8.ToArray()
                     }

@@ -1,3 +1,4 @@
+using Darkspyre.Inference.Common.LLM;
 using Amazon.BedrockRuntime;
 using Amazon.BedrockRuntime.Model;
 using Darkspyre.Inference.Connect.LLM.Bedrock;
@@ -99,7 +100,7 @@ public sealed class BedrockAgentTests
     }
 
     private static LlmChatResult Complete(ConverseResponse response) =>
-        Assert.IsType<LlmCompletionEvent>(BedrockLlmClient.MapResponse(Connection(), Request([new("user", "hello")]), null, response).Last()).Result;
+        Assert.IsType<LlmChatCompletionEvent>(BedrockLlmClient.MapResponse(Connection(), Request([new("user", "hello")]), null, response).Last()).Result;
 
     private static LlmProviderResponseState Counts(long input, long output) =>
         Complete(Response(new TokenUsage { InputTokens = (int)input, OutputTokens = (int)output, TotalTokens = (int)(input + output) })).ResponseState!;
@@ -133,7 +134,7 @@ public sealed class BedrockAgentTests
 
     private static LlmAttachment Png() => new()
     {
-        Kind = LlmAttachmentKind.Image,
+        Kind = LlmBinaryKind.Image,
         FileName = "chart.png",
         Data = new byte[] { 0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a }
     };

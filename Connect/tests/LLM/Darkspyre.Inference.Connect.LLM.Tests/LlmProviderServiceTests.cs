@@ -2,6 +2,7 @@ using Darkspyre.Inference.Connect.LLM;
 using Darkspyre.Inference.Connect.LLM.Internal;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
+using Darkspyre.Inference.Common.LLM;
 
 namespace Darkspyre.Inference.Connect.LLM.Tests;
 
@@ -460,7 +461,7 @@ public sealed class LlmProviderServiceTests
                 throw Failure;
             }
 
-            yield return new LlmCompletionEvent(new LlmChatResult
+            yield return new LlmChatCompletionEvent(new LlmChatResult
             {
                 Text = Transport.ToString(),
                 Status = LlmCompletionStatus.Completed,

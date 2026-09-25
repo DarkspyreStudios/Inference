@@ -1,4 +1,5 @@
 using System.Text.Json.Nodes;
+using Darkspyre.Inference.Common.LLM;
 
 namespace Darkspyre.Inference.Connect.LLM.Internal;
 
@@ -6,8 +7,8 @@ internal static class AnthropicAttachments
 {
     public static JsonObject BuildContentBlock(LlmAttachment attachment) => attachment.Kind switch
     {
-        LlmAttachmentKind.Image => BuildImage(attachment),
-        LlmAttachmentKind.Document => BuildDocument(attachment),
+        LlmBinaryKind.Image => BuildImage(attachment),
+        LlmBinaryKind.Document => BuildDocument(attachment),
         _ => throw new ArgumentOutOfRangeException(nameof(attachment))
     };
 

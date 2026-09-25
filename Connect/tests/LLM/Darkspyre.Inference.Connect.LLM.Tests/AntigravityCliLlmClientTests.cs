@@ -1,6 +1,7 @@
 using Darkspyre.Inference.Connect.LLM.Internal;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
+using Darkspyre.Inference.Common.LLM;
 using Darkspyre.Inference.Connect.LLM;
 using Darkspyre.Inference.Connect.LLM.Providers;
 using LlmReasoningLevel = Darkspyre.Inference.Common.LLM.LlmReasoningLevel;
@@ -46,7 +47,7 @@ public sealed class AntigravityCliLlmClientTests
 
         Assert.Equal("Hello", Assert.Single(events.OfType<LlmTextDeltaEvent>()).Delta);
         Assert.NotEmpty(events.OfType<LlmActivityEvent>());
-        LlmChatResult result = Assert.Single(events.OfType<LlmCompletionEvent>()).Result;
+        LlmChatResult result = Assert.Single(events.OfType<LlmChatCompletionEvent>()).Result;
         Assert.Equal("Hello from Antigravity.", result.Text);
         Assert.Equal("conversation-1", result.ProviderResponseId);
         Assert.Equal(17, result.Usage?.TotalTokens);
@@ -76,7 +77,7 @@ public sealed class AntigravityCliLlmClientTests
                             [
                                 new LlmAttachment
                                 {
-                                    Kind = LlmAttachmentKind.Document,
+                                    Kind = LlmBinaryKind.Document,
                                     FileName = "notes.txt",
                                     Data = "text"u8.ToArray()
                                 }
@@ -180,7 +181,7 @@ public sealed class AntigravityCliLlmClientTests
         Assert.True(await pendingCompletion);
         Assert.IsType<LlmActivityEvent>(events.Current);
         Assert.True(await events.MoveNextAsync());
-        Assert.IsType<LlmCompletionEvent>(events.Current);
+        Assert.IsType<LlmChatCompletionEvent>(events.Current);
         Assert.False(await events.MoveNextAsync());
     }
 
@@ -254,7 +255,7 @@ public sealed class AntigravityCliLlmClientTests
     }
 
     [Fact]
-    public async Task UsesNativeJsonSchemaAndReasoningEffort()
+    public async Task UsesProviderJsonSchemaAndReasoningEffort()
     {
         var runner = new RecordingRunner(new AntigravityCliProcessResult(
             0,
@@ -289,7 +290,7 @@ public sealed class AntigravityCliLlmClientTests
         Assert.EndsWith("output-schema.json", invocation.Arguments[schemaIndex + 1], StringComparison.Ordinal);
         Assert.Contains("\"score\"", runner.SchemaContent, StringComparison.Ordinal);
 
-        LlmChatResult result = Assert.Single(events.OfType<LlmCompletionEvent>()).Result;
+        LlmChatResult result = Assert.Single(events.OfType<LlmChatCompletionEvent>()).Result;
         Assert.True(result.StructuredOutput?.IsValid);
         Assert.Equal(
             LlmStructuredOutputEnforcement.ProviderJsonSchema,
@@ -322,7 +323,7 @@ public sealed class AntigravityCliLlmClientTests
             }));
 
         Assert.Equal("{\"score\":7}", Assert.Single(events.OfType<LlmTextDeltaEvent>()).Delta);
-        LlmChatResult result = Assert.Single(events.OfType<LlmCompletionEvent>()).Result;
+        LlmChatResult result = Assert.Single(events.OfType<LlmChatCompletionEvent>()).Result;
         Assert.Equal("{\"score\":7}", result.Text);
         Assert.True(result.StructuredOutput?.IsValid);
     }
@@ -435,7 +436,7 @@ public sealed class AntigravityCliLlmClientTests
         IReadOnlyList<LlmStreamEvent> events = await ReadAllAsync(client.StreamAsync(
             Connection(), new LlmChatRequest { ModelId = "auto", Messages = ToolHistory() }));
 
-        Assert.Equal("522,000", Assert.Single(events.OfType<LlmCompletionEvent>()).Result.Text);
+        Assert.Equal("522,000", Assert.Single(events.OfType<LlmChatCompletionEvent>()).Result.Text);
         string input = Assert.Single(runner.Invocations).StandardInput!;
         Assert.Contains("[TOOL CALL id=c1 name=lookup]", input, StringComparison.Ordinal);
         Assert.Contains("[TOOL RESULT id=c1 status=ok]", input, StringComparison.Ordinal);

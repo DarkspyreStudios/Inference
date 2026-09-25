@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Globalization;
+using Darkspyre.Inference.Common.LLM;
 using Amazon.Bedrock.Model;
 using Amazon.BedrockRuntime;
 using Amazon.BedrockRuntime.Model;
@@ -48,7 +49,7 @@ public sealed class BedrockSafetyTests
                         [
                             new LlmAttachment
                             {
-                                Kind = LlmAttachmentKind.Image,
+                                Kind = LlmBinaryKind.Image,
                                 FileName = "chart.png",
                                 Data = new byte[]
                                 {
@@ -57,7 +58,7 @@ public sealed class BedrockSafetyTests
                             },
                             new LlmAttachment
                             {
-                                Kind = LlmAttachmentKind.Document,
+                                Kind = LlmBinaryKind.Document,
                                 FileName = "notes.txt",
                                 Data = "document"u8.ToArray()
                             }

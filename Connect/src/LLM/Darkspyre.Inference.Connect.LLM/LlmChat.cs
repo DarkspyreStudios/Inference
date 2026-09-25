@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Darkspyre.Inference.Common.LLM;
 
 namespace Darkspyre.Inference.Connect.LLM;
 
@@ -19,31 +20,6 @@ public sealed record LlmChatMessage(string Role, string Content)
     public IReadOnlyList<LlmToolResult> ToolResults { get; init; } = [];
 }
 
-/// <summary>A host-provided tool that the model may request.</summary>
-public sealed record LlmToolDefinition
-{
-    public required string Name { get; init; }
-
-    public string? Description { get; init; }
-
-    public required JsonElement InputSchema { get; init; }
-
-    /// <summary>
-    /// Requests provider-enforced schema adherence. The schema must then meet the provider's strict
-    /// rules; for OpenAI that means every object closes <c>additionalProperties</c> and lists every
-    /// property as required. A host schema describes what the tool accepts, so the default is false.
-    /// </summary>
-    public bool Strict { get; init; }
-}
-
-public enum LlmToolChoiceMode
-{
-    Auto,
-    None,
-    Required,
-    Specific
-}
-
 /// <summary>
 /// What happens to message response state that the target transport, model or account cannot replay.
 /// </summary>
@@ -57,69 +33,6 @@ public enum LlmUnboundResponseState
     /// and attachments are kept. The caller's messages are not modified.
     /// </summary>
     Omit
-}
-
-/// <summary>Controls whether, and which, tool the model may request.</summary>
-public sealed record LlmToolChoice
-{
-    public LlmToolChoiceMode Mode { get; init; } = LlmToolChoiceMode.Auto;
-
-    /// <summary>Required only when <see cref="Mode"/> is <see cref="LlmToolChoiceMode.Specific"/>.</summary>
-    public string? Name { get; init; }
-}
-
-/// <summary>A tool invocation requested by the model. Arguments are preserved as provider JSON.</summary>
-public sealed record LlmToolCall(string Id, string Name, string ArgumentsJson);
-
-/// <summary>The high-level kind of binary content supplied to a model.</summary>
-public enum LlmAttachmentKind
-{
-    Image,
-    Document
-}
-
-/// <summary>
-/// Provider-neutral binary content supplied with a prompt or host tool result. Adapters own media
-/// detection and any base64, data-URL, upload, staging, or provider content-block representation.
-/// </summary>
-public sealed record LlmAttachment
-{
-    public required LlmAttachmentKind Kind { get; init; }
-
-    public required string FileName { get; init; }
-
-    public required ReadOnlyMemory<byte> Data { get; init; }
-}
-
-/// <summary>The output of a tool invocation executed by the host application.</summary>
-public sealed record LlmToolResult(string ToolCallId, LlmToolOutput Output);
-
-/// <summary>How far a structured request may fall back when native JSON Schema is unavailable.</summary>
-public enum LlmStructuredOutputFallback
-{
-    None,
-    JsonObject,
-    LocalValidation
-}
-
-public enum LlmStructuredOutputEnforcement
-{
-    ProviderJsonSchema,
-    ProviderJsonObject,
-    LocalValidationOnly
-}
-
-public sealed record LlmStructuredOutputRequest
-{
-    public required string Name { get; init; }
-
-    public string? Description { get; init; }
-
-    public required JsonElement Schema { get; init; }
-
-    public bool Strict { get; init; } = true;
-
-    public LlmStructuredOutputFallback Fallback { get; init; } = LlmStructuredOutputFallback.None;
 }
 
 /// <summary>Provider-neutral generation request. The model is selected per request.</summary>
@@ -163,23 +76,6 @@ public sealed record LlmChatRequest
     public LlmUnboundResponseState UnboundResponseState { get; init; } = LlmUnboundResponseState.Reject;
 }
 
-public sealed record LlmChatUsage(int? InputTokens, int? OutputTokens, int? TotalTokens);
-
-public enum LlmCompletionStatus
-{
-    Completed,
-    Incomplete,
-    Refused,
-    Failed,
-    RequiresAction
-}
-
-public sealed record LlmStructuredOutputValidation(
-    LlmStructuredOutputEnforcement Enforcement,
-    bool WasEvaluated,
-    bool IsValid,
-    IReadOnlyList<string> Errors);
-
 public sealed record LlmProviderDiagnostics(
     int HttpStatusCode,
     string? RequestId,
@@ -200,7 +96,7 @@ public sealed record LlmChatResult
 
     public string? IncompleteReason { get; init; }
 
-    public LlmChatUsage? Usage { get; init; }
+    public LlmUsage? Usage { get; init; }
 
     public string? ProviderResponseId { get; init; }
 

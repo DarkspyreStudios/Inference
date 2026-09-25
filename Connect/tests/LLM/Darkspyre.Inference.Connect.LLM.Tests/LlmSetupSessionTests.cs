@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using Darkspyre.Inference.Common.LLM;
 using Darkspyre.Inference.Common.Setup;
 using Darkspyre.Inference.Connect.LLM.Internal;
 using Darkspyre.Inference.Connect.LLM.Providers;
@@ -323,7 +324,7 @@ public sealed class LlmSetupSessionTests
         {
             cancellationToken.ThrowIfCancellationRequested();
             Calls++;
-            yield return new LlmCompletionEvent(new LlmChatResult { Text = "OK", Status = LlmCompletionStatus.Completed, Diagnostics = new(200, null, null) });
+            yield return new LlmChatCompletionEvent(new LlmChatResult { Text = "OK", Status = LlmCompletionStatus.Completed, Diagnostics = new(200, null, null) });
             await Task.CompletedTask;
         }
     }

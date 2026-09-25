@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Darkspyre.Inference.Common.LLM;
 using Darkspyre.Inference.Connect.ConsoleTester;
 using SecureStore;
 

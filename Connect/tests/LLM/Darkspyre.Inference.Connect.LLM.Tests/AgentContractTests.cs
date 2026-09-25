@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Darkspyre.Inference.Common.LLM;
 using Darkspyre.Inference.Connect.LLM.Internal;
 
 namespace Darkspyre.Inference.Connect.LLM.Tests;
@@ -11,7 +12,7 @@ public sealed class AgentContractTests
     {
         var attachment = new LlmAttachment
         {
-            Kind = LlmAttachmentKind.Document,
+            Kind = LlmBinaryKind.Document,
             FileName = "report.txt",
             Data = "hello"u8.ToArray()
         };

@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Darkspyre.Inference.Common.LLM;
 
 namespace Darkspyre.Inference.Connect.LLM.Examples;
 

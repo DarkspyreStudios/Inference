@@ -3,6 +3,7 @@ using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Darkspyre.Inference.Common.LLM;
 using Darkspyre.Inference.Connect.LLM.Internal;
 
 namespace Darkspyre.Inference.Connect.LLM.Providers;
@@ -259,7 +260,7 @@ internal sealed class AnthropicMessagesLlmClient : LlmClientBase
                                         ["Structured output was not evaluated because the provider refused the request."])
                                     : StructuredOutput.Validate(finalText, structured, enforcement.Value)
                                 : null;
-                        yield return new LlmCompletionEvent(new LlmChatResult
+                        yield return new LlmChatCompletionEvent(new LlmChatResult
                         {
                             Text = finalText,
                             Refusal = refused ? refusalExplanation ?? string.Empty : null,
@@ -267,7 +268,7 @@ internal sealed class AnthropicMessagesLlmClient : LlmClientBase
                             Status = completionStatus,
                             FinishReason = stopReason,
                             IncompleteReason = incomplete ? stopReason : null,
-                            Usage = new LlmChatUsage(
+                            Usage = new LlmUsage(
                                 inputTokens,
                                 outputTokens,
                                 inputTokens is null && outputTokens is null
@@ -417,7 +418,7 @@ internal sealed class AnthropicMessagesLlmClient : LlmClientBase
                 {
                     content.Add(attachment.Kind switch
                     {
-                        LlmAttachmentKind.Image or LlmAttachmentKind.Document =>
+                        LlmBinaryKind.Image or LlmBinaryKind.Document =>
                             AnthropicAttachments.BuildContentBlock(attachment),
                         _ => throw new ArgumentOutOfRangeException(nameof(request))
                     });

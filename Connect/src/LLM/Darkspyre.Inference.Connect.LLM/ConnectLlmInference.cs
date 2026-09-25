@@ -49,7 +49,7 @@ internal sealed class ConnectLlmInference(
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
-        IAsyncEnumerable<LlmStreamEvent> stream;
+        IAsyncEnumerable<CommonLlm.LlmStreamEvent> stream;
         try
         {
             stream = service.StreamAsync(connectionId, ToConnect(request), cancellationToken);
@@ -59,7 +59,7 @@ internal sealed class ConnectLlmInference(
             throw ToCommonException(exception);
         }
 
-        IAsyncEnumerator<LlmStreamEvent> enumerator = stream.GetAsyncEnumerator(cancellationToken);
+        IAsyncEnumerator<CommonLlm.LlmStreamEvent> enumerator = stream.GetAsyncEnumerator(cancellationToken);
         await using (enumerator.ConfigureAwait(false))
         {
             while (true)
@@ -84,65 +84,23 @@ internal sealed class ConnectLlmInference(
         }
     }
 
-    private CommonLlm.LlmStreamEvent ToCommon(LlmStreamEvent streamEvent, string modelId) => streamEvent switch
-    {
-        LlmTextDeltaEvent value => new CommonLlm.LlmTextDeltaEvent(value.Delta),
-        LlmReasoningDeltaEvent value => new CommonLlm.LlmReasoningDeltaEvent(value.Delta, value.IsSummary),
-        LlmRefusalDeltaEvent value => new CommonLlm.LlmRefusalDeltaEvent(value.Delta),
-        LlmActivityEvent value => new CommonLlm.LlmActivityEvent(value.Activity),
-        LlmToolCallStartedEvent value => new CommonLlm.LlmToolCallStartedEvent(
-            value.ToolCallId,
-            value.Name,
-            value.Index),
-        LlmToolCallArgumentsDeltaEvent value => new CommonLlm.LlmToolCallArgumentsDeltaEvent(
-            value.ToolCallId,
-            value.Delta),
-        LlmToolCallCompletedEvent value => new CommonLlm.LlmToolCallCompletedEvent(ToCommon(value.ToolCall)),
-        LlmCompletionEvent value => new CommonLlm.LlmCompletionEvent(ToCommon(value.Result, modelId)),
-        _ => throw new Common.InferenceException(
-            Common.InferenceFailureCode.ExecutionFailed,
-            $"Connect emitted unsupported stream event '{streamEvent.GetType().Name}'.")
-    };
+    // Connect streams Common's events; only its completion event carries a Connect-only result.
+    private CommonLlm.LlmStreamEvent ToCommon(CommonLlm.LlmStreamEvent streamEvent, string modelId) =>
+        streamEvent is LlmChatCompletionEvent completion
+            ? new CommonLlm.LlmCompletionEvent(ToCommon(completion.Result, modelId))
+            : streamEvent;
 
     private CommonLlm.LlmInferenceResult ToCommon(LlmChatResult result, string modelId) => new()
     {
         Text = result.Text,
         Refusal = result.Refusal,
         RefusalCategory = result.RefusalCategory,
-        Status = result.Status switch
-        {
-            LlmCompletionStatus.Completed => CommonLlm.LlmCompletionStatus.Completed,
-            LlmCompletionStatus.Incomplete => CommonLlm.LlmCompletionStatus.Incomplete,
-            LlmCompletionStatus.Refused => CommonLlm.LlmCompletionStatus.Refused,
-            LlmCompletionStatus.Failed => CommonLlm.LlmCompletionStatus.Failed,
-            LlmCompletionStatus.RequiresAction => CommonLlm.LlmCompletionStatus.RequiresAction,
-            _ => throw new ArgumentOutOfRangeException(nameof(result))
-        },
+        Status = result.Status,
         FinishReason = result.FinishReason,
         IncompleteReason = result.IncompleteReason,
-        Usage = result.Usage is null
-            ? null
-            : new CommonLlm.LlmUsage(
-                result.Usage.InputTokens,
-                result.Usage.OutputTokens,
-                result.Usage.TotalTokens),
-        ToolCalls = result.ToolCalls.Select(ToCommon).ToArray(),
-        StructuredOutput = result.StructuredOutput is null
-            ? null
-            : new CommonLlm.LlmStructuredOutputValidation(
-                result.StructuredOutput.Enforcement switch
-                {
-                    LlmStructuredOutputEnforcement.ProviderJsonSchema =>
-                        CommonLlm.LlmStructuredOutputEnforcement.NativeJsonSchema,
-                    LlmStructuredOutputEnforcement.ProviderJsonObject =>
-                        CommonLlm.LlmStructuredOutputEnforcement.NativeJsonObject,
-                    LlmStructuredOutputEnforcement.LocalValidationOnly =>
-                        CommonLlm.LlmStructuredOutputEnforcement.LocalValidationOnly,
-                    _ => throw new ArgumentOutOfRangeException(nameof(result))
-                },
-                result.StructuredOutput.WasEvaluated,
-                result.StructuredOutput.IsValid,
-                result.StructuredOutput.Errors),
+        Usage = result.Usage,
+        ToolCalls = result.ToolCalls,
+        StructuredOutput = result.StructuredOutput,
         Provenance = new Common.InferenceProvenance
         {
             ImplementationId = Descriptor.Id,
@@ -158,98 +116,19 @@ internal sealed class ConnectLlmInference(
         Instructions = request.Instructions,
         Messages = request.Messages.Select(static message => new LlmChatMessage(message.Role, message.Content)
         {
-            Attachments = message.Attachments.Select(static attachment => new LlmAttachment
-            {
-                Kind = attachment.Kind switch
-                {
-                    CommonLlm.LlmAttachmentKind.Image => LlmAttachmentKind.Image,
-                    CommonLlm.LlmAttachmentKind.Document => LlmAttachmentKind.Document,
-                    _ => throw new ArgumentOutOfRangeException(nameof(attachment))
-                },
-                FileName = attachment.FileName,
-                Data = attachment.Data
-            }).ToArray(),
-            ToolCalls = message.ToolCalls.Select(static call => new LlmToolCall(
-                call.Id,
-                call.Name,
-                call.ArgumentsJson)).ToArray(),
-            // The portable result's text comes first, then its attachments in their order.
-            ToolResults = message.ToolResults.Select(static result => new LlmToolResult(
-                result.ToolCallId,
-                new LlmToolOutput
-                {
-                    IsError = result.IsError,
-                    Parts =
-                    [
-                        new LlmToolOutputText(result.Content),
-                        .. result.Attachments.Select(static attachment =>
-                        {
-                            var converted = new LlmAttachment
-                            {
-                                Kind = attachment.Kind switch
-                                {
-                                    CommonLlm.LlmAttachmentKind.Image => LlmAttachmentKind.Image,
-                                    CommonLlm.LlmAttachmentKind.Document => LlmAttachmentKind.Document,
-                                    _ => throw new ArgumentOutOfRangeException(nameof(attachment))
-                                },
-                                FileName = attachment.FileName,
-                                Data = attachment.Data
-                            };
-                            return new LlmToolOutputBinary(
-                                converted.Kind == LlmAttachmentKind.Image ? LlmBinaryKind.Image : LlmBinaryKind.Document,
-                                LlmAttachments.ResolveMediaType(converted),
-                                converted.Data,
-                                converted.FileName);
-                        })
-                    ]
-                })).ToArray()
+            Attachments = message.Attachments,
+            ToolCalls = message.ToolCalls,
+            ToolResults = message.ToolResults
         }).ToArray(),
         Temperature = request.Temperature,
         MaxOutputTokens = request.MaxOutputTokens,
         ReasoningLevel = request.ReasoningLevel,
-        StructuredOutput = request.StructuredOutput is null
-            ? null
-            : new LlmStructuredOutputRequest
-            {
-                Name = request.StructuredOutput.Name,
-                Description = request.StructuredOutput.Description,
-                Schema = request.StructuredOutput.Schema,
-                Strict = request.StructuredOutput.Strict,
-                Fallback = request.StructuredOutput.Fallback switch
-                {
-                    CommonLlm.LlmStructuredOutputFallback.None => LlmStructuredOutputFallback.None,
-                    CommonLlm.LlmStructuredOutputFallback.JsonObject => LlmStructuredOutputFallback.JsonObject,
-                    CommonLlm.LlmStructuredOutputFallback.LocalValidation => LlmStructuredOutputFallback.LocalValidation,
-                    _ => throw new ArgumentOutOfRangeException(nameof(request))
-                }
-            },
-        Tools = request.Tools.Select(static tool => new LlmToolDefinition
-        {
-            Name = tool.Name,
-            Description = tool.Description,
-            InputSchema = tool.InputSchema,
-            Strict = tool.Strict
-        }).ToArray(),
-        ToolChoice = request.ToolChoice is null
-            ? null
-            : new LlmToolChoice
-            {
-                Mode = request.ToolChoice.Mode switch
-                {
-                    CommonLlm.LlmToolChoiceMode.Auto => LlmToolChoiceMode.Auto,
-                    CommonLlm.LlmToolChoiceMode.None => LlmToolChoiceMode.None,
-                    CommonLlm.LlmToolChoiceMode.Required => LlmToolChoiceMode.Required,
-                    CommonLlm.LlmToolChoiceMode.Specific => LlmToolChoiceMode.Specific,
-                    _ => throw new ArgumentOutOfRangeException(nameof(request))
-                },
-                Name = request.ToolChoice.Name
-            },
+        StructuredOutput = request.StructuredOutput,
+        Tools = request.Tools,
+        ToolChoice = request.ToolChoice,
         AllowParallelToolCalls = request.AllowParallelToolCalls,
         ConversationKey = request.ConversationKey
     };
-
-    private static CommonLlm.LlmToolCall ToCommon(LlmToolCall call) =>
-        new(call.Id, call.Name, call.ArgumentsJson);
 
     private static CommonLlm.LlmCapabilities ToCommon(LlmProviderCapabilities capabilities) => new()
     {

@@ -11,19 +11,18 @@ public sealed record LlmMessage(string Role, string Content)
     public IReadOnlyList<LlmToolResult> ToolResults { get; init; } = [];
 }
 
-public enum LlmAttachmentKind
-{
-    Image,
-    Document
-}
-
+/// <summary>
+/// Provider-neutral binary content supplied with a prompt. Adapters own any base64, data-URL, upload or
+/// provider content-block representation. A set <see cref="MediaType"/> is used as given; otherwise the
+/// adapter detects the type from the bytes.
+/// </summary>
 public sealed record LlmAttachment
 {
-    public required LlmAttachmentKind Kind { get; init; }
+    public required LlmBinaryKind Kind { get; init; }
 
     public required string FileName { get; init; }
 
-    public string? ContentType { get; init; }
+    public string? MediaType { get; init; }
 
     public required ReadOnlyMemory<byte> Data { get; init; }
 }
@@ -61,10 +60,8 @@ public sealed record LlmToolChoice
 
 public sealed record LlmToolCall(string Id, string Name, string ArgumentsJson);
 
-public sealed record LlmToolResult(string ToolCallId, string Content, bool IsError = false)
-{
-    public IReadOnlyList<LlmAttachment> Attachments { get; init; } = [];
-}
+/// <summary>The output of a tool invocation executed by the host application.</summary>
+public sealed record LlmToolResult(string ToolCallId, LlmToolOutput Output);
 
 public enum LlmStructuredOutputFallback
 {
@@ -75,8 +72,8 @@ public enum LlmStructuredOutputFallback
 
 public enum LlmStructuredOutputEnforcement
 {
-    NativeJsonSchema,
-    NativeJsonObject,
+    ProviderJsonSchema,
+    ProviderJsonObject,
     LocalValidationOnly
 }
 

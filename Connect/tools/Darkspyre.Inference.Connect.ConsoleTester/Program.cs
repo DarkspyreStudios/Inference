@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Darkspyre.Inference.Common.LLM;
 using Darkspyre.Inference.Connect.LLM;
 using Darkspyre.Inference.Connect.LLM.Bedrock;
 using Microsoft.Extensions.DependencyInjection;
@@ -290,7 +291,7 @@ internal static class Program
                 case LlmActivityEvent activity:
                     Console.Error.WriteLine($"[activity] {activity.Activity}");
                     break;
-                case LlmCompletionEvent completion:
+                case LlmChatCompletionEvent completion:
                     if (wroteOutput)
                     {
                         Console.WriteLine();
@@ -547,10 +548,10 @@ internal static class Program
                     schemaPath = value;
                     break;
                 case "--attach-image":
-                    attachments.Add(new AttachmentOption(LlmAttachmentKind.Image, value));
+                    attachments.Add(new AttachmentOption(LlmBinaryKind.Image, value));
                     break;
                 case "--attach-document":
-                    attachments.Add(new AttachmentOption(LlmAttachmentKind.Document, value));
+                    attachments.Add(new AttachmentOption(LlmBinaryKind.Document, value));
                     break;
             }
         }
@@ -724,7 +725,7 @@ internal static class Program
         string? SchemaPath,
         IReadOnlyList<AttachmentOption> Attachments);
 
-    private sealed record AttachmentOption(LlmAttachmentKind Kind, string Path);
+    private sealed record AttachmentOption(LlmBinaryKind Kind, string Path);
 
     internal sealed record BedrockLoginOptions(string Profile, string Region);
 }

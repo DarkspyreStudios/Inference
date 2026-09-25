@@ -31,7 +31,7 @@ All eight entry points use the same deterministic `get_weather` fixture from
 argument validation, cancellation, success results, and error results.
 
 [`AttachmentToolResults.cs`](AttachmentToolResults.cs) shows the shared attachment contract for both
-lanes. A tool supplies only `LlmAttachmentKind.Image` or `LlmAttachmentKind.Document`, a filename,
+lanes. A tool supplies only `LlmBinaryKind.Image` or `LlmBinaryKind.Document`, a filename,
 and bytes. It does not construct media types, base64, data URLs, provider file IDs, temporary paths,
 MCP resources, or provider-specific content blocks.
 
@@ -261,7 +261,7 @@ await foreach (LlmAgentEvent agentEvent in session.RunTurnAsync(
                        [
                            new LlmAttachment
                            {
-                               Kind = LlmAttachmentKind.Document,
+                               Kind = LlmBinaryKind.Document,
                                FileName = "report.pdf",
                                Data = reportBytes
                            }

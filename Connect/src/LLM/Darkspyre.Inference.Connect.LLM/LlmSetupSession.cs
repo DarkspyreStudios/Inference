@@ -1,4 +1,5 @@
 using System.Globalization;
+using Darkspyre.Inference.Common.LLM;
 using Darkspyre.Inference.Common.Setup;
 
 namespace Darkspyre.Inference.Connect.LLM;

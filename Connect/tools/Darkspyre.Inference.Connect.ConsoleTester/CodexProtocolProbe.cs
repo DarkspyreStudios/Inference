@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using Darkspyre.Inference.Common.LLM;
 using Darkspyre.Inference.Connect.LLM;
 using LlmReasoningLevel = Darkspyre.Inference.Common.LLM.LlmReasoningLevel;
 
@@ -70,7 +71,7 @@ internal static class CodexProtocolProbe
                     [
                         .. imageOutput.Parts.OfType<LlmToolOutputBinary>().Select(image => new LlmAttachment
                         {
-                            Kind = LlmAttachmentKind.Image,
+                            Kind = LlmBinaryKind.Image,
                             FileName = image.FileName ?? "image.png",
                             Data = image.Data
                         })

@@ -1,6 +1,7 @@
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
+using Darkspyre.Inference.Common.LLM;
 using Amazon.BedrockAgentCore;
 using Amazon.BedrockAgentCore.Model;
 using Amazon.Runtime.Documents;
@@ -70,7 +71,7 @@ internal sealed class BedrockAgentCoreLlmClient(IBedrockAgentCoreInvoker invoker
         LlmAwsCredentials aws = RequireAws(connection);
         InvokeHarnessRequest invokeRequest = BuildChatRequest(connection, request);
         var text = new StringBuilder();
-        LlmChatUsage? usage = null;
+        LlmUsage? usage = null;
         string? stopReason = null;
 
         await foreach (IEventStreamEvent streamEvent in invoker.InvokeAsync(
@@ -97,7 +98,7 @@ internal sealed class BedrockAgentCoreLlmClient(IBedrockAgentCoreInvoker invoker
                     stopReason = stopped.StopReason?.Value;
                     break;
                 case HarnessMetadataEvent { Usage: not null } metadata:
-                    usage = new LlmChatUsage(
+                    usage = new LlmUsage(
                         metadata.Usage.InputTokens,
                         metadata.Usage.OutputTokens,
                         metadata.Usage.TotalTokens);
@@ -128,7 +129,7 @@ internal sealed class BedrockAgentCoreLlmClient(IBedrockAgentCoreInvoker invoker
                         ["Structured output was not evaluated because the provider refused the request."])
                     : StructuredOutput.Validate(finalText, structured, enforcement.Value)
                 : null;
-        yield return new LlmCompletionEvent(new LlmChatResult
+        yield return new LlmChatCompletionEvent(new LlmChatResult
         {
             Text = finalText,
             Refusal = refused ? finalText : null,

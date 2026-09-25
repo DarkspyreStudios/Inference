@@ -2,6 +2,7 @@ using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Darkspyre.Inference.Common.LLM;
 using Darkspyre.Inference.Connect.LLM.Internal;
 
 namespace Darkspyre.Inference.Connect.LLM.Providers;
@@ -70,7 +71,7 @@ internal sealed class OpenAiCompatibleChatLlmClient(HttpClient http) : LlmClient
         var refusal = new StringBuilder();
         string? finishReason = null;
         string? responseId = null;
-        LlmChatUsage? usage = null;
+        LlmUsage? usage = null;
         string? lastEvent = null;
         bool sawDone = false;
         var toolCalls = new Dictionary<int, ToolCallBuilder>();
@@ -225,7 +226,7 @@ internal sealed class OpenAiCompatibleChatLlmClient(HttpClient http) : LlmClient
                 : StructuredOutput.Validate(finalText, structured, enforcement.Value);
         }
 
-        yield return new LlmCompletionEvent(new LlmChatResult
+        yield return new LlmChatCompletionEvent(new LlmChatResult
         {
             Text = finalText,
             Refusal = finalRefusal.Length == 0 ? null : finalRefusal,
@@ -437,14 +438,14 @@ internal sealed class OpenAiCompatibleChatLlmClient(HttpClient http) : LlmClient
         return value;
     }
 
-    private static LlmChatUsage? ReadUsage(JsonElement root)
+    private static LlmUsage? ReadUsage(JsonElement root)
     {
         if (LlmJson.GetObject(root, "usage") is not { } usage)
         {
             return null;
         }
 
-        return new LlmChatUsage(
+        return new LlmUsage(
             LlmJson.GetInt(usage, "prompt_tokens"),
             LlmJson.GetInt(usage, "completion_tokens"),
             LlmJson.GetInt(usage, "total_tokens"));

@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json.Nodes;
+using Darkspyre.Inference.Common.LLM;
 using Darkspyre.Inference.Connect.LLM.Internal;
 
 namespace Darkspyre.Inference.Connect.LLM.Tests;
@@ -211,7 +212,7 @@ public sealed class ContextTransferTests
 
     private static LlmAttachment Attachment(string name) => new()
     {
-        Kind = LlmAttachmentKind.Document,
+        Kind = LlmBinaryKind.Document,
         FileName = name,
         Data = "hello"u8.ToArray()
     };

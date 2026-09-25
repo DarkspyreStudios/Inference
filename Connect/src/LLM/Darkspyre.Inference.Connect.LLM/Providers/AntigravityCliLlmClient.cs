@@ -1,6 +1,7 @@
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
+using Darkspyre.Inference.Common.LLM;
 using Darkspyre.Inference.Connect.LLM.Internal;
 
 using LlmReasoningLevel = Darkspyre.Inference.Common.LLM.LlmReasoningLevel;
@@ -186,7 +187,7 @@ internal sealed class AntigravityCliLlmClient(IAntigravityCliRunner runner)
                 request.StructuredOutput,
                 enforcement!.Value);
 
-        yield return new LlmCompletionEvent(new LlmChatResult
+        yield return new LlmChatCompletionEvent(new LlmChatResult
         {
             Text = response.Text,
             Status = LlmCompletionStatus.Completed,
@@ -592,7 +593,7 @@ internal sealed class AntigravityCliLlmClient(IAntigravityCliRunner runner)
                 && idElement.ValueKind == JsonValueKind.String
                     ? idElement.GetString()
                     : null;
-            LlmChatUsage? usage = result.TryGetProperty("usage", out JsonElement usageElement)
+            LlmUsage? usage = result.TryGetProperty("usage", out JsonElement usageElement)
                 ? ReadUsage(usageElement)
                 : null;
             return new ParsedStreamLine(
@@ -610,7 +611,7 @@ internal sealed class AntigravityCliLlmClient(IAntigravityCliRunner runner)
         }
     }
 
-    private static LlmChatUsage? ReadUsage(JsonElement usage)
+    private static LlmUsage? ReadUsage(JsonElement usage)
     {
         int? input = ReadInteger(usage, "input_tokens");
         int? output = ReadInteger(usage, "output_tokens");
@@ -618,7 +619,7 @@ internal sealed class AntigravityCliLlmClient(IAntigravityCliRunner runner)
             ?? (input is not null && output is not null ? input + output : null);
         return input is null && output is null && total is null
             ? null
-            : new LlmChatUsage(input, output, total);
+            : new LlmUsage(input, output, total);
     }
 
     private static int? ReadInteger(JsonElement element, string propertyName) =>
@@ -732,7 +733,7 @@ internal sealed class AntigravityCliLlmClient(IAntigravityCliRunner runner)
         string Text,
         string Status,
         string? ConversationId,
-        LlmChatUsage? Usage);
+        LlmUsage? Usage);
 
     private sealed record ParsedStreamLine(
         string? TextDelta,

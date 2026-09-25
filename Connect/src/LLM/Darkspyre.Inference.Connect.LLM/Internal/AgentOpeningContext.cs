@@ -1,4 +1,5 @@
 using System.Text;
+using Darkspyre.Inference.Common.LLM;
 
 namespace Darkspyre.Inference.Connect.LLM.Internal;
 
@@ -42,7 +43,7 @@ internal sealed record AgentOpeningContext(string Text, IReadOnlyList<LlmAttachm
                 .Where(binary => binary.Kind is LlmBinaryKind.Image or LlmBinaryKind.Document)
                 .Select(binary => new LlmAttachment
                 {
-                    Kind = binary.Kind == LlmBinaryKind.Image ? LlmAttachmentKind.Image : LlmAttachmentKind.Document,
+                    Kind = binary.Kind == LlmBinaryKind.Image ? LlmBinaryKind.Image : LlmBinaryKind.Document,
                     FileName = binary.FileName ?? "attachment",
                     Data = binary.Data
                 })];

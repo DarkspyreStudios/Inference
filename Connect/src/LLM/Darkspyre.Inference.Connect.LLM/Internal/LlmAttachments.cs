@@ -1,4 +1,5 @@
 using System.Text;
+using Darkspyre.Inference.Common.LLM;
 
 namespace Darkspyre.Inference.Connect.LLM.Internal;
 
@@ -26,10 +27,10 @@ internal static class LlmAttachments
                 throw new ArgumentException("Attachments cannot contain null entries.", parameterName);
             }
 
-            if (!Enum.IsDefined(attachment.Kind))
+            if (attachment.Kind is not (LlmBinaryKind.Image or LlmBinaryKind.Document))
             {
                 throw new ArgumentException(
-                    "Every attachment requires a supported attachment kind.",
+                    "Every prompt attachment must be an image or a document.",
                     parameterName);
             }
 
@@ -47,13 +48,13 @@ internal static class LlmAttachments
                 throw new ArgumentException("Attachments cannot be empty.", parameterName);
             }
 
-            if (attachment.Kind == LlmAttachmentKind.Image && !supportsImages)
+            if (attachment.Kind == LlmBinaryKind.Image && !supportsImages)
             {
                 throw new NotSupportedException(
                     "The selected connection does not support image attachments on this lane.");
             }
 
-            if (attachment.Kind == LlmAttachmentKind.Document && !supportsDocuments)
+            if (attachment.Kind == LlmBinaryKind.Document && !supportsDocuments)
             {
                 throw new NotSupportedException(
                     "The selected connection does not support document attachments on this lane.");
@@ -63,10 +64,11 @@ internal static class LlmAttachments
         }
     }
 
-    public static string ResolveMediaType(LlmAttachment attachment) => attachment.Kind switch
+    /// <summary>The attachment's given media type, or the type detected from its bytes.</summary>
+    public static string ResolveMediaType(LlmAttachment attachment) => attachment.MediaType ?? attachment.Kind switch
     {
-        LlmAttachmentKind.Image => ResolveImageMediaType(attachment.Data.Span),
-        LlmAttachmentKind.Document => ResolveDocumentMediaType(
+        LlmBinaryKind.Image => ResolveImageMediaType(attachment.Data.Span),
+        LlmBinaryKind.Document => ResolveDocumentMediaType(
             attachment.FileName,
             attachment.Data.Span),
         _ => throw new ArgumentOutOfRangeException(nameof(attachment))

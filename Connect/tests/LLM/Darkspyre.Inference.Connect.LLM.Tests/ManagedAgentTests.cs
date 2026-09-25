@@ -2,6 +2,7 @@ using System.Net;
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
+using Darkspyre.Inference.Common.LLM;
 using Darkspyre.Inference.Connect.LLM.Internal;
 using LlmReasoningLevel = Darkspyre.Inference.Common.LLM.LlmReasoningLevel;
 
@@ -210,7 +211,7 @@ public sealed class ManagedAgentTests
         await using var session = harness.Create();
         await Read(session.RunTurnAsync(Turn("read") with
         {
-            Attachments = [new() { Kind = LlmAttachmentKind.Document,
+            Attachments = [new() { Kind = LlmBinaryKind.Document,
             FileName = "input.txt", Data = data }]
         }));
         data[0] = 0;
@@ -581,7 +582,7 @@ public sealed class ManagedAgentTests
             await Task.Yield();
             if (ExposeBeforeFailure) { yield return new LlmTextDeltaEvent("partial"); }
             if (Failure is not null) { throw Failure; }
-            yield return new LlmCompletionEvent(Results.Dequeue());
+            yield return new LlmChatCompletionEvent(Results.Dequeue());
         }
     }
 }

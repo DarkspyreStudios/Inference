@@ -1692,7 +1692,7 @@ Connect's completion event carries `LlmChatResult`, which has no Common equivale
 `LlmChatCompletionEvent`. `LlmChatMessage`, `LlmChatResult` and `LlmModel` stay in Connect. Each carries
 Connect-only data: response state, diagnostics, or provider capabilities.
 
-`QwenLlmInference` moves to the new tool result shape.
+`QwenLlmInference` rejects attachments and tool results, so it needs no change.
 
 ### 9. Credential and sign-in members
 

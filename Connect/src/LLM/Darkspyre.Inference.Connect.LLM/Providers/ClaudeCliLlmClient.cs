@@ -2,6 +2,7 @@ using System.Net.Http.Headers;
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
+using Darkspyre.Inference.Common.LLM;
 using Darkspyre.Inference.Connect.LLM.Internal;
 
 using LlmReasoningLevel = Darkspyre.Inference.Common.LLM.LlmReasoningLevel;
@@ -223,7 +224,7 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
                     request.StructuredOutput,
                     enforcement!.Value);
 
-        yield return new LlmCompletionEvent(new LlmChatResult
+        yield return new LlmChatCompletionEvent(new LlmChatResult
         {
             Text = refused ? string.Empty : terminal.Text,
             Refusal = refused ? terminal.Text : null,
@@ -544,7 +545,7 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
         }
         bool isError = root.TryGetProperty("is_error", out JsonElement error)
             && error.ValueKind == JsonValueKind.True;
-        LlmChatUsage? usage = root.TryGetProperty("usage", out JsonElement usageElement)
+        LlmUsage? usage = root.TryGetProperty("usage", out JsonElement usageElement)
             ? ReadClaudeUsage(usageElement)
             : null;
         return new ParsedClaudeLine(
@@ -560,12 +561,12 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
             "Claude CLI response received; validating output…");
     }
 
-    private static LlmChatUsage? ReadClaudeUsage(JsonElement usage)
+    private static LlmUsage? ReadClaudeUsage(JsonElement usage)
     {
         int? input = LlmJson.GetInt(usage, "input_tokens");
         int? output = LlmJson.GetInt(usage, "output_tokens");
         int? total = input is null && output is null ? null : (input ?? 0) + (output ?? 0);
-        return total is null ? null : new LlmChatUsage(input, output, total);
+        return total is null ? null : new LlmUsage(input, output, total);
     }
 
     private async Task<ClaudeCliProcessResult> InvokeClaudeAsync(
@@ -673,7 +674,7 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
         string? StopReason,
         string? TerminalReason,
         string? SessionId,
-        LlmChatUsage? Usage);
+        LlmUsage? Usage);
 
     private sealed record ParsedClaudeLine(
         string? TextDelta,

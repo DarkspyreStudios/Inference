@@ -1,6 +1,7 @@
 using Darkspyre.Inference.Connect.LLM.Internal;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
+using Darkspyre.Inference.Common.LLM;
 using Darkspyre.Inference.Connect.LLM;
 using Darkspyre.Inference.Connect.LLM.Providers;
 using LlmReasoningLevel = Darkspyre.Inference.Common.LLM.LlmReasoningLevel;
@@ -34,7 +35,7 @@ public sealed class ClaudeCliLlmClientTests
                     [
                         new LlmAttachment
                         {
-                            Kind = LlmAttachmentKind.Image,
+                            Kind = LlmBinaryKind.Image,
                             FileName = "chart.png",
                             Data = new byte[]
                             {
@@ -43,7 +44,7 @@ public sealed class ClaudeCliLlmClientTests
                         },
                         new LlmAttachment
                         {
-                            Kind = LlmAttachmentKind.Document,
+                            Kind = LlmBinaryKind.Document,
                             FileName = "notes.txt",
                             Data = "attachment text"u8.ToArray()
                         }
@@ -101,7 +102,7 @@ public sealed class ClaudeCliLlmClientTests
 
         Assert.Equal("{\"status\":\"ready\"}", Assert.Single(events.OfType<LlmTextDeltaEvent>()).Delta);
         Assert.NotEmpty(events.OfType<LlmActivityEvent>());
-        LlmChatResult result = Assert.Single(events.OfType<LlmCompletionEvent>()).Result;
+        LlmChatResult result = Assert.Single(events.OfType<LlmChatCompletionEvent>()).Result;
         Assert.Equal("{\"status\":\"ready\"}", result.Text);
         Assert.Equal(LlmCompletionStatus.Completed, result.Status);
         Assert.Equal("session-1", result.ProviderResponseId);
@@ -143,7 +144,7 @@ public sealed class ClaudeCliLlmClientTests
         Assert.Empty(events.OfType<LlmRefusalDeltaEvent>());
         Assert.Contains(events.OfType<LlmActivityEvent>(), activity =>
             activity.Activity.Contains("switching", StringComparison.OrdinalIgnoreCase));
-        LlmChatResult result = Assert.Single(events.OfType<LlmCompletionEvent>()).Result;
+        LlmChatResult result = Assert.Single(events.OfType<LlmChatCompletionEvent>()).Result;
         Assert.Equal(LlmCompletionStatus.Completed, result.Status);
         Assert.Equal("OK", result.Text);
         Assert.Null(result.Refusal);
@@ -176,7 +177,7 @@ public sealed class ClaudeCliLlmClientTests
         Assert.True(await pendingCompletion);
         Assert.IsType<LlmActivityEvent>(events.Current);
         Assert.True(await events.MoveNextAsync());
-        Assert.IsType<LlmCompletionEvent>(events.Current);
+        Assert.IsType<LlmChatCompletionEvent>(events.Current);
         Assert.False(await events.MoveNextAsync());
     }
 
@@ -402,7 +403,7 @@ public sealed class ClaudeCliLlmClientTests
         IReadOnlyList<LlmStreamEvent> events = await ReadAllAsync(client.StreamAsync(
             CliConnection(), new LlmChatRequest { ModelId = "claude-test", Messages = ToolHistory() }));
 
-        Assert.Equal("522,000", Assert.Single(events.OfType<LlmCompletionEvent>()).Result.Text);
+        Assert.Equal("522,000", Assert.Single(events.OfType<LlmChatCompletionEvent>()).Result.Text);
         string input = Assert.Single(runner.Invocations).StandardInput!;
         Assert.Contains("[TOOL CALL id=c1 name=lookup]", input, StringComparison.Ordinal);
         Assert.Contains("[TOOL RESULT id=c1 status=ok]", input, StringComparison.Ordinal);
@@ -438,7 +439,7 @@ public sealed class ClaudeCliLlmClientTests
         {
             Messages = [new LlmChatMessage("user", "See this.") { Attachments = [new LlmAttachment
             {
-                Kind = LlmAttachmentKind.Document, FileName = "note.txt", Data = "hello"u8.ToArray()
+                Kind = LlmBinaryKind.Document, FileName = "note.txt", Data = "hello"u8.ToArray()
             }] }]
         }));
     }

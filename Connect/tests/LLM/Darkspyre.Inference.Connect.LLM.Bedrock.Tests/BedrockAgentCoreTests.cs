@@ -1,5 +1,6 @@
 using System.Runtime.CompilerServices;
 using System.Text.Json;
+using Darkspyre.Inference.Common.LLM;
 using Amazon.BedrockAgentCore;
 using Amazon.BedrockAgentCore.Model;
 using Amazon.Runtime.EventStreams;
@@ -130,10 +131,10 @@ public sealed class BedrockAgentCoreTests
             }));
 
         Assert.Equal("Hello", Assert.IsType<LlmTextDeltaEvent>(events[0]).Delta);
-        LlmChatResult result = Assert.IsType<LlmCompletionEvent>(events[^1]).Result;
+        LlmChatResult result = Assert.IsType<LlmChatCompletionEvent>(events[^1]).Result;
         Assert.Equal("Hello", result.Text);
         Assert.Equal(LlmCompletionStatus.Completed, result.Status);
-        Assert.Equal(new LlmChatUsage(4, 1, 5), result.Usage);
+        Assert.Equal(new LlmUsage(4, 1, 5), result.Usage);
         Assert.Null(invoker.Requests[0].Model);
     }
 
@@ -331,7 +332,7 @@ public sealed class BedrockAgentCoreTests
                 [
                     new LlmAttachment
                     {
-                        Kind = LlmAttachmentKind.Document,
+                        Kind = LlmBinaryKind.Document,
                         FileName = "notes.txt",
                         Data = "notes"u8.ToArray()
                     }
@@ -427,7 +428,7 @@ public sealed class BedrockAgentCoreTests
                 [
                     new("e1", "t1", new LlmChatMessage("user", "What is 17 times 23?")
                     {
-                        Attachments = [new LlmAttachment { Kind = LlmAttachmentKind.Document, FileName = "note.txt", Data = "hi"u8.ToArray() }]
+                        Attachments = [new LlmAttachment { Kind = LlmBinaryKind.Document, FileName = "note.txt", Data = "hi"u8.ToArray() }]
                     }),
                     new("e2", "t1", new LlmChatMessage("assistant", "391"))
                 ]

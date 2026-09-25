@@ -160,7 +160,7 @@ public sealed class QwenLlmInference : ITensorLlmInference
         {
             StructuredOutputNormalizationResult normalized = StructuredOutputValidator.NormalizeOutput(text, format);
             structuredValidation = new LlmStructuredOutputValidation(
-                LlmStructuredOutputEnforcement.NativeJsonSchema,
+                LlmStructuredOutputEnforcement.ProviderJsonSchema,
                 WasEvaluated: true,
                 normalized.IsValid,
                 normalized.Errors);

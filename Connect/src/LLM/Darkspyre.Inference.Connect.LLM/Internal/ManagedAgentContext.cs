@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Darkspyre.Inference.Common.LLM;
 
 namespace Darkspyre.Inference.Connect.LLM.Internal;
 
@@ -146,7 +147,7 @@ internal static class ManagedAgentContext
             for (int i = 0; i < attachments.Count; i++)
             {
                 while (omitted.Any(item => item.ToolCallId == toolId && item.Index == index)) { index++; }
-                LlmBinaryKind kind = attachments[i].Kind == LlmAttachmentKind.Image ? LlmBinaryKind.Image : LlmBinaryKind.Document;
+                LlmBinaryKind kind = attachments[i].Kind == LlmBinaryKind.Image ? LlmBinaryKind.Image : LlmBinaryKind.Document;
                 omitted.Add(new(kind, attachments[i].FileName, index++, toolId));
             }
             return [];

@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Darkspyre.Inference.Common.LLM;
 
 namespace Darkspyre.Inference.Connect.LLM.Internal;
 
@@ -135,12 +136,12 @@ internal static class OpenAiResponsesTools
 
     private static JsonObject BuildAttachment(LlmAttachment attachment) => attachment.Kind switch
     {
-        LlmAttachmentKind.Image => new JsonObject
+        LlmBinaryKind.Image => new JsonObject
         {
             ["type"] = "input_image",
             ["image_url"] = LlmAttachments.ToDataUrl(attachment)
         },
-        LlmAttachmentKind.Document => new JsonObject
+        LlmBinaryKind.Document => new JsonObject
         {
             ["type"] = "input_file",
             ["filename"] = attachment.FileName,

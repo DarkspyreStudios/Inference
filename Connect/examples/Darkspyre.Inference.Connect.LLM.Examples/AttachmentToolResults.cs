@@ -1,3 +1,5 @@
+using Darkspyre.Inference.Common.LLM;
+
 namespace Darkspyre.Inference.Connect.LLM.Examples;
 
 /// <summary>
@@ -49,13 +51,13 @@ public static class AttachmentToolResults
     [
         new LlmAttachment
         {
-            Kind = LlmAttachmentKind.Image,
+            Kind = LlmBinaryKind.Image,
             FileName = "chart.png",
             Data = imageBytes
         },
         new LlmAttachment
         {
-            Kind = LlmAttachmentKind.Document,
+            Kind = LlmBinaryKind.Document,
             FileName = "report.pdf",
             Data = documentBytes
         }
