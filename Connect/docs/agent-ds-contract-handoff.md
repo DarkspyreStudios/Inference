@@ -165,7 +165,7 @@ Darkspyre.Inference.Connect.LLM will not read application paths to reconstruct m
 ## Context pressure and compaction
 
 `LlmAgentContextStatus` exposes `ModelId`, `ContextRevision`, `MaxContextTokens`, `UsedContextTokens`,
-`ReservedOutputTokens`, `AvailableInputTokens`, nullable `NeedsCompaction`, `IsEstimated`, and
+`ReservedOutputTokens`, `AvailableInputTokens`, nullable `NeedsCompaction`, and
 `Source` (`Unknown`, `Estimated`, `Mixed`). All token values are nullable `long`.
 
 Unknown is not zero, false, unlimited, or a request to compact. Used context is the projected next
@@ -230,8 +230,8 @@ override. Agent DS owns plugin instruction composition; Darkspyre.Inference.Conn
 
 `LlmAgentUsageEvent` contains a model-step `RequestId`, per-request `Usage`, and `RunTotals` including
 earlier continued segments. Null means unreported. `LlmAgentTurnCompletedEvent.Reason` distinguishes
-completed, iteration limit, refusal, truncation, provider failure and interruption; existing status
-values remain. `LlmReasoningDeltaEvent` carries exposed reasoning deltas; encrypted state is never
+completed, iteration limit, refusal, truncation, provider failure and interruption. `Status` derives
+from it: completed, interrupted, or failed for every other reason. `LlmReasoningDeltaEvent` carries exposed reasoning deltas; encrypted state is never
 displayed. Pre-output transient retries are bounded to three total attempts; exposed streams are not retried.
 
 Breaking enumeration or cancellation must settle active work before capturing. A cancelled consumer

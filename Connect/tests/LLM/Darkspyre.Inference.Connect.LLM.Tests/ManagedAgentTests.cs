@@ -417,7 +417,7 @@ public sealed class ManagedAgentTests
         Assert.Null(status.UsedContextTokens);
         Assert.Null(status.NeedsCompaction);
         Assert.Null(status.AvailableInputTokens);
-        Assert.False(status.IsEstimated);
+        Assert.Equal(LlmContextMeasurementSource.Unknown, status.Source);
         Assert.Throws<ArgumentException>(() => harness.Create(Options() with { ExecutionOptions = new() { MaxModelIterations = 0 } }));
         Assert.Throws<ArgumentException>(() => harness.Create(Options() with
         { ExecutionOptions = new() { ContextPolicy = new() { MaxContextTokens = 1001 } } }));

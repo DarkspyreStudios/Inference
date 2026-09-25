@@ -38,7 +38,7 @@ public sealed class RequestAccountingTests
         Assert.Equal(680, accounting.InputBudgetTokens);
         Assert.Equal(Math.Max(0, 680 - accounting.UsedContextTokens!.Value), accounting.AvailableInputTokens);
         Assert.Equal(LlmContextMeasurementSource.Estimated, accounting.Source);
-        Assert.True(accounting.IsEstimated);
+        Assert.NotEqual(LlmContextMeasurementSource.Unknown, accounting.Source);
         Assert.Equal(LlmOutputLimitEnforcement.ProviderEnforced, accounting.OutputLimitEnforcement);
         Assert.Null(accounting.ContextRevision);
         Assert.Equal(before, JsonSerializer.Serialize(request));

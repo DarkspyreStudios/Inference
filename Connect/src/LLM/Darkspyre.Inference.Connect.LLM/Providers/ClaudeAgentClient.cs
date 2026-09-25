@@ -1445,10 +1445,10 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             }
             bool isError = OptionalBoolean(root, "is_error") == true;
             string subtype = OptionalString(root, "subtype") ?? string.Empty;
-            LlmAgentTurnStatus status = subtype.Contains("interrupt", StringComparison.OrdinalIgnoreCase)
-                ? LlmAgentTurnStatus.Interrupted
-                : isError ? LlmAgentTurnStatus.Failed : LlmAgentTurnStatus.Completed;
-            Emit(new LlmAgentTurnCompletedEvent(ThreadId, target.Id, status, isError ? "Claude CLI reported a turn error." : null));
+            LlmAgentCompletionReason reason = subtype.Contains("interrupt", StringComparison.OrdinalIgnoreCase)
+                ? LlmAgentCompletionReason.Interruption
+                : isError ? LlmAgentCompletionReason.ProviderFailure : LlmAgentCompletionReason.Completed;
+            Emit(new LlmAgentTurnCompletedEvent(ThreadId, target.Id, reason, isError ? "Claude CLI reported a turn error." : null));
             lock (_route)
             {
                 if (target is HostTurn host)

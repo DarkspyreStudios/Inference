@@ -25,7 +25,6 @@ public sealed record LlmRequestAccounting
     public long? InputBudgetTokens { get; init; }
     public long? AvailableInputTokens { get; init; }
     public bool? NeedsCompaction { get; init; }
-    public bool IsEstimated { get; init; }
     public LlmContextMeasurementSource Source { get; init; }
     public LlmOutputLimitEnforcement OutputLimitEnforcement { get; init; }
 }

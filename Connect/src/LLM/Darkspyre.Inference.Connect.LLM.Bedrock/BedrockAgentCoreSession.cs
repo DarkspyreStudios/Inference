@@ -211,26 +211,19 @@ internal sealed class BedrockAgentCoreSession : ILlmAgentSession
                     yield return new LlmAgentTurnCompletedEvent(
                         ThreadId,
                         turnId,
-                        LlmAgentTurnStatus.Failed,
+                        LlmAgentCompletionReason.ProviderFailure,
                         "AgentCore ended the Harness stream without a message-stop event.");
                     yield break;
                 }
 
                 if (!string.Equals(stopReason, "tool_use", StringComparison.Ordinal))
                 {
-                    (LlmAgentTurnStatus status, string? error) = Completion(stopReason);
+                    (LlmAgentCompletionReason reason, string? error) = Completion(stopReason);
                     yield return new LlmAgentTurnCompletedEvent(
                         ThreadId,
                         turnId,
-                        status,
-                        error)
-                    {
-                        Reason = stopReason is "refusal" or "guardrail_intervened" or "content_filtered"
-                            ? LlmAgentCompletionReason.Refusal
-                            : status == LlmAgentTurnStatus.Completed
-                                ? LlmAgentCompletionReason.Completed
-                                : LlmAgentCompletionReason.ProviderFailure
-                    };
+                        reason,
+                        error);
                     yield break;
                 }
 
@@ -239,7 +232,7 @@ internal sealed class BedrockAgentCoreSession : ILlmAgentSession
                     yield return new LlmAgentTurnCompletedEvent(
                         ThreadId,
                         turnId,
-                        LlmAgentTurnStatus.Failed,
+                        LlmAgentCompletionReason.ProviderFailure,
                         "AgentCore stopped for tool use without returning a tool call.");
                     yield break;
                 }
@@ -255,7 +248,7 @@ internal sealed class BedrockAgentCoreSession : ILlmAgentSession
                         yield return new LlmAgentTurnCompletedEvent(
                             ThreadId,
                             turnId,
-                            LlmAgentTurnStatus.Failed,
+                            LlmAgentCompletionReason.ProviderFailure,
                             $"AgentCore returned invalid JSON for tool '{pending.Name}'.");
                         yield break;
                     }
@@ -304,11 +297,8 @@ internal sealed class BedrockAgentCoreSession : ILlmAgentSession
             yield return new LlmAgentTurnCompletedEvent(
                 ThreadId,
                 turnId,
-                LlmAgentTurnStatus.Failed,
-                $"AgentCore exceeded {MaximumInlineToolRounds} host tool rounds.")
-            {
-                Reason = LlmAgentCompletionReason.IterationLimit
-            };
+                LlmAgentCompletionReason.IterationLimit,
+                $"AgentCore exceeded {MaximumInlineToolRounds} host tool rounds.");
         }
         finally
         {
@@ -569,12 +559,13 @@ internal sealed class BedrockAgentCoreSession : ILlmAgentSession
 
     private static LlmToolOutput FailedToolResult(string message) => LlmToolOutput.FromText(message, isError: true);
 
-    private static (LlmAgentTurnStatus Status, string? Error) Completion(string? stopReason) =>
+    private static (LlmAgentCompletionReason Reason, string? Error) Completion(string? stopReason) =>
         stopReason switch
         {
-            "interrupted" => (LlmAgentTurnStatus.Interrupted, "AgentCore interrupted the turn."),
-            "content_filtered"
-                or "malformed_model_output"
+            "interrupted" => (LlmAgentCompletionReason.Interruption, "AgentCore interrupted the turn."),
+            "refusal" or "guardrail_intervened" => (LlmAgentCompletionReason.Refusal, null),
+            "content_filtered" => (LlmAgentCompletionReason.Refusal, $"AgentCore stopped with '{stopReason}'."),
+            "malformed_model_output"
                 or "malformed_tool_use"
                 or "max_iterations_exceeded"
                 or "max_output_tokens_exceeded"
@@ -582,8 +573,8 @@ internal sealed class BedrockAgentCoreSession : ILlmAgentSession
                 or "model_context_window_exceeded"
                 or "partial_turn"
                 or "timeout_exceeded" =>
-                (LlmAgentTurnStatus.Failed, $"AgentCore stopped with '{stopReason}'."),
-            _ => (LlmAgentTurnStatus.Completed, null)
+                (LlmAgentCompletionReason.ProviderFailure, $"AgentCore stopped with '{stopReason}'."),
+            _ => (LlmAgentCompletionReason.Completed, null)
         };
 
     private sealed record PendingToolUse(

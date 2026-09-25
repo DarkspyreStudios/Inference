@@ -45,7 +45,6 @@ internal static class ManagedAgentPolicy
             ReservedOutputTokens = accounting.ReservedOutputTokens,
             AvailableInputTokens = accounting.AvailableInputTokens,
             NeedsCompaction = accounting.NeedsCompaction,
-            IsEstimated = accounting.IsEstimated,
             Source = accounting.Source
         };
     }
@@ -74,7 +73,6 @@ internal static class ManagedAgentPolicy
             AvailableInputTokens = budget is long available && used is long occupied ? Math.Max(0, available - occupied) : null,
             NeedsCompaction = budget is long input && used is long count
                 ? count >= Math.Floor(input * policy.CompactionThresholdRatio) : null,
-            IsEstimated = used is not null,
             Source = estimate is not { } known ? LlmContextMeasurementSource.Unknown
                 : known.IncludesProviderReport ? LlmContextMeasurementSource.Mixed : LlmContextMeasurementSource.Estimated
         };

@@ -340,7 +340,7 @@ Native-owned sessions return unsupported; their resolved model may itself be unk
 `LlmRequestAccounting` contains `ModelId`, `IsSupported`, safe `Diagnostic`, nullable `ContextRevision`,
 `ModelMaxContextTokens`, `ModelMaxOutputTokens`, effective `MaxContextTokens`, `UsedContextTokens`,
 `ReservedOutputTokens`, `SafetyMarginTokens`, `InputBudgetTokens`, `AvailableInputTokens`, nullable
-`NeedsCompaction`, `IsEstimated`, `Source`, and `OutputLimitEnforcement`. Token fields are nullable long.
+`NeedsCompaction`, `Source`, and `OutputLimitEnforcement`. Token fields are nullable long.
 Counts include full projected instructions/tools/schema/messages, not just summarizable history.
 The existing managed policy calculation is shared by live status and both accounting operations.
 Missing attachment bytes, binary attachments and encrypted state never become free input.
@@ -386,15 +386,13 @@ public sealed record LlmAgentContextStatus
     public long? ReservedOutputTokens { get; init; }
     public long? AvailableInputTokens { get; init; }
     public bool? NeedsCompaction { get; init; }
-    public bool IsEstimated { get; init; }
     public LlmContextMeasurementSource Source { get; init; }
 }
 ```
 
 `Source` is `Unknown`, `Estimated` or `Mixed`. Unknown token components
 remain null. `NeedsCompaction = null` means insufficient evidence, not safe to continue.
-`IsEstimated` is true if any number used in the decision is estimated; `Source` distinguishes
-unknown from exact. Cached input tokens remain included in occupied context.
+`Source` distinguishes an unknown measurement from an estimated one. Cached input tokens remain included in occupied context.
 
 For a pending request, `UsedContextTokens` means projected input occupancy: instructions, tool
 schemas, retained messages/state and attachments, new user/steering input, and request overhead.

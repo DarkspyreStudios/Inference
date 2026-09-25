@@ -99,8 +99,13 @@ public sealed class AgentContractTests
         Assert.Equal(3, continuation.ExpectedContextRevision);
         Assert.Equal("turn", continuation.TurnId);
         Assert.Null(RoundTrip(new LlmAgentUsageEvent("thread", "turn", "request", null, null)).RunTotals);
-        Assert.Equal(LlmAgentCompletionReason.Interruption,
-            new LlmAgentTurnCompletedEvent("thread", "turn", LlmAgentTurnStatus.Interrupted, null).Reason);
+        Assert.Equal(
+            [LlmAgentTurnStatus.Completed, LlmAgentTurnStatus.Interrupted, LlmAgentTurnStatus.Failed, LlmAgentTurnStatus.Failed],
+            new[]
+            {
+                LlmAgentCompletionReason.Completed, LlmAgentCompletionReason.Interruption,
+                LlmAgentCompletionReason.Refusal, LlmAgentCompletionReason.IterationLimit
+            }.Select(reason => new LlmAgentTurnCompletedEvent("thread", "turn", reason, null).Status));
     }
 
     [Fact]

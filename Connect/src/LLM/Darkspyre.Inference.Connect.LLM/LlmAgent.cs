@@ -230,15 +230,19 @@ public sealed record LlmAgentWarningEvent(
 public sealed record LlmAgentTurnCompletedEvent(
     string ThreadId,
     string TurnId,
-    LlmAgentTurnStatus Status,
+    LlmAgentCompletionReason Reason,
     string? Error)
     : LlmAgentEvent(ThreadId, TurnId)
 {
-    public LlmAgentCompletionReason Reason { get; init; } = Status switch
+    /// <summary>
+    /// Derived from <see cref="Reason"/>: <c>Completed</c> for a completed turn, <c>Interrupted</c> for an
+    /// interruption, and <c>Failed</c> for every other reason.
+    /// </summary>
+    public LlmAgentTurnStatus Status => Reason switch
     {
-        LlmAgentTurnStatus.Completed => LlmAgentCompletionReason.Completed,
-        LlmAgentTurnStatus.Interrupted => LlmAgentCompletionReason.Interruption,
-        _ => LlmAgentCompletionReason.ProviderFailure
+        LlmAgentCompletionReason.Completed => LlmAgentTurnStatus.Completed,
+        LlmAgentCompletionReason.Interruption => LlmAgentTurnStatus.Interrupted,
+        _ => LlmAgentTurnStatus.Failed
     };
 }
 

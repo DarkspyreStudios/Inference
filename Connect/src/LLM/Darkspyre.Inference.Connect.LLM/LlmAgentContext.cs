@@ -87,8 +87,6 @@ public sealed record LlmAgentContextStatus
     /// <summary>Null means insufficient evidence, not false or a guarantee that input will fit.</summary>
     public bool? NeedsCompaction { get; init; }
 
-    public bool IsEstimated { get; init; }
-
     public LlmContextMeasurementSource Source { get; init; }
 }
 

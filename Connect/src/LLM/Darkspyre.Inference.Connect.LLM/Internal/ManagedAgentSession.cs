@@ -474,17 +474,15 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
         catch (OperationCanceledException) when (token.IsCancellationRequested)
         {
             // Best effort only: a cancelled/abandoned reader must never block tool settlement.
-            writer.TryWrite(new LlmAgentTurnCompletedEvent(ThreadId, run.Id, LlmAgentTurnStatus.Interrupted, null)
-            { Reason = LlmAgentCompletionReason.Interruption });
+            writer.TryWrite(new LlmAgentTurnCompletedEvent(ThreadId, run.Id, LlmAgentCompletionReason.Interruption, null));
         }
         catch (Exception error)
         {
             // Host exceptions/opaque provider payloads are not exposed as diagnostics or context.
             try
             {
-                await writer.WriteAsync(new LlmAgentTurnCompletedEvent(ThreadId, run.Id, LlmAgentTurnStatus.Failed,
-                    error is LlmProviderException provider ? provider.Message : "Managed execution failed; inspect the host operation boundary.")
-                { Reason = LlmAgentCompletionReason.ProviderFailure }, token);
+                await writer.WriteAsync(new LlmAgentTurnCompletedEvent(ThreadId, run.Id, LlmAgentCompletionReason.ProviderFailure,
+                    error is LlmProviderException provider ? provider.Message : "Managed execution failed; inspect the host operation boundary."), token);
             }
             catch (OperationCanceledException) when (token.IsCancellationRequested) { }
         }
@@ -594,10 +592,8 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
     private async Task CompleteAsync(LiveRun run, ChannelWriter<LlmAgentEvent> writer, LlmAgentCompletionReason reason, CancellationToken token)
     {
         lock (_sync) { run.Terminal = true; }
-        await writer.WriteAsync(new LlmAgentTurnCompletedEvent(ThreadId, run.Id,
-            reason == LlmAgentCompletionReason.Completed ? LlmAgentTurnStatus.Completed : LlmAgentTurnStatus.Failed,
-            reason == LlmAgentCompletionReason.Completed ? null : reason.ToString())
-        { Reason = reason }, token);
+        await writer.WriteAsync(new LlmAgentTurnCompletedEvent(ThreadId, run.Id, reason,
+            reason == LlmAgentCompletionReason.Completed ? null : reason.ToString()), token);
     }
 
     private LlmChatRequest Request(LlmAgentContext context, LlmAgentTurnRequest turn) => new()
