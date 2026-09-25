@@ -35,7 +35,7 @@ The [compile-checked generic editor example](examples/Darkspyre.Inference.Setup.
 uses one field/action driver for real Connect and Tensor sessions, including speech/audio. Hosts retain
 operation lifetime, user consent, storage and rendering. Field edits are revision-checked; cancelled
 edits never commit. Unknown observations are nullable, separate from false, stale and not applicable.
-These contracts are included in the synchronized **11.8.2-rc.1** package family. Connect, Tensor and
+These contracts are included in the synchronized **11.9.0-rc.1** package family. Connect, Tensor and
 UI.Settings declare exact Common NuGet dependencies; none embeds the Common DLL. This release
 targets .NET 11 RC; the shared version retains a prerelease suffix while the UI's ASP.NET dependency
 is a release candidate.
