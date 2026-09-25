@@ -1664,7 +1664,7 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             tools = tools.Select(tool => new Dictionary<string, object?>
             {
                 ["name"] = tool.Name,
-                ["description"] = tool.Description,
+                ["description"] = tool.Description ?? string.Empty,
                 ["inputSchema"] = tool.InputSchema,
                 ["_meta"] = new Dictionary<string, object?>
                 {

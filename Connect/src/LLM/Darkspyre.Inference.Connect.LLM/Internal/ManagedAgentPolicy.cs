@@ -4,13 +4,13 @@ internal static class ManagedAgentPolicy
 {
     public static LlmAgentCapabilities Capabilities { get; } = new()
     {
-        ContextOwnership = LlmAgentContextOwnership.Host,
+        ContextOwnership = LlmAgentOwnership.Host,
         ContextImport = LlmAgentContextImport.Structured,
         SupportsContextCapture = true,
         SupportsContextReplacement = true,
         SupportsContextStatus = true,
         SupportsCompactionHandoff = true,
-        CompactionOwnership = LlmAgentCompactionOwnership.Host,
+        CompactionOwnership = LlmAgentOwnership.Host,
         Steering = LlmAgentSteering.SafeBoundary,
         SupportsInterrupt = true,
         ToolExecutionOwnership = LlmAgentToolExecutionOwnership.Host,

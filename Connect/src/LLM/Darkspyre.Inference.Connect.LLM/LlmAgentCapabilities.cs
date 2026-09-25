@@ -1,6 +1,7 @@
 namespace Darkspyre.Inference.Connect.LLM;
 
-public enum LlmAgentContextOwnership
+/// <summary>Who owns a part of the session: nobody, the host, or the provider-owned runtime.</summary>
+public enum LlmAgentOwnership
 {
     None,
     Host,
@@ -21,13 +22,6 @@ public enum LlmAgentContextImport
     /// No response state is carried.
     /// </summary>
     OpeningContext
-}
-
-public enum LlmAgentCompactionOwnership
-{
-    None,
-    Host,
-    Provider
 }
 
 public enum LlmAgentNativeFork
@@ -56,7 +50,7 @@ public enum LlmAgentToolExecutionOwnership
 /// </summary>
 public sealed record LlmAgentCapabilities
 {
-    public LlmAgentContextOwnership ContextOwnership { get; init; }
+    public LlmAgentOwnership ContextOwnership { get; init; }
 
     /// <summary>How a session start accepts <see cref="LlmAgentSessionOptions.Context"/>.</summary>
     public LlmAgentContextImport ContextImport { get; init; }
@@ -73,7 +67,7 @@ public sealed record LlmAgentCapabilities
 
     public LlmAgentNativeFork NativeFork { get; init; }
 
-    public LlmAgentCompactionOwnership CompactionOwnership { get; init; }
+    public LlmAgentOwnership CompactionOwnership { get; init; }
 
     public LlmAgentSteering Steering { get; init; }
 
@@ -93,14 +87,14 @@ public sealed record LlmAgentCapabilities
         if (!Enum.IsDefined(ContextOwnership) || !Enum.IsDefined(ContextImport) || !Enum.IsDefined(CompactionOwnership)
             || !Enum.IsDefined(NativeFork) || !Enum.IsDefined(Steering)
             || !Enum.IsDefined(ToolExecutionOwnership)
-            || (ContextOwnership == LlmAgentContextOwnership.None && this != new LlmAgentCapabilities())
-            || (SupportsCompactionHandoff && (ContextOwnership != LlmAgentContextOwnership.Host
-                || CompactionOwnership != LlmAgentCompactionOwnership.Host
+            || (ContextOwnership == LlmAgentOwnership.None && this != new LlmAgentCapabilities())
+            || (SupportsCompactionHandoff && (ContextOwnership != LlmAgentOwnership.Host
+                || CompactionOwnership != LlmAgentOwnership.Host
                 || !SupportsContextCapture || !SupportsContextReplacement || !SupportsContextStatus))
             || (NativeFork != LlmAgentNativeFork.None && !SupportsNativeResume)
-            || (ContextImport == LlmAgentContextImport.Structured && ContextOwnership != LlmAgentContextOwnership.Host)
-            || (ContextImport == LlmAgentContextImport.OpeningContext && ContextOwnership != LlmAgentContextOwnership.Provider)
-            || (ContextOwnership == LlmAgentContextOwnership.Host
+            || (ContextImport == LlmAgentContextImport.Structured && ContextOwnership != LlmAgentOwnership.Host)
+            || (ContextImport == LlmAgentContextImport.OpeningContext && ContextOwnership != LlmAgentOwnership.Provider)
+            || (ContextOwnership == LlmAgentOwnership.Host
                 && (SupportsNativeResume || NativeFork != LlmAgentNativeFork.None)))
         {
             throw new ArgumentException("The agent capability combination cannot be implemented consistently.");

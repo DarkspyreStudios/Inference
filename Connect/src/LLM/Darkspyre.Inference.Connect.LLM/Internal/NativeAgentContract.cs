@@ -5,11 +5,11 @@ internal static class NativeAgentContract
 {
     public static LlmAgentCapabilities Claude { get; } = new()
     {
-        ContextOwnership = LlmAgentContextOwnership.Provider,
+        ContextOwnership = LlmAgentOwnership.Provider,
         ContextImport = LlmAgentContextImport.OpeningContext,
         SupportsNativeResume = true,
         NativeFork = LlmAgentNativeFork.CurrentPosition,
-        CompactionOwnership = LlmAgentCompactionOwnership.Provider,
+        CompactionOwnership = LlmAgentOwnership.Provider,
         SupportsInterrupt = true,
         ToolExecutionOwnership = LlmAgentToolExecutionOwnership.Mixed,
         RichContentSupported = RichContentRoutes.ClaudeMcp,
@@ -18,10 +18,10 @@ internal static class NativeAgentContract
 
     public static LlmAgentCapabilities AgentCore { get; } = new()
     {
-        ContextOwnership = LlmAgentContextOwnership.Provider,
+        ContextOwnership = LlmAgentOwnership.Provider,
         ContextImport = LlmAgentContextImport.OpeningContext,
         SupportsNativeResume = true,
-        CompactionOwnership = LlmAgentCompactionOwnership.Provider,
+        CompactionOwnership = LlmAgentOwnership.Provider,
         ToolExecutionOwnership = LlmAgentToolExecutionOwnership.Mixed,
         RichContentSupported = RichContentRoutes.AgentCore,
         // Not measured: no AgentCore credentials were available.

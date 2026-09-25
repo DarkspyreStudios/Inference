@@ -50,7 +50,7 @@ public sealed class DirectCodexTests
         Assert.DoesNotContain("token", result.ResponseState?.Payload);
         Assert.Equal("authorize-chatgpt", client.ProviderDefinition.SetupSteps[0].Id);
         Assert.True(client.GetCapabilities(Connection()).SupportsToolUse);
-        Assert.Equal(LlmAgentContextOwnership.Host, client.GetCapabilities(Connection()).Agent.ContextOwnership);
+        Assert.Equal(LlmAgentOwnership.Host, client.GetCapabilities(Connection()).Agent.ContextOwnership);
     }
 
     [Fact]

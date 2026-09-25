@@ -333,7 +333,7 @@ public sealed class AgentContractTests
     internal static async Task AssertNativeOperationsAsync(ILlmAgentSession session)
     {
         var caps = await session.GetCapabilitiesAsync();
-        Assert.Equal(LlmAgentContextOwnership.Provider, caps.ContextOwnership);
+        Assert.Equal(LlmAgentOwnership.Provider, caps.ContextOwnership);
         Assert.Equal(LlmAgentContextImport.OpeningContext, caps.ContextImport);
         Assert.False(caps.SupportsContextCapture);
         Assert.False(caps.SupportsContextReplacement);

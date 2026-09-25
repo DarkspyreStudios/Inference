@@ -152,9 +152,9 @@ public sealed class ContextTransferTests
     }
 
     [Theory]
-    [InlineData(LlmAgentContextOwnership.Provider, LlmAgentContextImport.Structured)]
-    [InlineData(LlmAgentContextOwnership.Host, LlmAgentContextImport.OpeningContext)]
-    public void ContextImportMustMatchContextOwnership(LlmAgentContextOwnership ownership, LlmAgentContextImport import)
+    [InlineData(LlmAgentOwnership.Provider, LlmAgentContextImport.Structured)]
+    [InlineData(LlmAgentOwnership.Host, LlmAgentContextImport.OpeningContext)]
+    public void ContextImportMustMatchContextOwnership(LlmAgentOwnership ownership, LlmAgentContextImport import)
     {
         LlmAgentCapabilities capabilities = new() { ContextOwnership = ownership, ContextImport = import };
 

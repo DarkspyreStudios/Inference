@@ -44,7 +44,7 @@ public static class HostOwnedAgentContext
         ArgumentNullException.ThrowIfNull(options);
         var capabilities = await providers.GetModelCapabilitiesAsync(connectionId, options.ModelId, cancellationToken);
         if (!capabilities.SupportsAgentSessions
-            || capabilities.Agent.ContextOwnership != LlmAgentContextOwnership.Host
+            || capabilities.Agent.ContextOwnership != LlmAgentOwnership.Host
             || !capabilities.Agent.SupportsContextCapture
             || !capabilities.Agent.SupportsContextReplacement)
         {
