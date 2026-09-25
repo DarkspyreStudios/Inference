@@ -1,344 +1,209 @@
 # Inference async public-contract technical design
 
-Status: **Draft for review — mapping in progress, not approved for implementation.**
+Status: **Implementation approved; migration in progress on `feature/11.10-async-boundaries`.**
 
-Target: **11.10.x**, breaking-contract migration.
+Target: **11.10.x**, breaking-contract migration. No package publication is authorized.
 
 Baseline: source `1544cb5`, published family `11.9.2-rc.1`; audited 2026-09-25.
 
-## 1. Authority and scope
+## 1. Approved boundary
 
-The user requires every public-facing method across Common, Connect and Tensor to be asynchronous.
-Public helpers, validators, factories, registration methods and capability queries are in scope;
-being fast, in-memory or currently synchronous does not exempt an operation.
-The user selected 11.10.x because this breaks contracts. Creating this design does not authorize
-implementation, a version bump, packaging or publication.
+The owner clarified the original “every public method” requirement: **crossing to another service is
+asynchronous; working on an object already in hand is synchronous**. The initial proposal to turn
+every helper and property into an asynchronous method was too broad and is superseded.
 
-This document maps the migration of:
-- `Common/src/Darkspyre.Inference.Common`.
-- Every shipped capability assembly in `Connect/src`.
-- Every shipped capability assembly in `Tensor/src`.
-- Their in-repository consumers, tests, examples, tools and release verification.
-- UI.Settings as a consumer of Common's changed contracts, not as an expansion of the audit to every
-  UI component method.
+- Request objects, snapshots, service instances and live observations asynchronously.
+- Read and modify detached local objects normally. A snapshot's name, a request's model ID,
+  validation of local values, pure projections and value factories do not require Task wrappers.
+- Submit changes through the owning provider/session asynchronously. Local edits never mutate
+  authoritative provider state through hidden synchronous callbacks.
+- Operations that perform inference, authentication, discovery, installation, loading, saving or
+  shared-state mutation use Task/Task<T>. A completed Task is valid for a no-op/in-memory operation.
+- No gratuitous Task.Run, sync-over-async, compatibility aliases or duplicate authority.
+- Connect remains out-of-process access; Tensor remains in-process execution. Hosts still own
+  applications, persistence, API translation and lifecycle scheduling.
 
-Connect still owns external connections; Tensor still owns in-process execution. Hosts own app
-startup, API translation, storage, consent and application/session orchestration. No new transport,
-agent scheduler, persistence owner or capability is introduced.
+The user explicitly approved implementation on a new branch. Subsequent confirmation settled
+settings timing: **submit local field edits to the session immediately to refresh dependent controls;
+Save is a separate persistence operation**. No new human decision is outstanding.
 
-Read this alongside the current behavior authorities:
+Related authorities:
+
 - [Repository laws](../.roles/laws.md) and [package rules](../.roles/design-rules.md).
-- [Connect integration](../Connect/README.md) and [managed-agent design](../Connect/docs/enhancements.md).
-- [Setup/audio design](provider-setup-and-audio-technical-design.md).
-- [Settings editor design](settings.ui.tech-design.md).
+- [Connect integration](../Connect/README.md) and [managed agents](../Connect/docs/enhancements.md).
+- [Setup/audio](provider-setup-and-audio-technical-design.md) and
+  [settings editor](settings.ui.tech-design.md).
 - [Tensor integration](../Tensor/README.md), [model locations](tensor-model-locations.tech-design.md)
   and [Laya runtime](laya-onnx-runtime.tech-design.md).
 
-These authorities describe current behavior, including synchronous and ValueTask signatures.
-They must be updated together with implementation; their old signatures do not override the user's
-new rule. This draft is not a claim that production already follows the target.
+## 2. Resolved decisions
 
-## 2. Audited baseline and counting rules
+| Boundary | Approved behavior |
+|---|---|
+| Streaming | Acquire with Task<IAsyncEnumerable<T>>, then consume with await foreach. Never buffer the whole result to manufacture a Task return. |
+| DTOs and snapshots | Ordinary properties, local edits, pure helpers and construction remain synchronous. Fetching/replacing authoritative state is asynchronous. |
+| Construction | Operational objects are obtained through asynchronous factories. Tensor creation, Start and Load remain separate; no implicit download or load. |
+| Framework plumbing | Preserve IDisposable, IAsyncDisposable, ToString and generated object/record signatures. Preserve await using and secret-safe formatting. |
+| Notifications | Hand off without waiting. Observer latency/failure must not delay, roll back or change the reported result of a completed operation. |
+| Required-result callbacks | Await them: tool execution and source-credential resolution return Task<T>, carry cancellation and remain part of the owning operation. |
+| Settings timing | Apply edits asynchronously to the session for dependent metadata; persist only on the separate Save/CommitAsync call. |
 
-| Family | Synchronous methods | ValueTask methods | Async streams | Task methods |
-|---|---:|---:|---:|---:|
-| Common | 11 | 1 | 2 | 16 |
-| Connect | 30 | 0 | 5 | 61 |
-| Tensor | 25 | 7 | 3 | 81 |
-| Total | **66** | **8** | **10** | **158** |
+Non-blocking notifications are invalidation hints, not an ordered change log or another state owner.
+Observers fetch the latest snapshot. Required-result callbacks and stream backpressure are not
+notifications and must not become fire-and-forget.
 
-These are explicitly authored public method declarations on externally accessible types. Interface
-and public implementation declarations count separately. Public members of internal/private types
-are excluded; inherited methods are not multiplied by each consuming class.
-The 158 Task-returning declarations already have an async return contract, even where their
-implementation returns a completed Task without an `async` modifier.
+## 3. Settings transaction
 
-Supplementary surface:
-- 47 synchronous protected declarations: Common 14, Connect 22, Tensor 11. Many are overrides on sealed
-  implementations; the extensible roots are the 14 setup-base helpers/hooks and 2 resolver-base hooks.
-- Two named public ValueTask delegates: `LlmAgentToolHandler` and `TensorSourceAccess`.
-- 613 explicitly declared public properties: Common 192, Connect 362, Tensor 59. This includes DTO
-  properties, not just operational getters; compiler-generated positional record properties are extra.
-- Constructors, synchronous callback parameters, events, inherited disposal and compiler-generated
-  record/Object members require explicit treatment below. None is hidden by the method count.
-
-Appendices map every audited synchronous/ValueTask/stream declaration and protected hook. Source
-line numbers are baseline navigation aids, not stable identities. Re-run the audit against the
-implementation starting commit before claiming the mapping is exhaustive for a later checkout.
-
-## 3. Target operation rules
-
-Proposed ordinary-operation shape:
+Target Common boundary:
 
 ```csharp
-Task OperationAsync(..., CancellationToken cancellationToken = default);
-Task<TResult> OperationAsync(..., CancellationToken cancellationToken = default);
+Task<SetupSnapshot> GetSnapshotAsync(CancellationToken cancellationToken = default);
+Task<SetupEditResult> ApplySnapshotAsync(
+    SetupSnapshot snapshot, CancellationToken cancellationToken = default);
+Task<SetupValidation> ValidateAsync(CancellationToken cancellationToken = default);
+Task<SetupCommitResult> CommitAsync(CancellationToken cancellationToken = default);
 ```
 
-- Keep the existing typed inputs, results, provider selection and error meanings unless a mapped
-  boundary explicitly needs redesign.
-- Convert public synchronous operation names to their Async form. Remove the old public sync form
-  in the migration; do not leave dual APIs or compatibility aliases.
-- Immediate computations can return completed Tasks. Do not add Task.Run merely to rename a method.
-- Do not introduce sync-over-async in constructors, DI registration, getters or compatibility code.
-- Callers await results; no fire-and-forget edits, cleanup, registration or authentication work.
-- Cancellation is forwarded to work the library owns. An awaited result reports completion, not
-  merely that work was queued.
-- Existing internal synchronous pure implementation helpers may remain internal. Public/protected
-  methods are not reclassified as internal solely to hide an operation the host needs.
-- Argument validation, cancellation, fault observation and cleanup must be specified consistently
-  for the final signatures; using the async keyword on every implementation is not the contract.
+The concrete implementation must preserve typed fields rather than introduce an untyped property bag.
+A fetched snapshot contains local editable values and the originating session/revision identity.
+SetValue/Add/Remove are local edits; they do not synchronously invoke the provider or save storage.
+The submit boundary validates typed edits, ownership, revision, visibility and availability before
+publishing changes. Omission never means delete: repeatable-row removal remains explicit.
 
-This is a draft mapping. The following language/framework boundaries still need a resolved technical
-shape, not assumed exceptions.
+Apply updates only the session draft and returns after publication. A successful submission advances
+revision once and invalidates dependent choices, validation and readiness. Busy/stale/closed/invalid
+submissions do not partially mutate the draft. Cancellation before publication prevents application;
+once published, a later cancellation does not pretend to roll back it.
 
-## 4. Decisions required before implementation approval
+The editor submits the edited snapshot, awaits the result and fetches the refreshed snapshot.
+Changing repository therefore refreshes revision/model choices without persisting the configuration.
+Unsaved input must not be silently discarded on a notification or stale apply. Existing parsing-error
+Save blocking, pending secret edits, callback retention, dirty-close signals and latest-choice handling
+remain mandatory.
 
-| ID | Boundary | Required behavior / unresolved shape |
+Provider-owned computation and publication remain serialized. Do not await host callbacks under the
+state monitor. Implementation hooks which only compute local values can remain synchronous.
+There is no need to make every protected hook asynchronous solely because it is extensible.
+
+Commit validates the current session draft, freezes conflicting mutation and awaits the host's
+existing typed commit target once. Preserve expected-version comparison and uncertain-commit
+semantics. Observer failure is unrelated to persistence success. Disposal closes admission,
+cancels/joins owned work and clears secret state; it never stops a host-owned Tensor instance.
+
+## 4. Streaming and callback implementation
+
+All public inference/agent stream methods return Task<IAsyncEnumerable<T>>:
+
+- Common ILlmInference.StreamAsync and CompleteAsStreamAsync.
+- Connect ILlmClient/LlmProviderService.StreamAsync.
+- Connect ILlmAgentSession.RunTurnAsync, ContinueTurnAsync and ObserveAsync.
+- Tensor Qwen StreamAsync and Whisper TranscribeStreamAsync.
+
+```csharp
+var events = await inference.StreamAsync(request, cancellationToken);
+await foreach (var item in events.WithCancellation(cancellationToken))
+{
+    // Read the returned event's properties normally.
+}
+```
+
+Acquisition obtains a lazy sequence; it does not mean the prompt has completed or that a live
+observation sequence has ended. Current lazy execution remains on enumeration: no extra inference,
+buffering, provider fallback or speculative work is introduced. Enumerator cancellation and disposal
+continue to govern in-flight execution and native-memory lifetime. Internal process/native iterators
+can remain IAsyncEnumerable; they are not alternate public routes.
+
+LlmAgentToolHandler becomes Task<LlmToolOutput>. TensorSourceAccess becomes
+Task<TensorSourceCredential?>. Hosts return completed Tasks for immediate results or await real work.
+Framework ValueTask disposal is unchanged. Source credentials retain exact-origin/redirect restrictions;
+tool ordering, approvals, pause/continue accounting and error handling retain existing semantics.
+
+## 5. Remaining provider and Tensor migration
+
+Classify by ownership, not by how quickly an implementation currently returns:
+
+| Area | System-facing work | Ordinary local work |
 |---|---|---|
-| D1 | Streaming | Preserve incremental delivery, cancellation, backpressure, terminal result events and enumerator cleanup. Existing IAsyncEnumerable methods are asynchronous but not Task-returning. Resolve whether they remain the async stream contract or acquisition becomes Task<IAsyncEnumerable<T>>. A Task of a buffered list is not acceptable. |
-| D2 | Framework disposal | IAsyncDisposable requires ValueTask, IDisposable requires void. Design Task-facing cleanup and decide how unavoidable framework integration is exposed. Explicit interface implementation is still externally callable; it cannot be described as eliminating the ValueTask contract. |
-| D3 | Properties and DTOs | Replace operational getters with Task-returning queries. Explicitly settle the treatment of data-only DTO properties, positional record members, immutable identities and configuration properties; do not silently classify all 613 as exempt. |
-| D4 | Construction / registration | Constructors cannot be async. Map operational construction to awaited factories and keep host composition viable. Settle data-only construction separately. DI registration can be Task-returning but the container's synchronous factories must not block awaiting initialization. |
-| D5 | Fixed CLR methods | Three authored ToString overrides and inherited/generated Object/record methods cannot return Task while retaining their CLR signatures. Define the boundary between library operations and unavoidable CLR mechanics explicitly. Preserve secret-safe formatting. |
-| D6 | Notifications / progress | Changed uses EventHandler; IProgress<T>.Report is synchronous. Decide Task-based delivery semantics and framework adaptation without async-void handlers, lost exceptions, or duplicate authoritative state. |
-| D7 | Settings atomicity | Async edit delegates and subclass hooks cannot be awaited inside existing monitor locks. Specify immutable/staged draft computation and revision-checked publication, or another approved owner-only protocol, before converting the setup base. |
+| Common | Fetch/apply setup snapshots and inference requests | DTO construction, field values, typed local validation, secret-edit/value factories, formatting |
+| Connect | Provider/service acquisition, live capabilities, setup creation, authentication start, operational listener creation | Credential serialization/parsing, capability-record projection, host-local DI collection composition |
+| Tensor | Engine/setup acquisition, shared catalog registration/query, pack operations, live observations, lifecycle | Pack-definition construction/validation, immutable artifact lookup, credential factories, local metadata calculations |
 
-No option may drop streaming, framework cleanup safety, redaction, settings atomicity or host composition.
-These decisions are not invitations to retain arbitrary synchronous public operations. They identify
-the shapes that cannot be implemented correctly through a mechanical return-type replacement.
+Review concrete constructors and properties individually. Fixed descriptors and identity values already
+owned by a returned object are not asynchronous lookups. Operational construction moves to factories;
+DI must not block on asynchronous initialization. No metadata query implicitly installs or loads weights.
 
-## 5. Common mapping and settings transaction boundary
+### 5.1 Lease acquisition, artifact lookup and file access
 
-### 5.1 Public operations
+These are three distinct operations, not one asynchronous category:
 
-Appendix A lists all 11 current synchronous declarations. In particular:
-- `SetValueAsync`, `AddAsync` and `RemoveAsync` return Task<SetupEditResult>.
-- Observation/output/secret-edit factories return Task of their existing typed value.
-- Public validation returns Task; it does not gain network or storage side effects.
-- Public extension helpers follow the same Async/Task rule.
-- `SetupSecretEdit.ToString` is tracked under D5, not blindly renamed as an override.
-
-### 5.2 Callback migration
-
-Ten public setup-field type declarations accept synchronous edit/add/remove callbacks, including the
-generic base; the repeatable group has both add and remove callbacks. Convert operation delegates
-to Task-returning, cancellation-aware contracts in every concrete field constructor/factory and
-provider binding. Choice retrieval already returns Task and must retain its revision/latest-result
-semantics.
-
-The public `Changed` contract appears on the setup interface and implementation. Its current
-observer-exception isolation must survive D6. Progress parameters on setup actions and image/model
-installation likewise require an explicit callback policy.
-
-### 5.3 State ownership and concurrency requirements
-
-The session remains the only owner of mutable draft, revision, operation status and published view.
-Currently Snapshot builds fields/actions under a monitor, and Edit invokes an Action under that
-monitor. Changing Action to Func<Task> and awaiting it there is not a valid migration.
-
-The completed design must map these exact invariants:
-1. Capture expected revision, active/closed state and immutable inputs before async computation.
-2. No externally supplied callback mutates live owner state across an await.
-3. Publication validates the relevant revision/operation identity before changing authoritative state.
-4. Invalid/stale/busy/cancelled edits do not partially mutate the draft or increment revision as success.
-5. A successful edit changes revision once and invalidates dependent choices/status once.
-6. Snapshot fields/actions correspond to one revision, including async step/action construction.
-7. Notify only after publication; observer failure cannot undo a successful host commit or suppress
-   another observer. Reentrancy and notification ordering must be specified under D6.
-8. Disposal closes admission, settles owned work and clears sensitive state. Cancellation after an
-   uncertain external commit must not fabricate a rollback or a successful retry.
-
-Changing a returned Task alone is not permission to add optimistic races or two owners.
-Detailed staging/serialization mechanics remain D7; implementation is blocked on that decision.
-
-Proposed operational getter replacement: `GetSnapshotAsync(ct)`. Returned SetupSnapshot remains a
-coherent typed view; D3 settles its data-property representation. Base protected hooks and all five
-provider setup subclasses are mapped in Appendix D.
-
-## 6. Connect mapping
-
-### 6.1 Composition and provider selection
-
-Map every Bind/CreateSetupSession and the five Add*Connect extension methods in Appendix A.
-Await registration before the host builds/uses its service provider. Do not add a sync wrapper around
-an async factory. Preserve explicit provider choice, exact transport matching and no automatic fallback.
-
-`ILlmClient.GetCapabilitiesAsync` propagates into every implementation, adapter validation/projection,
-model-specific capability resolution, setup discovery and service/portable adapter caller. Methods on
-internal implementation classes may be excluded from the public audit count but still implement
-changed public interfaces and therefore must migrate.
-
-`ILlmEmbeddingClient.SupportsAsync` similarly requires awaited selection. Image transport preparation
-becomes `PrepareAsync` and remains side-effect-equivalent to today's preparation contract.
-
-### 6.2 Authentication
-
-Both StartClaudeLogin overloads and IClaudePkceLogin.Start become Task-returning operations. Preserve
-PKCE identity/state, callback validation and the existing credential-owner boundary.
-
-LoopbackRedirectListener currently opens a listener in its public constructor. Move operational
-startup behind awaited creation/start according to D4; preserve its redirect result and cleanup.
-Do not make a constructor call GetAwaiter().GetResult on an async factory.
-
-Credential Serialize/Parse and pasted-code parsing remain typed operations but become Task-facing.
-Credential material must remain absent from logs, diagnostics and generated documentation examples.
-
-### 6.3 Agent and chat callers
-
-The existing nonmutating accounting operations already return Task and keep their no-generation,
-no-refresh/persistence, nullable-limit and provenance semantics. No compactor moves into Connect.
-Model/run configuration, pause/revision validation, tool ordering, native approvals and safe teardown
-must remain unchanged when their dependencies become awaitable.
-
-`LlmAgentToolHandler`: ValueTask<LlmToolOutput> -> Task<LlmToolOutput>, preserving its existing
-cancellation token and typed result. Update managed, Claude/native and AgentCore dispatch paths,
-examples and host fixtures together. Native synchronous process internals are not public exceptions;
-they may remain private behind the awaited boundary when required by the underlying runtime.
-
-Streaming and framework agent-session disposal depend on D1/D2.
-
-## 7. Tensor mapping
-
-### 7.1 Catalog, packs, resolution and setup
-
-Map the catalog and pack-manager Register/GetRequired* methods, definition validation, lease artifact
-lookup, resolved-pack builders and source credential factories to Task operations (Appendix A).
-Preserve explicit install/import versus load; no query or async factory implicitly downloads weights.
-
-Operational query candidates under D3:
-- Catalog/pack-manager Definitions -> GetDefinitionsAsync.
-- ITensorModelInstance.Observation -> GetObservationAsync; state remains owned by model lifetime.
-- RequestedBackend -> GetRequestedBackendAsync if retained as a service query.
-- Resolver Requirements / AdditionalArtifactRolePrefix / Source -> named async accessors or an
-  approved immutable descriptor. Do not turn them into a second authoritative registry.
-- Setup Definition and implementation Descriptor -> async discovery at the owning service boundary.
-
-All four setup factories become CreateSessionAsync, including their host-provided pack manager,
-model choices, reader/source and optional instance inputs.
-
-TensorModelResolver's CompanionPath/SelectArtifacts hooks become awaited hooks and its orchestration
-must await them. The synchronous metadata-parser callback in TensorMetadataReader.ReadAsync also
-needs mapping; the method's Task return does not make Func<Stream,T> an async external contract.
-Preserve bounded range reads and compatibility inspection without loading tensors. Synchronous
-third-party parsers may remain internal behind an adapter; exposing an async callback must not break
-the existing stream lifetime or permit a retained stream after the callback settles.
-
-TensorSourceAccess becomes Task<TensorSourceCredential?> with the existing exact-origin cancellation
-contract. Retain origin/redirect boundaries; credentials are not broadened by this change.
-TensorBackendProbes.CpuCuda and its Func<bool> callback both need Task-facing forms.
-
-### 7.2 Lifecycle and cleanup
-
-StartAsync, LoadAsync, UnloadAsync, StopAsync and execution methods are already async contracts.
-Do not add another lifecycle, force flags or a process boundary during this migration.
-
-MarkLoaded/MarkUnloaded become awaited mutations. Preserve load publication only after successful
-initialization, coherent observations and unload's release order.
-TensorExecutionCoordinator.AcquireAsync changes ValueTask<IAsyncDisposable> under D2; the acquisition
-must still be cancellation-safe and must not leak or double-release a gate.
-
-Uncancelled Unload/Stop protects active requests. Cancellation requests urgent teardown but must
-still wait until native work stops using memory. Stop remains terminal as already documented.
-Dispose of a lease exactly once, and make repeated/in-flight cleanup safe under the final D2 shape.
-Do not translate framework cleanup to a completed Task while native cleanup is still running.
-
-## 8. Constructors, helpers and generated members
-
-The method appendix alone is not the entire reachable CLR surface. Constructors, implicit default
-constructors, positional records, synthesized equality/Deconstruct and property accessors exist too.
-
-The final API review must distinguish and explicitly document:
-- Host-invoked operations, which must become async.
-- Operational construction/accessors, which must move to awaited entry points.
-- Framework-required dispatch and value representation, whose signatures C# fixes.
-
-This distinction is unresolved design work, not an approved exception list. Do not invent Task-returning
-ToString overrides, awaitable constructors, or Task DisposeAsync implementations of IAsyncDisposable.
-Do not remove secret-safe ToString behavior from SetupSecretEdit or TensorSourceCredential without
-an equally safe approved replacement.
-
-Public methods may be internalized only when their capability is no longer needed externally and
-the approved public route preserves all existing required functionality.
-
-## 9. Consumer migration / dependency order
-
-| Unit | Contract owner | Required simultaneous callers |
+| Operation | Contract | Reason |
 |---|---|---|
-| Task callbacks, fields, setup snapshots/hooks | Common | All Connect/Tensor setup providers, UI.Settings renderer, generic editor example and tests |
-| Provider binding, registration, capabilities, preparation | Connect | Concrete adapters (including internal ones), provider services, portable bindings, console tester, examples and controlled test doubles |
-| Tool callbacks / agent lifetime / streams | Connect + Common | Managed/native/AgentCore sessions, host callback fixtures, stream consumers and integration guidance |
-| Model catalog, source access, resolution, lifecycle helpers | Tensor | Qwen/Supra/Laya/Whisper, model pack manager, setup sessions, resolver tests and examples |
-| Shared discovery/getter contracts | Common + product owners | Both portable implementations, setup renderer/composition and package-only consumer |
-| Final release surface | Entire family | Exact Common dependency, all four packages, XML documentation and release consumer |
+| Ask the pack manager to acquire a model-pack lease | `AcquireAsync` | Crosses to the manager that owns access and the lease lifetime. |
+| Find the tokenizer/model reference in an acquired lease | `GetRequiredArtifact` stays synchronous | Reads the lease's existing `Artifacts` dictionary; it neither opens a file nor calls a store. |
+| Open or read the referenced artifact through storage | Asynchronous storage operation | Crosses to the store/file-access service to obtain contents. |
 
-Implement dependency-first, but do not publish half-migrated packages or keep compatibility aliases.
-Each compiling implementation unit updates its affected canonical docs and tests. The final release
-contains a coherent contract set, not independent Common/Connect/Tensor version bumps.
+A lease containing a file reference does not necessarily contain the file's bytes. Returning that
+already-held reference is ordinary object access. If an operation instead resolves an artifact by
+calling a store or another service, that service-facing operation must be asynchronous; do not hide
+such work inside a synchronous getter or the local lookup method.
 
-UI.Settings remains a consumer migration: await SetValue/Add/Remove before processing SetupEditResult,
-and replace Snapshot reads/notification handling according to D3/D6. Preserve parsing-error Save
-blocking, dirty state, uncertain-commit reporting and latest-choice-result behavior. No redesign of
-UI layout, no Lumeo fork and no new application ownership.
+The same rule keeps `TensorModelDefinitionValidator.Validate`, `TensorResolvedPack.Create` and
+`SetupConfigurationIdentity.Validate` synchronous: they validate or construct values already in hand.
+By contrast, registering a pack with its manager remains an asynchronous publication boundary.
+Classification depends on responsibility and service access, not execution speed, an in-memory
+implementation, or whether the method name contains “Get”, “Create” or “Validate”.
 
-External consumer repositories (Agent DS, Desktop apps, other hosts) receive explicit migration
-guidance and the final package version; do not edit them without separate authorization.
-Public extension interfaces/delegates can break host implementations even when all our concrete
-adapters are internal. Document those breaks, not just caller renames.
+Start/Load/request/Unload/Stop semantics do not change. Graceful teardown waits for requests; urgency
+cancels requests but must still join native execution before freeing memory. Stop remains terminal.
+Keep explicit framework cleanup and never report completed cleanup while native work still owns memory.
 
-## 10. Verification and acceptance
+The appendices retain the original audit as historical inventory, not as an instruction to async-wrap
+local helpers. Their initial proposed names are superseded by the approved ownership boundary above.
 
-Required before implementation is considered complete:
-- Repeat source API inventory; every remaining non-Task public operation has a disposition backed
-  by an explicitly approved decision, not a private test allowlist invented during implementation.
-- Add a public-surface contract test/analyzer covering implicit interface members, external type
-  visibility, inherited owned interfaces, delegates, public operations on generic types and nested
-  accessible types. Track fixed-framework/generated surface explicitly.
-- Compile controlled external implementations of changed interfaces/hooks/delegates, not only
-  concrete product classes.
-- Assert awaited completion, cancellation propagation and faults; no fire-and-forget mutation,
-  sync-over-async, unnecessary Task.Run, duplicate operation or silent fallback.
-- Setup concurrency tests: two edits, stale revision, cancellation before/during publication,
-  dependent choice refresh, commit uncertainty, observer failures/reentrancy and disposal races.
-- Streaming tests: first result before full completion, backpressure, cancellation, partial failure,
-  tool events, single terminal completion, abandoned-enumerator cleanup and native memory lifetime.
-- Tensor tests: repeated cleanup, failed/cancelled acquisition/load, urgent stop, request drain,
-  observations, gates and lease ownership; no download/load during discovery.
-- Secret-redaction and credential-origin regressions remain green.
-- Zero-warning Debug/Release builds and deterministic tests for Connect, Tensor and UI; format and
-  transitive vulnerability checks; compile examples and migrate package-only release consumer.
-- No paid provider calls or model downloads as gates. Pack/private-feed validation only after an
-  explicit publish request.
+## 6. Migration and verification
 
-## 11. Release and documentation
+Implement coherent, compiling units; update all in-repository implementations, tests, examples,
+tools and UI.Settings consumers for each changed seam. No parallel legacy signature remains.
+External application repositories are not authorized for modification.
 
-The user selected **11.10.x**. The expected first contract release is 11.10.0 with the repository's
-then-required prerelease suffix; do not change framework generation or invent a suffix policy.
-Leave Directory.Build.props unchanged while drafting. All four packages still release together,
-including UI.Settings's necessary Common-consumer updates.
+- Stream acquisition: progressive output, no eager generation, backpressure, terminal events,
+  cancellation, partial failure and abandoned-enumerator cleanup.
+- Required-result callbacks: await completion/fault/cancellation; preserve tool and credential policy.
+- Snapshots: independent local edits, typed submission, one revision per batch, stale/busy/closed
+  rejection, dependent choices, secret redaction, no persistence on Apply.
+- Notifications: blocked/throwing observers cannot block operations; reentrancy does not deadlock;
+  queued invalidations do not create a second state owner.
+- Lifecycle: failed/cancelled load, urgent/graceful stop, repeated cleanup, gate/lease ownership.
+- Public API inventory: classify remaining methods against the approved boundary, not a blanket
+  “all non-Task methods fail” rule. Compile external implementations of changed contracts.
+- All three solutions: zero-warning Debug/Release builds and deterministic tests; format and
+  dependency-vulnerability checks. No paid provider calls or downloaded models as gates.
 
-Before publication, update Common/Connect/Tensor/UI entry points, setup and managed-agent designs,
-Tensor model-source/lifecycle guidance, examples, XML docs, Agent DS handoff, project map and release
-consumer. Preserve old release notes as historical evidence. Do not tell consumers that a draft API
-is already in their floating NuGet resolution.
+Four packages remain synchronized through Directory.Build.props. The target is 11.10.x, with the
+repository's existing prerelease convention. Do not create packages or publish until separately
+authorized, and do not advertise an incomplete branch as a released API.
 
-## 12. Draft completion checklist
+## 7. Implementation progress
 
-- [x] Baseline public methods inventoried.
-- [x] All synchronous, ValueTask and stream declarations mapped below.
-- [x] Protected-hook and consumer impact identified.
-- [x] Version line recorded as 11.10.x.
-- [ ] Resolve D1–D7 with exact final signatures and state transitions.
-- [ ] Complete member-level operational getter/factory dispositions; classify DTO/CLR mechanics.
-- [ ] Approve complete technical design.
-- [ ] Implement, verify and commit production migration.
-- [ ] Publish only when explicitly authorized.
+- [x] Original public surface audited.
+- [x] Owner decisions resolved, including immediate draft submission versus durable Save.
+- [ ] Stream acquisition and required-result callbacks migrated, verified and committed.
+- [ ] Detached snapshot/apply boundary, non-blocking notifications and all settings consumers.
+- [ ] Remaining provider factories, system queries and Tensor operations.
+- [ ] Final API audit, examples, documentation and complete Debug/Release verification.
+- [ ] Coordinated version update; publish only with separate authorization.
+
+## Historical audit inventory
+
+The following tables preserve the baseline audit and initial proposals for traceability.
+**Initial async-everything proposals are not the approved implementation scope.** Use sections 1–6
+above to distinguish system access from local object work; source links refer to the audited baseline.
 
 ## Appendix A. Every synchronous public method
 
-Proposals below are mappings, not already implemented API. Unless a decision row says otherwise,
-append a CancellationToken parameter and preserve existing parameters/generic constraints.
-Constructors and property getters are covered in sections 4, 7 and 8, not counted here.
+The initial proposals below are historical, not instructions to append Async or CancellationToken
+to local operations. Explicit corrections identify confirmed synchronous methods; sections 1–5
+govern all remaining classifications. Constructors and property getters are not counted here.
 
 ### Common
 
@@ -347,7 +212,7 @@ Constructors and property getters are covered in sections 4, 7 and 8, not counte
 | `InferenceCapability InferenceTaskExtensions.GetCapability(this InferenceTask task)` | `GetCapabilityAsync → Task<InferenceCapability>` | [Inference.cs:29](../Common/src/Darkspyre.Inference.Common/Inference.cs) |
 | `bool LlmToolOutputResource.IsTextMediaType(string mediaType)` | `IsTextMediaTypeAsync → Task<bool>` | [LlmToolOutput.cs:53](../Common/src/Darkspyre.Inference.Common/LLM/LlmToolOutput.cs) |
 | `LlmToolOutput LlmToolOutput.FromText(string text, bool isError = false)` | `FromTextAsync → Task<LlmToolOutput>` | [LlmToolOutput.cs:67](../Common/src/Darkspyre.Inference.Common/LLM/LlmToolOutput.cs) |
-| `void SetupConfigurationIdentity.Validate()` | `ValidateAsync → Task` | [SetupModels.cs:43](../Common/src/Darkspyre.Inference.Common/Setup/SetupModels.cs) |
+| `void SetupConfigurationIdentity.Validate()` | **Corrected: retain synchronous `Validate`; validates local data.** | [SetupModels.cs:43](../Common/src/Darkspyre.Inference.Common/Setup/SetupModels.cs) |
 | `SetupObservation SetupObservation.Known(bool value, string? reason = null)` | `KnownAsync → Task<SetupObservation>` | [SetupModels.cs:70](../Common/src/Darkspyre.Inference.Common/Setup/SetupModels.cs) |
 | `SetupEditResult SetupValueField.SetValue(T value)` | `SetValueAsync → Task<SetupEditResult>` | [SetupFields.cs:26](../Common/src/Darkspyre.Inference.Common/Setup/SetupFields.cs) |
 | `SetupSecretEdit SetupSecretEdit.Replace(string value)` | `ReplaceAsync → Task<SetupSecretEdit>` | [SetupFields.cs:83](../Common/src/Darkspyre.Inference.Common/Setup/SetupFields.cs) |
@@ -397,18 +262,18 @@ Constructors and property getters are covered in sections 4, 7 and 8, not counte
 |---|---|---|
 | `TensorSetupSession QwenSetup.CreateSession(SetupConfigurationIdentity identity, ISetupCommitTarget<TensorSetupChanges> target, ITensorModelPackManager packs, TensorSetupConfiguration? existing = null, ITensorLlmInference? instance = null, IReadOnlyList<TensorModelPackDefinition>? offeredModels = null, ITensorModelSource? source = null, ITensorArtifactReader? reader = null)` | `CreateSessionAsync → Task<TensorSetupSession>` | [QwenSetup.cs:13](../Tensor/src/LLM/Darkspyre.Inference.Tensor.LLM.Qwen/QwenSetup.cs) |
 | `TensorSetupSession SupraSetup.CreateSession(SetupConfigurationIdentity identity, ISetupCommitTarget<TensorSetupChanges> target, ITensorModelPackManager packs, TensorSetupConfiguration? existing = null, ITensorImageInference? instance = null, IReadOnlyList<TensorModelPackDefinition>? offeredModels = null, ITensorModelSource? source = null, ITensorArtifactReader? reader = null)` | `CreateSessionAsync → Task<TensorSetupSession>` | [SupraSetup.cs:13](../Tensor/src/Image/Darkspyre.Inference.Tensor.Image.Supra/SupraSetup.cs) |
-| `PersistenceFileReference TensorModelPackLease.GetRequiredArtifact(string role)` | `GetRequiredArtifactAsync → Task<PersistenceFileReference>` | [TensorModelPackLease.cs:23](../Tensor/src/Common/Darkspyre.Inference.Tensor.Common/TensorModelPackLease.cs) |
+| `PersistenceFileReference TensorModelPackLease.GetRequiredArtifact(string role)` | **Corrected: retain synchronous `GetRequiredArtifact`; local dictionary lookup (section 5.1).** | [TensorModelPackLease.cs:23](../Tensor/src/Common/Darkspyre.Inference.Tensor.Common/TensorModelPackLease.cs) |
 | `string TensorModelKey.ToString()` | D5: fixed CLR override; preserve formatting/redaction | [TensorModels.cs:28](../Tensor/src/Common/Darkspyre.Inference.Tensor.Common/TensorModels.cs) |
 | `TensorModelPackDefinition TensorModelCatalog.Register(TensorModelPackDefinition definition)` | `RegisterAsync → Task<TensorModelPackDefinition>` | [TensorModels.cs:84](../Tensor/src/Common/Darkspyre.Inference.Tensor.Common/TensorModels.cs) |
 | `TensorModelPackDefinition TensorModelCatalog.GetRequired(TensorModelKey key)` | `GetRequiredAsync → Task<TensorModelPackDefinition>` | [TensorModels.cs:107](../Tensor/src/Common/Darkspyre.Inference.Tensor.Common/TensorModels.cs) |
-| `void TensorModelDefinitionValidator.Validate(TensorModelPackDefinition definition)` | `ValidateAsync → Task` | [TensorModels.cs:129](../Tensor/src/Common/Darkspyre.Inference.Tensor.Common/TensorModels.cs) |
+| `void TensorModelDefinitionValidator.Validate(TensorModelPackDefinition definition)` | **Corrected: retain synchronous `Validate`; validates a definition in hand.** | [TensorModels.cs:129](../Tensor/src/Common/Darkspyre.Inference.Tensor.Common/TensorModels.cs) |
 | `TensorModelPackDefinition ITensorModelPackManager.Register(TensorModelPackDefinition definition)` | `RegisterAsync → Task<TensorModelPackDefinition>` | [TensorModelPackManager.cs:44](../Tensor/src/Common/Darkspyre.Inference.Tensor.Common/TensorModelPackManager.cs) |
 | `TensorModelPackDefinition ITensorModelPackManager.GetRequiredDefinition(TensorModelKey key)` | `GetRequiredDefinitionAsync → Task<TensorModelPackDefinition>` | [TensorModelPackManager.cs:46](../Tensor/src/Common/Darkspyre.Inference.Tensor.Common/TensorModelPackManager.cs) |
 | `TensorModelPackDefinition TensorModelPackManager.Register(TensorModelPackDefinition definition)` | `RegisterAsync → Task<TensorModelPackDefinition>` | [TensorModelPackManager.cs:104](../Tensor/src/Common/Darkspyre.Inference.Tensor.Common/TensorModelPackManager.cs) |
 | `TensorModelPackDefinition TensorModelPackManager.GetRequiredDefinition(TensorModelKey key)` | `GetRequiredDefinitionAsync → Task<TensorModelPackDefinition>` | [TensorModelPackManager.cs:110](../Tensor/src/Common/Darkspyre.Inference.Tensor.Common/TensorModelPackManager.cs) |
 | `void TensorModelPackManager.Dispose()` | D2: Task-facing cleanup; framework disposition required | [TensorModelPackManager.cs:425](../Tensor/src/Common/Darkspyre.Inference.Tensor.Common/TensorModelPackManager.cs) |
 | `void HuggingFaceModelSource.Dispose()` | D2: Task-facing cleanup; framework disposition required | [HuggingFaceModelSource.cs:234](../Tensor/src/Common/Darkspyre.Inference.Tensor.Common/HuggingFaceModelSource.cs) |
-| `TensorModelPackDefinition TensorResolvedPack.Create(TensorModelCandidate candidate, TensorCapability capability, string architecture, IReadOnlySet<TensorBackendKind> backends, IReadOnlyList<TensorModelArtifactDefinition> artifacts, TensorModelPackDefinition? builtIn = null)` | `CreateAsync → Task<TensorModelPackDefinition>` | [TensorModelResolution.cs:39](../Tensor/src/Common/Darkspyre.Inference.Tensor.Common/TensorModelResolution.cs) |
+| `TensorModelPackDefinition TensorResolvedPack.Create(TensorModelCandidate candidate, TensorCapability capability, string architecture, IReadOnlySet<TensorBackendKind> backends, IReadOnlyList<TensorModelArtifactDefinition> artifacts, TensorModelPackDefinition? builtIn = null)` | **Corrected: retain synchronous `Create`; constructs a local definition.** | [TensorModelResolution.cs:39](../Tensor/src/Common/Darkspyre.Inference.Tensor.Common/TensorModelResolution.cs) |
 | `TensorModelArtifactDefinition TensorResolvedPack.Artifact(TensorSourceArtifact source, string role, string relativePath)` | `ArtifactAsync → Task<TensorModelArtifactDefinition>` | [TensorModelResolution.cs:100](../Tensor/src/Common/Darkspyre.Inference.Tensor.Common/TensorModelResolution.cs) |
 | `void TensorModelLifetime.MarkLoaded(TensorModelKey model, TensorBackendKind backend)` | `MarkLoadedAsync → Task` | [TensorModelLifetime.cs:27](../Tensor/src/Common/Darkspyre.Inference.Tensor.Common/TensorModelLifetime.cs) |
 | `void TensorModelLifetime.MarkUnloaded()` | `MarkUnloadedAsync → Task` | [TensorModelLifetime.cs:88](../Tensor/src/Common/Darkspyre.Inference.Tensor.Common/TensorModelLifetime.cs) |
