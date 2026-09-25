@@ -38,7 +38,7 @@ Related authorities:
 | DTOs and snapshots | Ordinary properties, local edits, pure helpers and construction remain synchronous. Fetching/replacing authoritative state is asynchronous. |
 | Construction | Operational objects are obtained through asynchronous factories. Tensor creation, Start and Load remain separate; no implicit download or load. |
 | Framework plumbing | Preserve IDisposable, IAsyncDisposable, ToString and generated object/record signatures. Preserve await using and secret-safe formatting. |
-| Notifications | Hand off without waiting. Observer latency/failure must not delay, roll back or change the reported result of a completed operation. |
+| Notifications | Call each listener outside the state lock and return. A listener posts its async work and returns without blocking. Listener failure must not roll back or change the reported result of a completed operation. |
 | Required-result callbacks | Await them: tool execution and source-credential resolution return Task<T>, carry cancellation and remain part of the owning operation. |
 | Settings timing | Apply edits asynchronously to the session for dependent metadata; persist only on the separate Save/CommitAsync call. |
 
@@ -48,11 +48,12 @@ notifications and must not become fire-and-forget.
 
 ### 2.1 Notification ownership across the host boundary
 
-Inference setup notifications are invalidation hints. Apply/Save finishes after its state or
-persistence work is complete and notification delivery is handed off, not after observers finish.
-Observers fetch the latest snapshot; they cannot assume one callback per intermediate revision.
-Notification work has an owner that observes failures and settles outstanding work during shutdown.
-A discarded Task is not an implementation of this contract. No observer runs under the state lock.
+Inference setup notifications are invalidation hints. The session calls each `Changed` listener
+after it releases the state lock, then returns. It does not wait for work a listener starts.
+A listener with async work posts it with `_ = ...` and returns. The settings editor posts its
+refresh through `InvokeAsync` this way. The session catches a listener's exception, and that
+exception does not affect the operation or the other listeners. Observers fetch the latest
+snapshot; they cannot assume one callback per intermediate revision.
 
 Agent DS owns a different publication guarantee: it starts every subscriber callback for its
 publication, isolates invocation failures, then awaits all entered callbacks. This guarantee belongs
@@ -187,8 +188,8 @@ public contracts. No parallel legacy signature is exposed.
 - Required-result callbacks: await completion/fault/cancellation; preserve tool and credential policy.
 - Snapshots: independent local edits, typed submission, one revision per batch, stale/busy/closed
   rejection, dependent choices, secret redaction, no persistence on Apply.
-- Notifications: blocked/throwing observers cannot block operations; reentrancy does not deadlock;
-  queued invalidations do not create a second state owner.
+- Notifications: a throwing listener does not affect the operation or other listeners; reentrancy
+  does not deadlock; listeners do not become a second state owner.
 - Lifecycle: failed/cancelled load, urgent/graceful stop, repeated cleanup, gate/lease ownership.
 - Public API inventory: classify remaining methods against the approved boundary, not a blanket
   “all non-Task methods fail” rule. Compile external implementations of changed contracts.
