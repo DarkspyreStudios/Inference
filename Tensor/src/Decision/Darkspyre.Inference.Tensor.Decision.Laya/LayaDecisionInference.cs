@@ -9,7 +9,7 @@ using Microsoft.ML.OnnxRuntime;
 
 namespace Darkspyre.Inference.Tensor.Decision.Laya;
 
-public sealed class LayaDecisionInference : ITensorDecisionInference
+public sealed class LayaDecisionInference : ITensorDecisionInference, IDecisionInputMeasurement
 {
     private readonly ITensorModelPackManager _packs;
     private readonly ILayaModelLoader _loader;
@@ -20,6 +20,7 @@ public sealed class LayaDecisionInference : ITensorDecisionInference
     private TensorModelPackLease? _modelLease;
     private LayaModelResources? _resources;
     private LayaAgentConfiguration? _configuration;
+    private LayaInputMeter? _meter;
     private TensorBackendKind? _loadedBackend;
     private bool _disposed;
 
@@ -148,6 +149,25 @@ public sealed class LayaDecisionInference : ITensorDecisionInference
 
     public Task StartAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
 
+    public async Task<DecisionInputMeasurement> MeasureAsync(
+        DecisionInferenceRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ThrowIfDisposed();
+        ArgumentNullException.ThrowIfNull(request);
+        ValidateRequest(request);
+        // The lease keeps an unload from releasing the tokenizer; no backend is needed, so the
+        // execution coordinator is not acquired.
+        await using TensorModelLifetime.ExecutionLease modelUse = await _lifetime.EnterExecutionAsync(cancellationToken)
+            .ConfigureAwait(false);
+        LayaInputMeter meter = _meter
+            ?? throw new InferenceException(InferenceFailureCode.ModelUnavailable, "The Laya model was not loaded.");
+        TensorModelKey selected = _modelLease?.Key
+            ?? throw new InferenceException(InferenceFailureCode.ModelUnavailable, "The Laya model pack was not loaded.");
+        ValidateModelId(request.ModelId, selected);
+        return meter.Measure(request, modelUse.CancellationToken);
+    }
+
     public TensorModelObservation Observation => _lifetime.Observation;
     public TensorBackendKind RequestedBackend => _requestedBackend;
 
@@ -157,6 +177,7 @@ public sealed class LayaDecisionInference : ITensorDecisionInference
         _resources?.Dispose();
         _resources = null;
         _configuration = null;
+        _meter = null;
         if (_modelLease is not null)
         {
             await _modelLease.DisposeAsync().ConfigureAwait(false);
@@ -240,6 +261,7 @@ public sealed class LayaDecisionInference : ITensorDecisionInference
             _lifetime.MarkLoaded(model, backend);
             _resources = loadedResources;
             _configuration = configuration;
+            _meter = new LayaInputMeter(loadedResources.Tokenizer, configuration);
             _modelLease = lease;
             _loadedBackend = backend;
             loadedResources = null;

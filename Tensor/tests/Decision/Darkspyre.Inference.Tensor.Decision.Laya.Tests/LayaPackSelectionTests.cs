@@ -271,6 +271,55 @@ public sealed class LayaPackSelectionTests : IDisposable
         }
     }
 
+    [Fact]
+    public async Task MeasureUsesTheLoadedPackWithoutAForwardPassAndMatchesWhatDecideKeeps()
+    {
+        TensorModelPackDefinition pack = Pack("host/custom", "1");
+        using var http = new HttpClient(new ArtifactHandler());
+        using var packs = Manager(http, pack);
+        await packs.InstallAsync(pack.Key);
+        var loader = new Loader();
+        var engine = new LayaDecisionInference(packs, loader, TensorBackendKind.Cpu);
+        var question = new BooleanDecisionQuestion { Id = "ready", Instructions = new string('y', 100) };
+        var request = new DecisionInferenceRequest
+        {
+            ModelId = pack.Key.ModelId,
+            State = JsonSerializer.SerializeToElement(new string('x', 2000)),
+            Questions = [question]
+        };
+
+        InferenceException invalid = await Assert.ThrowsAsync<InferenceException>(() =>
+            engine.MeasureAsync(request with { Questions = [] }));
+        Assert.Equal(InferenceFailureCode.InvalidRequest, invalid.Code);
+        InferenceException notLoaded = await Assert.ThrowsAsync<InferenceException>(() => engine.MeasureAsync(request));
+        Assert.Equal(InferenceFailureCode.ModelUnavailable, notLoaded.Code);
+
+        await engine.LoadAsync(pack.Key);
+        DecisionInputMeasurement measurement = await engine.MeasureAsync(request);
+        LayaFrame frame = LayaSequenceBuilder.Frame(new Tokenizer(), question, 384, 128);
+        Assert.Equal(2000, measurement.StateTokens);
+        Assert.Equal(frame.StateBudget, measurement.StateTokenBudgets["ready"]);
+        Assert.Empty(Assert.Single(loader.Models).Sequences);
+
+        await engine.DecideAsync(request);
+        LayaSequence sequence = Assert.Single(loader.Models[0].Sequences);
+        Assert.Equal(
+            Math.Min(measurement.StateTokens, measurement.StateTokenBudgets["ready"]),
+            sequence.TokenIds.Length - frame.Prefix.Length - 1);
+
+        InferenceException wrongModel = await Assert.ThrowsAsync<InferenceException>(() =>
+            engine.MeasureAsync(request with { ModelId = "not-loaded" }));
+        Assert.Equal(InferenceFailureCode.ModelUnavailable, wrongModel.Code);
+
+        await engine.UnloadAsync();
+        InferenceException unloaded = await Assert.ThrowsAsync<InferenceException>(() => engine.MeasureAsync(request));
+        Assert.Equal(InferenceFailureCode.ModelUnavailable, unloaded.Code);
+
+        await engine.DisposeAsync();
+        await Assert.ThrowsAsync<ObjectDisposedException>(() => engine.MeasureAsync(request));
+        await packs.RemoveAsync(pack.Key);
+    }
+
     private TensorModelPackManager Manager(HttpClient http, params TensorModelPackDefinition[] definitions) =>
         new(new TensorModelCatalog(definitions), new TensorDirectFilePersistStore(_root), http);
     private static ISetupAction Action(TensorSetupSession setup, SetupActionPurpose purpose) =>
