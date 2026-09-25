@@ -129,6 +129,7 @@ public sealed class LlmProviderService
     public async Task SetApiKeyAsync(
         string connectionId,
         string apiKey,
+        string expectedVersion,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(apiKey))
@@ -136,9 +137,9 @@ public sealed class LlmProviderService
             throw new ArgumentException("An API key is required.", nameof(apiKey));
         }
 
-        LlmConnection connection = await LlmConnectionResolver.ResolveAsync(
-            _connections,
+        LlmConnection connection = await RequireExpectedVersionAsync(
             connectionId,
+            expectedVersion,
             cancellationToken);
         await _connections.SaveCredentialAsync(
             connectionId,
@@ -237,12 +238,13 @@ public sealed class LlmProviderService
     public async Task SetBedrockCredentialsAsync(
         string connectionId,
         LlmAwsCredentials aws,
+        string expectedVersion,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(aws);
-        LlmConnection connection = await LlmConnectionResolver.ResolveAsync(
-            _connections,
+        LlmConnection connection = await RequireExpectedVersionAsync(
             connectionId,
+            expectedVersion,
             cancellationToken);
         await _connections.SaveCredentialAsync(
             connectionId,
@@ -259,7 +261,6 @@ public sealed class LlmProviderService
     public async Task SignInAsync(
         string connectionId,
         ILlmAuthPrompt prompt,
-        string? redirectUri = null,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(prompt);

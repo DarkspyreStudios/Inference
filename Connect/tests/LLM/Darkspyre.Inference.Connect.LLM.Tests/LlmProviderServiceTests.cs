@@ -240,6 +240,21 @@ public sealed class LlmProviderServiceTests
     }
 
     [Fact]
+    public async Task CredentialSettersRejectAStaleVersionAndSaveAtTheExpectedOne()
+    {
+        var source = new MutableConnectionSource(Connection("v2", null, LlmTransport.OpenAiResponses));
+        var service = new LlmProviderService(source, [new StubClient(LlmTransport.OpenAiResponses)], []);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => service.SetApiKeyAsync("configured-provider", "key", "v1"));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => service.SetBedrockCredentialsAsync(
+            "configured-provider", new LlmAwsCredentials { Profile = "profile", Region = "us-east-1" }, "v1"));
+        Assert.Null(source.Connection.Credential);
+
+        await service.SetApiKeyAsync("configured-provider", "key", "v2");
+        Assert.Equal("key", LlmCredential.Parse(source.Connection.Credential)?.ApiKey);
+    }
+
+    [Fact]
     public async Task ExplicitCompletionRejectsAStaleVersionBeforeTokenExchange()
     {
         var source = new MutableConnectionSource(Connection("v2"));
@@ -394,10 +409,6 @@ public sealed class LlmProviderServiceTests
         public Task ShowDeviceCodeAsync(
             LlmDeviceCode code,
             CancellationToken cancellationToken = default) => Task.CompletedTask;
-
-        public Task<LlmRedirectResult> GetAuthorizationCodeAsync(
-            Uri authorizeUrl,
-            CancellationToken cancellationToken = default) => throw new NotSupportedException();
     }
 
     private sealed class StubClient(LlmTransport transport)

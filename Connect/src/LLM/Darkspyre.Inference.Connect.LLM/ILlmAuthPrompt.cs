@@ -10,9 +10,4 @@ public interface ILlmAuthPrompt
     Task ShowDeviceCodeAsync(
         LlmDeviceCode code,
         CancellationToken cancellationToken = default);
-
-    /// <summary>Opens or displays a Claude authorization URL and returns its redirect result.</summary>
-    Task<LlmRedirectResult> GetAuthorizationCodeAsync(
-        Uri authorizeUrl,
-        CancellationToken cancellationToken = default);
 }

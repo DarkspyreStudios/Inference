@@ -66,7 +66,7 @@ internal static class Program
         {
             return invocation.Command switch
             {
-                "login" => await RunLoginAsync(llms, invocation, cancellation.Token),
+                "login" => await RunLoginAsync(llms, provider.GetRequiredService<ILlmConnectionSource>(), invocation, cancellation.Token),
                 "status" => await RunStatusAsync(llms, invocation, cancellation.Token),
                 "models" => await RunModelsAsync(llms, invocation, cancellation.Token),
                 "usage" => await RunUsageAsync(llms, invocation, cancellation.Token),
@@ -110,6 +110,7 @@ internal static class Program
 
     private static async Task<int> RunLoginAsync(
         LlmProviderService llms,
+        ILlmConnectionSource connections,
         ConsoleInvocation invocation,
         CancellationToken cancellationToken)
     {
@@ -129,6 +130,8 @@ internal static class Program
             or LlmTransport.AwsBedrockAgentCore)
         {
             BedrockLoginOptions options = ParseBedrockLoginOptions(invocation.CommandArguments);
+            LlmConnection connection = await connections.GetConnectionAsync(invocation.Provider.ConnectionId, cancellationToken)
+                ?? throw new InvalidOperationException($"Connection '{invocation.Provider.ConnectionId}' is not configured.");
             await llms.SetBedrockCredentialsAsync(
                 invocation.Provider.ConnectionId,
                 new LlmAwsCredentials
@@ -136,6 +139,7 @@ internal static class Program
                     Profile = options.Profile,
                     Region = options.Region
                 },
+                connection.Version,
                 cancellationToken);
             if (invocation.Provider.Transport == LlmTransport.AwsBedrockConverse)
             {
@@ -157,7 +161,6 @@ internal static class Program
         await llms.SignInAsync(
             invocation.Provider.ConnectionId,
             new ConsoleAuthPrompt(),
-            redirectUri: null,
             cancellationToken);
 
         bool ready = await llms.IsAuthenticatedAsync(

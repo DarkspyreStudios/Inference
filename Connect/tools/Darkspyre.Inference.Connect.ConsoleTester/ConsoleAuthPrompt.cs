@@ -19,20 +19,6 @@ internal sealed class ConsoleAuthPrompt : ILlmAuthPrompt
         return Task.CompletedTask;
     }
 
-    public Task<LlmRedirectResult> GetAuthorizationCodeAsync(
-        Uri authorizeUrl,
-        CancellationToken cancellationToken = default)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        Console.WriteLine("Open this URL in a browser and authorize the connection:");
-        Console.WriteLine(authorizeUrl);
-        Console.WriteLine();
-        Console.Write("Paste the complete callback response: ");
-        string callback = ReadSecretLine();
-        Console.WriteLine();
-        return Task.FromResult(LlmRedirectResult.ParsePastedCode(callback));
-    }
-
     private static string ReadSecretLine()
     {
         if (Console.IsInputRedirected)

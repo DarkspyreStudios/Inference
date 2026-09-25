@@ -1697,8 +1697,8 @@ Connect-only data: response state, diagnostics, or provider capabilities.
 ### 9. Credential and sign-in members
 
 - `SignInAsync` loses its unused `redirectUri` parameter.
-- `ILlmAuthPrompt.GetAuthorizationCodeAsync` and `LlmRedirectResult` are removed if nothing else uses
-  them. Sign-in never calls the member; Claude sign-in goes through the CLI.
+- `ILlmAuthPrompt.GetAuthorizationCodeAsync` is removed. Sign-in never calls it; Claude sign-in goes
+  through the CLI. `LlmRedirectResult` stays, because Claude login and the loopback listener use it.
 - `SetApiKeyAsync` and `SetBedrockCredentialsAsync` take `expectedVersion`, like the Codex and Claude
   login members, so a credential cannot overwrite a connection the host changed in between.
 
