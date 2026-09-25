@@ -54,7 +54,8 @@ and the step's own title is not repeated; a single-step session keeps its title.
 authorization shows a **Copy code** button that writes the user code to the clipboard and reports
 the outcome; the code itself selects in one click. A searchable choice list shows its separate
 provider-search box only while the loaded list is incomplete or a search is active; otherwise the
-combobox filters the loaded choices.
+combobox filters the loaded choices. A choice whose value differs from its display name shows the
+value on a second line, and the combobox filter matches either one.
 
 ## Settings corrections in 11.3.1-rc.1
 

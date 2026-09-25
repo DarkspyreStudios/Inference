@@ -268,6 +268,16 @@ public sealed class BedrockSafetyTests
     public void ModelResolverPrefersRegionalProfiles(string region, string[] expected) =>
         Assert.Equal(expected, BedrockModelResolver.PreferredProfilePrefixes(region));
 
+    [Theory]
+    [InlineData(new[] { "PROVISIONED" }, true)]
+    [InlineData(new[] { "ON_DEMAND", "PROVISIONED" }, false)]
+    [InlineData(new[] { "ON_DEMAND", "INFERENCE_PROFILE" }, false)]
+    [InlineData(new[] { "INFERENCE_PROFILE" }, false)]
+    [InlineData(new string[0], false)]
+    [InlineData(null, false)]
+    public void ModelListingOmitsOnlyProvisionedOnlyModels(string[]? inferenceTypes, bool expected) =>
+        Assert.Equal(expected, BedrockModelResolver.IsProvisionedOnly(inferenceTypes));
+
     [Fact]
     public void LoggingGuardDetectsDeliveryFlagsAndDestinations()
     {

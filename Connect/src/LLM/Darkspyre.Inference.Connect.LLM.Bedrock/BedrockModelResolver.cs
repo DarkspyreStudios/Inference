@@ -76,7 +76,7 @@ internal sealed class BedrockModelResolver
                 cancellationToken);
             foreach (FoundationModelSummary model in models.ModelSummaries ?? [])
             {
-                if (!string.IsNullOrEmpty(model.ModelId))
+                if (!string.IsNullOrEmpty(model.ModelId) && !IsProvisionedOnly(model.InferenceTypesSupported))
                 {
                     byId.TryAdd(
                         model.ModelId,
@@ -143,6 +143,17 @@ internal sealed class BedrockModelResolver
         {
             return [];
         }
+    }
+
+    /// <summary>
+    /// A provisioned-only model, such as a context-window variant like <c>amazon.nova-lite-v1:0:300k</c>,
+    /// runs only through purchased provisioned throughput, so a connection cannot invoke it by model ID.
+    /// A model that reports no inference types is kept.
+    /// </summary>
+    internal static bool IsProvisionedOnly(IEnumerable<string>? inferenceTypes)
+    {
+        string[] types = [.. inferenceTypes ?? []];
+        return types.Length > 0 && types.All(type => string.Equals(type, "PROVISIONED", StringComparison.Ordinal));
     }
 
     internal static bool LooksLikeInferenceProfile(string modelId) =>

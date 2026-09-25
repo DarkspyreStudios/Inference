@@ -832,6 +832,11 @@ model fails with Bedrock's own error.
 Converse sends no reasoning setting. It reports no reasoning levels, a capability override cannot add
 one, and a request with `ReasoningLevel` fails before the call.
 
+Converse model listing returns the region's inference profiles and its foundation models. It omits a
+foundation model whose only inference type is `PROVISIONED`, such as `amazon.nova-lite-v1:0:300k`.
+Such a model runs only through purchased provisioned throughput, so a connection cannot invoke it by
+model ID.
+
 Converse also runs on the host-owned managed agent runtime. `AddLlmConnectBedrock()` registers an
 `ILlmAgentClient` for `AwsBedrockConverse`; each model step is one Converse request, and the host runs
 every tool. Managed Converse sessions take the same options, context and tool output as managed Codex,

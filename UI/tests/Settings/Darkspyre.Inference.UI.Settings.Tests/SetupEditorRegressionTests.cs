@@ -255,6 +255,26 @@ public sealed class SetupEditorRegressionTests : BunitContext
     }
 
     [Fact]
+    public async Task ChoicesSharingADisplayNameShowTheirValues()
+    {
+        await using var session = new Session(new Target())
+        {
+            ChoiceCapabilities = SetupChoiceCapabilities.Searchable,
+            Loader = (query, _) => Task.FromResult(new SetupChoicePage(query.ExpectedRevision,
+                [new("a", "a"), new("model-v1", "Model"), new("model-v1:300k", "Model")])),
+        };
+        IRenderedComponent<SetupFieldInput> choice = Field(Editor(session), "choice");
+        choice.WaitForAssertion(() => Assert.Single(choice.FindComponents<Combobox>()));
+        await choice.InvokeAsync(() => choice.FindComponent<Combobox>().Instance.OpenChanged.InvokeAsync(true));
+        choice.WaitForAssertion(() => Assert.Equal(3, choice.FindComponents<ComboboxItem>().Count));
+        IReadOnlyList<IRenderedComponent<ComboboxItem>> items = choice.FindComponents<ComboboxItem>();
+        Assert.Empty(items.Single(item => item.Instance.Value == "a").FindAll(".inference-settings-editor__choice-value"));
+        Assert.Equal("model-v1:300k", items.Single(item => item.Instance.Value == "model-v1:300k")
+            .Find(".inference-settings-editor__choice-value").TextContent);
+        Assert.Equal("Model model-v1", items.Single(item => item.Instance.Value == "model-v1").Instance.SearchValue);
+    }
+
+    [Fact]
     public void NumericKeyboardBoundsAndDisabledStateAreAccessible()
     {
         SetupNumberEdit<decimal>? lastEdit = null;

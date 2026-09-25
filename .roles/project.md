@@ -748,3 +748,13 @@ Authenticated restores, Debug/Release builds and tests, formatting, vulnerabilit
 archive boundaries and local/fresh-feed consumer checks passed. Downloaded archives match
 the verified local archives; feed readback confirms private visibility. Source is tagged
 `v11.9.0-rc.1`. No model weights or paid inference were used as verification gates.
+
+## Bedrock model list and choice values
+
+`BedrockModelResolver.ListAsync` omits a foundation model whose only inference type is `PROVISIONED`.
+Bedrock gives such context-window variants the base model's name, so Nova Lite appeared three times in
+the setup model list. The setup choice combobox shows a choice's value under its display name when the
+two differ, and filters on both. A compatible change for `11.9.1-rc.1`.
+
+Verification: 63 Bedrock and 30 UI.Settings tests, and `dotnet format --verify-no-changes` for the
+Connect and UI solutions.

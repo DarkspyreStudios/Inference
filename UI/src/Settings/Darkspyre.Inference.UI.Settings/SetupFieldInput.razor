@@ -91,7 +91,14 @@
                             <ComboboxInput Placeholder="Choose or search" />
                             <ComboboxContent>
                                 @foreach (var option in _choices)
-                                { <ComboboxItem Value="@option.Value" SearchValue="@option.DisplayName">@option.DisplayName</ComboboxItem> }
+                                {
+                                    @* Providers can give distinct values one display name, so the value names the choice. *@
+                                    <ComboboxItem Value="@option.Value" SearchValue="@ChoiceSearchText(option)">
+                                        @option.DisplayName
+                                        @if (option.DisplayName != option.Value)
+                                        { <span class="inference-settings-editor__choice-value">@option.Value</span> }
+                                    </ComboboxItem>
+                                }
                                 @if (choice.AllowsManualEntry) { <ComboboxCreate /> }
                             </ComboboxContent>
                         </Combobox>
@@ -176,6 +183,9 @@
     }
     private string? FieldError => Input.Issues.FirstOrDefault(issue => issue.Severity == SetupIssueSeverity.Error)?.Message
         ?? Issues.FirstOrDefault(issue => issue.FieldId == Field.Description.Id && issue.Severity == SetupIssueSeverity.Error)?.Message;
+
+    private static string ChoiceSearchText(SetupChoice choice) =>
+        choice.DisplayName == choice.Value ? choice.Value : choice.DisplayName + " " + choice.Value;
 
     private static string SecretState(SetupSecretField field) => field.Change switch
     {

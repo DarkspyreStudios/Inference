@@ -19,3 +19,10 @@
     align-items: center;
     gap: var(--inference-settings-action-gap, .75rem);
 }
+
+.inference-settings-editor__choice-value {
+    display: block;
+    color: var(--color-muted-foreground);
+    font-size: .75rem;
+    overflow-wrap: anywhere;
+}
