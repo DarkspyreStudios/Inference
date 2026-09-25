@@ -9,6 +9,17 @@ internal readonly record struct LayaSequence(
     string[] OptionIds,
     int QuestionType);
 
+/// <summary>
+/// A question's sequence up to and including the separator after its options, and the state tokens
+/// that still fit before the final separator.
+/// </summary>
+internal readonly record struct LayaFrame(
+    int[] Prefix,
+    int[] MarkerPositions,
+    string[] OptionIds,
+    int QuestionType,
+    int StateBudget);
+
 internal static class LayaSequenceBuilder
 {
     private const int MaximumOptionLength = 48;
@@ -16,6 +27,38 @@ internal static class LayaSequenceBuilder
     public static LayaSequence Build(
         ILayaTokenizer tokenizer,
         JsonElement state,
+        DecisionQuestion question,
+        int maximumLength,
+        int maximumHeadLength)
+    {
+        LayaFrame frame = Frame(tokenizer, question, maximumLength, maximumHeadLength);
+        var tokenIds = new List<int>(maximumLength);
+        tokenIds.AddRange(frame.Prefix);
+        tokenIds.AddRange(EncodeState(tokenizer, state).Take(frame.StateBudget));
+        tokenIds.Add(LayaTokenizer.SeparatorTokenId);
+
+        return new LayaSequence(
+            [.. tokenIds.Take(maximumLength)],
+            [.. frame.MarkerPositions.Where(marker => marker < maximumLength)],
+            frame.OptionIds,
+            frame.QuestionType);
+    }
+
+    /// <summary>The state text as <see cref="Build"/> reads it, encoded without any framing token.</summary>
+    public static IReadOnlyList<int> EncodeState(ILayaTokenizer tokenizer, JsonElement state)
+    {
+        ArgumentNullException.ThrowIfNull(tokenizer);
+        string serializedState = state.ValueKind == JsonValueKind.String
+            ? state.GetString() ?? string.Empty
+            : state.GetRawText();
+        return tokenizer.Encode(serializedState.Replace(
+            LayaTokenizer.MaskToken,
+            " ",
+            StringComparison.Ordinal));
+    }
+
+    public static LayaFrame Frame(
+        ILayaTokenizer tokenizer,
         DecisionQuestion question,
         int maximumLength,
         int maximumHeadLength)
@@ -61,21 +104,8 @@ internal static class LayaSequenceBuilder
         }
 
         tokenIds.Add(LayaTokenizer.SeparatorTokenId);
-        int room = Math.Max(0, maximumLength - tokenIds.Count - 1);
-        string serializedState = state.ValueKind == JsonValueKind.String
-            ? state.GetString() ?? string.Empty
-            : state.GetRawText();
-        tokenIds.AddRange(tokenizer.Encode(serializedState.Replace(
-            LayaTokenizer.MaskToken,
-            " ",
-            StringComparison.Ordinal)).Take(room));
-        tokenIds.Add(LayaTokenizer.SeparatorTokenId);
-
-        return new LayaSequence(
-            [.. tokenIds.Take(maximumLength)],
-            [.. markers.Where(marker => marker < maximumLength)],
-            optionIds,
-            questionType);
+        int stateBudget = Math.Max(0, maximumLength - tokenIds.Count - 1);
+        return new LayaFrame([.. tokenIds], [.. markers], optionIds, questionType, stateBudget);
     }
 
     private static (string Type, string[] OptionIds, string[] OptionText, int QuestionType) Render(
