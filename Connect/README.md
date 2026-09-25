@@ -707,13 +707,14 @@ and never consumes credits. The upstream route is evidenced in
 The old Codex process/App Server implementation is removed, not retained as a second lane.
 Claude and AgentCore still use their native session adapters.
 
-Managed agent tools are sent non-strict unless `LlmAgentToolDefinition.Strict` is set. A strict
+Tools are sent non-strict unless their definition sets `Strict`: Common's and Connect's `LlmToolDefinition`
+and `LlmAgentToolDefinition` all default to false, because a host schema describes what the tool accepts.
+Structured output keeps `Strict = true`, because its schema describes the reply the host requires. A strict
 tool's schema must meet the provider's strict rules; for OpenAI, every object closes
 `additionalProperties` and lists every property as required, and any other schema fails the whole
 request.
 
-Chat tools default to strict (`LlmToolDefinition.Strict = true`). OpenAI Responses and Codex send the flag
-as given. Anthropic Messages, OpenAI-compatible Chat Completions and Bedrock Converse send `strict` only
+OpenAI Responses and Codex send the flag as given. Anthropic Messages, OpenAI-compatible Chat Completions and Bedrock Converse send `strict` only
 for a strict tool, because some models and compatible servers reject the field even when it is false.
 
 ```csharp

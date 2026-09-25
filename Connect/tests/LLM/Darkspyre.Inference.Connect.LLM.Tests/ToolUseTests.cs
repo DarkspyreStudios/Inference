@@ -248,7 +248,7 @@ public sealed class ToolUseTests
                 },
                 new LlmChatMessage("user", "Again")
             ],
-            Tools = [tool, tool with { Name = "lookup_loose", Strict = false }],
+            Tools = [tool with { Strict = true }, tool with { Name = "lookup_loose" }],
             ToolChoice = new LlmToolChoice { Mode = LlmToolChoiceMode.Required },
             AllowParallelToolCalls = true
         };
@@ -343,7 +343,7 @@ public sealed class ToolUseTests
                     Attachments = [ImageAttachment(), TextAttachment()]
                 }
             ],
-            Tools = [tool, tool with { Name = "get_weather_loose", Strict = false }],
+            Tools = [tool with { Strict = true }, tool with { Name = "get_weather_loose" }],
             ToolChoice = new LlmToolChoice { Mode = LlmToolChoiceMode.Required },
             AllowParallelToolCalls = false
         };

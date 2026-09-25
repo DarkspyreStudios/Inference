@@ -1523,3 +1523,23 @@ parallel use the Codex discovery endpoint answered 429.
 
 Adding an interface member is a breaking change, released as `12.0.0-rc.1`.
 
+## One non-strict default for tool definitions
+
+**Status:** Included in this technical design
+
+### Problem
+
+Common's `LlmToolDefinition` and Connect's chat `LlmToolDefinition` defaulted to `Strict = true`, while
+`LlmAgentToolDefinition` defaulted to false. A host that left the flag alone asked for provider-enforced
+schemas on the chat lane and not on the agent lane, and every such schema had to meet each provider's strict
+rules.
+
+### Design
+
+All three tool definitions default to `Strict = false`. A host schema describes what the tool accepts;
+`Strict = true` asks the provider to enforce it, and the schema must then meet the provider's strict rules.
+Structured output keeps `Strict = true`, because its schema describes the reply the host requires.
+
+A host that relied on the old chat default sets `Strict = true`. The change is breaking and ships in
+`12.0.0-rc.1`.
+

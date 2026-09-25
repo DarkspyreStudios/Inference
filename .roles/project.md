@@ -695,3 +695,12 @@ breaking change for `12.0.0-rc.1` through the new `ILlmInference.RefreshModelsAs
 Verification: zero-warning builds and clean formatting for the Connect, Tensor and UI solutions; Connect
 403, Tensor 298 and UI 53 tests, Common's 24 included in each.
 
+## One non-strict default for tool definitions
+
+Common's and Connect's `LlmToolDefinition` default to `Strict = false`, matching `LlmAgentToolDefinition`;
+structured output keeps `Strict = true`. Breaking, in `12.0.0-rc.1`. The Bedrock and tool-use tests set
+`Strict = true` where they test a strict tool.
+
+Verification: zero-warning builds and clean formatting for the Connect, Tensor and UI solutions; Connect
+403, Tensor 298 and UI 53 tests.
+

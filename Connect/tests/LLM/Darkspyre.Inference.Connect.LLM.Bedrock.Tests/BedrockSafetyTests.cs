@@ -146,14 +146,14 @@ public sealed class BedrockSafetyTests
                     {
                         Name = "weather",
                         Description = "Get weather.",
-                        InputSchema = schema.RootElement.Clone()
+                        InputSchema = schema.RootElement.Clone(),
+                        Strict = true
                     },
                     new LlmToolDefinition
                     {
                         Name = "notes",
                         Description = "Read notes.",
-                        InputSchema = schema.RootElement.Clone(),
-                        Strict = false
+                        InputSchema = schema.RootElement.Clone()
                     }
                 ],
                 ToolChoice = new LlmToolChoice
