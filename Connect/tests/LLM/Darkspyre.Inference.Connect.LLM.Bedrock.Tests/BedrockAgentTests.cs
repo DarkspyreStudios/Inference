@@ -85,6 +85,19 @@ public sealed class BedrockAgentTests
         Assert.Throws<ArgumentException>(() => _client.EstimateInputTokens(Connection(), Request([other])));
     }
 
+    [Fact]
+    public void ARequestedReasoningLevelFailsBeforeTheCallAndOverridesCannotOfferOne()
+    {
+        var overridden = Connection() with
+        {
+            CapabilityOverrides = new() { ReasoningLevels = new HashSet<Common.LLM.LlmReasoningLevel> { Common.LLM.LlmReasoningLevel.High } }
+        };
+
+        Assert.Empty(_client.GetCapabilities(overridden, Model).ReasoningLevels);
+        Assert.Throws<Common.InferenceException>(() => _client.EstimateInputTokens(overridden,
+            Request([new("user", "hello")]) with { ReasoningLevel = Common.LLM.LlmReasoningLevel.High }));
+    }
+
     private static LlmChatResult Complete(ConverseResponse response) =>
         Assert.IsType<LlmCompletionEvent>(BedrockLlmClient.MapResponse(Connection(), Request([new("user", "hello")]), null, response).Last()).Result;
 

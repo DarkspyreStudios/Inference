@@ -1,9 +1,11 @@
+using System.Collections.Frozen;
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
 using Amazon.BedrockRuntime;
 using Amazon.BedrockRuntime.Model;
 using Amazon.Runtime.Documents;
+using Darkspyre.Inference.Common.LLM;
 using Darkspyre.Inference.Connect.LLM.Internal;
 using Darkspyre.Inference.Connect.LLM.Providers;
 
@@ -47,12 +49,14 @@ internal sealed class BedrockLlmClient(
     {
         EnsureTransport(connection);
         LlmProviderCapabilities capabilities = Defaults.Apply(connection.CapabilityOverrides);
-        return modelId is not null
+        capabilities = modelId is not null
             && connection.ModelCapabilityOverrides.TryGetValue(
                 modelId,
                 out LlmCapabilityOverrides? modelOverrides)
                     ? capabilities.Apply(modelOverrides)
                     : capabilities;
+        // Converse sends no reasoning setting, so no override can offer a level.
+        return capabilities with { ReasoningLevels = FrozenSet<LlmReasoningLevel>.Empty };
     }
 
     public async IAsyncEnumerable<LlmStreamEvent> StreamAsync(
@@ -131,6 +135,7 @@ internal sealed class BedrockLlmClient(
             throw new NotSupportedException("This Bedrock connection does not support temperature.");
         }
 
+        LlmReasoningEffort.Validate(request.ReasoningLevel, capabilities);
         LlmClientBase.ValidatePromptAttachments(request, capabilities);
         LlmClientBase.ValidateToolUse(request, capabilities);
         foreach (LlmChatMessage message in request.Messages.Where(message => message.ResponseState is not null))

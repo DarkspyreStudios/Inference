@@ -822,6 +822,9 @@ Converse sends a tool's `strict` flag only when `LlmToolDefinition.Strict` is tr
 strict schemas, such as Amazon Nova, reject the field even when it is false; a strict tool on such a
 model fails with Bedrock's own error.
 
+Converse sends no reasoning setting. It reports no reasoning levels, a capability override cannot add
+one, and a request with `ReasoningLevel` fails before the call.
+
 Converse also runs on the host-owned managed agent runtime. `AddLlmConnectBedrock()` registers an
 `ILlmAgentClient` for `AwsBedrockConverse`; each model step is one Converse request, and the host runs
 every tool. Managed Converse sessions take the same options, context and tool output as managed Codex,
