@@ -18,7 +18,7 @@ specifications.
 | Version line | `<net>.<release>.<minor>`: .NET generation, breaking-contract release, compatible tweak/fix |
 | Release model | `Common`, `Connect`, `Tensor`, and `UI.Settings` publish together at the one version declared in `/Directory.Build.props` |
 | Primary branch | `master` |
-| Lifecycle stage | Four-package `11.9.0-rc.1` published privately |
+| Lifecycle stage | Four-package `11.9.1-rc.1` published privately |
 | Jira project and parent | TBD |
 | Jira subject label | TBD |
 
@@ -758,3 +758,11 @@ two differ, and filters on both. A compatible change for `11.9.1-rc.1`.
 
 Verification: 63 Bedrock and 30 UI.Settings tests, and `dotnet format --verify-no-changes` for the
 Connect and UI solutions.
+
+## Automated private release 11.9.1-rc.1
+
+Published all four packages from `8435a743e79c90ffee4fa358aca16a546c55aa5c` using `deploy-minor.sh`.
+Authenticated restores, Debug/Release builds and tests, formatting, vulnerability audits,
+archive boundaries and local/fresh-feed consumer checks passed. Downloaded archives match
+the verified local archives; feed readback confirms private visibility. Source is tagged
+`v11.9.1-rc.1`. No model weights or paid inference were used as verification gates.
