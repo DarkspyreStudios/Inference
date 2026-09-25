@@ -672,3 +672,13 @@ Authenticated restores, Debug/Release builds and tests, formatting, vulnerabilit
 archive boundaries and local/fresh-feed consumer checks passed. Downloaded archives match
 the verified local archives; feed readback confirms private visibility. Source is tagged
 `v11.8.2-rc.1`. No model weights or paid inference were used as verification gates.
+
+## Strict tool flags on Anthropic Messages and compatible Chat Completions
+
+`AnthropicMessagesLlmClient` and `OpenAiCompatibleChatLlmClient` write `strict` only for a strict tool, as
+Bedrock Converse does. A compatible change for `11.8.3-rc.1`. Neither route has a configured connection
+here, so the change is not live-verified.
+
+Verification: Debug build with zero warnings, `dotnet format --verify-no-changes`, and 396 Connect and
+Common tests.
+

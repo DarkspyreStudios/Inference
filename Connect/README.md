@@ -702,6 +702,10 @@ tool's schema must meet the provider's strict rules; for OpenAI, every object cl
 `additionalProperties` and lists every property as required, and any other schema fails the whole
 request.
 
+Chat tools default to strict (`LlmToolDefinition.Strict = true`). OpenAI Responses and Codex send the flag
+as given. Anthropic Messages, OpenAI-compatible Chat Completions and Bedrock Converse send `strict` only
+for a strict tool, because some models and compatible servers reject the field even when it is false.
+
 ```csharp
 LlmAgentProviderService agents = services.GetRequiredService<LlmAgentProviderService>();
 var agentWeatherTool = new LlmAgentToolDefinition

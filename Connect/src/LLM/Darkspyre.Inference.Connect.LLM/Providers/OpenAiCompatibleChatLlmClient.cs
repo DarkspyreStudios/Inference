@@ -352,9 +352,13 @@ internal sealed class OpenAiCompatibleChatLlmClient(HttpClient http) : LlmClient
                 var function = new JsonObject
                 {
                     ["name"] = tool.Name,
-                    ["parameters"] = JsonNode.Parse(tool.InputSchema.GetRawText()),
-                    ["strict"] = tool.Strict
+                    ["parameters"] = JsonNode.Parse(tool.InputSchema.GetRawText())
                 };
+                // Sent only for a strict tool: compatible servers can reject the field even when false.
+                if (tool.Strict)
+                {
+                    function["strict"] = true;
+                }
                 if (!string.IsNullOrWhiteSpace(tool.Description))
                 {
                     function["description"] = tool.Description;

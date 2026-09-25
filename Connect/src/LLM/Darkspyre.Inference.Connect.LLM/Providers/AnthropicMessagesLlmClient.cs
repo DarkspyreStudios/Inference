@@ -471,9 +471,13 @@ internal sealed class AnthropicMessagesLlmClient : LlmClientBase
                 var tool = new JsonObject
                 {
                     ["name"] = definition.Name,
-                    ["input_schema"] = JsonNode.Parse(definition.InputSchema.GetRawText()),
-                    ["strict"] = definition.Strict
+                    ["input_schema"] = JsonNode.Parse(definition.InputSchema.GetRawText())
                 };
+                // Sent only for a strict tool: a model without strict schemas can reject the field even when false.
+                if (definition.Strict)
+                {
+                    tool["strict"] = true;
+                }
                 if (!string.IsNullOrWhiteSpace(definition.Description))
                 {
                     tool["description"] = definition.Description;

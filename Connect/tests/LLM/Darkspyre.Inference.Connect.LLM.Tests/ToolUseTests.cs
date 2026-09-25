@@ -248,7 +248,7 @@ public sealed class ToolUseTests
                 },
                 new LlmChatMessage("user", "Again")
             ],
-            Tools = [tool],
+            Tools = [tool, tool with { Name = "lookup_loose", Strict = false }],
             ToolChoice = new LlmToolChoice { Mode = LlmToolChoiceMode.Required },
             AllowParallelToolCalls = true
         };
@@ -269,6 +269,8 @@ public sealed class ToolUseTests
         Assert.Equal("required", root.GetProperty("tool_choice").GetString());
         Assert.True(root.GetProperty("parallel_tool_calls").GetBoolean());
         Assert.Equal("function", root.GetProperty("tools")[0].GetProperty("type").GetString());
+        Assert.True(root.GetProperty("tools")[0].GetProperty("function").GetProperty("strict").GetBoolean());
+        Assert.False(root.GetProperty("tools")[1].GetProperty("function").TryGetProperty("strict", out _));
         JsonElement messages = root.GetProperty("messages");
         Assert.Equal("old_call", messages[1].GetProperty("tool_calls")[0].GetProperty("id").GetString());
         Assert.Equal("tool", messages[2].GetProperty("role").GetString());
@@ -341,7 +343,7 @@ public sealed class ToolUseTests
                     Attachments = [ImageAttachment(), TextAttachment()]
                 }
             ],
-            Tools = [tool],
+            Tools = [tool, tool with { Name = "get_weather_loose", Strict = false }],
             ToolChoice = new LlmToolChoice { Mode = LlmToolChoiceMode.Required },
             AllowParallelToolCalls = false
         };
@@ -361,6 +363,8 @@ public sealed class ToolUseTests
         JsonElement root = sent.RootElement;
         Assert.Equal("get_weather", root.GetProperty("tools")[0].GetProperty("name").GetString());
         Assert.Equal("object", root.GetProperty("tools")[0].GetProperty("input_schema").GetProperty("type").GetString());
+        Assert.True(root.GetProperty("tools")[0].GetProperty("strict").GetBoolean());
+        Assert.False(root.GetProperty("tools")[1].TryGetProperty("strict", out _));
         Assert.Equal("any", root.GetProperty("tool_choice").GetProperty("type").GetString());
         Assert.True(root.GetProperty("tool_choice").GetProperty("disable_parallel_tool_use").GetBoolean());
         Assert.Equal("tool_use", root.GetProperty("messages")[0].GetProperty("content")[0].GetProperty("type").GetString());
