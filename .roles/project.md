@@ -18,7 +18,7 @@ specifications.
 | Version line | `<net>.<release>.<minor>`: .NET generation, breaking-contract release, compatible tweak/fix |
 | Release model | `Common`, `Connect`, `Tensor`, and `UI.Settings` publish together at the one version declared in `/Directory.Build.props` |
 | Primary branch | `master` |
-| Lifecycle stage | Four-package `11.8.1-rc.1` published privately |
+| Lifecycle stage | Four-package `11.8.2-rc.1` published privately |
 | Jira project and parent | TBD |
 | Jira subject label | TBD |
 
@@ -664,3 +664,11 @@ change for `11.8.2-rc.1`. Agent DS confirmed it live: Nova Lite over Converse ra
 
 Verification: Debug build with zero warnings, `dotnet format --verify-no-changes`, and 396 Connect and
 Common tests.
+
+## Automated private release 11.8.2-rc.1
+
+Published all four packages from `b7fa8dff65ac88fc1ba9d119b7ece0c6d030c08b` using `deploy-minor.sh`.
+Authenticated restores, Debug/Release builds and tests, formatting, vulnerability audits,
+archive boundaries and local/fresh-feed consumer checks passed. Downloaded archives match
+the verified local archives; feed readback confirms private visibility. Source is tagged
+`v11.8.2-rc.1`. No model weights or paid inference were used as verification gates.
