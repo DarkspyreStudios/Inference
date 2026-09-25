@@ -333,6 +333,16 @@ and recognizes every added token, including non-special whitespace/placeholder t
 The 24 supplied HF golden cases run offline against a pinned tokenizer fixture. Full RightSize
 checkpoint probability parity remains an external acceptance check, not a claim made by these tests.
 
+`DecideAsync` truncates a state that is longer than a question's room: the sequence builder keeps
+the state tokens that fit before the final `[SEP]` and raises nothing. A caller detects truncation by
+measuring first. `LayaDecisionInference` implements `IDecisionInputMeasurement`: `MeasureAsync`
+returns the tokens the state encodes to and, per question ID, the most state tokens that question's
+sequence keeps. It uses the same tokenizer and framing as `DecideAsync`, runs no forward pass and
+acquires no backend, and fails as `DecideAsync` does when no pack is loaded or the model ID differs.
+`LayaInputMeter.LoadAsync` builds the same measurement from a pack's `tokenizer` and `agent-config`
+artifacts alone, without the `model` artifact. A question truncates the state exactly when
+`StateTokens` exceeds its budget.
+
 ```csharp
 // customPack describes the host's compatible trained checkpoint and its actual artifact sources.
 var catalog = new TensorModelCatalog([customPack]);
