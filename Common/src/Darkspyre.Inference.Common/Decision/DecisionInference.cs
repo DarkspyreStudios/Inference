@@ -162,3 +162,18 @@ public interface IDecisionInference
         DecisionInferenceRequest request,
         CancellationToken cancellationToken = default);
 }
+
+public sealed record DecisionInputMeasurement
+{
+    public required int StateTokens { get; init; }
+
+    public IReadOnlyDictionary<string, int> StateTokenBudgets { get; init; } =
+        new Dictionary<string, int>(StringComparer.Ordinal);
+}
+
+public interface IDecisionInputMeasurement
+{
+    Task<DecisionInputMeasurement> MeasureAsync(
+        DecisionInferenceRequest request,
+        CancellationToken cancellationToken = default);
+}

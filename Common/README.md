@@ -19,9 +19,12 @@ LlmInferenceResult result = await inference.CompleteAsync(new LlmInferenceReques
 The same `ILlmInference` and `IImageInference` contracts are implemented by the corresponding Tensor
 packages. `IDecisionInference` adds a typed decision lane with distinct choice, ordinal-score, and
 boolean question and answer records; its polymorphic JSON discriminators can be projected by a host
-service without falling back to untyped dictionaries. Rich provider-specific operations remain on
-their owning packages; Common is the portable inference lane, not a least-common-denominator
-replacement for implementation management.
+service without falling back to untyped dictionaries. An implementation that can also measure a
+request without deciding it implements `IDecisionInputMeasurement`: `MeasureAsync` returns the
+tokens the request's state encodes to and, per question, the most state tokens that question's input
+keeps. A question truncates the state when the first exceeds the second. Rich provider-specific
+operations remain on their owning packages; Common is the portable inference lane, not a
+least-common-denominator replacement for implementation management.
 
 ## Provider setup
 
