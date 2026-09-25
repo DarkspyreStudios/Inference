@@ -314,7 +314,8 @@ internal sealed class BedrockLlmClient(
                         {
                             Json = DeserializeDocument(definition.InputSchema.GetRawText())
                         },
-                        Strict = definition.Strict
+                        // Models without strict schemas, such as Amazon Nova, reject the field even when false.
+                        Strict = definition.Strict ? true : null
                     }
                 }).ToList()
             };

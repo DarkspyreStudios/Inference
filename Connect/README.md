@@ -803,6 +803,10 @@ content; use `Attachments`. Claude materializes MCP document resources through i
 
 ## AWS Bedrock AgentCore Harness transport
 
+Converse sends a tool's `strict` flag only when `LlmToolDefinition.Strict` is true. Models without
+strict schemas, such as Amazon Nova, reject the field even when it is false; a strict tool on such a
+model fails with Bedrock's own error.
+
 `AwsBedrockAgentCore` is a separate transport from `AwsBedrockConverse`. Converse is a stateless chat
 API with a host-managed tool loop; AgentCore invokes a deployed
 [Harness](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/harness.html) and owns the

@@ -147,6 +147,13 @@ public sealed class BedrockSafetyTests
                         Name = "weather",
                         Description = "Get weather.",
                         InputSchema = schema.RootElement.Clone()
+                    },
+                    new LlmToolDefinition
+                    {
+                        Name = "notes",
+                        Description = "Read notes.",
+                        InputSchema = schema.RootElement.Clone(),
+                        Strict = false
                     }
                 ],
                 ToolChoice = new LlmToolChoice
@@ -157,9 +164,13 @@ public sealed class BedrockSafetyTests
             },
             "model-x");
 
-        ToolSpecification specification = Assert.Single(request.ToolConfig.Tools).ToolSpec;
+        Assert.Equal(2, request.ToolConfig.Tools.Count);
+        ToolSpecification specification = request.ToolConfig.Tools[0].ToolSpec;
         Assert.Equal("weather", specification.Name);
         Assert.True(specification.Strict);
+        // A non-strict tool leaves the field out; Nova rejects it even when false.
+        Assert.Equal("notes", request.ToolConfig.Tools[1].ToolSpec.Name);
+        Assert.Null(request.ToolConfig.Tools[1].ToolSpec.Strict);
         Assert.Equal("weather", request.ToolConfig.ToolChoice.Tool.Name);
         Assert.Equal("tool-1", request.Messages[1].Content[0].ToolUse.ToolUseId);
         Assert.Equal("Chicago", request.Messages[1].Content[0].ToolUse.Input.AsDictionary()["city"].AsString());

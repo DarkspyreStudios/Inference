@@ -654,3 +654,13 @@ Authenticated restores, Debug/Release builds and tests, formatting, vulnerabilit
 archive boundaries and local/fresh-feed consumer checks passed. Downloaded archives match
 the verified local archives; feed readback confirms private visibility. Source is tagged
 `v11.8.1-rc.1`. No model weights or paid inference were used as verification gates.
+
+## Bedrock Converse strict tools
+
+`BedrockLlmClient` sets `ToolSpecification.Strict` only for a strict tool definition and leaves it unset
+otherwise. Amazon Nova rejected every tool request because the SDK wrote `"strict": false`. A compatible
+change for `11.8.2-rc.1`. Agent DS confirmed it live: Nova Lite over Converse ran Agent DS's `read` and
+`bash` tools on its own agent loop.
+
+Verification: Debug build with zero warnings, `dotnet format --verify-no-changes`, and 396 Connect and
+Common tests.
