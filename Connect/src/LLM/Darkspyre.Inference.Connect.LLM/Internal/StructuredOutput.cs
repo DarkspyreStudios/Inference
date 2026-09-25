@@ -3,7 +3,7 @@ using Json.Schema;
 
 namespace Darkspyre.Inference.Connect.LLM.Internal;
 
-public static class StructuredOutput
+internal static class StructuredOutput
 {
     public static LlmStructuredOutputEnforcement ResolveEnforcement(
         LlmStructuredOutputRequest request,
