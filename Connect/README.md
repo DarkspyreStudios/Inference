@@ -228,6 +228,16 @@ var result = await provider.CompleteAsync(
     cancellationToken);
 ```
 
+### Model lists
+
+`LlmProviderService.ListModelsAsync` keeps each connection's model list in `LlmModelListCache`, which
+`AddLlmConnect` registers once for the application. A list stays until the connection's `Version` changes,
+which every connection or credential edit does, or until `RefreshModelsAsync` lists again and replaces it.
+Concurrent requests for one connection share a single listing, request accounting and managed sessions
+read the same list, and a failed listing is not kept. Common's `ILlmInference` carries the same pair:
+`ListModelsAsync` may answer from a kept list, and `RefreshModelsAsync` lists again. A service built by
+hand without the shared cache keeps its own.
+
 ## Image provider integration
 
 Register the image capability and resolve its provider-neutral transport through

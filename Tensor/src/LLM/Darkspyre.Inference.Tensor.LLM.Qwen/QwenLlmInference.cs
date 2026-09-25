@@ -72,6 +72,10 @@ public sealed class QwenLlmInference : ITensorLlmInference
         });
     }
 
+    /// <summary>Qwen reads its local model packs on every call and keeps no list.</summary>
+    public Task<IReadOnlyList<LlmModelInfo>> RefreshModelsAsync(CancellationToken cancellationToken = default) =>
+        ListModelsAsync(cancellationToken);
+
     public async Task<IReadOnlyList<LlmModelInfo>> ListModelsAsync(
         CancellationToken cancellationToken = default)
     {

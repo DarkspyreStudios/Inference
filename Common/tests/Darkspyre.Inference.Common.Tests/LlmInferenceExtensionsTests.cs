@@ -29,6 +29,10 @@ public sealed class LlmInferenceExtensionsTests
             CancellationToken cancellationToken = default) =>
             Task.FromResult<IReadOnlyList<LlmModelInfo>>([]);
 
+        public Task<IReadOnlyList<LlmModelInfo>> RefreshModelsAsync(
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<LlmModelInfo>>([]);
+
         public async IAsyncEnumerable<LlmStreamEvent> StreamAsync(
             LlmInferenceRequest request,
             [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)

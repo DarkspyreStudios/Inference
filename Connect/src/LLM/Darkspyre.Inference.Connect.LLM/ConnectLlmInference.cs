@@ -26,11 +26,15 @@ internal sealed class ConnectLlmInference(
     }
 
     public async Task<IReadOnlyList<CommonLlm.LlmModelInfo>> ListModelsAsync(
-        CancellationToken cancellationToken = default)
-    {
-        IReadOnlyList<LlmModel> models = await service.ListModelsAsync(connectionId, cancellationToken)
-            .ConfigureAwait(false);
-        return models.Select(static model => new CommonLlm.LlmModelInfo(
+        CancellationToken cancellationToken = default) =>
+        ToCommon(await service.ListModelsAsync(connectionId, cancellationToken).ConfigureAwait(false));
+
+    public async Task<IReadOnlyList<CommonLlm.LlmModelInfo>> RefreshModelsAsync(
+        CancellationToken cancellationToken = default) =>
+        ToCommon(await service.RefreshModelsAsync(connectionId, cancellationToken).ConfigureAwait(false));
+
+    private static CommonLlm.LlmModelInfo[] ToCommon(IReadOnlyList<LlmModel> models) =>
+        models.Select(static model => new CommonLlm.LlmModelInfo(
             model.Id,
             model.DisplayName,
             model.OwnedBy,
@@ -39,7 +43,6 @@ internal sealed class ConnectLlmInference(
             MaxContextTokens = model.MaxContextTokens,
             MaxOutputTokens = model.MaxOutputTokens
         }).ToArray();
-    }
 
     public async IAsyncEnumerable<CommonLlm.LlmStreamEvent> StreamAsync(
         CommonLlm.LlmInferenceRequest request,

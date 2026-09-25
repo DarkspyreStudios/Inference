@@ -1491,3 +1491,35 @@ the next host turn runs normally.
 This is a compatible change for `11.8.1-rc.1`. Scripted stream tests cover a stop request and resource
 events routed while a tool runs, cancellation by the CLI, a result after its turn ended, and
 cancellation by CLI exit and by disposal.
+
+## Model lists kept for the application
+
+**Status:** Included in this technical design
+
+**Motivating consumer:** Agent DS, whose context accounting and session starts listed models on every call
+
+### Problem
+
+Every model listing reached the provider. `LlmProviderService.ListModelsAsync` passed each call through,
+request accounting listed on every measurement, and a managed Codex session listed on every start. Under
+parallel use the Codex discovery endpoint answered 429.
+
+### Design
+
+- `LlmModelListCache` keeps one model list per connection ID for the application's lifetime.
+  `AddLlmConnect` registers it once, and every scoped `LlmProviderService` uses it; a service built by hand
+  without it keeps its own.
+- A kept list belongs to the connection's `Version`. Any connection or credential edit changes the version,
+  so the next call lists again. There is no expiry.
+- `LlmProviderService.RefreshModelsAsync` lists again and replaces the kept list, for a user who asks for
+  new models.
+- Concurrent requests for one connection share one listing. It runs apart from any caller's cancellation;
+  a cancelled caller stops waiting and the others still receive the list.
+- A failed listing is not kept; the next call lists again.
+- Request accounting, managed sessions, setup sessions and `ConnectLlmInference` read through the cache.
+- Common's `ILlmInference` gains `RefreshModelsAsync`, and its `ListModelsAsync` may answer from a kept
+  list. Connect's implementation delegates both to `LlmProviderService`; Qwen reads its local packs on
+  every call, so its refresh is the same listing.
+
+Adding an interface member is a breaking change, released as `12.0.0-rc.1`.
+

@@ -93,7 +93,11 @@ public interface ILlmInference
         string? modelId = null,
         CancellationToken cancellationToken = default);
 
+    /// <summary>The available models. An implementation may keep the list and answer later calls from it.</summary>
     Task<IReadOnlyList<LlmModelInfo>> ListModelsAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>Lists the available models again, replacing any list the implementation keeps.</summary>
+    Task<IReadOnlyList<LlmModelInfo>> RefreshModelsAsync(CancellationToken cancellationToken = default);
 
     IAsyncEnumerable<LlmStreamEvent> StreamAsync(
         LlmInferenceRequest request,

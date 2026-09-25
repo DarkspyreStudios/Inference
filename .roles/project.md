@@ -682,3 +682,16 @@ here, so the change is not live-verified.
 Verification: Debug build with zero warnings, `dotnet format --verify-no-changes`, and 396 Connect and
 Common tests.
 
+## Model lists kept for the application
+
+The design is the "Model lists kept for the application" section of `Connect/docs/enhancements.md`, a
+breaking change for `12.0.0-rc.1` through the new `ILlmInference.RefreshModelsAsync`.
+
+- `LlmModelListCache` holds one list per connection keyed by `LlmConnection.Version`, shares a listing
+  among concurrent callers, and keeps no failed listing. `AddLlmConnect` registers it as a singleton.
+- `LlmProviderService.ListModelsAsync`, `RefreshModelsAsync` and `MeasureRequestAsync` read through it.
+- `ConnectLlmInference` and `QwenLlmInference` implement `RefreshModelsAsync`.
+
+Verification: zero-warning builds and clean formatting for the Connect, Tensor and UI solutions; Connect
+403, Tensor 298 and UI 53 tests, Common's 24 included in each.
+

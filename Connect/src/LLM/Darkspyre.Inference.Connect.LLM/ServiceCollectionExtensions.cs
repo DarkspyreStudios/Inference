@@ -56,6 +56,7 @@ public static class ServiceCollectionExtensions
             provider.GetRequiredService<ClaudeAuthenticator>());
         services.AddTransient<ILlmEmbeddingClient>(provider =>
             provider.GetRequiredService<OpenAiEmbeddingClient>());
+        services.AddSingleton<LlmModelListCache>();
         services.AddScoped<LlmProviderService>();
         services.AddScoped<LlmAgentProviderService>();
         services.AddScoped<LlmEmbeddingProviderService>();

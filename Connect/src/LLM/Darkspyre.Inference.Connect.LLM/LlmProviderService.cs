@@ -15,6 +15,7 @@ public sealed class LlmProviderService
     private readonly Dictionary<LlmTransport, ILlmAccountUsageClient> _accountUsageClients;
     private readonly Dictionary<LlmTransport, ILlmAuthenticator> _authenticators;
     private readonly IReadOnlyDictionary<LlmTransport, ILlmSetupEnvironment> _setupEnvironments;
+    private readonly LlmModelListCache _modelLists;
 
     public LlmProviderService(
         ILlmConnectionSource connections,
@@ -27,12 +28,15 @@ public sealed class LlmProviderService
         ILlmConnectionSource connections,
         IEnumerable<ILlmClient> clients,
         IEnumerable<ILlmAuthenticator> authenticators,
-        IEnumerable<ILlmSetupEnvironment>? setupEnvironments = null)
+        IEnumerable<ILlmSetupEnvironment>? setupEnvironments = null,
+        LlmModelListCache? modelLists = null)
     {
         ArgumentNullException.ThrowIfNull(connections);
         ArgumentNullException.ThrowIfNull(clients);
 
         _connections = connections;
+        // A service built without the application's shared cache keeps its own lists.
+        _modelLists = modelLists ?? new LlmModelListCache();
         ILlmClient[] clientArray = [.. clients];
         IGrouping<LlmTransport, ILlmClient>? duplicate = clientArray
             .GroupBy(client => client.Transport)
@@ -401,7 +405,8 @@ public sealed class LlmProviderService
         {
             try
             {
-                model = (await client.ListModelsAsync(connection, cancellationToken))
+                model = (await _modelLists.GetAsync(connectionId, connection.Version,
+                        () => client.ListModelsAsync(connection, CancellationToken.None), cancellationToken))
                     .FirstOrDefault(candidate => candidate.Id == request.ModelId);
             }
             catch (Exception error) when (error is HttpRequestException or LlmProviderException or NotSupportedException)
@@ -458,12 +463,29 @@ public sealed class LlmProviderService
             "The LLM transport ended without emitting a completion event.");
     }
 
+    /// <summary>
+    /// The connection's models. A list is kept until the connection's version changes or
+    /// <see cref="RefreshModelsAsync"/> replaces it, so repeated calls do not ask the provider again.
+    /// </summary>
     public async Task<IReadOnlyList<LlmModel>> ListModelsAsync(
         string connectionId,
         CancellationToken cancellationToken = default)
     {
         LlmConnection connection = await ResolveFreshConnectionAsync(connectionId, cancellationToken);
-        return await ClientFor(connection.Transport).ListModelsAsync(connection, cancellationToken);
+        ILlmClient client = ClientFor(connection.Transport);
+        return await _modelLists.GetAsync(connectionId, connection.Version,
+            () => client.ListModelsAsync(connection, CancellationToken.None), cancellationToken);
+    }
+
+    /// <summary>Asks the provider for the connection's models again and keeps the new list.</summary>
+    public async Task<IReadOnlyList<LlmModel>> RefreshModelsAsync(
+        string connectionId,
+        CancellationToken cancellationToken = default)
+    {
+        LlmConnection connection = await ResolveFreshConnectionAsync(connectionId, cancellationToken);
+        ILlmClient client = ClientFor(connection.Transport);
+        return await _modelLists.RefreshAsync(connectionId, connection.Version,
+            () => client.ListModelsAsync(connection, CancellationToken.None), cancellationToken);
     }
 
     public async Task<LlmAccountUsageSnapshot> GetAccountUsageAsync(
