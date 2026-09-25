@@ -310,7 +310,7 @@ public sealed class LayaDecisionInference : ITensorDecisionInference
         };
     }
 
-    private static void ValidateRequest(DecisionInferenceRequest request)
+    internal static void ValidateRequest(DecisionInferenceRequest request)
     {
         if (request.State.ValueKind == JsonValueKind.Undefined)
         {
