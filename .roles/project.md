@@ -722,3 +722,21 @@ No live Bedrock session has run on the managed lane yet.
 Verification: zero-warning builds and clean formatting for the Connect, Tensor and UI solutions; Connect
 410, Tensor 298 and UI 53 tests.
 
+
+## Public surface cleanup
+
+The design is the "Public surface cleanup for 11.9.0-rc.1" section of `Connect/docs/enhancements.md`,
+released with `11.9.0-rc.1`.
+
+- Removed agent members no runtime implements; `ToolHandler` sits on the session options.
+- `ILlmAgentClient` has one start member; resume and fork are `ILlmAgentResumeClient` and
+  `ILlmAgentForkClient`.
+- `LlmAgentNativeRuntimeOptions` carries native runtime settings; managed sessions reject it.
+- Turn status derives from its reason; `IsEstimated` is gone.
+- `StructuredOutput` is internal; Bedrock Converse rejects reasoning levels.
+- Agent tool descriptions are nullable and the ownership enums are one `LlmAgentOwnership`.
+- Connect uses Common's LLM primitives; tool output types and `LlmBinaryKind` live in Common.
+- Sign-in drops unused members; the credential setters take `expectedVersion`.
+
+Verification: zero-warning builds and clean formatting for the Connect, Tensor and UI solutions; Connect
+415, Tensor 298 and UI 53 tests.
