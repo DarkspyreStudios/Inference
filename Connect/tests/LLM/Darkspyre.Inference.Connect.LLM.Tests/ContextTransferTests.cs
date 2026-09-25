@@ -204,7 +204,7 @@ public sealed class ContextTransferTests
     private static LlmAgentSessionOptions Options(LlmAgentContext context) => new()
     {
         ModelId = "model",
-        WorkingDirectory = ".",
+        Runtime = new() { WorkingDirectory = "." },
         Context = context,
         UnboundResponseState = LlmUnboundResponseState.Omit
     };

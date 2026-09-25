@@ -253,10 +253,10 @@ handoff; no runtime summarizes on request.
 Add `Context`, optional host-assigned `ThreadId`/`SessionId`, and `ExecutionOptions` to start
 options. A managed session starts empty or from that supplied context. Native start rejects supplied
 host context/identities it cannot honor. Provider-native `ResumeSessionAsync` and
-`ForkSessionAsync` keep their existing purpose; managed adapters reject them and callers use
+`ForkSessionAsync` keep their existing purpose; managed clients do not implement them and callers use
 `StartSessionAsync` with host-selected snapshot/identity. No hidden thread-ID registry is added.
 
-Managed `Ephemeral` does not select a storage backend: all managed sessions are storage-ignorant.
+Managed sessions take no `Ephemeral` setting: all managed sessions are storage-ignorant.
 The host's persistence choice is authoritative. Base instructions and executable handlers are
 provided on start; they are not recovered from opaque response state. A snapshot intentionally does
 not capture transient per-run instructions or delegates.
@@ -535,8 +535,8 @@ and attachments are validated before the next model call; unsupported attachment
 failed tool result with an explanatory event, never a silently dropped payload.
 
 Do not add a second generic approval framework: the host handler enforces its permissions and
-invokes its approval UI if necessary. Managed sessions do not promise OS sandbox enforcement merely because start options
-contain `Sandbox`, `WritableRoots` or `NetworkAllowed`. Capabilities identify execution ownership;
+invokes its approval UI if necessary. Managed sessions reject `Runtime`, so they never promise OS
+sandbox enforcement. Capabilities identify execution ownership;
 documentation must say those controls govern native runtime tools while host tools need their own
 enforcement. `DeferLoading` is rejected by managed Codex until an actual tool-loading mechanism exists.
 

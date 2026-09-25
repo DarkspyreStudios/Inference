@@ -733,10 +733,6 @@ await using ILlmAgentSession session = await agents.StartSessionAsync(
     new LlmAgentSessionOptions
     {
         ModelId = "gpt-5.6-terra",
-        WorkingDirectory = repositoryPath,
-        Sandbox = LlmAgentSandboxMode.WorkspaceWrite,
-        WritableRoots = [repositoryPath, artifactDirectory],
-        NetworkAllowed = true,
         Tools = [agentWeatherTool],
         ToolHandler = ExecuteToolAsync
     },
@@ -777,11 +773,14 @@ await foreach (LlmAgentEvent agentEvent in session.RunTurnAsync(
 }
 ```
 
-`Sandbox`, `WritableRoots`, `WorkingDirectory`, `NetworkAllowed`, and approval settings control
-provider-owned runtimes, not managed host callbacks. Managed Codex has no built-in shell, file
-editor, network tool, or approval executor. Agent DS must enforce authorization, filesystem roots,
-and network policy inside each tool handler. Managed sessions are always live/in-memory; persistence
-is explicit host capture regardless of `Ephemeral`.
+`LlmAgentSessionOptions.Runtime` (`LlmAgentNativeRuntimeOptions`) controls a provider-owned runtime:
+its working directory, writable roots, network access, sandbox, approval policy and `Ephemeral`. The
+Claude CLI and AgentCore require it; managed sessions reject it. A resume without `Runtime` uses the
+current directory as working directory and only writable root, `WorkspaceWrite`, network allowed and
+`OnRequest`; a supplied `Runtime` is used whole. Managed Codex has no built-in shell, file editor,
+network tool, or approval executor. Agent DS must enforce authorization, filesystem roots, and network
+policy inside each tool handler. Managed sessions are always live/in-memory; persistence is explicit
+host capture.
 
 Claude uses restricted mode and `--add-dir` for read-only/workspace sessions. A workspace session
 with `NetworkAllowed = false` is rejected because the CLI cannot independently constrain Bash

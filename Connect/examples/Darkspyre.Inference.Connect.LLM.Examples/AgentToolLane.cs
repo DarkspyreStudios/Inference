@@ -24,10 +24,13 @@ public static class AgentToolLane
             new LlmAgentSessionOptions
             {
                 ModelId = modelId,
-                WorkingDirectory = Path.GetFullPath(workingDirectory),
-                Sandbox = LlmAgentSandboxMode.ReadOnly,
-                ApprovalPolicy = LlmAgentApprovalPolicy.Never,
-                Ephemeral = ephemeral,
+                Runtime = new()
+                {
+                    WorkingDirectory = Path.GetFullPath(workingDirectory),
+                    Sandbox = LlmAgentSandboxMode.ReadOnly,
+                    ApprovalPolicy = LlmAgentApprovalPolicy.Never,
+                    Ephemeral = ephemeral
+                },
                 Tools = [WeatherTool.AgentDefinition],
                 ToolHandler = WeatherTool.ExecuteAsync
             },

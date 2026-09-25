@@ -351,9 +351,7 @@ internal static class Program
             new LlmAgentSessionOptions
             {
                 ModelId = options.Model,
-                WorkingDirectory = Environment.CurrentDirectory,
-                Sandbox = LlmAgentSandboxMode.ReadOnly,
-                ApprovalPolicy = LlmAgentApprovalPolicy.Never,
+                Runtime = new() { WorkingDirectory = Environment.CurrentDirectory, Sandbox = LlmAgentSandboxMode.ReadOnly, ApprovalPolicy = LlmAgentApprovalPolicy.Never },
                 Tools = tools,
                 ToolHandler = ExecuteToolAsync
             },

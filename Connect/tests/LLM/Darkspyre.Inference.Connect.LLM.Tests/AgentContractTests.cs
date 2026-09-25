@@ -297,7 +297,7 @@ public sealed class AgentContractTests
     [InlineData(3)]
     public void NativeStartRejectsHostIdentitiesAndManagedExecutionOptions(int field)
     {
-        var options = new LlmAgentSessionOptions { ModelId = "model", WorkingDirectory = "." };
+        var options = new LlmAgentSessionOptions { ModelId = "model", Runtime = new() { WorkingDirectory = "." } };
         options = field switch
         {
             1 => options with { ThreadId = "thread" },
@@ -305,6 +305,20 @@ public sealed class AgentContractTests
             _ => options with { ExecutionOptions = new() }
         };
         Assert.Throws<NotSupportedException>(() => NativeAgentContract.ValidateStart(options));
+    }
+
+    [Fact]
+    public void NativeStartRequiresRuntimeOptionsAndResumeDefaultsToTheCurrentDirectory()
+    {
+        Assert.Throws<ArgumentException>(() => NativeAgentContract.ValidateStart(new LlmAgentSessionOptions { ModelId = "model" }));
+
+        LlmAgentNativeRuntimeOptions resumed = NativeAgentContract.ResumeRuntime(new LlmAgentResumeOptions());
+        Assert.Equal(Environment.CurrentDirectory, resumed.WorkingDirectory);
+        Assert.Equal([Environment.CurrentDirectory], resumed.WritableRoots);
+        Assert.Equal((LlmAgentSandboxMode.WorkspaceWrite, true, LlmAgentApprovalPolicy.OnRequest, false),
+            (resumed.Sandbox, resumed.NetworkAllowed, resumed.ApprovalPolicy, resumed.Ephemeral));
+        var supplied = new LlmAgentNativeRuntimeOptions { WorkingDirectory = "/work", Sandbox = LlmAgentSandboxMode.ReadOnly };
+        Assert.Same(supplied, NativeAgentContract.ResumeRuntime(new LlmAgentResumeOptions { Runtime = supplied }));
     }
 
     private static ProjectedToolOutput Project(LlmToolOutput output) =>

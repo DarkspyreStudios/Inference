@@ -305,8 +305,7 @@ public sealed class ClaudeAgentResourcesTests : IDisposable
         await using ILlmAgentSession session = await new ClaudeAgentClient(factory).StartSessionAsync("connection", Connection(), new()
         {
             ModelId = "claude-test",
-            WorkingDirectory = _directory,
-            Sandbox = sandbox,
+            Runtime = new() { WorkingDirectory = _directory, Sandbox = sandbox },
             AllowRuntimeBackgroundWork = allow
         });
 
@@ -326,7 +325,7 @@ public sealed class ClaudeAgentResourcesTests : IDisposable
         Assert.Throws<ArgumentOutOfRangeException>(() => AgentResourceOptions.Validate(NativeAgentContract.Claude, false, 0));
         AgentResourceOptions.Validate(NativeAgentContract.Claude, true, 1);
         await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => new ClaudeAgentClient(new Factory(new ManualProcess()))
-            .StartSessionAsync("connection", Connection(), new() { ModelId = "claude-test", WorkingDirectory = _directory, ResourceOutputRetentionBytes = 0 }));
+            .StartSessionAsync("connection", Connection(), new() { ModelId = "claude-test", Runtime = new() { WorkingDirectory = _directory }, ResourceOutputRetentionBytes = 0 }));
 
         var none = new NoAgentResources(LlmAgentResourceStopStatus.Unsupported);
         Task observed = Task.Run(async () => { await foreach (LlmAgentEvent _ in none.ObserveAsync(CancellationToken.None)) { } });
@@ -341,13 +340,13 @@ public sealed class ClaudeAgentResourcesTests : IDisposable
     }
 
     private Task<ILlmAgentSession> Start(ManualProcess process) =>
-        new ClaudeAgentClient(new Factory(process)).StartSessionAsync("connection", Connection(), new() { ModelId = "claude-test", WorkingDirectory = _directory });
+        new ClaudeAgentClient(new Factory(process)).StartSessionAsync("connection", Connection(), new() { ModelId = "claude-test", Runtime = new() { WorkingDirectory = _directory } });
 
     private Task<ILlmAgentSession> StartWithTool(ManualProcess process, LlmAgentToolHandler handler) =>
         new ClaudeAgentClient(new Factory(process)).StartSessionAsync("connection", Connection(), new()
         {
             ModelId = "claude-test",
-            WorkingDirectory = _directory,
+            Runtime = new() { WorkingDirectory = _directory },
             Tools = [new LlmAgentToolDefinition { Name = "hold", Description = "Holds.", InputSchema = Json(new { type = "object" }) }],
             ToolHandler = handler,
         });

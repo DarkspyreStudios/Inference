@@ -523,7 +523,7 @@ public sealed class ManagedAgentTests
         Assert.All((await session.CaptureContextAsync()).Entries, entry => Assert.Null(entry.Message.ResponseState));
     }
 
-    private static LlmAgentSessionOptions Options() => new() { ModelId = "test", WorkingDirectory = Environment.CurrentDirectory };
+    private static LlmAgentSessionOptions Options() => new() { ModelId = "test" };
     private static LlmAgentContext History(string text) => new() { Entries = [new("old", "previous", new("user", text))] };
     private static LlmAgentExecutionOptions SmallPolicy() => new()
     { ContextPolicy = new() { MaxContextTokens = 100, ReservedOutputTokens = 10, SafetyMarginTokens = 0, CompactionThresholdRatio = .8 } };
@@ -541,6 +541,10 @@ public sealed class ManagedAgentTests
         await foreach (var item in source) { events.Add(item); }
         return events;
     }
+
+    [Fact]
+    public void ManagedSessionsRejectNativeRuntimeOptions() =>
+        Assert.Throws<NotSupportedException>(() => new Harness().Create(Options() with { Runtime = new() { WorkingDirectory = "." } }));
 
     private sealed class Harness : ILlmContextEstimator
     {

@@ -60,6 +60,27 @@ public delegate ValueTask<LlmToolOutput> LlmAgentToolHandler(
     LlmAgentToolCall call,
     CancellationToken cancellationToken);
 
+/// <summary>
+/// Settings only a provider-owned runtime reads: where it works, what it may write, and how it is
+/// sandboxed. The Claude CLI and AgentCore require them; managed transports reject them.
+/// </summary>
+public sealed record LlmAgentNativeRuntimeOptions
+{
+    public required string WorkingDirectory { get; init; }
+
+    /// <summary>Every filesystem root the provider-owned runtime may write beneath.</summary>
+    public IReadOnlyList<string> WritableRoots { get; init; } = [];
+
+    /// <summary>Whether provider-owned commands may use the network.</summary>
+    public bool NetworkAllowed { get; init; } = true;
+
+    public LlmAgentSandboxMode Sandbox { get; init; } = LlmAgentSandboxMode.WorkspaceWrite;
+
+    public LlmAgentApprovalPolicy ApprovalPolicy { get; init; } = LlmAgentApprovalPolicy.OnRequest;
+
+    public bool Ephemeral { get; init; }
+}
+
 public sealed record LlmAgentSessionOptions
 {
     /// <summary>
@@ -81,25 +102,14 @@ public sealed record LlmAgentSessionOptions
     /// <summary>Null selects managed defaults. Native adapters reject supplied managed options.</summary>
     public LlmAgentExecutionOptions? ExecutionOptions { get; init; }
 
-    public required string ModelId { get; init; }
+    /// <summary>Required by provider-owned runtimes; managed transports reject it.</summary>
+    public LlmAgentNativeRuntimeOptions? Runtime { get; init; }
 
-    public required string WorkingDirectory { get; init; }
+    public required string ModelId { get; init; }
 
     public string? Instructions { get; init; }
 
-    /// <summary>Every filesystem root the provider-owned runtime may write beneath.</summary>
-    public IReadOnlyList<string> WritableRoots { get; init; } = [];
-
-    /// <summary>Whether provider-owned commands may use the network.</summary>
-    public bool NetworkAllowed { get; init; } = true;
-
     public IReadOnlyList<LlmAgentToolDefinition> Tools { get; init; } = [];
-
-    public LlmAgentSandboxMode Sandbox { get; init; } = LlmAgentSandboxMode.WorkspaceWrite;
-
-    public LlmAgentApprovalPolicy ApprovalPolicy { get; init; } = LlmAgentApprovalPolicy.OnRequest;
-
-    public bool Ephemeral { get; init; }
 
     public LlmAgentToolHandler? ToolHandler { get; init; }
 
@@ -117,27 +127,20 @@ public sealed record LlmAgentResumeOptions
 {
     public string? ModelId { get; init; }
 
-    public string? WorkingDirectory { get; init; }
-
     public string? Instructions { get; init; }
 
     /// <summary>
-    /// Replacement filesystem roots for the resumed runtime, or null to use the working directory.
+    /// Runtime settings used whole, or null for the resume defaults: the current directory as working
+    /// directory and only writable root, <see cref="LlmAgentSandboxMode.WorkspaceWrite"/>, network allowed
+    /// and <see cref="LlmAgentApprovalPolicy.OnRequest"/>.
     /// </summary>
-    public IReadOnlyList<string>? WritableRoots { get; init; }
-
-    /// <summary>Replacement network choice, or null to use the provider's resume behavior.</summary>
-    public bool? NetworkAllowed { get; init; }
+    public LlmAgentNativeRuntimeOptions? Runtime { get; init; }
 
     /// <summary>
     /// Host tools to expose after resuming. Providers that persist tool definitions may reuse the
     /// stored definitions when this collection is empty.
     /// </summary>
     public IReadOnlyList<LlmAgentToolDefinition> Tools { get; init; } = [];
-
-    public LlmAgentSandboxMode? Sandbox { get; init; }
-
-    public LlmAgentApprovalPolicy? ApprovalPolicy { get; init; }
 
     public LlmAgentToolHandler? ToolHandler { get; init; }
 

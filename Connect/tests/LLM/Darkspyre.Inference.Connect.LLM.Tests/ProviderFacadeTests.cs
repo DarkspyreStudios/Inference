@@ -60,7 +60,7 @@ public sealed class ProviderFacadeTests
     private static LlmAgentSessionOptions AgentOptions() => new()
     {
         ModelId = "model",
-        WorkingDirectory = Environment.CurrentDirectory
+        Runtime = new() { WorkingDirectory = Environment.CurrentDirectory },
     };
 
     private static LlmEmbeddingRequest EmbeddingRequest() => new()

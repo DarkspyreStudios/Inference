@@ -200,10 +200,8 @@ public sealed class BedrockAgentCoreTests
             new LlmAgentSessionOptions
             {
                 ModelId = BedrockAgentCoreLlmClient.DefaultModelId,
-                WorkingDirectory = "/not-sent-to-agentcore",
+                Runtime = new() { WorkingDirectory = "/not-sent-to-agentcore", Sandbox = LlmAgentSandboxMode.ReadOnly, ApprovalPolicy = LlmAgentApprovalPolicy.Never },
                 Instructions = "Be concise.",
-                Sandbox = LlmAgentSandboxMode.ReadOnly,
-                ApprovalPolicy = LlmAgentApprovalPolicy.Never,
                 Tools =
                 [
                     new LlmAgentToolDefinition
@@ -312,10 +310,8 @@ public sealed class BedrockAgentCoreTests
             "connection", Connection(),
             Options(
                 LlmAgentSandboxMode.DangerFullAccess,
-                LlmAgentApprovalPolicy.Never) with
-            {
-                NetworkAllowed = false
-            }));
+                LlmAgentApprovalPolicy.Never,
+                networkAllowed: false)));
     }
 
     [Fact]
@@ -379,12 +375,17 @@ public sealed class BedrockAgentCoreTests
 
     private static LlmAgentSessionOptions Options(
         LlmAgentSandboxMode sandbox,
-        LlmAgentApprovalPolicy approvalPolicy) => new()
+        LlmAgentApprovalPolicy approvalPolicy,
+        bool networkAllowed = true) => new()
         {
             ModelId = BedrockAgentCoreLlmClient.DefaultModelId,
-            WorkingDirectory = "/not-sent-to-agentcore",
-            Sandbox = sandbox,
-            ApprovalPolicy = approvalPolicy
+            Runtime = new()
+            {
+                WorkingDirectory = "/not-sent-to-agentcore",
+                Sandbox = sandbox,
+                ApprovalPolicy = approvalPolicy,
+                NetworkAllowed = networkAllowed
+            },
         };
 
     private static List<HarnessMessage> UserMessages() =>
@@ -418,7 +419,7 @@ public sealed class BedrockAgentCoreTests
         await using ILlmAgentSession session = await client.StartSessionAsync("connection", Connection(), new LlmAgentSessionOptions
         {
             ModelId = BedrockAgentCoreLlmClient.DefaultModelId,
-            WorkingDirectory = "/not-sent-to-agentcore",
+            Runtime = new() { WorkingDirectory = "/not-sent-to-agentcore" },
             UnboundResponseState = LlmUnboundResponseState.Omit,
             Context = new LlmAgentContext
             {

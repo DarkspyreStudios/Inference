@@ -285,7 +285,6 @@ public sealed class DirectCodexTests
         var options = new LlmAgentSessionOptions
         {
             ModelId = "model",
-            WorkingDirectory = Environment.CurrentDirectory,
             Tools = [new() { Name = "echo", InputSchema = JsonSerializer.SerializeToElement(new
             { type = "object", properties = new { }, additionalProperties = false }) }],
             ToolHandler = (_, _) =>

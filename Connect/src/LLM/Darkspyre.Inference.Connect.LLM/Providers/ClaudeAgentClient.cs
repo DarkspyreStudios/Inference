@@ -20,11 +20,11 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(options);
-        NativeAgentContract.ValidateStart(options);
+        LlmAgentNativeRuntimeOptions runtime = NativeAgentContract.ValidateStart(options);
         NativeAgentContract.ValidateConnection(connection, NativeAgentContract.Claude,
             options.ModelId, options.Tools, options.ToolHandler);
         ClaudeCliConfiguration.ValidateConnection(connection);
-        ValidateOptions(options.ModelId, options.WorkingDirectory, options.Tools, options.ToolHandler);
+        ValidateOptions(options.ModelId, runtime.WorkingDirectory, options.Tools, options.ToolHandler);
         AgentOpeningContext? opening = AgentOpeningContext.For(options, carriesAttachments: true);
         string threadId = Guid.NewGuid().ToString();
         return await CreateSessionAsync(
@@ -34,14 +34,14 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             fork: false,
             ClaudeCliConfiguration.ResolveExecutable(connection.Endpoint),
             options.ModelId,
-            options.WorkingDirectory,
+            runtime.WorkingDirectory,
             options.Instructions,
-            options.WritableRoots,
-            options.Sandbox,
-            options.NetworkAllowed,
+            runtime.WritableRoots,
+            runtime.Sandbox,
+            runtime.NetworkAllowed,
             options.Tools,
             options.ToolHandler,
-            options.Ephemeral,
+            runtime.Ephemeral,
             connection,
             NativeAgentContract.Claude.RichContentSupported.For(connection, options.ModelId),
             opening,
@@ -62,8 +62,8 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
         options ??= new LlmAgentResumeOptions();
         NativeAgentContract.ValidateConnection(connection, NativeAgentContract.Claude,
             options.ModelId, options.Tools, options.ToolHandler);
-        string workingDirectory = options.WorkingDirectory ?? Environment.CurrentDirectory;
-        ValidateOptions(options.ModelId, workingDirectory, options.Tools, options.ToolHandler, modelOptional: true);
+        LlmAgentNativeRuntimeOptions runtime = NativeAgentContract.ResumeRuntime(options);
+        ValidateOptions(options.ModelId, runtime.WorkingDirectory, options.Tools, options.ToolHandler, modelOptional: true);
         return await CreateSessionAsync(
             threadId,
             threadId,
@@ -71,14 +71,14 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             fork: false,
             ClaudeCliConfiguration.ResolveExecutable(connection.Endpoint),
             options.ModelId,
-            workingDirectory,
+            runtime.WorkingDirectory,
             options.Instructions,
-            options.WritableRoots ?? [workingDirectory],
-            options.Sandbox ?? LlmAgentSandboxMode.WorkspaceWrite,
-            options.NetworkAllowed ?? true,
+            runtime.WritableRoots,
+            runtime.Sandbox,
+            runtime.NetworkAllowed,
             options.Tools,
             options.ToolHandler,
-            ephemeral: false,
+            runtime.Ephemeral,
             connection,
             NativeAgentContract.Claude.RichContentSupported.For(connection, options.ModelId),
             opening: null,
@@ -106,8 +106,8 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
         options ??= new LlmAgentResumeOptions();
         NativeAgentContract.ValidateConnection(connection, NativeAgentContract.Claude,
             options.ModelId, options.Tools, options.ToolHandler);
-        string workingDirectory = options.WorkingDirectory ?? Environment.CurrentDirectory;
-        ValidateOptions(options.ModelId, workingDirectory, options.Tools, options.ToolHandler, modelOptional: true);
+        LlmAgentNativeRuntimeOptions runtime = NativeAgentContract.ResumeRuntime(options);
+        ValidateOptions(options.ModelId, runtime.WorkingDirectory, options.Tools, options.ToolHandler, modelOptional: true);
         string forkedThreadId = Guid.NewGuid().ToString();
         return await CreateSessionAsync(
             forkedThreadId,
@@ -116,14 +116,14 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             fork: true,
             ClaudeCliConfiguration.ResolveExecutable(connection.Endpoint),
             options.ModelId,
-            workingDirectory,
+            runtime.WorkingDirectory,
             options.Instructions,
-            options.WritableRoots ?? [workingDirectory],
-            options.Sandbox ?? LlmAgentSandboxMode.WorkspaceWrite,
-            options.NetworkAllowed ?? true,
+            runtime.WritableRoots,
+            runtime.Sandbox,
+            runtime.NetworkAllowed,
             options.Tools,
             options.ToolHandler,
-            ephemeral: false,
+            runtime.Ephemeral,
             connection,
             NativeAgentContract.Claude.RichContentSupported.For(connection, options.ModelId),
             opening: null,

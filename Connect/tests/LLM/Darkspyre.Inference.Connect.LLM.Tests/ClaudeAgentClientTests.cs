@@ -17,7 +17,7 @@ public sealed class ClaudeAgentClientTests
         var options = new LlmAgentSessionOptions
         {
             ModelId = "claude-test",
-            WorkingDirectory = Environment.CurrentDirectory
+            Runtime = new() { WorkingDirectory = Environment.CurrentDirectory },
         };
         await Assert.ThrowsAsync<NotSupportedException>(() =>
             client.StartSessionAsync("connection", Connection(), options with { Context = new() }));
@@ -44,9 +44,7 @@ public sealed class ClaudeAgentClientTests
             new LlmAgentSessionOptions
             {
                 ModelId = "claude-test",
-                WorkingDirectory = Environment.CurrentDirectory,
-                WritableRoots = [Environment.CurrentDirectory, Path.GetTempPath()],
-                NetworkAllowed = true,
+                Runtime = new() { WorkingDirectory = Environment.CurrentDirectory, WritableRoots = [Environment.CurrentDirectory, Path.GetTempPath()], NetworkAllowed = true },
                 Tools =
                 [
                     new LlmAgentToolDefinition
@@ -194,7 +192,7 @@ public sealed class ClaudeAgentClientTests
             new LlmAgentSessionOptions
             {
                 ModelId = "claude-test",
-                WorkingDirectory = Environment.CurrentDirectory
+                Runtime = new() { WorkingDirectory = Environment.CurrentDirectory },
             }));
 
         using JsonDocument schema = JsonDocument.Parse("""{"type":"object"}""");
@@ -203,7 +201,7 @@ public sealed class ClaudeAgentClientTests
             new LlmAgentSessionOptions
             {
                 ModelId = "claude-test",
-                WorkingDirectory = Environment.CurrentDirectory,
+                Runtime = new() { WorkingDirectory = Environment.CurrentDirectory },
                 Tools =
                 [
                     new LlmAgentToolDefinition
@@ -229,9 +227,7 @@ public sealed class ClaudeAgentClientTests
             new LlmAgentSessionOptions
             {
                 ModelId = "claude-test",
-                WorkingDirectory = Environment.CurrentDirectory,
-                Sandbox = sandbox,
-                NetworkAllowed = false
+                Runtime = new() { WorkingDirectory = Environment.CurrentDirectory, Sandbox = sandbox, NetworkAllowed = false },
             }));
     }
 
@@ -248,7 +244,7 @@ public sealed class ClaudeAgentClientTests
                 new LlmAgentSessionOptions
                 {
                     ModelId = "claude-test",
-                    WorkingDirectory = Environment.CurrentDirectory,
+                    Runtime = new() { WorkingDirectory = Environment.CurrentDirectory },
                     Tools =
                     [
                         new LlmAgentToolDefinition
@@ -273,7 +269,7 @@ public sealed class ClaudeAgentClientTests
         await using ILlmAgentSession session = await client.StartSessionAsync("connection", Connection(), new LlmAgentSessionOptions
         {
             ModelId = "claude-test",
-            WorkingDirectory = Environment.CurrentDirectory,
+            Runtime = new() { WorkingDirectory = Environment.CurrentDirectory },
             UnboundResponseState = LlmUnboundResponseState.Omit,
             Context = new LlmAgentContext
             {

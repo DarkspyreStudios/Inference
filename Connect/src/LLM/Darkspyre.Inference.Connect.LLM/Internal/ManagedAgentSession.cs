@@ -35,6 +35,11 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
         Func<string, LlmProviderCapabilities> capabilities)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(options.ModelId);
+        if (options.Runtime is not null)
+        {
+            throw new NotSupportedException(
+                "Managed sessions run no provider-owned runtime, so they reject native runtime options.");
+        }
         AgentResourceOptions.Validate(ManagedAgentPolicy.Capabilities, options.AllowRuntimeBackgroundWork, options.ResourceOutputRetentionBytes);
         _connection = connection;
         _execution = options.ExecutionOptions ?? new();

@@ -28,7 +28,7 @@ internal static class NativeAgentContract
         ResourceObservation = LlmOperationSupport.Unknown
     };
 
-    public static void ValidateStart(LlmAgentSessionOptions options)
+    public static LlmAgentNativeRuntimeOptions ValidateStart(LlmAgentSessionOptions options)
     {
         // A supplied context becomes opening context; see AgentOpeningContext.
         if (options.ThreadId is not null || options.SessionId is not null || options.ExecutionOptions is not null)
@@ -39,7 +39,17 @@ internal static class NativeAgentContract
         }
 
         ValidateTools(options.Tools);
+        return options.Runtime ?? throw new ArgumentException(
+            "This native runtime requires Runtime options with a working directory.", nameof(options));
     }
+
+    /// <summary>The resume settings: the supplied runtime whole, or the documented resume defaults.</summary>
+    public static LlmAgentNativeRuntimeOptions ResumeRuntime(LlmAgentResumeOptions options) =>
+        options.Runtime ?? new()
+        {
+            WorkingDirectory = Environment.CurrentDirectory,
+            WritableRoots = [Environment.CurrentDirectory]
+        };
 
     public static void ValidateConnection(
         LlmConnection connection,

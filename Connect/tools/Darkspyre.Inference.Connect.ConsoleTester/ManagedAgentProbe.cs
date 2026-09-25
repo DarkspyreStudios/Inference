@@ -14,7 +14,6 @@ internal static class ManagedAgentProbe
         var options = new LlmAgentSessionOptions
         {
             ModelId = modelId,
-            WorkingDirectory = Environment.CurrentDirectory,
             Instructions = "Follow the user's request.",
             Tools = [Program.CreateAttachmentTool(supportsDocuments: true)],
             ToolHandler = async (call, token) =>
