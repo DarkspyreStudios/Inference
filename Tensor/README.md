@@ -273,7 +273,9 @@ set, integrity and per-artifact source/license provenance. Artifact/source order
 identity. Exact built-in matches retain their established keys and provenance; different companion
 or revision manifests do not reuse those keys. Resolved manifests snapshot their input collections.
 
-The host may supply `TensorSourceAccess` to the source and pack manager. It returns a short-lived
+The host may supply `TensorSourceAccess` to the source and pack manager. On the unpublished 11.10
+branch its return type is `Task<TensorSourceCredential?>`: credential resolution is awaited, not a
+notification. The host may return a completed Task for a credential already in memory. It returns a short-lived
 credential for the exact requested origin: `TensorSourceCredential.Bearer(token)` or
 `TensorSourceCredential.Basic(username, password)`. The credential exposes no secret through a public
 member and is attached per request. No credential is stored in a pack definition.
@@ -393,7 +395,10 @@ on English-only/turbo packs are rejected before processing. Capabilities disting
 support from unknown custom-pack metadata; the loaded header supplies actual vocabulary capabilities.
 
 Batch results contain text, timestamped segments, nullable detected language and selected-pack
-provenance. `TranscribeStreamAsync` accepts caller-identified `SpeechAudioWindow` values and yields
+provenance. `TranscribeStreamAsync` accepts caller-identified `SpeechAudioWindow` values and returns
+`IAsyncEnumerable<SpeechWindowTranscription>` directly, as Qwen's `StreamAsync` returns its event
+sequence directly. Setup and processing remain lazy during enumeration; no extra Task acquisition
+or implicit model load is introduced. Enumeration yields
 one completed result per window, including empty results. Timestamps stay relative to that window.
 There is no overlapping-window deduplication, speaker diarization or continuous partial recognition.
 Hosts must dispose abandoned enumerators and their input enumerable must honor cancellation.

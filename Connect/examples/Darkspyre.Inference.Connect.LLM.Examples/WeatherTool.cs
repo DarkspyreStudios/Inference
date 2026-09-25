@@ -51,7 +51,7 @@ internal static class WeatherTool
         }
     }
 
-    public static ValueTask<LlmToolOutput> ExecuteAsync(
+    public static Task<LlmToolOutput> ExecuteAsync(
         LlmAgentToolCall call,
         CancellationToken cancellationToken)
     {
@@ -59,11 +59,11 @@ internal static class WeatherTool
         try
         {
             (string content, bool success) = ExecuteValidated(call.Name, call.Arguments);
-            return ValueTask.FromResult(LlmToolOutput.FromText(content, isError: !success));
+            return Task.FromResult(LlmToolOutput.FromText(content, isError: !success));
         }
         catch (ArgumentException)
         {
-            return ValueTask.FromResult(LlmToolOutput.FromText("Invalid get_weather arguments.", isError: true));
+            return Task.FromResult(LlmToolOutput.FromText("Invalid get_weather arguments.", isError: true));
         }
     }
 

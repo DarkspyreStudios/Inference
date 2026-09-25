@@ -1371,7 +1371,10 @@ public interface ILlmAgentSession
 
 `LlmAgentCapabilities.ResourceObservation` is an `LlmOperationSupport`: Supported for the Claude CLI,
 Unknown for AgentCore, Unsupported for managed Codex. A runtime without resources returns an empty set
-and completes `ObserveAsync` only at disposal.
+and ends the sequence returned by `ObserveAsync` only at disposal. All public streams return
+IAsyncEnumerable<T> directly; setup and execution remain lazy during enumeration.
+Host tool callbacks return Task<LlmToolOutput> and remain
+awaited required-result work, not background notifications.
 
 - `ObserveAsync` carries every resource event, including those raised during a host turn; the turn
   stream carries only turn events. A provider-started turn arrives on it as

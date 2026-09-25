@@ -433,16 +433,16 @@ internal static class Program
         };
     }
 
-    internal static ValueTask<LlmToolOutput> ExecuteToolAsync(
+    internal static Task<LlmToolOutput> ExecuteToolAsync(
         LlmAgentToolCall call,
         CancellationToken cancellationToken) => call.Name switch
         {
             "darkspyre_inference_connect_echo" => ExecuteEchoToolAsync(call, cancellationToken),
             "darkspyre_inference_connect_attachment" => ExecuteAttachmentToolAsync(call, cancellationToken),
-            _ => ValueTask.FromResult(LlmToolOutput.FromText($"Unknown tool '{call.Name}'.", isError: true))
+            _ => Task.FromResult(LlmToolOutput.FromText($"Unknown tool '{call.Name}'.", isError: true))
         };
 
-    private static ValueTask<LlmToolOutput> ExecuteEchoToolAsync(
+    private static Task<LlmToolOutput> ExecuteEchoToolAsync(
         LlmAgentToolCall call,
         CancellationToken cancellationToken)
     {
@@ -451,10 +451,10 @@ internal static class Program
             && textElement.ValueKind == JsonValueKind.String
                 ? textElement.GetString() ?? string.Empty
                 : string.Empty;
-        return ValueTask.FromResult(LlmToolOutput.FromText(text));
+        return Task.FromResult(LlmToolOutput.FromText(text));
     }
 
-    private static ValueTask<LlmToolOutput> ExecuteAttachmentToolAsync(
+    private static Task<LlmToolOutput> ExecuteAttachmentToolAsync(
         LlmAgentToolCall call,
         CancellationToken cancellationToken)
     {
@@ -486,7 +486,7 @@ internal static class Program
             _ => throw new ArgumentException("Attachment tool kind must be 'image' or 'document'.")
         };
 
-        return ValueTask.FromResult(new LlmToolOutput
+        return Task.FromResult(new LlmToolOutput
         {
             Parts = [new LlmToolOutputText($"Attached {attachment.FileName}."), attachment]
         });

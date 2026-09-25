@@ -58,7 +58,7 @@ public sealed class ClaudeAgentClientTests
                 ToolHandler = (call, _) =>
                 {
                     observedCall = call;
-                    return ValueTask.FromResult(new LlmToolOutput
+                    return Task.FromResult(new LlmToolOutput
                     {
                         Parts =
                         [
@@ -254,7 +254,7 @@ public sealed class ClaudeAgentClientTests
                             InputSchema = schema.RootElement.Clone()
                         }
                     ],
-                    ToolHandler = (_, _) => ValueTask.FromResult(new LlmToolOutput())
+                    ToolHandler = (_, _) => Task.FromResult(new LlmToolOutput())
                 }));
 
         Assert.Contains("valid MCP name", exception.Message, StringComparison.Ordinal);
@@ -284,7 +284,7 @@ public sealed class ClaudeAgentClientTests
                 ]
             },
             Tools = [new LlmAgentToolDefinition { Name = "echo", Description = "Echo text.", InputSchema = schema.RootElement.Clone() }],
-            ToolHandler = (_, _) => ValueTask.FromResult(LlmToolOutput.FromText("echo"))
+            ToolHandler = (_, _) => Task.FromResult(LlmToolOutput.FromText("echo"))
         });
 
         IReadOnlyList<LlmAgentEvent> first = await ReadAllAsync(session.RunTurnAsync(

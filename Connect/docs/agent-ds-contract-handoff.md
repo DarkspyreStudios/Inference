@@ -93,8 +93,18 @@ managed-session subtype or host storage interface is required.
 | Compact within a run | `LlmAgentCompactionRequiredEvent` → `ContinueTurnAsync(continuation, ct)` |
 | Preserve reasoning and ordered tool outputs | `LlmChatMessage.ResponseState`, copied from `LlmChatResult.ResponseState` |
 
-Session I/O/control operations use `Task`, streaming uses `IAsyncEnumerable`, handlers/disposal use
-`ValueTask`. Identity properties and model records are ordinary data, not asynchronous lookups.
+On the unpublished 11.10 development branch, session I/O/control operations use `Task`, streams
+return `IAsyncEnumerable<T>` directly, and tool handlers use `Task<LlmToolOutput>`.
+Consume streams with `await foreach`; setup and execution remain lazy during enumeration.
+Framework `IAsyncDisposable` still uses `ValueTask`. Identity properties and model records remain
+ordinary data, not asynchronous lookups. Published 11.9.2-rc.1 retains its previous signatures;
+do not migrate a package consumer until the coordinated contract release is available.
+
+Inference setup notifications are non-blocking invalidation hints. Agent DS separately awaits all
+entered subscribers when publishing its own change. The host adapter owns snapshot refresh,
+stale-result rejection, downstream publication, failures and shutdown settlement. Awaiting an
+Inference save does not mean Agent DS subscribers have finished; no discarded Task bridges these
+two completion boundaries. See the [async contract design](../../docs/inference-async-tech-design.md#21-notification-ownership-across-the-host-boundary).
 
 ### Retained context
 

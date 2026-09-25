@@ -292,7 +292,7 @@ public sealed class DirectCodexTests
         {
             source.Connection = source.Connection with { Credential = Credential(switchAccount ? "other" : "account") };
             if (disableAgent) { source.Connection = source.Connection with { CapabilityOverrides = new() { SupportsAgentSessions = false } }; }
-            return ValueTask.FromResult(new LlmToolOutput());
+            return Task.FromResult(new LlmToolOutput());
         }
         };
         Assert.IsNotAssignableFrom<ILlmAgentResumeClient>(managed);

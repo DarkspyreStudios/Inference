@@ -216,7 +216,7 @@ public sealed class BedrockAgentCoreTests
                 {
                     calls.Add(call);
                     // The route carries no images; the image is omitted and the tool still succeeds.
-                    return ValueTask.FromResult(new LlmToolOutput
+                    return Task.FromResult(new LlmToolOutput
                     {
                         Parts =
                         [

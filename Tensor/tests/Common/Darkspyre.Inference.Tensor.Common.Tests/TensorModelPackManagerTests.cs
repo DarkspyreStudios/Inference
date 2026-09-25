@@ -114,7 +114,7 @@ public sealed class TensorModelPackManagerTests : IDisposable
             sourceAccess: (origin, _) =>
             {
                 Assert.Equal(new Uri("http://127.0.0.1/"), origin);
-                return ValueTask.FromResult<TensorSourceCredential?>(TensorSourceCredential.Bearer("protected-token"));
+                return Task.FromResult<TensorSourceCredential?>(TensorSourceCredential.Bearer("protected-token"));
             });
         await Task.WhenAll(manager.InstallAsync(definition.Key), manager.InstallAsync(definition.Key));
         Assert.Equal(2, calls); // The second installation verifies the first, without downloading again.
@@ -137,7 +137,7 @@ public sealed class TensorModelPackManagerTests : IDisposable
                 : new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(weights) });
         }));
         using var manager = new TensorModelPackManager(new([definition]), new MemoryPersistenceStore(), http,
-            sourceAccess: (_, _) => ValueTask.FromResult<TensorSourceCredential?>(TensorSourceCredential.Basic("stonks", "p:ss wörd")));
+            sourceAccess: (_, _) => Task.FromResult<TensorSourceCredential?>(TensorSourceCredential.Basic("stonks", "p:ss wörd")));
 
         await manager.InstallAsync(definition.Key);
 

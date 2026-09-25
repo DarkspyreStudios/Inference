@@ -57,7 +57,7 @@ public sealed record LlmAgentToolCall(
     string Name,
     JsonElement Arguments);
 
-public delegate ValueTask<LlmToolOutput> LlmAgentToolHandler(
+public delegate Task<LlmToolOutput> LlmAgentToolHandler(
     LlmAgentToolCall call,
     CancellationToken cancellationToken);
 

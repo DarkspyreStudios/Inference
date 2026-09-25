@@ -532,7 +532,7 @@ public sealed class ManagedAgentTests
     {
         Tools = [new() { Name = "echo", InputSchema = JsonSerializer.SerializeToElement(new
         { type = "object", properties = new { }, additionalProperties = false }) }],
-        ToolHandler = (call, _) => ValueTask.FromResult(handler(call))
+        ToolHandler = (call, _) => Task.FromResult(handler(call))
     };
     private static string TextOf(LlmToolResult result) =>
         Assert.IsType<LlmToolOutputText>(Assert.Single(result.Output.Parts)).Text;

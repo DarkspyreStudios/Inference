@@ -405,7 +405,7 @@ was created because this repository has no configured Git remote.
 | Connect 10.0 architecture and sequence | `Connect/docs/darkspyre-inference-connect-10-design.md` |
 | Current LLM integration contract | `Connect/README.md` |
 | Managed-agent technical design | `Connect/docs/enhancements.md` |
-| Public async contract migration, 11.10.x (draft; not implementation approval) | `docs/inference-async-tech-design.md` |
+| Async service boundaries, local object operations, streams and notifications | `docs/inference-async-tech-design.md` |
 | Managed-agent verification | `Connect/docs/managed-agent-verification.md` |
 | Tensor package boundary, persistence, and implemented modalities | `Tensor/README.md` |
 | Shared CE / Agent-DS Settings UI requirements and provider contract gaps (not an approved API design) | `docs/provider-settings-contract-support-and-gaps.md` |

@@ -82,4 +82,4 @@ public sealed class TensorSourceCredential
 }
 
 /// <summary>The callback receives the original, exact origin. Credentials are never forwarded across redirect origins.</summary>
-public delegate ValueTask<TensorSourceCredential?> TensorSourceAccess(Uri origin, CancellationToken cancellationToken);
+public delegate Task<TensorSourceCredential?> TensorSourceAccess(Uri origin, CancellationToken cancellationToken);
