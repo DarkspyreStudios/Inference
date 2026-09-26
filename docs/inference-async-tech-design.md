@@ -150,13 +150,12 @@ These are three distinct operations, not one asynchronous category:
 | Operation | Contract | Reason |
 |---|---|---|
 | Ask the pack manager to acquire a model-pack lease | `AcquireAsync` | Crosses to the manager that owns access and the lease lifetime. |
-| Find the tokenizer/model reference in an acquired lease | `GetRequiredArtifact` stays synchronous | Reads the lease's existing `Artifacts` dictionary; it neither opens a file nor calls a store. |
-| Open or read the referenced artifact through storage | Asynchronous storage operation | Crosses to the store/file-access service to obtain contents. |
+| Find the tokenizer/model file in an acquired lease | `GetRequiredArtifact` stays synchronous | Reads the lease's existing `Artifacts` dictionary of file paths; it neither opens a file nor calls a store. |
+| Open or read the artifact file | Async file read where .NET provides one; native loaders take the path | Crosses to the file system. |
 
-A lease containing a file reference does not necessarily contain the file's bytes. Returning that
-already-held reference is ordinary object access. If an operation instead resolves an artifact by
-calling a store or another service, that service-facing operation must be asynchronous; do not hide
-such work inside a synchronous getter or the local lookup method.
+A lease holds file paths, not file contents. Returning an already-held path is ordinary object
+access. Reading the file is file-system access: Inference uses async reads where .NET provides them
+and runs native loaders that take a path on the background thread (section 5.3).
 
 The same rule keeps `TensorModelDefinitionValidator.Validate`, `TensorResolvedPack.Create` and
 `SetupConfigurationIdentity.Validate` synchronous: they validate or construct values already in hand.
@@ -221,6 +220,13 @@ Tensor runs models through three native libraries. Qwen and Supra use TensorShar
 Runtime. Whisper uses Whisper.net. Supra and Laya tokenize through ML.Tokenizers. Inference uses
 TensorSharp and ML.Tokenizers through the public API they already provide and requires no change
 to either.
+
+**Model files are plain paths.** Model packs live in a directory on the local file system. The
+default is `LocalApplicationData/Darkspyre Studios/Inference/Tensor`; the host can supply another
+directory, such as its app folder. Inference passes each library the file path inside that
+directory. Laya creates its `InferenceSession` from the model path. Supra opens a `FileStream` on the
+tokenizer path. Whisper loads through `WhisperFactory.FromPath`. Inference does not use TensorSharp's
+persistence-store loading.
 
 **Native work runs on a background thread.** GPU and CPU compute has no async form. This covers
 backend and device initialization, CUDA kernel compilation, weight upload, model steps, ONNX
