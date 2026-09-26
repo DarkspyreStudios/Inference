@@ -158,6 +158,49 @@ Start/Load/request/Unload/Stop semantics do not change. Graceful teardown waits 
 cancels requests but must still join native execution before freeing memory. Stop remains terminal.
 Keep explicit framework cleanup and never report completed cleanup while native work still owns memory.
 
+### 5.2 Common, Connect and Settings.UI public members
+
+This list covers every public synchronous member in `Common/src`, `Connect/src` and
+`UI/src/Settings` that touches a service or live state. Tensor has its own requirements and is
+not listed.
+
+**Becomes async**
+
+| Member | Change |
+|---|---|
+| `CreateSetupSession` on `LlmProviderService`, `ImageProviderService`, `AudioProviderService`, `TtsProviderService` | Async Open call that returns the wizard: steps plus current or blank settings (section 3). |
+| `LoopbackRedirectListener` constructor | Opens sockets. Moves to an async factory. |
+| `LlmProviderService.StartClaudeLogin` (both overloads) | Becomes `StartClaudeLoginAsync`. Starting a sign-in is authentication start. |
+
+**Removed by the settings editor flow**
+
+| Member | Replacement |
+|---|---|
+| `IInferenceSetupSession.Snapshot` | The Open call's result. |
+| `IInferenceSetupSession.Changed` | None. Button handlers receive their call's result. |
+| `IInferenceSetupSession.ValidateAsync` | Local validation on the settings object, and validation inside Save. |
+| `IInferenceSetupSession.CommitAsync()` | Save, which hands the local settings object to the host's commit target. |
+
+**Changes behaviour, signature unchanged**
+
+| Member | Change |
+|---|---|
+| `SetupValueField<T>.SetValue`, `SetupSecretField.SetValue`, `SetupRepeatableGroupField.Add`/`Remove` | Stay synchronous. They edit the local settings object and no longer call the session's `Edit`. |
+| Bedrock and Claude `ContinueTurnAsync`; Bedrock and managed `ObserveAsync` | Report "not supported" and "disposed" on the first read, not on the call. |
+| Claude and Bedrock `RunTurnAsync` | Refuse a second turn on a running session. They no longer wait on the turn gate. |
+
+**Stays synchronous**
+
+| Member | Reason |
+|---|---|
+| `ILlmAgentSession.ThreadId`, `SessionId` | Set in the constructor and read-only in every provider. |
+| `SupportedProviders`, `SupportedTransports`, `SetupDefinitions`, `Transport`, `ProviderDefinition`, `DisplayName` | Fixed definitions. |
+| `ILlmClient.GetCapabilities` | Reads the supplied connection. |
+| `Bind` on the four provider services, `ImageProviderService.GetRequiredTransport` | Wraps a supplied connection around the service in hand. The adapter's calls are async. |
+| `LlmCredential.Serialize`/`Parse`, `LlmRedirectResult.ParsePastedCode`, `SetupConfigurationIdentity.Validate`, `LlmToolOutput.FromText` | Work on values in hand. |
+| `AddLlmConnect`, `AddLlmConnectBedrock`, `AddImageConnect`, `AddAudioConnect`, `AddTtsConnect`, service constructors | DI registration and construction with no I/O. |
+| Bedrock AWS profile reads inside `GetProfilesAsync` and credential resolution | The AWS SDK has no async form. The async method calls them directly. |
+
 ## 6. Verification
 
 All in-repository implementations, tests, examples, tools and UI.Settings consumers use the same
@@ -173,8 +216,8 @@ public contracts. No parallel legacy signature is exposed.
   nothing reaches the app without Save; closing without Save discards everything;
   secret redaction.
 - Lifecycle: failed/cancelled load, urgent/graceful stop, repeated cleanup, gate/lease ownership.
-- Public API inventory: classify remaining methods against the approved boundary, not a blanket
-  “all non-Task methods fail” rule. Compile external implementations of changed contracts.
+- Public API: every member in section 5.2 has its listed signature and behaviour. Compile external
+  implementations of changed contracts.
 - All three solutions: zero-warning Debug/Release builds and deterministic tests; format and
   dependency-vulnerability checks. No paid provider calls or downloaded models as gates.
 
