@@ -18,8 +18,8 @@ Target contract: **11.10.x**.
 - Connect remains out-of-process access; Tensor remains in-process execution. Hosts still own
   applications, persistence, API translation and lifecycle scheduling.
 
-The editor submits local field edits to the session immediately to refresh dependent controls.
-Save is a separate persistence operation.
+The settings editor keeps every edit in a local settings object. Only Save returns settings to the
+app.
 
 Related authorities:
 
@@ -40,7 +40,7 @@ Related authorities:
 | Framework plumbing | Preserve IDisposable, IAsyncDisposable, ToString and generated object/record signatures. Preserve await using and secret-safe formatting. |
 | Notifications | Call each listener outside the state lock and return. A listener posts its async work and returns without blocking. Listener failure must not roll back or change the reported result of a completed operation. |
 | Required-result callbacks | Await them: tool execution and source-credential resolution return Task<T>, carry cancellation and remain part of the owning operation. |
-| Settings timing | Apply edits asynchronously to the session for dependent metadata; persist only on the separate Save/CommitAsync call. |
+| Settings timing | Edits stay in the local settings object. Actions and model queries run against the local values. Only Save returns settings to the app. |
 
 Non-blocking notifications are invalidation hints, not an ordered change log or another state owner.
 Observers fetch the latest snapshot. Required-result callbacks and stream backpressure are not
@@ -73,43 +73,33 @@ shutdown settlement; it must not make an Inference save await its own downstream
 Required-result callbacks such as host persistence, tool execution and credential resolution are
 awaited as part of their operation. They are not invalidation notifications.
 
-## 3. Settings transaction
+## 3. Settings editor flow
 
-Target Common boundary:
+The settings editor works on a local settings object. Only Save returns settings to the app.
 
-```csharp
-Task<SetupSnapshot> GetSnapshotAsync(CancellationToken cancellationToken = default);
-Task<SetupEditResult> ApplySnapshotAsync(
-    SetupSnapshot snapshot, CancellationToken cancellationToken = default);
-Task<SetupValidation> ValidateAsync(CancellationToken cancellationToken = default);
-Task<SetupCommitResult> CommitAsync(CancellationToken cancellationToken = default);
-```
+1. **Open.** The user picks a provider type. An async call returns the wizard for that type: its
+   steps and the entry's current settings, or blank settings for a new entry.
+2. **Edit.** A field edit changes only the local object. It makes no provider call and writes no
+   storage. Show/hide and enable rules between fields run on the local object synchronously.
+3. **Act.** Sign-in, tests, checks and model queries are async connector calls. Each call takes the
+   current local values, including unsaved ones. Its result, including a sign-in credential, goes
+   into the local object.
+4. **Save.** Save is one async call. It validates the local object and hands the whole object to the
+   app through the host's typed commit target, once. Closing without Save discards the object, and
+   the app receives nothing.
 
-The concrete implementation must preserve typed fields rather than introduce an untyped property bag.
-A fetched snapshot contains local editable values and the originating session/revision identity.
-SetValue/Add/Remove are local edits; they do not synchronously invoke the provider or save storage.
-The submit boundary validates typed edits, ownership, revision, visibility and availability before
-publishing changes. Omission never means delete: repeatable-row removal remains explicit.
+Blazor pages are event based. A field's change handler edits the local object synchronously. A
+button's click handler is async: it awaits its connector calls in order, then updates the page
+state with the result.
 
-Apply updates only the session draft and returns after publication. A successful submission advances
-revision once and invalidates dependent choices, validation and readiness. Busy/stale/closed/invalid
-submissions do not partially mutate the draft. Cancellation before publication prevents application;
-once published, a later cancellation does not pretend to roll back it.
+The implementation keeps typed fields and does not introduce an untyped property bag. Omission
+never means delete: repeatable-row removal stays explicit. A parse error blocks Save. The editor
+reports unsaved changes so the host can warn before closing. Save keeps expected-version comparison
+and uncertain-commit semantics. Disposal cancels and joins owned work and clears secret state; it
+never stops a host-owned Tensor instance.
 
-The editor submits the edited snapshot, awaits the result and fetches the refreshed snapshot.
-Changing repository therefore refreshes revision/model choices without persisting the configuration.
-Unsaved input must not be silently discarded on a notification or stale apply. Existing parsing-error
-Save blocking, pending secret edits, callback retention, dirty-close signals and latest-choice handling
-remain mandatory.
-
-Provider-owned computation and publication remain serialized. Do not await host callbacks under the
-state monitor. Implementation hooks which only compute local values can remain synchronous.
-There is no need to make every protected hook asynchronous solely because it is extensible.
-
-Commit validates the current session draft, freezes conflicting mutation and awaits the host's
-existing typed commit target once. Preserve expected-version comparison and uncertain-commit
-semantics. Observer failure is unrelated to persistence success. Disposal closes admission,
-cancels/joins owned work and clears secret state; it never stops a host-owned Tensor instance.
+Tensor setup actions that write model files or change a running instance are exceptions to this
+flow and are specified separately.
 
 ## 4. Streaming and callback implementation
 
@@ -186,8 +176,9 @@ public contracts. No parallel legacy signature is exposed.
 - Streaming: progressive output, no eager generation, backpressure, terminal events,
   cancellation, partial failure and abandoned-enumerator cleanup.
 - Required-result callbacks: await completion/fault/cancellation; preserve tool and credential policy.
-- Snapshots: independent local edits, typed submission, one revision per batch, stale/busy/closed
-  rejection, dependent choices, secret redaction, no persistence on Apply.
+- Settings editor: edits and show/hide rules make no provider call; actions and model queries use
+  unsaved values; nothing reaches the app without Save; closing without Save discards everything;
+  secret redaction.
 - Notifications: a throwing listener does not affect the operation or other listeners; reentrancy
   does not deadlock; listeners do not become a second state owner.
 - Lifecycle: failed/cancelled load, urgent/graceful stop, repeated cleanup, gate/lease ownership.
