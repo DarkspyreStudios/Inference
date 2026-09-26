@@ -172,8 +172,7 @@ Keep explicit framework cleanup and never report completed cleanup while native 
 ### 5.2 Common, Connect and Settings.UI public members
 
 This list covers every public synchronous member in `Common/src`, `Connect/src` and
-`UI/src/Settings` that touches a service or live state. Tensor has its own requirements and is
-not listed.
+`UI/src/Settings` that touches a service or live state. Section 5.3 covers Tensor.
 
 **Becomes async**
 
@@ -217,6 +216,43 @@ not listed.
 | `AddLlmConnect`, `AddLlmConnectBedrock`, `AddImageConnect`, `AddAudioConnect`, `AddTtsConnect`, service constructors | DI registration and construction with no I/O. |
 | Bedrock AWS profile reads inside `GetProfilesAsync` and credential resolution | The AWS SDK has no async form. The async method calls them directly. |
 
+### 5.3 Tensor native work
+
+Tensor runs models through three native libraries. Qwen and Supra use TensorSharp. Laya uses ONNX
+Runtime. Whisper uses Whisper.net. Supra and Laya tokenize through the Darkspyre.ML.Tokenizers fork.
+TensorSharp and the tokenizer fork are Darkspyre packages. ONNX Runtime and Whisper.net are
+external.
+
+**Compute runs on a background thread.** GPU and CPU compute has no async form. This covers
+backend and device initialization, CUDA kernel compilation, weight upload, model steps, ONNX
+session creation and `Run`, and native teardown. Every public Tensor method that performs this
+work runs it with `Task.Run`, so no Tensor method blocks its caller. This applies to load,
+generate, decide, measure, unload, dispose and backend probes. Cancellation takes effect between
+steps: a native step that has started finishes before the method observes cancellation. Laya runs
+synchronous `InferenceSession.Run` on the background thread and cancels it through
+`RunOptions.Terminate`.
+
+**File reading is async in the Darkspyre libraries.**
+
+- TensorSharp reads GGUF, safetensors and torch headers asynchronously and takes a cancellation
+  token. The Inference metadata reader awaits these reads and holds no blocking wait.
+- `ModelService.LoadModelAsync` honours its cancellation token for the whole load and checks it
+  after each tensor. It reads the file header once. Tensor reads that are not memory-mapped, and
+  the file-cache prefault, use async reads.
+- `SafetensorsFile` and `TorchStateDictionaryFile` open asynchronously. Torch tensor reads have an
+  async form.
+- TensorSharp reads the CUDA kernel file asynchronously. The kernel compile after it stays
+  synchronous.
+- The tokenizer fork loads SentencePiece asynchronously from a stream. Its BPE `CreateAsync` takes
+  a cancellation token.
+
+**Qwen streams.** Disposing a Qwen stream before it completes aborts its engine request, the same
+as cancellation.
+
+**Concurrency limits.** GGML runs one compute step at a time under the model's GPU compute lock. A
+Supra model uses one CUDA stream. A process uses one GGML backend type. Concurrent work comes from
+file reading, tokenization and CPU work running beside GPU work.
+
 ## 6. Verification
 
 All in-repository implementations, tests, examples, tools and UI.Settings consumers use the same
@@ -233,11 +269,15 @@ public contracts. No parallel legacy signature is exposed.
   nothing reaches the app without Save; closing without Save discards everything;
   secret redaction.
 - Lifecycle: failed/cancelled load, urgent/graceful stop, repeated cleanup, gate/lease ownership.
+- Tensor: no public method runs native work on the caller's thread; cancellation between steps;
+  disposing an unfinished Qwen stream aborts its engine request; the metadata reader holds no
+  blocking wait.
 - Public API: every member in section 5.2 has its listed signature and behaviour. Compile external
   implementations of changed contracts.
 - All three solutions: zero-warning Debug/Release builds and deterministic tests; format and
   dependency-vulnerability checks. No paid provider calls or downloaded models as gates.
 
 Common, Connect, Tensor and UI.Settings share the version in Directory.Build.props and exact
-Common package dependency. These boundaries do not introduce application-owned persistence,
+Common package dependency. Tensor depends on the TensorSharp and Darkspyre.ML.Tokenizers
+versions that provide the async reads in section 5.3. These boundaries do not introduce application-owned persistence,
 provider selection or lifecycle scheduling into the libraries.
