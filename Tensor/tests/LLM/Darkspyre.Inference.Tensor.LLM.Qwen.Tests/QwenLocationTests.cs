@@ -32,7 +32,7 @@ public sealed class QwenLocationTests
             var selection = new TensorModelSelection(kind == "folder" ? new TensorModelLocation.LocalFolder(root, primary) : Location(primary),
                 TensorBackendKind.Cpu, "test", Companions: kind != "folder" && split
                     ? [new("model-shard-2", Location(files.Keys.Last()))] : null);
-            using var manager = new TensorModelPackManager(new([]), new TensorDirectFilePersistStore(Path.Combine(root, "store")), http);
+            using var manager = new TensorModelPackManager(new([]), Path.Combine(root, "store"), http);
             TensorModelImportResult result = await manager.ImportAsync(new(selection, resolver));
             Assert.Equal(TensorCompatibilityState.Supported, result.Resolution.Evaluation.State);
             Assert.Equal(files.Count, result.Resolution.Definition!.Artifacts.Count);

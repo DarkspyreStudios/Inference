@@ -166,7 +166,7 @@ public sealed class SupraPackSelectionTests : IDisposable
     }
 
     private TensorModelPackManager Manager(HttpClient http, params TensorModelPackDefinition[] definitions) =>
-        new(new(definitions), new TensorDirectFilePersistStore(_root), http);
+        new(new(definitions), _root, http);
 
     private static TensorModelPackDefinition Pack(string id) => TensorImageModels.Supra2Image with
     {
@@ -200,19 +200,17 @@ public sealed class SupraPackSelectionTests : IDisposable
         public List<TensorModelKey> LoadedKeys { get; } = [];
         public List<Model> Models { get; } = [];
         public Action<Model>? AfterCreate { get; init; }
-        public async Task<ISupraImageModel> LoadAsync(TensorModelPackLease lease, TensorBackendKind backend, CancellationToken cancellationToken)
+        public Task<ISupraImageModel> LoadAsync(TensorModelPackLease lease, TensorBackendKind backend, CancellationToken cancellationToken)
         {
             foreach (string role in new[] { "supra-model", "text-model", "text-tokenizer", "vae-model" })
             {
-                var reference = lease.GetRequiredArtifact(role);
-                await using Stream? stream = await reference.Store.OpenReadAsync(reference.StoreName, reference.AssetName, cancellationToken);
-                Assert.NotNull(stream);
+                Assert.True(File.Exists(lease.GetRequiredArtifact(role)));
             }
             LoadedKeys.Add(lease.Key);
             var model = new Model();
             Models.Add(model);
             AfterCreate?.Invoke(model);
-            return model;
+            return Task.FromResult<ISupraImageModel>(model);
         }
     }
 

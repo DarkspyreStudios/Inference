@@ -29,7 +29,7 @@ public sealed class LayaModelResolverTests : IDisposable
         var selection = new TensorModelSelection(new TensorModelLocation.LocalFolder(_root, "laya.onnx"), License: "test-fixture");
         TensorModelResolution before = await resolver.ResolveAsync(selection);
         Assert.Equal(TensorCompatibilityState.Unverified, before.Evaluation.State);
-        using var manager = new TensorModelPackManager(new([]), new TensorDirectFilePersistStore(Path.Combine(_root, "store")));
+        using var manager = new TensorModelPackManager(new([]), Path.Combine(_root, "store"));
         TensorModelImportResult imported = await manager.ImportAsync(new(selection, resolver));
         Assert.Equal(TensorCompatibilityState.Supported, imported.Resolution.Evaluation.State);
         TensorModelPackDefinition definition = Assert.IsType<TensorModelPackDefinition>(imported.Resolution.Definition);
@@ -54,7 +54,7 @@ public sealed class LayaModelResolverTests : IDisposable
         Assert.Contains((await resolver.DiscoverAsync(selection)).Issues!, issue => issue.Code == "companion-missing");
         File.Copy(Fixture("tokenizer.json"), Path.Combine(_root, "tokenizer.json"));
         await File.WriteAllTextAsync(Path.Combine(_root, "rl_agent_config.json"), Configuration(64));
-        using var manager = new TensorModelPackManager(new([]), new TensorDirectFilePersistStore(Path.Combine(_root, "store")));
+        using var manager = new TensorModelPackManager(new([]), Path.Combine(_root, "store"));
         TensorModelImportResult rejected = await manager.ImportAsync(new(selection, resolver));
         Assert.Equal(TensorCompatibilityState.Unsupported, rejected.Resolution.Evaluation.State);
         Assert.Empty(manager.Definitions);

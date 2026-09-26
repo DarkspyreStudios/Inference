@@ -1,5 +1,3 @@
-using TensorSharp.Runtime;
-
 namespace Darkspyre.Inference.Tensor.Common;
 
 public sealed class TensorModelPackLease : IAsyncDisposable
@@ -8,7 +6,7 @@ public sealed class TensorModelPackLease : IAsyncDisposable
 
     internal TensorModelPackLease(
         TensorModelKey key,
-        IReadOnlyDictionary<string, PersistenceFileReference> artifacts,
+        IReadOnlyDictionary<string, string> artifacts,
         Func<ValueTask> release)
     {
         Key = key;
@@ -18,10 +16,12 @@ public sealed class TensorModelPackLease : IAsyncDisposable
 
     public TensorModelKey Key { get; }
 
-    public IReadOnlyDictionary<string, PersistenceFileReference> Artifacts { get; }
+    /// <summary>The absolute file path of each artifact, by role.</summary>
+    public IReadOnlyDictionary<string, string> Artifacts { get; }
 
-    public PersistenceFileReference GetRequiredArtifact(string role) =>
-        Artifacts.TryGetValue(role, out PersistenceFileReference? artifact)
+    /// <summary>Returns the absolute file path of the artifact with <paramref name="role"/>.</summary>
+    public string GetRequiredArtifact(string role) =>
+        Artifacts.TryGetValue(role, out string? artifact)
             ? artifact
             : throw new KeyNotFoundException($"Model pack '{Key}' has no artifact role '{role}'.");
 

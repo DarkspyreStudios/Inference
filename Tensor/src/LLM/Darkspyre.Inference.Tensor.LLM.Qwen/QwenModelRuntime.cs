@@ -23,21 +23,23 @@ internal sealed class QwenModelRuntime : IQwenModelRuntime
     public int? ContextLength => _service.ContextTokens > 0 ? _service.ContextTokens : null;
     public string? LoadedBackend => _service.LoadedBackend;
 
-    public async Task LoadAsync(TensorModelPackDefinition definition, TensorModelPackLease lease, string backend, CancellationToken cancellationToken)
-    {
-        PersistenceFileSet files = CreateFileSet(definition, lease);
-        using (GgufFile file = await GgufFile.OpenAsync(files, cancellationToken).ConfigureAwait(false))
+    /// <summary>
+    /// Validates and loads the pack's GGUF on a background thread. TensorSharp reads the file and
+    /// uploads weights synchronously; sibling shards are found beside the primary file.
+    /// </summary>
+    public Task LoadAsync(TensorModelPackDefinition definition, TensorModelPackLease lease, string backend, CancellationToken cancellationToken) =>
+        Task.Run(() =>
         {
-            QwenModelCompatibility.ValidateCheckpoint(file, definition);
-            file.ThrowIfTruncated();
-        }
-        await _service.LoadModelAsync(files, null, backend, cancellationToken).ConfigureAwait(false);
-    }
-
-    internal static PersistenceFileSet CreateFileSet(TensorModelPackDefinition definition, TensorModelPackLease lease) =>
-        new(definition.Artifacts.Single(artifact => artifact.Role == "model").RelativePath,
-            definition.Artifacts.ToDictionary(artifact => artifact.RelativePath,
-                artifact => lease.GetRequiredArtifact(artifact.Role), StringComparer.Ordinal));
+            string modelPath = lease.GetRequiredArtifact("model");
+            using (var file = new GgufFile(modelPath))
+            {
+                QwenModelCompatibility.ValidateCheckpoint(file, definition);
+                file.ThrowIfTruncated();
+            }
+            cancellationToken.ThrowIfCancellationRequested();
+            // TensorSharp annotates the projector path as non-null but treats null as no projector.
+            _service.LoadModel(modelPath, null!, backend);
+        }, cancellationToken);
 
     public void ApplyGrammar(SamplingConfig sampling, StructuredOutputFormat format)
     {

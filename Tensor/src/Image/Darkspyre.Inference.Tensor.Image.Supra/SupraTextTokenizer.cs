@@ -1,5 +1,4 @@
 using Microsoft.ML.Tokenizers;
-using TensorSharp.Runtime;
 using MlSentencePieceTokenizer = Microsoft.ML.Tokenizers.SentencePieceTokenizer;
 
 namespace Darkspyre.Inference.Tensor.Image.Supra;
@@ -16,19 +15,10 @@ internal sealed class SupraTextTokenizer
         _tokenizer = tokenizer;
     }
 
-    public static async Task<SupraTextTokenizer> CreateAsync(
-        PersistenceFileReference source,
-        CancellationToken cancellationToken)
+    /// <summary>Loads the SentencePiece model at <paramref name="path"/>. ML.Tokenizers reads it synchronously.</summary>
+    public static SupraTextTokenizer Create(string path)
     {
-        await using Stream? content = await source.Store.OpenReadAsync(
-            source.StoreName,
-            source.AssetName,
-            cancellationToken).ConfigureAwait(false);
-        if (content is null)
-        {
-            throw new FileNotFoundException($"Tokenizer artifact '{source}' does not exist.", source.AssetName);
-        }
-
+        using FileStream content = File.OpenRead(path);
         return new SupraTextTokenizer(MlSentencePieceTokenizer.Create(
             content,
             addBeginningOfSentence: false,

@@ -115,7 +115,7 @@ public sealed class QwenPackSelectionTests : IDisposable
         Assert.Null(runtime.ContextLength);
     }
 
-    private TensorModelPackManager Manager(HttpClient http, params TensorModelPackDefinition[] definitions) => new(new(definitions), new TensorDirectFilePersistStore(_root), http);
+    private TensorModelPackManager Manager(HttpClient http, params TensorModelPackDefinition[] definitions) => new(new(definitions), _root, http);
     private static TensorModelPackDefinition Pack(string id) => TensorLlmModels.Qwen3FourBillionQ4Km with
     {
         Key = new(id, "custom-revision"),

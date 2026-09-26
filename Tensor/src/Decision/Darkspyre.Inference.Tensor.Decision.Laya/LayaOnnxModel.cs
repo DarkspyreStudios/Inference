@@ -35,9 +35,9 @@ internal sealed class LayaOnnxModel : ILayaDecisionModel
 
     /// <summary>Creates the session and validates the graph against the agent configuration.</summary>
     /// <exception cref="InvalidDataException">The graph's metadata or input shapes do not match.</exception>
-    public static LayaOnnxModel Create(byte[] model, SessionOptions options, int configuredMaximumLength)
+    public static LayaOnnxModel Create(string modelPath, SessionOptions options, int configuredMaximumLength)
     {
-        var session = new InferenceSession(model, options);
+        var session = new InferenceSession(modelPath, options);
         try
         {
             Dictionary<string, string> metadata = session.ModelMetadata.CustomMetadataMap;

@@ -7,18 +7,17 @@ model-location/import contracts introduced in 11.4.0-rc.1.
 In-process, first-class .NET inference built on TensorSharp, ONNX Runtime and Whisper.net and distributed as the
 `Darkspyre.Inference.Tensor` NuGet. The current package targets .NET 11 and references the synchronized
 `Darkspyre.Inference.Common` NuGet rather than embedding Common. Model weights are installed
-separately through Tensor's
-model-pack manager into the `IPersistenceStore` supplied by the application; constructing a runtime
-or running inference never downloads weights. The optional `TensorDirectFilePersistStore` is the
-filesystem default and still exposes only `IPersistenceStore`. TensorSharp uses a returned
-`FileStream` in place and temporarily projects non-file store streams when a native loader needs a
-path. Laya reads its model bytes through the store and passes them to ONNX Runtime, so the host
-alone decides where model files live.
+separately through Tensor's model-pack manager into a pack directory on the local file system;
+constructing a runtime or running inference never downloads weights. The pack directory defaults to
+`LocalApplicationData/Darkspyre Studios/Inference/Tensor`, and the host can supply another
+directory, such as its app folder. Each engine receives the installed files as plain paths: Qwen and
+Supra pass them to TensorSharp, Laya creates its ONNX Runtime session from the model path, and
+Whisper loads through `WhisperFactory.FromPath`.
 
 Assemblies included by Tensor **11.9.2-rc.1**:
 
 - `Darkspyre.Inference.Tensor.Common` — the host-controlled model lifecycle, model packs,
-  verification, direct-file persistence, and execution coordination.
+  verification, the local pack directory, and execution coordination.
 - `Darkspyre.Inference.Tensor.LLM`, `.Image`, and `.Decision` — interchangeable capability
   interfaces using the typed requests and results from `Darkspyre.Inference.Common`.
 - `Darkspyre.Inference.Tensor.LLM.Qwen` — Qwen-compatible GGUF text inference.
@@ -59,7 +58,7 @@ assemblies and namespaces; consuming code remains first-class C# and does not lo
 
 Each capability assembly publishes its pack definition separately from installation. A desktop
 application composes the packs it supports into a `TensorModelCatalog`, constructs one
-`TensorModelPackManager` with its own `IPersistenceStore`, and explicitly calls `InstallAsync` when
+`TensorModelPackManager` over its pack directory, and explicitly calls `InstallAsync` when
 the user chooses to download a model. Inference only acquires verified packs and never initiates a
 download.
 
@@ -88,9 +87,9 @@ using Darkspyre.Inference.Tensor.Common;
 using Darkspyre.Inference.Tensor.Image;
 using Darkspyre.Inference.Tensor.Image.Supra;
 
-// applicationStore is the host's IPersistenceStore (or omit it to use the file-store default).
+// packDirectory is the host's pack directory (or omit it to use the per-user default).
 TensorModelPackDefinition supra = TensorImageModels.Supra2Image;
-using var packs = new TensorModelPackManager(new TensorModelCatalog([supra]), applicationStore);
+using var packs = new TensorModelPackManager(new TensorModelCatalog([supra]), packDirectory);
 await using ITensorImageInference image = new SupraImageInference(packs);
 
 await image.StartAsync();
@@ -172,13 +171,10 @@ Qwen currently targets `TensorLlmModels.QwenRuntimeArchitecture` (Qwen3 GGUF), n
 implemented by TensorSharp. Its loader checks the installed GGUF architecture/version, tokenizer
 and chat metadata, layer dimensions/tensor shapes, storage encoding and complete shard declarations
 before native allocation. Listed context/output limits remain unknown until validated loaded-runtime
-metadata is available; the built-in 4B limits are not copied onto other models. Split GGUF loading
-passes every declared artifact and relative filename to TensorSharp's `PersistenceFileSet`. The
-fork retains an in-place file layout or projects the complete set together for other stores,
-including mixed stores. Shard count/names/numbering and duplicate tensors are checked before native
-allocation. No unlisted persistence artifacts are discovered through adjacent filesystem paths.
-Inference still owns no path-materialization implementation; the fork owns cleanup on failure,
-cancellation and unload. The host continues to use only the pack manager and `IPersistenceStore`.
+metadata is available; the built-in 4B limits are not copied onto other models. A split GGUF pack
+installs every declared shard beside the primary file under its numbered name, and Qwen passes
+TensorSharp the primary path; TensorSharp opens the sibling shards from the same directory. Shard
+count/names/numbering and duplicate tensors are checked before native allocation.
 
 **Capability addition (11.9.2-rc.1):** Qwen's Common `LlmCapabilities.OutputLimitEnforcement` is
 `EngineEnforced`, describing its existing `MaxOutputTokens` runtime limit. This is separate from
@@ -203,8 +199,8 @@ host-owned. No web directory crawling or native model activation occurs during i
 
 Inspect reads bounded metadata. When complete lengths/hashes are unavailable, **Import model
 artifacts** is an explicit full-copy/download action: it calculates integrity, checks the selected
-family against staged bytes, then uses the existing pack manager and application persistence store
-to install the complete pack. Missing licenses are requested, never fabricated. A calculated hash
+family against staged bytes, then uses the existing pack manager to install the complete pack into
+its pack directory. Missing licenses are requested, never fabricated. A calculated hash
 identifies the imported content, not its publisher. Expected hashes must match. Save still only
 commits a complete compatible definition; neither Save nor Import loads the model. Closing an
 unsaved editor does not remove an imported pack.
@@ -422,12 +418,9 @@ quantized variants or modified architecture dimensions are not advertised. No al
 is introduced. Language/translation are typed request options, not a library-owned application
 settings store.
 
-Whisper.net 1.9.1 requires a path or whole-model buffer, not a stream. Its adapter reads the pack's
-persistence reference: it retains a FileStream's real path, or bounded-copies other store streams
-into a private temporary file. It holds that resource until factory disposal and cleans it on failed
-or cancelled loads. This is an internal native-loader projection, not another durable model cache;
-the application still supplies only `IPersistenceStore`. Native processing is not crash-isolated and
-teardown has no guaranteed deadline.
+Whisper.net 1.9.1 requires a path or whole-model buffer, not a stream. Its adapter passes the
+installed model's path and holds the file open until factory disposal, releasing it on failed or
+cancelled loads. Native processing is not crash-isolated and teardown has no guaranteed deadline.
 
 The [source-only bridge](examples/Darkspyre.Inference.Tensor.STT.Bridge/README.md) is a non-packable
 ASP.NET example showing a host's explicit startup/load, PCM request mapping and terminal shutdown.
@@ -438,10 +431,9 @@ the Audio / SpeechTranscription task without provider-name renderer branches.
 ## Package dependency boundary
 
 Tensor depends on **Darkspyre.Inference.Common [11.9.2-rc.1]** and the **Darkspyre.TensorSharp.*
-2.8.6.4** dependency closure through NuGet. None of their DLLs is embedded in Tensor. The TensorSharp
-release includes the named GGUF persistence and bounded metadata inspection changes previously
-validated at fork commit `9b248715`, through the existing GGUF, safetensors and restricted PyTorch
-readers. The local-only validation version is no longer a product dependency.
+2.8.6.5** dependency closure through NuGet. None of their DLLs is embedded in Tensor. TensorSharp
+2.8.6.5 loads model files from paths and provides bounded metadata inspection through its GGUF,
+safetensors and restricted PyTorch readers.
 
 Use the root `NuGet.Config` and process-scoped private-feed credentials for normal restores.
 Darkspyre dependencies come from the private feed; Microsoft.ML.OnnxRuntime, Whisper.net, its

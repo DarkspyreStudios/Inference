@@ -2,7 +2,6 @@ using System.Text.Json;
 using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Common.Decision;
 using Darkspyre.Inference.Tensor.Common;
-using TensorSharp.Runtime;
 
 namespace Darkspyre.Inference.Tensor.Decision.Laya;
 
@@ -23,8 +22,8 @@ public sealed class LayaInputMeter : IDecisionInputMeasurement
     }
 
     public static async Task<LayaInputMeter> LoadAsync(
-        PersistenceFileReference tokenizer,
-        PersistenceFileReference agentConfiguration,
+        string tokenizer,
+        string agentConfiguration,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(tokenizer);

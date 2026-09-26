@@ -2,14 +2,11 @@ using System.Text.Json;
 using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Common.Decision;
 using Darkspyre.Inference.Tensor.Common;
-using TensorSharp.Runtime;
 
 namespace Darkspyre.Inference.Tensor.Decision.Laya.Tests;
 
 public sealed class LayaInputMeterTests
 {
-    private static readonly TensorDirectFilePersistStore Base = new(AppContext.BaseDirectory);
-
     [Fact]
     public async Task MeasuresTheStateAndEachQuestionsBudgetFromTheTwoArtifacts()
     {
@@ -61,10 +58,8 @@ public sealed class LayaInputMeterTests
         {
             Directory.CreateDirectory(Path.Combine(root, "fixture"));
             await File.WriteAllTextAsync(Path.Combine(root, "fixture", "config.json"), "{ not json");
-            var store = new TensorDirectFilePersistStore(root);
-
             InferenceException failure = await Assert.ThrowsAsync<InferenceException>(() =>
-                LayaInputMeter.LoadAsync(Fixture("tokenizer.json"), new PersistenceFileReference(store, "fixture", "config.json")));
+                LayaInputMeter.LoadAsync(Fixture("tokenizer.json"), Path.Combine(root, "fixture", "config.json")));
 
             Assert.Equal(InferenceFailureCode.ModelCorrupt, failure.Code);
         }
@@ -109,5 +104,5 @@ public sealed class LayaInputMeterTests
     private static Task<LayaInputMeter> LoadFixtureMeterAsync() =>
         LayaInputMeter.LoadAsync(Fixture("tokenizer.json"), Fixture("laya-agent-config.json"));
 
-    private static PersistenceFileReference Fixture(string name) => new(Base, "Fixtures", name);
+    private static string Fixture(string name) => Path.Combine(AppContext.BaseDirectory, "Fixtures", name);
 }

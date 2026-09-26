@@ -44,47 +44,33 @@ public sealed class WhisperPcmAndStorageTests
     }
 
     [Fact]
-    public async Task NonFileStoreProjectionKeepsSourceAliveAndDeletesOnlyItsPrivateFile()
+    public async Task TheInstalledFileIsUsedInPlaceAndHeldOpenUntilDisposal()
     {
-        var store = new WhisperFixture.Store();
+        using var directory = new WhisperFixture.PackDirectory();
+        string path = Path.Combine(directory.Path, "model.bin");
         byte[] bytes = WhisperFixture.Header();
-        await store.SaveAsync("models", "weights", new MemoryStream(bytes));
-        WhisperModelFile file = await WhisperModelFile.OpenAsync(new(store, "models", "weights"), bytes.Length, default);
-        string path = file.Path;
-        Assert.Equal(bytes, await File.ReadAllBytesAsync(path));
-        Assert.True(store.LastRead!.CanRead);
-        await file.DisposeAsync();
-        Assert.False(store.LastRead.CanRead); Assert.False(File.Exists(path)); Assert.False(Directory.Exists(Path.GetDirectoryName(path)));
-        Assert.True(await store.ExistsAsync("models", "weights"));
-    }
+        await File.WriteAllBytesAsync(path, bytes);
 
-    [Fact]
-    public async Task DirectFileStoreRetainsOriginalFileWithoutCopyOrDeletion()
-    {
-        string root = Directory.CreateTempSubdirectory("whisper-direct-test-").FullName;
-        try
-        {
-            var store = new TensorDirectFilePersistStore(root);
-            byte[] bytes = WhisperFixture.Header();
-            await store.SaveAsync("models", "weights", new MemoryStream(bytes));
-            WhisperModelFile file = await WhisperModelFile.OpenAsync(new(store, "models", "weights"), bytes.Length, default);
-            string path = file.Path;
-            Assert.StartsWith(root, path, StringComparison.Ordinal);
-            await file.DisposeAsync(); Assert.True(File.Exists(path));
-            await store.DeleteAsync("models", "weights");
-        }
-        finally { Directory.Delete(root, recursive: true); }
+        WhisperModelFile file = await WhisperModelFile.OpenAsync(path, bytes.Length, default);
+        Assert.Equal(path, file.Path);
+        Assert.Throws<IOException>(() => WhisperFixture.AssertNoOpenHandle(path));
+        await file.DisposeAsync();
+        WhisperFixture.AssertNoOpenHandle(path);
+        Assert.True(File.Exists(path));
     }
 
     [Theory]
     [InlineData(-1)]
     [InlineData(1)]
-    public async Task ProjectionRejectsChangedLengthAndClosesSource(int adjustment)
+    public async Task AChangedLengthIsRejectedAndTheFileIsClosed(int adjustment)
     {
-        var store = new WhisperFixture.Store(); byte[] bytes = WhisperFixture.Header();
-        await store.SaveAsync("models", "weights", new MemoryStream(bytes));
-        await Assert.ThrowsAsync<InvalidDataException>(() => WhisperModelFile.OpenAsync(new(store, "models", "weights"), bytes.Length + adjustment, default));
-        Assert.False(store.LastRead!.CanRead);
+        using var directory = new WhisperFixture.PackDirectory();
+        string path = Path.Combine(directory.Path, "model.bin");
+        byte[] bytes = WhisperFixture.Header();
+        await File.WriteAllBytesAsync(path, bytes);
+
+        await Assert.ThrowsAsync<InvalidDataException>(() => WhisperModelFile.OpenAsync(path, bytes.Length + adjustment, default));
+        WhisperFixture.AssertNoOpenHandle(path);
     }
 
     [Fact]

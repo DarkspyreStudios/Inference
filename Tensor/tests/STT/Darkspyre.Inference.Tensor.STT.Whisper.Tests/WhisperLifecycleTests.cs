@@ -28,9 +28,10 @@ public sealed class WhisperLifecycleTests
         Assert.Single(host.Loader.Models); Assert.Equal(1, host.Handler.Calls);
         await Assert.ThrowsAsync<InvalidOperationException>(() => host.Engine.LoadAsync(host.Pack.Key));
         await Assert.ThrowsAsync<TensorModelPackException>(() => host.Packs.RemoveAsync(host.Pack.Key));
-        string projected = host.Loader.Models[0].Path;
+        string installed = host.Loader.Models[0].Path;
         await host.Engine.UnloadAsync();
-        Assert.True(host.Loader.Models[0].Disposed); Assert.False(File.Exists(projected)); Assert.Null(host.Engine.Observation.Model);
+        Assert.True(host.Loader.Models[0].Disposed); Assert.Null(host.Engine.Observation.Model);
+        Assert.True(File.Exists(installed)); WhisperFixture.AssertNoOpenHandle(installed);
         TensorModelPackDefinition second = host.Pack with { Key = new("host/another-whisper", "two") };
         host.Packs.Register(second); await host.Packs.InstallAsync(second.Key); await host.Engine.LoadAsync(second.Key);
         Assert.Equal(second.Key.ModelId, (await host.Engine.TranscribeAsync(Request)).Provenance.ModelId);
@@ -71,13 +72,17 @@ public sealed class WhisperLifecycleTests
         byte[] bytes = WhisperFixture.Header(); bytes[0] = 0;
         TensorModelPackDefinition pack = WhisperFixture.Pack(bytes);
         using var http = new HttpClient(new WhisperFixture.Handler(bytes));
-        var store = new WhisperFixture.Store();
-        using var packs = new TensorModelPackManager(new([pack]), store, http);
+        using var directory = new WhisperFixture.PackDirectory();
+        using var packs = new TensorModelPackManager(new([pack]), directory.Path, http);
         var loader = new WhisperFixture.Loader();
         await using var engine = new WhisperSpeechToTextInference(packs, loader);
         await packs.InstallAsync(pack.Key);
         Assert.Equal(InferenceFailureCode.ModelCorrupt, (await Assert.ThrowsAsync<InferenceException>(() => engine.LoadAsync(pack.Key))).Code);
-        Assert.Null(engine.Observation.Model); Assert.Empty(loader.Models); Assert.False(store.LastRead!.CanRead);
+        Assert.Null(engine.Observation.Model); Assert.Empty(loader.Models);
+        await using (TensorModelPackLease lease = await packs.AcquireAsync(pack.Key))
+        {
+            WhisperFixture.AssertNoOpenHandle(lease.GetRequiredArtifact("model"));
+        }
         await packs.RemoveAsync(pack.Key);
     }
 
@@ -141,7 +146,7 @@ public sealed class WhisperLifecycleTests
     }
 
     [Fact]
-    public async Task CancellationAfterNativeLoadCleansProjectionAndLeaseWithoutPublishingModel()
+    public async Task CancellationAfterNativeLoadReleasesTheModelFileAndLeaseWithoutPublishingModel()
     {
         await using var host = new WhisperFixture.Host();
         await host.Packs.InstallAsync(host.Pack.Key);
@@ -149,7 +154,7 @@ public sealed class WhisperLifecycleTests
         host.Loader.Loaded = _ => cancellation.Cancel();
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => host.Engine.LoadAsync(host.Pack.Key, cancellation.Token));
         Assert.Null(host.Engine.Observation.Model);
-        Assert.True(host.Loader.Models.Single().Disposed); Assert.False(File.Exists(host.Loader.Models[0].Path));
+        Assert.True(host.Loader.Models.Single().Disposed); WhisperFixture.AssertNoOpenHandle(host.Loader.Models[0].Path);
         await host.Packs.RemoveAsync(host.Pack.Key);
     }
 

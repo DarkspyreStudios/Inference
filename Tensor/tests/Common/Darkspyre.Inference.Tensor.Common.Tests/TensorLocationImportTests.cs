@@ -1,9 +1,8 @@
 using System.Net;
 using System.Net.Http.Headers;
+using System.Runtime.Versioning;
 using System.Security.Cryptography;
 using Darkspyre.Inference.Common.Setup;
-using Darkspyre.Persistence;
-using MemoryPersistenceStore = Darkspyre.Inference.Tensor.Common.Tests.TensorModelPackManagerTests.MemoryPersistenceStore;
 
 namespace Darkspyre.Inference.Tensor.Common.Tests;
 
@@ -12,13 +11,13 @@ public sealed class TensorLocationImportTests : IDisposable
     private readonly string _root = Directory.CreateTempSubdirectory("tensor-location-tests-").FullName;
 
     [Fact]
-    public async Task LocalImportEstablishesIntegrityAndUsesTheApplicationStore()
+    public async Task LocalImportEstablishesIntegrityAndInstallsIntoThePackDirectory()
     {
         string path = await FileAsync("model.bin", "model"u8.ToArray());
         var resolver = new Resolver();
         var selection = new TensorModelSelection(new TensorModelLocation.LocalFile(path), License: "test-license");
         Assert.Null((await resolver.ResolveAsync(selection)).Definition);
-        using var manager = new TensorModelPackManager(new([]), new MemoryPersistenceStore());
+        using var manager = new TensorModelPackManager(new([]), Path.Combine(_root, "packs"));
         TensorModelImportResult result = await manager.ImportAsync(new(selection, resolver));
         TensorModelPackDefinition definition = Assert.IsType<TensorModelPackDefinition>(result.Resolution.Definition);
         TensorModelArtifactDefinition artifact = Assert.Single(definition.Artifacts);
@@ -28,10 +27,7 @@ public sealed class TensorLocationImportTests : IDisposable
         Assert.DoesNotContain(_root, definition.Key.ToString(), StringComparison.Ordinal);
         Assert.Equal(TensorModelPackState.Installed, (await manager.VerifyAsync(definition.Key)).State);
         await using TensorModelPackLease lease = await manager.AcquireAsync(definition.Key);
-        var reference = lease.GetRequiredArtifact("model");
-        await using Stream? content = await reference.Store.OpenReadAsync(reference.StoreName, reference.AssetName);
-        using var reader = new StreamReader(content!);
-        Assert.Equal("model", await reader.ReadToEndAsync());
+        Assert.Equal("model", await File.ReadAllTextAsync(lease.GetRequiredArtifact("model")));
         TensorModelImportResult duplicate = await manager.ImportAsync(new(selection, resolver));
         Assert.Equal(definition.Key, duplicate.Resolution.Definition!.Key);
         Assert.Single(manager.Definitions);
@@ -50,7 +46,7 @@ public sealed class TensorLocationImportTests : IDisposable
         var selection = new TensorModelSelection(new TensorModelLocation.RemoteFile(new("https://models.test/model.bin")), License: "test");
         Assert.Null((await resolver.ResolveAsync(selection)).Definition);
         Assert.Equal(0, fullReads);
-        using var manager = new TensorModelPackManager(new([]), new MemoryPersistenceStore(), http);
+        using var manager = new TensorModelPackManager(new([]), Path.Combine(_root, "packs"), http);
         TensorModelImportResult result = await manager.ImportAsync(new(selection, resolver));
         Assert.Equal(TensorCompatibilityState.Supported, result.Resolution.Evaluation.State);
         Assert.Equal(1, fullReads);
@@ -62,7 +58,7 @@ public sealed class TensorLocationImportTests : IDisposable
     {
         string path = await FileAsync("model.bin", "model"u8.ToArray());
         var resolver = new Resolver();
-        using var manager = new TensorModelPackManager(new([]), new MemoryPersistenceStore());
+        using var manager = new TensorModelPackManager(new([]), Path.Combine(_root, "packs"));
         var selection = new TensorModelSelection(new TensorModelLocation.LocalFile(path), License: "test", ExpectedSha256: new('0', 64));
         await Assert.ThrowsAsync<InvalidDataException>(() => manager.ImportAsync(new(selection, resolver)));
         Assert.Empty(manager.Definitions);
@@ -93,7 +89,7 @@ public sealed class TensorLocationImportTests : IDisposable
     public async Task MissingLicenseAndCancellationDoNotPublish()
     {
         string path = await FileAsync("model.bin", "model"u8.ToArray());
-        using var manager = new TensorModelPackManager(new([]), new MemoryPersistenceStore());
+        using var manager = new TensorModelPackManager(new([]), Path.Combine(_root, "packs"));
         var selection = new TensorModelSelection(new TensorModelLocation.LocalFile(path));
         TensorModelImportResult result = await manager.ImportAsync(new(selection, new Resolver()));
         Assert.Contains(result.Resolution.Evaluation.Issues, issue => issue.Code == "license-required");
@@ -106,7 +102,7 @@ public sealed class TensorLocationImportTests : IDisposable
     {
         string path = await FileAsync("model.bin", "model"u8.ToArray());
         var target = new Target();
-        using var manager = new TensorModelPackManager(new([]), new MemoryPersistenceStore());
+        using var manager = new TensorModelPackManager(new([]), Path.Combine(_root, "packs"));
         await using var setup = new TensorSetupSession(new(new("test", "Test", Darkspyre.Inference.Common.InferenceImplementationKind.Tensor,
             Darkspyre.Inference.Common.InferenceTask.TextGeneration), "test"), new(SetupChangeIntent.Create, "test", null), target, [], manager, resolver: new Resolver());
         Text(setup, "local-path").SetValue(path);
@@ -126,7 +122,7 @@ public sealed class TensorLocationImportTests : IDisposable
     {
         string path = await FileAsync("model.bin", "model"u8.ToArray());
         using var cancellation = new CancellationTokenSource();
-        using var manager = new TensorModelPackManager(new([]), new MemoryPersistenceStore());
+        using var manager = new TensorModelPackManager(new([]), Path.Combine(_root, "packs"));
         var selection = new TensorModelSelection(new TensorModelLocation.LocalFile(path), License: "test");
         var progress = new CancelProgress(cancellation);
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => manager.ImportAsync(new(selection, new Resolver()), progress, cancellation.Token));
@@ -134,17 +130,53 @@ public sealed class TensorLocationImportTests : IDisposable
         Assert.Empty(manager.Definitions);
     }
 
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task PersistenceFailureNeverPublishesInstalledState(bool failManifest)
+    [Fact]
+    public async Task AnArtifactThatCannotBeSavedLeavesThePackNotInstalled()
     {
         string path = await FileAsync("model.bin", "model"u8.ToArray());
-        using var manager = new TensorModelPackManager(new([]), new FailingStore(failManifest));
         var selection = new TensorModelSelection(new TensorModelLocation.LocalFile(path), License: "test");
-        await Assert.ThrowsAsync<IOException>(() => manager.ImportAsync(new(selection, new Resolver())));
+        string packs = Path.Combine(_root, "packs-under-test");
+        await File.WriteAllBytesAsync(packs, []); // A file occupies the pack directory, so no artifact can be saved.
+
+        using var manager = new TensorModelPackManager(new([]), packs);
+        await Assert.ThrowsAnyAsync<IOException>(() => manager.ImportAsync(new(selection, new Resolver())));
+        File.Delete(packs);
         TensorModelKey key = Assert.Single(manager.Definitions).Key;
         Assert.Equal(TensorModelPackState.NotInstalled, (await manager.GetStatusAsync(key)).State);
+    }
+
+    [UnixFact]
+    [SupportedOSPlatform("linux")]
+    [SupportedOSPlatform("macos")]
+    public async Task AManifestThatCannotBeSavedLeavesThePackNotInstalled()
+    {
+        string path = await FileAsync("model.bin", "model"u8.ToArray());
+        var selection = new TensorModelSelection(new TensorModelLocation.LocalFile(path), License: "test");
+        string probe = Path.Combine(_root, "probe");
+        string packs = Path.Combine(_root, "packs-under-test");
+        string packFolder;
+        using (var probeManager = new TensorModelPackManager(new([]), probe))
+        {
+            // An unobstructed import reveals where this pack's folder and manifest go.
+            TensorModelImportResult probed = await probeManager.ImportAsync(new(selection, new Resolver()));
+            await using TensorModelPackLease lease = await probeManager.AcquireAsync(probed.Resolution.Definition!.Key);
+            string relative = Path.GetRelativePath(probe, Path.GetDirectoryName(Path.GetDirectoryName(lease.GetRequiredArtifact("model"))!)!);
+            packFolder = Path.Combine(packs, relative);
+        }
+        // Artifacts can still be written into artifacts/, but the manifest cannot be added to the pack folder.
+        Directory.CreateDirectory(Path.Combine(packFolder, "artifacts"));
+        File.SetUnixFileMode(packFolder, UnixFileMode.UserRead | UnixFileMode.UserExecute);
+        try
+        {
+            using var manager = new TensorModelPackManager(new([]), packs);
+            await Assert.ThrowsAnyAsync<UnauthorizedAccessException>(() => manager.ImportAsync(new(selection, new Resolver())));
+            TensorModelKey key = Assert.Single(manager.Definitions).Key;
+            Assert.Equal(TensorModelPackState.NotInstalled, (await manager.GetStatusAsync(key)).State);
+        }
+        finally
+        {
+            File.SetUnixFileMode(packFolder, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
     }
 
     [Fact]
@@ -178,17 +210,6 @@ public sealed class TensorLocationImportTests : IDisposable
         public TensorModelInstallStage Last { get; private set; }
         public void Report(TensorModelInstallProgress value)
         { Last = value.Stage; if (value.Stage == TensorModelInstallStage.Downloading) cancellation.Cancel(); }
-    }
-    private sealed class FailingStore(bool failManifest) : IPersistenceStore
-    {
-        private readonly MemoryPersistenceStore _store = new();
-        public Task<bool> ExistsAsync(string storeName, string assetName, CancellationToken cancellationToken = default) => _store.ExistsAsync(storeName, assetName, cancellationToken);
-        public Task<Stream?> OpenReadAsync(string storeName, string assetName, CancellationToken cancellationToken = default) => _store.OpenReadAsync(storeName, assetName, cancellationToken);
-        public Task<IReadOnlyList<string>> EnumerateAsync(string storeName, string assetNamePrefix, CancellationToken cancellationToken = default) => _store.EnumerateAsync(storeName, assetNamePrefix, cancellationToken);
-        public Task DeleteAsync(string storeName, string assetName, CancellationToken cancellationToken = default) => _store.DeleteAsync(storeName, assetName, cancellationToken);
-        public Task SaveAsync(string storeName, string assetName, Stream content, CancellationToken cancellationToken = default) =>
-            assetName.EndsWith("install.json", StringComparison.Ordinal) == failManifest
-                ? throw new IOException("Controlled persistence failure.") : _store.SaveAsync(storeName, assetName, content, cancellationToken);
     }
     private sealed class Resolver(ITensorArtifactReader? reader = null) : TensorModelResolver(reader: reader)
     {

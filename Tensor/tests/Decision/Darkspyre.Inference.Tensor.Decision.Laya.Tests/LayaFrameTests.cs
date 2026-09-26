@@ -1,7 +1,6 @@
 using System.Text.Json;
 using Darkspyre.Inference.Common.Decision;
 using Darkspyre.Inference.Tensor.Common;
-using TensorSharp.Runtime;
 
 namespace Darkspyre.Inference.Tensor.Decision.Laya.Tests;
 
@@ -74,7 +73,7 @@ public sealed class LayaFrameTests
     public async Task TheV7Onnx1ShapeKeepsFiveHundredTwelveMinusTheFramedQuestion()
     {
         LayaTokenizer tokenizer = await LayaTokenizer.CreateAsync(
-            new PersistenceFileReference(new TensorDirectFilePersistStore(AppContext.BaseDirectory), "Fixtures", "tokenizer.json"),
+            Path.Combine(AppContext.BaseDirectory, "Fixtures", "tokenizer.json"),
             CancellationToken.None);
         var question = new BooleanDecisionQuestion
         {

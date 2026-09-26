@@ -2,7 +2,6 @@ using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Darkspyre.Inference.Tensor.Common;
-using TensorSharp.Runtime;
 
 namespace Darkspyre.Inference.Tensor.Decision.Laya.Tests;
 
@@ -22,8 +21,7 @@ public sealed class LayaServingParityTests
     [MemberData(nameof(GoldenCases))]
     public async Task TokenIdsMatchHuggingFaceReference(string text, int[] expected)
     {
-        var source = new PersistenceFileReference(new TensorDirectFilePersistStore(AppContext.BaseDirectory), "Fixtures", "tokenizer.json");
-        LayaTokenizer tokenizer = await LayaTokenizer.CreateAsync(source, CancellationToken.None);
+        LayaTokenizer tokenizer = await LayaTokenizer.CreateAsync(Path.Combine(Fixtures, "tokenizer.json"), CancellationToken.None);
         Assert.Equal(expected, tokenizer.Encode(text));
     }
 
@@ -41,7 +39,7 @@ public sealed class LayaServingParityTests
     public async Task PublishedCheckpointConfigurationsRetainTheirOwnLimitsAndFallbacks(string file, int maximum, int head, double fallback)
     {
         LayaAgentConfiguration configuration = await LayaAgentConfiguration.LoadAsync(
-            new(new TensorDirectFilePersistStore(AppContext.BaseDirectory), "Fixtures", file), CancellationToken.None);
+            Path.Combine(Fixtures, file), CancellationToken.None);
         Assert.Equal(maximum, configuration.MaximumLength);
         Assert.Equal(head, configuration.MaximumHeadLength);
         Assert.Equal(fallback, configuration.Temperature(0, 1));
@@ -60,12 +58,12 @@ public sealed class LayaServingParityTests
         if (field == "missing") { root.AsObject().Remove("pre_tokenizer"); }
         else { root["pre_tokenizer"]![field] = field == "type" ? JsonValue.Create(value) : JsonValue.Create(bool.Parse(value)); }
         string directory = Path.Combine(Path.GetTempPath(), $"laya-tokenizer-{Guid.NewGuid():N}");
-        var store = new TensorDirectFilePersistStore(directory);
         try
         {
-            using var content = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(root.ToJsonString()));
-            await store.SaveAsync("fixture", "tokenizer.json", content);
-            await Assert.ThrowsAsync<InvalidDataException>(() => LayaTokenizer.CreateAsync(new(store, "fixture", "tokenizer.json"), CancellationToken.None));
+            Directory.CreateDirectory(directory);
+            string path = Path.Combine(directory, "tokenizer.json");
+            await File.WriteAllTextAsync(path, root.ToJsonString());
+            await Assert.ThrowsAsync<InvalidDataException>(() => LayaTokenizer.CreateAsync(path, CancellationToken.None));
         }
         finally { if (Directory.Exists(directory)) { Directory.Delete(directory, true); } }
     }

@@ -288,8 +288,7 @@ fails. Deep-copy mutable collections on entry. The catalog remains the one defin
 the pack manager; discovery does not create a parallel downloader/catalog. Host persistence of chosen
 definitions is explicit and registrations are reconstructed by the host after restart.
 
-Installation still uses `ITensorModelPackManager` and the application-supplied `IPersistenceStore`
-(including the direct-file default). Add a source-access seam to the existing manager for protected
+Installation still uses `ITensorModelPackManager`, which installs into its local pack directory. Add a source-access seam to the existing manager for protected
 artifact reads; do not put credentials into definitions/URLs. The Hugging Face source obtains a
 short-lived credential through a host callback bound to the exact origin. Follow redirects with
 explicit origin checks, never forwarding authorization to another origin. Gated/license-required,

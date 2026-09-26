@@ -1,6 +1,5 @@
 using Darkspyre.Inference.Tensor.Common;
 using Microsoft.ML.OnnxRuntime;
-using TensorSharp.Runtime;
 
 namespace Darkspyre.Inference.Tensor.Decision.Laya;
 
@@ -32,10 +31,14 @@ internal sealed class LayaModelLoader : ILayaModelLoader
         LayaAgentConfiguration configuration, CancellationToken cancellationToken)
     {
         LayaTokenizer tokenizer = await LayaTokenizer.CreateAsync(lease.GetRequiredArtifact("tokenizer"), cancellationToken).ConfigureAwait(false);
-        byte[] model = await ReadAsync(lease.GetRequiredArtifact("model"), cancellationToken).ConfigureAwait(false);
-        cancellationToken.ThrowIfCancellationRequested();
-        using SessionOptions options = CreateOptions(backend);
-        return new(tokenizer, LayaOnnxModel.Create(model, options, configuration.MaximumLength));
+        string modelPath = lease.GetRequiredArtifact("model");
+        // ONNX Runtime creates the session synchronously from the model path; it cannot be cancelled once started.
+        LayaOnnxModel model = await Task.Run(() =>
+        {
+            using SessionOptions options = CreateOptions(backend);
+            return LayaOnnxModel.Create(modelPath, options, configuration.MaximumLength);
+        }, cancellationToken).ConfigureAwait(false);
+        return new(tokenizer, model);
     }
 
     /// <summary>
@@ -72,24 +75,5 @@ internal sealed class LayaModelLoader : ILayaModelLoader
             options.Dispose();
             throw;
         }
-    }
-
-    private static async Task<byte[]> ReadAsync(PersistenceFileReference source, CancellationToken cancellationToken)
-    {
-        await using Stream content = await source.Store.OpenReadAsync(
-            source.StoreName,
-            source.AssetName,
-            cancellationToken).ConfigureAwait(false)
-            ?? throw new FileNotFoundException($"Model artifact '{source}' does not exist.", source.AssetName);
-        if (content.CanSeek)
-        {
-            byte[] buffer = new byte[checked((int)(content.Length - content.Position))];
-            await content.ReadExactlyAsync(buffer, cancellationToken).ConfigureAwait(false);
-            return buffer;
-        }
-
-        using var copy = new MemoryStream();
-        await content.CopyToAsync(copy, cancellationToken).ConfigureAwait(false);
-        return copy.ToArray();
     }
 }

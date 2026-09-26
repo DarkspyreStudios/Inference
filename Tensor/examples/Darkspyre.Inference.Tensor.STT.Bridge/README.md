@@ -6,16 +6,16 @@ authentication and is not intended for external deployment. Production transport
 request limits and shutdown policy belong to the real host. This is not an OpenAI-compatible API.
 
 First, explicitly install a chosen definition from `TensorSpeechModels.Whisper` with the library's
-`ITensorModelPackManager.InstallAsync` using your application's persistence store (or the explicit
+`ITensorModelPackManager.InstallAsync` into your application's pack directory (or the explicit
 Install action on `WhisperSetup`). The example never downloads or repairs weights. Then run:
 
 ```sh
 dotnet run --project Tensor/examples/Darkspyre.Inference.Tensor.STT.Bridge -- --WhisperModel whisper/tiny.en
 ```
 
-Optionally supply `--TensorStore /absolute/application/store` to use the same direct-file store as
-the installing host. Missing, corrupt or uninstalled weights fail startup. The library also supports
-other `IPersistenceStore` implementations; replace the example composition, not the library API.
+Optionally supply `--TensorStore /absolute/pack/directory` to use the same pack directory as the
+installing host; without it the example uses the per-user default. Missing, corrupt or uninstalled
+weights fail startup.
 
 POST JSON to `/transcribe`:
 

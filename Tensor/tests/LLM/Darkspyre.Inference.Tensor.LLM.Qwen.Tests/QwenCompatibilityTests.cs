@@ -2,7 +2,6 @@ using System.Text;
 using System.Net;
 using System.Security.Cryptography;
 using Darkspyre.Inference.Tensor.Common;
-using Darkspyre.Persistence;
 using TensorSharp.Runtime;
 
 namespace Darkspyre.Inference.Tensor.LLM.Qwen.Tests;
@@ -34,7 +33,7 @@ public sealed class QwenCompatibilityTests
     }
 
     [Fact]
-    public async Task QwenPassesEveryNamedArtifactFromThePackLeaseToTheForkLoader()
+    public async Task AnInstalledShardedPackOpensFromItsPrimaryPathWithItsSiblingShards()
     {
         byte[][] shards = [Fixture("valid", 0), Fixture("valid", 1)];
         TensorModelPackDefinition definition = TensorLlmModels.Qwen3FourBillionQ4Km with
@@ -48,20 +47,22 @@ public sealed class QwenCompatibilityTests
                 Sources = [new Uri($"https://example.test/{index}")]
             }).ToArray()
         };
-        using var http = new HttpClient(new ShardHandler(shards));
-        using var packs = new TensorModelPackManager(new TensorModelCatalog([definition]), new MemoryStore(), http);
-        await packs.InstallAsync(definition.Key);
-        await using TensorModelPackLease lease = await packs.AcquireAsync(definition.Key);
-        PersistenceFileSet files = QwenModelRuntime.CreateFileSet(definition, lease);
-        Assert.Equal(definition.Artifacts[0].RelativePath, files.PrimaryPath);
-        Assert.Equal(2, files.Files.Count);
-        using GgufFile file = await GgufFile.OpenAsync(files);
-        Assert.Equal(13, file.Tensors.Count);
-        QwenModelCompatibility.ValidateCheckpoint(file, definition);
-        file.ThrowIfTruncated();
-        string[] paths = file.FilePaths.ToArray();
-        file.Dispose();
-        Assert.All(paths, path => Assert.False(File.Exists(path)));
+        string directory = Directory.CreateTempSubdirectory("qwen-shards-").FullName;
+        try
+        {
+            using var http = new HttpClient(new ShardHandler(shards));
+            using var packs = new TensorModelPackManager(new TensorModelCatalog([definition]), directory, http);
+            await packs.InstallAsync(definition.Key);
+            await using TensorModelPackLease lease = await packs.AcquireAsync(definition.Key);
+            using var file = new GgufFile(lease.GetRequiredArtifact("model"));
+            Assert.Equal(13, file.Tensors.Count);
+            QwenModelCompatibility.ValidateCheckpoint(file, definition);
+            file.ThrowIfTruncated();
+            Assert.Equal(
+                [lease.GetRequiredArtifact("model"), lease.GetRequiredArtifact("model-shard-2")],
+                file.FilePaths.Select(Path.GetFullPath).Order(StringComparer.Ordinal).ToArray());
+        }
+        finally { Directory.Delete(directory, true); }
     }
 
     [Fact]
@@ -131,18 +132,5 @@ public sealed class QwenCompatibilityTests
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
             Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
             { Content = new ByteArrayContent(shards[int.Parse(request.RequestUri!.AbsolutePath[1..], System.Globalization.CultureInfo.InvariantCulture)]) });
-    }
-    private sealed class MemoryStore : IPersistenceStore
-    {
-        private readonly Dictionary<(string Store, string Asset), byte[]> _assets = [];
-        public Task<bool> ExistsAsync(string storeName, string assetName, CancellationToken cancellationToken = default) => Task.FromResult(_assets.ContainsKey((storeName, assetName)));
-        public Task<Stream?> OpenReadAsync(string storeName, string assetName, CancellationToken cancellationToken = default) =>
-            Task.FromResult<Stream?>(_assets.TryGetValue((storeName, assetName), out byte[]? bytes) ? new MemoryStream(bytes, writable: false) : null);
-        public async Task SaveAsync(string storeName, string assetName, Stream content, CancellationToken cancellationToken = default)
-        { using var buffer = new MemoryStream(); await content.CopyToAsync(buffer, cancellationToken); _assets[(storeName, assetName)] = buffer.ToArray(); }
-        public Task DeleteAsync(string storeName, string assetName, CancellationToken cancellationToken = default)
-        { _assets.Remove((storeName, assetName)); return Task.CompletedTask; }
-        public Task<IReadOnlyList<string>> EnumerateAsync(string storeName, string assetNamePrefix, CancellationToken cancellationToken = default) =>
-            Task.FromResult<IReadOnlyList<string>>(_assets.Keys.Where(key => key.Store == storeName && key.Asset.StartsWith(assetNamePrefix, StringComparison.Ordinal)).Select(key => key.Asset).ToArray());
     }
 }

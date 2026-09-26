@@ -2,7 +2,6 @@ using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Microsoft.ML.Tokenizers;
-using TensorSharp.Runtime;
 using MlBpeTokenizer = Microsoft.ML.Tokenizers.BpeTokenizer;
 
 namespace Darkspyre.Inference.Tensor.Decision.Laya;
@@ -27,23 +26,18 @@ internal sealed class LayaTokenizer : ILayaTokenizer
         _tokenizer = tokenizer;
     }
 
-    public static async Task<LayaTokenizer> CreateAsync(
-        PersistenceFileReference source,
-        CancellationToken cancellationToken)
+    /// <summary>
+    /// Reads tokenizer.json at <paramref name="path"/> asynchronously, then builds the BPE tokenizer on
+    /// a background thread: ML.Tokenizers builds it synchronously.
+    /// </summary>
+    public static async Task<LayaTokenizer> CreateAsync(string path, CancellationToken cancellationToken)
     {
-        await using Stream? content = await source.Store.OpenReadAsync(
-            source.StoreName,
-            source.AssetName,
-            cancellationToken).ConfigureAwait(false);
-        if (content is null)
-        {
-            throw new FileNotFoundException($"Tokenizer artifact '{source}' does not exist.", source.AssetName);
-        }
-
+        await using var content = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read,
+            4096, FileOptions.Asynchronous | FileOptions.SequentialScan);
         using JsonDocument document = await JsonDocument.ParseAsync(
             content,
             cancellationToken: cancellationToken).ConfigureAwait(false);
-        return Parse(document.RootElement);
+        return await Task.Run(() => Parse(document.RootElement), cancellationToken).ConfigureAwait(false);
     }
 
     internal static LayaTokenizer Parse(JsonElement root)

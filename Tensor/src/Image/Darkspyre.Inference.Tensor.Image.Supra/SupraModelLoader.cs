@@ -16,18 +16,23 @@ internal interface ISupraModelLoader
 
 internal sealed class SupraModelLoader : ISupraModelLoader
 {
-    public async Task<ISupraImageModel> LoadAsync(TensorModelPackLease lease, TensorBackendKind backend, CancellationToken cancellationToken)
-    {
-        SupraTextTokenizer tokenizer = await SupraTextTokenizer.CreateAsync(lease.GetRequiredArtifact("text-tokenizer"), cancellationToken).ConfigureAwait(false);
-        using SafetensorsFile textWeights = await SafetensorsFile.OpenAsync(lease.GetRequiredArtifact("text-model"), cancellationToken).ConfigureAwait(false);
-        using TorchStateDictionaryFile ditWeights = await TorchStateDictionaryFile.OpenAsync(lease.GetRequiredArtifact("supra-model"), cancellationToken).ConfigureAwait(false);
-        using SafetensorsFile vaeWeights = await SafetensorsFile.OpenAsync(lease.GetRequiredArtifact("vae-model"), cancellationToken).ConfigureAwait(false);
-        cancellationToken.ThrowIfCancellationRequested();
-        SupraCheckpointSchema.ValidateDit(ditWeights.Tensors, ditWeights.IntegerMetadata);
-        SupraCheckpointSchema.ValidateText(textWeights.Tensors);
-        SupraCheckpointSchema.ValidateVae(vaeWeights.Tensors);
-        return new SupraImageModel(tokenizer, textWeights, ditWeights, vaeWeights, backend == TensorBackendKind.Cuda);
-    }
+    /// <summary>
+    /// Reads the tokenizer and weight files and builds the model on a background thread. TensorSharp
+    /// and ML.Tokenizers read these files synchronously.
+    /// </summary>
+    public Task<ISupraImageModel> LoadAsync(TensorModelPackLease lease, TensorBackendKind backend, CancellationToken cancellationToken) =>
+        Task.Run<ISupraImageModel>(() =>
+        {
+            SupraTextTokenizer tokenizer = SupraTextTokenizer.Create(lease.GetRequiredArtifact("text-tokenizer"));
+            using var textWeights = new SafetensorsFile(lease.GetRequiredArtifact("text-model"));
+            using var ditWeights = new TorchStateDictionaryFile(lease.GetRequiredArtifact("supra-model"));
+            using var vaeWeights = new SafetensorsFile(lease.GetRequiredArtifact("vae-model"));
+            cancellationToken.ThrowIfCancellationRequested();
+            SupraCheckpointSchema.ValidateDit(ditWeights.Tensors, ditWeights.IntegerMetadata);
+            SupraCheckpointSchema.ValidateText(textWeights.Tensors);
+            SupraCheckpointSchema.ValidateVae(vaeWeights.Tensors);
+            return new SupraImageModel(tokenizer, textWeights, ditWeights, vaeWeights, backend == TensorBackendKind.Cuda);
+        }, cancellationToken);
 }
 
 internal static class SupraModelCompatibility

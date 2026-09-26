@@ -1,7 +1,6 @@
 using System.Net;
 using System.Security.Cryptography;
 using Darkspyre.Inference.Tensor.Common;
-using Darkspyre.Persistence;
 
 namespace Darkspyre.Inference.Tensor.STT.Whisper.Tests;
 
@@ -33,22 +32,17 @@ internal static class WhisperFixture
         { cancellationToken.ThrowIfCancellationRequested(); Calls++; return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(bytes) }); }
     }
 
-    internal sealed class Store : IPersistenceStore
+    /// <summary>A temporary pack directory, deleted on disposal.</summary>
+    internal sealed class PackDirectory : IDisposable
     {
-        private readonly Dictionary<(string Store, string Asset), byte[]> _data = [];
-        public Stream? LastRead { get; private set; }
-        public Task<bool> ExistsAsync(string storeName, string assetName, CancellationToken cancellationToken = default) => Task.FromResult(_data.ContainsKey((storeName, assetName)));
-        public Task<Stream?> OpenReadAsync(string storeName, string assetName, CancellationToken cancellationToken = default)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            return Task.FromResult(LastRead = _data.TryGetValue((storeName, assetName), out byte[]? value) ? new MemoryStream(value, writable: false) : null);
-        }
-        public Task<IReadOnlyList<string>> EnumerateAsync(string storeName, string assetNamePrefix, CancellationToken cancellationToken = default) =>
-            Task.FromResult<IReadOnlyList<string>>(_data.Keys.Where(key => key.Store == storeName && key.Asset.StartsWith(assetNamePrefix, StringComparison.Ordinal)).Select(key => key.Asset).ToArray());
-        public async Task SaveAsync(string storeName, string assetName, Stream content, CancellationToken cancellationToken = default)
-        { using var copy = new MemoryStream(); await content.CopyToAsync(copy, cancellationToken); _data[(storeName, assetName)] = copy.ToArray(); }
-        public Task DeleteAsync(string storeName, string assetName, CancellationToken cancellationToken = default)
-        { _data.Remove((storeName, assetName)); return Task.CompletedTask; }
+        public string Path { get; } = Directory.CreateTempSubdirectory("whisper-packs-").FullName;
+        public void Dispose() { if (Directory.Exists(Path)) Directory.Delete(Path, recursive: true); }
+    }
+
+    /// <summary>Fails when another handle still holds <paramref name="path"/> open.</summary>
+    public static void AssertNoOpenHandle(string path)
+    {
+        using var exclusive = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.None);
     }
 
     internal sealed class Loader : IWhisperLoader
@@ -87,7 +81,7 @@ internal static class WhisperFixture
     {
         private readonly HttpClient _http;
         public Handler Handler { get; }
-        public Store Store { get; } = new();
+        public PackDirectory Directory { get; } = new();
         public Loader Loader { get; } = new();
         public TensorModelPackManager Packs { get; }
         public TensorModelPackDefinition Pack { get; }
@@ -97,10 +91,10 @@ internal static class WhisperFixture
             byte[] bytes = Header(english, turbo);
             Pack = WhisperFixture.Pack(bytes);
             Handler = new(bytes); _http = new(Handler);
-            Packs = new(new([Pack]), Store, _http);
+            Packs = new(new([Pack]), Directory.Path, _http);
             Engine = new(Packs, Loader);
         }
         public async Task LoadAsync() { await Packs.InstallAsync(Pack.Key); await Engine.LoadAsync(Pack.Key); }
-        public async ValueTask DisposeAsync() { await Engine.DisposeAsync(); Packs.Dispose(); _http.Dispose(); }
+        public async ValueTask DisposeAsync() { await Engine.DisposeAsync(); Packs.Dispose(); _http.Dispose(); Directory.Dispose(); }
     }
 }

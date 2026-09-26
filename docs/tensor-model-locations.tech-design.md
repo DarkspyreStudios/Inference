@@ -74,17 +74,17 @@ typed `TensorModelImportRequest` containing the selection and selected family re
 2. Stage complete artifacts, computing their lengths and hashes. Supplied expectations must match.
 3. Run family validation through a reader restricted to those staged bytes.
 4. Register the resulting immutable definition and use the existing installation path to write
-   artifacts through the host's `IPersistenceStore`, publishing the installed manifest last.
+   artifacts into the pack directory, publishing the installed manifest last.
 
 Install and Import share copying/hashing, per-key installation serialization, active-lease checks
 and manifest publication. Import cannot fetch additional un-staged sources after validation. Staging
-files are cleaned on success, rejection, failure or cancellation; incomplete persistence writes do
-not advertise an installed pack. Retry uses the established installation/repair rules. Cancellation
+files are cleaned on success, rejection, failure or cancellation; incomplete pack writes do not
+advertise an installed pack. Retry uses the established installation/repair rules. Cancellation
 does not promise rollback after a completed external write. An observed hash identifies copied bytes,
 not publisher authenticity. No license, digest, size or compatibility evidence is invented.
 
-Copying/importing is not loading. Runtime artifact access still goes through installed pack leases
-and the application-supplied persistence store. No new durable model cache, hosted process, inference
+Copying/importing is not loading. Runtime artifact access still goes through installed pack leases,
+which return the installed file paths. No new durable model cache, hosted process, inference
 transport or engine-lifetime mechanism is introduced.
 
 ## Setup and host UI

@@ -20,7 +20,6 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Darkspyre.Persistence" />
     <PackageReference Include="Darkspyre.ML.Tokenizers" />
     <PackageReference Include="Darkspyre.TensorSharp.Backends.Cuda" />
     <PackageReference Include="Darkspyre.TensorSharp.Chat" />

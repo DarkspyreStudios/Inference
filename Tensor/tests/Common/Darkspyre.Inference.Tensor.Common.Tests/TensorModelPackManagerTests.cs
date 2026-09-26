@@ -1,12 +1,11 @@
 using System.Net;
 using System.Security.Cryptography;
-using Darkspyre.Persistence;
 
 namespace Darkspyre.Inference.Tensor.Common.Tests;
 
 public sealed class TensorModelPackManagerTests : IDisposable
 {
-    private readonly string _persistenceRoot = Path.Combine(
+    private readonly string _packDirectory = Path.Combine(
         Path.GetTempPath(),
         $"darkspyre-tensor-tests-{Guid.NewGuid():N}");
 
@@ -14,7 +13,7 @@ public sealed class TensorModelPackManagerTests : IDisposable
     public void RegistrationIsImmutableIdempotentAndSharedWithManager()
     {
         var catalog = new TensorModelCatalog([]);
-        using var manager = new TensorModelPackManager(catalog, new MemoryPersistenceStore());
+        using var manager = new TensorModelPackManager(catalog, _packDirectory);
         TensorModelPackDefinition definition = Definition("weights"u8.ToArray());
         var sources = new List<Uri>(definition.Artifacts[0].Sources);
         var artifacts = new List<TensorModelArtifactDefinition> { definition.Artifacts[0] with { Sources = sources } };
@@ -47,7 +46,7 @@ public sealed class TensorModelPackManagerTests : IDisposable
         byte[] weights = "weights"u8.ToArray();
         TensorModelPackDefinition definition = Definition(weights);
         using var http = new HttpClient(new BytesHandler(weights));
-        using var manager = new TensorModelPackManager(new([definition]), new MemoryPersistenceStore(), http);
+        using var manager = new TensorModelPackManager(new([definition]), _packDirectory, http);
         var progress = new CaptureProgress(throws: true);
         await manager.InstallAsync(definition.Key, progress);
         Assert.Contains(progress.Values, value => value.Stage == TensorModelInstallStage.Downloading);
@@ -63,7 +62,7 @@ public sealed class TensorModelPackManagerTests : IDisposable
     {
         TensorModelPackDefinition definition = Definition("expected"u8.ToArray());
         using var http = new HttpClient(new BytesHandler("too-many-bytes"u8.ToArray()));
-        using var manager = new TensorModelPackManager(new([definition]), new MemoryPersistenceStore(), http);
+        using var manager = new TensorModelPackManager(new([definition]), _packDirectory, http);
         var progress = new CaptureProgress();
         await Assert.ThrowsAsync<TensorModelPackException>(() => manager.InstallAsync(definition.Key, progress));
         Assert.Equal(TensorModelInstallStage.Failed, progress.Values[^1].Stage);
@@ -77,15 +76,13 @@ public sealed class TensorModelPackManagerTests : IDisposable
     {
         byte[] weights = "weights"u8.ToArray();
         TensorModelPackDefinition definition = Definition(weights);
-        var store = new MemoryPersistenceStore();
         bool fail = false;
         using var http = new HttpClient(new CallbackHandler((_, _) => Task.FromResult(new HttpResponseMessage(fail ? HttpStatusCode.Forbidden : HttpStatusCode.OK)
         { Content = new ByteArrayContent(weights) })));
-        using var manager = new TensorModelPackManager(new([definition]), store, http);
+        using var manager = new TensorModelPackManager(new([definition]), _packDirectory, http);
         await manager.InstallAsync(definition.Key);
         await using TensorModelPackLease lease = await manager.AcquireAsync(definition.Key);
-        var artifact = lease.GetRequiredArtifact("weights");
-        await store.DeleteAsync(artifact.StoreName, artifact.AssetName);
+        File.Delete(lease.GetRequiredArtifact("weights"));
         await Assert.ThrowsAsync<TensorModelPackException>(() => manager.InstallAsync(definition.Key));
         await lease.DisposeAsync();
         fail = true;
@@ -110,7 +107,7 @@ public sealed class TensorModelPackManagerTests : IDisposable
             Assert.Null(request.Headers.Authorization);
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(weights) });
         }));
-        using var manager = new TensorModelPackManager(new([definition]), new MemoryPersistenceStore(), http,
+        using var manager = new TensorModelPackManager(new([definition]), _packDirectory, http,
             sourceAccess: (origin, _) =>
             {
                 Assert.Equal(new Uri("http://127.0.0.1/"), origin);
@@ -136,7 +133,7 @@ public sealed class TensorModelPackManagerTests : IDisposable
                 ? new HttpResponseMessage(HttpStatusCode.Redirect) { Headers = { Location = new("https://cdn.example.test/weights") } }
                 : new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(weights) });
         }));
-        using var manager = new TensorModelPackManager(new([definition]), new MemoryPersistenceStore(), http,
+        using var manager = new TensorModelPackManager(new([definition]), _packDirectory, http,
             sourceAccess: (_, _) => Task.FromResult<TensorSourceCredential?>(TensorSourceCredential.Basic("stonks", "p:ss wörd")));
 
         await manager.InstallAsync(definition.Key);
@@ -167,15 +164,14 @@ public sealed class TensorModelPackManagerTests : IDisposable
     }
 
     [Fact]
-    public async Task InstallVerifyAndAcquireUseAnyApplicationPersistenceStore()
+    public async Task InstallVerifyAndAcquireReturnArtifactFilesInsideThePackDirectory()
     {
         byte[] weights = "model-weights"u8.ToArray();
         TensorModelPackDefinition definition = Definition(weights);
-        var persistence = new MemoryPersistenceStore();
         using var http = new HttpClient(new BytesHandler(weights));
         using var manager = new TensorModelPackManager(
             new TensorModelCatalog([definition]),
-            persistence,
+            _packDirectory,
             http);
 
         Assert.Equal(
@@ -188,16 +184,10 @@ public sealed class TensorModelPackManagerTests : IDisposable
             TensorModelPackState.Installed,
             (await manager.VerifyAsync(definition.Key)).State);
         await using TensorModelPackLease lease = await manager.AcquireAsync(definition.Key);
-        TensorSharp.Runtime.PersistenceFileReference artifact = lease.GetRequiredArtifact("weights");
-        Assert.Same(persistence, artifact.Store);
-        Assert.Equal(TensorModelPackManager.DefaultStoreName, artifact.StoreName);
-        await using Stream? storedWeights = await artifact.Store.OpenReadAsync(
-            artifact.StoreName,
-            artifact.AssetName);
-        Assert.NotNull(storedWeights);
-        using var copiedWeights = new MemoryStream();
-        await storedWeights.CopyToAsync(copiedWeights);
-        Assert.Equal(weights, copiedWeights.ToArray());
+        string artifact = lease.GetRequiredArtifact("weights");
+        Assert.True(Path.IsPathFullyQualified(artifact));
+        Assert.StartsWith(Path.GetFullPath(_packDirectory) + Path.DirectorySeparatorChar, artifact, StringComparison.Ordinal);
+        Assert.Equal(weights, await File.ReadAllBytesAsync(artifact));
         await Assert.ThrowsAsync<TensorModelPackException>(() => manager.RemoveAsync(definition.Key));
     }
 
@@ -207,11 +197,10 @@ public sealed class TensorModelPackManagerTests : IDisposable
         byte[] expected = "expected"u8.ToArray();
         byte[] received = "received"u8.ToArray();
         TensorModelPackDefinition definition = Definition(expected);
-        var persistence = new MemoryPersistenceStore();
         using var http = new HttpClient(new BytesHandler(received));
         using var manager = new TensorModelPackManager(
             new TensorModelCatalog([definition]),
-            persistence,
+            _packDirectory,
             http);
 
         await Assert.ThrowsAsync<TensorModelPackException>(() => manager.InstallAsync(definition.Key));
@@ -219,28 +208,6 @@ public sealed class TensorModelPackManagerTests : IDisposable
         Assert.Equal(
             TensorModelPackState.NotInstalled,
             (await manager.GetStatusAsync(definition.Key)).State);
-    }
-
-    [Fact]
-    public async Task DirectFileStoreExposesOnlyThePersistenceContract()
-    {
-        var directStore = new TensorDirectFilePersistStore(_persistenceRoot);
-        IPersistenceStore applicationStore = Assert.IsAssignableFrom<IPersistenceStore>(directStore);
-        byte[] content = "weights"u8.ToArray();
-        await using var input = new MemoryStream(content);
-
-        await applicationStore.SaveAsync("models", "pack/model.bin", input);
-
-        Assert.True(await applicationStore.ExistsAsync("models", "pack/model.bin"));
-        await using Stream? saved = await applicationStore.OpenReadAsync("models", "pack/model.bin");
-        Assert.NotNull(saved);
-        Assert.IsType<FileStream>(saved);
-        using var copy = new MemoryStream();
-        await saved.CopyToAsync(copy);
-        Assert.Equal(content, copy.ToArray());
-        await using var invalid = new MemoryStream(content);
-        await Assert.ThrowsAsync<ArgumentException>(() =>
-            applicationStore.SaveAsync("models", "../model.bin", invalid));
     }
 
     [Fact]
@@ -258,9 +225,9 @@ public sealed class TensorModelPackManagerTests : IDisposable
 
     public void Dispose()
     {
-        if (Directory.Exists(_persistenceRoot))
+        if (Directory.Exists(_packDirectory))
         {
-            Directory.Delete(_persistenceRoot, recursive: true);
+            Directory.Delete(_packDirectory, recursive: true);
         }
     }
 
@@ -307,83 +274,4 @@ public sealed class TensorModelPackManagerTests : IDisposable
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) => send(request, cancellationToken);
     }
-
-    internal sealed class MemoryPersistenceStore : IPersistenceStore
-    {
-        private readonly Dictionary<(string Store, string Asset), byte[]> _assets = [];
-        private readonly Lock _gate = new();
-
-        public Task<bool> ExistsAsync(
-            string storeName,
-            string assetName,
-            CancellationToken cancellationToken = default)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            lock (_gate)
-            {
-                return Task.FromResult(_assets.ContainsKey((storeName, assetName)));
-            }
-        }
-
-        public Task<Stream?> OpenReadAsync(
-            string storeName,
-            string assetName,
-            CancellationToken cancellationToken = default)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            lock (_gate)
-            {
-                return Task.FromResult<Stream?>(_assets.TryGetValue((storeName, assetName), out byte[]? value)
-                    ? new MemoryStream(value, writable: false)
-                    : null);
-            }
-        }
-
-        public Task<IReadOnlyList<string>> EnumerateAsync(
-            string storeName,
-            string assetNamePrefix,
-            CancellationToken cancellationToken = default)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            lock (_gate)
-            {
-                IReadOnlyList<string> names = _assets.Keys
-                    .Where(key => string.Equals(key.Store, storeName, StringComparison.Ordinal)
-                                  && key.Asset.StartsWith(assetNamePrefix, StringComparison.Ordinal))
-                    .Select(static key => key.Asset)
-                    .Order(StringComparer.Ordinal)
-                    .ToArray();
-                return Task.FromResult(names);
-            }
-        }
-
-        public async Task SaveAsync(
-            string storeName,
-            string assetName,
-            Stream content,
-            CancellationToken cancellationToken = default)
-        {
-            using var copy = new MemoryStream();
-            await content.CopyToAsync(copy, cancellationToken).ConfigureAwait(false);
-            lock (_gate)
-            {
-                _assets[(storeName, assetName)] = copy.ToArray();
-            }
-        }
-
-        public Task DeleteAsync(
-            string storeName,
-            string assetName,
-            CancellationToken cancellationToken = default)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            lock (_gate)
-            {
-                _assets.Remove((storeName, assetName));
-            }
-
-            return Task.CompletedTask;
-        }
-    }
-
 }

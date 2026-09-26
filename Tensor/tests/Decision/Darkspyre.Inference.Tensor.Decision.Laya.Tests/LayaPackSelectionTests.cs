@@ -321,7 +321,7 @@ public sealed class LayaPackSelectionTests : IDisposable
     }
 
     private TensorModelPackManager Manager(HttpClient http, params TensorModelPackDefinition[] definitions) =>
-        new(new TensorModelCatalog(definitions), new TensorDirectFilePersistStore(_root), http);
+        new(new TensorModelCatalog(definitions), _root, http);
     private static ISetupAction Action(TensorSetupSession setup, SetupActionPurpose purpose) =>
         Assert.Single(setup.Snapshot.Actions, action => action.Descriptor.Purpose == purpose);
     private static DecisionInferenceRequest Request(string modelId) => new()
@@ -374,11 +374,8 @@ public sealed class LayaPackSelectionTests : IDisposable
         {
             Loaded.Add(lease.Key);
             Assert.Equal(TensorBackendKind.Cpu, backend);
-            var artifact = lease.GetRequiredArtifact("model");
-            await using Stream? stream = await artifact.Store.OpenReadAsync(artifact.StoreName, artifact.AssetName, cancellationToken);
-            Assert.NotNull(stream);
-            using var reader = new StreamReader(stream);
-            Assert.Equal($"/{lease.Key.ModelId}/{lease.Key.Revision}/model", await reader.ReadToEndAsync(cancellationToken));
+            Assert.Equal($"/{lease.Key.ModelId}/{lease.Key.Revision}/model",
+                await File.ReadAllTextAsync(lease.GetRequiredArtifact("model"), cancellationToken));
             if (Failure is not null) { throw Failure; }
             var model = new Model(Forward);
             Models.Add(model);

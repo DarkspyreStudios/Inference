@@ -43,7 +43,8 @@ public sealed class WhisperMetadataTests
     [Fact]
     public async Task SetupSelectionUsesExistingGenericContractAndSavingDoesNotInstall()
     {
-        using var packs = new TensorModelPackManager(new(TensorSpeechModels.Whisper), new WhisperFixture.Store());
+        using var directory = new WhisperFixture.PackDirectory();
+        using var packs = new TensorModelPackManager(new(TensorSpeechModels.Whisper), directory.Path);
         var target = new Target();
         await using TensorSetupSession session = WhisperSetup.CreateSession(new(SetupChangeIntent.Create, "speech", null), target, packs);
         Assert.False((await session.ValidateAsync()).IsValid);
@@ -73,7 +74,8 @@ public sealed class WhisperMetadataTests
     public async Task RemoteResolutionBindsSetupAndRetainsBuiltInIdentityWithoutRegistration()
     {
         var source = new Source();
-        using var packs = new TensorModelPackManager(new([]), new WhisperFixture.Store());
+        using var directory = new WhisperFixture.PackDirectory();
+        using var packs = new TensorModelPackManager(new([]), directory.Path);
         var target = new Target();
         await using TensorSetupSession session = WhisperSetup.CreateSession(new(SetupChangeIntent.Create, "speech", null), target, packs, source: source);
         foreach ((string field, string value) in new[] { ("repository", TensorSpeechModels.Repository), ("source-revision", "main"), ("variant", "ggml-tiny.bin") })

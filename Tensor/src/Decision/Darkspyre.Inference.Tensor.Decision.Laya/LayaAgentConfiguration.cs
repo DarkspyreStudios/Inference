@@ -1,5 +1,4 @@
 using System.Text.Json;
-using TensorSharp.Runtime;
 
 namespace Darkspyre.Inference.Tensor.Decision.Laya;
 
@@ -19,10 +18,12 @@ internal sealed class LayaAgentConfiguration
         _byOptions = byOptions;
     }
 
-    public static async Task<LayaAgentConfiguration> LoadAsync(PersistenceFileReference source, CancellationToken cancellationToken)
+    /// <summary>Reads and validates the agent configuration JSON at <paramref name="path"/>.</summary>
+    public static async Task<LayaAgentConfiguration> LoadAsync(string path, CancellationToken cancellationToken)
     {
-        await using Stream? stream = await source.Store.OpenReadAsync(source.StoreName, source.AssetName, cancellationToken).ConfigureAwait(false);
-        if (stream is null) { throw new InvalidDataException("The Laya agent configuration is missing."); }
+        if (!File.Exists(path)) { throw new InvalidDataException("The Laya agent configuration is missing."); }
+        await using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read,
+            4096, FileOptions.Asynchronous | FileOptions.SequentialScan);
         using JsonDocument document = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken).ConfigureAwait(false);
         return Parse(document.RootElement);
     }

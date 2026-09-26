@@ -86,8 +86,7 @@ public sealed class LayaOnnxModelTests
 
     private static LayaOnnxModel Create(string fixture, int configuredLength = FixtureLength)
     {
-        byte[] bytes = File.ReadAllBytes(Path.Combine(AppContext.BaseDirectory, "Fixtures", fixture));
         using var options = new SessionOptions();
-        return LayaOnnxModel.Create(bytes, options, configuredLength);
+        return LayaOnnxModel.Create(Path.Combine(AppContext.BaseDirectory, "Fixtures", fixture), options, configuredLength);
     }
 }

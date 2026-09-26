@@ -80,7 +80,8 @@ Tensor provides:
 
 - Explicit `StartAsync`, `LoadAsync`, inference, `UnloadAsync`, and `StopAsync` operations.
 - Repeated inference against a loaded model; one loaded model per engine instance.
-- Model-pack storage through the host's `IPersistenceStore`, with an optional direct-file default.
+- Model-pack storage in a local pack directory, by default
+  `LocalApplicationData/Darkspyre Studios/Inference/Tensor`, or one the host supplies.
 - User-selected files, folders, direct URLs, and optional repository-source adapters, subject to each
   engine's compatibility policy.
 - Bounded metadata inspection followed by explicit installation/import, integrity checks, and
@@ -199,7 +200,6 @@ This example **downloads the Supra pack if needed**. Invoke it only after user c
 sufficient storage, memory, and a supported runtime. For an already installed pack, skip installation.
 
 ```csharp
-using Darkspyre.Persistence;
 using Darkspyre.Inference.Common.Image;
 using Darkspyre.Inference.Tensor.Common;
 using Darkspyre.Inference.Tensor.Image.Supra;
@@ -209,12 +209,12 @@ namespace MyApp.Examples;
 public static class LocalImageExample
 {
     public static async Task<ImageGenerationResult> GenerateAsync(
-        IPersistenceStore applicationStore, string prompt,
+        string packDirectory, string prompt,
         CancellationToken cancellationToken = default)
     {
         TensorModelPackDefinition model = TensorImageModels.Supra2Image;
         using var packs = new TensorModelPackManager(
-            new TensorModelCatalog([model]), applicationStore);
+            new TensorModelCatalog([model]), packDirectory);
 
         await packs.InstallAsync(model.Key, cancellationToken: cancellationToken);
         await using var engine = new SupraImageInference(packs);

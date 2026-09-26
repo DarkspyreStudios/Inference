@@ -10,14 +10,13 @@
     <PackageVersion Include="AWSSDK.BedrockRuntime" Version="4.0.100.5" />
     <PackageVersion Include="AWSSDK.Core" Version="4.0.102.6" />
     <PackageVersion Include="AWSSDK.SecurityToken" Version="4.0.5" />
-    <PackageVersion Include="Darkspyre.Persistence" Version="1.0.0" />
     <PackageVersion Include="Darkspyre.SecureStore" Version="1.0.0" />
     <PackageVersion Include="Darkspyre.ML.Tokenizers" Version="2.0.0.1" />
-    <PackageVersion Include="Darkspyre.TensorSharp.Backends.Cuda" Version="2.8.6.4" />
-    <PackageVersion Include="Darkspyre.TensorSharp.Chat" Version="2.8.6.4" />
-    <PackageVersion Include="Darkspyre.TensorSharp.Models" Version="2.8.6.4" />
-    <PackageVersion Include="Darkspyre.TensorSharp.Runtime" Version="2.8.6.4" />
-    <PackageVersion Include="Darkspyre.TensorSharp.Tensors" Version="2.8.6.4" />
+    <PackageVersion Include="Darkspyre.TensorSharp.Backends.Cuda" Version="2.8.6.5" />
+    <PackageVersion Include="Darkspyre.TensorSharp.Chat" Version="2.8.6.5" />
+    <PackageVersion Include="Darkspyre.TensorSharp.Models" Version="2.8.6.5" />
+    <PackageVersion Include="Darkspyre.TensorSharp.Runtime" Version="2.8.6.5" />
+    <PackageVersion Include="Darkspyre.TensorSharp.Tensors" Version="2.8.6.5" />
     <PackageVersion Include="JsonSchema.Net" Version="9.4.0" />
     <PackageVersion Include="Lumeo" Version="5.9.1" />
     <PackageVersion Include="Microsoft.Bcl.Memory" Version="10.0.9" />

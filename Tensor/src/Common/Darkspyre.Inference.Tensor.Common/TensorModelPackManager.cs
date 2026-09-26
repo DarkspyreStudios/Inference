@@ -1,8 +1,6 @@
 using System.Collections.Concurrent;
 using System.Security.Cryptography;
 using System.Text.Json;
-using Darkspyre.Persistence;
-using TensorSharp.Runtime;
 
 namespace Darkspyre.Inference.Tensor.Common;
 
@@ -70,33 +68,34 @@ public interface ITensorModelPackManager
 
 public sealed class TensorModelPackManager : ITensorModelPackManager, IDisposable
 {
-    public const string DefaultStoreName = "Darkspyre.Inference.Tensor.Models";
-
     private readonly TensorModelCatalog _catalog;
-    private readonly IPersistenceStore _persistence;
+    private readonly TensorPackDirectory _directory;
     private readonly HttpClient _httpClient;
     private readonly bool _ownsHttpClient;
     private readonly TensorSourceHttp _sourceHttp;
-    private readonly string _storeName;
     private readonly ConcurrentDictionary<TensorModelKey, SemaphoreSlim> _packGates = new();
     private readonly ConcurrentDictionary<TensorModelKey, int> _activeLeases = new();
     private bool _disposed;
 
+    /// <param name="catalog">The shared definition catalog.</param>
+    /// <param name="packDirectory">
+    /// The local directory that holds installed packs. Null selects
+    /// LocalApplicationData/Darkspyre Studios/Inference/Tensor.
+    /// </param>
+    /// <param name="httpClient">The client for downloads; null creates and owns one.</param>
+    /// <param name="sourceAccess">Resolves credentials for restricted download origins.</param>
     public TensorModelPackManager(
         TensorModelCatalog catalog,
-        IPersistenceStore? persistence = null,
+        string? packDirectory = null,
         HttpClient? httpClient = null,
-        string storeName = DefaultStoreName,
         TensorSourceAccess? sourceAccess = null)
     {
         ArgumentNullException.ThrowIfNull(catalog);
-        ArgumentException.ThrowIfNullOrWhiteSpace(storeName);
         _catalog = catalog;
-        _persistence = persistence ?? new TensorDirectFilePersistStore();
+        _directory = new TensorPackDirectory(packDirectory ?? TensorPackDirectory.DefaultRootDirectory);
         _httpClient = httpClient ?? TensorSourceHttp.CreateClient();
         _ownsHttpClient = httpClient is null;
         _sourceHttp = new(_httpClient, sourceAccess);
-        _storeName = storeName;
     }
 
     public IReadOnlyList<TensorModelPackDefinition> Definitions { get { ThrowIfDisposed(); return _catalog.Definitions; } }
@@ -120,8 +119,7 @@ public sealed class TensorModelPackManager : ITensorModelPackManager, IDisposabl
         ThrowIfDisposed();
         TensorModelPackDefinition definition = _catalog.GetRequired(key);
         string manifestName = ManifestName(definition.Key);
-        await using Stream? content = await _persistence.OpenReadAsync(
-            _storeName,
+        await using Stream? content = await _directory.OpenReadAsync(
             manifestName,
             cancellationToken).ConfigureAwait(false);
         if (content is null)
@@ -177,7 +175,7 @@ public sealed class TensorModelPackManager : ITensorModelPackManager, IDisposabl
             // A previous manifest must not advertise an interrupted repair as installed.
             if (existing.State == TensorModelPackState.Invalid)
             {
-                await _persistence.DeleteAsync(_storeName, ManifestName(key), cancellationToken).ConfigureAwait(false);
+                await _directory.DeleteAsync(ManifestName(key), cancellationToken).ConfigureAwait(false);
             }
 
             foreach (TensorModelArtifactDefinition artifact in definition.Artifacts)
@@ -210,8 +208,7 @@ public sealed class TensorModelPackManager : ITensorModelPackManager, IDisposabl
                         FileShare.Read,
                         1024 * 1024,
                         FileOptions.Asynchronous | FileOptions.SequentialScan);
-                    await _persistence.SaveAsync(
-                        _storeName,
+                    await _directory.SaveAsync(
                         ArtifactName(definition.Key, artifact.RelativePath),
                         input,
                         cancellationToken).ConfigureAwait(false);
@@ -230,8 +227,7 @@ public sealed class TensorModelPackManager : ITensorModelPackManager, IDisposabl
                 manifest,
                 cancellationToken: cancellationToken).ConfigureAwait(false);
             manifestContent.Position = 0;
-            await _persistence.SaveAsync(
-                _storeName,
+            await _directory.SaveAsync(
                 ManifestName(definition.Key),
                 manifestContent,
                 cancellationToken).ConfigureAwait(false);
@@ -335,8 +331,7 @@ public sealed class TensorModelPackManager : ITensorModelPackManager, IDisposabl
 
         foreach (TensorModelArtifactDefinition artifact in definition.Artifacts)
         {
-            await using Stream? content = await _persistence.OpenReadAsync(
-                _storeName,
+            await using Stream? content = await _directory.OpenReadAsync(
                 ArtifactName(key, artifact.RelativePath),
                 cancellationToken).ConfigureAwait(false);
             if (content is null)
@@ -371,12 +366,9 @@ public sealed class TensorModelPackManager : ITensorModelPackManager, IDisposabl
                 throw new TensorModelPackException(key, status.Detail ?? "The tensor model pack is not installed and verified.");
             }
 
-            IReadOnlyDictionary<string, PersistenceFileReference> artifacts = definition.Artifacts.ToDictionary(
+            IReadOnlyDictionary<string, string> artifacts = definition.Artifacts.ToDictionary(
                 static artifact => artifact.Role,
-                artifact => new PersistenceFileReference(
-                    _persistence,
-                    _storeName,
-                    ArtifactName(definition.Key, artifact.RelativePath)),
+                artifact => _directory.GetPath(ArtifactName(definition.Key, artifact.RelativePath)),
                 StringComparer.Ordinal);
             _activeLeases.AddOrUpdate(key, 1, static (_, count) => checked(count + 1));
             return new TensorModelPackLease(
@@ -407,11 +399,10 @@ public sealed class TensorModelPackManager : ITensorModelPackManager, IDisposabl
                 throw new TensorModelPackException(key, "The tensor model pack is currently in use.");
             }
 
-            await _persistence.DeleteAsync(_storeName, ManifestName(key), cancellationToken).ConfigureAwait(false);
+            await _directory.DeleteAsync(ManifestName(key), cancellationToken).ConfigureAwait(false);
             foreach (TensorModelArtifactDefinition artifact in definition.Artifacts)
             {
-                await _persistence.DeleteAsync(
-                    _storeName,
+                await _directory.DeleteAsync(
                     ArtifactName(key, artifact.RelativePath),
                     cancellationToken).ConfigureAwait(false);
             }

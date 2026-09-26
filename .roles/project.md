@@ -79,7 +79,7 @@ implementation share the same semantic contract even though the first Connect re
 ship a decision provider.
 `Darkspyre.Inference.Tensor.Common` is an internal product assembly, included in the
 `Darkspyre.Inference.Tensor` NuGet, and is limited to behavior actually shared by two Tensor
-capabilities, such as the host-controlled model lifecycle, model packs, persistence-backed weights,
+capabilities, such as the host-controlled model lifecycle, model packs in a local pack directory,
 and execution coordination. The capability assemblies define interchangeable interfaces; engine
 implementations live in separate assemblies within the same NuGet. Laya architecture, tokenization,
 calibration, and its model-pack definition remain in the Tensor Decision Laya assembly. There is

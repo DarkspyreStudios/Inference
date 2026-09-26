@@ -9,9 +9,8 @@ string modelId = builder.Configuration["WhisperModel"]
     ?? throw new InvalidOperationException("Set WhisperModel to the explicit model ID of an already-installed pack (for example whisper/tiny.en).");
 TensorModelPackDefinition selected = TensorSpeechModels.Whisper.SingleOrDefault(pack => pack.Key.ModelId == modelId)
     ?? throw new InvalidOperationException("WhisperModel must identify one of the example's declared Whisper packs.");
-string? storeRoot = builder.Configuration["TensorStore"];
-var store = storeRoot is null ? new TensorDirectFilePersistStore() : new TensorDirectFilePersistStore(storeRoot);
-using var packs = new TensorModelPackManager(new(TensorSpeechModels.Whisper), store);
+string? packDirectory = builder.Configuration["TensorStore"];
+using var packs = new TensorModelPackManager(new(TensorSpeechModels.Whisper), packDirectory);
 await using var engine = new WhisperSpeechToTextInference(packs, TensorBackendKind.Cpu);
 await engine.StartAsync();
 await engine.LoadAsync(selected.Key); // No download fallback. Installation is an explicit host operation outside this example.

@@ -109,10 +109,9 @@ The engine reaches the model only through `ILayaModelLoader` and
 - Weights are stored as fp16 with fp32 inputs and outputs, which keeps the file near the
   checkpoint's 843 MB. The export gate (section 8) decides this: if fp16 fails the gate, the export
   stores fp32 (about 1.7 GB).
-- The file embeds its weights, and both sizes stay below protobuf's 2 GB limit. The loader reads the
-  `model` artifact through the host's `IPersistenceStore` and passes the bytes to ONNX Runtime. The
-  host decides where and how model files are stored, so the engine never assumes a file path. The
-  bytes are released once the session exists, so the load briefly holds one extra copy of the model.
+- The file embeds its weights, and both sizes stay below protobuf's 2 GB limit. The loader creates
+  the ONNX Runtime session from the installed `model` artifact's path, on a background thread;
+  ONNX Runtime has no async or cancellable session constructor.
 - Metadata properties: `laya.max_len`, `laya.max_markers`, `laya.export_version`, and
   `laya.source_sha256` (the SHA-256 of the source `model.safetensors`).
 - Pack artifact roles: `model` (`laya.onnx`), `tokenizer` and `agent-config`.
@@ -194,8 +193,8 @@ training on gpu-box. Its packaging and release flow are in
   parsed agent configuration, and `ILayaDecisionModel` gains `MaximumOptions` and a cancellation
   token on `Forward`. A run that ONNX Runtime terminates after cancellation surfaces as
   `OperationCanceledException`.
-- The Laya project drops its `Darkspyre.TensorSharp.*` references and PTX content. It keeps
-  `TensorSharp.Runtime`'s `PersistenceFileReference` through Tensor.Common's pack lease.
+- The Laya project has no `Darkspyre.TensorSharp.*` reference and no PTX content. Tensor.Common's
+  pack lease gives it artifact file paths.
 - `TensorDecisionModels.LayaTypedDecisions` is deleted. `LayaSetup.CreateSession` requires
   `offeredModels`. Tests use test-local packs that declare `CoreMl` and `Cpu`.
 - `LayaOnnxModelTests` runs `LayaOnnxModel` on the CPU provider against three tracked fixture graphs
