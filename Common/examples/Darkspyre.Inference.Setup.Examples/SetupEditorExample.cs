@@ -8,10 +8,13 @@ using Darkspyre.Inference.Tensor.LLM.Qwen;
 
 namespace Darkspyre.Inference.Setup.Examples;
 
+/// <summary>One provider entry being edited: the settings object and the manager that acts on it.</summary>
+public sealed record SetupDraft(IInferenceSettingsManager Manager, InferenceSettings Settings);
+
 /// <summary>Composition belongs to the host; rendering below has no provider-specific dispatch.</summary>
 public static class SetupCompositionExample
 {
-    public static async Task<IReadOnlyList<IInferenceSetupSession>> CreateDraftsAsync(
+    public static async Task<IReadOnlyList<SetupDraft>> CreateDraftsAsync(
         LlmProviderService llms, ImageProviderService images, ITensorModelPackManager packs,
         IImageWorkflowChoiceSource workflows, ISetupCommitTarget<LlmSetupChanges> llmTarget,
         ISetupCommitTarget<ImageSetupChanges> imageTarget, ISetupCommitTarget<TensorSetupChanges> tensorTarget,
@@ -20,28 +23,40 @@ public static class SetupCompositionExample
         ArgumentNullException.ThrowIfNull(llms);
         ArgumentNullException.ThrowIfNull(images);
         ArgumentNullException.ThrowIfNull(packs);
-        // No network requests, model loads or installs occur here. The caller owns/disposes the sessions.
+        // No network requests, model loads or installs occur here. Nothing reaches the host until Save.
         IReadOnlyList<TensorModelPackDefinition> definitions = await packs.GetDefinitionsAsync(cancellationToken).ConfigureAwait(false);
-        List<IInferenceSetupSession> sessions = llms.SupportedProviders.Select(provider =>
-            (IInferenceSetupSession)llms.CreateSetupSession(provider.Transport,
-                new(SetupChangeIntent.Create, Guid.NewGuid().ToString("N"), null), llmTarget)).ToList();
-        sessions.Add(images.CreateSetupSession(ImageTransport.ComfyUi,
-            new(SetupChangeIntent.Create, Guid.NewGuid().ToString("N"), null), imageTarget, workflows));
-        sessions.Add(QwenSetup.CreateSession(new(SetupChangeIntent.Create, Guid.NewGuid().ToString("N"), null), tensorTarget, packs,
+        var drafts = new List<SetupDraft>();
+        LlmSettingsManager llmManager = llms.CreateSettingsManager(llmTarget);
+        foreach (LlmProviderDefinition provider in llms.SupportedProviders)
+        {
+            drafts.Add(new(llmManager, await llmManager.OpenAsync(provider.Transport, NewEntry(), cancellationToken: cancellationToken)
+                .ConfigureAwait(false)));
+        }
+
+        ImageSettingsManager imageManager = images.CreateSettingsManager(imageTarget, workflows);
+        drafts.Add(new(imageManager, await imageManager.OpenAsync(ImageTransport.ComfyUi, NewEntry(), cancellationToken: cancellationToken)
+            .ConfigureAwait(false)));
+        TensorSettingsManager qwen = QwenSetup.CreateSettingsManager(tensorTarget, packs,
             offeredModels: definitions.Where(pack => pack.Capability == TensorCapability.Llm
-                && pack.RuntimeArchitecture == TensorLlmModels.QwenRuntimeArchitecture).ToArray(), source: modelSource));
-        sessions.Add(SupraSetup.CreateSession(new(SetupChangeIntent.Create, Guid.NewGuid().ToString("N"), null), tensorTarget, packs,
+                && pack.RuntimeArchitecture == TensorLlmModels.QwenRuntimeArchitecture).ToArray(), source: modelSource);
+        TensorSettingsManager supra = SupraSetup.CreateSettingsManager(tensorTarget, packs,
             offeredModels: definitions.Where(pack => pack.Capability == TensorCapability.Image
-                && pack.RuntimeArchitecture == TensorImageModels.SupraRuntimeArchitecture).ToArray(), source: modelSource));
-        sessions.Add(WhisperSetup.CreateSession(new(SetupChangeIntent.Create, Guid.NewGuid().ToString("N"), null), tensorTarget, packs,
-            source: modelSource));
-        return sessions.AsReadOnly();
+                && pack.RuntimeArchitecture == TensorImageModels.SupraRuntimeArchitecture).ToArray(), source: modelSource);
+        TensorSettingsManager whisper = WhisperSetup.CreateSettingsManager(tensorTarget, packs, source: modelSource);
+        foreach (TensorSettingsManager manager in new[] { qwen, supra, whisper })
+        {
+            drafts.Add(new(manager, await manager.OpenAsync(NewEntry(), cancellationToken: cancellationToken).ConfigureAwait(false)));
+        }
+
+        return drafts.AsReadOnly();
     }
+
+    private static SetupConfigurationIdentity NewEntry() => new(SetupChangeIntent.Create, Guid.NewGuid().ToString("N"), null);
 }
 
 /// <summary>
 /// The UI supplies reusable controls. Implementations bind the field's typed SetValue method and
-/// refresh from Snapshot after edits; they do not inspect provider IDs or parse help text.
+/// render the settings again after edits; they do not inspect provider IDs or parse help text.
 /// </summary>
 public interface ISetupEditorControls
 {
@@ -53,7 +68,7 @@ public interface ISetupEditorControls
     void WholeNumber(SetupIntegerField field);
     void FractionalNumber(SetupDecimalField field);
     void Toggle(SetupBooleanField field);
-    void Choice(SetupChoiceField field, long revision);
+    void Choice(SetupChoiceField field, IInferenceSettingsManager manager, InferenceSettings settings);
     void Secret(SetupSecretField field);
     void BeginGroup(SetupRepeatableGroupField field);
     void BeginRow(SetupFieldRow row);
@@ -61,42 +76,42 @@ public interface ISetupEditorControls
     void EndGroup();
     void EndSection();
     void EndStep();
-    void Action(ISetupAction action);
+    void Action(SetupActionDescriptor action);
     void DeviceAuthorization(SetupDeviceAuthorization interaction);
     void BrowserAuthorization(SetupBrowserAuthorization interaction);
     void ExternalPrerequisite(SetupExternalPrerequisite interaction);
-    void Status(SetupStatus status, SetupValidation validation, bool isBusy, bool isClosed);
+    void Status(SetupStatus status, SetupValidation validation, bool canSave);
 }
 
 public static class SetupEditorExample
 {
-    public static void Render(IInferenceSetupSession session, ISetupEditorControls controls)
+    public static void Render(SetupDraft draft, ISetupEditorControls controls)
     {
-        ArgumentNullException.ThrowIfNull(session);
+        ArgumentNullException.ThrowIfNull(draft);
         ArgumentNullException.ThrowIfNull(controls);
-        SetupSnapshot snapshot = session.Snapshot;
-        foreach (SetupStep step in snapshot.Steps)
+        InferenceSettings settings = draft.Settings;
+        foreach (SetupStep step in settings.Steps)
         {
             controls.BeginStep(step);
             foreach (SetupSection section in step.Sections)
             {
                 controls.BeginSection(section);
-                foreach (SetupField field in section.Fields) { RenderField(field, snapshot.Revision, controls); }
+                foreach (SetupField field in section.Fields) { RenderField(field, draft, controls); }
                 controls.EndSection();
             }
             controls.EndStep();
         }
-        foreach (ISetupAction action in snapshot.Actions) { controls.Action(action); }
-        switch (snapshot.Interaction)
+        foreach (SetupActionDescriptor action in settings.Actions) { controls.Action(action); }
+        switch (settings.Interaction)
         {
             case SetupDeviceAuthorization device: controls.DeviceAuthorization(device); break;
             case SetupBrowserAuthorization browser: controls.BrowserAuthorization(browser); break;
             case SetupExternalPrerequisite prerequisite: controls.ExternalPrerequisite(prerequisite); break;
         }
-        controls.Status(snapshot.Status, snapshot.Validation, snapshot.IsBusy, snapshot.IsClosed);
+        controls.Status(settings.Status, settings.Validate(), settings.CanSave);
     }
 
-    private static void RenderField(SetupField field, long revision, ISetupEditorControls controls)
+    private static void RenderField(SetupField field, SetupDraft draft, ISetupEditorControls controls)
     {
         if (!field.Description.IsVisible) { return; }
         switch (field)
@@ -107,14 +122,14 @@ public static class SetupEditorExample
             case SetupIntegerField integer: controls.WholeNumber(integer); break;
             case SetupDecimalField number: controls.FractionalNumber(number); break;
             case SetupBooleanField boolean: controls.Toggle(boolean); break;
-            case SetupChoiceField choice: controls.Choice(choice, revision); break;
+            case SetupChoiceField choice: controls.Choice(choice, draft.Manager, draft.Settings); break;
             case SetupSecretField secret: controls.Secret(secret); break;
             case SetupRepeatableGroupField group:
                 controls.BeginGroup(group);
                 foreach (SetupFieldRow row in group.Rows)
                 {
                     controls.BeginRow(row);
-                    foreach (SetupField child in row.Fields) { RenderField(child, revision, controls); }
+                    foreach (SetupField child in row.Fields) { RenderField(child, draft, controls); }
                     controls.EndRow();
                 }
                 controls.EndGroup();
@@ -124,14 +139,15 @@ public static class SetupEditorExample
     }
 
     /// <summary>Authorization is supplied explicitly by the host, never inferred from clicking Save.</summary>
-    public static Task<SetupActionResult> ExecuteAuthorizedAsync(ISetupAction action,
+    public static Task<SetupActionResult> ExecuteAuthorizedAsync(SetupDraft draft, SetupActionDescriptor action,
         Func<SetupSideEffect, bool> authorize, IProgress<SetupProgress>? progress = null,
         CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(draft);
         ArgumentNullException.ThrowIfNull(action);
         ArgumentNullException.ThrowIfNull(authorize);
-        return authorize(action.Descriptor.SideEffects)
-            ? action.ExecuteAsync(progress, cancellationToken)
+        return authorize(action.SideEffects)
+            ? draft.Manager.RunAsync(draft.Settings, action.Id, progress, cancellationToken)
             : Task.FromResult(new SetupActionResult(SetupActionState.Unavailable));
     }
 }

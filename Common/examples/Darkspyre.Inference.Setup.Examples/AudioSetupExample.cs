@@ -7,20 +7,23 @@ namespace Darkspyre.Inference.Setup.Examples;
 /// <summary>Host composition for two distinct Audio tasks; neither adapter starts its external server.</summary>
 public static class AudioSetupExample
 {
-    public static IReadOnlyList<IInferenceSetupSession> CreateDrafts(
+    public static async Task<IReadOnlyList<SetupDraft>> CreateDraftsAsync(
         TtsProviderService speech, AudioProviderService audio,
-        ISetupCommitTarget<TtsSetupChanges> speechTarget, ISetupCommitTarget<AudioSetupChanges> audioTarget)
+        ISetupCommitTarget<TtsSetupChanges> speechTarget, ISetupCommitTarget<AudioSetupChanges> audioTarget,
+        CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(speech);
         ArgumentNullException.ThrowIfNull(audio);
-        // Discovery/composition is local. Render either session with SetupEditorExample.Render.
-        // The host retains and disposes sessions; a dialog closing need not cancel an active test.
+        // Opening settings is local. Render either draft with SetupEditorExample.Render.
+        // Nothing reaches the host until the person presses Save.
+        TtsSettingsManager speechManager = speech.CreateSettingsManager(speechTarget);
+        AudioSettingsManager audioManager = audio.CreateSettingsManager(audioTarget);
         return
         [
-            speech.CreateSetupSession(TtsTransport.PocketTtsHttp,
-                new(SetupChangeIntent.Create, Guid.NewGuid().ToString("N"), null), speechTarget),
-            audio.CreateSetupSession(AudioTransport.TangoFluxHttp,
-                new(SetupChangeIntent.Create, Guid.NewGuid().ToString("N"), null), audioTarget)
+            new(speechManager, await speechManager.OpenAsync(TtsTransport.PocketTtsHttp,
+                new(SetupChangeIntent.Create, Guid.NewGuid().ToString("N"), null), cancellationToken: cancellationToken).ConfigureAwait(false)),
+            new(audioManager, await audioManager.OpenAsync(AudioTransport.TangoFluxHttp,
+                new(SetupChangeIntent.Create, Guid.NewGuid().ToString("N"), null), cancellationToken: cancellationToken).ConfigureAwait(false))
         ];
     }
 

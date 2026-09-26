@@ -26,17 +26,17 @@ internal sealed class SetupEditorInputState
             ? [new SetupIssue("input-unapplied", "Apply or clear the pending input before saving.", pair.Key)]
             : Array.Empty<SetupIssue>()).ToArray();
 
-    public void Reconcile(SetupSnapshot snapshot)
+    public void Reconcile(InferenceSettings settings)
     {
-        var ids = Fields(snapshot).Select(field => field.Description.Id).ToHashSet(StringComparer.Ordinal);
+        var ids = Fields(settings).Select(field => field.Description.Id).ToHashSet(StringComparer.Ordinal);
         foreach (string id in _inputs.Keys.Where(id => !ids.Contains(id)).ToArray()) { _inputs.Remove(id); }
     }
 
     public void Clear() => _inputs.Clear();
 
-    public static IEnumerable<SetupField> Fields(SetupSnapshot snapshot) =>
-        snapshot.Steps.SelectMany(step => step.Sections).SelectMany(section => section.Fields).SelectMany(Flatten)
-            .Concat(snapshot.Interaction is SetupBrowserAuthorization browser ? [browser.Callback] : []);
+    public static IEnumerable<SetupField> Fields(InferenceSettings settings) =>
+        settings.Steps.SelectMany(step => step.Sections).SelectMany(section => section.Fields).SelectMany(Flatten)
+            .Concat(settings.Interaction is SetupBrowserAuthorization browser ? [browser.Callback] : []);
 
     public static IEnumerable<SetupField> Flatten(SetupField field)
     {

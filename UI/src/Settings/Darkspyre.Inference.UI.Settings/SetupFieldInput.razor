@@ -11,8 +11,8 @@
                 <div class="inference-settings-editor__row" @key="row.Id">
                     @foreach (var child in row.Fields.Where(item => item.Description.IsVisible))
                     {
-                        <SetupFieldInput @key="child.Description.Id" Field="child" Revision="Revision" Host="Host"
-                                         Issues="Issues" Edited="Edited" Disabled="Disabled" />
+                        <SetupFieldInput @key="child.Description.Id" Field="child" Settings="Settings" Manager="Manager"
+                                         EditVersion="EditVersion" Host="Host" Issues="Issues" Edited="Edited" Disabled="Disabled" />
                     }
                     <Button Variant="Button.ButtonVariant.Ghost" Disabled="@Unavailable"
                             OnClick="() => ApplyAsync(group.Remove(row.Id))">Remove row</Button>
@@ -136,7 +136,10 @@
 @code {
     [Parameter, EditorRequired] public SetupField Field { get; set; } = default!;
     [Parameter, EditorRequired] public IInferenceSettingsInteractionHost Host { get; set; } = default!;
-    [Parameter] public long Revision { get; set; }
+    [Parameter, EditorRequired] public InferenceSettings Settings { get; set; } = default!;
+    [Parameter, EditorRequired] public IInferenceSettingsManager Manager { get; set; } = default!;
+    /// <summary>The page's count of local edits. A choice result requested at an earlier count is dropped.</summary>
+    [Parameter] public long EditVersion { get; set; }
     [Parameter] public IReadOnlyList<SetupIssue> Issues { get; set; } = [];
     [Parameter] public EventCallback<SetupEditResult> Edited { get; set; }
     [Parameter] public bool Disabled { get; set; }
@@ -157,8 +160,8 @@
     private readonly CancellationTokenSource _lifetime = new();
     private CancellationTokenSource? _choiceCancellation;
     private long _choiceGeneration;
-    private long _requestedRevision = -1;
-    private long _loadedRevision = -1;
+    private long _requestedVersion = -1;
+    private long _loadedVersion = -1;
     private bool _wasUnavailable;
     private bool Unavailable => Disabled || Field.Description.IsReadOnly || !Field.Description.IsEnabled || !Field.Description.IsVisible;
 
@@ -166,14 +169,14 @@
     {
         if (Unavailable || _picking || Host is not IInferenceSettingsPathPicker picker) return;
         SetupField field = Field;
-        long revision = Revision;
+        long version = EditVersion;
         string previous = _value;
         SetupPathSelectionKind kind = field is SetupTextField text ? text.PathSelection!.Value : SetupPathSelectionKind.File;
         _picking = true;
         try
         {
             string? value = await picker.SelectPathAsync(kind, previous, _lifetime.Token);
-            if (value is null || _disposed || Unavailable || revision != Revision || !ReferenceEquals(field, Field) || _value != previous) return;
+            if (value is null || _disposed || Unavailable || version != EditVersion || !ReferenceEquals(field, Field) || _value != previous) return;
             if (field is SetupTextField path) await SetTextAsync(path, value);
             else if (field is SetupExecutableField executable) await SetExecutableAsync(executable, value);
         }
@@ -212,9 +215,9 @@
         }
         bool becameAvailable = _wasUnavailable && !Unavailable;
         _wasUnavailable = Unavailable;
-        if (Field is SetupChoiceField && (_requestedRevision != Revision || becameAvailable))
+        if (Field is SetupChoiceField && (_requestedVersion != EditVersion || becameAvailable))
         {
-            _requestedRevision = Revision;
+            _requestedVersion = EditVersion;
             await LoadChoicesAsync(reset: true);
         }
     }
@@ -285,7 +288,7 @@
         await ApplyAsync(field.SetValue(change));
     }
 
-    private Task LoadMoreAsync() => _loading || _loadedRevision != Revision ? Task.CompletedTask : LoadChoicesAsync(reset: false);
+    private Task LoadMoreAsync() => _loading || _loadedVersion != EditVersion ? Task.CompletedTask : LoadChoicesAsync(reset: false);
 
     private Task SearchChoicesAsync() => RefreshChoicesAsync();
 
@@ -295,10 +298,11 @@
     {
         long generation = ++_choiceGeneration;
         _choiceCancellation?.Cancel();
-        if (reset) { _choices = []; _continuation = null; _loadedRevision = -1; }
+        if (reset) { _choices = []; _continuation = null; _loadedVersion = -1; }
         _loading = false;
         if (Field is not SetupChoiceField choice || Unavailable || _disposed) { return; }
-        long revision = Revision;
+        // The values this query reads; a result that arrives after a later edit is dropped.
+        long version = EditVersion;
         string search = _search;
         string? continuation = _continuation;
         using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
@@ -311,14 +315,14 @@
                 && !await Host.AuthorizeAsync("Load " + choice.Description.DisplayName, choice.ChoiceSideEffects, cancellation.Token))
             { if (IsCurrent()) { _choiceIssue = "Choice loading was not authorized."; } return; }
             if (!IsCurrent()) { return; }
-            SetupChoicePage page = await choice.GetChoicesAsync(new(revision, search, continuation,
+            SetupChoicePage page = await Manager.QueryChoicesAsync(Settings, choice.Description.Id, new(search, continuation,
                 choice.Capabilities.SupportsPaging ? 50 : 200), cancellation.Token);
             if (!IsCurrent()) { return; }
-            if (page.State == SetupChoiceState.Completed && page.Revision == revision)
+            if (page.State == SetupChoiceState.Completed)
             {
                 _choices = _choices.Concat(page.Choices).DistinctBy(item => item.Value).ToList();
                 _continuation = page.Continuation;
-                _loadedRevision = revision;
+                _loadedVersion = version;
                 if (page.Continuation is not null && !choice.Capabilities.SupportsPaging)
                 { _choiceIssue = "The provider returned an incomplete bounded list."; }
             }
@@ -331,7 +335,7 @@
             if (generation == _choiceGeneration) { _loading = false; }
             if (ReferenceEquals(_choiceCancellation, cancellation)) { _choiceCancellation = null; }
         }
-        bool IsCurrent() => !_disposed && !cancellation.IsCancellationRequested && generation == _choiceGeneration && revision == Revision;
+        bool IsCurrent() => !_disposed && !cancellation.IsCancellationRequested && generation == _choiceGeneration && version == EditVersion;
     }
 
     public void Dispose()

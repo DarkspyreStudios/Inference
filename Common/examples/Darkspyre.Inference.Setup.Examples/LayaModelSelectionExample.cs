@@ -11,15 +11,18 @@ public static class LayaModelSelectionExample
     /// Host composition supplies its own catalog/manager, including private or fine-tuned packs.
     /// The same generic editor renders Laya without any provider-specific controls.
     /// </summary>
-    public static TensorSetupSession CreateAndRender(TensorModelCatalog catalog, ITensorModelPackManager packs,
-        ISetupCommitTarget<TensorSetupChanges> target, ISetupEditorControls controls)
+    public static async Task<SetupDraft> CreateAndRenderAsync(TensorModelCatalog catalog, ITensorModelPackManager packs,
+        ISetupCommitTarget<TensorSetupChanges> target, ISetupEditorControls controls, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(catalog);
         TensorModelPackDefinition[] offered = catalog.Definitions.Where(definition =>
             definition.Capability == TensorCapability.Decision && definition.RuntimeArchitecture == TensorDecisionModels.LayaRuntimeArchitecture).ToArray();
-        TensorSetupSession setup = LayaSetup.CreateSession(new(SetupChangeIntent.Create, Guid.NewGuid().ToString("N"), null), target, packs, offered);
-        SetupEditorExample.Render(setup, controls);
-        return setup; // The host owns the session and disposes it after finishing/cancelling the edit.
+        TensorSettingsManager manager = LayaSetup.CreateSettingsManager(target, packs, offered);
+        TensorSettings settings = await manager.OpenAsync(new(SetupChangeIntent.Create, Guid.NewGuid().ToString("N"), null),
+            cancellationToken: cancellationToken).ConfigureAwait(false);
+        var draft = new SetupDraft(manager, settings);
+        SetupEditorExample.Render(draft, controls);
+        return draft;
     }
 
     /// <summary>The host has explicitly installed both chosen packs before calling this example.</summary>

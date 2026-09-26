@@ -3,12 +3,12 @@
 @inject IJSRuntime JS
 
 <CascadingValue Value="_inputs" IsFixed="true">
-<section class="inference-settings-editor" aria-label="@($"{Snapshot.Definition.Implementation.DisplayName} settings")">
+<section class="inference-settings-editor" aria-label="@($"{Settings.Definition.Implementation.DisplayName} settings")">
     @if (ShowHeading)
     {
         <header class="inference-settings-editor__heading">
-            <h2>@Snapshot.Definition.Implementation.DisplayName</h2>
-            <p>@Snapshot.Definition.Description</p>
+            <h2>@Settings.Definition.Implementation.DisplayName</h2>
+            <p>@Settings.Definition.Description</p>
         </header>
     }
     @IntroContent
@@ -20,13 +20,13 @@
         }
     </div>
 
-    @if (Snapshot.Steps.Count > 1)
+    @if (Steps.Count > 1)
     {
         <nav class="inference-settings-editor__steps" aria-label="Setup steps">
             <ol>
-                @for (var index = 0; index < Snapshot.Steps.Count; index++)
+                @for (var index = 0; index < Steps.Count; index++)
                 {
-                    <li aria-current="@(index == _stepIndex ? "step" : null)">@Snapshot.Steps[index].Title</li>
+                    <li aria-current="@(index == _stepIndex ? "step" : null)">@Steps[index].Title</li>
                 }
             </ol>
         </nav>
@@ -36,7 +36,7 @@
     {
         <div class="inference-settings-editor__step">
             @* The step list above names and marks the current step; a single step has no list. *@
-            @if (Snapshot.Steps.Count <= 1) { <h3>@step.Title</h3> }
+            @if (Steps.Count <= 1) { <h3>@step.Title</h3> }
             @if (!string.IsNullOrWhiteSpace(step.Instructions)) { <p>@step.Instructions</p> }
             @if (step.HasPlatformInstructions) { <p>@step.PlatformInstructions</p> }
             @foreach (var section in step.Sections)
@@ -48,8 +48,8 @@
                         <div class="inference-settings-editor__fields">
                             @foreach (var field in section.Fields.Where(value => value.Description.IsVisible))
                             {
-                                <SetupFieldInput @key="(Session, field.Description.Id)" Field="field" Revision="Snapshot.Revision"
-                                                 Host="Host" Issues="AllIssues" Disabled="@(Snapshot.IsBusy || Snapshot.IsClosed || _saving)"
+                                <SetupFieldInput @key="(Settings, field.Description.Id)" Field="field" Settings="Settings" Manager="Manager"
+                                                 EditVersion="_editVersion" Host="Host" Issues="AllIssues" Disabled="@Busy"
                                                  Edited="OnFieldEditedAsync" />
                             }
                         </div>
@@ -62,8 +62,8 @@
                         <div class="inference-settings-editor__fields">
                             @foreach (var field in section.Fields.Where(value => value.Description.IsVisible))
                             {
-                                <SetupFieldInput @key="(Session, field.Description.Id)" Field="field" Revision="Snapshot.Revision"
-                                                 Host="Host" Issues="AllIssues" Disabled="@(Snapshot.IsBusy || Snapshot.IsClosed || _saving)"
+                                <SetupFieldInput @key="(Settings, field.Description.Id)" Field="field" Settings="Settings" Manager="Manager"
+                                                 EditVersion="_editVersion" Host="Host" Issues="AllIssues" Disabled="@Busy"
                                                  Edited="OnFieldEditedAsync" />
                             }
                         </div>
@@ -83,7 +83,7 @@
         </div>
     }
 
-    @if (Snapshot.Interaction is { } interaction)
+    @if (Settings.Interaction is { } interaction)
     {
         <section class="inference-settings-editor__interaction" aria-label="Connection instructions">
             @switch (interaction)
@@ -92,37 +92,37 @@
                     <p>Use code <strong class="inference-settings-editor__user-code">@device.UserCode</strong> to finish connecting.</p>
                     <Button Variant="Button.ButtonVariant.Outline" OnClick="() => CopyCodeAsync(device.UserCode)">Copy code</Button>
                     <Button OnClick="() => OpenBrowserAsync(device.VerificationUri)">Open authorization page</Button>
-                    <Button Disabled="@(Snapshot.IsBusy || Snapshot.IsClosed)" OnClick="() => RunActionAsync(device.Continue)">Continue</Button>
-                    <Button Disabled="@(Snapshot.IsBusy || Snapshot.IsClosed)" Variant="Button.ButtonVariant.Outline" OnClick="() => RunActionAsync(device.Cancel)">Cancel connection</Button>
+                    <Button Disabled="@Busy" OnClick="() => RunActionAsync(device.Continue)">Continue</Button>
+                    <Button Disabled="@Busy" Variant="Button.ButtonVariant.Outline" OnClick="() => RunActionAsync(device.Cancel)">Cancel connection</Button>
                     @if (_copiedCode == device.UserCode && _copyStatus is not null) { <p role="status">@_copyStatus</p> }
                     break;
                 case SetupBrowserAuthorization browser:
                     <Button OnClick="() => OpenBrowserAsync(browser.AuthorizationUri)">Open authorization page</Button>
-                    <SetupFieldInput @key="(Session, browser.Callback.Description.Id)" Field="browser.Callback" Revision="Snapshot.Revision" Host="Host"
-                                     Issues="AllIssues" Edited="OnFieldEditedAsync" SensitiveInput="true" Disabled="@(Snapshot.IsBusy || Snapshot.IsClosed || _saving)" />
-                    <Button Disabled="@(Snapshot.IsBusy || Snapshot.IsClosed)" OnClick="() => RunActionAsync(browser.Continue)">Continue</Button>
-                    <Button Disabled="@(Snapshot.IsBusy || Snapshot.IsClosed)" Variant="Button.ButtonVariant.Outline" OnClick="() => RunActionAsync(browser.Cancel)">Cancel connection</Button>
+                    <SetupFieldInput @key="(Settings, browser.Callback.Description.Id)" Field="browser.Callback" Settings="Settings" Manager="Manager"
+                                     EditVersion="_editVersion" Host="Host" Issues="AllIssues" Edited="OnFieldEditedAsync" SensitiveInput="true" Disabled="@Busy" />
+                    <Button Disabled="@Busy" OnClick="() => RunActionAsync(browser.Continue)">Continue</Button>
+                    <Button Disabled="@Busy" Variant="Button.ButtonVariant.Outline" OnClick="() => RunActionAsync(browser.Cancel)">Cancel connection</Button>
                     break;
                 case SetupExternalPrerequisite prerequisite:
                     <p>@prerequisite.Instructions</p>
-                    <Button Disabled="@(Snapshot.IsBusy || Snapshot.IsClosed)" OnClick="() => RunActionAsync(prerequisite.Recheck)">Check again</Button>
+                    <Button Disabled="@Busy" OnClick="() => RunActionAsync(prerequisite.Recheck)">Check again</Button>
                     break;
             }
         </section>
     }
 
-    @if (Snapshot.Actions.Count > 0)
+    @if (Settings.Actions.Count > 0)
     {
         <section class="inference-settings-editor__actions" aria-label="Provider actions">
-            @foreach (var action in Snapshot.Actions)
+            @foreach (var action in Settings.Actions)
             {
                 <div class="inference-settings-editor__action">
-                    <Button Variant="Button.ButtonVariant.Outline" Disabled="@(Snapshot.IsBusy || Snapshot.IsClosed || !action.Descriptor.IsEnabled)"
-                            OnClick="() => RunActionAsync(action)">@action.Descriptor.DisplayName</Button>
-                    @if (!action.Descriptor.IsEnabled && !string.IsNullOrWhiteSpace(action.Descriptor.UnavailableReason))
-                    { <span>@action.Descriptor.UnavailableReason</span> }
-                    @if (ShowActionEffects && action.Descriptor.SideEffects != SetupSideEffect.None)
-                    { <small>@DescribeEffects(action.Descriptor.SideEffects)</small> }
+                    <Button Variant="Button.ButtonVariant.Outline" Disabled="@(Busy || !action.IsEnabled)"
+                            OnClick="() => RunActionAsync(action)">@action.DisplayName</Button>
+                    @if (!action.IsEnabled && !string.IsNullOrWhiteSpace(action.UnavailableReason))
+                    { <span>@action.UnavailableReason</span> }
+                    @if (ShowActionEffects && action.SideEffects != SetupSideEffect.None)
+                    { <small>@DescribeEffects(action.SideEffects)</small> }
                 </div>
             }
         </section>
@@ -143,17 +143,18 @@
 
     <div class="inference-settings-editor__navigation">
         @if (_stepIndex > 0)
-        { <Button Variant="Button.ButtonVariant.Ghost" Disabled="@Snapshot.IsBusy" OnClick="PreviousStep">Back</Button> }
-        @if (_stepIndex < Snapshot.Steps.Count - 1)
-        { <Button Disabled="@Snapshot.IsBusy" OnClick="NextStepAsync">Next</Button> }
-        @if (ShowSaveButton && _stepIndex >= Snapshot.Steps.Count - 1)
+        { <Button Variant="Button.ButtonVariant.Ghost" Disabled="@Busy" OnClick="PreviousStep">Back</Button> }
+        @if (_stepIndex < Steps.Count - 1)
+        { <Button Disabled="@Busy" OnClick="NextStepAsync">Next</Button> }
+        @if (ShowSaveButton && _stepIndex >= Steps.Count - 1)
         { <Button Disabled="@(!State.CanSave)" OnClick="SaveFromButtonAsync">Save settings</Button> }
     </div>
 </section>
 </CascadingValue>
 
 @code {
-    [Parameter, EditorRequired] public IInferenceSetupSession Session { get; set; } = default!;
+    [Parameter, EditorRequired] public InferenceSettings Settings { get; set; } = default!;
+    [Parameter, EditorRequired] public IInferenceSettingsManager Manager { get; set; } = default!;
     [Parameter, EditorRequired] public IInferenceSettingsInteractionHost Host { get; set; } = default!;
     [Parameter] public bool ShowSaveButton { get; set; } = true;
     /// <summary>False when the host already shows the provider's name and description in its own frame.</summary>
@@ -162,17 +163,19 @@
     [Parameter] public bool ShowActionEffects { get; set; } = true;
     [Parameter] public RenderFragment? IntroContent { get; set; }
     [Parameter] public RenderFragment? SupplementaryContent { get; set; }
+    /// <summary>Raised after Save. A Committed result means the host closes the dialog.</summary>
     [Parameter] public EventCallback<SetupCommitResult> CommitCompleted { get; set; }
-    [Parameter] public EventCallback<SetupSnapshot> SnapshotChanged { get; set; }
     [Parameter] public EventCallback<SetupEditorState> StateChanged { get; set; }
 
-    private IInferenceSetupSession? _subscribed;
-    private SetupSnapshot _snapshot = default!;
-    private SetupSnapshot Snapshot => _snapshot;
+    private InferenceSettings? _shown;
+    private IInferenceSettingsStatusSource? _statusSource;
     private readonly SetupEditorInputState _inputs = new();
     private SetupEditorState? _lastPublishedState;
     private bool _saving;
-    private SetupStep? CurrentStep => _stepIndex < Snapshot.Steps.Count ? Snapshot.Steps[_stepIndex] : null;
+    private bool _running;
+    private long _editVersion;
+    private IReadOnlyList<SetupStep> Steps => Settings.Steps;
+    private SetupStep? CurrentStep => Steps is var steps && _stepIndex < steps.Count ? steps[_stepIndex] : null;
     private int _stepIndex;
     private SetupProgress? _progress;
     private string? _copiedCode;
@@ -180,44 +183,52 @@
     private SetupActionResult? _actionResult;
     private SetupCommitResult? _commitResult;
     private CancellationTokenSource? _actionCancellation;
+    private SetupValidation _validation = SetupValidation.Valid;
     private bool _disposed;
-    public SetupEditorState State => new(Snapshot.IsDirty || _inputs.HasPendingInput || Snapshot.CommitOutcomeUncertain,
-        _inputs.HasPendingInput, _inputs.Issues.Any(issue => issue.Severity == SetupIssueSeverity.Error),
-        !_saving && !Snapshot.IsBusy && !Snapshot.IsClosed && !_inputs.HasPendingInput
-            && !AllIssues.Any(issue => issue.Severity == SetupIssueSeverity.Error), Snapshot.CommitOutcomeUncertain);
+    private bool Busy => _running || _saving || Settings.IsSaved;
 
-    private IReadOnlyList<SetupIssue> AllIssues => Snapshot.Validation.Issues.Concat(_inputs.Issues).Distinct().ToArray();
+    public SetupEditorState State => new(Settings.HasUnsavedChanges || _inputs.HasPendingInput || Settings.SaveOutcomeUncertain,
+        _inputs.HasPendingInput, _inputs.Issues.Any(issue => issue.Severity == SetupIssueSeverity.Error),
+        !Busy && !_inputs.HasPendingInput && Settings.CanSave
+            && !AllIssues.Any(issue => issue.Severity == SetupIssueSeverity.Error), Settings.SaveOutcomeUncertain);
+
+    private IReadOnlyList<SetupIssue> AllIssues => _validation.Issues.Concat(_inputs.Issues).Distinct().ToArray();
     private IReadOnlyList<SetupIssue> VisibleIssues => AllIssues.Where(issue => issue.StepId is null || issue.StepId == CurrentStep?.Id).ToArray();
 
     protected override async Task OnParametersSetAsync()
     {
-        if (ReferenceEquals(_subscribed, Session)) { return; }
-        if (_subscribed is not null) { _subscribed.Changed -= OnSessionChanged; }
-        _subscribed = Session;
-        _subscribed.Changed += OnSessionChanged;
+        if (ReferenceEquals(_shown, Settings) && ReferenceEquals(_statusSource, Manager as IInferenceSettingsStatusSource)) { return; }
+        if (_statusSource is not null) { _statusSource.StatusChanged -= OnStatusChanged; }
+        _shown = Settings;
+        _statusSource = Manager as IInferenceSettingsStatusSource;
+        if (_statusSource is not null) { _statusSource.StatusChanged += OnStatusChanged; }
         _stepIndex = 0;
         _progress = null;
         _actionResult = null;
         _commitResult = null;
         _actionCancellation = null;
+        _validation = SetupValidation.Valid;
         _inputs.Clear();
         _saving = false;
+        _running = false;
         _lastPublishedState = null;
-        RefreshSnapshot();
+        _editVersion++;
         await PublishStateAsync();
     }
 
-    private void OnSessionChanged(object? sender, EventArgs args)
+    // A running engine changed; the editor reads the new state and renders it.
+    private void OnStatusChanged(object? sender, EventArgs args)
     {
-        if (_disposed || !ReferenceEquals(sender, Session)) { return; }
+        if (_disposed) { return; }
+        InferenceSettings settings = Settings;
+        IInferenceSettingsStatusSource? source = _statusSource;
         _ = InvokeAsync(async () =>
         {
-            if (_disposed || !ReferenceEquals(sender, Session)) { return; }
-            RefreshSnapshot();
-            SetupSnapshot snapshot = Snapshot;
-            _stepIndex = Math.Clamp(_stepIndex, 0, Math.Max(0, snapshot.Steps.Count - 1));
+            if (_disposed || source is null || !ReferenceEquals(settings, Settings)) { return; }
+            try { await source.RefreshStatusAsync(settings); }
+            catch (Exception) { return; }
+            if (_disposed || !ReferenceEquals(settings, Settings)) { return; }
             StateHasChanged();
-            await SnapshotChanged.InvokeAsync(snapshot);
             await PublishStateAsync();
         });
     }
@@ -225,11 +236,11 @@
     private async Task OnFieldEditedAsync(SetupEditResult result)
     {
         _commitResult = null;
-        RefreshSnapshot();
+        _editVersion++;
+        _inputs.Reconcile(Settings);
         await PublishStateAsync();
     }
 
-    private void RefreshSnapshot() { _snapshot = Session.Snapshot; _inputs.Reconcile(_snapshot); }
     private async Task PublishStateAsync()
     {
         SetupEditorState state = State;
@@ -245,12 +256,11 @@
     private void SelectStep(int index) => _stepIndex = index;
     private void PreviousStep() => SelectStep(_stepIndex - 1);
 
-    private async Task NextStepAsync()
+    private void NextStepAsync()
     {
         if (_inputs.Issues.Any(IsCurrentStepError)) { return; }
-        SetupValidation validation = await Session.ValidateAsync();
-        RefreshSnapshot();
-        if (validation.Issues.Any(IsCurrentStepError)) { return; }
+        _validation = Settings.Validate();
+        if (_validation.Issues.Any(IsCurrentStepError)) { return; }
         SelectStep(_stepIndex + 1);
     }
 
@@ -258,10 +268,11 @@
         && ((issue.StepId is null && issue.FieldId is null) || issue.StepId == CurrentStep?.Id || CurrentStep?.Sections.Any(section =>
             section.Fields.SelectMany(SetupEditorInputState.Flatten).Any(field => field.Description.Id == issue.FieldId)) == true);
 
+    /// <summary>Saves the settings through the manager. Nothing reaches the app without this call.</summary>
     public async Task<SetupCommitResult> SaveAsync()
     {
-        IInferenceSetupSession session = Session;
-        if (_saving) { return new(SetupCommitState.Busy); }
+        InferenceSettings settings = Settings;
+        if (_saving || _running) { return new(SetupCommitState.Invalid, Issues: [new("editor-busy", "Wait for the running operation to finish.")]); }
         IReadOnlyList<SetupIssue> inputIssues = _inputs.Issues;
         SetupCommitResult result;
         if (inputIssues.Any(issue => issue.Severity == SetupIssueSeverity.Error))
@@ -271,17 +282,17 @@
             _saving = true;
             await PublishStateAsync();
             StateHasChanged();
-            try { result = await session.CommitAsync(); }
-            finally { if (ReferenceEquals(session, Session)) { _saving = false; } }
+            try { result = await Manager.SaveAsync(settings); }
+            finally { if (ReferenceEquals(settings, Settings)) { _saving = false; } }
         }
-        if (!_disposed && ReferenceEquals(session, Session))
+        if (!_disposed && ReferenceEquals(settings, Settings))
         {
             _commitResult = result;
             if (result.State == SetupCommitState.Committed) { _inputs.Clear(); }
-            RefreshSnapshot();
             if (result.State == SetupCommitState.Invalid)
             {
-                int step = Snapshot.Steps.ToList().FindIndex(item => (result.Issues ?? []).Any(issue =>
+                _validation = new(result.Issues ?? []);
+                int step = Steps.ToList().FindIndex(item => (result.Issues ?? []).Any(issue =>
                     issue.StepId == item.Id || item.Sections.SelectMany(section => section.Fields).SelectMany(SetupEditorInputState.Flatten)
                         .Any(field => field.Description.Id == issue.FieldId)));
                 if (step >= 0) { _stepIndex = step; }
@@ -295,47 +306,60 @@
 
     private async Task SaveFromButtonAsync() { await SaveAsync(); }
 
-    private async Task RunActionAsync(ISetupAction action)
+    private async Task RunActionAsync(SetupActionDescriptor action)
     {
-        IInferenceSetupSession session = Session;
+        InferenceSettings settings = Settings;
         bool authorized;
-        try { authorized = await Host.AuthorizeAsync(action.Descriptor.DisplayName, action.Descriptor.SideEffects); }
+        try { authorized = await Host.AuthorizeAsync(action.DisplayName, action.SideEffects); }
         catch (Exception) { _actionResult = new(SetupActionState.Failed); return; }
-        if (!authorized || _disposed || !ReferenceEquals(session, Session)) { return; }
+        if (!authorized || _disposed || !ReferenceEquals(settings, Settings)) { return; }
         using var cancellation = new CancellationTokenSource();
         _actionCancellation = cancellation;
         _progress = null;
         _actionResult = null;
+        _running = true;
+        await PublishStateAsync();
         var progress = new Progress<SetupProgress>(value =>
         {
-            if (!_disposed && ReferenceEquals(session, Session))
-            { _ = InvokeAsync(() => { if (!_disposed && ReferenceEquals(session, Session)) { _progress = value; StateHasChanged(); } }); }
+            if (!_disposed && ReferenceEquals(settings, Settings))
+            { _ = InvokeAsync(() => { if (!_disposed && ReferenceEquals(settings, Settings)) { _progress = value; StateHasChanged(); } }); }
         });
         try
         {
-            SetupActionResult result = await Host.ExecuteAsync(session, action, progress, cancellation.Token);
-            if (!_disposed && ReferenceEquals(session, Session)) { _actionResult = result; }
+            SetupActionResult result = await Host.ExecuteAsync(Manager, settings, action, progress, cancellation.Token);
+            if (!_disposed && ReferenceEquals(settings, Settings)) { _actionResult = result; }
         }
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
-        { if (!_disposed && ReferenceEquals(session, Session)) { _actionResult = new(SetupActionState.Cancelled); } }
-        catch (Exception) { if (!_disposed && ReferenceEquals(session, Session)) { _actionResult = new(SetupActionState.Failed); } }
-        finally { if (ReferenceEquals(_actionCancellation, cancellation)) { _actionCancellation = null; } }
-        if (!_disposed) { StateHasChanged(); }
+        { if (!_disposed && ReferenceEquals(settings, Settings)) { _actionResult = new(SetupActionState.Cancelled); } }
+        catch (Exception) { if (!_disposed && ReferenceEquals(settings, Settings)) { _actionResult = new(SetupActionState.Failed); } }
+        finally
+        {
+            if (ReferenceEquals(_actionCancellation, cancellation)) { _actionCancellation = null; }
+            if (ReferenceEquals(settings, Settings)) { _running = false; }
+        }
+        if (!_disposed)
+        {
+            // An action can change values, such as a sign-in credential or a resolved pack.
+            _editVersion++;
+            _inputs.Reconcile(Settings);
+            StateHasChanged();
+            await PublishStateAsync();
+        }
     }
 
     private void CancelAction() => _actionCancellation?.Cancel();
     private async Task OpenBrowserAsync(Uri uri)
     {
-        IInferenceSetupSession session = Session;
+        InferenceSettings settings = Settings;
         try
         {
             if (await Host.AuthorizeAsync("Open authorization page", SetupSideEffect.BrowserInteraction)
-                && !_disposed && ReferenceEquals(session, Session))
+                && !_disposed && ReferenceEquals(settings, Settings))
             { await Host.OpenBrowserAsync(uri); }
         }
         catch (Exception)
         {
-            if (!_disposed && ReferenceEquals(session, Session))
+            if (!_disposed && ReferenceEquals(settings, Settings))
             { _actionResult = new(SetupActionState.Failed); }
         }
     }
@@ -357,7 +381,7 @@
 
     private IEnumerable<(string Label, SetupObservation Observation)> StatusItems()
     {
-        SetupStatus status = Snapshot.Status;
+        SetupStatus status = Settings.Status;
         return new[]
         {
             ("Configured", status.Configured), ("Authenticated", status.Authenticated),
@@ -379,7 +403,7 @@
     {
         _disposed = true;
         _inputs.Clear();
-        if (_subscribed is not null) { _subscribed.Changed -= OnSessionChanged; }
+        if (_statusSource is not null) { _statusSource.StatusChanged -= OnStatusChanged; }
         GC.SuppressFinalize(this);
     }
 }

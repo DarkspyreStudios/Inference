@@ -1,23 +1,24 @@
 # Generic setup editor example
 
-This non-packable, framework-neutral example compiles against the real Connect and Tensor setup
-sessions. `SetupCompositionExample` demonstrates typed host registration. `SetupEditorExample`
-renders every session through the same semantic field/action contract, with no provider-name
-switch. It is a reference for the separately scoped UI library, not a competing UI framework.
+This non-packable, framework-neutral example compiles against the real Connect and Tensor settings
+managers. `SetupCompositionExample` demonstrates typed host registration: each `SetupDraft` pairs a
+settings object with the manager that acts on it. `SetupEditorExample` renders every draft through
+the same semantic field/action contract, with no provider-name switch. It is a reference for the
+separately scoped UI library, not a competing UI framework.
 
-The host implements `ISetupEditorControls` using its chosen controls. Choice retrieval is explicit:
-inspect `ChoiceSideEffects`, obtain consent where needed, pass the current snapshot revision, and
-ignore stale pages. Re-read `Snapshot` after any edit/action or `Changed` notification; bound
-controls from an older revision return Stale. Never log secret inputs or typed commit payloads.
+The host implements `ISetupEditorControls` using its chosen controls. A field edit changes only the
+settings object. Render the settings again after any edit or action. Choice retrieval is explicit:
+inspect `ChoiceSideEffects`, obtain consent where needed, and call `QueryChoicesAsync` with the
+settings object. Ignore a page that returns after a later edit. Never log secret inputs or typed
+commit payloads.
 
-The host retains sessions, tasks and cancellation sources outside dialog components when work
-must survive closing a view. Dispose a session when cancelling the edit, not merely hiding its UI.
-Normal Cancel does not revoke already-issued external authorization or undo a downloaded model.
-An already-cancelled token passed to an Unload/Stop action requests urgent, safe teardown.
+Nothing reaches the host until `SaveAsync`. Dropping the settings object discards the edit. Normal
+Cancel does not revoke already-issued external authorization or undo a downloaded model. An
+already-cancelled token passed to an Unload/Stop action requests urgent, safe teardown.
 
 Implement each typed `ISetupCommitTarget<TChanges>` with create-if-absent/edit-if-version-matches
 semantics over both configuration and protected secret changes. A conflict never overwrites newer
-state. An uncertain outcome closes the draft: read the host store before beginning a new edit.
+state. After an uncertain outcome the settings object is not saved again: read the host store before opening a new edit.
 Image header removals are explicit; omitted headers are untouched. LLM changes carry a separate
 credential mutation; never put it into ordinary connection settings. Save does not run provider
 tests, authenticate, install or load weights.
@@ -40,11 +41,11 @@ No package/version change or paid/native inference run is needed to build this e
 
 The same composition includes `WhisperSetup` for Audio / SpeechTranscription, with the twelve pinned
 Whisper packs and an optional metadata source. It uses `TensorSetupChanges`, the existing manager
-and the same renderer; selection is not installation. Pass a host-owned live engine when composing
-a session that should expose explicit model lifecycle actions. Language and translation are typed
+and the same renderer; selection is not installation. Pass a host-owned live engine when creating
+a manager whose settings expose explicit model lifecycle actions. Language and translation are typed
 per-request options; hosts decide whether and how to persist their preferred request defaults.
 
-`AudioSetupExample.CreateDrafts` composes PocketTTS speech and TangoFlux generated audio for the same
+`AudioSetupExample.CreateDraftsAsync` composes PocketTTS speech and TangoFlux generated audio for the same
 renderer. The host supplies separate typed commit targets; protected-header mutations are committed
 atomically with settings. Both endpoints are external, including on localhost. Tests declare network
 and potential billing effects. TangoFlux has no independent health/model-list protocol; its one test

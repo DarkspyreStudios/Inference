@@ -8,7 +8,8 @@ public interface IInferenceSettingsInteractionHost
     ValueTask<bool> AuthorizeAsync(string operation, SetupSideEffect sideEffects,
         CancellationToken cancellationToken = default);
 
-    Task<SetupActionResult> ExecuteAsync(IInferenceSetupSession session, ISetupAction action,
+    /// <summary>Runs one action; a host without extra policy returns <c>manager.RunAsync(settings, action.Id, progress, cancellationToken)</c>.</summary>
+    Task<SetupActionResult> ExecuteAsync(IInferenceSettingsManager manager, InferenceSettings settings, SetupActionDescriptor action,
         IProgress<SetupProgress> progress, CancellationToken cancellationToken = default);
 
     ValueTask OpenBrowserAsync(Uri uri, CancellationToken cancellationToken = default);
