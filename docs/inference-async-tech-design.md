@@ -82,8 +82,7 @@ against the app's stored entry and uncertain-commit semantics. The settings obje
 and is not disposable. Every settings-manager call takes a cancellation token, and closing the
 dialog cancels running calls.
 
-This section covers Connect providers and Settings.UI. Tensor setup has its own requirements,
-which this section does not cover.
+Section 5.3 covers the Tensor setup buttons that change files or a running instance.
 
 ## 4. Streaming and callback implementation
 
@@ -165,9 +164,9 @@ By contrast, registering a pack with its manager remains an asynchronous publica
 Classification depends on responsibility and service access, not execution speed, an in-memory
 implementation, or whether the method name contains “Get”, “Create” or “Validate”.
 
-Start/Load/request/Unload/Stop semantics do not change. Graceful teardown waits for requests; urgency
+Load, Unload and Stop return once the instance accepts the request (section 5.3). Graceful teardown waits for requests; urgency
 cancels requests but must still join native execution before freeing memory. Stop remains terminal.
-Keep explicit framework cleanup and never report completed cleanup while native work still owns memory.
+Keep explicit framework cleanup.
 
 ### 5.2 Common, Connect and Settings.UI public members
 
@@ -219,39 +218,56 @@ This list covers every public synchronous member in `Common/src`, `Connect/src` 
 ### 5.3 Tensor native work
 
 Tensor runs models through three native libraries. Qwen and Supra use TensorSharp. Laya uses ONNX
-Runtime. Whisper uses Whisper.net. Supra and Laya tokenize through the Darkspyre.ML.Tokenizers fork.
-TensorSharp and the tokenizer fork are Darkspyre packages. ONNX Runtime and Whisper.net are
-external.
+Runtime. Whisper uses Whisper.net. Supra and Laya tokenize through ML.Tokenizers. Inference uses
+TensorSharp and ML.Tokenizers through the public API they already provide and requires no change
+to either.
 
-**Compute runs on a background thread.** GPU and CPU compute has no async form. This covers
+**Native work runs on a background thread.** GPU and CPU compute has no async form. This covers
 backend and device initialization, CUDA kernel compilation, weight upload, model steps, ONNX
-session creation and `Run`, and native teardown. Every public Tensor method that performs this
-work runs it with `Task.Run`, so no Tensor method blocks its caller. This applies to load,
-generate, decide, measure, unload, dispose and backend probes. Cancellation takes effect between
-steps: a native step that has started finishes before the method observes cancellation. Laya runs
-synchronous `InferenceSession.Run` on the background thread and cancels it through
+session creation and `Run`, and native teardown. TensorSharp and ML.Tokenizers also read model,
+weight and tokenizer files synchronously. Every public Tensor method that performs this work runs
+it with `Task.Run`, so no Tensor method blocks its caller. This applies to load, generate, decide,
+measure, unload, stop and dispose. Cancellation takes effect between steps: a native step that has
+started finishes before the method observes cancellation. TensorSharp stops checking cancellation
+early in a Qwen load, so a cancelled load finishes on its background thread and is then unloaded.
+Laya runs synchronous `InferenceSession.Run` on the background thread and cancels it through
 `RunOptions.Terminate`.
 
-**File reading is async in the Darkspyre libraries.**
+**Metadata reads.** TensorSharp parses GGUF, safetensors and torch headers from a synchronous
+`Stream`. The Inference metadata reader downloads the header bytes asynchronously first, up to the
+parser's 16 MB limit, and passes the parser an in-memory stream. No blocking wait remains.
 
-- TensorSharp reads GGUF, safetensors and torch headers asynchronously and takes a cancellation
-  token. The Inference metadata reader awaits these reads and holds no blocking wait.
-- `ModelService.LoadModelAsync` honours its cancellation token for the whole load and checks it
-  after each tensor. It reads the file header once. Tensor reads that are not memory-mapped, and
-  the file-cache prefault, use async reads.
-- `SafetensorsFile` and `TorchStateDictionaryFile` open asynchronously. Torch tensor reads have an
-  async form.
-- TensorSharp reads the CUDA kernel file asynchronously. The kernel compile after it stays
-  synchronous.
-- The tokenizer fork loads SentencePiece asynchronously from a stream. Its BPE `CreateAsync` takes
-  a cancellation token.
+**Backend checks.** The prerequisites check confirms that a backend is present without starting
+it. It calls `GgmlBasicOps.CanInitializeBackend` for GGML backends, `MlxBackend.IsAvailable` for
+MLX and `CudaBackend.IsAvailable` for direct CUDA. A device that is present but broken fails on
+Load. The first GGML backend type a process initializes stays fixed until the process exits. Stop,
+Dispose, a new instance and `GgmlBasicOps.RecreateBackend` keep that type. Changing from one GGML
+type to another requires a new process. Changing from GGML to MLX, direct CUDA or managed CPU uses
+Stop and a new instance.
+
+**Instance lifecycle.** `ITensorModelInstance` raises `EngineStatusChanged` with the model, the
+backend, the state, the time and, for Failed, the error. The states are Starting, Started,
+Loading, Loaded, Unloading, Unloaded, Stopping, Stopped and Failed. The instance raises the event
+and moves on. A listener with async work posts it with `_ = ...` and returns. The instance catches
+a listener's exception.
+
+- `StartAsync`, `LoadAsync`, `UnloadAsync` and `StopAsync` validate their input, return once the
+  engine accepts the request, and report the outcome through `EngineStatusChanged`. A model that
+  is not installed or not supported fails on the call.
+- `GetObservationAsync` returns the instance's current model, backend and state. It replaces the
+  synchronous `Observation` property.
+- The instance reports Unloaded or Stopped only after native work has released model memory.
+
+**Tensor setup buttons.** Import and Install write model files to the pack store. The files stay
+when the settings dialog closes without Save. Load, Unload and Stop act on the host's running
+instance in real time. The inspect, check and verify buttons read files and headers only.
 
 **Qwen streams.** Disposing a Qwen stream before it completes aborts its engine request, the same
 as cancellation.
 
 **Concurrency limits.** GGML runs one compute step at a time under the model's GPU compute lock. A
-Supra model uses one CUDA stream. A process uses one GGML backend type. Concurrent work comes from
-file reading, tokenization and CPU work running beside GPU work.
+Supra model uses one CUDA stream. Concurrent work comes from file reading, tokenization and CPU
+work running beside GPU work.
 
 ## 6. Verification
 
@@ -270,14 +286,14 @@ public contracts. No parallel legacy signature is exposed.
   secret redaction.
 - Lifecycle: failed/cancelled load, urgent/graceful stop, repeated cleanup, gate/lease ownership.
 - Tensor: no public method runs native work on the caller's thread; cancellation between steps;
-  disposing an unfinished Qwen stream aborts its engine request; the metadata reader holds no
-  blocking wait.
+  Load, Unload and Stop return on acceptance and report through `EngineStatusChanged`; Failed
+  carries the error; the prerequisites check starts no backend; disposing an unfinished Qwen
+  stream aborts its engine request; the metadata reader holds no blocking wait.
 - Public API: every member in section 5.2 has its listed signature and behaviour. Compile external
   implementations of changed contracts.
 - All three solutions: zero-warning Debug/Release builds and deterministic tests; format and
   dependency-vulnerability checks. No paid provider calls or downloaded models as gates.
 
 Common, Connect, Tensor and UI.Settings share the version in Directory.Build.props and exact
-Common package dependency. Tensor depends on the TensorSharp and Darkspyre.ML.Tokenizers
-versions that provide the async reads in section 5.3. These boundaries do not introduce application-owned persistence,
+Common package dependency. These boundaries do not introduce application-owned persistence,
 provider selection or lifecycle scheduling into the libraries.
