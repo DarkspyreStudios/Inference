@@ -46,7 +46,8 @@ internal static class Program
     {
         string store = options.Store!;
         Console.WriteLine($"store   : {store}");
-        using var http = new HttpClient { Timeout = Timeout.InfiniteTimeSpan };
+        // The library follows redirects itself so a credential never crosses to another origin.
+        using var http = new HttpClient(new SocketsHttpHandler { AllowAutoRedirect = false }) { Timeout = Timeout.InfiniteTimeSpan };
         TensorSourceAccess access = HuggingFaceToken;
         using var source = new HuggingFaceModelSource(http, access);
         var resolver = new QwenModelResolver(source, new TensorArtifactReader(source, http, access));
