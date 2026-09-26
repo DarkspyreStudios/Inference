@@ -1,3 +1,5 @@
+using System.Runtime.CompilerServices;
+
 namespace Darkspyre.Inference.Connect.LLM.Internal;
 
 /// <summary>Current native-runtime declarations and fail-fast managed-only option checks.</summary>
@@ -101,5 +103,13 @@ internal static class NativeAgentContract
         return new NotSupportedException(
             "This runtime owns its conversation. Host context capture, status, replacement, and "
             + "compaction continuation are not supported; check GetCapabilitiesAsync.");
+    }
+
+    /// <summary>A continuation stream that reports <see cref="UnsupportedContext"/> on its first read.</summary>
+    public static async IAsyncEnumerable<LlmAgentEvent> UnsupportedContinuation(
+        [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        await Task.FromException(UnsupportedContext(cancellationToken));
+        yield break;
     }
 }

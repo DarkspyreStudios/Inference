@@ -267,10 +267,14 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
         await producer.WaitAsync(cancellationToken);
     }
 
-    public IAsyncEnumerable<LlmAgentEvent> ObserveAsync(CancellationToken cancellationToken = default)
+    public async IAsyncEnumerable<LlmAgentEvent> ObserveAsync(
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        return _resources.ObserveAsync(cancellationToken);
+        await foreach (LlmAgentEvent item in _resources.ObserveAsync(cancellationToken))
+        {
+            yield return item;
+        }
     }
 
     public Task<IReadOnlyList<LlmAgentResource>> GetResourcesAsync(CancellationToken cancellationToken = default)

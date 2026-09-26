@@ -493,7 +493,7 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
         public IAsyncEnumerable<LlmAgentEvent> ContinueTurnAsync(
             LlmAgentTurnContinuation continuation,
             CancellationToken cancellationToken = default) =>
-            throw NativeAgentContract.UnsupportedContext(cancellationToken);
+            NativeAgentContract.UnsupportedContinuation(cancellationToken);
 
 
         /// <summary>Starts reading the CLI for the session's lifetime; control requests need it running.</summary>
@@ -551,7 +551,10 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
                 supportsDocuments: true,
                 parameterName: nameof(request));
 
-            await _turnGate.WaitAsync(cancellationToken);
+            if (!_turnGate.Wait(0, cancellationToken))
+            {
+                throw new InvalidOperationException("The session is running or paused.");
+            }
             string turnId = Guid.NewGuid().ToString();
             var turn = new HostTurn(turnId);
             bool completed = false;

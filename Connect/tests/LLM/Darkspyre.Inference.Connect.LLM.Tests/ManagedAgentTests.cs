@@ -169,6 +169,17 @@ public sealed class ManagedAgentTests
     }
 
     [Fact]
+    public async Task ObservingADisposedSessionFailsOnTheFirstRead()
+    {
+        var harness = new Harness();
+        var session = harness.Create(Options());
+        await session.DisposeAsync();
+
+        IAsyncEnumerable<LlmAgentEvent> feed = session.ObserveAsync();
+        await Assert.ThrowsAsync<ObjectDisposedException>(() => Read(feed));
+    }
+
+    [Fact]
     public async Task OversizeNewInputDoesNotLoopOrSendAModelRequest()
     {
         var harness = new Harness();

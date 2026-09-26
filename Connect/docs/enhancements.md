@@ -813,7 +813,9 @@ including compaction continuations. Provider-specific wire fields remain inside 
 
 - Validation occurs before any provider request or visible partial turn is produced.
 - Two different agent sessions may run turns with different instruction overrides concurrently.
-- One session continues to permit only one active turn under its existing concurrency rules.
+- One session permits one active turn. A `RunTurnAsync` read that starts while a turn on the same
+  session is running or paused fails on its first read with "The session is running or paused."
+  The session refuses the second turn and does not queue it.
 - Cancellation must not leave an override active for the next turn.
 - Provider retries belonging to the same turn reuse that turn's override.
 
@@ -1372,7 +1374,9 @@ public interface ILlmAgentSession
 `LlmAgentCapabilities.ResourceObservation` is an `LlmOperationSupport`: Supported for the Claude CLI,
 Unknown for AgentCore, Unsupported for managed Codex. A runtime without resources returns an empty set
 and ends the sequence returned by `ObserveAsync` only at disposal. All public streams return
-IAsyncEnumerable<T> directly; setup and execution remain lazy during enumeration.
+IAsyncEnumerable<T> directly; setup and execution remain lazy during enumeration. A stream method
+never throws from the call itself: every error, including an unsupported operation and a disposed
+session, surfaces on the first read.
 Host tool callbacks return Task<LlmToolOutput> and remain
 awaited required-result work, not background notifications.
 

@@ -356,6 +356,39 @@ public sealed class BedrockAgentCoreTests
         Assert.IsNotAssignableFrom<ILlmAgentForkClient>(client);
     }
 
+    [Fact]
+    public async Task StreamMethodsReportErrorsOnTheFirstRead()
+    {
+        var client = new BedrockAgentCoreLlmClient(new StubInvoker());
+        ILlmAgentSession session = await client.ResumeSessionAsync(
+            "connection", Connection(), "session_123456789012345678901234567890");
+
+        IAsyncEnumerable<LlmAgentEvent> continuation = session.ContinueTurnAsync(
+            new LlmAgentTurnContinuation("turn", "pause", 0, new LlmAgentContext()));
+        await Assert.ThrowsAsync<NotSupportedException>(() => ToArrayAsync(continuation));
+
+        await session.DisposeAsync();
+        IAsyncEnumerable<LlmAgentEvent> feed = session.ObserveAsync();
+        await Assert.ThrowsAsync<ObjectDisposedException>(() => ToArrayAsync(feed));
+    }
+
+    [Fact]
+    public async Task ASecondTurnOnARunningSessionIsRefused()
+    {
+        var client = new BedrockAgentCoreLlmClient(new StubInvoker());
+        await using ILlmAgentSession session = await client.ResumeSessionAsync(
+            "connection", Connection(), "session_123456789012345678901234567890");
+        var request = new LlmAgentTurnRequest { Input = [new LlmAgentTextContent("Hello")] };
+
+        await using IAsyncEnumerator<LlmAgentEvent> running = session.RunTurnAsync(request).GetAsyncEnumerator();
+        Assert.True(await running.MoveNextAsync());
+        Assert.IsType<LlmAgentTurnStartedEvent>(running.Current);
+
+        InvalidOperationException refused = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => ToArrayAsync(session.RunTurnAsync(request)));
+        Assert.Equal("The session is running or paused.", refused.Message);
+    }
+
     private const string HarnessArn =
         "arn:aws:bedrock-agentcore:us-east-1:123456789012:harness/test-harness";
 

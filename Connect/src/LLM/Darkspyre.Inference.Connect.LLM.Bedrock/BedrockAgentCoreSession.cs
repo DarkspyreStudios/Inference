@@ -109,7 +109,7 @@ internal sealed class BedrockAgentCoreSession : ILlmAgentSession
     public IAsyncEnumerable<LlmAgentEvent> ContinueTurnAsync(
         LlmAgentTurnContinuation continuation,
         CancellationToken cancellationToken = default) =>
-        throw NativeAgentContract.UnsupportedContext(cancellationToken);
+        NativeAgentContract.UnsupportedContinuation(cancellationToken);
 
 
     public async IAsyncEnumerable<LlmAgentEvent> RunTurnAsync(
@@ -120,7 +120,10 @@ internal sealed class BedrockAgentCoreSession : ILlmAgentSession
         ArgumentNullException.ThrowIfNull(request);
         NativeAgentContract.ValidateTurn(request);
         ValidateTurn(request);
-        await _turnGate.WaitAsync(cancellationToken);
+        if (!_turnGate.Wait(0, cancellationToken))
+        {
+            throw new InvalidOperationException("The session is running or paused.");
+        }
         string turnId = $"turn-{Guid.NewGuid():N}";
         try
         {
@@ -330,10 +333,14 @@ internal sealed class BedrockAgentCoreSession : ILlmAgentSession
             "AgentCore Harness does not expose a remote turn-interrupt operation. Cancel RunTurnAsync instead.");
     }
 
-    public IAsyncEnumerable<LlmAgentEvent> ObserveAsync(CancellationToken cancellationToken = default)
+    public async IAsyncEnumerable<LlmAgentEvent> ObserveAsync(
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        return _resources.ObserveAsync(cancellationToken);
+        await foreach (LlmAgentEvent item in _resources.ObserveAsync(cancellationToken))
+        {
+            yield return item;
+        }
     }
 
     public Task<IReadOnlyList<LlmAgentResource>> GetResourcesAsync(CancellationToken cancellationToken = default)

@@ -307,6 +307,30 @@ public sealed class ClaudeAgentClientTests
         Assert.Empty(second.OfType<LlmAgentWarningEvent>());
     }
 
+    [Fact]
+    public async Task ASecondTurnIsRefusedAndAnUnsupportedContinuationFailsOnTheFirstRead()
+    {
+        var client = new ClaudeAgentClient(new RecordingSessionProcessFactory(new ScriptedSessionProcess()));
+        await using ILlmAgentSession session = await client.StartSessionAsync("connection", Connection(), new LlmAgentSessionOptions
+        {
+            ModelId = "claude-test",
+            Runtime = new() { WorkingDirectory = Environment.CurrentDirectory }
+        });
+        var request = new LlmAgentTurnRequest { Input = [new LlmAgentTextContent("Hello")] };
+
+        IAsyncEnumerable<LlmAgentEvent> continuation = session.ContinueTurnAsync(
+            new LlmAgentTurnContinuation("turn", "pause", 0, new LlmAgentContext()));
+        await Assert.ThrowsAsync<NotSupportedException>(() => ReadAllAsync(continuation));
+
+        await using IAsyncEnumerator<LlmAgentEvent> running = session.RunTurnAsync(request).GetAsyncEnumerator();
+        Assert.True(await running.MoveNextAsync());
+        Assert.IsType<LlmAgentTurnStartedEvent>(running.Current);
+
+        InvalidOperationException refused = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => ReadAllAsync(session.RunTurnAsync(request)));
+        Assert.Equal("The session is running or paused.", refused.Message);
+    }
+
     private static LlmConnection Connection() => new()
     {
         Version = "v1",
