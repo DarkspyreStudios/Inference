@@ -192,8 +192,8 @@ Classify by ownership, not by how quickly an implementation currently returns:
 | Tensor | Engine/setup acquisition, shared catalog registration/query, pack operations, live observations, lifecycle | Pack-definition construction/validation, immutable artifact lookup, credential factories, local metadata calculations |
 
 Review concrete constructors and properties individually. Fixed descriptors and identity values already
-owned by a returned object are not asynchronous lookups. Construction that opens a resource, such as the
-loopback redirect listener, moves to an async factory. DI must not block on asynchronous initialization. No metadata query implicitly installs or loads weights.
+owned by a returned object are not asynchronous lookups. Construction that opens a resource moves to an
+async factory. DI must not block on asynchronous initialization. No metadata query implicitly installs or loads weights.
 
 ### 5.1 Lease acquisition, artifact lookup and file access
 
@@ -229,7 +229,7 @@ This list covers every public synchronous member in `Common/src`, `Connect/src` 
 | Member | Change |
 |---|---|
 | `CreateSetupSession` on `LlmProviderService`, `ImageProviderService`, `AudioProviderService`, `TtsProviderService` | Replaced by `settingsManager.OpenAsync`, which returns the settings object: steps plus current or blank settings (section 3). |
-| `LoopbackRedirectListener` constructor | Opens sockets. Moves to an async factory. |
+| `LoopbackRedirectListener` | Removed. It had no callers; hosted sign-in uses the pasted code. |
 | `LlmProviderService.StartClaudeLogin` (both overloads) | Becomes `StartClaudeLoginAsync`. Starting a sign-in is authentication start. |
 
 **Removed by the settings editor flow**
