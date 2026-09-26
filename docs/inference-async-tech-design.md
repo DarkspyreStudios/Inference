@@ -38,40 +38,8 @@ Related authorities:
 | DTOs and snapshots | Ordinary properties, local edits, pure helpers and construction remain synchronous. Fetching/replacing authoritative state is asynchronous. |
 | Construction | Operational objects are obtained through asynchronous factories. Tensor creation, Start and Load remain separate; no implicit download or load. |
 | Framework plumbing | Preserve IDisposable, IAsyncDisposable, ToString and generated object/record signatures. Preserve await using and secret-safe formatting. |
-| Notifications | Call each listener outside the state lock and return. A listener posts its async work and returns without blocking. Listener failure must not roll back or change the reported result of a completed operation. |
 | Required-result callbacks | Await them: tool execution and source-credential resolution return Task<T>, carry cancellation and remain part of the owning operation. |
 | Settings timing | Edits stay in the local settings object. Actions and model queries run against the local values. Only Save returns settings to the app. |
-
-Non-blocking notifications are invalidation hints, not an ordered change log or another state owner.
-Observers fetch the latest snapshot. Required-result callbacks and stream backpressure are not
-notifications and must not become fire-and-forget.
-
-### 2.1 Notification ownership across the host boundary
-
-Inference setup notifications are invalidation hints. The session calls each `Changed` listener
-after it releases the state lock, then returns. It does not wait for work a listener starts.
-A listener with async work posts it with `_ = ...` and returns. The settings editor posts its
-refresh through `InvokeAsync` this way. The session catches a listener's exception, and that
-exception does not affect the operation or the other listeners. Observers fetch the latest
-snapshot; they cannot assume one callback per intermediate revision.
-
-Agent DS owns a different publication guarantee: it starts every subscriber callback for its
-publication, isolates invocation failures, then awaits all entered callbacks. This guarantee belongs
-to Agent DS's publication, not to the upstream Inference operation.
-
-The host integration has two separate completion boundaries:
-
-1. Inference publishes its change and hands off an invalidation.
-2. The host adapter fetches the latest snapshot, rejects stale derived results, and publishes through
-   Agent DS's awaited notification mechanism.
-
-Awaiting Inference CommitAsync therefore does not imply that Agent DS subscribers or UI rendering
-have settled. A host needing downstream completion awaits a host-owned operation that explicitly
-includes that publication. The adapter owns its pending work, error reporting, unsubscription and
-shutdown settlement; it must not make an Inference save await its own downstream callbacks.
-
-Required-result callbacks such as host persistence, tool execution and credential resolution are
-awaited as part of their operation. They are not invalidation notifications.
 
 ## 3. Settings editor flow
 
@@ -84,9 +52,13 @@ The settings editor works on a local settings object. Only Save returns settings
 3. **Act.** Sign-in, tests, checks and model queries are async connector calls. Each call takes the
    current local values, including unsaved ones. Its result, including a sign-in credential, goes
    into the local object.
-4. **Save.** Save is one async call. It validates the local object and hands the whole object to the
-   app through the host's typed commit target, once. Closing without Save discards the object, and
-   the app receives nothing.
+4. **Save.** The Save button is disabled until sign-in succeeds. Save is one async call. It
+   validates the local object, hands the whole object to the app through the host's typed commit
+   target once, and closes the dialog. Closing the dialog without Save discards the object, and the
+   app receives nothing.
+
+The session has no change event. Each button's handler receives its call's result and updates the
+page. Sign-in reports its progress through the action's progress callback.
 
 Blazor pages are event based. A field's change handler edits the local object synchronously. A
 button's click handler is async: it awaits its connector calls in order, then updates the page
@@ -98,8 +70,8 @@ reports unsaved changes so the host can warn before closing. Save keeps expected
 and uncertain-commit semantics. Disposal cancels and joins owned work and clears secret state; it
 never stops a host-owned Tensor instance.
 
-Tensor setup actions that write model files or change a running instance are exceptions to this
-flow and are specified separately.
+This section covers Connect providers and Settings.UI. Tensor setup has its own requirements,
+which this section does not cover.
 
 ## 4. Streaming and callback implementation
 
@@ -177,10 +149,9 @@ public contracts. No parallel legacy signature is exposed.
   cancellation, partial failure and abandoned-enumerator cleanup.
 - Required-result callbacks: await completion/fault/cancellation; preserve tool and credential policy.
 - Settings editor: edits and show/hide rules make no provider call; actions and model queries use
-  unsaved values; nothing reaches the app without Save; closing without Save discards everything;
+  unsaved values; Save stays disabled until sign-in succeeds, then saves and closes the dialog;
+  nothing reaches the app without Save; closing without Save discards everything;
   secret redaction.
-- Notifications: a throwing listener does not affect the operation or other listeners; reentrancy
-  does not deadlock; listeners do not become a second state owner.
 - Lifecycle: failed/cancelled load, urgent/graceful stop, repeated cleanup, gate/lease ownership.
 - Public API inventory: classify remaining methods against the approved boundary, not a blanket
   “all non-Task methods fail” rule. Compile external implementations of changed contracts.
