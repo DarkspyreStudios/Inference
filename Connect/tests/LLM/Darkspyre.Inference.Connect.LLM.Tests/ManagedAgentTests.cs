@@ -297,17 +297,19 @@ public sealed class ManagedAgentTests
     }
         };
         await using var session = harness.Create(options);
-        string? turnId = null;
+        // The tool can start before the consumer reads the turn's first item, so wait for both.
+        var turn = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
         async Task Consume()
         {
-            await foreach (var item in session.RunTurnAsync(Turn("go"))) { turnId ??= item.TurnId; }
+            await foreach (var item in session.RunTurnAsync(Turn("go"))) { turn.TrySetResult(item.TurnId); }
         }
         var running = Consume();
         await started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        string turnId = await turn.Task.WaitAsync(TimeSpan.FromSeconds(5));
         await Assert.ThrowsAsync<InvalidOperationException>(() => session.CaptureContextAsync());
         await Assert.ThrowsAsync<InvalidOperationException>(() => session.MeasureContextAsync(History("proposal")));
         await Assert.ThrowsAsync<InvalidOperationException>(() => Read(session.RunTurnAsync(Turn("overlap"))));
-        await session.InterruptAsync(turnId!);
+        await session.InterruptAsync(turnId);
         await running.WaitAsync(TimeSpan.FromSeconds(5));
         var captured = await session.CaptureContextAsync();
         Assert.Equal(2, captured.Entries[^1].Message.ToolResults.Count);
