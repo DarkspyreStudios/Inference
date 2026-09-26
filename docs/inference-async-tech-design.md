@@ -102,9 +102,11 @@ A stream method never throws from the call itself. Every error, including an uns
 operation and a disposed session, surfaces on the first MoveNextAsync. A caller wraps the
 `await foreach` in one `try`.
 
-Each read of a returned stream is a new call. Reading one RunTurnAsync stream twice starts two
-turns, and reading one StreamAsync stream twice sends the prompt twice. The calling app gates its
-reads: it does not start a stream while another read of it is in progress.
+Each read of a returned stream is a new call. Reading one StreamAsync stream twice sends the
+prompt twice. An agent session runs one turn at a time. A RunTurnAsync or ContinueTurnAsync read
+that starts while another turn on the same session is running or paused fails on its first read
+with "The session is running or paused." The session refuses the second turn and does not queue
+it.
 
 Each agent session's `ObserveAsync` feed never slows the provider. Events wait in that session's
 queue until its reader takes them. A session's feed allows one reader at a time and ends when that
@@ -160,7 +162,7 @@ All in-repository implementations, tests, examples, tools and UI.Settings consum
 public contracts. No parallel legacy signature is exposed.
 
 - Streaming: progressive output, no eager generation, backpressure, terminal events, every
-  error on the first read, a second read runs again,
+  error on the first read, a second turn on a running session is refused,
   cancellation, partial failure and abandoned-enumerator cleanup.
 - Required-result callbacks: await completion/fault/cancellation; preserve tool and credential policy.
 - Settings editor: edits and show/hide rules make no provider call; actions and model queries use
