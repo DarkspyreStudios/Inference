@@ -93,18 +93,18 @@ public sealed class QwenModelResolverTests
     {
         var source = new Source();
         var target = new Target();
-        await using TensorSetupSession session = QwenSetup.CreateSession(new(SetupChangeIntent.Create, "test", null), target, new NoInstallPacks(), source: source);
-        Select(session, "repository", "owner/model"); Select(session, "source-revision", "main"); Select(session, "variant", "model.gguf");
-        ISetupAction resolve = session.Snapshot.Actions.Single(action => action.Descriptor.Id == "resolve");
-        Assert.Equal(SetupActionState.Completed, (await resolve.ExecuteAsync()).State);
-        Assert.Equal(SetupCommitState.Committed, (await session.CommitAsync()).State);
+        TensorSettingsManager manager = QwenSetup.CreateSettingsManager(target, new NoInstallPacks(), source: source);
+        TensorSettings settings = await manager.OpenAsync(new(SetupChangeIntent.Create, "test", null));
+        Select(settings, "repository", "owner/model"); Select(settings, "source-revision", "main"); Select(settings, "variant", "model.gguf");
+        Assert.Equal(SetupActionState.Completed, (await manager.RunAsync(settings, "resolve")).State);
+        Assert.Equal(SetupCommitState.Committed, (await manager.SaveAsync(settings)).State);
         Assert.Equal(TensorLlmModels.QwenRuntimeArchitecture, target.Changes!.Definition.RuntimeArchitecture);
         Assert.Equal(target.Changes.Definition.Key, target.Changes.Configuration.Model);
     }
 
-    private static void Select(TensorSetupSession session, string field, string value)
+    private static void Select(TensorSettings settings, string field, string value)
     {
-        SetupChoiceField choice = Assert.IsType<SetupChoiceField>(session.Snapshot.Steps.SelectMany(step => step.Sections)
+        SetupChoiceField choice = Assert.IsType<SetupChoiceField>(settings.Steps.SelectMany(step => step.Sections)
             .SelectMany(section => section.Fields).Single(item => item.Description.Id == field));
         Assert.Equal(SetupEditState.Applied, choice.SetValue(value).State);
     }

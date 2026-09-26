@@ -179,7 +179,9 @@ public sealed class LlmSettingsTests
 
         LlmConnection former = new()
         {
-            Version = "v1", Transport = LlmTransport.OpenAiCodex, Endpoint = "codex",
+            Version = "v1",
+            Transport = LlmTransport.OpenAiCodex,
+            Endpoint = "codex",
             Credential = new LlmCredential { OAuth = new() { AccessToken = "saved-token" } }.Serialize()
         };
         var edited = new Target();

@@ -20,85 +20,95 @@ public sealed class TensorSetupTests
     [Fact]
     public async Task SavingASelectionDoesNotInstallOrLoad()
     {
-        var manager = new Packs();
+        var packs = new Packs();
         var target = new Target();
-        await using var session = new TensorSetupSession(Definition, new(SetupChangeIntent.Create, "id", null), target, [Pack], manager);
-        SetupChoiceField model = Assert.IsType<SetupChoiceField>(session.Snapshot.Steps[0].Sections[0].Fields[0]);
+        var manager = new TensorSettingsManager(Definition, target, [Pack], packs);
+        TensorSettings settings = await manager.OpenAsync(new(SetupChangeIntent.Create, "id", null));
+        SetupChoiceField model = Assert.IsType<SetupChoiceField>(settings.Steps[0].Sections[0].Fields[0]);
         Assert.Equal(SetupEditState.Applied, model.SetValue(Pack.Key.ToString()).State);
-        Assert.Equal(SetupCommitState.Committed, (await session.CommitAsync()).State);
+        Assert.Equal(SetupCommitState.Committed, (await manager.SaveAsync(settings)).State);
         Assert.Equal(Pack.Key, target.Changes!.Configuration.Model);
-        Assert.Equal(0, manager.Calls);
+        Assert.Equal(0, packs.Calls);
     }
 
     [Fact]
     public async Task InstalledDoesNotMeanLoadedOrReadyWithoutALiveInstance()
     {
-        var manager = new Packs();
-        await using TensorSetupSession session = Edit(manager);
-        Assert.Equal(SetupActionState.Completed, (await Action(session, SetupActionPurpose.CheckReadiness).ExecuteAsync()).State);
-        Assert.True(session.Snapshot.Status.Installed.Value);
-        Assert.Null(session.Snapshot.Status.Verified.Value);
-        Assert.Null(session.Snapshot.Status.Loaded.Value);
-        Assert.Null(session.Snapshot.Status.Ready.Value);
+        var (manager, settings) = await EditAsync(new Packs());
+        Assert.Equal(SetupActionState.Completed, (await manager.RunAsync(settings, Action(settings, SetupActionPurpose.CheckReadiness).Id)).State);
+        Assert.True(settings.Status.Installed.Value);
+        Assert.Null(settings.Status.Verified.Value);
+        Assert.Null(settings.Status.Loaded.Value);
+        Assert.Null(settings.Status.Ready.Value);
     }
 
     [Fact]
     public async Task PrecancelledUnloadStillReachesTheEngineAsUrgentTeardown()
     {
         var runtime = new Runtime { Observation = new(Pack.Key, TensorBackendKind.Cpu, TensorEngineState.Loaded, DateTimeOffset.UtcNow) };
-        await using TensorSetupSession session = Edit(new Packs(), runtime);
-        SetupActionResult result = await Action(session, SetupActionPurpose.Unload).ExecuteAsync(cancellationToken: new(true));
+        var (manager, settings) = await EditAsync(new Packs(), runtime);
+        SetupActionResult result = await manager.RunAsync(settings, Action(settings, SetupActionPurpose.Unload).Id, cancellationToken: new(true));
         Assert.Equal(SetupActionState.Completed, result.State);
         Assert.True(runtime.Urgent);
-        Assert.False(session.Snapshot.Status.Loaded.Value);
+        Assert.False(settings.Status.Loaded.Value);
     }
 
     [Fact]
-    public async Task HostModelChangesReachTheSessionThroughEngineStatus()
+    public async Task HostModelChangesReachTheSettingsThroughStatusChanged()
     {
         var runtime = new Runtime();
-        await using TensorSetupSession session = Edit(new Packs(), runtime);
-        Assert.False(session.Snapshot.Status.Ready.Value);
+        var (manager, settings) = await EditAsync(new Packs(), runtime);
+        Assert.False(settings.Status.Ready.Value);
+        int changes = 0;
+        void OnChanged(object? sender, EventArgs args) => changes++;
+        manager.StatusChanged += OnChanged;
+        Assert.Equal(1, runtime.Listeners);
         await runtime.LoadAsync(Pack.Key);
-        Assert.True(session.Snapshot.Status.Ready.Value);
+        Assert.Equal(1, changes);
+        await manager.RefreshStatusAsync(settings);
+        Assert.True(settings.Status.Ready.Value);
         await runtime.UnloadAsync();
-        Assert.False(session.Snapshot.Status.Ready.Value);
-        Assert.Equal(0, runtime.StopCalls);
-        await session.DisposeAsync();
-        Assert.Equal(0, runtime.StopCalls); // The session does not own the host's engine.
+        await manager.RefreshStatusAsync(settings);
+        Assert.False(settings.Status.Ready.Value);
+        manager.StatusChanged -= OnChanged;
+        Assert.Equal(0, runtime.Listeners);
+        Assert.Equal(0, runtime.StopCalls); // The manager does not own the host's engine.
     }
 
     [Fact]
     public async Task ExplicitStopUpdatesReadinessAndDisablesFurtherLifecycleActions()
     {
         var runtime = new Runtime();
-        await using TensorSetupSession session = Edit(new Packs(), runtime);
-        Assert.Equal(SetupActionState.Completed, (await Action(session, SetupActionPurpose.Stop).ExecuteAsync()).State);
+        var (manager, settings) = await EditAsync(new Packs(), runtime);
+        Assert.Equal(SetupActionState.Completed, (await manager.RunAsync(settings, Action(settings, SetupActionPurpose.Stop).Id)).State);
         Assert.Equal(1, runtime.StopCalls);
-        Assert.False(Action(session, SetupActionPurpose.Load).Descriptor.IsEnabled);
-        Assert.False(session.Snapshot.Status.Ready.Value);
+        Assert.False(Action(settings, SetupActionPurpose.Load).IsEnabled);
+        Assert.False(settings.Status.Ready.Value);
     }
 
-    private static TensorSetupSession Edit(Packs packs, Runtime? runtime = null) =>
-        new(Definition, new(SetupChangeIntent.Edit, "id", "v1"), new Target(), [Pack], packs,
-            new(Definition.Implementation.Id, Pack.Key, TensorBackendKind.Cpu), runtime);
+    private static async Task<(TensorSettingsManager Manager, TensorSettings Settings)> EditAsync(Packs packs, Runtime? runtime = null)
+    {
+        var manager = new TensorSettingsManager(Definition, new Target(), [Pack], packs, runtime);
+        return (manager, await manager.OpenAsync(new(SetupChangeIntent.Edit, "id", "v1"),
+            new(Definition.Implementation.Id, Pack.Key, TensorBackendKind.Cpu)));
+    }
 
     [Fact]
     public async Task DirtyTracksBackendRevertsAndNotReadinessChecks()
     {
-        await using TensorSetupSession session = Edit(new Packs());
-        Assert.False(session.Snapshot.IsDirty);
-        await Action(session, SetupActionPurpose.CheckReadiness).ExecuteAsync();
-        Assert.False(session.Snapshot.IsDirty);
-        SetupChoiceField Backend() => Assert.Single(session.Snapshot.Steps[0].Sections[0].Fields.OfType<SetupChoiceField>(), field => field.Description.Id == "backend");
+        var (manager, settings) = await EditAsync(new Packs());
+        Assert.False(settings.HasUnsavedChanges);
+        await manager.RunAsync(settings, Action(settings, SetupActionPurpose.CheckReadiness).Id);
+        Assert.False(settings.HasUnsavedChanges);
+        SetupChoiceField Backend() => Assert.Single(settings.Steps[0].Sections[0].Fields.OfType<SetupChoiceField>(), field => field.Description.Id == "backend");
         Assert.Equal(SetupChoiceCapabilities.Bounded, Backend().Capabilities);
         Backend().SetValue(nameof(TensorBackendKind.Auto));
-        Assert.True(session.Snapshot.IsDirty);
+        Assert.True(settings.HasUnsavedChanges);
         Backend().SetValue(nameof(TensorBackendKind.Cpu));
-        Assert.False(session.Snapshot.IsDirty);
+        Assert.False(settings.HasUnsavedChanges);
     }
-    private static ISetupAction Action(TensorSetupSession session, SetupActionPurpose purpose) =>
-        Assert.Single(session.Snapshot.Actions, action => action.Descriptor.Purpose == purpose);
+    private static SetupActionDescriptor Action(TensorSettings settings, SetupActionPurpose purpose) =>
+        Assert.Single(settings.Actions, action => action.Purpose == purpose);
 
     private sealed class Target : ISetupCommitTarget<TensorSetupChanges>
     {
@@ -125,7 +135,9 @@ public sealed class TensorSetupTests
 
     private sealed class Runtime : ITensorModelInstance
     {
-        public event EventHandler<TensorEngineStatus>? EngineStatusChanged;
+        private EventHandler<TensorEngineStatus>? _engineStatusChanged;
+        public event EventHandler<TensorEngineStatus>? EngineStatusChanged { add => _engineStatusChanged += value; remove => _engineStatusChanged -= value; }
+        public int Listeners => _engineStatusChanged?.GetInvocationList().Length ?? 0;
         public TensorModelObservation Observation { get; set; } = new(null, null, TensorEngineState.Unloaded, DateTimeOffset.UtcNow);
         public TensorBackendKind RequestedBackend => TensorBackendKind.Cpu;
         public bool Urgent { get; private set; }
@@ -143,7 +155,7 @@ public sealed class TensorSetupTests
         private void Report(TensorModelObservation observation)
         {
             Observation = observation;
-            EngineStatusChanged?.Invoke(this, new(observation.Model, observation.Backend, observation.State, observation.ObservedAt));
+            _engineStatusChanged?.Invoke(this, new(observation.Model, observation.Backend, observation.State, observation.ObservedAt));
         }
     }
 }

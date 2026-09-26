@@ -46,28 +46,29 @@ public sealed class WhisperMetadataTests
         using var directory = new WhisperFixture.PackDirectory();
         using var packs = new TensorModelPackManager(new(TensorSpeechModels.Whisper), directory.Path);
         var target = new Target();
-        await using TensorSetupSession session = WhisperSetup.CreateSession(new(SetupChangeIntent.Create, "speech", null), target, packs);
-        Assert.False((await session.ValidateAsync()).IsValid);
-        SetupChoiceField model = Field(session, "model");
-        Assert.Equal(12, (await model.GetChoicesAsync(new(session.Snapshot.Revision))).Choices.Count);
+        TensorSettingsManager manager = WhisperSetup.CreateSettingsManager(target, packs);
+        TensorSettings settings = await manager.OpenAsync(new(SetupChangeIntent.Create, "speech", null));
+        Assert.False(settings.Validate().IsValid);
+        SetupChoiceField model = Field(settings, "model");
+        Assert.Equal(12, (await manager.QueryChoicesAsync(settings, "model", new())).Choices.Count);
         TensorModelPackDefinition selected = TensorSpeechModels.Whisper.Single(pack => pack.Key.ModelId == "whisper/large-v3-turbo");
         Assert.Equal(SetupEditState.Applied, model.SetValue(selected.Key.ToString()).State);
-        Assert.Equal(SetupEditState.Applied, Field(session, "backend").SetValue("Cpu").State);
-        Assert.Equal(SetupCommitState.Committed, (await session.CommitAsync()).State);
+        Assert.Equal(SetupEditState.Applied, Field(settings, "backend").SetValue("Cpu").State);
+        Assert.Equal(SetupCommitState.Committed, (await manager.SaveAsync(settings)).State);
         Assert.Equal(selected.Key, target.Changes!.Configuration.Model);
         var editTarget = new Target();
-        await using TensorSetupSession edit = WhisperSetup.CreateSession(new(SetupChangeIntent.Edit, "speech", "saved-v1"),
-            editTarget, packs, existing: target.Changes.Configuration);
+        TensorSettingsManager editManager = WhisperSetup.CreateSettingsManager(editTarget, packs);
+        TensorSettings edit = await editManager.OpenAsync(new(SetupChangeIntent.Edit, "speech", "saved-v1"), target.Changes.Configuration);
         Assert.Equal(selected.Key.ToString(), Field(edit, "model").Value);
         TensorModelPackDefinition replacement = TensorSpeechModels.Whisper.Single(pack => pack.Key.ModelId == "whisper/tiny.en");
         Assert.Equal(SetupEditState.Applied, Field(edit, "model").SetValue(replacement.Key.ToString()).State);
-        Assert.Equal(SetupCommitState.Committed, (await edit.CommitAsync()).State);
+        Assert.Equal(SetupCommitState.Committed, (await editManager.SaveAsync(edit)).State);
         Assert.Equal("saved-v1", editTarget.Changes!.Identity.ExpectedVersion);
         Assert.Equal(replacement.Key, editTarget.Changes.Configuration.Model);
         Assert.True(editTarget.Changes.RequiresUnload);
         Assert.Equal(TensorModelPackState.NotInstalled, (await packs.GetStatusAsync(selected.Key)).State);
         Assert.Equal(TensorModelPackState.NotInstalled, (await packs.GetStatusAsync(replacement.Key)).State);
-        Assert.Null(session.Snapshot.Status.Loaded.Value);
+        Assert.Null(settings.Status.Loaded.Value);
     }
 
     [Fact]
@@ -77,11 +78,12 @@ public sealed class WhisperMetadataTests
         using var directory = new WhisperFixture.PackDirectory();
         using var packs = new TensorModelPackManager(new([]), directory.Path);
         var target = new Target();
-        await using TensorSetupSession session = WhisperSetup.CreateSession(new(SetupChangeIntent.Create, "speech", null), target, packs, source: source);
+        TensorSettingsManager manager = WhisperSetup.CreateSettingsManager(target, packs, source: source);
+        TensorSettings settings = await manager.OpenAsync(new(SetupChangeIntent.Create, "speech", null));
         foreach ((string field, string value) in new[] { ("repository", TensorSpeechModels.Repository), ("source-revision", "main"), ("variant", "ggml-tiny.bin") })
-            Assert.Equal(SetupEditState.Applied, Field(session, field).SetValue(value).State);
-        Assert.Equal(SetupActionState.Completed, (await session.Snapshot.Actions.Single(action => action.Descriptor.Id == "resolve").ExecuteAsync()).State);
-        Assert.Equal(SetupCommitState.Committed, (await session.CommitAsync()).State);
+            Assert.Equal(SetupEditState.Applied, Field(settings, field).SetValue(value).State);
+        Assert.Equal(SetupActionState.Completed, (await manager.RunAsync(settings, "resolve")).State);
+        Assert.Equal(SetupCommitState.Committed, (await manager.SaveAsync(settings)).State);
         Assert.Equal(source.Pack.Key, target.Changes!.Definition.Key);
         Assert.Empty((await packs.GetDefinitionsAsync()));
         Assert.Single(source.Reads);
@@ -121,8 +123,8 @@ public sealed class WhisperMetadataTests
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => probe.CheckAsync(TensorBackendKind.Cpu, new(true)));
     }
 
-    private static SetupChoiceField Field(TensorSetupSession session, string id) => Assert.IsType<SetupChoiceField>(
-        session.Snapshot.Steps.SelectMany(step => step.Sections).SelectMany(section => section.Fields).Single(field => field.Description.Id == id));
+    private static SetupChoiceField Field(TensorSettings settings, string id) => Assert.IsType<SetupChoiceField>(
+        settings.Steps.SelectMany(step => step.Sections).SelectMany(section => section.Fields).Single(field => field.Description.Id == id));
     private sealed class Target : ISetupCommitTarget<TensorSetupChanges>
     {
         public TensorSetupChanges? Changes { get; private set; }

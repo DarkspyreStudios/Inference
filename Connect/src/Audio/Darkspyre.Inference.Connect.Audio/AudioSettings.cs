@@ -201,8 +201,12 @@ public sealed class AudioSettingsManager : InferenceSettingsManager<AudioSetting
         AudioSetupConfiguration configuration = settings.Configuration();
         await _providers[settings.Transport].Bind(configuration.Connection).GenerateAsync(new()
         {
-            Prompt = "A gentle breeze rustling leaves.", Duration = configuration.Duration, Steps = configuration.Steps,
-            GuidanceScale = configuration.GuidanceScale, Seed = configuration.Seed, UseCache = configuration.UseCache
+            Prompt = "A gentle breeze rustling leaves.",
+            Duration = configuration.Duration,
+            Steps = configuration.Steps,
+            GuidanceScale = configuration.GuidanceScale,
+            Seed = configuration.Seed,
+            UseCache = configuration.UseCache
         }, cancellationToken).ConfigureAwait(false);
         settings.Status = settings.Status with { Ready = SetupObservation.Known(true), Verified = SetupObservation.Known(true) };
         return SetupActionResult.Completed;

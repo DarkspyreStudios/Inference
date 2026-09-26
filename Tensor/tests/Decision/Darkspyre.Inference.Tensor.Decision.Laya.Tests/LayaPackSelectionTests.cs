@@ -209,26 +209,30 @@ public sealed class LayaPackSelectionTests : IDisposable
         await packs.InstallAsync(second.Key);
         await engine.LoadAndWaitAsync(first.Key);
         var target = new Target();
-        await using TensorSetupSession setup = LayaSetup.CreateSession(new(SetupChangeIntent.Edit, "laya", "v1"), target,
-            packs, [first, second], new(LayaSetup.Definition.Implementation.Id, first.Key, TensorBackendKind.Cpu), engine);
-        SetupChoiceField choice = Assert.IsType<SetupChoiceField>(setup.Snapshot.Steps[0].Sections[0].Fields[0]);
-        SetupChoicePage page = await choice.GetChoicesAsync(new(setup.Snapshot.Revision, PageSize: 1));
+        TensorSettingsManager manager = LayaSetup.CreateSettingsManager(target, packs, [first, second], engine);
+        TensorSettings setup = await manager.OpenAsync(new(SetupChangeIntent.Edit, "laya", "v1"),
+            new(LayaSetup.Definition.Implementation.Id, first.Key, TensorBackendKind.Cpu));
+        SetupChoiceField choice = Assert.IsType<SetupChoiceField>(setup.Steps[0].Sections[0].Fields[0]);
+        SetupChoicePage page = await manager.QueryChoicesAsync(setup, "model", new(PageSize: 1));
         Assert.Equal(first.Key.ToString(), Assert.Single(page.Choices).Value);
         Assert.NotNull(page.Continuation);
-        SetupChoicePage next = await choice.GetChoicesAsync(new(setup.Snapshot.Revision, Continuation: page.Continuation, PageSize: 1));
+        SetupChoicePage next = await manager.QueryChoicesAsync(setup, "model", new(Continuation: page.Continuation, PageSize: 1));
         Assert.Equal(second.Key.ToString(), Assert.Single(next.Choices).Value);
         Assert.Equal(SetupEditState.Applied, choice.SetValue(second.Key.ToString()).State);
-        Assert.False(Action(setup, SetupActionPurpose.Load).Descriptor.IsEnabled);
-        Assert.False(setup.Snapshot.Status.Ready.Value);
-        Assert.Equal(SetupActionState.Completed, (await Action(setup, SetupActionPurpose.Unload).ExecuteAsync()).State);
-        Assert.Equal(SetupActionState.Completed, (await Action(setup, SetupActionPurpose.Load).ExecuteAsync()).State);
-        Assert.True(setup.Snapshot.Status.Ready.Value);
+        Assert.False(Action(setup, SetupActionPurpose.Load).IsEnabled);
+        Assert.False(setup.Status.Ready.Value);
+        Assert.Equal(SetupActionState.Completed, (await engine.WaitForAsync(
+            () => manager.RunAsync(setup, Action(setup, SetupActionPurpose.Unload).Id), TensorEngineState.Unloaded)).State);
+        await manager.RefreshStatusAsync(setup);
+        Assert.Equal(SetupActionState.Completed, (await engine.WaitForAsync(
+            () => manager.RunAsync(setup, Action(setup, SetupActionPurpose.Load).Id), TensorEngineState.Loaded)).State);
+        await manager.RefreshStatusAsync(setup);
+        Assert.True(setup.Status.Ready.Value);
         Assert.Equal(second.Key, (await engine.GetObservationAsync()).Model);
-        Assert.Equal(SetupCommitState.Committed, (await setup.CommitAsync()).State);
+        Assert.Equal(SetupCommitState.Committed, (await manager.SaveAsync(setup)).State);
         Assert.Equal(second.Key, target.Changes!.Configuration.Model);
         Assert.True(target.Changes.RequiresUnload);
-        await setup.DisposeAsync();
-        Assert.Equal(second.Key, (await engine.GetObservationAsync()).Model); // View/session disposal never owns the engine.
+        Assert.Equal(second.Key, (await engine.GetObservationAsync()).Model); // Saving never owns the engine.
         Assert.Equal(InferenceCapability.Decision, Assert.Single(setup.Definition.Implementation.Tasks).GetCapability());
     }
 
@@ -239,12 +243,13 @@ public sealed class LayaPackSelectionTests : IDisposable
         using var http = new HttpClient(new ArtifactHandler());
         using var packs = Manager(http, offered);
         var target = new Target();
-        await using TensorSetupSession setup = LayaSetup.CreateSession(new(SetupChangeIntent.Create, "laya", null), target, packs, [offered]);
-        SetupChoiceField choice = Assert.IsType<SetupChoiceField>(setup.Snapshot.Steps[0].Sections[0].Fields[0]);
-        SetupChoice pack = Assert.Single((await choice.GetChoicesAsync(new(setup.Snapshot.Revision))).Choices);
+        TensorSettingsManager manager = LayaSetup.CreateSettingsManager(target, packs, [offered]);
+        TensorSettings setup = await manager.OpenAsync(new(SetupChangeIntent.Create, "laya", null));
+        SetupChoiceField choice = Assert.IsType<SetupChoiceField>(setup.Steps[0].Sections[0].Fields[0]);
+        SetupChoice pack = Assert.Single((await manager.QueryChoicesAsync(setup, "model", new())).Choices);
         Assert.Equal(offered.Key.ToString(), pack.Value);
         choice.SetValue(pack.Value);
-        Assert.Equal(SetupCommitState.Committed, (await setup.CommitAsync()).State);
+        Assert.Equal(SetupCommitState.Committed, (await manager.SaveAsync(setup)).State);
         Assert.Equal(offered.Key, target.Changes!.Configuration.Model);
         Assert.Equal(TensorModelPackState.NotInstalled, (await packs.GetStatusAsync(offered.Key)).State);
     }
@@ -267,7 +272,7 @@ public sealed class LayaPackSelectionTests : IDisposable
             pack with { SupportedBackends = new HashSet<TensorBackendKind>() }
         })
         {
-            Assert.Throws<ArgumentException>(() => LayaSetup.CreateSession(new(SetupChangeIntent.Create, "laya", null), new Target(), packs, [invalid]));
+            Assert.Throws<ArgumentException>(() => LayaSetup.CreateSettingsManager(new Target(), packs, [invalid]));
         }
     }
 
@@ -322,8 +327,8 @@ public sealed class LayaPackSelectionTests : IDisposable
 
     private TensorModelPackManager Manager(HttpClient http, params TensorModelPackDefinition[] definitions) =>
         new(new TensorModelCatalog(definitions), _root, http);
-    private static ISetupAction Action(TensorSetupSession setup, SetupActionPurpose purpose) =>
-        Assert.Single(setup.Snapshot.Actions, action => action.Descriptor.Purpose == purpose);
+    private static SetupActionDescriptor Action(TensorSettings setup, SetupActionPurpose purpose) =>
+        Assert.Single(setup.Actions, action => action.Purpose == purpose);
     private static DecisionInferenceRequest Request(string modelId) => new()
     {
         ModelId = modelId,

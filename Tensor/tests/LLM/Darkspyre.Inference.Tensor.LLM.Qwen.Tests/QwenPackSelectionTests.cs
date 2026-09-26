@@ -53,18 +53,19 @@ public sealed class QwenPackSelectionTests : IDisposable
         using var http = new HttpClient(new Handler());
         using var packs = Manager(http, pack);
         var target = new Target();
-        await using var setup = QwenSetup.CreateSession(new(SetupChangeIntent.Create, "custom", null), target, packs, offeredModels: [pack]);
-        var field = Assert.IsType<SetupChoiceField>(setup.Snapshot.Steps[0].Sections[0].Fields[0]);
+        TensorSettingsManager manager = QwenSetup.CreateSettingsManager(target, packs, offeredModels: [pack]);
+        TensorSettings setup = await manager.OpenAsync(new(SetupChangeIntent.Create, "custom", null));
+        var field = Assert.IsType<SetupChoiceField>(setup.Steps[0].Sections[0].Fields[0]);
         Assert.Equal(SetupEditState.Applied, field.SetValue(pack.Key.ToString()).State);
-        Assert.Equal(SetupCommitState.Committed, (await setup.CommitAsync()).State);
+        Assert.Equal(SetupCommitState.Committed, (await manager.SaveAsync(setup)).State);
         Assert.Equal(pack.Key, target.Changes!.Configuration.Model);
         var editTarget = new Target();
-        await using var edit = QwenSetup.CreateSession(new(SetupChangeIntent.Edit, "custom", "saved-v1"),
-            editTarget, packs, existing: target.Changes.Configuration, offeredModels: [pack]);
-        SetupChoiceField backend = Assert.IsType<SetupChoiceField>(edit.Snapshot.Steps.SelectMany(step => step.Sections)
+        TensorSettingsManager editManager = QwenSetup.CreateSettingsManager(editTarget, packs, offeredModels: [pack]);
+        TensorSettings edit = await editManager.OpenAsync(new(SetupChangeIntent.Edit, "custom", "saved-v1"), target.Changes.Configuration);
+        SetupChoiceField backend = Assert.IsType<SetupChoiceField>(edit.Steps.SelectMany(step => step.Sections)
             .SelectMany(section => section.Fields).Single(item => item.Description.Id == "backend"));
         Assert.Equal(SetupEditState.Applied, backend.SetValue(nameof(TensorBackendKind.Cpu)).State);
-        Assert.Equal(SetupCommitState.Committed, (await edit.CommitAsync()).State);
+        Assert.Equal(SetupCommitState.Committed, (await editManager.SaveAsync(edit)).State);
         Assert.Equal("saved-v1", editTarget.Changes!.Identity.ExpectedVersion);
         Assert.Equal(pack.Key, editTarget.Changes.Configuration.Model);
         Assert.Equal(TensorBackendKind.Cpu, editTarget.Changes.Configuration.Backend);

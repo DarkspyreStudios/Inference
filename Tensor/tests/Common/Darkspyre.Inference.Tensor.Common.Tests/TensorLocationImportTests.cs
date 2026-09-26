@@ -102,19 +102,20 @@ public sealed class TensorLocationImportTests : IDisposable
     {
         string path = await FileAsync("model.bin", "model"u8.ToArray());
         var target = new Target();
-        using var manager = new TensorModelPackManager(new([]), Path.Combine(_root, "packs"));
-        await using var setup = new TensorSetupSession(new(new("test", "Test", Darkspyre.Inference.Common.InferenceImplementationKind.Tensor,
-            Darkspyre.Inference.Common.InferenceTask.TextGeneration), "test"), new(SetupChangeIntent.Create, "test", null), target, [], manager, resolver: new Resolver());
+        using var packs = new TensorModelPackManager(new([]), Path.Combine(_root, "packs"));
+        var manager = new TensorSettingsManager(new(new("test", "Test", Darkspyre.Inference.Common.InferenceImplementationKind.Tensor,
+            Darkspyre.Inference.Common.InferenceTask.TextGeneration), "test"), target, [], packs, resolver: new Resolver());
+        TensorSettings setup = await manager.OpenAsync(new(SetupChangeIntent.Create, "test", null));
         Text(setup, "local-path").SetValue(path);
         Text(setup, "source-license").SetValue("test");
-        Assert.True(setup.Snapshot.IsDirty);
-        Assert.False((await setup.ValidateAsync()).IsValid);
-        Assert.Equal(SetupActionState.Completed, (await setup.Snapshot.Actions.Single(item => item.Descriptor.Id == "import").ExecuteAsync()).State);
-        Assert.Equal(SetupCommitState.Committed, (await setup.CommitAsync()).State);
+        Assert.True(setup.HasUnsavedChanges);
+        Assert.False(setup.Validate().IsValid);
+        Assert.Equal(SetupActionState.Completed, (await manager.RunAsync(setup, "import")).State);
+        Assert.Equal(SetupCommitState.Committed, (await manager.SaveAsync(setup)).State);
         Assert.NotNull(target.Changes);
-        Assert.Equal(SetupObservation.Unknown, setup.Snapshot.Status.Loaded);
+        Assert.Equal(SetupObservation.Unknown, setup.Status.Loaded);
         Text(setup, "local-path").SetValue(path + ".different");
-        Assert.False((await setup.ValidateAsync()).IsValid);
+        Assert.False(setup.Validate().IsValid);
     }
 
     [Fact]
@@ -190,7 +191,7 @@ public sealed class TensorLocationImportTests : IDisposable
         Assert.Equal(TensorSourceState.InvalidRequest, (await reader.ReadMetadataAsync(artifact, new(long.MaxValue, 2))).State);
     }
 
-    private static SetupTextField Text(TensorSetupSession setup, string id) => Assert.IsType<SetupTextField>(setup.Snapshot.Steps.SelectMany(step => step.Sections).SelectMany(section => section.Fields).Single(field => field.Description.Id == id));
+    private static SetupTextField Text(TensorSettings setup, string id) => Assert.IsType<SetupTextField>(setup.Steps.SelectMany(step => step.Sections).SelectMany(section => section.Fields).Single(field => field.Description.Id == id));
     private async Task<string> FileAsync(string name, byte[] bytes)
     { string path = Path.Combine(_root, name); await File.WriteAllBytesAsync(path, bytes); return path; }
     public void Dispose() => Directory.Delete(_root, true);

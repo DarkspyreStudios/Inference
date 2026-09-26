@@ -50,19 +50,19 @@ public sealed class SupraPackSelectionTests : IDisposable
         using var http = new HttpClient(new Handler());
         using var packs = Manager(http, pack);
         var target = new Target();
-        await using TensorSetupSession setup = SupraSetup.CreateSession(new(SetupChangeIntent.Create, "custom", null),
-            target, packs, offeredModels: [pack]);
+        TensorSettingsManager manager = SupraSetup.CreateSettingsManager(target, packs, offeredModels: [pack]);
+        TensorSettings setup = await manager.OpenAsync(new(SetupChangeIntent.Create, "custom", null));
         SetupChoiceField model = Field(setup, "model");
         Assert.Equal(SetupEditState.Applied, model.SetValue(pack.Key.ToString()).State);
         Assert.Equal(SetupEditState.Applied, Field(setup, "backend").SetValue(TensorBackendKind.Cpu.ToString()).State);
-        Assert.Equal(SetupCommitState.Committed, (await setup.CommitAsync()).State);
+        Assert.Equal(SetupCommitState.Committed, (await manager.SaveAsync(setup)).State);
         Assert.Equal(pack.Key, target.Changes!.Configuration.Model);
         var editTarget = new Target();
-        await using TensorSetupSession edit = SupraSetup.CreateSession(new(SetupChangeIntent.Edit, "custom", "saved-v1"),
-            editTarget, packs, existing: target.Changes.Configuration, offeredModels: [pack]);
+        TensorSettingsManager editManager = SupraSetup.CreateSettingsManager(editTarget, packs, offeredModels: [pack]);
+        TensorSettings edit = await editManager.OpenAsync(new(SetupChangeIntent.Edit, "custom", "saved-v1"), target.Changes.Configuration);
         Assert.Equal(pack.Key.ToString(), Field(edit, "model").Value);
         Assert.Equal(SetupEditState.Applied, Field(edit, "backend").SetValue(nameof(TensorBackendKind.Auto)).State);
-        Assert.Equal(SetupCommitState.Committed, (await edit.CommitAsync()).State);
+        Assert.Equal(SetupCommitState.Committed, (await editManager.SaveAsync(edit)).State);
         Assert.Equal("saved-v1", editTarget.Changes!.Identity.ExpectedVersion);
         Assert.Equal(pack.Key, editTarget.Changes.Configuration.Model);
         Assert.Equal(TensorBackendKind.Auto, editTarget.Changes.Configuration.Backend);
@@ -77,14 +77,13 @@ public sealed class SupraPackSelectionTests : IDisposable
         using var http = new HttpClient(new Handler());
         using var packs = Manager(http);
         var target = new Target();
-        await using TensorSetupSession setup = SupraSetup.CreateSession(new(SetupChangeIntent.Create, "remote", null),
-            target, packs, source: source);
+        TensorSettingsManager manager = SupraSetup.CreateSettingsManager(target, packs, source: source);
+        TensorSettings setup = await manager.OpenAsync(new(SetupChangeIntent.Create, "remote", null));
         foreach ((string field, string value) in new[] { ("repository", source.Candidate.Selection.Repository!),
             ("source-revision", "main"), ("variant", source.Candidate.Selection.Variant!), ("backend", "Cpu") })
         { Assert.Equal(SetupEditState.Applied, Field(setup, field).SetValue(value).State); }
-        ISetupAction resolve = setup.Snapshot.Actions.Single(action => action.Descriptor.Id == "resolve");
-        Assert.Equal(SetupActionState.Completed, (await resolve.ExecuteAsync()).State);
-        Assert.Equal(SetupCommitState.Committed, (await setup.CommitAsync()).State);
+        Assert.Equal(SetupActionState.Completed, (await manager.RunAsync(setup, "resolve")).State);
+        Assert.Equal(SetupCommitState.Committed, (await manager.SaveAsync(setup)).State);
         Assert.Equal(TensorImageModels.Supra2Image.Key, target.Changes!.Configuration.Model);
         Assert.Equal(4, target.Changes.Definition.Artifacts.Count);
         Assert.All(target.Changes.Definition.Artifacts, artifact => Assert.NotNull(artifact.Provenance));
@@ -104,7 +103,7 @@ public sealed class SupraPackSelectionTests : IDisposable
         await using var engine = new SupraImageInference(packs, loader, TensorBackendKind.Cpu);
         foreach (TensorModelPackDefinition invalid in new[] { missing, wrong })
         {
-            Assert.Throws<ArgumentException>(() => SupraSetup.CreateSession(new(SetupChangeIntent.Create, "invalid", null), new Target(), packs, offeredModels: [invalid]));
+            Assert.Throws<ArgumentException>(() => SupraSetup.CreateSettingsManager(new Target(), packs, offeredModels: [invalid]));
             InferenceException failure = await Assert.ThrowsAsync<InferenceException>(() => engine.LoadAndWaitAsync(invalid.Key));
             Assert.Equal(InferenceFailureCode.UnsupportedFeature, failure.Code);
         }
@@ -179,8 +178,8 @@ public sealed class SupraPackSelectionTests : IDisposable
         }).ToArray()
     };
 
-    private static SetupChoiceField Field(TensorSetupSession session, string id) =>
-        Assert.IsType<SetupChoiceField>(session.Snapshot.Steps.SelectMany(step => step.Sections).SelectMany(section => section.Fields).Single(field => field.Description.Id == id));
+    private static SetupChoiceField Field(TensorSettings settings, string id) =>
+        Assert.IsType<SetupChoiceField>(settings.Steps.SelectMany(step => step.Sections).SelectMany(section => section.Fields).Single(field => field.Description.Id == id));
 
     private sealed class Target : ISetupCommitTarget<TensorSetupChanges>
     {
