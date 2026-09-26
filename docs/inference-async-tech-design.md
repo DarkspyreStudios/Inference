@@ -98,6 +98,14 @@ Callers dispose abandoned enumerators. Native resources remain owned until execu
 the enumerator releases them. No Task wrapper, eager generation or full-result buffering is needed.
 Framework MoveNextAsync and DisposeAsync retain their standard ValueTask signatures.
 
+A stream method never throws from the call itself. Every error, including an unsupported
+operation and a disposed session, surfaces on the first MoveNextAsync. A caller wraps the
+`await foreach` in one `try`.
+
+Each read of a returned stream is a new call. Reading one RunTurnAsync stream twice starts two
+turns, and reading one StreamAsync stream twice sends the prompt twice. The calling app gates its
+reads: it does not start a stream while another read of it is in progress.
+
 Each agent session's `ObserveAsync` feed never slows the provider. Events wait in that session's
 queue until its reader takes them. A session's feed allows one reader at a time and ends when that
 session is disposed. The host is that reader and distributes the events to its own consumers.
@@ -151,7 +159,8 @@ Keep explicit framework cleanup and never report completed cleanup while native 
 All in-repository implementations, tests, examples, tools and UI.Settings consumers use the same
 public contracts. No parallel legacy signature is exposed.
 
-- Streaming: progressive output, no eager generation, backpressure, terminal events,
+- Streaming: progressive output, no eager generation, backpressure, terminal events, every
+  error on the first read, a second read runs again,
   cancellation, partial failure and abandoned-enumerator cleanup.
 - Required-result callbacks: await completion/fault/cancellation; preserve tool and credential policy.
 - Settings editor: edits and show/hide rules make no provider call; actions and model queries use
