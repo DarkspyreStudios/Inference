@@ -129,6 +129,8 @@ public sealed class QwenLlmInference : ITensorLlmInference
             messages = StructuredOutputPrompt.Apply(messages, format);
         }
 
+        int maxOutputTokens = request.MaxOutputTokens ?? 1_024;
+        await EnsureFitsAsync(messages, tools, thinking, maxOutputTokens, executionToken).ConfigureAwait(false);
         SamplingConfig sampling = await CreateSamplingAsync(request, format, thinking, executionToken).ConfigureAwait(false);
         // The architecture's protocol parser separates the answer from thinking and tool calls.
         IOutputParser parser = OutputParserFactory.Create(_runtime.Architecture);
@@ -144,7 +146,7 @@ public sealed class QwenLlmInference : ITensorLlmInference
         IAsyncEnumerator<ChatStreamUpdate> updates = _runtime.StreamAsync(
             session,
             messages,
-            request.MaxOutputTokens ?? 1_024,
+            maxOutputTokens,
             sampling,
             tools,
             thinking,
@@ -414,6 +416,21 @@ public sealed class QwenLlmInference : ITensorLlmInference
         _loadedBackend = null;
         _definition = null;
         _lifetime.MarkUnloaded();
+    }
+
+    /// <summary>Refuses a request whose estimated prompt and output budget exceed the usable context.</summary>
+    private async Task EnsureFitsAsync(List<ChatMessage> messages, List<ToolFunction>? tools, bool thinking, int maxOutputTokens,
+        CancellationToken cancellationToken)
+    {
+        if (_runtime.ContextLength is not { } usable) { return; }
+        // Rendering the template and tokenizing the prompt are CPU work in TensorSharp.
+        int? prompt = await Task.Run(() => _runtime.EstimatePromptTokens(messages, tools, thinking), cancellationToken).ConfigureAwait(false);
+        if (prompt is { } tokens && (long)tokens + maxOutputTokens > usable)
+        {
+            throw new InferenceException(
+                InferenceFailureCode.CapacityExhausted,
+                $"The request needs about {tokens + (long)maxOutputTokens} tokens; the loaded model fits {usable} in the memory available.");
+        }
     }
 
     private async Task<SamplingConfig> CreateSamplingAsync(

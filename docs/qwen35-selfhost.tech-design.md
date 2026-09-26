@@ -86,8 +86,8 @@ usable = min(declared context, spare bytes / cache bytes per token)
 - `spare bytes` is measured once after the weights are resident: the GC's available memory, minus
   the process working set, minus a reserve of the larger of 512 MiB and one sixteenth of available
   memory. This matches TensorSharp's own host estimate.
-- `cache bytes per token` is `full-attention layers x 2 x head_count_kv x key_length x 2`. Recurrent
-  layers keep a fixed state and do not count per token. Qwen3.8-27B has 16 full-attention layers of
+- `cache bytes per token` is `full-attention layers x head_count_kv x (key_length + value_length) x 2`
+  bytes. Recurrent layers keep a fixed state and do not count per token. Qwen3.8-27B has 16 full-attention layers of
   64, 4 KV heads and a key length of 256: 64 KiB per token, 16 GiB at 262,144 tokens.
 
 The result is `LlmModelInfo.MaxContextTokens` for the loaded model. The adapter estimates a request's

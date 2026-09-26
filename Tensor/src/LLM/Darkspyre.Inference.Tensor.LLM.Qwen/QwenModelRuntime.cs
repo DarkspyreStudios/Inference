@@ -15,6 +15,8 @@ internal interface IQwenModelRuntime : IDisposable
     Task LoadAsync(TensorModelPackDefinition definition, TensorModelPackLease lease, string backend, CancellationToken cancellationToken);
     void Unload();
     void ApplyGrammar(SamplingConfig sampling, StructuredOutputFormat format, bool enableThinking);
+    /// <summary>Estimates a request's prompt tokens by rendering and counting it, or null when the protocol has no renderer.</summary>
+    int? EstimatePromptTokens(List<ChatMessage> messages, List<ToolFunction>? tools, bool enableThinking);
     IAsyncEnumerable<ChatStreamUpdate> StreamAsync(ChatSession session, List<ChatMessage> messages, int maxTokens,
         SamplingConfig sampling, List<ToolFunction>? tools, bool enableThinking, CancellationToken cancellationToken);
 }
@@ -22,7 +24,9 @@ internal interface IQwenModelRuntime : IDisposable
 internal sealed class QwenModelRuntime : IQwenModelRuntime
 {
     private readonly ModelService _service = new(NullLogger<ModelService>.Instance);
-    public int? ContextLength => _service.ContextTokens > 0 ? _service.ContextTokens : null;
+    private int? _usableContext;
+    /// <summary>The usable context measured at load; see <see cref="QwenContextFit"/>.</summary>
+    public int? ContextLength => _service.ContextTokens > 0 ? _usableContext : null;
     public string? LoadedBackend => _service.LoadedBackend;
     public string? Architecture => _service.Architecture;
 
@@ -34,14 +38,18 @@ internal sealed class QwenModelRuntime : IQwenModelRuntime
         Task.Run(() =>
         {
             string modelPath = lease.GetRequiredArtifact("model");
+            long cacheBytesPerToken;
             using (var file = new GgufFile(modelPath))
             {
                 QwenModelCompatibility.ValidateCheckpoint(file, definition);
                 file.ThrowIfTruncated();
+                cacheBytesPerToken = QwenContextFit.CacheBytesPerToken(file.Metadata, QwenModelCompatibility.ArchitectureOf(file.Metadata));
             }
             cancellationToken.ThrowIfCancellationRequested();
             // TensorSharp annotates the projector path as non-null but treats null as no projector.
             _service.LoadModel(modelPath, null!, backend);
+            // Measured once the weights are resident: memory taken later does not lower it.
+            _usableContext = QwenContextFit.Usable(_service.ContextTokens, QwenContextFit.SpareBytes(), cacheBytesPerToken);
         }, cancellationToken);
 
     public void ApplyGrammar(SamplingConfig sampling, StructuredOutputFormat format, bool enableThinking)
@@ -56,7 +64,18 @@ internal sealed class QwenModelRuntime : IQwenModelRuntime
     public IAsyncEnumerable<ChatStreamUpdate> StreamAsync(ChatSession session, List<ChatMessage> messages, int maxTokens,
         SamplingConfig sampling, List<ToolFunction>? tools, bool enableThinking, CancellationToken cancellationToken) =>
         _service.ChatStreamWithMetricsAsync(session, messages, maxTokens, cancellationToken, sampling, tools, enableThinking);
-    public void Unload() => _service.UnloadModel();
+    public int? EstimatePromptTokens(List<ChatMessage> messages, List<ToolFunction>? tools, bool enableThinking)
+    {
+        string architecture = _service.Architecture;
+        if (ChatProtocolRegistry.For(architecture)?.Render is not { } render) { return null; }
+        string prompt = render(new ChatRenderRequest(messages, AddGenerationPrompt: true, architecture, tools, enableThinking));
+        return _service.Model.Tokenizer.Encode(prompt, addSpecial: false).Count;
+    }
+    public void Unload()
+    {
+        _service.UnloadModel();
+        _usableContext = null;
+    }
     public void Dispose() => _service.Dispose();
 }
 

@@ -217,6 +217,24 @@ public sealed class QwenPackSelectionTests : IDisposable
         }
     }
 
+    [Fact]
+    public async Task ARequestLargerThanTheFittedContextFailsBeforeTheEngineRuns()
+    {
+        var runtime = new Runtime { LoadedContext = 4096, PromptEstimate = 3500 };
+        (QwenLlmInference engine, TensorModelPackManager packs, string model) = await LoadedAsync(runtime, "host/fit");
+        await using (engine)
+        using (packs)
+        {
+            Assert.Equal(4096, (await engine.ListModelsAsync()).Single().MaxContextTokens);
+            InferenceException full = await Assert.ThrowsAsync<InferenceException>(() =>
+                Collect(engine, Request(model) with { MaxOutputTokens = 1000 }));
+            Assert.Equal(InferenceFailureCode.CapacityExhausted, full.Code);
+            Assert.Empty(runtime.LastMessages);
+            List<LlmStreamEvent> events = await Collect(engine, Request(model) with { MaxOutputTokens = 500 });
+            Assert.IsType<LlmCompletionEvent>(events[^1]);
+        }
+    }
+
     private async Task<(QwenLlmInference Engine, TensorModelPackManager Packs, string Model)> LoadedAsync(Runtime runtime, string id)
     {
         TensorModelPackDefinition pack = Pack(id);
@@ -251,6 +269,9 @@ public sealed class QwenPackSelectionTests : IDisposable
         public List<ToolFunction>? LastTools { get; private set; }
         public bool LastThinking { get; private set; }
         public List<ChatMessage> LastMessages { get; private set; } = [];
+        public int LoadedContext { get; init; } = 8192;
+        public int? PromptEstimate { get; init; }
+        public int? EstimatePromptTokens(List<ChatMessage> messages, List<ToolFunction>? tools, bool enableThinking) => PromptEstimate;
         public Action? OnLoad { get; init; }
         public int? ContextLength { get; private set; }
         public string? LoadedBackend { get; private set; }
@@ -258,7 +279,7 @@ public sealed class QwenPackSelectionTests : IDisposable
         public Task LoadAsync(TensorModelPackDefinition definition, TensorModelPackLease lease, string backend, CancellationToken cancellationToken)
         {
             Assert.Equal(definition.Key, lease.Key);
-            Keys.Add(lease.Key); ContextLength = 8192; LoadedBackend = backend;
+            Keys.Add(lease.Key); ContextLength = LoadedContext; LoadedBackend = backend;
             OnLoad?.Invoke();
             return Task.CompletedTask;
         }
