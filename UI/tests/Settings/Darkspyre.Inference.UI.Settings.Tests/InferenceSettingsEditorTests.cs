@@ -110,6 +110,22 @@ public sealed class InferenceSettingsEditorTests : BunitContext
         Assert.Equal(0, manager.ListenerCount);
     }
 
+    [Fact]
+    public void EnteringTheModelAfterNextRefreshesValidationAndEnablesSave()
+    {
+        var manager = new ModelStepManager();
+        IRenderedComponent<InferenceSettingsEditor> editor = Render<InferenceSettingsEditor>(parameters => parameters
+            .Add(value => value.Settings, new ModelStepSettings()).Add(value => value.Manager, manager).Add(value => value.Host, new FakeHost()));
+
+        editor.FindAll("button").Single(button => button.TextContent.Trim() == "Next").Click();
+        Assert.True(SaveButton(editor).HasAttribute("disabled"));
+
+        editor.FindComponents<SetupFieldInput>().Single(field => field.Instance.Field.Description.Id == "model").Find("input").Input("model-a");
+
+        Assert.False(SaveButton(editor).HasAttribute("disabled"));
+        Assert.DoesNotContain("Select a model.", editor.Markup, StringComparison.Ordinal);
+    }
+
     private IRenderedComponent<InferenceSettingsEditor> RenderEditor(FakeSettings settings, FakeManager manager, FakeHost? host = null) =>
         Render<InferenceSettingsEditor>(parameters => parameters
             .Add(value => value.Settings, settings).Add(value => value.Manager, manager).Add(value => value.Host, host ?? new FakeHost()));
@@ -135,6 +151,31 @@ public sealed class InferenceSettingsEditorTests : BunitContext
         protected override string CreateChanges() => Url;
         protected override bool IsDraftDirty => false;
         protected override bool IsSignInSatisfied => SignedIn;
+    }
+
+    private sealed class ModelStepSettings() : InferenceSettings<string>(
+        new(new("example", "Example provider", InferenceImplementationKind.Connect, InferenceTask.TextGeneration), "Example description"),
+        new(SetupChangeIntent.Create, "entry", null))
+    {
+        private string _url = "https://example.test", _model = string.Empty;
+        protected override IReadOnlyList<SetupStep> CreateSteps() =>
+        [
+            new("connect", "Connect", "Enter the endpoint", [new("endpoint", "Endpoint",
+                [new SetupTextField(new("url", "URL") { IsRequired = true }, _url, string.Empty, value => Edit(() => _url = value))])]),
+            new("model", "Model", "Choose a model", [new("selection", "Selection",
+                [new SetupTextField(new("model", "Model") { IsRequired = true }, _model, string.Empty, value => Edit(() => _model = value))])])
+        ];
+        protected override IReadOnlyList<SetupActionDescriptor> CreateActions() => [];
+        protected override SetupValidation ValidateDraft() => _model.Length == 0
+            ? new([new("model-required", "Select a model.", "model")]) : SetupValidation.Valid;
+        protected override string CreateChanges() => _model;
+        protected override bool IsDraftDirty => _model.Length != 0;
+    }
+
+    private sealed class ModelStepManager() : InferenceSettingsManager<ModelStepSettings, string>(new FakeTarget())
+    {
+        protected override Task<SetupActionResult> RunCoreAsync(ModelStepSettings settings, SetupActionDescriptor action,
+            IProgress<SetupProgress>? progress, CancellationToken cancellationToken) => Task.FromResult(SetupActionResult.Completed);
     }
 
     private class FakeManager(FakeTarget target) : InferenceSettingsManager<FakeSettings, string>(target)

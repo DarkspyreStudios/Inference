@@ -238,7 +238,14 @@
         _commitResult = null;
         _editVersion++;
         _inputs.Reconcile(Settings);
+        RefreshValidation();
         await PublishStateAsync();
+    }
+
+    // Shown validation follows the current values; an edit or action can resolve or raise an issue.
+    private void RefreshValidation()
+    {
+        if (_validation.Issues.Count > 0) { _validation = Settings.Validate(); }
     }
 
     private async Task PublishStateAsync()
@@ -342,6 +349,7 @@
             // An action can change values, such as a sign-in credential or a resolved pack.
             _editVersion++;
             _inputs.Reconcile(Settings);
+            RefreshValidation();
             StateHasChanged();
             await PublishStateAsync();
         }

@@ -170,7 +170,8 @@ appended. Settings replacement/removal cancels view-owned queries, not host-reta
 
 The editor follows the provider's ordered steps and sections. Advanced sections remain
 discoverable and expand when they contain a blocking issue. Next validates the current settings and
-shows current-step issues before advancing. Back preserves edits. Save/Finish validates the whole
+shows current-step issues before advancing. Once validation is shown, it runs again after each edit
+and each action, so a fixed value clears its issue and re-enables Save. Back preserves edits. Save/Finish validates the whole
 object and calls `SaveAsync`. A descriptive completion instruction or successful test is
 not proof of a committed configuration. Field and step issues have accessible summaries beside
 their targets; warnings remain warnings. If final Common validation cannot identify current-step
