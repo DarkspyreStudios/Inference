@@ -11,19 +11,17 @@ public static class LayaSetup
         "In-process typed decisions using a host-selected, compatible Laya checkpoint.");
 
     /// <summary>
-    /// Creates an editor over the host's offered Laya packs. Register these same definitions in the
-    /// catalog used by packs. Saving selects a key; installation and loading remain explicit actions.
+    /// Creates the settings manager over the host's offered Laya packs. Register these same definitions in
+    /// the catalog used by packs. Saving selects a key; installation and loading remain explicit actions.
     /// An empty list offers no models.
     /// </summary>
-    public static TensorSetupSession CreateSession(SetupConfigurationIdentity identity,
-        ISetupCommitTarget<TensorSetupChanges> target, ITensorModelPackManager packs,
-        IReadOnlyList<TensorModelPackDefinition> offeredModels,
-        TensorSetupConfiguration? existing = null, ITensorDecisionInference? instance = null, ITensorModelSource? source = null,
-        ITensorArtifactReader? reader = null)
+    public static TensorSettingsManager CreateSettingsManager(ISetupCommitTarget<TensorSetupChanges> target,
+        ITensorModelPackManager packs, IReadOnlyList<TensorModelPackDefinition> offeredModels,
+        ITensorDecisionInference? instance = null, ITensorModelSource? source = null, ITensorArtifactReader? reader = null)
     {
         ArgumentNullException.ThrowIfNull(packs);
         ArgumentNullException.ThrowIfNull(offeredModels);
         foreach (TensorModelPackDefinition definition in offeredModels) { LayaModelCompatibility.Validate(definition); }
-        return new(Definition, identity, target, offeredModels, packs, existing, instance, new LayaBackendProbe(), new LayaModelResolver(source, reader));
+        return new(Definition, target, offeredModels, packs, instance, new LayaBackendProbe(), new LayaModelResolver(source, reader));
     }
 }

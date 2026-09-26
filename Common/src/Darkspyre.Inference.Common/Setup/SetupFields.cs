@@ -11,7 +11,7 @@ public sealed record SetupFieldDescription(string Id, string DisplayName)
     public bool IsEnabled { get; init; } = true;
 }
 
-/// <summary>A safe snapshot plus a provider-bound edit operation, never a configuration bag.</summary>
+/// <summary>One typed field of a settings object. Its edit changes only that object; never a configuration bag.</summary>
 public abstract class SetupField(SetupFieldDescription description)
 {
     public SetupFieldDescription Description { get; } = description;
@@ -72,7 +72,7 @@ public sealed class SetupBooleanField(
 
 public enum SetupSecretEditKind { Keep, Replace, Clear }
 
-/// <summary>One-way secret input. Never place this value in snapshots, diagnostics or logs.</summary>
+/// <summary>One-way secret input. Never place this value in diagnostics or logs.</summary>
 public sealed class SetupSecretEdit
 {
     private SetupSecretEdit(SetupSecretEditKind kind, string? value) { Kind = kind; Value = value; }
@@ -105,10 +105,10 @@ public sealed class SetupSecretField(
 }
 
 public sealed record SetupChoice(string Value, string DisplayName, string? Description = null);
-public sealed record SetupChoiceQuery(long ExpectedRevision, string Search = "", string? Continuation = null, int PageSize = 50);
-public enum SetupChoiceState { Completed, Stale, Unavailable, Failed, Cancelled }
+public sealed record SetupChoiceQuery(string Search = "", string? Continuation = null, int PageSize = 50);
+public enum SetupChoiceState { Completed, Unavailable, Failed, Cancelled }
 public sealed record SetupChoicePage(
-    long Revision, IReadOnlyList<SetupChoice> Choices, string? Continuation = null,
+    IReadOnlyList<SetupChoice> Choices, string? Continuation = null,
     SetupChoiceState State = SetupChoiceState.Completed, IReadOnlyList<SetupIssue>? Issues = null);
 
 /// <summary>Choice-source behavior, independent of any UI framework or manual-entry permission.</summary>
@@ -118,10 +118,10 @@ public sealed record SetupChoiceCapabilities(bool SupportsSearch = false, bool S
     public static SetupChoiceCapabilities Searchable { get; } = new(true, true, true);
 }
 
+/// <summary>A choice field. Its choices come from <see cref="IInferenceSettingsManager.QueryChoicesAsync"/>.</summary>
 public sealed class SetupChoiceField(
     SetupFieldDescription description, string value, string defaultValue, Func<string, SetupEditResult> edit,
-    bool allowsManualEntry, Func<SetupChoiceQuery, CancellationToken, Task<SetupChoicePage>> getChoices,
-    long revision,
+    bool allowsManualEntry,
     SetupSideEffect choiceSideEffects = SetupSideEffect.None,
     SetupChoiceCapabilities? capabilities = null)
     : SetupValueField<string>(description, value, defaultValue, edit)
@@ -129,16 +129,6 @@ public sealed class SetupChoiceField(
     public bool AllowsManualEntry { get; } = allowsManualEntry;
     public SetupSideEffect ChoiceSideEffects { get; } = choiceSideEffects;
     public SetupChoiceCapabilities Capabilities { get; } = capabilities ?? SetupChoiceCapabilities.Bounded;
-    public Task<SetupChoicePage> GetChoicesAsync(SetupChoiceQuery query, CancellationToken cancellationToken = default)
-    {
-        ArgumentNullException.ThrowIfNull(query);
-        ArgumentOutOfRangeException.ThrowIfLessThan(query.PageSize, 1);
-        ArgumentOutOfRangeException.ThrowIfGreaterThan(query.PageSize, 200);
-        if (query.ExpectedRevision != revision) { return Task.FromResult(new SetupChoicePage(revision, [], State: SetupChoiceState.Stale)); }
-        if (!Description.IsEnabled || !Description.IsVisible)
-        { return Task.FromResult(new SetupChoicePage(revision, [], State: SetupChoiceState.Unavailable)); }
-        return getChoices(query, cancellationToken);
-    }
 }
 
 public sealed record SetupFieldRow(string Id, IReadOnlyList<SetupField> Fields);

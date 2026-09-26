@@ -30,15 +30,15 @@ public sealed class ImageProviderService
     public IReadOnlyList<ImageTransportDescriptor> AvailableTransports { get; }
 
     public IReadOnlyList<Common.Setup.InferenceSetupDefinition> SetupDefinitions =>
-        AvailableTransports.Select(ImageSetupSession.DefinitionFor).ToArray();
+        AvailableTransports.Select(ImageSettings.DefinitionFor).ToArray();
 
-    public ImageSetupSession CreateSetupSession(
-        ImageTransport transport,
-        Common.Setup.SetupConfigurationIdentity identity,
+    /// <summary>
+    /// Creates the settings manager that opens, acts on and saves image settings through
+    /// <paramref name="target"/>. The host's <paramref name="workflows"/> catalog supplies workflow choices.
+    /// </summary>
+    public ImageSettingsManager CreateSettingsManager(
         Common.Setup.ISetupCommitTarget<ImageSetupChanges> target,
-        IImageWorkflowChoiceSource? workflows = null,
-        ImageConnection? existing = null,
-        string? workflowId = null) => new(this, transport, identity, target, workflows, existing, workflowId);
+        IImageWorkflowChoiceSource? workflows = null) => new(this, target, workflows);
 
     public Darkspyre.Inference.Common.Image.IImageInference Bind(
         ImageConnection connection,

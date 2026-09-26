@@ -23,14 +23,14 @@ public sealed record SetupValidation(IReadOnlyList<SetupIssue> Issues)
     public bool IsValid => Issues.All(issue => issue.Severity != SetupIssueSeverity.Error);
 }
 
-public enum SetupEditState { Applied, Busy, Stale, Invalid, Closed }
+public enum SetupEditState { Applied, Invalid }
 
 public sealed record SetupEditResult(SetupEditState State, IReadOnlyList<SetupIssue> Issues)
 {
     public static SetupEditResult Applied { get; } = new(SetupEditState.Applied, []);
 }
 
-public enum SetupCommitState { Committed, Conflict, Invalid, Busy, Cancelled, Failed, Uncertain, Closed }
+public enum SetupCommitState { Committed, Conflict, Invalid, Cancelled, Failed, Uncertain }
 
 public sealed record SetupCommitResult(
     SetupCommitState State, string? Version = null, IReadOnlyList<SetupIssue>? Issues = null);
@@ -108,32 +108,27 @@ public sealed record SetupActionDescriptor(
 
 public sealed record SetupProgress(string Stage, string? Message = null, long? Completed = null, long? Total = null);
 
-public enum SetupActionState { Completed, NeedsInteraction, Failed, Cancelled, Busy, Stale, Unavailable, Closed }
+public enum SetupActionState { Completed, NeedsInteraction, Failed, Cancelled, Unavailable }
 
 public abstract record SetupInteraction;
 
+/// <summary>A device sign-in in progress. Its Continue and Cancel actions run through the settings manager.</summary>
 public sealed record SetupDeviceAuthorization(
     Uri VerificationUri, string UserCode, DateTimeOffset? ExpiresAt,
-    ISetupAction Continue, ISetupAction Cancel) : SetupInteraction;
+    SetupActionDescriptor Continue, SetupActionDescriptor Cancel) : SetupInteraction;
 
+/// <summary>A browser sign-in in progress. The callback field is local; Continue and Cancel run through the settings manager.</summary>
 public sealed record SetupBrowserAuthorization(
-    Uri AuthorizationUri, SetupTextField Callback, ISetupAction Continue,
-    ISetupAction Cancel, DateTimeOffset? ExpiresAt = null) : SetupInteraction;
+    Uri AuthorizationUri, SetupTextField Callback, SetupActionDescriptor Continue,
+    SetupActionDescriptor Cancel, DateTimeOffset? ExpiresAt = null) : SetupInteraction;
 
-public sealed record SetupExternalPrerequisite(string Instructions, ISetupAction Recheck) : SetupInteraction;
+public sealed record SetupExternalPrerequisite(string Instructions, SetupActionDescriptor Recheck) : SetupInteraction;
 
 public sealed record SetupActionResult(
     SetupActionState State, IReadOnlyList<SetupIssue>? Issues = null,
     SetupInteraction? Interaction = null, bool IsRetryable = false)
 {
     public static SetupActionResult Completed { get; } = new(SetupActionState.Completed);
-}
-
-public interface ISetupAction
-{
-    SetupActionDescriptor Descriptor { get; }
-    Task<SetupActionResult> ExecuteAsync(
-        IProgress<SetupProgress>? progress = null, CancellationToken cancellationToken = default);
 }
 
 public sealed record SetupSection(string Id, string Title, IReadOnlyList<SetupField> Fields, bool IsAdvanced = false);
@@ -152,29 +147,4 @@ public sealed record SetupStep(string Id, string Title, string Instructions, IRe
     public bool HasPlatformInstructions => !string.IsNullOrWhiteSpace(PlatformInstructions);
     public bool HasCompletionRequirement => !string.IsNullOrWhiteSpace(CompletionRequirement);
     public bool HasTroubleshooting => !string.IsNullOrWhiteSpace(Troubleshooting);
-}
-
-public sealed record SetupSnapshot(
-    long Revision, InferenceSetupDefinition Definition, IReadOnlyList<SetupStep> Steps,
-    IReadOnlyList<ISetupAction> Actions, SetupValidation Validation, SetupStatus Status,
-    bool IsBusy, bool IsClosed)
-{
-    /// <summary>Editable draft changes, excluding checks, progress and other observations.</summary>
-    public bool IsDirty { get; init; }
-    /// <summary>A host write may have occurred; read back before creating another save attempt.</summary>
-    public bool CommitOutcomeUncertain { get; init; }
-    /// <summary>The current interaction, with controls bound to this snapshot's revision.</summary>
-    public SetupInteraction? Interaction { get; init; }
-}
-
-public interface IInferenceSetupSession : IAsyncDisposable
-{
-    SetupSnapshot Snapshot { get; }
-    /// <summary>
-    /// Signals a new published view; observers read Snapshot and never become state owners.
-    /// Observer exceptions are isolated from operations and other observers.
-    /// </summary>
-    event EventHandler? Changed;
-    Task<SetupValidation> ValidateAsync(CancellationToken cancellationToken = default);
-    Task<SetupCommitResult> CommitAsync(CancellationToken cancellationToken = default);
 }

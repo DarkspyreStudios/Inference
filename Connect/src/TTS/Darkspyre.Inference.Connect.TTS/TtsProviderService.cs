@@ -17,9 +17,8 @@ public sealed class TtsProviderService
         ArgumentNullException.ThrowIfNull(connection);
         return _providers[connection.Transport].Bind(connection);
     }
-    public TtsSetupSession CreateSetupSession(TtsTransport transport, SetupConfigurationIdentity identity,
-        ISetupCommitTarget<TtsSetupChanges> target, TtsSetupConfiguration? existing = null) =>
-        new(_providers[transport], identity, target, existing);
+    /// <summary>Creates the settings manager that opens, acts on and saves TTS settings through <paramref name="target"/>.</summary>
+    public TtsSettingsManager CreateSettingsManager(ISetupCommitTarget<TtsSetupChanges> target) => new(_providers, target);
 }
 
 public static class ServiceCollectionExtensions

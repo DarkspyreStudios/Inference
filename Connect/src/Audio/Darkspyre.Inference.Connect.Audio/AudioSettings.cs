@@ -1,4 +1,3 @@
-using System.Globalization;
 using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Common.Setup;
 
@@ -16,10 +15,9 @@ public sealed record AudioSetupConfiguration(AudioConnection Connection)
 public sealed record AudioSetupHeaderChanges(IReadOnlyDictionary<string, string> Set, IReadOnlyList<string> Remove);
 public sealed record AudioSetupChanges(SetupConfigurationIdentity Identity, AudioSetupConfiguration Configuration, AudioSetupHeaderChanges Headers);
 
-public sealed class AudioSetupSession : InferenceSetupSession<AudioSetupChanges>
+/// <summary>Editable TangoFlux settings. Plain data: edits change only this object.</summary>
+public sealed class AudioSettings : InferenceSettings<AudioSetupChanges>
 {
-    private readonly IAudioProvider _provider;
-    private readonly SetupConfigurationIdentity _identity;
     private AudioSetupConfiguration _draft;
     private readonly AudioSetupConfiguration _baseline;
     private Uri? _endpoint;
@@ -30,17 +28,15 @@ public sealed class AudioSetupSession : InferenceSetupSession<AudioSetupChanges>
     private readonly List<Header> _headers = [];
     private readonly HashSet<string> _removed = new(StringComparer.OrdinalIgnoreCase);
 
-    internal AudioSetupSession(IAudioProvider provider, SetupConfigurationIdentity identity,
-        ISetupCommitTarget<AudioSetupChanges> target, AudioSetupConfiguration? existing)
-        : base(provider.SetupDefinition, target)
+    internal AudioSettings(InferenceSetupDefinition definition, AudioTransport transport, SetupConfigurationIdentity identity,
+        AudioSetupConfiguration? existing)
+        : base(definition, identity)
     {
-        identity.Validate();
         if ((identity.Intent == SetupChangeIntent.Edit) != (existing is not null)
-            || existing is not null && existing.Connection.Transport != provider.Transport)
+            || existing is not null && existing.Connection.Transport != transport)
         { throw new ArgumentException("An edit requires the matching saved audio configuration.", nameof(existing)); }
-        _identity = identity;
-        _provider = provider;
-        _draft = existing ?? new(new() { Transport = provider.Transport, Endpoint = new("http://127.0.0.1:8769") });
+        Transport = transport;
+        _draft = existing ?? new(new() { Transport = transport, Endpoint = new("http://127.0.0.1:8769") });
         _endpoint = _draft.Connection.Endpoint;
         _timeout = (decimal)_draft.Connection.RequestTimeout.TotalSeconds;
         _duration = (decimal)_draft.Duration.TotalSeconds;
@@ -52,59 +48,54 @@ public sealed class AudioSetupSession : InferenceSetupSession<AudioSetupChanges>
         Status = new() { Configured = SetupObservation.Known(existing is not null) };
     }
 
-    protected override IReadOnlyList<SetupStep> CreateSteps(long revision) =>
+    internal AudioTransport Transport { get; }
+
+    protected override IReadOnlyList<SetupStep> CreateSteps() =>
     [
         new("connection", "External endpoint", "The host or administrator runs TangoFlux. Model listing and a separate health check are unavailable.",
         [new("connection", "Connection",
         [
-            new SetupUriField(new("endpoint", "Endpoint") { IsRequired = true }, _endpoint, new("http://127.0.0.1:8769"), value => Edit(revision, () => _endpoint = value)),
+            new SetupUriField(new("endpoint", "Endpoint") { IsRequired = true }, _endpoint, new("http://127.0.0.1:8769"), value => Edit(() => _endpoint = value)),
             new SetupDecimalField(new("timeout", "Timeout (seconds)") { IsRequired = true, HelpText = "A positive per-request timeout of at most one day." },
-                _timeout, 12, value => Edit(revision, () => _timeout = value), 0, 86400, 0.1m)
+                _timeout, 12, value => Edit(() => _timeout = value), 0, 86400, 0.1m)
         ]), new("options", "Endpoint options",
         [
             new SetupTextField(new("generate-path", "Generation path") { IsRequired = true }, _draft.Connection.TangoFlux.GeneratePath, "/generate",
-                value => Edit(revision, () => _draft = _draft with { Connection = _draft.Connection with { TangoFlux = new() { GeneratePath = value } } })),
-            Headers(revision)
+                value => Edit(() => _draft = _draft with { Connection = _draft.Connection with { TangoFlux = new() { GeneratePath = value } } })),
+            Headers()
         ], IsAdvanced: true)]),
         new("audio", "Audio defaults", "Saving does not generate audio. The explicit generation test can incur usage charges.",
         [new("generation", "Generation",
         [
-            new SetupDecimalField(new("duration", "Duration (seconds)") { IsRequired = true }, _duration, 5, value => Edit(revision, () => _duration = value), 1, 30, 0.1m),
+            new SetupDecimalField(new("duration", "Duration (seconds)") { IsRequired = true }, _duration, 5, value => Edit(() => _duration = value), 1, 30, 0.1m),
             new SetupIntegerField(new("steps", "Steps") { HelpText = "Blank uses the adapter default of 10." }, _steps, null,
-                value => Edit(revision, () => _steps = value), 10, 100),
+                value => Edit(() => _steps = value), 10, 100),
             new SetupDecimalField(new("guidance", "Guidance scale") { HelpText = "Blank uses the adapter default of 4.5." },
                 _draft.GuidanceScale is { } guidance && double.IsFinite(guidance) && guidance > (double)decimal.MinValue && guidance < (double)decimal.MaxValue
                     ? (decimal)guidance : null, null,
-                value => Edit(revision, () => _draft = _draft with { GuidanceScale = value is null ? null : (double)value }), 0.1m, 20, 0.1m),
+                value => Edit(() => _draft = _draft with { GuidanceScale = value is null ? null : (double)value }), 0.1m, 20, 0.1m),
             new SetupIntegerField(new("seed", "Seed") { HelpText = "Blank leaves seed selection to the server. Cache preference never changes the seed." },
-                _seed, null, value => Edit(revision, () => _seed = value), int.MinValue, int.MaxValue),
+                _seed, null, value => Edit(() => _seed = value), int.MinValue, int.MaxValue),
             new SetupChoiceField(new("cache", "Provider cache") { HelpText = "Controls only the provider's cache, not an application cache." },
                 CacheValue(_draft.UseCache), "default", value => value is "default" or "use" or "bypass"
-                    ? Edit(revision, () => _draft = _draft with { UseCache = value == "default" ? null : value == "use" })
+                    ? Edit(() => _draft = _draft with { UseCache = value == "default" ? null : value == "use" })
                     : new(SetupEditState.Invalid, [new("cache-invalid", "Select a supported cache preference.", "cache")]),
-                false, (query, token) => QueryChoicesAsync(query, _ => Task.FromResult(CacheChoices(query)), token), revision)
+                false)
         ])])
     ];
 
     private static string CacheValue(bool? value) => value switch { true => "use", false => "bypass", _ => "default" };
-    private static SetupChoicePage CacheChoices(SetupChoiceQuery query)
-    {
-        if (!int.TryParse(query.Continuation ?? "0", NumberStyles.None, CultureInfo.InvariantCulture, out int offset))
-        { return new(query.ExpectedRevision, [], State: SetupChoiceState.Failed); }
-        SetupChoice[] choices = [new("default", "Server default"), new("use", "Allow provider cache"), new("bypass", "Bypass provider cache")];
-        SetupChoice[] matches = choices.Where(choice => choice.Value.Contains(query.Search, StringComparison.OrdinalIgnoreCase)
-            || choice.DisplayName.Contains(query.Search, StringComparison.OrdinalIgnoreCase)).ToArray();
-        return new(query.ExpectedRevision, matches.Skip(offset).Take(query.PageSize).ToArray(),
-            query.PageSize < matches.Length - offset ? (offset + query.PageSize).ToString(CultureInfo.InvariantCulture) : null);
-    }
+    protected override SetupChoicePage? GetLocalChoices(string fieldId, SetupChoiceQuery query) => fieldId == "cache"
+        ? Page(query, [new("default", "Server default"), new("use", "Allow provider cache"), new("bypass", "Bypass provider cache")])
+        : null;
 
-    private SetupRepeatableGroupField Headers(long revision) => new(new("headers", "Protected HTTP headers"),
+    private SetupRepeatableGroupField Headers() => new(new("headers", "Protected HTTP headers"),
         _headers.Select(header => new SetupFieldRow(header.Id,
         [
-            new SetupTextField(new(header.Id + ".name", "Name"), header.Name, string.Empty, value => Edit(revision, () => header.Name = value)),
-            new SetupSecretField(new(header.Id + ".value", "Value"), header.Value is not null, header.Edit.Kind, value => Edit(revision, () => header.Edit = value))
-        ])).ToArray(), () => Edit(revision, () => _headers.Add(new(string.Empty, null))),
-        id => Edit(revision, () =>
+            new SetupTextField(new(header.Id + ".name", "Name"), header.Name, string.Empty, value => Edit(() => header.Name = value)),
+            new SetupSecretField(new(header.Id + ".value", "Value"), header.Value is not null, header.Edit.Kind, value => Edit(() => header.Edit = value))
+        ])).ToArray(), () => Edit(() => _headers.Add(new(string.Empty, null))),
+        id => Edit(() =>
         {
             Header? header = _headers.Find(item => item.Id == id);
             if (header is null) { return; }
@@ -112,21 +103,10 @@ public sealed class AudioSetupSession : InferenceSetupSession<AudioSetupChanges>
             _headers.Remove(header);
         }));
 
-    protected override IReadOnlyList<ISetupAction> CreateActions(long revision) =>
+    protected override IReadOnlyList<SetupActionDescriptor> CreateActions() =>
     [
-        BindAction(revision, new("test", "Generate a test clip", SetupActionPurpose.Test, SetupSideEffect.Network | SetupSideEffect.PotentialBilling,
-            ValidateDraft().IsValid), async (_, token) =>
-        {
-            Publish(() => Status = Status with { Ready = SetupObservation.Unknown, Verified = SetupObservation.Unknown });
-            AudioSetupConfiguration settings = Configuration();
-            await _provider.Bind(settings.Connection).GenerateAsync(new()
-            {
-                Prompt = "A gentle breeze rustling leaves.", Duration = settings.Duration, Steps = settings.Steps,
-                GuidanceScale = settings.GuidanceScale, Seed = settings.Seed, UseCache = settings.UseCache
-            }, token).ConfigureAwait(false);
-            Publish(() => Status = Status with { Ready = SetupObservation.Known(true), Verified = SetupObservation.Known(true) });
-            return SetupActionResult.Completed;
-        })
+        new("test", "Generate a test clip", SetupActionPurpose.Test, SetupSideEffect.Network | SetupSideEffect.PotentialBilling,
+            ValidateDraft().IsValid)
     ];
 
     private AudioConnection Connection() => _draft.Connection with
@@ -136,7 +116,7 @@ public sealed class AudioSetupSession : InferenceSetupSession<AudioSetupChanges>
         Headers = _headers.Where(header => header.Value is not null).ToDictionary(header => header.Name, header => header.Value!, StringComparer.OrdinalIgnoreCase)
     };
 
-    private AudioSetupConfiguration Configuration() => _draft with
+    internal AudioSetupConfiguration Configuration() => _draft with
     {
         Connection = Connection(),
         Duration = TimeSpan.FromSeconds((double)_duration!),
@@ -183,10 +163,8 @@ public sealed class AudioSetupSession : InferenceSetupSession<AudioSetupChanges>
         }
         removed.ExceptWith(set.Keys);
         AudioSetupConfiguration settings = Configuration();
-        return new(_identity, settings with { Connection = settings.Connection with { Headers = new Dictionary<string, string>() } }, new(set, removed.ToArray()));
+        return new(Identity, settings with { Connection = settings.Connection with { Headers = new Dictionary<string, string>() } }, new(set, removed.ToArray()));
     }
-
-    protected override void ClearSensitiveState() => _headers.Clear();
 
     private sealed class Header(string name, string? originalValue)
     {
@@ -195,5 +173,38 @@ public sealed class AudioSetupSession : InferenceSetupSession<AudioSetupChanges>
         public string OriginalName { get; } = name;
         public SetupSecretEdit Edit { get; set; } = SetupSecretEdit.Keep;
         public string? Value => Edit.Kind switch { SetupSecretEditKind.Replace => Edit.Value, SetupSecretEditKind.Clear => null, _ => originalValue };
+    }
+}
+
+/// <summary>Opens, acts on and saves TangoFlux settings. The test action calls the endpoint.</summary>
+public sealed class AudioSettingsManager : InferenceSettingsManager<AudioSettings, AudioSetupChanges>
+{
+    private readonly IReadOnlyDictionary<AudioTransport, IAudioProvider> _providers;
+
+    internal AudioSettingsManager(IReadOnlyDictionary<AudioTransport, IAudioProvider> providers, ISetupCommitTarget<AudioSetupChanges> target)
+        : base(target) => _providers = providers;
+
+    /// <summary>Returns settings for <paramref name="transport"/>, blank or from the saved entry.</summary>
+    public Task<AudioSettings> OpenAsync(AudioTransport transport, SetupConfigurationIdentity identity,
+        AudioSetupConfiguration? existing = null, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        IAudioProvider provider = _providers[transport];
+        return Task.FromResult(new AudioSettings(provider.SetupDefinition, provider.Transport, identity, existing));
+    }
+
+    protected override async Task<SetupActionResult> RunCoreAsync(AudioSettings settings, SetupActionDescriptor action,
+        IProgress<SetupProgress>? progress, CancellationToken cancellationToken)
+    {
+        if (action.Id != "test") { return new(SetupActionState.Unavailable); }
+        settings.Status = settings.Status with { Ready = SetupObservation.Unknown, Verified = SetupObservation.Unknown };
+        AudioSetupConfiguration configuration = settings.Configuration();
+        await _providers[settings.Transport].Bind(configuration.Connection).GenerateAsync(new()
+        {
+            Prompt = "A gentle breeze rustling leaves.", Duration = configuration.Duration, Steps = configuration.Steps,
+            GuidanceScale = configuration.GuidanceScale, Seed = configuration.Seed, UseCache = configuration.UseCache
+        }, cancellationToken).ConfigureAwait(false);
+        settings.Status = settings.Status with { Ready = SetupObservation.Known(true), Verified = SetupObservation.Known(true) };
+        return SetupActionResult.Completed;
     }
 }

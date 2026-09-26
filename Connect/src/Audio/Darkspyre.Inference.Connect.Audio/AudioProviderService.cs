@@ -17,9 +17,8 @@ public sealed class AudioProviderService
         ArgumentNullException.ThrowIfNull(connection);
         return _providers[connection.Transport].Bind(connection);
     }
-    public AudioSetupSession CreateSetupSession(AudioTransport transport, SetupConfigurationIdentity identity,
-        ISetupCommitTarget<AudioSetupChanges> target, AudioSetupConfiguration? existing = null) =>
-        new(_providers[transport], identity, target, existing);
+    /// <summary>Creates the settings manager that opens, acts on and saves audio settings through <paramref name="target"/>.</summary>
+    public AudioSettingsManager CreateSettingsManager(ISetupCommitTarget<AudioSetupChanges> target) => new(_providers, target);
 }
 
 public static class ServiceCollectionExtensions

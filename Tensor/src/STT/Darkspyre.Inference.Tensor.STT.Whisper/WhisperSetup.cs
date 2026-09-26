@@ -10,15 +10,14 @@ public static class WhisperSetup
         new("darkspyre.tensor.whisper", "Darkspyre Tensor Whisper", InferenceImplementationKind.Tensor, InferenceTask.SpeechTranscription),
         "Resident CPU speech transcription. Select and explicitly install a model; the host controls Load and Unload.");
 
-    public static TensorSetupSession CreateSession(SetupConfigurationIdentity identity,
-        ISetupCommitTarget<TensorSetupChanges> target, ITensorModelPackManager packs,
-        TensorSetupConfiguration? existing = null, ITensorSpeechToTextInference? instance = null,
+    /// <summary>Creates the settings manager for Whisper packs over the host's pack manager and optional live instance.</summary>
+    public static TensorSettingsManager CreateSettingsManager(ISetupCommitTarget<TensorSetupChanges> target,
+        ITensorModelPackManager packs, ITensorSpeechToTextInference? instance = null,
         IReadOnlyList<TensorModelPackDefinition>? offeredModels = null, ITensorModelSource? source = null, ITensorArtifactReader? reader = null)
     {
         IReadOnlyList<TensorModelPackDefinition> models = offeredModels ?? TensorSpeechModels.Whisper;
         foreach (TensorModelPackDefinition model in models) WhisperCompatibility.Validate(model);
-        return new(Definition, identity, target, models, packs, existing, instance, new WhisperBackendProbe(),
-            new WhisperModelResolver(source, reader));
+        return new(Definition, target, models, packs, instance, new WhisperBackendProbe(), new WhisperModelResolver(source, reader));
     }
 }
 

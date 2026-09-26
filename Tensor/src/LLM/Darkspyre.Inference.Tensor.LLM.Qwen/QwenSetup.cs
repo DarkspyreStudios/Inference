@@ -10,14 +10,13 @@ public static class QwenSetup
         new("darkspyre.tensor.qwen", "Darkspyre Tensor Qwen", InferenceImplementationKind.Tensor, InferenceTask.TextGeneration),
         "In-process Qwen text inference with explicitly installed weights and a host-owned resident model.");
 
-    public static TensorSetupSession CreateSession(SetupConfigurationIdentity identity,
-        ISetupCommitTarget<TensorSetupChanges> target, ITensorModelPackManager packs,
-        TensorSetupConfiguration? existing = null, ITensorLlmInference? instance = null,
+    /// <summary>Creates the settings manager for Qwen packs over the host's pack manager and optional live instance.</summary>
+    public static TensorSettingsManager CreateSettingsManager(ISetupCommitTarget<TensorSetupChanges> target,
+        ITensorModelPackManager packs, ITensorLlmInference? instance = null,
         IReadOnlyList<TensorModelPackDefinition>? offeredModels = null, ITensorModelSource? source = null, ITensorArtifactReader? reader = null)
     {
         IReadOnlyList<TensorModelPackDefinition> models = offeredModels ?? [TensorLlmModels.Qwen3FourBillionQ4Km];
         foreach (TensorModelPackDefinition model in models) { QwenModelCompatibility.Validate(model); }
-        return new(Definition, identity, target, models, packs, existing, instance, new QwenBackendProbe(),
-            new QwenModelResolver(source, reader));
+        return new(Definition, target, models, packs, instance, new QwenBackendProbe(), new QwenModelResolver(source, reader));
     }
 }
