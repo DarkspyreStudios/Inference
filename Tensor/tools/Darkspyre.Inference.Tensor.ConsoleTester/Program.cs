@@ -40,6 +40,14 @@ internal static class Program
             Console.Error.WriteLine("Cancelled.");
             return 130;
         }
+        catch (Exception exception) when (exception is Darkspyre.Inference.Common.InferenceException or TensorModelPackException)
+        {
+            // A failed load reports the engine's error; its inner exception names the native cause.
+            Console.Error.WriteLine($"Failed: {exception.Message}");
+            for (Exception? inner = exception.InnerException; inner is not null; inner = inner.InnerException)
+            { Console.Error.WriteLine($"  {inner.GetType().Name}: {inner.Message.Split('\n')[0]}"); }
+            return 1;
+        }
     }
 
     private static async Task<int> RunQwenAsync(ConsoleOptions options, CancellationToken cancellationToken)

@@ -128,7 +128,7 @@ internal sealed class QwenSuite(ILlmInference engine, string modelId)
                             ? tokens / Math.Max(0.001, seconds - first.TotalSeconds) : 0;
                         Console.WriteLine();
                         Console.WriteLine($"  {result.Status} ({result.FinishReason}); prompt {result.Usage?.InputTokens} + output {result.Usage?.OutputTokens} tokens; "
-                            + $"first token {firstToken?.TotalSeconds:F1}s; {rate:F1} tokens/s; total {seconds:F1}s");
+                            + (firstToken is { } shown ? $"first token {shown.TotalSeconds:F1}s; {rate:F1} tokens/s; " : "") + $"total {seconds:F1}s");
                         return result;
                 }
             }

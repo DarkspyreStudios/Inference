@@ -3,9 +3,20 @@
     <OutputType>Exe</OutputType>
     <IsPackable>false</IsPackable>
     <AssemblyName>tensor</AssemblyName>
+    <!--
+      The GGML backends need TensorSharp's native bridge, which no TensorSharp package ships. For local
+      testing, build it with TensorSharp.GGML.Native/build-macos.sh in a TensorSharp checkout beside this
+      repository; the build copies it next to the tester. Override the folder with -p:GgmlNativeDirectory.
+    -->
+    <GgmlNativeDirectory Condition="'$(GgmlNativeDirectory)' == ''">$(MSBuildThisFileDirectory)../../../../TensorSharp/TensorSharp.GGML.Native/build/</GgmlNativeDirectory>
   </PropertyGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\LLM\Darkspyre.Inference.Tensor.LLM.Qwen\Darkspyre.Inference.Tensor.LLM.Qwen.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="$(GgmlNativeDirectory)libGgmlOps.dylib" Condition="Exists('$(GgmlNativeDirectory)libGgmlOps.dylib')"
+          Link="libGgmlOps.dylib" CopyToOutputDirectory="PreserveNewest" Visible="false" />
   </ItemGroup>
 </Project>
