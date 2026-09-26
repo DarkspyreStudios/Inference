@@ -127,32 +127,32 @@ public sealed class BedrockRegistrationTests
         using ServiceProvider container = services.BuildServiceProvider();
         using IServiceScope scope = container.CreateScope();
         var target = new SetupTarget();
-        await using LlmSetupSession session = scope.ServiceProvider.GetRequiredService<LlmProviderService>()
-            .CreateSetupSession(transport, new(SetupChangeIntent.Create, "new", null), target, modelId: "default");
-        Assert.False((await session.ValidateAsync()).IsValid);
-        SetupChoiceField Choice(string id) => Assert.Single(session.Snapshot.Steps.SelectMany(step => step.Sections)
+        LlmSettingsManager manager = scope.ServiceProvider.GetRequiredService<LlmProviderService>().CreateSettingsManager(target);
+        LlmSettings settings = await manager.OpenAsync(transport, new(SetupChangeIntent.Create, "new", null), modelId: "default");
+        Assert.False(settings.Validate().IsValid);
+        SetupChoiceField Choice(string id) => Assert.Single(settings.Steps.SelectMany(step => step.Sections)
             .SelectMany(section => section.Fields).OfType<SetupChoiceField>(), field => field.Description.Id == id);
-        Assert.False(session.Snapshot.IsDirty);
+        Assert.False(settings.HasUnsavedChanges);
         Choice("aws-profile").SetValue("temporary-profile");
-        Assert.True(session.Snapshot.IsDirty);
+        Assert.True(settings.HasUnsavedChanges);
         Choice("aws-profile").SetValue(string.Empty);
-        Assert.False(session.Snapshot.IsDirty);
+        Assert.False(settings.HasUnsavedChanges);
         Assert.Equal(SetupEditState.Applied, Choice("aws-profile").SetValue("fixture-profile").State);
         Assert.Equal(SetupEditState.Applied, Choice("aws-region").SetValue("us-east-1").State);
-        Assert.True(session.Snapshot.IsDirty);
+        Assert.True(settings.HasUnsavedChanges);
         if (transport == LlmTransport.AwsBedrockAgentCore)
         {
-            SetupTextField arn = Assert.Single(session.Snapshot.Steps.SelectMany(step => step.Sections)
+            SetupTextField arn = Assert.Single(settings.Steps.SelectMany(step => step.Sections)
                 .SelectMany(section => section.Fields).OfType<SetupTextField>());
             Assert.Equal(SetupEditState.Applied, arn.SetValue("arn:aws:bedrock-agentcore:us-east-1:123456789012:harness/fixture").State);
         }
-        Assert.True((await session.ValidateAsync()).IsValid);
-        Assert.Equal(SetupCommitState.Committed, (await session.CommitAsync()).State);
+        Assert.True(settings.Validate().IsValid);
+        Assert.Equal(SetupCommitState.Committed, (await manager.SaveAsync(settings)).State);
         LlmAwsCredentials aws = LlmCredential.Parse(target.Changes!.Credential.Value)!.Aws!;
-        Assert.False(session.Snapshot.IsDirty);
+        Assert.False(settings.HasUnsavedChanges);
         Assert.Equal("fixture-profile", aws.Profile);
         Assert.Equal("us-east-1", aws.Region);
-        Assert.Null(session.Snapshot.Status.Ready.Value);
+        Assert.Null(settings.Status.Ready.Value);
     }
 
     [Fact]
@@ -169,8 +169,8 @@ public sealed class BedrockRegistrationTests
         foreach (LlmProviderDefinition definition in providers.SupportedProviders)
         {
             var created = new SetupTarget();
-            await using LlmSetupSession draft = providers.CreateSetupSession(definition.Transport,
-                new(SetupChangeIntent.Create, "configuration", null), created);
+            LlmSettingsManager createManager = providers.CreateSettingsManager(created);
+            LlmSettings draft = await createManager.OpenAsync(definition.Transport, new(SetupChangeIntent.Create, "configuration", null));
             string[] ids = Fields(draft).Select(field => field.Description.Id).ToArray();
             // Fixture inputs exercise the real provider-owned fields. This is test data, not renderer dispatch.
             foreach (string id in ids)
@@ -188,21 +188,29 @@ public sealed class BedrockRegistrationTests
                 };
                 if (result is not null) Assert.Equal(SetupEditState.Applied, result.State);
             }
-            Assert.True((await draft.ValidateAsync()).IsValid);
-            Assert.Equal(SetupCommitState.Committed, (await draft.CommitAsync()).State);
+            Assert.True(draft.Validate().IsValid);
+            if (definition.Transport == LlmTransport.OpenAiCodex)
+            {
+                // Direct Codex saves only after its ChatGPT sign-in, which needs the network.
+                Assert.False(draft.CanSave);
+                Assert.Equal(SetupCommitState.Invalid, (await createManager.SaveAsync(draft)).State);
+                continue;
+            }
+            Assert.Equal(SetupCommitState.Committed, (await createManager.SaveAsync(draft)).State);
             Assert.Null(created.Changes!.Configuration.Connection.Credential);
             Assert.Equal("fixture-model", created.Changes.Configuration.ModelId);
-            Assert.Null(draft.Snapshot.Status.Ready.Value);
+            Assert.Null(draft.Status.Ready.Value);
 
             LlmConnection saved = created.Changes.Configuration.Connection with
             { Version = "saved-v1", Credential = created.Changes.Credential.Value };
             var edited = new SetupTarget();
-            await using LlmSetupSession edit = providers.CreateSetupSession(definition.Transport,
-                new(SetupChangeIntent.Edit, "configuration", "saved-v1"), edited, saved, "fixture-model");
+            LlmSettingsManager editManager = providers.CreateSettingsManager(edited);
+            LlmSettings edit = await editManager.OpenAsync(definition.Transport,
+                new(SetupChangeIntent.Edit, "configuration", "saved-v1"), saved, "fixture-model");
             Assert.Equal("fixture-model", Assert.IsType<SetupChoiceField>(Fields(edit).Single(field => field.Description.Id == "model")).Value);
             Assert.All(Fields(edit).OfType<SetupSecretField>(), field => Assert.True(field.HasValue));
             Assert.Equal(SetupEditState.Applied, Assert.IsType<SetupChoiceField>(Fields(edit).Single(field => field.Description.Id == "model")).SetValue("edited-model").State);
-            Assert.Equal(SetupCommitState.Committed, (await edit.CommitAsync()).State);
+            Assert.Equal(SetupCommitState.Committed, (await editManager.SaveAsync(edit)).State);
             Assert.Equal("saved-v1", edited.Changes!.Identity.ExpectedVersion);
             Assert.Equal("edited-model", edited.Changes.Configuration.ModelId);
             Assert.Equal(SetupSecretEditKind.Keep, edited.Changes.Credential.Kind);
@@ -210,8 +218,8 @@ public sealed class BedrockRegistrationTests
         }
     }
 
-    private static IEnumerable<SetupField> Fields(LlmSetupSession session) =>
-        session.Snapshot.Steps.SelectMany(step => step.Sections).SelectMany(section => section.Fields);
+    private static IEnumerable<SetupField> Fields(LlmSettings settings) =>
+        settings.Steps.SelectMany(step => step.Sections).SelectMany(section => section.Fields);
 
     private sealed class NoSavedConnectionAccess : ILlmConnectionSource
     {

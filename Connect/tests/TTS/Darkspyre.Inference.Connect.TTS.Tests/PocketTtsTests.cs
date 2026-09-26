@@ -144,18 +144,18 @@ public sealed class PocketTtsTests
         using var http = new HttpClient(handler);
         var target = new Target();
         var service = new TtsProviderService([new PocketTtsHttpProvider(http)]);
-        await using TtsSetupSession session = service.CreateSetupSession(TtsTransport.PocketTtsHttp,
-            new(SetupChangeIntent.Edit, "connection", "v1"), target, new(Connection() with { Headers = new Dictionary<string, string> { ["Authorization"] = "private-key" } }));
+        TtsSettingsManager manager = service.CreateSettingsManager(target);
+        TtsSettings session = await manager.OpenAsync(TtsTransport.PocketTtsHttp, new(SetupChangeIntent.Edit, "connection", "v1"), new(Connection() with { Headers = new Dictionary<string, string> { ["Authorization"] = "private-key" } }));
         SetupRepeatableGroupField group = Assert.Single(Fields(session).OfType<SetupRepeatableGroupField>());
         SetupSecretField secret = Assert.Single(Assert.Single(group.Rows).Fields.OfType<SetupSecretField>());
         Assert.True(secret.HasValue);
         Assert.Equal(SetupEditState.Applied, secret.SetValue(SetupSecretEdit.Replace("new-key")).State);
-        Assert.Equal(SetupCommitState.Committed, (await session.CommitAsync()).State);
+        Assert.Equal(SetupCommitState.Committed, (await manager.SaveAsync(session)).State);
         Assert.Equal("v1", target.Changes!.Identity.ExpectedVersion);
         Assert.Equal("new-key", target.Changes.Headers.Set["Authorization"]);
         Assert.Empty(target.Changes.Headers.Remove);
         Assert.Empty(target.Changes.Configuration.Connection.Headers);
-        Assert.Null(session.Snapshot.Status.Ready.Value);
+        Assert.Null(session.Status.Ready.Value);
         Assert.Equal(0, handler.Calls);
     }
 
@@ -166,25 +166,25 @@ public sealed class PocketTtsTests
         using var http = new HttpClient(handler);
         var service = new TtsProviderService([new PocketTtsHttpProvider(http)]);
         var createTarget = new Target();
-        await using TtsSetupSession create = service.CreateSetupSession(TtsTransport.PocketTtsHttp,
-            new(SetupChangeIntent.Create, "connection", null), createTarget);
+        TtsSettingsManager createManager = service.CreateSettingsManager(createTarget);
+        TtsSettings create = await createManager.OpenAsync(TtsTransport.PocketTtsHttp, new(SetupChangeIntent.Create, "connection", null));
         Assert.Equal(SetupEditState.Applied, Assert.Single(Fields(create).OfType<SetupChoiceField>(),
             field => field.Description.Id == "voice").SetValue("host-voice").State);
-        Assert.Equal(SetupCommitState.Committed, (await create.CommitAsync()).State);
+        Assert.Equal(SetupCommitState.Committed, (await createManager.SaveAsync(create)).State);
         Assert.Equal("host-voice", createTarget.Changes!.Configuration.VoiceId);
         var editTarget = new Target();
-        await using TtsSetupSession edit = service.CreateSetupSession(TtsTransport.PocketTtsHttp,
-            new(SetupChangeIntent.Edit, "connection", "saved-v1"), editTarget, createTarget.Changes.Configuration);
+        TtsSettingsManager editManager = service.CreateSettingsManager(editTarget);
+        TtsSettings edit = await editManager.OpenAsync(TtsTransport.PocketTtsHttp, new(SetupChangeIntent.Edit, "connection", "saved-v1"), createTarget.Changes.Configuration);
         Assert.Equal("host-voice", Assert.Single(Fields(edit).OfType<SetupChoiceField>(), field => field.Description.Id == "voice").Value);
         Assert.Equal(SetupEditState.Applied, Assert.Single(Fields(edit).OfType<SetupChoiceField>(),
             field => field.Description.Id == "protocol").SetValue(nameof(PocketTtsProtocol.BridgeJson)).State);
         Assert.Equal(SetupEditState.Applied, Assert.Single(Fields(edit).OfType<SetupDecimalField>()).SetValue(1.25m).State);
-        Assert.Equal(SetupCommitState.Committed, (await edit.CommitAsync()).State);
+        Assert.Equal(SetupCommitState.Committed, (await editManager.SaveAsync(edit)).State);
         Assert.Equal("saved-v1", editTarget.Changes!.Identity.ExpectedVersion);
         Assert.Equal("host-voice", editTarget.Changes.Configuration.VoiceId);
         Assert.Equal(1.25, editTarget.Changes.Configuration.Speed);
         Assert.Equal(PocketTtsProtocol.BridgeJson, editTarget.Changes.Configuration.Connection.PocketTts.Protocol);
-        Assert.Null(edit.Snapshot.Status.Ready.Value);
+        Assert.Null(edit.Status.Ready.Value);
         Assert.Equal(0, handler.Calls);
     }
 
@@ -194,21 +194,22 @@ public sealed class PocketTtsTests
         using var handler = new Handler((request, _) => Task.FromResult(request.Method == HttpMethod.Get ? Json(new { voices = TestVoices }) : Wave()));
         using var http = new HttpClient(handler);
         var service = new TtsProviderService([new PocketTtsHttpProvider(http)]);
-        await using TtsSetupSession session = service.CreateSetupSession(TtsTransport.PocketTtsHttp, new(SetupChangeIntent.Create, "new", null), new Target());
-        await Assert.Single(session.Snapshot.Actions, action => action.Descriptor.Purpose == SetupActionPurpose.CheckReadiness).ExecuteAsync();
-        Assert.True(session.Snapshot.Status.Verified.Value);
-        Assert.Null(session.Snapshot.Status.Ready.Value);
-        ISetupAction synthesize = Assert.Single(session.Snapshot.Actions, action => action.Descriptor.Purpose == SetupActionPurpose.Test);
-        Assert.True(synthesize.Descriptor.SideEffects.HasFlag(SetupSideEffect.PotentialBilling));
-        Assert.Equal(SetupActionState.Completed, (await synthesize.ExecuteAsync()).State);
-        Assert.True(session.Snapshot.Status.Ready.Value);
+        TtsSettingsManager manager = service.CreateSettingsManager(new Target());
+        TtsSettings session = await manager.OpenAsync(TtsTransport.PocketTtsHttp, new(SetupChangeIntent.Create, "new", null));
+        await manager.RunAsync(session, Assert.Single(session.Actions, action => action.Purpose == SetupActionPurpose.CheckReadiness).Id);
+        Assert.True(session.Status.Verified.Value);
+        Assert.Null(session.Status.Ready.Value);
+        SetupActionDescriptor synthesize = Assert.Single(session.Actions, action => action.Purpose == SetupActionPurpose.Test);
+        Assert.True(synthesize.SideEffects.HasFlag(SetupSideEffect.PotentialBilling));
+        Assert.Equal(SetupActionState.Completed, (await manager.RunAsync(session, synthesize.Id)).State);
+        Assert.True(session.Status.Ready.Value);
         SetupDecimalField speed = Assert.Single(Fields(session).OfType<SetupDecimalField>());
         Assert.Equal(1, speed.Maximum);
         speed.SetValue(2);
-        Assert.False((await session.ValidateAsync()).IsValid);
+        Assert.False(session.Validate().IsValid);
         Assert.Single(Fields(session).OfType<SetupChoiceField>(), field => field.Description.Id == "protocol").SetValue(nameof(PocketTtsProtocol.BridgeJson));
-        Assert.True((await session.ValidateAsync()).IsValid);
-        Assert.True(session.Snapshot.Status.Ready.IsStale);
+        Assert.True(session.Validate().IsValid);
+        Assert.True(session.Status.Ready.IsStale);
     }
 
     [Fact]
@@ -227,23 +228,23 @@ public sealed class PocketTtsTests
         using var handler = new Handler((_, _) => throw new InvalidOperationException("No requests expected."));
         using var http = new HttpClient(handler);
         var service = new TtsProviderService([new PocketTtsHttpProvider(http)]);
-        await using TtsSetupSession session = service.CreateSetupSession(TtsTransport.PocketTtsHttp,
-            new(SetupChangeIntent.Edit, "id", "v1"), new Target(), new(Connection()));
+        TtsSettingsManager manager = service.CreateSettingsManager(new Target());
+        TtsSettings session = await manager.OpenAsync(TtsTransport.PocketTtsHttp, new(SetupChangeIntent.Edit, "id", "v1"), new(Connection()));
         SetupChoiceField Protocol() => Assert.Single(Fields(session).OfType<SetupChoiceField>(), field => field.Description.Id == "protocol");
-        Assert.False(session.Snapshot.IsDirty);
+        Assert.False(session.HasUnsavedChanges);
         Assert.Equal(SetupChoiceCapabilities.Bounded, Protocol().Capabilities);
         Protocol().SetValue(nameof(PocketTtsProtocol.BridgeJson));
-        Assert.True(session.Snapshot.IsDirty);
+        Assert.True(session.HasUnsavedChanges);
         Protocol().SetValue(nameof(PocketTtsProtocol.Multipart));
-        Assert.False(session.Snapshot.IsDirty);
+        Assert.False(session.HasUnsavedChanges);
         Assert.Single(Fields(session).OfType<SetupRepeatableGroupField>()).Add();
-        Assert.True(session.Snapshot.IsDirty);
+        Assert.True(session.HasUnsavedChanges);
         SetupRepeatableGroupField group = Assert.Single(Fields(session).OfType<SetupRepeatableGroupField>());
         group.Remove(Assert.Single(group.Rows).Id);
-        Assert.False(session.Snapshot.IsDirty);
+        Assert.False(session.HasUnsavedChanges);
     }
 
-    private static IEnumerable<SetupField> Fields(TtsSetupSession session) => session.Snapshot.Steps.SelectMany(step => step.Sections).SelectMany(section => section.Fields);
+    private static IEnumerable<SetupField> Fields(TtsSettings settings) => settings.Steps.SelectMany(step => step.Sections).SelectMany(section => section.Fields);
     private static TtsConnection Connection() => new() { Endpoint = new("https://example.test/api") };
     private static HttpResponseMessage Json<T>(T value) => new(HttpStatusCode.OK) { Content = JsonContent.Create(value) };
     private static HttpResponseMessage Wave()

@@ -93,8 +93,9 @@ public abstract class InferenceSettings
 
         SetupChoice[] matches = choices.Where(choice => choice.Value.Contains(query.Search, StringComparison.OrdinalIgnoreCase)
             || choice.DisplayName.Contains(query.Search, StringComparison.OrdinalIgnoreCase)).ToArray();
+        long next = (long)offset + query.PageSize;
         return new(matches.Skip(offset).Take(query.PageSize).ToArray(),
-            offset + query.PageSize < matches.Length ? (offset + query.PageSize).ToString(CultureInfo.InvariantCulture) : null);
+            next < matches.Length ? next.ToString(CultureInfo.InvariantCulture) : null);
     }
 
     internal SetupField? FindField(string fieldId) =>

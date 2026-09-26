@@ -9,12 +9,12 @@ public sealed class ImageSetupTests
     public async Task MissingWorkflowCatalogIsUnavailableNotAnEmptySuccessfulPicker()
     {
         var service = new ImageProviderService([new Transport()]);
-        await using ImageSetupSession session = service.CreateSetupSession(ImageTransport.ComfyUi,
-            new(SetupChangeIntent.Create, "id", null), new Target());
-        SetupChoiceField field = Assert.Single(Fields(session).OfType<SetupChoiceField>());
+        ImageSettingsManager manager = service.CreateSettingsManager(new Target());
+        ImageSettings settings = await manager.OpenAsync(ImageTransport.ComfyUi, new(SetupChangeIntent.Create, "id", null));
+        SetupChoiceField field = Assert.Single(Fields(settings).OfType<SetupChoiceField>());
         Assert.False(field.Description.IsEnabled);
-        Assert.Equal(SetupChoiceState.Unavailable, (await field.GetChoicesAsync(new(0))).State);
-        Assert.False((await session.ValidateAsync()).IsValid);
+        Assert.Equal(SetupChoiceState.Unavailable, (await manager.QueryChoicesAsync(settings, "workflow", new())).State);
+        Assert.False(settings.Validate().IsValid);
     }
 
     [Fact]
@@ -22,11 +22,11 @@ public sealed class ImageSetupTests
     {
         var transport = new Transport();
         var target = new Target();
-        await using ImageSetupSession session = New(transport, target);
-        Assert.Equal(SetupEditState.Applied, Assert.Single(Fields(session).OfType<SetupChoiceField>()).SetValue("workflow").State);
-        Assert.Equal(SetupCommitState.Invalid, (await session.CommitAsync()).State);
-        Assert.Equal(SetupActionState.Completed, (await Action(session, SetupActionPurpose.CheckPrerequisites).ExecuteAsync()).State);
-        Assert.Equal(SetupCommitState.Committed, (await session.CommitAsync()).State);
+        var (manager, settings) = await NewAsync(transport, target);
+        Assert.Equal(SetupEditState.Applied, Assert.Single(Fields(settings).OfType<SetupChoiceField>()).SetValue("workflow").State);
+        Assert.Equal(SetupCommitState.Invalid, (await manager.SaveAsync(settings)).State);
+        Assert.Equal(SetupActionState.Completed, (await manager.RunAsync(settings, Action(settings, SetupActionPurpose.CheckPrerequisites).Id)).State);
+        Assert.Equal(SetupCommitState.Committed, (await manager.SaveAsync(settings)).State);
         Assert.Equal("workflow", target.Changes!.Configuration.WorkflowId);
         Assert.Equal(0, transport.HealthCalls);
         Assert.Equal(0, transport.SubmitCalls);
@@ -36,17 +36,17 @@ public sealed class ImageSetupTests
     public async Task HealthAndGenerationAreSeparateExplicitActions()
     {
         var transport = new Transport();
-        await using ImageSetupSession session = New(transport, new Target());
-        Assert.Single(Fields(session).OfType<SetupChoiceField>()).SetValue("workflow");
-        await Action(session, SetupActionPurpose.CheckPrerequisites).ExecuteAsync();
-        await Action(session, SetupActionPurpose.CheckReadiness).ExecuteAsync();
+        var (manager, settings) = await NewAsync(transport, new Target());
+        Assert.Single(Fields(settings).OfType<SetupChoiceField>()).SetValue("workflow");
+        await manager.RunAsync(settings, Action(settings, SetupActionPurpose.CheckPrerequisites).Id);
+        await manager.RunAsync(settings, Action(settings, SetupActionPurpose.CheckReadiness).Id);
         Assert.Equal(1, transport.HealthCalls);
         Assert.Equal(0, transport.SubmitCalls);
-        Assert.Null(session.Snapshot.Status.Ready.Value);
-        Assert.True(Action(session, SetupActionPurpose.Test).Descriptor.SideEffects.HasFlag(SetupSideEffect.PotentialBilling));
-        Assert.Equal(SetupActionState.Completed, (await Action(session, SetupActionPurpose.Test).ExecuteAsync()).State);
+        Assert.Null(settings.Status.Ready.Value);
+        Assert.True(Action(settings, SetupActionPurpose.Test).SideEffects.HasFlag(SetupSideEffect.PotentialBilling));
+        Assert.Equal(SetupActionState.Completed, (await manager.RunAsync(settings, Action(settings, SetupActionPurpose.Test).Id)).State);
         Assert.Equal(1, transport.SubmitCalls);
-        Assert.True(session.Snapshot.Status.Ready.Value);
+        Assert.True(settings.Status.Ready.Value);
     }
 
     [Fact]
@@ -57,14 +57,14 @@ public sealed class ImageSetupTests
         var service = new ImageProviderService([transport]);
         var existing = new ImageConnection
         { Transport = ImageTransport.ComfyUi, Endpoint = "http://localhost:8188", AdditionalHeaders = new Dictionary<string, string> { ["Authorization"] = "saved-secret" } };
-        await using ImageSetupSession session = service.CreateSetupSession(ImageTransport.ComfyUi,
-            new(SetupChangeIntent.Edit, "id", "v1"), target, new Workflows(), existing, "workflow");
-        SetupRepeatableGroupField headers = Assert.Single(Fields(session).OfType<SetupRepeatableGroupField>());
+        ImageSettingsManager manager = service.CreateSettingsManager(target, new Workflows());
+        ImageSettings settings = await manager.OpenAsync(ImageTransport.ComfyUi, new(SetupChangeIntent.Edit, "id", "v1"), existing, "workflow");
+        SetupRepeatableGroupField headers = Assert.Single(Fields(settings).OfType<SetupRepeatableGroupField>());
         SetupSecretField secret = Assert.IsType<SetupSecretField>(Assert.Single(headers.Rows).Fields[1]);
         Assert.True(secret.HasValue);
-        Assert.DoesNotContain("saved-secret", session.Snapshot.ToString(), StringComparison.Ordinal);
-        await Action(session, SetupActionPurpose.CheckPrerequisites).ExecuteAsync();
-        await session.CommitAsync();
+        Assert.DoesNotContain("saved-secret", settings.ToString(), StringComparison.Ordinal);
+        await manager.RunAsync(settings, Action(settings, SetupActionPurpose.CheckPrerequisites).Id);
+        await manager.SaveAsync(settings);
         Assert.Empty(target.Changes!.Headers.Set);
         Assert.Empty(target.Changes.Headers.Remove);
         Assert.Equal("saved-secret", existing.AdditionalHeaders["Authorization"]);
@@ -73,27 +73,30 @@ public sealed class ImageSetupTests
     [Fact]
     public async Task DirtyTracksEditableFieldsAndHeaderRowsButNotHealth()
     {
-        await using ImageSetupSession session = New(new Transport(), new Target());
-        Assert.False(session.Snapshot.IsDirty);
-        await Action(session, SetupActionPurpose.CheckReadiness).ExecuteAsync();
-        Assert.False(session.Snapshot.IsDirty);
-        SetupIntegerField Timeout() => Assert.Single(Fields(session).OfType<SetupIntegerField>());
+        var (manager, settings) = await NewAsync(new Transport(), new Target());
+        Assert.False(settings.HasUnsavedChanges);
+        await manager.RunAsync(settings, Action(settings, SetupActionPurpose.CheckReadiness).Id);
+        Assert.False(settings.HasUnsavedChanges);
+        SetupIntegerField Timeout() => Assert.Single(Fields(settings).OfType<SetupIntegerField>());
         long? baseline = Timeout().Value;
         Timeout().SetValue(123);
-        Assert.True(session.Snapshot.IsDirty);
+        Assert.True(settings.HasUnsavedChanges);
         Timeout().SetValue(baseline);
-        Assert.False(session.Snapshot.IsDirty);
-        Assert.Single(Fields(session).OfType<SetupRepeatableGroupField>()).Add();
-        Assert.True(session.Snapshot.IsDirty);
-        SetupRepeatableGroupField group = Assert.Single(Fields(session).OfType<SetupRepeatableGroupField>());
+        Assert.False(settings.HasUnsavedChanges);
+        Assert.Single(Fields(settings).OfType<SetupRepeatableGroupField>()).Add();
+        Assert.True(settings.HasUnsavedChanges);
+        SetupRepeatableGroupField group = Assert.Single(Fields(settings).OfType<SetupRepeatableGroupField>());
         group.Remove(Assert.Single(group.Rows).Id);
-        Assert.False(session.Snapshot.IsDirty);
+        Assert.False(settings.HasUnsavedChanges);
     }
 
-    private static ImageSetupSession New(Transport transport, Target target) => new ImageProviderService([transport])
-        .CreateSetupSession(ImageTransport.ComfyUi, new(SetupChangeIntent.Create, "id", null), target, new Workflows());
-    private static IEnumerable<SetupField> Fields(ImageSetupSession session) => session.Snapshot.Steps.SelectMany(step => step.Sections).SelectMany(section => section.Fields);
-    private static ISetupAction Action(ImageSetupSession session, SetupActionPurpose purpose) => Assert.Single(session.Snapshot.Actions, action => action.Descriptor.Purpose == purpose);
+    private static async Task<(ImageSettingsManager Manager, ImageSettings Settings)> NewAsync(Transport transport, Target target)
+    {
+        ImageSettingsManager manager = new ImageProviderService([transport]).CreateSettingsManager(target, new Workflows());
+        return (manager, await manager.OpenAsync(ImageTransport.ComfyUi, new(SetupChangeIntent.Create, "id", null)));
+    }
+    private static IEnumerable<SetupField> Fields(ImageSettings settings) => settings.Steps.SelectMany(step => step.Sections).SelectMany(section => section.Fields);
+    private static SetupActionDescriptor Action(ImageSettings settings, SetupActionPurpose purpose) => Assert.Single(settings.Actions, action => action.Purpose == purpose);
 
     private sealed class Target : ISetupCommitTarget<ImageSetupChanges>
     {
@@ -105,7 +108,7 @@ public sealed class ImageSetupTests
     private sealed class Workflows : IImageWorkflowChoiceSource
     {
         public Task<SetupChoicePage> GetChoicesAsync(ImageTransport transport, SetupChoiceQuery query, CancellationToken cancellationToken = default)
-            => Task.FromResult(new SetupChoicePage(query.ExpectedRevision, [new("workflow", "Workflow")]));
+            => Task.FromResult(new SetupChoicePage([new("workflow", "Workflow")]));
         public Task<ImageWorkflow?> GetWorkflowAsync(string workflowId, CancellationToken cancellationToken = default) => Task.FromResult<ImageWorkflow?>(new()
         { Id = workflowId, Label = "Workflow", Transport = ImageTransport.ComfyUi, TransportConfiguration = JsonSerializer.SerializeToElement(new { }) });
     }

@@ -7,7 +7,7 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace Darkspyre.Inference.Connect.LLM.Tests;
 
-public sealed class LlmSetupSessionTests
+public sealed class LlmSettingsTests
 {
     [Fact]
     public async Task RegisteredProvidersExposeTypedFieldsAndBoundActionsWithoutConnecting()
@@ -20,13 +20,13 @@ public sealed class LlmSetupSessionTests
         LlmProviderService provider = scope.ServiceProvider.GetRequiredService<LlmProviderService>();
         foreach (LlmProviderDefinition definition in provider.SupportedProviders)
         {
-            await using LlmSetupSession session = provider.CreateSetupSession(definition.Transport,
+            var (manager, settings) = await OpenAsync(provider, definition.Transport,
                 new(SetupChangeIntent.Create, "new", null), new Target());
-            Assert.Equal(definition.Id, session.Snapshot.Definition.Implementation.Id);
-            Assert.NotEmpty(Fields(session));
-            Assert.Contains(session.Snapshot.Actions, action => action.Descriptor.Purpose == SetupActionPurpose.Test
-                && action.Descriptor.SideEffects.HasFlag(SetupSideEffect.PotentialBilling));
-            Assert.Null(session.Snapshot.Status.Ready.Value);
+            Assert.Equal(definition.Id, settings.Definition.Implementation.Id);
+            Assert.NotEmpty(Fields(settings));
+            Assert.Contains(settings.Actions, action => action.Purpose == SetupActionPurpose.Test
+                && action.SideEffects.HasFlag(SetupSideEffect.PotentialBilling));
+            Assert.Null(settings.Status.Ready.Value);
         }
     }
 
@@ -37,14 +37,14 @@ public sealed class LlmSetupSessionTests
         var client = new Client(ProviderDefinitions.OpenAiApiKey);
         var provider = new LlmProviderService(new UnusedSource(), [client]);
         LlmConnection original = Connection(LlmTransport.OpenAiResponses, "saved-key");
-        await using LlmSetupSession session = provider.CreateSetupSession(client.Transport,
+        var (manager, settings) = await OpenAsync(provider, client.Transport,
             new(SetupChangeIntent.Edit, "id", "v1"), target, original, "model");
-        SetupSecretField key = Assert.Single(Fields(session).OfType<SetupSecretField>());
+        SetupSecretField key = Assert.Single(Fields(settings).OfType<SetupSecretField>());
         Assert.True(key.HasValue);
         Assert.Equal(SetupEditState.Applied, key.SetValue(SetupSecretEdit.Replace("replacement-key")).State);
         Assert.Equal("saved-key", LlmCredential.Parse(original.Credential)!.ApiKey);
         Assert.Equal(0, target.Calls);
-        Assert.Equal(SetupCommitState.Committed, (await session.CommitAsync()).State);
+        Assert.Equal(SetupCommitState.Committed, (await manager.SaveAsync(settings)).State);
         Assert.Equal("v1", target.Changes!.Identity.ExpectedVersion);
         Assert.Null(target.Changes.Configuration.Connection.Credential);
         Assert.Equal("replacement-key", LlmCredential.Parse(target.Changes.Credential.Value)!.ApiKey);
@@ -56,15 +56,15 @@ public sealed class LlmSetupSessionTests
     {
         var target = new Target();
         var provider = new LlmProviderService(new UnusedSource(), [new Client(ProviderDefinitions.OpenAiApiKey)]);
-        await using LlmSetupSession session = provider.CreateSetupSession(LlmTransport.OpenAiResponses,
+        var (manager, settings) = await OpenAsync(provider, LlmTransport.OpenAiResponses,
             new(SetupChangeIntent.Edit, "id", "v1"), target, Connection(LlmTransport.OpenAiResponses, "saved-key"), "model");
-        Assert.Single(Fields(session).OfType<SetupSecretField>()).SetValue(SetupSecretEdit.Clear);
-        Assert.True(session.Snapshot.IsDirty);
-        Assert.False((await session.ValidateAsync()).IsValid);
-        Assert.Single(Fields(session).OfType<SetupSecretField>()).SetValue(SetupSecretEdit.Keep);
-        Assert.False(session.Snapshot.IsDirty);
-        Assert.True((await session.ValidateAsync()).IsValid);
-        await session.CommitAsync();
+        Assert.Single(Fields(settings).OfType<SetupSecretField>()).SetValue(SetupSecretEdit.Clear);
+        Assert.True(settings.HasUnsavedChanges);
+        Assert.False(settings.Validate().IsValid);
+        Assert.Single(Fields(settings).OfType<SetupSecretField>()).SetValue(SetupSecretEdit.Keep);
+        Assert.False(settings.HasUnsavedChanges);
+        Assert.True(settings.Validate().IsValid);
+        await manager.SaveAsync(settings);
         Assert.Equal(SetupSecretEditKind.Keep, target.Changes!.Credential.Kind);
     }
 
@@ -74,39 +74,38 @@ public sealed class LlmSetupSessionTests
         var target = new Target();
         var client = new Client(ProviderDefinitions.OpenAiApiKey);
         var provider = new LlmProviderService(new UnusedSource(), [client]);
-        await using LlmSetupSession session = provider.CreateSetupSession(client.Transport,
+        var (manager, settings) = await OpenAsync(provider, client.Transport,
             new(SetupChangeIntent.Edit, "id", "v1"), target, Connection(client.Transport, "saved-key"), "model");
         Assert.Equal(0, client.Calls);
-        SetupActionResult result = await Action(session, SetupActionPurpose.Test).ExecuteAsync();
+        SetupActionResult result = await manager.RunAsync(settings, Action(settings, SetupActionPurpose.Test).Id);
         Assert.Equal(SetupActionState.Completed, result.State);
-        Assert.True(session.Snapshot.Status.Ready.Value);
-        Assert.False(session.Snapshot.IsDirty);
+        Assert.True(settings.Status.Ready.Value);
+        Assert.False(settings.HasUnsavedChanges);
         Assert.Equal(0, target.Calls);
     }
 
     [Fact]
-    public async Task BrowserAuthorizationCanContinueFromRefreshedSnapshotAndOnlyCommitsThroughHost()
+    public async Task BrowserAuthorizationKeepsTheCallbackOutOfFieldValuesAndOnlyCommitsThroughHost()
     {
         var target = new Target();
         var auth = new BrowserAuth();
         var provider = new LlmProviderService(new UnusedSource(), [new Client(ProviderDefinitions.ClaudeSubscription)], [auth]);
-        await using LlmSetupSession session = provider.CreateSetupSession(LlmTransport.AnthropicClaudeCli,
+        var (manager, settings) = await OpenAsync(provider, LlmTransport.AnthropicClaudeCli,
             new(SetupChangeIntent.Create, "id", null), target, modelId: "model");
-        Assert.Equal(SetupActionState.NeedsInteraction, (await Action(session, SetupActionPurpose.Authenticate).ExecuteAsync()).State);
-        SetupBrowserAuthorization interaction = Assert.IsType<SetupBrowserAuthorization>(session.Snapshot.Interaction);
+        Assert.Equal(SetupActionState.NeedsInteraction, (await manager.RunAsync(settings, Action(settings, SetupActionPurpose.Authenticate).Id)).State);
+        SetupBrowserAuthorization interaction = Assert.IsType<SetupBrowserAuthorization>(settings.Interaction);
         Assert.Equal(SetupEditState.Applied, interaction.Callback.SetValue("code#state").State);
-        Assert.Equal(SetupActionState.Stale, (await interaction.Continue.ExecuteAsync()).State);
-        SetupBrowserAuthorization current = Assert.IsType<SetupBrowserAuthorization>(session.Snapshot.Interaction);
+        SetupBrowserAuthorization current = Assert.IsType<SetupBrowserAuthorization>(settings.Interaction);
         Assert.Equal(interaction.Callback.Description.Id, current.Callback.Description.Id);
         Assert.Empty(current.Callback.Value);
-        Assert.True(session.Snapshot.IsDirty);
-        Assert.Equal(SetupActionState.Completed, (await current.Continue.ExecuteAsync()).State);
+        Assert.True(settings.HasUnsavedChanges);
+        Assert.Equal(SetupActionState.Completed, (await manager.RunAsync(settings, current.Continue.Id)).State);
         Assert.Equal(1, auth.Completed);
-        Assert.Null(session.Snapshot.Interaction);
-        Assert.True(session.Snapshot.IsDirty); // The acquired credential is still an unsaved draft mutation.
-        Assert.Null(session.Snapshot.Status.Authenticated.Value); // Catalog OAuth is not CLI login.
+        Assert.Null(settings.Interaction);
+        Assert.True(settings.HasUnsavedChanges); // The acquired credential is still an unsaved draft mutation.
+        Assert.Null(settings.Status.Authenticated.Value); // Catalog OAuth is not CLI login.
         Assert.Equal(0, target.Calls);
-        await session.CommitAsync();
+        await manager.SaveAsync(settings);
         Assert.Equal("catalog-token", LlmCredential.Parse(target.Changes!.Credential.Value)!.OAuth!.AccessToken);
     }
 
@@ -115,13 +114,14 @@ public sealed class LlmSetupSessionTests
     {
         var auth = new BrowserAuth();
         var provider = new LlmProviderService(new UnusedSource(), [new Client(ProviderDefinitions.ClaudeSubscription)], [auth]);
-        await using LlmSetupSession session = provider.CreateSetupSession(LlmTransport.AnthropicClaudeCli,
+        var (manager, settings) = await OpenAsync(provider, LlmTransport.AnthropicClaudeCli,
             new(SetupChangeIntent.Create, "id", null), new Target(), modelId: "model");
-        await Action(session, SetupActionPurpose.Authenticate).ExecuteAsync();
-        Assert.IsType<SetupBrowserAuthorization>(session.Snapshot.Interaction).Callback.SetValue("code#state");
-        Assert.Single(Fields(session).OfType<SetupExecutableField>()).SetValue(new("different-cli"));
-        Assert.Null(session.Snapshot.Interaction);
-        Assert.DoesNotContain(session.Snapshot.Actions, action => action.Descriptor.Purpose == SetupActionPurpose.ContinueAuthentication);
+        await manager.RunAsync(settings, Action(settings, SetupActionPurpose.Authenticate).Id);
+        Assert.IsType<SetupBrowserAuthorization>(settings.Interaction).Callback.SetValue("code#state");
+        Assert.Single(Fields(settings).OfType<SetupExecutableField>()).SetValue(new("different-cli"));
+        Assert.Null(settings.Interaction);
+        Assert.DoesNotContain(settings.Actions, action => action.Purpose == SetupActionPurpose.ContinueAuthentication);
+        Assert.Equal(SetupActionState.Unavailable, (await manager.RunAsync(settings, "continue-authorization")).State);
         Assert.Equal(0, auth.Completed);
     }
 
@@ -130,11 +130,11 @@ public sealed class LlmSetupSessionTests
     {
         var target = new Target { Result = new(SetupCommitState.Conflict) };
         var provider = new LlmProviderService(new UnusedSource(), [new Client(ProviderDefinitions.OpenAiApiKey)]);
-        await using LlmSetupSession session = provider.CreateSetupSession(LlmTransport.OpenAiResponses,
+        var (manager, settings) = await OpenAsync(provider, LlmTransport.OpenAiResponses,
             new(SetupChangeIntent.Edit, "id", "v1"), target, Connection(LlmTransport.OpenAiResponses, "saved-key"), "model");
-        Assert.Equal(SetupCommitState.Conflict, (await session.CommitAsync()).State);
+        Assert.Equal(SetupCommitState.Conflict, (await manager.SaveAsync(settings)).State);
         Assert.Equal(1, target.Calls);
-        Assert.False(session.Snapshot.IsClosed);
+        Assert.False(settings.IsSaved);
     }
 
     [Fact]
@@ -143,19 +143,19 @@ public sealed class LlmSetupSessionTests
         var target = new Target();
         var auth = new DeviceAuth();
         var provider = new LlmProviderService(new UnusedSource(), [new Client(ProviderDefinitions.ChatGptSubscription)], [auth]);
-        await using LlmSetupSession session = provider.CreateSetupSession(LlmTransport.OpenAiCodex,
+        var (manager, settings) = await OpenAsync(provider, LlmTransport.OpenAiCodex,
             new(SetupChangeIntent.Create, "id", null), target, modelId: "model");
-        await Action(session, SetupActionPurpose.Authenticate).ExecuteAsync();
-        SetupDeviceAuthorization interaction = Assert.IsType<SetupDeviceAuthorization>(session.Snapshot.Interaction);
+        await manager.RunAsync(settings, Action(settings, SetupActionPurpose.Authenticate).Id);
+        SetupDeviceAuthorization interaction = Assert.IsType<SetupDeviceAuthorization>(settings.Interaction);
         Assert.Equal("code", interaction.UserCode);
         Assert.Null(interaction.ExpiresAt); // The existing upstream contract does not report expiry.
         // A status-only publication must not invalidate the authorization identity.
-        await Action(session, SetupActionPurpose.CheckPrerequisites).ExecuteAsync();
-        SetupDeviceAuthorization current = Assert.IsType<SetupDeviceAuthorization>(session.Snapshot.Interaction);
-        Assert.Equal(SetupActionState.Completed, (await current.Continue.ExecuteAsync()).State);
-        Assert.True(session.Snapshot.Status.Authenticated.Value);
+        await manager.RunAsync(settings, Action(settings, SetupActionPurpose.CheckPrerequisites).Id);
+        SetupDeviceAuthorization current = Assert.IsType<SetupDeviceAuthorization>(settings.Interaction);
+        Assert.Equal(SetupActionState.Completed, (await manager.RunAsync(settings, current.Continue.Id)).State);
+        Assert.True(settings.Status.Authenticated.Value);
         Assert.Equal(0, target.Calls);
-        await session.CommitAsync();
+        await manager.SaveAsync(settings);
         Assert.Equal("device-token", LlmCredential.Parse(target.Changes!.Credential.Value)!.OAuth!.AccessToken);
     }
 
@@ -165,31 +165,34 @@ public sealed class LlmSetupSessionTests
         var provider = new LlmProviderService(new UnusedSource(), [new Client(ProviderDefinitions.ChatGptSubscription)], [new DeviceAuth()]);
         string official = ProviderDefinitions.ChatGptSubscription.DefaultEndpoint;
         var created = new Target();
-        await using (LlmSetupSession session = provider.CreateSetupSession(LlmTransport.OpenAiCodex,
-            new(SetupChangeIntent.Create, "id", null), created, modelId: "model"))
-        {
-            Assert.Equal(["model"], Fields(session).Select(field => field.Description.Id));
-            Assert.Empty(session.Snapshot.Steps[0].Sections); // Sign-in has instructions and actions, no empty field group.
-            Assert.Equal(SetupCommitState.Committed, (await session.CommitAsync()).State);
-            Assert.Equal(official, created.Changes!.Configuration.Connection.Endpoint);
-        }
+        var (createManager, create) = await OpenAsync(provider, LlmTransport.OpenAiCodex,
+            new(SetupChangeIntent.Create, "id", null), created, modelId: "model");
+        Assert.Equal(["model"], Fields(create).Select(field => field.Description.Id));
+        Assert.Empty(create.Steps[0].Sections); // Sign-in has instructions and actions, no empty field group.
+        Assert.False(create.CanSave); // Direct Codex saves only after its ChatGPT sign-in.
+        Assert.Equal(SetupCommitState.Invalid, (await createManager.SaveAsync(create)).State);
+        await createManager.RunAsync(create, Action(create, SetupActionPurpose.Authenticate).Id);
+        await createManager.RunAsync(create, Assert.IsType<SetupDeviceAuthorization>(create.Interaction).Continue.Id);
+        Assert.True(create.CanSave);
+        Assert.Equal(SetupCommitState.Committed, (await createManager.SaveAsync(create)).State);
+        Assert.Equal(official, created.Changes!.Configuration.Connection.Endpoint);
 
-        LlmConnection former = new() { Version = "v1", Transport = LlmTransport.OpenAiCodex, Endpoint = "codex" };
+        LlmConnection former = new()
+        {
+            Version = "v1", Transport = LlmTransport.OpenAiCodex, Endpoint = "codex",
+            Credential = new LlmCredential { OAuth = new() { AccessToken = "saved-token" } }.Serialize()
+        };
         var edited = new Target();
-        await using (LlmSetupSession session = provider.CreateSetupSession(LlmTransport.OpenAiCodex,
-            new(SetupChangeIntent.Edit, "id", "v1"), edited, former, "model"))
-        {
-            Assert.True(session.Snapshot.IsDirty);
-            Assert.Equal(SetupCommitState.Committed, (await session.CommitAsync()).State);
-            Assert.Equal(official, edited.Changes!.Configuration.Connection.Endpoint);
-            Assert.True(edited.Changes.RequiresReauthentication);
-        }
+        var (editManager, edit) = await OpenAsync(provider, LlmTransport.OpenAiCodex,
+            new(SetupChangeIntent.Edit, "id", "v1"), edited, former, "model");
+        Assert.True(edit.HasUnsavedChanges);
+        Assert.Equal(SetupCommitState.Committed, (await editManager.SaveAsync(edit)).State);
+        Assert.Equal(official, edited.Changes!.Configuration.Connection.Endpoint);
+        Assert.True(edited.Changes.RequiresReauthentication);
 
-        await using (LlmSetupSession session = provider.CreateSetupSession(LlmTransport.OpenAiCodex,
-            new(SetupChangeIntent.Edit, "id", "v1"), new Target(), former with { Endpoint = official }, "model"))
-        {
-            Assert.False(session.Snapshot.IsDirty);
-        }
+        var (_, unchanged) = await OpenAsync(provider, LlmTransport.OpenAiCodex,
+            new(SetupChangeIntent.Edit, "id", "v1"), new Target(), former with { Endpoint = official }, "model");
+        Assert.False(unchanged.HasUnsavedChanges);
     }
 
     private static LlmConnection Connection(LlmTransport transport, string key) => new()
@@ -202,23 +205,27 @@ public sealed class LlmSetupSessionTests
         var provider = new LlmProviderService(new UnusedSource(), [new Client(ProviderDefinitions.OpenAiCompatible)]);
         LlmConnection existing = Connection(LlmTransport.OpenAiCompatibleChat, "saved") with
         { CapabilityOverrides = new() { SupportsTemperature = false, SupportsToolUse = true } };
-        await using LlmSetupSession session = provider.CreateSetupSession(existing.Transport,
+        var (manager, settings) = await OpenAsync(provider, existing.Transport,
             new(SetupChangeIntent.Edit, "id", "v1"), target, existing, "model");
-        SetupChoiceField Field(string id) => Assert.Single(Fields(session).OfType<SetupChoiceField>(), field => field.Description.Id == id);
-        SetupChoiceField oldField = Field("model-listing");
+        SetupChoiceField Field(string id) => Assert.Single(Fields(settings).OfType<SetupChoiceField>(), field => field.Description.Id == id);
         Assert.Equal(SetupEditState.Invalid, Field("model-listing").SetValue("unexpected").State);
         Assert.Equal(SetupEditState.Applied, Field("model-listing").SetValue("disabled").State);
-        Assert.Equal(SetupChoiceState.Stale, (await oldField.GetChoicesAsync(new(session.Snapshot.Revision))).State);
         Assert.Equal(SetupEditState.Applied, Field("temperature").SetValue("default").State);
-        Assert.Equal(SetupCommitState.Committed, (await session.CommitAsync()).State);
+        Assert.Equal(SetupCommitState.Committed, (await manager.SaveAsync(settings)).State);
         LlmCapabilityOverrides overrides = target.Changes!.Configuration.Connection.CapabilityOverrides!;
         Assert.False(overrides.SupportsModelListing);
         Assert.Null(overrides.SupportsTemperature);
         Assert.True(overrides.SupportsToolUse);
         Assert.True(target.Changes.RequiresRetest);
     }
-    private static IEnumerable<SetupField> Fields(LlmSetupSession session) => session.Snapshot.Steps.SelectMany(step => step.Sections).SelectMany(section => section.Fields);
-    private static ISetupAction Action(LlmSetupSession session, SetupActionPurpose purpose) => Assert.Single(session.Snapshot.Actions, action => action.Descriptor.Purpose == purpose);
+    private static async Task<(LlmSettingsManager Manager, LlmSettings Settings)> OpenAsync(LlmProviderService provider, LlmTransport transport,
+        SetupConfigurationIdentity identity, Target target, LlmConnection? existing = null, string? modelId = null)
+    {
+        LlmSettingsManager manager = provider.CreateSettingsManager(target);
+        return (manager, await manager.OpenAsync(transport, identity, existing, modelId));
+    }
+    private static IEnumerable<SetupField> Fields(LlmSettings settings) => settings.Steps.SelectMany(step => step.Sections).SelectMany(section => section.Fields);
+    private static SetupActionDescriptor Action(LlmSettings settings, SetupActionPurpose purpose) => Assert.Single(settings.Actions, action => action.Purpose == purpose);
 
     private sealed class Target : ISetupCommitTarget<LlmSetupChanges>
     {
@@ -236,52 +243,51 @@ public sealed class LlmSetupSessionTests
     }
 
     [Fact]
-    public async Task CliPrerequisiteIsPublishedAndReboundAfterOtherDraftRevisions()
+    public async Task CliPrerequisiteStaysUntilTheRecheckSucceeds()
     {
         var client = new Client(ProviderDefinitions.ClaudeSubscription) { Authenticated = false };
         var provider = new LlmProviderService(new UnusedSource(), [client]);
-        await using LlmSetupSession session = provider.CreateSetupSession(client.Transport,
+        var (manager, settings) = await OpenAsync(provider, client.Transport,
             new(SetupChangeIntent.Create, "id", null), new Target(), modelId: "model");
-        Assert.Equal(SetupActionState.NeedsInteraction, (await Action(session, SetupActionPurpose.CheckPrerequisites).ExecuteAsync()).State);
-        SetupExternalPrerequisite first = Assert.IsType<SetupExternalPrerequisite>(session.Snapshot.Interaction);
+        Assert.Equal(SetupActionState.NeedsInteraction, (await manager.RunAsync(settings, Action(settings, SetupActionPurpose.CheckPrerequisites).Id)).State);
+        SetupExternalPrerequisite first = Assert.IsType<SetupExternalPrerequisite>(settings.Interaction);
         Assert.False(string.IsNullOrWhiteSpace(first.Instructions));
-        Assert.False(session.Snapshot.IsDirty);
-        await first.Recheck.ExecuteAsync();
-        Assert.Equal(SetupActionState.Stale, (await first.Recheck.ExecuteAsync()).State);
+        Assert.False(settings.HasUnsavedChanges);
+        Assert.Equal(SetupActionState.NeedsInteraction, (await manager.RunAsync(settings, first.Recheck.Id)).State);
         client.Authenticated = true;
-        SetupExternalPrerequisite current = Assert.IsType<SetupExternalPrerequisite>(session.Snapshot.Interaction);
-        Assert.Equal(SetupActionState.Completed, (await current.Recheck.ExecuteAsync()).State);
-        Assert.Null(session.Snapshot.Interaction);
-        Assert.False(session.Snapshot.IsDirty);
+        SetupExternalPrerequisite current = Assert.IsType<SetupExternalPrerequisite>(settings.Interaction);
+        Assert.Equal(SetupActionState.Completed, (await manager.RunAsync(settings, current.Recheck.Id)).State);
+        Assert.Null(settings.Interaction);
+        Assert.False(settings.HasUnsavedChanges);
     }
 
     [Fact]
     public async Task CallbackRestartChangesIdentityAndNeverEchoesEnteredCode()
     {
         var provider = new LlmProviderService(new UnusedSource(), [new Client(ProviderDefinitions.ClaudeSubscription)], [new BrowserAuth()]);
-        await using LlmSetupSession session = provider.CreateSetupSession(LlmTransport.AnthropicClaudeCli,
+        var (manager, settings) = await OpenAsync(provider, LlmTransport.AnthropicClaudeCli,
             new(SetupChangeIntent.Create, "id", null), new Target(), modelId: "model");
-        await Action(session, SetupActionPurpose.Authenticate).ExecuteAsync();
-        SetupBrowserAuthorization first = Assert.IsType<SetupBrowserAuthorization>(session.Snapshot.Interaction);
+        await manager.RunAsync(settings, Action(settings, SetupActionPurpose.Authenticate).Id);
+        SetupBrowserAuthorization first = Assert.IsType<SetupBrowserAuthorization>(settings.Interaction);
         first.Callback.SetValue("sensitive-code");
-        Assert.Empty(Assert.IsType<SetupBrowserAuthorization>(session.Snapshot.Interaction).Callback.Value);
-        await Action(session, SetupActionPurpose.CancelAuthentication).ExecuteAsync();
-        Assert.False(session.Snapshot.IsDirty);
-        await Action(session, SetupActionPurpose.Authenticate).ExecuteAsync();
-        Assert.NotEqual(first.Callback.Description.Id, Assert.IsType<SetupBrowserAuthorization>(session.Snapshot.Interaction).Callback.Description.Id);
+        Assert.Empty(Assert.IsType<SetupBrowserAuthorization>(settings.Interaction).Callback.Value);
+        await manager.RunAsync(settings, Action(settings, SetupActionPurpose.CancelAuthentication).Id);
+        Assert.False(settings.HasUnsavedChanges);
+        await manager.RunAsync(settings, Action(settings, SetupActionPurpose.Authenticate).Id);
+        Assert.NotEqual(first.Callback.Description.Id, Assert.IsType<SetupBrowserAuthorization>(settings.Interaction).Callback.Description.Id);
     }
 
     [Fact]
     public async Task ReturningCapabilityOverrideToDefaultRestoresCleanDraft()
     {
         var provider = new LlmProviderService(new UnusedSource(), [new Client(ProviderDefinitions.OpenAiCompatible)]);
-        await using LlmSetupSession session = provider.CreateSetupSession(LlmTransport.OpenAiCompatibleChat,
+        var (manager, settings) = await OpenAsync(provider, LlmTransport.OpenAiCompatibleChat,
             new(SetupChangeIntent.Create, "id", null), new Target());
-        SetupChoiceField Field() => Assert.Single(Fields(session).OfType<SetupChoiceField>(), field => field.Description.Id == "streaming");
+        SetupChoiceField Field() => Assert.Single(Fields(settings).OfType<SetupChoiceField>(), field => field.Description.Id == "streaming");
         Field().SetValue("enabled");
-        Assert.True(session.Snapshot.IsDirty);
+        Assert.True(settings.HasUnsavedChanges);
         Field().SetValue("default");
-        Assert.False(session.Snapshot.IsDirty);
+        Assert.False(settings.HasUnsavedChanges);
         Assert.Equal(SetupChoiceCapabilities.Bounded, Field().Capabilities);
     }
 
@@ -291,21 +297,21 @@ public sealed class LlmSetupSessionTests
     public async Task ReasoningLevelOverrideBecomesExplicitAndReturnsToDefault()
     {
         var provider = new LlmProviderService(new UnusedSource(), [new Client(ProviderDefinitions.OpenAiCompatible)]);
-        await using LlmSetupSession session = provider.CreateSetupSession(LlmTransport.OpenAiCompatibleChat,
+        var (manager, settings) = await OpenAsync(provider, LlmTransport.OpenAiCompatibleChat,
             new(SetupChangeIntent.Create, "id", null), new Target());
         SetupChoiceField Level(string name) =>
-            Assert.Single(Fields(session).OfType<SetupChoiceField>(), field => field.Description.Id == "reasoning-level-" + name);
+            Assert.Single(Fields(settings).OfType<SetupChoiceField>(), field => field.Description.Id == "reasoning-level-" + name);
 
-        Assert.Equal(7, Fields(session).OfType<SetupChoiceField>().Count(field => field.Description.Id.StartsWith("reasoning-level-", StringComparison.Ordinal)));
+        Assert.Equal(7, Fields(settings).OfType<SetupChoiceField>().Count(field => field.Description.Id.StartsWith("reasoning-level-", StringComparison.Ordinal)));
         foreach (string name in DefaultedLevels) { Assert.Equal("default", Level(name).Value); }
 
         Level("low").SetValue("enabled");
-        Assert.True(session.Snapshot.IsDirty);
+        Assert.True(settings.HasUnsavedChanges);
         Assert.Equal("enabled", Level("low").Value);
         Assert.Equal("disabled", Level("high").Value);
 
         Level("low").SetValue("default");
-        Assert.False(session.Snapshot.IsDirty);
+        Assert.False(settings.HasUnsavedChanges);
         Assert.Equal("default", Level("high").Value);
     }
 

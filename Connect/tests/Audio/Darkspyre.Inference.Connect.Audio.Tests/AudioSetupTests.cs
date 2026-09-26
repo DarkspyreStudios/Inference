@@ -12,17 +12,17 @@ public sealed class AudioSetupTests
         using var handler = new Handler((_, _) => throw new InvalidOperationException("No network expected."));
         using var http = new HttpClient(handler);
         var target = new Target();
-        await using AudioSetupSession session = Service(http).CreateSetupSession(AudioTransport.TangoFluxHttp, new(SetupChangeIntent.Create, "new", null), target);
-        Assert.False(session.Snapshot.Status.Configured.Value);
-        Field<SetupUriField>(session, "endpoint").SetValue(new("https://audio.test"));
-        Field<SetupDecimalField>(session, "duration").SetValue(2.5m);
-        Field<SetupDecimalField>(session, "timeout").SetValue(12.5m);
-        Field<SetupIntegerField>(session, "steps").SetValue(20);
-        Field<SetupDecimalField>(session, "guidance").SetValue(3.5m);
-        Field<SetupIntegerField>(session, "seed").SetValue(42);
-        Field<SetupChoiceField>(session, "cache").SetValue("bypass");
-        Assert.True((await session.ValidateAsync()).IsValid);
-        Assert.Equal(SetupCommitState.Committed, (await session.CommitAsync()).State);
+        var (manager, settings) = await CreateAsync(http, target);
+        Assert.False(settings.Status.Configured.Value);
+        Field<SetupUriField>(settings, "endpoint").SetValue(new("https://audio.test"));
+        Field<SetupDecimalField>(settings, "duration").SetValue(2.5m);
+        Field<SetupDecimalField>(settings, "timeout").SetValue(12.5m);
+        Field<SetupIntegerField>(settings, "steps").SetValue(20);
+        Field<SetupDecimalField>(settings, "guidance").SetValue(3.5m);
+        Field<SetupIntegerField>(settings, "seed").SetValue(42);
+        Field<SetupChoiceField>(settings, "cache").SetValue("bypass");
+        Assert.True(settings.Validate().IsValid);
+        Assert.Equal(SetupCommitState.Committed, (await manager.SaveAsync(settings)).State);
         AudioSetupChanges changes = Assert.IsType<AudioSetupChanges>(target.Changes);
         Assert.Equal(SetupChangeIntent.Create, changes.Identity.Intent);
         Assert.Null(changes.Identity.ExpectedVersion);
@@ -33,7 +33,7 @@ public sealed class AudioSetupTests
         Assert.Equal(3.5, changes.Configuration.GuidanceScale);
         Assert.Equal(42, changes.Configuration.Seed);
         Assert.False(changes.Configuration.UseCache);
-        Assert.Null(session.Snapshot.Status.Ready.Value);
+        Assert.Null(settings.Status.Ready.Value);
         Assert.Equal(0, handler.Calls);
     }
 
@@ -45,12 +45,12 @@ public sealed class AudioSetupTests
     {
         using var http = new HttpClient();
         var target = new Target();
-        await using AudioSetupSession session = EditSession(http, target);
-        SetupSecretField secret = Assert.Single(Assert.Single(Headers(session).Rows).Fields.OfType<SetupSecretField>());
+        var (manager, settings) = await EditAsync(http, target);
+        SetupSecretField secret = Assert.Single(Assert.Single(Headers(settings).Rows).Fields.OfType<SetupSecretField>());
         Assert.True(secret.HasValue);
         Assert.Equal(SetupSecretEditKind.Keep, secret.Change);
         secret.SetValue(kind switch { SetupSecretEditKind.Replace => SetupSecretEdit.Replace("replacement"), SetupSecretEditKind.Clear => SetupSecretEdit.Clear, _ => SetupSecretEdit.Keep });
-        Assert.Equal(SetupCommitState.Committed, (await session.CommitAsync()).State);
+        Assert.Equal(SetupCommitState.Committed, (await manager.SaveAsync(settings)).State);
         AudioSetupChanges changes = Assert.IsType<AudioSetupChanges>(target.Changes);
         Assert.Equal("v1", changes.Identity.ExpectedVersion);
         Assert.Empty(changes.Configuration.Connection.Headers);
@@ -66,19 +66,19 @@ public sealed class AudioSetupTests
     {
         using var http = new HttpClient();
         var target = new Target();
-        await using (AudioSetupSession session = EditSession(http, target))
         {
-            SetupFieldRow row = Assert.Single(Headers(session).Rows);
+            var (manager, settings) = await EditAsync(http, target);
+            SetupFieldRow row = Assert.Single(Headers(settings).Rows);
             Assert.Single(row.Fields.OfType<SetupTextField>()).SetValue("X-Api-Key");
-            await session.CommitAsync();
+            await manager.SaveAsync(settings);
             Assert.Equal("Authorization", Assert.Single(target.Changes!.Headers.Remove));
             Assert.Equal("protected", target.Changes.Headers.Set["X-Api-Key"]);
         }
-        await using (AudioSetupSession session = EditSession(http, target))
         {
-            SetupRepeatableGroupField headers = Headers(session);
+            var (manager, settings) = await EditAsync(http, target);
+            SetupRepeatableGroupField headers = Headers(settings);
             headers.Remove(Assert.Single(headers.Rows).Id);
-            await session.CommitAsync();
+            await manager.SaveAsync(settings);
             Assert.Equal("Authorization", Assert.Single(target.Changes!.Headers.Remove));
             Assert.Empty(target.Changes.Headers.Set);
         }
@@ -89,42 +89,44 @@ public sealed class AudioSetupTests
     {
         using var http = new HttpClient();
         var target = new Target();
-        await using AudioSetupSession session = EditSession(http, target);
-        Headers(session).Add();
-        SetupFieldRow row = Headers(session).Rows[1];
+        var (manager, settings) = await EditAsync(http, target);
+        Headers(settings).Add();
+        SetupFieldRow row = Headers(settings).Rows[1];
         string id = row.Id;
         Assert.Single(row.Fields.OfType<SetupTextField>()).SetValue("authorization");
-        Assert.Single(Headers(session).Rows[1].Fields.OfType<SetupSecretField>()).SetValue(SetupSecretEdit.Replace("duplicate"));
-        Assert.False((await session.ValidateAsync()).IsValid);
-        Assert.Equal(SetupCommitState.Invalid, (await session.CommitAsync()).State);
+        Assert.Single(Headers(settings).Rows[1].Fields.OfType<SetupSecretField>()).SetValue(SetupSecretEdit.Replace("duplicate"));
+        Assert.False(settings.Validate().IsValid);
+        Assert.Equal(SetupCommitState.Invalid, (await manager.SaveAsync(settings)).State);
         Assert.Null(target.Changes);
-        Assert.Single(Headers(session).Rows.Single(item => item.Id == id).Fields.OfType<SetupTextField>()).SetValue("X-Api-Key");
-        Assert.True((await session.ValidateAsync()).IsValid);
-        await session.CommitAsync();
+        Assert.Single(Headers(settings).Rows.Single(item => item.Id == id).Fields.OfType<SetupTextField>()).SetValue("X-Api-Key");
+        Assert.True(settings.Validate().IsValid);
+        await manager.SaveAsync(settings);
         Assert.Equal("duplicate", target.Changes!.Headers.Set["X-Api-Key"]);
         Assert.Single(target.Changes.Headers.Set);
         Assert.Empty(target.Changes.Headers.Remove);
     }
 
     [Fact]
-    public async Task ChoicesArePagedSearchedAndRevisionCheckedWithoutNetwork()
+    public async Task ChoicesArePagedAndSearchedWithoutNetwork()
     {
-        using var http = new HttpClient();
-        await using AudioSetupSession session = CreateSession(http, new Target());
-        SetupChoiceField field = Field<SetupChoiceField>(session, "cache");
-        long revision = session.Snapshot.Revision;
-        SetupChoicePage page = await field.GetChoicesAsync(new(revision, PageSize: 1));
+        using var handler = new Handler((_, _) => throw new InvalidOperationException("No network expected."));
+        using var http = new HttpClient(handler);
+        var (manager, settings) = await CreateAsync(http, new Target());
+        SetupChoiceField field = Field<SetupChoiceField>(settings, "cache");
+        Task<SetupChoicePage> Query(SetupChoiceQuery query) => manager.QueryChoicesAsync(settings, "cache", query);
+        SetupChoicePage page = await Query(new(PageSize: 1));
         Assert.Equal("default", Assert.Single(page.Choices).Value);
         Assert.NotNull(page.Continuation);
-        SetupChoicePage next = await field.GetChoicesAsync(new(revision, Continuation: page.Continuation, PageSize: 1));
+        SetupChoicePage next = await Query(new(Continuation: page.Continuation, PageSize: 1));
         Assert.Equal("use", Assert.Single(next.Choices).Value);
-        Assert.Equal("bypass", Assert.Single((await field.GetChoicesAsync(new(revision, "Bypass"))).Choices).Value);
-        Assert.Null((await field.GetChoicesAsync(new(revision, Continuation: int.MaxValue.ToString(System.Globalization.CultureInfo.InvariantCulture)))).Continuation);
-        Assert.Equal(SetupChoiceState.Failed, (await field.GetChoicesAsync(new(revision, Continuation: "invalid"))).State);
+        Assert.Equal("bypass", Assert.Single((await Query(new("Bypass"))).Choices).Value);
+        Assert.Null((await Query(new(Continuation: int.MaxValue.ToString(System.Globalization.CultureInfo.InvariantCulture)))).Continuation);
+        Assert.Equal(SetupChoiceState.Failed, (await Query(new(Continuation: "invalid"))).State);
         Assert.Equal(SetupEditState.Invalid, field.SetValue("unsupported").State);
         Assert.Equal(SetupEditState.Applied, field.SetValue("use").State);
-        Assert.Equal(SetupEditState.Stale, field.SetValue("bypass").State);
-        Assert.Equal(SetupChoiceState.Stale, (await field.GetChoicesAsync(new(session.Snapshot.Revision))).State);
+        Assert.Equal(SetupEditState.Applied, field.SetValue("bypass").State);
+        Assert.Equal("bypass", Field<SetupChoiceField>(settings, "cache").Value);
+        Assert.Equal(0, handler.Calls);
     }
 
     [Fact]
@@ -143,21 +145,21 @@ public sealed class AudioSetupTests
             return Wave();
         });
         using var http = new HttpClient(handler);
-        await using AudioSetupSession session = EditSession(http, new Target());
-        Field<SetupDecimalField>(session, "duration").SetValue(7.5m);
-        Field<SetupIntegerField>(session, "steps").SetValue(25);
-        Field<SetupIntegerField>(session, "seed").SetValue(42);
-        Field<SetupChoiceField>(session, "cache").SetValue("bypass");
-        Assert.Single(Assert.Single(Headers(session).Rows).Fields.OfType<SetupSecretField>()).SetValue(SetupSecretEdit.Replace("replacement"));
-        ISetupAction test = Assert.Single(session.Snapshot.Actions);
-        Assert.Equal(SetupActionPurpose.Test, test.Descriptor.Purpose);
-        Assert.Equal(SetupSideEffect.Network | SetupSideEffect.PotentialBilling, test.Descriptor.SideEffects);
+        var (manager, settings) = await EditAsync(http, new Target());
+        Field<SetupDecimalField>(settings, "duration").SetValue(7.5m);
+        Field<SetupIntegerField>(settings, "steps").SetValue(25);
+        Field<SetupIntegerField>(settings, "seed").SetValue(42);
+        Field<SetupChoiceField>(settings, "cache").SetValue("bypass");
+        Assert.Single(Assert.Single(Headers(settings).Rows).Fields.OfType<SetupSecretField>()).SetValue(SetupSecretEdit.Replace("replacement"));
+        SetupActionDescriptor test = Assert.Single(settings.Actions);
+        Assert.Equal(SetupActionPurpose.Test, test.Purpose);
+        Assert.Equal(SetupSideEffect.Network | SetupSideEffect.PotentialBilling, test.SideEffects);
         Assert.Equal(0, handler.Calls);
-        Assert.Equal(SetupActionState.Completed, (await test.ExecuteAsync()).State);
-        Assert.True(session.Snapshot.Status.Ready.Value);
-        Assert.True(session.Snapshot.Status.Verified.Value);
-        Field<SetupUriField>(session, "endpoint").SetValue(new("https://elsewhere.test"));
-        Assert.True(session.Snapshot.Status.Ready.IsStale);
+        Assert.Equal(SetupActionState.Completed, (await manager.RunAsync(settings, test.Id)).State);
+        Assert.True(settings.Status.Ready.Value);
+        Assert.True(settings.Status.Verified.Value);
+        Field<SetupUriField>(settings, "endpoint").SetValue(new("https://elsewhere.test"));
+        Assert.True(settings.Status.Ready.IsStale);
         Assert.Equal(1, handler.Calls);
     }
 
@@ -166,33 +168,33 @@ public sealed class AudioSetupTests
     {
         using var http = new HttpClient();
         var target = new Target();
-        await using AudioSetupSession session = CreateSession(http, target);
-        Field<SetupDecimalField>(session, "duration").SetValue(decimal.MaxValue);
-        Field<SetupIntegerField>(session, "steps").SetValue(long.MaxValue);
-        Field<SetupIntegerField>(session, "seed").SetValue(long.MinValue);
-        Field<SetupDecimalField>(session, "guidance").SetValue(0);
-        Field<SetupDecimalField>(session, "timeout").SetValue(decimal.MaxValue);
-        Assert.Equal(5, (await session.ValidateAsync()).Issues.Count);
-        Assert.Equal(SetupCommitState.Invalid, (await session.CommitAsync()).State);
-        Assert.False(Assert.Single(session.Snapshot.Actions).Descriptor.IsEnabled);
-        Assert.Equal(SetupActionState.Unavailable, (await Assert.Single(session.Snapshot.Actions).ExecuteAsync()).State);
+        var (manager, settings) = await CreateAsync(http, target);
+        Field<SetupDecimalField>(settings, "duration").SetValue(decimal.MaxValue);
+        Field<SetupIntegerField>(settings, "steps").SetValue(long.MaxValue);
+        Field<SetupIntegerField>(settings, "seed").SetValue(long.MinValue);
+        Field<SetupDecimalField>(settings, "guidance").SetValue(0);
+        Field<SetupDecimalField>(settings, "timeout").SetValue(decimal.MaxValue);
+        Assert.Equal(5, settings.Validate().Issues.Count);
+        Assert.Equal(SetupCommitState.Invalid, (await manager.SaveAsync(settings)).State);
+        Assert.False(Assert.Single(settings.Actions).IsEnabled);
+        Assert.Equal(SetupActionState.Unavailable, (await manager.RunAsync(settings, Assert.Single(settings.Actions).Id)).State);
         Assert.Null(target.Changes);
     }
 
     [Fact]
-    public async Task CancelledEditDoesNotSaveAndCommitConflictRemainsEditable()
+    public async Task UnsavedEditNeverReachesTheHostAndConflictRemainsEditable()
     {
         using var http = new HttpClient();
         var target = new Target { Result = new(SetupCommitState.Conflict) };
-        await using AudioSetupSession session = EditSession(http, target);
-        Assert.Equal(SetupCommitState.Conflict, (await session.CommitAsync()).State);
-        Assert.False(session.Snapshot.IsClosed);
-        Assert.Equal(SetupEditState.Applied, Field<SetupIntegerField>(session, "steps").SetValue(30).State);
-        var cancelledTarget = new Target();
-        AudioSetupSession cancelled = EditSession(http, cancelledTarget);
-        Assert.Single(Assert.Single(Headers(cancelled).Rows).Fields.OfType<SetupSecretField>()).SetValue(SetupSecretEdit.Clear);
-        await cancelled.DisposeAsync();
-        Assert.Null(cancelledTarget.Changes);
+        var (manager, settings) = await EditAsync(http, target);
+        Assert.Equal(SetupCommitState.Conflict, (await manager.SaveAsync(settings)).State);
+        Assert.False(settings.IsSaved);
+        Assert.Equal(SetupEditState.Applied, Field<SetupIntegerField>(settings, "steps").SetValue(30).State);
+        var unsavedTarget = new Target();
+        var (_, unsaved) = await EditAsync(http, unsavedTarget);
+        Assert.Single(Assert.Single(Headers(unsaved).Rows).Fields.OfType<SetupSecretField>()).SetValue(SetupSecretEdit.Clear);
+        Assert.True(unsaved.HasUnsavedChanges);
+        Assert.Null(unsavedTarget.Changes);
     }
 
     [Theory]
@@ -203,13 +205,14 @@ public sealed class AudioSetupTests
     {
         using var http = new HttpClient();
         var target = new Target();
-        await using AudioSetupSession session = Service(http).CreateSetupSession(AudioTransport.TangoFluxHttp,
-            new(SetupChangeIntent.Edit, "connection", "v1"), target, new(Connection()) { GuidanceScale = guidance });
-        SetupDecimalField field = Field<SetupDecimalField>(session, "guidance");
-        Assert.False((await session.ValidateAsync()).IsValid);
+        AudioSettingsManager manager = Service(http).CreateSettingsManager(target);
+        AudioSettings settings = await manager.OpenAsync(AudioTransport.TangoFluxHttp,
+            new(SetupChangeIntent.Edit, "connection", "v1"), new(Connection()) { GuidanceScale = guidance });
+        SetupDecimalField field = Field<SetupDecimalField>(settings, "guidance");
+        Assert.False(settings.Validate().IsValid);
         Assert.Equal(SetupEditState.Applied, field.SetValue(null).State);
-        Assert.True((await session.ValidateAsync()).IsValid);
-        await session.CommitAsync();
+        Assert.True(settings.Validate().IsValid);
+        await manager.SaveAsync(settings);
         Assert.Null(target.Changes!.Configuration.GuidanceScale);
     }
 
@@ -220,19 +223,19 @@ public sealed class AudioSetupTests
         using var handler = new Handler((_, _) => Task.FromResult(++calls == 1 ? Wave()
             : new HttpResponseMessage(System.Net.HttpStatusCode.InternalServerError) { Content = new StringContent("private response") }));
         using var http = new HttpClient(handler);
-        await using AudioSetupSession session = CreateSession(http, new Target());
-        Assert.Equal(SetupActionState.Completed, (await Assert.Single(session.Snapshot.Actions).ExecuteAsync()).State);
-        Assert.True(session.Snapshot.Status.Ready.Value);
-        SetupActionResult failure = await Assert.Single(session.Snapshot.Actions).ExecuteAsync();
+        var (manager, settings) = await CreateAsync(http, new Target());
+        Assert.Equal(SetupActionState.Completed, (await manager.RunAsync(settings, Assert.Single(settings.Actions).Id)).State);
+        Assert.True(settings.Status.Ready.Value);
+        SetupActionResult failure = await manager.RunAsync(settings, Assert.Single(settings.Actions).Id);
         Assert.Equal(SetupActionState.Failed, failure.State);
-        Assert.Null(session.Snapshot.Status.Ready.Value);
-        Assert.Null(session.Snapshot.Status.Verified.Value);
+        Assert.Null(settings.Status.Ready.Value);
+        Assert.Null(settings.Status.Verified.Value);
         Assert.DoesNotContain("private response", failure.ToString(), StringComparison.Ordinal);
         Assert.Equal(2, handler.Calls);
     }
 
     [Fact]
-    public async Task SessionDisposalCancelsAndWaitsForActiveTest()
+    public async Task CancellingAnActiveTestCancelsTheRequestAndClearsReadiness()
     {
         var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var cancelled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -247,49 +250,51 @@ public sealed class AudioSetupTests
         });
         using var http = new HttpClient(handler);
         var target = new Target();
-        AudioSetupSession session = CreateSession(http, target);
-        Task<SetupActionResult> running = Assert.Single(session.Snapshot.Actions).ExecuteAsync();
+        var (manager, settings) = await CreateAsync(http, target);
+        using var cancellation = new CancellationTokenSource();
+        Task<SetupActionResult> running = manager.RunAsync(settings, Assert.Single(settings.Actions).Id, cancellationToken: cancellation.Token);
         await started.Task;
-        Assert.Equal(SetupCommitState.Busy, (await session.CommitAsync()).State);
-        Assert.Equal(SetupEditState.Busy, Field<SetupIntegerField>(session, "steps").SetValue(30).State);
-        Task disposal = session.DisposeAsync().AsTask();
+        await cancellation.CancelAsync();
         await cancelled.Task.WaitAsync(TimeSpan.FromSeconds(5));
-        bool wasWaiting = !disposal.IsCompleted;
         release.SetResult();
-        await disposal;
-        Assert.True(wasWaiting);
         Assert.Equal(SetupActionState.Cancelled, (await running).State);
         Assert.Null(target.Changes);
-        Assert.Null(session.Snapshot.Status.Ready.Value);
+        Assert.Null(settings.Status.Ready.Value);
     }
 
     [Fact]
     public async Task DirtyTracksRevertsForNumericDefaultsAndProtectedHeaderEdits()
     {
         using var http = new HttpClient();
-        await using AudioSetupSession session = EditSession(http, new Target());
-        Assert.False(session.Snapshot.IsDirty);
-        Field<SetupDecimalField>(session, "timeout").SetValue(13.5m);
-        Assert.True(session.Snapshot.IsDirty);
-        Field<SetupDecimalField>(session, "timeout").SetValue(12.5m);
-        Assert.False(session.Snapshot.IsDirty);
-        SetupSecretField Secret() => Assert.Single(Assert.Single(Headers(session).Rows).Fields.OfType<SetupSecretField>());
+        var (manager, settings) = await EditAsync(http, new Target());
+        Assert.False(settings.HasUnsavedChanges);
+        Field<SetupDecimalField>(settings, "timeout").SetValue(13.5m);
+        Assert.True(settings.HasUnsavedChanges);
+        Field<SetupDecimalField>(settings, "timeout").SetValue(12.5m);
+        Assert.False(settings.HasUnsavedChanges);
+        SetupSecretField Secret() => Assert.Single(Assert.Single(Headers(settings).Rows).Fields.OfType<SetupSecretField>());
         Secret().SetValue(SetupSecretEdit.Clear);
-        Assert.True(session.Snapshot.IsDirty);
+        Assert.True(settings.HasUnsavedChanges);
         Secret().SetValue(SetupSecretEdit.Keep);
-        Assert.False(session.Snapshot.IsDirty);
-        Assert.Equal(SetupChoiceCapabilities.Bounded, Field<SetupChoiceField>(session, "cache").Capabilities);
+        Assert.False(settings.HasUnsavedChanges);
+        Assert.Equal(SetupChoiceCapabilities.Bounded, Field<SetupChoiceField>(settings, "cache").Capabilities);
     }
 
     private static AudioProviderService Service(HttpClient http) => new([new TangoFluxHttpProvider(http)]);
-    private static AudioSetupSession CreateSession(HttpClient http, Target target) => Service(http).CreateSetupSession(AudioTransport.TangoFluxHttp,
-        new(SetupChangeIntent.Create, "new", null), target);
-    private static AudioSetupSession EditSession(HttpClient http, Target target) => Service(http).CreateSetupSession(AudioTransport.TangoFluxHttp,
-        new(SetupChangeIntent.Edit, "connection", "v1"), target, new(Connection() with
-        { Headers = new Dictionary<string, string> { ["Authorization"] = "protected" }, RequestTimeout = TimeSpan.FromSeconds(12.5) }));
-    private static T Field<T>(IInferenceSetupSession session, string id) where T : SetupField =>
-        Assert.IsType<T>(Assert.Single(session.Snapshot.Steps.SelectMany(step => step.Sections).SelectMany(section => section.Fields), field => field.Description.Id == id));
-    private static SetupRepeatableGroupField Headers(IInferenceSetupSession session) => Field<SetupRepeatableGroupField>(session, "headers");
+    private static async Task<(AudioSettingsManager Manager, AudioSettings Settings)> CreateAsync(HttpClient http, Target target)
+    {
+        AudioSettingsManager manager = Service(http).CreateSettingsManager(target);
+        return (manager, await manager.OpenAsync(AudioTransport.TangoFluxHttp, new(SetupChangeIntent.Create, "new", null)));
+    }
+    private static async Task<(AudioSettingsManager Manager, AudioSettings Settings)> EditAsync(HttpClient http, Target target)
+    {
+        AudioSettingsManager manager = Service(http).CreateSettingsManager(target);
+        return (manager, await manager.OpenAsync(AudioTransport.TangoFluxHttp, new(SetupChangeIntent.Edit, "connection", "v1"), new(Connection() with
+        { Headers = new Dictionary<string, string> { ["Authorization"] = "protected" }, RequestTimeout = TimeSpan.FromSeconds(12.5) })));
+    }
+    private static T Field<T>(InferenceSettings settings, string id) where T : SetupField =>
+        Assert.IsType<T>(Assert.Single(settings.Steps.SelectMany(step => step.Sections).SelectMany(section => section.Fields), field => field.Description.Id == id));
+    private static SetupRepeatableGroupField Headers(InferenceSettings settings) => Field<SetupRepeatableGroupField>(settings, "headers");
     private sealed class Target : ISetupCommitTarget<AudioSetupChanges>
     {
         public AudioSetupChanges? Changes { get; private set; }
