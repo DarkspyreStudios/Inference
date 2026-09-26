@@ -1,7 +1,7 @@
 # Darkspyre.Inference.UI.Settings
 
-Version **11.9.2-rc.1**, synchronized with Common, Connect and Tensor. Its exact Common NuGet
-dependency is `[11.9.2-rc.1]`; the package does not embed Common, Connect, Tensor or Lumeo DLLs.
+Version **11.10.0-rc.1**, synchronized with Common, Connect and Tensor. Its exact Common NuGet
+dependency is `[11.10.0-rc.1]`; the package does not embed Common, Connect, Tensor or Lumeo DLLs.
 The release-candidate suffix reflects the .NET 11 RC ASP.NET component dependency.
 
 This package provides one host-placed Blazor editor for a provider's `InferenceSettings` object and
