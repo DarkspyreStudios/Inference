@@ -18,12 +18,7 @@ public sealed class InferenceSettingsEditorTests : BunitContext
     [Fact]
     public void RendersProviderStatusWithoutAHostConnectionFlag()
     {
-        var session = new FakeSession();
-        var host = new FakeHost();
-
-        IRenderedComponent<InferenceSettingsEditor> editor = Render<InferenceSettingsEditor>(parameters => parameters
-            .Add(value => value.Session, session)
-            .Add(value => value.Host, host));
+        IRenderedComponent<InferenceSettingsEditor> editor = RenderEditor(new FakeSettings(), new FakeManager());
 
         Assert.Contains("Example provider", editor.Markup, StringComparison.Ordinal);
         Assert.Contains("Configured: Yes", editor.Markup, StringComparison.Ordinal);
@@ -34,15 +29,15 @@ public sealed class InferenceSettingsEditorTests : BunitContext
     [Fact]
     public void HostsWithTheirOwnFrameCanHideTheHeadingAndEffectLabels()
     {
-        var session = new FakeSession();
-        IRenderedComponent<InferenceSettingsEditor> shown = Render<InferenceSettingsEditor>(parameters => parameters
-            .Add(value => value.Session, session).Add(value => value.Host, new FakeHost()));
+        var settings = new FakeSettings();
+        var manager = new FakeManager();
+        IRenderedComponent<InferenceSettingsEditor> shown = RenderEditor(settings, manager);
         Assert.Equal("Example provider", shown.Find(".inference-settings-editor__heading h2").TextContent);
         Assert.Equal("Network", shown.Find(".inference-settings-editor__action small").TextContent);
         Assert.Equal("Connect", shown.Find(".inference-settings-editor__step h3").TextContent); // One step has no step list.
 
         IRenderedComponent<InferenceSettingsEditor> framed = Render<InferenceSettingsEditor>(parameters => parameters
-            .Add(value => value.Session, session).Add(value => value.Host, new FakeHost())
+            .Add(value => value.Settings, settings).Add(value => value.Manager, manager).Add(value => value.Host, new FakeHost())
             .Add(value => value.ShowHeading, false).Add(value => value.ShowActionEffects, false));
         Assert.Empty(framed.FindAll(".inference-settings-editor__heading"));
         Assert.Empty(framed.FindAll(".inference-settings-editor__action small"));
@@ -51,75 +46,131 @@ public sealed class InferenceSettingsEditorTests : BunitContext
     }
 
     [Fact]
-    public async Task SaveUsesProviderSessionCommit()
+    public async Task SaveCallsTheManagerOnceAndReportsTheResult()
     {
-        var session = new FakeSession();
-        var host = new FakeHost();
+        var manager = new FakeManager();
+        SetupCommitResult? reported = null;
         IRenderedComponent<InferenceSettingsEditor> editor = Render<InferenceSettingsEditor>(parameters => parameters
-            .Add(value => value.Session, session)
-            .Add(value => value.Host, host));
+            .Add(value => value.Settings, new FakeSettings()).Add(value => value.Manager, manager)
+            .Add(value => value.Host, new FakeHost()).Add(value => value.CommitCompleted, result => reported = result));
 
         SetupCommitResult result = await editor.InvokeAsync(() => editor.Instance.SaveAsync());
 
         Assert.Equal(SetupCommitState.Committed, result.State);
-        Assert.Equal(1, session.CommitCount);
+        Assert.Equal(SetupCommitState.Committed, reported?.State);
+        Assert.Equal(1, manager.Target.Calls);
+        Assert.False(editor.Instance.State.CanSave);
     }
 
     [Fact]
-    public void CheckConnectionUsesBoundActionAndProviderObservation()
+    public void SaveIsEnabledOnlyWhenRequiredValuesAndSignInAreSatisfied()
     {
-        var session = new FakeSession();
+        Assert.True(SaveButton(RenderEditor(new FakeSettings(), new FakeManager())).HasAttribute("disabled") is false);
+        Assert.True(SaveButton(RenderEditor(new FakeSettings { Url = string.Empty }, new FakeManager())).HasAttribute("disabled"));
+        Assert.True(SaveButton(RenderEditor(new FakeSettings { SignedIn = false }, new FakeManager())).HasAttribute("disabled"));
+    }
+
+    [Fact]
+    public void CheckConnectionRunsThroughTheHostAndManager()
+    {
+        var manager = new FakeManager();
         var host = new FakeHost();
-        IRenderedComponent<InferenceSettingsEditor> editor = Render<InferenceSettingsEditor>(parameters => parameters
-            .Add(value => value.Session, session)
-            .Add(value => value.Host, host));
+        IRenderedComponent<InferenceSettingsEditor> editor = RenderEditor(new FakeSettings(), manager, host);
 
         editor.FindAll("button").Single(button => button.TextContent.Contains("Check connection", StringComparison.Ordinal)).Click();
 
         editor.WaitForAssertion(() => Assert.Contains("Ready: Yes", editor.Markup, StringComparison.Ordinal));
         Assert.Equal(1, host.AuthorizationCount);
         Assert.Equal(1, host.ExecutionCount);
+        Assert.Equal(0, manager.Target.Calls);
     }
 
-    private sealed class FakeSession : IInferenceSetupSession
+    [Fact]
+    public void StatusChangeRefreshesTheRenderedStatus()
     {
-        public int CommitCount { get; private set; }
-        public FakeSession()
-        {
-            Snapshot = new(0,
-                new(new("example", "Example provider", InferenceImplementationKind.Connect,
-                    InferenceTask.TextGeneration), "Example description"),
-                [new("connect", "Connect", "Enter settings", [])], [new FakeAction(this)], SetupValidation.Valid,
-                new SetupStatus { Configured = SetupObservation.Known(true) }, false, false);
-        }
+        var manager = new FakeStatusManager();
+        IRenderedComponent<InferenceSettingsEditor> editor = RenderEditor(new FakeSettings(), manager);
+        Assert.Contains("Ready: Unknown", editor.Markup, StringComparison.Ordinal);
 
-        public SetupSnapshot Snapshot { get; private set; }
+        manager.RaiseStatusChanged();
 
-        public event EventHandler? Changed;
-        public void MarkReady()
-        {
-            Snapshot = Snapshot with { Status = Snapshot.Status with { Ready = SetupObservation.Known(true) } };
-            Changed?.Invoke(this, EventArgs.Empty);
-        }
-        public Task<SetupValidation> ValidateAsync(CancellationToken cancellationToken = default) =>
-            Task.FromResult(SetupValidation.Valid);
-        public Task<SetupCommitResult> CommitAsync(CancellationToken cancellationToken = default)
-        {
-            CommitCount++;
-            return Task.FromResult(new SetupCommitResult(SetupCommitState.Committed));
-        }
-        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+        editor.WaitForAssertion(() => Assert.Contains("Ready: Yes", editor.Markup, StringComparison.Ordinal));
+        Assert.Equal(1, manager.RefreshCount);
     }
 
-    private sealed class FakeAction(FakeSession session) : ISetupAction
+    [Fact]
+    public async Task DisposingTheEditorStopsListeningForStatus()
     {
-        public SetupActionDescriptor Descriptor { get; } = new("check", "Check connection",
-            SetupActionPurpose.CheckReadiness, SetupSideEffect.Network);
-        public Task<SetupActionResult> ExecuteAsync(IProgress<SetupProgress>? progress = null,
-            CancellationToken cancellationToken = default)
+        var manager = new FakeStatusManager();
+        RenderEditor(new FakeSettings(), manager);
+        Assert.Equal(1, manager.ListenerCount);
+
+        await DisposeComponentsAsync();
+
+        Assert.Equal(0, manager.ListenerCount);
+    }
+
+    private IRenderedComponent<InferenceSettingsEditor> RenderEditor(FakeSettings settings, FakeManager manager, FakeHost? host = null) =>
+        Render<InferenceSettingsEditor>(parameters => parameters
+            .Add(value => value.Settings, settings).Add(value => value.Manager, manager).Add(value => value.Host, host ?? new FakeHost()));
+
+    private static AngleSharp.Dom.IElement SaveButton(IRenderedComponent<InferenceSettingsEditor> editor) =>
+        editor.FindAll("button").Single(button => button.TextContent.Contains("Save settings", StringComparison.Ordinal));
+
+    private sealed class FakeSettings : InferenceSettings<string>
+    {
+        public FakeSettings() : base(
+            new(new("example", "Example provider", InferenceImplementationKind.Connect, InferenceTask.TextGeneration), "Example description"),
+            new(SetupChangeIntent.Create, "entry", null)) =>
+            Status = new SetupStatus { Configured = SetupObservation.Known(true) };
+
+        public string Url { get; set; } = "https://example.test";
+        public bool SignedIn { get; init; } = true;
+        protected override IReadOnlyList<SetupStep> CreateSteps() =>
+        [new("connect", "Connect", "Enter settings", [new("endpoint", "Endpoint",
+            [new SetupTextField(new("url", "URL") { IsRequired = true }, Url, string.Empty, value => Edit(() => Url = value))])])];
+        protected override IReadOnlyList<SetupActionDescriptor> CreateActions() =>
+            [new("check", "Check connection", SetupActionPurpose.CheckReadiness, SetupSideEffect.Network)];
+        protected override SetupValidation ValidateDraft() => SetupValidation.Valid;
+        protected override string CreateChanges() => Url;
+        protected override bool IsDraftDirty => false;
+        protected override bool IsSignInSatisfied => SignedIn;
+    }
+
+    private class FakeManager(FakeTarget target) : InferenceSettingsManager<FakeSettings, string>(target)
+    {
+        public FakeManager() : this(new FakeTarget()) { }
+        public FakeTarget Target { get; } = target;
+        protected override Task<SetupActionResult> RunCoreAsync(FakeSettings settings, SetupActionDescriptor action,
+            IProgress<SetupProgress>? progress, CancellationToken cancellationToken)
         {
-            session.MarkReady();
+            settings.Status = settings.Status with { Ready = SetupObservation.Known(true) };
             return Task.FromResult(SetupActionResult.Completed);
+        }
+    }
+
+    private sealed class FakeStatusManager : FakeManager, IInferenceSettingsStatusSource
+    {
+        private EventHandler? _statusChanged;
+        public int ListenerCount => _statusChanged?.GetInvocationList().Length ?? 0;
+        public int RefreshCount { get; private set; }
+        public event EventHandler? StatusChanged { add => _statusChanged += value; remove => _statusChanged -= value; }
+        public void RaiseStatusChanged() => _statusChanged?.Invoke(this, EventArgs.Empty);
+        public Task RefreshStatusAsync(InferenceSettings settings, CancellationToken cancellationToken = default)
+        {
+            RefreshCount++;
+            settings.Status = settings.Status with { Ready = SetupObservation.Known(true) };
+            return Task.CompletedTask;
+        }
+    }
+
+    private sealed class FakeTarget : ISetupCommitTarget<string>
+    {
+        public int Calls { get; private set; }
+        public Task<SetupCommitResult> CommitAsync(string changes, CancellationToken cancellationToken = default)
+        {
+            Calls++;
+            return Task.FromResult(new SetupCommitResult(SetupCommitState.Committed));
         }
     }
 
@@ -133,11 +184,11 @@ public sealed class InferenceSettingsEditorTests : BunitContext
             AuthorizationCount++;
             return ValueTask.FromResult(true);
         }
-        public Task<SetupActionResult> ExecuteAsync(IInferenceSetupSession session, ISetupAction action,
-            IProgress<SetupProgress> progress, CancellationToken cancellationToken = default)
+        public Task<SetupActionResult> ExecuteAsync(IInferenceSettingsManager manager, InferenceSettings settings,
+            SetupActionDescriptor action, IProgress<SetupProgress> progress, CancellationToken cancellationToken = default)
         {
             ExecutionCount++;
-            return action.ExecuteAsync(progress, cancellationToken);
+            return manager.RunAsync(settings, action.Id, progress, cancellationToken);
         }
         public ValueTask OpenBrowserAsync(Uri uri, CancellationToken cancellationToken = default) =>
             ValueTask.CompletedTask;

@@ -35,7 +35,7 @@ public sealed class SetupPathPickerTests : BunitContext
             _ => { calls++; return SetupEditResult.Applied; }, pathSelection: SetupPathSelectionKind.File);
         var component = Render<SetupFieldInput>(parameters => parameters.Add(item => item.Field, field).Add(item => item.Host, host));
         Task click = component.Find("button").ClickAsync(new());
-        component.Render(parameters => parameters.Add(item => item.Revision, 1));
+        component.Render(parameters => parameters.Add(item => item.EditVersion, 1));
         completion.SetResult("/obsolete");
         await click;
         Assert.Equal(0, calls);
@@ -66,7 +66,8 @@ public sealed class SetupPathPickerTests : BunitContext
         public ValueTask<string?> SelectPathAsync(SetupPathSelectionKind kind, string currentValue, CancellationToken cancellationToken = default)
         { Kind = kind; Current = currentValue; return new(Result); }
         public ValueTask<bool> AuthorizeAsync(string operation, SetupSideEffect sideEffects, CancellationToken cancellationToken = default) => ValueTask.FromResult(true);
-        public Task<SetupActionResult> ExecuteAsync(IInferenceSetupSession session, ISetupAction action, IProgress<SetupProgress> progress, CancellationToken cancellationToken = default) => action.ExecuteAsync(progress, cancellationToken);
+        public Task<SetupActionResult> ExecuteAsync(IInferenceSettingsManager manager, InferenceSettings settings, SetupActionDescriptor action,
+            IProgress<SetupProgress> progress, CancellationToken cancellationToken = default) => manager.RunAsync(settings, action.Id, progress, cancellationToken);
         public ValueTask OpenBrowserAsync(Uri uri, CancellationToken cancellationToken = default) => ValueTask.CompletedTask;
     }
 }

@@ -15,10 +15,10 @@ public sealed class SetupEditorRegressionTests : BunitContext
     [Fact]
     public async Task InvalidUrlSurvivesRefreshAndAnotherEditAndNeverCommitsOldValue()
     {
-        await using var session = new Session(new Target());
-        IRenderedComponent<InferenceSettingsEditor> editor = Editor(session);
+        var (settings, manager) = New();
+        IRenderedComponent<InferenceSettingsEditor> editor = Editor(settings, manager);
         Field(editor, "url").Find("input").Input("not a url");
-        await editor.InvokeAsync(session.RefreshStatus);
+        await editor.InvokeAsync(manager.RaiseStatusChanged);
         Field(editor, "name").Find("input").Input("changed");
         editor.WaitForAssertion(() => Assert.Equal("not a url", Field(editor, "url").Find("input").GetAttribute("value")));
         Assert.True(editor.Instance.State.HasUnsavedChanges);
@@ -26,11 +26,11 @@ public sealed class SetupEditorRegressionTests : BunitContext
         Assert.False(editor.Instance.State.CanSave);
         SetupCommitResult result = await editor.InvokeAsync(editor.Instance.SaveAsync);
         Assert.Equal(SetupCommitState.Invalid, result.State);
-        Assert.Equal(0, session.Target.Calls);
+        Assert.Equal(0, manager.Target.Calls);
         WritePreview(editor.Markup, "invalid");
         Field(editor, "url").Find("input").Input("https://changed.test/");
         Assert.Equal(SetupCommitState.Committed, (await editor.InvokeAsync(editor.Instance.SaveAsync)).State);
-        Assert.Equal(new Uri("https://changed.test/"), session.Target.Saved!.Endpoint);
+        Assert.Equal(new Uri("https://changed.test/"), manager.Target.Saved!.Endpoint);
         Assert.False(editor.Instance.State.HasUnsavedChanges);
     }
 
@@ -43,19 +43,19 @@ public sealed class SetupEditorRegressionTests : BunitContext
     [InlineData("amount", "0.12345678901234567890123456789")]
     public async Task InvalidNumericInputCannotSavePreviousValue(string field, string text)
     {
-        await using var session = new Session(new Target());
-        IRenderedComponent<InferenceSettingsEditor> editor = Editor(session);
+        var (settings, manager) = New();
+        IRenderedComponent<InferenceSettingsEditor> editor = Editor(settings, manager);
         Field(editor, field).Find("input").Input(text);
         Assert.Equal(text, Field(editor, field).Find("input").GetAttribute("value"));
         Assert.Equal(SetupCommitState.Invalid, (await editor.InvokeAsync(editor.Instance.SaveAsync)).State);
-        Assert.Equal(0, session.Target.Calls);
+        Assert.Equal(0, manager.Target.Calls);
     }
 
     [Fact]
     public async Task ErrorsArePerFieldAndNextCannotDiscardThem()
     {
-        await using var session = new Session(new Target());
-        IRenderedComponent<InferenceSettingsEditor> editor = Editor(session);
+        var (settings, manager) = New();
+        IRenderedComponent<InferenceSettingsEditor> editor = Editor(settings, manager);
         Field(editor, "url").Find("input").Input("bad");
         Field(editor, "count").Find("input").Input("-");
         Click(editor, "Next");
@@ -70,24 +70,24 @@ public sealed class SetupEditorRegressionTests : BunitContext
     [Fact]
     public async Task BackNavigationRetainsInvalidInputAndSaveReturnsToItsStep()
     {
-        await using var session = new Session(new Target());
-        IRenderedComponent<InferenceSettingsEditor> editor = Editor(session);
+        var (settings, manager) = New();
+        IRenderedComponent<InferenceSettingsEditor> editor = Editor(settings, manager);
         Click(editor, "Next");
         Field(editor, "second-url").Find("input").Input("unfinished");
         Click(editor, "Back");
         Assert.True(editor.Instance.State.HasPendingInput);
         Assert.Equal(SetupCommitState.Invalid, (await editor.InvokeAsync(editor.Instance.SaveAsync)).State);
         Assert.Equal("unfinished", Field(editor, "second-url").Find("input").GetAttribute("value"));
-        Assert.Equal(0, session.Target.Calls);
+        Assert.Equal(0, manager.Target.Calls);
     }
 
     [Fact]
     public async Task HostStateIncludesUnappliedSecretsAndRevertsWithoutRevisionHeuristics()
     {
-        await using var session = new Session(new Target());
+        var (settings, manager) = New();
         var states = new List<SetupEditorState>();
-        IRenderedComponent<InferenceSettingsEditor> editor = Editor(session, states);
-        await editor.InvokeAsync(session.RefreshStatus);
+        IRenderedComponent<InferenceSettingsEditor> editor = Editor(settings, manager, states);
+        await editor.InvokeAsync(manager.RaiseStatusChanged);
         Assert.False(editor.Instance.State.HasUnsavedChanges);
         Field(editor, "name").Find("input").Input("new");
         Assert.True(editor.Instance.State.HasUnsavedChanges);
@@ -107,8 +107,8 @@ public sealed class SetupEditorRegressionTests : BunitContext
     [Fact]
     public async Task UncertainCommitRemainsAnExplicitHostState()
     {
-        await using var session = new Session(new Target { Result = new(SetupCommitState.Uncertain) });
-        IRenderedComponent<InferenceSettingsEditor> editor = Editor(session);
+        var (settings, manager) = New(new Target { Result = new(SetupCommitState.Uncertain) });
+        IRenderedComponent<InferenceSettingsEditor> editor = Editor(settings, manager);
         Assert.Equal(SetupCommitState.Uncertain, (await editor.InvokeAsync(editor.Instance.SaveAsync)).State);
         Assert.True(editor.Instance.State.CommitOutcomeUncertain);
         Assert.True(editor.Instance.State.HasUnsavedChanges);
@@ -116,85 +116,87 @@ public sealed class SetupEditorRegressionTests : BunitContext
     }
 
     [Fact]
-    public async Task InteractionInstructionsAndFreshRecheckComeFromSnapshot()
+    public async Task InteractionInstructionsAndRecheckComeFromTheSettings()
     {
-        await using var session = new Session(new Target());
-        session.ShowPrerequisite();
-        IRenderedComponent<InferenceSettingsEditor> editor = Editor(session);
+        var (settings, manager) = New();
+        settings.ShowPrerequisite();
+        IRenderedComponent<InferenceSettingsEditor> editor = Editor(settings, manager);
         Assert.Contains("Authenticate the external CLI", editor.Markup, StringComparison.Ordinal);
-        await editor.InvokeAsync(session.RefreshStatus);
+        await editor.InvokeAsync(manager.RaiseStatusChanged);
         Click(editor, "Check again");
-        editor.WaitForAssertion(() => Assert.Null(session.Snapshot.Interaction));
-        Assert.Equal(1, session.Rechecks);
+        editor.WaitForAssertion(() => Assert.Null(settings.Interaction));
+        Assert.Equal(1, manager.Rechecks);
     }
 
     [Fact]
-    public async Task CallbackIsRetainedOnlyForItsAttemptAndDoesNotEnterSnapshotValues()
+    public async Task CallbackIsRetainedOnlyForItsAttemptAndDoesNotEnterFieldValues()
     {
-        await using var session = new Session(new Target());
-        session.StartCallback();
-        IRenderedComponent<InferenceSettingsEditor> editor = Editor(session);
-        string id = ((SetupBrowserAuthorization)session.Snapshot.Interaction!).Callback.Description.Id;
+        var (settings, manager) = New();
+        settings.StartCallback();
+        IRenderedComponent<InferenceSettingsEditor> editor = Editor(settings, manager);
+        string id = ((SetupBrowserAuthorization)settings.Interaction!).Callback.Description.Id;
         Field(editor, id).Find("input").Input("code");
-        await editor.InvokeAsync(session.RefreshStatus);
+        await editor.InvokeAsync(manager.RaiseStatusChanged);
         Assert.Equal("code", Field(editor, id).Find("input").GetAttribute("value"));
-        Assert.Empty(((SetupBrowserAuthorization)session.Snapshot.Interaction!).Callback.Value);
+        Assert.Empty(((SetupBrowserAuthorization)settings.Interaction!).Callback.Value);
         Field(editor, id).Find("input").Input("code#state");
         Click(editor, "Continue");
-        editor.WaitForAssertion(() => Assert.Equal("code#state", session.CompletedCallback));
-        await editor.InvokeAsync(session.StartCallback);
-        string next = ((SetupBrowserAuthorization)session.Snapshot.Interaction!).Callback.Description.Id;
+        editor.WaitForAssertion(() => Assert.Equal("code#state", manager.CompletedCallback));
+        settings.StartCallback();
+        editor.Render();
+        string next = ((SetupBrowserAuthorization)settings.Interaction!).Callback.Description.Id;
         Assert.NotEqual(id, next);
         Assert.Empty(Field(editor, next).Find("input").GetAttribute("value") ?? string.Empty);
     }
 
     [Fact]
-    public async Task ReplacedSessionCannotRetainOldInvalidInput()
+    public void ReplacedSettingsCannotRetainOldInvalidInput()
     {
-        await using var first = new Session(new Target());
-        await using var second = new Session(new Target());
-        IRenderedComponent<InferenceSettingsEditor> editor = Editor(first);
+        var (first, manager) = New();
+        var second = new TestSettings();
+        IRenderedComponent<InferenceSettingsEditor> editor = Editor(first, manager);
         Field(editor, "url").Find("input").Input("old invalid input");
-        editor.Render(parameters => parameters.Add(value => value.Session, second));
+        editor.Render(parameters => parameters.Add(value => value.Settings, second));
         Assert.False(editor.Instance.State.HasUnsavedChanges);
         Assert.Equal("https://original.test/", Field(editor, "url").Find("input").GetAttribute("value"));
     }
 
     [Fact]
-    public async Task DependentRevisionStartsNewChoiceRequestAndDiscardsOldCompletion()
+    public async Task DependentEditStartsNewChoiceRequestAndDiscardsOldCompletion()
     {
         var first = new TaskCompletionSource<SetupChoicePage>(TaskCreationOptions.RunContinuationsAsynchronously);
         var second = new TaskCompletionSource<SetupChoicePage>(TaskCreationOptions.RunContinuationsAsynchronously);
-        await using var session = new Session(new Target()) { ChoiceCapabilities = SetupChoiceCapabilities.Searchable };
-        session.Loader = (query, _) => query.ExpectedRevision == 0 ? first.Task : second.Task;
+        var settings = new TestSettings { ChoiceCapabilities = SetupChoiceCapabilities.Searchable };
+        var manager = new TestManager(new Target());
+        manager.Loader = (_, _) => manager.ChoiceCalls == 1 ? first.Task : second.Task;
         try
         {
-            IRenderedComponent<InferenceSettingsEditor> editor = Editor(session);
+            IRenderedComponent<InferenceSettingsEditor> editor = Editor(settings, manager);
             Field(editor, "name").Find("input").Input("new repository");
-            editor.WaitForAssertion(() => Assert.Equal(2, session.ChoiceCalls));
-            Assert.True(session.ChoiceTokens[0].IsCancellationRequested);
-            second.SetResult(new(session.Snapshot.Revision, [new("new", "New variant")]));
+            editor.WaitForAssertion(() => Assert.Equal(2, manager.ChoiceCalls));
+            Assert.True(manager.ChoiceTokens[0].IsCancellationRequested);
+            second.SetResult(new([new("new", "New variant")]));
             IRenderedComponent<SetupFieldInput> choices = Field(editor, "choice");
             choices.WaitForAssertion(() => Assert.DoesNotContain("Loading choices", choices.Markup, StringComparison.Ordinal));
             await choices.InvokeAsync(() => choices.FindComponent<Combobox>().Instance.OpenChanged.InvokeAsync(true));
             choices.WaitForAssertion(() => Assert.Contains(choices.FindComponents<ComboboxItem>(), item => item.Instance.Value == "new"));
-            first.SetResult(new(0, [], State: SetupChoiceState.Failed, Issues: [new("old", "Obsolete failure")]));
+            first.SetResult(new([], State: SetupChoiceState.Failed, Issues: [new("old", "Obsolete failure")]));
             await editor.InvokeAsync(() => Task.CompletedTask);
             choices.WaitForAssertion(() => Assert.DoesNotContain("Obsolete failure", choices.Markup, StringComparison.Ordinal));
             Assert.Contains(Field(editor, "choice").FindComponents<ComboboxItem>(), item => item.Instance.Value == "new");
         }
         finally
         {
-            first.TrySetResult(new(0, []));
-            second.TrySetResult(new(session.Snapshot.Revision, []));
+            first.TrySetResult(new([]));
+            second.TrySetResult(new([]));
         }
     }
 
     [Fact]
-    public async Task BoundedChoicesUseSelectWithoutSearchOrRefresh()
+    public void BoundedChoicesUseSelectWithoutSearchOrRefresh()
     {
-        await using var session = new Session(new Target());
-        IRenderedComponent<InferenceSettingsEditor> editor = Editor(session);
+        var (settings, manager) = New();
+        IRenderedComponent<InferenceSettingsEditor> editor = Editor(settings, manager);
         IRenderedComponent<SetupFieldInput> choice = Field(editor, "choice");
         Assert.Single(choice.FindComponents<Select>());
         Assert.Empty(choice.FindComponents<Combobox>());
@@ -206,10 +208,10 @@ public sealed class SetupEditorRegressionTests : BunitContext
     }
 
     [Fact]
-    public async Task MultiStepSessionsNameTheCurrentStepOnceInTheStepList()
+    public void MultiStepSettingsNameTheCurrentStepOnceInTheStepList()
     {
-        await using var session = new Session(new Target());
-        IRenderedComponent<InferenceSettingsEditor> editor = Editor(session);
+        var (settings, manager) = New();
+        IRenderedComponent<InferenceSettingsEditor> editor = Editor(settings, manager);
         Assert.Empty(editor.FindAll(".inference-settings-editor__step h3"));
         Assert.Equal(["First step", "Second step"], editor.FindAll(".inference-settings-editor__steps li").Select(item => item.TextContent));
         Assert.Equal("First step", editor.Find(".inference-settings-editor__steps li[aria-current=step]").TextContent);
@@ -219,37 +221,35 @@ public sealed class SetupEditorRegressionTests : BunitContext
     }
 
     [Fact]
-    public async Task DeviceCodeCanBeCopiedAndReportsWhenTheClipboardRefuses()
+    public void DeviceCodeCanBeCopiedAndReportsWhenTheClipboardRefuses()
     {
-        await using var session = new Session(new Target());
-        IRenderedComponent<InferenceSettingsEditor> editor = Editor(session);
-        session.StartDevice("ABCD-1234");
+        var (settings, manager) = New();
+        IRenderedComponent<InferenceSettingsEditor> editor = Editor(settings, manager);
+        settings.StartDevice("ABCD-1234");
+        editor.Render();
         editor.WaitForAssertion(() => Assert.Equal("ABCD-1234", editor.Find(".inference-settings-editor__user-code").TextContent));
         Click(editor, "Copy code");
         editor.WaitForAssertion(() => Assert.Contains("Code copied.", editor.Markup, StringComparison.Ordinal));
         Assert.Equal(["ABCD-1234"], JSInterop.VerifyInvoke("navigator.clipboard.writeText").Arguments);
 
         JSInterop.SetupVoid("navigator.clipboard.writeText", "WXYZ-9876").SetException(new Microsoft.JSInterop.JSException("denied"));
-        session.StartDevice("WXYZ-9876");
+        settings.StartDevice("WXYZ-9876");
+        editor.Render();
         editor.WaitForAssertion(() => Assert.DoesNotContain("Code copied.", editor.Markup, StringComparison.Ordinal));
         Click(editor, "Copy code");
         editor.WaitForAssertion(() => Assert.Contains("The code could not be copied. Select it and copy it instead.", editor.Markup, StringComparison.Ordinal));
     }
 
     [Fact]
-    public async Task ProviderSearchAppearsOnlyWhileMoreChoicesRemain()
+    public void ProviderSearchAppearsOnlyWhileMoreChoicesRemain()
     {
-        await using var complete = new Session(new Target()) { ChoiceCapabilities = SetupChoiceCapabilities.Searchable };
-        IRenderedComponent<SetupFieldInput> choice = Field(Editor(complete), "choice");
+        var searchable = new TestSettings { ChoiceCapabilities = SetupChoiceCapabilities.Searchable };
+        IRenderedComponent<SetupFieldInput> choice = Field(Editor(searchable, new TestManager(new Target())), "choice");
         choice.WaitForAssertion(() => Assert.Single(choice.FindComponents<Combobox>()));
         Assert.DoesNotContain("Search choices", choice.Markup, StringComparison.Ordinal);
 
-        await using var paged = new Session(new Target())
-        {
-            ChoiceCapabilities = SetupChoiceCapabilities.Searchable,
-            Loader = (query, _) => Task.FromResult(new SetupChoicePage(query.ExpectedRevision, [new("a", "A")], "1")),
-        };
-        IRenderedComponent<SetupFieldInput> more = Field(Editor(paged), "choice");
+        var paged = new TestManager(new Target()) { Loader = (_, _) => Task.FromResult(new SetupChoicePage([new("a", "A")], "1")) };
+        IRenderedComponent<SetupFieldInput> more = Field(Editor(new TestSettings { ChoiceCapabilities = SetupChoiceCapabilities.Searchable }, paged), "choice");
         more.WaitForAssertion(() => Assert.Contains("Search choices", more.Markup, StringComparison.Ordinal));
         Assert.Contains("Load more", more.Markup, StringComparison.Ordinal);
     }
@@ -257,13 +257,12 @@ public sealed class SetupEditorRegressionTests : BunitContext
     [Fact]
     public async Task ChoicesSharingADisplayNameShowTheirValues()
     {
-        await using var session = new Session(new Target())
+        var manager = new TestManager(new Target())
         {
-            ChoiceCapabilities = SetupChoiceCapabilities.Searchable,
-            Loader = (query, _) => Task.FromResult(new SetupChoicePage(query.ExpectedRevision,
+            Loader = (_, _) => Task.FromResult(new SetupChoicePage(
                 [new("a", "a"), new("model-v1", "Model"), new("model-v1:300k", "Model")])),
         };
-        IRenderedComponent<SetupFieldInput> choice = Field(Editor(session), "choice");
+        IRenderedComponent<SetupFieldInput> choice = Field(Editor(new TestSettings { ChoiceCapabilities = SetupChoiceCapabilities.Searchable }, manager), "choice");
         choice.WaitForAssertion(() => Assert.Single(choice.FindComponents<Combobox>()));
         await choice.InvokeAsync(() => choice.FindComponent<Combobox>().Instance.OpenChanged.InvokeAsync(true));
         choice.WaitForAssertion(() => Assert.Equal(3, choice.FindComponents<ComboboxItem>().Count));
@@ -326,8 +325,10 @@ public sealed class SetupEditorRegressionTests : BunitContext
         Assert.Null(fraction.Error);
     }
 
-    private IRenderedComponent<InferenceSettingsEditor> Editor(Session session, List<SetupEditorState>? states = null) =>
-        Render<InferenceSettingsEditor>(parameters => parameters.Add(value => value.Session, session)
+    private static (TestSettings Settings, TestManager Manager) New(Target? target = null) =>
+        (new TestSettings(), new TestManager(target ?? new Target()));
+    private IRenderedComponent<InferenceSettingsEditor> Editor(TestSettings settings, TestManager manager, List<SetupEditorState>? states = null) =>
+        Render<InferenceSettingsEditor>(parameters => parameters.Add(value => value.Settings, settings).Add(value => value.Manager, manager)
             .Add(value => value.Host, new Host()).Add(value => value.StateChanged, state => states?.Add(state)));
     private static IRenderedComponent<SetupFieldInput> Field(IRenderedComponent<InferenceSettingsEditor> editor, string id) =>
         Assert.Single(editor.FindComponents<SetupFieldInput>(), component => component.Instance.Field.Description.Id == id);
@@ -368,80 +369,100 @@ public sealed class SetupEditorRegressionTests : BunitContext
         { Calls++; Saved = changes; return Task.FromResult(Result); }
     }
 
-    private sealed class Session(Target target) : InferenceSetupSession<Changes>(
-        new(new("test", "Test", InferenceImplementationKind.Connect, InferenceTask.TextGeneration), "Test editor"), target)
+    private sealed class TestSettings() : InferenceSettings<Changes>(
+        new(new("test", "Test", InferenceImplementationKind.Connect, InferenceTask.TextGeneration), "Test editor"),
+        new(SetupChangeIntent.Create, "entry", null))
     {
         private Uri? _endpoint = new("https://original.test/");
         private Uri? _secondEndpoint = new("https://second.test/");
         private long? _count = 2;
         private decimal? _amount = 1.5m;
-        private string _name = string.Empty, _choice = "a", _callback = string.Empty;
-        private string? _callbackId, _deviceCode;
-        private bool _prerequisite;
+        private string _name = string.Empty, _choice = "a";
         private SetupSecretEditKind _secret;
+        public string Callback { get; private set; } = string.Empty;
+        public SetupChoiceCapabilities ChoiceCapabilities { get; init; } = SetupChoiceCapabilities.Bounded;
+        public void ShowPrerequisite() => Interaction = new SetupExternalPrerequisite("Authenticate the external CLI",
+            new("recheck", "Check again", SetupActionPurpose.CheckPrerequisites, SetupSideEffect.None));
+        public void StartCallback()
+        {
+            Callback = string.Empty;
+            Interaction = new SetupBrowserAuthorization(new("https://auth.test/"),
+                new(new(Guid.NewGuid().ToString("N"), "Callback"), string.Empty, string.Empty, value => Edit(() => Callback = value)),
+                new("continue", "Continue", SetupActionPurpose.ContinueAuthentication, SetupSideEffect.None),
+                new("cancel", "Cancel", SetupActionPurpose.CancelAuthentication, SetupSideEffect.None));
+        }
+        public void StartDevice(string code) => Interaction = new SetupDeviceAuthorization(new("https://device.test/"), code, null,
+            new("continue", "Continue", SetupActionPurpose.ContinueAuthentication, SetupSideEffect.Network),
+            new("cancel", "Cancel", SetupActionPurpose.CancelAuthentication, SetupSideEffect.None));
+        public void EndInteraction()
+        {
+            Callback = string.Empty;
+            Interaction = null;
+        }
+        protected override bool IsDraftDirty => _endpoint != new Uri("https://original.test/") || _secondEndpoint != new Uri("https://second.test/")
+            || _count != 2 || _amount != 1.5m || _name.Length != 0 || _choice != "a" || _secret != SetupSecretEditKind.Keep || Callback.Length != 0;
+        protected override IReadOnlyList<SetupStep> CreateSteps() =>
+        [new("first", "First step", "Edit", [new("fields", "Fields",
+        [
+            new SetupUriField(new("url", "URL"), _endpoint, null, value => Edit(() => _endpoint = value)),
+            new SetupTextField(new("name", "Name"), _name, string.Empty, value => Edit(() => _name = value)),
+            new SetupIntegerField(new("count", "Count"), _count, 2, value => Edit(() => _count = value)),
+            new SetupDecimalField(new("amount", "Amount"), _amount, 1.5m, value => Edit(() => _amount = value), 0, 10, 0.1m),
+            new SetupSecretField(new("secret", "Secret"), true, _secret, value => Edit(() => _secret = value.Kind)),
+            new SetupChoiceField(new("choice", "Choice"), _choice, "a", value => Edit(() => _choice = value), false,
+                capabilities: ChoiceCapabilities)
+        ])]), new("second", "Second step", "Edit", [new("second-fields", "Fields",
+            [new SetupUriField(new("second-url", "Second URL"), _secondEndpoint, null, value => Edit(() => _secondEndpoint = value))])])];
+        protected override IReadOnlyList<SetupActionDescriptor> CreateActions() => [];
+        protected override SetupValidation ValidateDraft() => SetupValidation.Valid;
+        protected override Changes CreateChanges() => new(_endpoint, _count, _amount);
+    }
+
+    private sealed class TestManager(Target target) : InferenceSettingsManager<TestSettings, Changes>(target), IInferenceSettingsStatusSource
+    {
         public Target Target { get; } = target;
         public int Rechecks { get; private set; }
         public string? CompletedCallback { get; private set; }
         public int ChoiceCalls { get; private set; }
         public List<CancellationToken> ChoiceTokens { get; } = [];
-        public SetupChoiceCapabilities ChoiceCapabilities { get; init; } = SetupChoiceCapabilities.Bounded;
         public Func<SetupChoiceQuery, CancellationToken, Task<SetupChoicePage>> Loader { get; set; } =
-            (query, _) => Task.FromResult(new SetupChoicePage(query.ExpectedRevision, [new("a", "A"), new("b", "B")]));
-        public void RefreshStatus() => Publish(() => Status = Status with { Verified = SetupObservation.Known(true) });
-        public void ShowPrerequisite() => Publish(() => _prerequisite = true);
-        public void StartCallback() => Publish(() => { _callbackId = Guid.NewGuid().ToString("N"); _callback = string.Empty; });
-        public void StartDevice(string code) => Publish(() => _deviceCode = code);
-        protected override bool IsDraftDirty => _endpoint != new Uri("https://original.test/") || _secondEndpoint != new Uri("https://second.test/")
-            || _count != 2 || _amount != 1.5m || _name.Length != 0 || _choice != "a" || _secret != SetupSecretEditKind.Keep || _callback.Length != 0;
-        protected override IReadOnlyList<SetupStep> CreateSteps(long revision) =>
-        [new("first", "First step", "Edit", [new("fields", "Fields",
-        [
-            new SetupUriField(new("url", "URL"), _endpoint, null, value => Edit(revision, () => _endpoint = value)),
-            new SetupTextField(new("name", "Name"), _name, string.Empty, value => Edit(revision, () => _name = value)),
-            new SetupIntegerField(new("count", "Count"), _count, 2, value => Edit(revision, () => _count = value)),
-            new SetupDecimalField(new("amount", "Amount"), _amount, 1.5m, value => Edit(revision, () => _amount = value), 0, 10, 0.1m),
-            new SetupSecretField(new("secret", "Secret"), true, _secret, value => Edit(revision, () => _secret = value.Kind)),
-            new SetupChoiceField(new("choice", "Choice"), _choice, "a", value => Edit(revision, () => _choice = value), false,
-                (query, token) => QueryChoicesAsync(query, ct => { ChoiceCalls++; ChoiceTokens.Add(ct); return Loader(query, ct); }, token),
-                revision, capabilities: ChoiceCapabilities)
-        ])]), new("second", "Second step", "Edit", [new("second-fields", "Fields",
-            [new SetupUriField(new("second-url", "Second URL"), _secondEndpoint, null, value => Edit(revision, () => _secondEndpoint = value))])])];
-        protected override IReadOnlyList<ISetupAction> CreateActions(long revision) => [];
-        protected override SetupInteraction? GetInteraction()
+            (_, _) => Task.FromResult(new SetupChoicePage([new("a", "A"), new("b", "B")]));
+        public event EventHandler? StatusChanged;
+        public void RaiseStatusChanged() => StatusChanged?.Invoke(this, EventArgs.Empty);
+        public Task RefreshStatusAsync(InferenceSettings settings, CancellationToken cancellationToken = default)
         {
-            long revision = Revision;
-            if (_prerequisite)
-            {
-                return new SetupExternalPrerequisite("Authenticate the external CLI", BindAction(revision,
-                new("recheck", "Check again", SetupActionPurpose.CheckPrerequisites, SetupSideEffect.None), (_, _) =>
-                { Publish(() => { _prerequisite = false; Rechecks++; }); return Task.FromResult(SetupActionResult.Completed); }));
-            }
-            if (_deviceCode is not null)
-            {
-                return new SetupDeviceAuthorization(new("https://device.test/"), _deviceCode, null,
-                    BindAction(revision, new("continue", "Continue", SetupActionPurpose.ContinueAuthentication, SetupSideEffect.Network),
-                        (_, _) => Task.FromResult(SetupActionResult.Completed)),
-                    BindAction(revision, new("cancel", "Cancel", SetupActionPurpose.CancelAuthentication, SetupSideEffect.None),
-                        (_, _) => { Publish(() => _deviceCode = null); return Task.FromResult(SetupActionResult.Completed); }));
-            }
-            if (_callbackId is null) { return null; }
-            return new SetupBrowserAuthorization(new("https://auth.test/"), new(new(_callbackId, "Callback"), string.Empty, string.Empty,
-                value => Edit(revision, () => _callback = value)), BindAction(revision,
-                new("continue", "Continue", SetupActionPurpose.ContinueAuthentication, SetupSideEffect.None), (_, _) =>
-                { Publish(() => { CompletedCallback = _callback; _callback = string.Empty; _callbackId = null; }); return Task.FromResult(SetupActionResult.Completed); }),
-                BindAction(revision, new("cancel", "Cancel", SetupActionPurpose.CancelAuthentication, SetupSideEffect.None), (_, _) =>
-                { Publish(() => { _callback = string.Empty; _callbackId = null; }); return Task.FromResult(SetupActionResult.Completed); }));
+            settings.Status = settings.Status with { Verified = SetupObservation.Known(true) };
+            return Task.CompletedTask;
         }
-        protected override SetupValidation ValidateDraft() => SetupValidation.Valid;
-        protected override Changes CreateChanges() => new(_endpoint, _count, _amount);
-        protected override void ClearSensitiveState() => _callback = string.Empty;
+
+        protected override Task<SetupActionResult> RunCoreAsync(TestSettings settings, SetupActionDescriptor action,
+            IProgress<SetupProgress>? progress, CancellationToken cancellationToken)
+        {
+            switch (action.Id)
+            {
+                case "recheck": Rechecks++; break;
+                case "continue" when settings.Interaction is SetupBrowserAuthorization: CompletedCallback = settings.Callback; break;
+                case "continue": return Task.FromResult(SetupActionResult.Completed);
+            }
+            settings.EndInteraction();
+            return Task.FromResult(SetupActionResult.Completed);
+        }
+
+        protected override Task<SetupChoicePage> QueryProviderChoicesAsync(TestSettings settings, string fieldId,
+            SetupChoiceQuery query, CancellationToken cancellationToken)
+        {
+            ChoiceCalls++;
+            ChoiceTokens.Add(cancellationToken);
+            return Loader(query, cancellationToken);
+        }
     }
 
     private sealed class Host : IInferenceSettingsInteractionHost
     {
         public ValueTask<bool> AuthorizeAsync(string operation, SetupSideEffect sideEffects, CancellationToken cancellationToken = default) => ValueTask.FromResult(true);
-        public Task<SetupActionResult> ExecuteAsync(IInferenceSetupSession session, ISetupAction action, IProgress<SetupProgress> progress,
-            CancellationToken cancellationToken = default) => action.ExecuteAsync(progress, cancellationToken);
+        public Task<SetupActionResult> ExecuteAsync(IInferenceSettingsManager manager, InferenceSettings settings, SetupActionDescriptor action,
+            IProgress<SetupProgress> progress, CancellationToken cancellationToken = default) =>
+            manager.RunAsync(settings, action.Id, progress, cancellationToken);
         public ValueTask OpenBrowserAsync(Uri uri, CancellationToken cancellationToken = default) => ValueTask.CompletedTask;
     }
 }
