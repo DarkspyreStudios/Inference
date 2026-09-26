@@ -63,8 +63,10 @@ opens, acts on and saves it. Only Save returns settings to the app.
    target once, and closes the dialog. Closing the dialog without Save discards the object, and the
    app receives nothing.
 
-There is no setup session and no change event. Each button's handler receives its call's result
-and updates the page. Sign-in reports its progress through the call's progress callback.
+There is no setup session, and the settings flow has no change event. Each button's handler
+receives its call's result and updates the page. Sign-in reports its progress through the call's
+progress callback. The Tensor settings page also listens to `EngineStatusChanged` for the outcome
+of Load, Unload and Stop (section 5.3).
 
 The settings object carries no revision number. Only the editor changes it, so no edit, action or
 query can be stale. A model query result that arrives after the user changed a field it depends on
@@ -260,6 +262,10 @@ a listener's exception.
 - `StartAsync`, `LoadAsync`, `UnloadAsync` and `StopAsync` validate their input, return once the
   engine accepts the request, and report the outcome through `EngineStatusChanged`. A model that
   is not installed or not supported fails on the call.
+- The cancellation token passed to `UnloadAsync` or `StopAsync` stays live until the teardown
+  finishes. An uncancelled token gives a graceful teardown that waits for active requests.
+  Cancelling it, at the call or later, makes the teardown urgent: active requests are cancelled,
+  and native work still finishes before model memory is released.
 - `GetObservationAsync` returns the instance's current model, backend and state. It replaces the
   synchronous `Observation` property.
 - The instance reports Unloaded or Stopped only after native work has released model memory.
@@ -269,7 +275,8 @@ when the settings dialog closes without Save. Load, Unload and Stop act on the h
 instance in real time. The inspect, check and verify buttons read files and headers only.
 
 **Qwen streams.** Disposing a Qwen stream before it completes aborts its engine request, the same
-as cancellation.
+as cancellation. A Qwen model runs one request at a time: a second request waits for the model's
+execution gate. The one-turn refusal in section 4 applies to agent sessions only.
 
 **Concurrency limits.** GGML runs one compute step at a time under the model's GPU compute lock. A
 Supra model uses one CUDA stream. Concurrent work comes from file reading, tokenization and CPU
@@ -301,5 +308,6 @@ public contracts. No parallel legacy signature is exposed.
   dependency-vulnerability checks. No paid provider calls or downloaded models as gates.
 
 Common, Connect, Tensor and UI.Settings share the version in Directory.Build.props and exact
-Common package dependency. These boundaries do not introduce application-owned persistence,
+Common package dependency. Tensor builds against `Darkspyre.TensorSharp` 2.8.6.5, which has no
+persistence-store loading. These boundaries do not introduce application-owned persistence,
 provider selection or lifecycle scheduling into the libraries.
