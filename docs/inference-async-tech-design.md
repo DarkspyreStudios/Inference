@@ -98,6 +98,10 @@ Callers dispose abandoned enumerators. Native resources remain owned until execu
 the enumerator releases them. No Task wrapper, eager generation or full-result buffering is needed.
 Framework MoveNextAsync and DisposeAsync retain their standard ValueTask signatures.
 
+Each agent session's `ObserveAsync` feed never slows the provider. Events wait in that session's
+queue until its reader takes them. A session's feed allows one reader at a time and ends when that
+session is disposed. The host is that reader and distributes the events to its own consumers.
+
 LlmAgentToolHandler returns Task<LlmToolOutput>. TensorSourceAccess returns
 Task<TensorSourceCredential?>. Hosts return completed Tasks for immediate results or await real work.
 Framework ValueTask disposal is unchanged. Source credentials retain exact-origin/redirect restrictions;
