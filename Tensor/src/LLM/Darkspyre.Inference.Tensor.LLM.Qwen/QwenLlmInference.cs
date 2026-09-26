@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Text;
+using System.Text.Json;
 using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Common.LLM;
 using Darkspyre.Inference.Tensor.Common;
@@ -14,9 +15,9 @@ namespace Darkspyre.Inference.Tensor.LLM.Qwen;
 
 public sealed class QwenLlmInference : ITensorLlmInference
 {
-    /// <summary>Qwen runs with thinking disabled, so it accepts only <see cref="LlmReasoningLevel.None"/>.</summary>
+    /// <summary>Qwen's thinking is on or off: <see cref="LlmReasoningLevel.None"/> turns it off, <see cref="LlmReasoningLevel.High"/> on.</summary>
     private static readonly System.Collections.Frozen.FrozenSet<LlmReasoningLevel> ReasoningLevels =
-        System.Collections.Frozen.FrozenSet.ToFrozenSet([LlmReasoningLevel.None]);
+        System.Collections.Frozen.FrozenSet.ToFrozenSet([LlmReasoningLevel.None, LlmReasoningLevel.High]);
 
     private readonly ITensorModelPackManager _packs;
     private TensorModelPackDefinition? _definition;
@@ -67,7 +68,7 @@ public sealed class QwenLlmInference : ITensorLlmInference
             SupportsJsonObject = true,
             ReasoningLevels = ReasoningLevels,
             SupportsTemperature = true,
-            SupportsToolUse = false,
+            SupportsToolUse = true,
             SupportsPromptImages = false,
             SupportsPromptDocuments = false
         };
@@ -112,6 +113,8 @@ public sealed class QwenLlmInference : ITensorLlmInference
             executionToken).ConfigureAwait(false);
         using var session = new ChatSession();
         List<ChatMessage> messages = BuildMessages(request);
+        List<ToolFunction>? tools = BuildTools(request.Tools);
+        bool thinking = request.ReasoningLevel == LlmReasoningLevel.High;
         StructuredOutputFormat? format = CreateStructuredFormat(request.StructuredOutput);
         if (format is not null)
         {
@@ -126,8 +129,12 @@ public sealed class QwenLlmInference : ITensorLlmInference
             messages = StructuredOutputPrompt.Apply(messages, format);
         }
 
-        SamplingConfig sampling = await CreateSamplingAsync(request, format, executionToken).ConfigureAwait(false);
+        SamplingConfig sampling = await CreateSamplingAsync(request, format, thinking, executionToken).ConfigureAwait(false);
+        // The architecture's protocol parser separates the answer from thinking and tool calls.
+        IOutputParser parser = OutputParserFactory.Create(_runtime.Architecture);
+        parser.Init(thinking, tools);
         var output = new StringBuilder();
+        var toolCalls = new List<LlmToolCall>();
         int promptTokens = 0;
         int outputTokens = 0;
         string? finishReason = null;
@@ -139,6 +146,8 @@ public sealed class QwenLlmInference : ITensorLlmInference
             messages,
             request.MaxOutputTokens ?? 1_024,
             sampling,
+            tools,
+            thinking,
             abandonment.Token).GetAsyncEnumerator(abandonment.Token);
         bool completed = false;
         try
@@ -150,10 +159,17 @@ public sealed class QwenLlmInference : ITensorLlmInference
                 ChatStreamUpdate update = updates.Current;
                 if (!update.Done)
                 {
-                    if (!string.IsNullOrEmpty(update.Piece))
+                    if (update.RawGenerationSuffix is not null)
                     {
-                        output.Append(update.Piece);
-                        yield return new LlmTextDeltaEvent(update.Piece);
+                        parser.SetGenerationPromptSuffix(update.RawGenerationSuffix);
+                    }
+
+                    ParsedOutput? part = update.IsParsed
+                        ? new ParsedOutput { Content = update.Piece ?? "", Thinking = update.ThinkingPiece ?? "", ToolCalls = update.ParsedToolCalls?.ToList() }
+                        : string.IsNullOrEmpty(update.Piece) ? null : parser.Add(update.Piece, false);
+                    foreach (LlmStreamEvent streamEvent in Events(part, output, toolCalls))
+                    {
+                        yield return streamEvent;
                     }
                 }
                 else
@@ -164,6 +180,11 @@ public sealed class QwenLlmInference : ITensorLlmInference
                 }
 
                 more = await updates.MoveNextAsync().ConfigureAwait(false);
+            }
+
+            foreach (LlmStreamEvent streamEvent in Events(parser.Add(string.Empty, true), output, toolCalls))
+            {
+                yield return streamEvent;
             }
 
             completed = true;
@@ -209,6 +230,7 @@ public sealed class QwenLlmInference : ITensorLlmInference
                 ? "max_output_tokens"
                 : null,
             Usage = new LlmUsage(promptTokens, outputTokens, promptTokens + outputTokens),
+            ToolCalls = toolCalls,
             StructuredOutput = structuredValidation,
             Provenance = new InferenceProvenance
             {
@@ -397,6 +419,7 @@ public sealed class QwenLlmInference : ITensorLlmInference
     private async Task<SamplingConfig> CreateSamplingAsync(
         LlmInferenceRequest request,
         StructuredOutputFormat? format,
+        bool thinking,
         CancellationToken cancellationToken)
     {
         SamplingConfig sampling = request.Temperature is null
@@ -410,7 +433,7 @@ public sealed class QwenLlmInference : ITensorLlmInference
         try
         {
             // Compiling the schema into a grammar is CPU work in TensorSharp.
-            await Task.Run(() => _runtime.ApplyGrammar(sampling, format), cancellationToken).ConfigureAwait(false);
+            await Task.Run(() => _runtime.ApplyGrammar(sampling, format, thinking), cancellationToken).ConfigureAwait(false);
             return sampling;
         }
         catch (Exception exception) when (
@@ -440,12 +463,91 @@ public sealed class QwenLlmInference : ITensorLlmInference
             messages.Add(new ChatMessage { Role = "system", Content = request.Instructions });
         }
 
-        messages.AddRange(request.Messages.Select(static message => new ChatMessage
+        foreach (LlmMessage message in request.Messages)
         {
-            Role = message.Role,
-            Content = message.Content
-        }));
+            if (message.ToolResults.Count == 0 || !string.IsNullOrEmpty(message.Content))
+            {
+                messages.Add(new ChatMessage
+                {
+                    Role = message.Role,
+                    Content = message.Content,
+                    ToolCalls = message.ToolCalls.Count == 0 ? null : message.ToolCalls.Select((call, index) => new ToolCall
+                    {
+                        Id = call.Id,
+                        Name = call.Name,
+                        Arguments = JsonSerializer.Deserialize<Dictionary<string, object?>>(call.ArgumentsJson) ?? [],
+                        Index = index
+                    }).ToList()
+                });
+            }
+
+            // The chat template renders each tool result as its own tool-role message.
+            messages.AddRange(message.ToolResults.Select(static result => new ChatMessage
+            {
+                Role = "tool",
+                ToolCallId = result.ToolCallId,
+                Content = ToolResultText(result.Output)
+            }));
+        }
+
         return messages;
+    }
+
+    private static string ToolResultText(LlmToolOutput output)
+    {
+        string text = string.Join("\n", output.Parts.Select(static part => part switch
+        {
+            LlmToolOutputText value => value.Text,
+            LlmToolOutputResource { Data: null } resource => resource.Text ?? resource.Uri,
+            _ => throw new InferenceException(InferenceFailureCode.UnsupportedFeature, "Qwen tool results accept text parts only.")
+        }));
+        return output.IsError ? "Error: " + text : text;
+    }
+
+    private static List<ToolFunction>? BuildTools(IReadOnlyList<LlmToolDefinition> tools)
+    {
+        if (tools.Count == 0)
+        {
+            return null;
+        }
+
+        // TensorSharp builds its tool functions from the same JSON-schema shape an OpenAI client sends.
+        string json = JsonSerializer.Serialize(tools.Select(static tool => new Dictionary<string, object?>
+        {
+            ["name"] = tool.Name,
+            ["description"] = tool.Description ?? string.Empty,
+            ["parameters"] = tool.InputSchema
+        }));
+        return ToolFunction.ParseList(json);
+    }
+
+    /// <summary>Maps one parsed piece to Common stream events, recording the answer text and completed tool calls.</summary>
+    private static IEnumerable<LlmStreamEvent> Events(ParsedOutput? part, StringBuilder output, List<LlmToolCall> toolCalls)
+    {
+        if (part is null)
+        {
+            yield break;
+        }
+
+        if (!string.IsNullOrEmpty(part.Thinking))
+        {
+            yield return new LlmReasoningDeltaEvent(part.Thinking, IsSummary: false);
+        }
+
+        if (!string.IsNullOrEmpty(part.Content))
+        {
+            output.Append(part.Content);
+            yield return new LlmTextDeltaEvent(part.Content);
+        }
+
+        foreach (ToolCall call in part.ToolCalls ?? [])
+        {
+            var completed = new LlmToolCall(call.Id ?? $"call_{Guid.NewGuid():N}", call.Name, JsonSerializer.Serialize(call.Arguments));
+            yield return new LlmToolCallStartedEvent(completed.Id, completed.Name, toolCalls.Count);
+            yield return new LlmToolCallArgumentsDeltaEvent(completed.Id, completed.ArgumentsJson);
+            yield return new LlmToolCallCompletedEvent(completed);
+            toolCalls.Add(completed);
+        }
     }
 
     private static void ValidateRequest(LlmInferenceRequest request)
@@ -465,26 +567,22 @@ public sealed class QwenLlmInference : ITensorLlmInference
             throw new InferenceException(InferenceFailureCode.InvalidRequest, "Temperature must be between 0 and 2.");
         }
 
-        if (request.Tools.Count > 0 || request.ToolChoice is not null || request.AllowParallelToolCalls is not null)
+        // The chat template has no control for a forced or serial tool choice.
+        if (request.ToolChoice is not null || request.AllowParallelToolCalls is not null)
         {
-            throw new InferenceException(InferenceFailureCode.UnsupportedFeature, "The initial Qwen runtime does not support tools.");
+            throw new InferenceException(InferenceFailureCode.UnsupportedFeature, "Qwen does not support a tool choice or parallel-call control.");
         }
 
-        if (request.Messages.Any(static message => message.Attachments.Count > 0
-                                                  || message.ToolCalls.Count > 0
-                                                  || message.ToolResults.Count > 0))
+        if (request.Messages.Any(static message => message.Attachments.Count > 0))
         {
-            throw new InferenceException(
-                InferenceFailureCode.UnsupportedFeature,
-                "The initial Qwen runtime supports text messages only.");
+            throw new InferenceException(InferenceFailureCode.UnsupportedFeature, "Qwen accepts text messages only.");
         }
 
         if (request.ReasoningLevel is { } level && !ReasoningLevels.Contains(level))
         {
-            // The engine always runs Qwen with thinking disabled, so only None describes a request.
             throw new InferenceException(
                 InferenceFailureCode.InvalidRequest,
-                $"Qwen accepts only reasoning level '{LlmReasoningLevel.None}'; '{level}' was requested.");
+                $"Qwen accepts reasoning level '{LlmReasoningLevel.None}' or '{LlmReasoningLevel.High}'; '{level}' was requested.");
         }
     }
 

@@ -10,11 +10,13 @@ internal interface IQwenModelRuntime : IDisposable
 {
     int? ContextLength { get; }
     string? LoadedBackend { get; }
+    /// <summary>The loaded checkpoint's GGUF architecture, which selects its chat protocol.</summary>
+    string? Architecture { get; }
     Task LoadAsync(TensorModelPackDefinition definition, TensorModelPackLease lease, string backend, CancellationToken cancellationToken);
     void Unload();
-    void ApplyGrammar(SamplingConfig sampling, StructuredOutputFormat format);
+    void ApplyGrammar(SamplingConfig sampling, StructuredOutputFormat format, bool enableThinking);
     IAsyncEnumerable<ChatStreamUpdate> StreamAsync(ChatSession session, List<ChatMessage> messages, int maxTokens,
-        SamplingConfig sampling, CancellationToken cancellationToken);
+        SamplingConfig sampling, List<ToolFunction>? tools, bool enableThinking, CancellationToken cancellationToken);
 }
 
 internal sealed class QwenModelRuntime : IQwenModelRuntime
@@ -22,6 +24,7 @@ internal sealed class QwenModelRuntime : IQwenModelRuntime
     private readonly ModelService _service = new(NullLogger<ModelService>.Instance);
     public int? ContextLength => _service.ContextTokens > 0 ? _service.ContextTokens : null;
     public string? LoadedBackend => _service.LoadedBackend;
+    public string? Architecture => _service.Architecture;
 
     /// <summary>
     /// Validates and loads the pack's GGUF on a background thread. TensorSharp reads the file and
@@ -41,14 +44,18 @@ internal sealed class QwenModelRuntime : IQwenModelRuntime
             _service.LoadModel(modelPath, null!, backend);
         }, cancellationToken);
 
-    public void ApplyGrammar(SamplingConfig sampling, StructuredOutputFormat format)
+    public void ApplyGrammar(SamplingConfig sampling, StructuredOutputFormat format, bool enableThinking)
     {
         var cache = GrammarLibrary.ForJsonSchema(format.SchemaJson, _service.Model.Tokenizer);
-        sampling.Grammar = GrammarLibrary.NewConstraint(cache, _service.Model.Tokenizer);
+        GrammarConstraint constraint = GrammarLibrary.NewConstraint(cache, _service.Model.Tokenizer);
+        // A model that thinks first writes its thinking block before the answer the schema constrains.
+        if (OutputParserFactory.GrammarActivationTrigger(_service.Architecture, enableThinking) is { } trigger)
+        { constraint.ActivateAfter(trigger, skipLeadingWhitespace: true); }
+        sampling.Grammar = constraint;
     }
     public IAsyncEnumerable<ChatStreamUpdate> StreamAsync(ChatSession session, List<ChatMessage> messages, int maxTokens,
-        SamplingConfig sampling, CancellationToken cancellationToken) =>
-        _service.ChatStreamWithMetricsAsync(session, messages, maxTokens, cancellationToken, sampling, tools: null, enableThinking: false);
+        SamplingConfig sampling, List<ToolFunction>? tools, bool enableThinking, CancellationToken cancellationToken) =>
+        _service.ChatStreamWithMetricsAsync(session, messages, maxTokens, cancellationToken, sampling, tools, enableThinking);
     public void Unload() => _service.UnloadModel();
     public void Dispose() => _service.Dispose();
 }

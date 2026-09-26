@@ -71,7 +71,7 @@ control for either.
 ### Thinking
 
 `ReasoningLevels` is `{ None, High }`. `None` passes `enableThinking: false`; `High` passes
-`enableThinking: true`. Any other level is refused as an unsupported feature.
+`enableThinking: true`. Any other level fails as an invalid request.
 
 ### Context
 

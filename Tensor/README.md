@@ -1,6 +1,6 @@
 # Darkspyre.Inference.Tensor
 
-Version **11.10.1-rc.1** adopts the shared typed reasoning-level contract; Qwen supports only `None`.
+Version **11.10.1-rc.1** adopts the shared typed reasoning-level contract; Qwen supports `None` and `High`.
 It includes Laya's CPU/GPU-only Core ML update and retains the ONNX and user-selected
 model-location/import contracts introduced in 11.4.0-rc.1.
 
@@ -205,6 +205,15 @@ count/names/numbering and duplicate tensors are checked before native allocation
 **Capability addition (11.10.1-rc.1):** Qwen's Common `LlmCapabilities.OutputLimitEnforcement` is
 `EngineEnforced`, describing its existing `MaxOutputTokens` runtime limit. This is separate from
 nullable discovered model limits and does not add a Tensor accounting/compaction service.
+
+Qwen follows the chat protocol TensorSharp registers for the loaded architecture. That protocol's
+output parser separates the answer, the thinking and the tool calls, which stream as
+`LlmTextDeltaEvent`, `LlmReasoningDeltaEvent` and the tool-call started, arguments and completed
+events. `SupportsToolUse` is true: request tools pass to TensorSharp, and history messages carry
+their tool calls and text tool results. `ToolChoice` and `AllowParallelToolCalls` fail as unsupported
+features, and a binary tool-result part fails as well. `ReasoningLevels` is `None` (thinking off) and
+`High` (thinking on). With structured output and thinking on, the schema's grammar starts after the
+thinking block. Image input is off.
 
 Supra uses `TensorImageModels.SupraRuntimeArchitecture` and requires all four roles: `supra-model`,
 `text-model`, `text-tokenizer`, `vae-model`. Its resolver and loader share the required DiT, text

@@ -1,6 +1,7 @@
 using System.Net;
 using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
+using System.Text.Json;
 using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Common.LLM;
 using Darkspyre.Inference.Common.Setup;
@@ -137,6 +138,96 @@ public sealed class QwenPackSelectionTests : IDisposable
         Assert.False(runtime.LastStreamToken.IsCancellationRequested);
     }
 
+    [Fact]
+    public async Task ThinkingStreamsAsReasoningApartFromTheAnswer()
+    {
+        var runtime = new Runtime { Architecture = "qwen35", Pieces = ["Checking the question.", "</think>\n\n", "Hi there"] };
+        (QwenLlmInference engine, TensorModelPackManager packs, string model) = await LoadedAsync(runtime, "host/thinking");
+        await using (engine)
+        using (packs)
+        {
+            List<LlmStreamEvent> events = await Collect(engine, Request(model) with { ReasoningLevel = LlmReasoningLevel.High });
+            Assert.True(runtime.LastThinking);
+            Assert.Contains("Checking the question.", string.Concat(events.OfType<LlmReasoningDeltaEvent>().Select(item => item.Delta)), StringComparison.Ordinal);
+            Assert.Equal("Hi there", string.Concat(events.OfType<LlmTextDeltaEvent>().Select(item => item.Delta)).Trim());
+            Assert.Equal("Hi there", Assert.IsType<LlmCompletionEvent>(events[^1]).Result.Text.Trim());
+        }
+    }
+
+    [Fact]
+    public async Task ToolCallsStreamAsCommonEventsAndTheirResultsReturnAsToolMessages()
+    {
+        var runtime = new Runtime
+        {
+            Architecture = "qwen35",
+            Pieces = ["<tool_call>\n{\"name\": \"read\", \"arguments\": {\"path\": \"a.txt\"}}\n</tool_call>"]
+        };
+        (QwenLlmInference engine, TensorModelPackManager packs, string model) = await LoadedAsync(runtime, "host/tools");
+        await using (engine)
+        using (packs)
+        {
+            using JsonDocument schema = JsonDocument.Parse("""{"type":"object","properties":{"path":{"type":"string"}},"required":["path"]}""");
+            LlmToolDefinition read = new() { Name = "read", Description = "Reads a file.", InputSchema = schema.RootElement.Clone() };
+            List<LlmStreamEvent> events = await Collect(engine, Request(model) with { Tools = [read] });
+
+            Assert.Equal("read", Assert.Single(runtime.LastTools!).Name);
+            LlmToolCallStartedEvent started = Assert.Single(events.OfType<LlmToolCallStartedEvent>());
+            Assert.Equal("read", started.Name);
+            LlmToolCall call = Assert.Single(events.OfType<LlmToolCallCompletedEvent>()).ToolCall;
+            Assert.Equal(started.ToolCallId, call.Id);
+            Assert.Equal("a.txt", JsonElement.Parse(call.ArgumentsJson).GetProperty("path").GetString());
+            Assert.Equal(call, Assert.Single(Assert.IsType<LlmCompletionEvent>(events[^1]).Result.ToolCalls));
+
+            await Collect(engine, Request(model) with
+            {
+                Tools = [read],
+                Messages =
+                [
+                    new("user", "Read a.txt"),
+                    new("assistant", "") { ToolCalls = [call] },
+                    new("user", "") { ToolResults = [new(call.Id, LlmToolOutput.FromText("contents"))] }
+                ]
+            });
+            ChatMessage assistant = runtime.LastMessages.Single(message => message.Role == "assistant");
+            Assert.Equal("read", Assert.Single(assistant.ToolCalls!).Name);
+            ChatMessage result = runtime.LastMessages.Single(message => message.Role == "tool");
+            Assert.Equal(call.Id, result.ToolCallId);
+            Assert.Equal("contents", result.Content);
+            Assert.DoesNotContain(runtime.LastMessages, message => message.Role == "user" && message.Content == "");
+        }
+    }
+
+    [Fact]
+    public async Task ReasoningLevelsAreNoneAndHighAndToolControlsAreRefused()
+    {
+        var runtime = new Runtime();
+        (QwenLlmInference engine, TensorModelPackManager packs, string model) = await LoadedAsync(runtime, "host/levels");
+        await using (engine)
+        using (packs)
+        {
+            LlmCapabilities capabilities = await engine.GetCapabilitiesAsync(model);
+            Assert.Equal(new HashSet<LlmReasoningLevel> { LlmReasoningLevel.None, LlmReasoningLevel.High }, capabilities.ReasoningLevels.ToHashSet());
+            Assert.True(capabilities.SupportsToolUse);
+            InferenceException level = await Assert.ThrowsAsync<InferenceException>(() =>
+                Collect(engine, Request(model) with { ReasoningLevel = LlmReasoningLevel.Medium }));
+            Assert.Equal(InferenceFailureCode.InvalidRequest, level.Code);
+            InferenceException choice = await Assert.ThrowsAsync<InferenceException>(() =>
+                Collect(engine, Request(model) with { AllowParallelToolCalls = false }));
+            Assert.Equal(InferenceFailureCode.UnsupportedFeature, choice.Code);
+        }
+    }
+
+    private async Task<(QwenLlmInference Engine, TensorModelPackManager Packs, string Model)> LoadedAsync(Runtime runtime, string id)
+    {
+        TensorModelPackDefinition pack = Pack(id);
+        var http = new HttpClient(new Handler());
+        TensorModelPackManager packs = Manager(http, pack);
+        await packs.InstallAsync(pack.Key);
+        var engine = new QwenLlmInference(packs, runtime, TensorBackendKind.Cpu);
+        await engine.LoadAndWaitAsync(pack.Key);
+        return (engine, packs, pack.Key.ModelId);
+    }
+
     private TensorModelPackManager Manager(HttpClient http, params TensorModelPackDefinition[] definitions) => new(new(definitions), _root, http);
     private static TensorModelPackDefinition Pack(string id) => TensorLlmModels.Qwen3FourBillionQ4Km with
     {
@@ -145,15 +236,21 @@ public sealed class QwenPackSelectionTests : IDisposable
             Sha256 = Convert.ToHexStringLower(SHA256.HashData(Weights)), Sources = [new("https://weights.example.test/model.gguf")] }]
     };
     private static LlmInferenceRequest Request(string id) => new() { ModelId = id, Messages = [new("user", "hello")] };
-    private static async Task<List<LlmStreamEvent>> Collect(QwenLlmInference engine, string id)
+    private static Task<List<LlmStreamEvent>> Collect(QwenLlmInference engine, string id) => Collect(engine, Request(id));
+    private static async Task<List<LlmStreamEvent>> Collect(QwenLlmInference engine, LlmInferenceRequest request)
     {
         var events = new List<LlmStreamEvent>();
-        await foreach (LlmStreamEvent item in engine.StreamAsync(Request(id))) { events.Add(item); }
+        await foreach (LlmStreamEvent item in engine.StreamAsync(request)) { events.Add(item); }
         return events;
     }
     private sealed class Runtime : IQwenModelRuntime
     {
         public List<TensorModelKey> Keys { get; } = [];
+        public string? Architecture { get; init; } = "qwen3";
+        public IReadOnlyList<string> Pieces { get; init; } = ["hello"];
+        public List<ToolFunction>? LastTools { get; private set; }
+        public bool LastThinking { get; private set; }
+        public List<ChatMessage> LastMessages { get; private set; } = [];
         public Action? OnLoad { get; init; }
         public int? ContextLength { get; private set; }
         public string? LoadedBackend { get; private set; }
@@ -166,14 +263,20 @@ public sealed class QwenPackSelectionTests : IDisposable
             return Task.CompletedTask;
         }
         public void Unload() { ContextLength = null; LoadedBackend = null; }
-        public void ApplyGrammar(SamplingConfig sampling, StructuredOutputFormat format) => throw new NotSupportedException();
+        public void ApplyGrammar(SamplingConfig sampling, StructuredOutputFormat format, bool enableThinking) => throw new NotSupportedException();
         public async IAsyncEnumerable<ChatStreamUpdate> StreamAsync(ChatSession session, List<ChatMessage> messages, int maxTokens,
-            SamplingConfig sampling, [EnumeratorCancellation] CancellationToken cancellationToken)
+            SamplingConfig sampling, List<ToolFunction>? tools, bool enableThinking, [EnumeratorCancellation] CancellationToken cancellationToken)
         {
             LastStreamToken = cancellationToken;
+            LastTools = tools;
+            LastThinking = enableThinking;
+            LastMessages = messages;
             await Task.Yield();
-            cancellationToken.ThrowIfCancellationRequested();
-            yield return ChatStreamUpdate.Text("hello");
+            foreach (string piece in Pieces)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                yield return ChatStreamUpdate.Text(piece);
+            }
             cancellationToken.ThrowIfCancellationRequested();
             yield return new("", true, 1, 1, 0, 0, 0, 0, "stop");
         }

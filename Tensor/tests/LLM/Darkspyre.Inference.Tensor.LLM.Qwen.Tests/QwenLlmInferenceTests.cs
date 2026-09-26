@@ -39,14 +39,14 @@ public sealed class QwenLlmInferenceTests
         Assert.True(capabilities.SupportsStreaming);
         Assert.Equal(LlmOutputLimitEnforcement.EngineEnforced, capabilities.OutputLimitEnforcement);
         Assert.True(capabilities.SupportsJsonSchema);
-        Assert.False(capabilities.SupportsToolUse);
+        Assert.True(capabilities.SupportsToolUse);
         Assert.False(capabilities.SupportsPromptImages);
-        Assert.Equal([LlmReasoningLevel.None], capabilities.ReasoningLevels);
-        Assert.False(capabilities.SupportsReasoning);
+        Assert.Equal([LlmReasoningLevel.None, LlmReasoningLevel.High], capabilities.ReasoningLevels.Order());
+        Assert.True(capabilities.SupportsReasoning);
     }
 
     [Fact]
-    public async Task ReasoningAboveNoneFailsBeforeModelMaterialization()
+    public async Task ReasoningOtherThanNoneOrHighFailsBeforeModelMaterialization()
     {
         await using var inference = new QwenLlmInference(new MissingPackManager());
         var request = new LlmInferenceRequest
@@ -67,7 +67,7 @@ public sealed class QwenLlmInferenceTests
     }
 
     [Fact]
-    public async Task UnsupportedToolsFailBeforeModelMaterialization()
+    public async Task ToolChoiceFailsBeforeModelMaterialization()
     {
         await using var inference = new QwenLlmInference(new MissingPackManager());
         var request = new LlmInferenceRequest
@@ -81,7 +81,8 @@ public sealed class QwenLlmInferenceTests
                     Name = "test",
                     InputSchema = System.Text.Json.JsonElement.Parse("{}")
                 }
-            ]
+            ],
+            AllowParallelToolCalls = false
         };
 
         InferenceException exception = await Assert.ThrowsAsync<InferenceException>(async () =>

@@ -22,7 +22,7 @@ Current adapter behaviour:
 | `AntigravityCliLlmClient` | yes | `--effort` | low, medium, high |
 | `AnthropicMessagesLlmClient`, `BedrockLlmClient` | no | rejected by `LlmClientBase` | none |
 | `BedrockAgentCoreLlmClient`, `BedrockAgentCoreSession` | no | rejected | none |
-| Tensor `QwenLlmInference` | no | rejected; thinking is always off | none |
+| Tensor `QwenLlmInference` | yes | TensorSharp `enableThinking` | none, high |
 
 `OpenAiCompatibleChatLlmClient` declares no support and still writes the field. The same neutral
 intent ("reason more") needs a different string per adapter, and nothing tells a caller which strings a
@@ -91,7 +91,7 @@ public enum LlmReasoningLevel
 | Anthropic Messages, adaptive-thinking models | per model: `None` where the model accepts disabled thinking, then Low to Maximum as the model's effort values allow | `None`: `thinking: {type: "disabled"}`. Otherwise `thinking: {type: "adaptive"}` and `output_config.effort`: `low`, `medium`, `high`, `xhigh`, `max` |
 | Anthropic Messages, budget-only models (Haiku 4.5, Sonnet 4.5) | None, Low, Medium, High, ExtraHigh, Maximum | `None`: no `thinking`. Otherwise `thinking: {type: "enabled", budget_tokens}` with 1,024, 4,096, 16,384, 32,768 or 64,000 |
 | Bedrock, Bedrock AgentCore | none | — |
-| Tensor Qwen | None | `None`: thinking stays disabled, as today |
+| Tensor Qwen | None, High | `None`: `enableThinking: false`. `High`: `enableThinking: true` |
 
 Each adapter keeps its level set and mapping table beside its capability declaration. A model the
 adapter cannot classify reports an empty set.
