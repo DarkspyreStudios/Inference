@@ -117,9 +117,9 @@ public sealed class QwenModelResolverTests
     private sealed class NoInstallPacks : ITensorModelPackManager
     {
         public Task<TensorModelImportResult> ImportAsync(TensorModelImportRequest request, IProgress<TensorModelInstallProgress>? progress = null, CancellationToken cancellationToken = default) => throw new NotSupportedException();
-        public IReadOnlyList<TensorModelPackDefinition> Definitions => [];
-        public TensorModelPackDefinition Register(TensorModelPackDefinition definition) => throw new InvalidOperationException("Must not register during Save.");
-        public TensorModelPackDefinition GetRequiredDefinition(TensorModelKey key) => throw new NotSupportedException();
+        public Task<IReadOnlyList<TensorModelPackDefinition>> GetDefinitionsAsync(CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<TensorModelPackDefinition>>([]);
+        public Task<TensorModelPackDefinition> RegisterAsync(TensorModelPackDefinition definition, CancellationToken cancellationToken = default) => throw new InvalidOperationException("Must not register during Save.");
+        public Task<TensorModelPackDefinition> GetRequiredDefinitionAsync(TensorModelKey key, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<TensorModelPackStatus> GetStatusAsync(TensorModelKey key, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task InstallAsync(TensorModelKey key, IProgress<TensorModelInstallProgress>? progress = null, CancellationToken cancellationToken = default) => throw new InvalidOperationException("Must not install during Save.");
         public Task<TensorModelPackStatus> VerifyAsync(TensorModelKey key, CancellationToken cancellationToken = default) => throw new NotSupportedException();

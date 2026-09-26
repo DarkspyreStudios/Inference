@@ -11,26 +11,27 @@ namespace Darkspyre.Inference.Setup.Examples;
 /// <summary>Composition belongs to the host; rendering below has no provider-specific dispatch.</summary>
 public static class SetupCompositionExample
 {
-    public static IReadOnlyList<IInferenceSetupSession> CreateDrafts(
+    public static async Task<IReadOnlyList<IInferenceSetupSession>> CreateDraftsAsync(
         LlmProviderService llms, ImageProviderService images, ITensorModelPackManager packs,
         IImageWorkflowChoiceSource workflows, ISetupCommitTarget<LlmSetupChanges> llmTarget,
         ISetupCommitTarget<ImageSetupChanges> imageTarget, ISetupCommitTarget<TensorSetupChanges> tensorTarget,
-        ITensorModelSource? modelSource = null)
+        ITensorModelSource? modelSource = null, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(llms);
         ArgumentNullException.ThrowIfNull(images);
         ArgumentNullException.ThrowIfNull(packs);
         // No network requests, model loads or installs occur here. The caller owns/disposes the sessions.
+        IReadOnlyList<TensorModelPackDefinition> definitions = await packs.GetDefinitionsAsync(cancellationToken).ConfigureAwait(false);
         List<IInferenceSetupSession> sessions = llms.SupportedProviders.Select(provider =>
             (IInferenceSetupSession)llms.CreateSetupSession(provider.Transport,
                 new(SetupChangeIntent.Create, Guid.NewGuid().ToString("N"), null), llmTarget)).ToList();
         sessions.Add(images.CreateSetupSession(ImageTransport.ComfyUi,
             new(SetupChangeIntent.Create, Guid.NewGuid().ToString("N"), null), imageTarget, workflows));
         sessions.Add(QwenSetup.CreateSession(new(SetupChangeIntent.Create, Guid.NewGuid().ToString("N"), null), tensorTarget, packs,
-            offeredModels: packs.Definitions.Where(pack => pack.Capability == TensorCapability.Llm
+            offeredModels: definitions.Where(pack => pack.Capability == TensorCapability.Llm
                 && pack.RuntimeArchitecture == TensorLlmModels.QwenRuntimeArchitecture).ToArray(), source: modelSource));
         sessions.Add(SupraSetup.CreateSession(new(SetupChangeIntent.Create, Guid.NewGuid().ToString("N"), null), tensorTarget, packs,
-            offeredModels: packs.Definitions.Where(pack => pack.Capability == TensorCapability.Image
+            offeredModels: definitions.Where(pack => pack.Capability == TensorCapability.Image
                 && pack.RuntimeArchitecture == TensorImageModels.SupraRuntimeArchitecture).ToArray(), source: modelSource));
         sessions.Add(WhisperSetup.CreateSession(new(SetupChangeIntent.Create, Guid.NewGuid().ToString("N"), null), tensorTarget, packs,
             source: modelSource));

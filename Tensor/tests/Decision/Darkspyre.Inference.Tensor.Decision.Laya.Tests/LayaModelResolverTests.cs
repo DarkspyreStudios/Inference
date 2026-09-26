@@ -57,7 +57,7 @@ public sealed class LayaModelResolverTests : IDisposable
         using var manager = new TensorModelPackManager(new([]), Path.Combine(_root, "store"));
         TensorModelImportResult rejected = await manager.ImportAsync(new(selection, resolver));
         Assert.Equal(TensorCompatibilityState.Unsupported, rejected.Resolution.Evaluation.State);
-        Assert.Empty(manager.Definitions);
+        Assert.Empty((await manager.GetDefinitionsAsync()));
     }
 
     [Fact]

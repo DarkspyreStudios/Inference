@@ -33,7 +33,7 @@ public sealed class WhisperLifecycleTests
         Assert.True(host.Loader.Models[0].Disposed); Assert.Null(host.Engine.Observation.Model);
         Assert.True(File.Exists(installed)); WhisperFixture.AssertNoOpenHandle(installed);
         TensorModelPackDefinition second = host.Pack with { Key = new("host/another-whisper", "two") };
-        host.Packs.Register(second); await host.Packs.InstallAsync(second.Key); await host.Engine.LoadAsync(second.Key);
+        await host.Packs.RegisterAsync(second); await host.Packs.InstallAsync(second.Key); await host.Engine.LoadAsync(second.Key);
         Assert.Equal(second.Key.ModelId, (await host.Engine.TranscribeAsync(Request)).Provenance.ModelId);
         Assert.Equal(InferenceFailureCode.ModelUnavailable, (await Assert.ThrowsAsync<InferenceException>(() => host.Engine.TranscribeAsync(Request with { ModelId = host.Pack.Key.ModelId }))).Code);
         await host.Engine.StopAsync(); await host.Engine.StopAsync();

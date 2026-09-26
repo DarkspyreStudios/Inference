@@ -36,10 +36,10 @@
     private IReadOnlyList<IInferenceSetupSession> _sessions = [];
     private IInferenceSetupSession? _selected;
 
-    protected override void OnInitialized()
+    protected override async Task OnInitializedAsync()
     {
         // The example host chooses how to list and place editors. The library renders one session.
-        _sessions = SetupCompositionExample.CreateDrafts(LlmProviders, ImageProviders, Packs,
+        _sessions = await SetupCompositionExample.CreateDraftsAsync(LlmProviders, ImageProviders, Packs,
             Workflows, LlmCommit, ImageCommit, TensorCommit);
         _selected = _sessions.FirstOrDefault();
     }

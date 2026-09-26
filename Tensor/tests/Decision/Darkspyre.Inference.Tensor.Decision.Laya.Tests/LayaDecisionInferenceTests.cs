@@ -112,9 +112,9 @@ public sealed class LayaDecisionInferenceTests
     private sealed class MissingPackManager : ITensorModelPackManager
     {
         public Task<TensorModelImportResult> ImportAsync(TensorModelImportRequest request, IProgress<TensorModelInstallProgress>? progress = null, CancellationToken cancellationToken = default) => throw new NotSupportedException();
-        public IReadOnlyList<TensorModelPackDefinition> Definitions => [Pack];
-        public TensorModelPackDefinition Register(TensorModelPackDefinition definition) => throw new NotSupportedException();
-        public TensorModelPackDefinition GetRequiredDefinition(TensorModelKey key) => Pack;
+        public Task<IReadOnlyList<TensorModelPackDefinition>> GetDefinitionsAsync(CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<TensorModelPackDefinition>>([Pack]);
+        public Task<TensorModelPackDefinition> RegisterAsync(TensorModelPackDefinition definition, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<TensorModelPackDefinition> GetRequiredDefinitionAsync(TensorModelKey key, CancellationToken cancellationToken = default) => Task.FromResult(Pack);
 
         public Task<TensorModelPackStatus> GetStatusAsync(
             TensorModelKey key,

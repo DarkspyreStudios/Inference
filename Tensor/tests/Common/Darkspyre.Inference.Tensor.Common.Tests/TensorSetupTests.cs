@@ -110,10 +110,10 @@ public sealed class TensorSetupTests
     private sealed class Packs : ITensorModelPackManager
     {
         public Task<TensorModelImportResult> ImportAsync(TensorModelImportRequest request, IProgress<TensorModelInstallProgress>? progress = null, CancellationToken cancellationToken = default) => throw new NotSupportedException();
-        public IReadOnlyList<TensorModelPackDefinition> Definitions => [Pack];
-        public TensorModelPackDefinition Register(TensorModelPackDefinition definition) => throw new NotSupportedException();
+        public Task<IReadOnlyList<TensorModelPackDefinition>> GetDefinitionsAsync(CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<TensorModelPackDefinition>>([Pack]);
+        public Task<TensorModelPackDefinition> RegisterAsync(TensorModelPackDefinition definition, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public int Calls { get; private set; }
-        public TensorModelPackDefinition GetRequiredDefinition(TensorModelKey key) => Pack;
+        public Task<TensorModelPackDefinition> GetRequiredDefinitionAsync(TensorModelKey key, CancellationToken cancellationToken = default) => Task.FromResult(Pack);
         public Task<TensorModelPackStatus> GetStatusAsync(TensorModelKey key, CancellationToken cancellationToken = default)
         { Calls++; return Task.FromResult(new TensorModelPackStatus(key, TensorModelPackState.Installed)); }
         public Task InstallAsync(TensorModelKey key, IProgress<TensorModelInstallProgress>? progress = null, CancellationToken cancellationToken = default)

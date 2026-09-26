@@ -37,11 +37,16 @@ public readonly record struct TensorModelInstallProgress(
 
 public interface ITensorModelPackManager
 {
-    IReadOnlyList<TensorModelPackDefinition> Definitions { get; }
+    Task<IReadOnlyList<TensorModelPackDefinition>> GetDefinitionsAsync(CancellationToken cancellationToken = default);
 
-    TensorModelPackDefinition Register(TensorModelPackDefinition definition);
+    /// <summary>Publishes a definition to the shared catalog and returns the registered snapshot.</summary>
+    Task<TensorModelPackDefinition> RegisterAsync(
+        TensorModelPackDefinition definition,
+        CancellationToken cancellationToken = default);
 
-    TensorModelPackDefinition GetRequiredDefinition(TensorModelKey key);
+    Task<TensorModelPackDefinition> GetRequiredDefinitionAsync(
+        TensorModelKey key,
+        CancellationToken cancellationToken = default);
 
     Task<TensorModelPackStatus> GetStatusAsync(
         TensorModelKey key,
@@ -98,18 +103,29 @@ public sealed class TensorModelPackManager : ITensorModelPackManager, IDisposabl
         _sourceHttp = new(_httpClient, sourceAccess);
     }
 
-    public IReadOnlyList<TensorModelPackDefinition> Definitions { get { ThrowIfDisposed(); return _catalog.Definitions; } }
-
-    public TensorModelPackDefinition Register(TensorModelPackDefinition definition)
+    public Task<IReadOnlyList<TensorModelPackDefinition>> GetDefinitionsAsync(CancellationToken cancellationToken = default)
     {
         ThrowIfDisposed();
-        return _catalog.Register(definition);
+        cancellationToken.ThrowIfCancellationRequested();
+        return Task.FromResult(_catalog.Definitions);
     }
 
-    public TensorModelPackDefinition GetRequiredDefinition(TensorModelKey key)
+    public Task<TensorModelPackDefinition> RegisterAsync(
+        TensorModelPackDefinition definition,
+        CancellationToken cancellationToken = default)
     {
         ThrowIfDisposed();
-        return _catalog.GetRequired(key);
+        cancellationToken.ThrowIfCancellationRequested();
+        return Task.FromResult(_catalog.Register(definition));
+    }
+
+    public Task<TensorModelPackDefinition> GetRequiredDefinitionAsync(
+        TensorModelKey key,
+        CancellationToken cancellationToken = default)
+    {
+        ThrowIfDisposed();
+        cancellationToken.ThrowIfCancellationRequested();
+        return Task.FromResult(_catalog.GetRequired(key));
     }
 
     public async Task<TensorModelPackStatus> GetStatusAsync(
@@ -295,7 +311,7 @@ public sealed class TensorModelPackManager : ITensorModelPackManager, IDisposabl
                 Report(progress, new(TensorModelInstallStage.Failed));
                 return new(resolution);
             }
-            resolution = resolution with { Definition = Register(resolution.Definition) };
+            resolution = resolution with { Definition = _catalog.Register(resolution.Definition) };
             // Reuse installation's hash checks, per-key serialization, lease protection and manifest-last publication.
             await InstallCoreAsync(resolution.Definition.Key, progress, staged, cancellationToken).ConfigureAwait(false);
             return new(resolution);

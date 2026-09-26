@@ -30,7 +30,7 @@ public sealed class TensorLocationImportTests : IDisposable
         Assert.Equal("model", await File.ReadAllTextAsync(lease.GetRequiredArtifact("model")));
         TensorModelImportResult duplicate = await manager.ImportAsync(new(selection, resolver));
         Assert.Equal(definition.Key, duplicate.Resolution.Definition!.Key);
-        Assert.Single(manager.Definitions);
+        Assert.Single((await manager.GetDefinitionsAsync()));
     }
 
     [Fact]
@@ -61,12 +61,12 @@ public sealed class TensorLocationImportTests : IDisposable
         using var manager = new TensorModelPackManager(new([]), Path.Combine(_root, "packs"));
         var selection = new TensorModelSelection(new TensorModelLocation.LocalFile(path), License: "test", ExpectedSha256: new('0', 64));
         await Assert.ThrowsAsync<InvalidDataException>(() => manager.ImportAsync(new(selection, resolver)));
-        Assert.Empty(manager.Definitions);
+        Assert.Empty((await manager.GetDefinitionsAsync()));
         await File.WriteAllTextAsync(path, "invalid");
         TensorModelImportResult rejected = await manager.ImportAsync(new(selection with { ExpectedSha256 = null }, resolver));
         Assert.Equal(TensorCompatibilityState.Unsupported, rejected.Resolution.Evaluation.State);
         Assert.Null(rejected.Resolution.Definition);
-        Assert.Empty(manager.Definitions);
+        Assert.Empty((await manager.GetDefinitionsAsync()));
     }
 
     [Fact]
@@ -94,7 +94,7 @@ public sealed class TensorLocationImportTests : IDisposable
         TensorModelImportResult result = await manager.ImportAsync(new(selection, new Resolver()));
         Assert.Contains(result.Resolution.Evaluation.Issues, issue => issue.Code == "license-required");
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => manager.ImportAsync(new(selection, new Resolver()), cancellationToken: new(true)));
-        Assert.Empty(manager.Definitions);
+        Assert.Empty((await manager.GetDefinitionsAsync()));
     }
 
     [Fact]
@@ -127,7 +127,7 @@ public sealed class TensorLocationImportTests : IDisposable
         var progress = new CancelProgress(cancellation);
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => manager.ImportAsync(new(selection, new Resolver()), progress, cancellation.Token));
         Assert.Equal(TensorModelInstallStage.Cancelled, progress.Last);
-        Assert.Empty(manager.Definitions);
+        Assert.Empty((await manager.GetDefinitionsAsync()));
     }
 
     [Fact]
@@ -141,7 +141,7 @@ public sealed class TensorLocationImportTests : IDisposable
         using var manager = new TensorModelPackManager(new([]), packs);
         await Assert.ThrowsAnyAsync<IOException>(() => manager.ImportAsync(new(selection, new Resolver())));
         File.Delete(packs);
-        TensorModelKey key = Assert.Single(manager.Definitions).Key;
+        TensorModelKey key = Assert.Single((await manager.GetDefinitionsAsync())).Key;
         Assert.Equal(TensorModelPackState.NotInstalled, (await manager.GetStatusAsync(key)).State);
     }
 
@@ -170,7 +170,7 @@ public sealed class TensorLocationImportTests : IDisposable
         {
             using var manager = new TensorModelPackManager(new([]), packs);
             await Assert.ThrowsAnyAsync<UnauthorizedAccessException>(() => manager.ImportAsync(new(selection, new Resolver())));
-            TensorModelKey key = Assert.Single(manager.Definitions).Key;
+            TensorModelKey key = Assert.Single((await manager.GetDefinitionsAsync())).Key;
             Assert.Equal(TensorModelPackState.NotInstalled, (await manager.GetStatusAsync(key)).State);
         }
         finally

@@ -178,9 +178,9 @@ public sealed class TensorRemoteSetupTests
         private readonly TensorModelCatalog _catalog = new([]);
         public List<string> Operations { get; } = [];
         public int Calls => Operations.Count;
-        public IReadOnlyList<TensorModelPackDefinition> Definitions => _catalog.Definitions;
-        public TensorModelPackDefinition Register(TensorModelPackDefinition definition) { Operations.Add("register"); return _catalog.Register(definition); }
-        public TensorModelPackDefinition GetRequiredDefinition(TensorModelKey key) => _catalog.GetRequired(key);
+        public Task<IReadOnlyList<TensorModelPackDefinition>> GetDefinitionsAsync(CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<TensorModelPackDefinition>>(_catalog.Definitions);
+        public Task<TensorModelPackDefinition> RegisterAsync(TensorModelPackDefinition definition, CancellationToken cancellationToken = default) { Operations.Add("register"); return Task.FromResult(_catalog.Register(definition)); }
+        public Task<TensorModelPackDefinition> GetRequiredDefinitionAsync(TensorModelKey key, CancellationToken cancellationToken = default) => Task.FromResult(_catalog.GetRequired(key));
         public Task<TensorModelPackStatus> GetStatusAsync(TensorModelKey key, CancellationToken cancellationToken = default)
         { Operations.Add("status"); return Task.FromResult(new TensorModelPackStatus(key, TensorModelPackState.Installed)); }
         public Task InstallAsync(TensorModelKey key, IProgress<TensorModelInstallProgress>? progress = null, CancellationToken cancellationToken = default)

@@ -97,9 +97,9 @@ public sealed class QwenLlmInferenceTests
     private sealed class MissingPackManager : ITensorModelPackManager
     {
         public Task<TensorModelImportResult> ImportAsync(TensorModelImportRequest request, IProgress<TensorModelInstallProgress>? progress = null, CancellationToken cancellationToken = default) => throw new NotSupportedException();
-        public IReadOnlyList<TensorModelPackDefinition> Definitions => [TensorLlmModels.Qwen3FourBillionQ4Km];
-        public TensorModelPackDefinition Register(TensorModelPackDefinition definition) => throw new NotSupportedException();
-        public TensorModelPackDefinition GetRequiredDefinition(TensorModelKey key) => TensorLlmModels.Qwen3FourBillionQ4Km;
+        public Task<IReadOnlyList<TensorModelPackDefinition>> GetDefinitionsAsync(CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<TensorModelPackDefinition>>([TensorLlmModels.Qwen3FourBillionQ4Km]);
+        public Task<TensorModelPackDefinition> RegisterAsync(TensorModelPackDefinition definition, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<TensorModelPackDefinition> GetRequiredDefinitionAsync(TensorModelKey key, CancellationToken cancellationToken = default) => Task.FromResult(TensorLlmModels.Qwen3FourBillionQ4Km);
 
         public Task<TensorModelPackStatus> GetStatusAsync(
             TensorModelKey key,

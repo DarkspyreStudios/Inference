@@ -342,11 +342,12 @@ public sealed class TensorSetupSession : InferenceSetupSession<TensorSetupChange
         TensorModelImportResult result = await _packs.ImportAsync(new(selection, _resolver!), new InstallProgress(progress), token).ConfigureAwait(false);
         token.ThrowIfCancellationRequested();
         TensorModelResolution resolution = result.Resolution;
+        TensorModelPackDefinition? resolved = resolution.Evaluation.State == TensorCompatibilityState.Supported && resolution.Definition is not null
+            ? await _packs.GetRequiredDefinitionAsync(resolution.Definition.Key, token).ConfigureAwait(false) : null;
         Publish(() =>
         {
             _evaluation = resolution.Evaluation;
-            _resolved = resolution.Evaluation.State == TensorCompatibilityState.Supported && resolution.Definition is not null
-                ? _packs.GetRequiredDefinition(resolution.Definition.Key) : null;
+            _resolved = resolved;
             _model = _resolved?.Key;
         });
         return _model is not null ? await VerifyAsync(progress, token).ConfigureAwait(false)
@@ -364,7 +365,7 @@ public sealed class TensorSetupSession : InferenceSetupSession<TensorSetupChange
 
     private async Task<SetupActionResult> CheckAsync(IProgress<SetupProgress>? progress, CancellationToken token)
     {
-        if (!_packs.Definitions.Any(definition => definition.Key == _model))
+        if (!(await _packs.GetDefinitionsAsync(token).ConfigureAwait(false)).Any(definition => definition.Key == _model))
         {
             Publish(() => Status = Status with { Installed = SetupObservation.Known(false), Verified = SetupObservation.Known(false) });
             return SetupActionResult.Completed;
@@ -378,14 +379,14 @@ public sealed class TensorSetupSession : InferenceSetupSession<TensorSetupChange
     private async Task<SetupActionResult> InstallAsync(IProgress<SetupProgress>? progress, CancellationToken token)
     {
         Publish(() => Status = Status with { Installed = SetupObservation.Unknown, Verified = SetupObservation.Unknown });
-        _packs.Register(SelectedDefinition()!);
+        await _packs.RegisterAsync(SelectedDefinition()!, token).ConfigureAwait(false);
         await _packs.InstallAsync(_model!, new InstallProgress(progress), token).ConfigureAwait(false);
         return await VerifyAsync(progress, token).ConfigureAwait(false);
     }
 
     private async Task<SetupActionResult> VerifyAsync(IProgress<SetupProgress>? progress, CancellationToken token)
     {
-        if (!_packs.Definitions.Any(definition => definition.Key == _model))
+        if (!(await _packs.GetDefinitionsAsync(token).ConfigureAwait(false)).Any(definition => definition.Key == _model))
         { return new(SetupActionState.Failed, [new("pack-not-installed", "Install the resolved pack explicitly before verifying it.", "model")]); }
         Publish(() => Status = Status with { Verified = SetupObservation.Unknown });
         TensorModelPackStatus status = await _packs.VerifyAsync(_model!, token).ConfigureAwait(false);

@@ -281,9 +281,10 @@ never forwarded to another origin or reattached after leaving the original origi
 HTTP clients must disable automatic redirects, cookies/default credentials and default headers;
 the default clients already do so. Never persist transient signed download URLs.
 
-`TensorModelCatalog.Register` and the manager's forwarding `Register` return an immutable snapshot.
+`TensorModelCatalog.Register` and the manager's `RegisterAsync` return an immutable snapshot.
 Identical registrations are idempotent; a different definition at the same key fails. The catalog is
-the one owner observed by `TensorModelPackManager.Definitions`, not a separate discovery cache.
+the one owner read by `TensorModelPackManager.GetDefinitionsAsync` and `GetRequiredDefinitionAsync`,
+not a separate discovery cache.
 The host persists chosen definitions and reconstructs registrations after restart. Registration,
 installation and configuration Save remain separate operations.
 

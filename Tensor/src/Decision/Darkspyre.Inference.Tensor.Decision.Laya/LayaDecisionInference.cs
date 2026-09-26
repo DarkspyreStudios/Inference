@@ -214,7 +214,7 @@ public sealed class LayaDecisionInference : ITensorDecisionInference, IDecisionI
         TensorModelPackDefinition definition;
         try
         {
-            definition = _packs.GetRequiredDefinition(model);
+            definition = await _packs.GetRequiredDefinitionAsync(model, cancellationToken).ConfigureAwait(false);
         }
         catch (KeyNotFoundException exception)
         {

@@ -49,14 +49,14 @@ public sealed class SupraImageInference : ITensorImageInference
 
     public InferenceImplementationDescriptor Descriptor => SupraSetup.Definition.Implementation;
 
-    public Task<ImageCapabilities> GetCapabilitiesAsync(
+    public async Task<ImageCapabilities> GetCapabilitiesAsync(
         string? modelId = null,
         CancellationToken cancellationToken = default)
     {
         ThrowIfDisposed();
         cancellationToken.ThrowIfCancellationRequested();
-        ValidateModelId(modelId);
-        return Task.FromResult(new ImageCapabilities
+        await ValidateModelIdAsync(modelId, cancellationToken).ConfigureAwait(false);
+        return new ImageCapabilities
         {
             SupportedSizes = [(SupraDiT.ImageSize, SupraDiT.ImageSize)],
             SupportsNegativePrompt = false,
@@ -64,7 +64,7 @@ public sealed class SupraImageInference : ITensorImageInference
             SupportsSteps = true,
             SupportsGuidanceScale = true,
             MaximumImageCount = MaximumCount
-        });
+        };
     }
 
     public async Task<ImageGenerationResult> GenerateAsync(
@@ -78,7 +78,7 @@ public sealed class SupraImageInference : ITensorImageInference
         progress?.Report(new ImageGenerationProgress(ImageGenerationStage.Queued));
         await using TensorModelLifetime.ExecutionLease modelUse = await _lifetime.EnterExecutionAsync(cancellationToken)
             .ConfigureAwait(false);
-        ValidateModelId(request.ModelId);
+        await ValidateModelIdAsync(request.ModelId, cancellationToken).ConfigureAwait(false);
         TensorModelPackDefinition definition = _definition!;
         CancellationToken executionToken = modelUse.CancellationToken;
         ISupraImageModel model = _model
@@ -198,7 +198,7 @@ public sealed class SupraImageInference : ITensorImageInference
         TensorModelPackDefinition definition;
         try
         {
-            definition = _packs.GetRequiredDefinition(model);
+            definition = await _packs.GetRequiredDefinitionAsync(model, cancellationToken).ConfigureAwait(false);
         }
         catch (KeyNotFoundException exception)
         {
@@ -308,10 +308,10 @@ public sealed class SupraImageInference : ITensorImageInference
         }
     }
 
-    private void ValidateModelId(string? modelId)
+    private async Task ValidateModelIdAsync(string? modelId, CancellationToken cancellationToken)
     {
         bool known = _definition is not null ? modelId == _definition.Key.ModelId
-            : _packs.Definitions.Any(definition => definition.Key.ModelId == modelId
+            : (await _packs.GetDefinitionsAsync(cancellationToken).ConfigureAwait(false)).Any(definition => definition.Key.ModelId == modelId
                 && definition.Capability == TensorCapability.Image && definition.RuntimeArchitecture == TensorImageModels.SupraRuntimeArchitecture);
         if (modelId is not null && !known)
         {

@@ -88,7 +88,7 @@ public sealed class SupraPackSelectionTests : IDisposable
         Assert.Equal(TensorImageModels.Supra2Image.Key, target.Changes!.Configuration.Model);
         Assert.Equal(4, target.Changes.Definition.Artifacts.Count);
         Assert.All(target.Changes.Definition.Artifacts, artifact => Assert.NotNull(artifact.Provenance));
-        Assert.Empty(packs.Definitions);
+        Assert.Empty((await packs.GetDefinitionsAsync()));
         Assert.False(Directory.Exists(_root));
     }
 

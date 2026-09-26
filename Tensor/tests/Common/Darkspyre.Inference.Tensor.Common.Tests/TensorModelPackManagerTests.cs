@@ -10,7 +10,7 @@ public sealed class TensorModelPackManagerTests : IDisposable
         $"darkspyre-tensor-tests-{Guid.NewGuid():N}");
 
     [Fact]
-    public void RegistrationIsImmutableIdempotentAndSharedWithManager()
+    public async Task RegistrationIsImmutableIdempotentAndSharedWithManager()
     {
         var catalog = new TensorModelCatalog([]);
         using var manager = new TensorModelPackManager(catalog, _packDirectory);
@@ -18,15 +18,15 @@ public sealed class TensorModelPackManagerTests : IDisposable
         var sources = new List<Uri>(definition.Artifacts[0].Sources);
         var artifacts = new List<TensorModelArtifactDefinition> { definition.Artifacts[0] with { Sources = sources } };
         var backends = new HashSet<TensorBackendKind> { TensorBackendKind.Cpu };
-        TensorModelPackDefinition registered = manager.Register(definition with { Artifacts = artifacts, SupportedBackends = backends });
+        TensorModelPackDefinition registered = await manager.RegisterAsync(definition with { Artifacts = artifacts, SupportedBackends = backends });
         sources.Clear();
         artifacts.Clear();
         backends.Clear();
         Assert.Single(registered.Artifacts[0].Sources);
         Assert.Contains(TensorBackendKind.Cpu, registered.SupportedBackends);
         Assert.Same(registered, catalog.Register(definition));
-        Assert.Same(registered, manager.GetRequiredDefinition(definition.Key));
-        Assert.Same(registered, Assert.Single(manager.Definitions));
+        Assert.Same(registered, await manager.GetRequiredDefinitionAsync(definition.Key));
+        Assert.Same(registered, Assert.Single(await manager.GetDefinitionsAsync()));
         Assert.Throws<ArgumentException>(() => catalog.Register(definition with { Artifacts = [definition.Artifacts[0] with { Length = 1000 }] }));
     }
 

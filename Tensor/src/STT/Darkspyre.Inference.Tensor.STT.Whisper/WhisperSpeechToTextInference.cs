@@ -33,35 +33,35 @@ public sealed class WhisperSpeechToTextInference : ITensorSpeechToTextInference
     public TensorBackendKind RequestedBackend { get; }
     public Task StartAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
 
-    public Task<IReadOnlyList<SpeechModelInfo>> ListModelsAsync(CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<SpeechModelInfo>> ListModelsAsync(CancellationToken cancellationToken = default)
     {
         ThrowIfStopped(); cancellationToken.ThrowIfCancellationRequested();
-        return Task.FromResult<IReadOnlyList<SpeechModelInfo>>(Array.AsReadOnly(_packs.Definitions
+        return Array.AsReadOnly((await _packs.GetDefinitionsAsync(cancellationToken).ConfigureAwait(false))
             .Where(pack => pack.Capability == TensorCapability.SpeechTranscription
                 && pack.RuntimeArchitecture == TensorSpeechModels.WhisperRuntimeArchitecture)
-            .Select(TensorSpeechModels.Info).ToArray()));
+            .Select(TensorSpeechModels.Info).ToArray());
     }
 
-    public Task<SpeechToTextCapabilities> GetCapabilitiesAsync(string? modelId = null, CancellationToken cancellationToken = default)
+    public async Task<SpeechToTextCapabilities> GetCapabilitiesAsync(string? modelId = null, CancellationToken cancellationToken = default)
     {
         ThrowIfStopped(); cancellationToken.ThrowIfCancellationRequested();
         TensorModelKey? loaded = Observation.Model;
         IWhisperModel? current = _model;
         if (loaded is not null && current is not null && (modelId is null || loaded.ModelId == modelId))
-            return Task.FromResult(current.Metadata.Capabilities);
-        TensorModelPackDefinition? known = _packs.Definitions.FirstOrDefault(pack => pack.Key.ModelId == modelId
+            return current.Metadata.Capabilities;
+        TensorModelPackDefinition? known = (await _packs.GetDefinitionsAsync(cancellationToken).ConfigureAwait(false)).FirstOrDefault(pack => pack.Key.ModelId == modelId
             && pack.RuntimeArchitecture == TensorSpeechModels.WhisperRuntimeArchitecture);
         SpeechModelInfo? info = known is null ? null : TensorSpeechModels.Info(known);
-        return Task.FromResult(new SpeechToTextCapabilities(info?.EnglishOnly, info?.SupportsTranslationToEnglish,
+        return new SpeechToTextCapabilities(info?.EnglishOnly, info?.SupportsTranslationToEnglish,
             info?.EnglishOnly is bool english ? !english : null, info?.EnglishOnly == true ? Array.AsReadOnly<string>(["en"]) : null,
-            WhisperPcm.MinimumRate, WhisperPcm.MaximumRate, WhisperPcm.MaximumChannels));
+            WhisperPcm.MinimumRate, WhisperPcm.MaximumRate, WhisperPcm.MaximumChannels);
     }
 
     public async Task LoadAsync(TensorModelKey model, CancellationToken cancellationToken = default)
     {
         ThrowIfStopped(); ArgumentNullException.ThrowIfNull(model);
         TensorModelPackDefinition definition;
-        try { definition = _packs.GetRequiredDefinition(model); }
+        try { definition = await _packs.GetRequiredDefinitionAsync(model, cancellationToken).ConfigureAwait(false); }
         catch (KeyNotFoundException) { throw new InferenceException(InferenceFailureCode.ModelUnavailable, "The Whisper pack is not registered."); }
         if (definition.Key != model) throw new InferenceException(InferenceFailureCode.ModelUnavailable, "The pack manager returned another model.");
         try { WhisperCompatibility.Validate(definition); }

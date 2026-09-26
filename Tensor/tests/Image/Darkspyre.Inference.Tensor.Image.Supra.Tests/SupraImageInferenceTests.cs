@@ -124,9 +124,9 @@ public sealed class SupraImageInferenceTests
     private sealed class MissingPackManager : ITensorModelPackManager
     {
         public Task<TensorModelImportResult> ImportAsync(TensorModelImportRequest request, IProgress<TensorModelInstallProgress>? progress = null, CancellationToken cancellationToken = default) => throw new NotSupportedException();
-        public IReadOnlyList<TensorModelPackDefinition> Definitions => [TensorImageModels.Supra2Image];
-        public TensorModelPackDefinition Register(TensorModelPackDefinition definition) => throw new NotSupportedException();
-        public TensorModelPackDefinition GetRequiredDefinition(TensorModelKey key) => TensorImageModels.Supra2Image;
+        public Task<IReadOnlyList<TensorModelPackDefinition>> GetDefinitionsAsync(CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<TensorModelPackDefinition>>([TensorImageModels.Supra2Image]);
+        public Task<TensorModelPackDefinition> RegisterAsync(TensorModelPackDefinition definition, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<TensorModelPackDefinition> GetRequiredDefinitionAsync(TensorModelKey key, CancellationToken cancellationToken = default) => Task.FromResult(TensorImageModels.Supra2Image);
 
         public Task<TensorModelPackStatus> GetStatusAsync(
             TensorModelKey key,

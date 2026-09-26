@@ -83,7 +83,7 @@ public sealed class WhisperMetadataTests
         Assert.Equal(SetupActionState.Completed, (await session.Snapshot.Actions.Single(action => action.Descriptor.Id == "resolve").ExecuteAsync()).State);
         Assert.Equal(SetupCommitState.Committed, (await session.CommitAsync()).State);
         Assert.Equal(source.Pack.Key, target.Changes!.Definition.Key);
-        Assert.Empty(packs.Definitions);
+        Assert.Empty((await packs.GetDefinitionsAsync()));
         Assert.Single(source.Reads);
         Assert.Equal(TensorMetadataReadKind.HeaderRange, source.Reads[0].Kind);
         Assert.Equal(65536, source.Reads[0].Length);

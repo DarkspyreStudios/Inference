@@ -50,14 +50,14 @@ public sealed class QwenLlmInference : ITensorLlmInference
 
     public InferenceImplementationDescriptor Descriptor => QwenSetup.Definition.Implementation;
 
-    public Task<LlmCapabilities> GetCapabilitiesAsync(
+    public async Task<LlmCapabilities> GetCapabilitiesAsync(
         string? modelId = null,
         CancellationToken cancellationToken = default)
     {
         ThrowIfDisposed();
         cancellationToken.ThrowIfCancellationRequested();
-        ValidateModelId(modelId);
-        return Task.FromResult(new LlmCapabilities
+        await ValidateModelIdAsync(modelId, cancellationToken).ConfigureAwait(false);
+        return new LlmCapabilities
         {
             OutputLimitEnforcement = LlmOutputLimitEnforcement.EngineEnforced,
             SupportsStreaming = true,
@@ -69,7 +69,7 @@ public sealed class QwenLlmInference : ITensorLlmInference
             SupportsToolUse = false,
             SupportsPromptImages = false,
             SupportsPromptDocuments = false
-        });
+        };
     }
 
     /// <summary>Qwen reads its local model packs on every call and keeps no list.</summary>
@@ -82,7 +82,7 @@ public sealed class QwenLlmInference : ITensorLlmInference
         ThrowIfDisposed();
         LlmCapabilities capabilities = await GetCapabilitiesAsync(cancellationToken: cancellationToken)
             .ConfigureAwait(false);
-        return _packs.Definitions.Where(definition => definition.Capability == TensorCapability.Llm
+        return (await _packs.GetDefinitionsAsync(cancellationToken).ConfigureAwait(false)).Where(definition => definition.Capability == TensorCapability.Llm
             && definition.RuntimeArchitecture == TensorLlmModels.QwenRuntimeArchitecture).Select(definition =>
             new LlmModelInfo(definition.Key.ModelId, definition.Key.ModelId, "Qwen", capabilities)
             {
@@ -100,7 +100,7 @@ public sealed class QwenLlmInference : ITensorLlmInference
         ValidateRequest(request);
         await using TensorModelLifetime.ExecutionLease modelUse = await _lifetime.EnterExecutionAsync(cancellationToken)
             .ConfigureAwait(false);
-        ValidateModelId(request.ModelId);
+        await ValidateModelIdAsync(request.ModelId, cancellationToken).ConfigureAwait(false);
         TensorModelPackDefinition definition = _definition!;
         CancellationToken executionToken = modelUse.CancellationToken;
         TensorBackendKind backend = _loadedBackend
@@ -247,7 +247,7 @@ public sealed class QwenLlmInference : ITensorLlmInference
         TensorModelPackDefinition definition;
         try
         {
-            definition = _packs.GetRequiredDefinition(model);
+            definition = await _packs.GetRequiredDefinitionAsync(model, cancellationToken).ConfigureAwait(false);
         }
         catch (KeyNotFoundException exception)
         {
@@ -402,10 +402,10 @@ public sealed class QwenLlmInference : ITensorLlmInference
         }
     }
 
-    private void ValidateModelId(string? modelId)
+    private async Task ValidateModelIdAsync(string? modelId, CancellationToken cancellationToken)
     {
         bool known = _definition is not null ? modelId == _definition.Key.ModelId
-            : _packs.Definitions.Any(definition => definition.Key.ModelId == modelId
+            : (await _packs.GetDefinitionsAsync(cancellationToken).ConfigureAwait(false)).Any(definition => definition.Key.ModelId == modelId
                 && definition.Capability == TensorCapability.Llm && definition.RuntimeArchitecture == TensorLlmModels.QwenRuntimeArchitecture);
         if (modelId is not null && !known)
         {
