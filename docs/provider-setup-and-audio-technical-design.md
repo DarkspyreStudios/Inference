@@ -49,8 +49,8 @@ The separately approved UI.Settings package is outside this implementation scope
 |---|---|
 | `Common/.../Setup/` | UI-neutral setup descriptions, typed fields, action/interaction contracts, validation, observations, typed host commit interface |
 | Existing Common inference types | Existing request/result contracts; implementation descriptor gains task classification |
-| `Connect/.../LLM/` and `.LLM.Bedrock` | LLM setup sessions, typed LLM edits, authentication and provider-specific protocol bindings |
-| `Connect/.../Image/` | Image setup sessions, typed image edits, host workflow-choice seam |
+| `Connect/.../LLM/` and `.LLM.Bedrock` | LLM settings and managers, typed LLM edits, authentication and provider-specific protocol bindings |
+| `Connect/.../Image/` | Image settings and managers, typed image edits, host workflow-choice seam |
 | `Connect/src/TTS/Darkspyre.Inference.Connect.TTS/` | TTS contract/models, provider service, PocketTTS HTTP adapter and setup |
 | `Connect/src/Audio/Darkspyre.Inference.Connect.Audio/` | Generated-audio contract/models, provider service, TangoFlux HTTP adapter and setup |
 | `Tensor/.../Common/` | Pack discovery/source contracts, immutable registration, installation integration and shared readiness observations |
@@ -75,7 +75,7 @@ Existing implementation identities remain stable; a configured instance has a se
 
 `InferenceSetupDefinition` contains the descriptor, description, display order, guided/advanced
 visibility, supported create/edit operations, and prerequisite descriptions. Each capability's
-existing catalog/service exposes its definitions and creates its setup sessions. A host composes
+existing catalog/service exposes its definitions and creates its settings manager. A host composes
 these definitions at its composition root; there is no global service locator or inference wrapper.
 Listing definitions does not resolve secrets, start CLIs, probe devices, connect, or load weights.
 Actual availability is an observation obtained by an explicit check, not a declaration inferred
@@ -83,7 +83,7 @@ from a registered implementation or backend enum.
 
 ### Typed fields and drafts
 
-Each provider owns a typed draft. A setup session exposes a safe, read-only projection containing:
+Each provider owns a typed settings class. A settings object exposes a safe projection containing:
 
 - Ordered `SetupStep` and `SetupSection` records, including advanced sections and help text.
 - `SetupField` variants for text, URI, executable reference, integer, decimal, Boolean, choice,
@@ -94,9 +94,9 @@ Each provider owns a typed draft. A setup session exposes a safe, read-only proj
   or derive behavior from labels, IDs or provider names.
 - Secret fields expose only `HasValue` and explicit Keep/Replace/Clear operations. They never return
   the current secret. Replace accepts the typed secret input without retaining it in the safe view.
-- Choice fields expose `GetChoicesAsync(SetupChoiceQuery, CancellationToken)`. Queries contain
-  search text, an opaque continuation token, bounded page size and expected draft revision. Results
-  contain stable value/label pairs, continuation and the revision they describe. Manual entry is
+- Choices for a choice field come from `IInferenceSettingsManager.QueryChoicesAsync(settings, fieldId,
+  SetupChoiceQuery, CancellationToken)`. Queries contain search text, an opaque continuation token and
+  a bounded page size. Results contain stable value/label pairs and a continuation. Manual entry is
   explicitly enabled or disabled by the field, never guessed by the host.
 - `SetupChoiceCapabilities` explicitly declares search, paging and refresh independently of manual
   entry. Bounded local lists (protocol, format, capability overrides, backend and cache policy) do
@@ -106,28 +106,44 @@ Each provider owns a typed draft. A setup session exposes a safe, read-only proj
   clamping it into a different typed value.
 
 The renderer branches on these shared field types only. The provider binds each edit method to its
-typed draft property. A field edit advances the session revision and invalidates dependent choices,
-validation and readiness evidence. Async completions for an older revision cannot update the draft.
-Choice selection is revalidated by the provider; a host-supplied choice ID is not trusted evidence.
+typed settings property. A field edit changes only the settings object and marks dependent readiness
+evidence stale. It never calls a provider. A choice query never changes the settings; the renderer
+drops a page that returns after a later edit. Choice selection is revalidated by the provider; a
+host-supplied choice ID is not trusted evidence.
 
-### Session and action signatures
+### Settings and manager signatures
 
 The shared callable surface is:
 
 ```csharp
-public interface IInferenceSetupSession : IAsyncDisposable
+public abstract class InferenceSettings
 {
-    SetupSnapshot Snapshot { get; }
-    Task<SetupValidation> ValidateAsync(CancellationToken cancellationToken = default);
-    Task<SetupCommitResult> CommitAsync(CancellationToken cancellationToken = default);
+    InferenceSetupDefinition Definition { get; }
+    SetupConfigurationIdentity Identity { get; }
+    IReadOnlyList<SetupStep> Steps { get; }
+    IReadOnlyList<SetupActionDescriptor> Actions { get; }
+    SetupStatus Status { get; set; }
+    SetupInteraction? Interaction { get; set; }
+    bool HasUnsavedChanges { get; }
+    bool CanSave { get; }
+    bool IsSaved { get; }
+    bool SaveOutcomeUncertain { get; }
+    SetupValidation Validate();
 }
 
-public interface ISetupAction
+public interface IInferenceSettingsManager
 {
-    SetupActionDescriptor Descriptor { get; }
-    Task<SetupActionResult> ExecuteAsync(
-        IProgress<SetupProgress>? progress = null,
-        CancellationToken cancellationToken = default);
+    Task<SetupActionResult> RunAsync(InferenceSettings settings, string actionId,
+        IProgress<SetupProgress>? progress = null, CancellationToken cancellationToken = default);
+    Task<SetupChoicePage> QueryChoicesAsync(InferenceSettings settings, string fieldId,
+        SetupChoiceQuery query, CancellationToken cancellationToken = default);
+    Task<SetupCommitResult> SaveAsync(InferenceSettings settings, CancellationToken cancellationToken = default);
+}
+
+public interface IInferenceSettingsStatusSource
+{
+    event EventHandler? StatusChanged;
+    Task RefreshStatusAsync(InferenceSettings settings, CancellationToken cancellationToken = default);
 }
 
 public interface ISetupCommitTarget<TChanges>
@@ -138,70 +154,77 @@ public interface ISetupCommitTarget<TChanges>
 }
 ```
 
-`SetupSnapshot` owns the current revision, steps/fields, available bound actions, validation and
-status observations. Fields/actions are bound to their originating session and recheck availability
-and revision when invoked. They are not string commands for the host to dispatch.
+Each provider has a typed manager with an `OpenAsync` that returns its settings for a provider type,
+blank or from a saved entry. `Steps` and `Actions` are rebuilt from the current values on each read,
+so show/hide and enable rules run locally. Actions are descriptors, not bound delegates; the manager
+runs one by ID against the settings' current values. A disabled or unknown action ID returns
+Unavailable. They are not string commands for the host to dispatch to providers.
 
-`SetupSnapshot.IsDirty` is a provider-owned comparison against the starting editable draft, not a
-revision counter. Every concrete session implements `IsDraftDirty`: changes to editable settings,
-selected models and explicit secret mutations count; checks, validation, progress and runtime
-observations alone do not. Reverting editable values restores clean state. The successful commit
-closes the session and clears its dirty signal. `CommitOutcomeUncertain` is separate and remains
-explicit even if the draft had no edits. The UI combines these signals with transient invalid or
-unapplied input for host dirty-close behavior; that transient text is not a second provider draft.
+`HasUnsavedChanges` is a provider-owned comparison against the opened values. Every concrete
+settings class implements `IsDraftDirty`: changes to editable settings, selected models and explicit
+secret mutations count; checks, validation, progress and runtime observations alone do not.
+Reverting editable values restores clean state. A successful save marks the object saved and clears
+its dirty signal. `SaveOutcomeUncertain` is separate and remains explicit even if the object had no
+edits. `CanSave` requires every visible required field to have a value and any required sign-in to
+have succeeded. Required fields are the values Save stores, such as an endpoint, an API key or a
+model; inputs that only feed an action are not required. The UI combines these signals with transient
+invalid or unapplied input for host dirty-close behavior; that transient text is not a second copy of
+the settings.
 
 Actions declare their semantic purpose and side effects: network access, potential billing,
 browser interaction, CLI execution, download, local verification, model load/unload or terminal stop.
-Execution returns Completed, NeedsInteraction, Failed or Cancelled, with structured issues and
-retryability. `SetupValidation` associates errors/warnings with fields or steps; warnings do not
-silently become errors. Busy, stale revision and unsupported action are explicit outcomes.
+Execution returns Completed, NeedsInteraction, Failed, Cancelled or Unavailable, with structured
+issues and retryability. `SetupValidation` associates errors/warnings with fields or steps; warnings do
+not silently become errors. An unknown or disabled action is an explicit Unavailable outcome.
 
 Interactions are typed variants: browser/device authorization with URI/code/expiry, callback input,
-or external prerequisite instructions followed by a bound recheck action. Continuation and cancel
-actions remain provider-owned. Authentication protocol fields such as OAuth verifier/state remain
+or external prerequisite instructions followed by a recheck action. Continuation, cancel and recheck
+are action descriptors that the manager runs by ID. Authentication protocol fields such as OAuth verifier/state remain
 inside the provider, not a host-interpreted payload. The host opens a browser or presents instructions
 only after its own consent checks. A provider cannot execute shell text from remote metadata.
 
-`Snapshot.Interaction` is authoritative for the current interaction. An action may also return its
-interaction as an immediate result, but renderers read fresh controls from the current snapshot.
-Failed CLI authentication publishes prerequisite instructions with a revision-bound recheck; a
-successful recheck clears them. Browser callback text remains one-way: the session accepts it but
-never echoes it in a snapshot. Each authorization attempt owns a unique callback field identity,
+`InferenceSettings.Interaction` is authoritative for the current interaction. An action may also
+return its interaction as an immediate result, but renderers read controls from the settings. Failed
+CLI authentication sets prerequisite instructions with a recheck action; a successful recheck clears
+them. An edit to a value the sign-in depends on clears a pending authorization. Browser callback text
+remains one-way: the settings accept it but never echo it in a field value. Each authorization attempt owns a unique callback field identity,
 stable across callback edits/status updates and replaced on restart. Renderers retain the transient
 masked text for that identity and clear it when the interaction ends or the editor is replaced.
 
 ### Commit, cancellation and concurrency
 
-At composition, the host creates a typed session with a capability-specific commit target. The
-generic renderer calls `CommitAsync`; the provider passes a typed change set to that target:
+At composition, the host creates a typed settings manager with a capability-specific commit target.
+The generic renderer calls `SaveAsync`; the manager passes a typed change set to that target:
 `LlmSetupChanges`, `ImageSetupChanges`, `TtsSetupChanges`, `AudioSetupChanges`, or
 `TensorSetupChanges`. Each contains create/edit intent, configuration ID, expected opaque version,
 the complete typed proposed configuration, and that family's typed secret changes where applicable.
 Common defines no universal configuration or secret-storage format.
 
-Commit validates the captured revision, freezes mutation while committing, and makes one host call.
+Save validates the settings, checks `CanSave`, computes the typed changes from the current values, and
+makes one host call. One settings object saves once.
 The host atomically compares the configuration version and publishes configuration plus protected
 secret changes, or returns Conflict/Failed without exposing a partial update. When vault and settings
 storage cannot share a transaction, the host stages a new secret and atomically switches the saved
 reference; its implementation owns cleanup. No distributed transaction is promised by the library.
 Creates require absence; edits require the same existing version. Neither silently upserts.
 
-LLM interactive setup uses a draft-local `ILlmConnectionSource`, so authentication completion updates
-the draft rather than saved credentials. Runtime refresh continues using the existing host
+LLM interactive setup uses a settings-local `ILlmConnectionSource`, so authentication completion updates
+the settings rather than saved credentials. Runtime refresh continues using the existing host
 `ILlmConnectionSource.SaveCredentialAsync` compare-and-replace seam unchanged. The final setup commit
 compares the original saved version, including credentials; a concurrent refresh can therefore cause
 a real conflict. Do not solve conflicts by overwriting newer credentials or replaying authorization.
 
-Cancelled/disposed edits discard draft changes and do not save or clear existing credentials.
+Dropping a settings object without Save discards its changes and does not save or clear existing
+credentials.
 Already-performed external effects (authorization, download or paid test) are not rolled back.
 Commit cancellation before invocation prevents the write; once invoked, the host must report the
 actual outcome. An uncertain outcome requires readback, not automatic retry or a false Cancelled.
 
-One mutating action runs per session. Conflicting edits/commit return Busy. Read-only choice queries
-may overlap, guarded by revision. The host retains the session, task, progress sink and cancellation
-source for any action that should survive a dialog closing. Closing a view is not cancellation.
-Disposal explicitly cancels and awaits session actions before releasing their resources; it does not
-stop an application-owned inference instance. There is no library background hosted service or
+The editor runs one action at a time and disables edits and Save while it runs. Choice queries may
+overlap; the renderer drops a page that returns after a later edit. The host retains the task,
+progress sink and cancellation source for any action that should survive a dialog closing. Closing a
+view is not cancellation. Neither the settings nor the manager stops an application-owned inference
+instance. There is no library background hosted service or
 durable operation scheduler. Retrying inference that may have billed is never automatic setup policy.
 
 ### Status and invalidation
@@ -450,8 +473,8 @@ Approved implementation units:
    until separately authorized; determine coordinated version impact from the actual approved API diff.
 
 Tests must demonstrate generic add/edit flows across every definition, not merely count fields.
-Cover conditional/dependent fields, paging, secret masking/Keep/Replace/Clear, cancelled drafts,
-concurrent credential changes, stale completions, commit conflicts/uncertainty, side-effect declarations,
+Cover conditional/dependent fields, paging, secret masking/Keep/Replace/Clear, unsaved settings,
+concurrent credential changes, late choice pages, commit conflicts/uncertainty, side-effect declarations,
 and status invalidation. Use a host example with typed registration/commit bindings and one generic
 field/action driver; no provider-name dispatch is permitted inside that driver.
 

@@ -89,11 +89,12 @@ transport or engine-lifetime mechanism is introduced.
 
 ## Setup and host UI
 
-`TensorSetupSession` remains the single draft owner. It exposes registered packs, location kind,
+`TensorSettings` is the single settings owner. It exposes registered packs, location kind,
 path/URL or repository inputs, explicit companion overrides, required license and optional primary
 integrity fields, and inspection evidence. Split-file families expose a repeatable artifact group.
-Edits invalidate the resolved model and observations. Mutating actions remain serialized by the
-existing session; stale bound edits/results cannot select an obsolete pack.
+Edits clear the resolved model and observations. `TensorSettingsManager` runs the actions; the
+editor runs one at a time, and a choice query never selects a pack. Location fields are inputs to
+Inspect and Import; Save needs only the selected pack and backend.
 
 Inspect, Import, Install and Save are distinct operations. Only Supported, complete definitions are
 saveable. Save returns `TensorSetupChanges` with the selected configuration and definition, without

@@ -96,13 +96,13 @@ See the [Tensor guide](Tensor/README.md) for exact backend and artifact requirem
 
 ### Shared setup and optional UI
 
-Providers expose typed fields, choices, validation, authentication interactions, actions, progress,
-and draft-dirty state through `IInferenceSetupSession`. Hosts can render those contracts themselves
-or use UI.Settings. The editor includes invalid-input Save protection, dependent choice loading,
+Providers expose typed fields, validation, authentication interactions and unsaved-change state
+through an `InferenceSettings` object. Its `IInferenceSettingsManager` runs actions, lists choices and
+saves. Hosts can render those contracts themselves or use UI.Settings. The editor includes invalid-input Save protection, dependent choice loading,
 typed numeric inputs, and optional host-owned file/folder selection.
 
 The host supplies commit targets, protected credentials, consent, and interaction handling. The
-editor does not own the connection list, dialogs, routing, or the lifetime of a setup session.
+editor does not own the connection list, dialogs, routing, or any engine behind the settings.
 
 ## Install
 

@@ -110,7 +110,7 @@ Anthropic rules that the per-model sets encode:
 
 ## 6. Setup and capability overrides
 
-`LlmSetupSession` today offers a boolean "Reasoning effort" override for connections whose capability
+`LlmSettings` offers a boolean "Reasoning effort" override for connections whose capability
 the adapter cannot infer. It becomes a level-set override: the host selects which levels the endpoint
 accepts. The override record carries `IReadOnlySet<LlmReasoningLevel>?` in place of `bool?`.
 

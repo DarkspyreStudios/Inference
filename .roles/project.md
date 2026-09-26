@@ -35,7 +35,7 @@ published NuGets.
 | `Darkspyre.Inference.Common` | Interfaces and models genuinely shared by connector-based and in-process tensor inference |
 | `Darkspyre.Inference.Connect` | All implemented out-of-process connectors; contains capability-specific assemblies such as `.Connect.LLM`, `.Connect.LLM.Bedrock`, and `.Connect.Image` |
 | `Darkspyre.Inference.Tensor` | All implemented in-process engines; contains `.Tensor.Common`, the `.Tensor.LLM`, `.Tensor.Image`, `.Tensor.STT`, and `.Tensor.Decision` capability contracts, and the `.Tensor.LLM.Qwen`, `.Tensor.Image.Supra`, `.Tensor.STT.Whisper`, and `.Tensor.Decision.Laya` implementations |
-| `Darkspyre.Inference.UI.Settings` | Host-placed Blazor/Lumeo editor for provider setup sessions; references Common but not Connect or Tensor |
+| `Darkspyre.Inference.UI.Settings` | Host-placed Blazor/Lumeo editor for provider settings and their managers; references Common but not Connect or Tensor |
 
 Connect implements LLM, ComfyUI Image, PocketTTS speech synthesis and TangoFlux audio generation.
 Tensor implements Qwen LLM, Supra Image, Laya Decision and Whisper speech transcription. Audio tasks

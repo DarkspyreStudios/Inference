@@ -45,9 +45,10 @@ The Connect, Tensor, and UI.Settings packages reference the `Darkspyre.Inference
 release version. They do not embed the Common assembly. All four package versions come from the
 single repository `/Directory.Build.props`; a project must not override that version.
 
-UI.Settings is a host-placed Blazor editor for provider setup sessions. It references Common and
-Lumeo, not Connect, Tensor, or an application assembly. A host owns its connection list, editor
-placement, persistence, protected credentials, consent, and provider-specific session composition.
+UI.Settings is a host-placed Blazor editor for a provider's settings object and settings manager. It
+references Common and Lumeo, not Connect, Tensor, or an application assembly. A host owns its
+connection list, editor placement, persistence, protected credentials, consent, and provider-specific
+manager composition. Field edits stay in the settings object; only Save reaches the host.
 Common, Connect, and Tensor remain UI-framework-neutral.
 
 ## Provider dependencies

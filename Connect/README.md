@@ -125,12 +125,12 @@ configured voice field (default `voice_url`). It rejects non-default speed. Brid
 Voice discovery uses `/voices`, falling back to `/health` only after a successful empty list. It
 preserves both voice-option objects and voice-name arrays; it never invents fallback voices.
 
-`SetupDefinitions` and `CreateSetupSession` use the shared typed setup editor. Endpoint, timeout,
+`SetupDefinitions` and `CreateSettingsManager` use the shared typed setup editor. Endpoint, timeout,
 protocol, paths, protected headers, voice and speech defaults are editable. `TtsSetupChanges`
 contains the host's identity/version, the typed configuration with no header values, and explicit
 protected-header sets/removals. Untouched headers are omitted from mutations, not deleted. Save
 does not list voices or synthesize. Endpoint/voice verification and potentially billed synthesis
-are separate actions; protocol changes update the speed constraints and invalidate test evidence.
+are separate actions; protocol changes update the speed constraints and mark test evidence stale.
 The host retains its usual atomic settings/secret commit responsibility.
 
 HTTP authentication/access errors, timeouts and malformed responses have distinct
@@ -174,12 +174,12 @@ WAV framing is validated; decoding and duration measurement are not performed, s
 is null rather than copied from the requested duration. An absent content type is accepted only
 with valid WAV bytes; an explicitly unsupported content type fails.
 
-`SetupDefinitions` and `CreateSetupSession` expose typed endpoint, fractional timeout, relative
+`SetupDefinitions` and `CreateSettingsManager` expose typed endpoint, fractional timeout, relative
 generation path, protected headers, duration, steps, guidance, optional seed and a three-state
 provider-cache choice. `AudioSetupChanges` carries create/edit identity and expected version, typed
 settings without header values, and explicit protected-header sets/removals. Keep and omission do
 not delete existing headers. The host owns the atomic configuration/secret commit. Save performs no
-network request; tests use the draft's current settings and invalidate when those settings change.
+network request; tests use the settings' current values, and an edit marks their result stale.
 
 TangoFlux advertises no model listing or independent health check. Its explicit test sends a real
 generation request and declares network/potential-billing effects. Listing implementations and
@@ -593,24 +593,24 @@ still conditional, so a connection change during the external authentication rou
 ## Provider setup and editing
 
 `LlmProviderCatalog.SetupDefinitions` describes providers without resolving connections or
-credentials. `LlmProviderService.CreateSetupSession` binds the shared typed editor to actual provider
-operations. `LlmProviderDefinition.SetupSteps` now uses Common's descriptive `SetupStep`; the old
-LLM-only input/action enums are removed. Render fields and invoke bound actions from the session,
-not by interpreting a descriptive step or switching on a provider ID.
+credentials. `LlmProviderService.CreateSettingsManager` returns the manager that opens settings and
+runs their actions against actual provider operations. `LlmProviderDefinition.SetupSteps` uses Common's
+descriptive `SetupStep`. Render fields and run actions from the settings object, not by interpreting a
+descriptive step or switching on a provider ID.
 
 ```csharp
-await using LlmSetupSession setup = llms.CreateSetupSession(
+LlmSettingsManager manager = llms.CreateSettingsManager(hostCommitTarget);
+LlmSettings settings = await manager.OpenAsync(
     LlmTransport.OpenAiResponses,
     new SetupConfigurationIdentity(SetupChangeIntent.Create, connectionId, null),
-    hostCommitTarget);
+    cancellationToken: cancellationToken);
 
-SetupSnapshot view = setup.Snapshot;
-// Render semantic field types, call their typed edit methods, and re-read Snapshot.
-// Inspect each action's declared side effects and obtain host authorization before invocation.
-SetupValidation validation = await setup.ValidateAsync(cancellationToken);
-if (validation.IsValid)
+// Render semantic field types and call their typed edit methods; edits change only `settings`.
+// Inspect each action's declared side effects and obtain host authorization before
+// manager.RunAsync(settings, action.Id, progress, cancellationToken).
+if (settings.CanSave)
 {
-    SetupCommitResult saved = await setup.CommitAsync(cancellationToken);
+    SetupCommitResult saved = await manager.SaveAsync(settings, cancellationToken);
     // Handle Committed, Conflict, Invalid, or Uncertain; never blindly retry Uncertain.
 }
 ```
@@ -622,7 +622,7 @@ atomically compare that version over configuration and credentials. Authenticati
 before commit. Normal runtime credential refresh still uses the existing host seam unchanged.
 CLI-owned authentication remains external; optional Claude catalog OAuth does not establish CLI login.
 
-Setup snapshots never expose saved secrets. API-key fields support Keep/Replace/Clear; provider options,
+Settings objects never expose saved secrets. API-key fields support Keep/Replace/Clear; provider options,
 capability overrides and additional headers already on a connection are retained when editing.
 Auth interactions, dynamic choices, validation and explicit model tests use one common contract.
 `AddLlmConnectBedrock` registers AWS profile/region choices in the SDK-owning assembly.
@@ -630,22 +630,23 @@ OpenAI-compatible remains an advanced provider with explicit manual-model suppor
 default/enabled/disabled capability overrides. Existing provider JSON, headers and model-specific
 overrides are retained; the editor does not turn them into an arbitrary JSON settings payload.
 
-`ImageProviderService.SetupDefinitions` and `CreateSetupSession` provide the same editing surface for
+`ImageProviderService.SetupDefinitions` and `CreateSettingsManager` provide the same editing surface for
 ComfyUI. Supply `IImageWorkflowChoiceSource` for host-owned saved workflows and a typed
 `ISetupCommitTarget<ImageSetupChanges>`. Header values remain protected, deletion is explicit, and
 health checking is separate from a potentially costly generation test. Reference-required workflows
 declare the generic generation test unavailable; their existing reference/upload/job APIs remain
 first-class. Setup does not replace durable job handling.
 
-The host retains sessions and action tasks when work should outlive a dialog, and explicitly disposes
-them to cancel an edit. Disposal never commits. A successful or uncertain commit closes that draft;
-an uncertain outcome requires readback before opening a new edit. The
+The host retains action tasks and their cancellation sources when work should outlive a dialog.
+Dropping a settings object discards its edit; nothing is committed without `SaveAsync`. A settings
+object saves once. After a successful or uncertain save, open the entry again for a later edit; an
+uncertain outcome requires readback first. The
 [generic editor example](../Common/examples/Darkspyre.Inference.Setup.Examples/README.md) compiles the
 same renderer against both Connect and Tensor. No UI framework is shipped in these packages.
 
 These contracts are included in the 11.9.2-rc.1 family. The old LLM setup-input/action description
 types were replaced by Common setup contracts in the 11.3.0-rc.1 breaking-contract release.
-The 11.3.1-rc.1 correction adds provider-owned dirty state, current authentication interactions and
+Settings objects carry provider-owned unsaved-change state, the current authentication interaction and
 explicit choice capabilities for the shared Settings editor.
 
 ## Account usage
@@ -683,8 +684,9 @@ await llms.SignInAsync(connectionId, authPrompt, cancellationToken: cancellation
 
 The host owns this OAuth credential. An existing Codex CLI login is separate and is never read,
 copied, or used as a fallback. Former executable endpoints (`codex`, `local://codex-cli`, executable
-paths) now fail with migration guidance. The setup session has no endpoint field for Direct Codex:
-its draft always uses the official endpoint, so saving an edit replaces a former value. Model
+paths) now fail with migration guidance. Direct Codex settings have no endpoint field: they always
+use the official endpoint, so saving an edit replaces a former value. Save requires a completed
+ChatGPT sign-in, or a saved credential that the edit keeps. Model
 discovery uses the direct authenticated catalog.
 
 Chat and managed agents share SSE request mapping, attachments, tool definitions, reasoning level,

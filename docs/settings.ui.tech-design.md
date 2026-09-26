@@ -9,9 +9,9 @@ dependency. Consuming-host migration remains separate.
 ## 1. Scope and ownership
 
 `Darkspyre.Inference.UI.Settings` is a reusable **editor surface** for a single Connect or Tensor
-provider setup session. It renders provider-authored fields, sections, steps, validation,
-provider-owned connection/readiness status, connection/authentication actions, tests, and other
-bound setup operations. It is a Blazor Razor Class Library using Lumeo controls. It does not decide
+provider's settings object and its settings manager. It renders provider-authored fields, sections,
+steps, validation, provider-owned connection/readiness status, connection/authentication actions,
+tests, and other setup operations. It is a Blazor Razor Class Library using Lumeo controls. It does not decide
 how existing connections are listed or
 where the editor is displayed. The host may put the same editor in a page, inline panel, dialog,
 drawer, or another host-owned frame. UI.Settings instantiates no Lumeo `Dialog`, `Drawer`, or
@@ -19,15 +19,15 @@ collection surface and owns no route or application shell.
 
 DarkspyreCE and Agent-DS each own discovery and listing, Add/Edit entry points, the editor's
 placement, frame, close behavior, navigation, theme, persistence, protected credentials, consent,
-and application operation lifetime. The host creates the appropriate provider setup session and
-passes only its Common interface to the editor. The editor never opens a provider session, loads
+and application operation lifetime. The host creates the appropriate provider settings manager, opens
+the settings, and passes only the Common types to the editor. The editor never opens settings, loads
 saved configuration, writes settings directly, or retrieves a saved secret.
 
 The [provider setup and audio technical design](provider-setup-and-audio-technical-design.md) owns
 the Common/Connect/Tensor contracts and provider behavior. This document owns the reusable editor
 presentation and its host integration. It does not expand protocols, model discovery, model
 compatibility, persistence, or credential implementation. It preserves the required Text, Image,
-and Audio provider coverage by rendering any valid setup session from those capabilities; it does
+and Audio provider coverage by rendering any valid settings object from those capabilities; it does
 not own a Text/Image/Audio navigation or grouping UI.
 
 ## 2. Repository, package, and dependency boundary
@@ -68,32 +68,35 @@ The request path is:
 
 ```text
 Host collection / Add or Edit action
-  -> host resolves existing configuration and creates provider setup session
-  -> UI.Settings editor receives IInferenceSetupSession
-  -> editor invokes bound Common fields, actions, ValidateAsync, CommitAsync
-  -> provider-owned Connect or Tensor session
+  -> host resolves existing configuration, creates the provider settings manager, calls OpenAsync
+  -> UI.Settings editor receives InferenceSettings and IInferenceSettingsManager
+  -> editor edits fields locally; RunAsync, QueryChoicesAsync and SaveAsync go through the manager
+  -> provider-owned Connect or Tensor manager
   -> ISetupCommitTarget<TChanges> implemented by the host
   -> host settings and protected credential storage
 ```
 
-The central public component is one provider-independent `InferenceSettingsEditor` (final name
-may be adjusted during API review). Its required input is an `IInferenceSetupSession` supplied by
-the host. It reads `Snapshot` and subscribes to `Changed` while mounted. It reports state and
-outcomes through callbacks so the host can render its own title, save/close controls, notifications,
-and frame. It does not dispose the session unless the host explicitly transfers ownership. Replacing
-the session resets field, choice, step, validation, and progress view state; callbacks from an older
-session cannot update the new editor.
+The central public component is one provider-independent `InferenceSettingsEditor`. Its required
+inputs are an `InferenceSettings` object and the `IInferenceSettingsManager` that opened it, supplied
+by the host. The page is event based: field edits change the settings object synchronously, and an
+async button click runs manager calls in order and then updates the page state. When the manager
+implements `IInferenceSettingsStatusSource`, the editor subscribes to `StatusChanged` while mounted,
+calls `RefreshStatusAsync`, and renders the result. It reports state and outcomes through callbacks
+so the host can render its own title, save/close controls, notifications, and frame. Replacing the
+settings resets field, choice, step, validation, and progress view state; callbacks for older settings
+cannot update the new editor.
 
 The integration surface has these semantics; exact signatures are finalized against the completed
 Common API:
 
-- **Session input:** one `IInferenceSetupSession`; its snapshot provides definition, sections,
-  fields, actions, validation, busy state, and status. The UI does not accept a configuration bag.
-- **State output:** `SnapshotChanged` supplies provider status and `StateChanged` supplies a safe
-  `SetupEditorState`, also readable through `State`. `HasUnsavedChanges` combines provider
-  `Snapshot.IsDirty`, transient pending input and uncertain commit state. `HasPendingInput`,
-  `HasInputErrors`, `CanSave` and `CommitOutcomeUncertain` support the host-owned frame. Revision
-  is never used as a dirty-state heuristic; state callbacks contain no input or secret values.
+- **Settings input:** one `InferenceSettings` object and its manager; the object provides definition,
+  sections, fields, actions, validation, interaction and status. The UI does not accept a
+  configuration bag.
+- **State output:** `StateChanged` supplies a safe `SetupEditorState`, also readable through
+  `State`. `HasUnsavedChanges` combines the settings' `HasUnsavedChanges`, transient pending input
+  and uncertain save state. `HasPendingInput`, `HasInputErrors`, `CanSave` and
+  `CommitOutcomeUncertain` support the host-owned frame. State callbacks contain no input or secret
+  values.
 - **Save command and result:** a host control may ask the editor to validate and commit; an editor
   embedded without a host save control may render its own Lumeo Save/Finish button. Both paths call
   the same controller method and report the exact `SetupCommitResult`.
@@ -101,9 +104,9 @@ Common API:
   handles browser opening or other external interaction, and retains operations that should
   continue after the view closes. It receives only Common action and interaction types.
 
-The host obtains definitions and sessions from Connect/Tensor factories at its composition root.
-That family-specific composition stays outside UI.Settings. A configured instance's host ID and
-opaque saved version are resolved there; the editor sees only the safe session snapshot. Multiple
+The host obtains definitions and settings managers from Connect/Tensor factories at its composition
+root. That family-specific composition stays outside UI.Settings. A configured instance's host ID and
+opaque saved version are resolved there; the editor sees only the safe settings object. Multiple
 configured instances of one implementation are distinguished and listed by the host, not by this
 component. Merely constructing the editor does not probe devices, resolve secrets, connect,
 authenticate, test, download, or load a model.
@@ -114,8 +117,8 @@ The unpublished model-location extension adds `SetupTextField.PathSelection` (fi
 When the interaction host also implements `IInferenceSettingsPathPicker`, the renderer offers
 Browse for these fields and for existing Connect executable fields. Native picker implementation
 and permissions remain host-owned; manual entry, including executable command names, is preserved.
-Cancel does not edit. A result from an older field/revision or superseded input is discarded rather
-than replayed. Picker failure reports a generic local input error. No Tensor reference or provider
+Cancel does not edit. A result that returns after the field was replaced or edited again is
+discarded rather than replayed. Picker failure reports a generic local input error. No Tensor reference or provider
 name dispatch is introduced. See [the location design](tensor-model-locations.tech-design.md).
 
 The renderer uses Common `SetupStep`, `SetupSection`, and `SetupField` variants. It maps text,
@@ -124,7 +127,7 @@ submitted Boolean values to checkbox; bounded choices to select; searchable/page
 enterable choices to combobox; secret to masked input plus Keep/Replace/Clear; and repeatable groups
 to ordered rows with Add/Remove controls. The actual Lumeo API is verified against the centrally
 pinned version during implementation. Labels, help, defaults, constraints, required/read-only
-state, visibility, and enablement come from each fresh snapshot. The UI never invents provider
+state, visibility, and enablement come from each read of the settings' `Steps`. The UI never invents provider
 fields, evaluates scripts, or dispatches by provider name or transport ID. `SetupChoiceCapabilities`
 declares search/paging/refresh separately from manual entry. Bounded lists use Select without
 search/refresh controls; discovery fields render only their advertised controls.
@@ -137,59 +140,62 @@ decimal step, preserve invalid/out-of-range text, and reject decimal precision l
 buttons/arrow keys step and clamp to declared or type bounds; typed input is never silently clamped.
 Labels, error associations, disabled state, density and spinbutton semantics are retained.
 
-An edit calls the field's bound method from the displayed snapshot. Applied reloads the snapshot
-and invalidates dependent choices, validation, actions, and status in the view. Stale reloads
-without replaying the edit. Busy and Invalid retain the user's visible draft and show the returned
-issue. Bound controls from older snapshots are discarded. The provider remains the draft-state
-owner; the component keeps only ephemeral control input and view state.
+An edit calls the field's typed edit method. It changes only the settings object and never calls a
+provider. Applied re-renders from the settings and reloads dependent choices. Invalid retains the
+user's visible input and shows the returned issue. The settings object owns accepted values; the
+component keeps only ephemeral control input and view state. The editor keeps an edit version that
+increases on each local edit and after each action.
 
 One editor-owned input scope retains pending text, secret replacement input and per-field errors
-across snapshots and wizard steps. Successful edits clear only that field's pending/error state.
+across renders and wizard steps. Successful edits clear only that field's pending/error state.
 Correcting a different field never clears its errors. Explicitly removed fields, completed callback
-attempts, session replacement, successful commit and editor disposal release their transient input.
-Provider snapshots still own accepted draft values; no configuration or saved-secret copy is kept
-by the renderer.
+attempts, settings replacement, successful save and editor disposal release their transient input.
+The settings object owns accepted values; no configuration or saved-secret copy is kept by the
+renderer.
 
-Choices use `SetupChoiceQuery` with the current revision and support search, bounded paging,
-continuation, loading, empty, failed, and stale outcomes. The UI drops old pages after a revision
-change and never treats a displayed choice as proof that selection is valid. The provider validates
+Choices come from `IInferenceSettingsManager.QueryChoicesAsync` with the current settings and a
+`SetupChoiceQuery`. They support search, bounded paging, continuation, loading, empty, failed and
+cancelled outcomes. The UI drops pages that return after a later edit and never treats a displayed
+choice as proof that selection is valid. The provider validates
 the selected value. Manual entry appears only when `AllowsManualEntry` is true. When a choice
 source fails or returns no choices, manual entry remains available only when the provider allows
 it. Natural-prerequisite loading occurs automatically only when declared side effects and the
 host's consent policy permit it.
 
-Every choice request captures its field, revision, search and continuation before awaiting consent
-or the source. A newer generation cancels the older request and starts the newest load; an old
-completion (including an error) cannot publish. Requested revision and successfully loaded revision
-are separate, so an in-flight older query cannot mark a newer revision loaded. Only current pages
-are appended. Session replacement/removal cancels view-owned queries, not host-retained actions.
+Every choice request captures its field, edit version, search and continuation before awaiting
+consent or the manager. A newer generation cancels the older request and starts the newest load; an
+old completion (including an error) cannot publish. Requested and successfully loaded edit versions
+are separate, so an in-flight older query cannot mark a newer version loaded. Only current pages are
+appended. Settings replacement/removal cancels view-owned queries, not host-retained actions.
 
 The editor follows the provider's ordered steps and sections. Advanced sections remain
-discoverable and expand when they contain a blocking issue. Next validates the current draft and
-shows current-step issues before advancing. Back preserves draft edits. Save/Finish validates the
-whole draft and calls `CommitAsync`. A descriptive completion instruction or successful test is
+discoverable and expand when they contain a blocking issue. Next validates the current settings and
+shows current-step issues before advancing. Back preserves edits. Save/Finish validates the whole
+object and calls `SaveAsync`. A descriptive completion instruction or successful test is
 not proof of a committed configuration. Field and step issues have accessible summaries beside
 their targets; warnings remain warnings. If final Common validation cannot identify current-step
-blocking issues, resolve that contract gap with the SetupSession owner instead of deriving logic
+blocking issues, resolve that contract gap with the provider settings owner instead of deriving logic
 from IDs, labels, or prose.
 
 Next first checks local current-step input errors, then provider validation. Built-in Save and public
 `SaveAsync` share one whole-editor gate: invalid/unapplied input returns Invalid without calling
-`CommitAsync`. A host cannot bypass that gate by drawing its own button. Invalid Save selects the
+the manager. Save is enabled when every required field has a value, any required sign-in has
+succeeded, and no action or save is running. A Committed save closes the host's dialog; closing
+without Save discards the settings. A host cannot bypass that gate by drawing its own button. Invalid Save selects the
 first affected step, including errors retained on a previously visited step.
 
 ## 5. Connect, test, and other bound actions
 
-The editor renders the current snapshot's `ISetupAction` collection. Actions may include
+The editor renders the settings' `Actions` descriptors. Actions may include
 authentication/connection, prerequisite checks, model discovery, provider tests, readiness checks,
-install, verify, load, unload, and stop, as actually supplied by the session. The descriptor
+install, verify, load, unload, and stop, as actually supplied by the provider. The descriptor
 determines display name, availability, purpose, and declared side effects. There is no UI-side
 provider switch and no placeholder successful action. Unavailable actions show their provider
 reason. Actions are never invoked merely by opening the editor or changing steps.
 
-The editor determines the displayed connection state from the session's built-in `SetupStatus`
-observations. It can invoke the session's bound CheckReadiness or Test action on user request and
-read the resulting snapshot to update that state. The host does not supply or maintain a second
+The editor determines the displayed connection state from the settings' `SetupStatus` observations.
+It can run the CheckReadiness or Test action on user request and re-render the settings to update
+that state. The host does not supply or maintain a second
 "connected" flag. Configured, Authenticated, Verified, Installed, Loaded, and Ready retain their
 separate meanings; unknown or stale evidence is displayed as such. For a Tensor provider, Loaded
 and Ready describe local model state rather than a network connection. The editor never infers
@@ -197,15 +203,16 @@ current connectivity merely from saved settings or a previously successful test.
 
 Before an action that opens a browser, invokes a CLI, contacts a provider, may bill, downloads
 weights, loads a model, unloads it, or stops an instance, the host's consent capability decides
-whether to proceed and the editor shows the effect clearly. The editor invokes only the bound
-action after consent. It displays `SetupProgress` by stage and bounded amount, with cancellation
-when supported. Completed, NeedsInteraction, Failed, Cancelled, Busy, Stale, and Unavailable produce
-distinct visible outcomes. No paid test or installation is retried automatically.
+whether to proceed and the editor shows the effect clearly. After consent the editor runs the action
+through `IInferenceSettingsInteractionHost.ExecuteAsync(manager, settings, action, progress, token)`.
+It displays `SetupProgress` by stage and bounded amount, with cancellation when supported.
+Completed, NeedsInteraction, Failed, Cancelled, and Unavailable produce distinct visible outcomes. No paid test or installation is retried automatically.
 
 Typed browser/device authorization, callback, and external-prerequisite interactions render from
-Common. Provider OAuth verifier/state and protocol payloads remain inside the provider session.
-`Snapshot.Interaction` is the sole current interaction source, with fresh revision-bound controls.
-CLI prerequisite instructions survive snapshot reads until cleared by the provider. Browser
+Common. Provider OAuth verifier/state and protocol payloads remain inside the provider settings.
+`InferenceSettings.Interaction` is the sole current interaction source. Its Continue, Cancel and
+Recheck descriptors run through the manager by ID. CLI prerequisite instructions remain until the
+provider clears them. Browser
 callback text is retained as masked one-way input under its attempt-scoped field ID; the provider
 never needs to echo the code to keep the field stable. Completion, cancellation or restarting the
 attempt clears its transient input.
@@ -213,16 +220,16 @@ The host performs browser opening or another external interaction; the UI does n
 shell text. Only structured, safe issues are shown. Raw provider responses and exceptions are
 never logged or displayed as diagnostic detail by default.
 
-The host retains a session, task, progress sink, and cancellation source whenever the operation
-must outlive the editor's placement. Removing the editor view does not automatically cancel a
-download, a paid test, or an application-owned Tensor instance. The editor unsubscribes from
-`Changed` when unmounted; the host decides when to dispose the session, and session disposal follows
-the provider contract's cancellation and cleanup rules.
+The host retains the task, progress sink, and cancellation source whenever the operation must
+outlive the editor's placement. Removing the editor view does not automatically cancel a download,
+a paid test, or an application-owned Tensor instance. The editor unsubscribes from `StatusChanged`
+when unmounted.
 
 ## 6. Save, conflicts, and secrets
 
-Save invokes `IInferenceSetupSession.CommitAsync` once for the current draft. The provider validates
-and sends a capability-specific typed change set to the host's `ISetupCommitTarget<TChanges>`.
+Save invokes `IInferenceSettingsManager.SaveAsync` once for the current settings. The manager
+validates them and sends a capability-specific typed change set to the host's
+`ISetupCommitTarget<TChanges>`.
 The host compares the expected opaque version and publishes settings with protected secret
 changes. UI.Settings never sees that typed change set or performs a separate settings or
 credential write. Create requires absence; edit requires the saved version. The host owns vault
@@ -231,13 +238,13 @@ staging and cleanup when settings and secrets cannot share one transaction.
 Secret fields expose only `HasValue` and Keep/Replace/Clear. The editor never prepopulates a saved
 secret, stores replacement input in durable UI state, logs it, or echoes it in an error. It clears
 transient replacement input after applying the field edit and on editor removal. Closing without
-save does not clear a saved credential. External effects already performed in a draft are not
+save does not clear a saved credential. External effects already performed while editing are not
 rolled back by dismissing the surface.
 
 On Committed, the editor reports success and the host refreshes its own connection list and shows
-transient feedback. Conflict keeps the editor and draft available, reports the saved version
-changed, and asks the host to provide a fresh read/new session; it never overwrites or replays
-credentials automatically. Invalid stays on the relevant fields. Failed is retryable only when the
+transient feedback. Conflict keeps the editor and settings available, reports the saved version
+changed, and asks the host to open the entry again; it never overwrites or replays credentials
+automatically. Invalid stays on the relevant fields. Failed is retryable only when the
 host reports a definite non-commit. Uncertain requires host readback before another save; it is
 never reported as Cancelled or retried automatically. The host decides whether to close, relocate,
 or keep showing the editor after each outcome.
@@ -260,37 +267,37 @@ The editor uses labeled controls, associated help/issues, keyboard-operable wiza
 controls, announced progress and status changes, and reduced-motion-safe transitions. If a host
 chooses a dialog, that host owns the focus trap, initial focus, Escape/backdrop behavior, dirty
 close confirmation, and focus restoration. UI.Settings exposes the state needed for those host
-decisions but does not impose a dialog lifecycle. Common supplies reliable draft dirty state through
-`Snapshot.IsDirty` starting in 11.3.1-rc.1; this signal was absent in 11.3.0-rc.1.
-Hosts using the corrected editor use `State.HasUnsavedChanges` for close confirmation, and
-`State.CommitOutcomeUncertain` to require readback. Status-only updates do not trigger discard
-prompts, and invalid visible input cannot be lost merely because it never entered the typed draft.
+decisions but does not impose a dialog lifecycle. Common supplies unsaved-change state through
+`InferenceSettings.HasUnsavedChanges`. Hosts use `State.HasUnsavedChanges` for close confirmation,
+and `State.CommitOutcomeUncertain` to require readback. Status-only updates do not trigger discard
+prompts, and invalid visible input cannot be lost merely because it never entered the settings.
 
 Presentation extension slots may add host guidance or surrounding context without replacing
 provider-owned fields, validation, action availability, status, or commit logic. The same shared
-renderer and session controller serve both hosts under their distinct themes.
+renderer and settings controller serve both hosts under their distinct themes.
 
 ## 8. Contract readiness and implementation gates
 
-The completed Common contract has setup records, bound fields/actions, session snapshots, status,
-and typed commit targets. Connect and Tensor sessions now cover the approved provider capabilities,
+The completed Common contract has setup records, typed fields, settings objects, settings managers,
+status, and typed commit targets. Connect and Tensor settings managers cover the approved provider
+capabilities,
 including Audio. The editor source is reconciled against these contracts. Debug/Release compilation
 and its regression suite passes; the former build hold was lifted by the release request. The initial
 published archive had three component tests; the source correction coverage is recorded below.
 
 Required gates:
 
-1. A host can supply a real create/edit `IInferenceSetupSession` for each supported provider
+1. A host can supply real create/edit settings and their manager for each supported provider
    without UI-side Connect/Tensor references or provider-name branches.
 2. The final Common fields and validation supply the state needed to render dependent controls,
    choices, step issues, and accessible errors. Missing semantics return to the provider-contract
    design instead of becoming a UI-local metadata model.
 3. Consent, action continuation, cancellation, progress, and host retention can be implemented
    with Common action/interaction types alone.
-4. Text, Image, and Audio provider sessions are real and accurately report unavailable actions;
+4. Text, Image, and Audio provider settings are real and accurately report unavailable actions;
    no family or modality is represented by a placeholder success.
 5. A host that requires dirty-close behavior obtains `SetupEditorState.HasUnsavedChanges`, combining
-   provider-owned dirty state and pending UI input. Revision counts are never substituted.
+   provider-owned unsaved-change state and pending UI input.
 
 If any required editor flow truly needs a Connect- or Tensor-specific UI interface, stop and
 redesign as family-specific UI libraries before implementation. The requirement cannot be met by
@@ -298,12 +305,13 @@ silently adding a family dependency to UI.Settings.
 
 ## 9. Verification and delivery
 
-Deterministic component tests use fake Common sessions and controlled host capabilities. They
-cover fields and dependent visibility, advanced sections, paged choices and manual fallback,
-stale snapshots, warning/error placement, step navigation, secret Keep/Replace/Clear, action
-availability and side-effect consent, interaction continuation, progress/cancellation, save,
-conflict and uncertain outcomes, session replacement, and removal during retained work. A
-non-packable example composes at least one real Connect and one real Tensor session behind host
+Deterministic component tests use fake Common settings and managers and controlled host
+capabilities. They cover fields and dependent visibility, advanced sections, paged choices and
+manual fallback, late choice pages, warning/error placement, step navigation, secret
+Keep/Replace/Clear, action availability and side-effect consent, interaction continuation,
+progress/cancellation, save enablement, conflict and uncertain outcomes, status refresh, settings
+replacement, and removal during retained work. A non-packable example composes at least one real
+Connect and one real Tensor settings manager behind host
 contracts without network, paid inference, model weights, or native execution. Package inspection
 confirms no Connect or Tensor dependency.
 

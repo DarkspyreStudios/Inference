@@ -57,8 +57,10 @@ opens, acts on and saves it. Only Save returns settings to the app.
    call takes the settings object with its current values, including unsaved ones. Its result,
    including a sign-in credential, goes into the settings object.
 4. **Save.** The Save button is enabled when every required field has a value, such as the
-   endpoint URL, the API key and the model where the provider needs one. A provider with sign-in
-   also requires a successful sign-in. Save is `settingsManager.SaveAsync(settings)`. It
+   endpoint URL, the API key and the model where the provider needs one. A required field is a
+   value Save stores. An input that only feeds an action, such as a Tensor model location for
+   Inspect or Import, is not required. A provider with sign-in also requires a successful sign-in;
+   for direct Codex, a kept saved credential counts. Save is `settingsManager.SaveAsync(settings)`. It
    validates the settings object, hands the whole object to the app through the host's typed commit
    target once, and closes the dialog. Closing the dialog without Save discards the object, and the
    app receives nothing.

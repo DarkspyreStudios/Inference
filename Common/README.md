@@ -28,31 +28,46 @@ least-common-denominator replacement for implementation management.
 
 ## Provider setup
 
-`Darkspyre.Inference.Common.Setup` supplies UI-neutral definitions, typed fields, callable actions,
-validation, safe status observations and a version-checked host commit boundary. It does not store
+`Darkspyre.Inference.Common.Setup` supplies UI-neutral definitions, a settings object with typed fields,
+a settings manager that runs actions, lists choices and saves, validation, safe status observations and a
+version-checked host commit boundary. It does not store
 settings/secrets, execute an application loop, or wrap inference requests in a generic payload.
 Text, Image, Audio and Decision grouping comes from the implementation's declared `InferenceTask`
 values; the three Audio tasks remain distinct.
 
 The [compile-checked generic editor example](examples/Darkspyre.Inference.Setup.Examples/README.md)
-uses one field/action driver for real Connect and Tensor sessions, including speech/audio. Hosts retain
-operation lifetime, user consent, storage and rendering. Field edits are revision-checked; cancelled
-edits never commit. Unknown observations are nullable, separate from false, stale and not applicable.
+uses one field/action driver for real Connect and Tensor settings, including speech/audio. Hosts retain
+operation lifetime, user consent, storage and rendering. A field edit changes only the settings object.
+Nothing reaches the host until `SaveAsync`. Unknown observations are nullable, separate from false,
+stale and not applicable.
 These contracts are included in the synchronized **11.9.2-rc.1** package family. Connect, Tensor and
 UI.Settings declare exact Common NuGet dependencies; none embeds the Common DLL. This release
 targets .NET 11 RC; the shared version retains a prerelease suffix while the UI's ASP.NET dependency
 is a release candidate.
 
-### Settings corrections in 11.3.1-rc.1
+### Settings objects and managers
 
-`SetupSnapshot.IsDirty` reports provider-owned draft changes against the session's starting values,
-including explicit secret changes. Checks, progress and revision changes alone do not make a draft
-dirty; reverting edits restores clean state. `CommitOutcomeUncertain` separately tells the host to
-read back persisted state before attempting another save. Neither signal authorizes an automatic retry.
+A provider manager's `OpenAsync` returns an `InferenceSettings` object for a provider type, blank or
+from a saved entry. The object is plain data. A field edit changes only that object and never calls a
+provider or writes storage. `Steps` and `Actions` are rebuilt from the current values on each read, so
+show, hide and enable rules run locally.
 
-`Snapshot.Interaction` is the authoritative current authorization/prerequisite interaction, including
-fresh revision-bound controls. Browser callback input is one-way and identified by authorization
-attempt; its value is not echoed in snapshots. Choice fields declare search, paging and refresh through
-`SetupChoiceCapabilities`, independently of manual-entry permission. Decimal fields declare their
-step as well as limits. Common remains UI-framework-neutral; renderers must also gate Save on any
-locally invalid or unapplied input which has not reached the typed provider draft.
+`IInferenceSettingsManager` is the service that acts on the object. `RunAsync` runs one enabled action
+against the current values. `QueryChoicesAsync` lists choices for one choice field. `SaveAsync`
+validates the object and calls the host's typed commit target once. One object saves once; a later
+edit opens the entry again at its new saved version.
+
+`HasUnsavedChanges` reports changes against the opened values, including explicit secret changes.
+Checks and progress do not make the object dirty; reverting edits restores clean state. `CanSave` is
+true when every visible required field has a value and any required sign-in has succeeded.
+`SaveOutcomeUncertain` tells the host to read back persisted state before opening another edit.
+Neither signal authorizes an automatic retry.
+
+`Interaction` is the current authorization or prerequisite interaction. Its Continue, Cancel and
+Recheck actions run through `RunAsync` by ID. Browser callback input is one-way; its value is not
+echoed in field values. Choice fields declare search, paging and refresh through
+`SetupChoiceCapabilities`, independently of manual-entry permission. Decimal fields declare their step
+as well as limits. A manager whose settings follow a running engine implements
+`IInferenceSettingsStatusSource`: `StatusChanged` reports a change, and `RefreshStatusAsync` reads it
+into the object. Common remains UI-framework-neutral; renderers must also gate Save on any locally
+invalid or unapplied input which has not reached the settings object.

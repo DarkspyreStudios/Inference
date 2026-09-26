@@ -146,8 +146,9 @@ in use by native execution.
 ## Provider setup
 
 `QwenSetup.Definition` and `SupraSetup.Definition` describe providers without constructing an engine,
-opening a store or loading native libraries. Their `CreateSession` methods bind a typed host
-`ISetupCommitTarget<TensorSetupChanges>` and the existing pack manager to the common setup editor.
+opening a store or loading native libraries. Their `CreateSettingsManager` methods bind a typed host
+`ISetupCommitTarget<TensorSetupChanges>` and the existing pack manager to a `TensorSettingsManager`.
+Its `OpenAsync(identity, existing)` returns the `TensorSettings` object the common setup editor renders.
 For Qwen and Supra, the default setup list contains the engine's built-in pack, and hosts may supply
 `offeredModels` with their own registered compatible packs. Laya has no built-in pack, so its
 `offeredModels` is required. Qwen and Supra validate the pack's capability, family,
@@ -157,9 +158,11 @@ for local files/folders and independent URLs. Supply an `ITensorModelSource` thr
 host-configured artifact access, for example `new TensorArtifactReader(source, httpClient, access)`.
 
 Selection/Save does not install or load. Install, verify, load, unload and stop are distinct callable
-actions with declared side effects. The supplied instance is optional and remains host-owned. The
-session reads its state through `GetObservationAsync` when created and after each
-`EngineStatusChanged` transition.
+actions with declared side effects. Load, Unload and Stop return once the engine accepts the request;
+the outcome arrives through `EngineStatusChanged`. The supplied instance is optional and remains
+host-owned. `OpenAsync` reads its state through `GetObservationAsync`. The manager implements
+`IInferenceSettingsStatusSource`: while a listener is attached to `StatusChanged`, it relays each
+`EngineStatusChanged` transition, and `RefreshStatusAsync` reads the new observation into the settings.
 Without an instance, Loaded/Ready remain unknown. A backend name is a supported selection, not proof
 that the backend is available. The explicit **Check backend prerequisites** action records available,
 unavailable or unknown runtime/device prerequisites without installing or loading a model. Qwen uses
@@ -168,7 +171,7 @@ to managed CPU. Laya Auto selects Core ML on macOS and CPU elsewhere. No check s
 checks `GgmlBasicOps.CanInitializeBackend`, MLX checks that its native library is present, direct
 CUDA checks its device/driver, and Core ML checks that ONNX Runtime offers its Core ML execution
 provider. Every check runs on a background thread. These observations do not guarantee memory allocation or successful model
-loading. Edits invalidate the observation, and constructing/browsing a session never runs a probe.
+loading. Edits clear the observation, and opening or browsing settings never runs a probe.
 Loading requires an instance configured for the selected backend;
 the editor does not silently replace instances or interrupt application work.
 
@@ -210,8 +213,9 @@ The 256x256 output, prompt/sampler constraints and generation algorithm are unch
 
 ### User-selected locations
 
-The same setup session exposes registered packs, local file/folder paths, direct artifact URLs and
-optional repository selection. Required companion locations and split-GGUF shard inputs come from
+The same settings expose registered packs, local file/folder paths, direct artifact URLs and
+optional repository selection. Location fields are inputs to Inspect and Import; Save needs only the
+selected pack and backend. Required companion locations and split-GGUF shard inputs come from
 the family resolver. A folder scan is top-level only (at most 256 files); ambiguous primary models
 require a filename. Direct file selections do not scan adjacent files. Direct URLs use durable HTTPS
 or numeric loopback HTTP, without query strings, fragments or user-info; access credentials remain
@@ -258,14 +262,14 @@ explicitly requested complete small metadata file). It validates the pinned sour
 total length and response body bounds. A weight server that ignores Range is Unverified: no fallback
 whole-weight read occurs. Protected redirect rules also apply to these reads.
 
-The shared `TensorSetupSession` accepts an engine-owned `ITensorModelResolver`. A supplied repository
+The shared `TensorSettingsManager` accepts an engine-owned `ITensorModelResolver`. A supplied repository
 adapter adds network-declared repository/revision/variant choices alongside the other locations and
 the separate **Inspect model location** action. Only a Supported result with a validated complete
-definition becomes selectable/saveable. Source/backend changes invalidate resolution; stale query
-completions cannot select a model. Browsing, resolving and Save do not register, install or load.
+definition becomes selectable/saveable. Source/backend changes clear the resolution; a choice query
+never selects a model. Browsing, resolving and Save do not register, install or load.
 Install registers the resolved immutable definition in the supplied manager before downloading and
 verifying it. Unregistered resolved selections report not installed rather than querying an unknown
-manager key. `QwenSetup.CreateSession` and `SupraSetup.CreateSession` compose their respective
+manager key. `QwenSetup.CreateSettingsManager` and `SupraSetup.CreateSettingsManager` compose their respective
 `QwenModelResolver` and `SupraModelResolver` regardless of whether a repository adapter is supplied.
 Construction performs no I/O.
 
@@ -384,14 +388,14 @@ provenance use that pack's actual key. Unloaded capabilities describe the family
 they do not assert that a named pack is registered, installed or verified.
 
 `LayaSetup.Definition` advertises the Decision task without activating the engine.
-`LayaSetup.CreateSession(identity, target, packs, offeredModels, existing, instance, source, reader)` feeds the host's
+`LayaSetup.CreateSettingsManager(target, packs, offeredModels, instance, source, reader)` feeds the host's
 compatible definitions to the existing shared editor. `offeredModels` is required; an empty list
 offers no pre-registered selections; local/URL resolution and optional repository browsing remain
 available. Validate/register the same definitions in the manager's
 catalog. The editor saves the selected key/backend in `TensorSetupConfiguration`, not raw weight
 bytes or a provider-specific UI payload. Selection and Save never unload an active model. The usual
 explicit install/verify/load/unload/stop actions apply; changing the saved selection reports
-`RequiresUnload`, and session disposal does not stop the host's engine. See the compile-checked
+`RequiresUnload`, and closing the editor does not stop the host's engine. See the compile-checked
 `LayaModelSelectionExample` in the shared examples.
 
 ## Speech transcription / Whisper
@@ -429,7 +433,7 @@ Only CPU is supplied/advertised. Auto selects CPU; other backend values fail exp
 backend check invokes the real native runtime without loading a model. Definition/model listing
 does not load native libraries, probe hardware, select a default pack or download anything.
 
-`WhisperSetup.CreateSession` uses the existing generic Tensor editor, with all twelve definitions,
+`WhisperSetup.CreateSettingsManager` uses the existing generic Tensor editor, with all twelve definitions,
 explicit install/verify/lifecycle actions and typed `TensorSetupChanges`. Its optional source binds
 `WhisperModelResolver`: the initial remote policy verifies published weight identities plus actual
 GGML architecture/vocabulary headers. Unknown hashes remain Unverified; tags or filenames alone
