@@ -218,10 +218,18 @@ public static class LocalImageExample
 
         await packs.InstallAsync(model.Key, cancellationToken: cancellationToken);
         await using var engine = new SupraImageInference(packs);
+        var loaded = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        engine.EngineStatusChanged += (_, status) =>
+        {
+            if (status.State == TensorEngineState.Loaded) { loaded.TrySetResult(); }
+            else if (status.State == TensorEngineState.Failed) { loaded.TrySetException(status.Error!); }
+        };
         await engine.StartAsync(cancellationToken);
         try
         {
+            // LoadAsync returns once the engine accepts the load; the outcome arrives through the event.
             await engine.LoadAsync(model.Key, cancellationToken);
+            await loaded.Task.WaitAsync(cancellationToken);
             return await engine.GenerateAsync(new ImageGenerationRequest
             {
                 ModelId = model.Key.ModelId,

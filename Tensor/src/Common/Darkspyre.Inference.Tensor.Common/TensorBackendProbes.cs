@@ -11,7 +11,11 @@ public static class TensorBackendProbes
 
     private sealed class CpuCudaProbe(Func<bool> isCudaAvailable) : ITensorBackendProbe
     {
-        public Task<TensorBackendAvailability> CheckAsync(TensorBackendKind backend, CancellationToken cancellationToken = default)
+        // Loading a native library or runtime to answer is synchronous work.
+        public Task<TensorBackendAvailability> CheckAsync(TensorBackendKind backend, CancellationToken cancellationToken = default) =>
+            Task.Run(() => Check(backend, cancellationToken), cancellationToken);
+
+        private TensorBackendAvailability Check(TensorBackendKind backend, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
             bool? available;
@@ -36,7 +40,7 @@ public static class TensorBackendProbes
             { available = false; reason = "The native CUDA runtime is unavailable on this machine."; }
             catch (Exception exception) when (exception is InvalidOperationException or IOException)
             { available = null; reason = "Backend availability could not be determined."; }
-            return Task.FromResult(new TensorBackendAvailability(backend, available, reason, DateTimeOffset.UtcNow));
+            return new TensorBackendAvailability(backend, available, reason, DateTimeOffset.UtcNow);
         }
     }
 }

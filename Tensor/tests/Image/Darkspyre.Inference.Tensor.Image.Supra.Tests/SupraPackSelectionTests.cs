@@ -22,11 +22,11 @@ public sealed class SupraPackSelectionTests : IDisposable
         await packs.InstallAsync(second.Key);
         var loader = new Loader();
         await using var engine = new SupraImageInference(packs, loader, TensorBackendKind.Cpu);
-        await engine.StartAsync();
+        await engine.StartAndWaitAsync();
         foreach (TensorModelPackDefinition pack in new[] { first, second })
         {
-            await engine.LoadAsync(pack.Key);
-            Assert.Equal(pack.Key, engine.Observation.Model);
+            await engine.LoadAndWaitAsync(pack.Key);
+            Assert.Equal(pack.Key, (await engine.GetObservationAsync()).Model);
             ImageGenerationResult result = await engine.GenerateAsync(new() { ModelId = pack.Key.ModelId, Prompt = "test", Steps = 1 });
             Assert.Equal(pack.Key.ModelId, result.Provenance!.ModelId);
             Assert.Equal(pack.Key.Revision, result.Provenance.ModelRevision);
@@ -35,9 +35,9 @@ public sealed class SupraPackSelectionTests : IDisposable
             { ModelId = "another/model", Prompt = "test" }));
             Assert.Equal(InferenceFailureCode.ModelUnavailable, wrong.Code);
             await Assert.ThrowsAsync<TensorModelPackException>(() => packs.RemoveAsync(pack.Key));
-            await engine.UnloadAsync();
+            await engine.UnloadAndWaitAsync();
             Assert.True(loader.Models[^1].Disposed);
-            Assert.Null(engine.Observation.Model);
+            Assert.Null((await engine.GetObservationAsync()).Model);
             await packs.RemoveAsync(pack.Key);
         }
         Assert.Equal(new[] { first.Key, second.Key }, loader.LoadedKeys);
@@ -105,7 +105,7 @@ public sealed class SupraPackSelectionTests : IDisposable
         foreach (TensorModelPackDefinition invalid in new[] { missing, wrong })
         {
             Assert.Throws<ArgumentException>(() => SupraSetup.CreateSession(new(SetupChangeIntent.Create, "invalid", null), new Target(), packs, offeredModels: [invalid]));
-            InferenceException failure = await Assert.ThrowsAsync<InferenceException>(() => engine.LoadAsync(invalid.Key));
+            InferenceException failure = await Assert.ThrowsAsync<InferenceException>(() => engine.LoadAndWaitAsync(invalid.Key));
             Assert.Equal(InferenceFailureCode.UnsupportedFeature, failure.Code);
         }
         Assert.Empty(loader.LoadedKeys);
@@ -123,9 +123,9 @@ public sealed class SupraPackSelectionTests : IDisposable
         using var cancellation = new CancellationTokenSource();
         var loader = new Loader { AfterCreate = model => { if (cancel) { cancellation.Cancel(); } else { model.Dispose(); throw new InvalidDataException(); } } };
         await using var engine = new SupraImageInference(packs, loader, TensorBackendKind.Cpu);
-        if (cancel) { await Assert.ThrowsAnyAsync<OperationCanceledException>(() => engine.LoadAsync(pack.Key, cancellation.Token)); }
-        else { Assert.Equal(InferenceFailureCode.ModelCorrupt, (await Assert.ThrowsAsync<InferenceException>(() => engine.LoadAsync(pack.Key))).Code); }
-        Assert.Null(engine.Observation.Model);
+        if (cancel) { await Assert.ThrowsAnyAsync<OperationCanceledException>(() => engine.LoadAndWaitAsync(pack.Key, cancellation.Token)); }
+        else { Assert.Equal(InferenceFailureCode.ModelCorrupt, (await Assert.ThrowsAsync<InferenceException>(() => engine.LoadAndWaitAsync(pack.Key))).Code); }
+        Assert.Null((await engine.GetObservationAsync()).Model);
         Assert.True(loader.Models.Single().Disposed);
         await packs.RemoveAsync(pack.Key);
     }
@@ -151,10 +151,10 @@ public sealed class SupraPackSelectionTests : IDisposable
         }
         };
         await using var engine = new SupraImageInference(packs, loader, TensorBackendKind.Cpu);
-        await engine.LoadAsync(pack.Key);
+        await engine.LoadAndWaitAsync(pack.Key);
         Task<ImageGenerationResult> request = Task.Run(() => engine.GenerateAsync(new() { ModelId = pack.Key.ModelId, Prompt = "test" }));
         Assert.True(entered.Wait(TimeSpan.FromSeconds(5)));
-        Task unloading = engine.UnloadAsync(new CancellationToken(urgent));
+        Task unloading = engine.UnloadAndWaitAsync(new CancellationToken(urgent));
         Assert.False(unloading.IsCompleted);
         Assert.False(loader.Models.Single().Disposed);
         finish.Set();
@@ -162,7 +162,7 @@ public sealed class SupraPackSelectionTests : IDisposable
         else { await request; }
         await unloading;
         Assert.True(loader.Models.Single().Disposed);
-        Assert.Null(engine.Observation.Model);
+        Assert.Null((await engine.GetObservationAsync()).Model);
     }
 
     private TensorModelPackManager Manager(HttpClient http, params TensorModelPackDefinition[] definitions) =>

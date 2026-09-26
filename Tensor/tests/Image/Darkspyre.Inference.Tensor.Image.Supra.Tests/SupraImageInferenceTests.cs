@@ -10,7 +10,7 @@ public sealed class SupraImageInferenceTests
     public async Task ValidRequestNeverLoadsAHiddenModel()
     {
         await using var inference = new SupraImageInference(new MissingPackManager());
-        await inference.StartAsync();
+        await inference.StartAndWaitAsync();
         var request = new ImageGenerationRequest
         {
             ModelId = TensorImageModels.Supra2Image.Key.ModelId,
@@ -21,7 +21,7 @@ public sealed class SupraImageInferenceTests
             () => inference.GenerateAsync(request));
 
         Assert.Equal(InferenceFailureCode.ModelUnavailable, exception.Code);
-        await inference.StopAsync();
+        await inference.StopAndWaitAsync();
     }
 
     [Fact]
@@ -75,7 +75,7 @@ public sealed class SupraImageInferenceTests
         };
 
         InferenceException exception = await Assert.ThrowsAsync<InferenceException>(
-            () => inference.LoadAsync(TensorImageModels.Supra2Image.Key));
+            () => inference.LoadAndWaitAsync(TensorImageModels.Supra2Image.Key));
 
         Assert.Equal(InferenceFailureCode.ModelUnavailable, exception.Code);
     }

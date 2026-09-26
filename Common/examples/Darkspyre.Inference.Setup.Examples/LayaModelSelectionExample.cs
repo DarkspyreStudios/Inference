@@ -31,11 +31,34 @@ public static class LayaModelSelectionExample
         ArgumentNullException.ThrowIfNull(request);
         await using var engine = new LayaDecisionInference(packs, TensorBackendKind.Cpu);
         await engine.StartAsync(cancellationToken).ConfigureAwait(false);
-        await engine.LoadAsync(first, cancellationToken).ConfigureAwait(false);
+        await AcceptAndWaitAsync(engine, () => engine.LoadAsync(first, cancellationToken), TensorEngineState.Loaded, cancellationToken).ConfigureAwait(false);
         await engine.DecideAsync(request with { ModelId = first.ModelId }, cancellationToken).ConfigureAwait(false);
-        await engine.UnloadAsync(CancellationToken.None).ConfigureAwait(false);
-        await engine.LoadAsync(second, cancellationToken).ConfigureAwait(false);
+        await AcceptAndWaitAsync(engine, () => engine.UnloadAsync(CancellationToken.None), TensorEngineState.Unloaded, cancellationToken).ConfigureAwait(false);
+        await AcceptAndWaitAsync(engine, () => engine.LoadAsync(second, cancellationToken), TensorEngineState.Loaded, cancellationToken).ConfigureAwait(false);
         return await engine.DecideAsync(request with { ModelId = second.ModelId }, cancellationToken).ConfigureAwait(false);
         // await using performs terminal Stop after the final request (also on error).
+    }
+
+    /// <summary>Lifecycle calls return once accepted; the outcome arrives through EngineStatusChanged.</summary>
+    private static async Task AcceptAndWaitAsync(ITensorModelInstance engine, Func<Task> accept, TensorEngineState target,
+        CancellationToken cancellationToken)
+    {
+        var outcome = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        void OnStatus(object? sender, TensorEngineStatus status)
+        {
+            if (status.State == target) { outcome.TrySetResult(); }
+            else if (status.State == TensorEngineState.Failed) { outcome.TrySetException(status.Error!); }
+        }
+
+        engine.EngineStatusChanged += OnStatus;
+        try
+        {
+            await accept().ConfigureAwait(false);
+            await outcome.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            engine.EngineStatusChanged -= OnStatus;
+        }
     }
 }

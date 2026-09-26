@@ -59,6 +59,34 @@ public sealed class TensorMetadataReaderTests
         Assert.Single(source.Reads);
     }
 
+    [Fact]
+    public async Task AParserThatCatchesTheMissingRangeStillRunsAgainOverDownloadedBytes()
+    {
+        var source = new Source();
+        var reader = new TensorMetadataReader(source);
+        int result = await reader.ReadAsync(Artifact, stream =>
+        {
+            try { return stream.ReadByte(); }
+            catch (IOException) { return -1; }
+        });
+        Assert.Equal(0, result);
+        Assert.Single(source.Reads);
+    }
+
+    [Fact]
+    public async Task SequentialReadsDoubleTheDownloadWindow()
+    {
+        var source = new Source();
+        var reader = new TensorMetadataReader(source);
+        await reader.ReadAsync(Artifact, stream =>
+        {
+            stream.ReadExactly(new byte[4 * 65536]);
+            return 0;
+        });
+        Assert.Equal([65536, 131072, 262144], source.Reads.Select(read => read.Length));
+        Assert.Equal([0L, 65536L, 196608L], source.Reads.Select(read => read.Offset));
+    }
+
     private sealed class Source : ITensorModelSource
     {
         public string Id => "test";

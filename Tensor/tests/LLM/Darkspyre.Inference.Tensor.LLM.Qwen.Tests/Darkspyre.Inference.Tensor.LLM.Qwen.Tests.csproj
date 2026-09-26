@@ -15,9 +15,11 @@
 
   <ItemGroup>
     <Using Include="Xunit" />
+    <Using Include="Darkspyre.Inference.Tensor.Testing" />
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\..\Common\Darkspyre.Inference.Tensor.Testing\Darkspyre.Inference.Tensor.Testing.csproj" />
     <ProjectReference Include="..\..\..\src\LLM\Darkspyre.Inference.Tensor.LLM.Qwen\Darkspyre.Inference.Tensor.LLM.Qwen.csproj" />
   </ItemGroup>
 </Project>

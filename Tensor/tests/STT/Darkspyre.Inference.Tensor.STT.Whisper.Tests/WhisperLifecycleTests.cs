@@ -12,7 +12,7 @@ public sealed class WhisperLifecycleTests
     public async Task ResidentModelServesRepeatedRequestsAndCanBeReplacedAfterUnload()
     {
         await using var host = new WhisperFixture.Host();
-        await host.Engine.StartAsync(); await host.Engine.StartAsync();
+        await host.Engine.StartAndWaitAsync(); await host.Engine.StartAndWaitAsync();
         Assert.Equal(InferenceFailureCode.ModelUnavailable, (await Assert.ThrowsAsync<InferenceException>(() => host.Engine.TranscribeAsync(Request))).Code);
         Assert.Equal(0, host.Handler.Calls);
         await host.LoadAsync();
@@ -26,19 +26,19 @@ public sealed class WhisperLifecycleTests
             Assert.Single(result.Segments);
         }
         Assert.Single(host.Loader.Models); Assert.Equal(1, host.Handler.Calls);
-        await Assert.ThrowsAsync<InvalidOperationException>(() => host.Engine.LoadAsync(host.Pack.Key));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => host.Engine.LoadAndWaitAsync(host.Pack.Key));
         await Assert.ThrowsAsync<TensorModelPackException>(() => host.Packs.RemoveAsync(host.Pack.Key));
         string installed = host.Loader.Models[0].Path;
-        await host.Engine.UnloadAsync();
-        Assert.True(host.Loader.Models[0].Disposed); Assert.Null(host.Engine.Observation.Model);
+        await host.Engine.UnloadAndWaitAsync();
+        Assert.True(host.Loader.Models[0].Disposed); Assert.Null((await host.Engine.GetObservationAsync()).Model);
         Assert.True(File.Exists(installed)); WhisperFixture.AssertNoOpenHandle(installed);
         TensorModelPackDefinition second = host.Pack with { Key = new("host/another-whisper", "two") };
-        await host.Packs.RegisterAsync(second); await host.Packs.InstallAsync(second.Key); await host.Engine.LoadAsync(second.Key);
+        await host.Packs.RegisterAsync(second); await host.Packs.InstallAsync(second.Key); await host.Engine.LoadAndWaitAsync(second.Key);
         Assert.Equal(second.Key.ModelId, (await host.Engine.TranscribeAsync(Request)).Provenance.ModelId);
         Assert.Equal(InferenceFailureCode.ModelUnavailable, (await Assert.ThrowsAsync<InferenceException>(() => host.Engine.TranscribeAsync(Request with { ModelId = host.Pack.Key.ModelId }))).Code);
-        await host.Engine.StopAsync(); await host.Engine.StopAsync();
-        Assert.True(host.Engine.Observation.IsStopped);
-        await Assert.ThrowsAsync<ObjectDisposedException>(() => host.Engine.LoadAsync(second.Key));
+        await host.Engine.StopAndWaitAsync(); await host.Engine.StopAsync(); // A second Stop is a no-op.
+        Assert.True((await host.Engine.GetObservationAsync()).State == TensorEngineState.Stopped);
+        await Assert.ThrowsAsync<ObjectDisposedException>(() => host.Engine.LoadAndWaitAsync(second.Key));
         await host.Engine.StartAsync(); // Start remains an allowed no-op, not a reset of terminal Stop.
         await Assert.ThrowsAsync<ObjectDisposedException>(() => host.Engine.TranscribeAsync(Request));
     }
@@ -56,7 +56,7 @@ public sealed class WhisperLifecycleTests
         host.Loader.Models[0].Processing = async _ => { entered.SetResult(); await finish.Task; };
         Task<SpeechTranscriptionResult> request = host.Engine.TranscribeAsync(Request);
         await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
-        Task unloading = stop ? host.Engine.StopAsync(new(urgent)) : host.Engine.UnloadAsync(new(urgent));
+        Task unloading = stop ? host.Engine.StopAndWaitAsync(new(urgent)) : host.Engine.UnloadAndWaitAsync(new(urgent));
         Assert.False(unloading.IsCompleted); Assert.False(host.Loader.Models[0].Disposed);
         Assert.True(File.Exists(host.Loader.Models[0].Path));
         finish.SetResult();
@@ -77,8 +77,8 @@ public sealed class WhisperLifecycleTests
         var loader = new WhisperFixture.Loader();
         await using var engine = new WhisperSpeechToTextInference(packs, loader);
         await packs.InstallAsync(pack.Key);
-        Assert.Equal(InferenceFailureCode.ModelCorrupt, (await Assert.ThrowsAsync<InferenceException>(() => engine.LoadAsync(pack.Key))).Code);
-        Assert.Null(engine.Observation.Model); Assert.Empty(loader.Models);
+        Assert.Equal(InferenceFailureCode.ModelCorrupt, (await Assert.ThrowsAsync<InferenceException>(() => engine.LoadAndWaitAsync(pack.Key))).Code);
+        Assert.Null((await engine.GetObservationAsync()).Model); Assert.Empty(loader.Models);
         await using (TensorModelPackLease lease = await packs.AcquireAsync(pack.Key))
         {
             WhisperFixture.AssertNoOpenHandle(lease.GetRequiredArtifact("model"));
@@ -90,9 +90,9 @@ public sealed class WhisperLifecycleTests
     public async Task UnsupportedBackendAndUninstalledPackFailWithoutNativeWork()
     {
         await using var host = new WhisperFixture.Host();
-        Assert.Equal(InferenceFailureCode.ModelUnavailable, (await Assert.ThrowsAsync<InferenceException>(() => host.Engine.LoadAsync(host.Pack.Key))).Code);
+        Assert.Equal(InferenceFailureCode.ModelUnavailable, (await Assert.ThrowsAsync<InferenceException>(() => host.Engine.LoadAndWaitAsync(host.Pack.Key))).Code);
         await using var gpu = new WhisperSpeechToTextInference(host.Packs, host.Loader, TensorBackendKind.Cuda);
-        Assert.Equal(InferenceFailureCode.BackendUnavailable, (await Assert.ThrowsAsync<InferenceException>(() => gpu.LoadAsync(host.Pack.Key))).Code);
+        Assert.Equal(InferenceFailureCode.BackendUnavailable, (await Assert.ThrowsAsync<InferenceException>(() => gpu.LoadAndWaitAsync(host.Pack.Key))).Code);
         Assert.Equal(0, host.Handler.Calls); Assert.Empty(host.Loader.Models);
     }
 
@@ -138,7 +138,7 @@ public sealed class WhisperLifecycleTests
         Assert.Equal(TimeSpan.Zero, enumerator.Current.Transcription.Segments[0].Start);
         Task<bool>? next = urgent ? enumerator.MoveNextAsync().AsTask() : null;
         if (urgent) await waiting.Task.WaitAsync(TimeSpan.FromSeconds(5));
-        Task unloading = host.Engine.UnloadAsync(new(urgent));
+        Task unloading = host.Engine.UnloadAndWaitAsync(new(urgent));
         Assert.False(unloading.IsCompleted);
         if (next is not null) await Assert.ThrowsAnyAsync<OperationCanceledException>(() => next);
         await enumerator.DisposeAsync(); await unloading;
@@ -152,8 +152,8 @@ public sealed class WhisperLifecycleTests
         await host.Packs.InstallAsync(host.Pack.Key);
         using var cancellation = new CancellationTokenSource();
         host.Loader.Loaded = _ => cancellation.Cancel();
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => host.Engine.LoadAsync(host.Pack.Key, cancellation.Token));
-        Assert.Null(host.Engine.Observation.Model);
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => host.Engine.LoadAndWaitAsync(host.Pack.Key, cancellation.Token));
+        Assert.Null((await host.Engine.GetObservationAsync()).Model);
         Assert.True(host.Loader.Models.Single().Disposed); WhisperFixture.AssertNoOpenHandle(host.Loader.Models[0].Path);
         await host.Packs.RemoveAsync(host.Pack.Key);
     }

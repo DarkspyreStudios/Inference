@@ -12,8 +12,15 @@ TensorModelPackDefinition selected = TensorSpeechModels.Whisper.SingleOrDefault(
 string? packDirectory = builder.Configuration["TensorStore"];
 using var packs = new TensorModelPackManager(new(TensorSpeechModels.Whisper), packDirectory);
 await using var engine = new WhisperSpeechToTextInference(packs, TensorBackendKind.Cpu);
+var loaded = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+engine.EngineStatusChanged += (_, status) =>
+{
+    if (status.State == TensorEngineState.Loaded) loaded.TrySetResult();
+    else if (status.State == TensorEngineState.Failed) loaded.TrySetException(status.Error!);
+};
 await engine.StartAsync();
 await engine.LoadAsync(selected.Key); // No download fallback. Installation is an explicit host operation outside this example.
+await loaded.Task; // LoadAsync returns once accepted; Loaded or Failed arrives through EngineStatusChanged.
 await using var app = builder.Build();
 app.MapPost("/transcribe", async (PcmTranscriptionRequest request, CancellationToken token) =>
 {

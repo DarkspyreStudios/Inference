@@ -11,10 +11,7 @@ public sealed class WhisperSpeechToTextInference : ITensorSpeechToTextInference
 {
     private readonly ITensorModelPackManager _packs;
     private readonly IWhisperLoader _loader;
-    private readonly TensorModelLifetime _lifetime = new();
-    private readonly Lock _stopGate = new();
-    private Task? _stopTask;
-    private volatile bool _stopping;
+    private readonly TensorModelLifetime _lifetime;
     private IWhisperModel? _model;
     private TensorModelPackLease? _lease;
 
@@ -26,12 +23,32 @@ public sealed class WhisperSpeechToTextInference : ITensorSpeechToTextInference
         ArgumentNullException.ThrowIfNull(packs);
         ArgumentNullException.ThrowIfNull(loader);
         _packs = packs; _loader = loader; RequestedBackend = backend;
+        _lifetime = new(this);
     }
 
     public InferenceImplementationDescriptor Descriptor => WhisperSetup.Definition.Implementation;
-    public TensorModelObservation Observation => _lifetime.Observation;
+
+    public event EventHandler<TensorEngineStatus>? EngineStatusChanged
+    {
+        add => _lifetime.EngineStatusChanged += value;
+        remove => _lifetime.EngineStatusChanged -= value;
+    }
+
+    public Task<TensorModelObservation> GetObservationAsync(CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return Task.FromResult(_lifetime.Observation);
+    }
     public TensorBackendKind RequestedBackend { get; }
-    public Task StartAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+    /// <summary>Start after Stop is an allowed no-op; it does not reset a stopped instance.</summary>
+    public Task StartAsync(CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (_lifetime.StopAccepted) return Task.CompletedTask;
+        return _lifetime.AcceptAsync(TensorEngineState.Starting, null, null,
+            _ => Task.FromResult(new TensorEngineStatus(null, null, TensorEngineState.Started, DateTimeOffset.UtcNow)),
+            cancellationToken);
+    }
 
     public async Task<IReadOnlyList<SpeechModelInfo>> ListModelsAsync(CancellationToken cancellationToken = default)
     {
@@ -45,7 +62,7 @@ public sealed class WhisperSpeechToTextInference : ITensorSpeechToTextInference
     public async Task<SpeechToTextCapabilities> GetCapabilitiesAsync(string? modelId = null, CancellationToken cancellationToken = default)
     {
         ThrowIfStopped(); cancellationToken.ThrowIfCancellationRequested();
-        TensorModelKey? loaded = Observation.Model;
+        TensorModelKey? loaded = _lifetime.Observation.Model;
         IWhisperModel? current = _model;
         if (loaded is not null && current is not null && (modelId is null || loaded.ModelId == modelId))
             return current.Metadata.Capabilities;
@@ -68,8 +85,16 @@ public sealed class WhisperSpeechToTextInference : ITensorSpeechToTextInference
         catch (ArgumentException) { throw new InferenceException(InferenceFailureCode.UnsupportedFeature, "This is not a compatible Whisper pack."); }
         if (RequestedBackend is not (TensorBackendKind.Auto or TensorBackendKind.Cpu))
             throw new InferenceException(InferenceFailureCode.BackendUnavailable, "This Whisper adapter supplies CPU inference only.");
+        TensorModelPackStatus installed = await _packs.GetStatusAsync(model, cancellationToken).ConfigureAwait(false);
+        if (installed.State != TensorModelPackState.Installed)
+            throw new InferenceException(InferenceFailureCode.ModelUnavailable, "The Whisper pack must be installed and verified before Load.");
+        await _lifetime.AcceptAsync(TensorEngineState.Loading, model, TensorBackendKind.Cpu,
+            token => LoadCoreAsync(definition, model, token), cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<TensorEngineStatus> LoadCoreAsync(TensorModelPackDefinition definition, TensorModelKey model, CancellationToken cancellationToken)
+    {
         using IDisposable loading = await _lifetime.EnterLoadAsync(cancellationToken).ConfigureAwait(false);
-        ThrowIfStopped();
         TensorModelPackLease lease;
         try { lease = await _packs.AcquireAsync(model, cancellationToken).ConfigureAwait(false); }
         catch (TensorModelPackException) { throw new InferenceException(InferenceFailureCode.ModelUnavailable, "The Whisper pack must be installed and verified before Load."); }
@@ -79,9 +104,9 @@ public sealed class WhisperSpeechToTextInference : ITensorSpeechToTextInference
             if (lease.Key != model) throw new InvalidDataException("The acquired Whisper pack identifies another model.");
             loaded = await _loader.LoadAsync(definition, lease, cancellationToken).ConfigureAwait(false);
             cancellationToken.ThrowIfCancellationRequested();
-            ThrowIfStopped();
             _model = loaded; _lease = lease;
             _lifetime.MarkLoaded(model, TensorBackendKind.Cpu);
+            return new TensorEngineStatus(model, TensorBackendKind.Cpu, TensorEngineState.Loaded, DateTimeOffset.UtcNow);
         }
         catch (Exception exception)
         {
@@ -156,10 +181,17 @@ public sealed class WhisperSpeechToTextInference : ITensorSpeechToTextInference
 
     public Task UnloadAsync(CancellationToken cancellationToken = default)
     {
-        lock (_stopGate) { return _stopTask ?? UnloadCoreAsync(cancellationToken); }
+        ThrowIfStopped();
+        TensorModelObservation current = _lifetime.Observation;
+        return _lifetime.AcceptAsync(TensorEngineState.Unloading, current.Model, current.Backend, async token =>
+        {
+            await ReleaseModelAsync(token).ConfigureAwait(false);
+            return new TensorEngineStatus(null, null, TensorEngineState.Unloaded, DateTimeOffset.UtcNow);
+        }, cancellationToken, teardown: true);
     }
 
-    private async Task UnloadCoreAsync(CancellationToken token)
+    /// <summary>Waits for active requests, or cancels them when the token is cancelled, then releases the model.</summary>
+    private async Task ReleaseModelAsync(CancellationToken token)
     {
         using IDisposable unloading = await _lifetime.EnterUnloadAsync(token).ConfigureAwait(false);
         if (_model is not null) await _model.DisposeAsync().ConfigureAwait(false);
@@ -171,17 +203,22 @@ public sealed class WhisperSpeechToTextInference : ITensorSpeechToTextInference
 
     public Task StopAsync(CancellationToken cancellationToken = default)
     {
-        lock (_stopGate)
+        if (_lifetime.StopAccepted) return Task.CompletedTask;
+        TensorModelObservation current = _lifetime.Observation;
+        return _lifetime.AcceptAsync(TensorEngineState.Stopping, current.Model, current.Backend, async token =>
         {
-            _stopping = true;
-            return _stopTask ??= StopCoreAsync(cancellationToken);
-        }
+            await ReleaseModelAsync(token).ConfigureAwait(false);
+            _lifetime.Dispose();
+            return new TensorEngineStatus(null, null, TensorEngineState.Stopped, DateTimeOffset.UtcNow);
+        }, cancellationToken, teardown: true, stops: true);
     }
-    private async Task StopCoreAsync(CancellationToken token)
+
+    /// <summary>Performs Stop and completes after native work has released model memory.</summary>
+    public async ValueTask DisposeAsync()
     {
-        await UnloadCoreAsync(token).ConfigureAwait(false);
-        _lifetime.Dispose();
+        await StopAsync().ConfigureAwait(false);
+        await _lifetime.WhenIdleAsync().ConfigureAwait(false);
     }
-    public async ValueTask DisposeAsync() => await StopAsync().ConfigureAwait(false);
-    private void ThrowIfStopped() => ObjectDisposedException.ThrowIf(_stopping, this);
+
+    private void ThrowIfStopped() => ObjectDisposedException.ThrowIf(_lifetime.StopAccepted, this);
 }

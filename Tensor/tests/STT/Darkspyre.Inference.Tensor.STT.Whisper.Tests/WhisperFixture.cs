@@ -94,7 +94,7 @@ internal static class WhisperFixture
             Packs = new(new([Pack]), Directory.Path, _http);
             Engine = new(Packs, Loader);
         }
-        public async Task LoadAsync() { await Packs.InstallAsync(Pack.Key); await Engine.LoadAsync(Pack.Key); }
+        public async Task LoadAsync() { await Packs.InstallAsync(Pack.Key); await Engine.LoadAndWaitAsync(Pack.Key); }
         public async ValueTask DisposeAsync() { await Engine.DisposeAsync(); Packs.Dispose(); _http.Dispose(); Directory.Dispose(); }
     }
 }

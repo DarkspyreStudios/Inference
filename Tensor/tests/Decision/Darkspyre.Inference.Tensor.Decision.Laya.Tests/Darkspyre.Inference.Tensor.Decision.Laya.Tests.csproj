@@ -15,10 +15,12 @@
 
   <ItemGroup>
     <Using Include="Xunit" />
+    <Using Include="Darkspyre.Inference.Tensor.Testing" />
     <None Update="Fixtures/**/*" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\..\Common\Darkspyre.Inference.Tensor.Testing\Darkspyre.Inference.Tensor.Testing.csproj" />
     <ProjectReference Include="..\..\..\src\Decision\Darkspyre.Inference.Tensor.Decision.Laya\Darkspyre.Inference.Tensor.Decision.Laya.csproj" />
   </ItemGroup>
 </Project>

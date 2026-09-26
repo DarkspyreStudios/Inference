@@ -16,7 +16,7 @@ public sealed class LayaDecisionInference : ITensorDecisionInference, IDecisionI
     private readonly TensorBackendKind _requestedBackend;
     private readonly TensorExecutionCoordinator _coordinator;
     private readonly bool _ownsCoordinator;
-    private readonly TensorModelLifetime _lifetime = new();
+    private readonly TensorModelLifetime _lifetime;
     private TensorModelPackLease? _modelLease;
     private LayaModelResources? _resources;
     private LayaAgentConfiguration? _configuration;
@@ -39,6 +39,7 @@ public sealed class LayaDecisionInference : ITensorDecisionInference, IDecisionI
         ArgumentNullException.ThrowIfNull(loader);
         _packs = packs;
         _loader = loader;
+        _lifetime = new(this);
 
         _requestedBackend = backend;
         _coordinator = coordinator ?? new TensorExecutionCoordinator();
@@ -96,38 +97,44 @@ public sealed class LayaDecisionInference : ITensorDecisionInference, IDecisionI
         long started = Stopwatch.GetTimestamp();
         int inputTokens = 0;
         var answers = new Dictionary<string, DecisionAnswer>(StringComparer.Ordinal);
-        foreach (DecisionQuestion question in request.Questions)
+        // Tokenizing and ONNX Runtime's Run are synchronous CPU and native work.
+        await Task.Run(() => AnswerQuestions(), executionToken).ConfigureAwait(false);
+
+        void AnswerQuestions()
         {
-            executionToken.ThrowIfCancellationRequested();
-            LayaSequence sequence = LayaSequenceBuilder.Build(resources.Tokenizer, request.State, question,
-                configuration.MaximumLength, configuration.MaximumHeadLength);
-            if (sequence.MarkerPositions.Length != sequence.OptionIds.Length
-                || sequence.OptionIds.Length > resources.Model.MaximumOptions)
+            foreach (DecisionQuestion question in request.Questions)
             {
-                throw new InferenceException(
-                    InferenceFailureCode.InvalidRequest,
-                    $"Question '{question.Id}' has too many options for the Laya input window.");
-            }
-
-            inputTokens = checked(inputTokens + sequence.TokenIds.Length);
-            LayaModelOutput output;
-            try
-            {
-                output = resources.Model.Forward(sequence, executionToken);
                 executionToken.ThrowIfCancellationRequested();
-            }
-            catch (Exception exception) when (exception is not OperationCanceledException and not InferenceException)
-            {
-                throw new InferenceException(
-                    InferenceFailureCode.ExecutionFailed,
-                    $"Laya failed while evaluating question '{question.Id}'.",
-                    exception);
-            }
+                LayaSequence sequence = LayaSequenceBuilder.Build(resources.Tokenizer, request.State, question,
+                    configuration.MaximumLength, configuration.MaximumHeadLength);
+                if (sequence.MarkerPositions.Length != sequence.OptionIds.Length
+                    || sequence.OptionIds.Length > resources.Model.MaximumOptions)
+                {
+                    throw new InferenceException(
+                        InferenceFailureCode.InvalidRequest,
+                        $"Question '{question.Id}' has too many options for the Laya input window.");
+                }
 
-            double temperature = configuration.Temperature(sequence.QuestionType, sequence.OptionIds.Length);
-            float[] scaled = output.Logits.Select(logit => checked((float)(logit / temperature))).ToArray();
-            float[] probabilities = LayaOnnxModel.Softmax(scaled);
-            answers.Add(question.Id, CreateAnswer(question, sequence.OptionIds, probabilities, output.ActionProbability));
+                inputTokens = checked(inputTokens + sequence.TokenIds.Length);
+                LayaModelOutput output;
+                try
+                {
+                    output = resources.Model.Forward(sequence, executionToken);
+                    executionToken.ThrowIfCancellationRequested();
+                }
+                catch (Exception exception) when (exception is not OperationCanceledException and not InferenceException)
+                {
+                    throw new InferenceException(
+                        InferenceFailureCode.ExecutionFailed,
+                        $"Laya failed while evaluating question '{question.Id}'.",
+                        exception);
+                }
+
+                double temperature = configuration.Temperature(sequence.QuestionType, sequence.OptionIds.Length);
+                float[] scaled = output.Logits.Select(logit => checked((float)(logit / temperature))).ToArray();
+                float[] probabilities = LayaOnnxModel.Softmax(scaled);
+                answers.Add(question.Id, CreateAnswer(question, sequence.OptionIds, probabilities, output.ActionProbability));
+            }
         }
 
         return new DecisionInferenceResult
@@ -147,8 +154,6 @@ public sealed class LayaDecisionInference : ITensorDecisionInference, IDecisionI
         };
     }
 
-    public Task StartAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
-
     public async Task<DecisionInputMeasurement> MeasureAsync(
         DecisionInferenceRequest request,
         CancellationToken cancellationToken = default)
@@ -165,52 +170,44 @@ public sealed class LayaDecisionInference : ITensorDecisionInference, IDecisionI
         TensorModelKey selected = _modelLease?.Key
             ?? throw new InferenceException(InferenceFailureCode.ModelUnavailable, "The Laya model pack was not loaded.");
         ValidateModelId(request.ModelId, selected);
-        return meter.Measure(request, modelUse.CancellationToken);
+        CancellationToken executionToken = modelUse.CancellationToken;
+        // Tokenizing is synchronous CPU work.
+        return await Task.Run(() => meter.Measure(request, executionToken), executionToken).ConfigureAwait(false);
     }
 
-    public TensorModelObservation Observation => _lifetime.Observation;
+    public event EventHandler<TensorEngineStatus>? EngineStatusChanged
+    {
+        add => _lifetime.EngineStatusChanged += value;
+        remove => _lifetime.EngineStatusChanged -= value;
+    }
+
+    public Task<TensorModelObservation> GetObservationAsync(CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return Task.FromResult(_lifetime.Observation);
+    }
+
     public TensorBackendKind RequestedBackend => _requestedBackend;
 
-    public async Task UnloadAsync(CancellationToken cancellationToken = default)
+    /// <summary>Start after Stop is an allowed no-op; it does not reset a stopped instance.</summary>
+    public Task StartAsync(CancellationToken cancellationToken = default)
     {
-        using IDisposable unloading = await _lifetime.EnterUnloadAsync(cancellationToken).ConfigureAwait(false);
-        _resources?.Dispose();
-        _resources = null;
-        _configuration = null;
-        _meter = null;
-        if (_modelLease is not null)
+        cancellationToken.ThrowIfCancellationRequested();
+        if (_lifetime.StopAccepted)
         {
-            await _modelLease.DisposeAsync().ConfigureAwait(false);
-            _modelLease = null;
+            return Task.CompletedTask;
         }
 
-        _loadedBackend = null;
-        _lifetime.MarkUnloaded();
+        return _lifetime.AcceptAsync(TensorEngineState.Starting, null, null,
+            _ => Task.FromResult(new TensorEngineStatus(null, null, TensorEngineState.Started, DateTimeOffset.UtcNow)),
+            cancellationToken);
     }
-
-    public async Task StopAsync(CancellationToken cancellationToken = default)
-    {
-        if (_disposed)
-        {
-            return;
-        }
-
-        await UnloadAsync(cancellationToken).ConfigureAwait(false);
-        _disposed = true;
-        _lifetime.Dispose();
-        if (_ownsCoordinator)
-        {
-            _coordinator.Dispose();
-        }
-
-    }
-
-    public async ValueTask DisposeAsync() => await StopAsync().ConfigureAwait(false);
 
     public async Task LoadAsync(TensorModelKey model, CancellationToken cancellationToken = default)
     {
         ThrowIfDisposed();
         ArgumentNullException.ThrowIfNull(model);
+        cancellationToken.ThrowIfCancellationRequested();
         TensorModelPackDefinition definition;
         try
         {
@@ -229,8 +226,6 @@ public sealed class LayaDecisionInference : ITensorDecisionInference, IDecisionI
         catch (ArgumentException exception)
         { throw new InferenceException(InferenceFailureCode.UnsupportedFeature, exception.Message, exception); }
 
-        using IDisposable loading = await _lifetime.EnterLoadAsync(cancellationToken).ConfigureAwait(false);
-
         TensorBackendKind backend = ResolveBackend(_requestedBackend);
         if (backend is not (TensorBackendKind.CoreMl or TensorBackendKind.Cpu) || !definition.SupportedBackends.Contains(backend))
         {
@@ -239,6 +234,21 @@ public sealed class LayaDecisionInference : ITensorDecisionInference, IDecisionI
                 $"Model pack '{model}' does not support backend '{backend}'.");
         }
 
+        TensorModelPackStatus installed = await _packs.GetStatusAsync(model, cancellationToken).ConfigureAwait(false);
+        if (installed.State != TensorModelPackState.Installed)
+        {
+            throw new InferenceException(InferenceFailureCode.ModelUnavailable,
+                installed.Detail ?? $"Model pack '{model}' is not installed.");
+        }
+
+        await _lifetime.AcceptAsync(TensorEngineState.Loading, model, backend,
+            token => LoadCoreAsync(model, backend, token), cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<TensorEngineStatus> LoadCoreAsync(
+        TensorModelKey model, TensorBackendKind backend, CancellationToken cancellationToken)
+    {
+        using IDisposable loading = await _lifetime.EnterLoadAsync(cancellationToken).ConfigureAwait(false);
         TensorModelPackLease lease;
         try
         {
@@ -265,6 +275,7 @@ public sealed class LayaDecisionInference : ITensorDecisionInference, IDecisionI
             _modelLease = lease;
             _loadedBackend = backend;
             loadedResources = null;
+            return new TensorEngineStatus(model, backend, TensorEngineState.Loaded, DateTimeOffset.UtcNow);
         }
         catch (Exception exception)
         {
@@ -281,6 +292,64 @@ public sealed class LayaDecisionInference : ITensorDecisionInference, IDecisionI
                 $"ONNX Runtime could not load Laya on backend '{backend}'.",
                 exception);
         }
+    }
+
+    public Task UnloadAsync(CancellationToken cancellationToken = default)
+    {
+        ThrowIfDisposed();
+        TensorModelObservation current = _lifetime.Observation;
+        return _lifetime.AcceptAsync(TensorEngineState.Unloading, current.Model, current.Backend, async token =>
+        {
+            await ReleaseModelAsync(token).ConfigureAwait(false);
+            return new TensorEngineStatus(null, null, TensorEngineState.Unloaded, DateTimeOffset.UtcNow);
+        }, cancellationToken, teardown: true);
+    }
+
+    public Task StopAsync(CancellationToken cancellationToken = default)
+    {
+        if (_lifetime.StopAccepted)
+        {
+            return Task.CompletedTask;
+        }
+
+        TensorModelObservation current = _lifetime.Observation;
+        return _lifetime.AcceptAsync(TensorEngineState.Stopping, current.Model, current.Backend, async token =>
+        {
+            await ReleaseModelAsync(token).ConfigureAwait(false);
+            _disposed = true;
+            if (_ownsCoordinator)
+            {
+                _coordinator.Dispose();
+            }
+
+            _lifetime.Dispose();
+            return new TensorEngineStatus(null, null, TensorEngineState.Stopped, DateTimeOffset.UtcNow);
+        }, cancellationToken, teardown: true, stops: true);
+    }
+
+    /// <summary>Performs Stop and completes after native work has released model memory.</summary>
+    public async ValueTask DisposeAsync()
+    {
+        await StopAsync().ConfigureAwait(false);
+        await _lifetime.WhenIdleAsync().ConfigureAwait(false);
+    }
+
+    /// <summary>Waits for active requests, or cancels them when the token is cancelled, then releases the model.</summary>
+    private async Task ReleaseModelAsync(CancellationToken urgency)
+    {
+        using IDisposable unloading = await _lifetime.EnterUnloadAsync(urgency).ConfigureAwait(false);
+        _resources?.Dispose();
+        _resources = null;
+        _configuration = null;
+        _meter = null;
+        if (_modelLease is not null)
+        {
+            await _modelLease.DisposeAsync().ConfigureAwait(false);
+            _modelLease = null;
+        }
+
+        _loadedBackend = null;
+        _lifetime.MarkUnloaded();
     }
 
     private static DecisionAnswer CreateAnswer(
@@ -462,5 +531,5 @@ public sealed class LayaDecisionInference : ITensorDecisionInference, IDecisionI
         ?? typeof(InferenceSession).Assembly.GetName().Version?.ToString()
         ?? "unknown";
 
-    private void ThrowIfDisposed() => ObjectDisposedException.ThrowIf(_disposed, this);
+    private void ThrowIfDisposed() => ObjectDisposedException.ThrowIf(_disposed || _lifetime.StopAccepted, this);
 }

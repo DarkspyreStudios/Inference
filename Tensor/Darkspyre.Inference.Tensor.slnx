@@ -29,6 +29,7 @@
   </Folder>
   <Folder Name="/tests/Common/">
     <Project Path="tests/Common/Darkspyre.Inference.Tensor.Common.Tests/Darkspyre.Inference.Tensor.Common.Tests.csproj" />
+    <Project Path="tests/Common/Darkspyre.Inference.Tensor.Testing/Darkspyre.Inference.Tensor.Testing.csproj" />
   </Folder>
   <Folder Name="/src/STT/">
     <Project Path="src/STT/Darkspyre.Inference.Tensor.STT/Darkspyre.Inference.Tensor.STT.csproj" />

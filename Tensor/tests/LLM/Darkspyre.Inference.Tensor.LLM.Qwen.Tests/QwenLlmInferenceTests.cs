@@ -10,7 +10,7 @@ public sealed class QwenLlmInferenceTests
     public async Task ValidRequestNeverLoadsAHiddenModel()
     {
         await using var inference = new QwenLlmInference(new MissingPackManager());
-        await inference.StartAsync();
+        await inference.StartAndWaitAsync();
         var request = new LlmInferenceRequest
         {
             ModelId = TensorLlmModels.Qwen3FourBillionQ4Km.Key.ModelId,
@@ -25,7 +25,7 @@ public sealed class QwenLlmInferenceTests
         });
 
         Assert.Equal(InferenceFailureCode.ModelUnavailable, exception.Code);
-        await inference.StopAsync();
+        await inference.StopAndWaitAsync();
     }
 
     [Fact]

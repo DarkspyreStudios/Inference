@@ -45,7 +45,7 @@ public sealed class TensorSetupTests
     [Fact]
     public async Task PrecancelledUnloadStillReachesTheEngineAsUrgentTeardown()
     {
-        var runtime = new Runtime { Observation = new(Pack.Key, TensorBackendKind.Cpu, false, DateTimeOffset.UtcNow) };
+        var runtime = new Runtime { Observation = new(Pack.Key, TensorBackendKind.Cpu, TensorEngineState.Loaded, DateTimeOffset.UtcNow) };
         await using TensorSetupSession session = Edit(new Packs(), runtime);
         SetupActionResult result = await Action(session, SetupActionPurpose.Unload).ExecuteAsync(cancellationToken: new(true));
         Assert.Equal(SetupActionState.Completed, result.State);
@@ -54,7 +54,7 @@ public sealed class TensorSetupTests
     }
 
     [Fact]
-    public async Task HostModelChangesAreReadFromTheRuntimeNotASecondSetupCache()
+    public async Task HostModelChangesReachTheSessionThroughEngineStatus()
     {
         var runtime = new Runtime();
         await using TensorSetupSession session = Edit(new Packs(), runtime);
@@ -125,17 +125,25 @@ public sealed class TensorSetupTests
 
     private sealed class Runtime : ITensorModelInstance
     {
-        public TensorModelObservation Observation { get; set; } = new(null, null, false, DateTimeOffset.UtcNow);
+        public event EventHandler<TensorEngineStatus>? EngineStatusChanged;
+        public TensorModelObservation Observation { get; set; } = new(null, null, TensorEngineState.Unloaded, DateTimeOffset.UtcNow);
         public TensorBackendKind RequestedBackend => TensorBackendKind.Cpu;
         public bool Urgent { get; private set; }
         public int StopCalls { get; private set; }
+        public Task<TensorModelObservation> GetObservationAsync(CancellationToken cancellationToken = default) => Task.FromResult(Observation);
         public Task StartAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
         public Task LoadAsync(TensorModelKey model, CancellationToken cancellationToken = default)
-        { Observation = new(model, RequestedBackend, false, DateTimeOffset.UtcNow); return Task.CompletedTask; }
+        { Report(new(model, RequestedBackend, TensorEngineState.Loaded, DateTimeOffset.UtcNow)); return Task.CompletedTask; }
         public Task UnloadAsync(CancellationToken cancellationToken = default)
-        { Urgent = cancellationToken.IsCancellationRequested; Observation = new(null, null, false, DateTimeOffset.UtcNow); return Task.CompletedTask; }
+        { Urgent = cancellationToken.IsCancellationRequested; Report(new(null, null, TensorEngineState.Unloaded, DateTimeOffset.UtcNow)); return Task.CompletedTask; }
         public Task StopAsync(CancellationToken cancellationToken = default)
-        { StopCalls++; Observation = new(null, null, true, DateTimeOffset.UtcNow); return Task.CompletedTask; }
+        { StopCalls++; Report(new(null, null, TensorEngineState.Stopped, DateTimeOffset.UtcNow)); return Task.CompletedTask; }
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+
+        private void Report(TensorModelObservation observation)
+        {
+            Observation = observation;
+            EngineStatusChanged?.Invoke(this, new(observation.Model, observation.Backend, observation.State, observation.ObservedAt));
+        }
     }
 }

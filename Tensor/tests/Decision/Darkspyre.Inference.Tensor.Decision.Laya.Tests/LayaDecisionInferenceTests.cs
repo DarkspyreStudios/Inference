@@ -11,7 +11,7 @@ public sealed class LayaDecisionInferenceTests
     public async Task ValidRequestNeverLoadsAHiddenModel()
     {
         await using var inference = new LayaDecisionInference(new MissingPackManager());
-        await inference.StartAsync();
+        await inference.StartAndWaitAsync();
         var request = new DecisionInferenceRequest
         {
             ModelId = Pack.Key.ModelId,
@@ -23,7 +23,7 @@ public sealed class LayaDecisionInferenceTests
             () => inference.DecideAsync(request));
 
         Assert.Equal(InferenceFailureCode.ModelUnavailable, exception.Code);
-        await inference.StopAsync();
+        await inference.StopAndWaitAsync();
     }
 
     [Fact]
@@ -87,7 +87,7 @@ public sealed class LayaDecisionInferenceTests
         };
 
         InferenceException exception = await Assert.ThrowsAsync<InferenceException>(
-            () => inference.LoadAsync(Pack.Key));
+            () => inference.LoadAndWaitAsync(Pack.Key));
 
         Assert.Equal(InferenceFailureCode.ModelUnavailable, exception.Code);
     }

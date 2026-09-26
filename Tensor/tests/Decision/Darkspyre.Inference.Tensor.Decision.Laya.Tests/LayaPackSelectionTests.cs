@@ -26,7 +26,7 @@ public sealed class LayaPackSelectionTests : IDisposable
         await packs.InstallAsync(pack.Key);
         var loader = new Loader();
         await using var engine = new LayaDecisionInference(packs, loader, TensorBackendKind.Cpu);
-        await engine.LoadAsync(pack.Key);
+        await engine.LoadAndWaitAsync(pack.Key);
         await engine.DecideAsync(new DecisionInferenceRequest
         {
             ModelId = pack.Key.ModelId,
@@ -47,7 +47,7 @@ public sealed class LayaPackSelectionTests : IDisposable
         using var packs = Manager(http, pack);
         var loader = new Loader();
         await using var engine = new LayaDecisionInference(packs, loader, TensorBackendKind.Cpu);
-        InferenceException error = await Assert.ThrowsAsync<InferenceException>(() => engine.LoadAsync(pack.Key));
+        InferenceException error = await Assert.ThrowsAsync<InferenceException>(() => engine.LoadAndWaitAsync(pack.Key));
         Assert.Equal(InferenceFailureCode.UnsupportedFeature, error.Code);
         Assert.Empty(loader.Loaded);
     }
@@ -61,10 +61,10 @@ public sealed class LayaPackSelectionTests : IDisposable
         await packs.InstallAsync(pack.Key);
         var loader = new Loader();
         await using var engine = new LayaDecisionInference(packs, loader, TensorBackendKind.Cpu);
-        InferenceException error = await Assert.ThrowsAsync<InferenceException>(() => engine.LoadAsync(pack.Key));
+        InferenceException error = await Assert.ThrowsAsync<InferenceException>(() => engine.LoadAndWaitAsync(pack.Key));
         Assert.Equal(InferenceFailureCode.ModelCorrupt, error.Code);
         Assert.Empty(loader.Loaded);
-        Assert.Null(engine.Observation.Model);
+        Assert.Null((await engine.GetObservationAsync()).Model);
         Assert.Null((await engine.GetCapabilitiesAsync()).MaximumInputTokens);
         await packs.RemoveAsync(pack.Key);
     }
@@ -80,13 +80,13 @@ public sealed class LayaPackSelectionTests : IDisposable
         await packs.InstallAsync(second.Key);
         var loader = new Loader();
         await using var engine = new LayaDecisionInference(packs, loader, TensorBackendKind.Cpu);
-        await engine.StartAsync();
-        Assert.Null(engine.Observation.Model);
+        await engine.StartAndWaitAsync();
+        Assert.Null((await engine.GetObservationAsync()).Model);
         Assert.Null((await engine.GetCapabilitiesAsync()).MaximumInputTokens);
         foreach (TensorModelPackDefinition selected in new[] { first, second })
         {
-            await engine.LoadAsync(selected.Key);
-            Assert.Equal(selected.Key, engine.Observation.Model);
+            await engine.LoadAndWaitAsync(selected.Key);
+            Assert.Equal(selected.Key, (await engine.GetObservationAsync()).Model);
             Assert.Equal(selected.Key, loader.Loaded[^1]);
             Assert.Equal(3, (await engine.GetCapabilitiesAsync(selected.Key.ModelId)).SupportedQuestionKinds.Count);
             Assert.Equal(384, (await engine.GetCapabilitiesAsync()).MaximumInputTokens);
@@ -98,18 +98,18 @@ public sealed class LayaPackSelectionTests : IDisposable
             Assert.True(Assert.IsType<BooleanDecisionAnswer>(result.Answers["ready"]).Value);
             Assert.Equal(Math.Round(1 / (1 + Math.Exp(-2 / 1.006)), 4),
                 Assert.IsType<BooleanDecisionAnswer>(result.Answers["ready"]).TrueProbability);
-            await Assert.ThrowsAsync<InvalidOperationException>(() => engine.LoadAsync(selected.Key));
+            await Assert.ThrowsAsync<InvalidOperationException>(() => engine.LoadAndWaitAsync(selected.Key));
             await Assert.ThrowsAsync<TensorModelPackException>(() => packs.RemoveAsync(selected.Key));
-            await engine.UnloadAsync();
+            await engine.UnloadAndWaitAsync();
             Assert.True(loader.Models[^1].Disposed);
-            Assert.Null(engine.Observation.Model);
+            Assert.Null((await engine.GetObservationAsync()).Model);
             Assert.Null((await engine.GetCapabilitiesAsync()).MaximumInputTokens);
             await packs.RemoveAsync(selected.Key); // Unload releases the storage lease too.
         }
         Assert.Equal(2, loader.Loaded.Count);
-        await engine.StopAsync();
-        Assert.True(engine.Observation.IsStopped);
-        await Assert.ThrowsAsync<ObjectDisposedException>(() => engine.LoadAsync(first.Key));
+        await engine.StopAndWaitAsync();
+        Assert.True((await engine.GetObservationAsync()).State == TensorEngineState.Stopped);
+        await Assert.ThrowsAsync<ObjectDisposedException>(() => engine.LoadAndWaitAsync(first.Key));
     }
 
     [Theory]
@@ -122,11 +122,11 @@ public sealed class LayaPackSelectionTests : IDisposable
         using var packs = Manager(http, invalid);
         var loader = new Loader();
         await using var engine = new LayaDecisionInference(packs, loader, TensorBackendKind.Cpu);
-        InferenceException error = await Assert.ThrowsAsync<InferenceException>(() => engine.LoadAsync(invalid.Key));
+        InferenceException error = await Assert.ThrowsAsync<InferenceException>(() => engine.LoadAndWaitAsync(invalid.Key));
         Assert.Equal(InferenceFailureCode.UnsupportedFeature, error.Code);
         Assert.Contains(expected, error.Message, StringComparison.Ordinal);
         Assert.Empty(loader.Loaded);
-        Assert.Null(engine.Observation.Model);
+        Assert.Null((await engine.GetObservationAsync()).Model);
     }
 
     [Fact]
@@ -137,17 +137,17 @@ public sealed class LayaPackSelectionTests : IDisposable
         using var packs = Manager(http, pack);
         var loader = new Loader { Failure = new InferenceException(InferenceFailureCode.ModelCorrupt, "fixture load failure") };
         await using var engine = new LayaDecisionInference(packs, loader, TensorBackendKind.Cpu);
-        InferenceException missing = await Assert.ThrowsAsync<InferenceException>(() => engine.LoadAsync(new("absent", "1")));
+        InferenceException missing = await Assert.ThrowsAsync<InferenceException>(() => engine.LoadAndWaitAsync(new("absent", "1")));
         Assert.Equal(InferenceFailureCode.ModelUnavailable, missing.Code);
         await packs.InstallAsync(pack.Key);
-        InferenceException corrupt = await Assert.ThrowsAsync<InferenceException>(() => engine.LoadAsync(pack.Key));
+        InferenceException corrupt = await Assert.ThrowsAsync<InferenceException>(() => engine.LoadAndWaitAsync(pack.Key));
         Assert.Equal(InferenceFailureCode.ModelCorrupt, corrupt.Code);
-        Assert.Null(engine.Observation.Model);
+        Assert.Null((await engine.GetObservationAsync()).Model);
         await packs.RemoveAsync(pack.Key);
         loader.Failure = null;
         await packs.InstallAsync(pack.Key);
-        await engine.LoadAsync(pack.Key);
-        Assert.Equal(pack.Key, engine.Observation.Model);
+        await engine.LoadAndWaitAsync(pack.Key);
+        Assert.Equal(pack.Key, (await engine.GetObservationAsync()).Model);
     }
 
     [Fact]
@@ -160,9 +160,9 @@ public sealed class LayaPackSelectionTests : IDisposable
         using var cancellation = new CancellationTokenSource();
         var loader = new Loader { AfterLoad = cancellation.Cancel };
         await using var engine = new LayaDecisionInference(packs, loader, TensorBackendKind.Cpu);
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => engine.LoadAsync(pack.Key, cancellation.Token));
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => engine.LoadAndWaitAsync(pack.Key, cancellation.Token));
         Assert.True(Assert.Single(loader.Models).Disposed);
-        Assert.Null(engine.Observation.Model);
+        Assert.Null((await engine.GetObservationAsync()).Model);
         await packs.RemoveAsync(pack.Key);
     }
 
@@ -179,13 +179,13 @@ public sealed class LayaPackSelectionTests : IDisposable
         var nativeEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var loader = new Loader { Forward = () => { nativeEntered.TrySetResult(); nativeRelease.Wait(); } };
         await using var engine = new LayaDecisionInference(packs, loader, TensorBackendKind.Cpu);
-        await engine.LoadAsync(pack.Key);
+        await engine.LoadAndWaitAsync(pack.Key);
         Task<DecisionInferenceResult> request = Task.Run(() => engine.DecideAsync(Request(pack.Key.ModelId)));
         Task? unload = null;
         try
         {
             await nativeEntered.Task.WaitAsync(TimeSpan.FromSeconds(10));
-            unload = engine.UnloadAsync(new CancellationToken(urgent));
+            unload = engine.UnloadAndWaitAsync(new CancellationToken(urgent));
             Assert.False(unload.IsCompleted);
             Assert.False(Assert.Single(loader.Models).Disposed);
         }
@@ -194,7 +194,7 @@ public sealed class LayaPackSelectionTests : IDisposable
         else { Assert.Equal(pack.Key.ModelId, (await request).Provenance.ModelId); }
         await unload!;
         Assert.True(Assert.Single(loader.Models).Disposed);
-        Assert.Null(engine.Observation.Model);
+        Assert.Null((await engine.GetObservationAsync()).Model);
     }
 
     [Fact]
@@ -207,7 +207,7 @@ public sealed class LayaPackSelectionTests : IDisposable
         await using var engine = new LayaDecisionInference(packs, loader, TensorBackendKind.Cpu);
         await packs.InstallAsync(first.Key);
         await packs.InstallAsync(second.Key);
-        await engine.LoadAsync(first.Key);
+        await engine.LoadAndWaitAsync(first.Key);
         var target = new Target();
         await using TensorSetupSession setup = LayaSetup.CreateSession(new(SetupChangeIntent.Edit, "laya", "v1"), target,
             packs, [first, second], new(LayaSetup.Definition.Implementation.Id, first.Key, TensorBackendKind.Cpu), engine);
@@ -223,12 +223,12 @@ public sealed class LayaPackSelectionTests : IDisposable
         Assert.Equal(SetupActionState.Completed, (await Action(setup, SetupActionPurpose.Unload).ExecuteAsync()).State);
         Assert.Equal(SetupActionState.Completed, (await Action(setup, SetupActionPurpose.Load).ExecuteAsync()).State);
         Assert.True(setup.Snapshot.Status.Ready.Value);
-        Assert.Equal(second.Key, engine.Observation.Model);
+        Assert.Equal(second.Key, (await engine.GetObservationAsync()).Model);
         Assert.Equal(SetupCommitState.Committed, (await setup.CommitAsync()).State);
         Assert.Equal(second.Key, target.Changes!.Configuration.Model);
         Assert.True(target.Changes.RequiresUnload);
         await setup.DisposeAsync();
-        Assert.Equal(second.Key, engine.Observation.Model); // View/session disposal never owns the engine.
+        Assert.Equal(second.Key, (await engine.GetObservationAsync()).Model); // View/session disposal never owns the engine.
         Assert.Equal(InferenceCapability.Decision, Assert.Single(setup.Definition.Implementation.Tasks).GetCapability());
     }
 
@@ -294,7 +294,7 @@ public sealed class LayaPackSelectionTests : IDisposable
         InferenceException notLoaded = await Assert.ThrowsAsync<InferenceException>(() => engine.MeasureAsync(request));
         Assert.Equal(InferenceFailureCode.ModelUnavailable, notLoaded.Code);
 
-        await engine.LoadAsync(pack.Key);
+        await engine.LoadAndWaitAsync(pack.Key);
         DecisionInputMeasurement measurement = await engine.MeasureAsync(request);
         LayaFrame frame = LayaSequenceBuilder.Frame(new Tokenizer(), question, 384, 128);
         Assert.Equal(2000, measurement.StateTokens);
@@ -311,7 +311,7 @@ public sealed class LayaPackSelectionTests : IDisposable
             engine.MeasureAsync(request with { ModelId = "not-loaded" }));
         Assert.Equal(InferenceFailureCode.ModelUnavailable, wrongModel.Code);
 
-        await engine.UnloadAsync();
+        await engine.UnloadAndWaitAsync();
         InferenceException unloaded = await Assert.ThrowsAsync<InferenceException>(() => engine.MeasureAsync(request));
         Assert.Equal(InferenceFailureCode.ModelUnavailable, unloaded.Code);
 

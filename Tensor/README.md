@@ -66,17 +66,27 @@ download.
 
 The application starts and shuts down independently of this library. For a selected Tensor engine,
 the host calls `StartAsync`, `LoadAsync`, the capability's typed inference method as many times as
-needed, `UnloadAsync`, and `StopAsync`. `StartAsync` can be a no-op when an engine has no resources
-independent of its loaded model. `LoadAsync` accepts a registered `TensorModelKey` and attempts to
-load its installed pack. Running a request never loads a model implicitly. One engine instance holds
-one model at a time; after Unload, the host may load another model supported by that engine or use
-another instance. Separate instances can hold models concurrently, subject to available resources.
-The host serializes lifecycle calls (`LoadAsync`, `UnloadAsync`, and `StopAsync`) on a single instance;
-requests can run concurrently with a host-initiated unload or stop.
+needed, `UnloadAsync`, and `StopAsync`. Running a request never loads a model implicitly. One engine
+instance holds one model at a time; after Unload, the host may load another model supported by that
+engine or use another instance. Separate instances can hold models concurrently, subject to available
+resources. Requests can run concurrently with a host-initiated unload or stop.
+
+`StartAsync`, `LoadAsync`, `UnloadAsync` and `StopAsync` validate their input and return once the
+engine accepts the request. A model that is not registered, installed or supported fails on the
+call. The engine runs accepted work in order on a background thread and reports each transition
+through `EngineStatusChanged`: Starting, Started, Loading, Loaded, Unloading, Unloaded, Stopping,
+Stopped, or Failed with its error. The engine calls each listener and moves on; a listener with async
+work posts it and returns. `GetObservationAsync` returns the resident model, its backend and the
+latest state.
+
+The token passed to `UnloadAsync` or `StopAsync` stays live until the teardown finishes. From the
+moment a teardown is accepted, new requests are refused. An uncancelled teardown waits for active
+requests; cancelling the token, at the call or later, cancels them. Native work still finishes
+before model memory is released, and the engine reports Unloaded or Stopped only after that.
 
 `StopAsync` unloads any remaining model and releases the engine's other resources. Stop is terminal
-for that instance: create a new instance to run again. This is a host usage contract, not an extra
-state check added solely to reject a second Start call. `DisposeAsync` performs normal Stop cleanup.
+for that instance: create a new instance to run again. A second Stop and a Start after Stop are
+no-ops. `DisposeAsync` performs Stop and completes after native work has released model memory.
 
 The following example assumes the user has already installed the Supra model pack through the
 explicit `TensorModelPackManager.InstallAsync` action:
@@ -92,10 +102,18 @@ TensorModelPackDefinition supra = TensorImageModels.Supra2Image;
 using var packs = new TensorModelPackManager(new TensorModelCatalog([supra]), packDirectory);
 await using ITensorImageInference image = new SupraImageInference(packs);
 
+var loaded = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+image.EngineStatusChanged += (_, status) =>
+{
+    if (status.State == TensorEngineState.Loaded) { loaded.TrySetResult(); }
+    else if (status.State == TensorEngineState.Failed) { loaded.TrySetException(status.Error!); }
+};
+
 await image.StartAsync();
 try
 {
-    await image.LoadAsync(supra.Key);
+    await image.LoadAsync(supra.Key); // Returns once the engine accepts the load.
+    await loaded.Task;               // Loaded, or Failed with its error, arrives through the event.
     try
     {
         ImageGenerationResult result = await image.GenerateAsync(new ImageGenerationRequest
@@ -139,15 +157,17 @@ for local files/folders and independent URLs. Supply an `ITensorModelSource` thr
 host-configured artifact access, for example `new TensorArtifactReader(source, httpClient, access)`.
 
 Selection/Save does not install or load. Install, verify, load, unload and stop are distinct callable
-actions with declared side effects. The supplied instance is optional and remains host-owned. Its
-`Observation` is a read-only view published by `TensorModelLifetime`, not a parallel setup cache.
+actions with declared side effects. The supplied instance is optional and remains host-owned. The
+session reads its state through `GetObservationAsync` when created and after each
+`EngineStatusChanged` transition.
 Without an instance, Loaded/Ready remain unknown. A backend name is a supported selection, not proof
 that the backend is available. The explicit **Check backend prerequisites** action records available,
 unavailable or unknown runtime/device prerequisites without installing or loading a model. Qwen uses
 the loader's same Auto policy (GGML Metal on macOS, GGML CUDA elsewhere); Supra Auto can fall back
-to managed CPU. Laya Auto selects Core ML on macOS and CPU elsewhere. MLX checks its GPU device, GGML
-checks its chosen native backend, direct CUDA checks its device/driver, and Core ML checks that ONNX
-Runtime offers its Core ML execution provider. These observations do not guarantee memory allocation or successful model
+to managed CPU. Laya Auto selects Core ML on macOS and CPU elsewhere. No check starts a backend: GGML
+checks `GgmlBasicOps.CanInitializeBackend`, MLX checks that its native library is present, direct
+CUDA checks its device/driver, and Core ML checks that ONNX Runtime offers its Core ML execution
+provider. Every check runs on a background thread. These observations do not guarantee memory allocation or successful model
 loading. Edits invalidate the observation, and constructing/browsing a session never runs a probe.
 Loading requires an instance configured for the selected backend;
 the editor does not silently replace instances or interrupt application work.

@@ -28,8 +28,8 @@ public sealed class QwenPackSelectionTests : IDisposable
         Assert.All(await engine.ListModelsAsync(), model => Assert.Null(model.MaxContextTokens));
         foreach (TensorModelPackDefinition pack in new[] { first, second })
         {
-            await engine.LoadAsync(pack.Key);
-            Assert.Equal(pack.Key, engine.Observation.Model);
+            await engine.LoadAndWaitAsync(pack.Key);
+            Assert.Equal(pack.Key, (await engine.GetObservationAsync()).Model);
             Assert.Equal(8192, (await engine.ListModelsAsync()).Single(model => model.Id == pack.Key.ModelId).MaxContextTokens);
             LlmCompletionEvent completion = Assert.IsType<LlmCompletionEvent>((await Collect(engine, pack.Key.ModelId))[^1]);
             Assert.Equal(pack.Key.ModelId, completion.Result.Provenance!.ModelId);
@@ -38,8 +38,8 @@ public sealed class QwenPackSelectionTests : IDisposable
             InferenceException wrong = await Assert.ThrowsAsync<InferenceException>(() => Collect(engine, "another/model"));
             Assert.Equal(InferenceFailureCode.ModelUnavailable, wrong.Code);
             await Assert.ThrowsAsync<TensorModelPackException>(() => packs.RemoveAsync(pack.Key));
-            await engine.UnloadAsync();
-            Assert.Null(engine.Observation.Model);
+            await engine.UnloadAndWaitAsync();
+            Assert.Null((await engine.GetObservationAsync()).Model);
             Assert.Null(runtime.ContextLength);
             await packs.RemoveAsync(pack.Key);
         }
@@ -84,10 +84,10 @@ public sealed class QwenPackSelectionTests : IDisposable
         using var cancellation = new CancellationTokenSource();
         var runtime = new Runtime { OnLoad = () => { if (cancel) { cancellation.Cancel(); } else { throw new InvalidDataException(); } } };
         await using var engine = new QwenLlmInference(packs, runtime, TensorBackendKind.Cpu);
-        if (cancel) { await Assert.ThrowsAnyAsync<OperationCanceledException>(() => engine.LoadAsync(pack.Key, cancellation.Token)); }
-        else { Assert.Equal(InferenceFailureCode.ModelCorrupt, (await Assert.ThrowsAsync<InferenceException>(() => engine.LoadAsync(pack.Key))).Code); }
+        if (cancel) { await Assert.ThrowsAnyAsync<OperationCanceledException>(() => engine.LoadAndWaitAsync(pack.Key, cancellation.Token)); }
+        else { Assert.Equal(InferenceFailureCode.ModelCorrupt, (await Assert.ThrowsAsync<InferenceException>(() => engine.LoadAndWaitAsync(pack.Key))).Code); }
         Assert.Null(runtime.ContextLength);
-        Assert.Null(engine.Observation.Model);
+        Assert.Null((await engine.GetObservationAsync()).Model);
         await packs.RemoveAsync(pack.Key);
     }
 
@@ -102,10 +102,10 @@ public sealed class QwenPackSelectionTests : IDisposable
         await packs.InstallAsync(pack.Key);
         var runtime = new Runtime();
         await using var engine = new QwenLlmInference(packs, runtime, TensorBackendKind.Cpu);
-        await engine.LoadAsync(pack.Key);
+        await engine.LoadAndWaitAsync(pack.Key);
         await using IAsyncEnumerator<LlmStreamEvent> stream = engine.StreamAsync(Request(pack.Key.ModelId)).GetAsyncEnumerator();
         Assert.True(await stream.MoveNextAsync());
-        Task unloading = engine.UnloadAsync(new CancellationToken(urgent));
+        Task unloading = engine.UnloadAndWaitAsync(new CancellationToken(urgent));
         Assert.False(unloading.IsCompleted);
         Assert.NotNull(runtime.ContextLength);
         if (urgent) { await Assert.ThrowsAnyAsync<OperationCanceledException>(async () => { await stream.MoveNextAsync(); }); }
@@ -113,6 +113,27 @@ public sealed class QwenPackSelectionTests : IDisposable
         await stream.DisposeAsync();
         await unloading;
         Assert.Null(runtime.ContextLength);
+    }
+
+    [Fact]
+    public async Task DisposingAnUnfinishedStreamAbortsItsEngineRequest()
+    {
+        TensorModelPackDefinition pack = Pack("host/abandon");
+        using var http = new HttpClient(new Handler());
+        using var packs = Manager(http, pack);
+        await packs.InstallAsync(pack.Key);
+        var runtime = new Runtime();
+        await using var engine = new QwenLlmInference(packs, runtime, TensorBackendKind.Cpu);
+        await engine.LoadAndWaitAsync(pack.Key);
+
+        await using (IAsyncEnumerator<LlmStreamEvent> stream = engine.StreamAsync(Request(pack.Key.ModelId)).GetAsyncEnumerator())
+        {
+            Assert.True(await stream.MoveNextAsync());
+        }
+        Assert.True(runtime.LastStreamToken.IsCancellationRequested);
+
+        await Collect(engine, pack.Key.ModelId);
+        Assert.False(runtime.LastStreamToken.IsCancellationRequested);
     }
 
     private TensorModelPackManager Manager(HttpClient http, params TensorModelPackDefinition[] definitions) => new(new(definitions), _root, http);
@@ -135,6 +156,7 @@ public sealed class QwenPackSelectionTests : IDisposable
         public Action? OnLoad { get; init; }
         public int? ContextLength { get; private set; }
         public string? LoadedBackend { get; private set; }
+        public CancellationToken LastStreamToken { get; private set; }
         public Task LoadAsync(TensorModelPackDefinition definition, TensorModelPackLease lease, string backend, CancellationToken cancellationToken)
         {
             Assert.Equal(definition.Key, lease.Key);
@@ -147,6 +169,7 @@ public sealed class QwenPackSelectionTests : IDisposable
         public async IAsyncEnumerable<ChatStreamUpdate> StreamAsync(ChatSession session, List<ChatMessage> messages, int maxTokens,
             SamplingConfig sampling, [EnumeratorCancellation] CancellationToken cancellationToken)
         {
+            LastStreamToken = cancellationToken;
             await Task.Yield();
             cancellationToken.ThrowIfCancellationRequested();
             yield return ChatStreamUpdate.Text("hello");

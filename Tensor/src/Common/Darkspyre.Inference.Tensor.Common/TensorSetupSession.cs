@@ -14,6 +14,7 @@ public sealed class TensorSetupSession : InferenceSetupSession<TensorSetupChange
     private readonly IReadOnlyList<TensorModelPackDefinition> _models;
     private readonly ITensorModelPackManager _packs;
     private readonly ITensorModelInstance? _instance;
+    private TensorModelObservation? _instanceObservation;
     private readonly TensorSetupConfiguration? _original;
     private readonly ITensorBackendProbe? _backendProbe;
     private readonly ITensorModelResolver? _resolver;
@@ -51,6 +52,7 @@ public sealed class TensorSetupSession : InferenceSetupSession<TensorSetupChange
         _models = new TensorModelCatalog(supportedModels).Definitions;
         _packs = packs;
         _instance = instance;
+        if (_instance is not null) { _instance.EngineStatusChanged += OnEngineStatusChanged; }
         _original = existing;
         _backendProbe = backendProbe;
         _resolver = resolver;
@@ -63,6 +65,7 @@ public sealed class TensorSetupSession : InferenceSetupSession<TensorSetupChange
             Installed = SetupObservation.Unknown,
             Loaded = SetupObservation.Unknown
         };
+        if (_instance is not null) { _ = RefreshObservationAsync(); }
     }
 
     protected override IReadOnlyList<SetupStep> CreateSteps(long revision)
@@ -266,7 +269,7 @@ public sealed class TensorSetupSession : InferenceSetupSession<TensorSetupChange
     protected override IReadOnlyList<ISetupAction> CreateActions(long revision)
     {
         bool selected = ValidateDraft().IsValid;
-        bool live = _instance is not null && !_instance.Observation.IsStopped;
+        bool live = _instance is not null && _instanceObservation?.State != TensorEngineState.Stopped;
         bool matchingBackend = _instance?.RequestedBackend == _backend;
         return
         [
@@ -286,7 +289,7 @@ public sealed class TensorSetupSession : InferenceSetupSession<TensorSetupChange
             BindAction(revision, new("verify", "Verify installed weights", SetupActionPurpose.Verify,
                 SetupSideEffect.LocalVerification, selected), VerifyAsync),
             BindAction(revision, new("load", "Load selected model", SetupActionPurpose.Load,
-                SetupSideEffect.ModelLoad, selected && live && matchingBackend && _instance!.Observation.Model is null,
+                SetupSideEffect.ModelLoad, selected && live && matchingBackend && _instanceObservation?.Model is null,
                 !live ? "The host must supply a live instance." : !matchingBackend ? "The host must supply an instance configured for this backend." : null),
                 async (_, token) => { await _instance!.LoadAsync(_model!, token).ConfigureAwait(false); return await CheckAsync(null, token).ConfigureAwait(false); }),
             BindAction(revision, new("unload", "Unload model", SetupActionPurpose.Unload, SetupSideEffect.ModelUnload, live),
@@ -371,8 +374,12 @@ public sealed class TensorSetupSession : InferenceSetupSession<TensorSetupChange
             return SetupActionResult.Completed;
         }
         TensorModelPackStatus status = await _packs.GetStatusAsync(_model!, token).ConfigureAwait(false);
-        Publish(() => Status = Status with { Installed = SetupObservation.Known(status.State == TensorModelPackState.Installed) });
-        RefreshLiveStatus();
+        TensorModelObservation? observed = _instance is null ? null : await _instance.GetObservationAsync(token).ConfigureAwait(false);
+        Publish(() =>
+        {
+            Status = Status with { Installed = SetupObservation.Known(status.State == TensorModelPackState.Installed) };
+            _instanceObservation = observed ?? _instanceObservation;
+        });
         return SetupActionResult.Completed;
     }
 
@@ -406,14 +413,30 @@ public sealed class TensorSetupSession : InferenceSetupSession<TensorSetupChange
         Publish(() => { });
     }
 
+    private void OnEngineStatusChanged(object? sender, TensorEngineStatus status) => _ = RefreshObservationAsync();
+
+    private async Task RefreshObservationAsync()
+    {
+        try
+        {
+            TensorModelObservation observed = await _instance!.GetObservationAsync().ConfigureAwait(false);
+            Publish(() => _instanceObservation = observed);
+        }
+        catch (Exception)
+        {
+            // A closed session or a stopped instance leaves the last observation in place.
+        }
+    }
+
     protected override SetupStatus GetStatus()
     {
-        TensorModelObservation? observed = _instance?.Observation;
+        TensorModelObservation? observed = _instanceObservation;
         return Status with
         {
             Loaded = observed is null ? SetupObservation.Unknown : new(true, observed.Model == _model && _model is not null, observed.ObservedAt),
             Ready = observed is null ? SetupObservation.Unknown : new(true,
-                observed.Model == _model && _model is not null && !observed.IsStopped && _instance!.RequestedBackend == _backend,
+                observed.Model == _model && _model is not null && observed.State == TensorEngineState.Loaded
+                    && _instance!.RequestedBackend == _backend,
                 observed.ObservedAt)
         };
     }
@@ -440,7 +463,11 @@ public sealed class TensorSetupSession : InferenceSetupSession<TensorSetupChange
         new(Definition.Implementation.Id, _model!, _backend),
         _original is not null && (_original.Model != _model || _original.Backend != _backend), SelectedDefinition()!);
 
-    protected override void ClearSensitiveState() { }
+    // Disposal clears the session's hold on the instance's status notifications.
+    protected override void ClearSensitiveState()
+    {
+        if (_instance is not null) { _instance.EngineStatusChanged -= OnEngineStatusChanged; }
+    }
 
     private sealed class InstallProgress(IProgress<SetupProgress>? progress) : IProgress<TensorModelInstallProgress>
     {

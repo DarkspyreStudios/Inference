@@ -16,10 +16,12 @@
 
   <ItemGroup>
     <Using Include="Xunit" />
+    <Using Include="Darkspyre.Inference.Tensor.Testing" />
     <None Update="Fixtures/supra-metadata.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\..\Common\Darkspyre.Inference.Tensor.Testing\Darkspyre.Inference.Tensor.Testing.csproj" />
     <ProjectReference Include="..\..\..\src\Image\Darkspyre.Inference.Tensor.Image.Supra\Darkspyre.Inference.Tensor.Image.Supra.csproj" />
   </ItemGroup>
 </Project>

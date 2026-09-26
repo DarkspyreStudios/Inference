@@ -242,8 +242,12 @@ Laya runs synchronous `InferenceSession.Run` on the background thread and cancel
 `RunOptions.Terminate`.
 
 **Metadata reads.** TensorSharp parses GGUF, safetensors and torch headers from a synchronous
-`Stream`. The Inference metadata reader downloads the header bytes asynchronously first, up to the
-parser's 16 MB limit, and passes the parser an in-memory stream. No blocking wait remains.
+`Stream`, and the torch parser reads a ZIP directory at the end of the file. The Inference metadata
+reader downloads ranges asynchronously and runs the parser, on a background thread, over the bytes
+already downloaded. A read beyond them records the missing offset; the reader discards that attempt,
+downloads the range asynchronously and runs the parser again. A miss fetches one 64 KiB page; a miss
+directly after the previous fetch doubles the window up to 1 MiB, and no window exceeds the remaining
+inspection budget. No blocking wait remains.
 
 **Backend checks.** The prerequisites check confirms that a backend is present without starting
 it. It calls `GgmlBasicOps.CanInitializeBackend` for GGML backends, `MlxBackend.IsAvailable` for
@@ -268,9 +272,30 @@ a listener's exception.
   and native work still finishes before model memory is released.
 - `GetObservationAsync` returns the instance's current model, backend and state. It replaces the
   synchronous `Observation` property.
+- Accepting `UnloadAsync` or `StopAsync` refuses new requests at once. Cancelling its token, at the
+  call or later, cancels active requests at once; the teardown itself runs in order with other
+  accepted work.
+- A second Stop, and Start after Stop, are no-ops.
 - The instance reports Unloaded or Stopped only after native work has released model memory.
 - `DisposeAsync` does not return early. It runs the native `Dispose` on a background thread and
   completes after native work has released model memory.
+
+**Tensor public members.**
+
+| Member | Contract |
+|---|---|
+| `TensorModelPackManager` constructor | Takes the catalog, an optional pack directory, an optional `HttpClient` and an optional `TensorSourceAccess`. |
+| `ITensorModelPackManager.RegisterAsync`, `GetDefinitionsAsync`, `GetRequiredDefinitionAsync` | Async; replace `Register`, `Definitions` and `GetRequiredDefinition`. |
+| `TensorModelPackLease.Artifacts`, `GetRequiredArtifact` | Synchronous; absolute file paths by role. |
+| `ITensorModelInstance.StartAsync`, `LoadAsync`, `UnloadAsync`, `StopAsync` | Return on acceptance; outcome through `EngineStatusChanged`. |
+| `ITensorModelInstance.EngineStatusChanged` | A .NET event of `TensorEngineStatus`, raised for every lifecycle transition. |
+| `ITensorModelInstance.GetObservationAsync` | Async; replaces the `Observation` property. `TensorModelObservation` carries `State` in place of `IsStopped`. |
+| `ITensorModelInstance.DisposeAsync` | Completes after native work has released model memory. |
+| `TensorModelLifetime` | Takes its engine as owner; `AcceptAsync` queues lifecycle work and `WhenIdleAsync` awaits it. |
+| `ITensorBackendProbe.CheckAsync` implementations | Run on a background thread; no check starts a backend. |
+| `TensorMetadataReader.ReadAsync` | Downloads ranges asynchronously and reruns the parser over downloaded bytes. |
+| `TensorModelCatalog`, `TensorModelDefinitionValidator.Validate`, `TensorResolvedPack.Create` | Synchronous; work on values in hand. |
+| Engine requests (`StreamAsync`, `GenerateAsync`, `DecideAsync`, `MeasureAsync`, `TranscribeAsync`) | Unchanged signatures; native and CPU work runs on a background thread. |
 
 **Tensor setup buttons.** Import and Install write model files to the pack store. The files stay
 when the settings dialog closes without Save. Load, Unload and Stop act on the host's running

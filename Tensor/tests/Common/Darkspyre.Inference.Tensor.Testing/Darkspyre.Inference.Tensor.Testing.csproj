@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>false</IsTestProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\src\Common\Darkspyre.Inference.Tensor.Common\Darkspyre.Inference.Tensor.Common.csproj" />
+  </ItemGroup>
+</Project>
