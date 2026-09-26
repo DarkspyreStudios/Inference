@@ -47,7 +47,8 @@ internal sealed class QwenSuite(ILlmInference engine, string modelId)
     private async Task<bool> ThinkAsync(ConsoleOptions options, CancellationToken cancellationToken)
     {
         LlmInferenceRequest request = Request(options, "A bat and a ball cost 1.10 in total. The bat costs 1.00 more than the ball. What does the ball cost?")
-            with { ReasoningLevel = LlmReasoningLevel.High, MaxOutputTokens = Math.Max(options.MaxTokens, 2048) };
+            with
+        { ReasoningLevel = LlmReasoningLevel.High, MaxOutputTokens = Math.Max(options.MaxTokens, 2048) };
         LlmInferenceResult? result = await StreamAsync("think", request, cancellationToken);
         return Check(result is { Text.Length: > 0 }, "the answer is empty");
     }
