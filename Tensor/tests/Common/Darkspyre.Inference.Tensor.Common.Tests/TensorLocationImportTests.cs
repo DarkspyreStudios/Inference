@@ -137,13 +137,13 @@ public sealed class TensorLocationImportTests : IDisposable
         string path = await FileAsync("model.bin", "model"u8.ToArray());
         var selection = new TensorModelSelection(new TensorModelLocation.LocalFile(path), License: "test");
         string packs = Path.Combine(_root, "packs-under-test");
-        await File.WriteAllBytesAsync(packs, []); // A file occupies the pack directory, so no artifact can be saved.
+        // A file occupies the pack directory, so no artifact can be staged or saved.
+        await File.WriteAllBytesAsync(packs, []);
 
         using var manager = new TensorModelPackManager(new([]), packs);
         await Assert.ThrowsAnyAsync<IOException>(() => manager.ImportAsync(new(selection, new Resolver())));
-        File.Delete(packs);
-        TensorModelKey key = Assert.Single((await manager.GetDefinitionsAsync())).Key;
-        Assert.Equal(TensorModelPackState.NotInstalled, (await manager.GetStatusAsync(key)).State);
+        // Staging lives in the pack directory, so the import fails before it registers the pack.
+        Assert.Empty(await manager.GetDefinitionsAsync());
     }
 
     [UnixFact]

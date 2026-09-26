@@ -71,14 +71,17 @@ the explicit path for already-complete definitions. `ITensorModelPackManager.Imp
 typed `TensorModelImportRequest` containing the selection and selected family resolver:
 
 1. Discover the exact artifact set; require actual supplied/source licenses.
-2. Stage complete artifacts, computing their lengths and hashes. Supplied expectations must match.
+2. Stage complete artifacts in the pack directory's `.tensor-staging` folder, computing their lengths
+   and hashes. Supplied expectations must match.
 3. Run family validation through a reader restricted to those staged bytes.
-4. Register the resulting immutable definition and use the existing installation path to write
-   artifacts into the pack directory, publishing the installed manifest last.
+4. Register the resulting immutable definition and use the existing installation path, which checks
+   each staged artifact's length and SHA-256 and renames it into place, publishing the installed
+   manifest last.
 
 Install and Import share copying/hashing, per-key installation serialization, active-lease checks
 and manifest publication. Import cannot fetch additional un-staged sources after validation. Staging
-files are cleaned on success, rejection, failure or cancellation; incomplete pack writes do not
+files are cleaned on success, rejection, failure or cancellation, and a later install or import removes
+any a stopped process left behind; incomplete pack writes do not
 advertise an installed pack. Retry uses the established installation/repair rules. Cancellation
 does not promise rollback after a completed external write. An observed hash identifies copied bytes,
 not publisher authenticity. No license, digest, size or compatibility evidence is invented.

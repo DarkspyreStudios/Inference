@@ -10,7 +10,12 @@ In-process, first-class .NET inference built on TensorSharp, ONNX Runtime and Wh
 separately through Tensor's model-pack manager into a pack directory on the local file system;
 constructing a runtime or running inference never downloads weights. The pack directory defaults to
 `LocalApplicationData/Darkspyre Studios/Inference/Tensor`, and the host can supply another
-directory, such as its app folder. Each engine receives the installed files as plain paths: Qwen and
+directory, such as its app folder. Install and Import write every artifact into the pack directory's
+own `.tensor-staging` folder, check its length and SHA-256, and rename it into place, so a download
+never passes through the system temporary folder or another volume, and never needs twice its size.
+An install or import removes staging files untouched for more than an hour, which a stopped process
+leaves behind; a newer file may belong to another process's download. Each engine receives the
+installed files as plain paths: Qwen and
 Supra pass them to TensorSharp, Laya creates its ONNX Runtime session from the model path, and
 Whisper loads through `WhisperFactory.FromPath`.
 

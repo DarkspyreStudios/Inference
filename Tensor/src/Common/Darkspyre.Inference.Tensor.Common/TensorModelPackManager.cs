@@ -177,6 +177,7 @@ public sealed class TensorModelPackManager : ITensorModelPackManager, IDisposabl
             await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
             entered = true;
             Report(progress, new(TensorModelInstallStage.Checking, OverallBytesTransferred: 0, OverallTotalBytes: total));
+            _directory.RemoveAbandonedStaging(AbandonedStagingAge);
             TensorModelPackStatus existing = await VerifyAsync(key, cancellationToken).ConfigureAwait(false);
             if (existing.State == TensorModelPackState.Installed)
             {
@@ -203,13 +204,22 @@ public sealed class TensorModelPackManager : ITensorModelPackManager, IDisposabl
                         $"Artifact '{artifact.Role}' has no registered download source.");
                 }
 
-                string temporaryPath = Path.Combine(
-                    Path.GetTempPath(),
-                    $"darkspyre-tensor-{Guid.NewGuid():N}.download");
+                // An imported artifact is already staged in this directory; anything else downloads into staging.
+                string? imported = staged is null ? null
+                    : artifact.Sources.Select(source => staged.GetValueOrDefault(source)).FirstOrDefault(path => path is not null)
+                        ?? throw new TensorModelPackException(key, "The resolved artifact was not included in the staged import.");
+                string temporaryPath = imported ?? _directory.CreateStagingPath();
                 try
                 {
-                    await DownloadAsync(key, artifact, temporaryPath, progress, completed, total, staged, cancellationToken)
-                        .ConfigureAwait(false);
+                    if (imported is null)
+                    {
+                        await DownloadAsync(key, artifact, temporaryPath, progress, completed, total, cancellationToken).ConfigureAwait(false);
+                    }
+                    else
+                    {
+                        await VerifyStagedAsync(key, artifact, imported, cancellationToken).ConfigureAwait(false);
+                    }
+
                     Report(progress, new TensorModelInstallProgress(
                         TensorModelInstallStage.Saving,
                         artifact.Role,
@@ -217,17 +227,7 @@ public sealed class TensorModelPackManager : ITensorModelPackManager, IDisposabl
                         artifact.Length,
                         completed + artifact.Length,
                         total));
-                    await using var input = new FileStream(
-                        temporaryPath,
-                        FileMode.Open,
-                        FileAccess.Read,
-                        FileShare.Read,
-                        1024 * 1024,
-                        FileOptions.Asynchronous | FileOptions.SequentialScan);
-                    await _directory.SaveAsync(
-                        ArtifactName(definition.Key, artifact.RelativePath),
-                        input,
-                        cancellationToken).ConfigureAwait(false);
+                    _directory.Publish(temporaryPath, ArtifactName(definition.Key, artifact.RelativePath));
                     completed += artifact.Length;
                 }
                 finally
@@ -271,6 +271,7 @@ public sealed class TensorModelPackManager : ITensorModelPackManager, IDisposabl
     {
         ThrowIfDisposed();
         ArgumentNullException.ThrowIfNull(request);
+        _directory.RemoveAbandonedStaging(AbandonedStagingAge);
         var staged = new Dictionary<Uri, string>();
         try
         {
@@ -293,7 +294,7 @@ public sealed class TensorModelPackManager : ITensorModelPackManager, IDisposabl
             long? total = candidate.Artifacts.All(item => item.Length.HasValue) ? candidate.Artifacts.Sum(item => item.Length!.Value) : null;
             foreach (TensorSourceArtifact artifact in candidate.Artifacts)
             {
-                string path = Path.Combine(Path.GetTempPath(), $"darkspyre-tensor-import-{Guid.NewGuid():N}.download");
+                string path = _directory.CreateStagingPath();
                 // Every staging path is retained for cleanup, including a failed partial copy.
                 if (!staged.TryAdd(artifact.DownloadUri, path))
                     throw new ArgumentException("A model import must not assign one source URI to multiple artifacts.", nameof(request));
@@ -448,6 +449,23 @@ public sealed class TensorModelPackManager : ITensorModelPackManager, IDisposabl
         }
     }
 
+    // A staging file untouched this long belongs to no running download.
+    private static readonly TimeSpan AbandonedStagingAge = TimeSpan.FromHours(1);
+
+    /// <summary>Checks an imported artifact's staged file against its definition without copying it.</summary>
+    private static async Task VerifyStagedAsync(TensorModelKey key, TensorModelArtifactDefinition artifact, string path,
+        CancellationToken cancellationToken)
+    {
+        await using var input = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read,
+            1024 * 1024, FileOptions.Asynchronous | FileOptions.SequentialScan);
+        string hash = input.Length == artifact.Length
+            ? Convert.ToHexStringLower(await SHA256.HashDataAsync(input, cancellationToken).ConfigureAwait(false)) : string.Empty;
+        if (!string.Equals(hash, artifact.Sha256, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new TensorModelPackException(key, $"Artifact '{artifact.Role}' did not match its expected length or SHA-256.");
+        }
+    }
+
     private async Task DownloadAsync(
         TensorModelKey key,
         TensorModelArtifactDefinition artifact,
@@ -455,7 +473,6 @@ public sealed class TensorModelPackManager : ITensorModelPackManager, IDisposabl
         IProgress<TensorModelInstallProgress>? progress,
         long completed,
         long total,
-        IReadOnlyDictionary<Uri, string>? staged,
         CancellationToken cancellationToken)
     {
         Exception? lastFailure = null;
@@ -464,9 +481,7 @@ public sealed class TensorModelPackManager : ITensorModelPackManager, IDisposabl
             cancellationToken.ThrowIfCancellationRequested();
             try
             {
-                Uri input = staged is null ? source : staged.TryGetValue(source, out string? local) ? new Uri(local)
-                    : throw new InvalidDataException("The resolved artifact was not included in the staged import.");
-                await CopySourceAsync(input, destination, artifact.Role, artifact.Length, artifact.Sha256,
+                await CopySourceAsync(source, destination, artifact.Role, artifact.Length, artifact.Sha256,
                     progress, completed, total, cancellationToken).ConfigureAwait(false);
 
                 return;
@@ -512,6 +527,8 @@ public sealed class TensorModelPackManager : ITensorModelPackManager, IDisposabl
             Report(progress, new(TensorModelInstallStage.Downloading, role, transferred, expectedLength, completed + transferred, total));
         }
         await output.FlushAsync(token).ConfigureAwait(false);
+        // The file is published by a rename, so it must be durable before it is moved into place.
+        output.Flush(flushToDisk: true);
         string actualHash = Convert.ToHexStringLower(hash.GetHashAndReset());
         if (expectedLength is long length && transferred != length
             || expectedHash is not null && !string.Equals(actualHash, expectedHash, StringComparison.OrdinalIgnoreCase))

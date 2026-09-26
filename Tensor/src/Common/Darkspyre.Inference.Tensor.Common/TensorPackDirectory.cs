@@ -2,8 +2,8 @@ namespace Darkspyre.Inference.Tensor.Common;
 
 /// <summary>
 /// The local directory that holds installed model packs. Assets are addressed by root-relative
-/// logical paths using '/'. Writes are staged and moved into place, so a reader never sees a partial
-/// file.
+/// logical paths using '/'. Writes are staged in the directory's own staging folder, on the same volume,
+/// and moved into place, so a reader never sees a partial file and nothing passes through another volume.
 /// </summary>
 internal sealed class TensorPackDirectory
 {
@@ -75,6 +75,42 @@ internal sealed class TensorPackDirectory
         }
     }
 
+    /// <summary>Returns a new file path in the staging folder. The caller writes it, then publishes or deletes it.</summary>
+    public string CreateStagingPath()
+    {
+        string stagingDirectory = Path.Combine(_rootDirectory, InternalDirectoryName);
+        Directory.CreateDirectory(stagingDirectory);
+        return Path.Combine(stagingDirectory, $"{Guid.NewGuid():N}.tmp");
+    }
+
+    /// <summary>Moves a complete staged file into place as the named asset.</summary>
+    public void Publish(string stagingPath, string assetName)
+    {
+        string destinationPath = GetPath(assetName);
+        Directory.CreateDirectory(Path.GetDirectoryName(destinationPath)!);
+        File.Move(stagingPath, destinationPath, overwrite: true);
+    }
+
+    /// <summary>
+    /// Deletes staging files that a stopped process left behind. A file written within
+    /// <paramref name="age"/> may belong to another process's download in progress, so it stays.
+    /// </summary>
+    public void RemoveAbandonedStaging(TimeSpan age)
+    {
+        var staging = new DirectoryInfo(Path.Combine(_rootDirectory, InternalDirectoryName));
+        if (!staging.Exists) { return; }
+        DateTime cutoff = DateTime.UtcNow - age;
+        foreach (FileInfo file in staging.EnumerateFiles("*.tmp"))
+        {
+            try
+            {
+                if (file.LastWriteTimeUtc < cutoff) { file.Delete(); }
+            }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+        }
+    }
+
     public async Task SaveAsync(string assetName, Stream content, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(content);
@@ -84,11 +120,7 @@ internal sealed class TensorPackDirectory
         }
 
         cancellationToken.ThrowIfCancellationRequested();
-        string destinationPath = GetPath(assetName);
-        Directory.CreateDirectory(Path.GetDirectoryName(destinationPath)!);
-        string stagingDirectory = Path.Combine(_rootDirectory, InternalDirectoryName);
-        Directory.CreateDirectory(stagingDirectory);
-        string stagingPath = Path.Combine(stagingDirectory, $"{Guid.NewGuid():N}.tmp");
+        string stagingPath = CreateStagingPath();
         try
         {
             var options = new FileStreamOptions
@@ -107,7 +139,7 @@ internal sealed class TensorPackDirectory
             }
 
             cancellationToken.ThrowIfCancellationRequested();
-            File.Move(stagingPath, destinationPath, overwrite: true);
+            Publish(stagingPath, assetName);
         }
         finally
         {
