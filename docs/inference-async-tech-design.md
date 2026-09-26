@@ -52,7 +52,9 @@ The settings editor works on a local settings object. Only Save returns settings
 3. **Act.** Sign-in, tests, checks and model queries are async connector calls. Each call takes the
    current local values, including unsaved ones. Its result, including a sign-in credential, goes
    into the local object.
-4. **Save.** The Save button is disabled until sign-in succeeds. Save is one async call. It
+4. **Save.** The Save button is enabled when every required field has a value, such as the
+   endpoint URL, the API key and the model where the provider needs one. A provider with sign-in
+   also requires a successful sign-in. Save is one async call. It
    validates the local object, hands the whole object to the app through the host's typed commit
    target once, and closes the dialog. Closing the dialog without Save discards the object, and the
    app receives nothing.
@@ -149,7 +151,8 @@ public contracts. No parallel legacy signature is exposed.
   cancellation, partial failure and abandoned-enumerator cleanup.
 - Required-result callbacks: await completion/fault/cancellation; preserve tool and credential policy.
 - Settings editor: edits and show/hide rules make no provider call; actions and model queries use
-  unsaved values; Save stays disabled until sign-in succeeds, then saves and closes the dialog;
+  unsaved values; Save enables once required fields are filled and any sign-in succeeds,
+  then saves and closes the dialog;
   nothing reaches the app without Save; closing without Save discards everything;
   secret redaction.
 - Lifecycle: failed/cancelled load, urgent/graceful stop, repeated cleanup, gate/lease ownership.
