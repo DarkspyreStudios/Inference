@@ -6,6 +6,20 @@ namespace Darkspyre.Inference.Connect.LLM;
 public static class ServiceCollectionExtensions
 {
     /// <summary>
+    /// Registers the SelfHost transport. The host registers its own <see cref="ILlmSelfHost"/>, which
+    /// resolves each engine a SelfHost connection names.
+    /// </summary>
+    public static IServiceCollection AddLlmConnectSelfHost(this IServiceCollection services)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        services.AddTransient<SelfHostLlmClient>();
+        services.AddTransient<ILlmClient>(provider => provider.GetRequiredService<SelfHostLlmClient>());
+        services.AddTransient<ManagedSelfHostAgentClient>();
+        services.AddTransient<ILlmAgentClient>(provider => provider.GetRequiredService<ManagedSelfHostAgentClient>());
+        return services;
+    }
+
+    /// <summary>
     /// Registers transport clients and the provider facade. The host must separately register an
     /// <see cref="ILlmConnectionSource"/> implementation.
     /// </summary>

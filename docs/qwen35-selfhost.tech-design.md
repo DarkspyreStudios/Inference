@@ -6,7 +6,8 @@ This design covers three parts:
    It changes no public contract and ships as a point release.
 2. A Connect `SelfHost` transport runs an in-process `ILlmInference` as an agent session. It adds
    public contract and ships as its own release.
-3. A host, such as Agent DS, configures Tensor entries and owns one engine per entry.
+3. A host, such as Agent DS, configures Tensor entries, owns one engine per entry, and lists the
+   engines that SelfHost connections name.
 
 The motivating model is `ukisai/Swift-1.5-Qwen3.8-27B-GGUF`. Its GGUF header reports
 `general.architecture = "qwen35"`, a 262,144-token context and a hybrid layer stack.
@@ -100,23 +101,33 @@ value is a snapshot: memory another engine or application takes later does not l
 
 This part adds public contract and needs its own release.
 
-- `LlmTransport.SelfHost` names a connection whose model runs in the host's process.
-- `ILlmSelfHost` is the host seam: `Task<ILlmInference> GetInferenceAsync(string connectionId,
-  CancellationToken)`. The host resolves a connection ID to its loaded model. Several connections can
-  be loaded at once.
-- The SelfHost client lists models and capabilities from that `ILlmInference`, maps Connect's
-  `LlmChatRequest` to Common's `LlmInferenceRequest`, and maps the stream back.
+- `LlmTransport.SelfHost` names a connection whose model runs in the host's process. The connection's
+  `Endpoint` is the ID of one of the host's engines; several connections can name one engine. It has
+  no credential.
+- `ILlmSelfHost` is the host seam:
+  - `ListEnginesAsync` lists the engines, as `LlmSelfHostEngine(Id, DisplayName)`;
+  - `GetInferenceAsync(engineId)` returns the loaded engine as Common's `ILlmInference`, or throws
+    `InferenceException` with `ModelUnavailable` when the engine is unknown or not loaded;
+  - `GetCapabilities(engineId, modelId)` returns the capabilities the engine declared, which the host
+    captures at load, or null when it is not loaded. Connect reads a transport's capabilities
+    synchronously on every request and turn, so this member reads the host's records and does no I/O.
+- The SelfHost client lists models from the engine, maps Connect's `LlmChatRequest` to Common's
+  `LlmInferenceRequest`, and maps the stream back; Common's events pass through and the completion
+  becomes `LlmChatCompletionEvent`. An engine that is not loaded reports streaming only.
 - Agent sessions run on the managed agent lane (`ManagedAgentSession`), which executes the tool
-  loop. Connect references Common only.
-- A SelfHost connection has no endpoint and no credential. Connect's settings do not offer it; the
-  host creates the connection.
+  loop. Context estimates count the request text with Connect's local tokenizer. Connect references
+  Common only.
+- `AddLlmConnectSelfHost()` registers the transport; the host registers its `ILlmSelfHost`.
+- Connect's settings offer SelfHost like any provider. Its fields are **Engine**, a required choice
+  listed from `ListEnginesAsync` and saved as the endpoint, and **Model**, a required choice listed
+  from that engine's models. Checking and testing are local verification, with no network or billing.
 
 ## 3. Host responsibilities
 
-- Settings add Tensor entries through `QwenSetup.CreateSettingsManager`, with a
+- Host settings add Tensor entries through `QwenSetup.CreateSettingsManager`, with a
   `HuggingFaceModelSource` for browsing. Packs use the library's default folder.
-- Each entry owns one engine. The host creates it from the saved `TensorSetupConfiguration`, loads and
-  unloads it, and disposes it.
-- A Tensor entry is also its connection. Saving the entry writes an `LlmConnection` with
-  `Transport = SelfHost` under the same ID.
-- The host implements `ILlmSelfHost` over its entry-to-engine map.
+- A Tensor entry is an engine. The host creates one engine per entry from the saved
+  `TensorSetupConfiguration`, loads and unloads it, and disposes it.
+- The host implements `ILlmSelfHost` over its entry-to-engine map, capturing each engine's capabilities
+  when it loads.
+- A SelfHost connection is an ordinary Connect entry that names an engine and a model.

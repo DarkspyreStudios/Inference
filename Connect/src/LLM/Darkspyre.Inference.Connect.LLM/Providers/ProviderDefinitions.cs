@@ -22,6 +22,29 @@ internal static class ProviderDefinitions
         Troubleshooting = "Verify the credential, account entitlement, model access, endpoint, and network connection, then retry."
     };
 
+    public static LlmProviderDefinition SelfHost { get; } = new()
+    {
+        Id = "self-host",
+        DisplayName = "In-process model",
+        Description = "Run a model that this application loads in its own process, such as a Tensor engine.",
+        Transport = LlmTransport.SelfHost,
+        DefaultEndpoint = string.Empty,
+        DisplayOrder = 95,
+        SetupSteps =
+        [
+            new SetupStep
+            {
+                Id = "select-engine",
+                Title = "Choose an engine",
+                Instructions = "Choose one of the engines this application runs. The application configures and loads each engine.",
+                CompletionRequirement = "An engine must be selected.",
+                Troubleshooting = "If no engine is listed, add and load one in the application's model settings."
+            },
+            SelectModel,
+            TestConnection
+        ]
+    };
+
     public static LlmProviderDefinition OpenAiApiKey { get; } = new()
     {
         Id = "openai-api-key",

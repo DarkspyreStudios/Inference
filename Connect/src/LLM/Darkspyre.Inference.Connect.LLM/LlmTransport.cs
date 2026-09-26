@@ -10,5 +10,8 @@ public enum LlmTransport
     AwsBedrockConverse = 4,
     GoogleAntigravityCli = 6,
     AnthropicClaudeCli = 7,
-    AwsBedrockAgentCore = 8
+    AwsBedrockAgentCore = 8,
+
+    /// <summary>A model the host runs in its own process; the connection's endpoint names the host's engine.</summary>
+    SelfHost = 9
 }

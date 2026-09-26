@@ -78,6 +78,8 @@ public sealed class LlmSettings : InferenceSettings<LlmSetupChanges>
     internal string ModelId => _model;
 
     internal bool UsesCli => _draft.Transport is LlmTransport.AnthropicClaudeCli or LlmTransport.GoogleAntigravityCli;
+    // A SelfHost connection's endpoint is the ID of an engine the host runs in its own process.
+    private bool UsesSelfHost => _draft.Transport == LlmTransport.SelfHost;
 
     internal string? AwsProfile => Credential.Aws?.Profile;
 
@@ -118,6 +120,16 @@ public sealed class LlmSettings : InferenceSettings<LlmSetupChanges>
         {
             fields.Add(new SetupExecutableField(new("executable", "CLI executable or absolute path") { IsRequired = true },
                 new(_draft.Endpoint), new(_definition.DefaultEndpoint), value => Edit(() => _draft = _draft with { Endpoint = value.Value })));
+        }
+        else if (UsesSelfHost)
+        {
+            fields.Add(new SetupChoiceField(new("engine", "Engine")
+            {
+                IsRequired = true,
+                HelpText = "An engine this application runs in its own process. The application loads it."
+            },
+                _draft.Endpoint, string.Empty, value => Edit(() => _draft = _draft with { Endpoint = value }), false,
+                SetupSideEffect.None, SetupChoiceCapabilities.Searchable));
         }
         else if (_draft.Transport == LlmTransport.AwsBedrockAgentCore)
         {
@@ -172,7 +184,8 @@ public sealed class LlmSettings : InferenceSettings<LlmSetupChanges>
             [new SetupChoiceField(new("model", "Model") { IsRequired = true,
                 HelpText = "Discover available models where supported, or enter an exact model ID." }, _model,
                 _definition.DefaultModelId, value => Edit(() => _model = value), true,
-                SetupSideEffect.Network | (UsesCli ? SetupSideEffect.ExternalCli : SetupSideEffect.None), SetupChoiceCapabilities.Searchable)])] },
+                UsesSelfHost ? SetupSideEffect.None : SetupSideEffect.Network | (UsesCli ? SetupSideEffect.ExternalCli : SetupSideEffect.None),
+                SetupChoiceCapabilities.Searchable)])] },
             testStep
         ];
     }
@@ -258,11 +271,13 @@ public sealed class LlmSettings : InferenceSettings<LlmSetupChanges>
             actions.Add(ContinueAction);
             actions.Add(CancelAction);
         }
-        actions.Add(new("check", UsesCli ? "Check CLI and authentication" : "Check authentication and model access",
-            SetupActionPurpose.CheckPrerequisites, SetupSideEffect.Network | (UsesCli ? SetupSideEffect.ExternalCli : SetupSideEffect.None),
+        actions.Add(new("check", UsesCli ? "Check CLI and authentication" : UsesSelfHost ? "Check the engine's models" : "Check authentication and model access",
+            SetupActionPurpose.CheckPrerequisites,
+            UsesSelfHost ? SetupSideEffect.LocalVerification : SetupSideEffect.Network | (UsesCli ? SetupSideEffect.ExternalCli : SetupSideEffect.None),
             ConnectionValidation().IsValid));
         actions.Add(new("test", "Test selected model", SetupActionPurpose.Test,
-            SetupSideEffect.Network | SetupSideEffect.PotentialBilling | (UsesCli ? SetupSideEffect.ExternalCli : SetupSideEffect.None),
+            UsesSelfHost ? SetupSideEffect.LocalVerification
+                : SetupSideEffect.Network | SetupSideEffect.PotentialBilling | (UsesCli ? SetupSideEffect.ExternalCli : SetupSideEffect.None),
             ValidateDraft().IsValid));
         return actions.AsReadOnly();
     }
@@ -349,6 +364,10 @@ public sealed class LlmSettings : InferenceSettings<LlmSetupChanges>
         {
             if (string.IsNullOrWhiteSpace(_draft.Endpoint) || _draft.Endpoint.IndexOfAny(['\r', '\n', '\0']) >= 0)
             { issues.Add(new("executable-invalid", "Enter an executable name or path, not a shell command.", "executable")); }
+        }
+        else if (UsesSelfHost)
+        {
+            if (string.IsNullOrWhiteSpace(_draft.Endpoint)) { issues.Add(new("engine-required", "Choose an engine.", "engine")); }
         }
         else if (_draft.Transport != LlmTransport.AwsBedrockAgentCore
             && (!Uri.TryCreate(_draft.Endpoint, UriKind.Absolute, out Uri? endpoint) || endpoint.Scheme is not ("http" or "https")
@@ -445,6 +464,9 @@ public sealed class LlmSettingsManager : InferenceSettingsManager<LlmSettings, L
         ILlmSetupEnvironment? environment = _environments.GetValueOrDefault(settings.Transport);
         switch (fieldId)
         {
+            case "engine" when _clients.GetValueOrDefault(LlmTransport.SelfHost) is Providers.SelfHostLlmClient selfHost:
+                return InferenceSettings.Page(query, (await selfHost.ListEnginesAsync(cancellationToken).ConfigureAwait(false))
+                    .Select(engine => new SetupChoice(engine.Id, engine.DisplayName)));
             case "aws-profile" when environment is not null:
                 return InferenceSettings.Page(query, await environment.GetProfilesAsync(cancellationToken).ConfigureAwait(false));
             case "aws-region" when environment is not null:

@@ -1,0 +1,134 @@
+using System.Runtime.CompilerServices;
+using System.Text;
+using System.Text.Json;
+using Darkspyre.Inference.Connect.LLM.Internal;
+using CommonLlm = Darkspyre.Inference.Common.LLM;
+
+namespace Darkspyre.Inference.Connect.LLM.Providers;
+
+/// <summary>
+/// Runs a SelfHost connection on the host's in-process engine. The connection's endpoint is the engine ID;
+/// the engine is Common's <see cref="CommonLlm.ILlmInference"/>, so Connect references no engine library.
+/// </summary>
+internal sealed class SelfHostLlmClient(ILlmSelfHost host) : ILlmClient, ILlmContextEstimator
+{
+    public LlmTransport Transport => LlmTransport.SelfHost;
+
+    public LlmProviderDefinition ProviderDefinition => ProviderDefinitions.SelfHost;
+
+    public string? EstimateDiagnostic => LocalTokenCount.CliDiagnostic;
+
+    /// <summary>Lists the host's engines for the settings' engine choice.</summary>
+    public Task<IReadOnlyList<LlmSelfHostEngine>> ListEnginesAsync(CancellationToken cancellationToken) =>
+        host.ListEnginesAsync(cancellationToken);
+
+    /// <summary>The loaded engine's capabilities; an engine that is not loaded offers streaming only.</summary>
+    public LlmProviderCapabilities GetCapabilities(LlmConnection connection, string? modelId = null)
+    {
+        ArgumentNullException.ThrowIfNull(connection);
+        CommonLlm.LlmCapabilities? engine = host.GetCapabilities(connection.Endpoint, modelId);
+        return engine is null
+            ? new LlmProviderCapabilities { SupportsStreaming = true, SupportsModelListing = true, SupportsAgentSessions = true }
+            : ToConnect(engine);
+    }
+
+    public async Task<IReadOnlyList<LlmModel>> ListModelsAsync(LlmConnection connection, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(connection);
+        CommonLlm.ILlmInference engine = await host.GetInferenceAsync(connection.Endpoint, cancellationToken).ConfigureAwait(false);
+        IReadOnlyList<CommonLlm.LlmModelInfo> models = await engine.ListModelsAsync(cancellationToken).ConfigureAwait(false);
+        return models.Select(model => new LlmModel(model.Id, model.DisplayName, model.OwnedBy,
+            model.Capabilities is null ? null : ToConnect(model.Capabilities))
+        {
+            MaxContextTokens = model.MaxContextTokens,
+            MaxOutputTokens = model.MaxOutputTokens
+        }).ToArray();
+    }
+
+    public async IAsyncEnumerable<CommonLlm.LlmStreamEvent> StreamAsync(LlmConnection connection, LlmChatRequest request,
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(connection);
+        ArgumentNullException.ThrowIfNull(request);
+        CommonLlm.ILlmInference engine = await host.GetInferenceAsync(connection.Endpoint, cancellationToken).ConfigureAwait(false);
+        await foreach (CommonLlm.LlmStreamEvent item in engine.StreamAsync(ToCommon(request), cancellationToken).ConfigureAwait(false))
+        {
+            // Common's events pass through; only the completion carries Connect's result.
+            yield return item is CommonLlm.LlmCompletionEvent completion ? new LlmChatCompletionEvent(ToConnect(completion.Result)) : item;
+        }
+    }
+
+    /// <summary>Counts the request's text locally. The engine's own tokenizer can differ.</summary>
+    public ContextEstimate? EstimateInputTokens(LlmConnection connection, LlmChatRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        var text = new StringBuilder(request.Instructions);
+        foreach (LlmChatMessage message in request.Messages)
+        {
+            text.Append('\n').Append(message.Content);
+            foreach (CommonLlm.LlmToolCall call in message.ToolCalls) { text.Append('\n').Append(call.Name).Append(call.ArgumentsJson); }
+            foreach (CommonLlm.LlmToolResult result in message.ToolResults)
+            {
+                foreach (CommonLlm.LlmToolOutputText part in result.Output.Parts.OfType<CommonLlm.LlmToolOutputText>()) { text.Append('\n').Append(part.Text); }
+            }
+        }
+        foreach (CommonLlm.LlmToolDefinition tool in request.Tools)
+        {
+            text.Append('\n').Append(tool.Name).Append(tool.Description).Append(tool.InputSchema.GetRawText());
+        }
+        return new ContextEstimate(LocalTokenCount.Count(text.ToString()));
+    }
+
+    private static CommonLlm.LlmInferenceRequest ToCommon(LlmChatRequest request) => new()
+    {
+        ModelId = request.ModelId,
+        Instructions = request.Instructions,
+        Messages = request.Messages.Select(static message => new CommonLlm.LlmMessage(message.Role, message.Content)
+        {
+            Attachments = message.Attachments,
+            ToolCalls = message.ToolCalls,
+            ToolResults = message.ToolResults
+        }).ToArray(),
+        Temperature = request.Temperature,
+        MaxOutputTokens = request.MaxOutputTokens,
+        ReasoningLevel = request.ReasoningLevel,
+        StructuredOutput = request.StructuredOutput,
+        Tools = request.Tools,
+        ToolChoice = request.ToolChoice,
+        AllowParallelToolCalls = request.AllowParallelToolCalls,
+        ConversationKey = request.ConversationKey
+    };
+
+    private static LlmChatResult ToConnect(CommonLlm.LlmInferenceResult result) => new()
+    {
+        Text = result.Text,
+        Refusal = result.Refusal,
+        RefusalCategory = result.RefusalCategory,
+        Status = result.Status,
+        FinishReason = result.FinishReason,
+        IncompleteReason = result.IncompleteReason,
+        Usage = result.Usage,
+        ToolCalls = result.ToolCalls,
+        StructuredOutput = result.StructuredOutput,
+        // An in-process call has no HTTP exchange; 200 records that it completed.
+        Diagnostics = new(200, null, null)
+    };
+
+    private static LlmProviderCapabilities ToConnect(CommonLlm.LlmCapabilities capabilities) => new()
+    {
+        OutputLimitEnforcement = capabilities.OutputLimitEnforcement,
+        SupportsStreaming = capabilities.SupportsStreaming,
+        SupportsStreamingUsage = true,
+        SupportsModelListing = capabilities.SupportsModelListing,
+        SupportsJsonSchema = capabilities.SupportsJsonSchema,
+        SupportsJsonObject = capabilities.SupportsJsonObject,
+        ReasoningLevels = capabilities.ReasoningLevels,
+        SupportsTemperature = capabilities.SupportsTemperature,
+        SupportsToolUse = capabilities.SupportsToolUse,
+        ToolHistory = LlmToolHistory.Structured,
+        SupportsAgentSessions = true,
+        SupportsAgentToolUse = capabilities.SupportsToolUse,
+        SupportsPromptImages = capabilities.SupportsPromptImages,
+        SupportsPromptDocuments = capabilities.SupportsPromptDocuments
+    };
+}

@@ -1076,6 +1076,29 @@ Account usage runs `/usage` as a standalone headless CLI command. Normalized mod
 returned when present; the sanitized CLI report is also retained in `Summary` because Antigravity
 documents the slash-command response as human-readable text rather than a versioned JSON schema.
 
+## SelfHost transport: in-process engines
+
+`LlmTransport.SelfHost` runs a model that the host loads in its own process, such as a Tensor Qwen
+engine. The host implements `ILlmSelfHost` and registers it with `AddLlmConnectSelfHost()`:
+
+```csharp
+services.AddLlmConnect();
+services.AddLlmConnectSelfHost();
+services.AddSingleton<ILlmSelfHost, MyEngineHost>(); // the host's engine map
+```
+
+A SelfHost connection's `Endpoint` is an engine ID from `ILlmSelfHost.ListEnginesAsync`, and it has no
+credential. Several connections can name one engine. Streaming, model listing and agent sessions go to
+the engine returned by `GetInferenceAsync`, which is Common's `ILlmInference`; an engine that is unknown
+or not loaded fails with `InferenceException` and `ModelUnavailable`. `GetCapabilities` returns what the
+engine declared when the host loaded it, and does no I/O, because Connect reads a transport's
+capabilities synchronously. An engine that is not loaded reports streaming only.
+
+Agent sessions run on the managed agent lane, which executes host tools; context estimates count the
+request text with Connect's local tokenizer. Connect references Common only, never the engine library.
+The settings offer an **Engine** choice listed from the host's engines and a **Model** choice listed
+from that engine; both are required to save. Checking and testing are local verification.
+
 ## Console smoke tester
 
 `tools/Darkspyre.Inference.Connect.ConsoleTester` exercises the public Darkspyre.Inference.Connect.LLM facade directly without a shim or
