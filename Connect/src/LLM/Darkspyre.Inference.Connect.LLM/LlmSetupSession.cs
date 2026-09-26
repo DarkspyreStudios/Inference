@@ -281,12 +281,11 @@ public sealed class LlmSetupSession : InferenceSetupSession<LlmSetupChanges>
         return Interaction();
     }
 
-    private Task<SetupActionResult> StartBrowserAsync(IProgress<SetupProgress>? progress, CancellationToken token)
+    private async Task<SetupActionResult> StartBrowserAsync(IProgress<SetupProgress>? progress, CancellationToken token)
     {
-        token.ThrowIfCancellationRequested();
-        LlmAuthorizationSession authorization = _service.StartClaudeLogin();
+        LlmAuthorizationSession authorization = await _service.StartClaudeLoginAsync(token).ConfigureAwait(false);
         Publish(() => { ClearAuthorization(); _browserAuthorization = authorization; _callbackFieldId = "authorization-callback-" + Guid.NewGuid().ToString("N"); });
-        return Task.FromResult(Interaction());
+        return Interaction();
     }
 
     private SetupActionResult Interaction()

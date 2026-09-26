@@ -175,18 +175,21 @@ public sealed class LlmProviderService
     }
 
     /// <summary>Starts the optional OAuth flow used only for Claude subscription model discovery.</summary>
-    public LlmAuthorizationSession StartClaudeLogin() =>
-        ClaudeLogin().Start(ClaudeManualRedirectUri);
+    public Task<LlmAuthorizationSession> StartClaudeLoginAsync(CancellationToken cancellationToken = default) =>
+        StartClaudeLoginAsync(ClaudeManualRedirectUri, cancellationToken);
 
     /// <summary>Starts the optional OAuth flow used only for Claude subscription model discovery.</summary>
-    public LlmAuthorizationSession StartClaudeLogin(string redirectUri)
+    public Task<LlmAuthorizationSession> StartClaudeLoginAsync(
+        string redirectUri,
+        CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(redirectUri))
         {
             throw new ArgumentException("A Claude redirect URI is required.", nameof(redirectUri));
         }
 
-        return ClaudeLogin().Start(redirectUri);
+        cancellationToken.ThrowIfCancellationRequested();
+        return Task.FromResult(ClaudeLogin().Start(redirectUri));
     }
 
     public async Task CompleteClaudeLoginAsync(
