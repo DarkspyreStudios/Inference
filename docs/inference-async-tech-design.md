@@ -86,6 +86,54 @@ dialog cancels running calls.
 
 Section 5.3 covers the Tensor setup buttons that change files or a running instance.
 
+### 3.1 Settings API
+
+Common defines the settings object and the manager contract. Each provider supplies one settings
+class and one manager.
+
+```csharp
+public abstract class InferenceSettings
+{
+    public InferenceSetupDefinition Definition { get; }
+    public SetupConfigurationIdentity Identity { get; }
+    public IReadOnlyList<SetupStep> Steps { get; }                 // built from current values
+    public IReadOnlyList<SetupActionDescriptor> Actions { get; }   // enabled from current values
+    public SetupStatus Status { get; set; }
+    public SetupInteraction? Interaction { get; set; }
+    public bool HasUnsavedChanges { get; }
+    public bool CanSave { get; }                                   // required fields filled, any sign-in done
+    public SetupValidation Validate();
+}
+
+public interface IInferenceSettingsManager
+{
+    Task<SetupActionResult> RunAsync(InferenceSettings settings, string actionId,
+        IProgress<SetupProgress>? progress = null, CancellationToken cancellationToken = default);
+    Task<SetupChoicePage> QueryChoicesAsync(InferenceSettings settings, string fieldId,
+        SetupChoiceQuery query, CancellationToken cancellationToken = default);
+    Task<SetupCommitResult> SaveAsync(InferenceSettings settings, CancellationToken cancellationToken = default);
+}
+```
+
+- **Settings object.** A field's `SetValue`, `Add` and `Remove` change the settings object and return
+  Applied or Invalid. `Steps` and `Actions` are recomputed from the current values on each read, so
+  show/hide and enable rules run locally. The object holds no service reference and is not disposable.
+- **Opening.** Each provider manager has a typed `OpenAsync` that returns its settings class for a
+  provider type and an optional saved entry. The provider service creates the manager with the host's
+  commit target, for example `LlmProviderService.CreateSettingsManager(target)`.
+- **Actions.** `Actions` lists descriptors; a button runs `RunAsync(settings, descriptor.Id)`. A
+  sign-in interaction carries the descriptors of its Continue and Cancel actions. Results go into the
+  settings object's values, `Status` and `Interaction`.
+- **Choices.** A choice field has no query of its own. The editor calls
+  `QueryChoicesAsync(settings, field.Description.Id, query)`; the manager answers local
+  enumerations from the settings object and live lists from the provider.
+- **Save.** `SaveAsync` refuses settings whose `CanSave` is false or whose `Validate` fails, then
+  calls the host's typed commit target once with the changes the settings object describes.
+- **Tensor status.** A manager whose settings follow a running engine also implements
+  `IInferenceSettingsStatusSource`. Its `StatusChanged` event reports that the engine changed; the
+  editor then calls `RefreshStatusAsync(settings)` and renders the result. The Tensor manager raises
+  it from `EngineStatusChanged`.
+
 ## 4. Streaming and callback implementation
 
 Public inference/agent stream methods return IAsyncEnumerable<T> directly:
