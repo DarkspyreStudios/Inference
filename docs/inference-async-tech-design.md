@@ -269,6 +269,8 @@ a listener's exception.
 - `GetObservationAsync` returns the instance's current model, backend and state. It replaces the
   synchronous `Observation` property.
 - The instance reports Unloaded or Stopped only after native work has released model memory.
+- `DisposeAsync` does not return early. It runs the native `Dispose` on a background thread and
+  completes after native work has released model memory.
 
 **Tensor setup buttons.** Import and Install write model files to the pack store. The files stay
 when the settings dialog closes without Save. Load, Unload and Stop act on the host's running
