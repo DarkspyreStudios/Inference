@@ -483,9 +483,12 @@ the Audio / SpeechTranscription task without provider-name renderer branches.
 ## Package dependency boundary
 
 Tensor depends on **Darkspyre.Inference.Common [11.10.2-rc.1]** and the **Darkspyre.TensorSharp.*
-2.8.6.5** dependency closure through NuGet. None of their DLLs is embedded in Tensor. TensorSharp
-2.8.6.5 loads model files from paths and provides bounded metadata inspection through its GGUF,
-safetensors and restricted PyTorch readers.
+2.8.6.6** dependency closure through NuGet. None of their DLLs is embedded in Tensor. TensorSharp
+2.8.6.6 loads model files from paths and provides bounded metadata inspection through its GGUF,
+safetensors and restricted PyTorch readers. `Darkspyre.TensorSharp.Backends.GGML` ships the macOS
+arm64 native bridge (`runtimes/osx-arm64/native/libGgmlOps.dylib`), so Qwen and Supra load on the
+GGML CPU and Metal backends on Apple silicon without a native build. Other platforms build the bridge
+from a TensorSharp checkout with its `TensorSharp.GGML.Native/build-*` script.
 
 Use the root `NuGet.Config` and process-scoped private-feed credentials for normal restores.
 Darkspyre dependencies come from the private feed; Microsoft.ML.OnnxRuntime, Whisper.net, its
