@@ -45,34 +45,42 @@ Related authorities:
 
 ## 3. Settings editor flow
 
-The settings editor works on a local settings object. Only Save returns settings to the app.
+The settings editor works on a plain settings object. The settings manager is the service that
+opens, acts on and saves it. Only Save returns settings to the app.
 
-1. **Open.** The user picks a provider type. An async call returns the wizard for that type: its
-   steps and the entry's current settings, or blank settings for a new entry.
+1. **Open.** The user picks a provider type. `settingsManager.OpenAsync` returns the settings object
+   for that type: the wizard steps and the entry's current settings, or blank settings for a new
+   entry.
 2. **Edit.** A field edit changes only the local object. It makes no provider call and writes no
    storage. Show/hide and enable rules between fields run on the local object synchronously.
-3. **Act.** Sign-in, tests, checks and model queries are async connector calls. Each call takes the
-   current local values, including unsaved ones. Its result, including a sign-in credential, goes
-   into the local object.
+3. **Act.** Sign-in, tests, checks and model queries are async calls on the settings manager. Each
+   call takes the settings object with its current values, including unsaved ones. Its result,
+   including a sign-in credential, goes into the settings object.
 4. **Save.** The Save button is enabled when every required field has a value, such as the
    endpoint URL, the API key and the model where the provider needs one. A provider with sign-in
-   also requires a successful sign-in. Save is one async call. It
-   validates the local object, hands the whole object to the app through the host's typed commit
+   also requires a successful sign-in. Save is `settingsManager.SaveAsync(settings)`. It
+   validates the settings object, hands the whole object to the app through the host's typed commit
    target once, and closes the dialog. Closing the dialog without Save discards the object, and the
    app receives nothing.
 
-The session has no change event. Each button's handler receives its call's result and updates the
-page. Sign-in reports its progress through the action's progress callback.
+There is no setup session and no change event. Each button's handler receives its call's result
+and updates the page. Sign-in reports its progress through the call's progress callback.
+
+The settings object carries no revision number. Only the editor changes it, so no edit, action or
+query can be stale. A model query result that arrives after the user changed a field it depends on
+is dropped by the page: the click handler compares the values it queried with the current ones.
 
 Blazor pages are event based. A field's change handler edits the local object synchronously. A
 button's click handler is async: it awaits its connector calls in order, then updates the page
 state with the result.
 
-The implementation keeps typed fields and does not introduce an untyped property bag. Omission
-never means delete: repeatable-row removal stays explicit. A parse error blocks Save. The editor
+The implementation keeps typed fields and does not introduce an untyped property bag. A row leaves
+the settings object only through Remove. A secret field starts as Keep: Save leaves a kept secret
+unchanged, stores a replaced one and deletes a cleared one. A parse error blocks Save. The editor
 reports unsaved changes so the host can warn before closing. Save keeps expected-version comparison
-and uncertain-commit semantics. Disposal cancels and joins owned work and clears secret state; it
-never stops a host-owned Tensor instance.
+against the app's stored entry and uncertain-commit semantics. The settings object is plain data
+and is not disposable. Every settings-manager call takes a cancellation token, and closing the
+dialog cancels running calls.
 
 This section covers Connect providers and Settings.UI. Tensor setup has its own requirements,
 which this section does not cover.
@@ -94,7 +102,8 @@ await foreach (var item in inference.StreamAsync(request, cancellationToken))
 ```
 
 Returning a sequence does not execute or complete the prompt. Setup runs lazily on the first
-MoveNextAsync; subsequent moves preserve incremental delivery and backpressure. Async iterator
+MoveNextAsync; subsequent moves on prompt and turn streams preserve incremental delivery and
+backpressure. Async iterator
 implementations use [EnumeratorCancellation] to combine method and enumeration cancellation.
 Callers dispose abandoned enumerators. Native resources remain owned until execution settles and
 the enumerator releases them. No Task wrapper, eager generation or full-result buffering is needed.
@@ -127,7 +136,7 @@ Classify by ownership, not by how quickly an implementation currently returns:
 
 | Area | System-facing work | Ordinary local work |
 |---|---|---|
-| Common | Fetch/apply setup snapshots and inference requests | DTO construction, field values, typed local validation, secret-edit/value factories, formatting |
+| Common | Open, act on and save settings through the settings manager; inference requests | DTO construction, field values, typed local validation, secret-edit/value factories, formatting |
 | Connect | Provider/service acquisition, live capabilities, setup creation, authentication start (including `StartClaudeLoginAsync`), operational listener creation | `Bind` adapters over a supplied connection, credential serialization/parsing, capability-record projection, host-local DI collection composition |
 | Tensor | Engine/setup acquisition, shared catalog registration/query, pack operations, live observations, lifecycle | Pack-definition construction/validation, immutable artifact lookup, credential factories, local metadata calculations |
 
@@ -170,7 +179,7 @@ not listed.
 
 | Member | Change |
 |---|---|
-| `CreateSetupSession` on `LlmProviderService`, `ImageProviderService`, `AudioProviderService`, `TtsProviderService` | Async Open call that returns the wizard: steps plus current or blank settings (section 3). |
+| `CreateSetupSession` on `LlmProviderService`, `ImageProviderService`, `AudioProviderService`, `TtsProviderService` | Replaced by `settingsManager.OpenAsync`, which returns the settings object: steps plus current or blank settings (section 3). |
 | `LoopbackRedirectListener` constructor | Opens sockets. Moves to an async factory. |
 | `LlmProviderService.StartClaudeLogin` (both overloads) | Becomes `StartClaudeLoginAsync`. Starting a sign-in is authentication start. |
 
@@ -178,10 +187,15 @@ not listed.
 
 | Member | Replacement |
 |---|---|
-| `IInferenceSetupSession.Snapshot` | The Open call's result. |
+| `IInferenceSetupSession` and `InferenceSetupSession<T>` | The settings object and the settings manager. |
+| `IInferenceSetupSession.Snapshot`, `SetupSnapshot` | The settings object returned by `OpenAsync`. |
 | `IInferenceSetupSession.Changed` | None. Button handlers receive their call's result. |
-| `IInferenceSetupSession.ValidateAsync` | Local validation on the settings object, and validation inside Save. |
-| `IInferenceSetupSession.CommitAsync()` | Save, which hands the local settings object to the host's commit target. |
+| `IInferenceSetupSession.ValidateAsync` | Local validation on the settings object, and validation inside `SaveAsync`. |
+| `IInferenceSetupSession.CommitAsync()` | `settingsManager.SaveAsync(settings)`. |
+| `SetupSnapshot.Revision`, `IsBusy`, `IsClosed` | None. The settings object has no revision. |
+| Busy, Stale and Closed states of `SetupEditResult` | None. A local edit cannot be busy, stale or closed. |
+| Revision binding of setup actions (`BindAction(revision, …)`) | Actions are settings-manager calls that take the settings object. |
+| `SetupChoiceQuery.ExpectedRevision`, Stale state of `SetupChoicePage` | The page drops a query result whose input values changed. |
 
 **Changes behaviour, signature unchanged**
 
@@ -208,7 +222,8 @@ not listed.
 All in-repository implementations, tests, examples, tools and UI.Settings consumers use the same
 public contracts. No parallel legacy signature is exposed.
 
-- Streaming: progressive output, no eager generation, backpressure, terminal events, every
+- Streaming: progressive output, no eager generation, backpressure on prompt and turn streams,
+  a non-blocking ObserveAsync feed, terminal events, every
   error on the first read, a second turn on a running session is refused,
   cancellation, partial failure and abandoned-enumerator cleanup.
 - Required-result callbacks: await completion/fault/cancellation; preserve tool and credential policy.
