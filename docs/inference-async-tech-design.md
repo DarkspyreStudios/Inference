@@ -14,7 +14,9 @@ Target contract: **11.10.x**.
 - Single-result service operations, including inference, authentication, discovery, installation,
   loading, saving and publication, use Task/Task<T>. Streams use IAsyncEnumerable<T> directly.
   A completed Task is valid for a no-op/in-memory implementation of a service operation.
-- No gratuitous Task.Run, sync-over-async, compatibility aliases or duplicate authority.
+- No sync-over-async, compatibility aliases or duplicate authority.
+- Independent work runs concurrently wherever it can: through async calls, or on separate threads
+  with Task.Run.
 - Connect remains out-of-process access; Tensor remains in-process execution. Hosts still own
   applications, persistence, API translation and lifecycle scheduling.
 
@@ -36,7 +38,7 @@ Related authorities:
 |---|---|
 | Streaming | Return IAsyncEnumerable<T> directly and consume with await foreach. Perform setup lazily during enumeration; use EnumeratorCancellation on async iterator implementations. |
 | DTOs and snapshots | Ordinary properties, local edits, pure helpers and construction remain synchronous. Fetching/replacing authoritative state is asynchronous. |
-| Construction | Operational objects are obtained through asynchronous factories. Tensor creation, Start and Load remain separate; no implicit download or load. |
+| Construction | A factory that acquires a service or opens a resource is asynchronous. `Bind` stays synchronous: it wraps a supplied connection around the service in hand, and the returned adapter's calls are async. Tensor creation, Start and Load remain separate; no implicit download or load. |
 | Framework plumbing | Preserve IDisposable, IAsyncDisposable, ToString and generated object/record signatures. Preserve await using and secret-safe formatting. |
 | Required-result callbacks | Await them: tool execution and source-credential resolution return Task<T>, carry cancellation and remain part of the owning operation. |
 | Settings timing | Edits stay in the local settings object. Actions and model queries run against the local values. Only Save returns settings to the app. |
@@ -124,12 +126,12 @@ Classify by ownership, not by how quickly an implementation currently returns:
 | Area | System-facing work | Ordinary local work |
 |---|---|---|
 | Common | Fetch/apply setup snapshots and inference requests | DTO construction, field values, typed local validation, secret-edit/value factories, formatting |
-| Connect | Provider/service acquisition, live capabilities, setup creation, authentication start, operational listener creation | Credential serialization/parsing, capability-record projection, host-local DI collection composition |
+| Connect | Provider/service acquisition, live capabilities, setup creation, authentication start (including `StartClaudeLoginAsync`), operational listener creation | `Bind` adapters over a supplied connection, credential serialization/parsing, capability-record projection, host-local DI collection composition |
 | Tensor | Engine/setup acquisition, shared catalog registration/query, pack operations, live observations, lifecycle | Pack-definition construction/validation, immutable artifact lookup, credential factories, local metadata calculations |
 
 Review concrete constructors and properties individually. Fixed descriptors and identity values already
-owned by a returned object are not asynchronous lookups. Operational construction moves to factories;
-DI must not block on asynchronous initialization. No metadata query implicitly installs or loads weights.
+owned by a returned object are not asynchronous lookups. Construction that opens a resource, such as the
+loopback redirect listener, moves to an async factory. DI must not block on asynchronous initialization. No metadata query implicitly installs or loads weights.
 
 ### 5.1 Lease acquisition, artifact lookup and file access
 
