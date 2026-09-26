@@ -13,13 +13,29 @@ public sealed class LoopbackRedirectListener : IDisposable
 {
     private readonly HttpListener _listener;
 
-    public LoopbackRedirectListener()
+    private LoopbackRedirectListener(HttpListener listener, string redirectUri)
     {
+        _listener = listener;
+        RedirectUri = redirectUri;
+    }
+
+    /// <summary>Opens a listener on a free loopback port and returns it started.</summary>
+    public static Task<LoopbackRedirectListener> StartAsync(CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
         int port = GetFreePort();
-        RedirectUri = $"http://localhost:{port}/callback";
-        _listener = new HttpListener();
-        _listener.Prefixes.Add($"http://localhost:{port}/");
-        _listener.Start();
+        var listener = new HttpListener();
+        try
+        {
+            listener.Prefixes.Add($"http://localhost:{port}/");
+            listener.Start();
+        }
+        catch
+        {
+            listener.Close();
+            throw;
+        }
+        return Task.FromResult(new LoopbackRedirectListener(listener, $"http://localhost:{port}/callback"));
     }
 
     public string RedirectUri { get; }
