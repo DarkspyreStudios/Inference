@@ -326,7 +326,7 @@ install is never verified/ready. Host-retained action lifetime keeps status obse
 
 ### Qwen and Supra changes
 
-Qwen initially targets the current Qwen3 GGUF architecture, not every TensorSharp architecture.
+Qwen targets the Qwen 3 and Qwen 3.5 family GGUF architectures, not every TensorSharp architecture.
 Validate GGUF architecture/version, tokenizer/chat metadata, dimensions, tensor names/shapes,
 quantization types, complete shard set and selected backend against the loader's supported schema.
 Do not treat repository tags or a `.gguf` suffix as sufficient. Model limits come from validated

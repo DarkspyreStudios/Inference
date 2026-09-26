@@ -8,6 +8,9 @@ namespace Darkspyre.Inference.Tensor.LLM.Qwen.Tests;
 
 public sealed class QwenCompatibilityTests
 {
+    private static readonly string[] ExplicitLayout = ["linear_attention", "full_attention", "linear_attention"];
+    private static readonly string[] MismatchedLayout = ["full_attention"];
+
     [Theory]
     [InlineData("valid")]
     [InlineData("multiple-layers")]
@@ -30,6 +33,41 @@ public sealed class QwenCompatibilityTests
             else { Assert.Throws<InvalidDataException>(() => QwenModelCompatibility.ValidateCheckpoint(file, TensorLlmModels.Qwen3FourBillionQ4Km)); }
         }
         finally { Directory.Delete(directory, true); }
+    }
+
+    [Theory]
+    [InlineData("qwen35", "valid")]
+    [InlineData("qwen35moe", "valid")]
+    [InlineData("qwen3next", "valid")]
+    [InlineData("qwen35", "state")]
+    [InlineData("qwen35", "layers")]
+    [InlineData("qwen4exp", "valid")]
+    public void HybridCheckpointPolicyValidatesTheRecurrentStateAndLayout(string architecture, string change)
+    {
+        string directory = Directory.CreateTempSubdirectory("qwen35-metadata-").FullName;
+        string path = Path.Combine(directory, TensorLlmModels.Qwen3FourBillionQ4Km.Artifacts[0].RelativePath);
+        try
+        {
+            File.WriteAllBytes(path, HybridFixture(architecture, change));
+            using var file = GgufFile.OpenWithoutSiblingShards(path);
+            if (change == "valid" && architecture != "qwen4exp") { QwenModelCompatibility.ValidateCheckpoint(file, TensorLlmModels.Qwen3FourBillionQ4Km); }
+            else { Assert.Throws<InvalidDataException>(() => QwenModelCompatibility.ValidateCheckpoint(file, TensorLlmModels.Qwen3FourBillionQ4Km)); }
+        }
+        finally { Directory.Delete(directory, true); }
+    }
+
+    [Fact]
+    public void FullAttentionLayersFollowTheLayerListOrTheInterval()
+    {
+        Assert.Equal(16, QwenModelCompatibility.FullAttentionLayers(new Dictionary<string, object>(), "qwen35", 64));
+        Assert.Equal(8, QwenModelCompatibility.FullAttentionLayers(
+            new Dictionary<string, object> { ["qwen35.full_attention_interval"] = 8u }, "qwen35", 64));
+        Assert.Equal(1, QwenModelCompatibility.FullAttentionLayers(
+            new Dictionary<string, object> { ["qwen35.layer_types"] = ExplicitLayout }, "qwen35", 3));
+        // A list that does not match the block count is ignored, as TensorSharp's loader ignores it.
+        Assert.Equal(1, QwenModelCompatibility.FullAttentionLayers(
+            new Dictionary<string, object> { ["qwen35.layer_types"] = MismatchedLayout }, "qwen35", 4));
+        Assert.Equal(36, QwenModelCompatibility.FullAttentionLayers(new Dictionary<string, object>(), "qwen3", 36));
     }
 
     [Fact]
@@ -121,6 +159,42 @@ public sealed class QwenCompatibilityTests
         writer.Write(new byte[checked((int)offset)]);
         return stream.ToArray();
     }
+    // Four layers, one full-attention layer every fourth, and four tensors per layer.
+    internal static byte[] HybridFixture(string arch, string change)
+    {
+        var tensors = new List<(string Name, ulong[] Shape)> { ("token_embd.weight", [4, 2]), ("output_norm.weight", [4]) };
+        int layers = change == "layers" ? 1 : 4;
+        for (int layer = 0; layer < layers; layer++)
+        {
+            foreach (string name in new[] { "attn_norm.weight", "ffn_norm.weight", "ffn_up.weight", "ffn_down.weight" })
+            { tensors.Add(($"blk.{layer}.{name}", [4])); }
+        }
+        string[] state = ["ssm.inner_size", "ssm.state_size", "ssm.group_count", "ssm.time_step_rank", "ssm.conv_kernel"];
+        using var stream = new MemoryStream();
+        using var writer = new BinaryWriter(stream, Encoding.UTF8, leaveOpen: true);
+        writer.Write(0x46554747u); writer.Write(3u); writer.Write((ulong)tensors.Count);
+        writer.Write((ulong)(12 + (change == "state" ? state.Length - 1 : state.Length)));
+        Text(writer, "general.architecture", arch);
+        Number(writer, $"{arch}.block_count", 4); Number(writer, $"{arch}.embedding_length", 4);
+        Number(writer, $"{arch}.attention.head_count", 2); Number(writer, $"{arch}.attention.head_count_kv", 1);
+        Number(writer, $"{arch}.context_length", 262144); Number(writer, $"{arch}.full_attention_interval", 4);
+        foreach (string key in change == "state" ? state.Skip(1) : state) { Number(writer, $"{arch}.{key}", 2); }
+        Text(writer, "tokenizer.ggml.model", "gpt2"); Text(writer, "tokenizer.chat_template", "template");
+        Strings(writer, "tokenizer.ggml.tokens", ["a", "b"]); Strings(writer, "tokenizer.ggml.merges", ["a b"]);
+        Number(writer, "split.count", 1u);
+        ulong offset = 0;
+        foreach ((string name, ulong[] shape) in tensors)
+        {
+            String(writer, name); writer.Write((uint)shape.Length);
+            foreach (ulong dimension in shape) { writer.Write(dimension); }
+            writer.Write(0u); writer.Write(offset);
+            offset += shape.Aggregate(4ul, (size, dimension) => size * dimension);
+        }
+        while (stream.Position % 32 != 0) { writer.Write((byte)0); }
+        writer.Write(new byte[checked((int)offset)]);
+        return stream.ToArray();
+    }
+
     private static void Number(BinaryWriter writer, string key, uint value) { String(writer, key); writer.Write(4u); writer.Write(value); }
     private static void Text(BinaryWriter writer, string key, string value) { String(writer, key); writer.Write(8u); String(writer, value); }
     private static void Strings(BinaryWriter writer, string key, string[] values)

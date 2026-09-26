@@ -190,10 +190,13 @@ Neither Save nor a prompt installs/loads weights. Requests, execution coordinati
 and provenance use the resident pack's actual key. The host can Unload and then Load another
 compatible pack on the same instance; Stop remains terminal.
 
-Qwen currently targets `TensorLlmModels.QwenRuntimeArchitecture` (Qwen3 GGUF), not every architecture
-implemented by TensorSharp. Its loader checks the installed GGUF architecture/version, tokenizer
-and chat metadata, layer dimensions/tensor shapes, storage encoding and complete shard declarations
-before native allocation. Listed context/output limits remain unknown until validated loaded-runtime
+Qwen targets `TensorLlmModels.QwenRuntimeArchitecture`: GGUF architectures `qwen3`, and the Qwen 3.5
+family `qwen35`, `qwen35moe` and `qwen3next`, which mixes full-attention layers with GatedDeltaNet
+recurrent layers. Other TensorSharp architectures, including `qwen4exp`, are not loaded. Its loader
+checks the installed GGUF architecture/version, tokenizer and chat metadata, dimensions, storage
+encoding and complete shard declarations before native allocation. Qwen 3 checks every layer's
+tensor shapes; for the Qwen 3.5 family it checks the recurrent-state keys and layer layout, and
+TensorSharp's own load validates each layer. Listed context/output limits remain unknown until validated loaded-runtime
 metadata is available; the built-in 4B limits are not copied onto other models. A split GGUF pack
 installs every declared shard beside the primary file under its numbered name, and Qwen passes
 TensorSharp the primary path; TensorSharp opens the sibling shards from the same directory. Shard

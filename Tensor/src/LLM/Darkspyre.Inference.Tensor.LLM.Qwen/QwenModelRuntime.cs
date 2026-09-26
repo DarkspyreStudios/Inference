@@ -55,6 +55,9 @@ internal sealed class QwenModelRuntime : IQwenModelRuntime
 
 internal static class QwenModelCompatibility
 {
+    /// <summary>GGUF architectures this adapter loads: Qwen 3, and the Qwen 3.5 family that TensorSharp runs as one model class.</summary>
+    internal static readonly IReadOnlySet<string> Architectures = new HashSet<string>(["qwen3", "qwen35", "qwen35moe", "qwen3next"], StringComparer.Ordinal);
+
     public static void Validate(TensorModelPackDefinition definition)
     {
         TensorModelDefinitionValidator.Validate(definition);
@@ -62,7 +65,7 @@ internal static class QwenModelCompatibility
             || definition.Artifacts.Count(artifact => artifact.Role == "model") != 1
             || definition.Artifacts.Any(artifact => !artifact.RelativePath.EndsWith(".gguf", StringComparison.OrdinalIgnoreCase)
                 || (artifact.Role != "model" && !artifact.Role.StartsWith("model-shard-", StringComparison.Ordinal))))
-        { throw new ArgumentException("A Qwen3 pack requires its GGUF model and any complete companion shards.", nameof(definition)); }
+        { throw new ArgumentException("A Qwen pack requires its GGUF model and any complete companion shards.", nameof(definition)); }
         if (definition.SupportedBackends.Count == 0 || definition.SupportedBackends.Any(backend =>
                 !TensorLlmModels.Qwen3FourBillionQ4Km.SupportedBackends.Contains(backend)))
         { throw new ArgumentException("The Qwen pack declares an unsupported backend.", nameof(definition)); }
@@ -81,7 +84,7 @@ internal static class QwenModelCompatibility
             var view = new CheckpointMetadata(header.Version, header.Values, header.Tensors, [files[index].Artifact.Path]);
             if (header.Version != files[0].Header.Version || view.GetUint32("split.count", 1) != files.Count
                 || view.GetUint32("split.no", (uint)index) != index
-                || (view.GetString("general.architecture") is string architecture && architecture != "qwen3"))
+                || view.GetString("general.architecture") != files[0].Header.Values.GetValueOrDefault("general.architecture") as string)
             { throw new InvalidDataException("Inconsistent GGUF shard metadata."); }
             foreach (GgufTensorInfo tensor in header.Tensors.Values)
             {
@@ -95,18 +98,20 @@ internal static class QwenModelCompatibility
         ValidateCheckpoint(new CheckpointMetadata(primary.Version, primary.Values, tensors, files.Select(file => file.Artifact.Path).ToArray()), definition);
     }
 
+    /// <summary>The architecture named by the checkpoint header, when this adapter loads it.</summary>
+    internal static string ArchitectureOf(IReadOnlyDictionary<string, object> header) =>
+        header.GetValueOrDefault("general.architecture") is string architecture && Architectures.Contains(architecture)
+            ? architecture : throw new InvalidDataException("This adapter requires a Qwen 3 or Qwen 3.5 family GGUF.");
+
     private static void ValidateCheckpoint(CheckpointMetadata file, TensorModelPackDefinition definition)
     {
-        if (file.Version is not (2 or 3) || file.GetString("general.architecture") != "qwen3")
-        { throw new InvalidDataException("This adapter requires Qwen3 GGUF version 2 or 3."); }
-        int layers = Positive(file, "qwen3.block_count"), hidden = Positive(file, "qwen3.embedding_length");
-        int heads = Positive(file, "qwen3.attention.head_count"), kvHeads = Positive(file, "qwen3.attention.head_count_kv");
-        int feedForward = Positive(file, "qwen3.feed_forward_length");
-        if (layers > file.Tensors.Count / 11) { throw new InvalidDataException("The Qwen layer tensor set is incomplete."); }
-        _ = Positive(file, "qwen3.context_length");
-        int headDimension = checked((int)file.GetUint32("qwen3.attention.key_length", (uint)(hidden / heads)));
-        if (headDimension <= 0 || kvHeads > heads || heads % kvHeads != 0
-            || file.GetUint32("qwen3.attention.value_length", (uint)headDimension) != headDimension)
+        if (file.Version is not (2 or 3)) { throw new InvalidDataException("This adapter requires GGUF version 2 or 3."); }
+        string arch = ArchitectureOf(file.Values);
+        int layers = Positive(file, $"{arch}.block_count"), hidden = Positive(file, $"{arch}.embedding_length");
+        int heads = Positive(file, $"{arch}.attention.head_count"), kvHeads = Positive(file, $"{arch}.attention.head_count_kv");
+        _ = Positive(file, $"{arch}.context_length");
+        int headDimension = checked((int)file.GetUint32($"{arch}.attention.key_length", (uint)(hidden / heads)));
+        if (headDimension <= 0 || kvHeads > heads || heads % kvHeads != 0)
         { throw new InvalidDataException("Incompatible Qwen attention dimensions."); }
         string[] vocabulary = file.GetStringArray("tokenizer.ggml.tokens") ?? throw new InvalidDataException("Missing tokenizer vocabulary.");
         if (vocabulary.Length == 0 || file.GetString("tokenizer.ggml.model") != "gpt2"
@@ -126,6 +131,16 @@ internal static class QwenModelCompatibility
         Shape(file, "token_embd.weight", hidden, vocabulary.Length);
         Shape(file, "output_norm.weight", hidden);
         if (file.Tensors.ContainsKey("output.weight")) { Shape(file, "output.weight", hidden, vocabulary.Length); }
+        if (arch == "qwen3") { ValidateQwen3Layers(file, layers, hidden, heads, kvHeads, headDimension); }
+        else { ValidateHybridLayers(file, arch, layers); }
+    }
+
+    private static void ValidateQwen3Layers(CheckpointMetadata file, int layers, int hidden, int heads, int kvHeads, int headDimension)
+    {
+        int feedForward = Positive(file, "qwen3.feed_forward_length");
+        if (layers > file.Tensors.Count / 11) { throw new InvalidDataException("The Qwen layer tensor set is incomplete."); }
+        if (file.GetUint32("qwen3.attention.value_length", (uint)headDimension) != headDimension)
+        { throw new InvalidDataException("Incompatible Qwen attention dimensions."); }
         for (int layer = 0; layer < layers; layer++)
         {
             string prefix = $"blk.{layer}.";
@@ -141,6 +156,33 @@ internal static class QwenModelCompatibility
             Shape(file, prefix + "ffn_up.weight", hidden, feedForward);
             Shape(file, prefix + "ffn_down.weight", feedForward, hidden);
         }
+    }
+
+    // The Qwen 3.5 family mixes full-attention layers with GatedDeltaNet recurrent layers. TensorSharp's
+    // own load validates each layer's tensors; this checks the recurrent state and the layer layout.
+    private static void ValidateHybridLayers(CheckpointMetadata file, string arch, int layers)
+    {
+        foreach (string key in new[] { "ssm.inner_size", "ssm.state_size", "ssm.group_count", "ssm.time_step_rank", "ssm.conv_kernel" })
+        { _ = Positive(file, $"{arch}.{key}"); }
+        if (FullAttentionLayers(file.Values, arch, layers) is <= 0)
+        { throw new InvalidDataException("The Qwen layer layout has no full-attention layer."); }
+        if (layers > file.Tensors.Count / 4) { throw new InvalidDataException("The Qwen layer tensor set is incomplete."); }
+    }
+
+    /// <summary>
+    /// Counts the layers that keep full attention history. The Qwen 3.5 family names them in
+    /// <c>layer_types</c> when its length matches the block count, or places one every
+    /// <c>full_attention_interval</c> layers (default 4), as TensorSharp's loader does. Every Qwen 3
+    /// layer is full attention.
+    /// </summary>
+    internal static int FullAttentionLayers(IReadOnlyDictionary<string, object> header, string arch, int layers)
+    {
+        if (arch == "qwen3") { return layers; }
+        if (header.GetValueOrDefault($"{arch}.layer_types") is string[] types && types.Length == layers)
+        { return types.Count(type => !string.Equals(type, "linear_attention", StringComparison.OrdinalIgnoreCase)); }
+        uint interval = header.GetValueOrDefault($"{arch}.full_attention_interval") is { } value
+            ? Convert.ToUInt32(value, System.Globalization.CultureInfo.InvariantCulture) : 4;
+        return interval is > 0 and <= int.MaxValue ? layers / (int)interval : throw new InvalidDataException("Invalid Qwen full-attention interval.");
     }
 
     private static long TensorBytes(GgufTensorInfo tensor)

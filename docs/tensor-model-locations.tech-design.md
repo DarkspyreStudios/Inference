@@ -42,7 +42,7 @@ protected access uses the host callback, not embedded/transient URL credentials.
 
 Family requirements:
 
-- Qwen: supported Qwen3 GGUF schema and all numbered shards. A folder/repository can list them;
+- Qwen: supported Qwen 3 or Qwen 3.5 family GGUF schema and all numbered shards. A folder/repository can list them;
   independent files/URLs can be supplied as explicit numbered companion inputs. They pass the
   same complete-set and header policy as repository candidates. Other GGUF architectures are not
   newly supported.

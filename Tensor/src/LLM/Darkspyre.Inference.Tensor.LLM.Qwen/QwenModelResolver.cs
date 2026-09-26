@@ -5,7 +5,7 @@ using TensorSharp.Runtime;
 
 namespace Darkspyre.Inference.Tensor.LLM.Qwen;
 
-/// <summary>Resolves complete Qwen3 GGUF packs through bounded metadata inspection, never weight loading.</summary>
+/// <summary>Resolves complete Qwen 3 and Qwen 3.5 family GGUF packs through bounded metadata inspection, never weight loading.</summary>
 public sealed partial class QwenModelResolver : TensorModelResolver
 {
     public QwenModelResolver(ITensorModelSource? source = null, ITensorArtifactReader? reader = null) : base(source, reader) { }
@@ -53,15 +53,16 @@ public sealed partial class QwenModelResolver : TensorModelResolver
                 TensorLlmModels.Qwen3FourBillionQ4Km);
             QwenModelCompatibility.Validate(definition);
             QwenModelCompatibility.ValidateHeaders(headers, definition);
-            evidence.Add(new(artifacts[0].Path, "qwen3-schema", "Complete Qwen3 tensor, tokenizer, chat-template, dimension, quantization and shard schema accepted by the loading policy."));
-            evidence.Add(new(artifacts[0].Path, "context-length", Convert.ToString(headers[0].Header.Values["qwen3.context_length"], CultureInfo.InvariantCulture)!));
+            string architecture = QwenModelCompatibility.ArchitectureOf(headers[0].Header.Values);
+            evidence.Add(new(artifacts[0].Path, "qwen-schema", $"Complete {architecture} tensor, tokenizer, chat-template, dimension, quantization and shard schema accepted by the loading policy."));
+            evidence.Add(new(artifacts[0].Path, "context-length", Convert.ToString(headers[0].Header.Values[$"{architecture}.context_length"], CultureInfo.InvariantCulture)!));
             evidence.Add(new(artifacts[0].Path, "backend", $"{actual} is supported. Device availability and model allocation are separate checks."));
             return new(new(TensorCompatibilityState.Supported, [], evidence.ToArray()), definition);
         }
         catch (TensorSourceException exception)
         { return Failure(TensorCompatibilityState.Unverified, exception.Code, exception.Message, exception.State); }
         catch (Exception exception) when (exception is InvalidDataException or NotSupportedException or OverflowException or FormatException or ArgumentException)
-        { return Failure(TensorCompatibilityState.Unsupported, "qwen-schema", "The checkpoint metadata does not satisfy this adapter's Qwen3 GGUF schema."); }
+        { return Failure(TensorCompatibilityState.Unsupported, "qwen-schema", "The checkpoint metadata does not satisfy this adapter's Qwen GGUF schema."); }
         catch (IOException)
         { return Failure(TensorCompatibilityState.Unverified, "metadata-incomplete", "The complete checkpoint header could not be inspected."); }
     }
