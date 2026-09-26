@@ -105,10 +105,12 @@ operation and a disposed session, surfaces on the first MoveNextAsync. A caller 
 `await foreach` in one `try`.
 
 Each read of a returned stream is a new call. Reading one StreamAsync stream twice sends the
-prompt twice. An agent session runs one turn at a time. A RunTurnAsync or ContinueTurnAsync read
-that starts while another turn on the same session is running or paused fails on its first read
-with "The session is running or paused." The session refuses the second turn and does not queue
-it.
+prompt twice. An agent session runs one turn at a time. A RunTurnAsync read that starts while a turn
+on the same session is running or paused fails on its first read with "The session is running or
+paused." ContinueTurnAsync resumes the paused turn itself. It succeeds when its turn ID and pause
+ID match the paused turn and that turn is not already running. Any other continuation fails with
+"The run or pause is stale, consumed, or active." The session refuses in both cases and does not
+queue.
 
 Each agent session's `ObserveAsync` feed never slows the provider. Events wait in that session's
 queue until its reader takes them. A session's feed allows one reader at a time and ends when that
