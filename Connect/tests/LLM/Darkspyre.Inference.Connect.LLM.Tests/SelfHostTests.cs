@@ -57,6 +57,9 @@ public sealed class SelfHostTests
         Assert.True(capabilities.SupportsToolUse);
         Assert.True(capabilities.SupportsAgentToolUse);
         Assert.Contains(LlmReasoningLevel.High, capabilities.ReasoningLevels);
+        // Connect runs the managed lane, so the host owns context and compaction.
+        Assert.True(capabilities.Agent.SupportsCompactionHandoff);
+        Assert.Equal(LlmAgentOwnership.Host, capabilities.Agent.ContextOwnership);
     }
 
     [Fact]

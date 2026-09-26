@@ -18,6 +18,9 @@ internal sealed class SelfHostLlmClient(ILlmSelfHost host) : ILlmClient, ILlmCon
 
     public string? EstimateDiagnostic => LocalTokenCount.CliDiagnostic;
 
+    // Connect runs the managed lane: the host owns context and tools. The engine takes text tool results only.
+    private static readonly LlmAgentCapabilities Agent = ManagedAgentPolicy.Capabilities with { RichContentSupported = new() };
+
     /// <summary>Lists the host's engines for the settings' engine choice.</summary>
     public Task<IReadOnlyList<LlmSelfHostEngine>> ListEnginesAsync(CancellationToken cancellationToken) =>
         host.ListEnginesAsync(cancellationToken);
@@ -28,7 +31,7 @@ internal sealed class SelfHostLlmClient(ILlmSelfHost host) : ILlmClient, ILlmCon
         ArgumentNullException.ThrowIfNull(connection);
         CommonLlm.LlmCapabilities? engine = host.GetCapabilities(connection.Endpoint, modelId);
         return engine is null
-            ? new LlmProviderCapabilities { SupportsStreaming = true, SupportsModelListing = true, SupportsAgentSessions = true }
+            ? new LlmProviderCapabilities { SupportsStreaming = true, SupportsModelListing = true, SupportsAgentSessions = true, Agent = Agent }
             : ToConnect(engine);
     }
 
@@ -128,6 +131,7 @@ internal sealed class SelfHostLlmClient(ILlmSelfHost host) : ILlmClient, ILlmCon
         ToolHistory = LlmToolHistory.Structured,
         SupportsAgentSessions = true,
         SupportsAgentToolUse = capabilities.SupportsToolUse,
+        Agent = Agent,
         SupportsPromptImages = capabilities.SupportsPromptImages,
         SupportsPromptDocuments = capabilities.SupportsPromptDocuments
     };

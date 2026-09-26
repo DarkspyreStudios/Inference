@@ -88,8 +88,8 @@ public sealed class QwenLlmInference : ITensorLlmInference
             && definition.RuntimeArchitecture == TensorLlmModels.QwenRuntimeArchitecture).Select(definition =>
             new LlmModelInfo(definition.Key.ModelId, definition.Key.ModelId, "Qwen", capabilities)
             {
-                MaxContextTokens = definition.Key == _definition?.Key ? _runtime.ContextLength : null,
-                MaxOutputTokens = definition.Key == _definition?.Key ? _runtime.ContextLength : null
+                // Qwen declares no separate output limit: a reply can use whatever context is left.
+                MaxContextTokens = definition.Key == _definition?.Key ? _runtime.ContextLength : null
             }).ToArray();
     }
 

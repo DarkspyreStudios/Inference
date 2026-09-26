@@ -29,6 +29,13 @@ internal static class Program
             return 2;
         }
 
+        if (options.TraceExceptions)
+        {
+            // Shows exceptions a library handles and reports generically, such as the managed agent lane's.
+            AppDomain.CurrentDomain.FirstChanceException += (_, raised) =>
+                Console.Error.WriteLine($"[exception] {raised.Exception.GetType().Name}: {raised.Exception.Message.Split('\n')[0]}");
+        }
+
         using var cancellation = new CancellationTokenSource();
         Console.CancelKeyPress += (_, eventArgs) => { eventArgs.Cancel = true; cancellation.Cancel(); };
         try

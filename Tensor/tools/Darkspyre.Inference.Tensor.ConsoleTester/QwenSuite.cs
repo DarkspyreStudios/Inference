@@ -30,6 +30,7 @@ internal sealed class QwenSuite(ILlmInference engine, string modelId)
                 "think" => await ThinkAsync(options, cancellationToken),
                 "tools" => await ToolsAsync(options, cancellationToken),
                 "json" => await JsonAsync(options, cancellationToken),
+                "selfhost" => await SelfHostSuite.RunAsync(engine, modelId, cancellationToken),
                 _ => throw new InvalidOperationException(test)
             };
         }

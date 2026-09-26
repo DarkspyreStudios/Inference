@@ -91,7 +91,9 @@ usable = min(declared context, spare bytes / cache bytes per token)
   bytes. Recurrent layers keep a fixed state and do not count per token. Qwen3.8-27B has 16 full-attention layers of
   64, 4 KV heads and a key length of 256: 64 KiB per token, 16 GiB at 262,144 tokens.
 
-The result is `LlmModelInfo.MaxContextTokens` for the loaded model. The adapter estimates a request's
+The result is `LlmModelInfo.MaxContextTokens` for the loaded model. `MaxOutputTokens` is null, because
+Qwen declares no separate output limit. Unknown is not a refusal: a host's managed lane then reserves no
+output by default, and the request goes to the engine. The adapter estimates a request's
 prompt by rendering it with the protocol's `Render` and counting it with the model's tokenizer. A
 request whose estimated prompt plus `MaxOutputTokens` exceeds the usable context fails with
 `CapacityExhausted` before TensorSharp runs. The

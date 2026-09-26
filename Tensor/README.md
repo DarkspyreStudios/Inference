@@ -220,8 +220,9 @@ features, and a binary tool-result part fails as well. `ReasoningLevels` is `Non
 `High` (thinking on). With structured output and thinking on, the schema's grammar starts after the
 thinking block. Image input is off.
 
-A loaded Qwen model reports its usable context as `LlmModelInfo.MaxContextTokens` and
-`MaxOutputTokens`. TensorSharp resolves the declared context from the GGUF metadata and grows the
+A loaded Qwen model reports its usable context as `LlmModelInfo.MaxContextTokens`. Its
+`MaxOutputTokens` is null: Qwen declares no separate output limit, and a reply can use whatever context
+is left. TensorSharp resolves the declared context from the GGUF metadata and grows the
 attention cache on demand. After the weights are resident, Qwen measures the memory left (the GC's
 available memory, minus the working set, minus the larger of 512 MiB and one sixteenth) and divides
 it by the cache bytes one token adds: keys and values for each full-attention layer at two bytes per

@@ -4,7 +4,7 @@ namespace Darkspyre.Inference.Tensor.ConsoleTester;
 
 internal sealed record ConsoleOptions
 {
-    public static readonly string[] Suites = ["chat", "think", "tools", "json"];
+    public static readonly string[] Suites = ["chat", "think", "tools", "json", "selfhost"];
 
     public string? Repository { get; init; }
     public string? File { get; init; }
@@ -17,6 +17,7 @@ internal sealed record ConsoleOptions
     public IReadOnlyList<string> Suite { get; init; } = Suites;
     public string? Prompt { get; init; }
     public int MaxTokens { get; init; } = 512;
+    public bool TraceExceptions { get; init; }
 
     public static ConsoleOptions Parse(string[] args)
     {
@@ -38,6 +39,7 @@ internal sealed record ConsoleOptions
                 "--install" => options with { Install = true },
                 "--suite" => options with { Suite = ParseSuite(Value()) },
                 "--prompt" => options with { Prompt = Value() },
+                "--trace-exceptions" => options with { TraceExceptions = true },
                 "--max-tokens" => options with { MaxTokens = int.Parse(Value(), System.Globalization.CultureInfo.InvariantCulture) },
                 _ => throw new ArgumentException($"Unknown option '{name}'.")
             };
@@ -67,8 +69,8 @@ internal sealed record ConsoleOptions
 
     public static void WriteHelp() => Console.WriteLine("""
         Usage: tensor qwen (--repo <owner/name> --file <gguf> [--revision <rev>] | --path <gguf> --license <id>)
-                           --store <dir> [--install] [--backend <kind>] [--suite all|chat,think,tools,json]
-                           [--prompt <text>] [--max-tokens <n>]
+                           --store <dir> [--install] [--backend <kind>] [--suite all|chat,think,tools,json,selfhost]
+                           [--prompt <text>] [--max-tokens <n>] [--trace-exceptions]
 
         Resolves the GGUF from its headers, installs it into the pack store when --install is passed, loads
         the engine and runs the test calls. A repeat run reuses the installed pack. --store names the pack
