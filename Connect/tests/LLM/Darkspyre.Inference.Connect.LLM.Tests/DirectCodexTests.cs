@@ -42,6 +42,7 @@ public sealed class DirectCodexTests
         Assert.True(sent.RootElement.GetProperty("stream").GetBoolean());
         Assert.Equal("base\n\nsystem\n\ndeveloper", sent.RootElement.GetProperty("instructions").GetString());
         Assert.Equal("high", sent.RootElement.GetProperty("reasoning").GetProperty("effort").GetString());
+        Assert.Equal("auto", sent.RootElement.GetProperty("reasoning").GetProperty("summary").GetString());
         Assert.Equal("thread", sent.RootElement.GetProperty("prompt_cache_key").GetString());
         Assert.Single(sent.RootElement.GetProperty("input").EnumerateArray());
         Assert.False(sent.RootElement.TryGetProperty("previous_response_id", out _));
@@ -52,6 +53,41 @@ public sealed class DirectCodexTests
         Assert.Equal("authorize-chatgpt", client.ProviderDefinition.SetupSteps[0].Id);
         Assert.True(client.GetCapabilities(Connection()).SupportsToolUse);
         Assert.Equal(LlmAgentOwnership.Host, client.GetCapabilities(Connection()).Agent.ContextOwnership);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData(LlmReasoningLevel.Medium)]
+    public async Task ManagedSubscriptionRequestsSummariesAndDeliversThemBeforeTheReply(LlmReasoningLevel? effort)
+    {
+        const string reasoning = """
+            data: {"type":"response.reasoning_summary_text.delta","delta":"Checking "}
+
+            data: {"type":"response.reasoning_summary_text.delta","delta":"the request"}
+
+            """;
+        using var handler = new Handler(request => request.Method == HttpMethod.Get
+            ? Json("{\"models\":[{\"slug\":\"model\",\"context_window\":100000}]}")
+            : Sse(reasoning + "\n" + Completed));
+        using var http = new HttpClient(handler);
+        var client = new OpenAiCodexLlmClient(http);
+        var source = new Source(Connection());
+        var providers = new LlmProviderService(source, [client]);
+        var agents = new LlmAgentProviderService(source, [new ManagedCodexAgentClient(client, providers)]);
+        await using var session = await agents.StartSessionAsync("configured", new() { ModelId = "model" });
+        var events = new List<LlmAgentEvent>();
+        await foreach (var item in session.RunTurnAsync(new() { Input = [new LlmAgentTextContent("hello")], ReasoningLevel = effort })) { events.Add(item); }
+
+        using var sent = JsonDocument.Parse(handler.Body!);
+        JsonElement sentReasoning = sent.RootElement.GetProperty("reasoning");
+        Assert.Equal("auto", sentReasoning.GetProperty("summary").GetString());
+        if (effort is null) { Assert.False(sentReasoning.TryGetProperty("effort", out _)); }
+        else { Assert.Equal("medium", sentReasoning.GetProperty("effort").GetString()); }
+        var summaries = events.OfType<LlmAgentReasoningDeltaEvent>().ToArray();
+        Assert.Equal(["Checking ", "the request"], summaries.Select(item => item.Delta));
+        Assert.All(summaries, item => Assert.True(item.IsSummary));
+        Assert.True(events.IndexOf(summaries[^1]) < events.FindIndex(item => item is LlmAgentTextDeltaEvent));
+        Assert.Equal(LlmAgentTurnStatus.Completed, Assert.Single(events.OfType<LlmAgentTurnCompletedEvent>()).Status);
     }
 
     [Fact]

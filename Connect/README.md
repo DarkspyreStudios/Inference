@@ -696,6 +696,12 @@ affinity only; managed sessions use `ThreadId`. Temperature, JSON-object mode, a
 `MaxOutputTokens` are unsupported; the managed output reserve budgets context without sending
 that unsupported parameter.
 
+Subscription requests explicitly opt into `reasoning.summary: "auto"`, retaining the selected
+effort or leaving effort to the provider when unspecified. Summary deltas flow through
+`LlmReasoningDeltaEvent` and managed `LlmAgentReasoningDeltaEvent` with `IsSummary = true`, so hosts
+can display progress before the reply. Summaries are provider output and may be absent for a turn;
+the library does not manufacture reasoning text. See [OpenAI reasoning summaries](https://developers.openai.com/api/docs/guides/reasoning#reasoning-summaries).
+
 Both `SupportsToolUse` and `SupportsAgentToolUse` are true. With chat, the caller runs the tool
 loop. With `LlmAgentProviderService`, Darkspyre.Inference.Connect.LLM runs it and invokes the host's handlers; do not
 run a second Agent DS loop on top. Start through that facade so every model iteration re-resolves

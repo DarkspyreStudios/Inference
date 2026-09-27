@@ -75,6 +75,9 @@ internal sealed class OpenAiCodexLlmClient(HttpClient http) : ResponsesLlmClient
         };
         JsonObject payload = base.BuildPayload(connection, projected, enforcement);
         payload["instructions"] = string.Join("\n\n", instructions);
+        // Subscription reasoning is only streamed when summaries are explicitly requested.
+        payload["reasoning"] ??= new JsonObject();
+        payload["reasoning"]!["summary"] = "auto";
         return payload;
     }
 
