@@ -1,3 +1,4 @@
+using Darkspyre.Inference.Common.LLM;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -64,8 +65,8 @@ internal sealed class AnthropicContentStream
         }
     }
 
-    public LlmProviderResponseState? Encode(LlmConnection connection, string modelId) =>
-        _blocks.Count == 0 ? null : ProviderResponseStateCodec.Encode(connection, modelId, BuildContent());
+    public LlmContinuationState? Encode(LlmConnection connection, string modelId) =>
+        _blocks.Count == 0 ? null : ProviderContinuationStateCodec.Encode(connection, modelId, BuildContent());
 
     private JsonArray BuildContent()
     {

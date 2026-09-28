@@ -24,7 +24,7 @@ public sealed class AgentContractTests
                 new("user-1", "turn-1", new LlmChatMessage("user", "read") { Attachments = [attachment] }),
                 new("assistant-1", "turn-1", new LlmChatMessage("assistant", "")
                 {
-                    ResponseState = State(),
+                    ContinuationState = State(),
                     ToolCalls = [new LlmToolCall("call-1", "read", "{}")]
                 }),
                 new("result-1", "turn-1", new LlmChatMessage("user", "")
@@ -45,10 +45,10 @@ public sealed class AgentContractTests
             ]
         };
         LlmAgentContext copy = RoundTrip(context);
-        Assert.Equal(1, copy.FormatVersion);
+        Assert.Equal(2, copy.FormatVersion);
         Assert.Equal(7, copy.Revision);
         Assert.Equal(context.Entries.Select(entry => entry.Id), copy.Entries.Select(entry => entry.Id));
-        Assert.Equal(State(), copy.Entries[1].Message.ResponseState);
+        Assert.Equal(State(), copy.Entries[1].Message.ContinuationState);
         Assert.Equal("hello"u8.ToArray(), copy.Entries[0].Message.Attachments[0].Data.ToArray());
         LlmToolOutput output = copy.Entries[2].Message.ToolResults[0].Output;
         Assert.Equal("done", Assert.IsType<LlmToolOutputText>(output.Parts[0]).Text);
@@ -141,22 +141,22 @@ public sealed class AgentContractTests
     [InlineData(2)]
     [InlineData(3)]
     [InlineData(4)]
-    public void ResponseStateRejectsWrongBinding(int change)
+    public void ContinuationStateRejectsWrongBinding(int change)
     {
         var state = State();
         state = change switch
         {
-            0 => state with { FormatVersion = 2 },
-            1 => state with { Transport = LlmTransport.AnthropicMessages },
+            0 => state with { FormatVersion = 1 },
+            1 => state with { ImplementationId = ProviderContinuationStateCodec.ImplementationId(LlmTransport.AnthropicMessages) },
             2 => state with { ModelId = "another-model" },
             3 => state with { ScopeId = "another-account" },
             _ => state with { Payload = "not-json" }
         };
-        Assert.Throws<ArgumentException>(() => ProviderResponseStateCodec.Decode(state, Connection(), "model"));
+        Assert.Throws<ArgumentException>(() => ProviderContinuationStateCodec.Decode(state, Connection(), "model"));
     }
 
     [Fact]
-    public void ResponseStateScopeSurvivesVersionAndOAuthRefreshButNotAccountChanges()
+    public void ContinuationStateScopeSurvivesVersionAndOAuthRefreshButNotAccountChanges()
     {
         LlmConnection connection = Connection() with
         {
@@ -165,7 +165,7 @@ public sealed class AgentContractTests
                 OAuth = new LlmOAuthTokens { AccessToken = "old-secret", AccountId = "account-1" }
             }.Serialize()
         };
-        var state = ProviderResponseStateCodec.Encode(connection, "model", Output());
+        var state = ProviderContinuationStateCodec.Encode(connection, "model", Output());
         LlmConnection refreshed = connection with
         {
             Version = "v2",
@@ -174,8 +174,8 @@ public sealed class AgentContractTests
                 OAuth = new LlmOAuthTokens { AccessToken = "new-secret", AccountId = "account-1" }
             }.Serialize()
         };
-        Assert.NotEmpty(ProviderResponseStateCodec.Decode(state, refreshed, "model"));
-        Assert.Throws<ArgumentException>(() => ProviderResponseStateCodec.Decode(state, refreshed with
+        Assert.NotEmpty(ProviderContinuationStateCodec.Decode(state, refreshed, "model"));
+        Assert.Throws<ArgumentException>(() => ProviderContinuationStateCodec.Decode(state, refreshed with
         {
             Credential = new LlmCredential
             {
@@ -190,14 +190,14 @@ public sealed class AgentContractTests
     public void CountsOnlyStateCarriesNoOutputAndBindsToItsConnection()
     {
         LlmConnection bedrock = new() { Version = "v1", Transport = LlmTransport.AwsBedrockConverse, Endpoint = "aws://bedrock" };
-        var state = ProviderResponseStateCodec.EncodeCounts(bedrock, "model", 1200, 80);
+        var state = ProviderContinuationStateCodec.EncodeCounts(bedrock, "model", 1200, 80);
         Assert.Equal((1200L, 80L), (state.InputTokens, state.OutputTokens));
-        Assert.Empty(ProviderResponseStateCodec.Decode(state, bedrock with { Version = "v2" }, "model"));
-        var message = new LlmChatMessage("assistant", "done") { ResponseState = state, ToolCalls = [new("call-1", "tool", "{}")] };
-        Assert.Empty(ProviderResponseStateCodec.DecodeMessage(message, bedrock, "model"));
-        Assert.Throws<ArgumentException>(() => ProviderResponseStateCodec.Decode(state, bedrock, "another-model"));
-        Assert.Throws<ArgumentException>(() => ProviderResponseStateCodec.Decode(state, bedrock with { Endpoint = "aws://other" }, "model"));
-        Assert.Throws<ArgumentException>(() => ProviderResponseStateCodec.Decode(
+        Assert.Empty(ProviderContinuationStateCodec.Decode(state, bedrock with { Version = "v2" }, "model"));
+        var message = new LlmChatMessage("assistant", "done") { ContinuationState = state, ToolCalls = [new("call-1", "tool", "{}")] };
+        Assert.Empty(ProviderContinuationStateCodec.DecodeMessage(message, bedrock, "model"));
+        Assert.Throws<ArgumentException>(() => ProviderContinuationStateCodec.Decode(state, bedrock, "another-model"));
+        Assert.Throws<ArgumentException>(() => ProviderContinuationStateCodec.Decode(state, bedrock with { Endpoint = "aws://other" }, "model"));
+        Assert.Throws<ArgumentException>(() => ProviderContinuationStateCodec.Decode(
             state with { Payload = Output().ToJsonString() }, bedrock, "model"));
     }
 
@@ -206,15 +206,15 @@ public sealed class AgentContractTests
     {
         JsonArray output = Output();
         output[0]!["secret_header"] = "must-not-export";
-        var state = ProviderResponseStateCodec.Encode(Connection(), "model", output);
+        var state = ProviderContinuationStateCodec.Encode(Connection(), "model", output);
         Assert.DoesNotContain("must-not-export", state.Payload, StringComparison.Ordinal);
         JsonArray forged = (JsonArray)JsonNode.Parse(state.Payload)!;
         forged[0]!["instructions"] = "override";
-        Assert.Throws<ArgumentException>(() => ProviderResponseStateCodec.Decode(
+        Assert.Throws<ArgumentException>(() => ProviderContinuationStateCodec.Decode(
             state with { Payload = forged.ToJsonString() }, Connection(), "model"));
         forged = (JsonArray)JsonNode.Parse(state.Payload)!;
         forged[1]!["role"] = "system";
-        Assert.Throws<ArgumentException>(() => ProviderResponseStateCodec.Decode(
+        Assert.Throws<ArgumentException>(() => ProviderContinuationStateCodec.Decode(
             state with { Payload = forged.ToJsonString() }, Connection(), "model"));
     }
 
@@ -227,21 +227,24 @@ public sealed class AgentContractTests
             Messages =
             [
                 new("user", "first"),
-                new("assistant", "do not duplicate") { ResponseState = State() },
+                new("assistant", "Hello") { ContinuationState = State() },
                 new("user", "second"),
-                new("assistant", "") { ResponseState = State() },
+                new("assistant", "") { ContinuationState = ProviderContinuationStateCodec.Encode(Connection(), "model",
+                    new JsonArray(Output()[0]!.DeepClone())) },
                 new("user", "third")
             ]
         };
         var input = OpenAiResponsesTools.BuildInput(request, Connection(), OpenAiResponsesTools.BuildMessage, Project);
-        Assert.Equal(7, input.Count);
+        Assert.Equal(6, input.Count);
         Assert.Equal("reasoning", input[1]!["type"]!.GetValue<string>());
         Assert.Equal("message", input[2]!["type"]!.GetValue<string>());
         Assert.Equal("reasoning", input[4]!["type"]!.GetValue<string>());
-        Assert.DoesNotContain("do not duplicate", input.ToJsonString(), StringComparison.Ordinal);
+        Assert.Single(input.OfType<JsonObject>(), item => item["type"]?.GetValue<string>() == "message");
+        Assert.Throws<ArgumentException>(() => ProviderContinuationStateCodec.DecodeMessage(
+            new("assistant", "changed") { ContinuationState = State() }, Connection(), "model"));
         Assert.Throws<ArgumentException>(() => OpenAiResponsesTools.BuildInput(request with
         {
-            Messages = [new("user", "bad") { ResponseState = State() }]
+            Messages = [new("user", "bad") { ContinuationState = State() }]
         }, Connection(), OpenAiResponsesTools.BuildMessage, Project));
     }
 
@@ -282,16 +285,16 @@ public sealed class AgentContractTests
             """)!;
         var message = new LlmChatMessage("assistant", "")
         {
-            ResponseState = ProviderResponseStateCodec.Encode(Connection(), "model", output)
+            ContinuationState = ProviderContinuationStateCodec.Encode(Connection(), "model", output)
         };
-        Assert.Throws<ArgumentException>(() => ProviderResponseStateCodec.DecodeMessage(message, Connection(), "model"));
+        Assert.Throws<ArgumentException>(() => ProviderContinuationStateCodec.DecodeMessage(message, Connection(), "model"));
         message = message with { ToolCalls = [new("call-1", "read", "{}")] };
-        Assert.Single(ProviderResponseStateCodec.DecodeMessage(message, Connection(), "model"));
-        Assert.Throws<ArgumentException>(() => ProviderResponseStateCodec.DecodeMessage(message with
+        Assert.Single(ProviderContinuationStateCodec.DecodeMessage(message, Connection(), "model"));
+        Assert.Throws<ArgumentException>(() => ProviderContinuationStateCodec.DecodeMessage(message with
         {
             ToolCalls = [new("call-1", "delete", "{}")]
         }, Connection(), "model"));
-        Assert.Throws<ArgumentException>(() => ProviderResponseStateCodec.DecodeMessage(message with
+        Assert.Throws<ArgumentException>(() => ProviderContinuationStateCodec.DecodeMessage(message with
         {
             ToolCalls = [new("call-1", "read", "{\"changed\":true}")]
         }, Connection(), "model"));
@@ -377,5 +380,5 @@ public sealed class AgentContractTests
          {"type":"message","id":"m1","role":"assistant","content":[{"type":"output_text","text":"Hello"}]}]
         """)!;
 
-    private static LlmProviderResponseState State() => ProviderResponseStateCodec.Encode(Connection(), "model", Output());
+    private static LlmContinuationState State() => ProviderContinuationStateCodec.Encode(Connection(), "model", Output());
 }

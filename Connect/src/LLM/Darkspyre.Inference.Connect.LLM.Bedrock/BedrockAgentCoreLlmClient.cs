@@ -61,9 +61,9 @@ internal sealed class BedrockAgentCoreLlmClient(IBedrockAgentCoreInvoker invoker
         ArgumentNullException.ThrowIfNull(request);
         LlmProviderCapabilities capabilities = GetCapabilities(connection, request.ModelId);
         ValidateChatRequest(request, capabilities);
-        if (request.Messages.Any(message => message.ResponseState is not null))
+        if (request.Messages.Any(message => message.ContinuationState is not null))
         {
-            throw new NotSupportedException("AgentCore cannot import adapter response state.");
+            throw new NotSupportedException("AgentCore cannot import adapter continuation state.");
         }
         LlmStructuredOutputEnforcement? enforcement = request.StructuredOutput is null
             ? null

@@ -45,6 +45,8 @@ public sealed record LlmProviderCapabilities
     /// </summary>
     public bool SupportsToolUse { get; init; }
 
+    public LlmToolCapabilities Tools { get; init; } = new();
+
     /// <summary>How tool calls and results already in the history reach the provider.</summary>
     public LlmToolHistory ToolHistory { get; init; }
 
@@ -94,6 +96,7 @@ public sealed record LlmProviderCapabilities
             ReasoningLevels = overrides.ReasoningLevels ?? ReasoningLevels,
             SupportsTemperature = overrides.SupportsTemperature ?? SupportsTemperature,
             SupportsToolUse = overrides.SupportsToolUse ?? SupportsToolUse,
+            Tools = overrides.SupportsToolUse is false ? new() : Tools,
             SupportsAgentSessions = Restrict(overrides.SupportsAgentSessions, SupportsAgentSessions),
             SupportsAgentToolUse = Restrict(overrides.SupportsAgentSessions, SupportsAgentSessions)
                 && Restrict(overrides.SupportsAgentToolUse, SupportsAgentToolUse),

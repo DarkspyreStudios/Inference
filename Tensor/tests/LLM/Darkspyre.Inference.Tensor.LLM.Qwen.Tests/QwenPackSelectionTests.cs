@@ -155,6 +155,26 @@ public sealed class QwenPackSelectionTests : IDisposable
     }
 
     [Fact]
+    public async Task ForeignContinuationRequiresExplicitOmissionAndReportsIt()
+    {
+        var runtime = new Runtime { Architecture = "qwen35", Pieces = ["done"] };
+        var (engine, packs, model) = await LoadedAsync(runtime, "host/continuation");
+        await using (engine)
+        using (packs)
+        {
+            var state = new LlmContinuationState
+            { ImplementationId = "foreign", ModelId = model, ScopeId = "scope", Payload = "private" };
+            var request = Request(model) with { Messages = [new("assistant", "prior") { ContinuationState = state }, new("user", "continue")] };
+            var rejected = await Assert.ThrowsAsync<InferenceException>(() => Collect(engine, request));
+            Assert.Equal(InferenceFailureCode.UnsupportedFeature, rejected.Code);
+            var events = await Collect(engine, request with { UnboundContinuationState = LlmUnboundContinuationState.Omit });
+            Assert.Equal(1, Assert.IsType<LlmCompletionEvent>(events[^1]).Result.OmittedContinuationStateCount);
+            Assert.Same(state, request.Messages[0].ContinuationState);
+            Assert.Equal(LlmStrictInputSchemaSupport.Unsupported, (await engine.GetCapabilitiesAsync(model)).Tools.StrictInputSchema);
+        }
+    }
+
+    [Fact]
     public async Task ToolCallsStreamAsCommonEventsAndTheirResultsReturnAsToolMessages()
     {
         var runtime = new Runtime

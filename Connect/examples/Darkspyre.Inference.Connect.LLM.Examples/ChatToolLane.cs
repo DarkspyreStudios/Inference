@@ -65,7 +65,7 @@ public static class ChatToolLane
             messages.Add(new LlmChatMessage("assistant", result.Text)
             {
                 ToolCalls = result.ToolCalls,
-                ResponseState = result.ResponseState
+                ContinuationState = result.ContinuationState
             });
             messages.Add(new LlmChatMessage("user", string.Empty)
             {

@@ -443,12 +443,12 @@ public sealed class AntigravityCliLlmClientTests
     }
 
     [Fact]
-    public async Task ResponseStateIsRejectedByNameAndOfferedToolsStillFail()
+    public async Task ContinuationStateIsRejectedByNameAndOfferedToolsStillFail()
     {
         var client = new AntigravityCliLlmClient(new RecordingRunner(new AntigravityCliProcessResult(0, string.Empty, string.Empty)));
-        var state = new LlmProviderResponseState
+        var state = new LlmContinuationState
         {
-            Transport = LlmTransport.OpenAiCodex,
+            ImplementationId = ProviderContinuationStateCodec.ImplementationId(LlmTransport.OpenAiCodex),
             ModelId = "model",
             ScopeId = "scope",
             Payload = "[]"
@@ -457,9 +457,9 @@ public sealed class AntigravityCliLlmClientTests
         var error = await Assert.ThrowsAsync<NotSupportedException>(() => ReadAllAsync(client.StreamAsync(Connection(), new LlmChatRequest
         {
             ModelId = "auto",
-            Messages = [new LlmChatMessage("user", "Hi"), new LlmChatMessage("assistant", "Hello") { ResponseState = state }]
+            Messages = [new LlmChatMessage("user", "Hi"), new LlmChatMessage("assistant", "Hello") { ContinuationState = state }]
         })));
-        Assert.Contains("response state", error.Message, StringComparison.Ordinal);
+        Assert.Contains("continuation state", error.Message, StringComparison.Ordinal);
         await Assert.ThrowsAsync<NotSupportedException>(() => ReadAllAsync(client.StreamAsync(Connection(), new LlmChatRequest
         {
             ModelId = "auto",

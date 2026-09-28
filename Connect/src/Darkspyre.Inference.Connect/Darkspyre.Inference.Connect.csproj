@@ -13,6 +13,7 @@
     <ProjectReference Include="..\Audio\Darkspyre.Inference.Connect.Audio\Darkspyre.Inference.Connect.Audio.csproj" PrivateAssets="all" />
     <ProjectReference Include="..\LLM\Darkspyre.Inference.Connect.LLM\Darkspyre.Inference.Connect.LLM.csproj" PrivateAssets="all" />
     <ProjectReference Include="..\LLM\Darkspyre.Inference.Connect.LLM.Bedrock\Darkspyre.Inference.Connect.LLM.Bedrock.csproj" PrivateAssets="all" />
+    <ProjectReference Include="..\LLM\Darkspyre.Inference.Connect.LLM.Vertex\Darkspyre.Inference.Connect.LLM.Vertex.csproj" PrivateAssets="all" />
   </ItemGroup>
 
   <ItemGroup>
@@ -20,6 +21,7 @@
     <PackageReference Include="AWSSDK.BedrockAgentCore" />
     <PackageReference Include="AWSSDK.BedrockRuntime" />
     <PackageReference Include="AWSSDK.Core" />
+    <PackageReference Include="Google.Apis.Auth" />
     <PackageReference Include="AWSSDK.SecurityToken" />
     <PackageReference Include="Darkspyre.ML.Tokenizers" />
     <PackageReference Include="JsonSchema.Net" />
@@ -39,6 +41,8 @@
     <None Include="..\LLM\Darkspyre.Inference.Connect.LLM\bin\$(Configuration)\$(TargetFramework)\Darkspyre.Inference.Connect.LLM.dll" Pack="true" PackagePath="lib\$(TargetFramework)" />
     <None Include="..\LLM\Darkspyre.Inference.Connect.LLM\bin\$(Configuration)\$(TargetFramework)\Darkspyre.Inference.Connect.LLM.xml" Pack="true" PackagePath="lib\$(TargetFramework)" />
     <None Include="..\LLM\Darkspyre.Inference.Connect.LLM.Bedrock\bin\$(Configuration)\$(TargetFramework)\Darkspyre.Inference.Connect.LLM.Bedrock.dll" Pack="true" PackagePath="lib\$(TargetFramework)" />
+    <None Include="..\LLM\Darkspyre.Inference.Connect.LLM.Vertex\bin\$(Configuration)\$(TargetFramework)\Darkspyre.Inference.Connect.LLM.Vertex.dll" Pack="true" PackagePath="lib\$(TargetFramework)" />
     <None Include="..\LLM\Darkspyre.Inference.Connect.LLM.Bedrock\bin\$(Configuration)\$(TargetFramework)\Darkspyre.Inference.Connect.LLM.Bedrock.xml" Pack="true" PackagePath="lib\$(TargetFramework)" />
+    <None Include="..\LLM\Darkspyre.Inference.Connect.LLM.Vertex\bin\$(Configuration)\$(TargetFramework)\Darkspyre.Inference.Connect.LLM.Vertex.xml" Pack="true" PackagePath="lib\$(TargetFramework)" />
   </ItemGroup>
 </Project>

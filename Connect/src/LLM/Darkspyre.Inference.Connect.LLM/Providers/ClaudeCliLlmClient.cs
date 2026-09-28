@@ -82,9 +82,9 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
         ArgumentNullException.ThrowIfNull(request);
         LlmProviderCapabilities capabilities = GetCapabilities(connection, request.ModelId);
         ValidateRequest(connection, request, capabilities);
-        if (request.Messages.Any(message => message.ResponseState is not null))
+        if (request.Messages.Any(message => message.ContinuationState is not null))
         {
-            throw new NotSupportedException("Claude CLI chat cannot import adapter response state.");
+            throw new NotSupportedException("Claude CLI chat cannot import adapter continuation state.");
         }
         ValidateClaudeCliRequest(connection, request);
         LlmStructuredOutputEnforcement? enforcement = request.StructuredOutput is null
@@ -447,9 +447,9 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
     {
         ArgumentNullException.ThrowIfNull(request);
         ValidateRequest(connection, request, GetCapabilities(connection, request.ModelId));
-        if (request.Messages.Any(message => message.ResponseState is not null))
+        if (request.Messages.Any(message => message.ContinuationState is not null))
         {
-            throw new NotSupportedException("Claude CLI chat cannot import adapter response state.");
+            throw new NotSupportedException("Claude CLI chat cannot import adapter continuation state.");
         }
         return request.Messages.Any(message => message.Attachments.Count > 0)
             ? null
@@ -563,10 +563,8 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
 
     private static LlmUsage? ReadClaudeUsage(JsonElement usage)
     {
-        int? input = LlmJson.GetInt(usage, "input_tokens");
-        int? output = LlmJson.GetInt(usage, "output_tokens");
-        int? total = input is null && output is null ? null : (input ?? 0) + (output ?? 0);
-        return total is null ? null : new LlmUsage(input, output, total);
+        return AnthropicUsage.Create(LlmJson.GetInt(usage, "input_tokens"), LlmJson.GetInt(usage, "output_tokens"),
+            LlmJson.GetInt(usage, "cache_read_input_tokens"), LlmJson.GetInt(usage, "cache_creation_input_tokens"));
     }
 
     private async Task<ClaudeCliProcessResult> InvokeClaudeAsync(

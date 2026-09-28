@@ -6,9 +6,11 @@ namespace Darkspyre.Inference.Connect.LLM;
 public sealed record LlmAgentContextEntry(string Id, string TurnId, LlmChatMessage Message);
 
 /// <summary>Settled model context. Contains no executable handlers or durable run checkpoint.</summary>
+[System.Text.Json.Serialization.JsonUnmappedMemberHandling(System.Text.Json.Serialization.JsonUnmappedMemberHandling.Disallow)]
 public sealed record LlmAgentContext
 {
-    public int FormatVersion { get; init; } = 1;
+    [System.Text.Json.Serialization.JsonRequired]
+    public int FormatVersion { get; init; } = 2;
 
     public long Revision { get; init; }
 
@@ -35,33 +37,6 @@ public sealed record LlmOmittedAttachment(
     string FileName,
     int Index,
     string? ToolCallId = null);
-
-/// <summary>
-/// Opaque adapter-owned assistant output. Preserve unchanged with its assistant message.
-/// Binding is a compatibility check, not authentication. Payload must never contain credentials.
-/// </summary>
-public sealed record LlmProviderResponseState
-{
-    public int FormatVersion { get; init; } = 1;
-
-    public required LlmTransport Transport { get; init; }
-
-    public required string ModelId { get; init; }
-
-    /// <summary>Opaque, non-secret account/connection scope, assigned by the adapter.</summary>
-    public required string ScopeId { get; init; }
-
-    public required string Payload { get; init; }
-
-    /// <summary>
-    /// Input tokens the provider reported for the request that produced this state; null when the adapter
-    /// did not record them. Accounting uses them for the history this state closes.
-    /// </summary>
-    public long? InputTokens { get; init; }
-
-    /// <summary>Output tokens, including reasoning, the provider reported for that response; null when not recorded.</summary>
-    public long? OutputTokens { get; init; }
-}
 
 public enum LlmContextMeasurementSource
 {

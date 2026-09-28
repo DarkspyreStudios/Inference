@@ -2,8 +2,11 @@ using System.Text.Json;
 
 namespace Darkspyre.Inference.Common.LLM;
 
+[System.Text.Json.Serialization.JsonUnmappedMemberHandling(System.Text.Json.Serialization.JsonUnmappedMemberHandling.Disallow)]
 public sealed record LlmMessage(string Role, string Content)
 {
+    public LlmContinuationState? ContinuationState { get; init; }
+
     public IReadOnlyList<LlmAttachment> Attachments { get; init; } = [];
 
     public IReadOnlyList<LlmToolCall> ToolCalls { get; init; } = [];
@@ -92,6 +95,8 @@ public sealed record LlmStructuredOutputRequest
 
 public sealed record LlmInferenceRequest
 {
+    public LlmUnboundContinuationState UnboundContinuationState { get; init; }
+
     public required string ModelId { get; init; }
 
     public string? Instructions { get; init; }
@@ -116,7 +121,17 @@ public sealed record LlmInferenceRequest
     public string? ConversationKey { get; init; }
 }
 
-public sealed record LlmUsage(int? InputTokens, int? OutputTokens, int? TotalTokens);
+public sealed record LlmUsage(int? InputTokens, int? OutputTokens, int? TotalTokens)
+{
+    /// <summary>Subset of input tokens served from cache; null means not reported.</summary>
+    public int? CachedInputTokens { get; init; }
+
+    /// <summary>Subset of input tokens written to cache; null means not reported.</summary>
+    public int? CacheWriteInputTokens { get; init; }
+
+    /// <summary>Subset of output tokens used for reasoning; null means not reported.</summary>
+    public int? ReasoningOutputTokens { get; init; }
+}
 
 public enum LlmCompletionStatus
 {
@@ -138,6 +153,10 @@ public sealed record LlmStructuredOutputValidation(
 
 public sealed record LlmInferenceResult
 {
+    public LlmContinuationState? ContinuationState { get; init; }
+
+    public int OmittedContinuationStateCount { get; init; }
+
     public required string Text { get; init; }
 
     public string? Refusal { get; init; }

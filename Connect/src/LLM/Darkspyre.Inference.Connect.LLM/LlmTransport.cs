@@ -16,5 +16,7 @@ public enum LlmTransport
     SelfHost = 9,
 
     /// <summary>Apple's on-device system model through the separately installed Swift helper.</summary>
-    AppleFoundationModels = 10
+    AppleFoundationModels = 10,
+
+    GoogleVertexAi = 11
 }

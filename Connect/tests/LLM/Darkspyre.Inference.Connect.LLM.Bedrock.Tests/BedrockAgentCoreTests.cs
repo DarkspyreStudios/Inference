@@ -454,7 +454,7 @@ public sealed class BedrockAgentCoreTests
         {
             ModelId = BedrockAgentCoreLlmClient.DefaultModelId,
             Runtime = new() { WorkingDirectory = "/not-sent-to-agentcore" },
-            UnboundResponseState = LlmUnboundResponseState.Omit,
+            UnboundContinuationState = LlmUnboundContinuationState.Omit,
             Context = new LlmAgentContext
             {
                 Entries =

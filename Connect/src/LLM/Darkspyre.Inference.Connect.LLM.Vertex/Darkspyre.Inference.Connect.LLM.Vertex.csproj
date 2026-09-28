@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <Description>Google Vertex AI Gemini and Claude protocol adapters.</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../Darkspyre.Inference.Connect.LLM/Darkspyre.Inference.Connect.LLM.csproj" />
+    <PackageReference Include="Google.Apis.Auth" />
+    <InternalsVisibleTo Include="Darkspyre.Inference.Connect.LLM.Vertex.Tests" />
+  </ItemGroup>
+</Project>

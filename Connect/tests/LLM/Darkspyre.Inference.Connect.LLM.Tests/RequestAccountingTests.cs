@@ -130,12 +130,12 @@ public sealed class RequestAccountingTests
         {
             Credential = new LlmCredential { OAuth = new() { AccessToken = "expired", AccountId = "account", ExpiresAtUnixSeconds = 1 } }.Serialize()
         };
-        var state = ProviderResponseStateCodec.Encode(connection, "model",
+        var state = ProviderContinuationStateCodec.Encode(connection, "model",
             System.Text.Json.Nodes.JsonNode.Parse("""[{"type":"reasoning","id":"reason","encrypted_content":"opaque","summary":[]}]""")!.AsArray());
         var service = new LlmProviderService(new Source(connection), [new OpenAiCodexLlmClient(http)],
             [new ForbiddenRefresh { Transport = LlmTransport.OpenAiCodex }]);
         var result = await service.MeasureRequestAsync("selected", Request() with
-        { Messages = [new("assistant", "") { ResponseState = state }, new("user", "summarize")] },
+        { Messages = [new("assistant", "") { ContinuationState = state }, new("user", "summarize")] },
             new() { MaxContextTokens = 1000, ReservedOutputTokens = 100, SafetyMarginTokens = 10 });
         Assert.True(result.IsSupported);
         Assert.Null(result.UsedContextTokens);

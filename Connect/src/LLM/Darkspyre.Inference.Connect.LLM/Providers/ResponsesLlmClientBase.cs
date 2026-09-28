@@ -25,7 +25,7 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
         int reported = -1;
         for (int index = request.Messages.Count - 1; index >= 0 && reported < 0; index--)
         {
-            if (request.Messages[index].ResponseState is { InputTokens: not null, OutputTokens: not null }) { reported = index; }
+            if (request.Messages[index].ContinuationState is { InputTokens: not null, OutputTokens: not null }) { reported = index; }
         }
         if (request.Messages.Skip(reported + 1).Any(Uncountable))
         {
@@ -51,7 +51,7 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
         int prefixItems = ((JsonArray)BuildPayload(connection,
             request with { Messages = [.. request.Messages.Take(reported + 1)] }, enforcement)["input"]!).Count;
         var tail = new JsonArray([.. full.Skip(prefixItems).Select(item => item?.DeepClone())]);
-        LlmProviderResponseState state = request.Messages[reported].ResponseState!;
+        LlmContinuationState state = request.Messages[reported].ContinuationState!;
         return new ContextEstimate(state.InputTokens!.Value + state.OutputTokens!.Value
             + (tail.Count == 0 ? 0 : LocalTokenCount.Count(tail.ToJsonString())), IncludesProviderReport: true);
     }
@@ -59,7 +59,7 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
     /// <summary>Content the local tokenizer cannot count: bytes, and encrypted reasoning.</summary>
     private static bool Uncountable(LlmChatMessage message) => message.Attachments.Count > 0
         || message.ToolResults.Any(result => result.Output.Parts.Any(part => part is LlmToolOutputBinary or LlmToolOutputResource { Data: not null }))
-        || message.ResponseState?.Payload.Contains("encrypted_content", StringComparison.Ordinal) == true;
+        || message.ContinuationState?.Payload.Contains("encrypted_content", StringComparison.Ordinal) == true;
 
     public override async IAsyncEnumerable<LlmStreamEvent> StreamAsync(
         LlmConnection connection,
@@ -425,9 +425,9 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
             ProviderResponseId = LlmJson.GetString(responseRoot, "id"),
             ToolCalls = toolCalls,
             // The reported counts travel with the state, so later accounting can use them for this history.
-            ResponseState = status is LlmCompletionStatus.Failed or LlmCompletionStatus.Incomplete
+            ContinuationState = status is LlmCompletionStatus.Failed or LlmCompletionStatus.Incomplete
                 ? null
-                : OpenAiResponsesTools.EncodeResponseState(responseRoot, connection, modelId) is { } state
+                : OpenAiResponsesTools.EncodeContinuationState(responseRoot, connection, modelId) is { } state
                     ? state with { InputTokens = usage?.InputTokens, OutputTokens = usage?.OutputTokens }
                     : null,
             StructuredOutput = validation,
@@ -483,7 +483,13 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
         return new LlmUsage(
             LlmJson.GetInt(usage, "input_tokens"),
             LlmJson.GetInt(usage, "output_tokens"),
-            LlmJson.GetInt(usage, "total_tokens"));
+            LlmJson.GetInt(usage, "total_tokens"))
+        {
+            CachedInputTokens = LlmJson.GetObject(usage, "input_tokens_details") is { } inputDetails
+                ? LlmJson.GetInt(inputDetails, "cached_tokens") : null,
+            ReasoningOutputTokens = LlmJson.GetObject(usage, "output_tokens_details") is { } outputDetails
+                ? LlmJson.GetInt(outputDetails, "reasoning_tokens") : null
+        };
     }
 
     private LlmProviderException StreamError(

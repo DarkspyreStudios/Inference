@@ -63,9 +63,9 @@ public sealed class ContextTransferTests
     [Fact]
     public void RejectLeavesTheRequestUnchanged()
     {
-        LlmChatRequest request = Request("other", Unbound()) with { UnboundResponseState = LlmUnboundResponseState.Reject };
+        LlmChatRequest request = Request("other", Unbound()) with { UnboundContinuationState = LlmUnboundContinuationState.Reject };
 
-        (LlmChatRequest projected, int omitted) = ResponseStateProjection.Project(request, Connection());
+        (LlmChatRequest projected, int omitted) = ContinuationStateProjection.Project(request, Connection());
 
         Assert.Same(request, projected);
         Assert.Equal(0, omitted);
@@ -74,59 +74,59 @@ public sealed class ContextTransferTests
     [Fact]
     public void OmitRemovesOnlyUnboundStateAndLeavesTheCallersMessagesIntact()
     {
-        LlmChatMessage bound = new("assistant", "Hello") { ResponseState = State("model") };
+        LlmChatMessage bound = new("assistant", "Hello") { ContinuationState = State("model") };
         LlmChatMessage unbound = Unbound();
-        LlmChatRequest request = Request("model", bound, unbound) with { UnboundResponseState = LlmUnboundResponseState.Omit };
+        LlmChatRequest request = Request("model", bound, unbound) with { UnboundContinuationState = LlmUnboundContinuationState.Omit };
 
-        (LlmChatRequest projected, int omitted) = ResponseStateProjection.Project(request, Connection());
+        (LlmChatRequest projected, int omitted) = ContinuationStateProjection.Project(request, Connection());
 
         Assert.Equal(1, omitted);
-        Assert.Same(bound.ResponseState, projected.Messages[1].ResponseState);
-        Assert.Null(projected.Messages[2].ResponseState);
+        Assert.Same(bound.ContinuationState, projected.Messages[1].ContinuationState);
+        Assert.Null(projected.Messages[2].ContinuationState);
         Assert.Equal(unbound.Content, projected.Messages[2].Content);
-        Assert.NotNull(request.Messages[2].ResponseState);
+        Assert.NotNull(request.Messages[2].ContinuationState);
     }
 
     [Fact]
     public void OmitOnATransportWithoutStateRemovesAllOfIt()
     {
         LlmConnection cli = new() { Version = "v1", Transport = LlmTransport.AnthropicClaudeCli, Endpoint = "claude" };
-        LlmChatMessage reply = new("assistant", "Hello") { ResponseState = State("model") };
-        LlmChatRequest request = Request("model", reply) with { UnboundResponseState = LlmUnboundResponseState.Omit };
+        LlmChatMessage reply = new("assistant", "Hello") { ContinuationState = State("model") };
+        LlmChatRequest request = Request("model", reply) with { UnboundContinuationState = LlmUnboundContinuationState.Omit };
 
-        (LlmChatRequest projected, int omitted) = ResponseStateProjection.Project(request, cli);
+        (LlmChatRequest projected, int omitted) = ContinuationStateProjection.Project(request, cli);
 
         Assert.Equal(1, omitted);
-        Assert.Null(projected.Messages[1].ResponseState);
+        Assert.Null(projected.Messages[1].ContinuationState);
     }
 
     [Fact]
     public void AnUndefinedHandlingValueIsRejected() =>
-        Assert.Throws<ArgumentOutOfRangeException>(() => ResponseStateProjection.Project(
-            Request("model") with { UnboundResponseState = (LlmUnboundResponseState)9 }, Connection()));
+        Assert.Throws<ArgumentOutOfRangeException>(() => ContinuationStateProjection.Project(
+            Request("model") with { UnboundContinuationState = (LlmUnboundContinuationState)9 }, Connection()));
 
     [Fact]
     public void ManagedImportWithOmitKeepsBoundStateAndCountsTheRest()
     {
         LlmAgentContext context = Context(
-            new LlmChatMessage("assistant", "Hello") { ResponseState = State("model") },
+            new LlmChatMessage("assistant", "Hello") { ContinuationState = State("model") },
             Unbound());
 
         (LlmAgentContext imported, int omitted) = ManagedAgentContext.Import(
-            context, Connection(), "model", LlmUnboundResponseState.Omit);
+            context, Connection(), "model", LlmUnboundContinuationState.Omit);
 
         Assert.Equal(1, omitted);
-        Assert.NotNull(imported.Entries[1].Message.ResponseState);
-        Assert.Null(imported.Entries[2].Message.ResponseState);
+        Assert.NotNull(imported.Entries[1].Message.ContinuationState);
+        Assert.Null(imported.Entries[2].Message.ContinuationState);
         Assert.Throws<ArgumentException>(() => ManagedAgentContext.Import(
-            context, Connection(), "model", LlmUnboundResponseState.Reject));
+            context, Connection(), "model", LlmUnboundContinuationState.Reject));
     }
 
     [Fact]
     public void OpeningContextCarriesTheTranscriptAndReportsWhatWasLeftBehind()
     {
         LlmAgentSessionOptions options = Options(Context(
-            new LlmChatMessage("assistant", "Hello") { ResponseState = State("model") },
+            new LlmChatMessage("assistant", "Hello") { ContinuationState = State("model") },
             new LlmChatMessage("user", "See this.") { Attachments = [Attachment("note.txt")] }));
 
         AgentOpeningContext carried = AgentOpeningContext.For(options, carriesAttachments: true)!;
@@ -135,7 +135,7 @@ public sealed class ContextTransferTests
         Assert.StartsWith(AgentOpeningContext.Header + Environment.NewLine + "[USER]", carried.Text, StringComparison.Ordinal);
         Assert.Contains("[ASSISTANT]" + Environment.NewLine + "Hello", carried.Text, StringComparison.Ordinal);
         Assert.Equal(["note.txt"], carried.Attachments.Select(attachment => attachment.FileName));
-        Assert.Contains("response state from 1 earlier messages was not carried.", carried.Notice, StringComparison.Ordinal);
+        Assert.Contains("continuation state from 1 earlier messages was not carried.", carried.Notice, StringComparison.Ordinal);
         Assert.DoesNotContain("attachments", carried.Notice, StringComparison.Ordinal);
         Assert.Empty(textOnly.Attachments);
         Assert.EndsWith("1 history attachments could not be carried.", textOnly.Notice, StringComparison.Ordinal);
@@ -147,7 +147,7 @@ public sealed class ContextTransferTests
         LlmAgentSessionOptions options = Options(Context(new LlmChatMessage("assistant", "Hello")));
 
         Assert.Throws<NotSupportedException>(() => AgentOpeningContext.For(
-            options with { UnboundResponseState = LlmUnboundResponseState.Reject }, carriesAttachments: true));
+            options with { UnboundContinuationState = LlmUnboundContinuationState.Reject }, carriesAttachments: true));
         Assert.Null(AgentOpeningContext.For(options with { Context = null }, carriesAttachments: true));
         Assert.Null(AgentOpeningContext.For(options with { Context = new LlmAgentContext() }, carriesAttachments: true));
     }
@@ -181,14 +181,14 @@ public sealed class ContextTransferTests
         Credential = new LlmCredential { ApiKey = "synthetic-test-key" }.Serialize()
     };
 
-    private static LlmProviderResponseState State(string modelId) => ProviderResponseStateCodec.Encode(Connection(), modelId,
+    private static LlmContinuationState State(string modelId) => ProviderContinuationStateCodec.Encode(Connection(), modelId,
         (JsonArray)JsonNode.Parse("""
             [{"type":"reasoning","id":"r1","summary":[],"encrypted_content":"opaque"},
              {"type":"message","id":"m1","role":"assistant","content":[{"type":"output_text","text":"Hello"}]}]
             """)!);
 
     /// <summary>An assistant reply whose state belongs to another model.</summary>
-    private static LlmChatMessage Unbound() => new("assistant", "Hello") { ResponseState = State("other-model") };
+    private static LlmChatMessage Unbound() => new("assistant", "Hello") { ContinuationState = State("other-model") };
 
     private static LlmChatRequest Request(string modelId, params LlmChatMessage[] replies) => new()
     {
@@ -207,7 +207,7 @@ public sealed class ContextTransferTests
         ModelId = "model",
         Runtime = new() { WorkingDirectory = "." },
         Context = context,
-        UnboundResponseState = LlmUnboundResponseState.Omit
+        UnboundContinuationState = LlmUnboundContinuationState.Omit
     };
 
     private static LlmAttachment Attachment(string name) => new()

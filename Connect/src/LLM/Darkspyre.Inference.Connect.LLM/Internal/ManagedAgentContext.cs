@@ -9,59 +9,59 @@ internal static class ManagedAgentContext
     public static LlmAgentContext Import(LlmAgentContext context, LlmConnection connection, string modelId) =>
         Validate(context, message =>
         {
-            _ = ProviderResponseStateCodec.DecodeMessage(message, connection, modelId);
+            _ = ProviderContinuationStateCodec.DecodeMessage(message, connection, modelId);
             return message;
         });
 
     /// <summary>Imports a start context; with Omit, state this target cannot replay is removed and counted.</summary>
     public static (LlmAgentContext Context, int Omitted) Import(
-        LlmAgentContext context, LlmConnection connection, string modelId, LlmUnboundResponseState unbound)
+        LlmAgentContext context, LlmConnection connection, string modelId, LlmUnboundContinuationState unbound)
     {
         if (!Enum.IsDefined(unbound))
         {
-            throw new ArgumentOutOfRangeException(nameof(unbound), "Unknown unbound response state handling.");
+            throw new ArgumentOutOfRangeException(nameof(unbound), "Unknown unbound continuation state handling.");
         }
-        if (unbound == LlmUnboundResponseState.Reject)
+        if (unbound == LlmUnboundContinuationState.Reject)
         {
             return (Import(context, connection, modelId), 0);
         }
         int omitted = 0;
         LlmAgentContext imported = Validate(context, message =>
         {
-            if (ProviderResponseStateCodec.IsBound(message.ResponseState!, connection, modelId))
+            if (ProviderContinuationStateCodec.IsBound(message.ContinuationState!, connection, modelId))
             {
-                _ = ProviderResponseStateCodec.DecodeMessage(message, connection, modelId);
+                _ = ProviderContinuationStateCodec.DecodeMessage(message, connection, modelId);
                 return message;
             }
             omitted++;
-            return message with { ResponseState = null };
+            return message with { ContinuationState = null };
         });
         return (imported, omitted);
     }
 
     /// <summary>
-    /// Validates a context for a new provider-side conversation, which carries no response state. Every
+    /// Validates a context for a new provider-side conversation, which carries no continuation state. Every
     /// entry's state is removed and counted.
     /// </summary>
-    public static (LlmAgentContext Context, int Omitted) WithoutResponseState(LlmAgentContext context)
+    public static (LlmAgentContext Context, int Omitted) WithoutContinuationState(LlmAgentContext context)
     {
         int omitted = 0;
         LlmAgentContext validated = Validate(context, message =>
         {
             omitted++;
-            return message with { ResponseState = null };
+            return message with { ContinuationState = null };
         });
         return (validated, omitted);
     }
 
     /// <summary>
-    /// One structural pass over a context. <paramref name="responseState"/> validates or rewrites each message
-    /// that carries response state.
+    /// One structural pass over a context. <paramref name="continuationState"/> validates or rewrites each message
+    /// that carries continuation state.
     /// </summary>
-    private static LlmAgentContext Validate(LlmAgentContext context, Func<LlmChatMessage, LlmChatMessage> responseState)
+    private static LlmAgentContext Validate(LlmAgentContext context, Func<LlmChatMessage, LlmChatMessage> continuationState)
     {
         ArgumentNullException.ThrowIfNull(context);
-        if (context.FormatVersion != 1 || context.Revision < 0)
+        if (context.FormatVersion != 2 || context.Revision < 0)
         {
             throw new ArgumentException("Unsupported context format or revision.");
         }
@@ -83,9 +83,9 @@ internal static class ManagedAgentContext
             {
                 throw new ArgumentException("Context roles and complete tool groups must remain ordered.");
             }
-            if (message.ResponseState is not null)
+            if (message.ContinuationState is not null)
             {
-                message = responseState(message);
+                message = continuationState(message);
             }
             entries.Add(entry with { Message = message });
             foreach (var call in message.ToolCalls)

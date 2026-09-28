@@ -95,7 +95,7 @@ public sealed class LlmProviderService
 
     /// <summary>
     /// Binds the portable inference contract to one explicitly selected Connect connection. The
-    /// returned adapter does not retain or expose provider response state or diagnostics.
+    /// returned adapter carries opaque continuation state unchanged and omits provider diagnostics.
     /// </summary>
     public ILlmInference Bind(string connectionId)
     {
@@ -330,7 +330,11 @@ public sealed class LlmProviderService
                 connection,
                 cancellationToken);
         }
-        if (expectedScope is not null && ProviderResponseStateCodec.Scope(connection) != expectedScope)
+        if (client is ILlmConnectionPreparation preparation)
+        {
+            connection = await preparation.PrepareAsync(connection, cancellationToken).ConfigureAwait(false);
+        }
+        if (expectedScope is not null && ProviderContinuationStateCodec.Scope(connection) != expectedScope)
         {
             throw new LlmProviderException("The agent connection/account changed. Open a new session explicitly.", connection.Transport);
         }
@@ -342,7 +346,7 @@ public sealed class LlmProviderService
                 throw new LlmProviderException("The connection now disables the requested agent operation.", connection.Transport);
             }
         }
-        (request, int omitted) = ResponseStateProjection.Project(request, connection);
+        (request, int omitted) = ContinuationStateProjection.Project(request, connection);
         await foreach (LlmStreamEvent streamEvent in client.StreamAsync(
                            connection,
                            request,
@@ -351,7 +355,7 @@ public sealed class LlmProviderService
             yield return streamEvent is LlmChatCompletionEvent completion
                 ? new LlmChatCompletionEvent(SanitizeDiagnostics(completion.Result, connection) with
                 {
-                    OmittedResponseStateCount = omitted
+                    OmittedContinuationStateCount = checked(omitted + completion.Result.OmittedContinuationStateCount)
                 })
                 : streamEvent;
         }
@@ -376,7 +380,10 @@ public sealed class LlmProviderService
         var connection = await LlmConnectionResolver.ResolveAsync(_connections, connectionId, cancellationToken);
         var client = ClientFor(connection.Transport);
         // Measure what would be sent: the same projection as the request path.
-        request = ResponseStateProjection.Project(request, connection).Request;
+        // Ambient-credential adapters cannot decide state binding without resolving identity.
+        // Their nonmutating estimator reports unknown for opaque state instead of dropping it.
+        if (client is not ILlmConnectionPreparation)
+        { request = ContinuationStateProjection.Project(request, connection).Request; }
         var capabilities = client.GetCapabilities(connection, request.ModelId);
         LlmRequestAccounting Unsupported(string diagnostic) => new()
         {
@@ -474,7 +481,11 @@ public sealed class LlmProviderService
     {
         LlmConnection connection = await ResolveFreshConnectionAsync(connectionId, cancellationToken);
         ILlmClient client = ClientFor(connection.Transport);
-        return await _modelLists.GetAsync(connectionId, connection.Version,
+        if (client is ILlmConnectionPreparation preparation)
+        {
+            connection = await preparation.PrepareAsync(connection, cancellationToken).ConfigureAwait(false);
+        }
+        return await _modelLists.GetAsync(connectionId, connection.Version + connection.ResolvedContinuationScope,
             () => client.ListModelsAsync(connection, CancellationToken.None), cancellationToken);
     }
 
@@ -485,7 +496,11 @@ public sealed class LlmProviderService
     {
         LlmConnection connection = await ResolveFreshConnectionAsync(connectionId, cancellationToken);
         ILlmClient client = ClientFor(connection.Transport);
-        return await _modelLists.RefreshAsync(connectionId, connection.Version,
+        if (client is ILlmConnectionPreparation preparation)
+        {
+            connection = await preparation.PrepareAsync(connection, cancellationToken).ConfigureAwait(false);
+        }
+        return await _modelLists.RefreshAsync(connectionId, connection.Version + connection.ResolvedContinuationScope,
             () => client.ListModelsAsync(connection, CancellationToken.None), cancellationToken);
     }
 

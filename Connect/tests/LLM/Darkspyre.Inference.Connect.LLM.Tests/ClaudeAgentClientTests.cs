@@ -271,7 +271,7 @@ public sealed class ClaudeAgentClientTests
         {
             ModelId = "claude-test",
             Runtime = new() { WorkingDirectory = Environment.CurrentDirectory },
-            UnboundResponseState = LlmUnboundResponseState.Omit,
+            UnboundContinuationState = LlmUnboundContinuationState.Omit,
             Context = new LlmAgentContext
             {
                 Entries =
@@ -279,7 +279,7 @@ public sealed class ClaudeAgentClientTests
                     new("e1", "t1", new LlmChatMessage("user", "What is 17 times 23?")),
                     new("e2", "t1", new LlmChatMessage("assistant", "391")
                     {
-                        ResponseState = new() { Transport = LlmTransport.OpenAiCodex, ModelId = "gpt", ScopeId = "scope", Payload = "[]" }
+                        ContinuationState = new() { ImplementationId = ProviderContinuationStateCodec.ImplementationId(LlmTransport.OpenAiCodex), ModelId = "gpt", ScopeId = "scope", Payload = "[]" }
                     })
                 ]
             },
@@ -303,7 +303,7 @@ public sealed class ClaudeAgentClientTests
         Assert.Equal(1, turns[1].GetArrayLength());
         Assert.Equal("Again.", turns[1][0].GetProperty("text").GetString());
         LlmAgentWarningEvent warning = Assert.Single(first.OfType<LlmAgentWarningEvent>());
-        Assert.Contains("response state from 1 earlier messages", warning.Message, StringComparison.Ordinal);
+        Assert.Contains("continuation state from 1 earlier messages", warning.Message, StringComparison.Ordinal);
         Assert.Empty(second.OfType<LlmAgentWarningEvent>());
     }
 

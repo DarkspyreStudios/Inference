@@ -91,10 +91,10 @@ public sealed record LlmAgentSessionOptions
     public LlmAgentContext? Context { get; init; }
 
     /// <summary>
-    /// Set to <see cref="LlmUnboundResponseState.Omit"/> when <see cref="Context"/> carries retained history
+    /// Set to <see cref="LlmUnboundContinuationState.Omit"/> when <see cref="Context"/> carries retained history
     /// from another model or provider. An opening-context start carries no state, so it requires Omit.
     /// </summary>
-    public LlmUnboundResponseState UnboundResponseState { get; init; } = LlmUnboundResponseState.Reject;
+    public LlmUnboundContinuationState UnboundContinuationState { get; init; } = LlmUnboundContinuationState.Reject;
 
     public string? ThreadId { get; init; }
 

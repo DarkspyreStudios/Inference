@@ -48,8 +48,8 @@ public sealed class DirectCodexTests
         Assert.False(sent.RootElement.TryGetProperty("previous_response_id", out _));
         Assert.Equal("Hello", result.Text);
         Assert.Equal(7, result.Usage?.TotalTokens);
-        Assert.Contains("final_answer", result.ResponseState?.Payload);
-        Assert.DoesNotContain("token", result.ResponseState?.Payload);
+        Assert.Contains("final_answer", result.ContinuationState?.Payload);
+        Assert.DoesNotContain("token", result.ContinuationState?.Payload);
         Assert.Equal("authorize-chatgpt", client.ProviderDefinition.SetupSteps[0].Id);
         Assert.True(client.GetCapabilities(Connection()).SupportsToolUse);
         Assert.Equal(LlmAgentOwnership.Host, client.GetCapabilities(Connection()).Agent.ContextOwnership);
@@ -111,14 +111,14 @@ public sealed class DirectCodexTests
         var result = Assert.Single(stream.OfType<LlmChatCompletionEvent>()).Result;
         Assert.Equal(LlmCompletionStatus.RequiresAction, result.Status);
         Assert.Equal("call", Assert.Single(result.ToolCalls).Id);
-        var state = ProviderResponseStateCodec.Decode(result.ResponseState!, Connection(), "model");
+        var state = ProviderContinuationStateCodec.Decode(result.ContinuationState!, Connection(), "model");
         Assert.Equal("reasoning", state[0]!["type"]!.GetValue<string>());
         Assert.Equal("function_call", state[1]!["type"]!.GetValue<string>());
         handler.Response = _ => Sse(Completed);
         await Complete(client, Connection(), Request() with
         {
             Messages = [new("user", "first"),
-            new("assistant", result.Text) { ToolCalls = result.ToolCalls, ResponseState = result.ResponseState },
+            new("assistant", result.Text) { ToolCalls = result.ToolCalls, ContinuationState = result.ContinuationState },
             new("user", "") { ToolResults = [new("call", LlmToolOutput.FromText("answer"))] }]
         });
         using var replay = JsonDocument.Parse(handler.Body!);
@@ -135,7 +135,7 @@ public sealed class DirectCodexTests
         using var http = new HttpClient(handler);
         var client = new OpenAiCodexLlmClient(http);
         var result = await Complete(client, Connection(), Request());
-        var followup = Request() with { Messages = [new("assistant", result.Text) { ResponseState = result.ResponseState }, new("user", "next")] };
+        var followup = Request() with { Messages = [new("assistant", result.Text) { ContinuationState = result.ContinuationState }, new("user", "next")] };
         await Complete(client, Connection(), followup);
         using var sent = JsonDocument.Parse(handler.Body!);
         Assert.Equal(2, sent.RootElement.GetProperty("input").GetArrayLength());
@@ -363,11 +363,11 @@ public sealed class DirectCodexTests
                 StringComparison.Ordinal)));
         var client = new OpenAiCodexLlmClient(new HttpClient(handler));
         LlmChatResult first = await Complete(client, Connection(), Request());
-        Assert.Equal((1200L, 80L), (first.ResponseState!.InputTokens, first.ResponseState.OutputTokens));
+        Assert.Equal((1200L, 80L), (first.ContinuationState!.InputTokens, first.ContinuationState.OutputTokens));
         LlmChatRequest followup = Request() with
         {
             Messages = [new("user", "first"),
-                new("assistant", first.Text) { ToolCalls = first.ToolCalls, ResponseState = first.ResponseState },
+                new("assistant", first.Text) { ToolCalls = first.ToolCalls, ContinuationState = first.ContinuationState },
                 new("user", "") { ToolResults = [new("call", LlmToolOutput.FromText("answer"))] }]
         };
 
@@ -380,14 +380,14 @@ public sealed class DirectCodexTests
         Assert.Equal(estimate.Tokens, accounting.UsedContextTokens);
         Assert.Equal(LlmContextMeasurementSource.Mixed, accounting.Source);
         // Encrypted reasoning without a report stays unknown, as does encrypted state after the last report.
-        var unreported = first.ResponseState with { InputTokens = null, OutputTokens = null };
+        var unreported = first.ContinuationState with { InputTokens = null, OutputTokens = null };
         Assert.Null(client.EstimateInputTokens(Connection(), followup with
         {
-            Messages = [followup.Messages[0], followup.Messages[1] with { ResponseState = unreported }, followup.Messages[2]]
+            Messages = [followup.Messages[0], followup.Messages[1] with { ContinuationState = unreported }, followup.Messages[2]]
         }));
         Assert.Null(client.EstimateInputTokens(Connection(), followup with
         {
-            Messages = [.. followup.Messages, new("assistant", "") { ToolCalls = first.ToolCalls, ResponseState = unreported },
+            Messages = [.. followup.Messages, new("assistant", "") { ToolCalls = first.ToolCalls, ContinuationState = unreported },
                 new("user", "") { ToolResults = [new("call", LlmToolOutput.FromText("again"))] }]
         }));
     }
@@ -416,8 +416,8 @@ public sealed class DirectCodexTests
             Assert.Contains("function_call", types);
             Assert.Contains("function_call_output", types);
             Assert.DoesNotContain("opaque", handler.Body!, StringComparison.Ordinal);
-            Assert.Equal(1, result.OmittedResponseStateCount);
-            Assert.NotNull(followup.Messages[1].ResponseState);
+            Assert.Equal(1, result.OmittedContinuationStateCount);
+            Assert.NotNull(followup.Messages[1].ContinuationState);
         }
     }
 
@@ -430,7 +430,7 @@ public sealed class DirectCodexTests
             int before = handler.Calls;
 
             await Assert.ThrowsAsync<ArgumentException>(() => providers.CompleteAsync(
-                "codex", followup with { UnboundResponseState = LlmUnboundResponseState.Reject }));
+                "codex", followup with { UnboundContinuationState = LlmUnboundContinuationState.Reject }));
 
             Assert.Equal(before, handler.Calls);
         }
@@ -444,8 +444,8 @@ public sealed class DirectCodexTests
         {
             LlmChatRequest stripped = followup with
             {
-                UnboundResponseState = LlmUnboundResponseState.Reject,
-                Messages = [.. followup.Messages.Select(message => message with { ResponseState = null })]
+                UnboundContinuationState = LlmUnboundContinuationState.Reject,
+                Messages = [.. followup.Messages.Select(message => message with { ContinuationState = null })]
             };
 
             LlmRequestAccounting omitted = await providers.MeasureRequestAsync("codex", followup);
@@ -471,9 +471,9 @@ public sealed class DirectCodexTests
         LlmChatRequest followup = Request() with
         {
             ModelId = "other",
-            UnboundResponseState = LlmUnboundResponseState.Omit,
+            UnboundContinuationState = LlmUnboundContinuationState.Omit,
             Messages = [new("user", "first"),
-                new("assistant", first.Text) { ToolCalls = first.ToolCalls, ResponseState = first.ResponseState },
+                new("assistant", first.Text) { ToolCalls = first.ToolCalls, ContinuationState = first.ContinuationState },
                 new("user", "") { ToolResults = [new("call", LlmToolOutput.FromText("answer"))] }]
         };
         return (handler, providers, followup);

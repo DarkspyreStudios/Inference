@@ -60,7 +60,7 @@ public sealed class ConsoleProbeTests
     [InlineData("--timeout-seconds", "no")]
     [InlineData("--case", "missing")]
     public void ProbeRejectsUnboundedOrUnknownOptions(string option, string value) =>
-        Assert.Throws<ArgumentException>(() => AppleProbeOptions.Parse([option, value], "apple-system-default"));
+        Assert.Throws<ArgumentException>(() => ProviderProbeOptions.Parse([option, value], "apple-system-default"));
 
     [Fact]
     public async Task RepeatsRetainFailuresAndOmitProviderErrorText()

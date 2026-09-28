@@ -3,10 +3,11 @@ using Darkspyre.Inference.Common.LLM;
 
 namespace Darkspyre.Inference.Connect.LLM;
 
+[System.Text.Json.Serialization.JsonUnmappedMemberHandling(System.Text.Json.Serialization.JsonUnmappedMemberHandling.Disallow)]
 public sealed record LlmChatMessage(string Role, string Content)
 {
     /// <summary>Complete adapter-owned output, serialized instead of visible assistant text/calls.</summary>
-    public LlmProviderResponseState? ResponseState { get; init; }
+    public LlmContinuationState? ContinuationState { get; init; }
 
     public IReadOnlyList<LlmOmittedAttachment> OmittedAttachments { get; init; } = [];
 
@@ -18,21 +19,6 @@ public sealed record LlmChatMessage(string Role, string Content)
 
     /// <summary>Host-executed results for previous tool calls.</summary>
     public IReadOnlyList<LlmToolResult> ToolResults { get; init; } = [];
-}
-
-/// <summary>
-/// What happens to message response state that the target transport, model or account cannot replay.
-/// </summary>
-public enum LlmUnboundResponseState
-{
-    /// <summary>The request fails before any provider call.</summary>
-    Reject,
-
-    /// <summary>
-    /// The sent request carries the message without its state; visible content, tool calls, tool results
-    /// and attachments are kept. The caller's messages are not modified.
-    /// </summary>
-    Omit
 }
 
 /// <summary>Provider-neutral generation request. The model is selected per request.</summary>
@@ -70,10 +56,10 @@ public sealed record LlmChatRequest
         new Dictionary<string, JsonElement>(StringComparer.Ordinal);
 
     /// <summary>
-    /// Set to <see cref="LlmUnboundResponseState.Omit"/> when carrying retained history to a new conversation
+    /// Set to <see cref="LlmUnboundContinuationState.Omit"/> when carrying retained history to a new conversation
     /// on another model or provider.
     /// </summary>
-    public LlmUnboundResponseState UnboundResponseState { get; init; } = LlmUnboundResponseState.Reject;
+    public LlmUnboundContinuationState UnboundContinuationState { get; init; } = LlmUnboundContinuationState.Reject;
 }
 
 public sealed record LlmProviderDiagnostics(
@@ -103,12 +89,12 @@ public sealed record LlmChatResult
     public IReadOnlyList<LlmToolCall> ToolCalls { get; init; } = [];
 
     /// <summary>Preserve unchanged on this response's assistant message, including ordinary turns.</summary>
-    public LlmProviderResponseState? ResponseState { get; init; }
+    public LlmContinuationState? ContinuationState { get; init; }
 
     public LlmStructuredOutputValidation? StructuredOutput { get; init; }
 
     public required LlmProviderDiagnostics Diagnostics { get; init; }
 
-    /// <summary>How many request messages were sent without their response state.</summary>
-    public int OmittedResponseStateCount { get; init; }
+    /// <summary>How many request messages were sent without their continuation state.</summary>
+    public int OmittedContinuationStateCount { get; init; }
 }

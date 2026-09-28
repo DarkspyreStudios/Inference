@@ -41,6 +41,9 @@ internal sealed class ConnectLlmInference(
             model.Capabilities is null ? null : ToCommon(model.Capabilities))
         {
             MaxContextTokens = model.MaxContextTokens,
+            Availability = model.Availability,
+            AvailabilityCheckedAt = model.AvailabilityCheckedAt,
+            AvailabilityReason = model.AvailabilityReason,
             MaxOutputTokens = model.MaxOutputTokens
         }).ToArray();
 
@@ -99,6 +102,8 @@ internal sealed class ConnectLlmInference(
         FinishReason = result.FinishReason,
         IncompleteReason = result.IncompleteReason,
         Usage = result.Usage,
+        ContinuationState = result.ContinuationState,
+        OmittedContinuationStateCount = result.OmittedContinuationStateCount,
         ToolCalls = result.ToolCalls,
         StructuredOutput = result.StructuredOutput,
         Provenance = new Common.InferenceProvenance
@@ -116,6 +121,7 @@ internal sealed class ConnectLlmInference(
         Instructions = request.Instructions,
         Messages = request.Messages.Select(static message => new LlmChatMessage(message.Role, message.Content)
         {
+            ContinuationState = message.ContinuationState,
             Attachments = message.Attachments,
             ToolCalls = message.ToolCalls,
             ToolResults = message.ToolResults
@@ -127,6 +133,7 @@ internal sealed class ConnectLlmInference(
         Tools = request.Tools,
         ToolChoice = request.ToolChoice,
         AllowParallelToolCalls = request.AllowParallelToolCalls,
+        UnboundContinuationState = request.UnboundContinuationState,
         ConversationKey = request.ConversationKey
     };
 
@@ -140,6 +147,7 @@ internal sealed class ConnectLlmInference(
         ReasoningLevels = capabilities.ReasoningLevels,
         SupportsTemperature = capabilities.SupportsTemperature,
         SupportsToolUse = capabilities.SupportsToolUse,
+        Tools = capabilities.Tools,
         SupportsPromptImages = capabilities.SupportsPromptImages,
         SupportsPromptDocuments = capabilities.SupportsPromptDocuments
     };

@@ -8,6 +8,10 @@ namespace Darkspyre.Inference.Connect.LLM;
 /// </summary>
 public sealed record LlmConnection
 {
+    // Resolved by the selected adapter for one operation. Never serialized or supplied by a host.
+    internal Internal.ILlmContinuationCodec? ContinuationCodec { get; init; }
+    internal string? ResolvedContinuationScope { get; init; }
+
     /// <summary>
     /// Opaque host concurrency token covering the connection and credential state. Every credential
     /// write must atomically compare this value before replacing the credential.
@@ -24,6 +28,8 @@ public sealed record LlmConnection
 
     /// <summary>Serialized <see cref="LlmCredential"/>.</summary>
     public string? Credential { get; init; }
+
+    public LlmVertexConfiguration? Vertex { get; init; }
 
     /// <summary>Non-standard headers such as OpenRouter attribution headers.</summary>
     public IReadOnlyDictionary<string, string> AdditionalHeaders { get; init; } =

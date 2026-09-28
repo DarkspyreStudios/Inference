@@ -44,6 +44,9 @@ internal sealed class SelfHostLlmClient(ILlmSelfHost host) : ILlmClient, ILlmCon
             model.Capabilities is null ? null : ToConnect(model.Capabilities))
         {
             MaxContextTokens = model.MaxContextTokens,
+            Availability = model.Availability,
+            AvailabilityCheckedAt = model.AvailabilityCheckedAt,
+            AvailabilityReason = model.AvailabilityReason,
             MaxOutputTokens = model.MaxOutputTokens
         }).ToArray();
     }
@@ -88,6 +91,7 @@ internal sealed class SelfHostLlmClient(ILlmSelfHost host) : ILlmClient, ILlmCon
         Instructions = request.Instructions,
         Messages = request.Messages.Select(static message => new CommonLlm.LlmMessage(message.Role, message.Content)
         {
+            ContinuationState = message.ContinuationState,
             Attachments = message.Attachments,
             ToolCalls = message.ToolCalls,
             ToolResults = message.ToolResults
@@ -99,6 +103,7 @@ internal sealed class SelfHostLlmClient(ILlmSelfHost host) : ILlmClient, ILlmCon
         Tools = request.Tools,
         ToolChoice = request.ToolChoice,
         AllowParallelToolCalls = request.AllowParallelToolCalls,
+        UnboundContinuationState = request.UnboundContinuationState,
         ConversationKey = request.ConversationKey
     };
 
@@ -111,6 +116,8 @@ internal sealed class SelfHostLlmClient(ILlmSelfHost host) : ILlmClient, ILlmCon
         FinishReason = result.FinishReason,
         IncompleteReason = result.IncompleteReason,
         Usage = result.Usage,
+        ContinuationState = result.ContinuationState,
+        OmittedContinuationStateCount = result.OmittedContinuationStateCount,
         ToolCalls = result.ToolCalls,
         StructuredOutput = result.StructuredOutput,
         // An in-process call has no HTTP exchange; 200 records that it completed.
@@ -128,6 +135,7 @@ internal sealed class SelfHostLlmClient(ILlmSelfHost host) : ILlmClient, ILlmCon
         ReasoningLevels = capabilities.ReasoningLevels,
         SupportsTemperature = capabilities.SupportsTemperature,
         SupportsToolUse = capabilities.SupportsToolUse,
+        Tools = capabilities.Tools,
         ToolHistory = LlmToolHistory.Structured,
         SupportsAgentSessions = true,
         SupportsAgentToolUse = capabilities.SupportsToolUse,

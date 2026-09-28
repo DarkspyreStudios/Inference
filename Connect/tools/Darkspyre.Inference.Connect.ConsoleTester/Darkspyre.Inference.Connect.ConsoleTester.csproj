@@ -7,6 +7,7 @@
   <ItemGroup>
     <PackageReference Include="Darkspyre.SecureStore" />
     <ProjectReference Include="..\..\src\LLM\Darkspyre.Inference.Connect.LLM.Bedrock\Darkspyre.Inference.Connect.LLM.Bedrock.csproj" />
+    <ProjectReference Include="..\..\src\LLM\Darkspyre.Inference.Connect.LLM.Vertex\Darkspyre.Inference.Connect.LLM.Vertex.csproj" />
     <ProjectReference Include="..\..\src\LLM\Darkspyre.Inference.Connect.LLM\Darkspyre.Inference.Connect.LLM.csproj" />
   </ItemGroup>
 

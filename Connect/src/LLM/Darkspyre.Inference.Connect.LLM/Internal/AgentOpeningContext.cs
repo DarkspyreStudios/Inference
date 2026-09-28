@@ -18,13 +18,13 @@ internal sealed record AgentOpeningContext(string Text, IReadOnlyList<LlmAttachm
         {
             return null;
         }
-        if (options.UnboundResponseState != LlmUnboundResponseState.Omit)
+        if (options.UnboundContinuationState != LlmUnboundContinuationState.Omit)
         {
             throw new NotSupportedException(
-                "This runtime starts a new provider conversation that carries no response state. "
-                + "Start with UnboundResponseState.Omit to carry the context as opening context.");
+                "This runtime starts a new provider conversation that carries no continuation state. "
+                + "Start with UnboundContinuationState.Omit to carry the context as opening context.");
         }
-        (LlmAgentContext context, int omitted) = ManagedAgentContext.WithoutResponseState(options.Context);
+        (LlmAgentContext context, int omitted) = ManagedAgentContext.WithoutContinuationState(options.Context);
         if (context.Entries.Count == 0)
         {
             return null;
@@ -54,7 +54,7 @@ internal sealed record AgentOpeningContext(string Text, IReadOnlyList<LlmAttachm
             LlmAttachments.Validate(attachments, supportsImages: true, supportsDocuments: true, parameterName: nameof(options));
         }
         string notice = "History was carried as opening context in a new provider conversation; "
-            + $"response state from {omitted} earlier messages was not carried.";
+            + $"continuation state from {omitted} earlier messages was not carried.";
         int notCarried = uncarried + (carriesAttachments ? 0 : attachments.Length);
         if (notCarried > 0)
         {

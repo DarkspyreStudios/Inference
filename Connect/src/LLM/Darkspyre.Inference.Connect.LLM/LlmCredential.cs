@@ -12,6 +12,8 @@ public sealed record LlmCredential
 
     public LlmAwsCredentials? Aws { get; init; }
 
+    public LlmGoogleCredentials? Google { get; init; }
+
     /// <summary>Protected custom headers, for providers that use credentials such as <c>x-api-key</c>.</summary>
     public IReadOnlyDictionary<string, string> SecretHeaders { get; init; } =
         new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);

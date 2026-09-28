@@ -69,6 +69,7 @@ public sealed class QwenLlmInference : ITensorLlmInference
             ReasoningLevels = ReasoningLevels,
             SupportsTemperature = true,
             SupportsToolUse = true,
+            Tools = new() { SupportsParallelCalls = true, StrictInputSchema = LlmStrictInputSchemaSupport.Unsupported },
             SupportsPromptImages = false,
             SupportsPromptDocuments = false
         };
@@ -99,6 +100,19 @@ public sealed class QwenLlmInference : ITensorLlmInference
     {
         ThrowIfDisposed();
         ArgumentNullException.ThrowIfNull(request);
+        if (!Enum.IsDefined(request.UnboundContinuationState))
+        {
+            throw new InferenceException(InferenceFailureCode.InvalidRequest, "Unknown continuation policy.");
+        }
+        int omitted = request.Messages.Count(message => message.ContinuationState is not null);
+        if (omitted > 0 && request.UnboundContinuationState != LlmUnboundContinuationState.Omit)
+        {
+            throw new InferenceException(InferenceFailureCode.UnsupportedFeature, "Qwen cannot replay supplied continuation state.");
+        }
+        if (omitted > 0)
+        {
+            request = request with { Messages = request.Messages.Select(message => message with { ContinuationState = null }).ToArray() };
+        }
         ValidateRequest(request);
         await using TensorModelLifetime.ExecutionLease modelUse = await _lifetime.EnterExecutionAsync(cancellationToken)
             .ConfigureAwait(false);
@@ -224,6 +238,7 @@ public sealed class QwenLlmInference : ITensorLlmInference
         yield return new LlmCompletionEvent(new LlmInferenceResult
         {
             Text = text,
+            OmittedContinuationStateCount = omitted,
             Status = string.Equals(finishReason, "max_tokens", StringComparison.Ordinal)
                 ? LlmCompletionStatus.Incomplete
                 : LlmCompletionStatus.Completed,
@@ -583,6 +598,9 @@ public sealed class QwenLlmInference : ITensorLlmInference
         {
             throw new InferenceException(InferenceFailureCode.InvalidRequest, "Temperature must be between 0 and 2.");
         }
+
+        if (request.Tools.Any(tool => tool.Strict))
+        { throw new InferenceException(InferenceFailureCode.UnsupportedFeature, "Qwen cannot enforce strict tool argument schemas."); }
 
         // The chat template has no control for a forced or serial tool choice.
         if (request.ToolChoice is not null || request.AllowParallelToolCalls is not null)

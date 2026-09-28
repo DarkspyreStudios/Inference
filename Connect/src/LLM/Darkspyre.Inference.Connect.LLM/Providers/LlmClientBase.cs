@@ -187,6 +187,13 @@ internal abstract class LlmClientBase(HttpClient http) : ILlmClient
             throw new NotSupportedException("The selected connection does not support host-executed tools.");
         }
 
+        if (!Enum.IsDefined(capabilities.Tools.StrictInputSchema))
+        { throw new ArgumentException("Invalid strict tool-schema capability.", nameof(capabilities)); }
+        // Unknown deliberately permits an attempt. Never turn a host opt-in into a non-strict request.
+        if (request.Tools.Any(tool => tool.Strict)
+            && capabilities.Tools.StrictInputSchema == LlmStrictInputSchemaSupport.Unsupported)
+        { throw new NotSupportedException("The selected route cannot enforce strict tool input schemas."); }
+
         var toolNames = new HashSet<string>(StringComparer.Ordinal);
         foreach (LlmToolDefinition tool in request.Tools)
         {

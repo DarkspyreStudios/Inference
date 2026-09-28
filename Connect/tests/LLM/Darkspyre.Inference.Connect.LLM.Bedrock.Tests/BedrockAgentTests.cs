@@ -24,15 +24,15 @@ public sealed class BedrockAgentTests
     }
 
     [Fact]
-    public void AReplyWithReportedUsageCarriesItsCountsAsResponseState()
+    public void AReplyWithReportedUsageCarriesItsCountsAsContinuationState()
     {
         LlmChatResult result = Complete(Response(new TokenUsage { InputTokens = 1200, OutputTokens = 80, TotalTokens = 1280 }));
 
-        LlmProviderResponseState state = Assert.IsType<LlmProviderResponseState>(result.ResponseState);
-        Assert.Equal((LlmTransport.AwsBedrockConverse, Model), (state.Transport, state.ModelId));
+        LlmContinuationState state = Assert.IsType<LlmContinuationState>(result.ContinuationState);
+        Assert.Equal((ProviderContinuationStateCodec.ImplementationId(LlmTransport.AwsBedrockConverse), Model), (state.ImplementationId, state.ModelId));
         Assert.Equal((1200L, 80L), (state.InputTokens, state.OutputTokens));
         Assert.Equal("[]", state.Payload);
-        Assert.Null(Complete(Response(usage: null)).ResponseState);
+        Assert.Null(Complete(Response(usage: null)).ContinuationState);
     }
 
     [Fact]
@@ -54,7 +54,7 @@ public sealed class BedrockAgentTests
     [Fact]
     public void AReportCountsTheHistoryItClosesAndOnlyTheTailIsTokenized()
     {
-        LlmChatMessage reported = new("assistant", "done") { ResponseState = Counts(1200, 80) };
+        LlmChatMessage reported = new("assistant", "done") { ContinuationState = Counts(1200, 80) };
         LlmChatMessage[] history = [new("user", "first"), reported];
 
         ContextEstimate closed = _client.EstimateInputTokens(Connection(), Request(history))!.Value;
@@ -69,7 +69,7 @@ public sealed class BedrockAgentTests
     public void AnAttachmentAfterTheLastReportLeavesTheRequestUnestimated()
     {
         LlmChatMessage image = new("user", "look") { Attachments = [Png()] };
-        LlmChatMessage reported = new("assistant", "done") { ResponseState = Counts(1200, 80) };
+        LlmChatMessage reported = new("assistant", "done") { ContinuationState = Counts(1200, 80) };
 
         Assert.Null(_client.EstimateInputTokens(Connection(), Request([image])));
         Assert.Null(_client.EstimateInputTokens(Connection(), Request([reported, image])));
@@ -79,8 +79,8 @@ public sealed class BedrockAgentTests
     [Fact]
     public void OnlyThisConnectionsOwnStateIsAccepted()
     {
-        LlmChatMessage foreign = new("assistant", "done") { ResponseState = Counts(1200, 80) with { ModelId = "another-model" } };
-        LlmChatMessage other = new("assistant", "done") { ResponseState = Counts(1200, 80) with { Transport = LlmTransport.OpenAiResponses } };
+        LlmChatMessage foreign = new("assistant", "done") { ContinuationState = Counts(1200, 80) with { ModelId = "another-model" } };
+        LlmChatMessage other = new("assistant", "done") { ContinuationState = Counts(1200, 80) with { ImplementationId = ProviderContinuationStateCodec.ImplementationId(LlmTransport.OpenAiResponses) } };
 
         Assert.Throws<ArgumentException>(() => _client.EstimateInputTokens(Connection(), Request([foreign])));
         Assert.Throws<ArgumentException>(() => _client.EstimateInputTokens(Connection(), Request([other])));
@@ -102,8 +102,8 @@ public sealed class BedrockAgentTests
     private static LlmChatResult Complete(ConverseResponse response) =>
         Assert.IsType<LlmChatCompletionEvent>(BedrockLlmClient.MapResponse(Connection(), Request([new("user", "hello")]), null, response).Last()).Result;
 
-    private static LlmProviderResponseState Counts(long input, long output) =>
-        Complete(Response(new TokenUsage { InputTokens = (int)input, OutputTokens = (int)output, TotalTokens = (int)(input + output) })).ResponseState!;
+    private static LlmContinuationState Counts(long input, long output) =>
+        Complete(Response(new TokenUsage { InputTokens = (int)input, OutputTokens = (int)output, TotalTokens = (int)(input + output) })).ContinuationState!;
 
     private static ConverseResponse Response(TokenUsage? usage) => new()
     {

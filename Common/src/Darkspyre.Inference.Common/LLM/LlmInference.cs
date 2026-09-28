@@ -52,6 +52,8 @@ public sealed record LlmCapabilities
 
     public bool SupportsToolUse { get; init; }
 
+    public LlmToolCapabilities Tools { get; init; } = new();
+
     public bool SupportsPromptImages { get; init; }
 
     public bool SupportsPromptDocuments { get; init; }
@@ -66,6 +68,12 @@ public sealed record LlmModelInfo(
     public long? MaxContextTokens { get; init; }
 
     public long? MaxOutputTokens { get; init; }
+
+    public LlmModelAvailability Availability { get; init; }
+
+    public DateTimeOffset? AvailabilityCheckedAt { get; init; }
+
+    public string? AvailabilityReason { get; init; }
 }
 
 public abstract record LlmStreamEvent;

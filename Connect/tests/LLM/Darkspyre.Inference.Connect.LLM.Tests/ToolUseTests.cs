@@ -137,7 +137,7 @@ public sealed class ToolUseTests
         Assert.Equal(LlmCompletionStatus.RequiresAction, firstResult.Status);
         Assert.Equal("tool_calls", firstResult.FinishReason);
         LlmToolCall call = Assert.Single(firstResult.ToolCalls);
-        Assert.NotNull(firstResult.ResponseState);
+        Assert.NotNull(firstResult.ContinuationState);
 
         using (JsonDocument sent = JsonDocument.Parse(handler.Bodies[0]))
         {
@@ -173,7 +173,7 @@ public sealed class ToolUseTests
                 new LlmChatMessage("assistant", string.Empty)
                 {
                     ToolCalls = firstResult.ToolCalls,
-                    ResponseState = firstResult.ResponseState
+                    ContinuationState = firstResult.ContinuationState
                 },
                 new LlmChatMessage("user", string.Empty)
                 {
@@ -254,6 +254,7 @@ public sealed class ToolUseTests
             AllowParallelToolCalls = true
         };
 
+        Assert.Equal(LlmStrictInputSchemaSupport.Unknown, client.GetCapabilities(CompatibleConnection(), request.ModelId).Tools.StrictInputSchema);
         IReadOnlyList<LlmStreamEvent> stream = await ReadAllAsync(
             client.StreamAsync(CompatibleConnection(), request));
 
@@ -358,7 +359,7 @@ public sealed class ToolUseTests
         LlmChatResult result = Assert.Single(stream.OfType<LlmChatCompletionEvent>()).Result;
         Assert.Equal(LlmCompletionStatus.RequiresAction, result.Status);
         Assert.Equal("toolu_1", Assert.Single(result.ToolCalls).Id);
-        Assert.NotNull(result.ResponseState);
+        Assert.NotNull(result.ContinuationState);
 
         using JsonDocument sent = JsonDocument.Parse(handler.Bodies[0]);
         JsonElement root = sent.RootElement;
@@ -384,7 +385,7 @@ public sealed class ToolUseTests
                 new LlmChatMessage("assistant", string.Empty)
                 {
                     ToolCalls = result.ToolCalls,
-                    ResponseState = result.ResponseState
+                    ContinuationState = result.ContinuationState
                 },
                 new LlmChatMessage("user", string.Empty)
                 {

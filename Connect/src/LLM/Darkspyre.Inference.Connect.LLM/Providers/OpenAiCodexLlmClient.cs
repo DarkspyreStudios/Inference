@@ -1,3 +1,4 @@
+using System.Collections.Frozen;
 using System.Net.Http.Headers;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -30,6 +31,14 @@ internal sealed class OpenAiCodexLlmClient(HttpClient http) : ResponsesLlmClient
             LlmReasoningLevel.Minimal, LlmReasoningLevel.Low, LlmReasoningLevel.Medium,
             LlmReasoningLevel.High, LlmReasoningLevel.ExtraHigh),
         SupportsToolUse = true,
+        Tools = new()
+        {
+            ChoiceModes = new[] { LlmToolChoiceMode.Auto, LlmToolChoiceMode.None, LlmToolChoiceMode.Required, LlmToolChoiceMode.Specific }.ToFrozenSet(),
+            StrictInputSchema = LlmStrictInputSchemaSupport.Supported,
+            SupportsParallelCalls = true,
+            SupportsParallelCallControl = true,
+            SupportsArgumentStreaming = true
+        },
         SupportsAgentSessions = true,
         SupportsAgentToolUse = true,
         SupportsAgentTurnInstructions = true,
@@ -63,7 +72,7 @@ internal sealed class OpenAiCodexLlmClient(HttpClient http) : ResponsesLlmClient
         }
         foreach (var message in request.Messages.Where(message => message.Role is "system" or "developer"))
         {
-            if (message.ResponseState is not null || message.ToolCalls.Count > 0 || message.ToolResults.Count > 0)
+            if (message.ContinuationState is not null || message.ToolCalls.Count > 0 || message.ToolResults.Count > 0)
             {
                 throw new ArgumentException("Assistant state and tool exchanges cannot be used as instructions.");
             }

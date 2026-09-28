@@ -65,6 +65,15 @@ internal static class ConsoleSetup
             };
             if (edit.State != SetupEditState.Applied) throw new ArgumentException("Invalid endpoint override.");
         }
+        if (invocation.Vertex is { } google)
+        {
+            foreach (var (id, value) in new[] { ("google-project", google.ProjectId), ("google-location", google.Location) })
+            {
+                var field = settings.Steps.SelectMany(step => step.Sections).SelectMany(section => section.Fields)
+                    .OfType<SetupTextField>().Single(field => field.Description.Id == id);
+                _ = field.SetValue(value);
+            }
+        }
         return (manager, settings);
     }
 

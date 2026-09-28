@@ -45,6 +45,7 @@ internal sealed class ConsoleTesterProviders(IEnumerable<ILlmClient> clients)
         "bedrock-aws-profile" => "bedrock",
         "bedrock-agentcore-harness" => "agentcore",
         "apple-foundation-models" => "apple",
+        "google-vertex-ai" => "vertex",
         _ => id
     };
 

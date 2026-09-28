@@ -15,7 +15,7 @@ internal sealed class ManagedAppleAgentClient(AppleFoundationModelsClient client
         var capabilities = client.GetCapabilities(connection, options.ModelId);
         if (!capabilities.SupportsAgentSessions || (options.Tools.Count > 0 && !capabilities.SupportsAgentToolUse))
             throw new NotSupportedException("The Apple connection disables this agent operation.");
-        string scope = ProviderResponseStateCodec.Scope(connection);
+        string scope = ProviderContinuationStateCodec.Scope(connection);
         return new ManagedAgentSession(connection, options, models, client,
             (request, token) => providers.StreamAgentAsync(connectionId, request, scope, token),
             model => client.GetCapabilities(connection, model));

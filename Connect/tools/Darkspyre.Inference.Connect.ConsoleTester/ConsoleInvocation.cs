@@ -8,6 +8,8 @@ internal sealed record ConsoleInvocation(
     string[] CommandArguments,
     string? EndpointOverride)
 {
+    public LlmVertexConfiguration? Vertex { get; init; }
+
     public static ConsoleInvocation Parse(string[] args, ConsoleTesterProviders providers)
     {
         ArgumentNullException.ThrowIfNull(args);
@@ -19,6 +21,8 @@ internal sealed record ConsoleInvocation(
         string? providerId = null;
         string? harnessArn = null;
         string? helper = null;
+        string? googleProject = null;
+        string? googleLocation = null;
         var commandArguments = new List<string>();
         for (int index = 1; index < args.Length; index++)
         {
@@ -52,6 +56,13 @@ internal sealed record ConsoleInvocation(
                         nameof(args));
                 }
                 harnessArn = args[index];
+            }
+            else if (argument is "--google-project" or "--google-location")
+            {
+                if (++index >= args.Length || string.IsNullOrWhiteSpace(args[index]))
+                    throw new ArgumentException("Google project/location options require a value.", nameof(args));
+                if (argument == "--google-project") { googleProject = args[index]; }
+                else { googleLocation = args[index]; }
             }
             else if (argument == "--helper")
             {
@@ -95,10 +106,19 @@ internal sealed record ConsoleInvocation(
         if (args[0] == "apple-probe" && provider.Transport != LlmTransport.AppleFoundationModels)
             throw new ArgumentException("apple-probe requires --provider apple.", nameof(args));
 
+        if (provider.Transport != LlmTransport.GoogleVertexAi && (googleProject is not null || googleLocation is not null))
+            throw new ArgumentException("Google configuration options require the Vertex provider.", nameof(args));
+        if (provider.Transport == LlmTransport.GoogleVertexAi && args[0] != "setup"
+            && (googleProject is null || googleLocation is null))
+            throw new ArgumentException("Vertex requires --google-project and --google-location. Configure ADC outside the harness.", nameof(args));
         return new ConsoleInvocation(
             args[0],
             provider,
             [.. commandArguments],
-            helper ?? harnessArn);
+            helper ?? harnessArn)
+        {
+            Vertex = provider.Transport == LlmTransport.GoogleVertexAi ? new()
+            { ProjectId = googleProject ?? string.Empty, Location = googleLocation ?? string.Empty } : null
+        };
     }
 }

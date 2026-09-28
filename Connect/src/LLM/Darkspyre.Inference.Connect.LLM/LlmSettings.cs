@@ -98,13 +98,15 @@ public sealed class LlmSettings : InferenceSettings<LlmSetupChanges>
     /// <summary>A CLI provider reported it is not authenticated; the settings show its prerequisite.</summary>
     internal bool CliPrerequisite { get; set; }
 
-    private static bool UsesFixedEndpoint(LlmTransport transport) => transport == LlmTransport.OpenAiCodex;
+    private static bool UsesFixedEndpoint(LlmTransport transport) => transport is LlmTransport.OpenAiCodex or LlmTransport.GoogleVertexAi;
+    private bool UsesVertex => _draft.Transport == LlmTransport.GoogleVertexAi;
+    private LlmVertexConfiguration Vertex => _draft.Vertex ?? new() { ProjectId = string.Empty, Location = string.Empty };
     private bool UsesAws => _draft.Transport is LlmTransport.AwsBedrockConverse or LlmTransport.AwsBedrockAgentCore;
     private bool UsesApiKey => _draft.Transport is LlmTransport.OpenAiResponses or LlmTransport.OpenAiCompatibleChat or LlmTransport.AnthropicMessages;
     private LlmCredential Credential => LlmCredential.Parse(_draft.Credential) ?? new();
 
     protected override bool IsDraftDirty =>
-        _draft.Endpoint != _baseline.Endpoint || _model != _originalModel
+        _draft.Endpoint != _baseline.Endpoint || _draft.Vertex != _baseline.Vertex || _model != _originalModel
             || (_draft.CapabilityOverrides ?? new()) != (_baseline.CapabilityOverrides ?? new()) || _callback.Length != 0
             || (UsesAws ? NormalizeAws(Credential.Aws) != NormalizeAws(LlmCredential.Parse(_baseline.Credential)?.Aws)
                 : _credentialChange != SetupSecretEditKind.Keep);
@@ -165,6 +167,43 @@ public sealed class LlmSettings : InferenceSettings<LlmSetupChanges>
                     };
                     _draft = _draft with { Credential = (Credential with { ApiKey = key }).Serialize() };
                 })));
+        }
+        if (UsesVertex)
+        {
+            fields.Add(new SetupTextField(new("google-project", "Google Cloud project") { IsRequired = true }, Vertex.ProjectId,
+                string.Empty, value => Edit(() => _draft = _draft with { Vertex = Vertex with { ProjectId = value } })));
+            fields.Add(new SetupTextField(new("google-location", "Location")
+            {
+                IsRequired = true,
+                HelpText = "Enter an explicit region or global. Global routing does not pin processing to one region."
+            }, Vertex.Location,
+                string.Empty, value => Edit(() => _draft = _draft with { Vertex = Vertex with { Location = value } })));
+            fields.Add(new SetupChoiceField(new("google-authentication", "Authentication"), Vertex.AuthenticationMode.ToString(),
+                LlmGoogleAuthenticationMode.ApplicationDefault.ToString(), value =>
+                {
+                    if (!Enum.TryParse<LlmGoogleAuthenticationMode>(value, out var mode) || !Enum.IsDefined(mode))
+                    { return new(SetupEditState.Invalid, [new("google-authentication-invalid", "Select a Google authentication mode.")]); }
+                    return Edit(() => _draft = _draft with { Vertex = Vertex with { AuthenticationMode = mode } });
+                }, false));
+            if (Vertex.AuthenticationMode == LlmGoogleAuthenticationMode.ServiceAccount || Credential.Google is not null)
+            {
+                fields.Add(new SetupSecretField(new("google-service-account", "Service-account JSON key")
+                {
+                    IsRequired = Vertex.AuthenticationMode == LlmGoogleAuthenticationMode.ServiceAccount,
+                    HelpText = "Stored only by the host's protected credential store. Clear a saved key when switching to ADC."
+                },
+                    Credential.Google is not null, _credentialChange, value => Edit(() =>
+                    {
+                        _credentialChange = value.Kind;
+                        LlmGoogleCredentials? google = value.Kind switch
+                        {
+                            SetupSecretEditKind.Replace => new() { ServiceAccountJson = value.Value ?? string.Empty },
+                            SetupSecretEditKind.Clear => null,
+                            _ => LlmCredential.Parse(_original?.Credential)?.Google
+                        };
+                        _draft = _draft with { Credential = (Credential with { Google = google }).Serialize() };
+                    })));
+            }
         }
         if (UsesAws)
         {
@@ -254,7 +293,10 @@ public sealed class LlmSettings : InferenceSettings<LlmSetupChanges>
     protected override SetupChoicePage? GetLocalChoices(string fieldId, SetupChoiceQuery query)
     {
         _ = CreateSteps(); // Registers the override field IDs for the current transport.
-        return _overrideFields.Contains(fieldId) ? Page(query, OverrideChoices) : null;
+        return fieldId == "google-authentication" && UsesVertex
+            ? Page(query, [new(LlmGoogleAuthenticationMode.ApplicationDefault.ToString(), "Application default credentials"),
+                new(LlmGoogleAuthenticationMode.ServiceAccount.ToString(), "Service-account key")])
+            : _overrideFields.Contains(fieldId) ? Page(query, OverrideChoices) : null;
     }
 
     protected override IReadOnlyList<SetupActionDescriptor> CreateActions()
@@ -392,9 +434,9 @@ public sealed class LlmSettings : InferenceSettings<LlmSetupChanges>
         if (UsesApiKey && _draft.Transport != LlmTransport.OpenAiCompatibleChat
             && string.IsNullOrWhiteSpace(Credential.ApiKey) && Credential.SecretHeaders.Count == 0)
         { issues.Add(new("key-required", "An API credential is required.", "api-key")); }
-        if (UsesAws)
+        if (UsesAws || UsesVertex)
         {
-            if (_validateEnvironment is null) { issues.Add(new("setup-environment-missing", "Register the provider's AWS setup support.")); }
+            if (_validateEnvironment is null) { issues.Add(new("setup-environment-missing", "Register the provider's setup support.")); }
             else { issues.AddRange(_validateEnvironment(CurrentConnection()).Issues); }
         }
         return new(issues.AsReadOnly());
@@ -414,8 +456,8 @@ public sealed class LlmSettings : InferenceSettings<LlmSetupChanges>
         new(_draft with { Credential = null, Version = Identity.ExpectedVersion ?? string.Empty }, _model),
         _credentialChange == SetupSecretEditKind.Keep ? SetupSecretEdit.Keep
             : _draft.Credential is null ? SetupSecretEdit.Clear : SetupSecretEdit.Replace(_draft.Credential),
-        _original is not null && _original.Endpoint != _draft.Endpoint,
-        _original is null || _original.Endpoint != _draft.Endpoint || _originalModel != _model
+        _original is not null && (_original.Endpoint != _draft.Endpoint || _original.Vertex != _draft.Vertex),
+        _original is null || _original.Endpoint != _draft.Endpoint || _original.Vertex != _draft.Vertex || _originalModel != _model
             || _original.CapabilityOverrides != _draft.CapabilityOverrides || _credentialChange != SetupSecretEditKind.Keep);
 }
 
@@ -496,7 +538,7 @@ public sealed class LlmSettingsManager : InferenceSettingsManager<LlmSettings, L
                         Issues: [new("manual-model", "This connection requires manual model entry.", "model", Severity: SetupIssueSeverity.Warning)]);
                 }
                 IReadOnlyList<LlmModel> models = await service.ListModelsAsync(settings.Identity.Id, cancellationToken).ConfigureAwait(false);
-                return InferenceSettings.Page(query, models.Select(model => new SetupChoice(model.Id, model.DisplayName, model.OwnedBy))
+                return InferenceSettings.Page(query, models.Select(model => new SetupChoice(model.Id, model.DisplayName, model.AvailabilityReason ?? model.OwnedBy))
                     .OrderBy(choice => choice.Value, StringComparer.Ordinal));
             default:
                 return new([], State: SetupChoiceState.Unavailable);
@@ -570,7 +612,7 @@ public sealed class LlmSettingsManager : InferenceSettingsManager<LlmSettings, L
             await service.ListModelsAsync(settings.Identity.Id, token).ConfigureAwait(false);
             authenticated = true;
         }
-        settings.Status = settings.Status with { Authenticated = SetupObservation.Known(authenticated), Verified = SetupObservation.Known(authenticated) };
+        settings.Status = settings.Status with { Authenticated = SetupObservation.Known(authenticated), Verified = settings.Transport == LlmTransport.GoogleVertexAi ? SetupObservation.Unknown : SetupObservation.Known(authenticated) };
         settings.CliPrerequisite = !authenticated;
         settings.RefreshInteraction();
         return authenticated ? SetupActionResult.Completed : new(SetupActionState.NeedsInteraction, Interaction: settings.Interaction);

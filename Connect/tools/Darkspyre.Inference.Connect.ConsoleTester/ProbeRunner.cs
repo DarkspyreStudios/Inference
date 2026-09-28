@@ -4,9 +4,9 @@ using Darkspyre.Inference.Common;
 
 namespace Darkspyre.Inference.Connect.ConsoleTester;
 
-internal sealed record AppleProbeOptions(string Model, string Case, int Repeat, int TimeoutSeconds)
+internal sealed record ProviderProbeOptions(string Model, string Case, int Repeat, int TimeoutSeconds)
 {
-    public static AppleProbeOptions Parse(string[] args, string defaultModel)
+    public static ProviderProbeOptions Parse(string[] args, string defaultModel)
     {
         string model = defaultModel, selected = "all";
         int repeat = 1, timeout = 180;
@@ -44,7 +44,7 @@ internal sealed class ProbeFailure(string message) : Exception(message);
 
 internal static class ProbeRunner
 {
-    public static async Task<int> RunAsync(IReadOnlyList<ProbeCase> cases, AppleProbeOptions options,
+    public static async Task<int> RunAsync(IReadOnlyList<ProbeCase> cases, ProviderProbeOptions options,
         bool ready, TextWriter output, CancellationToken token)
     {
         int passed = 0, failed = 0, skipped = 0;

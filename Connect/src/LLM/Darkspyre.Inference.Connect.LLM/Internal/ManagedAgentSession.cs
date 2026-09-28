@@ -19,8 +19,8 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
     private readonly Func<LlmChatRequest, CancellationToken, IAsyncEnumerable<LlmStreamEvent>> _stream;
     private readonly Dictionary<string, LlmAgentToolDefinition> _tools;
     private LlmAgentContext _context;
-    // Messages whose response state was left out at start; reported once, on the first turn.
-    private int _startOmittedResponseStates;
+    // Messages whose continuation state was left out at start; reported once, on the first turn.
+    private int _startOmittedContinuationStates;
     private LiveRun? _run;
     private bool _segmentActive;
     private bool _disposed;
@@ -63,8 +63,8 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
             Context = null
         };
         _tools = _options.Tools.ToDictionary(tool => tool.Name, StringComparer.Ordinal);
-        (_context, _startOmittedResponseStates) = ManagedAgentContext.Import(
-            options.Context ?? new(), connection, options.ModelId, options.UnboundResponseState);
+        (_context, _startOmittedContinuationStates) = ManagedAgentContext.Import(
+            options.Context ?? new(), connection, options.ModelId, options.UnboundContinuationState);
         ThreadId = options.ThreadId ?? Guid.NewGuid().ToString();
         SessionId = options.SessionId ?? ThreadId;
         ArgumentException.ThrowIfNullOrWhiteSpace(ThreadId);
@@ -376,7 +376,7 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
                 await writer.WriteAsync(new LlmAgentWarningEvent(ThreadId, run.Id,
                     "Some restored attachments are unavailable; omission descriptors are not sent to the model."), token);
             }
-            if (continuedPause is null && Interlocked.Exchange(ref _startOmittedResponseStates, 0) is int omitted and > 0)
+            if (continuedPause is null && Interlocked.Exchange(ref _startOmittedContinuationStates, 0) is int omitted and > 0)
             {
                 await writer.WriteAsync(new LlmAgentWarningEvent(ThreadId, run.Id,
                     $"Response state from {omitted} earlier messages was not carried to this model."), token);
@@ -450,7 +450,7 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
                 var assistant = new LlmAgentContextEntry(stepId, run.Id, ManagedAgentContext.CopyMessage(new("assistant", result.Text)
                 {
                     ToolCalls = result.ToolCalls,
-                    ResponseState = result.ResponseState
+                    ContinuationState = result.ContinuationState
                 }));
                 ValidateCalls(result.ToolCalls);
                 lock (_sync) { _context = Append(_context, assistant); }
@@ -704,7 +704,12 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
     private static LlmUsage? AddUsage(LlmUsage? total, LlmUsage? usage, bool first) => first ? usage
         : total is null || usage is null ? null : new(
             SumTokens(total.InputTokens, usage.InputTokens), SumTokens(total.OutputTokens, usage.OutputTokens),
-            SumTokens(total.TotalTokens, usage.TotalTokens));
+            SumTokens(total.TotalTokens, usage.TotalTokens))
+        {
+            CachedInputTokens = SumTokens(total.CachedInputTokens, usage.CachedInputTokens),
+            CacheWriteInputTokens = SumTokens(total.CacheWriteInputTokens, usage.CacheWriteInputTokens),
+            ReasoningOutputTokens = SumTokens(total.ReasoningOutputTokens, usage.ReasoningOutputTokens)
+        };
     private static int? SumTokens(int? left, int? right) => left is >= 0 && right is >= 0
         && (long)left.Value + right.Value <= int.MaxValue ? left.Value + right.Value : null;
 

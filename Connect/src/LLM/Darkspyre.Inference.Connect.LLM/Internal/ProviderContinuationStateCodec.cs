@@ -1,3 +1,4 @@
+using Darkspyre.Inference.Common.LLM;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -6,20 +7,22 @@ using System.Text.Json.Nodes;
 namespace Darkspyre.Inference.Connect.LLM.Internal;
 
 /// <summary>Versioned, account-bound output only. Never stores an unfiltered provider response.</summary>
-internal static class ProviderResponseStateCodec
+internal static class ProviderContinuationStateCodec
 {
-    public static LlmProviderResponseState Encode(
+    internal static string ImplementationId(LlmTransport transport) => $"darkspyre.connect.llm.{transport}";
+
+    public static LlmContinuationState Encode(
         LlmConnection connection,
         string modelId,
-        JsonArray output) => new()
+        JsonArray output) => connection.ContinuationCodec is { } codec ? codec.Encode(connection, modelId, output) : new()
         {
-            Transport = connection.Transport,
+            ImplementationId = ImplementationId(connection.Transport),
             ModelId = modelId,
             ScopeId = Scope(connection),
             Payload = Project(output, connection.Transport).ToJsonString()
         };
 
-    /// <summary>Transports whose adapters keep response state.</summary>
+    /// <summary>Transports whose adapters keep continuation state.</summary>
     public static bool Retains(LlmTransport transport) =>
         transport is LlmTransport.OpenAiResponses or LlmTransport.OpenAiCodex or LlmTransport.AnthropicMessages
             or LlmTransport.AwsBedrockConverse;
@@ -32,13 +35,13 @@ internal static class ProviderResponseStateCodec
 
     private const string NoOutput = "[]";
 
-    public static LlmProviderResponseState EncodeCounts(
+    public static LlmContinuationState EncodeCounts(
         LlmConnection connection,
         string modelId,
         long inputTokens,
         long outputTokens) => new()
         {
-            Transport = connection.Transport,
+            ImplementationId = ImplementationId(connection.Transport),
             ModelId = modelId,
             ScopeId = Scope(connection),
             Payload = NoOutput,
@@ -47,16 +50,17 @@ internal static class ProviderResponseStateCodec
         };
 
     /// <summary>Whether this state can be replayed on the connection and model.</summary>
-    public static bool IsBound(LlmProviderResponseState state, LlmConnection connection, string modelId) =>
-        Retains(connection.Transport) && state.FormatVersion == 1 && state.Transport == connection.Transport
+    public static bool IsBound(LlmContinuationState state, LlmConnection connection, string modelId) =>
+        connection.ContinuationCodec is { } codec ? codec.IsBound(state, connection, modelId)
+        : Retains(connection.Transport) && state.FormatVersion == 2 && state.ImplementationId == ImplementationId(connection.Transport)
         && state.ModelId == modelId && state.ScopeId == Scope(connection);
 
     public static JsonArray Decode(
-        LlmProviderResponseState state,
+        LlmContinuationState state,
         LlmConnection connection,
         string modelId)
     {
-        if (!IsBound(state, connection, modelId))
+        if (state.Payload is null || state.Payload.Length > 16 * 1024 * 1024 || !IsBound(state, connection, modelId))
         {
             throw new ArgumentException("Response state does not match this version, transport, model, or account scope.");
         }
@@ -100,16 +104,33 @@ internal static class ProviderResponseStateCodec
     public static JsonArray DecodeMessage(LlmChatMessage message, LlmConnection connection, string modelId)
     {
         ValidateMessage(message);
-        JsonArray output = Decode(message.ResponseState!, connection, modelId);
+        if (connection.ContinuationCodec is { } codec)
+        {
+            return codec.DecodeMessage(message, connection, modelId);
+        }
+        JsonArray output = Decode(message.ContinuationState!, connection, modelId);
         if (CountsOnly(connection.Transport))
         {
             return output;
+        }
+        string text = connection.Transport == LlmTransport.AnthropicMessages
+            ? string.Concat(output.OfType<JsonObject>()
+                .Where(item => item["type"]?.GetValue<string>() == "text")
+                .Select(item => item["text"]?.GetValue<string>()))
+            : string.Concat(output.OfType<JsonObject>()
+                .Where(item => item["type"]?.GetValue<string>() == "message")
+                .SelectMany(item => (item["content"] as JsonArray ?? []).OfType<JsonObject>())
+                .Where(part => part["type"]?.GetValue<string>() == "output_text")
+                .Select(part => part["text"]?.GetValue<string>()));
+        if (!string.Equals(text, message.Content, StringComparison.Ordinal))
+        {
+            throw new ArgumentException("Assistant text must match its opaque continuation state.");
         }
         var calls = output.OfType<JsonObject>()
             .Where(item => item["type"]?.GetValue<string>() is "function_call" or "tool_use").ToArray();
         if (calls.Length != message.ToolCalls.Count)
         {
-            throw new ArgumentException("Assistant tool calls must match its opaque response state.");
+            throw new ArgumentException("Assistant tool calls must match its opaque continuation state.");
         }
         for (int index = 0; index < calls.Length; index++)
         {
@@ -124,7 +145,7 @@ internal static class ProviderResponseStateCodec
                             : JsonNode.Parse(call["arguments"]!.GetValue<string>()),
                         JsonNode.Parse(visible.ArgumentsJson)))
                 {
-                    throw new ArgumentException("Assistant tool calls must match its opaque response state.");
+                    throw new ArgumentException("Assistant tool calls must match its opaque continuation state.");
                 }
             }
             catch (JsonException)
@@ -138,6 +159,7 @@ internal static class ProviderResponseStateCodec
 
     internal static string Scope(LlmConnection connection)
     {
+        if (connection.ResolvedContinuationScope is { } scope) { return scope; }
         LlmCredential? credential = LlmCredential.Parse(connection.Credential);
         // The concurrency Version and rotating OAuth tokens are not account identities. Missing an
         // OAuth account ID binds conservatively to its current token; never guess account equivalence.
@@ -192,7 +214,7 @@ internal static class ProviderResponseStateCodec
                     {
                         if (value is not JsonObject)
                         {
-                            throw new ArgumentException("Tool input in response state must be a JSON object.");
+                            throw new ArgumentException("Tool input in continuation state must be a JSON object.");
                         }
                         copy[field] = value.DeepClone();
                     }

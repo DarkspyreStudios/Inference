@@ -840,3 +840,23 @@ No version was bumped again and no package was overwritten or republished.
 This release includes the managed Apple connector. The separately distributed signed Swift helper,
 clean-machine/oldest-OS checks and intermittent native continuation failure qualification remain
 open under DSA-59.
+
+
+## DSA-61 Vertex and portable continuation migration (unreleased)
+
+Implemented the Google Vertex AI adapter for reviewed Gemini 3 Flash preview and Claude Sonnet 4.6
+profiles, typed project/location/authentication setup, Google SDK credential ownership, publisher
+catalog discovery, native streams, tools, structured output and managed context capture/import.
+The existing ConsoleTester supplies an explicit metered `vertex-probe`; no live qualification was run.
+
+Common now owns `LlmContinuationState`; every Connect projection and Tensor consumer carries or
+explicitly rejects/omits it. Captures and envelopes require format 2. Old response-state members and
+unversioned captures are rejected; DSA-68 owns host migration and preservation of original records.
+`LlmToolCapabilities.StrictInputSchema` distinguishes Supported, Unsupported and Unknown. Unknown
+allows an explicit strict attempt unchanged, with AgentDS defaulting to trying it. Ordinary tools
+remain non-strict. Added nullable usage breakdowns and model availability evidence. DSA-69 tracks
+Bedrock signed reasoning; its existing counts-only behavior remains.
+
+Verification: Connect 553 passed / 3 existing conditional skips; Tensor 346 passed; UI 65 passed
+(Common repeats across solutions). All solutions passed restore, zero-warning build, format checks
+and transitive vulnerability audits. No package artifacts, version bump or publication were performed.

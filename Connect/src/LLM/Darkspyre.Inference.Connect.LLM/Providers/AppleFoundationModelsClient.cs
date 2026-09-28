@@ -1,3 +1,4 @@
+using System.Collections.Frozen;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 using Darkspyre.Inference.Common;
@@ -20,6 +21,14 @@ internal sealed class AppleFoundationModelsClient(HttpClient http, IAppleProcess
         SupportsJsonSchema = true,
         SupportsTemperature = true,
         SupportsToolUse = true,
+        Tools = new()
+        {
+            ChoiceModes = new[] { LlmToolChoiceMode.Auto, LlmToolChoiceMode.None }.ToFrozenSet(),
+            StrictInputSchema = LlmStrictInputSchemaSupport.Unsupported,
+            SupportsParallelCalls = true,
+            SupportsParallelCallControl = false,
+            SupportsArgumentStreaming = false
+        },
         ToolHistory = LlmToolHistory.Structured,
         SupportsAgentSessions = true,
         SupportsAgentToolUse = true,
@@ -136,7 +145,7 @@ internal sealed class AppleFoundationModelsClient(HttpClient http, IAppleProcess
         var messages = new List<AppleMessage>();
         foreach (LlmChatMessage message in request.Messages)
         {
-            if (message.ResponseState is not null) throw new NotSupportedException("Apple uses semantic history and accepts no provider response-state payload.");
+            if (message.ContinuationState is not null) throw new NotSupportedException("Apple uses semantic history and accepts no provider response-state payload.");
             if (message.Role is not ("user" or "assistant"))
                 throw new NotSupportedException("Apple accepts Instructions and user/assistant history; this message role cannot be preserved.");
             if (pending.Count > 0 && message.ToolResults.Count == 0)

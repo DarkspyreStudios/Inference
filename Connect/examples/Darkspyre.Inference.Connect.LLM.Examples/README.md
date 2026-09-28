@@ -143,9 +143,9 @@ For every round, the example:
 2. Returns immediately when the status is terminal.
 3. On `RequiresAction`, validates and executes every `LlmToolCall` in the host.
 4. Appends the assistant's exact calls and a user message containing matching `LlmToolResult` IDs.
-5. Preserves `ResponseState` unchanged on each assistant message for the same connection and model.
+5. Preserves `ContinuationState` unchanged on each assistant message for the same connection and model.
 
-Per-message response state preserves OpenAI Responses reasoning and Anthropic thinking/signatures.
+Per-message continuation state preserves OpenAI Responses reasoning and Anthropic thinking/signatures.
 It is normally null for Chat Completions and Bedrock. Preserve it on ordinary assistant turns too,
 and never decode it or move it between providers, account scopes, or models. There is no longer a
 request-level continuation token.
@@ -393,7 +393,7 @@ These live scenarios consume usage. See the [verification record](../../docs/man
 - Do not treat CLI-internal activity as a host tool call. Antigravity has no host callback lane.
 - Do not execute arguments before validating the tool name, JSON shape, authorization, and intended
   side effects. A schema guides the model; it is not the host's security boundary.
-- Do not omit the assistant tool-call message, mismatch result IDs, or drop per-message response state in
+- Do not omit the assistant tool-call message, mismatch result IDs, or drop per-message continuation state in
   a multi-round chat tool exchange.
 - Do not base64-encode attachments in application code. Supply bytes through `LlmAttachment` and
   let the selected adapter detect the media type and construct its native representation.

@@ -1,3 +1,5 @@
+using Darkspyre.Inference.Common.LLM;
+using System.Collections.Frozen;
 using LlmReasoningLevel = Darkspyre.Inference.Common.LLM.LlmReasoningLevel;
 using Darkspyre.Inference.Connect.LLM.Internal;
 
@@ -23,6 +25,14 @@ internal sealed class OpenAiResponsesLlmClient(HttpClient http) : ResponsesLlmCl
             LlmReasoningLevel.High, LlmReasoningLevel.ExtraHigh),
         SupportsTemperature = true,
         SupportsToolUse = true,
+        Tools = new()
+        {
+            ChoiceModes = new[] { LlmToolChoiceMode.Auto, LlmToolChoiceMode.None, LlmToolChoiceMode.Required, LlmToolChoiceMode.Specific }.ToFrozenSet(),
+            StrictInputSchema = LlmStrictInputSchemaSupport.Supported,
+            SupportsParallelCalls = true,
+            SupportsParallelCallControl = true,
+            SupportsArgumentStreaming = true
+        },
         SupportsPromptImages = true,
         SupportsPromptDocuments = true,
         RichContentSupported = RichContentRoutes.Responses

@@ -60,7 +60,7 @@ operation is production-complete. Its durable repositories, lanes and replay sys
 this design. We adopt behavior only where it serves Darkspyre.Inference.Connect.LLM's agreed responsibilities.
 
 Official Responses documentation explains retaining encrypted reasoning in stateless conversations.
-This supports preserving opaque response state, but does not establish compatibility of the private
+This supports preserving opaque continuation state, but does not establish compatibility of the private
 ChatGPT subscription endpoint. See [Reasoning models](https://developers.openai.com/api/docs/guides/reasoning).
 Context windows include input, output and reasoning allocations; usage for one request differs
 from aggregate spending. See [Conversation state](https://developers.openai.com/api/docs/guides/conversation-state).
@@ -144,7 +144,7 @@ could support. Native per-turn instructions and context telemetry default unsupp
 verified independently. Existing prompt/tool attachment and reasoning capabilities remain per kind
 and per provider/model.
 
-## 5. Retained context and response state
+## 5. Retained context and continuation state
 
 **Pending DSA-61 amendment:** the [Vertex technical mapping](google-vertex-ai-tech-design.md#6-required-continuation-contract-change)
 proposes moving continuation state into the shared portable contract so `ILlmInference` can preserve
@@ -168,7 +168,7 @@ public sealed record LlmAgentContext
 }
 ```
 
-Add `LlmProviderResponseState? ResponseState` to both `LlmChatMessage` and `LlmChatResult`.
+Add `LlmContinuationState? ContinuationState` to both `LlmChatMessage` and `LlmChatResult`.
 The state is a versioned, opaque adapter payload with a transport/model binding and an opaque
 non-secret connection/account scope identifier. Its bytes contain only allowlisted continuation
 content, never credentials, secret headers, diagnostics, or entire unfiltered responses.
@@ -179,7 +179,7 @@ claim. Imported state is untrusted; adapters still validate shape and never let 
 credentials, endpoints, instructions, or tool declarations. Ordinary context content can itself be
 sensitive, so the host applies its existing storage protections even though credentials are absent.
 
-An assistant entry's response state represents that complete response, including ordered reasoning,
+An assistant entry's continuation state represents that complete response, including ordered reasoning,
 text, calls and other required output items. If present, the adapter uses it instead of separately
 serializing the same visible message/calls; it must never duplicate both representations. Multiple
 assistant entries retain independent state. Empty visible text may still have essential state.
@@ -198,7 +198,7 @@ preserving complete unsummarized assistant/tool groups.
 
 No cross-provider/model conversion of opaque state is implicit. By default, model changes that
 cannot reuse state fail before mutation. A host carrying retained history to a new conversation opts
-in with `LlmUnboundResponseState.Omit`: unbound state is left out of the sent request and the
+in with `LlmUnboundContinuationState.Omit`: unbound state is left out of the sent request and the
 omission is reported. Raw old state is never discarded without that opt-in. See "Host-supplied
 history on a new target".
 
@@ -263,7 +263,7 @@ host context/identities it cannot honor. Provider-native `ResumeSessionAsync` an
 
 Managed sessions take no `Ephemeral` setting: all managed sessions are storage-ignorant.
 The host's persistence choice is authoritative. Base instructions and executable handlers are
-provided on start; they are not recovered from opaque response state. A snapshot intentionally does
+provided on start; they are not recovered from opaque continuation state. A snapshot intentionally does
 not capture transient per-run instructions or delegates.
 
 Add `Instructions` to `LlmAgentTurnRequest`. A logical run has one `TurnId` across model
@@ -444,7 +444,7 @@ tokens. Where attachments or opaque state prevent credible measurement, report u
 a falsely precise total. Estimates and overflow handling both require tests.
 
 Responses-family adapters record the provider's reported input and output tokens on the
-`LlmProviderResponseState` they produce (`InputTokens`, `OutputTokens`). The estimate for a request
+`LlmContinuationState` they produce (`InputTokens`, `OutputTokens`). The estimate for a request
 then takes the last message whose state carries both counts: that history counts as their sum, which
 covers the encrypted reasoning and attachments it contained, and only the input items after it are
 tokenized. Such an estimate reports `Source = Mixed`. Content after that message that the tokenizer
@@ -870,14 +870,14 @@ it and compacting it belong to the host. Connect must accept the history on ever
 that target supports.
 
 Live runs against Connect 11.6.0-rc.1 on 2026-09-24 show where that fails today. The source history
-was one Direct Codex `gpt-6-luna` reply carrying reasoning response state, plus a follow-up.
+was one Direct Codex `gpt-6-luna` reply carrying reasoning continuation state, plus a follow-up.
 
 | Target | History with the source state | Same history, state removed |
 | --- | --- | --- |
 | Direct Codex, `gpt-6-luna` | Succeeds | Succeeds |
 | Direct Codex, `gpt-6-sol` | `ArgumentException`: the state does not match the version, transport, model, or account scope | Succeeds |
-| Claude CLI chat | `NotSupportedException`: the client cannot import adapter response state | Succeeds |
-| Antigravity CLI chat | `NotSupportedException` with a tool-call message, raised by the response state | Succeeds |
+| Claude CLI chat | `NotSupportedException`: the client cannot import adapter continuation state | Succeeds |
+| Antigravity CLI chat | `NotSupportedException` with a tool-call message, raised by the continuation state | Succeeds |
 
 A history holding a host tool call and its result behaved the same way on Direct Codex. A different
 model accepted the function call and output without their reasoning item. Claude CLI chat and
@@ -894,11 +894,11 @@ omission is reported. Section 5's final paragraph reflects this.
 
 ### Proposed provider-neutral contract
 
-**Response state omission.** A new request option controls response state that is not bound to
+**Response state omission.** A new request option controls continuation state that is not bound to
 the target:
 
 ```csharp
-public enum LlmUnboundResponseState
+public enum LlmUnboundContinuationState
 {
     Reject,
     Omit
@@ -907,30 +907,30 @@ public enum LlmUnboundResponseState
 public sealed record LlmChatRequest
 {
     // Existing properties omitted.
-    public LlmUnboundResponseState UnboundResponseState { get; init; } = LlmUnboundResponseState.Reject;
+    public LlmUnboundContinuationState UnboundContinuationState { get; init; } = LlmUnboundContinuationState.Reject;
 }
 
 public sealed record LlmAgentSessionOptions
 {
     // Existing properties omitted.
-    public LlmUnboundResponseState UnboundResponseState { get; init; } = LlmUnboundResponseState.Reject;
+    public LlmUnboundContinuationState UnboundContinuationState { get; init; } = LlmUnboundContinuationState.Reject;
 }
 
 public sealed record LlmChatResult
 {
     // Existing properties omitted.
-    public int OmittedResponseStateCount { get; init; }
+    public int OmittedContinuationStateCount { get; init; }
 }
 ```
 
 - A message's state is bound to the target when its format version, transport, model and scope all
   match the resolved target connection and model. Bound state is sent as today.
 - `LlmProviderService` builds one projected copy of the request before it reaches the adapter. With
-  `Omit`, the copy drops every unbound `ResponseState` and keeps the visible content, tool calls,
+  `Omit`, the copy drops every unbound `ContinuationState` and keeps the visible content, tool calls,
   tool results and attachments. A transport that never accepts state receives none. The caller's
   request and messages are not modified.
 - With `Reject`, behavior is unchanged: unbound state fails before any provider call.
-- `OmittedResponseStateCount` reports how many messages lost their state in the sent request.
+- `OmittedContinuationStateCount` reports how many messages lost their state in the sent request.
 - `MeasureRequestAsync` measures the same projected copy, so the estimate describes what is sent.
 - For a managed session started with `Context`, `Omit` imports each entry with unbound state as an
   entry without state. The first turn emits one `LlmAgentWarningEvent` that names the count.
@@ -946,14 +946,14 @@ public sealed record LlmChatResult
   its content. Tool-result attachments are listed by file name in the existing attachment line.
 - A request that offers tools to these routes still fails, because they execute no host tools. Only
   history is projected.
-- The Antigravity client's rejection of response state uses a message about response state.
+- The Antigravity client's rejection of continuation state uses a message about continuation state.
 
 **Opening context for provider-owned agent sessions.** The Claude CLI agent client and the AgentCore
-session accept `Context` when `UnboundResponseState` is `Omit`.
+session accept `Context` when `UnboundContinuationState` is `Omit`.
 
 - The session starts as a new provider-side conversation. Connect writes the context with the shared
   transcript projection and prepends it to the first turn's input as one text item, under the header
-  `CONVERSATION SO FAR`. No response state is carried, so every entry's state counts as omitted.
+  `CONVERSATION SO FAR`. No continuation state is carried, so every entry's state counts as omitted.
 - Where the first turn accepts attachments, history attachments are sent with it; AgentCore sends
   none. The first turn emits one `LlmAgentWarningEvent` that the history was carried as opening
   context, with the omitted-state count and any attachment that could not be carried.
@@ -1561,7 +1561,7 @@ A host that relied on the old chat default sets `Strict = true`. The change is b
 The managed agent engine ran only on direct Codex. Bedrock Converse already had a host-executed tool loop
 on the chat lane, but no agent client, so a host could not open a managed session on a Bedrock model.
 Converse also had no context estimator: request accounting could not measure a Bedrock request, and a
-request carrying any response state failed.
+request carrying any continuation state failed.
 
 ### Design
 
@@ -1570,9 +1570,9 @@ request carrying any response state failed.
 `SupportsAgentSessions`, `SupportsAgentToolUse` and `SupportsAgentTurnInstructions`, with
 `ManagedAgentPolicy.Capabilities` on the Converse rich-content route.
 
-Converse is stateless, so its response state carries no output. A reply that reports both token counts
+Converse is stateless, so its continuation state carries no output. A reply that reports both token counts
 carries counts-only state: `Payload` is an empty array, and `InputTokens` and `OutputTokens` hold
-Converse's counts. `ProviderResponseStateCodec` retains Converse state, binds it to transport, model and
+Converse's counts. `ProviderContinuationStateCodec` retains Converse state, binds it to transport, model and
 scope like any other state, and decodes it to no output. A Converse request accepts bound counts-only
 state and rejects anything else before sending.
 
@@ -1702,9 +1702,11 @@ Connect deletes its copies of types that Common already defines, and uses Common
 
 Connect's completion event carries `LlmChatResult`, which has no Common equivalent, so it is renamed
 `LlmChatCompletionEvent`. `LlmChatMessage`, `LlmChatResult` and `LlmModel` stay in Connect. Each carries
-Connect-only data: response state, diagnostics, or provider capabilities.
+Connect-specific diagnostics or provider capabilities. DSA-61 moves continuation state into Common
+and carries it unchanged through both message/result surfaces.
 
-`QwenLlmInference` reads Common's messages directly, so it needs no change.
+`QwenLlmInference` reads Common's messages directly. For the DSA-61 migration it rejects foreign
+continuation state by default, or reports each explicit omission; strict tool enforcement is Unsupported.
 
 ### 9. Credential and sign-in members
 

@@ -18,7 +18,7 @@ internal sealed class ManagedBedrockAgentClient(BedrockLlmClient client, LlmProv
             throw new NotSupportedException("The selected model/connection disables the requested agent operation.");
         }
         var models = await providers.ListModelsAsync(connectionId, cancellationToken);
-        string scope = ProviderResponseStateCodec.Scope(connection);
+        string scope = ProviderContinuationStateCodec.Scope(connection);
         return new ManagedAgentSession(connection, options, models, client,
             (request, token) => providers.StreamAgentAsync(connectionId, request, scope, token),
             model => client.GetCapabilities(connection, model));

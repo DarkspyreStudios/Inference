@@ -6,6 +6,7 @@ using Darkspyre.Inference.Common.LLM;
 using Darkspyre.Inference.Common.Setup;
 using Darkspyre.Inference.Connect.LLM;
 using Darkspyre.Inference.Connect.LLM.Bedrock;
+using Darkspyre.Inference.Connect.LLM.Vertex;
 using Microsoft.Extensions.DependencyInjection;
 using SecureStore;
 using LlmReasoningLevel = Darkspyre.Inference.Common.LLM.LlmReasoningLevel;
@@ -51,6 +52,7 @@ internal static class Program
             provider.GetRequiredService<SecureConnectionSource>());
         services.AddLlmConnect();
         services.AddLlmConnectBedrock();
+        services.AddLlmConnectVertex();
         await using ServiceProvider provider = services.BuildServiceProvider();
         try
         {
@@ -69,6 +71,8 @@ internal static class Program
             {
                 "setup" => await RunSetupAsync(llms, invocation, cancellation.Token),
                 "apple-probe" => await RunAppleProbeAsync(llms, agent, invocation, cancellation.Token),
+                "vertex-probe" when invocation.Provider.Transport == LlmTransport.GoogleVertexAi =>
+                    await VertexProbe.RunAsync(llms, agent, invocation, cancellation.Token),
                 "login" => await RunLoginAsync(llms, provider.GetRequiredService<ILlmConnectionSource>(), invocation, cancellation.Token),
                 "status" => await RunStatusAsync(llms, invocation, cancellation.Token),
                 "models" => await RunModelsAsync(llms, invocation, cancellation.Token),
@@ -209,7 +213,7 @@ internal static class Program
     private static async Task<bool> CheckReadyAsync(LlmProviderService llms,
         ConsoleInvocation invocation, CancellationToken cancellationToken)
     {
-        if (invocation.Provider.Transport == LlmTransport.AppleFoundationModels)
+        if (invocation.Provider.Transport is LlmTransport.AppleFoundationModels or LlmTransport.GoogleVertexAi)
             return await ConsoleSetup.CheckAsync(llms, invocation, Console.Error, cancellationToken) == SetupActionState.Completed;
         bool ready = await llms.IsAuthenticatedAsync(invocation.Provider.ConnectionId, cancellationToken);
         Console.Error.WriteLine(ready
@@ -227,7 +231,7 @@ internal static class Program
     private static async Task<int> RunAppleProbeAsync(LlmProviderService llms, LlmAgentProviderService agents,
         ConsoleInvocation invocation, CancellationToken token)
     {
-        AppleProbeOptions options = AppleProbeOptions.Parse(invocation.CommandArguments, invocation.Provider.Definition.DefaultModelId);
+        ProviderProbeOptions options = ProviderProbeOptions.Parse(invocation.CommandArguments, invocation.Provider.Definition.DefaultModelId);
         SetupActionState readiness = await ConsoleSetup.CheckAsync(llms, invocation, Console.Error, token);
         if (readiness == SetupActionState.Failed)
         {
@@ -708,6 +712,7 @@ internal static class Program
               darkspyre-inference-connect-tester setup --provider <provider-id-or-alias> [--helper <path>]
               darkspyre-inference-connect-tester status --provider apple [--helper <path>]
               darkspyre-inference-connect-tester models --provider apple [--helper <path>]
+              darkspyre-inference-connect-tester vertex-probe --provider vertex --google-project <project> --google-location <location> --model <publisher/model> [--case all|text|structured|tools|agent|cancel] [--repeat 1..20] [--timeout-seconds 1..600]
               darkspyre-inference-connect-tester apple-probe --provider apple [--helper <path>] [--case all|text|structured|tools|agent|cancel] [--repeat 1..20] [--timeout-seconds 1..600] [--model <id>]
               darkspyre-inference-connect-tester prompt --provider apple [--helper <path>] [--model <id>] [--schema <file>]
               darkspyre-inference-connect-tester agent --provider apple [--helper <path>] [--model <id>]
@@ -736,6 +741,7 @@ internal static class Program
             providers and setup display adapter-owned metadata without generation or authentication.
             Apple needs its separately built helper and a ready on-device model; no login is required.
             Apple defaults its model from provider metadata. --helper accepts a name on PATH or an absolute path.
+            vertex-probe performs explicit metered cloud generation using ADC; missing access is reported as skipped.
             apple-probe performs explicit local generation, reports each case and never retries a failed case.
             Exit codes: 0 passed, 1 failed, 3 skipped prerequisites, 130 cancelled (invalid invocation: 2).
 

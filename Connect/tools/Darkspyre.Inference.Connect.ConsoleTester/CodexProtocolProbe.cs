@@ -29,12 +29,12 @@ internal static class CodexProtocolProbe
         };
         LlmChatResult result = await llms.CompleteAsync(connectionId, request, cancellationToken);
         if (result.Status != LlmCompletionStatus.RequiresAction || result.ToolCalls.Count != 1
-            || result.ToolCalls[0].Name != tool.Name || result.ResponseState is null)
+            || result.ToolCalls[0].Name != tool.Name || result.ContinuationState is null)
         {
             throw new InvalidOperationException("Protocol probe expected one complete tool call with retained state.");
         }
-        Console.WriteLine("PASS: tool call with retained response state.");
-        messages.Add(new("assistant", result.Text) { ToolCalls = result.ToolCalls, ResponseState = result.ResponseState });
+        Console.WriteLine("PASS: tool call with retained continuation state.");
+        messages.Add(new("assistant", result.Text) { ToolCalls = result.ToolCalls, ContinuationState = result.ContinuationState });
         messages.Add(new("user", "")
         {
             ToolResults = [new(result.ToolCalls[0].Id, new LlmToolOutput
@@ -51,7 +51,7 @@ internal static class CodexProtocolProbe
         result = await llms.CompleteAsync(connectionId, request, cancellationToken);
         RequireWord(result);
         Console.WriteLine("PASS: tool-result document attachment and stateless continuation.");
-        messages.Add(new("assistant", result.Text) { ResponseState = result.ResponseState });
+        messages.Add(new("assistant", result.Text) { ContinuationState = result.ContinuationState });
         messages.Add(new("user", "What was the verification word? Reply with the word only."));
         result = await llms.CompleteAsync(connectionId, request, cancellationToken);
         RequireWord(result);
@@ -89,10 +89,10 @@ internal static class CodexProtocolProbe
 
     private static void RequireWord(LlmChatResult result)
     {
-        if (result.Status != LlmCompletionStatus.Completed || result.ResponseState is null
+        if (result.Status != LlmCompletionStatus.Completed || result.ContinuationState is null
             || !result.Text.Contains("cerulean", StringComparison.OrdinalIgnoreCase))
         {
-            throw new InvalidOperationException("Protocol probe did not complete with the expected document word and response state.");
+            throw new InvalidOperationException("Protocol probe did not complete with the expected document word and continuation state.");
         }
     }
 }

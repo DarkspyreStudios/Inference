@@ -11,6 +11,7 @@
   </Folder>
   <Folder Name="/src/LLM/">
     <Project Path="src/LLM/Darkspyre.Inference.Connect.LLM.Bedrock/Darkspyre.Inference.Connect.LLM.Bedrock.csproj" />
+    <Project Path="src/LLM/Darkspyre.Inference.Connect.LLM.Vertex/Darkspyre.Inference.Connect.LLM.Vertex.csproj" />
     <Project Path="src/LLM/Darkspyre.Inference.Connect.LLM/Darkspyre.Inference.Connect.LLM.csproj" />
   </Folder>
   <Folder Name="/src/">
@@ -33,6 +34,7 @@
   </Folder>
   <Folder Name="/tests/LLM/">
     <Project Path="tests/LLM/Darkspyre.Inference.Connect.LLM.Bedrock.Tests/Darkspyre.Inference.Connect.LLM.Bedrock.Tests.csproj" />
+    <Project Path="tests/LLM/Darkspyre.Inference.Connect.LLM.Vertex.Tests/Darkspyre.Inference.Connect.LLM.Vertex.Tests.csproj" />
     <Project Path="tests/LLM/Darkspyre.Inference.Connect.LLM.Tests/Darkspyre.Inference.Connect.LLM.Tests.csproj" />
   </Folder>
   <Folder Name="/tests/Image/">

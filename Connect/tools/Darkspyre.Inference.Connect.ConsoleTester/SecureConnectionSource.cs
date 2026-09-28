@@ -121,8 +121,8 @@ internal sealed class SecureConnectionSource(
                 ? invocation.EndpointOverride
                 : provider.Endpoint;
         return provider.CreateConnection(
-            ComputeVersion(provider, endpoint, credential), credential) with
-        { Endpoint = endpoint };
+            ComputeVersion(provider, endpoint + invocation?.Vertex?.ProjectId + "/" + invocation?.Vertex?.Location, credential), credential) with
+        { Endpoint = endpoint, Vertex = invocation?.Vertex };
     }
 
     private static string ComputeVersion(

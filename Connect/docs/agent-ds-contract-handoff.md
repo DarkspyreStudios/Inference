@@ -1,8 +1,18 @@
+> **Approved host policy:** `LlmToolCapabilities.StrictInputSchema` is Supported / Unsupported /
+> Unknown. Unknown must permit an explicit strict attempt in Connect; AgentDS defaults to trying it
+> and handling the provider result. Do not translate Unknown into Unsupported or silently change
+> `Strict=true` to false. Ordinary tool definitions remain non-strict by default.
+
+> **DSA-61 implementation in progress:** host migration is required and approved. DSA-68 must
+> migrate stored messages and captures before adopting the new package. The new capture/envelope
+> version is 2; unversioned captures and the old `ResponseState` member are rejected. Preserve
+> original records during migration. No package has been released for this change.
+
 # Agent DS: managed-agent contract handoff
 
 ## Pending: shared LLM contract migration (DSA-61 / DSA-68)
 
-**Technical design only; no released version yet.**
+**Implemented in source; no released version yet.**
 [DSA-61's technical mapping](google-vertex-ai-tech-design.md#mandatory-migration-of-every-connector)
 requires migration of every existing LLM connector, both Common/Connect bridges, managed/native
 session projections and Tensor consumers. Continuation state, tool controls, usage details and model
@@ -11,9 +21,31 @@ access evidence must survive each supported boundary. Non-strict tool defaults r
 [DSA-68](https://darkspyre.atlassian.net/browse/DSA-68) owns the host/shell adoption: package/plugin
 references, transcript and capture persistence, explicit state omission on switching, compaction,
 capability-driven controls, usage display and provider-owned Google setup with protected credentials.
-It also owns the consumer inventory and stored-format migration decision. Final member names,
-serialized-format policy and release version follow the agreed technical design. Existing released
+It also owns the consumer inventory and stored-format migration. The approved format is version 2;
+the coordinated release version has not been selected. Existing released
 contract guidance below remains the integration baseline until that coordinated migration.
+
+### Required host adoption
+
+- Replace `LlmProviderResponseState` / `ResponseState` with Common `LlmContinuationState` /
+  `ContinuationState` throughout transcript, capture, import/export and compaction paths.
+- Preserve `ImplementationId`, `ModelId`, `ScopeId`, `Payload` and reported counts verbatim after
+  migration. Hosts must not decode or rebuild opaque provider payloads. The new envelope and
+  `LlmAgentContext` require `FormatVersion = 2`.
+- Migrate version-1 records in the host before calling Connect. Preserve original records and reject
+  ambiguous ownership; changing a format number alone does not establish valid scope or ownership.
+  There is no Connect fallback reader for old records.
+- Carry `UnboundContinuationState` through requests and surface `OmittedContinuationStateCount`.
+  Reject is the default; discarding incompatible state requires explicit Omit policy.
+- Use `Tools.StrictInputSchema` independently of ordinary `SupportsToolUse`. Unknown remains
+  attemptable; AgentDS defaults to trying the requested operation and handling failure.
+- Preserve model Availability/AvailabilityReason and nullable cache/reasoning usage details. Usage
+  details are subsets, not extra tokens to add to the normalized totals.
+- Add typed Google project/location/authentication setup; protect service-account JSON in the host
+  credential store. ADC remains owned by Google's credential discovery and refresh.
+
+DSA-69 separately tracks Bedrock signed-reasoning replay unlocked by the shared envelope; this
+implementation preserves Bedrock's current counts-only continuation behavior.
 
 ## Native background resources: 11.8.0-rc.1
 
@@ -106,7 +138,7 @@ managed-session subtype or host storage interface is required.
 | Capture settled context | `await session.CaptureContextAsync(options, ct)` |
 | Compact between runs | `await session.ReplaceContextAsync(replacement, expectedRevision, ct)` |
 | Compact within a run | `LlmAgentCompactionRequiredEvent` → `ContinueTurnAsync(continuation, ct)` |
-| Preserve reasoning and ordered tool outputs | `LlmChatMessage.ResponseState`, copied from `LlmChatResult.ResponseState` |
+| Preserve reasoning and ordered tool outputs | `LlmChatMessage.ContinuationState`, copied from `LlmChatResult.ContinuationState` |
 
 On the unpublished 11.10 development branch, session I/O/control operations use `Task`, streams
 return `IAsyncEnumerable<T>` directly, and tool handlers use `Task<LlmToolOutput>`.
@@ -124,7 +156,7 @@ two completion boundaries. See the [async contract design](../../docs/inference-
 ### Retained context
 
 `LlmAgentContext` has `FormatVersion` (currently 1), `Revision` (`long`, initially 0), and `Entries`.
-Entries reuse `LlmChatMessage`, including `Attachments`, `ToolCalls`, `ToolResults`, `ResponseState`
+Entries reuse `LlmChatMessage`, including `Attachments`, `ToolCalls`, `ToolResults`, `ContinuationState`
 and `OmittedAttachments`. Store these model records separately from the existing display transcript.
 
 Persist the whole response-state value unchanged. It has `FormatVersion`, `Transport`, `ModelId`,
@@ -138,12 +170,12 @@ fields, validates version/transport/model/account binding and assistant roles, a
 visible tool calls match the encoded calls. Unknown state fields cannot become request options,
 instructions or credentials. API-key state is conservatively bound to the configured credential and
 endpoint/header scope; after key rotation, old state is unbound and a request that carries it must
-opt in with `UnboundResponseState.Omit`. OAuth account identity, when available, survives token
+opt in with `UnboundContinuationState.Omit`. OAuth account identity, when available, survives token
 refresh. Scope is compatibility, not authenticity.
 
 To switch a session to another model or provider, Agent DS sends its retained history, or a compacted
-summary, to the target with `UnboundResponseState.Omit`. `MeasureRequestAsync` on the target connection
-and model estimates the history before sending. The result's `OmittedResponseStateCount`, or the
+summary, to the target with `UnboundContinuationState.Omit`. `MeasureRequestAsync` on the target connection
+and model estimates the history before sending. The result's `OmittedContinuationStateCount`, or the
 first-turn `LlmAgentWarningEvent` on an agent session, reports what the target did not receive. Agent
 DS keeps the original state in its storage. Claude CLI chat and Antigravity CLI chat carry tool history
 as text; Claude CLI and AgentCore sessions carry a start context as opening context.
@@ -202,8 +234,8 @@ the pending run. Prospective-turn preview is idle-only.
 `LlmModel.MaxContextTokens` and `MaxOutputTokens` are nullable discovery metadata. Session policy
 can set a smaller/manual limit; it cannot increase a known hard limit. No model catalog limits are
 invented. Text occupancy is estimated using the bundled o200k tokenizer over the actual request
-projection. History up to the last response state that carries the provider's reported counts
-(`LlmProviderResponseState.InputTokens` and `OutputTokens`) counts as their sum, reported as
+projection. History up to the last continuation state that carries the provider's reported counts
+(`LlmContinuationState.InputTokens` and `OutputTokens`) counts as their sum, reported as
 `Source = Mixed`; content after it that cannot be counted, or opaque state without counts, still makes
 occupancy unknown. If the
 catalog lacks an output limit, configure a host output reserve for threshold admission.
@@ -274,7 +306,7 @@ recovery policy. No durable harness, scheduler, journal or automatic tool replay
 | Antigravity CLI | No agent session | Unsupported | Neither | Neither |
 | Direct Codex managed engine | Host | Supported | Host snapshot instead | Host compaction; explicit interrupt supported |
 
-Native adapters take `Context` only as opening context, which requires `UnboundResponseState.Omit`.
+Native adapters take `Context` only as opening context, which requires `UnboundContinuationState.Omit`.
 They reject host IDs, managed `ExecutionOptions`, managed tool scheduling flags, and non-null per-run
 `Instructions` before effects. Overrides cannot enable unimplemented
 agent features. Direct Codex uses the existing device-OAuth flow and protected host connection store;

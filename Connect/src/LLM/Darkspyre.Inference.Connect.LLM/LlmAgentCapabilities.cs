@@ -19,7 +19,7 @@ public enum LlmAgentContextImport
 
     /// <summary>
     /// A new provider-side conversation starts with the entries as a text transcript in its first turn.
-    /// No response state is carried.
+    /// No continuation state is carried.
     /// </summary>
     OpeningContext
 }

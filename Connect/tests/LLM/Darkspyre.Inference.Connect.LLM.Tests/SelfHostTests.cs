@@ -19,6 +19,37 @@ public sealed class SelfHostTests
     };
 
     [Fact]
+    public async Task PortableSelfHostBridgePreservesEngineOwnershipPolicyAndUsageDetails()
+    {
+        var state = new LlmContinuationState
+        { ImplementationId = "engine", ModelId = "qwen", ScopeId = "engine-session", Payload = "protected-engine-state" };
+        var usage = new LlmUsage(20, 8, 28) { CachedInputTokens = 5, CacheWriteInputTokens = 2, ReasoningOutputTokens = 3 };
+        var engine = new Engine();
+        engine.Script.Enqueue([new LlmCompletionEvent(new()
+        {
+            Text = "answer", Status = LlmCompletionStatus.Completed, ContinuationState = state,
+            OmittedContinuationStateCount = 2, Usage = usage,
+            Provenance = new() { ImplementationId = "engine", ModelId = "qwen" }
+        })]);
+        using ServiceProvider services = Services(engine);
+        var portable = services.GetRequiredService<LlmProviderService>().Bind("connection");
+        var events = new List<LlmStreamEvent>();
+        await foreach (var item in portable.StreamAsync(new()
+        {
+            ModelId = "qwen",
+            UnboundContinuationState = LlmUnboundContinuationState.Omit,
+            Messages = [new("assistant", "prior") { ContinuationState = state }]
+        })) { events.Add(item); }
+        var sent = Assert.Single(engine.Requests);
+        Assert.Same(state, Assert.Single(sent.Messages).ContinuationState);
+        Assert.Equal(LlmUnboundContinuationState.Omit, sent.UnboundContinuationState);
+        var result = Assert.IsType<LlmCompletionEvent>(Assert.Single(events)).Result;
+        Assert.Same(state, result.ContinuationState);
+        Assert.Equal(2, result.OmittedContinuationStateCount);
+        Assert.Equal(usage, result.Usage);
+    }
+
+    [Fact]
     public async Task ChatStreamsTheEngineAndMapsTheRequestAndCompletion()
     {
         var engine = new Engine();

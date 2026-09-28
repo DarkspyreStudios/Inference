@@ -14,7 +14,7 @@ Dictionary<string, string[]> owned = new(StringComparer.Ordinal)
     [common] = [common],
     ["Darkspyre.Inference.Connect"] =
     [
-        "Darkspyre.Inference.Connect.LLM", "Darkspyre.Inference.Connect.LLM.Bedrock",
+        "Darkspyre.Inference.Connect.LLM", "Darkspyre.Inference.Connect.LLM.Bedrock", "Darkspyre.Inference.Connect.LLM.Vertex",
         "Darkspyre.Inference.Connect.Image", "Darkspyre.Inference.Connect.TTS", "Darkspyre.Inference.Connect.Audio"
     ],
     ["Darkspyre.Inference.Tensor"] =

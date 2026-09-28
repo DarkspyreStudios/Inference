@@ -517,13 +517,13 @@ public sealed class ManagedAgentTests
     public async Task AStartContextFromAnotherModelImportsWithoutItsStateAndWarnsOnce()
     {
         var harness = new Harness();
-        var foreign = new LlmProviderResponseState { Transport = LlmTransport.OpenAiCodex, ModelId = "other", ScopeId = "scope", Payload = "[]" };
+        var foreign = new LlmContinuationState { ImplementationId = ProviderContinuationStateCodec.ImplementationId(LlmTransport.OpenAiCodex), ModelId = "other", ScopeId = "scope", Payload = "[]" };
         LlmAgentContext history = new()
         {
-            Entries = [new("q", "t1", new("user", "What is 17 times 23?")), new("a", "t1", new("assistant", "391") { ResponseState = foreign })]
+            Entries = [new("q", "t1", new("user", "What is 17 times 23?")), new("a", "t1", new("assistant", "391") { ContinuationState = foreign })]
         };
         Assert.Throws<ArgumentException>(() => harness.Create(Options() with { Context = history }));
-        await using var session = harness.Create(Options() with { Context = history, UnboundResponseState = LlmUnboundResponseState.Omit });
+        await using var session = harness.Create(Options() with { Context = history, UnboundContinuationState = LlmUnboundContinuationState.Omit });
         harness.Results.Enqueue(new() { Diagnostics = new(200, null, null), Text = "396", Status = LlmCompletionStatus.Completed });
         harness.Results.Enqueue(new() { Diagnostics = new(200, null, null), Text = "401", Status = LlmCompletionStatus.Completed });
 
@@ -532,9 +532,9 @@ public sealed class ManagedAgentTests
 
         Assert.Contains("from 1 earlier messages", Assert.Single(first.OfType<LlmAgentWarningEvent>()).Message, StringComparison.Ordinal);
         Assert.Empty(second.OfType<LlmAgentWarningEvent>());
-        Assert.Null(harness.Requests[0].Messages[1].ResponseState);
+        Assert.Null(harness.Requests[0].Messages[1].ContinuationState);
         Assert.Equal("391", harness.Requests[0].Messages[1].Content);
-        Assert.All((await session.CaptureContextAsync()).Entries, entry => Assert.Null(entry.Message.ResponseState));
+        Assert.All((await session.CaptureContextAsync()).Entries, entry => Assert.Null(entry.Message.ContinuationState));
     }
 
     private static LlmAgentSessionOptions Options() => new() { ModelId = "test" };

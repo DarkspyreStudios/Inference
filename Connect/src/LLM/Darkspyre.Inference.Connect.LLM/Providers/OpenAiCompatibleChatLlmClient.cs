@@ -1,3 +1,4 @@
+using System.Collections.Frozen;
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
@@ -22,7 +23,15 @@ internal sealed class OpenAiCompatibleChatLlmClient(HttpClient http) : LlmClient
         SupportsJsonSchema = false,
         SupportsJsonObject = false,
         SupportsTemperature = true,
-        SupportsToolUse = true
+        SupportsToolUse = true,
+        Tools = new()
+        {
+            ChoiceModes = new[] { LlmToolChoiceMode.Auto, LlmToolChoiceMode.None, LlmToolChoiceMode.Required, LlmToolChoiceMode.Specific }.ToFrozenSet(),
+            StrictInputSchema = LlmStrictInputSchemaSupport.Unknown,
+            SupportsParallelCalls = true,
+            SupportsParallelCallControl = true,
+            SupportsArgumentStreaming = true
+        }
     };
 
     public override LlmProviderCapabilities GetCapabilities(
@@ -250,10 +259,10 @@ internal sealed class OpenAiCompatibleChatLlmClient(HttpClient http) : LlmClient
         LlmStructuredOutputEnforcement? enforcement,
         LlmProviderCapabilities capabilities)
     {
-        if (request.Messages.Any(message => message.ResponseState is not null))
+        if (request.Messages.Any(message => message.ContinuationState is not null))
         {
             throw new NotSupportedException(
-                "OpenAI-compatible Chat Completions cannot import adapter response state.");
+                "OpenAI-compatible Chat Completions cannot import adapter continuation state.");
         }
 
         var messages = new JsonArray();
@@ -448,7 +457,13 @@ internal sealed class OpenAiCompatibleChatLlmClient(HttpClient http) : LlmClient
         return new LlmUsage(
             LlmJson.GetInt(usage, "prompt_tokens"),
             LlmJson.GetInt(usage, "completion_tokens"),
-            LlmJson.GetInt(usage, "total_tokens"));
+            LlmJson.GetInt(usage, "total_tokens"))
+        {
+            CachedInputTokens = LlmJson.GetObject(usage, "prompt_tokens_details") is { } inputDetails
+                ? LlmJson.GetInt(inputDetails, "cached_tokens") : null,
+            ReasoningOutputTokens = LlmJson.GetObject(usage, "completion_tokens_details") is { } outputDetails
+                ? LlmJson.GetInt(outputDetails, "reasoning_tokens") : null
+        };
     }
 
     private LlmProviderException StreamError(

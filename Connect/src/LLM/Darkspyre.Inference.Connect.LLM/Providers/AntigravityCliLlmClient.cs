@@ -83,9 +83,9 @@ internal sealed class AntigravityCliLlmClient(IAntigravityCliRunner runner)
             throw new NotSupportedException(
                 "Antigravity CLI does not expose host-executed tool calls.");
         }
-        if (request.Messages.Any(message => message.ResponseState is not null))
+        if (request.Messages.Any(message => message.ContinuationState is not null))
         {
-            throw new NotSupportedException("Antigravity CLI chat cannot import adapter response state.");
+            throw new NotSupportedException("Antigravity CLI chat cannot import adapter continuation state.");
         }
 
         JsonElement? providerSchema = enforcement == LlmStructuredOutputEnforcement.ProviderJsonSchema
@@ -477,9 +477,9 @@ internal sealed class AntigravityCliLlmClient(IAntigravityCliRunner runner)
         {
             throw new NotSupportedException("Antigravity CLI does not expose host-executed tool calls.");
         }
-        if (request.Messages.Any(message => message.ResponseState is not null))
+        if (request.Messages.Any(message => message.ContinuationState is not null))
         {
-            throw new NotSupportedException("Antigravity CLI chat cannot import adapter response state.");
+            throw new NotSupportedException("Antigravity CLI chat cannot import adapter continuation state.");
         }
         return new ContextEstimate(LocalTokenCount.Count(BuildPrompt(request, enforcement)));
     }

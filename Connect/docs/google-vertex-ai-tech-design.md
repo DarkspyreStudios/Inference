@@ -1,9 +1,47 @@
 # Google Vertex AI connector: technical mapping
 
 **Ticket:** [DSA-61](https://darkspyre.atlassian.net/browse/DSA-61), under DSA-57.  
-**Date:** 2026-09-28. **Phase:** technical design, first mapping draft.  
-**Authorization:** contract changes required for parity are in scope. Implementation has not
-been authorized. Names and signatures below are proposals, not shipped APIs.
+**Date:** 2026-09-28. **Phase:** source implementation on `dsa-61-vertex`; live qualification outstanding.
+**Authorization:** implementation and contract changes required for parity are authorized.
+The host must migrate persisted history (confirmed by the user). These changes are not released.
+
+### Implementation checkpoint
+
+The source implementation includes the Common continuation envelope, all existing connector
+projections, typed Google setup, Vertex authentication/routing, Gemini/Claude protocols and the
+ConsoleTester probe. Deterministic tests cover protocol and migration behavior. Live Vertex
+qualification has not been run; catalog visibility does not establish invocation access.
+No package release is included in this work.
+
+Verification (2026-09-28): Connect 553 passed / 3 existing conditional skips (27 Vertex fixtures);
+Tensor 346 passed; UI 65 passed. Shared Common tests occur in each solution. All three solutions
+passed restore, zero-warning build, format verification and transitive dependency vulnerability audit.
+No paid/live inference calls were used.
+
+Initial reviewed profiles:
+
+| Model ID | Locations | Input / output token limits | Strict tools |
+| --- | --- | --- | --- |
+| `google/gemini-3-flash-preview` | `global` | 1,048,576 / 65,536 | Unsupported |
+| `anthropic/claude-sonnet-4-6` | `global`, `us-east5`, `europe-west1`, `asia-southeast1` | 1,000,000 / 128,000 | Supported |
+
+Other catalog entries are not advertised until their model profiles are implemented. Discovery uses
+`v1beta1/publishers/{publisher}/models`, paginates both publishers and filters to reviewed profiles
+for the configured location. Returned availability stays Unknown. Google.Apis.Auth 1.76.0 owns token
+acquisition and refresh; deterministic tests cover credential-owner caching, concurrent resolution,
+file replacement and cancellation, not Google's live token exchange.
+
+**Approved strict capability amendment:** `LlmToolCapabilities.StrictInputSchema` uses
+`LlmStrictInputSchemaSupport` with Supported / Unsupported / Unknown (Unknown is the default).
+Unknown permits an explicit strict attempt through Connect, unchanged; it does not promise success.
+The host decides its policy, and AgentDS defaults to "try and see if it works". Known Unsupported
+rejects explicit strict requests. Ordinary tools remain non-strict and are never gated by strict
+support. Existing compatible-chat, Anthropic and Bedrock opt-in wire behavior is preserved.
+
+**Approved persistence policy:** capture/envelope format 2 replaces format 1. Unversioned captures
+and messages containing the former `ResponseState` member are rejected, not silently accepted with
+lost state. DSA-68 owns migration before host package adoption and preservation of original records.
+No library dual-reader or compatibility shim is planned.
 
 ## 1. Scope and evidence
 
@@ -24,7 +62,7 @@ This boundary does not remove any of the existing host-executed tool requirement
 
 ## 2. Components and ownership
 
-| Component | Proposed responsibility |
+| Component | Responsibility |
 | --- | --- |
 | Common LLM contracts | Portable continuation state and capability/usage additions shared by Connect and Tensor |
 | `Darkspyre.Inference.Connect.LLM` | Existing services, setup integration, managed session runtime and neutral contracts |
@@ -34,11 +72,11 @@ This boundary does not remove any of the existing host-executed tool requirement
 | Internal Gemini/Claude protocol components | Request projection, stream parsing, continuation codecs and error translation |
 | Existing ConsoleTester | Setup/discovery and explicit live qualification for both routes |
 
-Proposed provider ID is `google-vertex-ai`; add `LlmTransport.GoogleVertexAi` without renumbering
+Provider ID is `google-vertex-ai`; add `LlmTransport.GoogleVertexAi` without renumbering
 existing values. Keep four NuGets. Include the new assembly in Connect and place any Google auth
 SDK dependency only in that assembly, with its version in `Directory.Packages.props`.
 Use owned HTTP protocol adapters and Google's credential library; no Google SDK types cross the seam.
-The exact dependency version is an implementation prerequisite, subject to the vulnerability audit.
+The dependency participates in the repository vulnerability audit.
 
 Reuse the managed-runtime access pattern already used by the Bedrock assembly. Extract genuinely
 shared Anthropic message/block handling into one internal implementation where behavior matches;
@@ -47,7 +85,7 @@ route through the direct Anthropic client by fabricating an API-key connection.
 
 ## 3. Connection, credentials and setup
 
-Propose a typed optional `LlmConnection.Vertex` configuration containing `ProjectId`, `Location`
+Use a typed optional `LlmConnection.Vertex` configuration containing `ProjectId`, `Location`
 and `AuthenticationMode` (`ApplicationDefault` or `ServiceAccount`). These belong to the owning
 connector contract, not Common. Add a protected Google service-account credential shape to
 `LlmCredential`; do not place a private key in `ProviderOptions` or `AdditionalHeaders`.
@@ -215,11 +253,11 @@ MIME types, payload limits and attachment completeness are validated before disp
 
 ## 6. Required continuation contract change
 
-Current `LlmChatMessage`/`LlmChatResult` carry `LlmProviderResponseState`; Common's `LlmMessage`
-and `LlmInferenceResult` do not. `ConnectLlmInference` consequently cannot round-trip it. Gemini
+Before DSA-61, `LlmChatMessage`/`LlmChatResult` carried the Connect-only `LlmProviderResponseState`; Common's `LlmMessage`
+and `LlmInferenceResult` did not. The former portable bridge consequently could not round-trip it. Gemini
 thought signatures make this a correctness requirement for applicable tool continuations [S8].
 
-**Proposal C1:** replace the Connect-only carrier with one Common semantic carrier,
+**C1:** replace the Connect-only carrier with one Common semantic carrier,
 `LlmContinuationState`, used by both portable and Connect messages/results. Proposed fields:
 
 | Field | Meaning |
@@ -248,7 +286,7 @@ retains ordered text/tool/thinking/redacted-thinking blocks and signatures. Neit
 content or reconstructs it from displayed reasoning. Compaction preserves complete retained groups;
 discarding summarized groups is explicit. Missing required state in a tool continuation is an error.
 
-Refactor the current central `ProviderResponseStateCodec`, which assumes Responses/Anthropic output
+Refactor the current central `ProviderContinuationStateCodec`, which assumes Responses/Anthropic output
 shapes and derives scope from generic connection fields. Each owning route validates its own payload
 and supplies its binding; shared runtime code works on the neutral envelope. Google project/location
 and principal must participate in binding. Do not add Gemini JSON parsing to host/session code.
@@ -261,11 +299,11 @@ and capture-format revision may be required. This document does not authorize a 
 ## 7. Other contract deltas
 
 **C2 — Tool controls:** add a shared `LlmToolCapabilities` descriptor to Common and Connect model
-capabilities. Proposed members: supported `ChoiceModes`, `SupportsStrictInputSchema`,
+capabilities. Members: supported `ChoiceModes`, `StrictInputSchema`,
 `SupportsParallelCalls`, `SupportsParallelCallControl`, and `SupportsArgumentStreaming`.
 Carry this descriptor through `ConnectLlmInference`. `SupportsToolUse` continues to mean that calls
 and results can round-trip with ordinary non-strict tools; it does not promise every control.
-`SupportsStrictInputSchema = false` must never disable ordinary tools or trigger a strict-schema
+`StrictInputSchema = Unsupported` must never disable ordinary tools or trigger a strict-schema
 preflight for them. It describes an optional generation guarantee, not schema parsing or local
 argument validation. These additions do not change either tool definition's default or add a
 connection-wide strict toggle. Profiles additionally validate
@@ -291,7 +329,7 @@ lock or hidden in the estimator. Initially retain truthful Estimated/Mixed/Unkno
 provider reports and existing estimation. If exact remote measurement is included in parity acceptance,
 replace the internal seam with asynchronous measurement: capture revision under lock, await outside
 it, reject stale results, honor cancellation, and distinguish provider-measured from estimated source.
-Do not present a token-count estimate as a provider admission guarantee. This choice remains open.
+Do not present a token-count estimate as a provider admission guarantee. The implementation uses local estimates and provider reports; remote preflight measurement is not included.
 
 ## 8. Stream and terminal mapping
 
@@ -436,9 +474,9 @@ tools throughout. Features already representable by current contracts are separa
 | Host streaming transcript for plain API connections | Existing DSA-17; no duplicate scope |
 | Explicit cache placement/TTL, native cloud runtimes and billing | Not implied by continuation or usage reporting; require separate scoped design |
 
-## 11. Qualification and design completion
+## 11. Qualification requirements
 
-| Open item | Evidence required to close it |
+| Area | Qualification evidence |
 | --- | --- |
 | Model catalog | Exact endpoint/version, auth requirements, pagination, regional applicability, and catalog/access distinction |
 | Initial supported profiles | Explicit Gemini and Claude IDs with documented limits and endpoint availability; fixtures per profile |
@@ -468,7 +506,7 @@ Live qualification is explicit and bounded: one selected model per publisher, te
 two-step tool continuation, reasoning state, cancellation and managed capture/import. Normal tests use
 doubles and no paid calls. Missing credentials produce a visible skip, never a passing live test.
 Use the existing ConsoleTester; a separate prototype is justified only for an unresolved protocol
-behavior it cannot isolate. This design remains open until the table above is resolved and reviewed.
+behavior it cannot isolate. Live qualification remains a release-readiness follow-up; deterministic fixtures do not certify provider access or live protocol behavior.
 
 ## 12. Sources and local anchors
 
@@ -483,13 +521,18 @@ Official documentation inspected for this mapping (2026-09-28):
 - [S7: Claude PDF support](https://platform.claude.com/docs/en/build-with-claude/pdf-support).
 - [S8: Gemini thought signatures](https://docs.cloud.google.com/vertex-ai/generative-ai/docs/thought-signatures).
 - [S9: Gemini FunctionDeclaration fields](https://docs.cloud.google.com/gemini-enterprise-agent-platform/reference/rest/Shared.Types/FunctionDeclaration).
+- [S11: Publisher model catalog](https://docs.cloud.google.com/gemini-enterprise-agent-platform/reference/rest/v1beta1/publishers.models/list).
+- [S12: Gemini 3 Flash profile](https://docs.cloud.google.com/vertex-ai/generative-ai/docs/models/gemini/3-flash).
+- [S13: Claude Sonnet 4.6 profile](https://docs.cloud.google.com/vertex-ai/generative-ai/docs/partner-models/claude/sonnet-4-6).
+- [S14: Gemini generation schema contract](https://docs.cloud.google.com/dotnet/docs/reference/Google.Cloud.AIPlatform.V1/latest/Google.Cloud.AIPlatform.V1.GenerationConfig).
+- [S15: Bedrock cache usage accounting](https://docs.aws.amazon.com/us_en/bedrock/latest/userguide/prompt-caching.html).
 - [S10: Claude optional tool definition properties](https://platform.claude.com/docs/en/agents-and-tools/tool-use/tool-reference).
 
 Repository baseline: [managed-agent design](enhancements.md),
 [Connect integration contract](../README.md),
 [portable LLM contracts](../../Common/src/Darkspyre.Inference.Common/LLM/LlmContracts.cs),
 [portable bridge](../src/LLM/Darkspyre.Inference.Connect.LLM/ConnectLlmInference.cs),
-[current state codec](../src/LLM/Darkspyre.Inference.Connect.LLM/Internal/ProviderResponseStateCodec.cs),
+[current state codec](../src/LLM/Darkspyre.Inference.Connect.LLM/Internal/ProviderContinuationStateCodec.cs),
 and [capability declarations](../src/LLM/Darkspyre.Inference.Connect.LLM/LlmProviderCapabilities.cs).
 The existing [non-strict tool decision](enhancements.md#one-non-strict-default-for-tool-definitions)
 and [managed tool regression tests](../tests/LLM/Darkspyre.Inference.Connect.LLM.Tests/ManagedAgentTests.cs)

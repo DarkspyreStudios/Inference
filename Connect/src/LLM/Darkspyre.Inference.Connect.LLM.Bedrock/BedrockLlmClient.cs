@@ -29,6 +29,11 @@ internal sealed class BedrockLlmClient(
         SupportsJsonObject = false,
         SupportsTemperature = true,
         SupportsToolUse = true,
+        Tools = new()
+        {
+            ChoiceModes = new[] { LlmToolChoiceMode.Auto, LlmToolChoiceMode.Required, LlmToolChoiceMode.Specific }.ToFrozenSet(),
+            SupportsParallelCalls = true
+        },
         SupportsPromptImages = true,
         SupportsPromptDocuments = true,
         RichContentSupported = RichContentRoutes.BedrockConverse,
@@ -97,7 +102,7 @@ internal sealed class BedrockLlmClient(
         int reported = -1;
         for (int index = request.Messages.Count - 1; index >= 0 && reported < 0; index--)
         {
-            if (request.Messages[index].ResponseState is { InputTokens: not null, OutputTokens: not null })
+            if (request.Messages[index].ContinuationState is { InputTokens: not null, OutputTokens: not null })
             {
                 reported = index;
             }
@@ -112,7 +117,7 @@ internal sealed class BedrockLlmClient(
             return new ContextEstimate(LocalTokenCount.Count(Projection(request, tail, framing: true)));
         }
         // The reported input already includes that request's instructions and tools.
-        LlmProviderResponseState state = request.Messages[reported].ResponseState!;
+        LlmContinuationState state = request.Messages[reported].ContinuationState!;
         return new ContextEstimate(state.InputTokens!.Value + state.OutputTokens!.Value
             + (tail.Length == 0 ? 0 : LocalTokenCount.Count(Projection(request, tail, framing: false))),
             IncludesProviderReport: true);
@@ -138,10 +143,10 @@ internal sealed class BedrockLlmClient(
         LlmReasoningEffort.Validate(request.ReasoningLevel, capabilities);
         LlmClientBase.ValidatePromptAttachments(request, capabilities);
         LlmClientBase.ValidateToolUse(request, capabilities);
-        foreach (LlmChatMessage message in request.Messages.Where(message => message.ResponseState is not null))
+        foreach (LlmChatMessage message in request.Messages.Where(message => message.ContinuationState is not null))
         {
             // Only this connection's own counts-only state is accepted; it adds nothing to the request.
-            _ = ProviderResponseStateCodec.DecodeMessage(message, connection, request.ModelId);
+            _ = ProviderContinuationStateCodec.DecodeMessage(message, connection, request.ModelId);
         }
 
         if (request.AllowParallelToolCalls is not null)
@@ -162,7 +167,7 @@ internal sealed class BedrockLlmClient(
 
     /// <summary>
     /// Maps a Converse reply to stream events. A reply that reports both token counts carries them as
-    /// counts-only response state, so accounting can count the history it closes.
+    /// counts-only continuation state, so accounting can count the history it closes.
     /// </summary>
     internal static IEnumerable<LlmStreamEvent> MapResponse(
         LlmConnection connection,
@@ -221,6 +226,9 @@ internal sealed class BedrockLlmClient(
                         ["Structured output was not evaluated because the provider refused the request."])
                     : StructuredOutput.Validate(finalText, structured, enforcement.Value)
                 : null;
+        LlmUsage? normalizedUsage = response.Usage is { } usage
+            ? AnthropicUsage.Create(usage.InputTokens, usage.OutputTokens, usage.CacheReadInputTokens, usage.CacheWriteInputTokens)
+            : null;
         yield return new LlmChatCompletionEvent(new LlmChatResult
         {
             Text = finalText,
@@ -228,14 +236,9 @@ internal sealed class BedrockLlmClient(
             Status = completionStatus,
             FinishReason = MapFinishReason(stopReason),
             IncompleteReason = incomplete ? stopReason : null,
-            Usage = response.Usage is null
-                ? null
-                : new LlmUsage(
-                    response.Usage.InputTokens,
-                    response.Usage.OutputTokens,
-                    response.Usage.TotalTokens),
-            ResponseState = response.Usage is { InputTokens: { } input, OutputTokens: { } output }
-                ? ProviderResponseStateCodec.EncodeCounts(connection, request.ModelId, input, output)
+            Usage = normalizedUsage,
+            ContinuationState = normalizedUsage is { InputTokens: { } input, OutputTokens: { } output }
+                ? ProviderContinuationStateCodec.EncodeCounts(connection, request.ModelId, input, output)
                 : null,
             ToolCalls = toolCalls,
             StructuredOutput = validation,

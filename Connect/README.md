@@ -18,7 +18,7 @@ The package also includes `Darkspyre.Inference.Connect.TTS` for external
 PocketTTS HTTP synthesis and `Darkspyre.Inference.Connect.Audio` for external TangoFlux generation.
 They are included in the Connect product project, not separate NuGets. See
 [PocketTTS integration](#pockettts-speech) and
-[TangoFlux integration](#tangoflux-audio). All five capability assemblies ship in Connect **11.11.0-rc.1**.
+[TangoFlux integration](#tangoflux-audio). The released package baseline is **11.11.0-rc.1**; the Vertex assembly and contract migration below are unreleased.
 
 The packages target .NET 11. Credentials
 for direct API transports remain owned by the host through `ILlmConnectionSource`; the connector
@@ -47,9 +47,37 @@ The Apple on-device adapter is registered by `AddLlmConnect`. Its separately bui
 helper and release gates are described in the [connector design](docs/apple-foundation-models-design.md).
 This source implementation has not been published as a signed helper release.
 
-Google Vertex AI support for Gemini and Claude is in technical design under DSA-61.
-The [technical mapping](docs/google-vertex-ai-tech-design.md) records proposed protocol mappings,
-contract changes for parity, migration scope and qualification gates; it is not shipped support.
+Google Vertex AI support for Gemini and Claude is implemented in source under DSA-61.
+Register `AddLlmConnectVertex()` alongside `AddLlmConnect()` and supply a typed `LlmConnection.Vertex`
+with project, location and authentication mode. The adapter assembly is included by the Connect
+package project. See the [technical mapping](docs/google-vertex-ai-tech-design.md) for reviewed model
+profiles and limits. Live cloud qualification and a coordinated breaking-contract release remain.
+
+### Unreleased contract migration
+
+Continuation state is now Common's opaque `LlmContinuationState`, carried by both portable and
+Connect messages/results as `ContinuationState`. Captures and envelopes use format 2; old
+`ResponseState` JSON members and unversioned captures are rejected. Hosts must migrate stored records
+before adoption; see [DSA-68 handoff](docs/agent-ds-contract-handoff.md). Explicit state omission is
+reported by `OmittedContinuationStateCount`; default handling rejects unbound state.
+
+`LlmToolCapabilities.StrictInputSchema` reports Supported, Unsupported or Unknown. Unknown allows an
+explicit `Strict=true` request unchanged so the host can try it and handle the provider result.
+Known Unsupported rejects that request. Ordinary tools default to `Strict=false` independently.
+Cache-read/write and reasoning usage details are optional subsets of normalized input/output totals.
+
+### Vertex ConsoleTester
+
+Use the existing console application with ADC configured on the machine:
+
+```bash
+dotnet run --project Connect/tools/Darkspyre.Inference.Connect.ConsoleTester -- vertex-probe --provider vertex --google-project YOUR_PROJECT --google-location global --model google/gemini-3-flash-preview --case all --repeat 1 --timeout-seconds 120
+```
+
+Use `anthropic/claude-sonnet-4-6` to exercise the Claude route. Cases are `text`, `structured`, `tools`,
+`agent` and `cancel`. Calls are explicitly metered; failed cases are not retried. Unavailable auth or
+catalog discovery produces a visible skip. The existing `prompt --image` and `prompt --document`
+commands cover attachment experiments separately. These live probes are not normal test gates.
 
 | Package | Purpose |
 |---|---|
@@ -70,7 +98,7 @@ semantic inference contracts that are also implemented by Tensor belong in
 Connect's chat lane uses Common's LLM primitives directly: the stream events, tool definitions, tool
 choice, tool calls, tool results with `LlmToolOutput`, attachments, structured-output types, completion
 status and `LlmUsage`, all in `Darkspyre.Inference.Common.LLM`. Connect adds only what carries
-Connect-only data: `LlmChatMessage` and `LlmChatResult` with response state and diagnostics,
+Connect-specific data: `LlmChatMessage` and `LlmChatResult` with provider diagnostics and the shared continuation envelope,
 `LlmChatCompletionEvent` for the final result, and `LlmModel` with provider capabilities. An attachment's
 `MediaType` is used as given; without one, the adapter detects the type from the bytes.
 
@@ -372,7 +400,7 @@ if (result.Status == LlmCompletionStatus.RequiresAction)
                 new LlmChatMessage("assistant", result.Text)
                 {
                     ToolCalls = result.ToolCalls,
-                    ResponseState = result.ResponseState
+                    ContinuationState = result.ContinuationState
                 },
                 new LlmChatMessage("user", string.Empty)
                 {
@@ -486,8 +514,8 @@ report matches the request. An omitted part never fails the request, the turn or
 changes `IsError`. Connect adds no notice for an omitted part. A host that wants one adds a text part
 and projects again.
 
-`LlmChatResult.ResponseState` is opaque, versioned adapter state. Preserve it unchanged on that
-response's `LlmChatMessage.ResponseState`, alongside its visible text and tool calls, on ordinary
+`LlmChatResult.ContinuationState` is opaque, versioned adapter state. Preserve it unchanged on that
+response's `LlmChatMessage.ContinuationState`, alongside its visible text and tool calls, on ordinary
 turns as well as tool turns. Keep every assistant record, not just the latest one. Responses adapters
 retain ordered reasoning/text/calls; Anthropic retains thinking/signatures/content. The adapter
 replays state instead of duplicating the message's visible text/calls. State is bound to transport,
@@ -500,10 +528,10 @@ Chat Completions, AgentCore and CLI chat do not import this opaque state.
 ### Carrying history to another model or provider
 
 A conversation that moves to another model or provider starts a new provider-side conversation from
-the host's retained history. Set `UnboundResponseState = LlmUnboundResponseState.Omit` on those
+the host's retained history. Set `UnboundContinuationState = LlmUnboundContinuationState.Omit` on those
 requests. Each message whose state does not bind to the target transport, model and account is sent
 without it; its visible text, tool calls, tool results and attachments are kept. The result's
-`OmittedResponseStateCount` reports how many messages were sent without state. The default,
+`OmittedContinuationStateCount` reports how many messages were sent without state. The default,
 `Reject`, fails before any request. The caller's messages are not modified, so the original state
 stays in host storage.
 
@@ -578,9 +606,9 @@ Text-only occupancy is estimated from the actual projected request using the bun
 tokenizer, including instructions and schemas. It is not an exact current-model token count.
 Binary attachments and encrypted reasoning make occupancy unknown; these return null rather than
 a fabricated count, with one exception. Responses, direct Codex and Bedrock Converse record the provider's reported input
-and output tokens on the response state (`LlmProviderResponseState.InputTokens` and `OutputTokens`), and
+and output tokens on the continuation state (`LlmContinuationState.InputTokens` and `OutputTokens`), and
 the estimate counts the history up to the last such state as their sum, tokenizing only what follows.
-That estimate reports `Source = Mixed`. Hosts that keep response state keep the counts with it. Each
+That estimate reports `Source = Mixed`. Hosts that keep continuation state keep the counts with it. Each
 Bedrock model has its own tokenizer, so a Bedrock estimate of the unreported tail is approximate and its
 diagnostic says so. Provider context-overflow errors still trigger a host handoff. Catalog limits
 are optional. Configure an explicit output reserve when the catalog provides none; without a

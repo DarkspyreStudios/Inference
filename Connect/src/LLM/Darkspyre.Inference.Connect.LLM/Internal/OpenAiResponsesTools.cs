@@ -17,9 +17,9 @@ internal static class OpenAiResponsesTools
 
         foreach (LlmChatMessage message in request.Messages)
         {
-            if (message.ResponseState is not null)
+            if (message.ContinuationState is not null)
             {
-                AppendClones(input, ProviderResponseStateCodec.DecodeMessage(message, connection, request.ModelId));
+                AppendClones(input, ProviderContinuationStateCodec.DecodeMessage(message, connection, request.ModelId));
                 continue;
             }
 
@@ -228,7 +228,7 @@ internal static class OpenAiResponsesTools
         return true;
     }
 
-    public static LlmProviderResponseState? EncodeResponseState(
+    public static LlmContinuationState? EncodeContinuationState(
         JsonElement responseRoot,
         LlmConnection connection,
         string modelId)
@@ -240,7 +240,7 @@ internal static class OpenAiResponsesTools
             return null;
         }
 
-        return ProviderResponseStateCodec.Encode(
+        return ProviderContinuationStateCodec.Encode(
             connection, modelId, (JsonArray)JsonNode.Parse(output.GetRawText())!);
     }
 

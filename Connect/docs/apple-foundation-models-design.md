@@ -165,7 +165,7 @@ This supports chat and agent tools through one mapping.
 Construct typed `Transcript` entries from Common messages each time. The rebuild probe
 preserved prior user/assistant text, two identical calls with arbitrary host IDs and
 reverse-ordered results, then consumed the values without a tool callback. It carried no
-original transcript JSON, GenerationIDs, asset IDs or Connect-only response state. This
+original transcript JSON, GenerationIDs, asset IDs or Connect-only continuation state. This
 keeps `LlmProviderService.Bind` fully usable without introducing a hidden cache or exposing
 Apple payloads to applications.
 

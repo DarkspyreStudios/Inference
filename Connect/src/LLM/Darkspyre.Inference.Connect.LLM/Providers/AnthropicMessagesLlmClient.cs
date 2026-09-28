@@ -1,3 +1,4 @@
+using System.Collections.Frozen;
 using System.Net.Http.Headers;
 using System.Runtime.CompilerServices;
 using System.Text;
@@ -9,7 +10,7 @@ using Darkspyre.Inference.Connect.LLM.Internal;
 namespace Darkspyre.Inference.Connect.LLM.Providers;
 
 /// <summary>Direct Anthropic Messages API adapter for API-key connections.</summary>
-internal sealed class AnthropicMessagesLlmClient : LlmClientBase
+internal class AnthropicMessagesLlmClient : LlmClientBase
 {
     private const string AnthropicVersion = "2023-06-01";
     private const int DefaultMaxOutputTokens = 8192;
@@ -34,6 +35,14 @@ internal sealed class AnthropicMessagesLlmClient : LlmClientBase
         SupportsJsonObject = false,
         SupportsTemperature = false,
         SupportsToolUse = true,
+        Tools = new()
+        {
+            ChoiceModes = new[] { LlmToolChoiceMode.Auto, LlmToolChoiceMode.None, LlmToolChoiceMode.Required, LlmToolChoiceMode.Specific }.ToFrozenSet(),
+            StrictInputSchema = LlmStrictInputSchemaSupport.Unknown,
+            SupportsParallelCalls = true,
+            SupportsParallelCallControl = true,
+            SupportsArgumentStreaming = true
+        },
         SupportsPromptImages = true,
         SupportsPromptDocuments = true,
         RichContentSupported = RichContentRoutes.Anthropic
@@ -76,13 +85,8 @@ internal sealed class AnthropicMessagesLlmClient : LlmClientBase
             : StructuredOutput.ResolveEnforcement(request.StructuredOutput, capabilities);
         LlmCredential? credential = LlmCredential.Parse(connection.Credential);
         JsonObject payload = BuildPayload(connection, request, output => ProjectToolOutput(connection, request.ModelId, output));
-        using var httpRequest = new HttpRequestMessage(
-            HttpMethod.Post,
-            BuildApiUri(connection, "messages"))
-        {
-            Content = JsonContent.Create(payload)
-        };
-        ApplyAnthropicHeaders(httpRequest, connection, credential);
+        using HttpRequestMessage httpRequest = CreateHttpRequest(connection, request, payload);
+
 
         using HttpResponseMessage response = await Http.SendAsync(
             httpRequest,
@@ -98,6 +102,8 @@ internal sealed class AnthropicMessagesLlmClient : LlmClientBase
         await using Stream stream = await response.Content.ReadAsStreamAsync(cancellationToken);
         var text = new StringBuilder();
         int? inputTokens = null;
+        int? cachedTokens = null;
+        int? cacheWriteTokens = null;
         int? outputTokens = null;
         string? responseId = null;
         string? stopReason = null;
@@ -135,6 +141,8 @@ internal sealed class AnthropicMessagesLlmClient : LlmClientBase
                         {
                             responseId = LlmJson.GetString(message, "id");
                             inputTokens = ReadToken(message, "usage", "input_tokens") ?? inputTokens;
+                            cachedTokens = ReadToken(message, "usage", "cache_read_input_tokens") ?? cachedTokens;
+                            cacheWriteTokens = ReadToken(message, "usage", "cache_creation_input_tokens") ?? cacheWriteTokens;
                         }
 
                         break;
@@ -149,6 +157,12 @@ internal sealed class AnthropicMessagesLlmClient : LlmClientBase
                                 text.Append(value);
                                 yield return new LlmTextDeltaEvent(value);
                             }
+                        }
+                        else if (LlmJson.GetObject(root, "delta") is { } thinkingDelta
+                            && LlmJson.GetString(thinkingDelta, "type") == "thinking_delta"
+                            && LlmJson.GetString(thinkingDelta, "thinking") is { Length: > 0 } thinking)
+                        {
+                            yield return new LlmReasoningDeltaEvent(thinking, true);
                         }
                         else if (LlmJson.GetObject(root, "delta") is { } toolDelta
                             && LlmJson.GetString(toolDelta, "type") == "input_json_delta")
@@ -168,6 +182,13 @@ internal sealed class AnthropicMessagesLlmClient : LlmClientBase
                         break;
                     case "content_block_start":
                         streamedContent.ObserveStart(root);
+                        if (LlmJson.GetObject(root, "content_block") is { } initialBlock
+                            && LlmJson.GetString(initialBlock, "type") == "text"
+                            && LlmJson.GetString(initialBlock, "text") is { Length: > 0 } initialText)
+                        {
+                            text.Append(initialText);
+                            yield return new LlmTextDeltaEvent(initialText);
+                        }
                         if (LlmJson.GetObject(root, "content_block") is { } contentBlock
                             && LlmJson.GetString(contentBlock, "type") == "tool_use"
                             && LlmJson.GetInt(root, "index") is int toolIndex
@@ -207,6 +228,9 @@ internal sealed class AnthropicMessagesLlmClient : LlmClientBase
 
                         ReadStopDetails(root, ref refusalCategory, ref refusalExplanation);
                         outputTokens = ReadToken(root, "usage", "output_tokens") ?? outputTokens;
+                        inputTokens = ReadToken(root, "usage", "input_tokens") ?? inputTokens;
+                        cachedTokens = ReadToken(root, "usage", "cache_read_input_tokens") ?? cachedTokens;
+                        cacheWriteTokens = ReadToken(root, "usage", "cache_creation_input_tokens") ?? cacheWriteTokens;
                         if (string.Equals(stopReason, "refusal", StringComparison.Ordinal)
                             && refusalExplanation is { Length: > 0 } declined)
                         {
@@ -248,7 +272,8 @@ internal sealed class AnthropicMessagesLlmClient : LlmClientBase
                                 ? LlmCompletionStatus.Incomplete
                                 : requiresAction
                                     ? LlmCompletionStatus.RequiresAction
-                                    : LlmCompletionStatus.Completed;
+                                    : stopReason is "end_turn" or "stop_sequence"
+                                        ? LlmCompletionStatus.Completed : LlmCompletionStatus.Unknown;
                         LlmStructuredOutputValidation? validation = request.StructuredOutput is { } structured
                             && enforcement is not null
                             && !requiresAction
@@ -268,15 +293,11 @@ internal sealed class AnthropicMessagesLlmClient : LlmClientBase
                             Status = completionStatus,
                             FinishReason = stopReason,
                             IncompleteReason = incomplete ? stopReason : null,
-                            Usage = new LlmUsage(
-                                inputTokens,
-                                outputTokens,
-                                inputTokens is null && outputTokens is null
-                                    ? null
-                                    : (inputTokens ?? 0) + (outputTokens ?? 0)),
+                            Usage = AnthropicUsage.Create(inputTokens, outputTokens, cachedTokens, cacheWriteTokens),
                             ProviderResponseId = responseId,
-                            ToolCalls = completedToolCalls,
-                            ResponseState = incomplete ? null : streamedContent.Encode(connection, request.ModelId),
+                            ToolCalls = completionStatus == LlmCompletionStatus.RequiresAction ? completedToolCalls : [],
+                            ContinuationState = completionStatus is LlmCompletionStatus.Completed or LlmCompletionStatus.RequiresAction
+                                ? streamedContent.Encode(connection, request.ModelId) : null,
                             StructuredOutput = validation,
                             Diagnostics = new LlmProviderDiagnostics(
                                 (int)response.StatusCode,
@@ -368,7 +389,16 @@ internal sealed class AnthropicMessagesLlmClient : LlmClientBase
         return [.. models.OrderBy(model => model.DisplayName, StringComparer.OrdinalIgnoreCase)];
     }
 
-    private static JsonObject BuildPayload(
+    protected virtual HttpRequestMessage CreateHttpRequest(LlmConnection connection, LlmChatRequest request, JsonObject payload)
+    {
+        var result = new HttpRequestMessage(HttpMethod.Post, BuildApiUri(connection, "messages")) { Content = JsonContent.Create(payload) };
+        ApplyAnthropicHeaders(result, connection, LlmCredential.Parse(connection.Credential));
+        return result;
+    }
+
+    protected virtual string ReasoningModelId(string modelId) => modelId;
+
+    protected virtual JsonObject BuildPayload(
         LlmConnection connection,
         LlmChatRequest request,
         Func<LlmToolOutput, ProjectedToolOutput> projectToolOutput)
@@ -382,12 +412,12 @@ internal sealed class AnthropicMessagesLlmClient : LlmClientBase
         var messages = new JsonArray();
         foreach (LlmChatMessage message in request.Messages)
         {
-            if (message.ResponseState is not null)
+            if (message.ContinuationState is not null)
             {
                 messages.Add(new JsonObject
                 {
                     ["role"] = "assistant",
-                    ["content"] = ProviderResponseStateCodec.DecodeMessage(message, connection, request.ModelId)
+                    ["content"] = ProviderContinuationStateCodec.DecodeMessage(message, connection, request.ModelId)
                 });
             }
             else if (message.Role is "system" or "developer")
@@ -452,7 +482,7 @@ internal sealed class AnthropicMessagesLlmClient : LlmClientBase
         };
         if (request.ReasoningLevel is { } level)
         {
-            AnthropicReasoning.Apply(payload, request.ModelId, level, request.MaxOutputTokens ?? DefaultMaxOutputTokens);
+            AnthropicReasoning.Apply(payload, ReasoningModelId(request.ModelId), level, request.MaxOutputTokens ?? DefaultMaxOutputTokens);
         }
         if (system.Count > 0)
         {
