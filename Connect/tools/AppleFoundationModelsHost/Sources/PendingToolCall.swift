@@ -1,5 +1,5 @@
-// DSA-59 prototype change, Copyright (c) 2026 Darkspyre Studios.
-// Built only into the explicitly patched research dependency.
+// Copyright (c) 2026 Darkspyre Studios.
+// Canonical continuation owner; the historical bridge experiment copies this into its ignored build.
 import Synchronization
 
 /// One winner between host completion and task cancellation, including before install.

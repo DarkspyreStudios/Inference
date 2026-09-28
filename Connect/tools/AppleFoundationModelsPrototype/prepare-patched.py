@@ -10,8 +10,9 @@ import subprocess
 
 ROOT = Path(__file__).resolve().parent
 SOURCE = ROOT / ".artifacts/upstream/foundation-models-c"
-INPUTS = [ROOT / "native" / name for name in (
-    "bridge-lifecycle.patch", "PendingToolCall.swift", "PendingToolCallTests.swift", "Package.swift")]
+INPUTS = [ROOT / "native/bridge-lifecycle.patch",
+          ROOT.parent / "AppleFoundationModelsHost/Sources/PendingToolCall.swift",
+          ROOT / "native/PendingToolCallTests.swift", ROOT / "native/Package.swift"]
 
 
 def main():

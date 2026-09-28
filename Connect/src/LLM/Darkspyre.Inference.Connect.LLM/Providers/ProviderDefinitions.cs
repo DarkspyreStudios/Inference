@@ -4,6 +4,41 @@ namespace Darkspyre.Inference.Connect.LLM.Providers;
 
 internal static class ProviderDefinitions
 {
+    public static LlmProviderDefinition AppleFoundationModels { get; } = new()
+    {
+        Id = "apple-foundation-models",
+        DisplayName = "Apple Foundation Models (On Device)",
+        Description = "Use Apple Intelligence's on-device language model on Apple Silicon.",
+        Transport = LlmTransport.AppleFoundationModels,
+        DefaultEndpoint = "darkspyre-apple-fm",
+        DefaultModelId = "apple-system-default",
+        DisplayOrder = 50,
+        SetupSteps =
+        [
+            new SetupStep
+            {
+                Id = "verify-apple", Title = "Prepare the on-device model",
+                Instructions = "Use an Apple Silicon Mac running macOS 26 or later. Enable Apple Intelligence in System Settings and wait for its model download. Install the Darkspyre Apple helper and enter its executable name or absolute path. No API key or account sign-in is required.",
+                CompletionRequirement = "The helper and on-device model must report that they are available.",
+                Troubleshooting = "Check the helper path, Apple Intelligence eligibility, its enabled setting and model download status."
+            },
+            new SetupStep
+            {
+                Id = "select-model", Title = "Choose the on-device model",
+                Instructions = "Load the locally available Apple system model.",
+                CompletionRequirement = "Select apple-system-default.",
+                Troubleshooting = "Recheck the helper and Apple Intelligence readiness."
+            },
+            new SetupStep
+            {
+                Id = "test-connection", Title = "Optional on-device test",
+                Instructions = "Explicitly generate a short response on this Mac. Saving does not generate a response.",
+                CompletionRequirement = "The model returns text. Apple does not report whether generation stopped naturally or reached its token limit.",
+                Troubleshooting = "Recheck local model readiness and retry when no other generation is using the model."
+            }
+        ]
+    };
+
     private static readonly SetupStep SelectModel = new()
     {
         Id = "select-model",

@@ -560,12 +560,30 @@ public sealed class ManagedAgentTests
     public void ManagedSessionsRejectNativeRuntimeOptions() =>
         Assert.Throws<NotSupportedException>(() => new Harness().Create(Options() with { Runtime = new() { WorkingDirectory = "." } }));
 
+    [Fact]
+    public async Task StructuredSnapshotsKeepIdentityAndUnknownResultTerminatesOnce()
+    {
+        var harness = new Harness { Snapshots = [JsonElement.Parse("{}"), JsonElement.Parse("{\"key\":\"value\"}")] };
+        harness.Results.Enqueue(new() { Text = "{\"key\":\"value\"}", Status = LlmCompletionStatus.Unknown, Diagnostics = new(200, null, null) });
+        await using var session = harness.Create();
+        var events = await Read(session.RunTurnAsync(Turn("hello")));
+        var snapshots = events.OfType<LlmAgentStructuredOutputSnapshotEvent>().ToArray();
+        var message = Assert.Single(events.OfType<LlmAgentMessageCompletedEvent>());
+        Assert.Equal(2, snapshots.Length);
+        Assert.All(snapshots, snapshot => { Assert.Equal(message.ItemId, snapshot.ItemId); Assert.Equal(message.TurnId, snapshot.TurnId); Assert.Equal(session.ThreadId, snapshot.ThreadId); });
+        Assert.Equal("value", snapshots[1].Content.GetProperty("key").GetString());
+        Assert.Equal(LlmAgentCompletionReason.Unknown, Assert.Single(events.OfType<LlmAgentTurnCompletedEvent>()).Reason);
+        Assert.Single(harness.Requests);
+        Assert.Equal(message.Text, (await session.CaptureContextAsync()).Entries[^1].Message.Content);
+    }
+
     private sealed class Harness : ILlmContextEstimator
     {
         public Queue<LlmChatResult> Results { get; } = new();
         public List<LlmChatRequest> Requests { get; } = [];
         public List<LlmChatRequest> Estimates { get; } = [];
         public Exception? Failure { get; set; }
+        public IReadOnlyList<JsonElement> Snapshots { get; init; } = [];
         public bool UnknownEstimate { get; init; }
         public bool ExposeBeforeFailure { get; init; }
         public ManagedAgentSession Create(LlmAgentSessionOptions? options = null) => new(
@@ -595,6 +613,7 @@ public sealed class ManagedAgentTests
             await Task.Yield();
             if (ExposeBeforeFailure) { yield return new LlmTextDeltaEvent("partial"); }
             if (Failure is not null) { throw Failure; }
+            foreach (var snapshot in Snapshots) yield return new LlmStructuredOutputSnapshotEvent(snapshot);
             yield return new LlmChatCompletionEvent(Results.Dequeue());
         }
     }

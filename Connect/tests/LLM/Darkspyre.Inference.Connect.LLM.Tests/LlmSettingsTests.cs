@@ -25,7 +25,8 @@ public sealed class LlmSettingsTests
             Assert.Equal(definition.Id, settings.Definition.Implementation.Id);
             Assert.NotEmpty(Fields(settings));
             Assert.Contains(settings.Actions, action => action.Purpose == SetupActionPurpose.Test
-                && action.SideEffects.HasFlag(SetupSideEffect.PotentialBilling));
+                && action.SideEffects.HasFlag(definition.Transport == LlmTransport.AppleFoundationModels
+                    ? SetupSideEffect.LocalVerification : SetupSideEffect.PotentialBilling));
             Assert.Null(settings.Status.Ready.Value);
         }
     }

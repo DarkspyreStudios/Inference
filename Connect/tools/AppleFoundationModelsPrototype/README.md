@@ -2,9 +2,8 @@
 
 Research for [DSA-59](https://darkspyre.atlassian.net/browse/DSA-59). This is an
 isolated, non-shipping tool. It does not register a Connect provider or change the
-product's supported capabilities. The connector remains in technical design.
-The current [implementation design proposal](../../docs/apple-foundation-models-design.md)
-uses an owned Swift helper and records the required neutral contract additions.
+product's supported capabilities. The approved [connector design](../../docs/apple-foundation-models-design.md)
+is implemented separately in Connect and the [owned Swift helper](../AppleFoundationModelsHost/README.md).
 
 ## Native dependency
 
@@ -17,7 +16,7 @@ package and its license as the baseline ignored build dependency in `.artifacts/
 exclude the Python SDK and other upstream application code. The authorized lifecycle
 experiment applies a narrow patch to a separate copy. Only the reviewable patch,
 owned continuation helper and research harness are tracked, not the full upstream
-source or binaries. Production dependency distribution remains a design decision.
+source or binaries. Production uses the owned Swift helper, with no C-bridge dependency.
 
 Prerequisites: macOS on Apple Silicon, Xcode with Foundation Models, the repository's
 .NET 11 SDK, Python 3 for fetching the pinned source, and Apple Intelligence enabled
@@ -41,7 +40,7 @@ bridge. A build prerequisite failure stops the experiment.
 
 The user authorized prototype fixes for immediate tool results, pending-tool
 cancellation and cancelled streams. `native/bridge-lifecycle.patch` registers the
-pending call before invoking host code, uses `PendingToolCall.swift` to settle
+pending call before invoking host code, uses the canonical `../AppleFoundationModelsHost/Sources/PendingToolCall.swift` to settle
 completion/cancellation once, and checks cancellation when the stream iterator ends.
 No C ABI or production adapter is changed.
 
@@ -62,6 +61,9 @@ PY
 ```
 
 Each patch/helper/test revision gets a separate directory identified by its SHA-256.
+The continuation helper moved to the production helper during DSA-59 implementation;
+new preparation fingerprints identify that current source, while recorded earlier results
+retain their original fingerprints.
 `.artifacts/patched.json` records the active library, original upstream revision and
 patch fingerprint. The four deterministic Swift tests use the identical owned helper
 in a small test-only package, including 1,000 races between registration, completion

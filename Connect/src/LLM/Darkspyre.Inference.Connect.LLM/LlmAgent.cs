@@ -181,7 +181,9 @@ public enum LlmAgentTurnStatus
 {
     Completed,
     Interrupted,
-    Failed
+    Failed,
+    /// <summary>Terminal output is available but its natural completion or truncation is unknown.</summary>
+    Unknown
 }
 
 public abstract record LlmAgentEvent(string ThreadId, string TurnId);
@@ -194,6 +196,14 @@ public sealed record LlmAgentTextDeltaEvent(
     string TurnId,
     string ItemId,
     string Delta)
+    : LlmAgentEvent(ThreadId, TurnId);
+
+/// <summary>Replaces the previous partial structured object for this item.</summary>
+public sealed record LlmAgentStructuredOutputSnapshotEvent(
+    string ThreadId,
+    string TurnId,
+    string ItemId,
+    JsonElement Content)
     : LlmAgentEvent(ThreadId, TurnId);
 
 public sealed record LlmAgentReasoningDeltaEvent(
@@ -237,12 +247,13 @@ public sealed record LlmAgentTurnCompletedEvent(
 {
     /// <summary>
     /// Derived from <see cref="Reason"/>: <c>Completed</c> for a completed turn, <c>Interrupted</c> for an
-    /// interruption, and <c>Failed</c> for every other reason.
+    /// interruption, <c>Unknown</c> for unreported termination, and <c>Failed</c> for every other reason.
     /// </summary>
     public LlmAgentTurnStatus Status => Reason switch
     {
         LlmAgentCompletionReason.Completed => LlmAgentTurnStatus.Completed,
         LlmAgentCompletionReason.Interruption => LlmAgentTurnStatus.Interrupted,
+        LlmAgentCompletionReason.Unknown => LlmAgentTurnStatus.Unknown,
         _ => LlmAgentTurnStatus.Failed
     };
 }

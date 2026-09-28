@@ -124,7 +124,10 @@ public enum LlmCompletionStatus
     Incomplete,
     Refused,
     Failed,
-    RequiresAction
+    RequiresAction,
+
+    /// <summary>A terminal response whose natural completion or truncation the provider cannot report.</summary>
+    Unknown
 }
 
 public sealed record LlmStructuredOutputValidation(

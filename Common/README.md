@@ -26,6 +26,17 @@ keeps. A question truncates the state when the first exceeds the second. Rich pr
 operations remain on their owning packages; Common is the portable inference lane, not a
 least-common-denominator replacement for implementation management.
 
+## Streaming and terminal results
+
+`LlmStructuredOutputSnapshotEvent.Content` replaces the previous JSON snapshot; it is not
+an append-only text fragment or a final schema validation. Use the terminal result's `Text`
+and `StructuredOutput` for the final representation and validation. Ordinary text uses
+`LlmTextDeltaEvent`.
+
+`LlmCompletionStatus.Unknown` is terminal: the implementation returned output but cannot
+classify a natural stop versus truncation. It does not mean failure or authorize a retry.
+Check validation separately and leave unreported finish reasons and usage unknown.
+
 ## Provider setup
 
 `Darkspyre.Inference.Common.Setup` supplies UI-neutral definitions, a settings object with typed fields,

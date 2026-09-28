@@ -1,4 +1,6 @@
+using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Common.LLM;
+using Darkspyre.Inference.Connect.LLM.Providers;
 using Darkspyre.Inference.Common.Setup;
 
 namespace Darkspyre.Inference.Connect.LLM;
@@ -78,6 +80,8 @@ public sealed class LlmSettings : InferenceSettings<LlmSetupChanges>
     internal string ModelId => _model;
 
     internal bool UsesCli => _draft.Transport is LlmTransport.AnthropicClaudeCli or LlmTransport.GoogleAntigravityCli;
+    internal bool UsesApple => _draft.Transport == LlmTransport.AppleFoundationModels;
+    internal string? ApplePrerequisite { get; set; }
     // A SelfHost connection's endpoint is the ID of an engine the host runs in its own process.
     private bool UsesSelfHost => _draft.Transport == LlmTransport.SelfHost;
 
@@ -116,9 +120,9 @@ public sealed class LlmSettings : InferenceSettings<LlmSetupChanges>
     protected override IReadOnlyList<SetupStep> CreateSteps()
     {
         var fields = new List<SetupField>();
-        if (UsesCli)
+        if (UsesCli || UsesApple)
         {
-            fields.Add(new SetupExecutableField(new("executable", "CLI executable or absolute path") { IsRequired = true },
+            fields.Add(new SetupExecutableField(new("executable", UsesApple ? "Apple helper executable or absolute path" : "CLI executable or absolute path") { IsRequired = true },
                 new(_draft.Endpoint), new(_definition.DefaultEndpoint), value => Edit(() => _draft = _draft with { Endpoint = value.Value })));
         }
         else if (UsesSelfHost)
@@ -184,7 +188,7 @@ public sealed class LlmSettings : InferenceSettings<LlmSetupChanges>
             [new SetupChoiceField(new("model", "Model") { IsRequired = true,
                 HelpText = "Discover available models where supported, or enter an exact model ID." }, _model,
                 _definition.DefaultModelId, value => Edit(() => _model = value), true,
-                UsesSelfHost ? SetupSideEffect.None : SetupSideEffect.Network | (UsesCli ? SetupSideEffect.ExternalCli : SetupSideEffect.None),
+                UsesApple ? SetupSideEffect.LocalVerification | SetupSideEffect.ExternalCli : UsesSelfHost ? SetupSideEffect.None : SetupSideEffect.Network | (UsesCli ? SetupSideEffect.ExternalCli : SetupSideEffect.None),
                 SetupChoiceCapabilities.Searchable)])] },
             testStep
         ];
@@ -271,12 +275,12 @@ public sealed class LlmSettings : InferenceSettings<LlmSetupChanges>
             actions.Add(ContinueAction);
             actions.Add(CancelAction);
         }
-        actions.Add(new("check", UsesCli ? "Check CLI and authentication" : UsesSelfHost ? "Check the engine's models" : "Check authentication and model access",
+        actions.Add(new("check", UsesApple ? "Check helper and on-device model" : UsesCli ? "Check CLI and authentication" : UsesSelfHost ? "Check the engine's models" : "Check authentication and model access",
             SetupActionPurpose.CheckPrerequisites,
-            UsesSelfHost ? SetupSideEffect.LocalVerification : SetupSideEffect.Network | (UsesCli ? SetupSideEffect.ExternalCli : SetupSideEffect.None),
+            UsesApple ? SetupSideEffect.LocalVerification | SetupSideEffect.ExternalCli : UsesSelfHost ? SetupSideEffect.LocalVerification : SetupSideEffect.Network | (UsesCli ? SetupSideEffect.ExternalCli : SetupSideEffect.None),
             ConnectionValidation().IsValid));
         actions.Add(new("test", "Test selected model", SetupActionPurpose.Test,
-            UsesSelfHost ? SetupSideEffect.LocalVerification
+            UsesApple ? SetupSideEffect.LocalVerification | SetupSideEffect.ExternalCli : UsesSelfHost ? SetupSideEffect.LocalVerification
                 : SetupSideEffect.Network | SetupSideEffect.PotentialBilling | (UsesCli ? SetupSideEffect.ExternalCli : SetupSideEffect.None),
             ValidateDraft().IsValid));
         return actions.AsReadOnly();
@@ -291,7 +295,13 @@ public sealed class LlmSettings : InferenceSettings<LlmSetupChanges>
     /// <summary>Rebuilds <see cref="InferenceSettings.Interaction"/> from the sign-in in progress.</summary>
     internal void RefreshInteraction()
     {
-        if (CliPrerequisite)
+        if (ApplePrerequisite is { } prerequisite)
+        {
+            Interaction = new SetupExternalPrerequisite(prerequisite,
+                new("check", "Recheck on-device model", SetupActionPurpose.CheckPrerequisites,
+                    SetupSideEffect.ExternalCli | SetupSideEffect.LocalVerification));
+        }
+        else if (CliPrerequisite)
         {
             Interaction = new SetupExternalPrerequisite(_definition.SetupSteps.Count > 0
                 ? _definition.SetupSteps[0].Instructions : "Install and authenticate the provider's CLI, then recheck.",
@@ -333,7 +343,7 @@ public sealed class LlmSettings : InferenceSettings<LlmSetupChanges>
     internal void ClearAuthorization()
     {
         DeviceCode = null; BrowserAuthorization = null; _callback = string.Empty;
-        _callbackFieldId = string.Empty; CliPrerequisite = false;
+        _callbackFieldId = string.Empty; CliPrerequisite = false; ApplePrerequisite = null;
         Interaction = null;
     }
 
@@ -360,7 +370,13 @@ public sealed class LlmSettings : InferenceSettings<LlmSetupChanges>
     private SetupValidation ConnectionValidation()
     {
         var issues = new List<SetupIssue>();
-        if (UsesCli)
+        if (UsesApple)
+        {
+            try { AppleFoundationModelsClient.ValidateConnection(_draft); }
+            catch (Exception error) when (error is ArgumentException or NotSupportedException)
+            { issues.Add(new("apple-invalid", error.Message, "executable")); }
+        }
+        else if (UsesCli)
         {
             if (string.IsNullOrWhiteSpace(_draft.Endpoint) || _draft.Endpoint.IndexOfAny(['\r', '\n', '\0']) >= 0)
             { issues.Add(new("executable-invalid", "Enter an executable name or path, not a shell command.", "executable")); }
@@ -516,9 +532,29 @@ public sealed class LlmSettingsManager : InferenceSettingsManager<LlmSettings, L
         return SetupActionResult.Completed;
     }
 
-    private static async Task<SetupActionResult> CheckAsync(LlmSettings settings, LlmProviderService service, CancellationToken token)
+    private async Task<SetupActionResult> CheckAsync(LlmSettings settings, LlmProviderService service, CancellationToken token)
     {
         settings.Status = settings.Status with { Authenticated = SetupObservation.Unknown, Verified = SetupObservation.Unknown };
+        if (settings.UsesApple)
+        {
+            settings.ApplePrerequisite = null;
+            settings.Status = settings.Status with { Ready = SetupObservation.Unknown };
+            try
+            {
+                AppleProtocol.Ready(await ((AppleFoundationModelsClient)Client(settings.Transport))
+                    .ProbeAsync(settings.CurrentConnection(), token).ConfigureAwait(false));
+                settings.Status = settings.Status with { Verified = SetupObservation.Known(true) };
+                settings.RefreshInteraction();
+                return SetupActionResult.Completed;
+            }
+            catch (InferenceException error) when (error.Code is InferenceFailureCode.BackendUnavailable or InferenceFailureCode.ModelUnavailable)
+            {
+                settings.Status = settings.Status with { Verified = SetupObservation.Known(false), Ready = SetupObservation.Known(false) };
+                settings.ApplePrerequisite = error.Message;
+                settings.RefreshInteraction();
+                return new(SetupActionState.NeedsInteraction, Interaction: settings.Interaction);
+            }
+        }
         bool authenticated;
         if (settings.UsesCli)
         {
@@ -563,7 +599,8 @@ public sealed class LlmSettingsManager : InferenceSettingsManager<LlmSettings, L
         {
             LlmChatResult result = await service.CompleteAsync(settings.Identity.Id, new()
             { ModelId = settings.ModelId, Messages = [new LlmChatMessage("user", "Reply with OK.")] }, token).ConfigureAwait(false);
-            completed = result.Status == LlmCompletionStatus.Completed;
+            completed = result.Status == LlmCompletionStatus.Completed
+                || settings.UsesApple && result.Status == LlmCompletionStatus.Unknown && !string.IsNullOrWhiteSpace(result.Text);
         }
         settings.Status = settings.Status with { Ready = SetupObservation.Known(completed), Verified = SetupObservation.Known(completed) };
         return completed ? SetupActionResult.Completed : new(SetupActionState.Failed, [new("test-incomplete", "The provider did not complete the test.")]);

@@ -408,6 +408,10 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
                             case LlmTextDeltaEvent text:
                                 await writer.WriteAsync(new LlmAgentTextDeltaEvent(ThreadId, run.Id, stepId, text.Delta), token);
                                 break;
+                            case LlmStructuredOutputSnapshotEvent snapshot:
+                                await writer.WriteAsync(new LlmAgentStructuredOutputSnapshotEvent(
+                                    ThreadId, run.Id, stepId, snapshot.Content.Clone()), token);
+                                break;
                             case LlmReasoningDeltaEvent reasoning:
                                 await writer.WriteAsync(new LlmAgentReasoningDeltaEvent(ThreadId, run.Id, stepId,
                                     reasoning.Delta, reasoning.IsSummary), token);
@@ -428,7 +432,7 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
                 run.Iterations++;
                 run.Usage = run.UsageUnknown ? null : AddUsage(run.Usage, result.Usage, run.Iterations == 1);
                 await writer.WriteAsync(new LlmAgentUsageEvent(ThreadId, run.Id, stepId, result.Usage, run.Usage), token);
-                if (result.Status is not (LlmCompletionStatus.Completed or LlmCompletionStatus.RequiresAction))
+                if (result.Status is not (LlmCompletionStatus.Completed or LlmCompletionStatus.RequiresAction or LlmCompletionStatus.Unknown))
                 {
                     await CompleteAsync(run, writer, result.Status switch
                     {
@@ -470,7 +474,8 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
                         if (run.Steering.Count > 0) { continue; }
                         run.Terminal = true;
                     }
-                    await CompleteAsync(run, writer, LlmAgentCompletionReason.Completed, token);
+                    await CompleteAsync(run, writer, result.Status == LlmCompletionStatus.Unknown
+                        ? LlmAgentCompletionReason.Unknown : LlmAgentCompletionReason.Completed, token);
                     return;
                 }
             }

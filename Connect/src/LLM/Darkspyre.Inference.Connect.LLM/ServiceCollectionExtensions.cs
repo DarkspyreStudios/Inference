@@ -33,6 +33,12 @@ public static class ServiceCollectionExtensions
         services.AddSingleton(ProviderDefinitions.ClaudeSubscription);
         services.AddSingleton(ProviderDefinitions.ChatGptSubscription);
         services.AddSingleton(ProviderDefinitions.GeminiSubscription);
+        services.AddSingleton(ProviderDefinitions.AppleFoundationModels);
+        services.AddSingleton<IAppleProcessRunner, AppleProcessRunner>();
+        services.AddHttpClient<AppleFoundationModelsClient>();
+        services.AddTransient<ILlmClient>(provider => provider.GetRequiredService<AppleFoundationModelsClient>());
+        services.AddTransient<ManagedAppleAgentClient>();
+        services.AddTransient<ILlmAgentClient>(provider => provider.GetRequiredService<ManagedAppleAgentClient>());
         services.AddSingleton<LlmProviderCatalog>();
         services.AddHttpClient<OpenAiResponsesLlmClient>();
         services.AddHttpClient<OpenAiCompatibleChatLlmClient>();

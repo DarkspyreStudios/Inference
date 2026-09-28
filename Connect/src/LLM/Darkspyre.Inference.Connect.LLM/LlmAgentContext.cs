@@ -173,5 +173,8 @@ public enum LlmAgentCompletionReason
     Refusal,
     ProviderFailure,
     Truncation,
-    Interruption
+    Interruption,
+
+    /// <summary>The model operation ended without a reported natural-completion or truncation classification.</summary>
+    Unknown
 }

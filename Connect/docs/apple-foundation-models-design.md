@@ -1,10 +1,11 @@
 # Apple Foundation Models connector design
 
 **Ticket:** [DSA-59](https://darkspyre.atlassian.net/browse/DSA-59), under DSA-57.
-**Date:** 2026-09-27. **Status:** proposed implementation design, awaiting the explicit
-transition from design to production implementation. No provider is registered yet.
+**Date:** 2026-09-27. **Status:** source implementation complete; runtime/release qualification
+remains open. The user explicitly authorized implementation after reviewing the design.
+Publication remains separately authorized.
 
-This is the current design proposal. Earlier prototype alternatives remain evidence,
+This is the approved implementation design. Earlier prototype alternatives remain evidence,
 not competing implementation paths. See the [experiment record](../tools/AppleFoundationModelsPrototype/RESULTS.md)
 for observations and their limits. Each additional Connect provider remains its own ticket.
 
@@ -14,7 +15,7 @@ Use an owned Swift executable, `darkspyre-apple-fm`, called through a versioned 
 stdio protocol by a managed Apple adapter in `Darkspyre.Inference.Connect.LLM`.
 The managed adapter uses no Apple SDK or native dependency, so it follows the existing
 process-adapter assembly convention. Swift source belongs under
-`Connect/tools/AppleFoundationModelsHost/` when implementation starts.
+`Connect/tools/AppleFoundationModelsHost/`.
 
 ```mermaid
 flowchart LR
@@ -52,7 +53,7 @@ back to cloud inference.
 - A process is launched directly with argument lists, never through a shell. The helper
   links the system FoundationModels framework and OS Swift runtime; users do not compile
   it and do not need Python or Xcode as a designed runtime prerequisite.
-- Proposed deployment target: macOS 26.0, Apple Silicon. The new direct Swift probe
+- Deployment target: macOS 26.0, Apple Silicon. The new direct Swift probe
   compiled with `-target arm64-apple-macos26.0`, Swift 6 and warnings as errors. Live
   evidence is macOS 26.7 only. A clean-machine test on the oldest supported OS must pass
   before publishing that compatibility claim. No 26.4 or 27-only API is required.
@@ -68,11 +69,11 @@ in [distribution signing](https://developer.apple.com/documentation/xcode/creati
 and [notarization requirements](https://developer.apple.com/documentation/security/resolving-common-notarization-issues).
 The current development binaries are not proof of signed distribution. Actual release
 signing requires the owner's Developer ID identity and notarization credentials at that
-stage; none are requested or accessed during this design task.
+stage; none were requested or accessed during design or implementation.
 
 ## 3. Provider discovery and setup
 
-Proposed stable identity:
+Stable identity:
 
 | Field | Value |
 | --- | --- |
@@ -119,7 +120,7 @@ Events are text snapshots, structured JSON snapshots, a complete tool-call batch
 terminal result/error. A batch is committed only after native cancellation for handoff has
 settled. stdout is protocol-only; diagnostics are separate, bounded and scrubbed of prompts,
 tool outputs and raw provider errors. Reject malformed, oversized, duplicate-terminal or
-wrong-request frames. Proposed limits: 1 MiB per frame, 64 KiB captured stderr, 10-second
+wrong-request frames. Default limits: 1 MiB per frame, 64 KiB captured stderr, 10-second
 startup handshake, 120-second request deadline and 5-second cancellation grace. These
 limits must be visible in the adapter configuration/documentation and validated before use.
 
@@ -304,7 +305,7 @@ finite in [0,1], matching [Apple's documented range](https://developer.apple.com
 
 ## 8. Advertised initial surface
 
-After implementation and the relevant tests pass:
+Implemented initial surface:
 
 | Capability | Design |
 | --- | --- |
@@ -320,7 +321,7 @@ After implementation and the relevant tests pass:
 | Prompt images/documents, custom weights/adapters, cloud/PCC | Outside this initial system-text-model connector |
 | Native resume/fork/background resources | Unavailable; managed semantic context can be imported/exported |
 
-Capabilities remain false/unregistered until the corresponding implementation exists.
+The registered capabilities correspond to the implemented surfaces above.
 Unsupported combinations must fail explicitly; a capability override cannot bypass a
 native limitation or enable an unimplemented contract.
 
@@ -348,6 +349,72 @@ native limitation or enable an unimplemented contract.
    embedded native helpers in product NuGets. Pack/sign/notarize/publish only under the
    separately authorized release workflow.
 
-The architecture and mappings are now concrete enough to implement after design approval.
-Signed deployment, OS certification, complete converters and deterministic lifecycle tests
-are implementation/release acceptance work, not claims established by the prototype.
+## 10. Implementation and verification record (2026-09-27)
+
+The source implementation follows the approved design: a registered managed process adapter,
+owned Swift executable, credential-free settings and existing managed-agent integration.
+Common and agent Unknown terminal values and replacement structured snapshots are implemented.
+No Apple SDK, C-bridge source or helper binary is added to a NuGet, and no release was published.
+
+The C# schema converter produces a private typed generation plan. Swift validates that wire
+plan and constructs public DynamicGenerationSchema values; it does not interpret a second
+standard JSON Schema representation. Title/description annotations travel as native property
+metadata and path-qualified guidance, including primitive/array nodes with no native description
+constructor. Conversion rejects depth beyond 64 or more than 16,384 expanded nodes, bounding
+acyclic-reference expansion. The original schema still validates output and tool arguments.
+
+Deterministic coverage includes the declared schema subset/rejections, semantic history and
+reverse-ordered results, complete-batch validation, successive managed tool batches, Unknown
+termination and snapshot identity, typed failures through Bind, credential-free setup, malformed
+protocol/UTF-8, duplicate/out-of-order events, deadlines, process reaping, abandoned streams,
+cancellation races and cancellation before handoff commitment. Optional live tests skip explicitly
+unless APPLE_FM_HELPER is supplied. Commands and limits live in the
+[helper README](../tools/AppleFoundationModelsHost/README.md).
+
+The first end-to-end run exposed a blocking FileHandle pipe read that waited beyond a complete
+request line. The helper now uses bounded POSIX reads; a deterministic test holds the writer open
+and verifies that the complete command is consumed without waiting for EOF. The current Swift
+suite also exercises 1,000 continuation-registration/cancellation races.
+
+Live evidence on macOS 26.7 (25G229), arm64:
+
+- Discovery reports the available logical model and native context capacity 4,096.
+- Bind text returns Unknown without invented usage or finish classification.
+- Structured generation emits replacement snapshots and passes original-schema final validation.
+- A two-call batch with identical arguments retains distinct native IDs; reverse-ordered host
+  results replay with no active tools and produce final text.
+- Managed sessions execute the host tool, retain the settled call/results and final assistant
+  entry, and finish once with Unknown on successful native continuation.
+- Cancelling after the first text chunk drains/reaps the operation; the next generation works.
+- Multiple complete live runs and five consecutive focused managed-agent runs passed. A separate
+  intermittent native continuation failure also reproduced outside .NET: NSError domain
+  FoundationModels.LanguageModelSession.GenerationError, code -1, with underlying domain
+  com.apple.tokengeneration, code 10. Only error type/domain/code metadata was examined using
+  temporary synthetic diagnostics; those diagnostics were removed from source. This is not
+  attributed to a documented cause. Production maps it to ExecutionFailed and managed
+  ProviderFailure, retains already-settled tools, and does not retry. A deterministic regression
+  test covers that behavior. Successful reruns do not establish that the native issue is fixed.
+
+Remaining release qualifications: investigate/characterize that intermittent native continuation
+failure, validate the signed/notarized helper on a clean Mac and the oldest supported macOS,
+and complete the separately authorized package/distribution workflow. These are not established
+by the development binary. The supported semantic history mapping follows Apple's public
+[Transcript](https://developer.apple.com/documentation/foundationmodels/transcript) and
+[ToolOutput](https://developer.apple.com/documentation/foundationmodels/transcript/tooloutput)
+constructors; those APIs do not document the observed token-generation error's cause.
+
+Final deterministic verification:
+
+| Gate | Result |
+| --- | --- |
+| Connect restore/build/test/format/audit | Zero warnings; 499 tests pass (including 31 Common); 3 opt-in live tests explicitly skipped in the normal suite; no vulnerable dependencies reported |
+| Tensor restore/build/test/format/audit | Zero warnings; 345 tests pass (including the same 31 Common); no vulnerable dependencies reported |
+| UI restore/build/test/format/audit | Zero warnings; 65 tests pass (including the same 31 Common); no vulnerable dependencies reported |
+| Unique .NET tests across products | 847 passed |
+| Owned Swift helper | Debug/release builds and 10 deterministic tests pass with warnings as errors; strict swift-format lint passes; release Mach-O reports macOS minimum 26.0 |
+| Relocated continuation helper | Historical prototype's 4 deterministic tests pass; patched C-bridge builds with the current helper fingerprint |
+| Package asset verification without packing | Pass: no repacked native assets, dependency shader copying preserved, output collisions rejected |
+
+No package archives, signed distribution artifact, notarization submission or publication were
+created. Opt-in live generation evidence and its unresolved intermittent failure are recorded above;
+they are not represented by the deterministic pass count.

@@ -13,5 +13,8 @@ public enum LlmTransport
     AwsBedrockAgentCore = 8,
 
     /// <summary>A model the host runs in its own process; the connection's endpoint names the host's engine.</summary>
-    SelfHost = 9
+    SelfHost = 9,
+
+    /// <summary>Apple's on-device system model through the separately installed Swift helper.</summary>
+    AppleFoundationModels = 10
 }

@@ -285,6 +285,10 @@ internal static class Program
                     Console.Write(text.Delta);
                     wroteOutput = true;
                     break;
+                case LlmStructuredOutputSnapshotEvent snapshot:
+                    Console.WriteLine($"[structured snapshot] {snapshot.Content.GetRawText()}");
+                    wroteOutput = true;
+                    break;
                 case LlmRefusalDeltaEvent refusal:
                     Console.Error.WriteLine($"[refusal] {refusal.Delta}");
                     break;
@@ -498,6 +502,9 @@ internal static class Program
         {
             case LlmAgentTextDeltaEvent text:
                 Console.Write(text.Delta);
+                break;
+            case LlmAgentStructuredOutputSnapshotEvent snapshot:
+                Console.WriteLine($"[structured snapshot] {snapshot.Content.GetRawText()}");
                 break;
             case LlmAgentReasoningDeltaEvent reasoning:
                 Console.Error.Write(reasoning.Delta);

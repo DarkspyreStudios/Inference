@@ -43,8 +43,9 @@ retained; Claude and AgentCore retain provider-owned sessions.
 See the [Agent DS handoff](docs/agent-ds-contract-handoff.md),
 [technical design](docs/enhancements.md), and [verification record](docs/managed-agent-verification.md).
 
-The [Apple on-device connector design](docs/apple-foundation-models-design.md) is a
-proposal backed by an isolated prototype. Apple is not yet a registered/shipping provider.
+The Apple on-device adapter is registered by `AddLlmConnect`. Its separately built Swift
+helper and release gates are described in the [connector design](docs/apple-foundation-models-design.md).
+This source implementation has not been published as a signed helper release.
 
 | Package | Purpose |
 |---|---|
@@ -1084,6 +1085,52 @@ terminates on any other content-block type, so `SupportsPromptImages` and
 Account usage runs `/usage` as a standalone headless CLI command. Normalized model quota fields are
 returned when present; the sanitized CLI report is also retained in `Summary` because Antigravity
 documents the slash-command response as human-readable text rather than a versioned JSON schema.
+
+## Apple Foundation Models on device
+
+`AddLlmConnect` registers `apple-foundation-models` with self-described capabilities and setup.
+Use `LlmTransport.AppleFoundationModels`, endpoint `darkspyre-apple-fm` (or an absolute helper
+path), model `apple-system-default` and no credential/headers. The host supplies the connection
+through `ILlmConnectionSource` as usual. `Bind` uses the same adapter and semantic tool history.
+
+Setup exposes the helper path, a local readiness check, local model discovery and an explicit
+short generation test. It has no API-key, OAuth or CLI-login step and no potential API billing.
+Apple Silicon, macOS 26+ and a ready Apple Intelligence system model are required. Provider
+metadata remains discoverable on other platforms without loading native code. The runtime has
+been exercised on macOS 26.7; oldest-OS and signed clean-machine certification remain release gates.
+See the [helper build/test instructions and process limits](tools/AppleFoundationModelsHost/README.md).
+
+Supported: text/instructions, user/assistant semantic history, streaming, temperature in [0,1],
+provider-enforced output caps, host-executed chat tools and existing managed agent sessions.
+Each model operation owns one helper process. Tools and persistence remain with the host.
+System/developer messages inside history, prompt images/documents, cloud/PCC, custom weights,
+account usage, reasoning controls and native resume/fork are unsupported. Put instructions in
+`Instructions`. Full input occupancy and token usage remain unknown.
+
+Tool choice supports Auto and None. Required/Specific and `AllowParallelToolCalls = false` fail
+before generation; prompt wording cannot enforce them. None disables active tools while retaining
+historical calls/results. Tool results use the existing text projection and omission reports.
+Missing, duplicate or mismatched results fail before another generation. No hidden provider state
+is needed. Model selection of tools is nondeterministic; multiple successive batches are handled
+by the same managed loop and its host execution policy.
+
+Structured output supports closed objects, required/optional nested fields, strings/booleans,
+Int64/finite-double values and inclusive bounds, string enum/const, homogeneous arrays/count
+bounds, and acyclic local `$defs` references (depth at most 64, at most 16,384 expanded nodes). Unsupported constraints fail explicitly. Explicit
+`LocalValidation` fallback allows unconstrained text plus final validation; arbitrary JsonObject
+fallback is unavailable. Original schemas always validate final JSON and returned tool arguments.
+
+Structured streaming emits replacement `LlmStructuredOutputSnapshotEvent` objects, not JSON text
+deltas. The agent equivalent carries thread/turn/item identity. Final `Text` contains the full JSON.
+Apple does not report natural-stop versus truncation, so normal results use terminal
+`LlmCompletionStatus.Unknown`; managed agents retain the response and end with reason/status
+Unknown. Do not infer completion from valid JSON or automatically continue/retry an Unknown result.
+Known tool handoff remains RequiresAction; refusal, cancellation and failures remain distinct.
+`Diagnostics.HttpStatusCode = 200` is the existing process-adapter success sentinel, not an HTTP call.
+
+The [design and verification record](docs/apple-foundation-models-design.md) lists runtime evidence
+and remaining release qualifications. No helper binary, Apple SDK or upstream C-bridge source is
+included in the Connect NuGet.
 
 ## SelfHost transport: in-process engines
 

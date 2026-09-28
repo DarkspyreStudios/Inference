@@ -1,5 +1,6 @@
 using System.Collections.Frozen;
 using System.Runtime.CompilerServices;
+using System.Text.Json;
 
 namespace Darkspyre.Inference.Common.LLM;
 
@@ -70,6 +71,9 @@ public sealed record LlmModelInfo(
 public abstract record LlmStreamEvent;
 
 public sealed record LlmTextDeltaEvent(string Delta) : LlmStreamEvent;
+
+/// <summary>Replaces the previous partial structured object. Only the terminal result is schema-validated.</summary>
+public sealed record LlmStructuredOutputSnapshotEvent(JsonElement Content) : LlmStreamEvent;
 
 /// <summary>Provider-exposed reasoning text only; never encrypted or private response-state bytes.</summary>
 public sealed record LlmReasoningDeltaEvent(string Delta, bool IsSummary) : LlmStreamEvent;

@@ -65,7 +65,7 @@ public static class AgentToolLane
             throw new InvalidOperationException("The agent turn ended without a completion event.");
         }
 
-        if (completion.Status == LlmAgentTurnStatus.Completed && completedToolCalls == 0)
+        if (completion.Status is (LlmAgentTurnStatus.Completed or LlmAgentTurnStatus.Unknown) && completedToolCalls == 0)
         {
             throw new InvalidOperationException(
                 "The agent completed without exercising the registered host tool.");
