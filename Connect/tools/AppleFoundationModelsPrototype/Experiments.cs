@@ -35,7 +35,8 @@ internal static class Experiments
             "token-limit" => await TokenLimitAsync(model).ConfigureAwait(false),
             "cancel-before" => await CancelBeforeAsync(model).ConfigureAwait(false),
             "cancel-stream" => await StreamAsync(model, true).ConfigureAwait(false),
-            "tool-delayed" or "tool-immediate" or "tool-duplicate" or "tool-cancel" or "tool-cancel-late" or "tool-roundtrip"
+            "tool-delayed" or "tool-immediate" or "tool-duplicate" or "tool-cancel" or "tool-cancel-late"
+                or "tool-roundtrip" or "tool-roundtrip-repeat"
                 => await ToolAsync(model, name).ConfigureAwait(false),
             _ => throw new ArgumentException("Unknown experiment.", nameof(name))
         };
@@ -260,7 +261,7 @@ internal static class Experiments
     private static string _toolMode = string.Empty;
     private static string _toolArguments = string.Empty;
     private static int _toolCallbacks;
-    private static readonly TaskCompletionSource<uint> ToolCalled = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private static TaskCompletionSource<uint> ToolCalled = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private static readonly TaskCompletionSource ToolFinished = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private static unsafe nint ToolCallback => (nint)(delegate* unmanaged[Cdecl]<nint, uint, void>)&OnTool;
 
@@ -322,8 +323,9 @@ internal static class Experiments
         using var task = new NativeReference(Native.FMLanguageModelSessionRespond(
             session.Pointer, prompt.Pointer, Options, operation.Id, NativeOperation.TextCallback));
         uint callId = await ToolCalled.Task.WaitAsync(TimeSpan.FromSeconds(20)).ConfigureAwait(false);
-        if (mode == "tool-roundtrip")
-            return await ToolRoundTripAsync(model, tool, session, task, operation, callId).ConfigureAwait(false);
+        if (mode is "tool-roundtrip" or "tool-roundtrip-repeat")
+            return await ToolRoundTripAsync(model, tool, session, task, operation, callId,
+                1, mode == "tool-roundtrip-repeat", []).ConfigureAwait(false);
         bool completedBeforeRecovery = false;
         var completionClock = Stopwatch.StartNew();
         if (mode == "tool-delayed")
@@ -382,7 +384,8 @@ internal static class Experiments
     }
 
     private static async Task<Evidence> ToolRoundTripAsync(NativeReference model, NativeReference tool,
-        NativeReference session, NativeReference task, NativeOperation operation, uint bridgeCallId)
+        NativeReference session, NativeReference task, NativeOperation operation, uint bridgeCallId,
+        int turn, bool repeat, HashSet<string> internalPromptIds)
     {
         JsonNode pending;
         string callbackArguments = _toolArguments;
@@ -399,12 +402,15 @@ internal static class Experiments
         session.Dispose(); // The second request cannot depend on this live native session.
 
         JsonArray pendingEntries = pending["transcript"]!["entries"]!.AsArray();
-        JsonNode[] calls = pendingEntries.SelectMany(static entry =>
+        HashSet<string> settledCallIds = pendingEntries.Where(static entry => entry?["role"]?.GetValue<string>() == "tool")
+            .Select(static entry => entry!["toolCallID"]!.GetValue<string>()).ToHashSet(StringComparer.Ordinal);
+        JsonNode[] allCalls = pendingEntries.SelectMany(static entry =>
             entry?["toolCalls"]?.AsArray().OfType<JsonNode>() ?? []).ToArray();
+        JsonNode[] calls = allCalls.Where(call => !settledCallIds.Contains(call["id"]!.GetValue<string>())).ToArray();
         if (calls.Length != 1)
             return new("limitation", new
             {
-                reason = "Pending transcript did not expose exactly one native tool call.",
+                reason = "Pending transcript did not expose exactly one unsettled native tool call.",
                 bridgeCallId,
                 callbackArguments,
                 pending,
@@ -414,8 +420,11 @@ internal static class Experiments
             });
 
         string nativeCallId = calls[0]["id"]!.GetValue<string>();
+        bool uniqueCallIds = allCalls.Select(static call => call["id"]!.GetValue<string>())
+            .Distinct(StringComparer.Ordinal).Count() == allCalls.Length;
         bool argumentsMatch = JsonNode.DeepEquals(JsonNode.Parse(callbackArguments),
             JsonNode.Parse(calls[0]["arguments"]!.GetValue<string>()));
+        string suppliedResult = turn == 1 ? "ORCHID-729" : "LANTERN-842";
         // Research-only wire fixture based on the bridge's own exported tool-output entry.
         // Preserve all existing entries; append the host's synthetic result with the native call ID.
         JsonNode replay = pending.DeepClone();
@@ -426,7 +435,7 @@ internal static class Experiments
             toolCallID = nativeCallId,
             toolName = "lookup_code",
             role = "tool",
-            contents = new[] { new { id = Guid.NewGuid().ToString(), type = "text", text = "ORCHID-729" } }
+            contents = new[] { new { id = Guid.NewGuid().ToString(), type = "text", text = suppliedResult } }
         }));
         nint pointer = Native.FMTranscriptCreateFromJSONString(replay.ToJsonString(), out int code, out nint error);
         string message = Native.TakeString(error);
@@ -458,34 +467,76 @@ internal static class Experiments
         JsonArray finalEntries = afterReplay["transcript"]!["entries"]!.AsArray();
         bool prefixPreserved = finalEntries.Count >= replayEntries.Count
             && replayEntries.Select((entry, index) => JsonNode.DeepEquals(entry, finalEntries[index])).All(static equal => equal);
-        int addedUserEntries = finalEntries.Skip(replayEntries.Count).Count(static entry => entry?["role"]?.GetValue<string>() == "user");
-        bool consumedResult = reply.Status == 0 && reply.Content.Contains("ORCHID-729", StringComparison.Ordinal)
+        JsonNode[] addedUsers = finalEntries.Skip(replayEntries.Count)
+            .Where(static entry => entry?["role"]?.GetValue<string>() == "user").OfType<JsonNode>().ToArray();
+        bool acceptedInternalPrompt = addedUsers.Length <= 1
+            && addedUsers.All(static entry => entry["contents"] is JsonArray { Count: 0 });
+        if (acceptedInternalPrompt)
+            foreach (JsonNode entry in addedUsers) internalPromptIds.Add(entry["id"]!.GetValue<string>());
+        // Research projection: omit only the exact IDs observed for our own empty prompts.
+        // Host-provided empty entries must never be removed merely because they are empty.
+        JsonNode hostHistory = afterReplay.DeepClone();
+        JsonArray hostEntries = hostHistory["transcript"]!["entries"]!.AsArray();
+        for (int index = hostEntries.Count - 1; index >= 0; index--)
+            if (internalPromptIds.Contains(hostEntries[index]!["id"]!.GetValue<string>())) hostEntries.RemoveAt(index);
+        bool consumedResult = reply.Status == 0 && reply.Content.Contains(suppliedResult, StringComparison.Ordinal)
             && !reply.Content.Contains("UNEXPECTED-REEXECUTION", StringComparison.Ordinal);
-        bool continuedFaithfully = argumentsMatch && restoredExactly && prefixPreserved && addedUserEntries == 0
-            && consumedResult && _toolCallbacks == 1;
-        return new(!idle || operation.TerminalCallbacks != 1 || resumed.TerminalCallbacks != 1 ? "unexpected"
-            : continuedFaithfully ? "observed" : "limitation", new
+        bool replayAccepted = argumentsMatch && uniqueCallIds && restoredExactly && prefixPreserved && acceptedInternalPrompt
+            && consumedResult && _toolCallbacks == turn;
+        string outcome = !idle || operation.TerminalCallbacks != 1 || resumed.TerminalCallbacks != 1
+            || Native.FMLanguageModelSessionIsResponding(restored.Pointer) ? "unexpected"
+            : replayAccepted ? "observed" : "limitation";
+        var details = new
+        {
+            turn,
+            bridgeCallId,
+            nativeCallId,
+            uniqueCallIds,
+            callbackArguments,
+            argumentsMatch,
+            pending,
+            afterCancellation,
+            cancellation,
+            idle,
+            restoredExactly,
+            prefixPreserved,
+            addedUserEntries = addedUsers.Length,
+            acceptedInternalPrompt,
+            internalPromptIds = internalPromptIds.ToArray(),
+            hostHistory,
+            suppliedResult,
+            consumedResult,
+            toolCallbacks = _toolCallbacks,
+            reply,
+            afterReplay,
+            replayAccepted,
+            originalTerminalCallbacks = operation.TerminalCallbacks,
+            resumedTerminalCallbacks = resumed.TerminalCallbacks,
+            responding = Native.FMLanguageModelSessionIsResponding(restored.Pointer)
+        };
+        if (!repeat || outcome != "observed") return new(outcome, details);
+
+        // Prior response is settled before replacing this worker's callback signal.
+        // Ask for the identical arguments again, with a different host result and a new native call ID.
+        ToolCalled = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        _toolMode = "tool-roundtrip";
+        using NativeReference nextPrompt = Prompt("The value for key sample has changed. Make a fresh lookup_code call for key sample. "
+            + "Do not reuse the earlier result. Return the new code.");
+        using var nextOperation = new NativeOperation();
+        using var nextTask = new NativeReference(Native.FMLanguageModelSessionRespond(
+            restored.Pointer, nextPrompt.Pointer, Options, nextOperation.Id, NativeOperation.TextCallback));
+        Task nextEvent = await Task.WhenAny(ToolCalled.Task, nextOperation.Completion).WaitAsync(TimeSpan.FromSeconds(20)).ConfigureAwait(false);
+        if (nextEvent != ToolCalled.Task)
+            return new("inconclusive", new
             {
-                bridgeCallId,
-                nativeCallId,
-                callbackArguments,
-                argumentsMatch,
-                pending,
-                afterCancellation,
-                cancellation,
-                idle,
-                restoredExactly,
-                prefixPreserved,
-                addedUserEntries,
-                consumedResult,
-                toolCallbacks = _toolCallbacks,
-                reply,
-                afterReplay,
-                continuedFaithfully,
-                originalTerminalCallbacks = operation.TerminalCallbacks,
-                resumedTerminalCallbacks = resumed.TerminalCallbacks,
-                responding = Native.FMLanguageModelSessionIsResponding(restored.Pointer)
+                first = details,
+                reason = "The model did not issue the requested fresh tool call.",
+                reply = await nextOperation.WaitAsync().ConfigureAwait(false)
             });
+        uint nextCallId = await ToolCalled.Task.ConfigureAwait(false);
+        Evidence second = await ToolRoundTripAsync(model, tool, restored, nextTask, nextOperation, nextCallId,
+            turn + 1, false, internalPromptIds).ConfigureAwait(false);
+        return new(second.Outcome, new { first = details, second });
     }
 
     private static async Task<bool> CompletesWithinAsync(Task task, TimeSpan timeout)

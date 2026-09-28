@@ -172,10 +172,22 @@ PY
 
 The probe compares callback arguments, restored transcript and preserved entry
 prefix, counts terminal/tool callbacks, and records any added user entries. The
-observed empty user entry makes this a `limitation` under exact turn preservation,
-even though the model consumed the tool result successfully. Whether that internal
-entry is acceptable is a production design question. This is a research wire fixture,
-not a Common-to-Apple converter or an enabled chat-tool capability.
+working design allows the adapter's empty internal turn while preserving host
+history. The probe accepts at most one newly added user entry with an empty content
+array. Its research projection excludes only the exact IDs observed for those
+adapter-generated entries; it never removes arbitrary empty host messages.
+
+Use `tool-roundtrip-repeat` in the command above, with report path
+`.artifacts/tool-roundtrip-repeat.json`, to request the same key again in a second
+turn. The host supplies `ORCHID-729` first and `LANTERN-842` second. The probe selects
+unsettled native call IDs rather than matching a previous call by name/arguments,
+verifies IDs are unique, disposes the generating session before each replay, and
+records both native and projected histories. An answer without the requested fresh
+tool call is `inconclusive`.
+
+The original exact-turn-preservation result remains historical evidence. Current
+`observed` results mean this narrow research mapping passed; they do not enable
+chat tools or provide a production Common-to-Apple converter.
 
 ## Local verification
 

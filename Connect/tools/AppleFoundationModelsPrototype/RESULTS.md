@@ -153,11 +153,11 @@ The `tool-roundtrip` follow-up tests the separate chat question on the same macO
 | Additional turn | Responding with an empty composed prompt inserted one new user entry with an empty content array before the assistant answer. |
 | Completion | Original cancellation and resumed response each produced one terminal callback. The resumed session was idle; no callbacks entered removed managed contexts. |
 
-The result is `limitation`: a single tool result can be replayed without retaining
+The initial result was `limitation`: a single tool result can be replayed without retaining
 the original live session, but exact provider-side turn preservation was not achieved.
-The internal empty user entry is an explicit design question, not silently accepted
-or filtered out. No Common history converter was implemented, and this observation
-does not enable chat tool support or settle handling of parallel calls.
+The subsequent working decision and repeat probe below allow this known internal
+entry while preserving host history. No Common history converter was implemented,
+and this observation does not enable chat tool support or settle parallel calls.
 
 Pending-call capture happened before cancellation; exporting only the settled
 cancelled session would have lost the call in this experiment. Mapping callback IDs
@@ -178,6 +178,45 @@ limitation; immediate-tool and cancellation-with-late-results controls both rema
 Managed build completed with zero warnings/errors; format verification and the
 dependency vulnerability audit passed. Native sources and shipping code were not
 changed by this follow-up.
+
+### Working decision and repeated-call follow-up
+
+The user accepted allowing Apple's empty internal turn, provided the host's history
+stays unchanged. This is the working design choice for continued prototyping; the
+production connector design remains open.
+
+The updated probe accepts at most one new user entry with an empty content array per
+replay and records its exact native ID. A research projection excludes only those
+known adapter-generated IDs from the host-facing history. Existing entries remain
+unchanged. Empty messages supplied by a host are not generally filtered out.
+
+`tool-roundtrip-repeat` exercised two successive requests with identical
+`{"key":"sample"}` arguments:
+
+| Observation | First request | Second request |
+| --- | --- | --- |
+| Bridge callback ID | 1 | 2 |
+| Native call ID | Distinct UUID | New distinct UUID |
+| Host result | `ORCHID-729` | `LANTERN-842` |
+| Answer | Consumed `ORCHID-729` | Consumed the new `LANTERN-842` |
+| New tool callbacks | One | One; no replay of the settled call |
+| Empty internal user entries added | One | One |
+| Empty internal entries in projected host history | Zero | Zero |
+
+Both rounds restored the transcript exactly, preserved all supplied entries, cancelled
+and disposed the generating native session before replay, then ended with one
+terminal callback and an idle resumed session. No callbacks entered removed contexts.
+The result was `observed` under the accepted internal-turn rule.
+
+The prototype selects the single unsettled transcript call by excluding IDs with
+existing tool results. It does not select an old call by repeated name/arguments.
+The two native UUIDs were unique despite identical arguments. This demonstrates
+sequential repeated-call correlation; simultaneous identical calls, batches and
+cross-process replay are still untested. The host-facing history here is a research
+projection of native JSON, not an implemented Common message conversion.
+
+Managed build completed with zero warnings/errors; format verification and the
+dependency vulnerability audit passed. No native patch or shipping code changed.
 
 ## Loading and distribution evidence
 
@@ -207,11 +246,11 @@ Other unresolved items:
 
 - Connect chat returns tool calls for later host result submission. The successful
   native callback test operates within one request. The chat replay probe above
-  consumed a supplied result but inserted an empty user turn; acceptance of that
-  internal entry remains to settle. The agent-session lane needs its own mapping.
-- Failure propagation from a host tool, multiple/parallel calls, forced tool choice
-  and rich tool results were not tested. The patched lifecycle experiments above
-  establish feasibility for single-tool completion/cancellation only.
+  consumed supplied results while allowing a known empty internal user turn under
+  the working design choice. The agent-session lane needs its own mapping.
+- Failure propagation from a host tool, batched/parallel calls, forced tool choice
+  and rich tool results were not tested. Sequential repeated calls were tested;
+  simultaneous identical-call correlation still needs a native identity contract.
 - Common-to-Apple transcript conversion, cross-version replay, arbitrary JSON Schema,
   unsupported constraints and strict fallback policy remain unimplemented.
 - The reviewed C exports lack structured streaming; neither adding that export nor
@@ -240,6 +279,9 @@ For this run they are in:
   replay into a new session, including the extra empty user entry.
 - `.artifacts/chat-tool-control-results.json`: immediate-tool and cancellation
   controls after adding the round-trip probe.
+- `.artifacts/tool-roundtrip-repeat.json`: two sequential requests with identical
+  arguments, distinct call IDs/results and projected history excluding known
+  adapter-generated empty turns.
 
 These paths refer to this prototype directory. They are local evidence, not required
 checked-in or shipped assets. This document records the durable findings.
