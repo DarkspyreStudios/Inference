@@ -15,6 +15,8 @@ internal static class Experiments
     internal static readonly string[] Names =
     ["availability", "text", "stream", "history", "schema", "schema-nested", "standard-schema",
         "token-limit", "cancel-before", "cancel-stream", "tool-delayed", "tool-immediate", "tool-cancel"];
+    internal static readonly string[] LifecycleNames =
+        ["cancel-before", "cancel-stream", "tool-delayed", "tool-immediate", "tool-duplicate", "tool-cancel", "tool-cancel-late"];
 
     internal static async Task<Evidence> RunAsync(string name)
     {
@@ -33,7 +35,8 @@ internal static class Experiments
             "token-limit" => await TokenLimitAsync(model).ConfigureAwait(false),
             "cancel-before" => await CancelBeforeAsync(model).ConfigureAwait(false),
             "cancel-stream" => await StreamAsync(model, true).ConfigureAwait(false),
-            "tool-delayed" or "tool-immediate" or "tool-cancel" => await ToolAsync(model, name).ConfigureAwait(false),
+            "tool-delayed" or "tool-immediate" or "tool-duplicate" or "tool-cancel" or "tool-cancel-late"
+                => await ToolAsync(model, name).ConfigureAwait(false),
             _ => throw new ArgumentException("Unknown experiment.", nameof(name))
         };
     }
@@ -79,8 +82,8 @@ internal static class Experiments
         if (cancel)
         {
             await operation.FirstSnapshot.WaitAsync(TimeSpan.FromSeconds(20)).ConfigureAwait(false);
-            completedBeforeCancellation = operation.Completion.IsCompleted;
             respondingBeforeCancellation = Native.FMLanguageModelSessionIsResponding(session.Pointer);
+            completedBeforeCancellation = !operation.RequestCancellation();
             var clock = Stopwatch.StartNew();
             stream.Dispose(); // Upstream's stream destructor requests iteration-task cancellation.
             await operation.WaitAsync().ConfigureAwait(false);
@@ -97,7 +100,7 @@ internal static class Experiments
         await Task.Delay(100).ConfigureAwait(false);
         string outcome = operation.TerminalCallbacks != 1 ? "unexpected"
             : cancel && completedBeforeCancellation == true ? "inconclusive"
-            : cancel && terminal.Status == 0 ? "limitation"
+            : cancel && !terminal.CancellationRequested ? "unexpected"
             : !cancel && terminal.Status != 0 ? "unexpected" : "observed";
         return new(outcome,
             new
@@ -241,6 +244,7 @@ internal static class Experiments
         using var task = new NativeReference(Native.FMLanguageModelSessionRespond(
             session.Pointer, prompt.Pointer, Options, operation.Id, NativeOperation.TextCallback));
         var clock = Stopwatch.StartNew();
+        operation.RequestCancellation();
         Native.FMTaskCancel(task.Pointer);
         NativeReply reply = await operation.WaitAsync().ConfigureAwait(false);
         return new(reply.Status != 0 ? "observed" : "unexpected", new
@@ -274,9 +278,10 @@ internal static class Experiments
         {
             string json = Native.TakeString(Native.FMGeneratedContentGetJSONString(arguments));
             Console.WriteLine(JsonSerializer.Serialize(new { progress = "tool-called", callId, arguments = json }));
-            if (_toolMode == "tool-immediate")
+            if (_toolMode is "tool-immediate" or "tool-duplicate")
             {
                 Native.FMBridgedToolFinishCall(_activeTool, callId, "ORCHID-729");
+                if (_toolMode == "tool-duplicate") Native.FMBridgedToolFinishCall(_activeTool, callId, "WRONG-DUPLICATE");
                 ToolFinished.TrySetResult();
             }
             ToolCalled.TrySetResult(callId);
@@ -303,13 +308,14 @@ internal static class Experiments
             session.Pointer, prompt.Pointer, Options, operation.Id, NativeOperation.TextCallback));
         uint callId = await ToolCalled.Task.WaitAsync(TimeSpan.FromSeconds(20)).ConfigureAwait(false);
         bool completedBeforeRecovery = false;
+        var completionClock = Stopwatch.StartNew();
         if (mode == "tool-delayed")
         {
             // A diagnostic control, not a proposed fix for the continuation race.
             await Task.Delay(100).ConfigureAwait(false);
             Native.FMBridgedToolFinishCall(tool.Pointer, callId, "ORCHID-729");
         }
-        else if (mode == "tool-immediate")
+        else if (mode is "tool-immediate" or "tool-duplicate")
         {
             await ToolFinished.Task.ConfigureAwait(false);
             completedBeforeRecovery = await CompletesWithinAsync(operation.Completion, TimeSpan.FromSeconds(5)).ConfigureAwait(false);
@@ -322,6 +328,8 @@ internal static class Experiments
         else
         {
             await Task.Delay(100).ConfigureAwait(false);
+            operation.RequestCancellation();
+            completionClock.Restart();
             Native.FMTaskCancel(task.Pointer);
             completedBeforeRecovery = await CompletesWithinAsync(operation.Completion, TimeSpan.FromSeconds(2)).ConfigureAwait(false);
             if (!completedBeforeRecovery)
@@ -331,12 +339,24 @@ internal static class Experiments
             }
         }
         NativeReply reply = await operation.WaitAsync().ConfigureAwait(false);
+        double milliseconds = completionClock.Elapsed.TotalMilliseconds;
+        if (mode == "tool-cancel-late" && completedBeforeRecovery)
+        {
+            Native.FMBridgedToolFinishCall(tool.Pointer, callId, "LATE-RESULT");
+            Native.FMBridgedToolFinishCall(tool.Pointer, callId, "DUPLICATE-LATE-RESULT");
+            await Task.Delay(100).ConfigureAwait(false);
+        }
         bool limitation = mode != "tool-delayed" && !completedBeforeRecovery;
-        return new(limitation ? "limitation" : reply.Status == 0 ? "observed" : "unexpected",
+        bool expected = mode.StartsWith("tool-cancel", StringComparison.Ordinal)
+            ? reply.CancellationRequested && reply.Status != 0
+            : reply.Status == 0 && reply.Content.Contains("ORCHID-729", StringComparison.Ordinal)
+                && !reply.Content.Contains("WRONG-DUPLICATE", StringComparison.Ordinal);
+        return new(limitation ? "limitation" : expected && operation.TerminalCallbacks == 1 ? "observed" : "unexpected",
             new
             {
                 mode,
                 completedBeforeRecovery,
+                milliseconds,
                 reply,
                 operation.TerminalCallbacks,
                 responding = Native.FMLanguageModelSessionIsResponding(session.Pointer),

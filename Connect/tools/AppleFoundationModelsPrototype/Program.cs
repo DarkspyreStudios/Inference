@@ -13,9 +13,9 @@ internal static class Program
     [SuppressMessage("Design", "CA1031", Justification = "The isolated research worker records unexpected native/probe failures for the parent.")]
     private static async Task<int> Main(string[] args)
     {
-        if (args.Length is < 2 or > 3 || args[0] is not ("suite" or "worker") || args[0] == "worker" && args.Length != 3)
+        if (args.Length is < 2 or > 3 || args[0] is not ("suite" or "lifecycle" or "worker") || args[0] == "worker" && args.Length != 3)
         {
-            Console.Error.WriteLine("Usage: <tool> suite <absolute-library-path> [report-path] | worker <absolute-library-path> <experiment>");
+            Console.Error.WriteLine("Usage: <tool> suite|lifecycle <library-path> [report-path] | worker <library-path> <experiment>");
             return 2;
         }
         if (!OperatingSystem.IsMacOSVersionAtLeast(26) || RuntimeInformation.ProcessArchitecture != Architecture.Arm64)
@@ -29,7 +29,9 @@ internal static class Program
             Console.WriteLine(JsonSerializer.Serialize(new { outcome = "unavailable", reason = "Build the pinned native bridge first.", library }));
             return 3;
         }
-        if (args[0] == "suite") return await SuiteAsync(library, args.Length == 3 ? args[2] : ".artifacts/results.json").ConfigureAwait(false);
+        if (args[0] != "worker") return await SuiteAsync(library,
+            args.Length == 3 ? args[2] : $".artifacts/{args[0]}-results.json",
+            args[0] == "lifecycle" ? Experiments.LifecycleNames : Experiments.Names).ConfigureAwait(false);
         try
         {
             Native.Load(library);
@@ -52,13 +54,13 @@ internal static class Program
         }
     }
 
-    private static async Task<int> SuiteAsync(string library, string reportPath)
+    private static async Task<int> SuiteAsync(string library, string reportPath, string[] experiments)
     {
         var observations = new List<object>();
         int errors = 0;
         bool unavailable = false;
         string assembly = Assembly.GetExecutingAssembly().Location;
-        foreach (string experiment in Experiments.Names)
+        foreach (string experiment in experiments)
         {
             var start = new ProcessStartInfo("dotnet") { RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false };
             start.ArgumentList.Add(assembly);

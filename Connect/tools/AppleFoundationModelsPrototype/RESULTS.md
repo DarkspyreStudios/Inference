@@ -7,21 +7,22 @@
 
 - macOS 26.7, arm64; Xcode 26.6 (17F113), Swift 6.3.3.
 - Portable .NET 11 console using the repository's `11.0.100-rc.1.26425.128` SDK.
-- Unmodified Apple C bridge at commit
+- Baseline: unmodified Apple C bridge at commit
   `e868e60811aa0706feb2ccb33cfe7e27626287b7`.
 - Upstream source archive SHA-256:
   `354c0178acc43c5c62eb550aad3ddb552de10e2a7487680096fa0cf6a7a5ac0f`.
 - Apple Intelligence was already enabled; the system model reported available.
-- Every prompt was synthetic and used `SystemLanguageModel.default` through the
-  bridge. Inference used no Python runtime, MAUI, API key or HTTP server; Python
-  was used only to prepare source and collect research evidence.
+- Every prompt was synthetic and used `SystemLanguageModel.default`, through the
+  bridge or the direct Swift output-limit probe. Inference used no Python runtime,
+  MAUI, API key or HTTP server; Python was used only to prepare source and collect
+  research evidence.
 
 The native package built successfully without modifying upstream source. The
 managed harness built with zero warnings and zero errors. Formatting verification
 and the dependency vulnerability audit passed; the harness has no NuGet package
 dependencies. No product package was created or released.
 
-## Observations
+## Initial observations: unmodified bridge
 
 The first suite exercised all 13 cases. It exited 2 because stream cancellation
 returned success, contrary to the initial probe expectation. A targeted follow-up
@@ -63,12 +64,76 @@ when the continuation is not present. The pending continuation also has no
 cancellation handler in the reviewed method.
 
 See Apple's [pinned tool implementation](https://github.com/apple/python-apple-fm-sdk/blob/e868e60811aa0706feb2ccb33cfe7e27626287b7/foundation-models-c/Sources/FoundationModelsCBindings/FoundationModelsCBindings.swift#L1740-L1831).
-The prototype leaves that implementation unchanged.
+The baseline experiment leaves that implementation unchanged; the authorized
+follow-up below tests a separate patched copy.
 
 This blocks using the unmodified bridge for dependable host-tool execution and
 pending-tool cancellation. Resolve the native wrapper strategy in technical design
 before implementing the connector. An upstream correction or an owned native
 implementation would need to satisfy the same tool and cancellation requirements.
+
+## Lifecycle corrections: authorized prototype follow-up
+
+The separate patched dependency registers a pending call before entering the host
+callback. An owned continuation state records one winning result or cancellation,
+including cancellation before continuation registration. Registry locks are released
+before invoking host code or resuming continuations. Duplicate/late results are
+ignored. Streaming checks task cancellation after its iterator finishes.
+
+The C ABI is unchanged. Managed replies retain cancellation intent independently of
+the raw native status, ordered against terminal completion under one lock. This is
+prototype evidence, not a selected production wrapper or Connect error contract.
+
+Four deterministic Swift tests passed, including 1,000 concurrent races among
+continuation registration, successful completion and cancellation. The tests also
+cover immediate results, duplicates and cancellation before registration. Seven
+targeted live lifecycle experiments passed with no diagnostic recovery needed:
+
+| Experiment | Patched observation |
+| --- | --- |
+| Cancel before output | Status 255, `Operation cancelled`, about 8.6 ms. |
+| Cancel active stream | Status 255, `Stream cancelled`, about 0.3 ms; the session was responding and completion was pending before cancellation. |
+| Delayed tool control | Returned `ORCHID-729` successfully, about 512 ms from tool callback including the deliberate 100 ms delay. |
+| Immediate tool result | Returned `ORCHID-729` successfully in about 412 ms, without the five-second recovery resend. |
+| Duplicate immediate result | Consumed the first result; ignored `WRONG-DUPLICATE`, about 416 ms. |
+| Cancel pending tool | Finished in about 2.7 ms without supplying a dummy tool result. |
+| Late results after cancellation | Cancellation finished in about 2.9 ms; two subsequent results caused no duplicate completion or native activity in the observation window. |
+
+All seven cases had exactly one terminal callback, an idle session afterward and
+zero callbacks into removed managed operation contexts. These are individual local
+observations, not latency guarantees or a full lifetime/concurrency proof.
+
+Foundation Models wraps pending-tool cancellation in `LanguageModelSession.ToolCallError`
+with an underlying `CancellationError`; the native callback still reports the generic
+status 255. The managed `CancellationRequested` flag remains true. A separate control
+against the unmodified bridge still returned stream status 0, while the updated
+managed harness correctly preserved cancellation intent. Thus native status or
+error-message matching alone cannot define host cancellation semantics.
+
+Native and managed builds completed with zero warnings/errors; managed format
+verification and the dependency vulnerability audit passed. The original baseline
+was preserved. Patch/helper/test fingerprint:
+`f8d212fea81cd1433f70034bf278fa2ac196413ab637510c69e82652b15e8735`.
+
+## Output-limit investigation
+
+Apple explicitly documents that reaching `maximumResponseTokens` terminates a
+response early without throwing an error. See
+[Apple's output-limit documentation](https://developer.apple.com/documentation/foundationmodels/generationoptions/maximumresponsetokens).
+
+The direct Swift probe confirmed that this is not merely metadata lost in the C
+bridge. With an eight-token limit, Swift returned `Nestled at the edge of a tranquil`
+and `rawContent.isComplete == true`. At 128 tokens it also returned true while ending
+mid-sentence at `its branches stretching`. Apple's
+[`isComplete` documentation](https://developer.apple.com/documentation/foundationmodels/generatedcontent/iscomplete)
+does not specify a termination reason; these observations show it cannot reliably
+identify output-limit truncation for text.
+
+The installed SDK's `LanguageModelSession.Response`, stream snapshot and transcript
+response interfaces expose content/transcript data without a finish-reason or
+generation-usage field. An exact truncation reason remains unavailable in the tested
+API. No punctuation heuristic, prompt-token recount or invented usage value was
+substituted. The connector design must represent this limitation explicitly.
 
 ## Loading and distribution evidence
 
@@ -100,13 +165,14 @@ Other unresolved items:
   native callback test operates within one request. Chat round-trip semantics and
   the existing agent-session lane still need separate decisions.
 - Failure propagation from a host tool, multiple/parallel calls, forced tool choice
-  and rich tool results were not tested. The demonstrated native lifecycle defects
-  should be resolved before extending those experiments.
+  and rich tool results were not tested. The patched lifecycle experiments above
+  establish feasibility for single-tool completion/cancellation only.
 - Common-to-Apple transcript conversion, cross-version replay, arbitrary JSON Schema,
   unsupported constraints and strict fallback policy remain unimplemented.
 - The reviewed C exports lack structured streaming; neither adding that export nor
   representing it as buffered output has been approved.
-- Exact truncation/usage reporting, refusals, context overflow, unsupported-platform
+- Exact truncation/usage reporting is unavailable in the tested API; its Connect
+  representation remains to settle. Refusals, context overflow, unsupported-platform
   discovery, readiness failures and production resource lifetimes remain to verify.
 
 ## Reproduction and local evidence
@@ -120,6 +186,11 @@ For this run they are in:
   stream-cancellation result.
 - `.artifacts/cancel-stream-followup.json`: targeted cancellation state observations.
 - `.artifacts/consumer-result.json`: isolated consumer-directory text result.
+- `.artifacts/patched.json`: active patched dependency identity and library path.
+- `.artifacts/patched-lifecycle-results.json`: seven patched live lifecycle cases.
+- `.artifacts/cancel-intent-baseline.json`: managed cancellation intent with the
+  original bridge's status-0 stream completion.
+- `.artifacts/truncation-swift.json`: direct Swift output-limit/isComplete evidence.
 
 These paths refer to this prototype directory. They are local evidence, not required
 checked-in or shipped assets. This document records the durable findings.

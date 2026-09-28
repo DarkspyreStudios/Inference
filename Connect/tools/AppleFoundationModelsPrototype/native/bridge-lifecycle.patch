@@ -1,0 +1,61 @@
+--- a/Sources/FoundationModelsCBindings/FoundationModelsCBindings.swift
++++ b/Sources/FoundationModelsCBindings/FoundationModelsCBindings.swift
+@@ -703,6 +703,9 @@
+           )
+         }
+       }
++
++      // DSA-59: a cancelled AsyncSequence can finish without throwing.
++      try Task.checkCancellation()
+ 
+       // Final callback to signal completion
+       callback( /*status*/
+@@ -1744,7 +1747,7 @@
+   let id: Atomic<CUnsignedInt> = Atomic(0)
+ 
+   let foreignCall: @convention(c) (FMGeneratedContentRef, CUnsignedInt) -> Void
+-  let outputContinuation = Mutex<[CUnsignedInt: CheckedContinuation<String, any Error>]>([:])
++  let pendingCalls = Mutex<[CUnsignedInt: PendingToolCall]>([:])
+   let parameters: GenerationSchema
+ 
+   init(
+@@ -1766,11 +1769,20 @@
+   func call(arguments: GeneratedContent) async throws -> String {
+     let arguments = GeneratedContentWrapper(content: arguments)
+     let id = nextID()
+-    foreignCall(FMGeneratedContentRef(Unmanaged.passRetained(arguments).toOpaque()), id)
+-    return try await withCheckedThrowingContinuation { continuation in
+-      outputContinuation.withLock {
+-        $0[id] = continuation
++    let pending = PendingToolCall()
++    pendingCalls.withLock { $0[id] = pending }
++    defer { _ = pendingCalls.withLock { $0.removeValue(forKey: id) } }
++
++    return try await withTaskCancellationHandler {
++      try await withCheckedThrowingContinuation { continuation in
++        // Register before calling foreign code, which may complete synchronously.
++        if pending.install(continuation) && !Task.isCancelled {
++          foreignCall(FMGeneratedContentRef(Unmanaged.passRetained(arguments).toOpaque()), id)
++        }
+       }
++    } onCancel: {
++      _ = self.pendingCalls.withLock { $0.removeValue(forKey: id) }
++      pending.finish(.failure(CancellationError()))
+     }
+   }
+ }
+@@ -1822,10 +1834,7 @@
+   output: UnsafePointer<CChar>
+ ) {
+   let bridgedTool = Unmanaged<BridgedTool>.fromOpaque(tool).takeUnretainedValue()
+-  bridgedTool.outputContinuation.withLock {
+-    if let continuation = $0[callId] {
+-      continuation.resume(returning: String(cString: output))
+-      $0.removeValue(forKey: callId)
+-    }
+-  }
+-}
++  let pending = bridgedTool.pendingCalls.withLock { $0.removeValue(forKey: callId) }
++  // Late/duplicate results are ignored. Resume outside the registry lock.
++  pending?.finish(.success(String(cString: output)))
++}

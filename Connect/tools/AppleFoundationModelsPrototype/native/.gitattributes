@@ -1,0 +1,2 @@
+# Unified diffs require one space before an empty context line.
+bridge-lifecycle.patch whitespace=-blank-at-eol

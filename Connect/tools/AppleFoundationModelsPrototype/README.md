@@ -11,10 +11,11 @@ The prototype evaluates Apple's C bridge at commit
 [`apple/python-apple-fm-sdk`](https://github.com/apple/python-apple-fm-sdk).
 
 Upstream extraction classification: retain the unmodified `foundation-models-c`
-package and its license solely as an ignored build dependency in `.artifacts/`;
-exclude the Python SDK and other upstream application code. No upstream source or
-binary becomes part of the tracked prototype or a product package. Production
-dependency distribution remains a design decision.
+package and its license as the baseline ignored build dependency in `.artifacts/`;
+exclude the Python SDK and other upstream application code. The authorized lifecycle
+experiment applies a narrow patch to a separate copy. Only the reviewable patch,
+owned continuation helper and research harness are tracked, not the full upstream
+source or binaries. Production dependency distribution remains a design decision.
 
 Prerequisites: macOS on Apple Silicon, Xcode with Foundation Models, the repository's
 .NET 11 SDK, Python 3 for fetching the pinned source, and Apple Intelligence enabled
@@ -31,9 +32,38 @@ dotnet build AppleFoundationModelsPrototype.csproj
 dotnet run --no-build --project AppleFoundationModelsPrototype.csproj -- suite .artifacts/upstream/foundation-models-c/.build/release/libFoundationModels.dylib
 ```
 
-The native source stays unmodified so observations are attributable to the pinned
-bridge. A build prerequisite failure stops the experiment; changing the bridge or
-the integration design requires discussion.
+This baseline stays unmodified so its observations remain attributable to the pinned
+bridge. A build prerequisite failure stops the experiment.
+
+## Patched lifecycle experiment
+
+The user authorized prototype fixes for immediate tool results, pending-tool
+cancellation and cancelled streams. `native/bridge-lifecycle.patch` registers the
+pending call before invoking host code, uses `PendingToolCall.swift` to settle
+completion/cancellation once, and checks cancellation when the stream iterator ends.
+No C ABI or production adapter is changed.
+
+Build and run from this directory after preparing the baseline:
+
+```bash
+python3 prepare-patched.py --build --test
+dotnet build AppleFoundationModelsPrototype.csproj
+python3 - <<'PY'
+import json
+import subprocess
+from pathlib import Path
+metadata = json.loads(Path('.artifacts/patched.json').read_text())
+subprocess.run(['dotnet', 'bin/Debug/net11.0/AppleFoundationModelsPrototype.dll',
+                'lifecycle', metadata['libraryPath'],
+                '.artifacts/patched-lifecycle-results.json'], check=True)
+PY
+```
+
+Each patch/helper/test revision gets a separate directory identified by its SHA-256.
+`.artifacts/patched.json` records the active library, original upstream revision and
+patch fingerprint. The four deterministic Swift tests use the identical owned helper
+in a small test-only package, including 1,000 races between registration, completion
+and cancellation. They do not invoke a model.
 
 ## Experiments and output
 
@@ -50,10 +80,13 @@ limits, cancellation and native tool callbacks. A single case can be repeated:
 dotnet run --no-build --project AppleFoundationModelsPrototype.csproj -- worker .artifacts/upstream/foundation-models-c/.build/release/libFoundationModels.dylib cancel-stream
 ```
 
-Case names are in `Experiments.Names`. Reports contain only the built-in synthetic
-prompts and native observations. Machine-generated logs and downloaded/build
-artifacts stay in `.artifacts/`. The default report is `.artifacts/results.json`;
-pass a third suite argument to preserve another run under a different name.
+Case names are in `Experiments.Names` and `Experiments.LifecycleNames`. The lifecycle
+suite also checks duplicate immediate results and late results after cancellation.
+Reports contain only the built-in synthetic prompts and native observations.
+Machine-generated logs and downloaded/build
+artifacts stay in `.artifacts/`. Default reports are `.artifacts/suite-results.json`
+and `.artifacts/lifecycle-results.json`; pass a third suite argument to preserve
+another run under a different name.
 
 Outcomes:
 
@@ -73,6 +106,12 @@ then supplies that result to let the worker settle. These diagnostic recovery
 steps demonstrate the stalled operation; they are not proposed production fixes.
 The delayed-tool control deliberately waits 100 ms before completing the tool.
 
+Managed replies record `CancellationRequested` separately from raw native status.
+Cancellation intent is ordered against terminal completion under one lock. This
+preserves host intent even when the baseline bridge returns success for a cancelled
+stream or Foundation Models wraps tool cancellation in a generic tool error.
+The raw status remains available as evidence; this is not a production error mapper.
+
 Native strings and owned references are released. Static unmanaged callbacks use
 numeric IDs backed by an operation registry rather than dereferencing managed
 object pointers. Finished contexts are removed; callbacks after removal are counted.
@@ -84,6 +123,26 @@ of native teardown under arbitrary concurrent calls.
 These live probes are optional research, not normal deterministic test gates. See
 [recorded findings](RESULTS.md) for the tested environment, evidence, design
 consequences and remaining questions.
+
+## Direct Swift output-limit probe
+
+`native/TruncationProbe.swift` bypasses the bridge to inspect `rawContent.isComplete`
+at output caps of 8 and 128 tokens. Run with a bounded parent process:
+
+```bash
+python3 - <<'PY'
+import subprocess
+from pathlib import Path
+result = subprocess.run(['xcrun', 'swift', 'native/TruncationProbe.swift'],
+                        capture_output=True, text=True, timeout=45)
+Path('.artifacts/truncation-swift.json').write_text(result.stdout)
+print(result.stdout)
+print(result.stderr)
+raise SystemExit(result.returncode)
+PY
+```
+
+This is another optional live experiment. Unavailable models exit 3 and errors exit 2.
 
 ## Local verification
 

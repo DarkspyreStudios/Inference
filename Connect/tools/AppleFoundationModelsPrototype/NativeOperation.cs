@@ -5,7 +5,7 @@ using System.Runtime.InteropServices;
 
 namespace AppleFoundationModelsPrototype;
 
-internal sealed record NativeReply(int Status, string Content);
+internal sealed record NativeReply(int Status, string Content, bool CancellationRequested = false);
 
 internal sealed class NativeOperation : IDisposable
 {
@@ -17,6 +17,8 @@ internal sealed class NativeOperation : IDisposable
     private readonly TaskCompletionSource _firstSnapshot = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly ConcurrentQueue<string> _snapshots = new();
     private int _terminalCallbacks;
+    private readonly object _completionGate = new();
+    private bool _cancellationRequested;
 
     internal NativeOperation(bool streaming = false)
     {
@@ -37,6 +39,16 @@ internal sealed class NativeOperation : IDisposable
 
     internal async Task<NativeReply> WaitAsync() => await Completion.WaitAsync(TimeSpan.FromSeconds(20)).ConfigureAwait(false);
 
+    internal bool RequestCancellation()
+    {
+        lock (_completionGate)
+        {
+            if (Completion.IsCompleted) return false;
+            _cancellationRequested = true;
+            return true;
+        }
+    }
+
     public void Dispose()
     {
         // A deliberately hung experiment keeps its context alive until its isolated worker exits.
@@ -53,8 +65,11 @@ internal sealed class NativeOperation : IDisposable
 
     private void Finish(NativeReply result)
     {
-        Interlocked.Increment(ref _terminalCallbacks);
-        _completion.TrySetResult(result);
+        lock (_completionGate)
+        {
+            Interlocked.Increment(ref _terminalCallbacks);
+            _completion.TrySetResult(result with { CancellationRequested = _cancellationRequested });
+        }
     }
 
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
