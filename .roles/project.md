@@ -18,7 +18,7 @@ specifications.
 | Version line | `<net>.<release>.<minor>`: .NET generation, breaking-contract release, compatible tweak/fix |
 | Release model | `Common`, `Connect`, `Tensor`, and `UI.Settings` publish together at the one version declared in `/Directory.Build.props` |
 | Primary branch | `master` |
-| Lifecycle stage | Four-package `11.10.5-rc.1` published privately |
+| Lifecycle stage | Four-package `11.11.0-rc.1` published privately |
 | Jira project and parent | TBD |
 | Jira subject label | TBD |
 
@@ -823,3 +823,20 @@ Authenticated restores, Debug/Release builds and tests, formatting, vulnerabilit
 archive boundaries and local/fresh-feed consumer checks passed. Downloaded archives match
 the verified local archives; feed readback confirms private visibility. Source is tagged
 `v11.10.5-rc.1`. No model weights or paid inference were used as verification gates.
+
+## Private release 11.11.0-rc.1
+
+Published all four packages from `6da836f835877a763f5cf11a14dbb3c2176dd28e` using `deploy-major.sh`.
+Authenticated restores, Debug/Release builds and tests, formatting, vulnerability audits,
+archive boundaries and local/fresh-feed consumer checks passed. Downloaded archives match
+the verified local archives; feed readback confirms private visibility. Source is tagged
+`v11.11.0-rc.1`. No model weights or paid inference were used as verification gates.
+
+The initial fresh-feed restore stopped after nuget.org dependency downloads returned unexpected
+EOF errors. The same release was resumed manually at that step using its initially empty
+verification cache; restore, consumer execution and all four archive comparisons then passed.
+No version was bumped again and no package was overwritten or republished.
+
+This release includes the managed Apple connector. The separately distributed signed Swift helper,
+clean-machine/oldest-OS checks and intermittent native continuation failure qualification remain
+open under DSA-59.
