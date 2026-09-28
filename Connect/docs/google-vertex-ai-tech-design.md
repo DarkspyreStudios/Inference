@@ -129,7 +129,7 @@ protocol references [S2–S4]. Use a single candidate; our result contract repre
 | Temperature | `generationConfig.temperature` | `temperature` |
 | Maximum output | `generationConfig.maxOutputTokens` | `max_tokens`; resolve a valid model-specific value when omitted |
 | Reasoning level | Profile maps to thinking level or budget | Profile maps to thinking mode/budget and applicable effort |
-| Tool declarations | `tools[].functionDeclarations` | `tools`, including input schema |
+| Tool declarations (default non-strict) | `tools[].functionDeclarations`; profile selects supported `parametersJsonSchema` or lossless `parameters` representation | `tools` with `input_schema`; omit `strict` when false |
 | Tool choice Auto/None | `AUTO`/`NONE` | `auto`/`none`, subject to model support |
 | Tool choice Required/Specific | `ANY`; restrict allowed function names for Specific | `any`/`tool` plus name |
 | Parallel-call control | Map only where the selected protocol can enforce it | Map to supported `disable_parallel_tool_use` setting |
@@ -144,13 +144,65 @@ association through the continuation envelope in section 6. Keep original wire c
 does not supply one, allocate a stable Connect call ID and retain its wire association in state.
 Repeated calls with the same function name remain distinct. Reject ambiguous imported tool histories.
 
-`Strict` requests provider-enforced adherence. Gemini's available function modes and schema subsets
-must be checked together; forcing a call to obtain schema enforcement changes Auto semantics and
-is not an acceptable mapping. Unsupported strict/choice/reasoning combinations fail before dispatch.
-Likewise, executing tools sequentially in our host does not enforce a request that the model emit
-only one call. No silent removal of `AllowParallelToolCalls = false` [S4].
+### Tool schema acceptance and optional strict enforcement
 
-Validate output and tool schemas without deleting constraints. JSON-object fallback must actually
+Review of the existing implementation and its fixes is authoritative for this proposal:
+
+| Existing behavior/evidence | Vertex requirement |
+| --- | --- |
+| `ea4245a`: managed tools inherited the chat default of true; OpenAI rejected valid host schemas | Preserve `LlmAgentToolDefinition.Strict = false` and pass the host's value unchanged into chat requests |
+| `201e84c`: all tool definitions moved to the non-strict default | Preserve `LlmToolDefinition.Strict = false`, including through the portable bridge |
+| `8285e6d`: Nova rejected even `strict: false` | False does not imply serializing a field named `strict` |
+| `27a8053`: Anthropic/compatible chat omit the flag unless true | Claude on Vertex follows that omission rule for ordinary tools |
+| Responses/Codex serialize the host's true/false value | Keep adapter-specific wire behavior; no universal strict-field serializer |
+| `ManagedAgentSession` validates returned arguments against `InputSchema` before invoking the handler | Keep this local validation regardless of Strict; invalid arguments produce an error tool result without running the handler |
+
+Four independent concepts govern a tool request:
+
+1. **Host input schema:** what the tool accepts. Optional properties stay optional. Preserve the
+   original `required` set and `additionalProperties` semantics.
+2. **Provider schema acceptance:** the schema dialect/shape the endpoint accepts in its declaration.
+   Validate actual wire requirements for the chosen route. A non-strict declaration must not be
+   rejected merely because it fails another provider's strict-generation subset.
+3. **Tool choice:** whether a call is permitted or required, and which tool can be called. This does
+   not opt a host into `Strict = true`.
+4. **Strict generation enforcement:** the host explicitly requests provider-enforced argument
+   conformance. Qualify this independently of ordinary tool support and local validation.
+
+**Default lane:** send tools non-strict. For Claude omit `strict`. Gemini has no equivalent per-tool
+`strict` property in `FunctionDeclaration`; use the ordinary native declaration and requested choice
+mode [S9]. `Auto` stays `AUTO`; do not promote it to `VALIDATED` or `ANY` because a schema exists.
+Gemini modes can intrinsically constrain arguments: `Strict = false` requests no extra strict
+guarantee, not that the provider disable its inherent validation. Required still maps to `ANY`.
+Use `parametersJsonSchema` where qualified; a typed `parameters` conversion must preserve meaning.
+Do not make every property required, close objects, or add nullable alternatives to manufacture an
+OpenAI strict schema. Unsupported wire constructs get a specific schema-compatibility error.
+
+**Explicit strict lane:** only a tool with `Strict = true` requests the additional guarantee.
+Claude may send `strict: true` on a qualified model. Gemini requires a proven schema/mode mapping;
+there is no flag to copy. Until that mapping is qualified, advertise strict enforcement unsupported
+while continuing to support ordinary tools. Reject only requests that actually ask for an unsupported
+guarantee or combination. Do not silently downgrade true, force Auto to call a tool, rewrite schemas,
+or enable stricter requirements for unrelated non-strict tools in a mixed request. Gemini's
+request-wide modes versus per-tool Strict need an explicit mixed-request qualification [S4, S10].
+
+`HostToolsAreSentNonStrictUnlessTheHostRequestsStrictness` is the existing regression anchor: its
+`command` is required, `timeout` optional, and `additionalProperties` absent. Its schema is preserved.
+`UnknownToolsAndSchemaFailuresReturnErrorsWithoutExecuting` anchors local execution validation.
+Chat callers still execute/validate their own tools; a chat adapter never executes a handler.
+
+Executing tools sequentially in our host also does not enforce a request that the model emit only
+one call. No silent removal of `AllowParallelToolCalls = false` [S4].
+
+### Structured reply output is a separate request
+
+Keep the current `LlmStructuredOutputRequest.Strict = true` default. It does not change the tool
+definitions' Strict values, and a structured reply does not make all tools strict. Qualify the
+provider's output-schema support separately from its tool-schema acceptance and strict tool support.
+Neither local validation nor a non-strict schema hint is evidence of provider-enforced conformance.
+
+Validate output and tool schemas against their respective route requirements without deleting
+constraints. JSON-object fallback must actually
 enforce the promised shape; JSON MIME type alone is not sufficient. Respect the existing explicit
 fallback policy and report the actual enforcement. Tools-plus-schema and thinking-plus-forced-tools
 must be qualified as combinations, not inferred from individual capability booleans [S3, S5, S6].
@@ -212,7 +264,11 @@ and capture-format revision may be required. This document does not authorize a 
 capabilities. Proposed members: supported `ChoiceModes`, `SupportsStrictInputSchema`,
 `SupportsParallelCalls`, `SupportsParallelCallControl`, and `SupportsArgumentStreaming`.
 Carry this descriptor through `ConnectLlmInference`. `SupportsToolUse` continues to mean that calls
-and results can round-trip; it does not promise every control. Profiles additionally validate
+and results can round-trip with ordinary non-strict tools; it does not promise every control.
+`SupportsStrictInputSchema = false` must never disable ordinary tools or trigger a strict-schema
+preflight for them. It describes an optional generation guarantee, not schema parsing or local
+argument validation. These additions do not change either tool definition's default or add a
+connection-wide strict toggle. Profiles additionally validate
 combinations with reasoning and structured output. Existing adapters receive accurate declarations
 in the same migration. Overrides cannot enable a control the adapter has not implemented.
 
@@ -306,7 +362,8 @@ No pack/publish action is part of technical design.
 | Model catalog | Exact endpoint/version, auth requirements, pagination, regional applicability, and catalog/access distinction |
 | Initial supported profiles | Explicit Gemini and Claude IDs with documented limits and endpoint availability; fixtures per profile |
 | Reasoning mapping | Supported neutral levels mapped to valid native values; temperature/output/tool-choice combinations verified |
-| Strict schemas | Supported keywords, rejection/fallback behavior, Auto semantics, schema-plus-tools combinations |
+| Ordinary tool schemas | Actual provider declaration requirements; optional properties/open objects preserved; omission of unsupported strict fields |
+| Opt-in strict tools and structured replies | Separate supported subsets/guarantees, mixed strict/non-strict tools, Auto semantics and schema-plus-tools combinations |
 | Parallel control | Whether Gemini can enforce model-call cardinality on the selected API; capability false and explicit rejection if it cannot |
 | Rich results | Images/PDFs/text/structured/error outputs through each native tool-result representation |
 | Scope identity | Stable refresh behavior and detectable ADC principal changes without retaining or logging tokens |
@@ -318,6 +375,13 @@ expired credentials; refresh races; cancellation during refresh; concurrent conf
 signed ordinary turns and signed tool turns; same-name parallel calls; invalid/duplicate tool IDs;
 altered visible state; unsupported schemas; partial/truncated arguments; missing finish; usage trailers;
 HTTP 200 errors; refusal versus token limit; no leaked secrets; and portable-interface round trips.
+
+The strictness regression matrix must cover both publishers through chat, portable chat and managed
+sessions: default false; optional `timeout` with required `command`; absent `additionalProperties`;
+unchanged schema meaning; Claude's absent false flag; Gemini's absence of an invented strict field;
+Auto remaining Auto; Required without explicit Strict; supported explicit true and its unsupported
+failure; mixed strict/non-strict tools; structured output leaving tools non-strict; and invalid returned
+arguments causing no handler execution. Ordinary tool support must pass independently of strict support.
 
 Live qualification is explicit and bounded: one selected model per publisher, text, schema, image/PDF,
 two-step tool continuation, reasoning state, cancellation and managed capture/import. Normal tests use
@@ -337,6 +401,8 @@ Official documentation inspected for this mapping (2026-09-28):
 - [S6: Claude structured output](https://platform.claude.com/docs/en/build-with-claude/structured-outputs).
 - [S7: Claude PDF support](https://platform.claude.com/docs/en/build-with-claude/pdf-support).
 - [S8: Gemini thought signatures](https://docs.cloud.google.com/vertex-ai/generative-ai/docs/thought-signatures).
+- [S9: Gemini FunctionDeclaration fields](https://docs.cloud.google.com/gemini-enterprise-agent-platform/reference/rest/Shared.Types/FunctionDeclaration).
+- [S10: Claude optional tool definition properties](https://platform.claude.com/docs/en/agents-and-tools/tool-use/tool-reference).
 
 Repository baseline: [managed-agent design](enhancements.md),
 [Connect integration contract](../README.md),
@@ -344,3 +410,6 @@ Repository baseline: [managed-agent design](enhancements.md),
 [portable bridge](../src/LLM/Darkspyre.Inference.Connect.LLM/ConnectLlmInference.cs),
 [current state codec](../src/LLM/Darkspyre.Inference.Connect.LLM/Internal/ProviderResponseStateCodec.cs),
 and [capability declarations](../src/LLM/Darkspyre.Inference.Connect.LLM/LlmProviderCapabilities.cs).
+The existing [non-strict tool decision](enhancements.md#one-non-strict-default-for-tool-definitions)
+and [managed tool regression tests](../tests/LLM/Darkspyre.Inference.Connect.LLM.Tests/ManagedAgentTests.cs)
+govern the tool-schema mapping above.
