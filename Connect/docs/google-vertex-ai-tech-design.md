@@ -406,6 +406,36 @@ Consumer-specific source changes do not belong inside the Connect adapter. Both 
 their consumer inventory and release sequencing before a breaking package reaches an incompatible
 host. No package version is selected by this mapping.
 
+### Additional provider features after migration
+
+[DSA-69](https://darkspyre.atlassian.net/browse/DSA-69) tracks additional provider features enabled by
+the revised contract and adapter-owned codecs. DSA-61 blocks its implementation completion;
+DSA-68 owns any host/shell integration. Mandatory migration behavior stays in DSA-61.
+
+The first concrete feature is **Bedrock Converse reasoning with signed continuation**. The current
+adapter forces `ReasoningLevels` empty, maps text/tool-use blocks only, and retains counts-only state.
+AWS exposes reasoning content and requires signed reasoning/history to be retained for subsequent
+turns ([content blocks](https://docs.aws.amazon.com/bedrock/latest/APIReference/API_runtime_ContentBlock.html),
+[conversation protocol](https://docs.aws.amazon.com/bedrock/latest/userguide/conversation-inference.html)).
+The owning-codec change removes the central codec's counts-only restriction and the portable envelope
+can carry the resulting state. The feature still requires model-specific request mapping, signed
+block replay, visible reasoning projection and tool-turn qualification. Signed-history constraints
+must be reconciled explicitly with compaction; changing prior messages can invalidate signatures.
+
+For each further feature, DSA-69 must identify the provider/model, missing behavior, previous contract
+limitation, exact enabling change, official protocol evidence, adapter work, host impact and tests.
+Do not equate a new capability field with implemented functionality. Preserve ordinary non-strict
+tools throughout. Features already representable by current contracts are separate adapter gaps.
+
+| Finding | Owner/disposition |
+| --- | --- |
+| Existing Responses/Codex/Anthropic state lost at portable boundaries | Required DSA-61 migration |
+| Existing providers exposing reported cache/reasoning usage details | Required DSA-61 mapping; DSA-68 host display |
+| Bedrock reasoning and signed assistant-history replay | Additional feature design in DSA-69 |
+| Direct Anthropic native structured output currently disabled | Existing contract already represents it; not classified as unlocked by this change |
+| Host streaming transcript for plain API connections | Existing DSA-17; no duplicate scope |
+| Explicit cache placement/TTL, native cloud runtimes and billing | Not implied by continuation or usage reporting; require separate scoped design |
+
 ## 11. Qualification and design completion
 
 | Open item | Evidence required to close it |
