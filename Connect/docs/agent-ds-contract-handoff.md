@@ -1,5 +1,20 @@
 # Agent DS: managed-agent contract handoff
 
+## Pending: shared LLM contract migration (DSA-61 / DSA-68)
+
+**Technical design only; no released version yet.**
+[DSA-61's technical mapping](google-vertex-ai-tech-design.md#mandatory-migration-of-every-connector)
+requires migration of every existing LLM connector, both Common/Connect bridges, managed/native
+session projections and Tensor consumers. Continuation state, tool controls, usage details and model
+access evidence must survive each supported boundary. Non-strict tool defaults remain in force.
+
+[DSA-68](https://darkspyre.atlassian.net/browse/DSA-68) owns the host/shell adoption: package/plugin
+references, transcript and capture persistence, explicit state omission on switching, compaction,
+capability-driven controls, usage display and provider-owned Google setup with protected credentials.
+It also owns the consumer inventory and stored-format migration decision. Final member names,
+serialized-format policy and release version follow the agreed technical design. Existing released
+contract guidance below remains the integration baseline until that coordinated migration.
+
 ## Native background resources: 11.8.0-rc.1
 
 `11.8.0-rc.1` is a breaking-contract release: `ILlmAgentSession` gains members, so every implementation,

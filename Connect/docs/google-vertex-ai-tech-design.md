@@ -355,6 +355,57 @@ half-migrated contract. Confirm affected external consumers and capture compatib
 Implementation verification covers all affected product solutions, not only the Vertex project.
 No pack/publish action is part of technical design.
 
+### Mandatory migration of every connector
+
+The user explicitly requires every connector to utilize the revised contracts. DSA-61 owns this
+library-wide migration; it is not satisfied by updating Vertex or by making other adapters compile.
+Every LLM transport must populate supported fields, validate supplied state and controls, and
+declare unsupported behavior truthfully. An implementation with no opaque continuation returns null
+and applies the explicit reject/omit policy to foreign state; it must not manufacture state or
+silently drop it. Optional usage details remain null when unavailable.
+
+| Existing transport / proposed route | Migration and regression obligation |
+| --- | --- |
+| OpenAI Responses | Move ordered assistant/reasoning/call state to the shared envelope; preserve replay, explicit tool Strict values, capability and usage semantics |
+| OpenAI-compatible Chat | Use the shared message/result/capability shapes; preserve non-strict omission; explicitly handle unsupported continuation rather than dropping it |
+| Anthropic Messages | Move signed thinking/redacted thinking and tool history to the shared envelope; preserve non-strict omission and existing authentication |
+| Direct Codex | Migrate Responses state plus managed-agent capture/import, accounting, scope binding and model metadata |
+| Bedrock Converse | Migrate current counts-only state and managed-agent accounting without falsely declaring native replay; preserve ordinary Nova tool requests |
+| Antigravity CLI | Update projections/capability/usage reporting and explicit unsupported-state handling; retain external CLI authentication and actual runtime limits |
+| Claude CLI | Cover chat and native agent paths, opening-context conversion and retained history; keep native resume/fork/resources separate from per-message state |
+| Bedrock AgentCore | Cover chat and native agent projections, opening context, usage and capability reporting; preserve its native session ownership |
+| SelfHost | Update `SelfHostLlmClient.ToCommon` and `ToConnect` in both directions, including messages, results, omission policy/count, capabilities, usage and model evidence |
+| Apple Foundation Models | Update managed process result/projection and agent paths; retain structured snapshots, Unknown completion and cancellation behavior; no fabricated opaque replay |
+| Vertex Gemini and Claude | Each route implements the shared state/control/usage contract and independently passes the mapping acceptance cases |
+
+Also migrate `ConnectLlmInference`, provider/session services, state projection and codecs, context
+capture/serialization, caches, console harness, examples and test doubles. Trace the SelfHost route
+into Tensor's Common LLM implementations, including Qwen. Engine-produced continuation state must
+retain its owning implementation identity across the SelfHost bridge; a transport wrapper must not
+claim ownership of the engine's opaque bytes. Foreign state is rejected or explicitly omitted there.
+
+Use a parameterized contract suite against the registry, with a coverage assertion that every
+registered chat and agent adapter is represented. Include optional registrations (Bedrock/AgentCore
+and SelfHost), not only the default `AddLlmConnect` composition. For each route, verify supported
+round trips or explicit unsupported handling, accurate metadata, unchanged non-strict defaults,
+usage totals, failure/cancellation and existing native-versus-managed ownership. Keep route-specific
+wire fixtures; a shared mock implementation is not evidence that every adapter was migrated.
+
+### Host and shell responsibility
+
+[DSA-68: Adopt Connect contract changes across the host and shell](https://darkspyre.atlassian.net/browse/DSA-68)
+tracks the consumer work separately. DSA-61's finalized contract and implementation block completion
+of that migration. Host design/inventory can proceed while this design is open.
+
+The host ticket owns package/plugin adoption, transcript and capture persistence, serialization
+compatibility, compaction/provider-switch handling, capability-driven tool controls, normalized
+usage display, provider/model discovery, and Google setup/secret-store commit projection. Its
+acceptance cases cover retained state across save/reload and tool turns, explicit omission, ordinary
+non-strict tools, unknown usage/access, native sessions and credential-store concurrency.
+Consumer-specific source changes do not belong inside the Connect adapter. Both tickets must record
+their consumer inventory and release sequencing before a breaking package reaches an incompatible
+host. No package version is selected by this mapping.
+
 ## 11. Qualification and design completion
 
 | Open item | Evidence required to close it |
