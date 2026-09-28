@@ -47,6 +47,10 @@ The Apple on-device adapter is registered by `AddLlmConnect`. Its separately bui
 helper and release gates are described in the [connector design](docs/apple-foundation-models-design.md).
 This source implementation has not been published as a signed helper release.
 
+Google Vertex AI support for Gemini and Claude is in technical design under DSA-61.
+The [technical mapping](docs/google-vertex-ai-tech-design.md) records proposed protocol mappings,
+contract changes for parity, migration scope and qualification gates; it is not shipped support.
+
 | Package | Purpose |
 |---|---|
 | `Darkspyre.Inference.Common` | Typed LLM, image, and decision requests, results, capabilities, streaming events, provenance, and failures shared by Connect and Tensor |

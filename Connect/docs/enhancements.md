@@ -146,6 +146,11 @@ and per provider/model.
 
 ## 5. Retained context and response state
 
+**Pending DSA-61 amendment:** the [Vertex technical mapping](google-vertex-ai-tech-design.md#6-required-continuation-contract-change)
+proposes moving continuation state into the shared portable contract so `ILlmInference` can preserve
+signed tool history. The contract below remains the implemented baseline until that migration is
+approved and completed across its consumers.
+
 Use existing `LlmChatMessage`, `LlmToolCall`, `LlmToolResult` and `LlmAttachment` as the neutral
 content vocabulary. Context entries add stable identity and provenance:
 
