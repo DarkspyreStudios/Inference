@@ -1158,10 +1158,74 @@ from that engine; both are required to save. Checking and testing are local veri
 ## Console smoke tester
 
 `tools/Darkspyre.Inference.Connect.ConsoleTester` exercises the public Darkspyre.Inference.Connect.LLM facade directly without a shim or
-consuming application. Select ChatGPT Codex, Claude subscription, Google Antigravity, Bedrock
-Converse, or AgentCore Harness with `--provider codex|claude|antigravity|bedrock|agentcore`.
+consuming application. `providers` lists the registered adapters; `setup --provider <id>` displays
+their own setup steps, fields, requirements and action effects without running those actions.
+Canonical provider IDs and the short aliases `codex|claude|antigravity|bedrock|agentcore|apple`
+are accepted. Adapter metadata owns names, endpoints and model defaults. Existing aliases retain
+their credential-store identities. Credential entry/sign-in commands retain the subscription/AWS
+flows described below; listing another adapter does not provision its credentials.
 Codex uses host-owned device OAuth stored in `Darkspyre.SecureStore`; Claude and Antigravity keep
 CLI-owned credentials. The tester also stores host-owned AWS profile/region configuration.
+
+### Apple console harness
+
+From `Connect/`, build the separate development helper and inspect its provider-owned setup:
+
+```bash
+xcrun swift build --package-path tools/AppleFoundationModelsHost
+APPLE_HELPER="$PWD/tools/AppleFoundationModelsHost/.build/debug/darkspyre-apple-fm"
+dotnet run --project tools/Darkspyre.Inference.Connect.ConsoleTester -- providers
+dotnet run --project tools/Darkspyre.Inference.Connect.ConsoleTester -- setup --provider apple
+dotnet run --project tools/Darkspyre.Inference.Connect.ConsoleTester -- status --provider apple --helper "$APPLE_HELPER"
+dotnet run --project tools/Darkspyre.Inference.Connect.ConsoleTester -- models --provider apple --helper "$APPLE_HELPER"
+```
+
+Apple requires no login or vault credential. `--helper` accepts an executable name on `PATH` or an
+absolute path, and is valid only with Apple. Without it, the adapter's default executable is used.
+`status` runs the settings manager's prerequisite check, with actionable helper/model readiness
+results. `prompt` and `agent` also check readiness. Apple's model defaults to the adapter's
+`apple-system-default`; an explicit `--model` is passed through normally.
+
+```bash
+echo 'Reply with hello.' | dotnet run --project tools/Darkspyre.Inference.Connect.ConsoleTester -- \
+  prompt --provider apple --helper "$APPLE_HELPER"
+echo 'Call darkspyre_inference_connect_echo with text hello and report the result.' | \
+  dotnet run --project tools/Darkspyre.Inference.Connect.ConsoleTester -- agent --provider apple --helper "$APPLE_HELPER"
+dotnet run --project tools/Darkspyre.Inference.Connect.ConsoleTester -- \
+  apple-probe --provider apple --helper "$APPLE_HELPER" --repeat 2
+dotnet run --project tools/Darkspyre.Inference.Connect.ConsoleTester -- \
+  apple-probe --provider apple --helper "$APPLE_HELPER" --case agent --repeat 5
+```
+
+`apple-probe` performs explicit synthetic on-device generation. Select `--case
+all|text|structured|tools|agent|cancel` (default `all`), `--repeat 1..20` (default 1), and
+`--timeout-seconds 1..600` per case (default 180). Cases execute sequentially; each repetition
+starts fresh requests/sessions. There is no retry of a failed case. The managed agent is limited
+to four model iterations and exposes only an in-memory synthetic lookup tool.
+
+| Case | Checks |
+| --- | --- |
+| `text` | Complete and streamed text, terminal `Unknown`, no invented usage/finish reason |
+| `structured` | Replacement snapshots without text deltas; final original-schema validation |
+| `tools` | Two identical-argument calls with distinct IDs, reversed host results, replay with tools disabled |
+| `agent` | One host lookup, settled result retention, no duplicate call-ID execution, final retained response |
+| `cancel` | Cancel after a text chunk, await stream cleanup, then complete a new request |
+
+Each case reports `PASS`, `FAIL` or `SKIP`, iteration and elapsed time, followed by totals.
+Exit codes are 0 for all passed, 1 for any failure, 3 for unavailable prerequisites, and 130
+for caller cancellation. A failed prerequisite operation returns failure rather than a skip.
+Unknown termination is expected for Apple; it does not certify a natural stop. Missing snapshots,
+unexpected tool selections and native continuation failures remain failures, even if later runs
+pass. Reports omit prompts, model output, raw provider errors and credentials; agent failures
+include the typed terminal reason and settled tool counts when available. Ctrl+C cancels the
+active case and stops subsequent runs. Interactive `prompt` and `agent` commands return failure
+on a failed or missing terminal event and accept Apple's normal `Unknown` terminal.
+
+These live checks are separate from deterministic tests. In particular, successful runs do not
+resolve the intermittent native continuation issue tracked in DSA-59. The helper's signing and
+clean-machine/oldest-OS distribution qualifications remain open.
+
+### Subscription and AWS smoke tests
 
 Sign in to the direct ChatGPT adapter (CLI login alone is insufficient):
 

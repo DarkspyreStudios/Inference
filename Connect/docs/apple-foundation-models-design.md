@@ -3,7 +3,8 @@
 **Ticket:** [DSA-59](https://darkspyre.atlassian.net/browse/DSA-59), under DSA-57.
 **Date:** 2026-09-27. **Status:** source implementation complete; runtime/release qualification
 remains open. The user explicitly authorized implementation after reviewing the design.
-Publication remains separately authorized.
+The managed connector was published in the authorized four-package `11.11.0-rc.1` release.
+Signed native helper distribution remains separately authorized.
 
 This is the approved implementation design. Earlier prototype alternatives remain evidence,
 not competing implementation paths. See the [experiment record](../tools/AppleFoundationModelsPrototype/RESULTS.md)
@@ -418,3 +419,79 @@ Final deterministic verification:
 No package archives, signed distribution artifact, notarization submission or publication were
 created. Opt-in live generation evidence and its unresolved intermittent failure are recorded above;
 they are not represented by the deterministic pass count.
+
+## 11. Console harness extension (2026-09-28)
+
+The user selected `Connect/tools/Darkspyre.Inference.Connect.ConsoleTester` and authorized this
+extension within DSA-59. It uses the existing console host and public Connect/Bind/managed-agent
+contracts. No new shipping API, package or native protocol is required.
+
+Provider discovery comes from registered `ILlmClient.ProviderDefinition` instances. The console
+keeps only its command aliases and credential-store identities; display names, defaults and setup
+instructions come from adapters. `providers` lists them; `setup --provider <id-or-alias>` renders
+the current settings steps, fields, requirements, troubleshooting and action effects without
+executing an action. Existing subscription and AWS sign-in flows remain available.
+
+Apple accepts `--helper <executable-name-or-absolute-path>`. Its `status`, `models`, `prompt`,
+`agent` and probe commands use the settings manager's prerequisite check, with no login or vault
+credential. `prompt`/`agent` use the provider's default model when omitted. Agent availability
+comes from capabilities; Apple uses the existing managed session without native runtime options.
+
+`apple-probe` runs five independent cases through public APIs: chat/text streaming, structured
+snapshots and final validation, two identical tool calls and reversed-result/no-tools replay,
+managed tool continuation and settled context, and cancellation followed by a new operation.
+The model must actually emit the requested shape and calls: an unmet live assertion is a failure,
+not evidence inferred from advertised capability flags. Apple `Unknown` is an expected terminal
+classification and never proof of natural completion.
+
+The caller can select one case, repeat 1–20 times and choose a 1–600-second case deadline (default
+180). Repetitions are explicit independent experiments. Cases run sequentially, own their
+cancellation lifetime, retain each failure and never retry it automatically. Managed sessions
+permit at most four model iterations and execute only a synthetic in-memory lookup. After a
+managed failure, the harness checks captured settled tool results and reports execution/retention
+counts and duplicate IDs when the session remains capturable.
+
+Reports contain per-case PASS/FAIL/SKIP, repeat index, elapsed time and aggregate counts. Missing
+prerequisites return exit 3; failures return 1; all passed returns 0; caller cancellation stops
+remaining cases and returns 130. A failed readiness operation returns failure. Error diagnostics
+use harness-owned assertions, typed failure categories or exception type names; raw provider
+exceptions, prompts, tool results and generated content are not report fields. The existing
+interactive prompt/agent commands continue to display their requested content.
+
+The [console instructions](../README.md#apple-console-harness) are the runnable entry point.
+Deterministic runner/scenario tests use controlled functions and inference doubles. Live runs are
+explicit development experiments and remain separate from commit gates and signed distribution
+qualification. No later successful run erases the previously recorded native continuation issue.
+
+Verification for this extension:
+
+- Connect restore/build: zero warnings/errors. Full solution tests: 515 passed, 3 opt-in Apple
+  tests skipped. This includes 16 new console harness test cases (21 console cases total), covering
+  metadata/aliases and credential isolation, invalid invocation, deadlines, cancellation, prerequisite
+  skips, failure retention/error redaction, snapshot requirements, stream/final-text consistency,
+  duplicate tool IDs and reversed-result replay. Formatting and the dependency vulnerability audit passed.
+- Two full live repetitions on macOS 26.7 arm64: 8 passed, 2 failed. Both repetitions passed text,
+  structured output, two identical tool calls/replay and cancellation/reuse. One managed run requested
+  two host lookups instead of one; another ended in ProviderFailure with one execution, one retained
+  result and no duplicate call ID. Neither failure was hidden or rerun automatically.
+- Three explicit focused managed repetitions: 2 passed, 1 ProviderFailure. Each run
+  executed and retained one tool result with no duplicate ID. Successful terminals were Unknown.
+- CLI checks passed for provider/setup display, readiness, model listing, default-model prompt and
+  agent calls, and streamed/final-text equality. A deliberately absent helper returned 3 with five
+  skipped cases; invalid repeat count returned 2 before generation.
+- Local evidence is in ignored `artifacts/apple-console-probe-2026-09-28.log`,
+  `artifacts/apple-console-agent-2026-09-28.log` and `artifacts/apple-console-smoke-2026-09-28.log`.
+
+## 12. Existing signing setup (2026-09-28)
+
+At the user's direction, inspected the sibling `tools/agent-ds` project's
+`scripts/build-macos-app.sh` and `scripts/macos-bundle.sh`. That workflow uses Developer ID signing,
+timestamps and hardened runtime, followed by optional notary submission, stapling and Gatekeeper
+assessment. Its configured identity is `Developer ID Application: Brandon Mathis (L469XNMGLQ)`;
+its keychain profile is `agent-ds-notary`.
+
+This Mac reports that valid signing identity and has `codesign`, `hdiutil`, `notarytool` and
+`stapler`. A read-only notary history request authenticated successfully with the existing profile.
+No credential values were displayed, copied or committed. These prerequisites are available for the
+helper's approved distribution workflow. This inspection did not sign a helper, submit a new
+notarization or establish clean-machine/oldest-OS compatibility; those acceptance checks remain open.

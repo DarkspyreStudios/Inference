@@ -2,11 +2,24 @@ using System.Text.Json;
 using Darkspyre.Inference.Common.LLM;
 using Darkspyre.Inference.Connect.ConsoleTester;
 using SecureStore;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Darkspyre.Inference.Connect.LLM.Bedrock.Tests;
 
 public sealed class ConsoleTesterTests
 {
+    private static ConsoleTesterProviders Providers { get; } = CreateProviders();
+    private static ConsoleInvocation Parse(string[] args) => ConsoleInvocation.Parse(args, Providers);
+
+    private static ConsoleTesterProviders CreateProviders()
+    {
+        var services = new ServiceCollection();
+        services.AddLlmConnect();
+        services.AddLlmConnectBedrock();
+        using var container = services.BuildServiceProvider();
+        return new(container.GetServices<ILlmClient>());
+    }
+
     [Fact]
     public async Task AttachmentSmokeToolReturnsProviderNeutralBytes()
     {
@@ -53,7 +66,7 @@ public sealed class ConsoleTesterTests
     [Fact]
     public void InvocationRequiresAndResolvesProvider()
     {
-        ConsoleInvocation invocation = ConsoleInvocation.Parse(
+        ConsoleInvocation invocation = Parse(
         [
             "prompt",
             "--model",
@@ -65,22 +78,22 @@ public sealed class ConsoleTesterTests
         Assert.Equal("prompt", invocation.Command);
         Assert.Equal("codex", invocation.Provider.Id);
         Assert.Equal(["--model", "gpt-test"], invocation.CommandArguments);
-        Assert.Throws<ArgumentException>(() => ConsoleInvocation.Parse(["status"]));
+        Assert.Throws<ArgumentException>(() => Parse(["status"]));
         Assert.Throws<ArgumentException>(() =>
-            ConsoleInvocation.Parse(["status", "--provider", "unknown"]));
+            Parse(["status", "--provider", "unknown"]));
 
-        ConsoleInvocation bedrock = ConsoleInvocation.Parse(
+        ConsoleInvocation bedrock = Parse(
             ["login", "--provider", "bedrock", "--profile", "test", "--region", "us-east-1"]);
         Assert.Equal(LlmTransport.AwsBedrockConverse, bedrock.Provider.Transport);
         Assert.Equal(
             ["--profile", "test", "--region", "us-east-1"],
             bedrock.CommandArguments);
 
-        ConsoleInvocation antigravity = ConsoleInvocation.Parse(
+        ConsoleInvocation antigravity = Parse(
             ["usage", "--provider", "agy"]);
         Assert.Equal(LlmTransport.GoogleAntigravityCli, antigravity.Provider.Transport);
 
-        ConsoleInvocation agentCore = ConsoleInvocation.Parse(
+        ConsoleInvocation agentCore = Parse(
         [
             "agent",
             "--provider",
@@ -95,7 +108,7 @@ public sealed class ConsoleTesterTests
             "arn:aws:bedrock-agentcore:us-east-1:123456789012:harness/test",
             agentCore.EndpointOverride);
         Assert.Equal(["--model", "default"], agentCore.CommandArguments);
-        Assert.Throws<ArgumentException>(() => ConsoleInvocation.Parse(
+        Assert.Throws<ArgumentException>(() => Parse(
             ["agent", "--provider", "agentcore", "--model", "default"]));
     }
 
@@ -115,8 +128,8 @@ public sealed class ConsoleTesterTests
     public async Task SecureConnectionSourcePersistsCredentialsAndRejectsStaleVersions()
     {
         var vault = new InMemoryCredentialStore();
-        var source = new SecureConnectionSource(vault);
-        ConsoleTesterProvider bedrock = ConsoleTesterProviders.Resolve("bedrock");
+        var source = new SecureConnectionSource(vault, Providers);
+        ConsoleTesterProvider bedrock = Providers.Resolve("bedrock");
         LlmConnection original = Assert.IsType<LlmConnection>(
             await source.GetConnectionAsync(bedrock.ConnectionId));
         string credential = new LlmCredential
@@ -129,7 +142,7 @@ public sealed class ConsoleTesterTests
             credential,
             original.Version);
 
-        var restartedSource = new SecureConnectionSource(vault);
+        var restartedSource = new SecureConnectionSource(vault, Providers);
         LlmConnection persisted = Assert.IsType<LlmConnection>(
             await restartedSource.GetConnectionAsync(bedrock.ConnectionId));
         Assert.NotEqual(original.Version, persisted.Version);
@@ -151,10 +164,10 @@ public sealed class ConsoleTesterTests
             {
                 OAuth = new LlmOAuthTokens { AccessToken = "legacy-catalog-token" }
             }.Serialize());
-        var source = new SecureConnectionSource(vault);
-        ConsoleTesterProvider codex = ConsoleTesterProviders.Resolve("codex");
-        ConsoleTesterProvider claude = ConsoleTesterProviders.Resolve("claude");
-        ConsoleTesterProvider bedrock = ConsoleTesterProviders.Resolve("bedrock");
+        var source = new SecureConnectionSource(vault, Providers);
+        ConsoleTesterProvider codex = Providers.Resolve("codex");
+        ConsoleTesterProvider claude = Providers.Resolve("claude");
+        ConsoleTesterProvider bedrock = Providers.Resolve("bedrock");
         LlmConnection bedrockConnection = Assert.IsType<LlmConnection>(
             await source.GetConnectionAsync(bedrock.ConnectionId));
         await source.SaveCredentialAsync(

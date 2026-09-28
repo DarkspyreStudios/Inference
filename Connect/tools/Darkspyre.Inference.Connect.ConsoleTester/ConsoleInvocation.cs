@@ -8,7 +8,7 @@ internal sealed record ConsoleInvocation(
     string[] CommandArguments,
     string? EndpointOverride)
 {
-    public static ConsoleInvocation Parse(string[] args)
+    public static ConsoleInvocation Parse(string[] args, ConsoleTesterProviders providers)
     {
         ArgumentNullException.ThrowIfNull(args);
         if (args.Length == 0)
@@ -18,6 +18,7 @@ internal sealed record ConsoleInvocation(
 
         string? providerId = null;
         string? harnessArn = null;
+        string? helper = null;
         var commandArguments = new List<string>();
         for (int index = 1; index < args.Length; index++)
         {
@@ -52,6 +53,15 @@ internal sealed record ConsoleInvocation(
                 }
                 harnessArn = args[index];
             }
+            else if (argument == "--helper")
+            {
+                if (helper is not null || ++index >= args.Length || string.IsNullOrWhiteSpace(args[index]))
+                    throw new ArgumentException("--helper requires one executable name or absolute path.", nameof(args));
+                helper = args[index];
+                if (helper.IndexOfAny(['\r', '\n', '\0']) >= 0
+                    || !Path.IsPathFullyQualified(helper) && (helper.Contains('/') || helper.Contains('\\')))
+                    throw new ArgumentException("--helper requires an executable name or absolute path.", nameof(args));
+            }
             else
             {
                 commandArguments.Add(argument);
@@ -61,13 +71,13 @@ internal sealed record ConsoleInvocation(
         if (string.IsNullOrWhiteSpace(providerId))
         {
             throw new ArgumentException(
-                $"{args[0]} requires --provider <{string.Join('|', ConsoleTesterProviders.All.Select(provider => provider.Id))}>.",
+                $"{args[0]} requires --provider <{string.Join('|', providers.All.Select(provider => provider.Id))}>.",
                 nameof(args));
         }
 
-        ConsoleTesterProvider provider = ConsoleTesterProviders.Resolve(providerId);
+        ConsoleTesterProvider provider = providers.Resolve(providerId);
         if (provider.Transport == LlmTransport.AwsBedrockAgentCore
-            && string.IsNullOrWhiteSpace(harnessArn))
+            && args[0] != "setup" && string.IsNullOrWhiteSpace(harnessArn))
         {
             throw new ArgumentException(
                 $"{args[0]} requires --harness-arn <arn> for provider agentcore.",
@@ -80,10 +90,15 @@ internal sealed record ConsoleInvocation(
                 nameof(args));
         }
 
+        if (helper is not null && provider.Transport != LlmTransport.AppleFoundationModels)
+            throw new ArgumentException("--helper is valid only for provider apple.", nameof(args));
+        if (args[0] == "apple-probe" && provider.Transport != LlmTransport.AppleFoundationModels)
+            throw new ArgumentException("apple-probe requires --provider apple.", nameof(args));
+
         return new ConsoleInvocation(
             args[0],
             provider,
             [.. commandArguments],
-            harnessArn);
+            helper ?? harnessArn);
     }
 }

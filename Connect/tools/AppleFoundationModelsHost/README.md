@@ -38,6 +38,11 @@ scripts and explicitly skip on unsupported platforms. Swift tests do not generat
 Live tests make no paid API calls, but exercise a nondeterministic OS-provided model and
 can report model/runtime failures. They are not the deterministic commit gate.
 
+For interactive prompts and repeatable scenarios through the public connector, use the existing
+[Connect console harness](../../README.md#apple-console-harness). Its `apple-probe` command can
+repeat chat, structured output, tool replay, managed continuation and cancellation checks, and
+keeps failed runs in its report.
+
 ## Protocol v1
 
 Launch directly with `--max-frame-bytes N`; no shell, socket or listening service.

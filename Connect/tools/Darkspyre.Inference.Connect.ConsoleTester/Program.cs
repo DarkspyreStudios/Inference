@@ -1,7 +1,9 @@
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Common.LLM;
+using Darkspyre.Inference.Common.Setup;
 using Darkspyre.Inference.Connect.LLM;
 using Darkspyre.Inference.Connect.LLM.Bedrock;
 using Microsoft.Extensions.DependencyInjection;
@@ -35,38 +37,38 @@ internal static class Program
             cancellation.Cancel();
         };
 
-        ConsoleInvocation invocation;
-        try
-        {
-            invocation = ConsoleInvocation.Parse(args);
-        }
-        catch (ArgumentException exception)
-        {
-            Console.Error.WriteLine($"Error: {exception.Message}");
-            WriteHelp();
-            return 2;
-        }
-
         var services = new ServiceCollection();
         services.AddSecureStore(options =>
         {
             options.ServiceName = CredentialServiceName;
             options.Label = "Darkspyre.Inference.Connect.LLM Console Tester";
         });
-        services.AddSingleton(invocation);
+        services.AddSingleton<ConsoleTesterProviders>();
+        services.AddSingleton(container => ConsoleInvocation.Parse(args,
+            container.GetRequiredService<ConsoleTesterProviders>()));
         services.AddSingleton<SecureConnectionSource>();
         services.AddSingleton<ILlmConnectionSource>(provider =>
             provider.GetRequiredService<SecureConnectionSource>());
         services.AddLlmConnect();
         services.AddLlmConnectBedrock();
         await using ServiceProvider provider = services.BuildServiceProvider();
-        LlmProviderService llms = provider.GetRequiredService<LlmProviderService>();
-        LlmAgentProviderService agent = provider.GetRequiredService<LlmAgentProviderService>();
-
         try
         {
+            ConsoleTesterProviders catalog = provider.GetRequiredService<ConsoleTesterProviders>();
+            if (args[0] == "providers")
+            {
+                if (args.Length != 1) throw new ArgumentException("providers does not accept options.");
+                foreach (var entry in catalog.All)
+                    Console.WriteLine($"{entry.Definition.Id}\t{entry.DisplayName}\t(alias: {entry.Id})");
+                return 0;
+            }
+            ConsoleInvocation invocation = provider.GetRequiredService<ConsoleInvocation>();
+            LlmProviderService llms = provider.GetRequiredService<LlmProviderService>();
+            LlmAgentProviderService agent = provider.GetRequiredService<LlmAgentProviderService>();
             return invocation.Command switch
             {
+                "setup" => await RunSetupAsync(llms, invocation, cancellation.Token),
+                "apple-probe" => await RunAppleProbeAsync(llms, agent, invocation, cancellation.Token),
                 "login" => await RunLoginAsync(llms, provider.GetRequiredService<ILlmConnectionSource>(), invocation, cancellation.Token),
                 "status" => await RunStatusAsync(llms, invocation, cancellation.Token),
                 "models" => await RunModelsAsync(llms, invocation, cancellation.Token),
@@ -91,13 +93,22 @@ internal static class Program
             Console.Error.WriteLine("Cancelled.");
             return 130;
         }
+        catch (InferenceException exception)
+        {
+            Console.Error.WriteLine($"Inference error [{exception.Code}].");
+            return 1;
+        }
         catch (LlmProviderException exception)
         {
             Console.Error.WriteLine($"Provider error [{exception.ProviderCode ?? "unknown"}]: {exception.Message}");
             return 1;
         }
-        catch (Exception exception) when (exception is ArgumentException
-                                              or FormatException
+        catch (ArgumentException exception)
+        {
+            Console.Error.WriteLine($"Error: {exception.Message}");
+            return 2;
+        }
+        catch (Exception exception) when (exception is FormatException
                                               or InvalidOperationException
                                               or NotSupportedException
                                               or IOException
@@ -115,6 +126,8 @@ internal static class Program
         ConsoleInvocation invocation,
         CancellationToken cancellationToken)
     {
+        if (invocation.Provider.Transport == LlmTransport.AppleFoundationModels)
+            throw new ArgumentException("Apple requires no login. Use status --provider apple [--helper <path>].");
         if (invocation.Provider.Transport == LlmTransport.GoogleAntigravityCli)
         {
             RequireNoCommandArguments(invocation);
@@ -190,13 +203,44 @@ internal static class Program
         CancellationToken cancellationToken)
     {
         RequireNoCommandArguments(invocation);
-        bool ready = await llms.IsAuthenticatedAsync(
-            invocation.Provider.ConnectionId,
-            cancellationToken);
-        Console.WriteLine(ready
+        return await CheckReadyAsync(llms, invocation, cancellationToken) ? 0 : 3;
+    }
+
+    private static async Task<bool> CheckReadyAsync(LlmProviderService llms,
+        ConsoleInvocation invocation, CancellationToken cancellationToken)
+    {
+        if (invocation.Provider.Transport == LlmTransport.AppleFoundationModels)
+            return await ConsoleSetup.CheckAsync(llms, invocation, Console.Error, cancellationToken) == SetupActionState.Completed;
+        bool ready = await llms.IsAuthenticatedAsync(invocation.Provider.ConnectionId, cancellationToken);
+        Console.Error.WriteLine(ready
             ? $"{invocation.Provider.DisplayName} is authenticated."
             : $"{invocation.Provider.DisplayName} is not authenticated. Run login --provider {invocation.Provider.Id}.");
-        return ready ? 0 : 3;
+        return ready;
+    }
+
+    private static Task<int> RunSetupAsync(LlmProviderService llms, ConsoleInvocation invocation, CancellationToken token)
+    {
+        RequireNoCommandArguments(invocation);
+        return ConsoleSetup.DescribeAsync(llms, invocation, Console.Out, token);
+    }
+
+    private static async Task<int> RunAppleProbeAsync(LlmProviderService llms, LlmAgentProviderService agents,
+        ConsoleInvocation invocation, CancellationToken token)
+    {
+        AppleProbeOptions options = AppleProbeOptions.Parse(invocation.CommandArguments, invocation.Provider.Definition.DefaultModelId);
+        SetupActionState readiness = await ConsoleSetup.CheckAsync(llms, invocation, Console.Error, token);
+        if (readiness == SetupActionState.Failed)
+        {
+            Console.WriteLine("FAIL readiness: helper check failed; no generation cases run.");
+            return 1;
+        }
+        Console.WriteLine($"Apple probe: Connect {typeof(LlmProviderService).Assembly.GetName().Version}; "
+            + $"{System.Runtime.InteropServices.RuntimeInformation.OSDescription}; "
+            + System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture);
+        var probe = new AppleProbe(llms.Bind(invocation.Provider.ConnectionId),
+            (sessionOptions, cancellation) => agents.StartSessionAsync(invocation.Provider.ConnectionId, sessionOptions, cancellation),
+            options.Model);
+        return await ProbeRunner.RunAsync(probe.Cases, options, readiness == SetupActionState.Completed, Console.Out, token);
     }
 
     private static async Task<int> RunModelsAsync(
@@ -205,14 +249,7 @@ internal static class Program
         CancellationToken cancellationToken)
     {
         RequireNoCommandArguments(invocation);
-        if (!await llms.IsAuthenticatedAsync(
-                invocation.Provider.ConnectionId,
-                cancellationToken))
-        {
-            Console.Error.WriteLine(
-                $"{invocation.Provider.DisplayName} is not authenticated. Run login --provider {invocation.Provider.Id}.");
-            return 3;
-        }
+        if (!await CheckReadyAsync(llms, invocation, cancellationToken)) return 3;
 
         IReadOnlyList<LlmModel> models = await llms.ListModelsAsync(
             invocation.Provider.ConnectionId,
@@ -243,15 +280,8 @@ internal static class Program
         ConsoleInvocation invocation,
         CancellationToken cancellationToken)
     {
-        PromptOptions options = ParsePromptOptions(invocation.CommandArguments);
-        if (!await llms.IsAuthenticatedAsync(
-                invocation.Provider.ConnectionId,
-                cancellationToken))
-        {
-            Console.Error.WriteLine(
-                $"{invocation.Provider.DisplayName} is not authenticated. Run login --provider {invocation.Provider.Id}.");
-            return 3;
-        }
+        PromptOptions options = ParsePromptOptions(invocation.CommandArguments, invocation.Provider.Definition.DefaultModelId);
+        if (!await CheckReadyAsync(llms, invocation, cancellationToken)) return 3;
 
         string prompt = await ReadPromptAsync();
         if (string.IsNullOrWhiteSpace(prompt))
@@ -274,6 +304,7 @@ internal static class Program
         };
 
         bool wroteOutput = false;
+        int exitCode = 1;
         await foreach (LlmStreamEvent streamEvent in llms.StreamAsync(
                            invocation.Provider.ConnectionId,
                            request,
@@ -301,11 +332,12 @@ internal static class Program
                         Console.WriteLine();
                     }
                     WriteCompletion(completion.Result);
+                    exitCode = completion.Result.Status is LlmCompletionStatus.Completed or LlmCompletionStatus.Unknown ? 0 : 1;
                     break;
             }
         }
 
-        return 0;
+        return exitCode;
     }
 
     private static async Task<int> RunAgentAsync(
@@ -314,23 +346,12 @@ internal static class Program
         ConsoleInvocation invocation,
         CancellationToken cancellationToken)
     {
-        if (invocation.Provider.Transport is not (
-                LlmTransport.OpenAiCodex
-                or LlmTransport.AnthropicClaudeCli
-                or LlmTransport.AwsBedrockAgentCore))
-        {
-            throw new NotSupportedException(
-                "Agent mode is available only for Codex, Claude, and AgentCore connections.");
-        }
-
-        PromptOptions options = ParsePromptOptions(invocation.CommandArguments);
-        if (!await llms.IsAuthenticatedAsync(invocation.Provider.ConnectionId, cancellationToken))
-        {
-            Console.Error.WriteLine(
-                $"{invocation.Provider.DisplayName} is not authenticated. "
-                + $"Run login --provider {invocation.Provider.Id}.");
-            return 3;
-        }
+        PromptOptions options = ParsePromptOptions(invocation.CommandArguments, invocation.Provider.Definition.DefaultModelId);
+        if (!await CheckReadyAsync(llms, invocation, cancellationToken)) return 3;
+        LlmProviderCapabilities capabilities = await llms.GetModelCapabilitiesAsync(
+            invocation.Provider.ConnectionId, options.Model, cancellationToken);
+        if (!capabilities.SupportsAgentSessions)
+            throw new NotSupportedException("The selected provider does not support agent sessions.");
 
         string prompt = await ReadPromptAsync();
         if (string.IsNullOrWhiteSpace(prompt))
@@ -344,10 +365,6 @@ internal static class Program
         IReadOnlyList<LlmAttachment> attachments = await ReadAttachmentsAsync(
             options.Attachments,
             cancellationToken);
-        LlmProviderCapabilities capabilities = await llms.GetModelCapabilitiesAsync(
-            invocation.Provider.ConnectionId,
-            options.Model,
-            cancellationToken);
         var tools = new List<LlmAgentToolDefinition> { CreateEchoTool() };
         LlmRichContentSupported richContent = capabilities.Agent.RichContentSupported;
         if (richContent.Images == LlmRichContentCarriage.Native)
@@ -359,11 +376,14 @@ internal static class Program
             new LlmAgentSessionOptions
             {
                 ModelId = options.Model,
-                Runtime = new() { WorkingDirectory = Environment.CurrentDirectory, Sandbox = LlmAgentSandboxMode.ReadOnly, ApprovalPolicy = LlmAgentApprovalPolicy.Never },
+                Runtime = invocation.Provider.Transport is LlmTransport.AnthropicClaudeCli or LlmTransport.AwsBedrockAgentCore
+                    ? new() { WorkingDirectory = Environment.CurrentDirectory, Sandbox = LlmAgentSandboxMode.ReadOnly, ApprovalPolicy = LlmAgentApprovalPolicy.Never }
+                    : null,
                 Tools = tools,
                 ToolHandler = ExecuteToolAsync
             },
             cancellationToken);
+        int exitCode = 1;
         await foreach (LlmAgentEvent agentEvent in session.RunTurnAsync(
                            new LlmAgentTurnRequest
                            {
@@ -375,9 +395,11 @@ internal static class Program
                            cancellationToken))
         {
             WriteAgentEvent(agentEvent);
+            if (agentEvent is LlmAgentTurnCompletedEvent completed)
+                exitCode = completed.Status is LlmAgentTurnStatus.Completed or LlmAgentTurnStatus.Unknown ? 0 : 1;
         }
 
-        return 0;
+        return exitCode;
     }
 
     private static LlmAgentToolDefinition CreateEchoTool()
@@ -522,9 +544,9 @@ internal static class Program
         }
     }
 
-    private static PromptOptions ParsePromptOptions(string[] args)
+    private static PromptOptions ParsePromptOptions(string[] args, string? defaultModel = null)
     {
-        string? model = null;
+        string? model = defaultModel;
         LlmReasoningLevel? effort = null;
         string? schemaPath = null;
         var attachments = new List<AttachmentOption>();
@@ -679,9 +701,16 @@ internal static class Program
     {
         Console.WriteLine(
             """
-            Darkspyre.Inference.Connect.ConsoleTester - direct smoke tests for Darkspyre.Inference.Connect.LLM subscription providers
+            Darkspyre.Inference.Connect.ConsoleTester - direct Connect LLM smoke tests
 
             Usage:
+              darkspyre-inference-connect-tester providers
+              darkspyre-inference-connect-tester setup --provider <provider-id-or-alias> [--helper <path>]
+              darkspyre-inference-connect-tester status --provider apple [--helper <path>]
+              darkspyre-inference-connect-tester models --provider apple [--helper <path>]
+              darkspyre-inference-connect-tester apple-probe --provider apple [--helper <path>] [--case all|text|structured|tools|agent|cancel] [--repeat 1..20] [--timeout-seconds 1..600] [--model <id>]
+              darkspyre-inference-connect-tester prompt --provider apple [--helper <path>] [--model <id>] [--schema <file>]
+              darkspyre-inference-connect-tester agent --provider apple [--helper <path>] [--model <id>]
               darkspyre-inference-connect-tester login  --provider <codex|claude|antigravity>
               darkspyre-inference-connect-tester login  --provider bedrock --profile <aws-profile> --region <aws-region>
               darkspyre-inference-connect-tester login  --provider agentcore --harness-arn <arn> --profile <aws-profile> --region <aws-region>
@@ -703,6 +732,12 @@ internal static class Program
               echo 'Test the echo tool with hello' | darkspyre-inference-connect-tester agent --provider claude --model sonnet
               echo 'Call darkspyre_inference_connect_attachment with kind image and confirm you received it.' | darkspyre-inference-connect-tester agent --provider codex --model gpt-5.6-terra
               echo 'Call darkspyre_inference_connect_attachment with kind document and quote its text.' | darkspyre-inference-connect-tester agent --provider claude --model sonnet
+
+            providers and setup display adapter-owned metadata without generation or authentication.
+            Apple needs its separately built helper and a ready on-device model; no login is required.
+            Apple defaults its model from provider metadata. --helper accepts a name on PATH or an absolute path.
+            apple-probe performs explicit local generation, reports each case and never retries a failed case.
+            Exit codes: 0 passed, 1 failed, 3 skipped prerequisites, 130 cancelled (invalid invocation: 2).
 
             Codex login uses ChatGPT device OAuth, stored in Darkspyre.SecureStore for direct requests.
             Claude and Antigravity login verify the official CLI's existing login. Their CLI

@@ -7,6 +7,7 @@ namespace Darkspyre.Inference.Connect.ConsoleTester;
 
 internal sealed class SecureConnectionSource(
     ICredentialStore credentials,
+    ConsoleTesterProviders providers,
     ConsoleInvocation? invocation = null) : ILlmConnectionSource
 {
     private const string CredentialPrefix = "provider-credential-";
@@ -17,7 +18,7 @@ internal sealed class SecureConnectionSource(
         string connectionId,
         CancellationToken cancellationToken = default)
     {
-        ConsoleTesterProvider? provider = ConsoleTesterProviders.FindByConnectionId(connectionId);
+        ConsoleTesterProvider? provider = providers.FindByConnectionId(connectionId);
         if (provider is null)
         {
             return null;
@@ -35,7 +36,7 @@ internal sealed class SecureConnectionSource(
         string expectedVersion,
         CancellationToken cancellationToken = default)
     {
-        ConsoleTesterProvider? provider = ConsoleTesterProviders.FindByConnectionId(connectionId);
+        ConsoleTesterProvider? provider = providers.FindByConnectionId(connectionId);
         if (provider is null)
         {
             throw new InvalidOperationException($"No LLM connection found for '{connectionId}'.");
@@ -43,7 +44,7 @@ internal sealed class SecureConnectionSource(
         if (!StoresHostCredential(provider.Transport))
         {
             throw new NotSupportedException(
-                $"{provider.DisplayName} owns its credential through the official CLI.");
+                $"{provider.DisplayName} does not use a host-stored credential.");
         }
 
         return Task.Run(
@@ -119,21 +120,21 @@ internal sealed class SecureConnectionSource(
             && invocation.EndpointOverride is not null
                 ? invocation.EndpointOverride
                 : provider.Endpoint;
-        ConsoleTesterProvider configured = provider with { Endpoint = endpoint };
-        return configured.CreateConnection(
-            ComputeVersion(configured, credential),
-            credential);
+        return provider.CreateConnection(
+            ComputeVersion(provider, endpoint, credential), credential) with
+        { Endpoint = endpoint };
     }
 
     private static string ComputeVersion(
         ConsoleTesterProvider provider,
+        string endpoint,
         string? credential)
     {
         string state = string.Join(
             '\0',
             provider.ConnectionId,
             provider.Transport.ToString(),
-            provider.Endpoint,
+            endpoint,
             credential ?? string.Empty);
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(state)));
     }
