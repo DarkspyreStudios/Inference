@@ -18,7 +18,7 @@ specifications.
 | Version line | `<net>.<release>.<minor>`: .NET generation, breaking-contract release, compatible tweak/fix |
 | Release model | `Common`, `Connect`, `Tensor`, and `UI.Settings` publish together at the one version declared in `/Directory.Build.props` |
 | Primary branch | `master` |
-| Lifecycle stage | Four-package `11.11.0-rc.1` published privately |
+| Lifecycle stage | Four-package `11.12.0-rc.1` published privately |
 | Jira project and parent | TBD |
 | Jira subject label | TBD |
 
@@ -860,3 +860,11 @@ Bedrock signed reasoning; its existing counts-only behavior remains.
 Verification: Connect 553 passed / 3 existing conditional skips; Tensor 346 passed; UI 65 passed
 (Common repeats across solutions). All solutions passed restore, zero-warning build, format checks
 and transitive vulnerability audits. No package artifacts, version bump or publication were performed.
+
+## Automated private release 11.12.0-rc.1
+
+Published all four packages from `1190ec5fbbc9df006857bfeadc6adcbd7abbf13b` using `deploy-major.sh`.
+Authenticated restores, Debug/Release builds and tests, formatting, vulnerability audits,
+archive boundaries and local/fresh-feed consumer checks passed. Downloaded archives match
+the verified local archives; feed readback confirms private visibility. Source is tagged
+`v11.12.0-rc.1`. No model weights or paid inference were used as verification gates.
