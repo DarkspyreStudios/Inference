@@ -1,9 +1,9 @@
 # Google Vertex AI connector: technical mapping
 
 **Ticket:** [DSA-61](https://darkspyre.atlassian.net/browse/DSA-61), under DSA-57.  
-**Date:** 2026-09-28. **Phase:** source implementation on `dsa-61-vertex`; live qualification outstanding.
+**Date:** 2026-09-28. **Phase:** merged to master; 11.12.0-rc.1 release authorized; live qualification outstanding.
 **Authorization:** implementation and contract changes required for parity are authorized.
-The host must migrate persisted history (confirmed by the user). These changes are not released.
+The host must migrate persisted history (confirmed by the user). Publication is authorized for host migration testing.
 
 ### Implementation checkpoint
 
@@ -11,7 +11,7 @@ The source implementation includes the Common continuation envelope, all existin
 projections, typed Google setup, Vertex authentication/routing, Gemini/Claude protocols and the
 ConsoleTester probe. Deterministic tests cover protocol and migration behavior. Live Vertex
 qualification has not been run; catalog visibility does not establish invocation access.
-No package release is included in this work.
+The coordinated breaking-contract release target is 11.12.0-rc.1. Publication evidence is recorded in `.roles/project.md`.
 
 Verification (2026-09-28): Connect 553 passed / 3 existing conditional skips (27 Vertex fixtures);
 Tensor 346 passed; UI 65 passed. Shared Common tests occur in each solution. All three solutions
@@ -294,7 +294,7 @@ and principal must participate in binding. Do not add Gemini JSON parsing to hos
 This is a public contract migration. Inventory exported types, serialized context captures and external
 consumer handoffs before implementation. No second internal state mechanism or implicit conversation
 cache. Decide the published-contract compatibility policy explicitly; a breaking coordinated release
-and capture-format revision may be required. This document does not authorize a release.
+and capture-format revision may be required. The user subsequently authorized the coordinated major release for host testing.
 
 ## 7. Other contract deltas
 

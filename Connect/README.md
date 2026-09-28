@@ -18,7 +18,7 @@ The package also includes `Darkspyre.Inference.Connect.TTS` for external
 PocketTTS HTTP synthesis and `Darkspyre.Inference.Connect.Audio` for external TangoFlux generation.
 They are included in the Connect product project, not separate NuGets. See
 [PocketTTS integration](#pockettts-speech) and
-[TangoFlux integration](#tangoflux-audio). The released package baseline is **11.11.0-rc.1**; the Vertex assembly and contract migration below are unreleased.
+[TangoFlux integration](#tangoflux-audio). The coordinated package version is **11.11.0-rc.1**.
 
 The packages target .NET 11. Credentials
 for direct API transports remain owned by the host through `ILlmConnectionSource`; the connector
@@ -51,9 +51,9 @@ Google Vertex AI support for Gemini and Claude is implemented in source under DS
 Register `AddLlmConnectVertex()` alongside `AddLlmConnect()` and supply a typed `LlmConnection.Vertex`
 with project, location and authentication mode. The adapter assembly is included by the Connect
 package project. See the [technical mapping](docs/google-vertex-ai-tech-design.md) for reviewed model
-profiles and limits. Live cloud qualification and a coordinated breaking-contract release remain.
+profiles and limits. Live cloud qualification remains; the shared contract requires host migration.
 
-### Unreleased contract migration
+### Contract migration
 
 Continuation state is now Common's opaque `LlmContinuationState`, carried by both portable and
 Connect messages/results as `ContinuationState`. Captures and envelopes use format 2; old

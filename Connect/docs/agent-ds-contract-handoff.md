@@ -3,16 +3,16 @@
 > and handling the provider result. Do not translate Unknown into Unsupported or silently change
 > `Strict=true` to false. Ordinary tool definitions remain non-strict by default.
 
-> **DSA-61 implementation in progress:** host migration is required and approved. DSA-68 must
+> **DSA-61 / 11.12.0-rc.1 migration:** host migration is required and approved. DSA-68 must
 > migrate stored messages and captures before adopting the new package. The new capture/envelope
 > version is 2; unversioned captures and the old `ResponseState` member are rejected. Preserve
-> original records during migration. No package has been released for this change.
+> original records during migration. The user authorized publication for host migration testing.
 
 # Agent DS: managed-agent contract handoff
 
 ## Pending: shared LLM contract migration (DSA-61 / DSA-68)
 
-**Implemented in source; no released version yet.**
+**Coordinated release target: 11.12.0-rc.1.**
 [DSA-61's technical mapping](google-vertex-ai-tech-design.md#mandatory-migration-of-every-connector)
 requires migration of every existing LLM connector, both Common/Connect bridges, managed/native
 session projections and Tensor consumers. Continuation state, tool controls, usage details and model
@@ -22,7 +22,7 @@ access evidence must survive each supported boundary. Non-strict tool defaults r
 references, transcript and capture persistence, explicit state omission on switching, compaction,
 capability-driven controls, usage display and provider-owned Google setup with protected credentials.
 It also owns the consumer inventory and stored-format migration. The approved format is version 2;
-the coordinated release version has not been selected. Existing released
+the coordinated release version is 11.12.0-rc.1. Existing released
 contract guidance below remains the integration baseline until that coordinated migration.
 
 ### Required host adoption
