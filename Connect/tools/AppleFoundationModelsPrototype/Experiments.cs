@@ -9,7 +9,7 @@ namespace AppleFoundationModelsPrototype;
 
 internal sealed record Evidence(string Outcome, object Details);
 
-internal static class Experiments
+internal static partial class Experiments
 {
     internal const string Options = "{\"temperature\":0,\"maximum_response_tokens\":128}";
     internal static readonly string[] Names =
@@ -33,11 +33,14 @@ internal static class Experiments
             "schema-nested" => await SchemaAsync(model, true).ConfigureAwait(false),
             "standard-schema" => await StandardSchemaAsync(model).ConfigureAwait(false),
             "token-limit" => await TokenLimitAsync(model).ConfigureAwait(false),
+            "context-overflow" => await ContextOverflowAsync(model).ConfigureAwait(false),
             "cancel-before" => await CancelBeforeAsync(model).ConfigureAwait(false),
             "cancel-stream" => await StreamAsync(model, true).ConfigureAwait(false),
             "tool-delayed" or "tool-immediate" or "tool-duplicate" or "tool-cancel" or "tool-cancel-late"
-                or "tool-roundtrip" or "tool-roundtrip-repeat"
+                or "tool-roundtrip" or "tool-roundtrip-repeat" or "tool-session-overlap"
                 => await ToolAsync(model, name).ConfigureAwait(false),
+            "tool-batch-distinct" or "tool-batch-identical" or "tool-batch-cancel" or "tool-batch-replay" or "tool-concurrent-sessions"
+                => await BatchToolsAsync(model, name).ConfigureAwait(false),
             _ => throw new ArgumentException("Unknown experiment.", nameof(name))
         };
     }
@@ -286,6 +289,11 @@ internal static class Experiments
         try
         {
             string json = Native.TakeString(Native.FMGeneratedContentGetJSONString(arguments));
+            if (_batchCalls is { } batch)
+            {
+                batch.Record(callId, json);
+                return;
+            }
             _toolArguments = json;
             Interlocked.Increment(ref _toolCallbacks);
             Console.WriteLine(JsonSerializer.Serialize(new { progress = "tool-called", callId, arguments = json }));
@@ -302,7 +310,11 @@ internal static class Experiments
             }
             ToolCalled.TrySetResult(callId);
         }
-        catch (Exception error) { ToolCalled.TrySetException(error); }
+        catch (Exception error)
+        {
+            if (_batchCalls is { } batch) batch.Fail(error);
+            else ToolCalled.TrySetException(error);
+        }
         finally { Native.FMRelease(arguments); }
     }
 
@@ -323,6 +335,35 @@ internal static class Experiments
         using var task = new NativeReference(Native.FMLanguageModelSessionRespond(
             session.Pointer, prompt.Pointer, Options, operation.Id, NativeOperation.TextCallback));
         uint callId = await ToolCalled.Task.WaitAsync(TimeSpan.FromSeconds(20)).ConfigureAwait(false);
+        if (mode == "tool-session-overlap")
+        {
+            bool respondingBeforeSecond = Native.FMLanguageModelSessionIsResponding(session.Pointer);
+            NativeReply rejected;
+            bool originalCompletedAfterRejection;
+            bool respondingAfterRejection;
+            try
+            {
+                rejected = await RespondAsync(session, "Reply with exactly SECOND.").ConfigureAwait(false);
+                originalCompletedAfterRejection = operation.Completion.IsCompleted;
+                respondingAfterRejection = Native.FMLanguageModelSessionIsResponding(session.Pointer);
+            }
+            finally { Native.FMBridgedToolFinishCall(tool.Pointer, callId, "ORCHID-729"); }
+            NativeReply original = await operation.WaitAsync().ConfigureAwait(false);
+            bool idle = !Native.FMLanguageModelSessionIsResponding(session.Pointer);
+            bool overlapExpected = respondingBeforeSecond && rejected.Status == 8 && !originalCompletedAfterRejection && original.Status == 0
+                && original.Content.Contains("ORCHID-729", StringComparison.Ordinal) && idle && operation.TerminalCallbacks == 1;
+            return new(!overlapExpected ? "unexpected" : respondingAfterRejection ? "observed" : "limitation",
+                new
+                {
+                    respondingBeforeSecond,
+                    rejected,
+                    originalCompletedAfterRejection,
+                    respondingAfterRejection,
+                    original,
+                    idle,
+                    operation.TerminalCallbacks
+                });
+        }
         if (mode is "tool-roundtrip" or "tool-roundtrip-repeat")
             return await ToolRoundTripAsync(model, tool, session, task, operation, callId,
                 1, mode == "tool-roundtrip-repeat", []).ConfigureAwait(false);
@@ -543,5 +584,32 @@ internal static class Experiments
     {
         try { await task.WaitAsync(timeout).ConfigureAwait(false); return true; }
         catch (TimeoutException) { return false; }
+    }
+
+    private static async Task<Evidence> ContextOverflowAsync(NativeReference model)
+    {
+        using NativeReference session = Session(model, "Answer concisely.");
+        JsonNode before = JsonNode.Parse(Transcript(session))!;
+        using NativeReference prompt = Prompt(string.Concat(Enumerable.Repeat("garden flower path tree ", 3000)));
+        using var count = new NativeOperation();
+        using var countTask = new NativeReference(Native.FMSystemLanguageModelTokenCountForPrompt(
+            model.Pointer, prompt.Pointer, count.Id, NativeOperation.TokenCallback));
+        NativeReply tokenCount = await count.WaitAsync().ConfigureAwait(false);
+        using var operation = new NativeOperation();
+        using var task = new NativeReference(Native.FMLanguageModelSessionRespond(
+            session.Pointer, prompt.Pointer, Options, operation.Id, NativeOperation.TextCallback));
+        NativeReply reply = await operation.WaitAsync().ConfigureAwait(false);
+        bool transcriptUnchanged = JsonNode.DeepEquals(before, JsonNode.Parse(Transcript(session)));
+        bool idle = !Native.FMLanguageModelSessionIsResponding(session.Pointer);
+        return new(reply.Status == 1 && transcriptUnchanged && idle && operation.TerminalCallbacks == 1 ? "observed" : "unexpected",
+            new
+            {
+                contextSize = Native.FMSystemLanguageModelGetContextSize(model.Pointer),
+                tokenCount,
+                reply,
+                transcriptUnchanged,
+                idle,
+                operation.TerminalCallbacks
+            });
     }
 }

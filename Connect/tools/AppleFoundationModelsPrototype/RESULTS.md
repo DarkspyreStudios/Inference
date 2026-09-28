@@ -165,6 +165,9 @@ to transcript IDs by a single matching name/argument pair also does not establis
 safe mapping for identical or parallel calls. That needs its own native identity
 contract before generalization.
 
+The later batch/identity probes below establish narrower ways to avoid or resolve
+that ambiguity; argument matching itself remains insufficient.
+
 Apple's newer [transcript error policy](https://developer.apple.com/documentation/foundationmodels/transcripterrorhandlingpolicy)
 and [tool-calling mode](https://developer.apple.com/documentation/foundationmodels/generationoptions/toolcallingmode-swift.struct)
 APIs are marked available from macOS 27 in the official documentation. Neither
@@ -210,13 +213,88 @@ The result was `observed` under the accepted internal-turn rule.
 
 The prototype selects the single unsettled transcript call by excluding IDs with
 existing tool results. It does not select an old call by repeated name/arguments.
-The two native UUIDs were unique despite identical arguments. This demonstrates
-sequential repeated-call correlation; simultaneous identical calls, batches and
-cross-process replay are still untested. The host-facing history here is a research
+The two native UUIDs were unique despite identical arguments. This demonstrated
+sequential repeated-call correlation; the later probes below extend coverage to
+fixed two-call batches. Cross-process replay is still untested. The host-facing history here is a research
 projection of native JSON, not an implemented Common message conversion.
 
 Managed build completed with zero warnings/errors; format verification and the
 dependency vulnerability audit passed. No native patch or shipping code changed.
+
+## Parallel calls, identity and batch handoff
+
+The batch experiments required two callbacks to remain pending simultaneously.
+They did not supply a first result merely to induce a second call. All five live
+cases reached that overlap condition on the tested macOS 26.7 runtime.
+
+| Case | Observation | Consequence |
+| --- | --- | --- |
+| Distinct arguments in one request | `alpha` and `bravo` were pending together. Results supplied in reverse callback-delivery order reached the corresponding native UUIDs; the answer contained both codes. | Parallel in-turn result routing works for this case. |
+| Identical arguments in one request | Two `sample` calls had distinct bridge integers and native UUIDs. Both results were recorded and used, but each callback's arguments matched both native calls. | In-turn execution works; name/argument matching cannot establish callback-to-transcript identity. The probe records that specific limitation. |
+| Cancel a pending batch | Cancellation settled in about 3 ms with status 255 while both calls awaited results. Late results did not restart generation or duplicate completion. | The existing lifecycle patch handles this two-call cancellation case. |
+| Concurrent sessions sharing one tool | Both sessions awaited their separate calls simultaneously. Reverse-order completion delivered `ORCHID-729` to the alpha session and `LANTERN-842` to bravo. | The shared tool registry isolated the tested pending results across sessions. |
+| Chat replay of identical calls | Captured the entire native batch, cancelled/disposed the original request/session, and restored two UUID-correlated host results in reverse transcript-call order. Both results were consumed without tool re-execution. | Whole-batch chat handoff need not join the bridge callback integer to each transcript UUID. |
+
+Every settled request had one terminal callback and an idle native session. No
+callbacks entered removed managed operation contexts. Late/duplicate result
+submissions were also exercised. Callback scheduling order and native transcript
+order must not be assumed to match.
+
+### Swift identity evidence
+
+`native/ToolIdentityProbe.swift` inspected two identical calls while both were
+pending, directly through Swift. Each callback argument had a non-null,
+distinct `GeneratedContent.id`. Comparing those values by Swift equality matched
+each callback to exactly one `Transcript.ToolCall.arguments.id`, yielding the
+corresponding native tool-call UUID without comparing argument text or order.
+Cancellation settled afterward; the session was idle.
+
+This provides a candidate for a native wrapper to expose identity when callback
+events must correlate with transcript entries. The reviewed C header exports
+argument JSON, not this generation identity. No new C export was implemented.
+`GenerationID` hashes or debug strings are not proposed as persistent IDs, and a
+missing/ambiguous ID must not fall back to guessed correspondence. The observation
+does not establish identity stability across OS versions or transcript serialization.
+
+### Whole-batch chat replay
+
+The chat batch probe used the native transcript as the source of the host-visible
+calls. It supplied `BATCH-1-729` and `BATCH-2-729` by their native UUIDs, in reverse
+order, and restored the transcript exactly. The model consumed both values; all
+supplied entries remained unchanged, no host tool ran again, and one empty internal
+user entry was added under the accepted working rule. Original callback integers
+were used only for the cancellation/late-result test, not to assign host results.
+
+This is a fixed two-call proof of feasibility. General detection of a complete
+batch, additional batches generated during replay, tool failures, strict tool-choice
+controls and the production Common history conversion remain unimplemented. No
+capability flags have been enabled from this evidence.
+
+## Request-boundary errors
+
+`context-overflow` counted a synthetic prompt at 12,009 tokens against the reported
+4,096-token window. Generation returned status 1, `Exceeded model context window size`.
+The transcript stayed unchanged, one terminal callback arrived and the session was
+idle. This verifies basic explicit overflow rejection, not a complete accounting
+model for instructions, schemas, tools and future output.
+
+`tool-session-overlap` issued a second request while the first awaited its tool.
+Apple rejected the second with status 8. The first later consumed its result and
+completed successfully, but the native `isResponding` flag became false immediately
+after the rejection while that first request was still incomplete. A targeted
+follow-up recorded the flag and managed completion independently and confirmed
+this state-reporting limitation.
+
+The adapter must own its active-request state and serialize each session until the
+previous request settles. The native flag alone is insufficient as an admission or
+disposal gate. No framework/native patch was introduced for this observation.
+
+The initial overlap probe is preserved as `unexpected`; the instrumented follow-up
+records `limitation`. The other boundary case passed, and the original immediate-tool
+control still passed after adding the batch recorder. Managed build, format verification
+and the dependency vulnerability audit passed. The Swift identity probe ran under
+Swift 6 with warnings treated as errors. Native dependency sources and shipping
+code were unchanged in this test round.
 
 ## Loading and distribution evidence
 
@@ -248,16 +326,18 @@ Other unresolved items:
   native callback test operates within one request. The chat replay probe above
   consumed supplied results while allowing a known empty internal user turn under
   the working design choice. The agent-session lane needs its own mapping.
-- Failure propagation from a host tool, batched/parallel calls, forced tool choice
-  and rich tool results were not tested. Sequential repeated calls were tested;
-  simultaneous identical-call correlation still needs a native identity contract.
+- Failure propagation from a host tool, forced tool choice and rich tool results
+  were not tested. Fixed two-call batches, identical calls and concurrent sessions
+  were tested; general batch boundaries and any required native identity export
+  still need an agreed contract.
 - Common-to-Apple transcript conversion, cross-version replay, arbitrary JSON Schema,
   unsupported constraints and strict fallback policy remain unimplemented.
 - The reviewed C exports lack structured streaming; neither adding that export nor
   representing it as buffered output has been approved.
 - Exact truncation/usage reporting is unavailable in the tested API; its Connect
-  representation remains to settle. Refusals, context overflow, unsupported-platform
-  discovery, readiness failures and production resource lifetimes remain to verify.
+  representation remains to settle. Basic context overflow was rejected explicitly;
+  complete context accounting, refusals, unsupported-platform discovery, readiness
+  failures and production resource lifetimes remain to verify.
 
 ## Reproduction and local evidence
 
@@ -282,6 +362,15 @@ For this run they are in:
 - `.artifacts/tool-roundtrip-repeat.json`: two sequential requests with identical
   arguments, distinct call IDs/results and projected history excluding known
   adapter-generated empty turns.
+- `.artifacts/batch-results.json`: original four-case batch suite (including the
+  explicit identical-argument identity limitation).
+- `.artifacts/tool-batch-replay-batch-followup.json`: whole-batch chat replay.
+- `.artifacts/tool-identity-swift.json`: direct Swift pending-call identity comparison.
+- `.artifacts/tool-immediate-batch-followup.json`: original immediate-tool control.
+- `.artifacts/context-overflow.json`: explicit overflow rejection and unchanged transcript.
+- `.artifacts/tool-session-overlap.json`: initial unexpected native responding flag.
+- `.artifacts/tool-session-overlap-followup.json`: separate native flag/managed completion
+  observations confirming the limitation.
 
 These paths refer to this prototype directory. They are local evidence, not required
 checked-in or shipped assets. This document records the durable findings.

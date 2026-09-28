@@ -80,12 +80,14 @@ limits, cancellation and native tool callbacks. A single case can be repeated:
 dotnet run --no-build --project AppleFoundationModelsPrototype.csproj -- worker .artifacts/upstream/foundation-models-c/.build/release/libFoundationModels.dylib cancel-stream
 ```
 
-Case names are in `Experiments.Names` and `Experiments.LifecycleNames`. The lifecycle
+Case names are in `Experiments.Names`, `Experiments.LifecycleNames` and
+`Experiments.BatchNames`, with additional worker-only cases below. The lifecycle
 suite also checks duplicate immediate results and late results after cancellation.
 Reports contain only the built-in synthetic prompts and native observations.
 Machine-generated logs and downloaded/build
 artifacts stay in `.artifacts/`. Default reports are `.artifacts/suite-results.json`
-and `.artifacts/lifecycle-results.json`; pass a third suite argument to preserve
+and `.artifacts/lifecycle-results.json` (`batches` writes `.artifacts/batches-results.json`);
+pass a third suite argument to preserve
 another run under a different name.
 
 Outcomes:
@@ -188,6 +190,57 @@ tool call is `inconclusive`.
 The original exact-turn-preservation result remains historical evidence. Current
 `observed` results mean this narrow research mapping passed; they do not enable
 chat tools or provide a production Common-to-Apple converter.
+
+## Parallel tools and request boundaries
+
+The `batches` suite covers two distinct calls in one request, two identical calls,
+cancellation of two pending calls, two concurrent sessions sharing one tool, and
+chat replay of an identical-call batch with results supplied in reverse order.
+It requires two callbacks to be pending together; failing to reach that state is
+`inconclusive`, never proof of parallel support. It waits up to 20 seconds for the
+first callback and three more for the second, then cancels incomplete experiments.
+
+```bash
+python3 - <<'PY'
+import json
+import subprocess
+from pathlib import Path
+metadata = json.loads(Path('.artifacts/patched.json').read_text())
+subprocess.run(['dotnet', 'bin/Debug/net11.0/AppleFoundationModelsPrototype.dll',
+                'batches', metadata['libraryPath'],
+                '.artifacts/batches-latest-results.json'], check=True)
+PY
+```
+
+`callbackDeliveryOrder` is the order observed by the reader. Results are completed
+in reverse order; the callback recorder's concurrent queue order is not used as a
+native transcript identity. Matching identical arguments yields two candidates and
+is recorded as a limitation. Batch chat replay uses transcript call UUIDs directly,
+so it does not require that ambiguous callback-to-transcript join.
+
+The separate direct Swift `native/ToolIdentityProbe.swift` holds two identical calls
+and compares each callback argument's `GenerationID` with transcript argument IDs.
+It reports missing/ambiguous identity without guessing. Run with a bounded parent:
+
+```bash
+python3 - <<'PY'
+import subprocess
+from pathlib import Path
+result = subprocess.run(['xcrun', 'swift', '-swift-version', '6', '-warnings-as-errors',
+                         'native/ToolIdentityProbe.swift'],
+                        capture_output=True, text=True, timeout=45)
+Path('.artifacts/tool-identity-swift.json').write_text(result.stdout)
+print(result.stdout)
+print(result.stderr)
+raise SystemExit(result.returncode)
+PY
+```
+
+Two additional worker-only cases use the same bounded command pattern as the chat
+probe: `context-overflow` sends a synthetic prompt larger than the reported context
+window and checks rollback; `tool-session-overlap` issues a second request while
+the first awaits a tool, observes rejection and checks the first still completes.
+The latter records native `isResponding` separately from actual request completion.
 
 ## Local verification
 
