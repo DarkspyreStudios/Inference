@@ -135,6 +135,50 @@ generation-usage field. An exact truncation reason remains unavailable in the te
 API. No punctuation heuristic, prompt-token recount or invented usage value was
 substituted. The connector design must represent this limitation explicitly.
 
+## Chat tool round-trip: transcript capture and replay
+
+Connect's `SupportsToolUse` requires returning tool calls and accepting their results
+in a later chat request; `SupportsAgentToolUse` describes callbacks within a running
+agent turn. The existing lifecycle experiments established the callback behavior.
+The `tool-roundtrip` follow-up tests the separate chat question on the same macOS
+26.7 runtime and patched dependency.
+
+| Stage | Observation |
+| --- | --- |
+| Capture during pending tool | Transcript contained instructions, the user prompt and one structured tool call. Its arguments exactly matched the callback arguments. |
+| Call identity | The bridge callback ID was the local integer `1`; the transcript's tool-call ID was a separate UUID. Those IDs must not be treated as interchangeable. |
+| Cancel original request | Cancellation settled once and the session became idle. Its transcript rolled back to the instructions entry, removing the current user prompt and pending call. |
+| Dispose and restore | The original native task and session were disposed. The captured transcript plus a synthetic host result, correlated by the native UUID, was accepted by a fresh session with the tool registered. Exported JSON matched exactly. |
+| Continue | The model returned `ORCHID-729` with status 0 and no second tool invocation. The original transcript entries and appended tool result remained unchanged. |
+| Additional turn | Responding with an empty composed prompt inserted one new user entry with an empty content array before the assistant answer. |
+| Completion | Original cancellation and resumed response each produced one terminal callback. The resumed session was idle; no callbacks entered removed managed contexts. |
+
+The result is `limitation`: a single tool result can be replayed without retaining
+the original live session, but exact provider-side turn preservation was not achieved.
+The internal empty user entry is an explicit design question, not silently accepted
+or filtered out. No Common history converter was implemented, and this observation
+does not enable chat tool support or settle handling of parallel calls.
+
+Pending-call capture happened before cancellation; exporting only the settled
+cancelled session would have lost the call in this experiment. Mapping callback IDs
+to transcript IDs by a single matching name/argument pair also does not establish a
+safe mapping for identical or parallel calls. That needs its own native identity
+contract before generalization.
+
+Apple's newer [transcript error policy](https://developer.apple.com/documentation/foundationmodels/transcripterrorhandlingpolicy)
+and [tool-calling mode](https://developer.apple.com/documentation/foundationmodels/generationoptions/toolcallingmode-swift.struct)
+APIs are marked available from macOS 27 in the official documentation. Neither
+appears in the installed macOS 26 SDK interface. They cannot be assumed to solve
+the proposed macOS 26 baseline. No newer OS/SDK was installed or tested, and the
+minimum supported OS remains a design decision.
+
+Verification for this follow-up: the new live probe completed and recorded the
+limitation; immediate-tool and cancellation-with-late-results controls both remained
+`observed`, with one terminal callback and no callbacks into removed contexts.
+Managed build completed with zero warnings/errors; format verification and the
+dependency vulnerability audit passed. Native sources and shipping code were not
+changed by this follow-up.
+
 ## Loading and distribution evidence
 
 Copying the managed DLL, runtime/dependency metadata and compiled dylib to a separate
@@ -162,8 +206,9 @@ does not reclassify the provider as Tensor or select a helper architecture.
 Other unresolved items:
 
 - Connect chat returns tool calls for later host result submission. The successful
-  native callback test operates within one request. Chat round-trip semantics and
-  the existing agent-session lane still need separate decisions.
+  native callback test operates within one request. The chat replay probe above
+  consumed a supplied result but inserted an empty user turn; acceptance of that
+  internal entry remains to settle. The agent-session lane needs its own mapping.
 - Failure propagation from a host tool, multiple/parallel calls, forced tool choice
   and rich tool results were not tested. The patched lifecycle experiments above
   establish feasibility for single-tool completion/cancellation only.
@@ -191,6 +236,10 @@ For this run they are in:
 - `.artifacts/cancel-intent-baseline.json`: managed cancellation intent with the
   original bridge's status-0 stream completion.
 - `.artifacts/truncation-swift.json`: direct Swift output-limit/isComplete evidence.
+- `.artifacts/tool-roundtrip.json`: pending-call capture, cancellation rollback and
+  replay into a new session, including the extra empty user entry.
+- `.artifacts/chat-tool-control-results.json`: immediate-tool and cancellation
+  controls after adding the round-trip probe.
 
 These paths refer to this prototype directory. They are local evidence, not required
 checked-in or shipped assets. This document records the durable findings.

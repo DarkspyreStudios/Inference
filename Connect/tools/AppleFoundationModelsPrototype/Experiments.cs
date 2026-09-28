@@ -35,7 +35,7 @@ internal static class Experiments
             "token-limit" => await TokenLimitAsync(model).ConfigureAwait(false),
             "cancel-before" => await CancelBeforeAsync(model).ConfigureAwait(false),
             "cancel-stream" => await StreamAsync(model, true).ConfigureAwait(false),
-            "tool-delayed" or "tool-immediate" or "tool-duplicate" or "tool-cancel" or "tool-cancel-late"
+            "tool-delayed" or "tool-immediate" or "tool-duplicate" or "tool-cancel" or "tool-cancel-late" or "tool-roundtrip"
                 => await ToolAsync(model, name).ConfigureAwait(false),
             _ => throw new ArgumentException("Unknown experiment.", nameof(name))
         };
@@ -258,6 +258,8 @@ internal static class Experiments
 
     private static nint _activeTool;
     private static string _toolMode = string.Empty;
+    private static string _toolArguments = string.Empty;
+    private static int _toolCallbacks;
     private static readonly TaskCompletionSource<uint> ToolCalled = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private static readonly TaskCompletionSource ToolFinished = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private static unsafe nint ToolCallback => (nint)(delegate* unmanaged[Cdecl]<nint, uint, void>)&OnTool;
@@ -270,6 +272,12 @@ internal static class Experiments
             (nint)(&pointer), 1));
     }
 
+    private static unsafe NativeReference RestoreToolSession(NativeReference transcript, NativeReference model, NativeReference tool)
+    {
+        nint pointer = tool.Pointer;
+        return new(Native.FMLanguageModelSessionCreateFromTranscript(transcript.Pointer, model.Pointer, (nint)(&pointer), 1));
+    }
+
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
     [SuppressMessage("Design", "CA1031", Justification = "Managed exceptions must not cross a native callback boundary.")]
     private static void OnTool(nint arguments, uint callId)
@@ -277,12 +285,19 @@ internal static class Experiments
         try
         {
             string json = Native.TakeString(Native.FMGeneratedContentGetJSONString(arguments));
+            _toolArguments = json;
+            Interlocked.Increment(ref _toolCallbacks);
             Console.WriteLine(JsonSerializer.Serialize(new { progress = "tool-called", callId, arguments = json }));
             if (_toolMode is "tool-immediate" or "tool-duplicate")
             {
                 Native.FMBridgedToolFinishCall(_activeTool, callId, "ORCHID-729");
                 if (_toolMode == "tool-duplicate") Native.FMBridgedToolFinishCall(_activeTool, callId, "WRONG-DUPLICATE");
                 ToolFinished.TrySetResult();
+            }
+            else if (_toolMode == "tool-roundtrip-replay")
+            {
+                // A second invocation must settle, but must not be mistaken for consuming the supplied history result.
+                Native.FMBridgedToolFinishCall(_activeTool, callId, "UNEXPECTED-REEXECUTION");
             }
             ToolCalled.TrySetResult(callId);
         }
@@ -307,6 +322,8 @@ internal static class Experiments
         using var task = new NativeReference(Native.FMLanguageModelSessionRespond(
             session.Pointer, prompt.Pointer, Options, operation.Id, NativeOperation.TextCallback));
         uint callId = await ToolCalled.Task.WaitAsync(TimeSpan.FromSeconds(20)).ConfigureAwait(false);
+        if (mode == "tool-roundtrip")
+            return await ToolRoundTripAsync(model, tool, session, task, operation, callId).ConfigureAwait(false);
         bool completedBeforeRecovery = false;
         var completionClock = Stopwatch.StartNew();
         if (mode == "tool-delayed")
@@ -361,6 +378,113 @@ internal static class Experiments
                 operation.TerminalCallbacks,
                 responding = Native.FMLanguageModelSessionIsResponding(session.Pointer),
                 transcript = JsonNode.Parse(Transcript(session))
+            });
+    }
+
+    private static async Task<Evidence> ToolRoundTripAsync(NativeReference model, NativeReference tool,
+        NativeReference session, NativeReference task, NativeOperation operation, uint bridgeCallId)
+    {
+        JsonNode pending;
+        string callbackArguments = _toolArguments;
+        try { pending = JsonNode.Parse(Transcript(session))!; }
+        finally
+        {
+            operation.RequestCancellation();
+            Native.FMTaskCancel(task.Pointer);
+        }
+        NativeReply cancellation = await operation.WaitAsync().ConfigureAwait(false);
+        JsonNode afterCancellation = JsonNode.Parse(Transcript(session))!;
+        bool idle = !Native.FMLanguageModelSessionIsResponding(session.Pointer);
+        task.Dispose();
+        session.Dispose(); // The second request cannot depend on this live native session.
+
+        JsonArray pendingEntries = pending["transcript"]!["entries"]!.AsArray();
+        JsonNode[] calls = pendingEntries.SelectMany(static entry =>
+            entry?["toolCalls"]?.AsArray().OfType<JsonNode>() ?? []).ToArray();
+        if (calls.Length != 1)
+            return new("limitation", new
+            {
+                reason = "Pending transcript did not expose exactly one native tool call.",
+                bridgeCallId,
+                callbackArguments,
+                pending,
+                afterCancellation,
+                cancellation,
+                idle
+            });
+
+        string nativeCallId = calls[0]["id"]!.GetValue<string>();
+        bool argumentsMatch = JsonNode.DeepEquals(JsonNode.Parse(callbackArguments),
+            JsonNode.Parse(calls[0]["arguments"]!.GetValue<string>()));
+        // Research-only wire fixture based on the bridge's own exported tool-output entry.
+        // Preserve all existing entries; append the host's synthetic result with the native call ID.
+        JsonNode replay = pending.DeepClone();
+        JsonArray replayEntries = replay["transcript"]!["entries"]!.AsArray();
+        replayEntries.Add(JsonSerializer.SerializeToNode(new
+        {
+            id = nativeCallId,
+            toolCallID = nativeCallId,
+            toolName = "lookup_code",
+            role = "tool",
+            contents = new[] { new { id = Guid.NewGuid().ToString(), type = "text", text = "ORCHID-729" } }
+        }));
+        nint pointer = Native.FMTranscriptCreateFromJSONString(replay.ToJsonString(), out int code, out nint error);
+        string message = Native.TakeString(error);
+        if (code != 0)
+            return new("limitation", new
+            {
+                reason = "The transcript plus host result was rejected.",
+                code,
+                message,
+                bridgeCallId,
+                nativeCallId,
+                argumentsMatch,
+                pending,
+                afterCancellation,
+                cancellation,
+                idle,
+                replay
+            });
+        using var transcript = new NativeReference(pointer);
+        using NativeReference restored = RestoreToolSession(transcript, model, tool);
+        bool restoredExactly = JsonNode.DeepEquals(replay, JsonNode.Parse(Transcript(restored)));
+        _toolMode = "tool-roundtrip-replay";
+        using var emptyPrompt = new NativeReference(Native.FMComposedPromptInitialize());
+        using var resumed = new NativeOperation();
+        using var resumedTask = new NativeReference(Native.FMLanguageModelSessionRespond(
+            restored.Pointer, emptyPrompt.Pointer, Options, resumed.Id, NativeOperation.TextCallback));
+        NativeReply reply = await resumed.WaitAsync().ConfigureAwait(false);
+        JsonNode afterReplay = JsonNode.Parse(Transcript(restored))!;
+        JsonArray finalEntries = afterReplay["transcript"]!["entries"]!.AsArray();
+        bool prefixPreserved = finalEntries.Count >= replayEntries.Count
+            && replayEntries.Select((entry, index) => JsonNode.DeepEquals(entry, finalEntries[index])).All(static equal => equal);
+        int addedUserEntries = finalEntries.Skip(replayEntries.Count).Count(static entry => entry?["role"]?.GetValue<string>() == "user");
+        bool consumedResult = reply.Status == 0 && reply.Content.Contains("ORCHID-729", StringComparison.Ordinal)
+            && !reply.Content.Contains("UNEXPECTED-REEXECUTION", StringComparison.Ordinal);
+        bool continuedFaithfully = argumentsMatch && restoredExactly && prefixPreserved && addedUserEntries == 0
+            && consumedResult && _toolCallbacks == 1;
+        return new(!idle || operation.TerminalCallbacks != 1 || resumed.TerminalCallbacks != 1 ? "unexpected"
+            : continuedFaithfully ? "observed" : "limitation", new
+            {
+                bridgeCallId,
+                nativeCallId,
+                callbackArguments,
+                argumentsMatch,
+                pending,
+                afterCancellation,
+                cancellation,
+                idle,
+                restoredExactly,
+                prefixPreserved,
+                addedUserEntries,
+                consumedResult,
+                toolCallbacks = _toolCallbacks,
+                reply,
+                afterReplay,
+                continuedFaithfully,
+                originalTerminalCallbacks = operation.TerminalCallbacks,
+                resumedTerminalCallbacks = resumed.TerminalCallbacks,
+                responding = Native.FMLanguageModelSessionIsResponding(restored.Pointer)
             });
     }
 

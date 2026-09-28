@@ -144,6 +144,39 @@ PY
 
 This is another optional live experiment. Unavailable models exit 3 and errors exit 2.
 
+## Chat tool round-trip probe
+
+The worker-only `tool-roundtrip` case evaluates Connect's return-call / later-result
+chat pattern using the patched bridge. It captures the native transcript while a
+single tool call is pending, cancels and disposes that original session, appends a
+synthetic host result with the captured native call ID, and imports it into a new
+session with the same tool registered. It then requests a response with an empty
+composed prompt. Unexpected tool re-execution returns a sentinel so it cannot be
+mistaken for consuming the supplied history result.
+
+```bash
+python3 - <<'PY'
+import json
+import subprocess
+from pathlib import Path
+metadata = json.loads(Path('.artifacts/patched.json').read_text())
+result = subprocess.run(['dotnet', 'bin/Debug/net11.0/AppleFoundationModelsPrototype.dll',
+                         'worker', metadata['libraryPath'], 'tool-roundtrip'],
+                        capture_output=True, text=True, timeout=45)
+Path('.artifacts/tool-roundtrip.json').write_text(result.stdout)
+print(result.stdout)
+print(result.stderr)
+raise SystemExit(result.returncode)
+PY
+```
+
+The probe compares callback arguments, restored transcript and preserved entry
+prefix, counts terminal/tool callbacks, and records any added user entries. The
+observed empty user entry makes this a `limitation` under exact turn preservation,
+even though the model consumed the tool result successfully. Whether that internal
+entry is acceptable is a production design question. This is a research wire fixture,
+not a Common-to-Apple converter or an enabled chat-tool capability.
+
 ## Local verification
 
 ```bash

@@ -34,6 +34,9 @@ internal static partial class Native
     internal static partial nint FMLanguageModelSessionCreateFromSystemLanguageModel(
         nint model, string? instructions, nint tools, int toolCount);
     [LibraryImport(Library)]
+    internal static partial nint FMLanguageModelSessionCreateFromTranscript(
+        nint transcriptSession, nint model, nint tools, int toolCount);
+    [LibraryImport(Library)]
     [return: MarshalAs(UnmanagedType.I1)]
     internal static partial bool FMLanguageModelSessionIsResponding(nint session);
     [LibraryImport(Library)]
