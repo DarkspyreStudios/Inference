@@ -3,6 +3,8 @@
 Research for [DSA-59](https://darkspyre.atlassian.net/browse/DSA-59). This is an
 isolated, non-shipping tool. It does not register a Connect provider or change the
 product's supported capabilities. The connector remains in technical design.
+The current [implementation design proposal](../../docs/apple-foundation-models-design.md)
+uses an owned Swift helper and records the required neutral contract additions.
 
 ## Native dependency
 
@@ -243,6 +245,43 @@ the first awaits a tool, observes rejection and checks the first still completes
 The latter records native `isResponding` separately from actual request completion.
 
 ## Local verification
+
+### Direct Swift design gates
+
+`native/DesignGatesProbe.swift` tests the remaining mappings without changing the C
+bridge or integrating a production provider. Compile once with the proposed minimum
+deployment target, then run each experiment under a bounded parent:
+
+```bash
+xcrun swiftc -swift-version 6 -warnings-as-errors -target arm64-apple-macos26.0 native/DesignGatesProbe.swift -o .artifacts/design-gates-probe
+python3 - <<'PY'
+import subprocess
+from pathlib import Path
+base = Path('.artifacts')
+for name in ['batch-one', 'batch-two', 'batch-three', 'rebuild', 'rebuild-none',
+             'rebuild-next-batch', 'throw', 'error-result', 'error-marker', 'structured-stream']:
+    result = subprocess.run([str((base / 'design-gates-probe').resolve()), name],
+                            capture_output=True, text=True, timeout=45)
+    (base / f'design-{name}-latest.json').write_text(result.stdout)
+    print(name, result.returncode, result.stdout, result.stderr, flush=True)
+PY
+```
+
+The batch oracle asks for one, two or three calls, but capture always uses the first
+callback's own transcript snapshot; it does not wait for the expected count.
+`rebuild` constructs typed history entirely from host-visible values, including
+arbitrary tool-call IDs and reverse-ordered results. `rebuild-none` supplies the same
+history without active tools. `rebuild-next-batch` distinguishes settled IDs from a
+new call after replay; model selection can leave the result inconclusive.
+`throw` compares rollback with explicit error-result data, including the existing
+Connect text error marker. `structured-stream` separates schema validity from exact
+prompt-value fidelity and checks whether JSON snapshots are append-only.
+
+Inspect every recorded outcome and exit status. The command continues collecting
+independent evidence after a limitation or inconclusive case; it is not a pass gate.
+Compilation for macOS 26.0 verifies API availability, not execution on that OS.
+
+### Managed harness
 
 ```bash
 dotnet build AppleFoundationModelsPrototype.csproj --no-restore

@@ -3,6 +3,10 @@
 **Date:** 2026-09-27. **Ticket:** [DSA-59](https://darkspyre.atlassian.net/browse/DSA-59).
 **Phase:** Research prototype; production connector design remains open.
 
+The current [implementation design proposal](../../docs/apple-foundation-models-design.md)
+specifies an owned Swift helper, semantic history reconstruction, managed agents,
+unknown termination and structured snapshot contracts. It awaits design approval.
+
 ## Environment and provenance
 
 - macOS 26.7, arm64; Xcode 26.6 (17F113), Swift 6.3.3.
@@ -312,7 +316,49 @@ notarization, a fresh user account, sandboxed applications, older macOS versions
 other machines. Existing product rules still require an agreed native dependency
 distribution strategy; no native binary is added to a product package here.
 
+## Focused design-gate probes
+
+`native/DesignGatesProbe.swift` compiled with Swift 6, warnings as errors and
+`-target arm64-apple-macos26.0`. All live execution still used macOS 26.7. The probe
+calls Swift directly, with no upstream C bridge or production adapter.
+
+| Probe | Result and limit |
+| --- | --- |
+| First callback, one/two/three identical calls | Each first callback's own transcript already contained the complete one/two/three-call entry, complete arguments and one identity match. Capture did not wait for the expected callback count or a quiet interval. Cancellation settled. This is observed ordering, not an API guarantee across every runtime. |
+| Semantic history rebuild | Constructed typed native entries from instructions, prior user/assistant text, two identical calls using arbitrary host IDs, and reverse-ordered results. No original native JSON, asset IDs, GenerationIDs or response state was retained. The model returned both codes and the remembered label; no tools ran, and supplied entries stayed unchanged. |
+| Replay without active tools | Native history accepted with no registered tools or active definitions. The response used both supplied codes, with zero callbacks and preserved entries. It omitted the requested remembered label, so the full experiment reports `limitation`; structural acceptance is not a recall guarantee. |
+| Additional batch after replay | Initial run captured one new pending call after excluding two settled IDs, but its argument was `host-call-a`, rather than the requested returned code. A clarified follow-up produced no call. Both overall outcomes remain `inconclusive`; no forced tool-selection capability is inferred. |
+| Throw from native tool | Typed `LanguageModelSession.ToolCallError` retained the synthetic underlying error and rolled history back to its pre-request state. One tool invocation, idle afterward. |
+| Explicit error result | A textual JSON envelope with `isError:true` was consumed as data; the answer reported `SYNTHETIC_UNAVAILABLE_729`, with no rollback or repeat invocation. |
+| Structured streaming | Partial objects arrived incrementally as valid JSON; final output satisfied the tested schema. JSON snapshots were not append-only, including key-order changes. A snapshot event is needed rather than concatenating serialized objects. |
+
+The initial structured-stream assertion also required exact copying of `café 🦊`.
+The model generated `cafe`, making that initial run `inconclusive`. The follow-up
+separately recorded original-schema shape validity and requested-value fidelity:
+schema validity passed, `requestedValuesMatched=false`. The original evidence is
+preserved; no claim of improved copying accuracy is made. These are protocol/schema
+probes, not a quality benchmark.
+
+The subsequent error-marker case uses exactly the existing Connect text projection
+form, `[Tool error]` followed by the synthetic error text. It passed: one tool call,
+the answer reported the error, no rollback and no repeated invocation. Its evidence
+is recorded in `.artifacts/design-error-marker.json`.
+
+These observations support the proposed first-callback batch capture and stateless
+Common history mapping. Production still needs invariant checks, complete converters,
+deterministic successive-batch/cancellation tests and OS certification. The new design
+chooses a separate signed Swift executable, so C ABI extensions and bundling the
+prototype dylib are no longer proposed production work.
+
+Managed build and format verification passed with zero warnings/errors; the
+dependency vulnerability audit reported no vulnerable packages. No shipping code,
+package, system setting or upstream native dependency changed in this round.
+
 ## Process boundary and remaining questions
+
+The following were the open questions after the C bridge rounds. The current
+[design proposal](../../docs/apple-foundation-models-design.md) now specifies the
+implementation choices; approval and implementation/release verification remain.
 
 The bridge itself is loaded inside the .NET worker and links FoundationModels.
 `modelmanagerd` was observed as a separate system process. Its presence alone does
@@ -371,6 +417,16 @@ For this run they are in:
 - `.artifacts/tool-session-overlap.json`: initial unexpected native responding flag.
 - `.artifacts/tool-session-overlap-followup.json`: separate native flag/managed completion
   observations confirming the limitation.
+- `.artifacts/design-batch-one.json`, `design-batch-two.json`, `design-batch-three.json`:
+  transcript snapshots from the first native callback.
+- `.artifacts/design-rebuild.json`, `design-rebuild-none.json`: typed semantic history
+  reconstruction, with and without active tools.
+- `.artifacts/design-rebuild-next-batch-initial.json`, `design-rebuild-next-batch.json`:
+  preserved inconclusive additional-batch attempts.
+- `.artifacts/design-throw.json`, `design-error-result.json`, `design-error-marker.json`:
+  thrown error versus host-returned failure data.
+- `.artifacts/design-structured-stream-initial.json`, `design-structured-stream.json`:
+  original exact-value assertion and separate schema/fidelity observations.
 
 These paths refer to this prototype directory. They are local evidence, not required
 checked-in or shipped assets. This document records the durable findings.

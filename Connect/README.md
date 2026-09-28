@@ -43,6 +43,9 @@ retained; Claude and AgentCore retain provider-owned sessions.
 See the [Agent DS handoff](docs/agent-ds-contract-handoff.md),
 [technical design](docs/enhancements.md), and [verification record](docs/managed-agent-verification.md).
 
+The [Apple on-device connector design](docs/apple-foundation-models-design.md) is a
+proposal backed by an isolated prototype. Apple is not yet a registered/shipping provider.
+
 | Package | Purpose |
 |---|---|
 | `Darkspyre.Inference.Common` | Typed LLM, image, and decision requests, results, capabilities, streaming events, provenance, and failures shared by Connect and Tensor |
