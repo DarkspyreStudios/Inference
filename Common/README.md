@@ -51,7 +51,7 @@ uses one field/action driver for real Connect and Tensor settings, including spe
 operation lifetime, user consent, storage and rendering. A field edit changes only the settings object.
 Nothing reaches the host until `SaveAsync`. Unknown observations are nullable, separate from false,
 stale and not applicable.
-These contracts are included in the synchronized **11.11.0-rc.1** package family. Connect, Tensor and
+These contracts are included in the synchronized **11.12.0-rc.1** package family. Connect, Tensor and
 UI.Settings declare exact Common NuGet dependencies; none embeds the Common DLL. This release
 targets .NET 11 RC; the shared version retains a prerelease suffix while the UI's ASP.NET dependency
 is a release candidate.
