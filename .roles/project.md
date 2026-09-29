@@ -18,7 +18,7 @@ specifications.
 | Version line | `<net>.<release>.<minor>`: .NET generation, breaking-contract release, compatible tweak/fix |
 | Release model | `Common`, `Connect`, `Tensor`, and `UI.Settings` publish together at the one version declared in `/Directory.Build.props` |
 | Primary branch | `master` |
-| Lifecycle stage | Four-package `11.12.0-rc.1` published privately |
+| Lifecycle stage | Four-package `11.13.0-rc.1` published privately |
 | Jira project and parent | TBD |
 | Jira subject label | TBD |
 
@@ -937,3 +937,11 @@ Verification: zero-warning Connect, Tensor and UI builds; Connect LLM 363 passed
 82, Vertex 27; clean formatting; no vulnerable packages. `agy-probe` on macOS AGY 1.2.12 passed all
 seven cases with 11 turns. Cache-read and reasoning usage normalization remains an open evidence gate.
 No package artifacts, version bump or publication were performed.
+
+## Automated private release 11.13.0-rc.1
+
+Published all four packages from `b51f2459526bd36793c1b6336b9b61b710d58f24` using `deploy-major.sh`.
+Authenticated restores, Debug/Release builds and tests, formatting, vulnerability audits,
+archive boundaries and local/fresh-feed consumer checks passed. Downloaded archives match
+the verified local archives; feed readback confirms private visibility. Source is tagged
+`v11.13.0-rc.1`. No model weights or paid inference were used as verification gates.
