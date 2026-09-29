@@ -222,4 +222,28 @@ internal static class ProviderDefinitions
             TestConnection
         ]
     };
+
+    public static LlmProviderDefinition GeminiApi { get; } = new()
+    {
+        Id = "gemini-api",
+        DisplayName = "Google AI Studio (Gemini API)",
+        Description = "Use Gemini models directly with a Google AI Studio API key.",
+        Transport = LlmTransport.GoogleGeminiApi,
+        DefaultEndpoint = GeminiApiLlmClient.DefaultEndpoint,
+        DefaultModelId = "gemini-3-flash-preview",
+        DisplayOrder = 54,
+        SetupSteps =
+        [
+            new SetupStep
+            {
+                Id = "enter-gemini-key",
+                Title = "Enter a Gemini API key",
+                Instructions = "Create an API key in Google AI Studio at https://aistudio.google.com/app/apikey and enter it here. The key is stored only by the host's protected credential store.",
+                CompletionRequirement = "An API key is required. Loading the model list confirms that Google accepts the key.",
+                Troubleshooting = "Check that the key is active, that the Generative Language API is enabled for its project, and that the project's billing tier allows the selected model."
+            },
+            SelectModel,
+            TestConnection
+        ]
+    };
 }

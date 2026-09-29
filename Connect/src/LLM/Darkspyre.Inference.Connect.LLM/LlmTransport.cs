@@ -18,5 +18,8 @@ public enum LlmTransport
     /// <summary>Apple's on-device system model through the separately installed Swift helper.</summary>
     AppleFoundationModels = 10,
 
-    GoogleVertexAi = 11
+    GoogleVertexAi = 11,
+
+    /// <summary>The Gemini API (Google AI Studio) with an API key.</summary>
+    GoogleGeminiApi = 12
 }

@@ -28,7 +28,8 @@ public sealed class BedrockRegistrationTests
                 LlmTransport.GoogleAntigravityCli,
                 LlmTransport.AnthropicClaudeCli,
                 LlmTransport.AwsBedrockAgentCore,
-                LlmTransport.AppleFoundationModels
+                LlmTransport.AppleFoundationModels,
+                LlmTransport.GoogleGeminiApi
             ],
             scopedProvider.GetServices<ILlmAgentClient>()
                 .Select(agent => agent.Transport)
@@ -40,7 +41,8 @@ public sealed class BedrockRegistrationTests
                 LlmTransport.GoogleAntigravityCli,
                 LlmTransport.AnthropicClaudeCli,
                 LlmTransport.AwsBedrockAgentCore,
-                LlmTransport.AppleFoundationModels
+                LlmTransport.AppleFoundationModels,
+                LlmTransport.GoogleGeminiApi
             ],
             scopedProvider.GetRequiredService<LlmAgentProviderService>().SupportedTransports);
 
@@ -58,6 +60,7 @@ public sealed class BedrockRegistrationTests
                 "Gemini Subscription",
                 "Apple Foundation Models (On Device)",
                 "Bedrock AWS Profile",
+                "Google AI Studio (Gemini API)",
                 "Bedrock AgentCore Harness"
             ],
             guided.Select(definition => definition.DisplayName));
@@ -115,6 +118,7 @@ public sealed class BedrockRegistrationTests
                 "Gemini Subscription",
                 "Apple Foundation Models (On Device)",
                 "Bedrock AWS Profile",
+                "Google AI Studio (Gemini API)",
                 "Bedrock AgentCore Harness",
                 "OpenAI-Compatible API"
             ],
@@ -171,7 +175,7 @@ public sealed class BedrockRegistrationTests
         using ServiceProvider container = services.BuildServiceProvider();
         using IServiceScope scope = container.CreateScope();
         LlmProviderService providers = scope.ServiceProvider.GetRequiredService<LlmProviderService>();
-        Assert.Equal(9, providers.SupportedProviders.Count);
+        Assert.Equal(10, providers.SupportedProviders.Count);
         foreach (LlmProviderDefinition definition in providers.SupportedProviders)
         {
             var created = new SetupTarget();

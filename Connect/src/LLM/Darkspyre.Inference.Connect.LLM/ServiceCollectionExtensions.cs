@@ -33,6 +33,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton(ProviderDefinitions.ClaudeSubscription);
         services.AddSingleton(ProviderDefinitions.ChatGptSubscription);
         services.AddSingleton(ProviderDefinitions.GeminiSubscription);
+        services.AddSingleton(ProviderDefinitions.GeminiApi);
         services.AddSingleton(ProviderDefinitions.AppleFoundationModels);
         services.AddSingleton<IAppleProcessRunner, AppleProcessRunner>();
         services.AddHttpClient<AppleFoundationModelsClient>();
@@ -40,6 +41,9 @@ public static class ServiceCollectionExtensions
         services.AddTransient<ManagedAppleAgentClient>();
         services.AddTransient<ILlmAgentClient>(provider => provider.GetRequiredService<ManagedAppleAgentClient>());
         services.AddSingleton<LlmProviderCatalog>();
+        services.AddHttpClient<GeminiApiLlmClient>().ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
+        services.AddTransient<ILlmClient>(provider => provider.GetRequiredService<GeminiApiLlmClient>());
+        services.AddTransient<ILlmAgentClient, ManagedGeminiApiAgentClient>();
         services.AddHttpClient<OpenAiResponsesLlmClient>();
         services.AddHttpClient<OpenAiCompatibleChatLlmClient>();
         services.AddHttpClient<AnthropicMessagesLlmClient>();

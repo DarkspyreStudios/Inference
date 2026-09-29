@@ -98,11 +98,12 @@ public sealed class LlmSettings : InferenceSettings<LlmSetupChanges>
     /// <summary>A CLI provider reported it is not authenticated; the settings show its prerequisite.</summary>
     internal bool CliPrerequisite { get; set; }
 
-    private static bool UsesFixedEndpoint(LlmTransport transport) => transport is LlmTransport.OpenAiCodex or LlmTransport.GoogleVertexAi;
+    private static bool UsesFixedEndpoint(LlmTransport transport) => transport is LlmTransport.OpenAiCodex or LlmTransport.GoogleVertexAi or LlmTransport.GoogleGeminiApi;
     private bool UsesVertex => _draft.Transport == LlmTransport.GoogleVertexAi;
     private LlmVertexConfiguration Vertex => _draft.Vertex ?? new() { ProjectId = string.Empty, Location = string.Empty };
     private bool UsesAws => _draft.Transport is LlmTransport.AwsBedrockConverse or LlmTransport.AwsBedrockAgentCore;
-    private bool UsesApiKey => _draft.Transport is LlmTransport.OpenAiResponses or LlmTransport.OpenAiCompatibleChat or LlmTransport.AnthropicMessages;
+    private bool UsesApiKey => _draft.Transport is LlmTransport.OpenAiResponses or LlmTransport.OpenAiCompatibleChat or LlmTransport.AnthropicMessages
+        or LlmTransport.GoogleGeminiApi;
     private LlmCredential Credential => LlmCredential.Parse(_draft.Credential) ?? new();
 
     protected override bool IsDraftDirty =>
