@@ -879,3 +879,11 @@ a persistent process owner and shared chat/agent parsing. Explicit provider-conf
 and native progress/tool-output event contracts require agreement before implementation. Usage
 normalization, repeated launch-option changes and cancellation/background boundaries retain explicit
 qualification gates. No source implementation or release was performed for this design.
+
+## DSA-75 combined Tensor/AGY design
+
+DSA-75 owns the combined technical design and acceptance for Tensor registration/factories (DSA-58),
+AGY native sessions/policy/event contracts (DSA-74), and AgentDS adoption/migration (DSA-76). Both
+library tasks are children of DSA-75 and block DSA-76. DSA-58 now contains its remaining registry and
+factory mapping; existing static setup definitions are reused. The epic and child designs live in
+Jira. Contract proposals remain subject to agreement; no implementation or release was performed.
