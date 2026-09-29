@@ -580,7 +580,8 @@ are introduced by these APIs.
 Agent sessions report adapter-owned progress as `LlmAgentActivityEvent`; it is not assistant transcript
 text. `LlmAgentToolEvent.Output` carries the tool result the runtime reported, or null when none was
 reported. It is an observation: a tool the runtime owns never reaches a host handler through it. The
-Claude CLI, AgentCore and managed runtimes set it on the completed or failed event of a host tool.
+Claude CLI, AgentCore and managed runtimes set it on the completed or failed event of a host tool. The
+Antigravity CLI sets it on native tool observations when AGY reports output or an error.
 
 `LlmProviderCapabilities.Agent` declares context and tool-execution ownership, capture/replacement,
 context status, host compaction handoff, native resume/fork/compaction, steering and interruption.
@@ -840,7 +841,8 @@ its working directory, `Ephemeral` and `Policy`. Native runtimes require it; man
   makes no claim about the filesystem, network or background limits it applies.
 
 `LlmAgentCapabilities.SupportedRuntimePolicies` lists the variants a runtime accepts. The Claude CLI and
-AgentCore accept `HostControlled`; managed runtimes report an empty set. A runtime rejects any other
+AgentCore accept `HostControlled`; the Antigravity CLI accepts only `ProviderConfigured`; managed runtimes
+report an empty set. A runtime rejects any other
 variant before effects. A resume without `Runtime` uses the current directory as working directory and a
 host-controlled policy with that directory as its only writable root, `WorkspaceWrite`, network allowed,
 `OnRequest` and no runtime background work. A runtime that accepts only `ProviderConfigured` therefore
@@ -1098,8 +1100,8 @@ can explicitly attach the optional browser-authorized catalog OAuth credential t
 
 ## Antigravity CLI subscription transport
 
-Native agent sessions and resume are proposed under [DSA-74 technical design](docs/antigravity-agent-tech-design.md).
-The published 11.12.0-rc.1 adapter remains chat-only; that proposal has not been implemented.
+The [DSA-74 technical design](docs/antigravity-agent-tech-design.md) holds the evidence and mapping for
+native agent sessions. They are unreleased: the published 11.12.0-rc.1 adapter is chat-only.
 
 `GoogleAntigravityCli` wraps the official [Antigravity CLI headless mode](https://antigravity.google/docs/cli/headless/). Darkspyre.Inference.Connect.LLM sends prompts over the documented stdin NDJSON protocol, consumes stdout events line by line, and emits model text and activity while the CLI is still running. It does not read, copy, or store Antigravity OAuth credentials.
 
@@ -1123,13 +1125,54 @@ new LlmConnection
 
 `Endpoint` may be `agy`, `local://antigravity-cli`, or an absolute executable path. Desktop apps launched outside a login shell should prefer the absolute path because their `PATH` can differ from Terminal or PowerShell. Model discovery calls `agy models`; model `auto` omits the command-line model override and uses the CLI default.
 
-Each request runs in an empty temporary workspace with terminal sandboxing and slash-command expansion disabled. Prompts are sent as BOM-free UTF-8 through standard input instead of process arguments. Native JSON Schema and the `Low`, `Medium` and `High` reasoning levels are supported; schema-backed requests use the terminal event's canonical `structured_output` value and are also validated locally before being returned. The free-text `response` remains a compatibility fallback for older CLI versions. Temperature, maximum output tokens, headers, and provider options are rejected rather than silently ignored.
+Each request runs in an empty temporary workspace with terminal sandboxing and slash-command expansion disabled. Prompts are sent as BOM-free UTF-8 through standard input instead of process arguments. Native JSON Schema and the `Low`, `Medium` and `High` reasoning levels are supported. Only `agent_response` step deltas stream as answer text. A schema-backed request streams no provisional text: it returns the terminal event's canonical `structured_output` value, validated locally. The free-text `response` remains a compatibility fallback for older CLI versions. Temperature, maximum output tokens, headers, and provider options are rejected rather than silently ignored.
 
 Antigravity may emit its own internal tool activity, but the CLI owns that execution. Because
 Darkspyre.Inference.Connect.LLM cannot surface the call for host authorization and result submission, this adapter reports
 `SupportsToolUse = false`. Its documented headless input protocol accepts only `text` blocks and
 terminates on any other content-block type, so `SupportsPromptImages` and
 `SupportsPromptDocuments` are also false. Darkspyre.Inference.Connect.LLM does not rely on undocumented `@path` behavior.
+
+### Antigravity native agent sessions
+
+`LlmAgentProviderService` starts and resumes native AGY conversations. AGY owns the conversation, its
+Google sign-in, its native tools and its configured permission policy. Connect owns one local process
+per open session, with an open standard input and one output reader.
+
+- `StartSessionAsync` requires `Runtime` with a working directory and an explicit
+  `LlmAgentProviderRuntimePolicy`. The runtime rejects `LlmAgentHostRuntimePolicy`, because the CLI cannot
+  enforce host roots, network, approval or background limits. The working directory is the process
+  working directory; it is not a filesystem boundary. `Ephemeral = true` is rejected: AGY persists every
+  conversation.
+- Start waits up to 15 seconds for the CLI handshake and returns its conversation ID as both
+  `ThreadId` and `SessionId`. No hidden prompt is sent.
+- `ResumeSessionAsync` passes that exact ID with `--conversation` and fails if the handshake reports
+  another. Resume without `Runtime` fails, so the host must supply its stored working directory and
+  provider policy. `--continue` is never used.
+- Host tools, a tool handler, host context, host identities, session instructions, per-turn instructions,
+  images and attachments are rejected before any process starts or any prompt is written.
+- One turn runs at a time. Model, effort (`Low`, `Medium`, `High`) and output schema apply to one turn.
+  When they differ from the running process, the session closes that process while idle and reopens the
+  same conversation with the new flags before sending the prompt.
+- A turn emits `LlmAgentActivityEvent` per step, `LlmAgentTextDeltaEvent` for `agent_response` deltas,
+  `LlmAgentToolEvent` for native tools with their reported output, one usage event and
+  `LlmAgentMessageCompletedEvent`. A schema turn streams no text and publishes one
+  `LlmAgentStructuredOutputSnapshotEvent` holding the validated canonical result.
+- `SUCCESS` completes the turn. `ERROR` and `INVALID` are provider failures. `CANCELED` and `INTERRUPTED`
+  are interruptions. Every other status is Unknown. End of output without a result is a provider failure.
+- Usage covers the current turn only. It is the difference between cumulative result counters within
+  one process, or the sum of the turn's completed step usage after a start or reopen. Decreasing
+  counters make the turn total unavailable. Cache-read and reasoning subsets stay null until their
+  inclusion in the input and output totals is established.
+- Cancelling or abandoning a turn kills the owned process and faults the session object. Output that
+  arrives while no turn is running also faults it. Resume opens a fresh session. Connect does not stop
+  work AGY may keep running on its side.
+- `SupportsAgentToolUse` is false, `ToolExecutionOwnership` is Provider, `ResourceObservation` is
+  Unsupported and resource operations throw. Interrupt, steering, fork and context capture, status,
+  replacement and compaction handoff are unsupported.
+
+The ConsoleTester `agy-probe` command runs bounded live qualification cases; see
+[Subscription and AWS smoke tests](#subscription-and-aws-smoke-tests).
 
 `IsAuthenticatedAsync` performs the non-consuming `agy models` check, so an installed but signed-out executable is not reported as authenticated. Run `agy` interactively to sign in or refresh the CLI session. Antigravity owns its credential and session storage in the operating system's native keyring; Darkspyre.Inference.Connect.LLM does not inspect it.
 
@@ -1339,8 +1382,10 @@ or store the CLI credential. Enter `sonnet`, `opus`, another alias, or an exact 
 because the tester does not configure the optional HTTP catalog credential.
 
 Antigravity uses `--provider antigravity` (or `agy`). Run `agy` interactively once to sign in; the
-tester does not request or store a Google authorization code. The `usage` command is available for all
-three subscription providers:
+tester does not request or store a Google authorization code. `agy-probe` runs explicit live cases
+through the native session: `text`, `structured`, `native-tools`, `session`, `resume`, `controls` and
+`cancel`. It works in a temporary workspace with one fixture, reports the CLI version and the number
+of turns sent, and never retries. The `usage` command is available for all three subscription providers:
 
 ```bash
 dotnet run --project tools/Darkspyre.Inference.Connect.ConsoleTester -- usage --provider claude

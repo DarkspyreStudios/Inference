@@ -58,9 +58,21 @@ public sealed class ConsoleProbeTests
     [InlineData("--repeat", "21")]
     [InlineData("--timeout-seconds", "601")]
     [InlineData("--timeout-seconds", "no")]
-    [InlineData("--case", "missing")]
     public void ProbeRejectsUnboundedOrUnknownOptions(string option, string value) =>
         Assert.Throws<ArgumentException>(() => ProviderProbeOptions.Parse([option, value], "apple-system-default"));
+
+    [Fact]
+    public async Task ProbeCaseNamesComeFromTheSuppliedCases()
+    {
+        var test = new ProbeCase("native-tools", _ => Task.FromResult("done"));
+        using var output = new StringWriter();
+
+        ArgumentException error = await Assert.ThrowsAsync<ArgumentException>(() =>
+            ProbeRunner.RunAsync([test], new("model", "missing", 1, 1), true, output, CancellationToken.None));
+
+        Assert.Contains("native-tools", error.Message, StringComparison.Ordinal);
+        Assert.Equal(0, await ProbeRunner.RunAsync([test], new("model", "native-tools", 1, 1), true, output, CancellationToken.None));
+    }
 
     [Fact]
     public async Task RepeatsRetainFailuresAndOmitProviderErrorText()

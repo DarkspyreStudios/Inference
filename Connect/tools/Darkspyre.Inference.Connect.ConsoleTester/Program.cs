@@ -78,6 +78,8 @@ internal static class Program
                 "models" => await RunModelsAsync(llms, invocation, cancellation.Token),
                 "usage" => await RunUsageAsync(llms, invocation, cancellation.Token),
                 "prompt" => await RunPromptAsync(llms, invocation, cancellation.Token),
+                "agy-probe" when invocation.Provider.Transport == LlmTransport.GoogleAntigravityCli =>
+                    await AntigravityProbe.RunAsync(llms, agent, invocation, cancellation.Token),
                 "codex-probe" when invocation.Provider.Transport == LlmTransport.OpenAiCodex =>
                     await CodexProtocolProbe.RunAsync(llms, invocation.Provider.ConnectionId,
                         ParsePromptOptions(invocation.CommandArguments).Model, cancellation.Token),
@@ -369,26 +371,25 @@ internal static class Program
         IReadOnlyList<LlmAttachment> attachments = await ReadAttachmentsAsync(
             options.Attachments,
             cancellationToken);
-        var tools = new List<LlmAgentToolDefinition> { CreateEchoTool() };
-        LlmRichContentSupported richContent = capabilities.Agent.RichContentSupported;
-        if (richContent.Images == LlmRichContentCarriage.Native)
+        // Host tools are offered only to a runtime that can call them back.
+        var tools = new List<LlmAgentToolDefinition>();
+        if (capabilities.SupportsAgentToolUse)
         {
-            tools.Add(CreateAttachmentTool(richContent.TextDocuments != LlmRichContentCarriage.Unsupported));
+            tools.Add(CreateEchoTool());
+            LlmRichContentSupported richContent = capabilities.Agent.RichContentSupported;
+            if (richContent.Images == LlmRichContentCarriage.Native)
+            {
+                tools.Add(CreateAttachmentTool(richContent.TextDocuments != LlmRichContentCarriage.Unsupported));
+            }
         }
         await using ILlmAgentSession session = await agent.StartSessionAsync(
             invocation.Provider.ConnectionId,
             new LlmAgentSessionOptions
             {
                 ModelId = options.Model,
-                Runtime = invocation.Provider.Transport is LlmTransport.AnthropicClaudeCli or LlmTransport.AwsBedrockAgentCore
-                    ? new()
-                    {
-                        WorkingDirectory = Environment.CurrentDirectory,
-                        Policy = new LlmAgentHostRuntimePolicy { Sandbox = LlmAgentSandboxMode.ReadOnly, ApprovalPolicy = LlmAgentApprovalPolicy.Never }
-                    }
-                    : null,
+                Runtime = RuntimeFor(capabilities.Agent),
                 Tools = tools,
-                ToolHandler = ExecuteToolAsync
+                ToolHandler = tools.Count > 0 ? ExecuteToolAsync : null
             },
             cancellationToken);
         int exitCode = 1;
@@ -409,6 +410,21 @@ internal static class Program
 
         return exitCode;
     }
+
+    /// <summary>
+    /// Read-only host limits where the runtime enforces host policy; otherwise the provider's own configured
+    /// policy, selected explicitly. Managed runtimes take no runtime options.
+    /// </summary>
+    private static LlmAgentNativeRuntimeOptions? RuntimeFor(LlmAgentCapabilities agent) =>
+        agent.SupportedRuntimePolicies.Contains(LlmAgentRuntimePolicyKind.HostControlled)
+            ? new()
+            {
+                WorkingDirectory = Environment.CurrentDirectory,
+                Policy = new LlmAgentHostRuntimePolicy { Sandbox = LlmAgentSandboxMode.ReadOnly, ApprovalPolicy = LlmAgentApprovalPolicy.Never }
+            }
+            : agent.SupportedRuntimePolicies.Contains(LlmAgentRuntimePolicyKind.ProviderConfigured)
+                ? new() { WorkingDirectory = Environment.CurrentDirectory, Policy = new LlmAgentProviderRuntimePolicy() }
+                : null;
 
     private static LlmAgentToolDefinition CreateEchoTool()
     {
@@ -731,10 +747,11 @@ internal static class Program
               darkspyre-inference-connect-tester status --provider <codex|claude|antigravity|bedrock|agentcore> [--harness-arn <arn>]
               darkspyre-inference-connect-tester models --provider <codex|antigravity|bedrock>
               darkspyre-inference-connect-tester usage  --provider <codex|claude|antigravity>
+              darkspyre-inference-connect-tester agy-probe --provider antigravity [--model <id>] [--case all|text|structured|native-tools|session|resume|controls|cancel] [--repeat 1..20] [--timeout-seconds 1..600]
               darkspyre-inference-connect-tester codex-probe --provider codex --model <model-id>
               darkspyre-inference-connect-tester managed-probe --provider codex --model <model-id>
               darkspyre-inference-connect-tester prompt --provider <codex|claude|antigravity|bedrock|agentcore> --model <model-id> [--harness-arn <arn>] [--effort <level>] [--schema <file>] [--attach-image <file>] [--attach-document <file>]
-              darkspyre-inference-connect-tester agent  --provider <codex|claude|agentcore> --model <model-id> [--harness-arn <arn>] [--effort <level>] [--schema <file>] [--attach-image <file>] [--attach-document <file>]
+              darkspyre-inference-connect-tester agent  --provider <codex|claude|agentcore|antigravity> --model <model-id> [--harness-arn <arn>] [--effort <level>] [--schema <file>] [--attach-image <file>] [--attach-document <file>]
 
             prompt reads one line interactively, or the complete prompt from redirected standard input:
               echo 'Reply only with OK.' | darkspyre-inference-connect-tester prompt --provider codex --model gpt-5.6-terra
@@ -752,6 +769,10 @@ internal static class Program
             Apple defaults its model from provider metadata. --helper accepts a name on PATH or an absolute path.
             vertex-probe performs explicit metered cloud generation using ADC; missing access is reported as skipped.
             apple-probe performs explicit local generation, reports each case and never retries a failed case.
+            agy-probe runs explicit subscription turns through the Antigravity native session in a temporary
+            workspace, reports the CLI version and turn count, and never retries a failed case.
+            agent offers host tools only to runtimes that support them, and selects the provider's configured
+            runtime policy for Antigravity, whose own settings decide its permissions.
             Exit codes: 0 passed, 1 failed, 3 skipped prerequisites, 130 cancelled (invalid invocation: 2).
 
             Codex login uses ChatGPT device OAuth, stored in Darkspyre.SecureStore for direct requests.

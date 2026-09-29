@@ -26,8 +26,6 @@ internal sealed record ProviderProbeOptions(string Model, string Case, int Repea
                 default: throw new ArgumentException($"Unknown probe option '{option}'.");
             }
         }
-        if (selected is not ("all" or "text" or "structured" or "tools" or "agent" or "cancel"))
-            throw new ArgumentException("--case must be all, text, structured, tools, agent or cancel.");
         if (string.IsNullOrWhiteSpace(model)) throw new ArgumentException("A model is required.");
         return new(model, selected, repeat, timeout);
     }
@@ -49,7 +47,8 @@ internal static class ProbeRunner
     {
         int passed = 0, failed = 0, skipped = 0;
         var selected = cases.Where(test => options.Case == "all" || test.Name == options.Case).ToArray();
-        if (selected.Length == 0) throw new ArgumentException("No matching probe cases.");
+        if (selected.Length == 0)
+            throw new ArgumentException($"--case must be all or one of: {string.Join(", ", cases.Select(test => test.Name))}.");
         for (int iteration = 1; iteration <= options.Repeat; iteration++)
         {
             foreach (var test in selected)

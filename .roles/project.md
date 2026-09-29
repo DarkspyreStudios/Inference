@@ -913,3 +913,27 @@ Verification: Tensor 393 tests pass in Debug and Release (47 new registry tests;
 zero-warning builds, clean formatting, no vulnerable packages in the transitive audit, and
 `eng/package-assets.tests.sh` passes. `eng/VerifyConsumer` restores published archives, so it runs
 with the next release.
+
+## DSA-74 runtime policy ownership and Antigravity native sessions (unreleased)
+
+The design is `Connect/docs/antigravity-agent-tech-design.md`. It is a breaking public contract change
+for the next coordinated release. The runtime policy and event proposals were agreed on 2026-09-28.
+
+- `LlmAgentNativeRuntimeOptions` holds `WorkingDirectory`, `Ephemeral` and `Policy`, one of
+  `LlmAgentHostRuntimePolicy` (the former flat members plus `AllowRuntimeBackgroundWork`) or
+  `LlmAgentProviderRuntimePolicy`. `LlmAgentCapabilities.SupportedRuntimePolicies` lists the accepted
+  variants, and `NativeAgentContract` validates them before effects. Claude and AgentCore accept
+  HostControlled; Antigravity accepts ProviderConfigured; managed runtimes accept none.
+- `LlmAgentActivityEvent` carries adapter-owned progress. `LlmAgentToolEvent.Output` carries a reported
+  tool result; Claude, AgentCore and managed runtimes set it where they already held the result.
+- `AntigravityAgentClient` and `AntigravityAgentSession` implement native sessions over one persistent
+  process per session. `AntigravityProtocol` parses the stream once for chat and agent paths, and
+  `AntigravityCliSessionProcess` is the single process owner; the one-shot runner uses it.
+- `NativeAgentContract.ValidateConnection` takes the runtime's implemented tool support explicitly.
+- The ConsoleTester `agent` command offers host tools only when `SupportsAgentToolUse` is true and selects
+  the runtime policy from the capabilities. `agy-probe` runs the bounded live cases.
+
+Verification: zero-warning Connect, Tensor and UI builds; Connect LLM 363 passed and 3 skipped, Bedrock
+82, Vertex 27; clean formatting; no vulnerable packages. `agy-probe` on macOS AGY 1.2.12 passed all
+seven cases with 11 turns. Cache-read and reasoning usage normalization remains an open evidence gate.
+No package artifacts, version bump or publication were performed.

@@ -11,7 +11,10 @@ The epic owns shared contract decisions, sequencing and combined acceptance; thi
 
 **Baseline:** Inference 11.12.0-rc.1, AGY CLI 1.2.12 on macOS.
 
-**Phase:** design proposal. The runtime-policy contract change below needs agreement before implementation.
+**Phase:** implemented, unreleased. The runtime-policy and event contract changes were agreed on
+2026-09-28 and are implemented on the DSA-75 branch. The [Connect README](../README.md#antigravity-native-agent-sessions)
+states current behavior. Section 7's usage evidence gate and section 9's qualification items record
+what remains open.
 
 ## 1. Outcome and evidence
 
@@ -282,19 +285,21 @@ version/publication remains separately authorized.
 
 ## 9. Decisions and remaining gates
 
-1. **Design decision needed:** accept the typed host-controlled/provider-configured runtime policy
-   contract, including explicit delegation of background behavior and its host migration.
-2. **Design decision needed:** accept the activity event and optional observed tool-output member.
-3. **Protocol qualification:** repeated turn-option changes, first-turn schema after empty resume,
-   schema removal, explicit model changes and invalid resume must preserve identity or fail cleanly.
-4. **Accounting qualification:** resolve cache/reasoning inclusion and missing-baseline behavior with
-   controlled evidence, not guesses. Maximum effort remains unadvertised until qualified.
-5. **Lifecycle qualification:** cancellation settles the local process; no claim is made that it
-   cancels persisted provider-side jobs. Unexpected autonomous output must not corrupt turn routing.
+1. **Agreed 2026-09-28:** the typed host-controlled/provider-configured runtime policy contract,
+   including explicit delegation of background behavior and its host migration.
+2. **Agreed 2026-09-28:** the activity event and the optional observed tool-output member.
+3. **Protocol qualification:** `agy-probe` on macOS AGY 1.2.12 (2026-09-28) passed effort change,
+   schema, schema removal, resume by exact ID, native tool output and cancellation, with 11 turns.
+   Explicit model changes and first-turn schema after empty resume have deterministic fixtures only.
+4. **Accounting qualification, open:** the live probe confirmed that step usage is per step and result
+   usage is cumulative, so per-turn totals use the step ledger or a same-process cumulative difference.
+   Cache/reasoning inclusion is still unestablished, so those subsets stay null. Maximum effort remains
+   unadvertised until qualified.
+5. **Lifecycle:** cancellation kills and awaits the local process and faults the session; no claim is
+   made that it cancels persisted provider-side jobs. Output while no turn runs faults the session
+   instead of reaching the next turn.
 
-The core session mapping is defined. Implementation should start only after the contract proposals
-are agreed. Do not silently reduce the request to chat-only support or claim host control that the
-CLI cannot enforce.
+Windows and Linux have process and protocol fixtures only; they have no live qualification.
 
 ## Sources and local anchors
 

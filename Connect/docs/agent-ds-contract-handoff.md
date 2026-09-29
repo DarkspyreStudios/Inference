@@ -68,6 +68,23 @@ adoption under the [DSA-75](https://darkspyre.atlassian.net/browse/DSA-75) epic.
 - `LlmAgentToolEvent.Output` is the tool result the runtime reported, or null. Persisted event
   serialization must carry it. It never invokes a host handler.
 
+### Antigravity native sessions
+
+- Start and resume AGY through `LlmAgentProviderService` with `LlmAgentProviderRuntimePolicy`. Explain
+  that AGY's own settings decide its permissions and background behavior; the host's usual ReadOnly,
+  Never and background-off promises do not apply. Never construct AGY runtime options from the host's
+  ReadOnly/Never defaults.
+- Persist the provider conversation ID (`ThreadId`), the connection ID, the working directory and the
+  selected policy with the host session. Resume with the same connection and exact ID. A resume without
+  `Runtime` fails for AGY.
+- Attach no host tools or handler. `SupportsAgentToolUse = false` stays meaningful even though native
+  tool observations arrive. Hide context capture/import/replacement, fork, compaction handoff, steering,
+  interrupt and resource controls from AGY sessions.
+- A cancelled or abandoned turn faults the session object. The host decides whether to resume; Connect
+  never replays a sent turn. A faulted session is not proof that AGY stopped its own work.
+- Per-turn usage may be null. Cache-read and reasoning subsets are null for AGY.
+- See the [Connect README](../README.md#antigravity-native-agent-sessions) for the complete mapping.
+
 ## Native background resources: 11.8.0-rc.1
 
 `11.8.0-rc.1` is a breaking-contract release: `ILlmAgentSession` gains members, so every implementation,
