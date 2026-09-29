@@ -17,7 +17,7 @@ public sealed class AntigravityCliLlmClientTests
             0,
             """
             {"event":"init","conversation_id":"conversation-1","init":{}}
-            {"event":"step_update","step_update":{"step_type":"agent_response","text_delta":"Hello"}}
+            {"event":"step_update","step_update":{"conversation_id":"conversation-1","step_index":1,"state":"ACTIVE","step_type":"agent_response","text_delta":"Hello"}}
             {"event":"result","result":{"conversation_id":"conversation-1","status":"SUCCESS","response":"Hello from Antigravity.","usage":{"input_tokens":12,"output_tokens":5,"total_tokens":17}}}
             """,
             string.Empty));
@@ -190,7 +190,7 @@ public sealed class AntigravityCliLlmClientTests
     {
         AntigravityCliInvocation invocation = CreateFirstByteProbeInvocation();
 
-        AntigravityCliProcessResult result = await new AntigravityCliProcessRunner().RunAsync(invocation);
+        AntigravityCliProcessResult result = await new AntigravityCliProcessRunner(new AntigravityCliSessionProcessFactory()).RunAsync(invocation);
 
         Assert.Equal(0, result.ExitCode);
         Assert.Null(result.StandardInputError);
@@ -203,7 +203,7 @@ public sealed class AntigravityCliLlmClientTests
         AntigravityCliInvocation invocation = CreateEarlyExitProbeInvocation(
             new string('x', 1024 * 1024));
 
-        AntigravityCliProcessResult result = await new AntigravityCliProcessRunner().RunAsync(invocation);
+        AntigravityCliProcessResult result = await new AntigravityCliProcessRunner(new AntigravityCliSessionProcessFactory()).RunAsync(invocation);
 
         Assert.Equal(23, result.ExitCode);
         Assert.Contains("synthetic agy failure", result.StandardError, StringComparison.Ordinal);
@@ -298,11 +298,14 @@ public sealed class AntigravityCliLlmClientTests
     }
 
     [Fact]
-    public async Task PrefersCanonicalStructuredOutputOverDuplicatedResponseText()
+    public async Task SchemaChatStreamsOnlyTheCanonicalStructuredOutput()
     {
         var runner = new RecordingRunner(new AntigravityCliProcessResult(
             0,
             """
+            {"event":"step_update","step_update":{"step_index":0,"state":"DONE","step_type":"user_input"}}
+            {"event":"step_update","step_update":{"step_index":1,"state":"ACTIVE","step_type":"agent_response","text_delta":"{\"wrapper\":"}}
+            {"event":"step_update","step_update":{"step_index":2,"state":"DONE","step_type":"tool","tool_name":"view_file","tool_info":{"name":"view_file","parameters":{},"output":"tool metadata"}}}
             {"event":"result","result":{"conversation_id":"conversation-structured","status":"SUCCESS","response":"{\"score\":7}\n{\"score\":8}","structured_output":{"score":7},"usage":{}}}
             """,
             string.Empty));
@@ -601,7 +604,7 @@ public sealed class AntigravityCliLlmClientTests
             [EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
             yield return new AntigravityCliOutputLine(
-                "{\"event\":\"step_update\",\"step_update\":{\"step_type\":\"agent_response\",\"text_delta\":\"live output\"}}");
+                "{\"event\":\"step_update\",\"step_update\":{\"step_index\":1,\"state\":\"ACTIVE\",\"step_type\":\"agent_response\",\"text_delta\":\"live output\"}}");
             WaitingForRelease.TrySetResult();
             await Release.Task.WaitAsync(cancellationToken);
             const string terminal =

@@ -23,7 +23,7 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
         ArgumentNullException.ThrowIfNull(options);
         LlmAgentNativeRuntimeOptions runtime = NativeAgentContract.ValidateStart(options, NativeAgentContract.Claude);
         LlmAgentHostRuntimePolicy policy = NativeAgentContract.HostPolicy(runtime);
-        NativeAgentContract.ValidateConnection(connection, NativeAgentContract.Claude,
+        NativeAgentContract.ValidateConnection(connection, NativeAgentContract.Claude, supportsAgentToolUse: true,
             options.ModelId, options.Tools, options.ToolHandler);
         ClaudeCliConfiguration.ValidateConnection(connection);
         ValidateOptions(options.ModelId, runtime.WorkingDirectory, options.Tools, options.ToolHandler);
@@ -62,7 +62,7 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
         ClaudeCliConfiguration.ValidateConnection(connection);
         CliInfrastructure.ValidateThreadId(threadId);
         options ??= new LlmAgentResumeOptions();
-        NativeAgentContract.ValidateConnection(connection, NativeAgentContract.Claude,
+        NativeAgentContract.ValidateConnection(connection, NativeAgentContract.Claude, supportsAgentToolUse: true,
             options.ModelId, options.Tools, options.ToolHandler);
         LlmAgentNativeRuntimeOptions runtime = NativeAgentContract.ResumeRuntime(options, NativeAgentContract.Claude);
         LlmAgentHostRuntimePolicy policy = NativeAgentContract.HostPolicy(runtime);
@@ -107,7 +107,7 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
         }
 
         options ??= new LlmAgentResumeOptions();
-        NativeAgentContract.ValidateConnection(connection, NativeAgentContract.Claude,
+        NativeAgentContract.ValidateConnection(connection, NativeAgentContract.Claude, supportsAgentToolUse: true,
             options.ModelId, options.Tools, options.ToolHandler);
         LlmAgentNativeRuntimeOptions runtime = NativeAgentContract.ResumeRuntime(options, NativeAgentContract.Claude);
         LlmAgentHostRuntimePolicy policy = NativeAgentContract.HostPolicy(runtime);

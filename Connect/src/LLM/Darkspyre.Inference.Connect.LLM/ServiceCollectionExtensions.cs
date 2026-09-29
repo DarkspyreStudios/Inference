@@ -45,6 +45,7 @@ public static class ServiceCollectionExtensions
         services.AddHttpClient<AnthropicMessagesLlmClient>();
         services.AddHttpClient<ClaudeCliLlmClient>();
         services.AddHttpClient<OpenAiEmbeddingClient>();
+        services.AddSingleton<IAntigravityCliSessionProcessFactory, AntigravityCliSessionProcessFactory>();
         services.AddSingleton<IAntigravityCliRunner, AntigravityCliProcessRunner>();
         services.AddSingleton<IClaudeCliRunner, ClaudeCliProcessRunner>();
         services.AddSingleton<IClaudeCliSessionProcessFactory, ClaudeCliSessionProcessFactory>();
@@ -68,6 +69,9 @@ public static class ServiceCollectionExtensions
         services.AddTransient<AntigravityCliLlmClient>();
         services.AddTransient<ILlmClient>(provider =>
             provider.GetRequiredService<AntigravityCliLlmClient>());
+        services.AddTransient<AntigravityAgentClient>();
+        services.AddTransient<ILlmAgentClient>(provider =>
+            provider.GetRequiredService<AntigravityAgentClient>());
         services.AddHttpClient<CodexAuthenticator>();
         services.AddHttpClient<ClaudeAuthenticator>();
         services.AddTransient<ILlmAuthenticator>(provider =>

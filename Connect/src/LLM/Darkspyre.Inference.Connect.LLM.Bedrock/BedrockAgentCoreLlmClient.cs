@@ -165,7 +165,7 @@ internal sealed class BedrockAgentCoreLlmClient(IBedrockAgentCoreInvoker invoker
         ArgumentNullException.ThrowIfNull(options);
         LlmAgentNativeRuntimeOptions runtime = NativeAgentContract.ValidateStart(options, NativeAgentContract.AgentCore);
         LlmAgentHostRuntimePolicy policy = NativeAgentContract.HostPolicy(runtime);
-        NativeAgentContract.ValidateConnection(connection, NativeAgentContract.AgentCore,
+        NativeAgentContract.ValidateConnection(connection, NativeAgentContract.AgentCore, supportsAgentToolUse: true,
             options.ModelId, options.Tools, options.ToolHandler);
         ValidateConnection(connection);
         ValidateSessionOptions(
@@ -204,7 +204,7 @@ internal sealed class BedrockAgentCoreLlmClient(IBedrockAgentCoreInvoker invoker
         ValidateConnection(connection);
         ValidateRuntimeSessionId(threadId);
         options ??= new LlmAgentResumeOptions();
-        NativeAgentContract.ValidateConnection(connection, NativeAgentContract.AgentCore,
+        NativeAgentContract.ValidateConnection(connection, NativeAgentContract.AgentCore, supportsAgentToolUse: true,
             options.ModelId, options.Tools, options.ToolHandler);
         string modelId = options.ModelId ?? DefaultModelId;
         LlmAgentNativeRuntimeOptions runtime = NativeAgentContract.ResumeRuntime(options, NativeAgentContract.AgentCore);

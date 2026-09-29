@@ -10,6 +10,9 @@ internal static class NativeAgentContract
     private static IReadOnlySet<LlmAgentRuntimePolicyKind> HostControlled { get; } =
         FrozenSet.Create(LlmAgentRuntimePolicyKind.HostControlled);
 
+    private static IReadOnlySet<LlmAgentRuntimePolicyKind> ProviderConfigured { get; } =
+        FrozenSet.Create(LlmAgentRuntimePolicyKind.ProviderConfigured);
+
     public static LlmAgentCapabilities Claude { get; } = new()
     {
         ContextOwnership = LlmAgentOwnership.Provider,
@@ -35,6 +38,16 @@ internal static class NativeAgentContract
         SupportedRuntimePolicies = HostControlled,
         // Not measured: no AgentCore credentials were available.
         ResourceObservation = LlmOperationSupport.Unknown
+    };
+
+    public static LlmAgentCapabilities Antigravity { get; } = new()
+    {
+        ContextOwnership = LlmAgentOwnership.Provider,
+        SupportsNativeResume = true,
+        CompactionOwnership = LlmAgentOwnership.Provider,
+        ToolExecutionOwnership = LlmAgentToolExecutionOwnership.Provider,
+        RichContentSupported = RichContentRoutes.TextOnly,
+        SupportedRuntimePolicies = ProviderConfigured
     };
 
     /// <summary>The validated start settings of a runtime that declares <paramref name="agent"/>.</summary>
@@ -93,9 +106,14 @@ internal static class NativeAgentContract
             retentionBytes);
     }
 
+    /// <summary>
+    /// Fails when the connection's overrides disable the operation. <paramref name="supportsAgentToolUse"/> is
+    /// what the runtime implements; overrides can only lower it.
+    /// </summary>
     public static void ValidateConnection(
         LlmConnection connection,
         LlmAgentCapabilities agent,
+        bool supportsAgentToolUse,
         string? modelId,
         IReadOnlyList<LlmAgentToolDefinition> tools,
         LlmAgentToolHandler? toolHandler)
@@ -103,7 +121,7 @@ internal static class NativeAgentContract
         var implemented = new LlmProviderCapabilities
         {
             SupportsAgentSessions = true,
-            SupportsAgentToolUse = true,
+            SupportsAgentToolUse = supportsAgentToolUse,
             Agent = agent
         };
         var effective = implemented.Apply(connection.CapabilityOverrides);

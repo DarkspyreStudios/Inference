@@ -24,7 +24,10 @@ internal sealed class AntigravityCliLlmClient(IAntigravityCliRunner runner)
         ReasoningLevels = LlmReasoningEffort.Levels(
             LlmReasoningLevel.Low, LlmReasoningLevel.Medium, LlmReasoningLevel.High),
         SupportsTemperature = false,
-        SupportsToolUse = false
+        SupportsToolUse = false,
+        SupportsAgentSessions = true,
+        SupportsAgentToolUse = false,
+        Agent = NativeAgentContract.Antigravity
     };
 
     public LlmTransport Transport => LlmTransport.GoogleAntigravityCli;
@@ -33,7 +36,7 @@ internal sealed class AntigravityCliLlmClient(IAntigravityCliRunner runner)
 
     public LlmProviderCapabilities GetCapabilities(LlmConnection connection, string? modelId = null)
     {
-        EnsureTransport(connection);
+        ValidateConnection(connection);
         LlmProviderCapabilities capabilities = Capabilities.Apply(connection.CapabilityOverrides);
         capabilities = modelId is not null
             && connection.ModelCapabilityOverrides.TryGetValue(modelId, out LlmCapabilityOverrides? overrides)
@@ -236,7 +239,7 @@ internal sealed class AntigravityCliLlmClient(IAntigravityCliRunner runner)
         LlmConnection connection,
         CancellationToken cancellationToken = default)
     {
-        EnsureTransport(connection);
+        ValidateConnection(connection);
         try
         {
             AntigravityCliProcessResult result = await InvokeAsync(
@@ -539,95 +542,51 @@ internal sealed class AntigravityCliLlmClient(IAntigravityCliRunner runner)
         message = new { content = prompt }
     }) + "\n";
 
+    /// <summary>
+    /// Maps one protocol event for chat. Only <c>agent_response</c> deltas are answer text; a schema turn
+    /// streams none, because its canonical answer is the terminal <c>structured_output</c>.
+    /// </summary>
     private static ParsedStreamLine ParseStreamLine(string line, bool preferStructuredOutput)
     {
-        try
+        switch (AntigravityProtocol.Parse(line))
         {
-            using JsonDocument document = JsonDocument.Parse(line);
-            JsonElement root = document.RootElement;
-            string eventName = root.TryGetProperty("event", out JsonElement eventElement)
-                ? eventElement.GetString() ?? string.Empty
-                : string.Empty;
-            if (string.Equals(eventName, "init", StringComparison.Ordinal))
-            {
+            case AntigravityInit:
                 return new ParsedStreamLine(null, null, "Provider connected; waiting for model output…");
-            }
-            if (string.Equals(eventName, "step_update", StringComparison.Ordinal)
-                && root.TryGetProperty("step_update", out JsonElement stepUpdate)
-                && stepUpdate.ValueKind == JsonValueKind.Object)
-            {
-                string? delta = stepUpdate.TryGetProperty("text_delta", out JsonElement textDelta)
-                    && textDelta.ValueKind == JsonValueKind.String
-                        ? textDelta.GetString()
+            case AntigravityStep step:
+                string? delta = !preferStructuredOutput
+                    && string.Equals(step.StepType, "agent_response", StringComparison.Ordinal)
+                        ? step.TextDelta
                         : null;
-                string? stepType = stepUpdate.TryGetProperty("step_type", out JsonElement stepTypeElement)
-                    && stepTypeElement.ValueKind == JsonValueKind.String
-                        ? stepTypeElement.GetString()
-                        : null;
-                string? activity = string.IsNullOrWhiteSpace(stepType)
-                    ? "The model is working…"
-                    : $"Model activity: {stepType.Replace('_', ' ')}";
-                return new ParsedStreamLine(delta, null, activity);
-            }
-            if (!string.Equals(eventName, "result", StringComparison.Ordinal)
-                || !root.TryGetProperty("result", out JsonElement result)
-                || result.ValueKind != JsonValueKind.Object)
-            {
+                return new ParsedStreamLine(delta, null, $"Model activity: {step.StepType.Replace('_', ' ')}");
+            case AntigravityResult result:
+                string response = preferStructuredOutput && result.StructuredOutput is { } structured
+                    ? structured.GetRawText()
+                    : result.Response;
+                return new ParsedStreamLine(
+                    null,
+                    new ParsedResponse(response, result.Status, result.ConversationId, ReadUsage(result.Usage)),
+                    "Provider response received; validating recommendations…");
+            default:
                 return new ParsedStreamLine(null, null, null);
-            }
-
-            string status = result.TryGetProperty("status", out JsonElement statusElement)
-                ? statusElement.GetString() ?? string.Empty
-                : string.Empty;
-            string response = result.TryGetProperty("response", out JsonElement responseElement)
-                && responseElement.ValueKind == JsonValueKind.String
-                    ? responseElement.GetString() ?? string.Empty
-                    : string.Empty;
-            if (preferStructuredOutput
-                && result.TryGetProperty("structured_output", out JsonElement structuredOutput)
-                && structuredOutput.ValueKind is not JsonValueKind.Null and not JsonValueKind.Undefined)
-            {
-                response = structuredOutput.GetRawText();
-            }
-            string? conversationId = result.TryGetProperty("conversation_id", out JsonElement idElement)
-                && idElement.ValueKind == JsonValueKind.String
-                    ? idElement.GetString()
-                    : null;
-            LlmUsage? usage = result.TryGetProperty("usage", out JsonElement usageElement)
-                ? ReadUsage(usageElement)
-                : null;
-            return new ParsedStreamLine(
-                null,
-                new ParsedResponse(response, status, conversationId, usage),
-                "Provider response received; validating recommendations…");
-        }
-        catch (JsonException exception)
-        {
-            throw new LlmProviderException(
-                "Antigravity CLI returned malformed streaming JSON.",
-                LlmTransport.GoogleAntigravityCli,
-                providerCode: "antigravity_cli_invalid_json",
-                innerException: exception);
         }
     }
 
-    private static LlmUsage? ReadUsage(JsonElement usage)
+    private static LlmUsage? ReadUsage(AntigravityUsage? usage)
     {
-        int? input = ReadInteger(usage, "input_tokens");
-        int? output = ReadInteger(usage, "output_tokens");
-        int? total = ReadInteger(usage, "total_tokens")
+        if (usage is null)
+        {
+            return null;
+        }
+        int? input = ToInt32(usage.InputTokens);
+        int? output = ToInt32(usage.OutputTokens);
+        int? total = ToInt32(usage.TotalTokens)
             ?? (input is not null && output is not null ? input + output : null);
         return input is null && output is null && total is null
             ? null
             : new LlmUsage(input, output, total);
     }
 
-    private static int? ReadInteger(JsonElement element, string propertyName) =>
-        element.ValueKind == JsonValueKind.Object
-        && element.TryGetProperty(propertyName, out JsonElement value)
-        && value.TryGetInt32(out int parsed)
-            ? parsed
-            : null;
+    private static int? ToInt32(long? value) => value is >= 0 and <= int.MaxValue ? (int)value : null;
 
     private static List<LlmModel> ParseModels(string output)
     {
@@ -706,19 +665,20 @@ internal sealed class AntigravityCliLlmClient(IAntigravityCliRunner runner)
             : $"{sanitized[..maximumDiagnosticLength]}...";
     }
 
-    private static string ResolveExecutable(string endpoint) => CliInfrastructure.ResolveExecutable(
+    internal static string ResolveExecutable(string endpoint) => CliInfrastructure.ResolveExecutable(
         endpoint,
         "agy",
         "local://antigravity-cli",
         "Antigravity CLI endpoint must be 'agy', 'local://antigravity-cli', or an absolute executable path.");
 
-    private void EnsureTransport(LlmConnection connection)
+    /// <summary>Rejects a connection of another transport or one that carries configuration the CLI owns.</summary>
+    internal static void ValidateConnection(LlmConnection connection)
     {
         ArgumentNullException.ThrowIfNull(connection);
-        if (connection.Transport != Transport)
+        if (connection.Transport != LlmTransport.GoogleAntigravityCli)
         {
             throw new ArgumentException(
-                $"A {connection.Transport} connection cannot be used with the {Transport} client.",
+                $"A {connection.Transport} connection cannot be used with the {LlmTransport.GoogleAntigravityCli} client.",
                 nameof(connection));
         }
 

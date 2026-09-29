@@ -22,7 +22,7 @@ public sealed class VertexRegistrationTests
         var clients = container.GetServices<ILlmClient>().ToArray();
         Assert.Equal(Enum.GetValues<LlmTransport>().Order(), clients.Select(client => client.Transport).Order());
         var expectedAgents = new[] { LlmTransport.OpenAiCodex, LlmTransport.AwsBedrockConverse,
-            LlmTransport.AnthropicClaudeCli, LlmTransport.AwsBedrockAgentCore, LlmTransport.SelfHost,
+            LlmTransport.GoogleAntigravityCli, LlmTransport.AnthropicClaudeCli, LlmTransport.AwsBedrockAgentCore, LlmTransport.SelfHost,
             LlmTransport.AppleFoundationModels, LlmTransport.GoogleVertexAi };
         Assert.Equal(expectedAgents.Order(), container.GetServices<ILlmAgentClient>().Select(client => client.Transport).Order());
         var provider = container.GetRequiredService<LlmProviderService>();

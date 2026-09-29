@@ -25,6 +25,7 @@ public sealed class BedrockRegistrationTests
             [
                 LlmTransport.OpenAiCodex,
                 LlmTransport.AwsBedrockConverse,
+                LlmTransport.GoogleAntigravityCli,
                 LlmTransport.AnthropicClaudeCli,
                 LlmTransport.AwsBedrockAgentCore,
                 LlmTransport.AppleFoundationModels
@@ -36,6 +37,7 @@ public sealed class BedrockRegistrationTests
             [
                 LlmTransport.OpenAiCodex,
                 LlmTransport.AwsBedrockConverse,
+                LlmTransport.GoogleAntigravityCli,
                 LlmTransport.AnthropicClaudeCli,
                 LlmTransport.AwsBedrockAgentCore,
                 LlmTransport.AppleFoundationModels
