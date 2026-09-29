@@ -34,7 +34,7 @@ published NuGets.
 |---|---|
 | `Darkspyre.Inference.Common` | Interfaces and models genuinely shared by connector-based and in-process tensor inference |
 | `Darkspyre.Inference.Connect` | All implemented out-of-process connectors; contains capability-specific assemblies such as `.Connect.LLM`, `.Connect.LLM.Bedrock`, and `.Connect.Image` |
-| `Darkspyre.Inference.Tensor` | All implemented in-process engines; contains `.Tensor.Common`, the `.Tensor.LLM`, `.Tensor.Image`, `.Tensor.STT`, and `.Tensor.Decision` capability contracts, and the `.Tensor.LLM.Qwen`, `.Tensor.Image.Supra`, `.Tensor.STT.Whisper`, and `.Tensor.Decision.Laya` implementations |
+| `Darkspyre.Inference.Tensor` | All implemented in-process engines; contains `.Tensor.Common`, the `.Tensor.LLM`, `.Tensor.Image`, `.Tensor.STT`, and `.Tensor.Decision` capability contracts, and the `.Tensor.LLM.Qwen`, `.Tensor.Image.Supra`, `.Tensor.STT.Whisper`, and `.Tensor.Decision.Laya` implementations, and the `.Tensor.Registry` engine registry |
 | `Darkspyre.Inference.UI.Settings` | Host-placed Blazor/Lumeo editor for provider settings and their managers; references Common but not Connect or Tensor |
 
 Connect implements LLM, ComfyUI Image, PocketTTS speech synthesis and TangoFlux audio generation.
@@ -66,7 +66,13 @@ Darkspyre.Inference.Tensor package
     ├── Darkspyre.Inference.Tensor.Image assembly → .Tensor.Image.Supra implementation
     ├── Darkspyre.Inference.Tensor.STT assembly → .Tensor.STT.Whisper implementation
     └── Darkspyre.Inference.Tensor.Decision assembly → .Tensor.Decision.Laya implementation
+
+Darkspyre.Inference.Tensor.Registry assembly → the four implementation assemblies
 ```
+
+`Darkspyre.Inference.Tensor.Common` defines `ITensorEngineProvider` and `TensorEngineDefinition`.
+Each implementation assembly supplies its provider. The Registry assembly owns `TensorEngineRegistry`
+and `AddTensorEngines`; Tensor.Common and the implementation assemblies never reference it.
 
 Place a contract or model in `Darkspyre.Inference.Common` only when the Connect and Tensor products
 truly share it. Connector-only contracts and models belong in their Connect capability assembly.
@@ -887,3 +893,23 @@ AGY native sessions/policy/event contracts (DSA-74), and AgentDS adoption/migrat
 library tasks are children of DSA-75 and block DSA-76. DSA-58 now contains its remaining registry and
 factory mapping; existing static setup definitions are reused. The epic and child designs live in
 Jira. Contract proposals remain subject to agreement; no implementation or release was performed.
+
+## DSA-58 Tensor engine registry (unreleased)
+
+Implemented the library part of DSA-58. Tensor.Common adds `ITensorEngineProvider` and the immutable
+`TensorEngineDefinition`, which wraps the existing `InferenceSetupDefinition` and a validated
+`ModelStoreKey`. Qwen, Supra, Laya and Whisper each ship a provider over their existing setup
+definition, compatibility validator, setup factory and constructor; the store keys are `Qwen`,
+`Supra`, `Laya` and `Whisper`. The new non-packable `Darkspyre.Inference.Tensor.Registry` assembly
+is embedded in the Tensor NuGet. It owns `TensorEngineRegistry` and the `AddTensorEngines`
+registration. The registry rejects duplicate implementation IDs and case-insensitive store-key
+collisions, orders by display order then ordinal ID, and filters by task. It uses the shared
+framework's dependency-injection abstractions, so the package gains no NuGet dependency.
+`eng/VerifyPackages`, `eng/VerifyConsumer` and `eng/package-assets.tests.sh` expect the Registry
+assembly and XML only in the Tensor package. The Tensor ConsoleTester adds `tensor registry`.
+Host adoption belongs to DSA-76. No package artifacts, version bump or publication were performed.
+
+Verification: Tensor 393 tests pass in Debug and Release (47 new registry tests; Common's 31 included),
+zero-warning builds, clean formatting, no vulnerable packages in the transitive audit, and
+`eng/package-assets.tests.sh` passes. `eng/VerifyConsumer` restores published archives, so it runs
+with the next release.

@@ -22,7 +22,7 @@ Dictionary<string, string[]> owned = new(StringComparer.Ordinal)
         "Darkspyre.Inference.Tensor.Common", "Darkspyre.Inference.Tensor.LLM", "Darkspyre.Inference.Tensor.LLM.Qwen",
         "Darkspyre.Inference.Tensor.Image", "Darkspyre.Inference.Tensor.Image.Supra",
         "Darkspyre.Inference.Tensor.Decision", "Darkspyre.Inference.Tensor.Decision.Laya",
-        "Darkspyre.Inference.Tensor.STT", "Darkspyre.Inference.Tensor.STT.Whisper"
+        "Darkspyre.Inference.Tensor.STT", "Darkspyre.Inference.Tensor.STT.Whisper", "Darkspyre.Inference.Tensor.Registry"
     ],
     ["Darkspyre.Inference.UI.Settings"] = ["Darkspyre.Inference.UI.Settings"]
 };

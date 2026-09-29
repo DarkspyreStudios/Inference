@@ -21,7 +21,7 @@ internal sealed record ConsoleOptions
 
     public static ConsoleOptions Parse(string[] args)
     {
-        if (args[0] != "qwen") { throw new ArgumentException($"Unknown family '{args[0]}'. Supported: qwen."); }
+        if (args[0] != "qwen") { throw new ArgumentException($"Unknown family '{args[0]}'. Supported: qwen, registry."); }
         var options = new ConsoleOptions();
         for (int index = 1; index < args.Length; index++)
         {
@@ -71,11 +71,16 @@ internal sealed record ConsoleOptions
         Usage: tensor qwen (--repo <owner/name> --file <gguf> [--revision <rev>] | --path <gguf> --license <id>)
                            --store <dir> [--install] [--backend <kind>] [--suite all|chat,think,tools,json,selfhost]
                            [--prompt <text>] [--max-tokens <n>] [--trace-exceptions]
+               tensor registry --store <dir>
 
         Resolves the GGUF from its headers, installs it into the pack store when --install is passed, loads
         the engine and runs the test calls. A repeat run reuses the installed pack. --store names the pack
         store; it is required so a multi-GB download never lands on an unintended volume. HF_TOKEN supplies
         a Hugging Face token for gated models.
+
+        registry lists every engine AddTensorEngines registers: identity, tasks, model store key, offered
+        models and the setup actions its provider opens over <dir>/<store key>. It reads metadata only; it
+        installs, loads and saves nothing, writes no file and makes no network call.
 
         Example:
           tensor qwen --repo ukisai/Swift-1.5-Qwen3.8-27B-GGUF --file Swift-1.5-Qwen3.8-27B-Q4_K_M.gguf \
