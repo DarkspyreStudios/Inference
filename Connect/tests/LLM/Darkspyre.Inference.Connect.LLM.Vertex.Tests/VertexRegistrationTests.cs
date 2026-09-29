@@ -71,6 +71,28 @@ public sealed class VertexRegistrationTests
         Assert.Null(settings.Status.Ready.Value);
     }
 
+    [Fact]
+    public async Task GeminiApiSetupStoresOnlyTheKeyAsProtectedCredentialAndHidesTheEndpoint()
+    {
+        var client = new Darkspyre.Inference.Connect.LLM.Providers.GeminiApiLlmClient(new HttpClient());
+        var service = new LlmProviderService(new UnusedSource(), [client]);
+        var target = new Target();
+        var manager = service.CreateSettingsManager(target);
+        var settings = await manager.OpenAsync(LlmTransport.GoogleGeminiApi, new(SetupChangeIntent.Create, "gemini", null));
+        var ids = settings.Steps.SelectMany(step => step.Sections).SelectMany(section => section.Fields).Select(field => field.Description.Id).ToArray();
+        Assert.DoesNotContain("endpoint", ids);
+        Assert.DoesNotContain("google-project", ids);
+        Assert.False(settings.Validate().IsValid);
+        Field<SetupSecretField>(settings, "api-key").SetValue(SetupSecretEdit.Replace("fixture-key"));
+        Field<SetupChoiceField>(settings, "model").SetValue("gemini-3-flash-preview");
+        Assert.True(settings.Validate().IsValid);
+        Assert.Equal(SetupCommitState.Committed, (await manager.SaveAsync(settings)).State);
+        Assert.Null(target.Changes!.Configuration.Connection.Credential);
+        Assert.Null(target.Changes.Configuration.Connection.Vertex);
+        Assert.Equal("https://generativelanguage.googleapis.com", target.Changes.Configuration.Connection.Endpoint);
+        Assert.Equal("fixture-key", LlmCredential.Parse(target.Changes.Credential.Value)!.ApiKey);
+    }
+
     private static T Field<T>(LlmSettings settings, string id) where T : SetupField =>
         Assert.IsType<T>(settings.Steps.SelectMany(step => step.Sections).SelectMany(section => section.Fields).Single(field => field.Description.Id == id));
 
