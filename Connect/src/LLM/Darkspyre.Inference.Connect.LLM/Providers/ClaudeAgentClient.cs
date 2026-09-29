@@ -21,7 +21,8 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(options);
-        LlmAgentNativeRuntimeOptions runtime = NativeAgentContract.ValidateStart(options);
+        LlmAgentNativeRuntimeOptions runtime = NativeAgentContract.ValidateStart(options, NativeAgentContract.Claude);
+        LlmAgentHostRuntimePolicy policy = NativeAgentContract.HostPolicy(runtime);
         NativeAgentContract.ValidateConnection(connection, NativeAgentContract.Claude,
             options.ModelId, options.Tools, options.ToolHandler);
         ClaudeCliConfiguration.ValidateConnection(connection);
@@ -37,16 +38,16 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             options.ModelId,
             runtime.WorkingDirectory,
             options.Instructions,
-            runtime.WritableRoots,
-            runtime.Sandbox,
-            runtime.NetworkAllowed,
+            policy.WritableRoots,
+            policy.Sandbox,
+            policy.NetworkAllowed,
             options.Tools,
             options.ToolHandler,
             runtime.Ephemeral,
             connection,
             NativeAgentContract.Claude.RichContentSupported.For(connection, options.ModelId),
             opening,
-            options.AllowRuntimeBackgroundWork,
+            policy.AllowRuntimeBackgroundWork,
             options.ResourceOutputRetentionBytes,
             cancellationToken);
     }
@@ -63,7 +64,8 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
         options ??= new LlmAgentResumeOptions();
         NativeAgentContract.ValidateConnection(connection, NativeAgentContract.Claude,
             options.ModelId, options.Tools, options.ToolHandler);
-        LlmAgentNativeRuntimeOptions runtime = NativeAgentContract.ResumeRuntime(options);
+        LlmAgentNativeRuntimeOptions runtime = NativeAgentContract.ResumeRuntime(options, NativeAgentContract.Claude);
+        LlmAgentHostRuntimePolicy policy = NativeAgentContract.HostPolicy(runtime);
         ValidateOptions(options.ModelId, runtime.WorkingDirectory, options.Tools, options.ToolHandler, modelOptional: true);
         return await CreateSessionAsync(
             threadId,
@@ -74,16 +76,16 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             options.ModelId,
             runtime.WorkingDirectory,
             options.Instructions,
-            runtime.WritableRoots,
-            runtime.Sandbox,
-            runtime.NetworkAllowed,
+            policy.WritableRoots,
+            policy.Sandbox,
+            policy.NetworkAllowed,
             options.Tools,
             options.ToolHandler,
             runtime.Ephemeral,
             connection,
             NativeAgentContract.Claude.RichContentSupported.For(connection, options.ModelId),
             opening: null,
-            options.AllowRuntimeBackgroundWork,
+            policy.AllowRuntimeBackgroundWork,
             options.ResourceOutputRetentionBytes,
             cancellationToken);
     }
@@ -107,7 +109,8 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
         options ??= new LlmAgentResumeOptions();
         NativeAgentContract.ValidateConnection(connection, NativeAgentContract.Claude,
             options.ModelId, options.Tools, options.ToolHandler);
-        LlmAgentNativeRuntimeOptions runtime = NativeAgentContract.ResumeRuntime(options);
+        LlmAgentNativeRuntimeOptions runtime = NativeAgentContract.ResumeRuntime(options, NativeAgentContract.Claude);
+        LlmAgentHostRuntimePolicy policy = NativeAgentContract.HostPolicy(runtime);
         ValidateOptions(options.ModelId, runtime.WorkingDirectory, options.Tools, options.ToolHandler, modelOptional: true);
         string forkedThreadId = Guid.NewGuid().ToString();
         return await CreateSessionAsync(
@@ -119,16 +122,16 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             options.ModelId,
             runtime.WorkingDirectory,
             options.Instructions,
-            runtime.WritableRoots,
-            runtime.Sandbox,
-            runtime.NetworkAllowed,
+            policy.WritableRoots,
+            policy.Sandbox,
+            policy.NetworkAllowed,
             options.Tools,
             options.ToolHandler,
             runtime.Ephemeral,
             connection,
             NativeAgentContract.Claude.RichContentSupported.For(connection, options.ModelId),
             opening: null,
-            options.AllowRuntimeBackgroundWork,
+            policy.AllowRuntimeBackgroundWork,
             options.ResourceOutputRetentionBytes,
             cancellationToken);
     }
@@ -155,7 +158,6 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
         long retentionBytes,
         CancellationToken cancellationToken)
     {
-        AgentResourceOptions.Validate(NativeAgentContract.Claude, allowRuntimeBackgroundWork, retentionBytes);
         string normalizedDirectory = CliInfrastructure.NormalizeWorkingDirectory(workingDirectory);
         IReadOnlyList<string> arguments = BuildArguments(
             threadId,
@@ -1006,7 +1008,8 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
                 call.Name,
                 call.Arguments,
                 !output.IsError,
-                output.IsError ? "failed" : "completed");
+                output.IsError ? "failed" : "completed",
+                output);
             return new McpResponse(
                 McpResult(
                     id,

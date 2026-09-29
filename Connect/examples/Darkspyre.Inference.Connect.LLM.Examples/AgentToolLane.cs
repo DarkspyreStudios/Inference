@@ -27,9 +27,12 @@ public static class AgentToolLane
                 Runtime = new()
                 {
                     WorkingDirectory = Path.GetFullPath(workingDirectory),
-                    Sandbox = LlmAgentSandboxMode.ReadOnly,
-                    ApprovalPolicy = LlmAgentApprovalPolicy.Never,
-                    Ephemeral = ephemeral
+                    Ephemeral = ephemeral,
+                    Policy = new LlmAgentHostRuntimePolicy
+                    {
+                        Sandbox = LlmAgentSandboxMode.ReadOnly,
+                        ApprovalPolicy = LlmAgentApprovalPolicy.Never
+                    }
                 },
                 Tools = [WeatherTool.AgentDefinition],
                 ToolHandler = WeatherTool.ExecuteAsync

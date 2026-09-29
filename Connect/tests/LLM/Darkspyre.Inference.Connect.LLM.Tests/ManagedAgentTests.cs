@@ -334,7 +334,9 @@ public sealed class ManagedAgentTests
 
         var events = await Read(session.RunTurnAsync(Turn("go")));
 
-        Assert.Contains(events.OfType<LlmAgentToolEvent>(), item => item.Status == "completed" && item.Success == true);
+        LlmAgentToolEvent completed = Assert.Single(events.OfType<LlmAgentToolEvent>(), item => item.Status == "completed");
+        Assert.True(completed.Success);
+        Assert.Equal(2, completed.Output!.Parts.Count);
         LlmToolOutput sent = Assert.Single(harness.Requests[1].Messages.SelectMany(message => message.ToolResults)).Output;
         Assert.False(sent.IsError);
         Assert.Equal(new byte[] { 1, 2 }, Assert.IsType<LlmToolOutputBinary>(sent.Parts[1]).Data.ToArray());
@@ -388,7 +390,7 @@ public sealed class ManagedAgentTests
         await using var session = harness.Create(ToolsOptions(_ => { executions++; return new(); }));
         var events = await Read(session.RunTurnAsync(Turn("go")));
         Assert.Equal(0, executions);
-        Assert.Contains(events.OfType<LlmAgentToolEvent>(), item => item.Status == "failed");
+        Assert.Contains(events.OfType<LlmAgentToolEvent>(), item => item.Status == "failed" && item.Output is { IsError: true });
         Assert.True((await session.CaptureContextAsync()).Entries[2].Message.ToolResults[0].Output.IsError);
     }
 

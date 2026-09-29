@@ -61,13 +61,34 @@ public delegate Task<LlmToolOutput> LlmAgentToolHandler(
     LlmAgentToolCall call,
     CancellationToken cancellationToken);
 
-/// <summary>
-/// Settings only a provider-owned runtime reads: where it works, what it may write, and how it is
-/// sandboxed. The Claude CLI and AgentCore require them; managed transports reject them.
-/// </summary>
-public sealed record LlmAgentNativeRuntimeOptions
+/// <summary>Who decides what a provider-owned runtime may do while it works.</summary>
+public enum LlmAgentRuntimePolicyKind
 {
-    public required string WorkingDirectory { get; init; }
+    /// <summary>The host selects the filesystem, network, approval and background-work limits.</summary>
+    HostControlled,
+
+    /// <summary>The runtime applies the policy configured in the provider's own settings.</summary>
+    ProviderConfigured
+}
+
+/// <summary>
+/// The execution policy a provider-owned runtime runs under. Exactly two variants exist:
+/// <see cref="LlmAgentHostRuntimePolicy"/> and <see cref="LlmAgentProviderRuntimePolicy"/>.
+/// <see cref="LlmAgentCapabilities.SupportedRuntimePolicies"/> lists the variants a runtime accepts.
+/// </summary>
+public abstract record LlmAgentRuntimePolicy
+{
+    private protected LlmAgentRuntimePolicy()
+    {
+    }
+
+    public abstract LlmAgentRuntimePolicyKind Kind { get; }
+}
+
+/// <summary>Limits the host selects and the runtime enforces.</summary>
+public sealed record LlmAgentHostRuntimePolicy : LlmAgentRuntimePolicy
+{
+    public override LlmAgentRuntimePolicyKind Kind => LlmAgentRuntimePolicyKind.HostControlled;
 
     /// <summary>Every filesystem root the provider-owned runtime may write beneath.</summary>
     public IReadOnlyList<string> WritableRoots { get; init; } = [];
@@ -79,7 +100,38 @@ public sealed record LlmAgentNativeRuntimeOptions
 
     public LlmAgentApprovalPolicy ApprovalPolicy { get; init; } = LlmAgentApprovalPolicy.OnRequest;
 
+    /// <summary>
+    /// Lets the runtime start subagents and output monitors of its own. Off by default. Only a runtime whose
+    /// <see cref="LlmAgentCapabilities.ResourceObservation"/> is Supported accepts it.
+    /// </summary>
+    public bool AllowRuntimeBackgroundWork { get; init; }
+}
+
+/// <summary>
+/// Explicit adoption of the policy configured in the provider's own settings, including its background
+/// behavior. Connect does not read, edit or strengthen that configuration, and makes no promise about the
+/// filesystem, network or background limits it applies.
+/// </summary>
+public sealed record LlmAgentProviderRuntimePolicy : LlmAgentRuntimePolicy
+{
+    public override LlmAgentRuntimePolicyKind Kind => LlmAgentRuntimePolicyKind.ProviderConfigured;
+}
+
+/// <summary>
+/// Settings only a provider-owned runtime reads: where it works, whether its conversation persists, and
+/// the policy it runs under. Native runtimes require them; managed transports reject them.
+/// </summary>
+public sealed record LlmAgentNativeRuntimeOptions
+{
+    public required string WorkingDirectory { get; init; }
+
     public bool Ephemeral { get; init; }
+
+    /// <summary>
+    /// The execution policy. Defaults to host-controlled limits. A runtime rejects a variant missing from
+    /// its <see cref="LlmAgentCapabilities.SupportedRuntimePolicies"/> before any effect.
+    /// </summary>
+    public LlmAgentRuntimePolicy Policy { get; init; } = new LlmAgentHostRuntimePolicy();
 }
 
 public sealed record LlmAgentSessionOptions
@@ -114,12 +166,6 @@ public sealed record LlmAgentSessionOptions
 
     public LlmAgentToolHandler? ToolHandler { get; init; }
 
-    /// <summary>
-    /// Lets the runtime start subagents and output monitors of its own. Off by default. Only a runtime whose
-    /// <see cref="LlmAgentCapabilities.ResourceObservation"/> is Supported accepts it.
-    /// </summary>
-    public bool AllowRuntimeBackgroundWork { get; init; }
-
     /// <summary>Output Connect retains per resource when the runtime keeps none; the earliest cursor advances past it.</summary>
     public long ResourceOutputRetentionBytes { get; init; } = 1_048_576;
 }
@@ -132,8 +178,9 @@ public sealed record LlmAgentResumeOptions
 
     /// <summary>
     /// Runtime settings used whole, or null for the resume defaults: the current directory as working
-    /// directory and only writable root, <see cref="LlmAgentSandboxMode.WorkspaceWrite"/>, network allowed
-    /// and <see cref="LlmAgentApprovalPolicy.OnRequest"/>.
+    /// directory, and a host-controlled policy with that directory as its only writable root,
+    /// <see cref="LlmAgentSandboxMode.WorkspaceWrite"/>, network allowed, <see cref="LlmAgentApprovalPolicy.OnRequest"/>
+    /// and no runtime background work. A runtime that accepts only a provider-configured policy rejects null.
     /// </summary>
     public LlmAgentNativeRuntimeOptions? Runtime { get; init; }
 
@@ -144,12 +191,6 @@ public sealed record LlmAgentResumeOptions
     public IReadOnlyList<LlmAgentToolDefinition> Tools { get; init; } = [];
 
     public LlmAgentToolHandler? ToolHandler { get; init; }
-
-    /// <summary>
-    /// Lets the runtime start subagents and output monitors of its own. Off by default. Only a runtime whose
-    /// <see cref="LlmAgentCapabilities.ResourceObservation"/> is Supported accepts it.
-    /// </summary>
-    public bool AllowRuntimeBackgroundWork { get; init; }
 
     /// <summary>Output Connect retains per resource when the runtime keeps none; the earliest cursor advances past it.</summary>
     public long ResourceOutputRetentionBytes { get; init; } = 1_048_576;
@@ -221,6 +262,11 @@ public sealed record LlmAgentMessageCompletedEvent(
     string Text)
     : LlmAgentEvent(ThreadId, TurnId);
 
+/// <summary>
+/// A tool call observed during a turn. <see cref="Output"/> is the result the runtime reported for it, or
+/// null when none was reported. It is an observation only: a tool the runtime owns never reaches a host
+/// handler through this event.
+/// </summary>
 public sealed record LlmAgentToolEvent(
     string ThreadId,
     string TurnId,
@@ -229,7 +275,16 @@ public sealed record LlmAgentToolEvent(
     string Tool,
     JsonElement Arguments,
     bool? Success,
-    string Status)
+    string Status,
+    LlmToolOutput? Output = null)
+    : LlmAgentEvent(ThreadId, TurnId);
+
+/// <summary>Adapter-owned progress text. It is not assistant transcript content.</summary>
+public sealed record LlmAgentActivityEvent(
+    string ThreadId,
+    string TurnId,
+    string ItemId,
+    string Activity)
     : LlmAgentEvent(ThreadId, TurnId);
 
 public sealed record LlmAgentWarningEvent(

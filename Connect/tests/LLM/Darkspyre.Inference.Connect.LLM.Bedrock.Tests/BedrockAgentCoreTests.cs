@@ -201,7 +201,11 @@ public sealed class BedrockAgentCoreTests
             new LlmAgentSessionOptions
             {
                 ModelId = BedrockAgentCoreLlmClient.DefaultModelId,
-                Runtime = new() { WorkingDirectory = "/not-sent-to-agentcore", Sandbox = LlmAgentSandboxMode.ReadOnly, ApprovalPolicy = LlmAgentApprovalPolicy.Never },
+                Runtime = new()
+                {
+                    WorkingDirectory = "/not-sent-to-agentcore",
+                    Policy = new LlmAgentHostRuntimePolicy { Sandbox = LlmAgentSandboxMode.ReadOnly, ApprovalPolicy = LlmAgentApprovalPolicy.Never }
+                },
                 Instructions = "Be concise.",
                 Tools =
                 [
@@ -260,8 +264,11 @@ public sealed class BedrockAgentCoreTests
         {
             Tool: "get_weather",
             Status: "completed",
-            Success: true
+            Success: true,
+            Output.IsError: false
         });
+        Assert.All(events.OfType<LlmAgentToolEvent>().Where(item => item.Status == "inProgress"),
+            item => Assert.Null(item.Output));
         Assert.Equal("It is 72 F.", Assert.Single(
             events.OfType<LlmAgentMessageCompletedEvent>()).Text);
         Assert.Equal(LlmAgentTurnStatus.Completed, Assert.Single(
@@ -416,9 +423,12 @@ public sealed class BedrockAgentCoreTests
             Runtime = new()
             {
                 WorkingDirectory = "/not-sent-to-agentcore",
-                Sandbox = sandbox,
-                ApprovalPolicy = approvalPolicy,
-                NetworkAllowed = networkAllowed
+                Policy = new LlmAgentHostRuntimePolicy
+                {
+                    Sandbox = sandbox,
+                    ApprovalPolicy = approvalPolicy,
+                    NetworkAllowed = networkAllowed
+                }
             },
         };
 

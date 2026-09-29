@@ -1,3 +1,5 @@
+using System.Collections.Frozen;
+
 namespace Darkspyre.Inference.Connect.LLM;
 
 /// <summary>Who owns a part of the session: nobody, the host, or the provider-owned runtime.</summary>
@@ -82,12 +84,27 @@ public sealed record LlmAgentCapabilities
     /// <summary>How host tool output reaches the model in this runtime's sessions.</summary>
     public LlmRichContentSupported RichContentSupported { get; init; } = new();
 
+    /// <summary>
+    /// The <see cref="LlmAgentNativeRuntimeOptions.Policy"/> variants a native runtime accepts. Managed
+    /// runtimes accept no native runtime options and report an empty set.
+    /// </summary>
+    public IReadOnlySet<LlmAgentRuntimePolicyKind> SupportedRuntimePolicies { get; init; } = NoRuntimePolicies;
+
+    internal static IReadOnlySet<LlmAgentRuntimePolicyKind> NoRuntimePolicies { get; } =
+        FrozenSet<LlmAgentRuntimePolicyKind>.Empty;
+
+    /// <summary>True when no agent operation is declared.</summary>
+    internal bool IsNone => SupportedRuntimePolicies.Count == 0
+        && this with { SupportedRuntimePolicies = NoRuntimePolicies } == new LlmAgentCapabilities();
+
     internal void Validate()
     {
         if (!Enum.IsDefined(ContextOwnership) || !Enum.IsDefined(ContextImport) || !Enum.IsDefined(CompactionOwnership)
             || !Enum.IsDefined(NativeFork) || !Enum.IsDefined(Steering)
             || !Enum.IsDefined(ToolExecutionOwnership)
-            || (ContextOwnership == LlmAgentOwnership.None && this != new LlmAgentCapabilities())
+            || SupportedRuntimePolicies is null || SupportedRuntimePolicies.Any(kind => !Enum.IsDefined(kind))
+            || (ContextOwnership == LlmAgentOwnership.None && !IsNone)
+            || (ContextOwnership == LlmAgentOwnership.Host && SupportedRuntimePolicies.Count > 0)
             || (SupportsCompactionHandoff && (ContextOwnership != LlmAgentOwnership.Host
                 || CompactionOwnership != LlmAgentOwnership.Host
                 || !SupportsContextCapture || !SupportsContextReplacement || !SupportsContextStatus))

@@ -627,7 +627,7 @@ public sealed class LlmSettingsManager : InferenceSettingsManager<LlmSettings, L
             await using ILlmAgentSession session = await agent.StartSessionAsync(settings.Identity.Id, settings.CurrentConnection(), new()
             {
                 ModelId = settings.ModelId,
-                Runtime = new() { WorkingDirectory = string.Empty, Sandbox = LlmAgentSandboxMode.ReadOnly },
+                Runtime = new() { WorkingDirectory = string.Empty, Policy = new LlmAgentHostRuntimePolicy { Sandbox = LlmAgentSandboxMode.ReadOnly } },
                 ToolHandler = (_, _) => throw new NotSupportedException("Setup tests grant no host tools.")
             }, token).ConfigureAwait(false);
             completed = false;

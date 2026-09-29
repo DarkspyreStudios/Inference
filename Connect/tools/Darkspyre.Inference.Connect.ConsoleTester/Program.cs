@@ -381,7 +381,11 @@ internal static class Program
             {
                 ModelId = options.Model,
                 Runtime = invocation.Provider.Transport is LlmTransport.AnthropicClaudeCli or LlmTransport.AwsBedrockAgentCore
-                    ? new() { WorkingDirectory = Environment.CurrentDirectory, Sandbox = LlmAgentSandboxMode.ReadOnly, ApprovalPolicy = LlmAgentApprovalPolicy.Never }
+                    ? new()
+                    {
+                        WorkingDirectory = Environment.CurrentDirectory,
+                        Policy = new LlmAgentHostRuntimePolicy { Sandbox = LlmAgentSandboxMode.ReadOnly, ApprovalPolicy = LlmAgentApprovalPolicy.Never }
+                    }
                     : null,
                 Tools = tools,
                 ToolHandler = ExecuteToolAsync
@@ -536,7 +540,12 @@ internal static class Program
                 Console.Error.Write(reasoning.Delta);
                 break;
             case LlmAgentToolEvent tool:
-                Console.Error.WriteLine($"[tool:{tool.Status}] {tool.Tool}");
+                Console.Error.WriteLine(tool.Output is null
+                    ? $"[tool:{tool.Status}] {tool.Tool}"
+                    : $"[tool:{tool.Status}] {tool.Tool} output parts={tool.Output.Parts.Count} error={tool.Output.IsError}");
+                break;
+            case LlmAgentActivityEvent activity:
+                Console.Error.WriteLine($"[activity] {activity.Activity}");
                 break;
             case LlmAgentWarningEvent warning:
                 Console.Error.WriteLine($"[warning] {warning.Message}");

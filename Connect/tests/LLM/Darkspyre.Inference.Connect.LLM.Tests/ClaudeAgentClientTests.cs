@@ -45,7 +45,7 @@ public sealed class ClaudeAgentClientTests
             new LlmAgentSessionOptions
             {
                 ModelId = "claude-test",
-                Runtime = new() { WorkingDirectory = Environment.CurrentDirectory, WritableRoots = [Environment.CurrentDirectory, Path.GetTempPath()], NetworkAllowed = true },
+                Runtime = new() { WorkingDirectory = Environment.CurrentDirectory, Policy = new LlmAgentHostRuntimePolicy { WritableRoots = [Environment.CurrentDirectory, Path.GetTempPath()], NetworkAllowed = true } },
                 Tools =
                 [
                     new LlmAgentToolDefinition
@@ -107,9 +107,9 @@ public sealed class ClaudeAgentClientTests
         Assert.Equal("hello", observedCall.Arguments.GetProperty("text").GetString());
         Assert.Equal("darkspyre-inference-connect", observedCall.Namespace);
         Assert.Contains(events.OfType<LlmAgentToolEvent>(), item =>
-            item.Tool == "echo" && item.Status == "inProgress");
+            item.Tool == "echo" && item.Status == "inProgress" && item.Output is null);
         Assert.Contains(events.OfType<LlmAgentToolEvent>(), item =>
-            item.Tool == "echo" && item.Status == "completed" && item.Success == true);
+            item.Tool == "echo" && item.Status == "completed" && item.Success == true && item.Output is { IsError: false });
         Assert.Equal(
             LlmAgentTurnStatus.Completed,
             Assert.Single(events.OfType<LlmAgentTurnCompletedEvent>()).Status);
@@ -228,7 +228,7 @@ public sealed class ClaudeAgentClientTests
             new LlmAgentSessionOptions
             {
                 ModelId = "claude-test",
-                Runtime = new() { WorkingDirectory = Environment.CurrentDirectory, Sandbox = sandbox, NetworkAllowed = false },
+                Runtime = new() { WorkingDirectory = Environment.CurrentDirectory, Policy = new LlmAgentHostRuntimePolicy { Sandbox = sandbox, NetworkAllowed = false } },
             }));
     }
 

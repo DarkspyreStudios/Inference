@@ -285,7 +285,8 @@ internal sealed class BedrockAgentCoreSession : ILlmAgentSession
                         pending.Name,
                         arguments,
                         !result.IsError,
-                        result.IsError ? "failed" : "completed");
+                        result.IsError ? "failed" : "completed",
+                        result);
                     results.Add(new CompletedToolUse(
                         callId,
                         pending.Name,

@@ -163,8 +163,8 @@ internal sealed class BedrockAgentCoreLlmClient(IBedrockAgentCoreInvoker invoker
     {
         cancellationToken.ThrowIfCancellationRequested();
         ArgumentNullException.ThrowIfNull(options);
-        LlmAgentNativeRuntimeOptions runtime = NativeAgentContract.ValidateStart(options);
-        AgentResourceOptions.Validate(NativeAgentContract.AgentCore, options.AllowRuntimeBackgroundWork, options.ResourceOutputRetentionBytes);
+        LlmAgentNativeRuntimeOptions runtime = NativeAgentContract.ValidateStart(options, NativeAgentContract.AgentCore);
+        LlmAgentHostRuntimePolicy policy = NativeAgentContract.HostPolicy(runtime);
         NativeAgentContract.ValidateConnection(connection, NativeAgentContract.AgentCore,
             options.ModelId, options.Tools, options.ToolHandler);
         ValidateConnection(connection);
@@ -174,8 +174,8 @@ internal sealed class BedrockAgentCoreLlmClient(IBedrockAgentCoreInvoker invoker
             options.Tools,
             options.ToolHandler,
             runtime.Ephemeral,
-            runtime.Sandbox,
-            runtime.NetworkAllowed);
+            policy.Sandbox,
+            policy.NetworkAllowed);
         string sessionId = $"darkspyre-inference-connect-{Guid.NewGuid():N}";
         return Task.FromResult<ILlmAgentSession>(new BedrockAgentCoreSession(
             invoker,
@@ -185,8 +185,8 @@ internal sealed class BedrockAgentCoreLlmClient(IBedrockAgentCoreInvoker invoker
             options.ModelId,
             options.Instructions,
             options.Tools,
-            runtime.Sandbox,
-            runtime.ApprovalPolicy,
+            policy.Sandbox,
+            policy.ApprovalPolicy,
             options.ToolHandler,
             NativeAgentContract.AgentCore.RichContentSupported.For(connection, null),
             NativeAgentContract.AgentCore.RichContentSupported.For(connection, options.ModelId),
@@ -204,19 +204,19 @@ internal sealed class BedrockAgentCoreLlmClient(IBedrockAgentCoreInvoker invoker
         ValidateConnection(connection);
         ValidateRuntimeSessionId(threadId);
         options ??= new LlmAgentResumeOptions();
-        AgentResourceOptions.Validate(NativeAgentContract.AgentCore, options.AllowRuntimeBackgroundWork, options.ResourceOutputRetentionBytes);
         NativeAgentContract.ValidateConnection(connection, NativeAgentContract.AgentCore,
             options.ModelId, options.Tools, options.ToolHandler);
         string modelId = options.ModelId ?? DefaultModelId;
-        LlmAgentNativeRuntimeOptions runtime = NativeAgentContract.ResumeRuntime(options);
+        LlmAgentNativeRuntimeOptions runtime = NativeAgentContract.ResumeRuntime(options, NativeAgentContract.AgentCore);
+        LlmAgentHostRuntimePolicy policy = NativeAgentContract.HostPolicy(runtime);
         ValidateSessionOptions(
             modelId,
             runtime.WorkingDirectory,
             options.Tools,
             options.ToolHandler,
             runtime.Ephemeral,
-            runtime.Sandbox,
-            runtime.NetworkAllowed);
+            policy.Sandbox,
+            policy.NetworkAllowed);
         return Task.FromResult<ILlmAgentSession>(new BedrockAgentCoreSession(
             invoker,
             RequireAws(connection),
@@ -225,8 +225,8 @@ internal sealed class BedrockAgentCoreLlmClient(IBedrockAgentCoreInvoker invoker
             modelId,
             options.Instructions,
             options.Tools,
-            runtime.Sandbox,
-            runtime.ApprovalPolicy,
+            policy.Sandbox,
+            policy.ApprovalPolicy,
             options.ToolHandler,
             NativeAgentContract.AgentCore.RichContentSupported.For(connection, null),
             NativeAgentContract.AgentCore.RichContentSupported.For(connection, modelId)));

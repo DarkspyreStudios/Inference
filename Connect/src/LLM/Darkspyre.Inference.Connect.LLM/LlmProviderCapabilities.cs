@@ -76,7 +76,7 @@ public sealed record LlmProviderCapabilities
         _ = Restrict(overrides?.SupportsAgentToolUse, SupportsAgentToolUse);
         _ = Restrict(overrides?.SupportsAgentTurnInstructions, SupportsAgentTurnInstructions);
         if ((!SupportsAgentSessions && (SupportsAgentToolUse || SupportsAgentTurnInstructions
-                || Agent != new LlmAgentCapabilities()))
+                || !Agent.IsNone))
             || (overrides?.SupportsAgentSessions is false
                 && (overrides.SupportsAgentToolUse is true || overrides.SupportsAgentTurnInstructions is true)))
         {

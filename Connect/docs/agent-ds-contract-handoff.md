@@ -47,6 +47,27 @@ contract guidance below remains the integration baseline until that coordinated 
 DSA-69 separately tracks Bedrock signed-reasoning replay unlocked by the shared envelope; this
 implementation preserves Bedrock's current counts-only continuation behavior.
 
+## Pending: runtime policy ownership and native tool observations (DSA-74 / DSA-76)
+
+This is a breaking public contract change. It is unreleased; the coordinated release version is chosen
+when publication is authorized. [DSA-76](https://darkspyre.atlassian.net/browse/DSA-76) owns the host
+adoption under the [DSA-75](https://darkspyre.atlassian.net/browse/DSA-75) epic.
+
+- `LlmAgentNativeRuntimeOptions` holds `WorkingDirectory`, `Ephemeral` and `Policy`. `WritableRoots`,
+  `NetworkAllowed`, `Sandbox` and `ApprovalPolicy` move to `LlmAgentHostRuntimePolicy`, the default
+  `Policy`.
+- `AllowRuntimeBackgroundWork` moves from `LlmAgentSessionOptions` and `LlmAgentResumeOptions` to
+  `LlmAgentHostRuntimePolicy`. `ResourceOutputRetentionBytes` stays on the session and resume options.
+- `LlmAgentProviderRuntimePolicy` adopts the provider's own configured policy, including background
+  behavior. Select it only for a runtime whose `LlmAgentCapabilities.SupportedRuntimePolicies` contains
+  `ProviderConfigured`, and present its limits as the provider's, not the host's.
+- Map existing Claude and AgentCore runtime settings mechanically into `LlmAgentHostRuntimePolicy`. Preserve
+  original stored records; there is no Connect reader for the flat shape.
+- `LlmAgentActivityEvent` carries adapter-owned progress. Render it as progress, never as assistant
+  transcript text.
+- `LlmAgentToolEvent.Output` is the tool result the runtime reported, or null. Persisted event
+  serialization must carry it. It never invokes a host handler.
+
 ## Native background resources: 11.8.0-rc.1
 
 `11.8.0-rc.1` is a breaking-contract release: `ILlmAgentSession` gains members, so every implementation,

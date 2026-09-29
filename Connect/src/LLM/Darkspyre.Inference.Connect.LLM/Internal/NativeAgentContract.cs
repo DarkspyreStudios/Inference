@@ -1,3 +1,4 @@
+using System.Collections.Frozen;
 using System.Runtime.CompilerServices;
 
 namespace Darkspyre.Inference.Connect.LLM.Internal;
@@ -5,6 +6,10 @@ namespace Darkspyre.Inference.Connect.LLM.Internal;
 /// <summary>Current native-runtime declarations and fail-fast managed-only option checks.</summary>
 internal static class NativeAgentContract
 {
+    // Declared before the capability records that read it: static initializers run in textual order.
+    private static IReadOnlySet<LlmAgentRuntimePolicyKind> HostControlled { get; } =
+        FrozenSet.Create(LlmAgentRuntimePolicyKind.HostControlled);
+
     public static LlmAgentCapabilities Claude { get; } = new()
     {
         ContextOwnership = LlmAgentOwnership.Provider,
@@ -15,6 +20,7 @@ internal static class NativeAgentContract
         SupportsInterrupt = true,
         ToolExecutionOwnership = LlmAgentToolExecutionOwnership.Mixed,
         RichContentSupported = RichContentRoutes.ClaudeMcp,
+        SupportedRuntimePolicies = HostControlled,
         ResourceObservation = LlmOperationSupport.Supported
     };
 
@@ -26,11 +32,13 @@ internal static class NativeAgentContract
         CompactionOwnership = LlmAgentOwnership.Provider,
         ToolExecutionOwnership = LlmAgentToolExecutionOwnership.Mixed,
         RichContentSupported = RichContentRoutes.AgentCore,
+        SupportedRuntimePolicies = HostControlled,
         // Not measured: no AgentCore credentials were available.
         ResourceObservation = LlmOperationSupport.Unknown
     };
 
-    public static LlmAgentNativeRuntimeOptions ValidateStart(LlmAgentSessionOptions options)
+    /// <summary>The validated start settings of a runtime that declares <paramref name="agent"/>.</summary>
+    public static LlmAgentNativeRuntimeOptions ValidateStart(LlmAgentSessionOptions options, LlmAgentCapabilities agent)
     {
         // A supplied context becomes opening context; see AgentOpeningContext.
         if (options.ThreadId is not null || options.SessionId is not null || options.ExecutionOptions is not null)
@@ -41,17 +49,49 @@ internal static class NativeAgentContract
         }
 
         ValidateTools(options.Tools);
-        return options.Runtime ?? throw new ArgumentException(
+        LlmAgentNativeRuntimeOptions runtime = options.Runtime ?? throw new ArgumentException(
             "This native runtime requires Runtime options with a working directory.", nameof(options));
+        ValidateRuntime(agent, runtime, options.ResourceOutputRetentionBytes);
+        return runtime;
     }
 
-    /// <summary>The resume settings: the supplied runtime whole, or the documented resume defaults.</summary>
-    public static LlmAgentNativeRuntimeOptions ResumeRuntime(LlmAgentResumeOptions options) =>
-        options.Runtime ?? new()
+    /// <summary>
+    /// The validated resume settings: the supplied runtime whole, or the documented host-controlled resume
+    /// defaults. A runtime that does not accept host-controlled policy therefore rejects a null runtime.
+    /// </summary>
+    public static LlmAgentNativeRuntimeOptions ResumeRuntime(LlmAgentResumeOptions options, LlmAgentCapabilities agent)
+    {
+        LlmAgentNativeRuntimeOptions runtime = options.Runtime ?? new()
         {
             WorkingDirectory = Environment.CurrentDirectory,
-            WritableRoots = [Environment.CurrentDirectory]
+            Policy = new LlmAgentHostRuntimePolicy { WritableRoots = [Environment.CurrentDirectory] }
         };
+        ValidateRuntime(agent, runtime, options.ResourceOutputRetentionBytes);
+        return runtime;
+    }
+
+    /// <summary>The host-controlled policy of settings that <see cref="ValidateRuntime"/> accepted for a host-only runtime.</summary>
+    public static LlmAgentHostRuntimePolicy HostPolicy(LlmAgentNativeRuntimeOptions runtime) =>
+        runtime.Policy as LlmAgentHostRuntimePolicy
+        ?? throw new NotSupportedException("This native runtime accepts only a host-controlled runtime policy.");
+
+    private static void ValidateRuntime(
+        LlmAgentCapabilities agent,
+        LlmAgentNativeRuntimeOptions runtime,
+        long retentionBytes)
+    {
+        LlmAgentRuntimePolicy policy = runtime.Policy
+            ?? throw new ArgumentException("Native runtime options require a runtime policy.", nameof(runtime));
+        if (!agent.SupportedRuntimePolicies.Contains(policy.Kind))
+        {
+            throw new NotSupportedException(
+                $"This native runtime does not accept a {policy.Kind} runtime policy; check SupportedRuntimePolicies.");
+        }
+        AgentResourceOptions.Validate(
+            agent,
+            policy is LlmAgentHostRuntimePolicy { AllowRuntimeBackgroundWork: true },
+            retentionBytes);
+    }
 
     public static void ValidateConnection(
         LlmConnection connection,

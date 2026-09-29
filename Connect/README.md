@@ -577,6 +577,11 @@ does not enforce `MaxOutputTokens`. Bounded summarization must reject an unsuppo
 route, not switch models or silently omit its cap. No new inference retries or compaction orchestration
 are introduced by these APIs.
 
+Agent sessions report adapter-owned progress as `LlmAgentActivityEvent`; it is not assistant transcript
+text. `LlmAgentToolEvent.Output` carries the tool result the runtime reported, or null when none was
+reported. It is an observation: a tool the runtime owns never reaches a host handler through it. The
+Claude CLI, AgentCore and managed runtimes set it on the completed or failed event of a host tool.
+
 `LlmProviderCapabilities.Agent` declares context and tool-execution ownership, capture/replacement,
 context status, host compaction handoff, native resume/fork/compaction, steering and interruption.
 Check these before selecting a pathway. `SupportsAgentTurnInstructions` separately gates a complete
@@ -825,10 +830,21 @@ await foreach (LlmAgentEvent agentEvent in session.RunTurnAsync(
 ```
 
 `LlmAgentSessionOptions.Runtime` (`LlmAgentNativeRuntimeOptions`) controls a provider-owned runtime:
-its working directory, writable roots, network access, sandbox, approval policy and `Ephemeral`. The
-Claude CLI and AgentCore require it; managed sessions reject it. A resume without `Runtime` uses the
-current directory as working directory and only writable root, `WorkspaceWrite`, network allowed and
-`OnRequest`; a supplied `Runtime` is used whole. Managed Codex has no built-in shell, file editor,
+its working directory, `Ephemeral` and `Policy`. Native runtimes require it; managed sessions reject it.
+`Policy` is one of two variants:
+
+- `LlmAgentHostRuntimePolicy` (the default): host-selected writable roots, network access, sandbox,
+  approval policy and `AllowRuntimeBackgroundWork`. The runtime enforces these limits.
+- `LlmAgentProviderRuntimePolicy`: explicit adoption of the policy configured in the provider's own
+  settings, including its background behavior. Connect does not read, edit or strengthen that policy and
+  makes no claim about the filesystem, network or background limits it applies.
+
+`LlmAgentCapabilities.SupportedRuntimePolicies` lists the variants a runtime accepts. The Claude CLI and
+AgentCore accept `HostControlled`; managed runtimes report an empty set. A runtime rejects any other
+variant before effects. A resume without `Runtime` uses the current directory as working directory and a
+host-controlled policy with that directory as its only writable root, `WorkspaceWrite`, network allowed,
+`OnRequest` and no runtime background work. A runtime that accepts only `ProviderConfigured` therefore
+rejects a resume without `Runtime`. A supplied `Runtime` is used whole. Managed Codex has no built-in shell, file editor,
 network tool, or approval executor. Agent DS must enforce authorization, filesystem roots, and network
 policy inside each tool handler. Managed sessions are always live/in-memory; persistence is explicit
 host capture.
@@ -1017,7 +1033,7 @@ A provider-owned runtime can run background work inside its own process. `ILlmAg
   `StopResourceAsync` returns Requested; the resource reports Stopped when the runtime confirms.
 - `LlmAgentCapabilities.ResourceObservation` is Supported for the Claude CLI, Unknown for AgentCore
   (not measured) and Unsupported for managed Codex, whose tools run in the host.
-- `LlmAgentSessionOptions.AllowRuntimeBackgroundWork` (off by default) lets the Claude CLI start
+- `LlmAgentHostRuntimePolicy.AllowRuntimeBackgroundWork` (off by default) lets the Claude CLI start
   subagents and monitors. A background Bash command is part of the Bash tool and is observed either
   way. `ResourceOutputRetentionBytes` (1 MiB by default) caps the subagent output Connect retains.
 

@@ -306,8 +306,11 @@ public sealed class ClaudeAgentResourcesTests : IDisposable
         await using ILlmAgentSession session = await new ClaudeAgentClient(factory).StartSessionAsync("connection", Connection(), new()
         {
             ModelId = "claude-test",
-            Runtime = new() { WorkingDirectory = _directory, Sandbox = sandbox },
-            AllowRuntimeBackgroundWork = allow
+            Runtime = new()
+            {
+                WorkingDirectory = _directory,
+                Policy = new LlmAgentHostRuntimePolicy { Sandbox = sandbox, AllowRuntimeBackgroundWork = allow }
+            }
         });
 
         IReadOnlyList<string> arguments = factory.Invocation!.Arguments;

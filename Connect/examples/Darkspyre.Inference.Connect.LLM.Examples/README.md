@@ -247,9 +247,15 @@ await using ILlmAgentSession session = await agents.StartSessionAsync(
     new LlmAgentSessionOptions
     {
         ModelId = modelId,
-        WorkingDirectory = repositoryPath,
-        Sandbox = LlmAgentSandboxMode.ReadOnly,
-        ApprovalPolicy = LlmAgentApprovalPolicy.Never
+        Runtime = new LlmAgentNativeRuntimeOptions
+        {
+            WorkingDirectory = repositoryPath,
+            Policy = new LlmAgentHostRuntimePolicy
+            {
+                Sandbox = LlmAgentSandboxMode.ReadOnly,
+                ApprovalPolicy = LlmAgentApprovalPolicy.Never
+            }
+        }
     },
     cancellationToken);
 

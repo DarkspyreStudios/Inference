@@ -313,21 +313,70 @@ public sealed class AgentContractTests
             2 => options with { SessionId = "session" },
             _ => options with { ExecutionOptions = new() }
         };
-        Assert.Throws<NotSupportedException>(() => NativeAgentContract.ValidateStart(options));
+        Assert.Throws<NotSupportedException>(() => NativeAgentContract.ValidateStart(options, NativeAgentContract.Claude));
     }
 
     [Fact]
     public void NativeStartRequiresRuntimeOptionsAndResumeDefaultsToTheCurrentDirectory()
     {
-        Assert.Throws<ArgumentException>(() => NativeAgentContract.ValidateStart(new LlmAgentSessionOptions { ModelId = "model" }));
+        Assert.Throws<ArgumentException>(() => NativeAgentContract.ValidateStart(
+            new LlmAgentSessionOptions { ModelId = "model" }, NativeAgentContract.Claude));
 
-        LlmAgentNativeRuntimeOptions resumed = NativeAgentContract.ResumeRuntime(new LlmAgentResumeOptions());
+        LlmAgentNativeRuntimeOptions resumed = NativeAgentContract.ResumeRuntime(new LlmAgentResumeOptions(), NativeAgentContract.Claude);
         Assert.Equal(Environment.CurrentDirectory, resumed.WorkingDirectory);
-        Assert.Equal([Environment.CurrentDirectory], resumed.WritableRoots);
+        Assert.False(resumed.Ephemeral);
+        var policy = Assert.IsType<LlmAgentHostRuntimePolicy>(resumed.Policy);
+        Assert.Equal([Environment.CurrentDirectory], policy.WritableRoots);
         Assert.Equal((LlmAgentSandboxMode.WorkspaceWrite, true, LlmAgentApprovalPolicy.OnRequest, false),
-            (resumed.Sandbox, resumed.NetworkAllowed, resumed.ApprovalPolicy, resumed.Ephemeral));
-        var supplied = new LlmAgentNativeRuntimeOptions { WorkingDirectory = "/work", Sandbox = LlmAgentSandboxMode.ReadOnly };
-        Assert.Same(supplied, NativeAgentContract.ResumeRuntime(new LlmAgentResumeOptions { Runtime = supplied }));
+            (policy.Sandbox, policy.NetworkAllowed, policy.ApprovalPolicy, policy.AllowRuntimeBackgroundWork));
+        var supplied = new LlmAgentNativeRuntimeOptions
+        {
+            WorkingDirectory = "/work",
+            Policy = new LlmAgentHostRuntimePolicy { Sandbox = LlmAgentSandboxMode.ReadOnly }
+        };
+        Assert.Same(supplied, NativeAgentContract.ResumeRuntime(new LlmAgentResumeOptions { Runtime = supplied }, NativeAgentContract.Claude));
+    }
+
+    [Fact]
+    public void NativeRuntimeDefaultsToHostControlledPolicy()
+    {
+        var policy = Assert.IsType<LlmAgentHostRuntimePolicy>(new LlmAgentNativeRuntimeOptions { WorkingDirectory = "." }.Policy);
+        Assert.Equal(LlmAgentRuntimePolicyKind.HostControlled, policy.Kind);
+        Assert.False(policy.AllowRuntimeBackgroundWork);
+        Assert.Equal(LlmAgentRuntimePolicyKind.ProviderConfigured, new LlmAgentProviderRuntimePolicy().Kind);
+    }
+
+    [Fact]
+    public void HostControlledRuntimesRejectProviderConfiguredPolicyBeforeEffects()
+    {
+        var runtime = new LlmAgentNativeRuntimeOptions { WorkingDirectory = ".", Policy = new LlmAgentProviderRuntimePolicy() };
+        foreach (LlmAgentCapabilities agent in new[] { NativeAgentContract.Claude, NativeAgentContract.AgentCore })
+        {
+            Assert.Equal([LlmAgentRuntimePolicyKind.HostControlled], agent.SupportedRuntimePolicies);
+            Assert.Throws<NotSupportedException>(() => NativeAgentContract.ValidateStart(
+                new LlmAgentSessionOptions { ModelId = "model", Runtime = runtime }, agent));
+            Assert.Throws<NotSupportedException>(() => NativeAgentContract.ResumeRuntime(
+                new LlmAgentResumeOptions { Runtime = runtime }, agent));
+        }
+        Assert.Throws<ArgumentException>(() => NativeAgentContract.ValidateStart(
+            new LlmAgentSessionOptions { ModelId = "model", Runtime = runtime with { Policy = null! } }, NativeAgentContract.Claude));
+    }
+
+    [Fact]
+    public void RuntimePolicySetsAreDeclaredOnlyForProviderOwnedContext()
+    {
+        Assert.Empty(new LlmAgentCapabilities().SupportedRuntimePolicies);
+        var hostOwned = new LlmAgentCapabilities
+        {
+            ContextOwnership = LlmAgentOwnership.Host,
+            SupportedRuntimePolicies = new HashSet<LlmAgentRuntimePolicyKind> { LlmAgentRuntimePolicyKind.HostControlled }
+        };
+        Assert.Throws<ArgumentException>(() => new LlmProviderCapabilities { SupportsAgentSessions = true, Agent = hostOwned }.Apply(null));
+        var none = new LlmAgentCapabilities
+        {
+            SupportedRuntimePolicies = new HashSet<LlmAgentRuntimePolicyKind> { LlmAgentRuntimePolicyKind.ProviderConfigured }
+        };
+        Assert.Throws<ArgumentException>(() => new LlmProviderCapabilities { SupportsAgentSessions = true, Agent = none }.Apply(null));
     }
 
     private static ProjectedToolOutput Project(LlmToolOutput output) =>

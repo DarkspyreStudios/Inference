@@ -41,7 +41,7 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
             throw new NotSupportedException(
                 "Managed sessions run no provider-owned runtime, so they reject native runtime options.");
         }
-        AgentResourceOptions.Validate(ManagedAgentPolicy.Capabilities, options.AllowRuntimeBackgroundWork, options.ResourceOutputRetentionBytes);
+        AgentResourceOptions.Validate(ManagedAgentPolicy.Capabilities, allowRuntimeBackgroundWork: false, options.ResourceOutputRetentionBytes);
         _connection = connection;
         _execution = options.ExecutionOptions ?? new();
         _models = Array.AsReadOnly(models.ToArray());
@@ -520,7 +520,8 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
                     try
                     {
                         await writer.WriteAsync(new LlmAgentToolEvent(ThreadId, run.Id, call.Id, null,
-                        call.Name, JsonSerializer.SerializeToElement(new { }), false, "failed"), token);
+                        call.Name, JsonSerializer.SerializeToElement(new { }), false, "failed",
+                        LlmToolOutput.FromText(message, isError: true)), token);
                     }
                     catch (OperationCanceledException) when (token.IsCancellationRequested) { }
                 }
@@ -549,7 +550,7 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
                     try
                     {
                         await writer.WriteAsync(new LlmAgentToolEvent(ThreadId, run.Id, call.Id, null, call.Name,
-                            arguments.RootElement.Clone(), !output.IsError, "completed"), token);
+                            arguments.RootElement.Clone(), !output.IsError, "completed", mapped.Output), token);
                     }
                     catch (OperationCanceledException) when (token.IsCancellationRequested) { }
                 }
