@@ -868,3 +868,14 @@ Authenticated restores, Debug/Release builds and tests, formatting, vulnerabilit
 archive boundaries and local/fresh-feed consumer checks passed. Downloaded archives match
 the verified local archives; feed readback confirms private visibility. Source is tagged
 `v11.12.0-rc.1`. No model weights or paid inference were used as verification gates.
+
+## DSA-74 AGY native sessions: design proposal
+
+The mapping is in `Connect/docs/antigravity-agent-tech-design.md`. AGY 1.2.12 live probes confirmed
+native multi-turn conversations, exact-ID resume, provider-owned file-tool execution and an init ID
+before user input; a zero-turn conversation also survived reopen with a schema launch option.
+The current released wrapper remains chat-only. The proposal adds the existing agent/resume seam,
+a persistent process owner and shared chat/agent parsing. Explicit provider-configured runtime policy
+and native progress/tool-output event contracts require agreement before implementation. Usage
+normalization, repeated launch-option changes and cancellation/background boundaries retain explicit
+qualification gates. No source implementation or release was performed for this design.

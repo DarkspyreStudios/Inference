@@ -1082,6 +1082,9 @@ can explicitly attach the optional browser-authorized catalog OAuth credential t
 
 ## Antigravity CLI subscription transport
 
+Native agent sessions and resume are proposed under [DSA-74 technical design](docs/antigravity-agent-tech-design.md).
+The published 11.12.0-rc.1 adapter remains chat-only; that proposal has not been implemented.
+
 `GoogleAntigravityCli` wraps the official [Antigravity CLI headless mode](https://antigravity.google/docs/cli/headless/). Darkspyre.Inference.Connect.LLM sends prompts over the documented stdin NDJSON protocol, consumes stdout events line by line, and emits model text and activity while the CLI is still running. It does not read, copy, or store Antigravity OAuth credentials.
 
 Install the CLI and complete its interactive Google sign-in once:
