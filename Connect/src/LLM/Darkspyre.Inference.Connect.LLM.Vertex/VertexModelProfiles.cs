@@ -9,13 +9,13 @@ internal sealed record VertexModelProfile(string Id, long ContextTokens, int Out
     IReadOnlySet<LlmReasoningLevel> ReasoningLevels)
 {
     public bool IsClaude => Id.StartsWith("anthropic/", StringComparison.Ordinal);
-    public LlmProviderCapabilities Capabilities
+    public LlmProviderCapabilities Capabilities => IsClaude ? ClaudeCapabilities : GeminiCapabilities.Create(ReasoningLevels);
+
+    private LlmProviderCapabilities ClaudeCapabilities
     {
         get
         {
-            LlmRichContentSupported rich = IsClaude
-                ? RichContentRoutes.Anthropic with { MaxBinaryBytes = 5 * 1024 * 1024 }
-                : RichContentRoutes.TextOnly with { ErrorFlag = LlmRichContentCarriage.Native };
+            LlmRichContentSupported rich = RichContentRoutes.Anthropic with { MaxBinaryBytes = 5 * 1024 * 1024 };
             return new()
             {
                 SupportsStreaming = true,
@@ -28,10 +28,10 @@ internal sealed record VertexModelProfile(string Id, long ContextTokens, int Out
                 Tools = new()
                 {
                     ChoiceModes = Enum.GetValues<LlmToolChoiceMode>().ToFrozenSet(),
-                    StrictInputSchema = IsClaude ? LlmStrictInputSchemaSupport.Supported : LlmStrictInputSchemaSupport.Unsupported,
+                    StrictInputSchema = LlmStrictInputSchemaSupport.Supported,
                     SupportsParallelCalls = true,
-                    SupportsParallelCallControl = IsClaude,
-                    SupportsArgumentStreaming = IsClaude
+                    SupportsParallelCallControl = true,
+                    SupportsArgumentStreaming = true
                 },
                 ReasoningLevels = ReasoningLevels,
                 SupportsPromptImages = true,

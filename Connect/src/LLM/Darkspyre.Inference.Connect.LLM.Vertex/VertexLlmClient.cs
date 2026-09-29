@@ -55,9 +55,9 @@ internal sealed class VertexLlmClient(HttpClient http, IVertexAuthentication aut
             : VertexSchemas.Enforcement(request.StructuredOutput, profile.IsClaude);
         IAsyncEnumerable<LlmStreamEvent> source = profile.IsClaude
             ? new VertexClaudeProtocol(Http, access.Token).StreamAsync(connection, request, cancellationToken)
-            : VertexGeminiStream.ReadAsync(Http, connection, request,
+            : GeminiStream.ReadAsync(Http, GeminiMessage(connection, request,
                 VertexGeminiRequest.Build(connection, request, enforcement, output => ProjectToolOutput(connection, request.ModelId, output)),
-                access.Token, enforcement, cancellationToken);
+                access.Token), GeminiRoute, connection, request, enforcement, cancellationToken);
         await using IAsyncEnumerator<LlmStreamEvent> iterator = source.GetAsyncEnumerator(cancellationToken);
         while (true)
         {
@@ -138,6 +138,16 @@ internal sealed class VertexLlmClient(HttpClient http, IVertexAuthentication aut
         return new(LocalTokenCount.Count(projection));
     }
 
+    private static readonly GeminiRoute GeminiRoute = new(LlmTransport.GoogleVertexAi, "Vertex", "vertex_", CheckStatus,
+        (connection, modelId, parts) => new VertexContinuationCodec().Encode(connection, modelId, parts));
+
+    private static HttpRequestMessage GeminiMessage(LlmConnection connection, LlmChatRequest request, JsonObject payload, string token)
+    {
+        var message = new HttpRequestMessage(HttpMethod.Post, VertexEndpoints.Generation(connection, request.ModelId)) { Content = JsonContent.Create(payload) };
+        message.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        return message;
+    }
+
     internal static void CheckStatus(HttpResponseMessage response)
     {
         if (!response.IsSuccessStatusCode)
@@ -159,12 +169,16 @@ internal sealed class VertexLlmClient(HttpClient http, IVertexAuthentication aut
         { throw new NotSupportedException("This route cannot enforce parallel tool-call control."); }
         foreach (LlmAttachment attachment in request.Messages.SelectMany(message => message.Attachments))
         {
+            if (!profile.IsClaude)
+            {
+                if (!GeminiCapabilities.AcceptsAttachment(attachment)) { throw new NotSupportedException("Unsupported Vertex attachment media type or size."); }
+                continue;
+            }
             string mime = LlmAttachments.ResolveMediaType(attachment);
             bool supported = attachment.Kind == LlmBinaryKind.Image
-                ? mime is "image/png" or "image/jpeg" or "image/webp" || profile.IsClaude && mime == "image/gif"
+                ? mime is "image/png" or "image/jpeg" or "image/webp" or "image/gif"
                 : mime is "application/pdf" or "text/plain";
-            int max = profile.IsClaude ? 5 * 1024 * 1024 : mime == "application/pdf" ? 50 * 1024 * 1024 : 7 * 1024 * 1024;
-            if (!supported || attachment.Data.Length > max) { throw new NotSupportedException("Unsupported Vertex attachment media type or size."); }
+            if (!supported || attachment.Data.Length > 5 * 1024 * 1024) { throw new NotSupportedException("Unsupported Vertex attachment media type or size."); }
         }
     }
 }

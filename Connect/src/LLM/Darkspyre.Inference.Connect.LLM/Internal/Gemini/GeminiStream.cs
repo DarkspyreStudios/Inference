@@ -1,25 +1,27 @@
-using System.Net.Http.Headers;
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Darkspyre.Inference.Common.LLM;
-using Darkspyre.Inference.Connect.LLM.Internal;
 
-namespace Darkspyre.Inference.Connect.LLM.Vertex;
+namespace Darkspyre.Inference.Connect.LLM.Internal;
 
-internal static class VertexGeminiStream
+/// <summary>The route-specific parts of a Gemini stream: naming, status checks and continuation ownership.</summary>
+internal sealed record GeminiRoute(LlmTransport Transport, string Name, string CallIdPrefix,
+    Action<HttpResponseMessage> CheckStatus, Func<LlmConnection, string, JsonArray, LlmContinuationState> Encode);
+
+/// <summary>Reads a Gemini streamGenerateContent SSE response. The caller supplies the URL and authentication.</summary>
+internal static class GeminiStream
 {
-    public static async IAsyncEnumerable<LlmStreamEvent> ReadAsync(HttpClient http, LlmConnection connection,
-        LlmChatRequest request, JsonObject payload, string token, LlmStructuredOutputEnforcement? enforcement,
+    public static async IAsyncEnumerable<LlmStreamEvent> ReadAsync(HttpClient http, HttpRequestMessage message, GeminiRoute route,
+        LlmConnection connection, LlmChatRequest request, LlmStructuredOutputEnforcement? enforcement,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
-        using var message = new HttpRequestMessage(HttpMethod.Post, VertexEndpoints.Generation(connection, request.ModelId))
-        { Content = JsonContent.Create(payload) };
-        message.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
-        using HttpResponseMessage response = await http.SendAsync(message, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
-        VertexLlmClient.CheckStatus(response);
+        using HttpRequestMessage owned = message;
+        using HttpResponseMessage response = await http.SendAsync(owned, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
+        route.CheckStatus(response);
         await using Stream stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+        LlmProviderException Failure(string reason) => new(reason, route.Transport);
         var text = new StringBuilder();
         var parts = new JsonArray();
         var calls = new List<LlmToolCall>();
@@ -32,7 +34,7 @@ internal static class VertexGeminiStream
         {
             using JsonDocument document = JsonDocument.Parse(data);
             JsonElement root = document.RootElement;
-            if (root.TryGetProperty("error", out _)) { throw Failure("Vertex returned a stream error."); }
+            if (root.TryGetProperty("error", out _)) { throw Failure($"{route.Name} returned a stream error."); }
             responseId = LlmJson.GetString(root, "responseId") ?? responseId;
             if (LlmJson.GetObject(root, "usageMetadata") is { } usage)
             {
@@ -46,15 +48,15 @@ internal static class VertexGeminiStream
             { blocked = LlmJson.GetString(feedback, "blockReason") ?? blocked; }
             if (!root.TryGetProperty("candidates", out JsonElement candidates)) { continue; }
             if (candidates.ValueKind != JsonValueKind.Array || candidates.GetArrayLength() > 1)
-            { throw Failure("Vertex returned an invalid candidate count."); }
+            { throw Failure($"{route.Name} returned an invalid candidate count."); }
             foreach (JsonElement candidate in candidates.EnumerateArray())
             {
                 if (LlmJson.GetInt(candidate, "index") is int index && index != 0)
-                { throw Failure("Vertex returned an unexpected candidate index."); }
+                { throw Failure($"{route.Name} returned an unexpected candidate index."); }
                 string? nextFinish = LlmJson.GetString(candidate, "finishReason");
                 if (nextFinish is not null)
                 {
-                    if (finish is not null && finish != nextFinish) { throw Failure("Vertex returned conflicting terminal reasons."); }
+                    if (finish is not null && finish != nextFinish) { throw Failure($"{route.Name} returned conflicting terminal reasons."); }
                     finish = nextFinish;
                 }
                 if (LlmJson.GetObject(candidate, "content") is not { } content
@@ -63,7 +65,7 @@ internal static class VertexGeminiStream
                 {
                     JsonObject part = JsonNode.Parse(item.GetRawText())!.AsObject();
                     if (part.Any(field => field.Key is not ("text" or "thought" or "thoughtSignature" or "functionCall")))
-                    { throw Failure("Vertex returned unsupported assistant content."); }
+                    { throw Failure($"{route.Name} returned unsupported assistant content."); }
                     if (part["text"] is { } value)
                     {
                         string delta = value.GetValue<string>();
@@ -72,11 +74,11 @@ internal static class VertexGeminiStream
                     }
                     if (part["functionCall"] is JsonObject function)
                     {
-                        string name = (string?)function["name"] ?? throw Failure("Vertex returned an unnamed function call.");
-                        if (function["args"] is not JsonObject arguments) { throw Failure("Vertex returned incomplete function arguments."); }
-                        string id = (string?)function["id"] ?? "vertex_" + Guid.NewGuid().ToString("N");
+                        string name = (string?)function["name"] ?? throw Failure($"{route.Name} returned an unnamed function call.");
+                        if (function["args"] is not JsonObject arguments) { throw Failure($"{route.Name} returned incomplete function arguments."); }
+                        string id = (string?)function["id"] ?? route.CallIdPrefix + Guid.NewGuid().ToString("N");
                         if (string.IsNullOrWhiteSpace(id) || string.IsNullOrWhiteSpace(name) || !callIds.Add(id))
-                        { throw Failure("Vertex returned an invalid or duplicate function identity."); }
+                        { throw Failure($"{route.Name} returned an invalid or duplicate function identity."); }
                         part["connectCallId"] = id;
                         calls.Add(new(id, name, arguments.ToJsonString()));
                         yield return new LlmToolCallStartedEvent(id, name, calls.Count - 1);
@@ -86,8 +88,8 @@ internal static class VertexGeminiStream
             }
         }
         cancellationToken.ThrowIfCancellationRequested();
-        if (finish is null && blocked is null) { throw Failure("Vertex ended without a terminal reason."); }
-        if (finish is "MALFORMED_FUNCTION_CALL" or "UNEXPECTED_TOOL_CALL") { throw Failure("Vertex could not produce a valid function call."); }
+        if (finish is null && blocked is null) { throw Failure($"{route.Name} ended without a terminal reason."); }
+        if (finish is "MALFORMED_FUNCTION_CALL" or "UNEXPECTED_TOOL_CALL") { throw Failure($"{route.Name} could not produce a valid function call."); }
         bool refused = blocked is not null || finish is "SAFETY" or "RECITATION" or "BLOCKLIST" or "PROHIBITED_CONTENT" or "SPII" or "MODEL_ARMOR";
         LlmCompletionStatus status = refused ? LlmCompletionStatus.Refused
             : finish == "MAX_TOKENS" ? LlmCompletionStatus.Incomplete
@@ -99,7 +101,7 @@ internal static class VertexGeminiStream
         var counts = input is null && output is null && total is null ? null : new LlmUsage(input, output, total)
         { CachedInputTokens = cached, ReasoningOutputTokens = thoughts };
         LlmContinuationState? state = status is LlmCompletionStatus.Completed or LlmCompletionStatus.RequiresAction
-            ? new VertexContinuationCodec().Encode(connection, request.ModelId, parts) with { InputTokens = input, OutputTokens = output } : null;
+            ? route.Encode(connection, request.ModelId, parts) with { InputTokens = input, OutputTokens = output } : null;
         yield return new LlmChatCompletionEvent(new()
         {
             Text = text.ToString(),
@@ -120,5 +122,4 @@ internal static class VertexGeminiStream
 
     private static string? SafeReason(string? reason) => reason is null ? null
         : reason.Length <= 64 && reason.All(character => char.IsAsciiLetterUpper(character) || character == '_') ? reason : "UNKNOWN";
-    private static LlmProviderException Failure(string message) => new(message, LlmTransport.GoogleVertexAi);
 }
