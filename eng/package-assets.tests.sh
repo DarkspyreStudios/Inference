@@ -19,5 +19,7 @@ dotnet msbuild "$project" -t:DoNotRepackWhisperRuntime -getItem:None -nologo |
 # _GetPackageFiles only collects the future archive inputs; it does not execute Pack.
 dotnet msbuild "$project" -t:_GetPackageFiles -getItem:_PackageFiles -p:Configuration=Release -nologo |
     jq -e '(.Items._PackageFiles | length > 0) and
-        ([.Items._PackageFiles[] | select(.Identity | test("\\.(metal|metallib|dylib|so|a)$"; "i"))] | length == 0)' >/dev/null
-printf 'Package asset checks passed: no repacked native assets; dependency shader copying preserved; output collisions rejected.\n'
+        ([.Items._PackageFiles[] | select(.Identity | test("\\.(metal|metallib|dylib|so|a)$"; "i"))] | length == 0) and
+        ([.Items._PackageFiles[] | select(.PackagePath == "lib/net11.0" and (.Identity |
+            test("/Darkspyre\\.Inference\\.Tensor\\.Registry\\.(dll|xml)$")))] | length == 2)' >/dev/null
+printf 'Package asset checks passed: Registry assembly and XML packed; no repacked native assets; dependency shader copying preserved; output collisions rejected.\n'

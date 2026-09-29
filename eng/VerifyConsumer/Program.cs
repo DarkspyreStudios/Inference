@@ -7,14 +7,16 @@ using Darkspyre.Inference.Connect.TTS;
 using Darkspyre.Inference.Tensor.Decision.Laya;
 using Darkspyre.Inference.Tensor.Image.Supra;
 using Darkspyre.Inference.Tensor.LLM.Qwen;
+using Darkspyre.Inference.Tensor.Registry;
 using Darkspyre.Inference.Tensor.STT.Whisper;
 using Darkspyre.Inference.UI.Settings;
+using Microsoft.Extensions.DependencyInjection;
 
 if (args.Length != 2) { throw new ArgumentException("Usage: VerifyConsumer <family-version> <source-commit>"); }
 string expected = args[0] + "+" + args[1];
 Type[] surfaces = [typeof(IInferenceSettingsManager), typeof(SetupChoiceCapabilities), typeof(LlmProviderService),
     typeof(ImageProviderService), typeof(TtsProviderService), typeof(AudioProviderService), typeof(QwenSetup),
-    typeof(SupraSetup), typeof(LayaSetup), typeof(WhisperSetup), typeof(InferenceSettingsEditor),
+    typeof(SupraSetup), typeof(LayaSetup), typeof(WhisperSetup), typeof(TensorEngineRegistry), typeof(InferenceSettingsEditor),
     typeof(SetupEditorState), typeof(SetupNumberInput<long>), typeof(SetupNumberInput<decimal>)];
 foreach (Type type in surfaces)
 {
@@ -26,5 +28,7 @@ if (typeof(InferenceSettings).GetProperty(nameof(InferenceSettings.HasUnsavedCha
     || typeof(InferenceSettings).GetProperty(nameof(InferenceSettings.SaveOutcomeUncertain)) is null)
 { throw new InvalidOperationException("Settings correction contracts are missing."); }
 if (TensorSpeechModels.Whisper.Count != 12) { throw new InvalidOperationException("Whisper variants missing."); }
-Console.WriteLine("Four-package consumer loaded the release contracts and twelve Whisper variants.");
+using ServiceProvider services = new ServiceCollection().AddTensorEngines().BuildServiceProvider();
+if (services.GetRequiredService<TensorEngineRegistry>().Definitions.Count != 4) { throw new InvalidOperationException("Tensor engine registrations missing."); }
+Console.WriteLine("Four-package consumer loaded the release contracts, four Tensor engines and twelve Whisper variants.");
 Console.WriteLine("Whisper native runtime: " + Whisper.net.WhisperFactory.GetRuntimeInfo());

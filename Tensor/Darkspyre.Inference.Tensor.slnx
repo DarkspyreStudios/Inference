@@ -23,6 +23,9 @@
     <Project Path="src/Image/Darkspyre.Inference.Tensor.Image/Darkspyre.Inference.Tensor.Image.csproj" />
     <Project Path="src/Image/Darkspyre.Inference.Tensor.Image.Supra/Darkspyre.Inference.Tensor.Image.Supra.csproj" />
   </Folder>
+  <Folder Name="/src/Registry/">
+    <Project Path="src/Registry/Darkspyre.Inference.Tensor.Registry/Darkspyre.Inference.Tensor.Registry.csproj" />
+  </Folder>
   <Folder Name="/src/LLM/">
     <Project Path="src/LLM/Darkspyre.Inference.Tensor.LLM/Darkspyre.Inference.Tensor.LLM.csproj" />
     <Project Path="src/LLM/Darkspyre.Inference.Tensor.LLM.Qwen/Darkspyre.Inference.Tensor.LLM.Qwen.csproj" />
@@ -44,6 +47,9 @@
   </Folder>
   <Folder Name="/tests/LLM/">
     <Project Path="tests/LLM/Darkspyre.Inference.Tensor.LLM.Qwen.Tests/Darkspyre.Inference.Tensor.LLM.Qwen.Tests.csproj" />
+  </Folder>
+  <Folder Name="/tests/Registry/">
+    <Project Path="tests/Registry/Darkspyre.Inference.Tensor.Registry.Tests/Darkspyre.Inference.Tensor.Registry.Tests.csproj" />
   </Folder>
   <Folder Name="/tests/STT/">
     <Project Path="tests/STT/Darkspyre.Inference.Tensor.STT.Whisper.Tests/Darkspyre.Inference.Tensor.STT.Whisper.Tests.csproj" />

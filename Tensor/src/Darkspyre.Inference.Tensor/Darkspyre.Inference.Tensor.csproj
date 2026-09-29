@@ -17,6 +17,7 @@
     <ProjectReference Include="..\LLM\Darkspyre.Inference.Tensor.LLM.Qwen\Darkspyre.Inference.Tensor.LLM.Qwen.csproj" PrivateAssets="all" />
     <ProjectReference Include="../STT/Darkspyre.Inference.Tensor.STT/Darkspyre.Inference.Tensor.STT.csproj" PrivateAssets="all" />
     <ProjectReference Include="../STT/Darkspyre.Inference.Tensor.STT.Whisper/Darkspyre.Inference.Tensor.STT.Whisper.csproj" PrivateAssets="all" />
+    <ProjectReference Include="../Registry/Darkspyre.Inference.Tensor.Registry/Darkspyre.Inference.Tensor.Registry.csproj" PrivateAssets="all" />
   </ItemGroup>
 
   <ItemGroup>
@@ -51,6 +52,8 @@
     <None Include="../STT/Darkspyre.Inference.Tensor.STT/bin/$(Configuration)/$(TargetFramework)/Darkspyre.Inference.Tensor.STT.xml" Pack="true" PackagePath="lib/$(TargetFramework)" />
     <None Include="../STT/Darkspyre.Inference.Tensor.STT.Whisper/bin/$(Configuration)/$(TargetFramework)/Darkspyre.Inference.Tensor.STT.Whisper.dll" Pack="true" PackagePath="lib/$(TargetFramework)" />
     <None Include="../STT/Darkspyre.Inference.Tensor.STT.Whisper/bin/$(Configuration)/$(TargetFramework)/Darkspyre.Inference.Tensor.STT.Whisper.xml" Pack="true" PackagePath="lib/$(TargetFramework)" />
+    <None Include="../Registry/Darkspyre.Inference.Tensor.Registry/bin/$(Configuration)/$(TargetFramework)/Darkspyre.Inference.Tensor.Registry.dll" Pack="true" PackagePath="lib/$(TargetFramework)" />
+    <None Include="../Registry/Darkspyre.Inference.Tensor.Registry/bin/$(Configuration)/$(TargetFramework)/Darkspyre.Inference.Tensor.Registry.xml" Pack="true" PackagePath="lib/$(TargetFramework)" />
   </ItemGroup>
   <!-- Whisper's imported targets mark native output files Pack=true. They belong to its public
        runtime NuGet, not this product archive. Preserve build output copying and the dependency. -->

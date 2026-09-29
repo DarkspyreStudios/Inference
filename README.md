@@ -88,6 +88,9 @@ Tensor provides:
   registered pack identities. Inspecting a source is not permission to download full model weights.
 - Host-controlled cancellation and teardown. Normal teardown protects active requests; cancellation
   asks for prompt termination but waits for native work to stop before freeing resources.
+- Engine discovery: `AddTensorEngines` registers every shipped engine and a `TensorEngineRegistry`
+  that lists each engine's setup definition and model store key and resolves its factories by
+  implementation ID.
 
 `StartAsync` may be a no-op. `UnloadAsync` frees the model so another can be loaded; `StopAsync`
 ends the instance's lifetime. Native dependencies, hardware, memory, and backend availability still

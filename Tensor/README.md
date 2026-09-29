@@ -19,7 +19,7 @@ installed files as plain paths: Qwen and
 Supra pass them to TensorSharp, Laya creates its ONNX Runtime session from the model path, and
 Whisper loads through `WhisperFactory.FromPath`.
 
-Assemblies included by Tensor **11.12.0-rc.1**:
+Assemblies included by the Tensor package:
 
 - `Darkspyre.Inference.Tensor.Common` — the host-controlled model lifecycle, model packs,
   verification, the local pack directory, and execution coordination.
@@ -41,6 +41,9 @@ Assemblies included by Tensor **11.12.0-rc.1**:
 - `Darkspyre.Inference.Tensor.STT.Whisper` — resident CPU Whisper inference through the public
   Whisper.net runtime. Whisper.net, Whisper.net.Runtime and NAudio.Core remain declared NuGet
   dependencies, not third-party DLLs embedded by the Darkspyre package.
+- `Darkspyre.Inference.Tensor.Registry` — `TensorEngineRegistry` and the `AddTensorEngines`
+  composition of the four shipped engines. It references the engine assemblies; neither
+  `.Tensor.Common` nor an engine assembly references it.
 
 Implementation names identify the model family they support, not a particular checkpoint or training
 run. Laya is not a general-purpose ModernBERT engine: a custom checkpoint must retain the Laya
@@ -147,6 +150,78 @@ escalates at that point. In-process native work may not observe cancellation imm
 host must not expect a fixed shutdown deadline. A host that abandons an LLM stream must dispose its
 enumerator so model teardown can complete. Cancellation does not authorize releasing memory still
 in use by native execution.
+
+## Engine registry
+
+Each engine assembly publishes an `ITensorEngineProvider` (`Darkspyre.Inference.Tensor.Common`):
+`QwenEngineProvider`, `SupraEngineProvider`, `LayaEngineProvider` and `WhisperEngineProvider`.
+A provider exposes four operations:
+
+- `Definition` is a `TensorEngineDefinition`. Its `Setup` is the engine's existing setup definition
+  (`QwenSetup.Definition` and so on), the only source of implementation ID, display name, tasks and
+  prerequisites. Its `ModelStoreKey` names the engine's pack namespace: `Qwen`, `Supra`, `Laya` or
+  `Whisper`. Reading a definition constructs no engine, loads no native library, opens no store,
+  reads no credential and makes no network call.
+- `GetOfferedModelsAsync(packs)` returns the engine's built-in packs followed by the packs of its
+  own family registered in `packs`. Qwen and Supra have one built-in pack, Whisper has its twelve
+  published variants, and Laya has none. The engine's compatibility validator checks every offered
+  pack. A registered manifest that differs from a built-in at the same key fails; it never replaces
+  the built-in.
+- `CreateInstance(packs, backend)` constructs the engine with its own execution coordinator. The
+  returned `ITensorModelInstance` also implements the engine's capability interface:
+  `ITensorLlmInference`, `ITensorImageInference`, `ITensorDecisionInference` or
+  `ITensorSpeechToTextInference`. Creation does not Start, Load or download anything. The engines'
+  public constructors remain available for compositions that supply their own coordinator.
+- `CreateSettingsManager(target, packs, offeredModels, instance, source, reader)` delegates to the
+  engine's `*Setup.CreateSettingsManager`. The instance is optional. A supplied instance must
+  implement the engine's capability interface and report the provider's implementation ID;
+  otherwise the call throws `ArgumentException`.
+
+`TensorEngineRegistry` (`Darkspyre.Inference.Tensor.Registry`) takes every registered provider and
+reads each definition once. It rejects a missing provider or definition, two providers with the
+same implementation ID, and two store keys that are equal ignoring case. `Definitions` is ordered
+by `DisplayOrder` and then by ordinal implementation ID. `GetDefinitions(task)` filters that list
+by declared task. `TryGetProvider(id)` resolves the exact, case-sensitive implementation ID and
+returns false for an unregistered one. The registry holds no pack manager, store, credential or
+live instance.
+
+`services.AddTensorEngines()` registers the four shipped providers and the registry as singletons.
+A repeated call adds nothing. A host that calls it receives an engine added in a later package
+release without its own engine list. A provider registered separately joins the same registry. A
+provider whose implementation ID or store key collides with another registration fails when the
+registry is resolved; the last registration never wins silently. The registry has no assembly
+scanning and loads no plugins.
+
+`TensorEngineDefinition` accepts a store key of one to 64 ASCII letters, digits, `-`, `_` and `.`
+that starts with a letter or digit, does not end with `.`, and is not a Windows device name. It
+rejects a descriptor whose kind is not Tensor. The host joins a store key beneath its own storage
+root and constructs one pack manager per engine kind:
+
+```csharp
+using Darkspyre.Inference.Common.Setup;
+using Darkspyre.Inference.Tensor.Common;
+using Darkspyre.Inference.Tensor.Registry;
+using Microsoft.Extensions.DependencyInjection;
+
+TensorEngineRegistry registry = serviceProvider.GetRequiredService<TensorEngineRegistry>();
+foreach (TensorEngineDefinition definition in registry.Definitions)
+{
+    // Render definition.Setup in the host's provider list.
+}
+
+if (registry.TryGetProvider(savedConfiguration.ImplementationId, out ITensorEngineProvider? provider))
+{
+    var packs = new TensorModelPackManager(new TensorModelCatalog(savedManifests),
+        Path.Combine(hostStorageRoot, provider.Definition.ModelStoreKey));
+    IReadOnlyList<TensorModelPackDefinition> offered = await provider.GetOfferedModelsAsync(packs);
+    ITensorModelInstance instance = provider.CreateInstance(packs, savedConfiguration.Backend);
+    TensorSettingsManager manager = provider.CreateSettingsManager(commitTarget, packs, offered, instance);
+}
+// Otherwise the saved entry's engine is not registered: keep the record and show it unavailable.
+```
+
+`tensor registry --store <dir>` in the Tensor ConsoleTester lists every registered engine and opens
+its settings through the same provider calls. It installs, loads and saves nothing.
 
 ## Provider setup
 
@@ -494,7 +569,8 @@ from a TensorSharp checkout with its `TensorSharp.GGML.Native/build-*` script.
 Use the root `NuGet.Config` and process-scoped private-feed credentials for normal restores.
 Darkspyre dependencies come from the private feed; Microsoft.ML.OnnxRuntime, Whisper.net, its
 runtime and NAudio.Core come from public NuGet. Their own packages own their assemblies/native runtime assets. Tensor contains
-only its capability assemblies and their XML documentation, README and license.
+only its capability, engine and registry assemblies and their XML documentation, README and license.
+The registry's dependency-injection abstractions come from the .NET shared framework.
 
 TensorSharp's managed package build does not embed GGML/MLX native libraries or certify native
 device availability. Explicit backend observations retain the documented available/unknown states;
