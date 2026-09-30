@@ -328,6 +328,15 @@ enumerators so their owned operations can leave. Disposal does not report comple
 operation remains active. A registration owner disposes its shared cache; sharing a cache across
 containers does not transfer that responsibility to a scoped facade.
 
+### Embedding lifetime
+
+`LlmEmbeddingProviderService` implements `IDisposable` and `IAsyncDisposable`. Its registration owner
+retires the facade. Retirement fences new requests, cancels connection lookup and provider calls,
+and awaits all active requests before releasing its adapter references. Supplied adapters and the
+connection source remain borrowed and are not disposed by the facade. Caller cancellation affects
+only that request. A provider that ignores cancellation keeps retirement pending; its late result
+is rejected. Use asynchronous scope disposal while embedding requests are active.
+
 ### Streaming, reasoning text and usage
 
 `LlmProviderCapabilities.SupportsStreaming` says whether the adapter streams provider output as the model

@@ -13,9 +13,9 @@ public sealed class ProviderFacadeTests
             Transport = LlmTransport.OpenAiResponses,
             Endpoint = "https://provider.test/v1"
         });
-        var chat = new LlmProviderService(source, []);
+        await using var chat = new LlmProviderService(source, []);
         var agents = new LlmAgentProviderService(source, []);
-        var embeddings = new LlmEmbeddingProviderService(source, []);
+        await using var embeddings = new LlmEmbeddingProviderService(source, []);
 
         InvalidOperationException chatFailure = await Assert.ThrowsAsync<InvalidOperationException>(
             () => chat.GetCapabilitiesAsync("connection"));
@@ -36,9 +36,9 @@ public sealed class ProviderFacadeTests
     public async Task AllProviderFacadesRejectBlankIdsBeforeReadingTheConnectionSource()
     {
         var source = new RecordingConnectionSource(null);
-        var chat = new LlmProviderService(source, []);
+        await using var chat = new LlmProviderService(source, []);
         var agents = new LlmAgentProviderService(source, []);
-        var embeddings = new LlmEmbeddingProviderService(source, []);
+        await using var embeddings = new LlmEmbeddingProviderService(source, []);
 
         await Assert.ThrowsAsync<ArgumentException>(() => chat.GetCapabilitiesAsync(" "));
         await Assert.ThrowsAsync<ArgumentException>(() => agents.StartSessionAsync(" ", AgentOptions()));
