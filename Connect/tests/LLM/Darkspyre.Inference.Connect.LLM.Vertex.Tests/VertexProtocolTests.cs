@@ -124,7 +124,7 @@ public sealed class VertexProtocolTests
                 ToolCalls = [new("one", "run", """{"command":"first"}"""), new("two", "run", """{"command":"second"}""")] },
                 new("user", "") { ToolResults = [new("two", LlmToolOutput.FromText("second-result")), new("one", LlmToolOutput.FromText("first-result"))] }]
         };
-        var payload = VertexGeminiRequest.Build(prepared, request, null,
+        var payload = GeminiRequest.Build(prepared, request, null,
             output => ToolOutputProjector.Project(output, RichContentRoutes.TextOnly, RichContentRoutes.TextOnly));
         Assert.Equal("first-result", (string?)payload["contents"]?[1]?["parts"]?[0]?["functionResponse"]?["response"]?["output"]);
         Assert.Equal("second-result", (string?)payload["contents"]?[1]?["parts"]?[1]?["functionResponse"]?["response"]?["output"]);
@@ -180,7 +180,7 @@ public sealed class VertexProtocolTests
         Assert.Contains("/publishers/google/models/gemini-3-flash-preview:streamGenerateContent", handler.Uris[0].AbsolutePath, StringComparison.Ordinal);
         var assistant = new LlmChatMessage("assistant", first.Text) { ContinuationState = first.ContinuationState, ToolCalls = first.ToolCalls };
         var prepared = await client.PrepareAsync(Connection, default);
-        JsonObject next = VertexGeminiRequest.Build(prepared, new()
+        JsonObject next = GeminiRequest.Build(prepared, new()
         {
             ModelId = Gemini,
             Messages = [new("user", "Run pwd"), assistant,

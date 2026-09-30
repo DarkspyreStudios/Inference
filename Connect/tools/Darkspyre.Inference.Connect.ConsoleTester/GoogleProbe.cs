@@ -4,8 +4,8 @@ using Darkspyre.Inference.Connect.LLM;
 
 namespace Darkspyre.Inference.Connect.ConsoleTester;
 
-/// <summary>Explicit metered qualification through the portable and managed public contracts.</summary>
-internal sealed class VertexProbe(ILlmInference inference, LlmAgentProviderService agents, string connectionId, string model)
+/// <summary>Explicit metered qualification of a Gemini route (Vertex or the Gemini API) through the portable and managed public contracts.</summary>
+internal sealed class GoogleProbe(ILlmInference inference, LlmAgentProviderService agents, string connectionId, string model)
 {
     private static readonly JsonElement Schema = JsonElement.Parse("""{"type":"object","properties":{"key":{"type":"string"},"timeout":{"type":"integer"}},"required":["key"],"additionalProperties":false}""");
     private LlmInferenceRequest Request(string prompt) => new()
@@ -22,8 +22,8 @@ internal sealed class VertexProbe(ILlmInference inference, LlmAgentProviderServi
             ready = true;
         }
         catch (LlmProviderException) { ready = false; }
-        var probe = new VertexProbe(llms.Bind(invocation.Provider.ConnectionId), agents, invocation.Provider.ConnectionId, options.Model);
-        Console.WriteLine("Vertex probe: explicit metered model calls; no automatic retries.");
+        var probe = new GoogleProbe(llms.Bind(invocation.Provider.ConnectionId), agents, invocation.Provider.ConnectionId, options.Model);
+        Console.WriteLine($"{invocation.Provider.DisplayName} probe: explicit metered model calls; no automatic retries.");
         return await ProbeRunner.RunAsync(
             [new("text", probe.TextAsync), new("structured", probe.StructuredAsync), new("tools", probe.ToolsAsync),
                 new("agent", probe.AgentAsync), new("cancel", probe.CancelAsync)], options, ready, Console.Out, token);

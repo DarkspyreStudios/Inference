@@ -72,7 +72,9 @@ internal static class Program
                 "setup" => await RunSetupAsync(llms, invocation, cancellation.Token),
                 "apple-probe" => await RunAppleProbeAsync(llms, agent, invocation, cancellation.Token),
                 "vertex-probe" when invocation.Provider.Transport == LlmTransport.GoogleVertexAi =>
-                    await VertexProbe.RunAsync(llms, agent, invocation, cancellation.Token),
+                    await GoogleProbe.RunAsync(llms, agent, invocation, cancellation.Token),
+                "gemini-probe" when invocation.Provider.Transport == LlmTransport.GoogleGeminiApi =>
+                    await GoogleProbe.RunAsync(llms, agent, invocation, cancellation.Token),
                 "login" => await RunLoginAsync(llms, provider.GetRequiredService<ILlmConnectionSource>(), invocation, cancellation.Token),
                 "status" => await RunStatusAsync(llms, invocation, cancellation.Token),
                 "models" => await RunModelsAsync(llms, invocation, cancellation.Token),
@@ -174,6 +176,20 @@ internal static class Program
                 Console.WriteLine(
                     $"AgentCore Harness is configured with AWS profile '{options.Profile}' in {options.Region}. Use the agent command to invoke it.");
             }
+            return 0;
+        }
+
+        if (invocation.Provider.Transport == LlmTransport.GoogleGeminiApi)
+        {
+            RequireNoCommandArguments(invocation);
+            // The key is read from the environment so it never appears in a command argument or shell history.
+            string key = Environment.GetEnvironmentVariable("GEMINI_API_KEY") is { Length: > 0 } value ? value
+                : throw new ArgumentException("Set GEMINI_API_KEY to the Google AI Studio key, then run login --provider gemini.");
+            LlmConnection current = await connections.GetConnectionAsync(invocation.Provider.ConnectionId, cancellationToken)
+                ?? throw new InvalidOperationException($"Connection '{invocation.Provider.ConnectionId}' is not configured.");
+            await llms.SetApiKeyAsync(invocation.Provider.ConnectionId, key, current.Version, cancellationToken);
+            IReadOnlyList<LlmModel> models = await llms.ListModelsAsync(invocation.Provider.ConnectionId, cancellationToken);
+            Console.WriteLine($"{invocation.Provider.DisplayName} key is stored in the operating system vault; discovered {models.Count} model(s).");
             return 0;
         }
 
@@ -738,6 +754,7 @@ internal static class Program
               darkspyre-inference-connect-tester status --provider apple [--helper <path>]
               darkspyre-inference-connect-tester models --provider apple [--helper <path>]
               darkspyre-inference-connect-tester vertex-probe --provider vertex --google-project <project> --google-location <location> --model <publisher/model> [--case all|text|structured|tools|agent|cancel] [--repeat 1..20] [--timeout-seconds 1..600]
+              darkspyre-inference-connect-tester gemini-probe --provider gemini [--model <id>] [--case all|text|structured|tools|agent|cancel] [--repeat 1..20] [--timeout-seconds 1..600]
               darkspyre-inference-connect-tester apple-probe --provider apple [--helper <path>] [--case all|text|structured|tools|agent|cancel] [--repeat 1..20] [--timeout-seconds 1..600] [--model <id>]
               darkspyre-inference-connect-tester prompt --provider apple [--helper <path>] [--model <id>] [--schema <file>]
               darkspyre-inference-connect-tester agent --provider apple [--helper <path>] [--model <id>]
@@ -768,6 +785,7 @@ internal static class Program
             Apple needs its separately built helper and a ready on-device model; no login is required.
             Apple defaults its model from provider metadata. --helper accepts a name on PATH or an absolute path.
             vertex-probe performs explicit metered cloud generation using ADC; missing access is reported as skipped.
+            gemini-probe performs explicit metered Gemini API generation with the key that login --provider gemini stored from GEMINI_API_KEY.
             apple-probe performs explicit local generation, reports each case and never retries a failed case.
             agy-probe runs explicit subscription turns through the Antigravity native session in a temporary
             workspace, reports the CLI version and turn count, and never retries a failed case.

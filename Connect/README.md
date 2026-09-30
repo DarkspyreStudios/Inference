@@ -53,6 +53,13 @@ with project, location and authentication mode. The adapter assembly is included
 package project. See the [technical mapping](docs/google-vertex-ai-tech-design.md) for reviewed model
 profiles and limits. Live cloud qualification remains; the shared contract requires host migration.
 
+The Gemini API (Google AI Studio) adapter is registered by `AddLlmConnect` under the provider id
+`gemini-api` and transport `GoogleGeminiApi`. It needs only an API key, sent in the `x-goog-api-key`
+header, and a fixed endpoint. It shares the Gemini request, stream, schema and continuation code with the
+Vertex Gemini route, so both send the same generateContent body. See the
+[Gemini API design](docs/gemini-api-tech-design.md) for model discovery, capabilities and limits. Live
+qualification remains.
+
 ### Contract migration
 
 Continuation state is now Common's opaque `LlmContinuationState`, carried by both portable and
@@ -78,6 +85,20 @@ Use `anthropic/claude-sonnet-4-6` to exercise the Claude route. Cases are `text`
 `agent` and `cancel`. Calls are explicitly metered; failed cases are not retried. Unavailable auth or
 catalog discovery produces a visible skip. The existing `prompt --image` and `prompt --document`
 commands cover attachment experiments separately. These live probes are not normal test gates.
+
+### Gemini API ConsoleTester
+
+Store the key once from the environment, so it never appears in a command argument, then run the probe:
+
+```bash
+GEMINI_API_KEY=YOUR_KEY dotnet run --project Connect/tools/Darkspyre.Inference.Connect.ConsoleTester -- login --provider gemini
+```
+
+```bash
+dotnet run --project Connect/tools/Darkspyre.Inference.Connect.ConsoleTester -- gemini-probe --provider gemini --model gemini-3-flash-preview --case all --repeat 1 --timeout-seconds 120
+```
+
+The cases match the Vertex probe; both commands run `GoogleProbe`. Calls are metered against the key's project.
 
 | Package | Purpose |
 |---|---|
@@ -351,6 +372,8 @@ own authorization and side-effect policy.
 | Claude subscription via official CLI | No | Yes | Yes | Yes |
 | AWS Bedrock Converse | Yes | Yes | Yes | Yes |
 | AWS Bedrock AgentCore Harness | No | Yes | No | No |
+| Google Vertex AI (Gemini and Claude) | Yes | Yes | Yes | Yes |
+| Gemini API (Google AI Studio) | Yes | Yes | Yes | Yes |
 | Antigravity CLI | No | No | No | No |
 
 Tool-result content support is declared per route and lane; see [Tool output](#tool-output).

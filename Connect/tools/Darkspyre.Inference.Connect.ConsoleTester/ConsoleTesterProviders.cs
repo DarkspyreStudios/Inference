@@ -46,6 +46,7 @@ internal sealed class ConsoleTesterProviders(IEnumerable<ILlmClient> clients)
         "bedrock-agentcore-harness" => "agentcore",
         "apple-foundation-models" => "apple",
         "google-vertex-ai" => "vertex",
+        "gemini-api" => "gemini",
         _ => id
     };
 

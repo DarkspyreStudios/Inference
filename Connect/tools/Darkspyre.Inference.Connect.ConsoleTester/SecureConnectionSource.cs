@@ -148,5 +148,6 @@ internal sealed class SecureConnectionSource(
         or LlmTransport.OpenAiCompatibleChat
         or LlmTransport.AnthropicMessages
         or LlmTransport.AwsBedrockConverse
-        or LlmTransport.AwsBedrockAgentCore;
+        or LlmTransport.AwsBedrockAgentCore
+        or LlmTransport.GoogleGeminiApi;
 }

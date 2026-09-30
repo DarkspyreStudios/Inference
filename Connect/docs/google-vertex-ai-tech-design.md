@@ -69,7 +69,8 @@ This boundary does not remove any of the existing host-executed tool requirement
 | New `Darkspyre.Inference.Connect.LLM.Vertex` assembly | Google authentication, endpoint validation, model catalog, Gemini and Claude wire adapters |
 | `VertexLlmClient : ILlmClient` | One provider definition, model routing, capabilities, listing and streaming |
 | `ManagedVertexAgentClient : ILlmAgentClient` | Compose the existing managed runtime with the Vertex client |
-| Internal Gemini/Claude protocol components | Request projection, stream parsing, continuation codecs and error translation |
+| Internal Claude protocol components | Request projection, stream parsing, continuation codec and error translation |
+| Shared Gemini protocol in `Connect.LLM/Internal/Gemini` | Request body, SSE stream reading, schema allowlist, continuation part validation and capabilities, shared with the Gemini API adapter |
 | Existing ConsoleTester | Setup/discovery and explicit live qualification for both routes |
 
 Provider ID is `google-vertex-ai`; add `LlmTransport.GoogleVertexAi` without renumbering
