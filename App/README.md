@@ -57,7 +57,7 @@ logs live in the configured log directory. Request bodies and credentials are no
 paths are absolute. `deploy/presets.ini` defines model IDs and model-specific context sizes.
 The Qwen preset uses a measured 98,304-token shared KV pool with two parallel slots on the
 RTX 3090 Ti. One request can use the full pool; concurrent requests share its capacity.
-An 88,473-token prompt completes with at least 1,847 MiB free with ComfyUI stopped.
+An 88,473-token prompt completes with at least 1,299 MiB free with ComfyUI running and idle.
 The 131,072-token profile leaves less than the required 1 GiB margin.
 Deployment on a different GPU requires measurement.
 `ReleasedMaxUsedMiB` is 2,482 MiB: the measured 1,458 MiB idle usage after ComfyUI frees
