@@ -385,6 +385,6 @@ public contracts. No parallel legacy signature is exposed.
   dependency-vulnerability checks. No paid provider calls or downloaded models as gates.
 
 Common, Connect, Tensor and UI.Settings share the version in Directory.Build.props and exact
-Common package dependency. Tensor builds against `Darkspyre.TensorSharp` 2.8.6.6, which has no
-persistence-store loading and ships the macOS arm64 GGML native bridge. These boundaries do not introduce application-owned persistence,
+Common package dependency. Tensor builds against `Darkspyre.TensorSharp` 2.8.6.7, which has no
+persistence-store loading and ships the GGML native bridges for osx-arm64, linux-x64, linux-arm64 and win-x64. These boundaries do not introduce application-owned persistence,
 provider selection or lifecycle scheduling into the libraries.
