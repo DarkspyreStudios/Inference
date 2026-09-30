@@ -31,13 +31,6 @@ internal sealed class VertexClaudeProtocol(HttpClient http, string token) : Anth
         JsonObject payload = base.BuildPayload(connection, request, projectToolOutput, stream);
         payload.Remove("model");
         payload["anthropic_version"] = "vertex-2023-10-16";
-        if (request.StructuredOutput is { } structured && GetCapabilities(connection, request.ModelId).SupportsJsonSchema)
-        {
-            JsonObject output = payload["output_config"]?.AsObject() ?? new JsonObject();
-            output["format"] = new JsonObject
-            { ["type"] = "json_schema", ["schema"] = JsonNode.Parse(structured.Schema.GetRawText()) };
-            if (payload["output_config"] is null) { payload["output_config"] = output; }
-        }
         return payload;
     }
 }

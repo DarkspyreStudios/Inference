@@ -59,7 +59,7 @@ internal sealed class VertexLlmClient(HttpClient http, IVertexAuthentication aut
         (request, int omitted) = ContinuationStateProjection.Project(request, connection);
         LlmStructuredOutputEnforcement? enforcement = request.StructuredOutput is { } structured && !capabilities.SupportsJsonSchema
             ? StructuredOutput.ResolveEnforcement(structured, capabilities)
-            : VertexSchemas.Enforcement(request.StructuredOutput, profile.IsClaude);
+            : VertexSchemas.Enforcement(request.StructuredOutput, capabilities, profile.IsClaude);
         IAsyncEnumerable<LlmStreamEvent> source = profile.IsClaude
             ? new VertexClaudeProtocol(Http, access.Token).StreamAsync(connection, request, cancellationToken)
             : GeminiStream.ReadAsync(Http, GeminiMessage(connection, request,
@@ -174,7 +174,11 @@ internal sealed class VertexLlmClient(HttpClient http, IVertexAuthentication aut
     {
         if (request.ProviderOptions.Count != 0) { throw new NotSupportedException("Vertex accepts only declared request controls."); }
         if (profile.IsClaude)
+        {
             AnthropicModelProfiles.ValidateSampling(request, AnthropicModelProfiles.Resolve(VertexEndpoints.ParseModel(request.ModelId).Model, null));
+            AnthropicSchemas.ValidateTools(request);
+            _ = AnthropicSchemas.Enforcement(request.StructuredOutput, capabilities);
+        }
         else if (request.PresencePenalty is < -2 or >= 2 || request.FrequencyPenalty is < -2 or >= 2)
             throw new ArgumentOutOfRangeException(nameof(request), "Vertex Gemini penalties must be in [-2, 2).");
         if (request.MaxOutputTokens > profile.OutputTokens || request.Temperature is < 0 or > 2

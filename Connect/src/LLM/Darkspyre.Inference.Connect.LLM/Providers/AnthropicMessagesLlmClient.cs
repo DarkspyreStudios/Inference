@@ -70,6 +70,19 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
         }
         return capabilities with
         {
+            SupportsJsonSchema = profile.SupportsStructuredOutputs != false
+                && (LlmCapabilityOverrideLookup.Overrides(connection, modelId, overrides => overrides.SupportsJsonSchema)
+                    ? capabilities.SupportsJsonSchema : profile.SupportsStructuredOutputs == true),
+            SupportsJsonObject = false,
+            Tools = capabilities.Tools with
+            {
+                StrictInputSchema = profile.SupportsStructuredOutputs switch
+                {
+                    true => LlmStrictInputSchemaSupport.Supported,
+                    false => LlmStrictInputSchemaSupport.Unsupported,
+                    null => LlmStrictInputSchemaSupport.Unknown
+                }
+            },
             SupportsAccountUsage = false,
             SupportsAgentSessions = false,
             SupportsAgentToolUse = false,
@@ -98,11 +111,10 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
         ArgumentNullException.ThrowIfNull(request);
         LlmProviderCapabilities capabilities = GetCapabilities(connection, request.ModelId);
         ValidateRequest(connection, request, capabilities);
+        AnthropicSchemas.ValidateTools(request);
         AnthropicModelProfiles.ValidateSampling(request, AnthropicModelProfiles.Resolve(
             ReasoningModelId(request.ModelId), ILlmCatalogCapabilities.EntryFor(connection, request.ModelId)));
-        LlmStructuredOutputEnforcement? enforcement = request.StructuredOutput is null
-            ? null
-            : StructuredOutput.ResolveEnforcement(request.StructuredOutput, capabilities);
+        LlmStructuredOutputEnforcement? enforcement = AnthropicSchemas.Enforcement(request.StructuredOutput, capabilities);
         LlmCredential? credential = LlmCredential.Parse(connection.Credential);
         bool stream = capabilities.SupportsStreaming;
         JsonObject payload = BuildPayload(connection, request, output => ProjectToolOutput(connection, request.ModelId, output), stream);
@@ -704,6 +716,17 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
         {
             payload["max_tokens"] = maxTokens;
         }
+        if (AnthropicSchemas.Enforcement(request.StructuredOutput, GetCapabilities(connection, request.ModelId))
+            == LlmStructuredOutputEnforcement.ProviderJsonSchema)
+        {
+            JsonObject output = payload["output_config"]?.AsObject() ?? new JsonObject();
+            output["format"] = new JsonObject
+            {
+                ["type"] = "json_schema",
+                ["schema"] = JsonNode.Parse(request.StructuredOutput!.Schema.GetRawText())
+            };
+            if (payload["output_config"] is null) payload["output_config"] = output;
+        }
         if (system.Count > 0)
         {
             payload["system"] = system;
@@ -767,6 +790,9 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
             payload["tool_choice"] = mappedChoice;
         }
 
+        if (connection.ProviderOptions.ContainsKey("output_config") || request.ProviderOptions.ContainsKey("output_config")
+            || connection.ProviderOptions.ContainsKey("output_format") || request.ProviderOptions.ContainsKey("output_format"))
+        { throw new NotSupportedException("Claude output configuration uses the typed reasoning and structured-output controls."); }
         RequestJson.ApplyProviderOptions(payload, connection, request);
         return payload;
     }

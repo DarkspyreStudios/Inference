@@ -1410,7 +1410,29 @@ A refusal can also arrive after partial output. `Text` keeps the streamed partia
 
 ### Structured output
 
-Direct API-key connections report `SupportsJsonSchema = false` and `SupportsJsonObject = false`; schema-backed requests must permit `LlmStructuredOutputFallback.LocalValidation`. Subscription connections use the Claude CLI's native `--json-schema` contract and accept the `Low`, `Medium`, `High`, `ExtraHigh` and `Maximum` reasoning levels. Darkspyre.Inference.Connect.LLM uses the terminal event's canonical `structured_output` value and validates it locally before returning completion.
+Direct API-key connections use the Models API's `structured_outputs` evidence for native schema and
+strict tool support. A missing entry does not advertise native output enforcement; a host can
+explicitly enable schema support when the catalog is unknown. A catalog rejection cannot be
+overridden. JSON-object-only enforcement is not advertised. Supported output schemas use
+`output_config.format` with `type: json_schema`; reasoning effort remains in the same output config.
+
+Anthropic Messages and Vertex Claude preflight the same schema subset. Objects must close
+`additionalProperties`; unsupported constraints, recursive/external references, complex enums,
+unsupported formats and unsupported pattern constructs do not reach native output enforcement.
+Schemas are not rewritten. A request must explicitly permit `LocalValidation` to use a schema
+outside that subset or a model without native support. That path omits the native format and
+validates the response against the original schema, including its omitted constraints.
+
+Strict tools use the same subset check and a maximum of 20 strict tools per request. Ordinary tools
+do not count toward that limit and retain their original schemas. Unsupported strict schemas are
+rejected before dispatch, not simplified or changed to non-strict. Unknown model strictness still
+permits an explicit strict attempt; a known unsupported profile rejects it. Provider options cannot
+replace the typed output config or supply the retired `output_format` field.
+
+Subscription connections use the Claude CLI's native `--json-schema` contract and accept the `Low`,
+`Medium`, `High`, `ExtraHigh` and `Maximum` reasoning levels. Darkspyre.Inference.Connect.LLM uses
+the terminal event's canonical `structured_output` value and validates it locally before returning
+completion.
 
 ### Model discovery
 

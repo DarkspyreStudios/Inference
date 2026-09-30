@@ -5,6 +5,7 @@ namespace Darkspyre.Inference.Connect.LLM.Vertex;
 
 internal static class VertexSchemas
 {
-    public static LlmStructuredOutputEnforcement? Enforcement(LlmStructuredOutputRequest? request, bool claude) =>
-        request is not null && claude ? LlmStructuredOutputEnforcement.ProviderJsonSchema : GeminiSchemas.Enforcement(request, "Vertex");
+    public static LlmStructuredOutputEnforcement? Enforcement(LlmStructuredOutputRequest? request,
+        LlmProviderCapabilities capabilities, bool claude) =>
+        claude ? AnthropicSchemas.Enforcement(request, capabilities) : GeminiSchemas.Enforcement(request, "Vertex");
 }

@@ -22,7 +22,7 @@ public sealed class VertexProtocolTests
     private static LlmToolDefinition Tool => new()
     {
         Name = "run",
-        InputSchema = JsonElement.Parse("""{"type":"object","properties":{"command":{"type":"string"},"timeout":{"type":"integer"}},"required":["command"]}""")
+        InputSchema = JsonElement.Parse("""{"type":"object","properties":{"command":{"type":"string"},"timeout":{"type":"integer"}},"required":["command"],"additionalProperties":false}""")
     };
 
     [Fact]
@@ -124,13 +124,45 @@ public sealed class VertexProtocolTests
     }
 
     [Fact]
+    public async Task ClaudeSchemaPreflightPrecedesAuthenticationAndLocalFallbackPreservesConstraints()
+    {
+        var handler = new Handler(
+            """{"type":"message_start","message":{"id":"m"}}""",
+            """{"type":"content_block_delta","delta":{"type":"text_delta","text":"{\"command\":\"x\"}"}}""",
+            """{"type":"message_delta","delta":{"stop_reason":"end_turn"}}""",
+            """{"type":"message_stop"}""");
+        using var http = new HttpClient(handler);
+        var authentication = new Authentication();
+        var client = new VertexLlmClient(http, authentication);
+        JsonElement schema = JsonElement.Parse("""{"type":"object","properties":{"command":{"type":"string","minLength":5}},"required":["command"],"additionalProperties":false}""");
+        var request = new LlmChatRequest
+        {
+            ModelId = Claude,
+            Messages = [new("user", "Return JSON")],
+            StructuredOutput = new() { Name = "result", Schema = schema }
+        };
+        await Assert.ThrowsAsync<NotSupportedException>(() => Complete(client, Connection, request));
+        await Assert.ThrowsAsync<NotSupportedException>(() => Complete(client, Connection, request with
+        { StructuredOutput = null, Tools = [Tool with { Strict = true, InputSchema = schema }] }));
+        Assert.Equal(0, authentication.Calls);
+        Assert.Empty(handler.Bodies);
+        LlmChatResult result = await Complete(client, Connection, request with
+        { StructuredOutput = request.StructuredOutput with { Fallback = LlmStructuredOutputFallback.LocalValidation } });
+        Assert.Null(JsonNode.Parse(Assert.Single(handler.Bodies))!["output_config"]);
+        Assert.Equal(LlmStructuredOutputEnforcement.LocalValidationOnly, result.StructuredOutput!.Enforcement);
+        Assert.True(result.StructuredOutput.WasEvaluated);
+        Assert.False(result.StructuredOutput.IsValid);
+        Assert.True(schema.GetProperty("properties").GetProperty("command").TryGetProperty("minLength", out _));
+    }
+
+    [Fact]
     public void UnsupportedGeminiSchemaRequiresExplicitFallback()
     {
         var request = new LlmStructuredOutputRequest
         { Name = "result", Schema = JsonElement.Parse("""{"type":"string","pattern":"^a"}""") };
-        Assert.Throws<NotSupportedException>(() => VertexSchemas.Enforcement(request, false));
+        Assert.Throws<NotSupportedException>(() => VertexSchemas.Enforcement(request, new(), false));
         Assert.Equal(LlmStructuredOutputEnforcement.LocalValidationOnly,
-            VertexSchemas.Enforcement(request with { Fallback = LlmStructuredOutputFallback.LocalValidation }, false));
+            VertexSchemas.Enforcement(request with { Fallback = LlmStructuredOutputFallback.LocalValidation }, new(), false));
     }
 
     [Fact]
