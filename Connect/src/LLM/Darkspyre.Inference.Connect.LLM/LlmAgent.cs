@@ -351,6 +351,10 @@ public interface ILlmAgentForkClient : ILlmAgentClient
         CancellationToken cancellationToken = default);
 }
 
+/// <summary>
+/// One caller-disposable agent session. Sessions opened through <see cref="LlmAgentProviderService"/>
+/// also retire with that facade. Direct agent-client callers own their sessions.
+/// </summary>
 public interface ILlmAgentSession : IAsyncDisposable
 {
     /// <summary>

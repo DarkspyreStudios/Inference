@@ -337,6 +337,25 @@ connection source remain borrowed and are not disposed by the facade. Caller can
 only that request. A provider that ignores cancellation keeps retirement pending; its late result
 is rejected. Use asynchronous scope disposal while embedding requests are active.
 
+### Agent-session lifetime
+
+`LlmAgentProviderService` implements `IDisposable` and `IAsyncDisposable`. It owns sessions returned
+by start, resume and fork. Facade retirement fences new openings, cancels active openings and
+retires every returned session. Existing sessions retire without waiting for another opening to
+finish. A session that finishes opening after cancellation is disposed before its opening call
+ends. Supplied clients and the connection source remain borrowed.
+
+Each returned session fences its methods on retirement, cancels and drains active calls and stream
+enumerations, then disposes its adapter session. Concurrent callers share one retirement completion.
+Disposing one session leaves its siblings and the facade usable. Caller cancellation affects only
+the named operation. Late results and events from cancelled work are rejected. A failed session
+retirement remains visible when its owning facade retires; another session is not skipped.
+
+Use asynchronous scope disposal while sessions are active. Consume or dispose active enumerators
+so their owned calls can leave; an enumerator suspended at a yielded event still owns a call.
+An adapter that ignores cancellation keeps retirement pending until its work leaves. Direct
+`ILlmAgentClient` callers own the sessions they create outside the facade.
+
 ### Streaming, reasoning text and usage
 
 `LlmProviderCapabilities.SupportsStreaming` says whether the adapter streams provider output as the model

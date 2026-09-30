@@ -14,7 +14,7 @@ public sealed class ProviderFacadeTests
             Endpoint = "https://provider.test/v1"
         });
         await using var chat = new LlmProviderService(source, []);
-        var agents = new LlmAgentProviderService(source, []);
+        await using var agents = new LlmAgentProviderService(source, []);
         await using var embeddings = new LlmEmbeddingProviderService(source, []);
 
         InvalidOperationException chatFailure = await Assert.ThrowsAsync<InvalidOperationException>(
@@ -37,7 +37,7 @@ public sealed class ProviderFacadeTests
     {
         var source = new RecordingConnectionSource(null);
         await using var chat = new LlmProviderService(source, []);
-        var agents = new LlmAgentProviderService(source, []);
+        await using var agents = new LlmAgentProviderService(source, []);
         await using var embeddings = new LlmEmbeddingProviderService(source, []);
 
         await Assert.ThrowsAsync<ArgumentException>(() => chat.GetCapabilitiesAsync(" "));

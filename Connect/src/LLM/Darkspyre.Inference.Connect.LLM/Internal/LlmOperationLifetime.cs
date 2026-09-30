@@ -27,7 +27,7 @@ internal sealed class LlmOperationLifetime : IDisposable, IAsyncDisposable
         lock (_gate) { ObjectDisposedException.ThrowIf(_retired is not null, this); }
     }
 
-    internal Task RetireAsync()
+    internal Task RetireAsync(Func<Task>? release = null)
     {
         TaskCompletionSource completion;
         lock (_gate)
@@ -36,7 +36,7 @@ internal sealed class LlmOperationLifetime : IDisposable, IAsyncDisposable
             _retired = completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
             if (_active == 0) _drained.TrySetResult();
         }
-        _ = CompleteRetirementAsync(completion);
+        _ = CompleteRetirementAsync(completion, release);
         return completion.Task;
     }
 
@@ -45,12 +45,13 @@ internal sealed class LlmOperationLifetime : IDisposable, IAsyncDisposable
     public void Dispose() => RetireAsync().GetAwaiter().GetResult();
 
     [SuppressMessage("Design", "CA1031", Justification = "The retirement completion preserves failures for every disposal caller.")]
-    private async Task CompleteRetirementAsync(TaskCompletionSource completion)
+    private async Task CompleteRetirementAsync(TaskCompletionSource completion, Func<Task>? release)
     {
         try
         {
-            try { await _stop.CancelAsync().ConfigureAwait(false); }
-            finally { await _drained.Task.ConfigureAwait(false); }
+            Task cancellation = _stop.CancelAsync();
+            Task retirement = DrainAndReleaseAsync(release);
+            await Task.WhenAll(cancellation, retirement).ConfigureAwait(false);
             _stop.Dispose();
             completion.TrySetResult();
         }
@@ -59,6 +60,12 @@ internal sealed class LlmOperationLifetime : IDisposable, IAsyncDisposable
             _stop.Dispose();
             completion.TrySetException(error);
         }
+    }
+
+    private async Task DrainAndReleaseAsync(Func<Task>? release)
+    {
+        await _drained.Task.ConfigureAwait(false);
+        if (release is not null) await release().ConfigureAwait(false);
     }
 
     private void Leave()

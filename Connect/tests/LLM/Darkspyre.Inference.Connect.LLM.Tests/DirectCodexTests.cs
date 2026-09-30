@@ -72,8 +72,8 @@ public sealed class DirectCodexTests
         using var http = new HttpClient(handler);
         var client = new OpenAiCodexLlmClient(http);
         var source = new Source(Connection());
-        var providers = new LlmProviderService(source, [client]);
-        var agents = new LlmAgentProviderService(source, [new ManagedCodexAgentClient(client, providers)]);
+        await using var providers = new LlmProviderService(source, [client]);
+        await using var agents = new LlmAgentProviderService(source, [new ManagedCodexAgentClient(client, providers)]);
         await using var session = await agents.StartSessionAsync("configured", new() { ModelId = "model" });
         var events = new List<LlmAgentEvent>();
         await foreach (var item in session.RunTurnAsync(new() { Input = [new LlmAgentTextContent("hello")], ReasoningLevel = effort })) { events.Add(item); }
@@ -318,7 +318,7 @@ public sealed class DirectCodexTests
         var auth = new RefreshAuthenticator();
         var providers = new LlmProviderService(source, [client], [auth]);
         var managed = new ManagedCodexAgentClient(client, providers);
-        var agents = new LlmAgentProviderService(source, [managed]);
+        await using var agents = new LlmAgentProviderService(source, [managed]);
         var options = new LlmAgentSessionOptions
         {
             ModelId = "model",

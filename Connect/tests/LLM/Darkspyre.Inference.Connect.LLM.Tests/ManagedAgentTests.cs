@@ -11,6 +11,43 @@ namespace Darkspyre.Inference.Connect.LLM.Tests;
 public sealed class ManagedAgentTests
 {
     [Fact]
+    public async Task SessionOwnerRetiresAnActiveManagedToolAndObservationFeed()
+    {
+        var harness = new Harness();
+        harness.Results.Enqueue(new()
+        {
+            Text = "",
+            Status = LlmCompletionStatus.RequiresAction,
+            Diagnostics = new(200, null, null),
+            ToolCalls = [new("call", "echo", "{}")]
+        });
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var stopped = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        ManagedAgentSession inner = harness.Create(ToolsOptions(_ => new()) with
+        {
+            ToolHandler = async (_, token) =>
+            {
+                using CancellationTokenRegistration registration = token.Register(() => stopped.TrySetResult());
+                started.TrySetResult();
+                await Task.Delay(Timeout.InfiniteTimeSpan, token);
+                return LlmToolOutput.FromText("unreachable");
+            }
+        });
+        await using var session = new OwnedLlmAgentSession(inner, _ => { });
+        Task turn = Read(session.RunTurnAsync(Turn("hello")));
+        Task observations = Read(session.ObserveAsync());
+        await started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        await session.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5));
+
+        await stopped.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => turn);
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => observations);
+        await Assert.ThrowsAsync<ObjectDisposedException>(() => inner.GetCapabilitiesAsync());
+        Assert.Single(harness.Requests);
+    }
+
+    [Fact]
     public async Task ProposalAccountingUsesFrozenProjectionWithoutInstallingOrConsumingPause()
     {
         var harness = new Harness();
