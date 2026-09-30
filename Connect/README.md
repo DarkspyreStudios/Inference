@@ -327,6 +327,11 @@ replaces the previous value for the entire call. Null counts remain unknown. Dup
 are suppressed. Only completion usage is authoritative, including when it corrects an earlier value.
 Anthropic and Vertex Claude report observations from `message_start` and `message_delta`. Gemini
 and Vertex Gemini report normalized `usageMetadata`, including reasoning output tokens.
+Claude CLI chat and native sessions share a ledger keyed by API message ID. It sums distinct calls
+and ignores replayed calls and subagent events. Its observations and final `result.usage` cover the
+main loop for the current turn, as described in the [Claude usage contract](https://code.claude.com/docs/en/agent-sdk/cost-tracking).
+Native sessions use one `LlmAgentUsageEvent.RequestId` for the turn's running and final observations.
+A final result without usage replaces the running estimate with unknown usage.
 
 OpenAI-compatible connections default running usage off. The **Running usage** capability override
 opts a vLLM-compatible endpoint into `stream_options.continuous_usage_stats` when streaming usage
@@ -334,6 +339,8 @@ is enabled. Other compatible endpoints do not receive that extension by default.
 responses emit no running usage events. Managed agent loops project observations into their existing
 `LlmAgentUsageEvent`: a repeated `RequestId` replaces that step's observation, and `RunTotals` includes
 completed steps plus the current estimate. Only a step's completion updates the settled run total.
+An override that enables running usage on an adapter without a producer is rejected. A model override
+takes precedence over the connection override.
 
 A response that arrives complete produces its events in a fixed order: reasoning text, the answer text as
 one `LlmTextDeltaEvent`, the refusal text when it differs from the answer text, then for each tool call its

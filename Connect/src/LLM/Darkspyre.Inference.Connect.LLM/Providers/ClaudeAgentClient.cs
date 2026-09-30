@@ -196,7 +196,8 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             NativeAgentContract.Claude.RichContentSupported.For(connection, null),
             richContent,
             opening,
-            retentionBytes);
+            retentionBytes,
+            connection);
         try
         {
             session.Start();
@@ -397,6 +398,9 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
     {
         private readonly IClaudeCliSessionProcess _process;
         private readonly string? _initialModelId;
+        private readonly LlmConnection _connection;
+        private readonly HashSet<string> _accountedCalls = new(StringComparer.Ordinal);
+        private readonly HashSet<string> _completedResults = new(StringComparer.Ordinal);
         private readonly IReadOnlyList<LlmAgentToolDefinition> _tools;
         private readonly Dictionary<string, LlmAgentToolDefinition> _toolsByName;
         private readonly LlmAgentToolHandler? _toolHandler;
@@ -436,7 +440,8 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             LlmRichContentSupported richRoute,
             LlmRichContentSupported richContent,
             AgentOpeningContext? opening,
-            long retentionBytes)
+            long retentionBytes,
+            LlmConnection connection)
         {
             _process = process;
             _tasks = new ClaudeBackgroundTasks(threadId, retentionBytes, item => _sessionEvents.Writer.TryWrite(item),
@@ -447,6 +452,7 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             ThreadId = threadId;
             SessionId = sessionId;
             _initialModelId = initialModelId;
+            _connection = connection;
             _tools = tools;
             _toolsByName = tools.ToDictionary(tool => tool.Name, StringComparer.Ordinal);
             _toolHandler = toolHandler;
@@ -553,12 +559,14 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
                 supportsDocuments: true,
                 parameterName: nameof(request));
 
+            bool usageDeltas = ClaudeCliLlmClient.ResolveCapabilities(
+                _connection, request.ModelId ?? _initialModelId).SupportsUsageDeltas;
             if (!_turnGate.Wait(0, cancellationToken))
             {
                 throw new InvalidOperationException("The session is running or paused.");
             }
             string turnId = Guid.NewGuid().ToString();
-            var turn = new HostTurn(turnId);
+            var turn = new HostTurn(turnId, new ClaudeStreamUsage(usageDeltas, _accountedCalls));
             bool completed = false;
             try
             {
@@ -1314,6 +1322,11 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
                     case "stream_event" when parent is null:
                         {
                             TurnTarget target = EnsureTarget();
+                            if (target.Usage.Observe(root) is { } observation)
+                            {
+                                Emit(new LlmAgentUsageEvent(ThreadId, target.Id, $"usage-{target.Id}",
+                                    observation.Cumulative, observation.Cumulative));
+                            }
                             foreach (LlmAgentEvent item in MapStreamEvent(root, target.Id))
                             {
                                 Emit(item);
@@ -1415,7 +1428,8 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
                 {
                     return running;
                 }
-                _provider = new ProviderTurn(Guid.NewGuid().ToString());
+                _provider = new ProviderTurn(Guid.NewGuid().ToString(), new ClaudeStreamUsage(
+                    ClaudeCliLlmClient.ResolveCapabilities(_connection, _initialModelId).SupportsUsageDeltas, _accountedCalls));
                 _activeTurnId = _provider.Id;
                 _pendingToolCalls.Clear();
                 _sessionEvents.Writer.TryWrite(new LlmAgentProviderTurnStartedEvent(ThreadId, _provider.Id, _tasks.TakeLastReported()));
@@ -1440,11 +1454,15 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
 
         private void EndTurn(JsonElement root)
         {
+            if (OptionalString(root, "uuid") is { } resultId && !_completedResults.Add(resultId)) { return; }
             TurnTarget? target = CurrentTarget();
             if (target is null)
             {
                 return;
             }
+            target.Usage.Finish();
+            LlmUsage? usage = ClaudeStreamUsage.ReadFinal(root);
+            Emit(new LlmAgentUsageEvent(ThreadId, target.Id, $"usage-{target.Id}", usage, usage));
             string text = OptionalString(root, "result") ?? string.Empty;
             if (text.Length > 0 && target.Completed.Count == 0)
             {
@@ -1527,14 +1545,15 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
         }
 
         /// <summary>A turn that receives routed events: a host turn, or one the runtime started.</summary>
-        private abstract class TurnTarget(string id)
+        private abstract class TurnTarget(string id, ClaudeStreamUsage usage)
         {
             public string Id { get; } = id;
+            public ClaudeStreamUsage Usage { get; } = usage;
 
             public HashSet<string> Completed { get; } = new(StringComparer.Ordinal);
         }
 
-        private sealed class HostTurn(string id) : TurnTarget(id)
+        private sealed class HostTurn(string id, ClaudeStreamUsage usage) : TurnTarget(id, usage)
         {
             public Channel<LlmAgentEvent> Events { get; } = Channel.CreateUnbounded<LlmAgentEvent>(
                 new UnboundedChannelOptions { SingleReader = true });
@@ -1544,7 +1563,7 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             public bool Abandoned { get; set; }
         }
 
-        private sealed class ProviderTurn(string id) : TurnTarget(id);
+        private sealed class ProviderTurn(string id, ClaudeStreamUsage usage) : TurnTarget(id, usage);
 
         /// <summary>A host tool call in flight, keyed by the CLI's JSON-RPC request ID so a cancellation can find it.</summary>
         private sealed class RunningToolCall(CancellationTokenSource cancellation)

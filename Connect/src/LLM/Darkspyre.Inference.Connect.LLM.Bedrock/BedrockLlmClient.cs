@@ -69,13 +69,8 @@ internal sealed class BedrockLlmClient(
     {
         EnsureTransport(connection);
         IReadOnlySet<LlmReasoningLevel> offered = modelId is null ? FrozenSet<LlmReasoningLevel>.Empty : ReasoningLevels(modelId);
-        LlmProviderCapabilities capabilities = (Defaults with { ReasoningLevels = offered }).Apply(connection.CapabilityOverrides);
-        capabilities = modelId is not null
-            && connection.ModelCapabilityOverrides.TryGetValue(
-                modelId,
-                out LlmCapabilityOverrides? modelOverrides)
-                    ? capabilities.Apply(modelOverrides)
-                    : capabilities;
+        LlmProviderCapabilities capabilities = LlmCapabilityOverrideLookup.Apply(
+            Defaults with { ReasoningLevels = offered }, connection, modelId);
         // An override can narrow the model family's levels but never widen them: Converse maps no other level.
         if (capabilities.ReasoningLevels.Any(level => !offered.Contains(level)))
         {

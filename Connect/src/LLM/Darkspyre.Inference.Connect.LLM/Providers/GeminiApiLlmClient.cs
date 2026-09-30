@@ -35,9 +35,7 @@ internal sealed partial class GeminiApiLlmClient(HttpClient http)
         IReadOnlySet<LlmReasoningLevel> levels = modelId is null ? new HashSet<LlmReasoningLevel>() : Reasoning(connection, modelId).Levels;
         LlmProviderCapabilities capabilities = GeminiCapabilities.Create(levels);
         if (modelId is not null && !IsReviewed(modelId)) { capabilities = capabilities with { SupportsJsonSchema = false }; }
-        capabilities = capabilities.Apply(connection.CapabilityOverrides);
-        capabilities = modelId is not null && connection.ModelCapabilityOverrides.TryGetValue(modelId, out var overrides)
-            ? capabilities.Apply(overrides) : capabilities;
+        capabilities = LlmCapabilityOverrideLookup.Apply(capabilities, connection, modelId);
         if (capabilities.SupportsJsonObject || capabilities.SupportsAccountUsage
             || capabilities.ReasoningLevels.Any(level => !levels.Contains(level)))
         { throw new NotSupportedException("Gemini API capability overrides cannot enable unimplemented controls."); }

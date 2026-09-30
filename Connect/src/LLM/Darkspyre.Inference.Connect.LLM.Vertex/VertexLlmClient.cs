@@ -23,9 +23,7 @@ internal sealed class VertexLlmClient(HttpClient http, IVertexAuthentication aut
         LlmProviderCapabilities capabilities = modelId is null
             ? VertexModelProfiles.All[0].Capabilities with { RichContentSupported = RichContentRoutes.Anthropic }
             : VertexModelProfiles.Get(modelId, connection.Vertex!.Location).Capabilities;
-        capabilities = capabilities.Apply(connection.CapabilityOverrides);
-        capabilities = modelId is not null && connection.ModelCapabilityOverrides.TryGetValue(modelId, out var overrides)
-            ? capabilities.Apply(overrides) : capabilities;
+        capabilities = LlmCapabilityOverrideLookup.Apply(capabilities, connection, modelId);
         if (capabilities.SupportsJsonObject || capabilities.SupportsAccountUsage
             || modelId is not null && capabilities.ReasoningLevels.Any(level =>
                 !VertexModelProfiles.Get(modelId, connection.Vertex!.Location).ReasoningLevels.Contains(level)))

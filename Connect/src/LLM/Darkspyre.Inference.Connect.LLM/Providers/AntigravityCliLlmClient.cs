@@ -43,11 +43,7 @@ internal sealed class AntigravityCliLlmClient(IAntigravityCliRunner runner)
     public LlmProviderCapabilities GetCapabilities(LlmConnection connection, string? modelId = null)
     {
         ValidateConnection(connection);
-        LlmProviderCapabilities capabilities = Capabilities.Apply(connection.CapabilityOverrides);
-        capabilities = modelId is not null
-            && connection.ModelCapabilityOverrides.TryGetValue(modelId, out LlmCapabilityOverrides? overrides)
-                ? capabilities.Apply(overrides)
-                : capabilities;
+        LlmProviderCapabilities capabilities = LlmCapabilityOverrideLookup.Apply(Capabilities, connection, modelId);
         return capabilities with
         {
             SupportsJsonObject = false,

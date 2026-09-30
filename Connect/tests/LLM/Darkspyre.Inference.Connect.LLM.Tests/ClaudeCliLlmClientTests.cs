@@ -10,6 +10,47 @@ namespace Darkspyre.Inference.Connect.LLM.Tests;
 
 public sealed class ClaudeCliLlmClientTests
 {
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task RunningUsageCountsDistinctCallsAndKeepsCompletionAuthoritative(bool enabled)
+    {
+        var runner = new RecordingRunner(new ClaudeCliProcessResult(0,
+            """
+            {"type":"stream_event","event":{"type":"message_start","message":{"id":"m1","usage":{"input_tokens":7,"cache_read_input_tokens":1,"cache_creation_input_tokens":2,"output_tokens":1}}}}
+            {"type":"stream_event","event":{"type":"message_delta","usage":{"output_tokens":3}}}
+            {"type":"stream_event","event":{"type":"message_delta","usage":{"output_tokens":3}}}
+            {"type":"stream_event","event":{"type":"message_stop"}}
+            {"type":"stream_event","event":{"type":"message_start","message":{"id":"m1","usage":{"input_tokens":999,"output_tokens":1}}}}
+            {"type":"stream_event","event":{"type":"message_delta","usage":{"output_tokens":999}}}
+            {"type":"stream_event","event":{"type":"message_start","message":{"id":"m2","usage":{"input_tokens":20,"cache_read_input_tokens":0,"cache_creation_input_tokens":0,"output_tokens":1}}}}
+            {"type":"stream_event","event":{"type":"message_delta","usage":{"output_tokens":4}}}
+            {"type":"stream_event","event":{"type":"message_stop"}}
+            {"type":"result","subtype":"success","is_error":false,"result":"ok","usage":{"input_tokens":25,"output_tokens":9,"cache_read_input_tokens":1,"cache_creation_input_tokens":2}}
+            {"type":"stream_event","event":{"type":"message_delta","usage":{"output_tokens":999}}}
+            """, string.Empty));
+        using var http = new HttpClient(new UnexpectedHttpHandler());
+        var connection = CliConnection() with
+        {
+            CapabilityOverrides = new() { SupportsUsageDeltas = !enabled },
+            ModelCapabilityOverrides = new Dictionary<string, LlmCapabilityOverrides>
+            { ["claude-test"] = new() { SupportsUsageDeltas = enabled } }
+        };
+        IReadOnlyList<LlmStreamEvent> events = await ReadAllAsync(new ClaudeCliLlmClient(http, runner).StreamAsync(
+            connection, new() { ModelId = "claude-test", Messages = [new("user", "hello")] }));
+
+        LlmUsageDeltaEvent[] usage = [.. events.OfType<LlmUsageDeltaEvent>()];
+        Assert.Equal(enabled ? 4 : 0, usage.Length);
+        if (enabled)
+        {
+            Assert.Equal(new int?[] { 10, 10, 30, 30 }, usage.Select(value => value.Cumulative.InputTokens));
+            Assert.Equal(new int?[] { null, 3, null, 7 }, usage.Select(value => value.Cumulative.OutputTokens));
+            Assert.Equal(37, usage[^1].Cumulative.TotalTokens);
+        }
+        Assert.Equal(new LlmUsage(28, 9, 37) { CachedInputTokens = 1, CacheWriteInputTokens = 2 },
+            Assert.IsType<LlmChatCompletionEvent>(events[^1]).Result.Usage);
+    }
+
     [Fact]
     public async Task SubscriptionPromptsUseOfficialCliWithStreamingJsonAndNativeSchema()
     {

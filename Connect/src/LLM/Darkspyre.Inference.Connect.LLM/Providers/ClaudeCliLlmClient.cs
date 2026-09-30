@@ -38,12 +38,15 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
         LlmReasoningLevel.Low, LlmReasoningLevel.Medium, LlmReasoningLevel.High,
         LlmReasoningLevel.ExtraHigh, LlmReasoningLevel.Maximum);
 
-    protected override LlmProviderCapabilities DefaultCapabilities { get; } = new()
+    protected override LlmProviderCapabilities DefaultCapabilities => Capabilities;
+
+    private static readonly LlmProviderCapabilities Capabilities = new()
     {
         OutputLimitEnforcement = Common.LLM.LlmOutputLimitEnforcement.Unsupported,
         ToolHistory = LlmToolHistory.Text,
         SupportsStreaming = true,
         SupportsStreamingUsage = true,
+        SupportsUsageDeltas = true,
         SupportsModelListing = false,
         SupportsAccountUsage = true,
         SupportsJsonSchema = true,
@@ -63,8 +66,13 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
         LlmConnection connection,
         string? modelId = null)
     {
-        LlmProviderCapabilities capabilities = base.GetCapabilities(connection, modelId);
+        return ResolveCapabilities(connection, modelId);
+    }
+
+    internal static LlmProviderCapabilities ResolveCapabilities(LlmConnection connection, string? modelId)
+    {
         LlmCredential? credential = ClaudeCliConfiguration.ValidateConnection(connection);
+        LlmProviderCapabilities capabilities = LlmCapabilityOverrideLookup.Apply(Capabilities, connection, modelId);
         return capabilities with
         {
             SupportsModelListing = HasCatalogCredential(credential),
@@ -121,6 +129,7 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
         ClaudeCliProcessResult? processResult = null;
         LlmProviderException? parseException = null;
         bool emittedText = false;
+        var usage = new ClaudeStreamUsage(capabilities.SupportsUsageDeltas);
         await foreach (ClaudeCliProcessEvent processEvent in InvokeClaudeStreamingAsync(
                            executable,
                            arguments,
@@ -139,10 +148,13 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
             }
 
             ParsedClaudeLine parsed;
+            LlmUsageDeltaEvent? observation;
             try
             {
+                using JsonDocument document = JsonDocument.Parse(outputLine.Line);
+                observation = usage.Observe(document.RootElement);
                 parsed = ParseClaudeLine(
-                    outputLine.Line,
+                    document.RootElement,
                     preferStructuredOutput: enforcement == LlmStructuredOutputEnforcement.ProviderJsonSchema);
             }
             catch (JsonException exception)
@@ -155,6 +167,7 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
                 continue;
             }
 
+            if (observation is not null) { yield return observation; }
             if (!string.IsNullOrEmpty(parsed.Activity))
             {
                 yield return new LlmActivityEvent(parsed.Activity);
@@ -167,6 +180,7 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
             if (parsed.Terminal is not null)
             {
                 terminal = parsed.Terminal;
+                usage.Finish();
             }
         }
 
@@ -594,7 +608,11 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
     private static ParsedClaudeLine ParseClaudeLine(string line, bool preferStructuredOutput)
     {
         using JsonDocument document = JsonDocument.Parse(line);
-        JsonElement root = document.RootElement;
+        return ParseClaudeLine(document.RootElement, preferStructuredOutput);
+    }
+
+    private static ParsedClaudeLine ParseClaudeLine(JsonElement root, bool preferStructuredOutput)
+    {
         string type = LlmJson.GetString(root, "type") ?? string.Empty;
         if (string.Equals(type, "system", StringComparison.Ordinal))
         {
@@ -628,9 +646,7 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
         }
         bool isError = root.TryGetProperty("is_error", out JsonElement error)
             && error.ValueKind == JsonValueKind.True;
-        LlmUsage? usage = root.TryGetProperty("usage", out JsonElement usageElement)
-            ? ReadClaudeUsage(usageElement)
-            : null;
+        LlmUsage? usage = ClaudeStreamUsage.ReadFinal(root);
         return new ParsedClaudeLine(
             null,
             new ClaudeTerminalResult(
@@ -642,12 +658,6 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
                 LlmJson.GetString(root, "session_id"),
                 usage),
             "Claude CLI response received; validating output…");
-    }
-
-    private static LlmUsage? ReadClaudeUsage(JsonElement usage)
-    {
-        return AnthropicUsage.Create(LlmJson.GetInt(usage, "input_tokens"), LlmJson.GetInt(usage, "output_tokens"),
-            LlmJson.GetInt(usage, "cache_read_input_tokens"), LlmJson.GetInt(usage, "cache_creation_input_tokens"));
     }
 
     private async Task<ClaudeCliProcessResult> InvokeClaudeAsync(

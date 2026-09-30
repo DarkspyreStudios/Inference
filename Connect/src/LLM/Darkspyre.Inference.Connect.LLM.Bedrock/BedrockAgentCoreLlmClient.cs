@@ -44,13 +44,7 @@ internal sealed class BedrockAgentCoreLlmClient(IBedrockAgentCoreInvoker invoker
         string? modelId = null)
     {
         ValidateConnection(connection);
-        LlmProviderCapabilities capabilities = Defaults.Apply(connection.CapabilityOverrides);
-        return modelId is not null
-            && connection.ModelCapabilityOverrides.TryGetValue(
-                modelId,
-                out LlmCapabilityOverrides? modelOverrides)
-                    ? capabilities.Apply(modelOverrides)
-                    : capabilities;
+        return LlmCapabilityOverrideLookup.Apply(Defaults, connection, modelId);
     }
 
     public async IAsyncEnumerable<LlmStreamEvent> StreamAsync(

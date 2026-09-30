@@ -16,6 +16,7 @@ internal sealed class OpenAiCompatibleChatLlmClient(HttpClient http) : LlmClient
     public override LlmProviderDefinition ProviderDefinition => ProviderDefinitions.OpenAiCompatible;
 
     protected override bool OffersNonStreamingRequests => true;
+    protected override bool OffersUsageDeltas => true;
 
     protected override LlmProviderCapabilities DefaultCapabilities { get; } = new()
     {

@@ -9,6 +9,26 @@ namespace Darkspyre.Inference.Connect.LLM.Tests;
 
 public sealed class UsageDeltaTests
 {
+    [Theory]
+    [InlineData(LlmTransport.OpenAiResponses)]
+    [InlineData(LlmTransport.OpenAiCodex)]
+    public void AnOverrideCannotEnableAnUnimplementedUsageProducer(LlmTransport transport)
+    {
+        using var http = new HttpClient(new Handler(""));
+        ILlmClient client = transport == LlmTransport.OpenAiResponses
+            ? new OpenAiResponsesLlmClient(http) : new OpenAiCodexLlmClient(http);
+        var connection = Connection(transport) with
+        { Credential = null, CapabilityOverrides = new() { SupportsUsageDeltas = true } };
+        Assert.Contains("running usage", Assert.Throws<NotSupportedException>(() => client.GetCapabilities(connection, "model")).Message,
+            StringComparison.Ordinal);
+        connection = connection with
+        {
+            ModelCapabilityOverrides = new Dictionary<string, LlmCapabilityOverrides>
+            { ["model"] = new() { SupportsUsageDeltas = false } }
+        };
+        Assert.False(client.GetCapabilities(connection, "model").SupportsUsageDeltas);
+    }
+
     [Fact]
     public void ObservationsDistinguishMissingFromZeroAndReplaceChangedFields()
     {

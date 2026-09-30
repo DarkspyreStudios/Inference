@@ -17,14 +17,12 @@ internal abstract class LlmClientBase(HttpClient http) : ILlmClient
     /// <summary>True when the provider has a non-streaming request that this adapter sends while streaming is off.</summary>
     protected virtual bool OffersNonStreamingRequests => false;
 
+    protected virtual bool OffersUsageDeltas => DefaultCapabilities.SupportsUsageDeltas;
+
     public virtual LlmProviderCapabilities GetCapabilities(LlmConnection connection, string? modelId = null)
     {
         EnsureTransport(connection);
-        LlmProviderCapabilities capabilities = DefaultCapabilities.Apply(connection.CapabilityOverrides);
-        return modelId is not null
-            && connection.ModelCapabilityOverrides.TryGetValue(modelId, out LlmCapabilityOverrides? modelOverrides)
-                ? capabilities.Apply(modelOverrides)
-                : capabilities;
+        return LlmCapabilityOverrideLookup.Apply(DefaultCapabilities, connection, modelId, OffersUsageDeltas);
     }
 
     public abstract IAsyncEnumerable<LlmStreamEvent> StreamAsync(

@@ -408,7 +408,7 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
                         {
                             case LlmUsageDeltaEvent usage:
                                 LlmUsage? runningTotal = run.UsageUnknown ? null
-                                    : AddUsage(run.Usage, usage.Cumulative, run.Iterations == 0);
+                                    : UsageTotals.Add(run.Usage, usage.Cumulative, run.Iterations == 0);
                                 await writer.WriteAsync(new LlmAgentUsageEvent(ThreadId, run.Id, stepId,
                                     usage.Cumulative, runningTotal), token);
                                 break;
@@ -437,7 +437,7 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
                 }
                 if (result is null) { throw new InvalidOperationException("Model stream ended without completion."); }
                 run.Iterations++;
-                run.Usage = run.UsageUnknown ? null : AddUsage(run.Usage, result.Usage, run.Iterations == 1);
+                run.Usage = run.UsageUnknown ? null : UsageTotals.Add(run.Usage, result.Usage, run.Iterations == 1);
                 await writer.WriteAsync(new LlmAgentUsageEvent(ThreadId, run.Id, stepId, result.Usage, run.Usage), token);
                 if (result.Status is not (LlmCompletionStatus.Completed or LlmCompletionStatus.RequiresAction or LlmCompletionStatus.Unknown))
                 {
@@ -709,18 +709,6 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
     {
         if (_context.Revision != revision) { throw new InvalidOperationException("The context revision is stale."); }
     }
-    private static LlmUsage? AddUsage(LlmUsage? total, LlmUsage? usage, bool first) => first ? usage
-        : total is null || usage is null ? null : new(
-            SumTokens(total.InputTokens, usage.InputTokens), SumTokens(total.OutputTokens, usage.OutputTokens),
-            SumTokens(total.TotalTokens, usage.TotalTokens))
-        {
-            CachedInputTokens = SumTokens(total.CachedInputTokens, usage.CachedInputTokens),
-            CacheWriteInputTokens = SumTokens(total.CacheWriteInputTokens, usage.CacheWriteInputTokens),
-            ReasoningOutputTokens = SumTokens(total.ReasoningOutputTokens, usage.ReasoningOutputTokens)
-        };
-    private static int? SumTokens(int? left, int? right) => left is >= 0 && right is >= 0
-        && (long)left.Value + right.Value <= int.MaxValue ? left.Value + right.Value : null;
-
     private void ValidateCalls(IReadOnlyList<LlmToolCall> calls)
     {
         var ids = _context.Entries.SelectMany(entry => entry.Message.ToolCalls)

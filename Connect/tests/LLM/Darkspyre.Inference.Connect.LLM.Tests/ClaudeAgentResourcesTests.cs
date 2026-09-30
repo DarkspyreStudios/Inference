@@ -14,6 +14,114 @@ public sealed class ClaudeAgentResourcesTests : IDisposable
 
     public void Dispose() => Directory.Delete(_directory, recursive: true);
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task HostTurnsProjectRunningUsageAndHonorModelOverrides(bool enabled)
+    {
+        var process = new ManualProcess();
+        var connection = Connection() with
+        {
+            CapabilityOverrides = new() { SupportsUsageDeltas = !enabled },
+            ModelCapabilityOverrides = new Dictionary<string, LlmCapabilityOverrides>
+            { ["claude-test"] = new() { SupportsUsageDeltas = enabled } }
+        };
+        await using ILlmAgentSession session = await Start(process, connection);
+        using var limit = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        Task<List<LlmAgentEvent>> host = Collect(session.RunTurnAsync(new() { Input = [new LlmAgentTextContent("hi")] }, limit.Token));
+        string uuid = await process.WaitForUserMessage(limit.Token);
+        process.Push(new { type = "user", isReplay = true, uuid, message = new { role = "user", content = "hi" } });
+        process.Push(UsageStart("subagent", parent: "tool-1"));
+        process.Push(UsageStart("m1"));
+        process.Push(UsageDelta(2));
+        process.Push(UsageDelta(2));
+        process.Push(new { type = "result", uuid = "r1", subtype = "success", result = "Hello.", usage = new { input_tokens = 8, output_tokens = 3 } });
+        List<LlmAgentEvent> events = await host;
+
+        LlmAgentUsageEvent[] usage = [.. events.OfType<LlmAgentUsageEvent>()];
+        Assert.Equal(enabled ? 3 : 1, usage.Length);
+        if (enabled)
+        {
+            Assert.Equal(new LlmUsage(7, null, null), usage[0].Usage);
+            Assert.Equal(new LlmUsage(7, 2, 9), usage[1].Usage);
+        }
+        Assert.Equal(new LlmUsage(8, 3, 11), usage[^1].Usage);
+        Assert.All(usage, item =>
+        {
+            Assert.Equal(usage[0].RequestId, item.RequestId);
+            Assert.Equal(item.Usage, item.RunTotals);
+            Assert.Equal(events[^1].TurnId, item.TurnId);
+        });
+        Assert.True(events.IndexOf(usage[^1]) < events.Count - 1);
+        Assert.IsType<LlmAgentTurnCompletedEvent>(events[^1]);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ProviderTurnsReplaceRunningUsageWithAnUnknownFinal(bool enabled)
+    {
+        var process = new ManualProcess();
+        await using ILlmAgentSession session = await Start(process, Connection() with
+        { CapabilityOverrides = new() { SupportsUsageDeltas = enabled } });
+        using var limit = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        await using var feed = session.ObserveAsync(limit.Token).GetAsyncEnumerator(limit.Token);
+        process.Push(UsageStart("m1"));
+        process.Push(UsageDelta(2));
+        process.Push(new { type = "result", uuid = "r1", subtype = "success", result = "Done." });
+        List<LlmAgentEvent> events = await ReadUntil(feed, item => item is LlmAgentTurnCompletedEvent);
+
+        LlmAgentUsageEvent[] usage = [.. events.OfType<LlmAgentUsageEvent>()];
+        Assert.Equal(enabled ? 3 : 1, usage.Length);
+        Assert.Null(usage[^1].Usage);
+        Assert.Null(usage[^1].RunTotals);
+        Assert.Equal(Assert.Single(events.OfType<LlmAgentProviderTurnStartedEvent>()).TurnId, usage[^1].TurnId);
+        Assert.All(usage, item => Assert.Equal(usage[0].RequestId, item.RequestId));
+        Assert.IsType<LlmAgentTurnCompletedEvent>(events[^1]);
+    }
+
+    [Fact]
+    public async Task ReplayedCallsAndResultsCannotChargeOrEndTheNextTurn()
+    {
+        var process = new ManualProcess();
+        await using ILlmAgentSession session = await Start(process);
+        using var limit = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        Task<List<LlmAgentEvent>> first = Collect(session.RunTurnAsync(new() { Input = [new LlmAgentTextContent("one")] }, limit.Token));
+        string firstId = await process.WaitForUserMessage(limit.Token);
+        process.Push(new { type = "user", isReplay = true, uuid = firstId, message = new { role = "user", content = "one" } });
+        process.Push(UsageStart("m1"));
+        process.Push(UsageDelta(2));
+        process.Push(new { type = "result", uuid = "r1", subtype = "success", result = "First.", usage = new { input_tokens = 7, output_tokens = 2 } });
+        await first;
+
+        Task<List<LlmAgentEvent>> second = Collect(session.RunTurnAsync(new() { Input = [new LlmAgentTextContent("two")] }, limit.Token));
+        string secondId = await process.WaitForUserMessage(limit.Token, index: 1);
+        process.Push(new { type = "user", isReplay = true, uuid = secondId, message = new { role = "user", content = "two" } });
+        process.Push(new { type = "result", uuid = "r1", subtype = "success", result = "First.", usage = new { input_tokens = 7, output_tokens = 2 } });
+        process.Push(UsageStart("m1"));
+        process.Push(UsageDelta(99));
+        process.Push(UsageStart("m2"));
+        process.Push(UsageDelta(3));
+        process.Push(new { type = "result", uuid = "r2", subtype = "success", result = "Second.", usage = new { input_tokens = 8, output_tokens = 4 } });
+        List<LlmAgentEvent> events = await second;
+
+        LlmAgentUsageEvent[] usage = [.. events.OfType<LlmAgentUsageEvent>()];
+        Assert.Equal(new int?[] { null, 3, 4 }, usage.Select(item => item.Usage?.OutputTokens));
+        Assert.Equal(new int?[] { 7, 7, 8 }, usage.Select(item => item.Usage?.InputTokens));
+        Assert.Equal("Second.", Assert.Single(events.OfType<LlmAgentMessageCompletedEvent>()).Text);
+        Assert.IsType<LlmAgentTurnCompletedEvent>(events[^1]);
+    }
+
+    private static object UsageStart(string id, string? parent = null) => new
+    {
+        type = "stream_event",
+        parent_tool_use_id = parent,
+        @event = new { type = "message_start", message = new { id, usage = new { input_tokens = 7, output_tokens = 1 } } }
+    };
+
+    private static object UsageDelta(int output) => new
+    { type = "stream_event", @event = new { type = "message_delta", usage = new { output_tokens = output } } };
+
     [Fact]
     public async Task CommandTasksFollowTheirMessagesAndOutputExcludesTheTrailer()
     {
@@ -343,8 +451,8 @@ public sealed class ClaudeAgentResourcesTests : IDisposable
         Assert.Equal(LlmOperationSupport.Unsupported, ManagedAgentPolicy.Capabilities.ResourceObservation);
     }
 
-    private Task<ILlmAgentSession> Start(ManualProcess process) =>
-        new ClaudeAgentClient(new Factory(process)).StartSessionAsync("connection", Connection(), new() { ModelId = "claude-test", Runtime = new() { WorkingDirectory = _directory } });
+    private Task<ILlmAgentSession> Start(ManualProcess process, LlmConnection? connection = null) =>
+        new ClaudeAgentClient(new Factory(process)).StartSessionAsync("connection", connection ?? Connection(), new() { ModelId = "claude-test", Runtime = new() { WorkingDirectory = _directory } });
 
     private Task<ILlmAgentSession> StartWithTool(ManualProcess process, LlmAgentToolHandler handler) =>
         new ClaudeAgentClient(new Factory(process)).StartSessionAsync("connection", Connection(), new()
@@ -460,12 +568,13 @@ public sealed class ClaudeAgentResourcesTests : IDisposable
             .Where(root => root.GetProperty("type").GetString() == "control_request")
             .Select(root => root.GetProperty("request"));
 
-        public async Task<string> WaitForUserMessage(CancellationToken cancellationToken)
+        public async Task<string> WaitForUserMessage(CancellationToken cancellationToken, int index = 0)
         {
             while (true)
             {
                 if (_writes.Select(line => JsonSerializer.Deserialize<JsonElement>(line))
-                    .FirstOrDefault(root => root.GetProperty("type").GetString() == "user") is { ValueKind: JsonValueKind.Object } user)
+                    .Where(root => root.GetProperty("type").GetString() == "user").Skip(index)
+                    .FirstOrDefault() is { ValueKind: JsonValueKind.Object } user)
                 {
                     return user.GetProperty("uuid").GetString()!;
                 }
