@@ -32,12 +32,22 @@ internal sealed partial class GeminiApiLlmClient(HttpClient http)
     public override LlmProviderCapabilities GetCapabilities(LlmConnection connection, string? modelId = null)
     {
         Validate(connection);
-        IReadOnlySet<LlmReasoningLevel> levels = modelId is null ? new HashSet<LlmReasoningLevel>() : Reasoning(connection, modelId).Levels;
-        LlmProviderCapabilities capabilities = GeminiCapabilities.Create(levels);
+        GeminiModelProfile profile = modelId is null ? GeminiModelProfiles.Get(string.Empty, null) : Reasoning(connection, modelId);
+        bool supportsTopK = modelId is not null && ILlmCatalogCapabilities.EntryFor(connection, modelId) is { ValueKind: JsonValueKind.Object } entry
+            && entry.TryGetProperty("topK", out JsonElement topK) && topK.ValueKind == JsonValueKind.Number
+            && topK.TryGetInt32(out int defaultTopK) && defaultTopK > 0;
+        LlmProviderCapabilities implemented = GeminiCapabilities.Create(profile, supportsTopK);
+        LlmProviderCapabilities capabilities = implemented;
         if (modelId is not null && !IsReviewed(modelId)) { capabilities = capabilities with { SupportsJsonSchema = false }; }
         capabilities = LlmCapabilityOverrideLookup.Apply(capabilities, connection, modelId);
         if (capabilities.SupportsJsonObject || capabilities.SupportsAccountUsage
-            || capabilities.ReasoningLevels.Any(level => !levels.Contains(level)))
+            || capabilities.SupportsTemperature && !implemented.SupportsTemperature
+            || capabilities.SupportsTopP && !implemented.SupportsTopP
+            || capabilities.SupportsTopK && !implemented.SupportsTopK
+            || capabilities.SupportsPresencePenalty && !implemented.SupportsPresencePenalty
+            || capabilities.SupportsFrequencyPenalty && !implemented.SupportsFrequencyPenalty
+            || capabilities.MaxStopSequences > implemented.MaxStopSequences
+            || capabilities.ReasoningLevels.Any(level => !profile.Levels.Contains(level)))
         { throw new NotSupportedException("Gemini API capability overrides cannot enable unimplemented controls."); }
         return capabilities;
     }
@@ -178,8 +188,8 @@ internal sealed partial class GeminiApiLlmClient(HttpClient http)
         modelId.StartsWith("gemini-3", StringComparison.Ordinal) || modelId.StartsWith("gemini-2.5", StringComparison.Ordinal);
 
     /// <summary>The model's reasoning control, gated on the catalog's <c>thinking</c> flag when the catalog is kept.</summary>
-    private static GeminiReasoningProfile Reasoning(LlmConnection connection, string modelId) =>
-        GeminiReasoning.Get(ParseModel(modelId), CatalogThinking(connection, modelId));
+    private static GeminiModelProfile Reasoning(LlmConnection connection, string modelId) =>
+        GeminiModelProfiles.Get(ParseModel(modelId), CatalogThinking(connection, modelId));
 
     private static bool? CatalogThinking(LlmConnection connection, string modelId) =>
         ILlmCatalogCapabilities.EntryFor(connection, modelId) is { ValueKind: JsonValueKind.Object } entry

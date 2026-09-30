@@ -443,7 +443,7 @@ public sealed class LlmTransportTests
     }
 
     [Fact]
-    public async Task AnthropicRejectsTemperatureUntilTheModelOptsBackIn()
+    public async Task AnthropicSamplingRequiresModelSupportAndAnOverrideCannotInventIt()
     {
         var handler = new RecordingHttpMessageHandler(_ => SseResponse(AnthropicReadyEvents));
         using var http = new HttpClient(handler);
@@ -462,7 +462,9 @@ public sealed class LlmTransportTests
             }
         };
 
-        await ReadAllAsync(client.StreamAsync(permitted, request));
+        await Assert.ThrowsAsync<NotSupportedException>(() => ReadAllAsync(client.StreamAsync(permitted, request)));
+        Assert.Equal(0, handler.CallCount);
+        await ReadAllAsync(client.StreamAsync(AnthropicConnection(), request with { ModelId = "claude-sonnet-4-6", ReasoningLevel = LlmReasoningLevel.None }));
 
         using JsonDocument sent = JsonDocument.Parse(Assert.IsType<string>(handler.Body));
         Assert.Equal(0.5, sent.RootElement.GetProperty("temperature").GetDouble());

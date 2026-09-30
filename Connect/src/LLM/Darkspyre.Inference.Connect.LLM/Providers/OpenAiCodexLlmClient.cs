@@ -58,6 +58,12 @@ internal sealed class OpenAiCodexLlmClient(HttpClient http)
         return capabilities with
         {
             SupportsTemperature = false,
+            SupportsTopP = false,
+            SupportsTopK = false,
+            SupportsSeed = false,
+            SupportsPresencePenalty = false,
+            SupportsFrequencyPenalty = false,
+            MaxStopSequences = 0,
             SupportsJsonObject = false,
             ReasoningLevels = !LlmCapabilityOverrideLookup.Overrides(connection, modelId, overrides => overrides.ReasoningLevels)
                 && CatalogLevels(ILlmCatalogCapabilities.EntryFor(connection, modelId)) is { } catalog

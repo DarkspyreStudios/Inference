@@ -390,6 +390,7 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
         {
             payload["temperature"] = temperature;
         }
+        if (request.TopP is { } topP) { payload["top_p"] = topP; }
 
         if (request.MaxOutputTokens is int maxOutputTokens)
         {

@@ -115,6 +115,25 @@ struct HostTests {
     #expect(complete.stream == false)
   }
 
+  @Test func samplingModesDecodeAndMapWithoutGeneration() throws {
+    let base = #""messages":[],"tools":[],"temperature":0.5,"maximumResponseTokens":100"#
+    func options(_ sampling: String) throws -> GenerationOptions {
+      try JSONDecoder().decode(GenerationRequest.self, from: Data("{\(base)\(sampling)}".utf8))
+        .generationOptions()
+    }
+    let nucleus = try options(#", "topP":0.8,"seed":42"#)
+    #expect(nucleus.sampling == .random(probabilityThreshold: 0.8, seed: 42))
+    #expect(nucleus.temperature == 0.5)
+    #expect(nucleus.maximumResponseTokens == 100)
+    #expect(try options(#", "topK":17,"seed":42"#).sampling == .random(top: 17, seed: 42))
+    #expect(try options(#", "seed":42"#).sampling == .random(probabilityThreshold: 1, seed: 42))
+    #expect(try options("").sampling == nil)
+    #expect(throws: HostFailure.self) { try options(#", "topP":0.8,"topK":17"#) }
+    #expect(throws: HostFailure.self) { try options(#", "topP":0"#) }
+    #expect(throws: HostFailure.self) { try options(#", "topK":0"#) }
+    #expect(throws: (any Error).self) { try options(#", "seed":-1"#) }
+  }
+
   @Test func nestedPlanBuildsWithPublicConstructors() throws {
     let json =
       #"{"kind":"object","properties":[{"name":"nested","required":true,"schema":{"kind":"array","minItems":1,"maxItems":2,"items":{"kind":"object","properties":[{"name":"number","required":true,"schema":{"kind":"integer","minimum":"1","maximum":"5"}}]}}}]}"#

@@ -63,6 +63,19 @@ public sealed record LlmCapabilities
 
     public bool SupportsTemperature { get; init; }
 
+    public bool SupportsTopP { get; init; }
+
+    public bool SupportsTopK { get; init; }
+
+    public bool SupportsSeed { get; init; }
+
+    public bool SupportsPresencePenalty { get; init; }
+
+    public bool SupportsFrequencyPenalty { get; init; }
+
+    /// <summary>Zero disables string stops; int.MaxValue means no adapter-imposed limit.</summary>
+    public int MaxStopSequences { get; init; }
+
     public bool SupportsToolUse { get; init; }
 
     public LlmToolCapabilities Tools { get; init; } = new();

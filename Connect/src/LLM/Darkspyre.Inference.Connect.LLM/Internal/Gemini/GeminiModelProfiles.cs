@@ -12,14 +12,17 @@ internal enum GeminiThinkingControl
     Budget
 }
 
-/// <summary>A Gemini model's reasoning control. <see cref="Budgets"/> applies to budget control only.</summary>
-internal sealed record GeminiReasoningProfile(
+/// <summary>A Gemini model's controls. <see cref="Budgets"/> applies to budget control only.</summary>
+internal sealed record GeminiModelProfile(
     GeminiThinkingControl Control,
     IReadOnlySet<LlmReasoningLevel> Levels,
-    IReadOnlyDictionary<LlmReasoningLevel, int> Budgets);
+    IReadOnlyDictionary<LlmReasoningLevel, int> Budgets)
+{
+    public bool AllowsSampling { get; init; } = true;
+}
 
 /// <summary>Per-model Gemini reasoning controls, shared by the Gemini API and Vertex Gemini routes.</summary>
-internal static class GeminiReasoning
+internal static class GeminiModelProfiles
 {
     private static readonly IReadOnlySet<LlmReasoningLevel> MinimalToHigh = new[]
     { LlmReasoningLevel.Minimal, LlmReasoningLevel.Low, LlmReasoningLevel.Medium, LlmReasoningLevel.High }.ToFrozenSet();
@@ -29,12 +32,12 @@ internal static class GeminiReasoning
 
     private static readonly FrozenDictionary<LlmReasoningLevel, int> NoBudgets = FrozenDictionary<LlmReasoningLevel, int>.Empty;
 
-    private static readonly GeminiReasoningProfile NoControl = new(
+    private static readonly GeminiModelProfile NoControl = new(
         GeminiThinkingControl.None, FrozenSet<LlmReasoningLevel>.Empty, NoBudgets);
 
     // Gemini 3 thinkingLevel sets. Longest prefix first, so a longer, more specific prefix is tested before a shorter
     // one it contains.
-    private static readonly (string Prefix, GeminiReasoningProfile Profile)[] Rows =
+    private static readonly (string Prefix, GeminiModelProfile Profile)[] Rows =
     [
         ("gemini-3.8-flash", Level(LowToHigh)),
         ("gemini-3.7-flash", Level(LowToHigh)),
@@ -55,29 +58,31 @@ internal static class GeminiReasoning
     /// The profile of a bare Gemini model id. <paramref name="catalogThinking"/> is the Gemini API catalog's
     /// <c>thinking</c> flag; false means the model takes no thinking configuration at all. Null uses the table.
     /// </summary>
-    public static GeminiReasoningProfile Get(string bareModelId, bool? catalogThinking)
+    public static GeminiModelProfile Get(string bareModelId, bool? catalogThinking)
     {
-        if (catalogThinking == false)
-        {
-            return NoControl;
-        }
-
-        foreach ((string prefix, GeminiReasoningProfile profile) in Rows)
+        GeminiModelProfile resolved = NoControl;
+        foreach ((string prefix, GeminiModelProfile profile) in Rows)
         {
             if (bareModelId.StartsWith(prefix, StringComparison.Ordinal))
             {
-                return profile;
+                resolved = profile;
+                break;
             }
         }
-
-        return NoControl;
+        if (catalogThinking == false) { resolved = NoControl; }
+        // Flash 3.6 and later ignore temperature, top-p and top-k, independently of thinking support.
+        string[] segments = bareModelId.Split('-');
+        bool ignoredSampling = segments is ["gemini", var versionText, "flash", ..]
+            && Version.TryParse(versionText.Contains('.') ? versionText : versionText + ".0", out Version? version)
+            && version >= new Version(3, 6);
+        return resolved with { AllowsSampling = !ignoredSampling };
     }
 
     /// <summary>
     /// The <c>thinkingConfig</c> for a level the profile offers. It never writes both <c>thinkingLevel</c> and
     /// <c>thinkingBudget</c>, which Gemini rejects.
     /// </summary>
-    public static JsonObject? ThinkingConfig(GeminiReasoningProfile profile, LlmReasoningLevel? level, bool requestReasoningText)
+    public static JsonObject? ThinkingConfig(GeminiModelProfile profile, LlmReasoningLevel? level, bool requestReasoningText)
     {
         JsonObject? config = level is null ? null : profile.Control switch
         {
@@ -94,11 +99,11 @@ internal static class GeminiReasoning
         return config;
     }
 
-    private static GeminiReasoningProfile Level(IReadOnlySet<LlmReasoningLevel> levels) =>
+    private static GeminiModelProfile Level(IReadOnlySet<LlmReasoningLevel> levels) =>
         new(GeminiThinkingControl.Level, levels, NoBudgets);
 
     /// <summary>Low is 1,024, which satisfies the Flash-Lite minimum of 512, the Pro minimum of 128 and Vertex's 1.</summary>
-    private static GeminiReasoningProfile Budget(bool disables, int high)
+    private static GeminiModelProfile Budget(bool disables, int high)
     {
         var budgets = new Dictionary<LlmReasoningLevel, int>
         {

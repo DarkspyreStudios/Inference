@@ -51,7 +51,15 @@ internal sealed class OpenAiResponsesLlmClient(HttpClient http) : ResponsesLlmCl
                 : profile.ReasoningLevels,
             SupportsTemperature = LlmCapabilityOverrideLookup.Overrides(connection, modelId, overrides => overrides.SupportsTemperature)
                 ? capabilities.SupportsTemperature
-                : profile.AllowsSampling
+                : profile.AllowsSampling,
+            SupportsTopP = profile.AllowsSampling
+                && (!LlmCapabilityOverrideLookup.Overrides(connection, modelId, overrides => overrides.SupportsTopP)
+                    || capabilities.SupportsTopP),
+            SupportsTopK = false,
+            SupportsSeed = false,
+            SupportsPresencePenalty = false,
+            SupportsFrequencyPenalty = false,
+            MaxStopSequences = 0
         };
     }
 }

@@ -6,7 +6,7 @@ namespace Darkspyre.Inference.Connect.LLM.Internal;
 /// <summary>Capabilities the shared Gemini protocol implements on every route.</summary>
 internal static class GeminiCapabilities
 {
-    public static LlmProviderCapabilities Create(IReadOnlySet<LlmReasoningLevel> reasoningLevels)
+    public static LlmProviderCapabilities Create(GeminiModelProfile profile, bool supportsTopK)
     {
         LlmRichContentSupported rich = RichContentRoutes.TextOnly with { ErrorFlag = LlmRichContentCarriage.Native };
         return new()
@@ -18,7 +18,13 @@ internal static class GeminiCapabilities
             SupportsModelListing = true,
             OutputLimitEnforcement = LlmOutputLimitEnforcement.ProviderEnforced,
             SupportsJsonSchema = true,
-            SupportsTemperature = true,
+            SupportsTemperature = profile.AllowsSampling,
+            SupportsTopP = profile.AllowsSampling,
+            SupportsTopK = profile.AllowsSampling && supportsTopK,
+            SupportsSeed = true,
+            SupportsPresencePenalty = profile.AllowsSampling,
+            SupportsFrequencyPenalty = profile.AllowsSampling,
+            MaxStopSequences = 5,
             SupportsToolUse = true,
             Tools = new()
             {
@@ -28,7 +34,7 @@ internal static class GeminiCapabilities
                 SupportsParallelCallControl = false,
                 SupportsArgumentStreaming = false
             },
-            ReasoningLevels = reasoningLevels,
+            ReasoningLevels = profile.Levels,
             SupportsPromptImages = true,
             SupportsPromptDocuments = true,
             RichContentSupported = rich,

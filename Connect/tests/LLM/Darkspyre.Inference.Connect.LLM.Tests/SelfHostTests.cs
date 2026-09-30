@@ -17,8 +17,38 @@ public sealed class SelfHostTests
         SupportsModelListing = true,
         SupportsJsonSchema = true,
         SupportsToolUse = true,
+        SupportsTopP = true,
+        SupportsTopK = true,
+        SupportsSeed = true,
+        SupportsPresencePenalty = true,
+        SupportsFrequencyPenalty = true,
+        MaxStopSequences = 16,
         ReasoningLevels = new HashSet<LlmReasoningLevel> { LlmReasoningLevel.None, LlmReasoningLevel.High }
     };
+
+    [Fact]
+    public async Task UnsupportedEngineSamplingFailsBeforeItsStreamStarts()
+    {
+        var engine = new Engine { Capabilities = new() };
+        using ServiceProvider services = Services(engine);
+        var llms = services.GetRequiredService<LlmProviderService>();
+        foreach (var request in new[]
+        {
+            new LlmChatRequest { ModelId = "qwen", TopP = .8 },
+            new LlmChatRequest { ModelId = "qwen", TopK = 17 },
+            new LlmChatRequest { ModelId = "qwen", Seed = 0 },
+            new LlmChatRequest { ModelId = "qwen", PresencePenalty = 0 },
+            new LlmChatRequest { ModelId = "qwen", FrequencyPenalty = 0 },
+            new LlmChatRequest { ModelId = "qwen", StopSequences = ["stop"] }
+        })
+        {
+            Assert.Throws<NotSupportedException>(() => new SelfHostLlmClient(new Host(engine, loaded: true)).EstimateInputTokens(
+                new() { Version = "1", Transport = LlmTransport.SelfHost, Endpoint = "qwen" }, request));
+            await Assert.ThrowsAsync<NotSupportedException>(async () =>
+            { await foreach (var item in llms.StreamAsync("connection", request)) { _ = item; } });
+        }
+        Assert.Empty(engine.Requests);
+    }
 
     [Fact]
     public async Task PortableSelfHostBridgePreservesEngineOwnershipPolicyAndUsageDetails()
@@ -65,7 +95,13 @@ public sealed class SelfHostTests
             ModelId = "qwen",
             Instructions = "be brief",
             Messages = [new("user", "hi")],
-            ReasoningLevel = LlmReasoningLevel.High
+            ReasoningLevel = LlmReasoningLevel.High,
+            TopP = .8,
+            TopK = 19,
+            Seed = 3,
+            PresencePenalty = .2,
+            FrequencyPenalty = -.3,
+            StopSequences = ["stop"]
         })) { events.Add(item); }
 
         LlmInferenceRequest sent = Assert.Single(engine.Requests);
@@ -73,6 +109,12 @@ public sealed class SelfHostTests
         Assert.Equal("be brief", sent.Instructions);
         Assert.Equal(LlmReasoningLevel.High, sent.ReasoningLevel);
         Assert.Equal("hi", Assert.Single(sent.Messages).Content);
+        Assert.Equal(.8, sent.TopP);
+        Assert.Equal(19, sent.TopK);
+        Assert.Equal(3, sent.Seed);
+        Assert.Equal(.2, sent.PresencePenalty);
+        Assert.Equal(-.3, sent.FrequencyPenalty);
+        Assert.Equal(["stop"], sent.StopSequences);
         Assert.IsType<LlmReasoningDeltaEvent>(events[0]);
         Assert.Equal("hello", Assert.IsType<LlmChatCompletionEvent>(events[^1]).Result.Text);
     }
@@ -89,6 +131,12 @@ public sealed class SelfHostTests
         LlmProviderCapabilities capabilities = await llms.GetModelCapabilitiesAsync("connection", "qwen");
         Assert.True(capabilities.SupportsToolUse);
         Assert.True(capabilities.SupportsReasoningText);
+        Assert.True(capabilities.SupportsTopP);
+        Assert.True(capabilities.SupportsTopK);
+        Assert.True(capabilities.SupportsSeed);
+        Assert.True(capabilities.SupportsPresencePenalty);
+        Assert.True(capabilities.SupportsFrequencyPenalty);
+        Assert.Equal(16, capabilities.MaxStopSequences);
         Assert.True((await llms.Bind("connection").GetCapabilitiesAsync("qwen")).SupportsReasoningText);
         Assert.True(capabilities.SupportsAgentToolUse);
         Assert.Contains(LlmReasoningLevel.High, capabilities.ReasoningLevels);

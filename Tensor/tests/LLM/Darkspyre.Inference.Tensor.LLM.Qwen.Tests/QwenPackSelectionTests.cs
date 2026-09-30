@@ -17,6 +17,79 @@ public sealed class QwenPackSelectionTests : IDisposable
     private static readonly byte[] Weights = "controlled checkpoint bytes"u8.ToArray();
 
     [Fact]
+    public async Task SamplingControlsReachTheEngineAndStopsWorkWithGreedyDecoding()
+    {
+        var runtime = new Runtime();
+        var (engine, packs, model) = await LoadedAsync(runtime, "host/sampling");
+        await using (engine)
+        using (packs)
+        {
+            await Collect(engine, Request(model) with
+            { Temperature = .6, TopP = .8, TopK = 17, Seed = 42, PresencePenalty = .2, FrequencyPenalty = -.3, StopSequences = ["stop"] });
+            SamplingConfig sampling = Assert.IsType<SamplingConfig>(runtime.LastSampling);
+            Assert.Equal(.6f, sampling.Temperature);
+            Assert.Equal(.8f, sampling.TopP);
+            Assert.Equal(17, sampling.TopK);
+            Assert.Equal(42, sampling.Seed);
+            Assert.Equal(.2f, sampling.PresencePenalty);
+            Assert.Equal(-.3f, sampling.FrequencyPenalty);
+            Assert.Equal(["stop"], sampling.StopSequences);
+            await Collect(engine, Request(model) with { StopSequences = ["end"], PresencePenalty = 3 });
+            Assert.True(runtime.LastSampling!.Temperature <= 0);
+            Assert.Equal(["end"], runtime.LastSampling.StopSequences);
+            Assert.Equal(3f, runtime.LastSampling.PresencePenalty);
+            var capabilities = await engine.GetCapabilitiesAsync(model);
+            Assert.True(capabilities.SupportsTopP && capabilities.SupportsTopK && capabilities.SupportsSeed);
+            Assert.True(capabilities.SupportsPresencePenalty && capabilities.SupportsFrequencyPenalty);
+            Assert.Equal(16, capabilities.MaxStopSequences);
+        }
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData(0d)]
+    public async Task GreedySamplingRejectsTopPTopKAndSeedBeforeTheEngine(double? temperature)
+    {
+        var runtime = new Runtime();
+        var (engine, packs, model) = await LoadedAsync(runtime, "host/greedy");
+        await using (engine)
+        using (packs)
+        {
+            foreach (var request in new[] { Request(model) with { TopP = .8 }, Request(model) with { TopK = 17 }, Request(model) with { Seed = 42 } })
+            {
+                var error = await Assert.ThrowsAsync<InferenceException>(() => Collect(engine, request with { Temperature = temperature }));
+                Assert.Equal(InferenceFailureCode.UnsupportedFeature, error.Code);
+            }
+            Assert.Null(runtime.LastSampling);
+        }
+    }
+
+    [Fact]
+    public async Task InvalidSamplingFailsBeforeAnUnloadedModelIsResolved()
+    {
+        using var http = new HttpClient(new Handler());
+        using var packs = Manager(http, Pack("host/invalid"));
+        var runtime = new Runtime();
+        await using var engine = new QwenLlmInference(packs, runtime, TensorBackendKind.Cpu);
+        foreach (var request in new[]
+        {
+            Request("host/invalid") with { Temperature = double.NaN },
+            Request("host/invalid") with { Temperature = 1, TopP = 0 },
+            Request("host/invalid") with { Temperature = 1, TopP = double.Epsilon },
+            Request("host/invalid") with { Temperature = 1, TopK = 0 },
+            Request("host/invalid") with { Temperature = 1, Seed = -1 },
+            Request("host/invalid") with { PresencePenalty = double.MaxValue },
+            Request("host/invalid") with { FrequencyPenalty = double.NaN },
+            Request("host/invalid") with { StopSequences = [""] }
+        })
+        {
+            var error = await Assert.ThrowsAsync<InferenceException>(() => Collect(engine, request));
+            Assert.Equal(InferenceFailureCode.InvalidRequest, error.Code);
+        }
+        Assert.Null(runtime.LastSampling);
+    }
+
+    [Fact]
     public async Task SelectedPackOwnsProvenanceAndLimitsOnlyAppearFromLoadedMetadata()
     {
         TensorModelPackDefinition first = Pack("host/first"), second = Pack("host/second");
@@ -291,6 +364,7 @@ public sealed class QwenPackSelectionTests : IDisposable
         public IReadOnlyList<string> Pieces { get; init; } = ["hello"];
         public List<ToolFunction>? LastTools { get; private set; }
         public bool LastThinking { get; private set; }
+        public SamplingConfig? LastSampling { get; private set; }
         public List<ChatMessage> LastMessages { get; private set; } = [];
         public int LoadedContext { get; init; } = 8192;
         public int? PromptEstimate { get; init; }
@@ -314,6 +388,7 @@ public sealed class QwenPackSelectionTests : IDisposable
             LastStreamToken = cancellationToken;
             LastTools = tools;
             LastThinking = enableThinking;
+            LastSampling = sampling;
             LastMessages = messages;
             await Task.Yield();
             foreach (string piece in Pieces)

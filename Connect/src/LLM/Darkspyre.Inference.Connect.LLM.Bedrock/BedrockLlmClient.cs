@@ -43,6 +43,8 @@ internal sealed class BedrockLlmClient(
         SupportsJsonSchema = false,
         SupportsJsonObject = false,
         SupportsTemperature = true,
+        SupportsTopP = true,
+        MaxStopSequences = 2500,
         SupportsToolUse = true,
         Tools = new()
         {
@@ -70,13 +72,36 @@ internal sealed class BedrockLlmClient(
     {
         EnsureTransport(connection);
         IReadOnlySet<LlmReasoningLevel> offered = modelId is null ? FrozenSet<LlmReasoningLevel>.Empty : ReasoningLevels(modelId);
+        (BedrockModelFamily family, string baseModelId) = BedrockModelFamilies.Classify(modelId ?? string.Empty);
+        bool claudeSampling = family != BedrockModelFamily.AnthropicClaude
+            || AnthropicModelProfiles.Resolve(BedrockModelFamilies.AnthropicModelId(baseModelId), null).AllowsSampling;
         LlmProviderCapabilities capabilities = LlmCapabilityOverrideLookup.Apply(
-            Defaults with { ReasoningLevels = offered }, connection, modelId);
+            Defaults with
+            {
+                ReasoningLevels = offered,
+                SupportsTemperature = claudeSampling,
+                SupportsTopP = claudeSampling,
+                SupportsTopK = family == BedrockModelFamily.AmazonNova2
+                    || family == BedrockModelFamily.AnthropicClaude && claudeSampling,
+                MaxStopSequences = family == BedrockModelFamily.DeepSeekR1 ? 10 : 2500
+            }, connection, modelId) with
+        {
+            SupportsSeed = false,
+            SupportsPresencePenalty = false,
+            SupportsFrequencyPenalty = false
+        };
         // An override can narrow the model family's levels but never widen them: Converse maps no other level.
         if (capabilities.ReasoningLevels.Any(level => !offered.Contains(level)))
         {
             throw new NotSupportedException(
                 "Bedrock capability overrides cannot offer a reasoning level the model family does not accept.");
+        }
+        if ((!claudeSampling && (capabilities.SupportsTemperature || capabilities.SupportsTopP))
+            || capabilities.SupportsTopK && !(family == BedrockModelFamily.AmazonNova2
+                || family == BedrockModelFamily.AnthropicClaude && claudeSampling)
+            || capabilities.MaxStopSequences > (family == BedrockModelFamily.DeepSeekR1 ? 10 : 2500))
+        {
+            throw new NotSupportedException("Bedrock capability overrides cannot enable unsupported sampling controls.");
         }
         return capabilities;
     }
@@ -195,7 +220,17 @@ internal sealed class BedrockLlmClient(
         }
 
         LlmReasoningEffort.Validate(request.ReasoningLevel, capabilities);
+        LlmClientBase.ValidateSampling(request, capabilities);
+        if (request.Temperature is { } temperature && (!double.IsFinite(temperature) || temperature is < 0 or > 1))
+        { throw new ArgumentOutOfRangeException(nameof(request), "Converse temperature must be finite and between 0 and 1."); }
         BedrockModelFamily family = BedrockModelFamilies.Classify(request.ModelId).Family;
+        if (family == BedrockModelFamily.AnthropicClaude)
+        {
+            AnthropicModelProfiles.ValidateSampling(request, AnthropicModelProfiles.Resolve(
+            BedrockModelFamilies.AnthropicModelId(BedrockModelFamilies.Classify(request.ModelId).BaseModelId), null));
+        }
+        if (family == BedrockModelFamily.AmazonNova2 && request.TopK > 128)
+        { throw new ArgumentOutOfRangeException(nameof(request), "Nova 2 top-k cannot exceed 128."); }
         if (family == BedrockModelFamily.AnthropicClaude
             && request.ReasoningLevel is { } level && level != LlmReasoningLevel.None
             && (request.Temperature is not null
@@ -205,10 +240,10 @@ internal sealed class BedrockLlmClient(
         }
         if (family == BedrockModelFamily.AmazonNova2
             && request.ReasoningLevel == LlmReasoningLevel.High
-            && (request.Temperature is not null || request.MaxOutputTokens is not null))
+            && (request.Temperature is not null || request.MaxOutputTokens is not null || request.TopP is not null || request.TopK is not null))
         {
             throw new NotSupportedException(
-                "Nova 2 high reasoning requires temperature and maximum output tokens to be unset.");
+                "Nova 2 high reasoning requires temperature, top-p, top-k and maximum output tokens to be unset.");
         }
         LlmClientBase.ValidatePromptAttachments(request, capabilities);
         LlmClientBase.ValidateToolUse(request, capabilities);
@@ -568,13 +603,16 @@ internal sealed class BedrockLlmClient(
             inference.Temperature = (float)temperature;
             hasInference = true;
         }
+        if (request.TopP is { } topP) { inference.TopP = (float)topP; hasInference = true; }
+        if (request.StopSequences.Count > 0) { inference.StopSequences = [.. request.StopSequences]; hasInference = true; }
 
+        JsonObject additional = new();
         if (request.ReasoningLevel is { } level
             && ReasoningFields(request.ModelId, level, request.MaxOutputTokens) is var (fields, raisedMaxTokens))
         {
             if (fields.Count > 0)
             {
-                result.AdditionalModelRequestFields = DeserializeDocument(fields.ToJsonString());
+                additional = fields;
             }
             if (raisedMaxTokens is int raised)
             {
@@ -582,6 +620,18 @@ internal sealed class BedrockLlmClient(
                 hasInference = true;
             }
         }
+        if (request.TopK is { } topK)
+        {
+            if (BedrockModelFamilies.Classify(request.ModelId).Family == BedrockModelFamily.AnthropicClaude)
+            { additional["top_k"] = topK; }
+            else
+            {
+                JsonObject config = additional["inferenceConfig"] as JsonObject ?? new();
+                config["topK"] = topK;
+                if (additional["inferenceConfig"] is null) { additional["inferenceConfig"] = config; }
+            }
+        }
+        if (additional.Count > 0) { result.AdditionalModelRequestFields = DeserializeDocument(additional.ToJsonString()); }
 
         if (hasInference)
         {

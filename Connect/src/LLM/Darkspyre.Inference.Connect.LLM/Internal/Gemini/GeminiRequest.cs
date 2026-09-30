@@ -8,7 +8,7 @@ internal static class GeminiRequest
 {
     public static JsonObject Build(LlmConnection connection, LlmChatRequest request,
         LlmStructuredOutputEnforcement? enforcement, Func<LlmToolOutput, ProjectedToolOutput> project,
-        GeminiReasoningProfile reasoning, bool reasoningText)
+        GeminiModelProfile reasoning, bool reasoningText)
     {
         var contents = new JsonArray();
         var calls = new Dictionary<string, (string Name, string? WireId)>(StringComparer.Ordinal);
@@ -87,7 +87,13 @@ internal static class GeminiRequest
         var generation = new JsonObject { ["candidateCount"] = 1 };
         if (request.MaxOutputTokens is int maximum) { generation["maxOutputTokens"] = maximum; }
         if (request.Temperature is double temperature) { generation["temperature"] = temperature; }
-        if (GeminiReasoning.ThinkingConfig(reasoning, request.ReasoningLevel, reasoningText) is { } thinking)
+        if (request.TopP is double topP) { generation["topP"] = topP; }
+        if (request.TopK is int topK) { generation["topK"] = topK; }
+        if (request.Seed is int seed) { generation["seed"] = seed; }
+        if (request.PresencePenalty is double presence) { generation["presencePenalty"] = presence; }
+        if (request.FrequencyPenalty is double frequency) { generation["frequencyPenalty"] = frequency; }
+        if (request.StopSequences.Count > 0) { generation["stopSequences"] = System.Text.Json.JsonSerializer.SerializeToNode(request.StopSequences); }
+        if (GeminiModelProfiles.ThinkingConfig(reasoning, request.ReasoningLevel, reasoningText) is { } thinking)
         {
             generation["thinkingConfig"] = thinking;
         }

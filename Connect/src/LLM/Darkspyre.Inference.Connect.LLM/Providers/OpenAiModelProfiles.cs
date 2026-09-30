@@ -81,11 +81,11 @@ internal static class OpenAiModelProfiles
     /// </summary>
     public static void ValidateSampling(LlmChatRequest request)
     {
-        if (request.Temperature is not null
+        if ((request.Temperature is not null || request.TopP is not null)
             && request.ReasoningLevel != LlmReasoningLevel.None
             && Get(request.ModelId).SamplingRequiresNoReasoning)
         {
-            throw new NotSupportedException("This model accepts temperature only with ReasoningLevel None.");
+            throw new NotSupportedException("This model accepts temperature and top-p only with ReasoningLevel None.");
         }
     }
 }

@@ -26,6 +26,7 @@ internal sealed class BedrockAgentCoreLlmClient(IBedrockAgentCoreInvoker invoker
         SupportsJsonSchema = false,
         SupportsJsonObject = false,
         SupportsTemperature = false,
+        SupportsTopP = true,
         SupportsToolUse = false,
         SupportsAgentSessions = true,
         Agent = NativeAgentContract.AgentCore,
@@ -48,8 +49,20 @@ internal sealed class BedrockAgentCoreLlmClient(IBedrockAgentCoreInvoker invoker
         return ResolveCapabilities(connection, modelId);
     }
 
-    internal static LlmProviderCapabilities ResolveCapabilities(LlmConnection connection, string? modelId) =>
-        LlmCapabilityOverrideLookup.Apply(Defaults, connection, modelId);
+    internal static LlmProviderCapabilities ResolveCapabilities(LlmConnection connection, string? modelId)
+    {
+        LlmProviderCapabilities capabilities = LlmCapabilityOverrideLookup.Apply(Defaults, connection, modelId);
+        return capabilities with
+        {
+            SupportsTopP = !string.Equals(modelId, DefaultModelId, StringComparison.OrdinalIgnoreCase)
+                && capabilities.SupportsTopP,
+            SupportsTopK = false,
+            SupportsSeed = false,
+            SupportsPresencePenalty = false,
+            SupportsFrequencyPenalty = false,
+            MaxStopSequences = 0
+        };
+    }
 
     public async IAsyncEnumerable<LlmStreamEvent> StreamAsync(
         LlmConnection connection,
@@ -298,6 +311,12 @@ internal sealed class BedrockAgentCoreLlmClient(IBedrockAgentCoreInvoker invoker
             result.MaxTokens = maxTokens;
         }
         result.Model = BuildModelConfiguration(request.ModelId);
+        if (request.TopP is { } topP)
+        {
+            if (result.Model?.BedrockModelConfig is not { } model)
+            { throw new NotSupportedException("AgentCore top-p requires an explicit Bedrock model ID, not the harness default."); }
+            model.TopP = (float)topP;
+        }
         return result;
     }
 
@@ -375,6 +394,7 @@ internal sealed class BedrockAgentCoreLlmClient(IBedrockAgentCoreInvoker invoker
                 nameof(request),
                 "Maximum output tokens must be positive.");
         }
+        LlmClientBase.ValidateSampling(request, capabilities);
         // AgentCore Harness exposes no reasoning control, so it accepts no level.
         Darkspyre.Inference.Connect.LLM.Providers.LlmReasoningEffort.Validate(
             request.ReasoningLevel,

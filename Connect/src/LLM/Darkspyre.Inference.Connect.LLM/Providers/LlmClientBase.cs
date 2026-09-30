@@ -130,6 +130,7 @@ internal abstract class LlmClientBase(HttpClient http) : ILlmClient
             throw new ArgumentOutOfRangeException(nameof(request), "Maximum output tokens must be positive.");
         }
 
+        ValidateSampling(request, capabilities);
         LlmReasoningEffort.Validate(request.ReasoningLevel, capabilities);
         if (request.MaxOutputTokens is not null
             && capabilities.OutputLimitEnforcement == Common.LLM.LlmOutputLimitEnforcement.Unsupported)
@@ -148,6 +149,36 @@ internal abstract class LlmClientBase(HttpClient http) : ILlmClient
 
         ValidatePromptAttachments(request, capabilities);
         ValidateToolUse(request, capabilities);
+    }
+
+    internal static void ValidateSampling(LlmChatRequest request, LlmProviderCapabilities capabilities)
+    {
+        if (capabilities.MaxStopSequences < 0)
+        { throw new ArgumentOutOfRangeException(nameof(capabilities), "The stop-sequence limit cannot be negative."); }
+        if (request.TopP is not null && !capabilities.SupportsTopP)
+        { throw new NotSupportedException("The selected model does not support top-p."); }
+        if (request.TopP is { } topP && (!double.IsFinite(topP) || topP is <= 0 or > 1))
+        { throw new ArgumentOutOfRangeException(nameof(request), "TopP must be finite and in (0, 1]."); }
+        if (request.TopK is not null && !capabilities.SupportsTopK)
+        { throw new NotSupportedException("The selected model does not support top-k."); }
+        if (request.TopK is <= 0)
+        { throw new ArgumentOutOfRangeException(nameof(request), "TopK must be positive."); }
+        if (request.Seed is not null && !capabilities.SupportsSeed)
+        { throw new NotSupportedException("The selected model does not support a sampling seed."); }
+        if (request.Seed is < 0)
+        { throw new ArgumentOutOfRangeException(nameof(request), "Seed must be non-negative."); }
+        if (request.PresencePenalty is not null && !capabilities.SupportsPresencePenalty)
+        { throw new NotSupportedException("The selected model does not support a presence penalty."); }
+        if (request.FrequencyPenalty is not null && !capabilities.SupportsFrequencyPenalty)
+        { throw new NotSupportedException("The selected model does not support a frequency penalty."); }
+        if (request.PresencePenalty is { } presence && !double.IsFinite(presence)
+            || request.FrequencyPenalty is { } frequency && !double.IsFinite(frequency))
+        { throw new ArgumentOutOfRangeException(nameof(request), "Sampling penalties must be finite."); }
+        ArgumentNullException.ThrowIfNull(request.StopSequences);
+        if (request.StopSequences.Any(string.IsNullOrEmpty))
+        { throw new ArgumentException("Stop sequences must contain non-empty strings.", nameof(request)); }
+        if (request.StopSequences.Count > capabilities.MaxStopSequences)
+        { throw new NotSupportedException($"The selected model accepts at most {capabilities.MaxStopSequences} stop sequences."); }
     }
 
     internal static void ValidatePromptAttachments(

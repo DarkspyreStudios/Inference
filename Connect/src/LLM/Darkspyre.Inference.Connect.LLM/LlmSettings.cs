@@ -267,6 +267,19 @@ public sealed class LlmSettings : InferenceSettings<LlmSetupChanges>
                 current.ReasoningLevels?.Contains(level),
                 (value, selection) => value with { ReasoningLevels = WithReasoningLevel(value.ReasoningLevels, level, selection) })),
             Override("temperature", "Temperature", current.SupportsTemperature, (value, selection) => value with { SupportsTemperature = selection }),
+            Override("top-p", "Top-p", current.SupportsTopP, (value, selection) => value with { SupportsTopP = selection }),
+            Override("top-k", "Top-k", current.SupportsTopK, (value, selection) => value with { SupportsTopK = selection }),
+            Override("seed", "Seed", current.SupportsSeed, (value, selection) => value with { SupportsSeed = selection }),
+            Override("presence-penalty", "Presence penalty", current.SupportsPresencePenalty, (value, selection) => value with { SupportsPresencePenalty = selection }),
+            Override("frequency-penalty", "Frequency penalty", current.SupportsFrequencyPenalty, (value, selection) => value with { SupportsFrequencyPenalty = selection }),
+            new SetupIntegerField(new("max-stop-sequences", "Maximum stop sequences") { HelpText = "Blank uses the adapter default. Zero disables stop sequences." },
+                current.MaxStopSequences, null, selection =>
+                {
+                    if (selection is < 0 or > int.MaxValue)
+                        return new(SetupEditState.Invalid, [new("stop-limit-invalid", "Enter a non-negative 32-bit integer.", "max-stop-sequences")]);
+                    return Edit(() => _draft = _draft with
+                    { CapabilityOverrides = (_draft.CapabilityOverrides ?? new()) with { MaxStopSequences = (int?)selection } });
+                }, 0, int.MaxValue),
             Override("tools", "Tool use", current.SupportsToolUse, (value, selection) => value with { SupportsToolUse = selection }),
             Override("prompt-images", "Prompt images", current.SupportsPromptImages, (value, selection) => value with { SupportsPromptImages = selection }),
             Override("prompt-documents", "Prompt documents", current.SupportsPromptDocuments, (value, selection) => value with { SupportsPromptDocuments = selection }),

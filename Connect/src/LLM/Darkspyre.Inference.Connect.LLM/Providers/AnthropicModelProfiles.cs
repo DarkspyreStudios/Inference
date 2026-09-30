@@ -49,6 +49,18 @@ internal sealed record AnthropicReasoningFields(JsonObject? Thinking, JsonObject
 /// </summary>
 internal static class AnthropicModelProfiles
 {
+    internal static void ValidateSampling(LlmChatRequest request, AnthropicModelProfile profile)
+    {
+        if (!profile.AllowsSampling && (request.Temperature is not null || request.TopP is not null || request.TopK is not null))
+        { throw new NotSupportedException("This Claude model does not accept temperature, top-p or top-k."); }
+        if (request.Temperature is < 0 or > 1)
+        { throw new ArgumentOutOfRangeException(nameof(request), "Claude temperature must be between 0 and 1."); }
+        bool thinking = request.ReasoningLevel is > LlmReasoningLevel.None
+            || request.ReasoningLevel is null && profile.ThinksByDefault;
+        if (thinking && (request.TopK is not null || request.TopP is < 0.95))
+        { throw new NotSupportedException("With thinking, Claude accepts top_p from 0.95 to 1 and no top_k."); }
+    }
+
     private sealed record FamilyRow(
         AnthropicThinkingMode Thinking,
         AnthropicNoneMapping NoneMapping,

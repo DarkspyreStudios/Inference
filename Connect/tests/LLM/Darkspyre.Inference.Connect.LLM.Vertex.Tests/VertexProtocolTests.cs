@@ -26,6 +26,39 @@ public sealed class VertexProtocolTests
     };
 
     [Fact]
+    public async Task SamplingRestrictionsFailBeforeAuthenticationAndClaudeUsesSharedWireFields()
+    {
+        var handler = new Handler(
+            """{"type":"message_start","message":{"id":"m"}}""",
+            """{"type":"message_delta","delta":{"stop_reason":"end_turn"}}""",
+            """{"type":"message_stop"}""");
+        var authentication = new Authentication();
+        using var http = new HttpClient(handler);
+        var client = new VertexLlmClient(http, authentication);
+        foreach (var request in new[]
+        {
+            new LlmChatRequest { ModelId = Gemini, PresencePenalty = 2 },
+            new LlmChatRequest { ModelId = Gemini, FrequencyPenalty = -2.1 },
+            new LlmChatRequest { ModelId = Claude, ReasoningLevel = LlmReasoningLevel.High, TopK = 17 },
+            new LlmChatRequest { ModelId = Claude, ReasoningLevel = LlmReasoningLevel.High, TopP = .94 }
+        })
+        {
+            if (request.ModelId == Claude)
+                await Assert.ThrowsAsync<NotSupportedException>(() => Complete(client, Connection, request));
+            else
+                await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => Complete(client, Connection, request));
+        }
+        Assert.Equal(0, authentication.Calls);
+        Assert.Empty(handler.Bodies);
+        await Complete(client, Connection, new()
+        { ModelId = Claude, Messages = [new("user", "hello")], ReasoningLevel = LlmReasoningLevel.None, TopP = .8, TopK = 17, StopSequences = ["stop"] });
+        JsonElement body = JsonElement.Parse(Assert.Single(handler.Bodies));
+        Assert.Equal(.8, body.GetProperty("top_p").GetDouble());
+        Assert.Equal(17, body.GetProperty("top_k").GetInt32());
+        Assert.Equal("stop", body.GetProperty("stop_sequences")[0].GetString());
+    }
+
+    [Fact]
     public async Task ClaudePreservesMixedStrictToolsAndIndependentOutputSchema()
     {
         var handler = new Handler(
@@ -126,7 +159,7 @@ public sealed class VertexProtocolTests
         };
         var payload = GeminiRequest.Build(prepared, request, null,
             output => ToolOutputProjector.Project(output, RichContentRoutes.TextOnly, RichContentRoutes.TextOnly),
-            GeminiReasoning.Get("gemini-3-flash-preview", catalogThinking: null), reasoningText: true);
+            GeminiModelProfiles.Get("gemini-3-flash-preview", catalogThinking: null), reasoningText: true);
         Assert.Equal("first-result", (string?)payload["contents"]?[1]?["parts"]?[0]?["functionResponse"]?["response"]?["output"]);
         Assert.Equal("second-result", (string?)payload["contents"]?[1]?["parts"]?[1]?["functionResponse"]?["response"]?["output"]);
     }
@@ -186,7 +219,7 @@ public sealed class VertexProtocolTests
             ModelId = Gemini,
             Messages = [new("user", "Run pwd"), assistant,
                 new("tool", "") { ToolResults = [new(first.ToolCalls[0].Id, new LlmToolOutput { Parts = [new LlmToolOutputText("/tmp")] })] }]
-        }, null, output => ToolOutputProjector.Project(output, new(), new()), GeminiReasoning.Get("gemini-3-flash-preview", catalogThinking: null), reasoningText: true);
+        }, null, output => ToolOutputProjector.Project(output, new(), new()), GeminiModelProfiles.Get("gemini-3-flash-preview", catalogThinking: null), reasoningText: true);
         Assert.Equal("signed", (string?)next["contents"]?[1]?["parts"]?[0]?["thoughtSignature"]);
         Assert.DoesNotContain("connectCallId", next.ToJsonString(), StringComparison.Ordinal);
         Assert.Equal("run", (string?)next["contents"]?[2]?["parts"]?[0]?["functionResponse"]?["name"]);
@@ -330,8 +363,9 @@ public sealed class VertexProtocolTests
     private sealed class Authentication : IVertexAuthentication
     {
         public string Scope { get; set; } = "stable-principal";
+        public int Calls { get; private set; }
         public Task<VertexAccess> ResolveAsync(LlmConnection connection, CancellationToken cancellationToken)
-        { cancellationToken.ThrowIfCancellationRequested(); return Task.FromResult(new VertexAccess("test-token", Scope)); }
+        { cancellationToken.ThrowIfCancellationRequested(); Calls++; return Task.FromResult(new VertexAccess("test-token", Scope)); }
     }
 
     private sealed class Handler(params string[] frames) : HttpMessageHandler

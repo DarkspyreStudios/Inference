@@ -258,13 +258,13 @@ public sealed class ReasoningProfileTests
     [InlineData("gemini-3-pro-preview", new[] { LlmReasoningLevel.Low, LlmReasoningLevel.High })]
     public void GeminiThreeOffersEachModelsThinkingLevels(string modelId, LlmReasoningLevel[] levels)
     {
-        GeminiReasoningProfile profile = GeminiReasoning.Get(modelId, catalogThinking: null);
+        GeminiModelProfile profile = GeminiModelProfiles.Get(modelId, catalogThinking: null);
 
         Assert.Equal(GeminiThinkingControl.Level, profile.Control);
         Assert.Equal(levels, profile.Levels.Order());
         Assert.Equal(
             """{"thinkingLevel":"HIGH","includeThoughts":true}""",
-            GeminiReasoning.ThinkingConfig(profile, LlmReasoningLevel.High, requestReasoningText: true)!.ToJsonString());
+            GeminiModelProfiles.ThinkingConfig(profile, LlmReasoningLevel.High, requestReasoningText: true)!.ToJsonString());
     }
 
     [Fact]

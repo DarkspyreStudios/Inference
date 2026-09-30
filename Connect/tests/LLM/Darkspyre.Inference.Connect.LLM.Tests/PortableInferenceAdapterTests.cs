@@ -34,7 +34,13 @@ public sealed class PortableInferenceAdapterTests
                 ModelId = "model-a",
                 Instructions = "Be concise.",
                 Messages = [new CommonLlm.LlmMessage("user", "Hello")],
-                MaxOutputTokens = 64
+                MaxOutputTokens = 64,
+                TopP = .8,
+                TopK = 19,
+                Seed = 3,
+                PresencePenalty = .2,
+                FrequencyPenalty = -.3,
+                StopSequences = ["stop"]
             });
 
         Assert.Equal("Hello back", result.Text);
@@ -44,6 +50,19 @@ public sealed class PortableInferenceAdapterTests
         Assert.Equal("model-a", client.Request?.ModelId);
         Assert.Equal("Be concise.", client.Request?.Instructions);
         Assert.Equal("Hello", Assert.Single(client.Request!.Messages).Content);
+        Assert.Equal(.8, client.Request.TopP);
+        Assert.Equal(19, client.Request.TopK);
+        Assert.Equal(3, client.Request.Seed);
+        Assert.Equal(.2, client.Request.PresencePenalty);
+        Assert.Equal(-.3, client.Request.FrequencyPenalty);
+        Assert.Equal(["stop"], client.Request.StopSequences);
+        var capabilities = await inference.GetCapabilitiesAsync("model-a");
+        Assert.True(capabilities.SupportsTopP);
+        Assert.True(capabilities.SupportsTopK);
+        Assert.True(capabilities.SupportsSeed);
+        Assert.True(capabilities.SupportsPresencePenalty);
+        Assert.True(capabilities.SupportsFrequencyPenalty);
+        Assert.Equal(16, capabilities.MaxStopSequences);
     }
 
     [Fact]
@@ -162,7 +181,17 @@ public sealed class PortableInferenceAdapterTests
         };
 
         public LlmProviderCapabilities GetCapabilities(LlmConnection connection, string? modelId = null) =>
-            new() { SupportsStreaming = true, SupportsUsageDeltas = RunningUsage is not null };
+            new()
+            {
+                SupportsStreaming = true,
+                SupportsUsageDeltas = RunningUsage is not null,
+                SupportsTopP = true,
+                SupportsTopK = true,
+                SupportsSeed = true,
+                SupportsPresencePenalty = true,
+                SupportsFrequencyPenalty = true,
+                MaxStopSequences = 16
+            };
 
         public async IAsyncEnumerable<LlmStreamEvent> StreamAsync(
             LlmConnection connection,

@@ -98,6 +98,20 @@ public sealed class BedrockAgentCoreTests
     }
 
     [Fact]
+    public void ChatTopPMapsToTheExplicitBedrockModelAndRejectsHarnessDefault()
+    {
+        var request = new LlmChatRequest { ModelId = "anthropic.claude-test", Messages = [new("user", "hi")], TopP = .8 };
+        var built = BedrockAgentCoreLlmClient.BuildChatRequest(Connection(), request);
+        Assert.Equal(.8f, built.Model.BedrockModelConfig.TopP);
+        Assert.Throws<NotSupportedException>(() => BedrockAgentCoreLlmClient.BuildChatRequest(Connection(), request with { ModelId = "default" }));
+        var capabilities = new BedrockAgentCoreLlmClient(new StubInvoker()).GetCapabilities(Connection());
+        Assert.True(capabilities.SupportsTopP);
+        Assert.False(new BedrockAgentCoreLlmClient(new StubInvoker()).GetCapabilities(Connection(), "default").SupportsTopP);
+        Assert.False(capabilities.SupportsTopK || capabilities.SupportsSeed || capabilities.SupportsPresencePenalty || capabilities.SupportsFrequencyPenalty);
+        Assert.Equal(0, capabilities.MaxStopSequences);
+    }
+
+    [Fact]
     public void ChatRequestMapsHarnessMessagesAndDisablesTools()
     {
         InvokeHarnessRequest request = BedrockAgentCoreLlmClient.BuildChatRequest(

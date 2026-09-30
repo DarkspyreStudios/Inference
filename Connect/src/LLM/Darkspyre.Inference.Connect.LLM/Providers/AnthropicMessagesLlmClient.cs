@@ -61,6 +61,7 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
         string? modelId = null)
     {
         LlmProviderCapabilities capabilities = base.GetCapabilities(connection, modelId);
+        AnthropicModelProfile profile = AnthropicModelProfiles.Resolve(modelId, ILlmCatalogCapabilities.EntryFor(connection, modelId));
         LlmCredential? credential = LlmCredential.Parse(connection.Credential);
         if (credential?.OAuth is not null || credential?.Aws is not null)
         {
@@ -72,9 +73,20 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
             SupportsAccountUsage = false,
             SupportsAgentSessions = false,
             SupportsAgentToolUse = false,
+            SupportsTemperature = profile.AllowsSampling
+                && (!LlmCapabilityOverrideLookup.Overrides(connection, modelId, overrides => overrides.SupportsTemperature) || capabilities.SupportsTemperature),
+            SupportsTopP = profile.AllowsSampling
+                && (!LlmCapabilityOverrideLookup.Overrides(connection, modelId, overrides => overrides.SupportsTopP) || capabilities.SupportsTopP),
+            SupportsTopK = profile.AllowsSampling
+                && (!LlmCapabilityOverrideLookup.Overrides(connection, modelId, overrides => overrides.SupportsTopK) || capabilities.SupportsTopK),
+            SupportsSeed = false,
+            SupportsPresencePenalty = false,
+            SupportsFrequencyPenalty = false,
+            MaxStopSequences = LlmCapabilityOverrideLookup.Overrides(connection, modelId, overrides => overrides.MaxStopSequences)
+                ? capabilities.MaxStopSequences : int.MaxValue,
             ReasoningLevels = LlmCapabilityOverrideLookup.Overrides(connection, modelId, overrides => overrides.ReasoningLevels)
                 ? capabilities.ReasoningLevels
-                : AnthropicModelProfiles.Resolve(modelId, ILlmCatalogCapabilities.EntryFor(connection, modelId)).ReasoningLevels
+                : profile.ReasoningLevels
         };
     }
 
@@ -86,6 +98,8 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
         ArgumentNullException.ThrowIfNull(request);
         LlmProviderCapabilities capabilities = GetCapabilities(connection, request.ModelId);
         ValidateRequest(connection, request, capabilities);
+        AnthropicModelProfiles.ValidateSampling(request, AnthropicModelProfiles.Resolve(
+            ReasoningModelId(request.ModelId), ILlmCatalogCapabilities.EntryFor(connection, request.ModelId)));
         LlmStructuredOutputEnforcement? enforcement = request.StructuredOutput is null
             ? null
             : StructuredOutput.ResolveEnforcement(request.StructuredOutput, capabilities);
@@ -698,6 +712,9 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
         {
             payload["temperature"] = temperature;
         }
+        if (request.TopP is { } topP) { payload["top_p"] = topP; }
+        if (request.TopK is { } topK) { payload["top_k"] = topK; }
+        if (request.StopSequences.Count > 0) { payload["stop_sequences"] = JsonSerializer.SerializeToNode(request.StopSequences); }
 
         if (request.Tools.Count > 0)
         {

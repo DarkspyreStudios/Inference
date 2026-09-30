@@ -58,6 +58,7 @@ internal sealed class SelfHostLlmClient(ILlmSelfHost host) : ILlmClient, ILlmCon
         ArgumentNullException.ThrowIfNull(request);
         ValidateOptions(connection, request);
         CommonLlm.ILlmInference engine = await host.GetInferenceAsync(connection.Endpoint, cancellationToken).ConfigureAwait(false);
+        LlmClientBase.ValidateSampling(request, ToConnect(await engine.GetCapabilitiesAsync(request.ModelId, cancellationToken).ConfigureAwait(false)));
         await foreach (CommonLlm.LlmStreamEvent item in engine.StreamAsync(ToCommon(request), cancellationToken).ConfigureAwait(false))
         {
             // Common's events pass through; only the completion carries Connect's result.
@@ -71,6 +72,7 @@ internal sealed class SelfHostLlmClient(ILlmSelfHost host) : ILlmClient, ILlmCon
         ArgumentNullException.ThrowIfNull(connection);
         ArgumentNullException.ThrowIfNull(request);
         ValidateOptions(connection, request);
+        LlmClientBase.ValidateSampling(request, GetCapabilities(connection, request.ModelId));
         var text = new StringBuilder(request.Instructions);
         foreach (LlmChatMessage message in request.Messages)
         {
@@ -116,6 +118,12 @@ internal sealed class SelfHostLlmClient(ILlmSelfHost host) : ILlmClient, ILlmCon
             ToolResults = message.ToolResults
         }).ToArray(),
         Temperature = request.Temperature,
+        TopP = request.TopP,
+        TopK = request.TopK,
+        Seed = request.Seed,
+        PresencePenalty = request.PresencePenalty,
+        FrequencyPenalty = request.FrequencyPenalty,
+        StopSequences = request.StopSequences,
         MaxOutputTokens = request.MaxOutputTokens,
         ReasoningLevel = request.ReasoningLevel,
         StructuredOutput = request.StructuredOutput,
@@ -155,6 +163,12 @@ internal sealed class SelfHostLlmClient(ILlmSelfHost host) : ILlmClient, ILlmCon
         SupportsJsonObject = capabilities.SupportsJsonObject,
         ReasoningLevels = capabilities.ReasoningLevels,
         SupportsTemperature = capabilities.SupportsTemperature,
+        SupportsTopP = capabilities.SupportsTopP,
+        SupportsTopK = capabilities.SupportsTopK,
+        SupportsSeed = capabilities.SupportsSeed,
+        SupportsPresencePenalty = capabilities.SupportsPresencePenalty,
+        SupportsFrequencyPenalty = capabilities.SupportsFrequencyPenalty,
+        MaxStopSequences = capabilities.MaxStopSequences,
         SupportsToolUse = capabilities.SupportsToolUse,
         Tools = capabilities.Tools,
         ToolHistory = LlmToolHistory.Structured,

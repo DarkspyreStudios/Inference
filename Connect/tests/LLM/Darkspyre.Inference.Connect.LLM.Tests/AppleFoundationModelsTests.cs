@@ -18,6 +18,31 @@ public sealed class AppleFoundationModelsTests
     internal const string Hello = """{"type":"hello","protocol":"darkspyre.apple-fm","major":1,"helperVersion":"test","osVersion":"26.0","availability":"available","contextSize":4096}""";
 
     [Fact]
+    public async Task SamplingRequiresHelperAdvertisementAndPreservesEveryWireValue()
+    {
+        var runner = new Runner(_ => [Frame("text", "hi"), Terminal("hi")]) { SupportsSampling = true };
+        using var http = new HttpClient();
+        var client = new AppleFoundationModelsClient(http, runner);
+        await Read(client.StreamAsync(Connection, Request with { TopP = .8, Seed = 42, Temperature = .5 }));
+        AppleGeneration generation = Assert.Single(runner.Requests).Request!;
+        Assert.Equal(.8, generation.TopP);
+        Assert.Equal(42, generation.Seed);
+        JsonElement serialized = JsonSerializer.SerializeToElement(generation, AppleProtocol.Json);
+        Assert.Equal(.8, serialized.GetProperty("topP").GetDouble());
+        Assert.Equal(42, serialized.GetProperty("seed").GetInt32());
+        await Read(client.StreamAsync(Connection, Request with { TopK = 17 }));
+        Assert.Equal(17, runner.Requests[^1].Request!.TopK);
+        await Assert.ThrowsAsync<NotSupportedException>(() => Read(client.StreamAsync(Connection, Request with { TopP = .8, TopK = 17 })));
+        Assert.Equal(2, runner.Requests.Count);
+        runner.SupportsSampling = false;
+        await Assert.ThrowsAsync<NotSupportedException>(() => Read(client.StreamAsync(Connection, Request with { Seed = 42 })));
+        var oldHelper = Assert.Single(await client.ListModelsAsync(Connection));
+        Assert.False(oldHelper.Capabilities!.SupportsSeed);
+        Assert.False(client.GetCapabilities(Connection with { Catalog = [oldHelper] }, AppleProtocol.ModelId).SupportsSeed);
+        Assert.Throws<NotSupportedException>(() => AppleProtocol.ValidateSampling(Json(Hello), generation));
+    }
+
+    [Fact]
     public async Task StreamingOffAsksForOneCompleteResponse()
     {
         var runner = new Runner(_ => [Frame("text", "Complete reply."), Terminal("Complete reply.")]);
@@ -136,7 +161,9 @@ public sealed class AppleFoundationModelsTests
         Assert.Null(result.Usage);
         Assert.Null(result.FinishReason);
         Assert.Null(result.IncompleteReason);
-        Assert.Single(runner.Requests);
+        Assert.Collection(runner.Requests,
+            command => Assert.Equal("probe", command.Command),
+            command => Assert.Equal("generate", command.Command));
     }
 
     [Fact]
@@ -181,7 +208,8 @@ public sealed class AppleFoundationModelsTests
             Messages = [new("user", ""), new("assistant", "looking") { ToolCalls = [new("a", "lookup", "{}"), new("b", "lookup", "{}")] },
                 new("user", "continue") { ToolResults = [new("b", LlmToolOutput.FromText("second", isError: true)), new("a", LlmToolOutput.FromText("first"))] }]
         });
-        var request = Assert.Single(runner.Requests).Request!;
+        Assert.Equal("probe", runner.Requests[0].Command);
+        var request = Assert.Single(runner.Requests, command => command.Command == "generate").Request!;
         Assert.Empty(request.Tools);
         Assert.Equal("", request.Messages[0].Content);
         Assert.Equal(["a", "b"], request.Messages[1].Calls.Select(c => c.Id));
@@ -381,12 +409,13 @@ public sealed class AppleFoundationModelsTests
     {
         internal List<AppleCommand> Requests { get; } = [];
         internal string Availability { get; set; } = "available";
+        internal bool SupportsSampling { get; set; }
         public async IAsyncEnumerable<JsonElement> RunAsync(string executable, AppleCommand command, AppleProcessLimits limits,
             [EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
             Requests.Add(command);
-            yield return Json(Hello.Replace("available", Availability, StringComparison.Ordinal));
+            yield return Json(Hello.Replace("available", Availability, StringComparison.Ordinal).Replace("\"major\":1", "\"major\":1,\"supportsSamplingControls\":" + (SupportsSampling ? "true" : "false"), StringComparison.Ordinal));
             foreach (var frame in command.Command == "probe" ? [Terminal("", "ready")] : response(command)) yield return frame;
             await Task.CompletedTask;
         }

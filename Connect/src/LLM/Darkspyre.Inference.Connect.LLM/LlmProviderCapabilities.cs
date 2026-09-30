@@ -51,6 +51,19 @@ public sealed record LlmProviderCapabilities
 
     public bool SupportsTemperature { get; init; }
 
+    public bool SupportsTopP { get; init; }
+
+    public bool SupportsTopK { get; init; }
+
+    public bool SupportsSeed { get; init; }
+
+    public bool SupportsPresencePenalty { get; init; }
+
+    public bool SupportsFrequencyPenalty { get; init; }
+
+    /// <summary>Zero disables string stops; int.MaxValue means no adapter-imposed limit.</summary>
+    public int MaxStopSequences { get; init; }
+
     /// <summary>
     /// Supports host-executed tools: the provider can return tool calls and accept their results
     /// on a subsequent chat request. The chat caller executes tools; managed agent loops invoke handlers.
@@ -83,6 +96,8 @@ public sealed record LlmProviderCapabilities
 
     public LlmProviderCapabilities Apply(LlmCapabilityOverrides? overrides)
     {
+        if (MaxStopSequences < 0 || overrides?.MaxStopSequences < 0)
+        { throw new ArgumentOutOfRangeException(nameof(overrides), "The stop-sequence limit cannot be negative."); }
         Agent.Validate();
         _ = Restrict(overrides?.SupportsAgentSessions, SupportsAgentSessions);
         _ = Restrict(overrides?.SupportsAgentToolUse, SupportsAgentToolUse);
@@ -109,6 +124,12 @@ public sealed record LlmProviderCapabilities
             SupportsJsonObject = overrides.SupportsJsonObject ?? SupportsJsonObject,
             ReasoningLevels = overrides.ReasoningLevels ?? ReasoningLevels,
             SupportsTemperature = overrides.SupportsTemperature ?? SupportsTemperature,
+            SupportsTopP = overrides.SupportsTopP ?? SupportsTopP,
+            SupportsTopK = overrides.SupportsTopK ?? SupportsTopK,
+            SupportsSeed = overrides.SupportsSeed ?? SupportsSeed,
+            SupportsPresencePenalty = overrides.SupportsPresencePenalty ?? SupportsPresencePenalty,
+            SupportsFrequencyPenalty = overrides.SupportsFrequencyPenalty ?? SupportsFrequencyPenalty,
+            MaxStopSequences = overrides.MaxStopSequences ?? MaxStopSequences,
             SupportsToolUse = overrides.SupportsToolUse ?? SupportsToolUse,
             Tools = overrides.SupportsToolUse is false ? new() : Tools,
             SupportsAgentSessions = Restrict(overrides.SupportsAgentSessions, SupportsAgentSessions),
@@ -167,6 +188,18 @@ public sealed record LlmCapabilityOverrides
     public IReadOnlySet<LlmReasoningLevel>? ReasoningLevels { get; init; }
 
     public bool? SupportsTemperature { get; init; }
+
+    public bool? SupportsTopP { get; init; }
+
+    public bool? SupportsTopK { get; init; }
+
+    public bool? SupportsSeed { get; init; }
+
+    public bool? SupportsPresencePenalty { get; init; }
+
+    public bool? SupportsFrequencyPenalty { get; init; }
+
+    public int? MaxStopSequences { get; init; }
 
     public bool? SupportsToolUse { get; init; }
 

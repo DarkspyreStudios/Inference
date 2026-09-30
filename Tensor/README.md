@@ -296,6 +296,12 @@ features, and a binary tool-result part fails as well. `ReasoningLevels` is `Non
 thinking block. Image input is off.
 
 Qwen reports `SupportsStreamingUsage = true` because streamed completions report final usage.
+Qwen supports top-p, top-k, seed, presence and frequency penalties, and up to 16 non-empty stop
+strings. The Common request maps directly to TensorSharp's `SamplingConfig`, including requests
+without a structured-output grammar. Top-p, top-k and seed require a positive temperature; null
+or zero temperature decodes greedily. Stops and penalties remain effective with greedy decoding.
+Numeric controls must be finite and representable by the engine's float fields; penalty values
+have no adapter-imposed [-2, 2] limit. Seed does not guarantee identical output across backends.
 Qwen reports `SupportsReasoningText = true` because its registered output parser emits thinking
 separately from the answer. Other engines keep the false capability default unless they implement
 that output. Running usage remains off for Tensor engines.

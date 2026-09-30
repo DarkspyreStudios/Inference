@@ -1229,22 +1229,31 @@ The Claude CLI starts a turn of its own when background work reports. Connect la
 its message, and output with no echo before it is a provider-started turn on `ObserveAsync`. A host turn
 sent during a provider turn is queued by the CLI and starts after it.
 
-### Temperature
+### Sampling
 
-`SupportsTemperature` defaults to `false`. Claude Opus 4.7 and later reject any non-default `temperature`, `top_p`, or `top_k` with HTTP 400, so Darkspyre.Inference.Connect.LLM throws `NotSupportedException` before the request leaves the process. An API-key host targeting Claude Opus 4.6, Claude Sonnet 4.6, or an earlier model can opt back in per model:
+The neutral request carries `TopP`, `TopK`, `Seed`, `PresencePenalty`, `FrequencyPenalty` and
+`StopSequences`. Null controls leave provider defaults intact. An explicit unsupported control fails
+before dispatch. `SupportsTopP`, `SupportsTopK`, `SupportsSeed`, `SupportsPresencePenalty` and
+`SupportsFrequencyPenalty` default to false; `MaxStopSequences` defaults to zero.
 
-```csharp
-new LlmConnection
-{
-    Version = version,
-    Transport = LlmTransport.AnthropicMessages,
-    Endpoint = "https://api.anthropic.com/v1",
-    ModelCapabilityOverrides = new Dictionary<string, LlmCapabilityOverrides>
-    {
-        ["claude-opus-4-6"] = new() { SupportsTemperature = true }
-    }
-};
-```
+| Route | Sampling mapping |
+|---|---|
+| OpenAI Responses | `top_p` on sampling-capable profiles; reasoning models require `ReasoningLevel.None` |
+| OpenAI-compatible Chat | `top_p`, `seed`, penalties in [-2, 2], up to four `stop` strings; `top_k` requires a known endpoint override |
+| Anthropic and Vertex Claude | Profile-owned temperature/top-p/top-k, `stop_sequences` without an invented Connect limit; thinking permits top-p from 0.95 to 1 and no top-k |
+| Bedrock Converse | `inferenceConfig.topP` and `stopSequences`; Claude `top_k`, Nova 2 `inferenceConfig.topK` up to 128, merged with reasoning fields; stop limit 2500, or 10 for DeepSeek R1 |
+| AgentCore | `BedrockModelConfig.TopP` on an explicit Bedrock model ID; the harness-default route cannot carry it |
+| Gemini API and Vertex Gemini | `generationConfig` sampling fields and penalties, up to five stops; Gemini API top-k requires a catalog default, Vertex uses its qualified profile |
+| Apple Foundation Models | Top-p or top-k random mode with optional seed; seed alone selects top-p 1; no stops or penalties |
+| Claude CLI, Antigravity CLI and Codex | All six controls rejected; capability overrides cannot enable an unmapped control |
+| SelfHost | All six controls and support flags pass to the selected Common engine; unsupported engine controls fail before its stream starts |
+
+Claude Opus 4.7 and newer non-sampling profiles reject temperature/top-p/top-k even with an override.
+Earlier sampling-capable Claude profiles enable these controls by default; overrides can disable them.
+Gemini Flash 3.6 and later ignore temperature/top-p/top-k and reject penalties, so Connect rejects
+explicit values. Vertex Gemini penalties use [-2, 2); Gemini API requires finite penalties.
+Compatible endpoint settings expose typed sampling overrides and a nullable maximum-stop count;
+zero disables stops, and blank uses detection. Raw provider options cannot inject these typed fields.
 
 ### Reasoning
 

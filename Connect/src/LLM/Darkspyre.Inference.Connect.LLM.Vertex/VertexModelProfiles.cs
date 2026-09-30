@@ -1,6 +1,7 @@
 using System.Collections.Frozen;
 using Darkspyre.Inference.Common.LLM;
 using Darkspyre.Inference.Connect.LLM.Internal;
+using Darkspyre.Inference.Connect.LLM.Providers;
 
 namespace Darkspyre.Inference.Connect.LLM.Vertex;
 
@@ -9,13 +10,15 @@ internal sealed record VertexModelProfile(string Id, long ContextTokens, int Out
     IReadOnlySet<LlmReasoningLevel> ReasoningLevels)
 {
     public bool IsClaude => Id.StartsWith("anthropic/", StringComparison.Ordinal);
-    public LlmProviderCapabilities Capabilities => IsClaude ? ClaudeCapabilities : GeminiCapabilities.Create(ReasoningLevels);
+    public LlmProviderCapabilities Capabilities => IsClaude ? ClaudeCapabilities
+        : GeminiCapabilities.Create(GeminiModelProfiles.Get(Id["google/".Length..], null), supportsTopK: true) with { ReasoningLevels = ReasoningLevels };
 
     private LlmProviderCapabilities ClaudeCapabilities
     {
         get
         {
             LlmRichContentSupported rich = RichContentRoutes.Anthropic with { MaxBinaryBytes = 5 * 1024 * 1024 };
+            bool allowsSampling = AnthropicModelProfiles.Resolve(Id["anthropic/".Length..], null).AllowsSampling;
             return new()
             {
                 SupportsStreaming = true,
@@ -25,7 +28,10 @@ internal sealed record VertexModelProfile(string Id, long ContextTokens, int Out
                 SupportsModelListing = true,
                 OutputLimitEnforcement = LlmOutputLimitEnforcement.ProviderEnforced,
                 SupportsJsonSchema = true,
-                SupportsTemperature = true,
+                SupportsTemperature = allowsSampling,
+                SupportsTopP = allowsSampling,
+                SupportsTopK = allowsSampling,
+                MaxStopSequences = int.MaxValue,
                 SupportsToolUse = true,
                 Tools = new()
                 {
@@ -55,7 +61,7 @@ internal static class VertexModelProfiles
     [
         new("google/gemini-3-flash-preview", 1_048_576, 65_536,
             new[] { "global" }.ToFrozenSet(StringComparer.Ordinal),
-            GeminiReasoning.Get("gemini-3-flash-preview", catalogThinking: null).Levels),
+            GeminiModelProfiles.Get("gemini-3-flash-preview", catalogThinking: null).Levels),
         new("anthropic/claude-sonnet-4-6", 1_000_000, 128_000,
             new[] { "global", "us-east5", "europe-west1", "asia-southeast1" }.ToFrozenSet(StringComparer.Ordinal),
             new[] { LlmReasoningLevel.None, LlmReasoningLevel.Low, LlmReasoningLevel.Medium, LlmReasoningLevel.High }.ToFrozenSet())

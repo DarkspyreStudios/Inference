@@ -191,12 +191,12 @@ public sealed class ReasoningTextTests
     [Fact]
     public void GeminiSummaryOptOutKeepsThinkingBudgetAndCatalogEvidenceAuthoritative()
     {
-        var profile = GeminiReasoning.Get("gemini-2.5-flash", null);
-        var config = GeminiReasoning.ThinkingConfig(profile, LlmReasoningLevel.High, false)!;
+        var profile = GeminiModelProfiles.Get("gemini-2.5-flash", null);
+        var config = GeminiModelProfiles.ThinkingConfig(profile, LlmReasoningLevel.High, false)!;
         Assert.NotNull(config["thinkingBudget"]);
         Assert.Null(config["includeThoughts"]);
-        Assert.Null(GeminiReasoning.ThinkingConfig(GeminiReasoning.Get("gemini-3-flash-preview", false), null, true));
-        Assert.Null(GeminiReasoning.ThinkingConfig(profile, LlmReasoningLevel.None, true)!["includeThoughts"]);
+        Assert.Null(GeminiModelProfiles.ThinkingConfig(GeminiModelProfiles.Get("gemini-3-flash-preview", false), null, true));
+        Assert.Null(GeminiModelProfiles.ThinkingConfig(profile, LlmReasoningLevel.None, true)!["includeThoughts"]);
     }
 
     private static LlmConnection Connection(LlmTransport transport, bool streaming, bool display) => new()

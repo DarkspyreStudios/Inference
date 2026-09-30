@@ -70,7 +70,7 @@ Every listed model has the shared Gemini capabilities: streaming with usage, too
 modes, text-only rich tool results, prompt images and documents, and managed agent sessions. Strict
 tool input is Unsupported. Parallel-call control and argument streaming are not offered.
 
-Reasoning control comes from `GeminiReasoning`, which the Vertex Gemini route shares. Gemini 3 takes
+Reasoning control comes from `GeminiModelProfiles`, which the Vertex Gemini route shares. Gemini 3 takes
 `thinkingLevel`; Gemini 2.5 takes `thinkingBudget`. The request never sends both.
 
 | Prefix | Reasoning levels | Wire form |
@@ -89,7 +89,12 @@ is an error. `gemini-3*` and `gemini-2.5*` models use provider JSON schema; any 
 structured output through the local fallback rules.
 
 Capability overrides cannot enable JSON object mode, account usage or a reasoning level the family
-lacks.
+lacks. The shared profile owns sampling support independently of catalog thinking support.
+Flash 3.6 and later reject explicit temperature, top-p, top-k and penalties. Supported profiles
+map top-p, top-k, seed, presence/frequency penalties and up to five stop strings into
+`generationConfig`. Top-k additionally requires a positive `topK` default in the retained catalog
+entry. An override cannot invent that evidence. Seeds are non-negative; top-p is finite and in
+(0, 1]; top-k is positive; penalties are finite.
 
 ## Request validation
 

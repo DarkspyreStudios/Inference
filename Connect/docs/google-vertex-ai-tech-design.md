@@ -166,8 +166,10 @@ protocol references [S2–S4]. Use a single candidate; our result contract repre
 | User/assistant history | `contents`, roles `user`/`model` | `messages`, roles `user`/`assistant` |
 | Text | Ordered text parts | Ordered text blocks |
 | Temperature | `generationConfig.temperature` | `temperature` |
+| Sampling | `generationConfig.topP`, `topK`, `seed`, `presencePenalty`, `frequencyPenalty`; penalties in [-2, 2) | `top_p`, `top_k`; thinking permits top-p >= 0.95 and no top-k |
+| Stop strings | `generationConfig.stopSequences`, maximum 5 | `stop_sequences`, no adapter-imposed limit |
 | Maximum output | `generationConfig.maxOutputTokens` | `max_tokens`; resolve a valid model-specific value when omitted |
-| Reasoning level | `GeminiReasoning`, shared with the Gemini API, supplies the profile's levels and maps a level to `thinkingLevel` or `thinkingBudget` | `AnthropicModelProfiles` family table maps to thinking mode/budget and applicable effort |
+| Reasoning level | `GeminiModelProfiles`, shared with the Gemini API, supplies the profile's levels and maps a level to `thinkingLevel` or `thinkingBudget` | `AnthropicModelProfiles` family table maps to thinking mode/budget and applicable effort |
 | Tool declarations (default non-strict) | `tools[].functionDeclarations`; profile selects supported `parametersJsonSchema` or lossless `parameters` representation | `tools` with `input_schema`; omit `strict` when false |
 | Tool choice Auto/None | `AUTO`/`NONE` | `auto`/`none`, subject to model support |
 | Tool choice Required/Specific | `ANY`; restrict allowed function names for Specific | `any`/`tool` plus name |

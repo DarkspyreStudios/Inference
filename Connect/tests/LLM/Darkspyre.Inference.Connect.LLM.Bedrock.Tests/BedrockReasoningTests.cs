@@ -35,6 +35,49 @@ public sealed class BedrockReasoningTests
         Assert.Equal(anthropicModelId, BedrockModelFamilies.AnthropicModelId(baseModelId));
 
     [Fact]
+    public void SamplingUsesConverseAndFamilyFieldsWithoutReplacingReasoning()
+    {
+        var request = Request(ClaudeSonnet45) with
+        { TopP = .97, TopK = 17, StopSequences = ["stop"], ReasoningLevel = LlmReasoningLevel.None };
+        ConverseRequest built = BedrockLlmClient.BuildRequest(Connection(), request, ClaudeSonnet45);
+        Assert.Equal(.97f, built.InferenceConfig.TopP);
+        Assert.Equal(["stop"], built.InferenceConfig.StopSequences);
+        JsonNode fields = JsonNode.Parse(JsonSerializer.Serialize(built.AdditionalModelRequestFields))!;
+        Assert.Equal(17, (int?)fields["top_k"]);
+        Assert.Null(fields["thinking"]);
+        ConverseRequest thinking = BedrockLlmClient.BuildRequest(Connection(), request with
+        { TopK = null, ReasoningLevel = LlmReasoningLevel.Medium }, ClaudeSonnet45);
+        JsonNode thinkingFields = JsonNode.Parse(JsonSerializer.Serialize(thinking.AdditionalModelRequestFields))!;
+        Assert.Equal("enabled", (string?)thinkingFields["thinking"]?["type"]);
+        Assert.Equal(4096, (int?)thinkingFields["thinking"]?["budget_tokens"]);
+        Assert.Equal(.97f, thinking.InferenceConfig.TopP);
+        ConverseStreamRequest streamed = BedrockLlmClient.ToStreamRequest(built);
+        Assert.Same(built.InferenceConfig, streamed.InferenceConfig);
+        Assert.Equal(built.AdditionalModelRequestFields, streamed.AdditionalModelRequestFields);
+        ConverseRequest nova = BedrockLlmClient.BuildRequest(Connection(), request with
+        { ModelId = Nova2, ReasoningLevel = LlmReasoningLevel.Medium }, Nova2);
+        JsonNode novaFields = JsonNode.Parse(JsonSerializer.Serialize(nova.AdditionalModelRequestFields))!;
+        Assert.Equal(17, (int?)novaFields["inferenceConfig"]?["topK"]);
+        Assert.Equal("medium", (string?)novaFields["reasoningConfig"]?["maxReasoningEffort"]);
+    }
+
+    [Fact]
+    public void UnsupportedSamplingAndNativeLimitsFailBeforeAwsResolution()
+    {
+        Assert.Throws<NotSupportedException>(() => _client.EstimateInputTokens(Connection(), Request(GptOss) with { TopK = 17 }));
+        Assert.Throws<NotSupportedException>(() => _client.GetCapabilities(Connection() with { CapabilityOverrides = new() { SupportsTopK = true } }, GptOss));
+        Assert.Throws<NotSupportedException>(() => _client.EstimateInputTokens(Connection(), Request(Nova2) with { Seed = 0 }));
+        Assert.Throws<NotSupportedException>(() => _client.EstimateInputTokens(Connection(), Request(Nova2) with { PresencePenalty = 0 }));
+        Assert.Throws<NotSupportedException>(() => _client.EstimateInputTokens(Connection(), Request(Nova2) with { FrequencyPenalty = 0 }));
+        Assert.Throws<ArgumentOutOfRangeException>(() => _client.EstimateInputTokens(Connection(), Request(Nova2) with { TopK = 129 }));
+        Assert.Throws<NotSupportedException>(() => _client.EstimateInputTokens(Connection(), Request(Nova2) with { TopK = 17, ReasoningLevel = LlmReasoningLevel.High }));
+        Assert.Throws<NotSupportedException>(() => _client.EstimateInputTokens(Connection(), Request(Nova2) with { TopP = .97, ReasoningLevel = LlmReasoningLevel.High }));
+        Assert.Throws<NotSupportedException>(() => _client.EstimateInputTokens(Connection(), Request("deepseek.r1-v1:0") with { StopSequences = Enumerable.Range(0, 11).Select(i => "stop" + i).ToArray() }));
+        Assert.Equal(2500, _client.GetCapabilities(Connection(), ClaudeSonnet45).MaxStopSequences);
+        Assert.Equal(10, _client.GetCapabilities(Connection(), "deepseek.r1-v1:0").MaxStopSequences);
+    }
+
+    [Fact]
     public void EachFamilyOffersItsLevels()
     {
         Assert.Equal(
@@ -121,8 +164,10 @@ public sealed class BedrockReasoningTests
             Tools = [tool],
             ToolChoice = new LlmToolChoice { Mode = LlmToolChoiceMode.Required }
         }));
-        Assert.NotNull(_client.EstimateInputTokens(Connection(),
+        Assert.Throws<NotSupportedException>(() => _client.EstimateInputTokens(Connection(),
             Request(ClaudeSonnet5) with { ReasoningLevel = LlmReasoningLevel.None, Temperature = 0.5 }));
+        Assert.NotNull(_client.EstimateInputTokens(Connection(),
+            Request(ClaudeSonnet45) with { ReasoningLevel = LlmReasoningLevel.None, Temperature = 0.5 }));
         NotSupportedException novaTemperature = Assert.Throws<NotSupportedException>(() => _client.EstimateInputTokens(Connection(),
             Request(Nova2) with { ReasoningLevel = LlmReasoningLevel.High, Temperature = 0.5 }));
         Assert.Throws<NotSupportedException>(() => _client.EstimateInputTokens(Connection(),
@@ -130,8 +175,8 @@ public sealed class BedrockReasoningTests
         Assert.NotNull(_client.EstimateInputTokens(Connection(),
             Request(Nova2) with { ReasoningLevel = LlmReasoningLevel.Medium, Temperature = 0.5, MaxOutputTokens = 100 }));
 
-        Assert.Equal("Claude thinking cannot be combined with temperature or forced tool choice.", claudeTemperature.Message);
-        Assert.Equal("Nova 2 high reasoning requires temperature and maximum output tokens to be unset.", novaTemperature.Message);
+        Assert.Contains("temperature", claudeTemperature.Message, StringComparison.Ordinal);
+        Assert.Contains("top-p", novaTemperature.Message, StringComparison.Ordinal);
     }
 
     private IEnumerable<LlmReasoningLevel> Levels(string modelId) =>

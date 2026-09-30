@@ -76,14 +76,7 @@ import FoundationModels
     var status = "unknown"
     var code: String?
     do {
-      if let temperature = request.temperature,
-        !temperature.isFinite || temperature < 0 || temperature > 1
-      {
-        throw HostFailure(code: "invalid_request")
-      }
-      if let maximum = request.maximumResponseTokens, maximum <= 0 {
-        throw HostFailure(code: "invalid_request")
-      }
+      let options = try request.generationOptions()
       let names = Set(request.tools.map(\.name))
       guard names.count == request.tools.count else { throw HostFailure(code: "invalid_request") }
       let tools = try request.tools.map { tool in
@@ -97,8 +90,6 @@ import FoundationModels
       let session = LanguageModelSession(tools: tools, transcript: transcript)
       operation.bind(session)
       try Task.checkCancellation()
-      let options = GenerationOptions(
-        temperature: request.temperature, maximumResponseTokens: request.maximumResponseTokens)
       let streams = request.stream ?? true
       if let output, streams {
         for try await snapshot in session.streamResponse(

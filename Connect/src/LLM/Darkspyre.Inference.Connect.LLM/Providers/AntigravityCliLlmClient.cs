@@ -52,6 +52,12 @@ internal sealed class AntigravityCliLlmClient(IAntigravityCliRunner runner)
         {
             SupportsJsonObject = false,
             SupportsTemperature = false,
+            SupportsTopP = false,
+            SupportsTopK = false,
+            SupportsSeed = false,
+            SupportsPresencePenalty = false,
+            SupportsFrequencyPenalty = false,
+            MaxStopSequences = 0,
             SupportsToolUse = false,
             SupportsPromptImages = false,
             SupportsPromptDocuments = false,
@@ -565,6 +571,7 @@ internal sealed class AntigravityCliLlmClient(IAntigravityCliRunner runner)
             throw new NotSupportedException("Antigravity CLI does not expose a temperature option.");
         }
 
+        LlmClientBase.ValidateSampling(request, capabilities);
         if (request.MaxOutputTokens is not null)
         {
             throw new NotSupportedException("Antigravity CLI does not expose a maximum-output-token option.");

@@ -80,6 +80,12 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
             SupportsModelListing = HasCatalogCredential(credential),
             SupportsJsonObject = false,
             SupportsTemperature = false,
+            SupportsTopP = false,
+            SupportsTopK = false,
+            SupportsSeed = false,
+            SupportsPresencePenalty = false,
+            SupportsFrequencyPenalty = false,
+            MaxStopSequences = 0,
             SupportsToolUse = false,
             // Attachments travel only as stream-json content blocks; the non-streaming request reads plain text.
             SupportsPromptImages = capabilities.SupportsStreaming,

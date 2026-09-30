@@ -10,7 +10,8 @@ internal sealed record AppleResult(string Id, string Name, string Text);
 internal sealed record AppleMessage(string Role, string Content, IReadOnlyList<AppleCall> Calls, IReadOnlyList<AppleResult> Results);
 /// <summary>One generation. <paramref name="Stream"/> false asks the helper for one complete response.</summary>
 internal sealed record AppleGeneration(string? Instructions, IReadOnlyList<AppleMessage> Messages,
-    IReadOnlyList<AppleTool> Tools, AppleSchemaNode? Schema, double? Temperature, int? MaximumResponseTokens, bool Stream);
+    IReadOnlyList<AppleTool> Tools, AppleSchemaNode? Schema, double? Temperature, int? MaximumResponseTokens, bool Stream,
+    double? TopP, int? TopK, int? Seed);
 internal sealed record AppleCommand(string Command, string Id, AppleGeneration? Request = null);
 
 internal static class AppleProtocol
@@ -43,6 +44,16 @@ internal static class AppleProtocol
             "modelNotReady" => "The Apple system model is not ready. Let macOS finish preparing it, then check again.",
             _ => "The Apple system model is unavailable on this Mac."
         });
+    }
+
+    internal static bool SupportsSampling(JsonElement hello) =>
+        hello.TryGetProperty("supportsSamplingControls", out JsonElement support) && support.ValueKind == JsonValueKind.True;
+
+    internal static void ValidateSampling(JsonElement hello, AppleGeneration? request)
+    {
+        if (request is not null && (request.TopP is not null || request.TopK is not null || request.Seed is not null)
+            && !SupportsSampling(hello))
+            throw new NotSupportedException("The installed Apple helper does not support sampling controls. Update the helper.");
     }
 
     internal static Exception Error(JsonElement frame)

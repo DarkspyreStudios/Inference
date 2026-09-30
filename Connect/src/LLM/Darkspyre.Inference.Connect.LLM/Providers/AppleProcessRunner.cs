@@ -57,6 +57,7 @@ internal sealed class AppleProcessRunner : IAppleProcessRunner
             startup.CancelAfter(TimeSpan.FromSeconds(limits.StartupTimeoutSeconds));
             string? helloLine = await ReadAsync(lines, startup.Token, cancellationToken).ConfigureAwait(false);
             JsonElement hello = frames.Hello(helloLine);
+            AppleProtocol.ValidateSampling(hello, command.Request);
             yield return hello;
             await WriteAsync(process, payload, deadline.Token, cancellationToken).ConfigureAwait(false);
             JsonElement? terminal = null;

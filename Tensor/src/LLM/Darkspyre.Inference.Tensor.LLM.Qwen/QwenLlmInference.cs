@@ -70,6 +70,12 @@ public sealed class QwenLlmInference : ITensorLlmInference
             SupportsReasoningText = true,
             SupportsStreamingUsage = true,
             SupportsTemperature = true,
+            SupportsTopP = true,
+            SupportsTopK = true,
+            SupportsSeed = true,
+            SupportsPresencePenalty = true,
+            SupportsFrequencyPenalty = true,
+            MaxStopSequences = 16,
             SupportsToolUse = true,
             Tools = new() { SupportsParallelCalls = true, StrictInputSchema = LlmStrictInputSchemaSupport.Unsupported },
             SupportsPromptImages = false,
@@ -459,6 +465,12 @@ public sealed class QwenLlmInference : ITensorLlmInference
         SamplingConfig sampling = request.Temperature is null
             ? SamplingConfig.Greedy
             : new SamplingConfig { Temperature = checked((float)request.Temperature.Value) };
+        if (request.TopP is double topP) sampling.TopP = (float)topP;
+        if (request.TopK is int topK) sampling.TopK = topK;
+        if (request.Seed is int seed) sampling.Seed = seed;
+        if (request.PresencePenalty is double presence) sampling.PresencePenalty = (float)presence;
+        if (request.FrequencyPenalty is double frequency) sampling.FrequencyPenalty = (float)frequency;
+        sampling.StopSequences = request.StopSequences.ToList();
         if (format is null)
         {
             return sampling;
@@ -596,9 +608,30 @@ public sealed class QwenLlmInference : ITensorLlmInference
             throw new InferenceException(InferenceFailureCode.InvalidRequest, "MaxOutputTokens must be positive.");
         }
 
-        if (request.Temperature is < 0 or > 2)
+        if (request.Temperature is double temperature && (!double.IsFinite(temperature) || temperature is < 0 or > 2))
         {
             throw new InferenceException(InferenceFailureCode.InvalidRequest, "Temperature must be between 0 and 2.");
+        }
+        if (request.TopP is double topP && (!double.IsFinite(topP) || topP is <= 0 or > 1 || (float)topP <= 0)
+            || request.TopK is <= 0 || request.Seed is < 0
+            || request.PresencePenalty is double presence && !float.IsFinite((float)presence)
+            || request.FrequencyPenalty is double frequency && !float.IsFinite((float)frequency))
+        {
+            throw new InferenceException(InferenceFailureCode.InvalidRequest, "Invalid Qwen sampling control value.");
+        }
+        if ((request.TopP is not null || request.TopK is not null || request.Seed is not null)
+            && (request.Temperature is null || (float)request.Temperature.Value <= 0))
+        {
+            throw new InferenceException(InferenceFailureCode.UnsupportedFeature,
+                "Qwen decodes greedily unless Temperature is positive; TopP, TopK and Seed require a sampling temperature.");
+        }
+        if (request.StopSequences is null || request.StopSequences.Any(string.IsNullOrEmpty))
+        {
+            throw new InferenceException(InferenceFailureCode.InvalidRequest, "Stop sequences must be non-empty strings.");
+        }
+        if (request.StopSequences.Count > 16)
+        {
+            throw new InferenceException(InferenceFailureCode.UnsupportedFeature, "Qwen accepts at most 16 stop sequences.");
         }
 
         if (request.Tools.Any(tool => tool.Strict))

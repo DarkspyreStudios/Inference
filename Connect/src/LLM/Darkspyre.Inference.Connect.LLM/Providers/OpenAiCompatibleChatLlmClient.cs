@@ -29,6 +29,11 @@ internal sealed class OpenAiCompatibleChatLlmClient(HttpClient http) : LlmClient
         SupportsJsonSchema = false,
         SupportsJsonObject = false,
         SupportsTemperature = true,
+        SupportsTopP = true,
+        SupportsSeed = true,
+        SupportsPresencePenalty = true,
+        SupportsFrequencyPenalty = true,
+        MaxStopSequences = 4,
         SupportsToolUse = true,
         Tools = new()
         {
@@ -529,6 +534,14 @@ internal sealed class OpenAiCompatibleChatLlmClient(HttpClient http) : LlmClient
         {
             payload["temperature"] = temperature;
         }
+        if (request.TopP is { } topP) { payload["top_p"] = topP; }
+        if (request.TopK is { } topK) { payload["top_k"] = topK; }
+        if (request.Seed is { } seed) { payload["seed"] = seed; }
+        if (request.PresencePenalty is { } presence) { payload["presence_penalty"] = presence; }
+        if (request.FrequencyPenalty is { } frequency) { payload["frequency_penalty"] = frequency; }
+        if (request.StopSequences.Count > 0) { payload["stop"] = JsonSerializer.SerializeToNode(request.StopSequences); }
+        if (request.PresencePenalty is < -2 or > 2 || request.FrequencyPenalty is < -2 or > 2)
+        { throw new ArgumentOutOfRangeException(nameof(request), "Chat Completions penalties must be between -2 and 2."); }
 
         if (request.MaxOutputTokens is int maxOutputTokens)
         {

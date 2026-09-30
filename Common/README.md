@@ -26,6 +26,19 @@ keeps. A question truncates the state when the first exceeds the second. Rich pr
 operations remain on their owning packages; Common is the portable inference lane, not a
 least-common-denominator replacement for implementation management.
 
+## Sampling controls
+
+`LlmInferenceRequest` carries nullable `TopP`, `TopK`, `Seed`, `PresencePenalty` and
+`FrequencyPenalty`, plus `StopSequences` (empty by default). Null leaves the provider default intact.
+An explicit unsupported control fails before generation. Top-p is finite and in (0, 1]; top-k is
+positive; seeds are non-negative. Penalties are finite, with ranges owned by the selected adapter.
+Stop strings are non-empty. A seed does not promise deterministic output.
+
+The corresponding capability flags default to false. `MaxStopSequences` is zero when unsupported
+and `int.MaxValue` when the adapter imposes no limit. Connect bindings and SelfHost preserve all
+controls and capabilities across the portable boundary. Qwen requires a positive temperature for
+top-p, top-k and seed; stops and penalties also work during greedy decoding.
+
 ## Streaming and terminal results
 
 `LlmStructuredOutputSnapshotEvent.Content` replaces the previous JSON snapshot; it is not

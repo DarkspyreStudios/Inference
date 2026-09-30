@@ -8,7 +8,7 @@ using Darkspyre.Inference.Connect.LLM.Internal;
 namespace Darkspyre.Inference.Connect.LLM.Providers;
 
 internal sealed class AppleFoundationModelsClient(HttpClient http, IAppleProcessRunner runner)
-    : LlmClientBase(http), ILlmContextEstimator, IExternalLlmAuthenticationProbe
+    : LlmClientBase(http), ILlmContextEstimator, IExternalLlmAuthenticationProbe, ILlmCatalogCapabilities
 {
     public override LlmTransport Transport => LlmTransport.AppleFoundationModels;
     public override LlmProviderDefinition ProviderDefinition => ProviderDefinitions.AppleFoundationModels;
@@ -21,6 +21,9 @@ internal sealed class AppleFoundationModelsClient(HttpClient http, IAppleProcess
         SupportsModelListing = true,
         SupportsJsonSchema = true,
         SupportsTemperature = true,
+        SupportsTopP = true,
+        SupportsTopK = true,
+        SupportsSeed = true,
         SupportsToolUse = true,
         Tools = new()
         {
@@ -45,8 +48,12 @@ internal sealed class AppleFoundationModelsClient(HttpClient http, IAppleProcess
         if (modelId is not null && modelId != AppleProtocol.ModelId)
             throw new InferenceException(InferenceFailureCode.ModelUnavailable, "Unknown Apple system model ID.");
         LlmProviderCapabilities result = base.GetCapabilities(connection, modelId);
+        if (ILlmCatalogCapabilities.EntryFor(connection, modelId) is { ValueKind: JsonValueKind.Object } hello
+            && !AppleProtocol.SupportsSampling(hello))
+            result = result with { SupportsTopP = false, SupportsTopK = false, SupportsSeed = false };
         if (result.SupportsJsonObject || result.SupportsPromptImages || result.SupportsPromptDocuments
-            || result.SupportsStreamingUsage || result.SupportsUsageDeltas || result.SupportsAccountUsage || result.ReasoningLevels.Count > 0)
+            || result.SupportsStreamingUsage || result.SupportsUsageDeltas || result.SupportsAccountUsage || result.ReasoningLevels.Count > 0
+            || result.SupportsPresencePenalty || result.SupportsFrequencyPenalty || result.MaxStopSequences > 0)
             throw new NotSupportedException("Capability overrides cannot enable unsupported Apple model features.");
         return result;
     }
@@ -84,8 +91,10 @@ internal sealed class AppleFoundationModelsClient(HttpClient http, IAppleProcess
         if (!capabilities.SupportsModelListing) return [];
         JsonElement hello = await ProbeAsync(connection, cancellationToken).ConfigureAwait(false);
         if (AppleProtocol.RequiredString(hello, "availability") != "available") return [];
+        if (!AppleProtocol.SupportsSampling(hello))
+            capabilities = capabilities with { SupportsTopP = false, SupportsTopK = false, SupportsSeed = false };
         return [new(AppleProtocol.ModelId, "Apple System Language Model", "Apple", capabilities)
-        { MaxContextTokens = AppleProtocol.RequiredInteger(hello, "contextSize") }];
+        { MaxContextTokens = AppleProtocol.RequiredInteger(hello, "contextSize"), CatalogEntry = hello.Clone() }];
     }
 
     public ContextEstimate? EstimateInputTokens(LlmConnection connection, LlmChatRequest request)
@@ -104,6 +113,8 @@ internal sealed class AppleFoundationModelsClient(HttpClient http, IAppleProcess
         ValidateRequest(connection, request, capabilities);
         if (request.ProviderOptions.Count > 0) throw new NotSupportedException("Apple does not accept raw provider request properties.");
         if (request.Temperature is < 0 or > 1) throw new ArgumentOutOfRangeException(nameof(request), "Apple temperature must be between zero and one.");
+        if (request.TopP is not null && request.TopK is not null)
+            throw new NotSupportedException("Apple samples with top-p or top-k, not both.");
         if (request.ToolChoice is { } choice && (!Enum.IsDefined(choice.Mode) || choice.Mode is LlmToolChoiceMode.Required or LlmToolChoiceMode.Specific))
             throw new NotSupportedException("Apple supports automatic tool choice or no tools on this baseline.");
         if (request.AllowParallelToolCalls == false) throw new NotSupportedException("Apple cannot disable model-side parallel tool calls on this baseline.");
@@ -169,7 +180,8 @@ internal sealed class AppleFoundationModelsClient(HttpClient http, IAppleProcess
             messages.Add(new(message.Role, message.Content, calls, results));
         }
         if (pending.Count > 0) throw new ArgumentException("Tool-call history is missing results.");
-        return new(new(instructions, messages, tools, outputSchema, request.Temperature, request.MaxOutputTokens, capabilities.SupportsStreaming),
+        return new(new(instructions, messages, tools, outputSchema, request.Temperature, request.MaxOutputTokens, capabilities.SupportsStreaming,
+                request.TopP, request.TopK, request.Seed),
             structured, enforcement, schemas, names.Keys.ToHashSet(StringComparer.Ordinal));
     }
 
@@ -187,7 +199,10 @@ internal sealed class AppleFoundationModelsClient(HttpClient http, IAppleProcess
             if (terminal) throw AppleProtocol.Failure("The Apple helper emitted data after completion.");
             switch (AppleProtocol.RequiredString(frame, "type"))
             {
-                case "hello": AppleProtocol.Ready(frame); break;
+                case "hello":
+                    AppleProtocol.Ready(frame);
+                    AppleProtocol.ValidateSampling(frame, prepared.Generation);
+                    break;
                 case "text":
                     if (prepared.Generation.Schema is not null) throw AppleProtocol.Failure("Apple returned text for structured generation.");
                     string snapshot = AppleProtocol.RequiredString(frame, "content");

@@ -34,6 +34,24 @@ public sealed record LlmChatRequest
 
     public int? MaxOutputTokens { get; init; }
 
+    /// <summary>Nucleus sampling in (0, 1]. Null leaves the provider default.</summary>
+    public double? TopP { get; init; }
+
+    /// <summary>Sample from the K most likely tokens; positive. Null leaves the provider default.</summary>
+    public int? TopK { get; init; }
+
+    /// <summary>A non-negative sampling seed. Determinism is not guaranteed.</summary>
+    public int? Seed { get; init; }
+
+    /// <summary>Penalty for a token already present in the generated response.</summary>
+    public double? PresencePenalty { get; init; }
+
+    /// <summary>Penalty multiplied by a token's occurrences in the generated response.</summary>
+    public double? FrequencyPenalty { get; init; }
+
+    /// <summary>Stop before any of these non-empty strings. Empty requests no string stops.</summary>
+    public IReadOnlyList<string> StopSequences { get; init; } = [];
+
     /// <summary>The requested reasoning level; null leaves the provider's default in place.</summary>
     public Darkspyre.Inference.Common.LLM.LlmReasoningLevel? ReasoningLevel { get; init; }
 

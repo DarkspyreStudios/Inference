@@ -36,6 +36,12 @@ public sealed class GeminiWireParityTests
             ToolChoice = new() { Mode = LlmToolChoiceMode.Specific, Name = "run" },
             MaxOutputTokens = 512,
             Temperature = 0.5,
+            TopP = .8,
+            TopK = 19,
+            Seed = 3,
+            PresencePenalty = .2,
+            FrequencyPenalty = -.3,
+            StopSequences = ["stop"],
             ReasoningLevel = LlmReasoningLevel.Medium,
             StructuredOutput = new() { Name = "result", Schema = JsonElement.Parse("""{"type":"object","properties":{"ok":{"type":"boolean"}}}""") }
         };
@@ -57,6 +63,7 @@ public sealed class GeminiWireParityTests
             Transport = LlmTransport.GoogleGeminiApi,
             Endpoint = GeminiApiLlmClient.DefaultEndpoint,
             Credential = new LlmCredential { ApiKey = "k" }.Serialize(),
+            Catalog = [new("gemini-3-flash-preview", "Flash") { CatalogEntry = JsonElement.Parse("{\"topK\":40}") }],
             CapabilityOverrides = overrides
         }, request with { ModelId = "gemini-3-flash-preview" }));
         string operation = stream ? ":streamGenerateContent" : ":generateContent";
@@ -67,6 +74,12 @@ public sealed class GeminiWireParityTests
         Assert.True(JsonNode.DeepEquals(fromVertex, fromGemini));
         Assert.Equal("MEDIUM", (string?)fromGemini["generationConfig"]?["thinkingConfig"]?["thinkingLevel"]);
         Assert.NotNull(fromGemini["generationConfig"]?["responseJsonSchema"]);
+        Assert.Equal(.8, (double?)fromGemini["generationConfig"]?["topP"]);
+        Assert.Equal(19, (int?)fromGemini["generationConfig"]?["topK"]);
+        Assert.Equal(3, (int?)fromGemini["generationConfig"]?["seed"]);
+        Assert.Equal(.2, (double?)fromGemini["generationConfig"]?["presencePenalty"]);
+        Assert.Equal(-.3, (double?)fromGemini["generationConfig"]?["frequencyPenalty"]);
+        Assert.Equal("stop", (string?)fromGemini["generationConfig"]?["stopSequences"]?[0]);
         Assert.Equal(stream ? 1 : 0, vertexEvents.OfType<LlmUsageDeltaEvent>().Count());
         Assert.Equal(geminiEvents.OfType<LlmUsageDeltaEvent>(), vertexEvents.OfType<LlmUsageDeltaEvent>());
         Assert.Equal(new(2, 1, 3), Assert.IsType<LlmChatCompletionEvent>(vertexEvents[^1]).Result.Usage);
@@ -94,7 +107,7 @@ public sealed class GeminiWireParityTests
         }, "gemini-3-flash-preview").ReasoningLevels;
 
         Assert.Equal(fromGemini.Order(), fromVertex.Order());
-        Assert.Equal(GeminiReasoning.Get("gemini-3-flash-preview", catalogThinking: null).Levels.Order(), fromVertex.Order());
+        Assert.Equal(GeminiModelProfiles.Get("gemini-3-flash-preview", catalogThinking: null).Levels.Order(), fromVertex.Order());
     }
 
     private static async Task<List<LlmStreamEvent>> Drain(IAsyncEnumerable<LlmStreamEvent> events)

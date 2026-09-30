@@ -52,14 +52,18 @@ The reader uses bounded POSIX pipe reads: a complete line must not wait for EOF 
 4 KiB read buffer. Narrative content is opaque data; it is never executed or logged.
 
 The first frame is `hello`, containing `protocol: "darkspyre.apple-fm"`, `major: 1`,
-`helperVersion`, `osVersion`, `availability` and native `contextSize`. Readiness values are
+`helperVersion`, `osVersion`, `availability`, native `contextSize` and `supportsSamplingControls`.
+Connect checks sampling support in this greeting before writing a generation command. A helper
+without this advertisement cannot accept explicit top-p, top-k or seed. Discovery reports these
+capabilities as false for that helper. Readiness values are
 `available`, `deviceNotEligible`, `appleIntelligenceNotEnabled`, `modelNotReady` and
 `unavailable`. `probe` returns terminal `ready` after this hello; the adapter separately
 checks availability. Probe never generates content.
 
 Commands contain `command` (`probe`, `generate`, `cancel`) and a nonempty `id`.
 `generate.request` contains instructions, semantic messages, tools, a typed schema plan,
-temperature and maximumResponseTokens. Standard JSON Schema is interpreted once in C#;
+temperature, maximumResponseTokens and optional topP, topK and seed. Top-p and top-k select
+alternative random sampling modes; a seed alone selects probabilityThreshold 1. Standard JSON Schema is interpreted once in C#;
 Swift validates the private plan and constructs public DynamicGenerationSchema values.
 The helper does not deserialize Apple's private schema JSON.
 

@@ -23,8 +23,16 @@ internal sealed class VertexLlmClient(HttpClient http, IVertexAuthentication aut
         LlmProviderCapabilities capabilities = modelId is null
             ? VertexModelProfiles.All[0].Capabilities with { RichContentSupported = RichContentRoutes.Anthropic }
             : VertexModelProfiles.Get(modelId, connection.Vertex!.Location).Capabilities;
+        LlmProviderCapabilities implemented = capabilities;
         capabilities = LlmCapabilityOverrideLookup.Apply(capabilities, connection, modelId);
         if (capabilities.SupportsJsonObject || capabilities.SupportsAccountUsage
+            || capabilities.SupportsTemperature && !implemented.SupportsTemperature
+            || capabilities.SupportsTopP && !implemented.SupportsTopP
+            || capabilities.SupportsTopK && !implemented.SupportsTopK
+            || capabilities.SupportsSeed && !implemented.SupportsSeed
+            || capabilities.SupportsPresencePenalty && !implemented.SupportsPresencePenalty
+            || capabilities.SupportsFrequencyPenalty && !implemented.SupportsFrequencyPenalty
+            || capabilities.MaxStopSequences > implemented.MaxStopSequences
             || modelId is not null && capabilities.ReasoningLevels.Any(level =>
                 !VertexModelProfiles.Get(modelId, connection.Vertex!.Location).ReasoningLevels.Contains(level)))
         { throw new NotSupportedException("Vertex capability overrides cannot enable unimplemented controls."); }
@@ -56,7 +64,7 @@ internal sealed class VertexLlmClient(HttpClient http, IVertexAuthentication aut
             ? new VertexClaudeProtocol(Http, access.Token).StreamAsync(connection, request, cancellationToken)
             : GeminiStream.ReadAsync(Http, GeminiMessage(connection, request,
                 GeminiRequest.Build(connection, request, enforcement, output => ProjectToolOutput(connection, request.ModelId, output),
-                    GeminiReasoning.Get(VertexEndpoints.ParseModel(request.ModelId).Model, catalogThinking: null), capabilities.SupportsReasoningText),
+                    GeminiModelProfiles.Get(VertexEndpoints.ParseModel(request.ModelId).Model, catalogThinking: null), capabilities.SupportsReasoningText),
                 access.Token, capabilities.SupportsStreaming), GeminiRoute, connection, request, enforcement,
                 capabilities.SupportsStreaming, capabilities.SupportsUsageDeltas, capabilities.SupportsReasoningText, cancellationToken);
         await using IAsyncEnumerator<LlmStreamEvent> iterator = source.GetAsyncEnumerator(cancellationToken);
@@ -132,7 +140,9 @@ internal sealed class VertexLlmClient(HttpClient http, IVertexAuthentication aut
     public string? EstimateDiagnostic => "Local text estimate; opaque reasoning and media occupancy are unknown. This is not a provider admission check.";
     public ContextEstimate? EstimateInputTokens(LlmConnection connection, LlmChatRequest request)
     {
-        ValidateRequest(connection, request, GetCapabilities(connection, request.ModelId));
+        LlmProviderCapabilities capabilities = GetCapabilities(connection, request.ModelId);
+        ValidateRequest(connection, request, capabilities);
+        ValidateVertexRequest(request, VertexModelProfiles.Get(request.ModelId, connection.Vertex!.Location), capabilities);
         if (request.Messages.Any(message => message.ContinuationState is not null || message.Attachments.Count != 0
             || message.ToolResults.Any(result => result.Output.Parts.Any(part => part is not LlmToolOutputText)))) { return null; }
         string projection = JsonSerializer.Serialize(request);
@@ -163,6 +173,10 @@ internal sealed class VertexLlmClient(HttpClient http, IVertexAuthentication aut
     private static void ValidateVertexRequest(LlmChatRequest request, VertexModelProfile profile, LlmProviderCapabilities capabilities)
     {
         if (request.ProviderOptions.Count != 0) { throw new NotSupportedException("Vertex accepts only declared request controls."); }
+        if (profile.IsClaude)
+            AnthropicModelProfiles.ValidateSampling(request, AnthropicModelProfiles.Resolve(VertexEndpoints.ParseModel(request.ModelId).Model, null));
+        else if (request.PresencePenalty is < -2 or >= 2 || request.FrequencyPenalty is < -2 or >= 2)
+            throw new ArgumentOutOfRangeException(nameof(request), "Vertex Gemini penalties must be in [-2, 2).");
         if (request.MaxOutputTokens > profile.OutputTokens || request.Temperature is < 0 or > 2
             || profile.IsClaude && request.Temperature > 1)
         { throw new ArgumentException("The output limit or temperature exceeds the selected model's range."); }

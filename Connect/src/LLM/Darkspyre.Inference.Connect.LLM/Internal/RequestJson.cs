@@ -18,7 +18,8 @@ internal static class RequestJson
 
         foreach ((string name, JsonElement value) in options)
         {
-            if (payload.ContainsKey(name))
+            if (payload.ContainsKey(name) || name is "top_p" or "top_k" or "seed" or "presence_penalty"
+                or "frequency_penalty" or "stop" or "stop_sequences")
             {
                 throw new InvalidOperationException($"Provider option '{name}' cannot replace a standard request field.");
             }

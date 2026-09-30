@@ -48,6 +48,9 @@ struct GenerationRequest: Codable, Sendable {
   let schema: SchemaNode?
   let temperature: Double?
   let maximumResponseTokens: Int?
+  var topP: Double? = nil
+  var topK: Int? = nil
+  var seed: UInt64? = nil
   // False asks for one complete response. An absent value streams.
   var stream: Bool? = nil
 }
@@ -60,6 +63,7 @@ struct Hello: Encodable {
   let type = "hello"
   let `protocol` = "darkspyre.apple-fm"
   let major = 1
+  let supportsSamplingControls = true
   let helperVersion = "1.0.0-dev"
   let osVersion = ProcessInfo.processInfo.operatingSystemVersionString
   let availability: String

@@ -215,12 +215,30 @@ public sealed class LlmSettingsTests
         Assert.Equal(SetupEditState.Applied, Field("model-listing").SetValue("disabled").State);
         Assert.Equal(SetupEditState.Applied, Field("temperature").SetValue("default").State);
         Assert.Equal(SetupEditState.Applied, Field("reasoning-text").SetValue("disabled").State);
+        foreach (string id in new[] { "top-p", "top-k", "seed", "presence-penalty", "frequency-penalty" })
+            Assert.Equal(SetupEditState.Applied, Field(id).SetValue("enabled").State);
+        SetupIntegerField StopLimit() => Assert.Single(Fields(settings).OfType<SetupIntegerField>(), field => field.Description.Id == "max-stop-sequences");
+        Assert.Null(StopLimit().Value);
+        Assert.Equal(SetupEditState.Invalid, StopLimit().SetValue(-1).State);
+        Assert.Equal(SetupEditState.Invalid, StopLimit().SetValue((long)int.MaxValue + 1).State);
+        Assert.Equal(SetupEditState.Applied, StopLimit().SetValue(0).State);
+        Assert.Equal(SetupEditState.Applied, StopLimit().SetValue(null).State);
+        Assert.Equal(SetupEditState.Applied, StopLimit().SetValue(12).State);
         Assert.Equal(SetupCommitState.Committed, (await manager.SaveAsync(settings)).State);
         LlmCapabilityOverrides overrides = target.Changes!.Configuration.Connection.CapabilityOverrides!;
         Assert.False(overrides.SupportsModelListing);
         Assert.Null(overrides.SupportsTemperature);
         Assert.False(overrides.SupportsReasoningText);
         Assert.True(overrides.SupportsToolUse);
+        Assert.True(overrides.SupportsTopP);
+        Assert.True(overrides.SupportsTopK);
+        Assert.True(overrides.SupportsSeed);
+        Assert.True(overrides.SupportsPresencePenalty);
+        Assert.True(overrides.SupportsFrequencyPenalty);
+        Assert.Equal(12, overrides.MaxStopSequences);
+        var (_, reopened) = await OpenAsync(provider, existing.Transport,
+            new(SetupChangeIntent.Edit, "id", "v2"), new Target(), target.Changes.Configuration.Connection with { Version = "v2" }, "model");
+        Assert.Equal(12, Assert.Single(Fields(reopened).OfType<SetupIntegerField>()).Value);
         Assert.True(target.Changes.RequiresRetest);
     }
     private static async Task<(LlmSettingsManager Manager, LlmSettings Settings)> OpenAsync(LlmProviderService provider, LlmTransport transport,
