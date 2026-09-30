@@ -11,7 +11,7 @@ public sealed class ModelListCacheTests
     public async Task RepeatedListingsAskTheProviderOnce()
     {
         var client = new ListingClient(["model-a"]);
-        var service = Service(new Source("v1"), client);
+        await using var service = Service(new Source("v1"), client);
 
         IReadOnlyList<LlmModel> first = await service.ListModelsAsync("connection");
         IReadOnlyList<LlmModel> second = await service.ListModelsAsync("connection");
@@ -26,7 +26,7 @@ public sealed class ModelListCacheTests
     {
         var source = new Source("v1");
         var client = new ListingClient(["model-a"]);
-        var service = Service(source, client);
+        await using var service = Service(source, client);
         await service.ListModelsAsync("connection");
 
         source.Version = "v2";
@@ -45,7 +45,7 @@ public sealed class ModelListCacheTests
     public async Task ConcurrentListingsShareOneRequestAndOneCallersCancellationStopsNoOther()
     {
         var client = new ListingClient(["model-a"]) { Gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously) };
-        var service = Service(new Source("v1"), client);
+        await using var service = Service(new Source("v1"), client);
         using var cancelled = new CancellationTokenSource();
 
         Task<IReadOnlyList<LlmModel>> abandoned = service.ListModelsAsync("connection", cancelled.Token);
@@ -63,7 +63,7 @@ public sealed class ModelListCacheTests
     public async Task AFailedListingIsNotKept()
     {
         var client = new ListingClient(["model-a"]) { Failures = 1 };
-        var service = Service(new Source("v1"), client);
+        await using var service = Service(new Source("v1"), client);
 
         await Assert.ThrowsAsync<LlmProviderException>(() => service.ListModelsAsync("connection"));
         Assert.Equal(["model-a"], (await service.ListModelsAsync("connection")).Select(model => model.Id));
@@ -74,13 +74,16 @@ public sealed class ModelListCacheTests
     public async Task ServicesShareListsOnlyThroughOneCache()
     {
         var client = new ListingClient(["model-a"]);
-        var shared = new LlmModelListCache();
-        await Service(new Source("v1"), client, shared).ListModelsAsync("connection");
-        await Service(new Source("v1"), client, shared).ListModelsAsync("connection");
+        await using var shared = new LlmModelListCache();
+        await using var first = Service(new Source("v1"), client, shared);
+        await using var second = Service(new Source("v1"), client, shared);
+        await first.ListModelsAsync("connection");
+        await second.ListModelsAsync("connection");
         Assert.Equal(1, client.Calls);
 
         // A service built without the application's cache keeps its own.
-        await Service(new Source("v1"), client).ListModelsAsync("connection");
+        await using var independent = Service(new Source("v1"), client);
+        await independent.ListModelsAsync("connection");
         Assert.Equal(2, client.Calls);
     }
 
@@ -88,7 +91,7 @@ public sealed class ModelListCacheTests
     public async Task RequestAccountingReadsTheKeptList()
     {
         var client = new ListingClient(["model-a"]);
-        var service = Service(new Source("v1"), client);
+        await using var service = Service(new Source("v1"), client);
 
         await service.ListModelsAsync("connection");
         LlmRequestAccounting accounting = await service.MeasureRequestAsync("connection", new LlmChatRequest { ModelId = "model-a" });

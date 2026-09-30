@@ -696,6 +696,9 @@ breaking change for `11.9.0-rc.1` through the new `ILlmInference.RefreshModelsAs
 
 - `LlmModelListCache` holds one list per connection keyed by `LlmConnection.Version`, shares a listing
   among concurrent callers, and keeps no failed listing. `AddLlmConnect` registers it as a singleton.
+- Its registration owner disposes it, cancelling and awaiting all listings, including replaced entries.
+  `LlmProviderService` fences and drains its calls on disposal and retires only a privately created cache;
+  an injected cache and supplied adapters remain borrowed.
 - `LlmProviderService.ListModelsAsync`, `RefreshModelsAsync` and `MeasureRequestAsync` read through it.
 - `ConnectLlmInference` and `QwenLlmInference` implement `RefreshModelsAsync`.
 

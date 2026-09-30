@@ -1514,7 +1514,7 @@ parallel use the Codex discovery endpoint answered 429.
 
 ### Design
 
-- `LlmModelListCache` keeps one model list per connection ID for the application's lifetime.
+- `LlmModelListCache` keeps one model list per connection ID for the registration owner's lifetime.
   `AddLlmConnect` registers it once, and every scoped `LlmProviderService` uses it; a service built by hand
   without it keeps its own.
 - A kept list belongs to the connection's `Version`. Any connection or credential edit changes the version,
@@ -1524,6 +1524,9 @@ parallel use the Codex discovery endpoint answered 429.
 - Concurrent requests for one connection share one listing. It runs apart from any caller's cancellation;
   a cancelled caller stops waiting and the others still receive the list.
 - A failed listing is not kept; the next call lists again.
+- Cache disposal fences new listings, clears kept lists, and cancels and awaits all owned listings,
+  including replaced entries. Caller cancellation stops only that caller's wait. The facade owns
+  a cache it creates; an injected cache remains the registration owner's responsibility.
 - Request accounting, managed sessions, setup sessions and `ConnectLlmInference` read through the cache.
 - Common's `ILlmInference` gains `RefreshModelsAsync`, and its `ListModelsAsync` may answer from a kept
   list. Connect's implementation delegates both to `LlmProviderService`; Qwen reads its local packs on
@@ -1661,7 +1664,8 @@ resumes with today's resume defaults: the current directory, that directory as t
 adapters call it, and the Bedrock assembly already has internal access.
 
 `LlmModelListCache` stays public. `LlmProviderService` takes it through its public constructor so that a
-host can share one cache across containers.
+host can share one cache across containers. The supplying owner disposes that shared cache. Disposing
+a facade retires its own calls and only a privately created cache; supplied adapters remain borrowed.
 
 ### 6. Bedrock Converse rejects a reasoning level
 

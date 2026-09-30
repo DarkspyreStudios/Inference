@@ -8,14 +8,18 @@ namespace Darkspyre.Inference.Connect.LLM;
 /// Resolves one configured connection and dispatches to exactly one matching transport. It never
 /// retries against, or falls back to, another provider.
 /// </summary>
-public sealed class LlmProviderService
+public sealed class LlmProviderService : IDisposable, IAsyncDisposable
 {
     private readonly ILlmConnectionSource _connections;
-    private readonly IReadOnlyDictionary<LlmTransport, ILlmClient> _clients;
+    private readonly Dictionary<LlmTransport, ILlmClient> _clients;
     private readonly Dictionary<LlmTransport, ILlmAccountUsageClient> _accountUsageClients;
     private readonly Dictionary<LlmTransport, ILlmAuthenticator> _authenticators;
     private readonly IReadOnlyDictionary<LlmTransport, ILlmSetupEnvironment> _setupEnvironments;
     private readonly LlmModelListCache _modelLists;
+    private readonly bool _ownsModelLists;
+    private readonly LlmOperationLifetime _lifetime = new();
+    private readonly Lock _disposeGate = new();
+    private Task? _disposal;
 
     public LlmProviderService(
         ILlmConnectionSource connections,
@@ -37,6 +41,7 @@ public sealed class LlmProviderService
         _connections = connections;
         // A service built without the application's shared cache keeps its own lists.
         _modelLists = modelLists ?? new LlmModelListCache();
+        _ownsModelLists = modelLists is null;
         ILlmClient[] clientArray = [.. clients];
         IGrouping<LlmTransport, ILlmClient>? duplicate = clientArray
             .GroupBy(client => client.Transport)
@@ -87,8 +92,11 @@ public sealed class LlmProviderService
         SupportedProviders.Select(provider => provider.SetupDefinition).ToArray();
 
     /// <summary>Creates the settings manager that opens, acts on and saves LLM settings through <paramref name="target"/>.</summary>
-    public LlmSettingsManager CreateSettingsManager(Common.Setup.ISetupCommitTarget<LlmSetupChanges> target) =>
-        new(_clients, _authenticators.Values, _setupEnvironments, target);
+    public LlmSettingsManager CreateSettingsManager(Common.Setup.ISetupCommitTarget<LlmSetupChanges> target)
+    {
+        _lifetime.ThrowIfStopping();
+        return new(_clients, _authenticators.Values, _setupEnvironments, target);
+    }
 
     public const string ClaudeManualRedirectUri =
         Providers.ClaudeAuthenticator.ManualRedirectUri;
@@ -99,6 +107,7 @@ public sealed class LlmProviderService
     /// </summary>
     public ILlmInference Bind(string connectionId)
     {
+        _lifetime.ThrowIfStopping();
         ArgumentException.ThrowIfNullOrWhiteSpace(connectionId);
         return new ConnectLlmInference(this, connectionId);
     }
@@ -107,6 +116,8 @@ public sealed class LlmProviderService
         string connectionId,
         CancellationToken cancellationToken = default)
     {
+        using var operation = _lifetime.Enter(cancellationToken);
+        cancellationToken = operation.Token;
         LlmConnection? connection = await _connections.GetConnectionAsync(connectionId, cancellationToken);
         if (connection is not null
             && _clients.TryGetValue(connection.Transport, out ILlmClient? client)
@@ -129,6 +140,8 @@ public sealed class LlmProviderService
         string expectedVersion,
         CancellationToken cancellationToken = default)
     {
+        using var operation = _lifetime.Enter(cancellationToken);
+        cancellationToken = operation.Token;
         if (string.IsNullOrWhiteSpace(apiKey))
         {
             throw new ArgumentException("An API key is required.", nameof(apiKey));
@@ -145,9 +158,11 @@ public sealed class LlmProviderService
             cancellationToken);
     }
 
-    public Task<LlmDeviceCode> StartCodexLoginAsync(
-        CancellationToken cancellationToken = default) =>
-        CodexLogin().StartAsync(cancellationToken);
+    public async Task<LlmDeviceCode> StartCodexLoginAsync(CancellationToken cancellationToken = default)
+    {
+        using var operation = _lifetime.Enter(cancellationToken);
+        return await CodexLogin().StartAsync(operation.Token).ConfigureAwait(false);
+    }
 
     public async Task CompleteCodexLoginAsync(
         string connectionId,
@@ -156,6 +171,8 @@ public sealed class LlmProviderService
         string expectedVersion,
         CancellationToken cancellationToken = default)
     {
+        using var operation = _lifetime.Enter(cancellationToken);
+        cancellationToken = operation.Token;
         LlmConnection connection = await RequireExpectedVersionAsync(
             connectionId,
             expectedVersion,
@@ -180,6 +197,7 @@ public sealed class LlmProviderService
         string redirectUri,
         CancellationToken cancellationToken = default)
     {
+        _lifetime.ThrowIfStopping();
         if (string.IsNullOrWhiteSpace(redirectUri))
         {
             throw new ArgumentException("A Claude redirect URI is required.", nameof(redirectUri));
@@ -196,6 +214,8 @@ public sealed class LlmProviderService
         string expectedVersion,
         CancellationToken cancellationToken = default)
     {
+        using var operation = _lifetime.Enter(cancellationToken);
+        cancellationToken = operation.Token;
         LlmRedirectResult redirect = LlmRedirectResult.ParsePastedCode(pastedCode);
         await CompleteClaudeLoginAsync(
             connectionId,
@@ -214,6 +234,8 @@ public sealed class LlmProviderService
         string expectedVersion,
         CancellationToken cancellationToken = default)
     {
+        using var operation = _lifetime.Enter(cancellationToken);
+        cancellationToken = operation.Token;
         LlmConnection connection = await RequireExpectedVersionAsync(
             connectionId,
             expectedVersion,
@@ -241,6 +263,8 @@ public sealed class LlmProviderService
         string expectedVersion,
         CancellationToken cancellationToken = default)
     {
+        using var operation = _lifetime.Enter(cancellationToken);
+        cancellationToken = operation.Token;
         ArgumentNullException.ThrowIfNull(aws);
         LlmConnection connection = await RequireExpectedVersionAsync(
             connectionId,
@@ -263,6 +287,8 @@ public sealed class LlmProviderService
         ILlmAuthPrompt prompt,
         CancellationToken cancellationToken = default)
     {
+        using var operation = _lifetime.Enter(cancellationToken);
+        cancellationToken = operation.Token;
         ArgumentNullException.ThrowIfNull(prompt);
         LlmConnection connection = await LlmConnectionResolver.ResolveAsync(
             _connections,
@@ -317,6 +343,8 @@ public sealed class LlmProviderService
         string connectionId, LlmChatRequest request, string? expectedScope,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
+        using var operation = _lifetime.Enter(cancellationToken);
+        cancellationToken = operation.Token;
         LlmConnection connection = await LlmConnectionResolver.ResolveAsync(
             _connections,
             connectionId,
@@ -360,6 +388,7 @@ public sealed class LlmProviderService
                 })
                 : streamEvent;
         }
+        cancellationToken.ThrowIfCancellationRequested();
     }
 
     /// <summary>
@@ -372,6 +401,8 @@ public sealed class LlmProviderService
         LlmAgentContextPolicy? policy = null,
         CancellationToken cancellationToken = default)
     {
+        using var operation = _lifetime.Enter(cancellationToken);
+        cancellationToken = operation.Token;
         cancellationToken.ThrowIfCancellationRequested();
         ArgumentNullException.ThrowIfNull(request);
         ArgumentException.ThrowIfNullOrWhiteSpace(request.ModelId);
@@ -420,7 +451,7 @@ public sealed class LlmProviderService
                 try
                 {
                     models = await _modelLists.GetAsync(connectionId, connection.Version,
-                        () => client.ListModelsAsync(connection, CancellationToken.None), cancellationToken);
+                        token => client.ListModelsAsync(connection, token), cancellationToken);
                 }
                 catch (Exception error) when (error is HttpRequestException or LlmProviderException or NotSupportedException)
                 {
@@ -459,6 +490,8 @@ public sealed class LlmProviderService
         LlmChatRequest request,
         CancellationToken cancellationToken = default)
     {
+        using var operation = _lifetime.Enter(cancellationToken);
+        cancellationToken = operation.Token;
         LlmChatResult? result = null;
         await foreach (LlmStreamEvent streamEvent in StreamAsync(
                            connectionId,
@@ -490,6 +523,8 @@ public sealed class LlmProviderService
         string connectionId,
         CancellationToken cancellationToken = default)
     {
+        using var operation = _lifetime.Enter(cancellationToken);
+        cancellationToken = operation.Token;
         LlmConnection connection = await ResolveFreshConnectionAsync(connectionId, cancellationToken);
         ILlmClient client = ClientFor(connection.Transport);
         if (client is ILlmConnectionPreparation preparation)
@@ -497,7 +532,7 @@ public sealed class LlmProviderService
             connection = await preparation.PrepareAsync(connection, cancellationToken).ConfigureAwait(false);
         }
         return await _modelLists.GetAsync(connectionId, connection.Version + connection.ResolvedContinuationScope,
-            () => client.ListModelsAsync(connection, CancellationToken.None), cancellationToken);
+            token => client.ListModelsAsync(connection, token), cancellationToken);
     }
 
     /// <summary>Asks the provider for the connection's models again and keeps the new list.</summary>
@@ -505,6 +540,8 @@ public sealed class LlmProviderService
         string connectionId,
         CancellationToken cancellationToken = default)
     {
+        using var operation = _lifetime.Enter(cancellationToken);
+        cancellationToken = operation.Token;
         LlmConnection connection = await ResolveFreshConnectionAsync(connectionId, cancellationToken);
         ILlmClient client = ClientFor(connection.Transport);
         if (client is ILlmConnectionPreparation preparation)
@@ -512,13 +549,15 @@ public sealed class LlmProviderService
             connection = await preparation.PrepareAsync(connection, cancellationToken).ConfigureAwait(false);
         }
         return await _modelLists.RefreshAsync(connectionId, connection.Version + connection.ResolvedContinuationScope,
-            () => client.ListModelsAsync(connection, CancellationToken.None), cancellationToken);
+            token => client.ListModelsAsync(connection, token), cancellationToken);
     }
 
     public async Task<LlmAccountUsageSnapshot> GetAccountUsageAsync(
         string connectionId,
         CancellationToken cancellationToken = default)
     {
+        using var operation = _lifetime.Enter(cancellationToken);
+        cancellationToken = operation.Token;
         LlmConnection connection = await LlmConnectionResolver.ResolveAsync(
             _connections,
             connectionId,
@@ -544,6 +583,8 @@ public sealed class LlmProviderService
         string connectionId,
         CancellationToken cancellationToken = default)
     {
+        using var operation = _lifetime.Enter(cancellationToken);
+        cancellationToken = operation.Token;
         LlmConnection connection = await ResolveFreshConnectionAsync(connectionId, cancellationToken);
         ILlmClient client = ClientFor(connection.Transport);
         connection = await AttachCatalogAsync(connectionId, connection, client, cancellationToken);
@@ -562,6 +603,8 @@ public sealed class LlmProviderService
         LlmToolOutputLane lane = LlmToolOutputLane.Chat,
         CancellationToken cancellationToken = default)
     {
+        using var operation = _lifetime.Enter(cancellationToken);
+        cancellationToken = operation.Token;
         ArgumentException.ThrowIfNullOrWhiteSpace(modelId);
         ArgumentNullException.ThrowIfNull(output);
         if (!Enum.IsDefined(lane))
@@ -583,6 +626,8 @@ public sealed class LlmProviderService
         string modelId,
         CancellationToken cancellationToken = default)
     {
+        using var operation = _lifetime.Enter(cancellationToken);
+        cancellationToken = operation.Token;
         LlmConnection connection = await ResolveFreshConnectionAsync(connectionId, cancellationToken);
         ILlmClient client = ClientFor(connection.Transport);
         connection = await AttachCatalogAsync(connectionId, connection, client, cancellationToken);
@@ -600,6 +645,8 @@ public sealed class LlmProviderService
         ILlmClient client,
         CancellationToken cancellationToken)
     {
+        using var operation = _lifetime.Enter(cancellationToken);
+        cancellationToken = operation.Token;
         if (client is not ILlmCatalogCapabilities)
         {
             return connection;
@@ -608,7 +655,7 @@ public sealed class LlmProviderService
         {
             IReadOnlyList<LlmModel> models = await _modelLists.GetAsync(connectionId,
                 connection.Version + connection.ResolvedContinuationScope,
-                () => client.ListModelsAsync(connection, CancellationToken.None), cancellationToken);
+                token => client.ListModelsAsync(connection, token), cancellationToken);
             return connection with { Catalog = models };
         }
         catch (Exception error) when (error is HttpRequestException or LlmProviderException or System.Text.Json.JsonException)
@@ -735,4 +782,32 @@ public sealed class LlmProviderService
             && authenticator is IClaudePkceLogin login
                 ? login
                 : throw new NotSupportedException("Claude login is not registered.");
+
+    /// <summary>
+    /// Fences new operations, cancels and awaits active facade work, and retires a privately owned model cache.
+    /// Supplied clients, authenticators, the connection source and an injected cache remain borrowed.
+    /// </summary>
+    public ValueTask DisposeAsync()
+    {
+        lock (_disposeGate) { return new(_disposal ??= RetireAsync()); }
+    }
+
+    private async Task RetireAsync()
+    {
+        Task operations = _lifetime.RetireAsync();
+        try
+        {
+            if (_ownsModelLists) await _modelLists.DisposeAsync().ConfigureAwait(false);
+        }
+        finally
+        {
+            await operations.ConfigureAwait(false);
+            _clients.Clear();
+            _authenticators.Clear();
+            _accountUsageClients.Clear();
+        }
+    }
+
+    /// <summary>Synchronously retires the facade. Use asynchronous disposal while provider work is active.</summary>
+    public void Dispose() => DisposeAsync().AsTask().GetAwaiter().GetResult();
 }

@@ -306,12 +306,27 @@ var result = await provider.CompleteAsync(
 ### Model lists
 
 `LlmProviderService.ListModelsAsync` keeps each connection's model list in `LlmModelListCache`, which
-`AddLlmConnect` registers once for the application. A list stays until the connection's `Version` changes,
+`AddLlmConnect` registers once for the registration owner's lifetime. A list stays until the connection's `Version` changes,
 which every connection or credential edit does, or until `RefreshModelsAsync` lists again and replaces it.
 Concurrent requests for one connection share a single listing, request accounting and managed sessions
 read the same list, and a failed listing is not kept. Common's `ILlmInference` carries the same pair:
 `ListModelsAsync` may answer from a kept list, and `RefreshModelsAsync` lists again. A service built by
 hand without the shared cache keeps its own.
+
+`LlmProviderService` and `LlmModelListCache` implement `IDisposable` and `IAsyncDisposable`. Facade
+retirement fences new calls, cancels active calls and waits for them to leave. It retires a privately
+created cache, but not an injected shared cache. Clients, authenticators and the connection source
+remain borrowed and are not disposed by the facade.
+
+Cache retirement clears kept models, cancels provider listings through an owner token, and waits
+for every listing, including entries replaced by an edit or refresh. A cancelled caller only stops
+its own wait. A provider that ignores owner cancellation keeps retirement pending until its call
+ends; its late result is not published. Abandoned provider faults are observed.
+
+Use asynchronous disposal while provider work is active. Consume or dispose active stream
+enumerators so their owned operations can leave. Disposal does not report completion while an
+operation remains active. A registration owner disposes its shared cache; sharing a cache across
+containers does not transfer that responsibility to a scoped facade.
 
 ### Streaming, reasoning text and usage
 
