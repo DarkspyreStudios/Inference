@@ -106,6 +106,32 @@ public sealed class ManagedAgentTests
     private static readonly string[] CommandOnly = ["command"];
 
     [Fact]
+    public async Task RunningUsageReplacesTheCurrentStepAndFinalUsageRemainsAuthoritative()
+    {
+        var harness = new Harness();
+        harness.UsageObservations.Enqueue([new(10, 1, 11), new(10, 2, 12)]);
+        harness.UsageObservations.Enqueue([new(20, 1, 21), new(20, 8, 28)]);
+        harness.Results.Enqueue(new()
+        {
+            Diagnostics = new(200, null, null),
+            Text = "",
+            Status = LlmCompletionStatus.RequiresAction,
+            ToolCalls = [new("a", "echo", "{}")],
+            Usage = new(10, 3, 13)
+        });
+        harness.Results.Enqueue(new()
+        { Diagnostics = new(200, null, null), Status = LlmCompletionStatus.Completed, Text = "done", Usage = new(20, 4, 24) });
+        await using var session = harness.Create(ToolsOptions(_ => LlmToolOutput.FromText("ok")));
+        var events = await Read(session.RunTurnAsync(Turn("hello")));
+        LlmAgentUsageEvent[] usage = [.. events.OfType<LlmAgentUsageEvent>()];
+        Assert.Equal(new int?[] { 11, 12, 13, 34, 41, 37 }, usage.Select(item => item.RunTotals?.TotalTokens));
+        Assert.Equal(new int?[] { 11, 12, 13, 21, 28, 24 }, usage.Select(item => item.Usage?.TotalTokens));
+        Assert.Single(usage.Take(3).Select(item => item.RequestId).Distinct());
+        Assert.Single(usage.Skip(3).Select(item => item.RequestId).Distinct());
+        Assert.NotEqual(usage[0].RequestId, usage[3].RequestId);
+    }
+
+    [Fact]
     public async Task HostToolsAreSentNonStrictUnlessTheHostRequestsStrictness()
     {
         // An optional property without additionalProperties is a valid host schema but not a strict one.
@@ -582,6 +608,7 @@ public sealed class ManagedAgentTests
     private sealed class Harness : ILlmContextEstimator
     {
         public Queue<LlmChatResult> Results { get; } = new();
+        public Queue<IReadOnlyList<LlmUsage>> UsageObservations { get; } = new();
         public List<LlmChatRequest> Requests { get; } = [];
         public List<LlmChatRequest> Estimates { get; } = [];
         public Exception? Failure { get; set; }
@@ -616,6 +643,10 @@ public sealed class ManagedAgentTests
             if (ExposeBeforeFailure) { yield return new LlmTextDeltaEvent("partial"); }
             if (Failure is not null) { throw Failure; }
             foreach (var snapshot in Snapshots) yield return new LlmStructuredOutputSnapshotEvent(snapshot);
+            if (UsageObservations.TryDequeue(out var usage))
+            {
+                foreach (var observation in usage) yield return new LlmUsageDeltaEvent(observation);
+            }
             yield return new LlmChatCompletionEvent(Results.Dequeue());
         }
     }

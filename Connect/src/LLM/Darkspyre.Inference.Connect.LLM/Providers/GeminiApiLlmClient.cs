@@ -73,7 +73,7 @@ internal sealed partial class GeminiApiLlmClient(HttpClient http)
         { Content = JsonContent.Create(payload) };
         message.Headers.TryAddWithoutValidation(KeyHeader, Key(connection));
         IAsyncEnumerable<LlmStreamEvent> source = GeminiStream.ReadAsync(Http, message, Route, connection, request, enforcement,
-            capabilities.SupportsStreaming, cancellationToken);
+            capabilities.SupportsStreaming, capabilities.SupportsUsageDeltas, cancellationToken);
         await using IAsyncEnumerator<LlmStreamEvent> iterator = source.GetAsyncEnumerator(cancellationToken);
         while (true)
         {

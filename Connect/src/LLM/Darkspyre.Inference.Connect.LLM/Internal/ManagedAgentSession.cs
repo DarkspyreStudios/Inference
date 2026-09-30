@@ -403,8 +403,15 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
                 {
                     await foreach (var item in StreamModelAsync(run, request, token))
                     {
+                        if (result is not null) { throw new InvalidOperationException("Model emitted an event after completion."); }
                         switch (item)
                         {
+                            case LlmUsageDeltaEvent usage:
+                                LlmUsage? runningTotal = run.UsageUnknown ? null
+                                    : AddUsage(run.Usage, usage.Cumulative, run.Iterations == 0);
+                                await writer.WriteAsync(new LlmAgentUsageEvent(ThreadId, run.Id, stepId,
+                                    usage.Cumulative, runningTotal), token);
+                                break;
                             case LlmTextDeltaEvent text:
                                 await writer.WriteAsync(new LlmAgentTextDeltaEvent(ThreadId, run.Id, stepId, text.Delta), token);
                                 break;

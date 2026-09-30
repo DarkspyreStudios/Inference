@@ -20,6 +20,7 @@ internal sealed record VertexModelProfile(string Id, long ContextTokens, int Out
             {
                 SupportsStreaming = true,
                 SupportsStreamingUsage = true,
+                SupportsUsageDeltas = true,
                 SupportsModelListing = true,
                 OutputLimitEnforcement = LlmOutputLimitEnforcement.ProviderEnforced,
                 SupportsJsonSchema = true,

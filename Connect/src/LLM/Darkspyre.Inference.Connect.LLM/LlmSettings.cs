@@ -256,6 +256,8 @@ public sealed class LlmSettings : InferenceSettings<LlmSetupChanges>
             Override("streaming", "Streaming", current.SupportsStreaming, (value, selection) => value with { SupportsStreaming = selection },
                 "Disabled sends the endpoint's non-streaming request. The reply arrives in one piece when generation ends."),
             Override("streaming-usage", "Streaming usage", current.SupportsStreamingUsage, (value, selection) => value with { SupportsStreamingUsage = selection }),
+            Override("usage-deltas", "Running usage", current.SupportsUsageDeltas, (value, selection) => value with { SupportsUsageDeltas = selection },
+                "Enabled asks a vLLM-compatible endpoint for usage on every chunk."),
             Override("model-listing", "Model listing", current.SupportsModelListing, (value, selection) => value with { SupportsModelListing = selection }),
             Override("json-schema", "JSON schema output", current.SupportsJsonSchema, (value, selection) => value with { SupportsJsonSchema = selection }),
             Override("json-object", "JSON object output", current.SupportsJsonObject, (value, selection) => value with { SupportsJsonObject = selection }),

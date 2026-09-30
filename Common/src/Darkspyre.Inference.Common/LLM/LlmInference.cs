@@ -40,6 +40,9 @@ public sealed record LlmCapabilities
     /// </summary>
     public bool SupportsStreaming { get; init; }
 
+    /// <summary>A streamed response can report cumulative usage before completion.</summary>
+    public bool SupportsUsageDeltas { get; init; }
+
     public bool SupportsModelListing { get; init; }
 
     public bool SupportsJsonSchema { get; init; }
@@ -99,6 +102,12 @@ public sealed record LlmToolCallStartedEvent(string ToolCallId, string Name, int
 public sealed record LlmToolCallArgumentsDeltaEvent(string ToolCallId, string Delta) : LlmStreamEvent;
 
 public sealed record LlmToolCallCompletedEvent(LlmToolCall ToolCall) : LlmStreamEvent;
+
+/// <summary>
+/// Running usage for the entire call. Each observation replaces the previous one; never add observations together.
+/// Null fields are unreported. Completion usage is authoritative and can differ from the last observation.
+/// </summary>
+public sealed record LlmUsageDeltaEvent(LlmUsage Cumulative) : LlmStreamEvent;
 
 public sealed record LlmCompletionEvent(LlmInferenceResult Result) : LlmStreamEvent;
 

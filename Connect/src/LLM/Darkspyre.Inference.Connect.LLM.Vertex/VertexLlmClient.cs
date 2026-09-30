@@ -60,7 +60,7 @@ internal sealed class VertexLlmClient(HttpClient http, IVertexAuthentication aut
                 GeminiRequest.Build(connection, request, enforcement, output => ProjectToolOutput(connection, request.ModelId, output),
                     GeminiReasoning.Get(VertexEndpoints.ParseModel(request.ModelId).Model, catalogThinking: null)),
                 access.Token, capabilities.SupportsStreaming), GeminiRoute, connection, request, enforcement,
-                capabilities.SupportsStreaming, cancellationToken);
+                capabilities.SupportsStreaming, capabilities.SupportsUsageDeltas, cancellationToken);
         await using IAsyncEnumerator<LlmStreamEvent> iterator = source.GetAsyncEnumerator(cancellationToken);
         while (true)
         {

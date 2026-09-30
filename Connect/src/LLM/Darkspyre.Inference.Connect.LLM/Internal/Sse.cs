@@ -11,8 +11,12 @@ internal static class Sse
         using var reader = new StreamReader(stream);
         var dataLines = new List<string>();
 
-        while (await reader.ReadLineAsync(cancellationToken) is { } line)
+        while (true)
         {
+            cancellationToken.ThrowIfCancellationRequested();
+            string? line = await reader.ReadLineAsync(cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+            if (line is null) { break; }
             if (line.Length == 0)
             {
                 if (dataLines.Count > 0)

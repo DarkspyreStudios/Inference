@@ -133,7 +133,10 @@ public sealed record LlmAgentTurnContinuedEvent(
     string TurnId,
     string PauseId) : LlmAgentEvent(ThreadId, TurnId);
 
-/// <summary>Usage for one model step and this logical run, including earlier continued segments.</summary>
+/// <summary>
+/// Usage for one model step and this logical run, including earlier continued segments. Repeated observations for
+/// the same request replace earlier ones. The step's completion supplies its authoritative usage.
+/// </summary>
 public sealed record LlmAgentUsageEvent(
     string ThreadId,
     string TurnId,

@@ -11,7 +11,7 @@ namespace Darkspyre.Inference.Connect.LLM.Vertex.Tests;
 /// <summary>The Vertex Gemini route and the Gemini API send the same generateContent body for the same portable request.</summary>
 public sealed class GeminiWireParityTests
 {
-    private const string Reply = """{"candidates":[{"content":{"parts":[{"text":"{\"ok\":true}"}]},"finishReason":"STOP"}]}""";
+    private const string Reply = """{"candidates":[{"content":{"parts":[{"text":"{\"ok\":true}"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":2,"candidatesTokenCount":1,"totalTokenCount":3}}""";
 
     [Theory]
     [InlineData(true)]
@@ -41,7 +41,7 @@ public sealed class GeminiWireParityTests
         };
         var vertexHandler = new Capture(stream);
         var vertex = new VertexLlmClient(new HttpClient(vertexHandler), new FixedAuthentication());
-        await Drain(vertex.StreamAsync(new LlmConnection
+        var vertexEvents = await Drain(vertex.StreamAsync(new LlmConnection
         {
             Version = "1",
             Transport = LlmTransport.GoogleVertexAi,
@@ -51,7 +51,7 @@ public sealed class GeminiWireParityTests
         }, request with { ModelId = "google/gemini-3-flash-preview" }));
         var geminiHandler = new Capture(stream);
         var gemini = new GeminiApiLlmClient(new HttpClient(geminiHandler));
-        await Drain(gemini.StreamAsync(new LlmConnection
+        var geminiEvents = await Drain(gemini.StreamAsync(new LlmConnection
         {
             Version = "1",
             Transport = LlmTransport.GoogleGeminiApi,
@@ -67,6 +67,9 @@ public sealed class GeminiWireParityTests
         Assert.True(JsonNode.DeepEquals(fromVertex, fromGemini));
         Assert.Equal("MEDIUM", (string?)fromGemini["generationConfig"]?["thinkingConfig"]?["thinkingLevel"]);
         Assert.NotNull(fromGemini["generationConfig"]?["responseJsonSchema"]);
+        Assert.Equal(stream ? 1 : 0, vertexEvents.OfType<LlmUsageDeltaEvent>().Count());
+        Assert.Equal(geminiEvents.OfType<LlmUsageDeltaEvent>(), vertexEvents.OfType<LlmUsageDeltaEvent>());
+        Assert.Equal(new(2, 1, 3), Assert.IsType<LlmChatCompletionEvent>(vertexEvents[^1]).Result.Usage);
     }
 
     [Fact]
@@ -94,9 +97,11 @@ public sealed class GeminiWireParityTests
         Assert.Equal(GeminiReasoning.Get("gemini-3-flash-preview", catalogThinking: null).Levels.Order(), fromVertex.Order());
     }
 
-    private static async Task Drain(IAsyncEnumerable<LlmStreamEvent> events)
+    private static async Task<List<LlmStreamEvent>> Drain(IAsyncEnumerable<LlmStreamEvent> events)
     {
-        await foreach (LlmStreamEvent _ in events) { }
+        var result = new List<LlmStreamEvent>();
+        await foreach (LlmStreamEvent item in events) { result.Add(item); }
+        return result;
     }
 
     private sealed class Capture(bool stream) : HttpMessageHandler

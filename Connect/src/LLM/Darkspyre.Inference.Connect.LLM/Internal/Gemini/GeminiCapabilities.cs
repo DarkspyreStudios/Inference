@@ -13,6 +13,7 @@ internal static class GeminiCapabilities
         {
             SupportsStreaming = true,
             SupportsStreamingUsage = true,
+            SupportsUsageDeltas = true,
             SupportsModelListing = true,
             OutputLimitEnforcement = LlmOutputLimitEnforcement.ProviderEnforced,
             SupportsJsonSchema = true,

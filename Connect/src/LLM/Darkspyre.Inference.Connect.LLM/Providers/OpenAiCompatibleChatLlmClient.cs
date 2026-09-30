@@ -97,6 +97,7 @@ internal sealed class OpenAiCompatibleChatLlmClient(HttpClient http) : LlmClient
         string? lastEvent = null;
         bool sawDone = false;
         var toolCalls = new Dictionary<int, ToolCallBuilder>();
+        var usageDeltas = new UsageDeltas(capabilities.SupportsUsageDeltas);
 
         await foreach (string data in Sse.ReadDataPayloadsAsync(stream, cancellationToken))
         {
@@ -126,11 +127,15 @@ internal sealed class OpenAiCompatibleChatLlmClient(HttpClient http) : LlmClient
             {
                 JsonElement root = document.RootElement;
                 responseId ??= LlmJson.GetString(root, "id");
-                usage = ReadUsage(root) ?? usage;
-
                 if (LlmJson.GetObject(root, "error") is { } error)
                 {
                     throw StreamError(error, response, data, credential);
+                }
+
+                usage = ReadUsage(root) ?? usage;
+                if (usageDeltas.Next(usage) is { } observation)
+                {
+                    yield return observation;
                 }
 
                 if (!root.TryGetProperty("choices", out JsonElement choices)
@@ -451,7 +456,12 @@ internal sealed class OpenAiCompatibleChatLlmClient(HttpClient http) : LlmClient
         // OpenAI accepts stream_options only on streaming requests; a non-streaming body always carries usage.
         if (capabilities.SupportsStreaming && capabilities.SupportsStreamingUsage)
         {
-            payload["stream_options"] = new JsonObject { ["include_usage"] = true };
+            var options = new JsonObject { ["include_usage"] = true };
+            if (capabilities.SupportsUsageDeltas)
+            {
+                options["continuous_usage_stats"] = true;
+            }
+            payload["stream_options"] = options;
         }
 
         if (request.Temperature is double temperature)

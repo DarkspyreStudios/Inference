@@ -348,6 +348,9 @@ internal static class Program
                 case LlmActivityEvent activity:
                     Console.Error.WriteLine($"[activity] {activity.Activity}");
                     break;
+                case LlmUsageDeltaEvent usage:
+                    Console.Error.WriteLine($"[usage] input={usage.Cumulative.InputTokens} output={usage.Cumulative.OutputTokens} total={usage.Cumulative.TotalTokens}");
+                    break;
                 case LlmChatCompletionEvent completion:
                     if (wroteOutput)
                     {

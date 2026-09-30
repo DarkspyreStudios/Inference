@@ -8,6 +8,19 @@ namespace Darkspyre.Inference.Connect.LLM.Tests;
 public sealed class PortableInferenceAdapterTests
 {
     [Fact]
+    public async Task BoundInferenceMirrorsRunningUsageCapabilityAndEvent()
+    {
+        var client = new RecordingClient { RunningUsage = new(4, 1, 5) };
+        var service = new LlmProviderService(new ConnectionSource(), [client]);
+        ILlmInference inference = service.Bind("primary");
+        Assert.True((await inference.GetCapabilitiesAsync("model-a")).SupportsUsageDeltas);
+        var events = new List<LlmStreamEvent>();
+        await foreach (var item in inference.StreamAsync(new() { ModelId = "model-a" })) { events.Add(item); }
+        Assert.Equal(client.RunningUsage, Assert.Single(events.OfType<LlmUsageDeltaEvent>()).Cumulative);
+        Assert.IsType<LlmCompletionEvent>(events[^1]);
+    }
+
+    [Fact]
     public async Task BoundInferenceMapsTypedRequestResultAndProvenance()
     {
         var client = new RecordingClient();
@@ -134,6 +147,7 @@ public sealed class PortableInferenceAdapterTests
         public LlmChatRequest? Request { get; private set; }
 
         public Exception? Failure { get; init; }
+        public LlmUsage? RunningUsage { get; init; }
 
         public LlmTransport Transport => LlmTransport.OpenAiCompatibleChat;
 
@@ -148,7 +162,7 @@ public sealed class PortableInferenceAdapterTests
         };
 
         public LlmProviderCapabilities GetCapabilities(LlmConnection connection, string? modelId = null) =>
-            new() { SupportsStreaming = true };
+            new() { SupportsStreaming = true, SupportsUsageDeltas = RunningUsage is not null };
 
         public async IAsyncEnumerable<LlmStreamEvent> StreamAsync(
             LlmConnection connection,
@@ -160,6 +174,7 @@ public sealed class PortableInferenceAdapterTests
                 throw Failure;
 
             yield return new LlmTextDeltaEvent("Hello back");
+            if (RunningUsage is { } usage) { yield return new LlmUsageDeltaEvent(usage); }
             yield return new LlmChatCompletionEvent(new LlmChatResult
             {
                 Text = "Hello back",

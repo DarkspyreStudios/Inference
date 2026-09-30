@@ -33,6 +33,13 @@ an append-only text fragment or a final schema validation. Use the terminal resu
 and `StructuredOutput` for the final representation and validation. Ordinary text uses
 `LlmTextDeltaEvent`.
 
+`LlmUsageDeltaEvent.Cumulative` reports running usage for the entire call. Each observation replaces
+the previous observation; never add them together. Null fields are unreported, not zero. Completion
+usage is authoritative and can differ from the last observation. An adapter emits changed observations
+only while streaming, when `LlmCapabilities.SupportsUsageDeltas` is true, and never after completion.
+Non-streaming responses report only final usage. Tensor engines report this capability as false
+unless the selected engine implements running usage.
+
 `LlmCompletionStatus.Unknown` is terminal: the implementation returned output but cannot
 classify a natural stop versus truncation. It does not mean failure or authorize a retry.
 Check validation separately and leave unreported finish reasons and usage unknown.

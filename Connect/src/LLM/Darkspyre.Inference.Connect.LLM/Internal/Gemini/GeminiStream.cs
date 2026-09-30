@@ -17,7 +17,7 @@ internal sealed record GeminiRoute(LlmTransport Transport, string Name, string C
 internal static class GeminiStream
 {
     public static async IAsyncEnumerable<LlmStreamEvent> ReadAsync(HttpClient http, HttpRequestMessage message, GeminiRoute route,
-        LlmConnection connection, LlmChatRequest request, LlmStructuredOutputEnforcement? enforcement, bool stream,
+        LlmConnection connection, LlmChatRequest request, LlmStructuredOutputEnforcement? enforcement, bool stream, bool usageDeltas,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         using HttpRequestMessage owned = message;
@@ -32,6 +32,7 @@ internal static class GeminiStream
         string? blocked = null;
         string? responseId = null;
         int? input = null, visibleOutput = null, thoughts = null, cached = null, total = null;
+        var deltas = new UsageDeltas(stream && usageDeltas);
         // A generateContent response is one GenerateContentResponse, the same type as each streamed chunk.
         IAsyncEnumerable<string> payloads = stream
             ? ReadStreamAsync(response, cancellationToken)
@@ -49,6 +50,10 @@ internal static class GeminiStream
                 thoughts = LlmJson.GetInt(usage, "thoughtsTokenCount") ?? thoughts;
                 cached = LlmJson.GetInt(usage, "cachedContentTokenCount") ?? cached;
                 total = LlmJson.GetInt(usage, "totalTokenCount") ?? total;
+                if (deltas.Next(Usage(input, visibleOutput, thoughts, cached, total)) is { } observation)
+                {
+                    yield return observation;
+                }
             }
             if (LlmJson.GetObject(root, "promptFeedback") is { } feedback)
             { blocked = LlmJson.GetString(feedback, "blockReason") ?? blocked; }
@@ -103,11 +108,9 @@ internal static class GeminiStream
             : LlmCompletionStatus.Unknown;
         LlmToolCall[] completeCalls = status == LlmCompletionStatus.RequiresAction ? calls.ToArray() : [];
         foreach (LlmToolCall call in completeCalls) { yield return new LlmToolCallCompletedEvent(call); }
-        int? output = visibleOutput is int visible ? checked(visible + (thoughts ?? 0)) : null;
-        var counts = input is null && output is null && total is null ? null : new LlmUsage(input, output, total)
-        { CachedInputTokens = cached, ReasoningOutputTokens = thoughts };
+        LlmUsage? counts = Usage(input, visibleOutput, thoughts, cached, total);
         LlmContinuationState? state = status is LlmCompletionStatus.Completed or LlmCompletionStatus.RequiresAction
-            ? route.Encode(connection, request.ModelId, parts) with { InputTokens = input, OutputTokens = output } : null;
+            ? route.Encode(connection, request.ModelId, parts) with { InputTokens = input, OutputTokens = counts?.OutputTokens } : null;
         yield return new LlmChatCompletionEvent(new()
         {
             Text = text.ToString(),
@@ -124,6 +127,13 @@ internal static class GeminiStream
                 ? StructuredOutput.Validate(text.ToString(), schema, mode) : null,
             Diagnostics = new((int)response.StatusCode, null, null)
         });
+    }
+
+    private static LlmUsage? Usage(int? input, int? visibleOutput, int? thoughts, int? cached, int? total)
+    {
+        int? output = visibleOutput is int visible ? checked(visible + (thoughts ?? 0)) : null;
+        return input is null && output is null && total is null && cached is null && thoughts is null ? null
+            : new(input, output, total) { CachedInputTokens = cached, ReasoningOutputTokens = thoughts };
     }
 
     private static async IAsyncEnumerable<string> ReadStreamAsync(HttpResponseMessage response,

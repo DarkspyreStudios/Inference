@@ -321,6 +321,20 @@ the adapter sends it and emits the complete response as events after it arrives.
 has no non-streaming request rejects every request while streaming is off. Common's
 `LlmCapabilities.SupportsStreaming` carries the same flag to `ILlmInference` hosts.
 
+`SupportsStreamingUsage` describes usage reported by completion. `SupportsUsageDeltas` describes
+running `LlmUsageDeltaEvent` observations and is mirrored on Common's capabilities. Each observation
+replaces the previous value for the entire call. Null counts remain unknown. Duplicate observations
+are suppressed. Only completion usage is authoritative, including when it corrects an earlier value.
+Anthropic and Vertex Claude report observations from `message_start` and `message_delta`. Gemini
+and Vertex Gemini report normalized `usageMetadata`, including reasoning output tokens.
+
+OpenAI-compatible connections default running usage off. The **Running usage** capability override
+opts a vLLM-compatible endpoint into `stream_options.continuous_usage_stats` when streaming usage
+is enabled. Other compatible endpoints do not receive that extension by default. Non-streaming
+responses emit no running usage events. Managed agent loops project observations into their existing
+`LlmAgentUsageEvent`: a repeated `RequestId` replaces that step's observation, and `RunTotals` includes
+completed steps plus the current estimate. Only a step's completion updates the settled run total.
+
 A response that arrives complete produces its events in a fixed order: reasoning text, the answer text as
 one `LlmTextDeltaEvent`, the refusal text when it differs from the answer text, then for each tool call its
 `LlmToolCallStartedEvent`, `LlmToolCallArgumentsDeltaEvent` and `LlmToolCallCompletedEvent`, and last the

@@ -35,6 +35,7 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
         OutputLimitEnforcement = Common.LLM.LlmOutputLimitEnforcement.ProviderEnforced,
         SupportsStreaming = true,
         SupportsStreamingUsage = true,
+        SupportsUsageDeltas = true,
         SupportsModelListing = true,
         SupportsAccountUsage = false,
         SupportsJsonSchema = false,
@@ -128,6 +129,7 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
         string? lastEvent = null;
         var toolCalls = new Dictionary<int, AnthropicToolCallBuilder>();
         var streamedContent = new AnthropicContentStream();
+        var usageDeltas = new UsageDeltas(capabilities.SupportsUsageDeltas);
 
         await foreach (string data in Sse.ReadDataPayloadsAsync(events, cancellationToken))
         {
@@ -159,6 +161,11 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
                             inputTokens = ReadToken(message, "usage", "input_tokens") ?? inputTokens;
                             cachedTokens = ReadToken(message, "usage", "cache_read_input_tokens") ?? cachedTokens;
                             cacheWriteTokens = ReadToken(message, "usage", "cache_creation_input_tokens") ?? cacheWriteTokens;
+                        }
+
+                        if (usageDeltas.Next(AnthropicUsage.Create(inputTokens, outputTokens, cachedTokens, cacheWriteTokens)) is { } initialUsage)
+                        {
+                            yield return initialUsage;
                         }
 
                         break;
@@ -247,6 +254,10 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
                         inputTokens = ReadToken(root, "usage", "input_tokens") ?? inputTokens;
                         cachedTokens = ReadToken(root, "usage", "cache_read_input_tokens") ?? cachedTokens;
                         cacheWriteTokens = ReadToken(root, "usage", "cache_creation_input_tokens") ?? cacheWriteTokens;
+                        if (usageDeltas.Next(AnthropicUsage.Create(inputTokens, outputTokens, cachedTokens, cacheWriteTokens)) is { } runningUsage)
+                        {
+                            yield return runningUsage;
+                        }
                         if (string.Equals(stopReason, "refusal", StringComparison.Ordinal)
                             && refusalExplanation is { Length: > 0 } declined)
                         {

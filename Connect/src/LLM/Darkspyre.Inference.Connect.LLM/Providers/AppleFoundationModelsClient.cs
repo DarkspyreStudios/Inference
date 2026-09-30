@@ -46,7 +46,7 @@ internal sealed class AppleFoundationModelsClient(HttpClient http, IAppleProcess
             throw new InferenceException(InferenceFailureCode.ModelUnavailable, "Unknown Apple system model ID.");
         LlmProviderCapabilities result = base.GetCapabilities(connection, modelId);
         if (result.SupportsJsonObject || result.SupportsPromptImages || result.SupportsPromptDocuments
-            || result.SupportsStreamingUsage || result.SupportsAccountUsage || result.ReasoningLevels.Count > 0)
+            || result.SupportsStreamingUsage || result.SupportsUsageDeltas || result.SupportsAccountUsage || result.ReasoningLevels.Count > 0)
             throw new NotSupportedException("Capability overrides cannot enable unsupported Apple model features.");
         return result;
     }

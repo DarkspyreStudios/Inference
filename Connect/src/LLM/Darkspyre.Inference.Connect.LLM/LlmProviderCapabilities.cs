@@ -26,7 +26,11 @@ public sealed record LlmProviderCapabilities
     /// </summary>
     public bool SupportsStreaming { get; init; }
 
+    /// <summary>A streamed response reports usage by its completion.</summary>
     public bool SupportsStreamingUsage { get; init; }
+
+    /// <summary>A streamed response can emit cumulative usage observations before completion.</summary>
+    public bool SupportsUsageDeltas { get; init; }
 
     public bool SupportsModelListing { get; init; }
 
@@ -94,6 +98,7 @@ public sealed record LlmProviderCapabilities
         {
             SupportsStreaming = overrides.SupportsStreaming ?? SupportsStreaming,
             SupportsStreamingUsage = overrides.SupportsStreamingUsage ?? SupportsStreamingUsage,
+            SupportsUsageDeltas = overrides.SupportsUsageDeltas ?? SupportsUsageDeltas,
             SupportsModelListing = overrides.SupportsModelListing ?? SupportsModelListing,
             SupportsAccountUsage = overrides.SupportsAccountUsage ?? SupportsAccountUsage,
             SupportsJsonSchema = overrides.SupportsJsonSchema ?? SupportsJsonSchema,
@@ -139,6 +144,9 @@ public sealed record LlmCapabilityOverrides
     public bool? SupportsStreaming { get; init; }
 
     public bool? SupportsStreamingUsage { get; init; }
+
+    /// <summary>Enables continuous usage on a compatible endpoint, or disables an adapter's running usage events.</summary>
+    public bool? SupportsUsageDeltas { get; init; }
 
     public bool? SupportsModelListing { get; init; }
 

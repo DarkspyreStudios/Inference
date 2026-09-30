@@ -141,6 +141,7 @@ internal sealed class ConnectLlmInference(
     {
         OutputLimitEnforcement = capabilities.OutputLimitEnforcement,
         SupportsStreaming = capabilities.SupportsStreaming,
+        SupportsUsageDeltas = capabilities.SupportsUsageDeltas,
         SupportsModelListing = capabilities.SupportsModelListing,
         SupportsJsonSchema = capabilities.SupportsJsonSchema,
         SupportsJsonObject = capabilities.SupportsJsonObject,
