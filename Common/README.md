@@ -38,6 +38,10 @@ It is independent of `ReasoningLevels`, which describe control over reasoning ef
 defaults to false. Engines set it only when they implement public reasoning output. SelfHost and
 the portable Connect binding preserve the selected adapter's flag.
 
+`LlmCapabilities.SupportsStreamingUsage` describes final usage on a streamed completion. It defaults
+to false and is independent of running usage observations. Connect and SelfHost preserve the selected
+adapter or engine's declaration.
+
 `LlmUsageDeltaEvent.Cumulative` reports running usage for the entire call. Each observation replaces
 the previous observation; never add them together. Null fields are unreported, not zero. Completion
 usage is authoritative and can differ from the last observation. An adapter emits changed observations

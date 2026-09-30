@@ -68,6 +68,7 @@ public sealed class QwenLlmInference : ITensorLlmInference
             SupportsJsonObject = true,
             ReasoningLevels = ReasoningLevels,
             SupportsReasoningText = true,
+            SupportsStreamingUsage = true,
             SupportsTemperature = true,
             SupportsToolUse = true,
             Tools = new() { SupportsParallelCalls = true, StrictInputSchema = LlmStrictInputSchemaSupport.Unsupported },

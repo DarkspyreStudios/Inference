@@ -3,6 +3,7 @@ using System.Text.Json;
 using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Common.LLM;
 using Darkspyre.Inference.Common.Setup;
+using Darkspyre.Inference.Connect.LLM.Providers;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Darkspyre.Inference.Connect.LLM.Tests;
@@ -105,6 +106,140 @@ public sealed class SelfHostTests
         InferenceException missing = await Assert.ThrowsAsync<InferenceException>(() => llms.ListModelsAsync("connection"));
         Assert.Equal(InferenceFailureCode.ModelUnavailable, missing.Code);
         Assert.False((await llms.GetCapabilitiesAsync("connection")).SupportsToolUse);
+        Assert.False((await llms.GetCapabilitiesAsync("connection")).SupportsStreamingUsage);
+    }
+
+    [Theory]
+    [InlineData(false, false, false)]
+    [InlineData(true, false, false)]
+    [InlineData(true, true, false)]
+    [InlineData(true, false, true)]
+    [InlineData(true, true, true)]
+    public async Task StreamingAndUsageCapabilitiesMirrorTheEngine(bool streaming, bool finalUsage, bool usageDeltas)
+    {
+        var engine = new Engine
+        {
+            Capabilities = EngineCapabilities with
+            {
+                SupportsStreaming = streaming,
+                SupportsStreamingUsage = finalUsage,
+                SupportsUsageDeltas = usageDeltas
+            }
+        };
+        using ServiceProvider services = Services(engine);
+        LlmProviderService llms = services.GetRequiredService<LlmProviderService>();
+        LlmProviderCapabilities capabilities = await llms.GetModelCapabilitiesAsync("connection", "qwen");
+        LlmCapabilities portable = await llms.Bind("connection").GetCapabilitiesAsync("qwen");
+        LlmProviderCapabilities listed = Assert.Single(await llms.ListModelsAsync("connection")).Capabilities!;
+        Assert.Equal(streaming, capabilities.SupportsStreaming);
+        Assert.Equal(finalUsage, capabilities.SupportsStreamingUsage);
+        Assert.Equal(usageDeltas, capabilities.SupportsUsageDeltas);
+        Assert.Equal(streaming, portable.SupportsStreaming);
+        Assert.Equal(finalUsage, portable.SupportsStreamingUsage);
+        Assert.Equal(usageDeltas, portable.SupportsUsageDeltas);
+        Assert.Equal(streaming, listed.SupportsStreaming);
+        Assert.Equal(finalUsage, listed.SupportsStreamingUsage);
+        Assert.Equal(usageDeltas, listed.SupportsUsageDeltas);
+    }
+
+    [Fact]
+    public async Task RequestProviderOptionsAreRejectedBeforeResolvingTheEngine()
+    {
+        var engine = new Engine();
+        using ServiceProvider services = Services(engine);
+        LlmProviderService llms = services.GetRequiredService<LlmProviderService>();
+        var request = new LlmChatRequest
+        {
+            ModelId = "qwen",
+            ProviderOptions = new Dictionary<string, JsonElement> { ["private-option"] = JsonSerializer.SerializeToElement("private-value") }
+        };
+        NotSupportedException error = await Assert.ThrowsAsync<NotSupportedException>(() => llms.CompleteAsync("connection", request));
+        Assert.Contains("ProviderOptions", error.Message);
+        Assert.DoesNotContain("private-value", error.Message);
+        LlmRequestAccounting accounting = await llms.MeasureRequestAsync("connection", request);
+        Assert.False(accounting.IsSupported);
+        Assert.Null(accounting.UsedContextTokens);
+        Assert.Equal("This route cannot project the requested features for accounting.", accounting.Diagnostic);
+        Assert.Equal(0, ((Host)services.GetRequiredService<ILlmSelfHost>()).ResolutionCount);
+        Assert.Empty(engine.Requests);
+    }
+
+    [Theory]
+    [InlineData("provider-options")]
+    [InlineData("headers")]
+    [InlineData("capabilities")]
+    [InlineData("empty-capabilities")]
+    [InlineData("model-capabilities")]
+    public async Task InvalidConnectionOptionsFailGenerationAndAccountingButRemainDiscoverable(string kind)
+    {
+        var engine = new Engine();
+        using ServiceProvider services = Services(engine, connection: UnsupportedConnection(kind));
+        LlmProviderService llms = services.GetRequiredService<LlmProviderService>();
+        await Assert.ThrowsAsync<NotSupportedException>(() => llms.CompleteAsync("connection", new() { ModelId = "qwen" }));
+        InferenceException portable = await Assert.ThrowsAsync<InferenceException>(async () =>
+        {
+            await foreach (LlmStreamEvent _ in llms.Bind("connection").StreamAsync(new() { ModelId = "qwen" })) { }
+        });
+        Assert.Equal(InferenceFailureCode.UnsupportedFeature, portable.Code);
+        LlmRequestAccounting accounting = await llms.MeasureRequestAsync("connection", new() { ModelId = "qwen" });
+        Assert.False(accounting.IsSupported);
+        Assert.Null(accounting.UsedContextTokens);
+        Assert.Null(accounting.NeedsCompaction);
+        Assert.Equal(0, ((Host)services.GetRequiredService<ILlmSelfHost>()).ResolutionCount);
+        Assert.Empty(engine.Requests);
+        Assert.True((await llms.GetModelCapabilitiesAsync("connection", "qwen")).SupportsToolUse);
+        Assert.Equal("qwen", Assert.Single(await llms.ListModelsAsync("connection")).Id);
+    }
+
+    [Theory]
+    [InlineData("provider-options", "self-host-provider-options")]
+    [InlineData("headers", "self-host-headers")]
+    [InlineData("capabilities", "self-host-capability-overrides")]
+    [InlineData("empty-capabilities", "self-host-capability-overrides")]
+    [InlineData("model-capabilities", "self-host-capability-overrides")]
+    public async Task SettingsRejectIgnoredConnectionOptions(string kind, string issueCode)
+    {
+        LlmConnection connection = UnsupportedConnection(kind);
+        using ServiceProvider services = Services(new Engine(), connection: connection);
+        var target = new Target();
+        LlmSettingsManager manager = services.GetRequiredService<LlmProviderService>().CreateSettingsManager(target);
+        LlmSettings settings = await manager.OpenAsync(LlmTransport.SelfHost,
+            new(SetupChangeIntent.Edit, "connection", "v1"), connection, "qwen");
+        Assert.False(settings.CanSave);
+        SetupCommitResult result = await manager.SaveAsync(settings);
+        Assert.Equal(SetupCommitState.Invalid, result.State);
+        Assert.NotNull(result.Issues);
+        Assert.Contains(result.Issues, issue => issue.Code == issueCode);
+        Assert.Null(target.Changes);
+        Assert.Equal("engine-1", Assert.Single((await manager.QueryChoicesAsync(settings, "engine", new())).Choices).Value);
+    }
+
+    [Fact]
+    public async Task ManagedTurnRejectsIgnoredOptionsBeforeResolvingTheEngine()
+    {
+        var engine = new Engine();
+        using ServiceProvider services = Services(engine);
+        await using ILlmAgentSession session = await services.GetRequiredService<LlmAgentProviderService>()
+            .StartSessionAsync("connection", new() { ModelId = "qwen" });
+        int resolutions = ((Host)services.GetRequiredService<ILlmSelfHost>()).ResolutionCount;
+        ((Source)services.GetRequiredService<ILlmConnectionSource>()).Connection = UnsupportedConnection("provider-options") with { Version = "v2" };
+        var events = new List<LlmAgentEvent>();
+        await foreach (LlmAgentEvent item in session.RunTurnAsync(new() { Input = [new LlmAgentTextContent("hello")] }))
+        { events.Add(item); }
+        LlmAgentTurnCompletedEvent terminal = Assert.Single(events.OfType<LlmAgentTurnCompletedEvent>());
+        Assert.Equal(LlmAgentCompletionReason.ProviderFailure, terminal.Reason);
+        Assert.Empty(events.OfType<LlmAgentTextDeltaEvent>());
+        Assert.Equal(resolutions, ((Host)services.GetRequiredService<ILlmSelfHost>()).ResolutionCount);
+        Assert.Empty(engine.Requests);
+    }
+
+    [Fact]
+    public void EstimatorRejectsUnsupportedOptionsWithoutResolvingTheEngine()
+    {
+        var host = new Host(new Engine(), true);
+        var client = new SelfHostLlmClient(host);
+        Assert.Throws<NotSupportedException>(() => client.EstimateInputTokens(UnsupportedConnection("headers"), new() { ModelId = "qwen" }));
+        Assert.Equal(0, host.ResolutionCount);
     }
 
     [Fact]
@@ -169,10 +304,10 @@ public sealed class SelfHostTests
         Provenance = new() { ImplementationId = "engine", ModelId = "qwen" }
     });
 
-    private static ServiceProvider Services(Engine engine, bool loaded = true)
+    private static ServiceProvider Services(Engine engine, bool loaded = true, LlmConnection? connection = null)
     {
         var services = new ServiceCollection();
-        services.AddSingleton<ILlmConnectionSource>(new Source());
+        services.AddSingleton<ILlmConnectionSource>(new Source(connection));
         services.AddSingleton<ILlmSelfHost>(new Host(engine, loaded));
         services.AddLlmConnect();
         services.AddLlmConnectSelfHost();
@@ -186,25 +321,30 @@ public sealed class SelfHostTests
 
     private sealed class Host(Engine engine, bool loaded) : ILlmSelfHost
     {
+        public int ResolutionCount { get; private set; }
         public Task<IReadOnlyList<LlmSelfHostEngine>> ListEnginesAsync(CancellationToken cancellationToken = default) =>
             Task.FromResult<IReadOnlyList<LlmSelfHostEngine>>([new("engine-1", "Swift 27B")]);
-        public Task<ILlmInference> GetInferenceAsync(string engineId, CancellationToken cancellationToken = default) =>
-            loaded && engineId == "engine-1" ? Task.FromResult<ILlmInference>(engine)
+        public Task<ILlmInference> GetInferenceAsync(string engineId, CancellationToken cancellationToken = default)
+        {
+            ResolutionCount++;
+            return loaded && engineId == "engine-1" ? Task.FromResult<ILlmInference>(engine)
                 : throw new InferenceException(InferenceFailureCode.ModelUnavailable, $"Engine '{engineId}' is not loaded.");
+        }
         public LlmCapabilities? GetCapabilities(string engineId, string? modelId) =>
-            loaded && engineId == "engine-1" ? EngineCapabilities : null;
+            loaded && engineId == "engine-1" ? engine.Capabilities : null;
     }
 
     private sealed class Engine : ILlmInference
     {
+        public LlmCapabilities Capabilities { get; init; } = EngineCapabilities;
         public Queue<LlmStreamEvent[]> Script { get; } = new();
         public List<LlmInferenceRequest> Requests { get; } = [];
         public InferenceImplementationDescriptor Descriptor { get; } =
             new("engine", "Engine", InferenceImplementationKind.Tensor, InferenceTask.TextGeneration);
         public Task<LlmCapabilities> GetCapabilitiesAsync(string? modelId = null, CancellationToken cancellationToken = default) =>
-            Task.FromResult(EngineCapabilities);
+            Task.FromResult(Capabilities);
         public Task<IReadOnlyList<LlmModelInfo>> ListModelsAsync(CancellationToken cancellationToken = default) =>
-            Task.FromResult<IReadOnlyList<LlmModelInfo>>([new("qwen", "Qwen", "Qwen", EngineCapabilities) { MaxContextTokens = 262_144 }]);
+            Task.FromResult<IReadOnlyList<LlmModelInfo>>([new("qwen", "Qwen", "Qwen", Capabilities) { MaxContextTokens = 262_144 }]);
         public Task<IReadOnlyList<LlmModelInfo>> RefreshModelsAsync(CancellationToken cancellationToken = default) =>
             ListModelsAsync(cancellationToken);
         public async IAsyncEnumerable<LlmStreamEvent> StreamAsync(LlmInferenceRequest request,
@@ -216,10 +356,23 @@ public sealed class SelfHostTests
         }
     }
 
-    private sealed class Source : ILlmConnectionSource
+    private static LlmConnection Connection() => new() { Version = "v1", Transport = LlmTransport.SelfHost, Endpoint = "engine-1" };
+
+    private static LlmConnection UnsupportedConnection(string kind) => kind switch
     {
+        "provider-options" => Connection() with { ProviderOptions = new Dictionary<string, JsonElement> { ["ignored"] = JsonSerializer.SerializeToElement(true) } },
+        "headers" => Connection() with { AdditionalHeaders = new Dictionary<string, string> { ["X-Ignored"] = "private-value" } },
+        "capabilities" => Connection() with { CapabilityOverrides = new() { SupportsToolUse = false } },
+        "empty-capabilities" => Connection() with { CapabilityOverrides = new() },
+        "model-capabilities" => Connection() with { ModelCapabilityOverrides = new Dictionary<string, LlmCapabilityOverrides> { ["qwen"] = new() { SupportsToolUse = false } } },
+        _ => throw new ArgumentOutOfRangeException(nameof(kind))
+    };
+
+    private sealed class Source(LlmConnection? connection) : ILlmConnectionSource
+    {
+        public LlmConnection Connection { get; set; } = connection ?? SelfHostTests.Connection();
         public Task<LlmConnection?> GetConnectionAsync(string connectionId, CancellationToken cancellationToken = default) =>
-            Task.FromResult<LlmConnection?>(new() { Version = "v1", Transport = LlmTransport.SelfHost, Endpoint = "engine-1" });
+            Task.FromResult<LlmConnection?>(Connection);
         public Task SaveCredentialAsync(string connectionId, string credentialJson, string expectedVersion, CancellationToken cancellationToken = default) =>
             throw new InvalidOperationException("A SelfHost connection has no credential.");
     }

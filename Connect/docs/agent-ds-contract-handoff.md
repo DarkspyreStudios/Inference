@@ -88,6 +88,11 @@ These changes are unreleased.
 
 ### Host-visible changes
 
+- SelfHost generation and accounting reject provider options, HTTP headers and capability overrides.
+  Remove these from saved SelfHost connections before adoption. Discovery remains available and
+  settings cannot save unsupported options. Common `LlmCapabilities.SupportsStreamingUsage` describes
+  final streamed usage, independent of running usage. Hosted engines declare the flag; SelfHost
+  and portable Connect bindings preserve it.
 - Common `LlmCapabilities` and Connect `LlmProviderCapabilities` carry `SupportsReasoningText`.
   It is independent of reasoning-level control. The Connect override suppresses public reasoning
   and summary requests while retaining opaque replay state. SelfHost mirrors engine support;

@@ -56,6 +56,7 @@ internal sealed class SelfHostLlmClient(ILlmSelfHost host) : ILlmClient, ILlmCon
     {
         ArgumentNullException.ThrowIfNull(connection);
         ArgumentNullException.ThrowIfNull(request);
+        ValidateOptions(connection, request);
         CommonLlm.ILlmInference engine = await host.GetInferenceAsync(connection.Endpoint, cancellationToken).ConfigureAwait(false);
         await foreach (CommonLlm.LlmStreamEvent item in engine.StreamAsync(ToCommon(request), cancellationToken).ConfigureAwait(false))
         {
@@ -67,7 +68,9 @@ internal sealed class SelfHostLlmClient(ILlmSelfHost host) : ILlmClient, ILlmCon
     /// <summary>Counts the request's text locally. The engine's own tokenizer can differ.</summary>
     public ContextEstimate? EstimateInputTokens(LlmConnection connection, LlmChatRequest request)
     {
+        ArgumentNullException.ThrowIfNull(connection);
         ArgumentNullException.ThrowIfNull(request);
+        ValidateOptions(connection, request);
         var text = new StringBuilder(request.Instructions);
         foreach (LlmChatMessage message in request.Messages)
         {
@@ -83,6 +86,22 @@ internal sealed class SelfHostLlmClient(ILlmSelfHost host) : ILlmClient, ILlmCon
             text.Append('\n').Append(tool.Name).Append(tool.Description).Append(tool.InputSchema.GetRawText());
         }
         return new ContextEstimate(LocalTokenCount.Count(text.ToString()));
+    }
+
+    private static void ValidateOptions(LlmConnection connection, LlmChatRequest request)
+    {
+        if (UnsupportedOptions(connection, request) is { } issue) { throw new NotSupportedException(issue.Message); }
+    }
+
+    internal static (string Code, string Message)? UnsupportedOptions(LlmConnection connection, LlmChatRequest? request = null)
+    {
+        if (connection.ProviderOptions.Count > 0 || request?.ProviderOptions.Count > 0)
+        { return ("self-host-provider-options", "A SelfHost engine accepts no provider request options. Remove ProviderOptions from the connection and request."); }
+        if (connection.AdditionalHeaders.Count > 0)
+        { return ("self-host-headers", "A SelfHost engine accepts no HTTP headers. Remove AdditionalHeaders from the connection."); }
+        if (connection.CapabilityOverrides is not null || connection.ModelCapabilityOverrides.Count > 0)
+        { return ("self-host-capability-overrides", "A SelfHost engine owns its capabilities. Remove connection and model capability overrides."); }
+        return null;
     }
 
     private static CommonLlm.LlmInferenceRequest ToCommon(LlmChatRequest request) => new()
@@ -130,7 +149,7 @@ internal sealed class SelfHostLlmClient(ILlmSelfHost host) : ILlmClient, ILlmCon
         SupportsStreaming = capabilities.SupportsStreaming,
         SupportsUsageDeltas = capabilities.SupportsUsageDeltas,
         SupportsReasoningText = capabilities.SupportsReasoningText,
-        SupportsStreamingUsage = true,
+        SupportsStreamingUsage = capabilities.SupportsStreamingUsage,
         SupportsModelListing = capabilities.SupportsModelListing,
         SupportsJsonSchema = capabilities.SupportsJsonSchema,
         SupportsJsonObject = capabilities.SupportsJsonObject,

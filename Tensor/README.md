@@ -295,6 +295,7 @@ features, and a binary tool-result part fails as well. `ReasoningLevels` is `Non
 `High` (thinking on). With structured output and thinking on, the schema's grammar starts after the
 thinking block. Image input is off.
 
+Qwen reports `SupportsStreamingUsage = true` because streamed completions report final usage.
 Qwen reports `SupportsReasoningText = true` because its registered output parser emits thinking
 separately from the answer. Other engines keep the false capability default unless they implement
 that output. Running usage remains off for Tensor engines.

@@ -431,6 +431,8 @@ public sealed class LlmSettings : InferenceSettings<LlmSetupChanges>
         else if (UsesSelfHost)
         {
             if (string.IsNullOrWhiteSpace(_draft.Endpoint)) { issues.Add(new("engine-required", "Choose an engine.", "engine")); }
+            if (Providers.SelfHostLlmClient.UnsupportedOptions(_draft) is { } unsupported)
+            { issues.Add(new(unsupported.Code, unsupported.Message)); }
         }
         else if (_draft.Transport != LlmTransport.AwsBedrockAgentCore
             && (!Uri.TryCreate(_draft.Endpoint, UriKind.Absolute, out Uri? endpoint) || endpoint.Scheme is not ("http" or "https")

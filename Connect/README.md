@@ -1424,7 +1424,14 @@ credential. Several connections can name one engine. Streaming, model listing an
 the engine returned by `GetInferenceAsync`, which is Common's `ILlmInference`; an engine that is unknown
 or not loaded fails with `InferenceException` and `ModelUnavailable`. `GetCapabilities` returns what the
 engine declared when the host loaded it, and does no I/O, because Connect reads a transport's
-capabilities synchronously. An engine that is not loaded reports streaming only.
+capabilities synchronously. Streaming, final streamed usage and running usage flags come from the
+engine. An engine that is not loaded declares no usage or tool support.
+
+Generation and request accounting reject nonempty connection or request `ProviderOptions`, connection
+`AdditionalHeaders`, and connection or model capability overrides. SelfHost passes only typed Common
+request controls to the engine. An engine owns its capabilities; connection overrides do not change
+them. Settings cannot save these unsupported options. Model and capability discovery remain available
+so an invalid saved connection can be inspected and repaired.
 
 Agent sessions run on the managed agent lane, which executes host tools; context estimates count the
 request text with Connect's local tokenizer. Connect references Common only, never the engine library.

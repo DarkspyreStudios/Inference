@@ -40,6 +40,9 @@ public sealed record LlmCapabilities
     /// </summary>
     public bool SupportsStreaming { get; init; }
 
+    /// <summary>A streamed response can report final token usage. Independent of running usage observations.</summary>
+    public bool SupportsStreamingUsage { get; init; }
+
     /// <summary>A streamed response can report cumulative usage before completion.</summary>
     public bool SupportsUsageDeltas { get; init; }
 
