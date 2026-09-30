@@ -12,7 +12,7 @@ foreach ($name in @("llama-$release-bin-win-cuda-13.4-x64.zip", 'cudart-llama-bi
     $expected = $Matches[1]
     $archive = Join-Path $binaryRoot $name
     if (-not (Test-Path $archive)) {
-        & curl.exe --fail --location --retry 3 --output $archive $asset.browser_download_url
+        & curl.exe --silent --show-error --fail --location --retry 3 --output $archive $asset.browser_download_url
         if ($LASTEXITCODE -ne 0) { throw "Download failed: $name" }
     }
     if ((Get-FileHash $archive -Algorithm SHA256).Hash -ne $expected) { throw "SHA-256 mismatch: $name" }
@@ -24,7 +24,7 @@ $model = $tree | Where-Object path -eq $file
 if (-not $model.lfs.oid -or $model.lfs.oid -notmatch '^[a-f0-9]{64}$') { throw 'No model SHA-256 digest is available.' }
 $destination = "$modelRoot\qwen3.8-27b\$file"
 if (-not (Test-Path $destination)) {
-    & curl.exe --fail --location --retry 3 --output $destination "https://huggingface.co/ggml-org/Qwen3.8-27B-GGUF/resolve/main/$file"
+    & curl.exe --silent --show-error --fail --location --retry 3 --output $destination "https://huggingface.co/ggml-org/Qwen3.8-27B-GGUF/resolve/main/$file"
     if ($LASTEXITCODE -ne 0) { throw 'Qwen model download failed.' }
 }
 if ((Get-FileHash $destination -Algorithm SHA256).Hash -ne $model.lfs.oid) { throw 'Qwen model SHA-256 mismatch.' }

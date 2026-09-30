@@ -104,6 +104,22 @@ public sealed class ProxyTests
         Assert.Equal(0, harness.UpstreamCalls);
     }
 
+    [Fact]
+    public async Task RouterExitReturns502AndCancelsActiveForward()
+    {
+        using var rig = new Rig();
+        using var initial = await rig.Admit("qwen");
+        using var harness = new ProxyHarness(rig, HttpStatusCode.OK, "application/json", "{}") { BlockUpstream = true };
+        var pending = harness.Send(stream: false);
+        await WaitFor(() => harness.UpstreamCalls == 1);
+        Assert.Equal(2, rig.Gpu.Snapshot().LlmInFlight);
+        rig.Gpu.RouterExited(12);
+        using var response = await pending.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal(HttpStatusCode.BadGateway, response.StatusCode);
+        Assert.Contains("llama-server restarted", await response.Content.ReadAsStringAsync());
+        Assert.Equal(0, rig.Gpu.Snapshot().LlmInFlight);
+    }
+
     private static async Task WaitFor(Func<bool> predicate)
     {
         for (var i = 0; i < 5000 && !predicate(); i++) await Task.Delay(1);
@@ -115,14 +131,16 @@ public sealed class ProxyTests
         private readonly IHost _host;
         private readonly Handler _handler;
         public HttpClient Client { get; }
+        public bool BlockUpstream { get; set; }
         public int UpstreamCalls { get; private set; }
         public string? UpstreamBody { get; private set; }
         public ProxyHarness(Rig rig, HttpStatusCode status, string type, string body)
         {
-            _handler = new Handler(async request =>
+            _handler = new Handler(async (request, token) =>
             {
                 UpstreamCalls++;
-                UpstreamBody = await request.Content!.ReadAsStringAsync();
+                UpstreamBody = await request.Content!.ReadAsStringAsync(token);
+                if (BlockUpstream) await Task.Delay(Timeout.InfiniteTimeSpan, token);
                 return new(status) { Content = new StringContent(body, Encoding.UTF8, type) };
             });
             _host = new HostBuilder().ConfigureWebHost(web => web.UseTestServer().ConfigureServices(services => services.AddRouting()).Configure(app =>
@@ -138,9 +156,9 @@ public sealed class ProxyTests
             HttpCompletionOption.ResponseHeadersRead, token);
         public HttpClient CreateClient(string name) => new(_handler, disposeHandler: false);
         public void Dispose() { Client.Dispose(); _host.Dispose(); _handler.Dispose(); }
-        private sealed class Handler(Func<HttpRequestMessage, Task<HttpResponseMessage>> send) : HttpMessageHandler
+        private sealed class Handler(Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> send) : HttpMessageHandler
         {
-            protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) => send(request);
+            protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) => send(request, cancellationToken);
         }
     }
 }

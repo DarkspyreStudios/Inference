@@ -228,11 +228,20 @@ internal static class Program
         return await CheckReadyAsync(llms, invocation, cancellationToken) ? 0 : 3;
     }
 
-    private static async Task<bool> CheckReadyAsync(LlmProviderService llms,
+    internal static async Task<bool> CheckReadyAsync(LlmProviderService llms,
         ConsoleInvocation invocation, CancellationToken cancellationToken)
     {
         if (invocation.Provider.Transport is LlmTransport.AppleFoundationModels or LlmTransport.GoogleVertexAi)
             return await ConsoleSetup.CheckAsync(llms, invocation, Console.Error, cancellationToken) == SetupActionState.Completed;
+        if (invocation.Provider.Transport == LlmTransport.OpenAiCompatibleChat)
+        {
+            IReadOnlyList<LlmModel> models = await llms.ListModelsAsync(invocation.Provider.ConnectionId, cancellationToken);
+            bool reachable = models.Count > 0;
+            Console.Error.WriteLine(reachable
+                ? $"{invocation.Provider.DisplayName} is reachable and has registered models."
+                : $"{invocation.Provider.DisplayName} has no registered models.");
+            return reachable;
+        }
         bool ready = await llms.IsAuthenticatedAsync(invocation.Provider.ConnectionId, cancellationToken);
         Console.Error.WriteLine(ready
             ? $"{invocation.Provider.DisplayName} is authenticated."

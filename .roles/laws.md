@@ -123,7 +123,8 @@ protected even when their local store is reset.
 ## L17 — Product-family boundaries are explicit
 
 `Connect` owns connections to external inference providers. `Tensor` owns self-hosted inference.
-`Console` is a separate product surface. A capability belongs to exactly one product family, and
+`Console` is a separate product surface. `App` owns the standalone GPU arbiter and its independent
+Windows deployment. A capability belongs to exactly one product family, and
 shared repository placement does not permit one family to absorb another family's runtime,
 persistence, user interface, or deployment concerns.
 

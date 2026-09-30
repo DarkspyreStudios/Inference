@@ -6,13 +6,17 @@ Typed .NET inference libraries for applications that need external AI providers,
 models, or both. Darkspyre Inference separates **what an application asks a model to do** from
 **how a particular provider or engine performs it**.
 
-The project ships libraries, not a standalone server. A Desktop application can call Tensor
+The four NuGet packages supply inference libraries. A Desktop application can call Tensor
 directly without an HTTP bridge. A web service can host the same libraries and translate its API
 into their typed contracts. In either case, the application owns startup, configuration, credentials,
 persistence, user consent, and shutdown.
 
 Current release: **11.14.0-rc.1**, targeting **.NET 11**, distributed through the private
 [DarkspyreStudios GitHub Packages feed](https://github.com/orgs/DarkspyreStudios/packages).
+
+The repository also hosts the [GPU arbiter](App/README.md), an independent .NET 10 Windows
+x64 application under `App/` that shares a GPU between llama.cpp and ComfyUI. It owns its
+solution, version and deployment outside the four-package release.
 
 ## Goals
 

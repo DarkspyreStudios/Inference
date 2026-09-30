@@ -16,6 +16,7 @@ public sealed class LlmProxy(GpuCoordinator coordinator, IHttpClientFactory clie
 
     public async Task HandleAsync(HttpContext context)
     {
+        using var admissionCancellation = CancellationTokenSource.CreateLinkedTokenSource(context.RequestAborted);
         GpuLease? lease = null;
         Task<GpuLease>? admission = null;
         try
@@ -23,7 +24,7 @@ public sealed class LlmProxy(GpuCoordinator coordinator, IHttpClientFactory clie
             var body = await RequestBody.ReadAsync(context.Request, context.RequestAborted).ConfigureAwait(false);
             if (body.Model is not null)
             {
-                admission = coordinator.AcquireAsync(GpuTarget.Llm(body.Model), context.RequestAborted);
+                admission = coordinator.AcquireAsync(GpuTarget.Llm(body.Model), admissionCancellation.Token);
                 if (body.Stream) await KeepAliveAsync(context, admission).ConfigureAwait(false);
                 lease = await admission.ConfigureAwait(false);
             }
@@ -72,7 +73,13 @@ public sealed class LlmProxy(GpuCoordinator coordinator, IHttpClientFactory clie
         finally
         {
             lease?.Dispose();
-            if (lease is null && admission?.IsCompletedSuccessfully == true) admission.Result.Dispose();
+            if (lease is null && admission is not null)
+            {
+                await admissionCancellation.CancelAsync().ConfigureAwait(false);
+                try { (await admission.ConfigureAwait(false)).Dispose(); }
+                catch (OperationCanceledException) { }
+                catch (GpuException) { }
+            }
         }
     }
 

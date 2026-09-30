@@ -18,6 +18,9 @@ var files = new FileLoggerProvider(options.LogDir);
 builder.Logging.ClearProviders();
 builder.Logging.AddProvider(files);
 builder.Logging.AddFilter("Microsoft", LogLevel.Warning);
+// HTTP transport logs can include caller query strings. Only owned operational events reach the file log.
+builder.Logging.AddFilter("System.Net.Http", LogLevel.None);
+builder.Logging.AddFilter("Yarp", LogLevel.None);
 builder.Services.AddSingleton(files);
 builder.Services.AddHttpClient<ILlamaRouterClient, LlamaRouterClient>(http =>
 { http.BaseAddress = new(options.Llama.Url); http.Timeout = TimeSpan.FromSeconds(10); });

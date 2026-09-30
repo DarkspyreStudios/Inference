@@ -23,8 +23,8 @@ public sealed class GpuCoordinator(ILlamaRouterClient llama, IComfyClient comfy,
     public GpuView Snapshot()
     {
         lock (_gate)
-            return new(_holder?.ToString() ?? "none", _phase == "idle" && (_llmInFlight > 0 || ComfyBusy) ? "busy" : _phase,
-                _llmInFlight, _comfy, _waiters.Select(w => new WaiterView(w.Target.ToString(), w.Kind,
+            return new(_holder?.ToString() ?? "none", _switching ? "switching" : (_llmInFlight > 0 || ComfyBusy) ? "busy" : "idle",
+                _switching ? _phase : null, _llmInFlight, _comfy, _waiters.Select(w => new WaiterView(w.Target.ToString(), w.Kind,
                     (clock.GetUtcNow() - w.Since).TotalSeconds)).ToArray(), _vramUsed);
     }
 
@@ -79,7 +79,11 @@ public sealed class GpuCoordinator(ILlamaRouterClient llama, IComfyClient comfy,
     {
         lock (_gate)
         {
-            if (_waiters.Remove(waiter)) waiter.Completion.TrySetCanceled(token);
+            if (_waiters.Remove(waiter))
+            {
+                waiter.Completion.TrySetCanceled(token);
+                logger.LogInformation("Canceled waiter for {Target}", waiter.Target);
+            }
         }
     }
 
@@ -160,8 +164,8 @@ public sealed class GpuCoordinator(ILlamaRouterClient llama, IComfyClient comfy,
         }
     }
 
-    // Public for deterministic, single-step tests; production calls this only from ExecuteAsync.
-    public async Task StepAsync(CancellationToken cancellationToken)
+    // Tests advance one loop iteration; production calls this only from ExecuteAsync.
+    internal async Task StepAsync(CancellationToken cancellationToken)
     {
         Waiter head;
         long generation;
@@ -253,6 +257,7 @@ public sealed class GpuCoordinator(ILlamaRouterClient llama, IComfyClient comfy,
                 {
                     _waiters.Remove(waiter);
                     waiter.Completion.TrySetException(failure);
+                    logger.LogInformation("Failed waiter for {Target}: {Reason}", waiter.Target, failure.Message);
                 }
             }
         }

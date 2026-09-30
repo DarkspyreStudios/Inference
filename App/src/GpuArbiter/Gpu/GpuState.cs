@@ -7,7 +7,7 @@ public sealed record GpuTarget(string? Model)
     public override string ToString() => Model is null ? "comfy" : $"llm:{Model}";
 }
 public sealed record WaiterView(string Target, string Kind, double WaitingSeconds);
-public sealed record GpuView(string Holder, string Phase, int LlmInFlight,
+public sealed record GpuView(string Holder, string Phase, string? HandoffStep, int LlmInFlight,
     Backends.ComfyState Comfy, IReadOnlyList<WaiterView> Waiters, int? VramUsedMiB);
 public sealed class GpuException(string message, int statusCode = 503) : Exception(message)
 {

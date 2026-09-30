@@ -27,7 +27,7 @@ other routes and websockets through YARP.
 
 ## HTTP interface
 
-- `GET /gpu` returns holder, phase, LLM request count, ComfyUI queue state, waiters and measured VRAM usage.
+- `GET /gpu` returns holder, phase, handoff step, LLM request count, ComfyUI queue state, waiters and measured VRAM usage.
 - `POST /models/load {"model":"id"}` waits for admission and a loaded model before returning `{"success":true}`.
 - `POST /models/unload {"model":"id"}` drains requests and waits for confirmed unload.
 - Inference POST routes include chat completions, completions, embeddings, responses, messages,
@@ -79,6 +79,7 @@ echo 'Call darkspyre_inference_connect_echo with text Hello, then reply with its
 ```
 
 The endpoint override is local to that process. An unauthenticated endpoint requires no login.
+Use the machine's LAN or Tailscale IP if `gpu-box` is only an SSH alias.
 
 ## Windows setup and deployment
 

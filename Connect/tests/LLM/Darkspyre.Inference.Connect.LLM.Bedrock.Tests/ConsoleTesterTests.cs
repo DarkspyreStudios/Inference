@@ -21,6 +21,35 @@ public sealed class ConsoleTesterTests
     }
 
     [Fact]
+    public async Task CompatibleEndpointCanBeInspectedAndUsedWithoutStoredCredentials()
+    {
+        ConsoleInvocation invocation = Parse(["status", "--provider", "openai-compatible-api", "--endpoint", "http://gpu-box:8080/v1"]);
+        var source = new SecureConnectionSource(new InMemoryCredentialStore(), Providers, invocation);
+        var services = new ServiceCollection();
+        services.AddLlmConnect();
+        services.ConfigureAll<Microsoft.Extensions.Http.HttpClientFactoryOptions>(options =>
+            options.HttpMessageHandlerBuilderActions.Add(builder => builder.PrimaryHandler = new CompatibleModelHandler()));
+        using var container = services.BuildServiceProvider();
+        var llms = new LlmProviderService(source, container.GetServices<ILlmClient>());
+        Assert.True(await Program.CheckReadyAsync(llms, invocation, CancellationToken.None));
+        using var description = new StringWriter();
+        Assert.Equal(0, await ConsoleSetup.DescribeAsync(llms, invocation, description, CancellationToken.None));
+        Assert.Contains("OpenAI-Compatible API", description.ToString(), StringComparison.Ordinal);
+        Assert.Null((await source.GetConnectionAsync(invocation.Provider.ConnectionId))?.Credential);
+    }
+
+    private sealed class CompatibleModelHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            Assert.Equal("http://gpu-box:8080/v1/models", request.RequestUri?.AbsoluteUri);
+            Assert.Null(request.Headers.Authorization);
+            return Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+            { Content = new StringContent("""{"data":[{"id":"qwen3.8-27b"}]}""") });
+        }
+    }
+
+    [Fact]
     public async Task AttachmentSmokeToolReturnsProviderNeutralBytes()
     {
         LlmAgentToolDefinition imageOnly = Program.CreateAttachmentTool(supportsDocuments: false);
