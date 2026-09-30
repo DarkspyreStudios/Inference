@@ -55,7 +55,11 @@ logs live in the configured log directory. Request bodies and credentials are no
 
 `deploy/appsettings.json` is the configuration source copied into the build output. All
 paths are absolute. `deploy/presets.ini` defines model IDs and model-specific context sizes.
-The Qwen context starts at a calibration value; deployment requires measurement on the GPU.
+The Qwen preset uses a measured 98,304-token shared KV pool with two parallel slots on the
+RTX 3090 Ti. One request can use the full pool; concurrent requests share its capacity.
+An 88,473-token prompt completes with at least 1,847 MiB free on the configured host.
+The 131,072-token profile leaves less than the required 1 GiB margin.
+Deployment on a different GPU requires measurement.
 `ReleasedMaxUsedMiB` must equal measured idle VRAM plus a margin.
 
 Run from `App/` so `global.json` selects the .NET 10 SDK:
@@ -107,7 +111,7 @@ into another directory requires this setting for its new executable path.
 Measure Qwen with q8_0 K/V caches and no projector. Try context sizes 131072, 98304, 65536,
 49152 and 32768 in descending order. The selected context must complete a request filling
 about 90 percent of its capacity with at least 1 GiB VRAM free. Measure `parallel = 2` with
-`kv-unified` separately before changing the preset. With all models unloaded and ComfyUI
+`kv-unified` separately. With all models unloaded and ComfyUI
 idle after `/free`, set `ReleasedMaxUsedMiB` to idle usage plus 1024 MiB.
 
 Copy the Windows publish output into `G:\AI\gpu-arbiter\app` and the measured presets
