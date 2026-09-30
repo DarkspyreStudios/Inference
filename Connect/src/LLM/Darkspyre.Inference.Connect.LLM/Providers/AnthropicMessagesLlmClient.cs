@@ -173,6 +173,7 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
         int? outputTokens = null;
         string? responseId = null;
         string? stopReason = null;
+        string? containerId = null;
         string? refusalCategory = null;
         string? refusalExplanation = null;
         string? lastEvent = null;
@@ -207,6 +208,7 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
                         if (LlmJson.GetObject(root, "message") is { } message)
                         {
                             responseId = LlmJson.GetString(message, "id");
+                            if (message.TryGetProperty("container", out _)) containerId = ReadContainer(message, connection.Transport);
                             inputTokens = ReadToken(message, "usage", "input_tokens") ?? inputTokens;
                             cachedTokens = ReadToken(message, "usage", "cache_read_input_tokens") ?? cachedTokens;
                             cacheWriteTokens = ReadToken(message, "usage", "cache_creation_input_tokens") ?? cacheWriteTokens;
@@ -295,6 +297,7 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
                         if (LlmJson.GetObject(root, "delta") is { } messageDelta)
                         {
                             stopReason = LlmJson.GetString(messageDelta, "stop_reason") ?? stopReason;
+                            if (messageDelta.TryGetProperty("container", out _)) containerId = ReadContainer(messageDelta, connection.Transport);
                             ReadStopDetails(messageDelta, ref refusalCategory, ref refusalExplanation);
                         }
 
@@ -339,6 +342,7 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
                             AnthropicUsage.Create(inputTokens, outputTokens, cachedTokens, cacheWriteTokens),
                             responseId,
                             streamedContent.BuildContent(),
+                            containerId,
                             response,
                             lastEvent,
                             credential));
@@ -446,6 +450,7 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
                     ReadToken(root, "usage", "cache_creation_input_tokens")),
                 LlmJson.GetString(root, "id"),
                 content.GetArrayLength() == 0 ? null : JsonNode.Parse(content.GetRawText())!.AsArray(),
+                ReadContainer(root, connection.Transport),
                 response,
                 body,
                 credential);
@@ -465,12 +470,16 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
         LlmUsage? usage,
         string? responseId,
         JsonArray? content,
+        string? containerId,
         HttpResponseMessage response,
         string? rawFinal,
         LlmCredential? credential)
     {
         bool refused = string.Equals(stopReason, "refusal", StringComparison.Ordinal);
         bool paused = string.Equals(stopReason, "pause_turn", StringComparison.Ordinal);
+        if (paused && toolCalls.Length > 0)
+            throw new LlmProviderException("Anthropic returned pause_turn with pending client tools; a mixed client/server-tool reply must end with tool_use.",
+                connection.Transport, response.StatusCode);
         bool incomplete = paused || stopReason is "max_tokens" or "model_context_window_exceeded";
         bool requiresAction = toolCalls.Length > 0
             || string.Equals(stopReason, "tool_use", StringComparison.Ordinal);
@@ -506,13 +515,21 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
             ToolCalls = completionStatus == LlmCompletionStatus.RequiresAction ? toolCalls : [],
             ContinuationState = (paused || completionStatus is LlmCompletionStatus.Completed or LlmCompletionStatus.RequiresAction)
                 && content is not null
-                    ? ProviderContinuationStateCodec.Encode(connection, request.ModelId, content) : null,
+                    ? AnthropicContinuation.WithContainer(ProviderContinuationStateCodec.Encode(connection, request.ModelId, content), containerId) : null,
             StructuredOutput = validation,
             Diagnostics = new LlmProviderDiagnostics(
                 (int)response.StatusCode,
                 ProviderHttp.ReadRequestId(response),
                 rawFinal is null ? null : SecretRedactor.Sanitize(rawFinal, credential))
         };
+    }
+
+    private static string? ReadContainer(JsonElement root, LlmTransport transport)
+    {
+        if (!root.TryGetProperty("container", out JsonElement container) || container.ValueKind == JsonValueKind.Null) return null;
+        if (container.ValueKind != JsonValueKind.Object || LlmJson.GetString(container, "id") is not { } id || string.IsNullOrWhiteSpace(id))
+            throw new LlmProviderException("Anthropic returned an invalid code-execution container identity.", transport);
+        return id;
     }
 
     private LlmProviderException ProviderError(
@@ -645,14 +662,17 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
         }
 
         var messages = new JsonArray();
+        string? containerId = null;
         foreach (LlmChatMessage message in request.Messages)
         {
             if (message.ContinuationState is not null)
             {
+                JsonArray retained = ProviderContinuationStateCodec.DecodeMessage(message, connection, request.ModelId);
+                containerId = AnthropicContinuation.ReadPayload(message.ContinuationState.Payload).ContainerId ?? containerId;
                 messages.Add(new JsonObject
                 {
                     ["role"] = "assistant",
-                    ["content"] = ProviderContinuationStateCodec.DecodeMessage(message, connection, request.ModelId)
+                    ["content"] = retained
                 });
             }
             else if (message.Role is "system" or "developer")
@@ -715,6 +735,7 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
             ["messages"] = messages,
             ["stream"] = stream
         };
+        if (containerId is not null) payload["container"] = containerId;
         AnthropicReasoningFields fields = AnthropicModelProfiles.Fields(
             AnthropicModelProfiles.Resolve(
                 ReasoningModelId(request.ModelId),

@@ -14,15 +14,15 @@ internal sealed class VertexContinuationCodec : ILlmContinuationCodec
 
     public LlmContinuationState Encode(LlmConnection connection, string modelId, JsonArray content)
     {
-        JsonArray projected = VertexEndpoints.ParseModel(modelId).Publisher == "anthropic"
-            ? JsonNode.Parse(ProviderContinuationStateCodec.Encode(AnthropicConnection(connection), modelId, content).Payload)!.AsArray()
-            : GeminiContinuation.Validate(content);
+        string payload = VertexEndpoints.ParseModel(modelId).Publisher == "anthropic"
+            ? ProviderContinuationStateCodec.Encode(AnthropicConnection(connection), modelId, content).Payload
+            : GeminiContinuation.Validate(content).ToJsonString();
         return new()
         {
             ImplementationId = Owner,
             ModelId = modelId,
             ScopeId = connection.ResolvedContinuationScope ?? throw new InvalidOperationException("Vertex identity is unresolved."),
-            Payload = projected.ToJsonString()
+            Payload = payload
         };
     }
 

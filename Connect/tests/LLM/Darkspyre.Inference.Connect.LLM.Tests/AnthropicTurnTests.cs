@@ -29,6 +29,174 @@ public sealed class AnthropicTurnTests
 
     private static LlmChatRequest Request => new() { ModelId = Model, Messages = [new("user", "start")] };
     private static LlmToolDefinition Tool => new() { Name = "run", InputSchema = JsonElement.Parse("""{"type":"object"}""") };
+    private const string MixedContent = """
+        [{"type":"text","text":"Working"},
+         {"type":"server_tool_use","id":"srv_code","name":"code_execution","input":{"code":"await run()"}},
+         {"type":"tool_use","id":"client_1","name":"run","input":{"name":"fixture"},"caller":{"type":"code_execution_20260120","tool_id":"srv_code"}}]
+        """;
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ContainerIdentitySurvivesPausedCaptureSerializationReplayAndScopeChecks(bool streaming)
+    {
+        using var handler = new Handler(streaming, "pause_turn")
+        {
+            InitialContainer = JsonNode.Parse("""{"id":"initial-container"}"""),
+            Container = JsonNode.Parse("""{"id":"container-current","expires_at":"2026-10-30T12:00:00Z","discarded":"not-continuation-data"}""")
+        };
+        using var http = new HttpClient(handler);
+        var client = new AnthropicMessagesLlmClient(http);
+        var connection = Connection(streaming);
+        var events = await Read(client.StreamAsync(connection, Request));
+        var result = Assert.Single(events.OfType<LlmChatCompletionEvent>()).Result;
+        LlmContinuationState state = JsonSerializer.Deserialize<LlmContinuationState>(JsonSerializer.Serialize(result.ContinuationState))!;
+        Assert.Equal("container-current", AnthropicContinuation.ReadPayload(state.Payload).ContainerId);
+        Assert.DoesNotContain("discarded", state.Payload, StringComparison.Ordinal);
+        Assert.DoesNotContain("expires_at", state.Payload, StringComparison.Ordinal);
+        var replay = Request with { Messages = [Request.Messages[0], new("assistant", result.Text) { ContinuationState = state }] };
+        await Read(client.StreamAsync(connection, replay));
+        Assert.Equal("container-current", (string?)JsonNode.Parse(handler.Bodies[1])!["container"]);
+        Assert.True(JsonNode.DeepEquals(JsonNode.Parse(Content), JsonNode.Parse(handler.Bodies[1])!["messages"]![1]!["content"]));
+        await Assert.ThrowsAsync<NotSupportedException>(() => client.CountInputTokensAsync(connection, replay));
+        Assert.Equal(2, handler.Bodies.Count);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => Read(client.StreamAsync(connection, replay with
+        { ProviderOptions = new Dictionary<string, JsonElement> { ["container"] = JsonElement.Parse("\"replacement\"") } })));
+        Assert.Equal(2, handler.Bodies.Count);
+        await Assert.ThrowsAsync<ArgumentException>(() => Read(client.StreamAsync(connection with
+        { Credential = new LlmCredential { ApiKey = "different-account" }.Serialize() }, replay)));
+        Assert.Equal(2, handler.Bodies.Count);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task LastRetainedContainerWinsWithoutMutatingEarlierState(bool streaming)
+    {
+        using var handler = new Handler(streaming, "end_turn");
+        using var http = new HttpClient(handler);
+        var connection = Connection(streaming);
+        var content = JsonNode.Parse("""[{"type":"text","text":"retained"}]""")!.AsArray();
+        var state = ProviderContinuationStateCodec.Encode(connection, Model, content);
+        var old = AnthropicContinuation.WithContainer(state, "older-container");
+        var latest = AnthropicContinuation.WithContainer(state, "latest-container");
+        var request = Request with
+        {
+            Messages = [Request.Messages[0], new("assistant", "retained") { ContinuationState = old },
+            new("user", "next"), new("assistant", "retained") { ContinuationState = latest },
+            new("user", "next"), new("assistant", "retained") { ContinuationState = state }, new("user", "continue")]
+        };
+        await Read(new AnthropicMessagesLlmClient(http).StreamAsync(connection, request));
+        Assert.Equal("latest-container", (string?)JsonNode.Parse(Assert.Single(handler.Bodies))!["container"]);
+        Assert.Equal("older-container", AnthropicContinuation.ReadPayload(old.Payload).ContainerId);
+        Assert.Null(AnthropicContinuation.ReadPayload(state.Payload).ContainerId);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ExpiredContainerFailureDoesNotRetryOrRecreateTheContainer(bool streaming)
+    {
+        using var handler = new Handler(streaming, "pause_turn")
+        { Container = JsonNode.Parse("""{"id":"container-current"}"""), ExpireAfterFirst = true };
+        using var http = new HttpClient(handler);
+        var client = new AnthropicMessagesLlmClient(http);
+        var connection = Connection(streaming);
+        var first = Assert.Single((await Read(client.StreamAsync(connection, Request))).OfType<LlmChatCompletionEvent>()).Result;
+        var replay = Request with { Messages = [Request.Messages[0], new("assistant", first.Text) { ContinuationState = first.ContinuationState }] };
+        var error = await Assert.ThrowsAsync<LlmProviderException>(() => Read(client.StreamAsync(connection, replay)));
+        Assert.Equal(HttpStatusCode.BadRequest, error.StatusCode);
+        Assert.Equal(2, handler.Bodies.Count);
+        Assert.Equal("container-current", (string?)JsonNode.Parse(handler.Bodies[1])!["container"]);
+        Assert.DoesNotContain("fixture-key", error.ToString(), StringComparison.Ordinal);
+        Assert.Contains("expired", error.Message, StringComparison.Ordinal);
+        Assert.Null(error.InnerException);
+        Assert.Equal("container-current", AnthropicContinuation.ReadPayload(first.ContinuationState!.Payload).ContainerId);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task MissingStreamContainerUpdateKeepsIdentityAndExplicitNullClearsIt(bool omitDeltaContainer)
+    {
+        using var handler = new Handler(true, "pause_turn")
+        { InitialContainer = JsonNode.Parse("""{"id":"initial-container"}"""), OmitDeltaContainer = omitDeltaContainer };
+        using var http = new HttpClient(handler);
+        var events = await Read(new AnthropicMessagesLlmClient(http).StreamAsync(Connection(), Request));
+        var state = Assert.Single(events.OfType<LlmChatCompletionEvent>()).Result.ContinuationState!;
+        Assert.Equal(omitDeltaContainer ? "initial-container" : null, AnthropicContinuation.ReadPayload(state.Payload).ContainerId);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task MixedDeferredServerAndClientCallsReplayWithClientResultsAndContainerOnly(bool streaming)
+    {
+        using var handler = new Handler(streaming, "tool_use")
+        { ContentJson = MixedContent, Container = JsonNode.Parse("""{"id":"container-current"}"""), CompleteAfterFirst = true };
+        using var http = new HttpClient(handler);
+        var client = new AnthropicMessagesLlmClient(http);
+        var connection = Connection(streaming);
+        var request = Request with { Tools = [Tool] };
+        var events = await Read(client.StreamAsync(connection, request));
+        var result = Assert.Single(events.OfType<LlmChatCompletionEvent>()).Result;
+        Assert.Equal(LlmCompletionStatus.RequiresAction, result.Status);
+        Assert.Equal("client_1", Assert.Single(result.ToolCalls).Id);
+        Assert.Equal("client_1", Assert.Single(events.OfType<LlmToolCallStartedEvent>()).ToolCallId);
+        Assert.Single(events.OfType<LlmToolCallCompletedEvent>());
+        var replay = request with
+        {
+            Messages = [request.Messages[0], new("assistant", result.Text) { ToolCalls = result.ToolCalls, ContinuationState = result.ContinuationState },
+                new("tool", "") { ToolResults = [new("client_1", new() { Parts = [new LlmToolOutputText("client result")] })] }]
+        };
+        await Read(client.StreamAsync(connection, replay));
+        JsonNode payload = JsonNode.Parse(handler.Bodies[1])!;
+        Assert.Equal("container-current", (string?)payload["container"]);
+        Assert.True(JsonNode.DeepEquals(JsonNode.Parse(MixedContent), payload["messages"]![1]!["content"]));
+        JsonArray results = payload["messages"]![2]!["content"]!.AsArray();
+        Assert.Single(results);
+        Assert.Equal("client_1", (string?)results[0]!["tool_use_id"]);
+        Assert.Equal("client result", (string?)results[0]!["content"]);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ContradictoryPauseWithPendingClientCallsFailsInsteadOfHidingCallsInState(bool streaming)
+    {
+        using var handler = new Handler(streaming, "pause_turn") { ContentJson = MixedContent };
+        using var http = new HttpClient(handler);
+        var client = new AnthropicMessagesLlmClient(http);
+        LlmProviderException error = await Assert.ThrowsAsync<LlmProviderException>(() =>
+            Read(client.StreamAsync(Connection(streaming), Request with { Tools = [Tool] })));
+        Assert.Contains("pending client tools", error.Message, StringComparison.Ordinal);
+        Assert.Single(handler.Bodies);
+    }
+
+    [Theory]
+    [InlineData("[]")]
+    [InlineData("{\"content\":null}")]
+    [InlineData("{\"content\":[],\"container_id\":null}")]
+    [InlineData("{\"content\":[],\"container_id\":1}")]
+    [InlineData("{\"content\":[],\"container_id\":\" \"}")]
+    [InlineData("{\"content\":[],\"unknown\":true}")]
+    public void ContinuationRejectsLegacyShapesAndUntrustedMetadata(string payload)
+    {
+        LlmContinuationState state = ProviderContinuationStateCodec.Encode(Connection(), Model, new JsonArray());
+        Assert.Throws<ArgumentException>(() => ProviderContinuationStateCodec.Decode(state with { Payload = payload }, Connection(), Model));
+    }
+
+    [Theory]
+    [InlineData("{\"id\":\"\"}")]
+    [InlineData("{\"id\":1}")]
+    [InlineData("{}")]
+    [InlineData("\"not-container\"")]
+    public async Task MalformedNativeContainerIdentityFailsWithoutInventingOne(string container)
+    {
+        using var handler = new Handler(false, "pause_turn") { Container = JsonNode.Parse(container) };
+        using var http = new HttpClient(handler);
+        await Assert.ThrowsAsync<LlmProviderException>(() => Read(new AnthropicMessagesLlmClient(http).StreamAsync(Connection(false), Request)));
+    }
 
     [Theory]
     [InlineData(true)]
@@ -207,10 +375,20 @@ public sealed class AnthropicTurnTests
     private sealed class Handler(bool streaming, string reason) : HttpMessageHandler
     {
         internal List<string> Bodies { get; } = [];
+        internal string ContentJson { get; init; } = Content;
+        internal JsonNode? Container { get; init; }
+        internal JsonNode? InitialContainer { get; init; }
+        internal bool CompleteAfterFirst { get; init; }
+        internal bool ExpireAfterFirst { get; init; }
+        internal bool OmitDeltaContainer { get; init; }
 
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             Bodies.Add(await request.Content!.ReadAsStringAsync(cancellationToken));
+            if (ExpireAfterFirst && Bodies.Count > 1) return new(HttpStatusCode.BadRequest)
+            { Content = new StringContent("""{"error":{"type":"invalid_request_error","message":"container expired fixture-key","api_key":"fixture-key"}}""", Encoding.UTF8, "application/json") };
+            string contentJson = CompleteAfterFirst && Bodies.Count > 1 ? """[{"type":"text","text":"done"}]""" : ContentJson;
+            string stopReason = CompleteAfterFirst && Bodies.Count > 1 ? "end_turn" : reason;
             string body;
             if (!streaming)
             {
@@ -219,8 +397,9 @@ public sealed class AnthropicTurnTests
                     ["id"] = "msg_fixture",
                     ["type"] = "message",
                     ["role"] = "assistant",
-                    ["content"] = JsonNode.Parse(Content),
-                    ["stop_reason"] = reason,
+                    ["content"] = JsonNode.Parse(contentJson),
+                    ["stop_reason"] = stopReason,
+                    ["container"] = Container?.DeepClone(),
                     ["usage"] = new JsonObject { ["input_tokens"] = 7, ["output_tokens"] = 4 }
                 }.ToJsonString();
             }
@@ -229,9 +408,10 @@ public sealed class AnthropicTurnTests
                 var events = new List<JsonObject>
                 {
                     new() { ["type"] = "message_start", ["message"] = new JsonObject
-                    { ["id"] = "msg_fixture", ["usage"] = new JsonObject { ["input_tokens"] = 7 } } }
+                    { ["id"] = "msg_fixture", ["container"] = (InitialContainer ?? Container)?.DeepClone(),
+                        ["usage"] = new JsonObject { ["input_tokens"] = 7 } } }
                 };
-                JsonArray content = JsonNode.Parse(Content)!.AsArray();
+                JsonArray content = JsonNode.Parse(contentJson)!.AsArray();
                 for (int index = 0; index < content.Count; index++)
                 {
                     JsonObject block = content[index]!.DeepClone().AsObject();
@@ -242,7 +422,7 @@ public sealed class AnthropicTurnTests
                         citations = nativeCitations.DeepClone();
                         block["citations"] = new JsonArray();
                     }
-                    if ((string?)block["type"] == "server_tool_use")
+                    if ((string?)block["type"] is "server_tool_use" or "tool_use")
                     {
                         input = block["input"]!.DeepClone();
                         block["input"] = new JsonObject();
@@ -271,10 +451,12 @@ public sealed class AnthropicTurnTests
                     }
                     events.Add(new() { ["type"] = "content_block_stop", ["index"] = index });
                 }
+                var delta = new JsonObject { ["stop_reason"] = stopReason };
+                if (!OmitDeltaContainer) delta["container"] = Container?.DeepClone();
                 events.Add(new()
                 {
                     ["type"] = "message_delta",
-                    ["delta"] = new JsonObject { ["stop_reason"] = reason },
+                    ["delta"] = delta,
                     ["usage"] = new JsonObject { ["output_tokens"] = 4 }
                 });
                 events.Add(new() { ["type"] = "message_stop" });

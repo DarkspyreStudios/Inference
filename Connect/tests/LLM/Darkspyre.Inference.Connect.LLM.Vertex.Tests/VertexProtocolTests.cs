@@ -89,7 +89,7 @@ public sealed class VertexProtocolTests
         { Messages = [request.Messages[0], new("assistant", paused.Text) { ContinuationState = state }] };
         await Complete(client, Connection, replay);
         JsonNode content = JsonNode.Parse(handler.Bodies[1])!["messages"]![1]!["content"]!;
-        Assert.True(JsonNode.DeepEquals(JsonNode.Parse(state.Payload!), content));
+        Assert.True(JsonNode.DeepEquals(JsonNode.Parse(state.Payload!)!["content"], content));
         Assert.Equal("fixture", (string?)content[1]!["input"]!["query"]);
         Assert.Null(JsonNode.Parse(handler.Bodies[1])!["model"]);
         Assert.Equal(state, replay.Messages[1].ContinuationState);
@@ -269,6 +269,118 @@ public sealed class VertexProtocolTests
         Assert.Contains("tool-signature", handler.Bodies[^1], StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ManagedClaudePausedContainerSurvivesCaptureImportWithoutRetryOrHostExecution(bool streaming)
+    {
+        const string content = """
+            [{"type":"server_tool_use","id":"srv_code","name":"code_execution","input":{"code":"long_running()"}},
+             {"type":"code_execution_tool_result","tool_use_id":"srv_code","content":{"type":"code_execution_result","stdout":"working","stderr":"","return_code":0}}]
+            """;
+        var handler = new Handler { Json = !streaming };
+        handler.Replies.Enqueue(ClaudeReply(content, "pause_turn", streaming));
+        handler.Replies.Enqueue(ClaudeReply("""[{"type":"text","text":"done"}]""", "end_turn", streaming));
+        using var http = new HttpClient(handler);
+        var client = new VertexLlmClient(http, new Authentication());
+        var connection = Connection with { CapabilityOverrides = new() { SupportsStreaming = streaming } };
+        await using var providers = new LlmProviderService(new Source(connection), [client]);
+        var agent = new ManagedVertexAgentClient(client, providers);
+        var options = new LlmAgentSessionOptions
+        {
+            ModelId = Claude,
+            Tools = [new() { Name = Tool.Name, InputSchema = Tool.InputSchema }],
+            ToolHandler = (_, _) => throw new InvalidOperationException("Server execution must not become a host call.")
+        };
+        await using var session = await agent.StartSessionAsync("fixture", connection, options);
+        var events = new List<LlmAgentEvent>();
+        await foreach (var item in session.RunTurnAsync(new() { Input = [new LlmAgentTextContent("start")] })) events.Add(item);
+        var paused = Assert.Single(events.OfType<LlmAgentTurnCompletedEvent>());
+        Assert.Equal("Truncation", paused.Error);
+        Assert.Equal(LlmAgentCompletionReason.Truncation, paused.Reason);
+        Assert.Empty(events.OfType<LlmAgentToolEvent>());
+        Assert.Single(handler.Bodies);
+        var capture = await session.CaptureContextAsync(new() { IncludeAttachmentData = true });
+        var restored = JsonSerializer.Deserialize<LlmAgentContext>(JsonSerializer.Serialize(capture))!;
+        var state = Assert.Single(restored.Entries, entry => entry.Message.ContinuationState is not null).Message.ContinuationState!;
+        Assert.Equal("darkspyre.connect.llm.google-vertex-ai", state.ImplementationId);
+        Assert.Equal("container-current", (string?)JsonNode.Parse(state.Payload)!["container_id"]);
+        await using var reopened = await agent.StartSessionAsync("fixture", connection, options with { Context = restored });
+        await foreach (var item in reopened.RunTurnAsync(new() { Input = [new LlmAgentTextContent("continue")] }))
+        {
+            Assert.IsNotType<LlmAgentToolEvent>(item);
+            if (item is LlmAgentTurnCompletedEvent end) Assert.Equal(LlmAgentCompletionReason.Completed, end.Reason);
+        }
+        Assert.Equal(2, handler.Bodies.Count);
+        JsonNode replay = JsonNode.Parse(handler.Bodies[1])!;
+        Assert.Equal("container-current", (string?)replay["container"]);
+        Assert.True(JsonNode.DeepEquals(JsonNode.Parse(content), replay["messages"]![1]!["content"]));
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ManagedClaudeMixedDeferredCallsExecuteOnlyClientToolAndRetainContainerThroughImport(bool streaming)
+    {
+        const string content = """
+            [{"type":"text","text":"Working"},
+             {"type":"server_tool_use","id":"srv_code","name":"code_execution","input":{"code":"await run()"}},
+             {"type":"tool_use","id":"client_1","name":"run","input":{"command":"pwd"},"caller":{"type":"code_execution_20260120","tool_id":"srv_code"}}]
+            """;
+        var handler = new Handler { Json = !streaming };
+        handler.Replies.Enqueue(ClaudeReply(content, "tool_use", streaming));
+        string[] done = ClaudeReply("""[{"type":"text","text":"done"}]""", "end_turn", streaming);
+        handler.Replies.Enqueue(done);
+        handler.Replies.Enqueue(done);
+        using var http = new HttpClient(handler);
+        var client = new VertexLlmClient(http, new Authentication());
+        var connection = Connection with { CapabilityOverrides = new() { SupportsStreaming = streaming } };
+        await using var providers = new LlmProviderService(new Source(connection), [client]);
+        var agent = new ManagedVertexAgentClient(client, providers);
+        int calls = 0;
+        var options = new LlmAgentSessionOptions
+        {
+            ModelId = Claude,
+            Tools = [new() { Name = Tool.Name, InputSchema = Tool.InputSchema }],
+            ToolHandler = (call, _) =>
+            {
+                Assert.Equal("client_1", call.CallId);
+                Assert.Equal("run", call.Name);
+                Assert.Equal("pwd", call.Arguments.GetProperty("command").GetString());
+                calls++;
+                return Task.FromResult(LlmToolOutput.FromText("client-result"));
+            }
+        };
+        await using var session = await agent.StartSessionAsync("fixture", connection, options);
+        var events = new List<LlmAgentEvent>();
+        await foreach (var item in session.RunTurnAsync(new() { Input = [new LlmAgentTextContent("start")] })) events.Add(item);
+        var completed = Assert.Single(events.OfType<LlmAgentTurnCompletedEvent>());
+        Assert.Null(completed.Error);
+        Assert.Equal(LlmAgentCompletionReason.Completed, completed.Reason);
+        Assert.Equal(1, calls);
+        Assert.NotEmpty(events.OfType<LlmAgentToolEvent>());
+        Assert.All(events.OfType<LlmAgentToolEvent>(), item => Assert.Equal("client_1", item.ItemId));
+        Assert.Equal(2, handler.Bodies.Count);
+        JsonNode replay = JsonNode.Parse(handler.Bodies[1])!;
+        Assert.Equal("container-current", (string?)replay["container"]);
+        Assert.True(JsonNode.DeepEquals(JsonNode.Parse(content), replay["messages"]![1]!["content"]));
+        JsonNode result = Assert.Single(replay["messages"]![2]!["content"]!.AsArray())!;
+        Assert.Equal("client_1", (string?)result["tool_use_id"]);
+        Assert.Equal("client-result", (string?)result["content"]);
+        var capture = await session.CaptureContextAsync(new() { IncludeAttachmentData = true });
+        var restored = JsonSerializer.Deserialize<LlmAgentContext>(JsonSerializer.Serialize(capture))!;
+        await using var reopened = await agent.StartSessionAsync("fixture", connection, options with { Context = restored });
+        await foreach (var item in reopened.RunTurnAsync(new() { Input = [new LlmAgentTextContent("continue")] }))
+        {
+            Assert.IsNotType<LlmAgentToolEvent>(item);
+            if (item is LlmAgentTurnCompletedEvent end) Assert.Equal(LlmAgentCompletionReason.Completed, end.Reason);
+        }
+        Assert.Equal(1, calls);
+        Assert.Equal(3, handler.Bodies.Count);
+        Assert.True(JsonNode.DeepEquals(JsonNode.Parse(content), JsonNode.Parse(handler.Bodies[2])!["messages"]![1]!["content"]));
+        Assert.Equal("container-current", (string?)JsonNode.Parse(handler.Bodies[2])!["container"]);
+    }
+
     [Fact]
     public async Task GeminiPreservesNonStrictSchemasSignedCallsAndUsageTrailers()
     {
@@ -427,9 +539,25 @@ public sealed class VertexProtocolTests
         return Assert.Single(completions);
     }
 
-    private sealed class Source : ILlmConnectionSource
+    private static string[] ClaudeReply(string content, string reason, bool streaming)
     {
-        public Task<LlmConnection?> GetConnectionAsync(string connectionId, CancellationToken cancellationToken = default) => Task.FromResult<LlmConnection?>(Connection);
+        if (!streaming) return [new JsonObject { ["id"] = "m", ["type"] = "message", ["role"] = "assistant", ["container"] = new JsonObject { ["id"] = "container-current" },
+            ["content"] = JsonNode.Parse(content), ["stop_reason"] = reason }.ToJsonString()];
+        var frames = new List<string> { """{"type":"message_start","message":{"id":"m","container":{"id":"container-current"}}}""" };
+        JsonArray blocks = JsonNode.Parse(content)!.AsArray();
+        for (int index = 0; index < blocks.Count; index++)
+        {
+            frames.Add(new JsonObject { ["type"] = "content_block_start", ["index"] = index, ["content_block"] = blocks[index]!.DeepClone() }.ToJsonString());
+            frames.Add(new JsonObject { ["type"] = "content_block_stop", ["index"] = index }.ToJsonString());
+        }
+        frames.Add(new JsonObject { ["type"] = "message_delta", ["delta"] = new JsonObject { ["stop_reason"] = reason } }.ToJsonString());
+        frames.Add("""{"type":"message_stop"}""");
+        return frames.ToArray();
+    }
+
+    private sealed class Source(LlmConnection? connection = null) : ILlmConnectionSource
+    {
+        public Task<LlmConnection?> GetConnectionAsync(string connectionId, CancellationToken cancellationToken = default) => Task.FromResult<LlmConnection?>(connection ?? Connection);
         public Task SaveCredentialAsync(string connectionId, string credentialJson, string expectedVersion, CancellationToken cancellationToken = default) => throw new InvalidOperationException("Vertex must not replace host credentials.");
     }
 

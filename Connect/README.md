@@ -437,10 +437,24 @@ sampling/tool controls. Anthropic Messages, Vertex Claude and Bedrock Claude use
 Anthropic Messages and Vertex Claude report `pause_turn` as `Incomplete` with its native reason and
 opaque continuation state. Ordered server-tool calls, their result blocks, caller metadata and
 citations remain replay data; they do not become host tool actions. Streaming retains partial
-server-tool argument deltas before constructing that state. A caller replays a paused assistant
-message with its unchanged text and continuation state. Vertex accepts that opaque replay without
+server-tool argument deltas before constructing that state. Calls from native code execution retain
+their `caller` metadata, including client calls that still require a tool result. A caller replays a
+paused assistant message with its unchanged text and continuation state. Vertex accepts that opaque replay without
 allowing ordinary assistant prefilling. Unknown stop reasons stay Unknown;
 `model_context_window_exceeded` and `max_tokens` are Incomplete without paused-turn state.
+
+The private Anthropic continuation payload contains ordered content and an optional opaque
+code-execution container ID. The ID shares the content's account/model binding and survives context
+capture/import. Replay sends the most recent retained ID as the top-level `container` field.
+It retains no container expiry, skills or arbitrary response metadata. Raw provider options cannot
+replace a retained ID. Container errors propagate without retry, recreation or silent identity removal.
+The count-tokens operation rejects requests containing `container`, which its API cannot represent.
+Legacy array-only Anthropic payloads are not accepted; other providers' payload shapes are unchanged.
+
+Mixed server/client responses with pending client tools report `tool_use` and RequiresAction.
+Only client calls emit tool events and reach a managed session's handler. Their results accompany
+the retained ordered server/client content and container on the next request. A contradictory
+`pause_turn` response with pending client calls fails without returning a resumable completion.
 
 Managed sessions retain an Incomplete reply that carries continuation state and no host tool calls.
 They emit its message, finish the turn with Truncation, and preserve the state through capture/import

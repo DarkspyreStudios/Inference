@@ -19,7 +19,9 @@ internal static class ProviderContinuationStateCodec
             ImplementationId = ImplementationId(connection.Transport),
             ModelId = modelId,
             ScopeId = Scope(connection),
-            Payload = Project(output, connection.Transport).ToJsonString()
+            Payload = connection.Transport == LlmTransport.AnthropicMessages
+                ? AnthropicContinuation.EncodePayload(Project(output, connection.Transport))
+                : Project(output, connection.Transport).ToJsonString()
         };
 
     /// <summary>
@@ -72,10 +74,10 @@ internal static class ProviderContinuationStateCodec
 
         try
         {
-            if (JsonNode.Parse(state.Payload) is not JsonArray output)
-            {
-                throw new ArgumentException("Response state must contain ordered assistant output.");
-            }
+            JsonArray output = connection.Transport == LlmTransport.AnthropicMessages
+                ? AnthropicContinuation.ReadPayload(state.Payload).Content
+                : JsonNode.Parse(state.Payload) as JsonArray
+                    ?? throw new ArgumentException("Response state must contain ordered assistant output.");
 
             JsonArray projected = Project(output, connection.Transport);
             if (!JsonNode.DeepEquals(output, projected))
@@ -197,7 +199,7 @@ internal static class ProviderContinuationStateCodec
                 (LlmTransport.AnthropicMessages, "text") => ["type", "text", "citations"],
                 (LlmTransport.AnthropicMessages, "thinking") => ["type", "thinking", "signature"],
                 (LlmTransport.AnthropicMessages, "redacted_thinking") => ["type", "data"],
-                (LlmTransport.AnthropicMessages, "tool_use") => ["type", "id", "name", "input"],
+                (LlmTransport.AnthropicMessages, "tool_use") => ["type", "id", "name", "input", "caller"],
                 (LlmTransport.AnthropicMessages, "server_tool_use") => ["type", "id", "name", "input", "caller"],
                 (LlmTransport.AnthropicMessages, "web_search_tool_result" or "web_fetch_tool_result"
                     or "code_execution_tool_result" or "bash_code_execution_tool_result"
