@@ -238,11 +238,11 @@ public sealed class LlmSettings : InferenceSettings<LlmSetupChanges>
     {
         LlmCapabilityOverrides current = _draft.CapabilityOverrides ?? new();
         SetupChoiceField Override(string id, string label, bool? value,
-            Func<LlmCapabilityOverrides, bool?, LlmCapabilityOverrides> update)
+            Func<LlmCapabilityOverrides, bool?, LlmCapabilityOverrides> update, string? helpText = null)
         {
             _overrideFields.Add(id);
             return new(
-                new(id, label) { HelpText = "Override only when the endpoint's protocol support is known. Default uses the adapter's detection." },
+                new(id, label) { HelpText = helpText ?? "Override only when the endpoint's protocol support is known. Default uses the adapter's detection." },
                 value is null ? "default" : value.Value ? "enabled" : "disabled", "default", selection =>
                 {
                     if (selection is not ("default" or "enabled" or "disabled"))
@@ -253,7 +253,8 @@ public sealed class LlmSettings : InferenceSettings<LlmSetupChanges>
         }
         return new("capabilities", "Endpoint capability overrides",
         [
-            Override("streaming", "Streaming", current.SupportsStreaming, (value, selection) => value with { SupportsStreaming = selection }),
+            Override("streaming", "Streaming", current.SupportsStreaming, (value, selection) => value with { SupportsStreaming = selection },
+                "Disabled sends the endpoint's non-streaming request. The reply arrives in one piece when generation ends."),
             Override("streaming-usage", "Streaming usage", current.SupportsStreamingUsage, (value, selection) => value with { SupportsStreamingUsage = selection }),
             Override("model-listing", "Model listing", current.SupportsModelListing, (value, selection) => value with { SupportsModelListing = selection }),
             Override("json-schema", "JSON schema output", current.SupportsJsonSchema, (value, selection) => value with { SupportsJsonSchema = selection }),

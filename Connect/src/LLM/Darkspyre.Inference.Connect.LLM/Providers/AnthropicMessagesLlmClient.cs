@@ -28,6 +28,8 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
 
     public override LlmProviderDefinition ProviderDefinition => ProviderDefinitions.AnthropicApiKey;
 
+    protected override bool OffersNonStreamingRequests => true;
+
     protected override LlmProviderCapabilities DefaultCapabilities { get; } = new()
     {
         OutputLimitEnforcement = Common.LLM.LlmOutputLimitEnforcement.ProviderEnforced,
@@ -86,9 +88,9 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
             ? null
             : StructuredOutput.ResolveEnforcement(request.StructuredOutput, capabilities);
         LlmCredential? credential = LlmCredential.Parse(connection.Credential);
-        JsonObject payload = BuildPayload(connection, request, output => ProjectToolOutput(connection, request.ModelId, output));
-        using HttpRequestMessage httpRequest = CreateHttpRequest(connection, request, payload);
-
+        bool stream = capabilities.SupportsStreaming;
+        JsonObject payload = BuildPayload(connection, request, output => ProjectToolOutput(connection, request.ModelId, output), stream);
+        using HttpRequestMessage httpRequest = CreateHttpRequest(connection, request, payload, stream);
 
         using HttpResponseMessage response = await Http.SendAsync(
             httpRequest,
@@ -101,7 +103,19 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
             "Anthropic Messages request",
             cancellationToken);
 
-        await using Stream stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+        if (!stream)
+        {
+            string body = await response.Content.ReadAsStringAsync(cancellationToken);
+            foreach (LlmStreamEvent completeEvent in ReadCompleteResponse(
+                         body, response, connection, request, enforcement, credential))
+            {
+                yield return completeEvent;
+            }
+
+            yield break;
+        }
+
+        await using Stream events = await response.Content.ReadAsStreamAsync(cancellationToken);
         var text = new StringBuilder();
         int? inputTokens = null;
         int? cachedTokens = null;
@@ -115,7 +129,7 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
         var toolCalls = new Dictionary<int, AnthropicToolCallBuilder>();
         var streamedContent = new AnthropicContentStream();
 
-        await foreach (string data in Sse.ReadDataPayloadsAsync(stream, cancellationToken))
+        await foreach (string data in Sse.ReadDataPayloadsAsync(events, cancellationToken))
         {
             lastEvent = data;
             JsonDocument document;
@@ -241,21 +255,8 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
 
                         break;
                     case "error":
-                        JsonElement error = LlmJson.GetObject(root, "error") ?? root;
-                        throw new LlmProviderException(
-                            SecretRedactor.Sanitize(
-                                LlmJson.GetString(error, "message")
-                                    ?? "Anthropic returned a stream error.",
-                                credential),
-                            Transport,
-                            response.StatusCode,
-                            LlmJson.GetString(error, "type"),
-                            ProviderHttp.ReadRequestId(response),
-                            sanitizedResponseBody: SecretRedactor.Sanitize(data, credential));
+                        throw ProviderError(root, response, data, credential);
                     case "message_stop":
-                        string finalText = text.ToString();
-                        bool refused = string.Equals(stopReason, "refusal", StringComparison.Ordinal);
-                        bool incomplete = string.Equals(stopReason, "max_tokens", StringComparison.Ordinal);
                         LlmToolCall[] completedToolCalls = toolCalls
                             .OrderBy(pair => pair.Key)
                             .Select(pair => pair.Value.Build())
@@ -266,48 +267,21 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
                             yield return new LlmToolCallCompletedEvent(builder.Build());
                         }
 
-                        bool requiresAction = completedToolCalls.Length > 0
-                            || string.Equals(stopReason, "tool_use", StringComparison.Ordinal);
-                        LlmCompletionStatus completionStatus = refused
-                            ? LlmCompletionStatus.Refused
-                            : incomplete
-                                ? LlmCompletionStatus.Incomplete
-                                : requiresAction
-                                    ? LlmCompletionStatus.RequiresAction
-                                    : stopReason is "end_turn" or "stop_sequence"
-                                        ? LlmCompletionStatus.Completed : LlmCompletionStatus.Unknown;
-                        LlmStructuredOutputValidation? validation = request.StructuredOutput is { } structured
-                            && enforcement is not null
-                            && !requiresAction
-                                ? refused
-                                    ? new LlmStructuredOutputValidation(
-                                        enforcement.Value,
-                                        false,
-                                        false,
-                                        ["Structured output was not evaluated because the provider refused the request."])
-                                    : StructuredOutput.Validate(finalText, structured, enforcement.Value)
-                                : null;
-                        yield return new LlmChatCompletionEvent(new LlmChatResult
-                        {
-                            Text = finalText,
-                            Refusal = refused ? refusalExplanation ?? string.Empty : null,
-                            RefusalCategory = refused ? refusalCategory : null,
-                            Status = completionStatus,
-                            FinishReason = stopReason,
-                            IncompleteReason = incomplete ? stopReason : null,
-                            Usage = AnthropicUsage.Create(inputTokens, outputTokens, cachedTokens, cacheWriteTokens),
-                            ProviderResponseId = responseId,
-                            ToolCalls = completionStatus == LlmCompletionStatus.RequiresAction ? completedToolCalls : [],
-                            ContinuationState = completionStatus is LlmCompletionStatus.Completed or LlmCompletionStatus.RequiresAction
-                                ? streamedContent.Encode(connection, request.ModelId) : null,
-                            StructuredOutput = validation,
-                            Diagnostics = new LlmProviderDiagnostics(
-                                (int)response.StatusCode,
-                                ProviderHttp.ReadRequestId(response),
-                                lastEvent is null
-                                    ? null
-                                    : SecretRedactor.Sanitize(lastEvent, credential))
-                        });
+                        yield return new LlmChatCompletionEvent(BuildResult(
+                            connection,
+                            request,
+                            enforcement,
+                            text.ToString(),
+                            stopReason,
+                            refusalCategory,
+                            refusalExplanation,
+                            completedToolCalls,
+                            AnthropicUsage.Create(inputTokens, outputTokens, cachedTokens, cacheWriteTokens),
+                            responseId,
+                            streamedContent.BuildContent(),
+                            response,
+                            lastEvent,
+                            credential));
                         yield break;
                 }
             }
@@ -318,6 +292,182 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
             response,
             lastEvent ?? string.Empty,
             credential);
+    }
+
+    /// <summary>Maps a response that arrived as one Message object.</summary>
+    private List<LlmStreamEvent> ReadCompleteResponse(
+        string body,
+        HttpResponseMessage response,
+        LlmConnection connection,
+        LlmChatRequest request,
+        LlmStructuredOutputEnforcement? enforcement,
+        LlmCredential? credential)
+    {
+        JsonDocument document;
+        try
+        {
+            document = JsonDocument.Parse(body);
+        }
+        catch (JsonException exception)
+        {
+            throw ProtocolException(
+                "Anthropic Messages returned a malformed response.",
+                response,
+                body,
+                credential,
+                exception);
+        }
+
+        using (document)
+        {
+            JsonElement root = document.RootElement;
+            string? type = root.ValueKind == JsonValueKind.Object ? LlmJson.GetString(root, "type") : null;
+            if (type == "error")
+            {
+                throw ProviderError(root, response, body, credential);
+            }
+
+            if (type != "message"
+                || !root.TryGetProperty("content", out JsonElement content)
+                || content.ValueKind != JsonValueKind.Array)
+            {
+                throw ProtocolException("Anthropic Messages returned a malformed response.", response, body, credential);
+            }
+
+            var text = new StringBuilder();
+            var reasoning = new List<LlmReasoningText>();
+            var toolCalls = new List<LlmToolCall>();
+            foreach (JsonElement block in content.EnumerateArray())
+            {
+                switch (LlmJson.GetString(block, "type"))
+                {
+                    case "text":
+                        text.Append(LlmJson.GetString(block, "text"));
+                        break;
+                    case "thinking" when LlmJson.GetString(block, "thinking") is { Length: > 0 } thinking:
+                        reasoning.Add(new LlmReasoningText(thinking, IsSummary: true));
+                        break;
+                    case "tool_use":
+                        string id = LlmJson.GetString(block, "id") ?? string.Empty;
+                        string name = LlmJson.GetString(block, "name") ?? string.Empty;
+                        if (id.Length == 0 || name.Length == 0)
+                        {
+                            throw ProtocolException("Anthropic Messages returned an incomplete tool call.", response, body, credential);
+                        }
+
+                        toolCalls.Add(new LlmToolCall(
+                            id,
+                            name,
+                            block.TryGetProperty("input", out JsonElement input) && input.ValueKind == JsonValueKind.Object
+                                ? input.GetRawText()
+                                : "{}"));
+                        break;
+                }
+            }
+
+            string? refusalCategory = null;
+            string? refusalExplanation = null;
+            ReadStopDetails(root, ref refusalCategory, ref refusalExplanation);
+            LlmChatResult result = BuildResult(
+                connection,
+                request,
+                enforcement,
+                text.ToString(),
+                LlmJson.GetString(root, "stop_reason"),
+                refusalCategory,
+                refusalExplanation,
+                [.. toolCalls],
+                AnthropicUsage.Create(
+                    ReadToken(root, "usage", "input_tokens"),
+                    ReadToken(root, "usage", "output_tokens"),
+                    ReadToken(root, "usage", "cache_read_input_tokens"),
+                    ReadToken(root, "usage", "cache_creation_input_tokens")),
+                LlmJson.GetString(root, "id"),
+                content.GetArrayLength() == 0 ? null : JsonNode.Parse(content.GetRawText())!.AsArray(),
+                response,
+                body,
+                credential);
+            return [.. CompleteResponseEvents.From(result, reasoning)];
+        }
+    }
+
+    private static LlmChatResult BuildResult(
+        LlmConnection connection,
+        LlmChatRequest request,
+        LlmStructuredOutputEnforcement? enforcement,
+        string text,
+        string? stopReason,
+        string? refusalCategory,
+        string? refusalExplanation,
+        LlmToolCall[] toolCalls,
+        LlmUsage? usage,
+        string? responseId,
+        JsonArray? content,
+        HttpResponseMessage response,
+        string? rawFinal,
+        LlmCredential? credential)
+    {
+        bool refused = string.Equals(stopReason, "refusal", StringComparison.Ordinal);
+        bool incomplete = string.Equals(stopReason, "max_tokens", StringComparison.Ordinal);
+        bool requiresAction = toolCalls.Length > 0
+            || string.Equals(stopReason, "tool_use", StringComparison.Ordinal);
+        LlmCompletionStatus completionStatus = refused
+            ? LlmCompletionStatus.Refused
+            : incomplete
+                ? LlmCompletionStatus.Incomplete
+                : requiresAction
+                    ? LlmCompletionStatus.RequiresAction
+                    : stopReason is "end_turn" or "stop_sequence"
+                        ? LlmCompletionStatus.Completed : LlmCompletionStatus.Unknown;
+        LlmStructuredOutputValidation? validation = request.StructuredOutput is { } structured
+            && enforcement is not null
+            && !requiresAction
+                ? refused
+                    ? new LlmStructuredOutputValidation(
+                        enforcement.Value,
+                        false,
+                        false,
+                        ["Structured output was not evaluated because the provider refused the request."])
+                    : StructuredOutput.Validate(text, structured, enforcement.Value)
+                : null;
+        return new LlmChatResult
+        {
+            Text = text,
+            Refusal = refused ? refusalExplanation ?? string.Empty : null,
+            RefusalCategory = refused ? refusalCategory : null,
+            Status = completionStatus,
+            FinishReason = stopReason,
+            IncompleteReason = incomplete ? stopReason : null,
+            Usage = usage,
+            ProviderResponseId = responseId,
+            ToolCalls = completionStatus == LlmCompletionStatus.RequiresAction ? toolCalls : [],
+            ContinuationState = completionStatus is LlmCompletionStatus.Completed or LlmCompletionStatus.RequiresAction
+                && content is not null
+                    ? ProviderContinuationStateCodec.Encode(connection, request.ModelId, content) : null,
+            StructuredOutput = validation,
+            Diagnostics = new LlmProviderDiagnostics(
+                (int)response.StatusCode,
+                ProviderHttp.ReadRequestId(response),
+                rawFinal is null ? null : SecretRedactor.Sanitize(rawFinal, credential))
+        };
+    }
+
+    private LlmProviderException ProviderError(
+        JsonElement root,
+        HttpResponseMessage response,
+        string raw,
+        LlmCredential? credential)
+    {
+        JsonElement error = LlmJson.GetObject(root, "error") ?? root;
+        return new LlmProviderException(
+            SecretRedactor.Sanitize(
+                LlmJson.GetString(error, "message") ?? "Anthropic returned a stream error.",
+                credential),
+            Transport,
+            response.StatusCode,
+            LlmJson.GetString(error, "type"),
+            ProviderHttp.ReadRequestId(response),
+            sanitizedResponseBody: SecretRedactor.Sanitize(raw, credential));
     }
 
     public override async Task<IReadOnlyList<LlmModel>> ListModelsAsync(
@@ -402,7 +552,7 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
         return [.. models.OrderBy(model => model.DisplayName, StringComparer.OrdinalIgnoreCase)];
     }
 
-    protected virtual HttpRequestMessage CreateHttpRequest(LlmConnection connection, LlmChatRequest request, JsonObject payload)
+    protected virtual HttpRequestMessage CreateHttpRequest(LlmConnection connection, LlmChatRequest request, JsonObject payload, bool stream)
     {
         var result = new HttpRequestMessage(HttpMethod.Post, BuildApiUri(connection, "messages")) { Content = JsonContent.Create(payload) };
         ApplyAnthropicHeaders(result, connection, LlmCredential.Parse(connection.Credential));
@@ -414,7 +564,8 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
     protected virtual JsonObject BuildPayload(
         LlmConnection connection,
         LlmChatRequest request,
-        Func<LlmToolOutput, ProjectedToolOutput> projectToolOutput)
+        Func<LlmToolOutput, ProjectedToolOutput> projectToolOutput,
+        bool stream)
     {
         var system = new JsonArray();
         if (!string.IsNullOrWhiteSpace(request.Instructions))
@@ -491,7 +642,7 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
             ["model"] = request.ModelId,
             ["max_tokens"] = request.MaxOutputTokens ?? DefaultMaxOutputTokens,
             ["messages"] = messages,
-            ["stream"] = true
+            ["stream"] = stream
         };
         if (request.ReasoningLevel is { } level)
         {

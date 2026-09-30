@@ -18,6 +18,23 @@ public sealed class AppleFoundationModelsTests
     internal const string Hello = """{"type":"hello","protocol":"darkspyre.apple-fm","major":1,"helperVersion":"test","osVersion":"26.0","availability":"available","contextSize":4096}""";
 
     [Fact]
+    public async Task StreamingOffAsksForOneCompleteResponse()
+    {
+        var runner = new Runner(_ => [Frame("text", "Complete reply."), Terminal("Complete reply.")]);
+        var client = new AppleFoundationModelsClient(new HttpClient(), runner);
+
+        List<LlmStreamEvent> events = await Read(client.StreamAsync(
+            Connection with { CapabilityOverrides = new() { SupportsStreaming = false } }, Request));
+
+        Assert.False(Assert.Single(runner.Requests).Request!.Stream);
+        Assert.Collection(events,
+            item => Assert.Equal(new LlmTextDeltaEvent("Complete reply."), item),
+            item => Assert.Equal(LlmCompletionStatus.Unknown, Assert.IsType<LlmChatCompletionEvent>(item).Result.Status));
+        await Read(client.StreamAsync(Connection, Request));
+        Assert.True(runner.Requests[^1].Request!.Stream);
+    }
+
+    [Fact]
     public void SchemaPreservesNestedRequiredOptionalReferencesAndBounds()
     {
         AppleSchemaNode node = AppleSchema.Convert(Json("""

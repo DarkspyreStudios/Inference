@@ -48,6 +48,8 @@ struct GenerationRequest: Codable, Sendable {
   let schema: SchemaNode?
   let temperature: Double?
   let maximumResponseTokens: Int?
+  // False asks for one complete response. An absent value streams.
+  var stream: Bool? = nil
 }
 struct Command: Codable, Sendable {
   let command: String

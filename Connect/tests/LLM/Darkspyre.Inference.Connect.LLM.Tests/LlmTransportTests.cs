@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Darkspyre.Inference.Common.LLM;
 using Darkspyre.Inference.Connect.LLM;
 using Darkspyre.Inference.Connect.LLM.Providers;
@@ -717,6 +718,262 @@ public sealed class LlmTransportTests
         Assert.Contains(LlmReasoningLevel.ExtraHigh, client.GetCapabilities(connection, "claude-sonnet-5").ReasoningLevels);
         Assert.Empty(client.GetCapabilities(connection, "claude-test").ReasoningLevels);
     }
+
+    private const string ResponsesCompleteBody = """
+        {"id":"resp_nonstream","object":"response","status":"completed","output":[
+          {"type":"reasoning","id":"rs_1","summary":[{"type":"summary_text","text":"Checking the key."}],"encrypted_content":"enc"},
+          {"type":"message","id":"msg_1","role":"assistant","status":"completed","content":[{"type":"output_text","text":"Looking it up."}]},
+          {"type":"function_call","id":"fc_1","status":"completed","call_id":"call_1","name":"lookup","arguments":"{\"key\":\"a\"}"}],
+         "usage":{"input_tokens":10,"output_tokens":6,"total_tokens":16}}
+        """;
+
+    private static readonly LlmToolDefinition LookupTool = new()
+    {
+        Name = "lookup",
+        InputSchema = Schema("""{"type":"object","properties":{"key":{"type":"string"}},"required":["key"]}""")
+    };
+
+    private static LlmCapabilityOverrides StreamingOff => new() { SupportsStreaming = false };
+
+    [Fact]
+    public async Task ResponsesNonStreamingSendsStreamFalseAndMapsTheResponse()
+    {
+        var handler = new RecordingHttpMessageHandler(_ => JsonResponse(ResponsesCompleteBody));
+        using var http = new HttpClient(handler);
+        var client = new OpenAiResponsesLlmClient(http);
+
+        IReadOnlyList<LlmStreamEvent> events = await ReadAllAsync(client.StreamAsync(
+            ResponsesConnection() with { CapabilityOverrides = StreamingOff },
+            new LlmChatRequest { ModelId = "gpt-test", Messages = [new LlmChatMessage("user", "Look up a.")], Tools = [LookupTool] }));
+
+        using JsonDocument sent = JsonDocument.Parse(Assert.IsType<string>(handler.Body));
+        Assert.False(sent.RootElement.GetProperty("stream").GetBoolean());
+        Assert.Collection(events,
+            item => Assert.Equal(new LlmReasoningDeltaEvent("Checking the key.", true), item),
+            item => Assert.Equal(new LlmTextDeltaEvent("Looking it up."), item),
+            item => Assert.Equal(new LlmToolCallStartedEvent("call_1", "lookup", 0), item),
+            item => Assert.Equal(new LlmToolCallArgumentsDeltaEvent("call_1", "{\"key\":\"a\"}"), item),
+            item => Assert.Equal("call_1", Assert.IsType<LlmToolCallCompletedEvent>(item).ToolCall.Id),
+            item =>
+            {
+                LlmChatResult result = Assert.IsType<LlmChatCompletionEvent>(item).Result;
+                Assert.Equal(LlmCompletionStatus.RequiresAction, result.Status);
+                Assert.Equal(16, result.Usage?.TotalTokens);
+                Assert.Equal("resp_nonstream", result.ProviderResponseId);
+            });
+    }
+
+    [Fact]
+    public async Task ResponsesNonStreamingMatchesTheStreamedResult()
+    {
+        string streamed = "data: {\"type\":\"response.output_text.delta\",\"delta\":\"Looking it up.\"}\n\n"
+            + "data: {\"type\":\"response.completed\",\"response\":" + ResponsesCompleteBody.ReplaceLineEndings(string.Empty) + "}\n\n";
+        var request = new LlmChatRequest { ModelId = "gpt-test", Messages = [new LlmChatMessage("user", "Look up a.")], Tools = [LookupTool] };
+        using var streamingHttp = new HttpClient(new RecordingHttpMessageHandler(_ => SseResponse(streamed)));
+        using var completeHttp = new HttpClient(new RecordingHttpMessageHandler(_ => JsonResponse(ResponsesCompleteBody)));
+
+        LlmChatResult fromStream = Assert.Single((await ReadAllAsync(new OpenAiResponsesLlmClient(streamingHttp)
+            .StreamAsync(ResponsesConnection(), request))).OfType<LlmChatCompletionEvent>()).Result;
+        LlmChatResult fromComplete = Assert.Single((await ReadAllAsync(new OpenAiResponsesLlmClient(completeHttp)
+            .StreamAsync(ResponsesConnection() with { CapabilityOverrides = StreamingOff }, request))).OfType<LlmChatCompletionEvent>()).Result;
+
+        var diagnostics = new LlmProviderDiagnostics(200, null, null);
+        Assert.Equal(
+            JsonSerializer.Serialize(fromStream with { Diagnostics = diagnostics }),
+            JsonSerializer.Serialize(fromComplete with { Diagnostics = diagnostics }));
+    }
+
+    [Fact]
+    public async Task ResponsesNonStreamingContextOverflowThrows()
+    {
+        var handler = new RecordingHttpMessageHandler(_ => JsonResponse("""
+            {"id":"resp_failed","status":"failed","error":{"code":"context_length_exceeded","message":"Too long."},"output":[]}
+            """));
+        using var http = new HttpClient(handler);
+
+        LlmProviderException error = await Assert.ThrowsAsync<LlmProviderException>(() => ReadAllAsync(
+            new OpenAiResponsesLlmClient(http).StreamAsync(
+                ResponsesConnection() with { CapabilityOverrides = StreamingOff },
+                new LlmChatRequest { ModelId = "gpt-test", Messages = [new LlmChatMessage("user", "Hi")] })));
+
+        Assert.Equal("context_length_exceeded", error.ProviderCode);
+    }
+
+    [Fact]
+    public async Task CompatibleChatNonStreamingOmitsStreamOptions()
+    {
+        var handler = new RecordingHttpMessageHandler(_ => JsonResponse("""
+            {"id":"chatcmpl-1","object":"chat.completion","choices":[{"index":0,"message":{"role":"assistant","content":"Partial","refusal":null,
+             "tool_calls":[{"id":"call_1","type":"function","function":{"name":"lookup","arguments":"{\"key\":\"a\"}"}}]},"finish_reason":"length"}],
+             "usage":{"prompt_tokens":5,"completion_tokens":7,"total_tokens":12}}
+            """));
+        using var http = new HttpClient(handler);
+        LlmConnection connection = CompatibleConnection() with
+        {
+            CapabilityOverrides = new() { SupportsStreaming = false, SupportsStreamingUsage = true }
+        };
+
+        IReadOnlyList<LlmStreamEvent> events = await ReadAllAsync(new OpenAiCompatibleChatLlmClient(http).StreamAsync(
+            connection,
+            new LlmChatRequest { ModelId = "model", Messages = [new LlmChatMessage("user", "Look up a.")], Tools = [LookupTool] }));
+
+        using JsonDocument sent = JsonDocument.Parse(Assert.IsType<string>(handler.Body));
+        Assert.False(sent.RootElement.GetProperty("stream").GetBoolean());
+        Assert.False(sent.RootElement.TryGetProperty("stream_options", out _));
+        Assert.Equal("Partial", Assert.Single(events.OfType<LlmTextDeltaEvent>()).Delta);
+        LlmChatResult result = Assert.Single(events.OfType<LlmChatCompletionEvent>()).Result;
+        Assert.Equal(LlmCompletionStatus.Incomplete, result.Status);
+        Assert.Null(result.Refusal);
+        Assert.Equal("lookup", Assert.Single(result.ToolCalls).Name);
+        Assert.Equal(new LlmUsage(5, 7, 12), result.Usage);
+
+        var refusalHandler = new RecordingHttpMessageHandler(_ => JsonResponse("""
+            {"id":"chatcmpl-2","choices":[{"index":0,"message":{"role":"assistant","content":null,"refusal":"No."},"finish_reason":"stop"}]}
+            """));
+        using var refusalHttp = new HttpClient(refusalHandler);
+        IReadOnlyList<LlmStreamEvent> refused = await ReadAllAsync(new OpenAiCompatibleChatLlmClient(refusalHttp).StreamAsync(
+            connection, new LlmChatRequest { ModelId = "model", Messages = [new LlmChatMessage("user", "Hi")] }));
+        Assert.Equal("No.", Assert.Single(refused.OfType<LlmRefusalDeltaEvent>()).Delta);
+        Assert.Equal(LlmCompletionStatus.Refused, Assert.Single(refused.OfType<LlmChatCompletionEvent>()).Result.Status);
+    }
+
+    [Fact]
+    public async Task CompatibleChatNonStreamingErrorBodyThrows()
+    {
+        var handler = new RecordingHttpMessageHandler(_ => JsonResponse("""{"error":{"message":"x","code":"y"}}"""));
+        using var http = new HttpClient(handler);
+
+        LlmProviderException error = await Assert.ThrowsAsync<LlmProviderException>(() => ReadAllAsync(
+            new OpenAiCompatibleChatLlmClient(http).StreamAsync(
+                CompatibleConnection() with { CapabilityOverrides = StreamingOff },
+                new LlmChatRequest { ModelId = "model", Messages = [new LlmChatMessage("user", "Hi")] })));
+
+        Assert.Equal("y", error.ProviderCode);
+    }
+
+    [Fact]
+    public async Task AnthropicNonStreamingMapsBlocksAndState()
+    {
+        var handler = new RecordingHttpMessageHandler(_ => JsonResponse("""
+            {"id":"msg_1","type":"message","role":"assistant","model":"claude-test","content":[
+              {"type":"thinking","thinking":"Plan.","signature":"sig"},
+              {"type":"text","text":"Looking up."},
+              {"type":"tool_use","id":"toolu_1","name":"lookup","input":{"key":"a"}}],
+             "stop_reason":"tool_use","usage":{"input_tokens":10,"output_tokens":4,"cache_read_input_tokens":2,"cache_creation_input_tokens":1}}
+            """));
+        using var http = new HttpClient(handler);
+        LlmChatRequest request = AnthropicRequest() with { Tools = [LookupTool] };
+
+        IReadOnlyList<LlmStreamEvent> events = await ReadAllAsync(new AnthropicMessagesLlmClient(http).StreamAsync(
+            AnthropicConnection() with { CapabilityOverrides = StreamingOff }, request));
+
+        using JsonDocument sent = JsonDocument.Parse(Assert.IsType<string>(handler.Body));
+        Assert.False(sent.RootElement.GetProperty("stream").GetBoolean());
+        Assert.Collection(events,
+            item => Assert.Equal(new LlmReasoningDeltaEvent("Plan.", true), item),
+            item => Assert.Equal(new LlmTextDeltaEvent("Looking up."), item),
+            item => Assert.Equal(new LlmToolCallStartedEvent("toolu_1", "lookup", 0), item),
+            item => Assert.Equal(new LlmToolCallArgumentsDeltaEvent("toolu_1", "{\"key\":\"a\"}"), item),
+            item => Assert.IsType<LlmToolCallCompletedEvent>(item),
+            item => Assert.IsType<LlmChatCompletionEvent>(item));
+        LlmChatResult complete = ((LlmChatCompletionEvent)events[^1]).Result;
+        Assert.Equal(LlmCompletionStatus.RequiresAction, complete.Status);
+        Assert.Equal(new LlmUsage(13, 4, 17) { CachedInputTokens = 2, CacheWriteInputTokens = 1 }, complete.Usage);
+
+        const string streamed = """
+            data: {"type":"message_start","message":{"id":"msg_1","usage":{"input_tokens":10,"cache_read_input_tokens":2,"cache_creation_input_tokens":1}}}
+
+            data: {"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":""}}
+
+            data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"Plan."}}
+
+            data: {"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"sig"}}
+
+            data: {"type":"content_block_stop","index":0}
+
+            data: {"type":"content_block_start","index":1,"content_block":{"type":"text","text":""}}
+
+            data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"Looking up."}}
+
+            data: {"type":"content_block_stop","index":1}
+
+            data: {"type":"content_block_start","index":2,"content_block":{"type":"tool_use","id":"toolu_1","name":"lookup","input":{}}}
+
+            data: {"type":"content_block_delta","index":2,"delta":{"type":"input_json_delta","partial_json":"{\"key\":\"a\"}"}}
+
+            data: {"type":"content_block_stop","index":2}
+
+            data: {"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"output_tokens":4}}
+
+            data: {"type":"message_stop"}
+
+            """;
+        using var streamingHttp = new HttpClient(new RecordingHttpMessageHandler(_ => SseResponse(streamed)));
+        LlmChatResult fromStream = Assert.Single((await ReadAllAsync(new AnthropicMessagesLlmClient(streamingHttp)
+            .StreamAsync(AnthropicConnection(), request))).OfType<LlmChatCompletionEvent>()).Result;
+        Assert.True(JsonNode.DeepEquals(
+            JsonNode.Parse(fromStream.ContinuationState!.Payload!),
+            JsonNode.Parse(complete.ContinuationState!.Payload!)));
+    }
+
+    [Fact]
+    public async Task AnthropicNonStreamingRefusal()
+    {
+        var handler = new RecordingHttpMessageHandler(_ => JsonResponse("""
+            {"id":"msg_2","type":"message","role":"assistant","content":[],"stop_reason":"refusal",
+             "stop_details":{"category":"cyber","explanation":"Declined."},"usage":{"input_tokens":3,"output_tokens":0}}
+            """));
+        using var http = new HttpClient(handler);
+
+        IReadOnlyList<LlmStreamEvent> events = await ReadAllAsync(new AnthropicMessagesLlmClient(http).StreamAsync(
+            AnthropicConnection() with { CapabilityOverrides = StreamingOff }, AnthropicRequest()));
+
+        Assert.Equal("Declined.", Assert.Single(events.OfType<LlmRefusalDeltaEvent>()).Delta);
+        LlmChatResult result = Assert.Single(events.OfType<LlmChatCompletionEvent>()).Result;
+        Assert.Equal(LlmCompletionStatus.Refused, result.Status);
+        Assert.Equal("cyber", result.RefusalCategory);
+    }
+
+    [Fact]
+    public async Task CodexRejectsDisabledStreaming()
+    {
+        var handler = new RecordingHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.OK));
+        using var http = new HttpClient(handler);
+
+        await Assert.ThrowsAsync<NotSupportedException>(() => ReadAllAsync(new OpenAiCodexLlmClient(http).StreamAsync(
+            DirectCodexTests.Connection() with { CapabilityOverrides = StreamingOff },
+            new LlmChatRequest { ModelId = "model", Messages = [new LlmChatMessage("user", "hello")] })));
+
+        Assert.Equal(0, handler.CallCount);
+    }
+
+    [Fact]
+    public async Task NonStreamingHonorsCancellation()
+    {
+        using var http = new HttpClient(new BlockingHttpMessageHandler());
+        using var cancellation = new CancellationTokenSource();
+        var events = new List<LlmStreamEvent>();
+        IAsyncEnumerable<LlmStreamEvent> stream = new OpenAiResponsesLlmClient(http).StreamAsync(
+            ResponsesConnection() with { CapabilityOverrides = StreamingOff },
+            new LlmChatRequest { ModelId = "gpt-test", Messages = [new LlmChatMessage("user", "Hi")] },
+            cancellation.Token);
+
+        cancellation.CancelAfter(TimeSpan.FromMilliseconds(50));
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
+        {
+            await foreach (LlmStreamEvent item in stream)
+            {
+                events.Add(item);
+            }
+        });
+
+        Assert.Empty(events);
+    }
+
+    private static HttpResponseMessage JsonResponse(string body) => new(HttpStatusCode.OK)
+    {
+        Content = new StringContent(body, Encoding.UTF8, "application/json")
+    };
 
     private static LlmConnection ResponsesConnection() => new()
     {

@@ -1,3 +1,4 @@
+using Darkspyre.Inference.Connect.LLM.Internal;
 using Darkspyre.Inference.Connect.LLM.Providers;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -41,12 +42,17 @@ public static class ServiceCollectionExtensions
         services.AddTransient<ManagedAppleAgentClient>();
         services.AddTransient<ILlmAgentClient>(provider => provider.GetRequiredService<ManagedAppleAgentClient>());
         services.AddSingleton<LlmProviderCatalog>();
-        services.AddHttpClient<GeminiApiLlmClient>().ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
+        services.AddHttpClient<GeminiApiLlmClient>()
+            .ConfigureHttpClient(client => client.Timeout = ProviderHttp.GenerationTimeout)
+            .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
         services.AddTransient<ILlmClient>(provider => provider.GetRequiredService<GeminiApiLlmClient>());
         services.AddTransient<ILlmAgentClient, ManagedGeminiApiAgentClient>();
-        services.AddHttpClient<OpenAiResponsesLlmClient>();
-        services.AddHttpClient<OpenAiCompatibleChatLlmClient>();
-        services.AddHttpClient<AnthropicMessagesLlmClient>();
+        services.AddHttpClient<OpenAiResponsesLlmClient>()
+            .ConfigureHttpClient(client => client.Timeout = ProviderHttp.GenerationTimeout);
+        services.AddHttpClient<OpenAiCompatibleChatLlmClient>()
+            .ConfigureHttpClient(client => client.Timeout = ProviderHttp.GenerationTimeout);
+        services.AddHttpClient<AnthropicMessagesLlmClient>()
+            .ConfigureHttpClient(client => client.Timeout = ProviderHttp.GenerationTimeout);
         services.AddHttpClient<ClaudeCliLlmClient>();
         services.AddHttpClient<OpenAiEmbeddingClient>();
         services.AddSingleton<IAntigravityCliSessionProcessFactory, AntigravityCliSessionProcessFactory>();

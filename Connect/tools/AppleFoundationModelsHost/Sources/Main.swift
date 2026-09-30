@@ -99,7 +99,8 @@ import FoundationModels
       try Task.checkCancellation()
       let options = GenerationOptions(
         temperature: request.temperature, maximumResponseTokens: request.maximumResponseTokens)
-      if let output {
+      let streams = request.stream ?? true
+      if let output, streams {
         for try await snapshot in session.streamResponse(
           to: prompt, schema: output, options: options)
         {
@@ -107,12 +108,22 @@ import FoundationModels
           content = snapshot.rawContent.jsonString
           try writer.emit(Event(type: "structured", id: id, content: content))
         }
-      } else {
+      } else if let output {
+        let response = try await session.respond(to: prompt, schema: output, options: options)
+        try Task.checkCancellation()
+        content = response.rawContent.jsonString
+        try writer.emit(Event(type: "structured", id: id, content: content))
+      } else if streams {
         for try await snapshot in session.streamResponse(to: prompt, options: options) {
           try Task.checkCancellation()
           content = snapshot.content
           try writer.emit(Event(type: "text", id: id, content: content))
         }
+      } else {
+        let response = try await session.respond(to: prompt, options: options)
+        try Task.checkCancellation()
+        content = response.content
+        try writer.emit(Event(type: "text", id: id, content: content))
       }
       try Task.checkCancellation()
     } catch let error as HostFailure {

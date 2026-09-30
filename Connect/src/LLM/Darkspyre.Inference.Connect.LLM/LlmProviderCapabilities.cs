@@ -19,6 +19,11 @@ public sealed record LlmProviderCapabilities
     /// <summary>Enforcement of MaxOutputTokens, independently of context output reserves.</summary>
     public LlmOutputLimitEnforcement OutputLimitEnforcement { get; init; }
 
+    /// <summary>
+    /// True when the adapter streams provider output as the model generates it. False makes the adapter send the
+    /// provider's non-streaming request and emit the complete response as events after it arrives. A transport whose
+    /// provider has no non-streaming request rejects every request while this is false.
+    /// </summary>
     public bool SupportsStreaming { get; init; }
 
     public bool SupportsStreamingUsage { get; init; }
@@ -130,6 +135,7 @@ public sealed record LlmProviderCapabilities
 /// <summary>Connection-specific corrections for an otherwise OpenAI-compatible endpoint.</summary>
 public sealed record LlmCapabilityOverrides
 {
+    /// <summary>False selects the provider's non-streaming request.</summary>
     public bool? SupportsStreaming { get; init; }
 
     public bool? SupportsStreamingUsage { get; init; }

@@ -14,6 +14,7 @@ internal sealed class VertexLlmClient(HttpClient http, IVertexAuthentication aut
     public override LlmTransport Transport => LlmTransport.GoogleVertexAi;
     public override LlmProviderDefinition ProviderDefinition => VertexProviderDefinition.Value;
     protected override LlmProviderCapabilities DefaultCapabilities => new() { SupportsModelListing = true };
+    protected override bool OffersNonStreamingRequests => true;
     public override LlmProviderCapabilities GetCapabilities(LlmConnection connection, string? modelId = null) => Capabilities(connection, modelId);
 
     internal static LlmProviderCapabilities Capabilities(LlmConnection connection, string? modelId)
@@ -58,7 +59,8 @@ internal sealed class VertexLlmClient(HttpClient http, IVertexAuthentication aut
             : GeminiStream.ReadAsync(Http, GeminiMessage(connection, request,
                 GeminiRequest.Build(connection, request, enforcement, output => ProjectToolOutput(connection, request.ModelId, output),
                     GeminiReasoning.Get(VertexEndpoints.ParseModel(request.ModelId).Model, catalogThinking: null)),
-                access.Token), GeminiRoute, connection, request, enforcement, cancellationToken);
+                access.Token, capabilities.SupportsStreaming), GeminiRoute, connection, request, enforcement,
+                capabilities.SupportsStreaming, cancellationToken);
         await using IAsyncEnumerator<LlmStreamEvent> iterator = source.GetAsyncEnumerator(cancellationToken);
         while (true)
         {
@@ -142,9 +144,11 @@ internal sealed class VertexLlmClient(HttpClient http, IVertexAuthentication aut
     private static readonly GeminiRoute GeminiRoute = new(LlmTransport.GoogleVertexAi, "Vertex", "vertex_", CheckStatus,
         (connection, modelId, parts) => new VertexContinuationCodec().Encode(connection, modelId, parts));
 
-    private static HttpRequestMessage GeminiMessage(LlmConnection connection, LlmChatRequest request, JsonObject payload, string token)
+    private static HttpRequestMessage GeminiMessage(LlmConnection connection, LlmChatRequest request, JsonObject payload, string token,
+        bool stream)
     {
-        var message = new HttpRequestMessage(HttpMethod.Post, VertexEndpoints.Generation(connection, request.ModelId)) { Content = JsonContent.Create(payload) };
+        var message = new HttpRequestMessage(HttpMethod.Post, VertexEndpoints.Generation(connection, request.ModelId, stream))
+        { Content = JsonContent.Create(payload) };
         message.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
         return message;
     }

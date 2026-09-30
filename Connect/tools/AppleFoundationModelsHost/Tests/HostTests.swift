@@ -104,6 +104,17 @@ struct HostTests {
     #expect(throws: HostFailure.self) { try History.build(invalid, tools: []) }
   }
 
+  @Test func streamFlagIsOptionalAndDecodesFalse() throws {
+    let base =
+      #""instructions":null,"messages":[],"tools":[],"schema":null,"temperature":null,"maximumResponseTokens":null"#
+    let absent = try JSONDecoder().decode(
+      GenerationRequest.self, from: Data("{\(base)}".utf8))
+    #expect(absent.stream == nil)
+    let complete = try JSONDecoder().decode(
+      GenerationRequest.self, from: Data("{\(base),\"stream\":false}".utf8))
+    #expect(complete.stream == false)
+  }
+
   @Test func nestedPlanBuildsWithPublicConstructors() throws {
     let json =
       #"{"kind":"object","properties":[{"name":"nested","required":true,"schema":{"kind":"array","minItems":1,"maxItems":2,"items":{"kind":"object","properties":[{"name":"number","required":true,"schema":{"kind":"integer","minimum":"1","maximum":"5"}}]}}}]}"#

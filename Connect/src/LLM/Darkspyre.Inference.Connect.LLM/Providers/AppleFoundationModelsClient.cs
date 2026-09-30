@@ -12,6 +12,7 @@ internal sealed class AppleFoundationModelsClient(HttpClient http, IAppleProcess
 {
     public override LlmTransport Transport => LlmTransport.AppleFoundationModels;
     public override LlmProviderDefinition ProviderDefinition => ProviderDefinitions.AppleFoundationModels;
+    protected override bool OffersNonStreamingRequests => true;
     public string? EstimateDiagnostic => "Apple does not report complete input occupancy. Native context overflow remains authoritative.";
 
     protected override LlmProviderCapabilities DefaultCapabilities { get; } = new()
@@ -168,7 +169,7 @@ internal sealed class AppleFoundationModelsClient(HttpClient http, IAppleProcess
             messages.Add(new(message.Role, message.Content, calls, results));
         }
         if (pending.Count > 0) throw new ArgumentException("Tool-call history is missing results.");
-        return new(new(instructions, messages, tools, outputSchema, request.Temperature, request.MaxOutputTokens),
+        return new(new(instructions, messages, tools, outputSchema, request.Temperature, request.MaxOutputTokens, capabilities.SupportsStreaming),
             structured, enforcement, schemas, names.Keys.ToHashSet(StringComparer.Ordinal));
     }
 
@@ -176,6 +177,7 @@ internal sealed class AppleFoundationModelsClient(HttpClient http, IAppleProcess
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         Prepared prepared = Prepare(connection, request);
+        bool stream = prepared.Generation.Stream;
         string previous = string.Empty;
         LlmToolCall[]? batch = null;
         bool terminal = false;
@@ -192,12 +194,13 @@ internal sealed class AppleFoundationModelsClient(HttpClient http, IAppleProcess
                     if (!snapshot.StartsWith(previous, StringComparison.Ordinal)) throw AppleProtocol.Failure("Apple revised previously emitted text.");
                     string delta = snapshot[previous.Length..];
                     previous = snapshot;
-                    if (delta.Length > 0) yield return new LlmTextDeltaEvent(delta);
+                    if (stream && delta.Length > 0) yield return new LlmTextDeltaEvent(delta);
                     break;
                 case "structured":
                     if (prepared.Generation.Schema is null) throw AppleProtocol.Failure("Apple returned an unexpected structured snapshot.");
                     previous = AppleProtocol.RequiredString(frame, "content");
-                    yield return new LlmStructuredOutputSnapshotEvent(ParseJson(previous));
+                    JsonElement structuredSnapshot = ParseJson(previous);
+                    if (stream) yield return new LlmStructuredOutputSnapshotEvent(structuredSnapshot);
                     break;
                 case "batch":
                     if (batch is not null) throw AppleProtocol.Failure("Apple returned more than one batch in a model operation.");
@@ -216,14 +219,7 @@ internal sealed class AppleFoundationModelsClient(HttpClient http, IAppleProcess
                         "refused" when batch is null => LlmCompletionStatus.Refused,
                         _ => throw AppleProtocol.Failure("Invalid Apple terminal status or tool batch.")
                     };
-                    if (batch is not null)
-                        for (int index = 0; index < batch.Length; index++)
-                        {
-                            yield return new LlmToolCallStartedEvent(batch[index].Id, batch[index].Name, index);
-                            yield return new LlmToolCallArgumentsDeltaEvent(batch[index].Id, batch[index].ArgumentsJson);
-                            yield return new LlmToolCallCompletedEvent(batch[index]);
-                        }
-                    yield return new LlmChatCompletionEvent(new()
+                    var result = new LlmChatResult
                     {
                         Text = text,
                         Status = completion,
@@ -238,7 +234,21 @@ internal sealed class AppleFoundationModelsClient(HttpClient http, IAppleProcess
                         } : null,
                         StructuredOutput = completion == LlmCompletionStatus.Unknown && prepared.Structured is { } structured
                             ? StructuredOutput.Validate(text, structured, prepared.Enforcement!.Value) : null
-                    });
+                    };
+                    if (!stream)
+                    {
+                        foreach (LlmStreamEvent completeEvent in CompleteResponseEvents.From(result, []))
+                            yield return completeEvent;
+                        break;
+                    }
+                    if (batch is not null)
+                        for (int index = 0; index < batch.Length; index++)
+                        {
+                            yield return new LlmToolCallStartedEvent(batch[index].Id, batch[index].Name, index);
+                            yield return new LlmToolCallArgumentsDeltaEvent(batch[index].Id, batch[index].ArgumentsJson);
+                            yield return new LlmToolCallCompletedEvent(batch[index]);
+                        }
+                    yield return new LlmChatCompletionEvent(result);
                     break;
                 default: throw AppleProtocol.Failure("Unknown Apple model event.");
             }

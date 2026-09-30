@@ -85,6 +85,25 @@ internal static class AntigravityProtocol
         }
     }
 
+    /// <summary>
+    /// Parses the single JSON object that <c>--output-format json</c> writes. It has the shape of the stream's
+    /// <c>result</c> payload.
+    /// </summary>
+    public static AntigravityResult ParseResultEnvelope(string json)
+    {
+        try
+        {
+            using JsonDocument document = JsonDocument.Parse(json);
+            return document.RootElement.ValueKind == JsonValueKind.Object
+                ? ParseResult(document.RootElement)
+                : throw Malformed(null);
+        }
+        catch (JsonException exception)
+        {
+            throw Malformed(exception);
+        }
+    }
+
     /// <summary>A valid opaque conversation identifier, or null. It is never used as a path or shell text.</summary>
     public static string? ConversationId(string? value) =>
         value is { Length: > 0 and <= MaximumConversationIdLength }

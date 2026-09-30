@@ -8,8 +8,9 @@ internal sealed record AppleTool(string Name, string? Description, AppleSchemaNo
 internal sealed record AppleCall(string Id, string Name, string Arguments);
 internal sealed record AppleResult(string Id, string Name, string Text);
 internal sealed record AppleMessage(string Role, string Content, IReadOnlyList<AppleCall> Calls, IReadOnlyList<AppleResult> Results);
+/// <summary>One generation. <paramref name="Stream"/> false asks the helper for one complete response.</summary>
 internal sealed record AppleGeneration(string? Instructions, IReadOnlyList<AppleMessage> Messages,
-    IReadOnlyList<AppleTool> Tools, AppleSchemaNode? Schema, double? Temperature, int? MaximumResponseTokens);
+    IReadOnlyList<AppleTool> Tools, AppleSchemaNode? Schema, double? Temperature, int? MaximumResponseTokens, bool Stream);
 internal sealed record AppleCommand(string Command, string Id, AppleGeneration? Request = null);
 
 internal static class AppleProtocol

@@ -315,9 +315,41 @@ hand without the shared cache keeps its own.
 
 ### Streaming, reasoning text and usage
 
+`LlmProviderCapabilities.SupportsStreaming` says whether the adapter streams provider output as the model
+generates it. `LlmCapabilityOverrides.SupportsStreaming = false` selects the provider's non-streaming request:
+the adapter sends it and emits the complete response as events after it arrives. A transport whose provider
+has no non-streaming request rejects every request while streaming is off. Common's
+`LlmCapabilities.SupportsStreaming` carries the same flag to `ILlmInference` hosts.
+
+A response that arrives complete produces its events in a fixed order: reasoning text, the answer text as
+one `LlmTextDeltaEvent`, the refusal text when it differs from the answer text, then for each tool call its
+`LlmToolCallStartedEvent`, `LlmToolCallArgumentsDeltaEvent` and `LlmToolCallCompletedEvent`, and last the
+completion. The completion carries the same result a streamed response of the same content produces. Gemini
+and Vertex Gemini read a `generateContent` response with the streaming reader, so their events follow part
+order in both modes.
+
+A non-streaming response sends its HTTP headers only when generation ends. The generation HTTP clients
+(OpenAI Responses, OpenAI-compatible, Anthropic, Gemini API and Vertex) therefore have no client timeout; the
+caller's cancellation token ends a request. Anthropic's SDKs refuse non-streaming requests they expect to run
+longer than 10 minutes, and the API can end a long non-streaming request with `504 timeout_error`. Connect
+does not pre-validate `max_tokens` against that limit, so a long non-streaming Anthropic request can fail
+where the same streamed request succeeds.
+
 | Transport | Streams | With `SupportsStreaming = false` |
 | --- | --- | --- |
+| OpenAI Responses | `stream: true` | `stream: false` |
+| Codex | `stream: true` | Rejected |
+| OpenAI-compatible | `stream: true` | `stream: false`, no `stream_options` |
+| Anthropic Messages | `stream: true` | `stream: false` |
+| Claude CLI | `--output-format stream-json` | `--output-format json`, prompt as text on standard input, no attachments |
 | Bedrock Converse | ConverseStream | Converse |
+| AgentCore | InvokeHarness | Rejected |
+| Vertex Gemini | `streamGenerateContent` | `generateContent` |
+| Vertex Claude | `streamRawPredict` | `rawPredict` |
+| Gemini API | `streamGenerateContent` | `generateContent` |
+| Antigravity | `--output-format stream-json` | `-p` with `--output-format json` |
+| Apple | `streamResponse` | `respond(to:)` |
+| SelfHost | Engine-defined | Engine-defined |
 
 ### Wrapped CLI processes
 
@@ -733,8 +765,10 @@ capability overrides and additional headers already on a connection are retained
 Auth interactions, dynamic choices, validation and explicit model tests use one common contract.
 `AddLlmConnectBedrock` registers AWS profile/region choices in the SDK-owning assembly.
 OpenAI-compatible remains an advanced provider with explicit manual-model support and typed
-default/enabled/disabled capability overrides. Existing provider JSON, headers and model-specific
-overrides are retained; the editor does not turn them into an arbitrary JSON settings payload.
+default/enabled/disabled capability overrides. Disabling the `Streaming` override selects the endpoint's
+non-streaming request, as [Streaming, reasoning text and usage](#streaming-reasoning-text-and-usage) describes.
+Existing provider JSON, headers and model-specific overrides are retained; the editor does not turn them into
+an arbitrary JSON settings payload.
 
 `ImageProviderService.SetupDefinitions` and `CreateSettingsManager` provide the same editing surface for
 ComfyUI. Supply `IImageWorkflowChoiceSource` for host-owned saved workflows and a typed
@@ -1219,7 +1253,7 @@ new LlmConnection
 
 `Endpoint` may be `agy`, `local://antigravity-cli`, or an absolute executable path. Desktop apps launched outside a login shell should prefer the absolute path because their `PATH` can differ from Terminal or PowerShell. Model discovery calls `agy models`; model `auto` omits the command-line model override and uses the CLI default.
 
-Each request runs in an empty temporary workspace with terminal sandboxing and slash-command expansion disabled. Prompts are sent as BOM-free UTF-8 through standard input instead of process arguments. Native JSON Schema and the `Low`, `Medium` and `High` reasoning levels are supported. Only `agent_response` step deltas stream as answer text. A schema-backed request streams no provisional text: it returns the terminal event's canonical `structured_output` value, validated locally. The free-text `response` remains a compatibility fallback for older CLI versions. Temperature, maximum output tokens, headers, and provider options are rejected rather than silently ignored.
+Each request runs in an empty temporary workspace with terminal sandboxing and slash-command expansion disabled. A streamed request sends its prompt as BOM-free UTF-8 through standard input. A request with `SupportsStreaming = false` is the exception: the CLI's only non-streaming form, `agy -p "<prompt>" --output-format json`, takes the prompt as a process argument, because stream-json input requires stream-json output. That prompt is visible in the local process list. It must fit in one argument: at most 131,071 UTF-8 bytes on macOS and Linux, and at most 30,000 characters on Windows, where a `.cmd` or `.bat` launcher cannot carry it at all because the prompt contains line breaks. A prompt that does not fit fails with `NotSupportedException` before the CLI starts. Native JSON Schema and the `Low`, `Medium` and `High` reasoning levels are supported. Only `agent_response` step deltas stream as answer text. A schema-backed request streams no provisional text: it returns the terminal event's canonical `structured_output` value, validated locally. The free-text `response` remains a compatibility fallback for older CLI versions. Temperature, maximum output tokens, headers, and provider options are rejected rather than silently ignored.
 
 Antigravity may emit its own internal tool activity, but the CLI owns that execution. Because
 Darkspyre.Inference.Connect.LLM cannot surface the call for host authorization and result submission, this adapter reports
@@ -1288,7 +1322,8 @@ metadata remains discoverable on other platforms without loading native code. Th
 been exercised on macOS 26.7; oldest-OS and signed clean-machine certification remain release gates.
 See the [helper build/test instructions and process limits](tools/AppleFoundationModelsHost/README.md).
 
-Supported: text/instructions, user/assistant semantic history, streaming, temperature in [0,1],
+Supported: text/instructions, user/assistant semantic history, streaming or one complete
+`respond(to:)` response when `SupportsStreaming` is false, temperature in [0,1],
 provider-enforced output caps, host-executed chat tools and existing managed agent sessions.
 Each model operation owns one helper process, which starts and ends as
 [Wrapped CLI processes](#wrapped-cli-processes) describes. Tools and persistence remain with the host.

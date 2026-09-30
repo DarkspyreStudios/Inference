@@ -34,6 +34,10 @@ public sealed record LlmCapabilities
 {
     public LlmOutputLimitEnforcement OutputLimitEnforcement { get; init; }
 
+    /// <summary>
+    /// True when <see cref="ILlmInference.StreamAsync"/> delivers events while the model generates. False when the
+    /// events arrive together after generation ends.
+    /// </summary>
     public bool SupportsStreaming { get; init; }
 
     public bool SupportsModelListing { get; init; }

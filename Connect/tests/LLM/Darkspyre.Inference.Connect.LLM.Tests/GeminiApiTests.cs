@@ -42,6 +42,33 @@ public sealed class GeminiApiTests
     }
 
     [Fact]
+    public async Task NonStreamingUsesGenerateContent()
+    {
+        const string reply = """{"responseId":"r1","candidates":[{"content":{"parts":[{"text":"Thinking.","thought":true},{"text":"Running."},{"functionCall":{"id":"call_1","name":"run","args":{"command":"pwd"}}}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":5,"candidatesTokenCount":3,"totalTokenCount":8}}""";
+        var request = new LlmChatRequest { ModelId = Flash, Messages = [new("user", "Run pwd")], Tools = [Tool] };
+        var complete = new Handler(reply) { Json = true };
+        var streamed = new Handler(reply);
+
+        var events = new List<LlmStreamEvent>();
+        await foreach (LlmStreamEvent item in new GeminiApiLlmClient(new HttpClient(complete)).StreamAsync(
+            Connection with { CapabilityOverrides = new() { SupportsStreaming = false } }, request))
+        { events.Add(item); }
+        LlmChatResult fromStream = await Complete(new GeminiApiLlmClient(new HttpClient(streamed)), Connection, request);
+
+        Uri uri = Assert.Single(complete.Uris);
+        Assert.Equal("/v1beta/models/gemini-3-flash-preview:generateContent", uri.AbsolutePath);
+        Assert.Equal(string.Empty, uri.Query);
+        Assert.Collection(events,
+            item => Assert.Equal(new LlmReasoningDeltaEvent("Thinking.", true), item),
+            item => Assert.Equal(new LlmTextDeltaEvent("Running."), item),
+            item => Assert.Equal(new LlmToolCallStartedEvent("call_1", "run", 0), item),
+            item => Assert.IsType<LlmToolCallCompletedEvent>(item),
+            item => Assert.IsType<LlmChatCompletionEvent>(item));
+        LlmChatResult fromComplete = ((LlmChatCompletionEvent)events[^1]).Result;
+        Assert.Equal(JsonSerializer.Serialize(fromStream), JsonSerializer.Serialize(fromComplete));
+    }
+
+    [Fact]
     public void ConnectionsRejectRoutingChangesAndForeignCredentials()
     {
         Assert.Throws<NotSupportedException>(() => GeminiApiLlmClient.Validate(Connection with { Endpoint = "https://example.com" }));
@@ -226,6 +253,8 @@ public sealed class GeminiApiTests
         public List<Uri> CatalogUris { get; } = [];
         public HttpStatusCode Status { get; init; } = HttpStatusCode.OK;
         public TimeSpan? RetryAfter { get; init; }
+        /// <summary>True answers with the frames as one JSON body, as generateContent does.</summary>
+        public bool Json { get; init; }
         public List<string> Bodies { get; } = [];
         public List<Uri> Uris { get; } = [];
         public List<string?> Keys { get; } = [];
@@ -246,9 +275,12 @@ public sealed class GeminiApiTests
             }
             Uris.Add(request.RequestUri!);
             Bodies.Add(request.Content is null ? "" : await request.Content.ReadAsStringAsync(cancellationToken));
+            string[] reply = Replies.Count > 0 ? Replies.Dequeue() : frames;
             return new(HttpStatusCode.OK)
             {
-                Content = new StringContent(string.Concat((Replies.Count > 0 ? Replies.Dequeue() : frames).Select(frame => "data: " + frame + "\n\n")), Encoding.UTF8, "text/event-stream")
+                Content = Json
+                    ? new StringContent(string.Concat(reply), Encoding.UTF8, "application/json")
+                    : new StringContent(string.Concat(reply.Select(frame => "data: " + frame + "\n\n")), Encoding.UTF8, "text/event-stream")
             };
         }
     }

@@ -27,6 +27,7 @@ internal sealed partial class GeminiApiLlmClient(HttpClient http)
     public override LlmTransport Transport => LlmTransport.GoogleGeminiApi;
     public override LlmProviderDefinition ProviderDefinition => ProviderDefinitions.GeminiApi;
     protected override LlmProviderCapabilities DefaultCapabilities => new() { SupportsModelListing = true };
+    protected override bool OffersNonStreamingRequests => true;
 
     public override LlmProviderCapabilities GetCapabilities(LlmConnection connection, string? modelId = null)
     {
@@ -67,10 +68,12 @@ internal sealed partial class GeminiApiLlmClient(HttpClient http)
             : GeminiSchemas.Enforcement(request.StructuredOutput, RouteName);
         JsonObject payload = GeminiRequest.Build(connection, request, enforcement, output => ProjectToolOutput(connection, request.ModelId, output),
             Reasoning(connection, request.ModelId));
-        var message = new HttpRequestMessage(HttpMethod.Post, $"{DefaultEndpoint}/v1beta/models/{model}:streamGenerateContent?alt=sse")
+        string operation = capabilities.SupportsStreaming ? "streamGenerateContent?alt=sse" : "generateContent";
+        var message = new HttpRequestMessage(HttpMethod.Post, $"{DefaultEndpoint}/v1beta/models/{model}:{operation}")
         { Content = JsonContent.Create(payload) };
         message.Headers.TryAddWithoutValidation(KeyHeader, Key(connection));
-        IAsyncEnumerable<LlmStreamEvent> source = GeminiStream.ReadAsync(Http, message, Route, connection, request, enforcement, cancellationToken);
+        IAsyncEnumerable<LlmStreamEvent> source = GeminiStream.ReadAsync(Http, message, Route, connection, request, enforcement,
+            capabilities.SupportsStreaming, cancellationToken);
         await using IAsyncEnumerator<LlmStreamEvent> iterator = source.GetAsyncEnumerator(cancellationToken);
         while (true)
         {

@@ -10,17 +10,19 @@ namespace Darkspyre.Inference.Connect.LLM.Internal;
 internal sealed record GeminiRoute(LlmTransport Transport, string Name, string CallIdPrefix,
     Action<HttpResponseMessage> CheckStatus, Func<LlmConnection, string, JsonArray, LlmContinuationState> Encode);
 
-/// <summary>Reads a Gemini streamGenerateContent SSE response. The caller supplies the URL and authentication.</summary>
+/// <summary>
+/// Reads a Gemini generateContent response or streamGenerateContent SSE stream. The caller supplies the URL and
+/// authentication.
+/// </summary>
 internal static class GeminiStream
 {
     public static async IAsyncEnumerable<LlmStreamEvent> ReadAsync(HttpClient http, HttpRequestMessage message, GeminiRoute route,
-        LlmConnection connection, LlmChatRequest request, LlmStructuredOutputEnforcement? enforcement,
+        LlmConnection connection, LlmChatRequest request, LlmStructuredOutputEnforcement? enforcement, bool stream,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         using HttpRequestMessage owned = message;
         using HttpResponseMessage response = await http.SendAsync(owned, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
         route.CheckStatus(response);
-        await using Stream stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
         LlmProviderException Failure(string reason) => new(reason, route.Transport);
         var text = new StringBuilder();
         var parts = new JsonArray();
@@ -30,7 +32,11 @@ internal static class GeminiStream
         string? blocked = null;
         string? responseId = null;
         int? input = null, visibleOutput = null, thoughts = null, cached = null, total = null;
-        await foreach (string data in Sse.ReadDataPayloadsAsync(stream, cancellationToken).ConfigureAwait(false))
+        // A generateContent response is one GenerateContentResponse, the same type as each streamed chunk.
+        IAsyncEnumerable<string> payloads = stream
+            ? ReadStreamAsync(response, cancellationToken)
+            : ReadCompleteAsync(response, cancellationToken);
+        await foreach (string data in payloads.ConfigureAwait(false))
         {
             using JsonDocument document = JsonDocument.Parse(data);
             JsonElement root = document.RootElement;
@@ -118,6 +124,22 @@ internal static class GeminiStream
                 ? StructuredOutput.Validate(text.ToString(), schema, mode) : null,
             Diagnostics = new((int)response.StatusCode, null, null)
         });
+    }
+
+    private static async IAsyncEnumerable<string> ReadStreamAsync(HttpResponseMessage response,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        await using Stream body = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+        await foreach (string data in Sse.ReadDataPayloadsAsync(body, cancellationToken).ConfigureAwait(false))
+        {
+            yield return data;
+        }
+    }
+
+    private static async IAsyncEnumerable<string> ReadCompleteAsync(HttpResponseMessage response,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        yield return await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
     }
 
     private static string? SafeReason(string? reason) => reason is null ? null

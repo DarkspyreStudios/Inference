@@ -62,6 +62,26 @@ public sealed class PortableInferenceAdapterTests
     }
 
     [Fact]
+    public async Task ConnectionWithStreamingOffReportsItAndCompletes()
+    {
+        using var http = new HttpClient(new JsonHandler("""
+            {"id":"chatcmpl-1","choices":[{"index":0,"message":{"role":"assistant","content":"Complete."},"finish_reason":"stop"}],"usage":{"prompt_tokens":2,"completion_tokens":1,"total_tokens":3}}
+            """));
+        var source = new ConnectionSource { Overrides = new LlmCapabilityOverrides { SupportsStreaming = false } };
+        var service = new LlmProviderService(source, [new Providers.OpenAiCompatibleChatLlmClient(http)]);
+        CommonLlm.ILlmInference inference = service.Bind("primary");
+
+        CommonLlm.LlmCapabilities capabilities = await inference.GetCapabilitiesAsync("model-a");
+        CommonLlm.LlmInferenceResult result = await CommonLlm.LlmInferenceExtensions.CompleteAsync(
+            inference,
+            new CommonLlm.LlmInferenceRequest { ModelId = "model-a", Messages = [new CommonLlm.LlmMessage("user", "Hi")] });
+
+        Assert.False(capabilities.SupportsStreaming);
+        Assert.Equal("Complete.", result.Text);
+        Assert.Equal(CommonLlm.LlmCompletionStatus.Completed, result.Status);
+    }
+
+    [Fact]
     public async Task BoundInferenceMapsProviderFailureToPortableFailure()
     {
         var client = new RecordingClient { Failure = new NotSupportedException("not supported") };
@@ -80,6 +100,8 @@ public sealed class PortableInferenceAdapterTests
 
     private sealed class ConnectionSource : ILlmConnectionSource
     {
+        public LlmCapabilityOverrides? Overrides { get; init; }
+
         public Task<LlmConnection?> GetConnectionAsync(
             string connectionId,
             CancellationToken cancellationToken = default) =>
@@ -87,7 +109,8 @@ public sealed class PortableInferenceAdapterTests
             {
                 Version = "v1",
                 Transport = LlmTransport.OpenAiCompatibleChat,
-                Endpoint = "https://provider.test/v1"
+                Endpoint = "https://provider.test/v1",
+                CapabilityOverrides = Overrides
             });
 
         public Task SaveCredentialAsync(
@@ -95,6 +118,15 @@ public sealed class PortableInferenceAdapterTests
             string credentialJson,
             string expectedVersion,
             CancellationToken cancellationToken = default) => throw new NotSupportedException();
+    }
+
+    private sealed class JsonHandler(string body) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
+            Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+            {
+                Content = new StringContent(body, System.Text.Encoding.UTF8, "application/json")
+            });
     }
 
     private sealed class RecordingClient : ILlmClient

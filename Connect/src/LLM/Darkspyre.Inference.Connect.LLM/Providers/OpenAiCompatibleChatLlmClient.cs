@@ -15,6 +15,8 @@ internal sealed class OpenAiCompatibleChatLlmClient(HttpClient http) : LlmClient
 
     public override LlmProviderDefinition ProviderDefinition => ProviderDefinitions.OpenAiCompatible;
 
+    protected override bool OffersNonStreamingRequests => true;
+
     protected override LlmProviderCapabilities DefaultCapabilities { get; } = new()
     {
         SupportsStreaming = true,
@@ -74,6 +76,17 @@ internal sealed class OpenAiCompatibleChatLlmClient(HttpClient http) : LlmClient
             credential,
             "OpenAI-compatible chat request",
             cancellationToken);
+
+        if (!capabilities.SupportsStreaming)
+        {
+            string body = await response.Content.ReadAsStringAsync(cancellationToken);
+            foreach (LlmStreamEvent completeEvent in ReadCompleteResponse(body, response, request, enforcement, credential))
+            {
+                yield return completeEvent;
+            }
+
+            yield break;
+        }
 
         await using Stream stream = await response.Content.ReadAsStreamAsync(cancellationToken);
         var text = new StringBuilder();
@@ -202,8 +215,6 @@ internal sealed class OpenAiCompatibleChatLlmClient(HttpClient http) : LlmClient
                 credential);
         }
 
-        string finalText = text.ToString();
-        string finalRefusal = refusal.ToString();
         LlmToolCall[] completedToolCalls = toolCalls
             .OrderBy(pair => pair.Key)
             .Select(pair => pair.Value.Build())
@@ -213,6 +224,109 @@ internal sealed class OpenAiCompatibleChatLlmClient(HttpClient http) : LlmClient
             yield return new LlmToolCallCompletedEvent(toolCall);
         }
 
+        yield return new LlmChatCompletionEvent(BuildResult(
+            request,
+            enforcement,
+            text.ToString(),
+            refusal.ToString(),
+            finishReason,
+            responseId,
+            usage,
+            completedToolCalls,
+            response,
+            lastEvent,
+            credential));
+    }
+
+    /// <summary>Maps a response that arrived as one chat.completion object.</summary>
+    private List<LlmStreamEvent> ReadCompleteResponse(
+        string body,
+        HttpResponseMessage response,
+        LlmChatRequest request,
+        LlmStructuredOutputEnforcement? enforcement,
+        LlmCredential? credential)
+    {
+        JsonDocument document;
+        try
+        {
+            document = JsonDocument.Parse(body);
+        }
+        catch (JsonException exception)
+        {
+            throw ProtocolException(
+                "OpenAI-compatible chat returned a malformed response.",
+                response,
+                body,
+                credential,
+                exception);
+        }
+
+        using (document)
+        {
+            JsonElement root = document.RootElement;
+            if (root.ValueKind != JsonValueKind.Object)
+            {
+                throw ProtocolException("OpenAI-compatible chat returned a malformed response.", response, body, credential);
+            }
+
+            if (LlmJson.GetObject(root, "error") is { } error)
+            {
+                throw StreamError(error, response, body, credential);
+            }
+
+            if (!root.TryGetProperty("choices", out JsonElement choices)
+                || choices.ValueKind != JsonValueKind.Array
+                || choices.GetArrayLength() == 0
+                || LlmJson.GetObject(choices[0], "message") is not { } message)
+            {
+                throw ProtocolException("OpenAI-compatible chat returned no message.", response, body, credential);
+            }
+
+            var toolCalls = new List<LlmToolCall>();
+            if (message.TryGetProperty("tool_calls", out JsonElement calls) && calls.ValueKind == JsonValueKind.Array)
+            {
+                foreach (JsonElement call in calls.EnumerateArray())
+                {
+                    var builder = new ToolCallBuilder { Id = LlmJson.GetString(call, "id") };
+                    if (LlmJson.GetObject(call, "function") is { } function)
+                    {
+                        builder.Name = LlmJson.GetString(function, "name");
+                        builder.Arguments.Append(LlmJson.GetString(function, "arguments"));
+                    }
+
+                    toolCalls.Add(builder.Build());
+                }
+            }
+
+            LlmChatResult result = BuildResult(
+                request,
+                enforcement,
+                LlmJson.GetString(message, "content") ?? string.Empty,
+                LlmJson.GetString(message, "refusal") ?? string.Empty,
+                LlmJson.GetString(choices[0], "finish_reason"),
+                LlmJson.GetString(root, "id"),
+                ReadUsage(root),
+                [.. toolCalls],
+                response,
+                body,
+                credential);
+            return [.. CompleteResponseEvents.From(result, [])];
+        }
+    }
+
+    private static LlmChatResult BuildResult(
+        LlmChatRequest request,
+        LlmStructuredOutputEnforcement? enforcement,
+        string finalText,
+        string finalRefusal,
+        string? finishReason,
+        string? responseId,
+        LlmUsage? usage,
+        LlmToolCall[] completedToolCalls,
+        HttpResponseMessage response,
+        string? rawFinal,
+        LlmCredential? credential)
+    {
         LlmCompletionStatus status = finalRefusal.Length > 0 || finishReason == "content_filter"
             ? LlmCompletionStatus.Refused
             : finishReason == "length"
@@ -235,7 +349,7 @@ internal sealed class OpenAiCompatibleChatLlmClient(HttpClient http) : LlmClient
                 : StructuredOutput.Validate(finalText, structured, enforcement.Value);
         }
 
-        yield return new LlmChatCompletionEvent(new LlmChatResult
+        return new LlmChatResult
         {
             Text = finalText,
             Refusal = finalRefusal.Length == 0 ? null : finalRefusal,
@@ -249,8 +363,8 @@ internal sealed class OpenAiCompatibleChatLlmClient(HttpClient http) : LlmClient
             Diagnostics = new LlmProviderDiagnostics(
                 (int)response.StatusCode,
                 ProviderHttp.ReadRequestId(response),
-                lastEvent is null ? null : SecretRedactor.Sanitize(lastEvent, credential))
-        });
+                rawFinal is null ? null : SecretRedactor.Sanitize(rawFinal, credential))
+        };
     }
 
     private static JsonObject BuildPayload(
@@ -331,10 +445,11 @@ internal sealed class OpenAiCompatibleChatLlmClient(HttpClient http) : LlmClient
         {
             ["model"] = request.ModelId,
             ["messages"] = messages,
-            ["stream"] = true
+            ["stream"] = capabilities.SupportsStreaming
         };
 
-        if (capabilities.SupportsStreamingUsage)
+        // OpenAI accepts stream_options only on streaming requests; a non-streaming body always carries usage.
+        if (capabilities.SupportsStreaming && capabilities.SupportsStreamingUsage)
         {
             payload["stream_options"] = new JsonObject { ["include_usage"] = true };
         }

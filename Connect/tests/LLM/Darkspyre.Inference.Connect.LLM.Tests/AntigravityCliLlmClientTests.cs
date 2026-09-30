@@ -54,6 +54,102 @@ public sealed class AntigravityCliLlmClientTests
         Assert.Null(result.Diagnostics.RawFinalResponseJson);
     }
 
+    private static LlmConnection StreamingOffConnection() => Connection() with
+    {
+        CapabilityOverrides = new() { SupportsStreaming = false }
+    };
+
+    [Fact]
+    public async Task StreamingOffPassesThePromptAsAnArgumentAndParsesTheEnvelope()
+    {
+        var runner = new RecordingRunner(new AntigravityCliProcessResult(
+            0,
+            """{"conversation_id":"conversation-2","status":"SUCCESS","response":"Complete answer.","duration_seconds":1.5,"num_turns":1,"usage":{"input_tokens":9,"output_tokens":4,"total_tokens":13}}""",
+            string.Empty));
+        var client = new AntigravityCliLlmClient(runner);
+
+        IReadOnlyList<LlmStreamEvent> events = await ReadAllAsync(client.StreamAsync(
+            StreamingOffConnection(),
+            new LlmChatRequest { ModelId = "auto", Messages = [new LlmChatMessage("user", "Secret prompt text")] }));
+
+        AntigravityCliInvocation invocation = Assert.Single(runner.Invocations);
+        Assert.Equal("-p", invocation.Arguments[0]);
+        Assert.Contains("Secret prompt text", invocation.Arguments[1], StringComparison.Ordinal);
+        Assert.Equal(["--output-format", "json"], invocation.Arguments.Skip(2).Take(2));
+        Assert.DoesNotContain("--input-format", invocation.Arguments);
+        Assert.Null(invocation.StandardInput);
+        Assert.Collection(events,
+            item => Assert.Equal(new LlmTextDeltaEvent("Complete answer."), item),
+            item =>
+            {
+                LlmChatResult result = Assert.IsType<LlmChatCompletionEvent>(item).Result;
+                Assert.Equal("Complete answer.", result.Text);
+                Assert.Equal("conversation-2", result.ProviderResponseId);
+                Assert.Equal(new LlmUsage(9, 4, 13), result.Usage);
+            });
+    }
+
+    [Fact]
+    public async Task StreamingOffReportsProviderAndExitErrors()
+    {
+        var failed = new AntigravityCliLlmClient(new RecordingRunner(new AntigravityCliProcessResult(
+            0, """{"status":"ERROR","response":"","error":{"message":"quota"}}""", string.Empty)));
+        LlmProviderException providerError = await Assert.ThrowsAsync<LlmProviderException>(() => ReadAllAsync(failed.StreamAsync(
+            StreamingOffConnection(), new LlmChatRequest { ModelId = "auto", Messages = [new LlmChatMessage("user", "Hi")] })));
+        Assert.Equal("antigravity_cli_error", providerError.ProviderCode);
+
+        var exited = new AntigravityCliLlmClient(new RecordingRunner(new AntigravityCliProcessResult(3, string.Empty, "boom")));
+        LlmProviderException exitError = await Assert.ThrowsAsync<LlmProviderException>(() => ReadAllAsync(exited.StreamAsync(
+            StreamingOffConnection(), new LlmChatRequest { ModelId = "auto", Messages = [new LlmChatMessage("user", "Hi")] })));
+        Assert.Equal("antigravity_cli_exit_3", exitError.ProviderCode);
+    }
+
+    [Fact]
+    public async Task StreamingOffRejectsAPromptOverTheArgumentLimitBeforeStarting()
+    {
+        var runner = new RecordingRunner(new AntigravityCliProcessResult(0, string.Empty, string.Empty));
+        var client = new AntigravityCliLlmClient(runner);
+        int length = OperatingSystem.IsWindows()
+            ? AntigravityCliLlmClient.MaximumWindowsArgumentCharacters + 1
+            : AntigravityCliLlmClient.MaximumUnixArgumentBytes + 1;
+
+        await Assert.ThrowsAsync<NotSupportedException>(() => ReadAllAsync(client.StreamAsync(
+            StreamingOffConnection(),
+            new LlmChatRequest { ModelId = "auto", Messages = [new LlmChatMessage("user", new string('a', length))] })));
+
+        Assert.Empty(runner.Invocations);
+    }
+
+    [Fact]
+    public async Task StreamingOffWithASchemaReturnsTheStructuredOutput()
+    {
+        var runner = new RecordingRunner(new AntigravityCliProcessResult(
+            0,
+            """{"conversation_id":"c3","status":"SUCCESS","response":"prose","structured_output":{"answer":"yes"},"usage":{}}""",
+            string.Empty));
+        var client = new AntigravityCliLlmClient(runner);
+
+        IReadOnlyList<LlmStreamEvent> events = await ReadAllAsync(client.StreamAsync(
+            StreamingOffConnection(),
+            new LlmChatRequest
+            {
+                ModelId = "auto",
+                Messages = [new LlmChatMessage("user", "Answer.")],
+                StructuredOutput = new LlmStructuredOutputRequest
+                {
+                    Name = "answer",
+                    Schema = Schema("""{"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"]}""")
+                }
+            }));
+
+        AntigravityCliInvocation invocation = Assert.Single(runner.Invocations);
+        Assert.Contains("--json-schema", invocation.Arguments);
+        Assert.NotNull(runner.SchemaContent);
+        LlmChatResult result = Assert.Single(events.OfType<LlmChatCompletionEvent>()).Result;
+        Assert.Equal("{\"answer\":\"yes\"}", result.Text);
+        Assert.True(result.StructuredOutput?.IsValid);
+    }
+
     [Fact]
     public async Task RejectsPromptAttachmentsBeforeStartingTextOnlyHeadlessCli()
     {

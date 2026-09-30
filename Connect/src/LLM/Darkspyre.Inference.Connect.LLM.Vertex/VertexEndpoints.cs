@@ -37,13 +37,20 @@ internal static partial class VertexEndpoints
         return (parts[0], parts[1]);
     }
 
-    public static Uri Generation(LlmConnection connection, string modelId)
+    /// <summary>The generation URL: the streaming operation when <paramref name="stream"/> is true, else the complete one.</summary>
+    public static Uri Generation(LlmConnection connection, string modelId, bool stream)
     {
         Validate(connection);
         var (publisher, model) = ParseModel(modelId);
         var config = connection.Vertex!;
         string host = config.Location == "global" ? "aiplatform.googleapis.com" : $"{config.Location}-aiplatform.googleapis.com";
-        string operation = publisher == "google" ? "streamGenerateContent?alt=sse" : "streamRawPredict";
+        string operation = (publisher, stream) switch
+        {
+            ("google", true) => "streamGenerateContent?alt=sse",
+            ("google", false) => "generateContent",
+            (_, true) => "streamRawPredict",
+            _ => "rawPredict"
+        };
         return new($"https://{host}/v1/projects/{config.ProjectId}/locations/{config.Location}/publishers/{publisher}/models/{model}:{operation}");
     }
 

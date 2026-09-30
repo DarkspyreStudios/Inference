@@ -119,6 +119,43 @@ public sealed class ClaudeCliLlmClientTests
     }
 
     [Fact]
+    public async Task StreamingOffUsesJsonOutputWithThePromptOnStandardInput()
+    {
+        var runner = new RecordingRunner(new ClaudeCliProcessResult(
+            0,
+            """{"type":"result","subtype":"success","is_error":false,"result":"Complete reply.","session_id":"session-2","stop_reason":"end_turn","usage":{"input_tokens":7,"output_tokens":5}}""",
+            string.Empty));
+        using var http = new HttpClient(new UnexpectedHttpHandler());
+        var client = new ClaudeCliLlmClient(http, runner);
+        LlmConnection connection = CliConnection() with { CapabilityOverrides = new() { SupportsStreaming = false } };
+
+        IReadOnlyList<LlmStreamEvent> events = await ReadAllAsync(client.StreamAsync(
+            connection,
+            new LlmChatRequest { ModelId = "claude-test", Messages = [new LlmChatMessage("user", "Secret prompt text")] }));
+
+        ClaudeCliInvocation invocation = Assert.Single(runner.Invocations);
+        Assert.Equal(["-p", "--output-format", "json"], invocation.Arguments.Take(3));
+        Assert.DoesNotContain("--input-format", invocation.Arguments);
+        Assert.DoesNotContain("--include-partial-messages", invocation.Arguments);
+        Assert.DoesNotContain("--verbose", invocation.Arguments);
+        Assert.Contains("Secret prompt text", invocation.StandardInput, StringComparison.Ordinal);
+        Assert.DoesNotContain("Secret prompt text", string.Join(' ', invocation.Arguments), StringComparison.Ordinal);
+        Assert.Collection(events,
+            item => Assert.Equal(new LlmTextDeltaEvent("Complete reply."), item),
+            item =>
+            {
+                LlmChatResult result = Assert.IsType<LlmChatCompletionEvent>(item).Result;
+                Assert.Equal(LlmCompletionStatus.Completed, result.Status);
+                Assert.Equal("session-2", result.ProviderResponseId);
+                Assert.Equal(12, result.Usage?.TotalTokens);
+            });
+
+        LlmProviderCapabilities capabilities = client.GetCapabilities(connection);
+        Assert.False(capabilities.SupportsPromptImages);
+        Assert.False(capabilities.SupportsPromptDocuments);
+    }
+
+    [Fact]
     public async Task IntermediateRefusalDoesNotOverrideSuccessfulFallbackResult()
     {
         var runner = new RecordingRunner(new ClaudeCliProcessResult(

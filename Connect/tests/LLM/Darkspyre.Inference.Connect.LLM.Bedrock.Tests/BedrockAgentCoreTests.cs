@@ -139,6 +139,24 @@ public sealed class BedrockAgentCoreTests
     }
 
     [Fact]
+    public async Task ChatLaneRejectsDisabledStreamingBeforeInvocation()
+    {
+        var invoker = new StubInvoker();
+        var client = new BedrockAgentCoreLlmClient(invoker);
+
+        await Assert.ThrowsAsync<NotSupportedException>(async () =>
+            await ToArrayAsync(client.StreamAsync(
+                Connection() with { CapabilityOverrides = new() { SupportsStreaming = false } },
+                new LlmChatRequest
+                {
+                    ModelId = BedrockAgentCoreLlmClient.DefaultModelId,
+                    Messages = [new LlmChatMessage("user", "Hello")]
+                })));
+
+        Assert.Empty(invoker.Requests);
+    }
+
+    [Fact]
     public async Task ChatLaneRejectsStreamWithoutTerminalMessageStop()
     {
         var client = new BedrockAgentCoreLlmClient(new StubInvoker([]));

@@ -359,6 +359,11 @@ internal sealed class BedrockAgentCoreLlmClient(IBedrockAgentCoreInvoker invoker
         {
             throw new ArgumentException("A model id is required.", nameof(request));
         }
+        if (!capabilities.SupportsStreaming)
+        {
+            throw new NotSupportedException(
+                "AgentCore Harness has no non-streaming request, so streaming cannot be turned off for this connection.");
+        }
         if (request.Temperature is not null)
         {
             throw new NotSupportedException(

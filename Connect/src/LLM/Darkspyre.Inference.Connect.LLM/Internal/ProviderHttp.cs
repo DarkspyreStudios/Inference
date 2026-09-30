@@ -5,6 +5,12 @@ namespace Darkspyre.Inference.Connect.LLM.Internal;
 
 internal static class ProviderHttp
 {
+    /// <summary>
+    /// The client timeout of the generation clients. A non-streaming response sends its headers only when generation
+    /// ends, so these clients have no client timeout; the caller's cancellation token ends a request.
+    /// </summary>
+    internal static readonly TimeSpan GenerationTimeout = Timeout.InfiniteTimeSpan;
+
     private static readonly string[] ReservedHeaders = ["Authorization", "Accept", "Content-Type", "Host"];
 
     public static void ApplyHeaders(

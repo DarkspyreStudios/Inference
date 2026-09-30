@@ -11,6 +11,12 @@ namespace Darkspyre.Inference.Connect.LLM.Providers;
 internal sealed class AntigravityCliLlmClient(IAntigravityCliRunner runner)
     : ILlmClient, ILlmAccountUsageClient, IExternalLlmAuthenticationProbe, ILlmContextEstimator
 {
+    /// <summary>The longest process argument Linux accepts (MAX_ARG_STRLEN less its terminator), in UTF-8 bytes.</summary>
+    internal const int MaximumUnixArgumentBytes = 131_071;
+
+    /// <summary>The longest non-streaming prompt on Windows, in UTF-16 characters, within the 32,767-character command line.</summary>
+    internal const int MaximumWindowsArgumentCharacters = 30_000;
+
     private static readonly LlmProviderCapabilities Capabilities = new()
     {
         OutputLimitEnforcement = Common.LLM.LlmOutputLimitEnforcement.Unsupported,
@@ -62,23 +68,6 @@ internal sealed class AntigravityCliLlmClient(IAntigravityCliRunner runner)
         LlmProviderCapabilities capabilities = GetCapabilities(connection, request.ModelId);
         LlmStructuredOutputEnforcement? enforcement = ValidateRequest(request, capabilities);
         string prompt = BuildPrompt(request, enforcement);
-        string standardInput = BuildStandardInput(prompt);
-        var arguments = new List<string>
-        {
-            "--input-format", "stream-json",
-            "--output-format", "stream-json",
-            "--sandbox",
-            "--disable-slash-commands"
-        };
-        if (!string.Equals(request.ModelId, "auto", StringComparison.OrdinalIgnoreCase))
-        {
-            arguments.AddRange(["--model", request.ModelId]);
-        }
-        if (request.ReasoningLevel is { } level)
-        {
-            arguments.AddRange(["--effort", LlmReasoningEffort.Word(level)]);
-        }
-
         if (request.Tools.Count > 0
             || request.ToolChoice is not null
             || request.AllowParallelToolCalls is not null)
@@ -94,12 +83,34 @@ internal sealed class AntigravityCliLlmClient(IAntigravityCliRunner runner)
         JsonElement? providerSchema = enforcement == LlmStructuredOutputEnforcement.ProviderJsonSchema
             ? request.StructuredOutput?.Schema
             : null;
+        string executable = ResolveExecutable(connection.Endpoint);
+        if (!capabilities.SupportsStreaming)
+        {
+            LlmChatResult completeResult = await CompleteAsync(
+                executable, prompt, request, enforcement, providerSchema, cancellationToken);
+            foreach (LlmStreamEvent completeEvent in CompleteResponseEvents.From(completeResult, []))
+            {
+                yield return completeEvent;
+            }
+
+            yield break;
+        }
+
+        string standardInput = BuildStandardInput(prompt);
+        var arguments = new List<string>
+        {
+            "--input-format", "stream-json",
+            "--output-format", "stream-json",
+            "--sandbox",
+            "--disable-slash-commands"
+        };
+        AddModelArguments(arguments, request);
         ParsedResponse? response = null;
         AntigravityCliProcessResult? processResult = null;
         LlmProviderException? parseException = null;
         bool emittedText = false;
         await foreach (AntigravityCliProcessEvent processEvent in InvokeStreamingAsync(
-                           ResolveExecutable(connection.Endpoint),
+                           executable,
                            arguments,
                            standardInput,
                            providerSchema,
@@ -170,6 +181,86 @@ internal sealed class AntigravityCliLlmClient(IAntigravityCliRunner runner)
                 Transport,
                 providerCode: "antigravity_cli_invalid_response");
         }
+
+        LlmChatResult result = BuildResult(response, request, enforcement);
+        if (!emittedText && response.Text.Length > 0)
+        {
+            yield return new LlmTextDeltaEvent(response.Text);
+        }
+
+        yield return new LlmChatCompletionEvent(result);
+    }
+
+    /// <summary>
+    /// Runs one non-streaming turn. The CLI's only non-streaming form takes the prompt as a process argument, and
+    /// standard input stays empty.
+    /// </summary>
+    private async Task<LlmChatResult> CompleteAsync(
+        string executable,
+        string prompt,
+        LlmChatRequest request,
+        LlmStructuredOutputEnforcement? enforcement,
+        JsonElement? providerSchema,
+        CancellationToken cancellationToken)
+    {
+        EnsurePromptFitsArgument(executable, prompt);
+        var arguments = new List<string>
+        {
+            "-p", prompt,
+            "--output-format", "json",
+            "--sandbox",
+            "--disable-slash-commands"
+        };
+        AddModelArguments(arguments, request);
+        AntigravityCliProcessResult processResult = await InvokeAsync(
+            executable,
+            arguments,
+            null,
+            providerSchema,
+            cancellationToken);
+        if (processResult.ExitCode != 0 || processResult.StandardInputError is not null)
+        {
+            throw CreateExitException(processResult);
+        }
+
+        AntigravityResult envelope = AntigravityProtocol.ParseResultEnvelope(processResult.StandardOutput);
+        return BuildResult(ToParsedResponse(envelope, preferStructuredOutput: providerSchema is not null), request, enforcement);
+    }
+
+    /// <summary>Rejects a prompt that the platform cannot carry as one process argument.</summary>
+    internal static void EnsurePromptFitsArgument(string executable, string prompt)
+    {
+        string extension = Path.GetExtension(executable);
+        bool fits = OperatingSystem.IsWindows()
+            ? !string.Equals(extension, ".cmd", StringComparison.OrdinalIgnoreCase)
+                && !string.Equals(extension, ".bat", StringComparison.OrdinalIgnoreCase)
+                && prompt.Length <= MaximumWindowsArgumentCharacters
+            : Encoding.UTF8.GetByteCount(prompt) <= MaximumUnixArgumentBytes;
+        if (!fits)
+        {
+            throw new NotSupportedException(
+                "The Antigravity CLI takes a non-streaming prompt as a process argument, and this prompt is too long for one. "
+                + "Turn streaming on for this connection.");
+        }
+    }
+
+    private static void AddModelArguments(List<string> arguments, LlmChatRequest request)
+    {
+        if (!string.Equals(request.ModelId, "auto", StringComparison.OrdinalIgnoreCase))
+        {
+            arguments.AddRange(["--model", request.ModelId]);
+        }
+        if (request.ReasoningLevel is { } level)
+        {
+            arguments.AddRange(["--effort", LlmReasoningEffort.Word(level)]);
+        }
+    }
+
+    private LlmChatResult BuildResult(
+        ParsedResponse response,
+        LlmChatRequest request,
+        LlmStructuredOutputEnforcement? enforcement)
+    {
         if (!string.Equals(response.Status, "SUCCESS", StringComparison.OrdinalIgnoreCase))
         {
             throw new LlmProviderException(
@@ -178,28 +269,18 @@ internal sealed class AntigravityCliLlmClient(IAntigravityCliRunner runner)
                 providerCode: "antigravity_cli_error");
         }
 
-        if (!emittedText && response.Text.Length > 0)
-        {
-            yield return new LlmTextDeltaEvent(response.Text);
-        }
-
-        LlmStructuredOutputValidation? validation = request.StructuredOutput is null
-            ? null
-            : StructuredOutput.Validate(
-                response.Text,
-                request.StructuredOutput,
-                enforcement!.Value);
-
-        yield return new LlmChatCompletionEvent(new LlmChatResult
+        return new LlmChatResult
         {
             Text = response.Text,
             Status = LlmCompletionStatus.Completed,
             FinishReason = "completed",
             Usage = response.Usage,
             ProviderResponseId = response.ConversationId,
-            StructuredOutput = validation,
+            StructuredOutput = request.StructuredOutput is null
+                ? null
+                : StructuredOutput.Validate(response.Text, request.StructuredOutput, enforcement!.Value),
             Diagnostics = new LlmProviderDiagnostics(200, null, null)
-        });
+        };
     }
 
     public async Task<IReadOnlyList<LlmModel>> ListModelsAsync(
@@ -328,17 +409,7 @@ internal sealed class AntigravityCliLlmClient(IAntigravityCliRunner runner)
         string workingDirectory = CliInfrastructure.CreateWorkingDirectory("antigravity");
         try
         {
-            var effectiveArguments = new List<string>(arguments);
-            if (schema is not null)
-            {
-                string schemaPath = Path.Combine(workingDirectory, "output-schema.json");
-                await File.WriteAllTextAsync(
-                    schemaPath,
-                    schema.Value.GetRawText(),
-                    cancellationToken);
-                effectiveArguments.AddRange(["--json-schema", schemaPath]);
-            }
-
+            List<string> effectiveArguments = await WithSchemaAsync(arguments, schema, workingDirectory, cancellationToken);
             return await runner.RunAsync(
                 new AntigravityCliInvocation(
                     executable,
@@ -375,17 +446,7 @@ internal sealed class AntigravityCliLlmClient(IAntigravityCliRunner runner)
         string workingDirectory = CliInfrastructure.CreateWorkingDirectory("antigravity");
         try
         {
-            var effectiveArguments = new List<string>(arguments);
-            if (schema is not null)
-            {
-                string schemaPath = Path.Combine(workingDirectory, "output-schema.json");
-                await File.WriteAllTextAsync(
-                    schemaPath,
-                    schema.Value.GetRawText(),
-                    cancellationToken);
-                effectiveArguments.AddRange(["--json-schema", schemaPath]);
-            }
-
+            List<string> effectiveArguments = await WithSchemaAsync(arguments, schema, workingDirectory, cancellationToken);
             IAsyncEnumerable<AntigravityCliProcessEvent> events = runner.StreamAsync(
                 new AntigravityCliInvocation(
                     executable,
@@ -434,6 +495,27 @@ internal sealed class AntigravityCliLlmClient(IAntigravityCliRunner runner)
         }
     }
 
+    /// <summary>
+    /// The arguments with <c>--json-schema</c> appended when a schema is given. The schema file is written to the
+    /// invocation's working directory.
+    /// </summary>
+    private static async Task<List<string>> WithSchemaAsync(
+        IReadOnlyList<string> arguments,
+        JsonElement? schema,
+        string workingDirectory,
+        CancellationToken cancellationToken)
+    {
+        var effectiveArguments = new List<string>(arguments);
+        if (schema is not null)
+        {
+            string schemaPath = Path.Combine(workingDirectory, "output-schema.json");
+            await File.WriteAllTextAsync(schemaPath, schema.Value.GetRawText(), cancellationToken);
+            effectiveArguments.AddRange(["--json-schema", schemaPath]);
+        }
+
+        return effectiveArguments;
+    }
+
     /// <summary>Disposes the runner's enumerator, which ends the process when the enumeration stops early.</summary>
     private async ValueTask DisposeRunnerAsync(IAsyncEnumerator<AntigravityCliProcessEvent> enumerator)
     {
@@ -460,11 +542,6 @@ internal sealed class AntigravityCliLlmClient(IAntigravityCliRunner runner)
         if (string.IsNullOrWhiteSpace(request.ModelId))
         {
             throw new ArgumentException("A model id is required.", nameof(request));
-        }
-
-        if (!capabilities.SupportsStreaming)
-        {
-            throw new NotSupportedException("The selected connection does not support streaming.");
         }
 
         if (request.Temperature is not null)
@@ -592,17 +669,21 @@ internal sealed class AntigravityCliLlmClient(IAntigravityCliRunner runner)
                         : null;
                 return new ParsedStreamLine(delta, null, $"Model activity: {step.StepType.Replace('_', ' ')}");
             case AntigravityResult result:
-                string response = preferStructuredOutput && result.StructuredOutput is { } structured
-                    ? structured.GetRawText()
-                    : result.Response;
                 return new ParsedStreamLine(
                     null,
-                    new ParsedResponse(response, result.Status, result.ConversationId, ReadUsage(result.Usage)),
+                    ToParsedResponse(result, preferStructuredOutput),
                     "Provider response received; validating recommendations…");
             default:
                 return new ParsedStreamLine(null, null, null);
         }
     }
+
+    /// <summary>The answer text is the structured output when a schema was sent, otherwise the response.</summary>
+    private static ParsedResponse ToParsedResponse(AntigravityResult result, bool preferStructuredOutput) => new(
+        preferStructuredOutput && result.StructuredOutput is { } structured ? structured.GetRawText() : result.Response,
+        result.Status,
+        result.ConversationId,
+        ReadUsage(result.Usage));
 
     private static LlmUsage? ReadUsage(AntigravityUsage? usage)
     {

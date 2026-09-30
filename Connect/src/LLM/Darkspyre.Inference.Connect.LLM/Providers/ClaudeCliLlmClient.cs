@@ -31,6 +31,8 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
 
     public override LlmProviderDefinition ProviderDefinition => ProviderDefinitions.ClaudeSubscription;
 
+    protected override bool OffersNonStreamingRequests => true;
+
     /// <summary>The effort levels the Claude CLI accepts, for its chat and agent lanes.</summary>
     internal static readonly IReadOnlySet<LlmReasoningLevel> ReasoningLevels = LlmReasoningEffort.Levels(
         LlmReasoningLevel.Low, LlmReasoningLevel.Medium, LlmReasoningLevel.High,
@@ -69,8 +71,9 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
             SupportsJsonObject = false,
             SupportsTemperature = false,
             SupportsToolUse = false,
-            SupportsPromptImages = true,
-            SupportsPromptDocuments = true
+            // Attachments travel only as stream-json content blocks; the non-streaming request reads plain text.
+            SupportsPromptImages = capabilities.SupportsStreaming,
+            SupportsPromptDocuments = capabilities.SupportsStreaming
         };
     }
 
@@ -91,6 +94,18 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
             ? null
             : StructuredOutput.ResolveEnforcement(request.StructuredOutput, capabilities);
         string prompt = BuildClaudePrompt(request);
+        string executable = ClaudeCliConfiguration.ResolveExecutable(connection.Endpoint);
+        if (!capabilities.SupportsStreaming)
+        {
+            LlmChatResult completeResult = await CompleteAsync(executable, prompt, request, enforcement, cancellationToken);
+            foreach (LlmStreamEvent completeEvent in CompleteResponseEvents.From(completeResult, []))
+            {
+                yield return completeEvent;
+            }
+
+            yield break;
+        }
+
         string standardInput = BuildClaudeStandardInput(request, prompt);
         var arguments = new List<string>
         {
@@ -98,30 +113,16 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
             "--verbose",
             "--input-format", "stream-json",
             "--output-format", "stream-json",
-            "--include-partial-messages",
-            "--no-session-persistence",
-            "--safe-mode",
-            "--disable-slash-commands",
-            "--tools", string.Empty,
-            "--permission-prompts", "none",
-            "--system-prompt", ClaudeSystemPrompt,
-            "--model", request.ModelId
+            "--include-partial-messages"
         };
-        if (request.ReasoningLevel is { } level)
-        {
-            arguments.AddRange(["--effort", LlmReasoningEffort.Word(level)]);
-        }
-        if (enforcement == LlmStructuredOutputEnforcement.ProviderJsonSchema)
-        {
-            arguments.AddRange(["--json-schema", request.StructuredOutput!.Schema.GetRawText()]);
-        }
+        AddChatArguments(arguments, request, enforcement);
 
         ClaudeTerminalResult? terminal = null;
         ClaudeCliProcessResult? processResult = null;
         LlmProviderException? parseException = null;
         bool emittedText = false;
         await foreach (ClaudeCliProcessEvent processEvent in InvokeClaudeStreamingAsync(
-                           ClaudeCliConfiguration.ResolveExecutable(connection.Endpoint),
+                           executable,
                            arguments,
                            standardInput,
                            cancellationToken))
@@ -184,6 +185,95 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
         {
             throw parseException;
         }
+        LlmChatResult result = BuildResult(terminal, request, enforcement);
+        if (!emittedText && terminal!.Text.Length > 0)
+        {
+            yield return result.Status == LlmCompletionStatus.Refused
+                ? new LlmRefusalDeltaEvent(terminal.Text)
+                : new LlmTextDeltaEvent(terminal.Text);
+        }
+
+        yield return new LlmChatCompletionEvent(result);
+    }
+
+    /// <summary>
+    /// Runs one non-streaming turn with <c>--output-format json</c>. The CLI accepts stream-json input only with
+    /// stream-json output, so the prompt travels as plain text on standard input.
+    /// </summary>
+    private async Task<LlmChatResult> CompleteAsync(
+        string executable,
+        string prompt,
+        LlmChatRequest request,
+        LlmStructuredOutputEnforcement? enforcement,
+        CancellationToken cancellationToken)
+    {
+        var arguments = new List<string> { "-p", "--output-format", "json" };
+        AddChatArguments(arguments, request, enforcement);
+        ClaudeCliProcessResult processResult;
+        try
+        {
+            processResult = await InvokeClaudeAsync(executable, arguments, prompt, cancellationToken);
+        }
+        catch (ClaudeCliUnavailableException exception)
+        {
+            throw ClaudeCliConfiguration.Unavailable(exception);
+        }
+
+        if (processResult.ExitCode != 0 || processResult.StandardInputError is not null)
+        {
+            throw CreateClaudeExitException(processResult);
+        }
+
+        ParsedClaudeLine parsed;
+        try
+        {
+            parsed = ParseClaudeLine(
+                processResult.StandardOutput,
+                preferStructuredOutput: enforcement == LlmStructuredOutputEnforcement.ProviderJsonSchema);
+        }
+        catch (JsonException exception)
+        {
+            throw new LlmProviderException(
+                "Claude CLI returned malformed JSON.",
+                Transport,
+                providerCode: "claude_cli_invalid_json",
+                innerException: exception);
+        }
+
+        return BuildResult(parsed.Terminal, request, enforcement);
+    }
+
+    /// <summary>The chat-lane arguments both output formats share.</summary>
+    private static void AddChatArguments(
+        List<string> arguments,
+        LlmChatRequest request,
+        LlmStructuredOutputEnforcement? enforcement)
+    {
+        arguments.AddRange(
+        [
+            "--no-session-persistence",
+            "--safe-mode",
+            "--disable-slash-commands",
+            "--tools", string.Empty,
+            "--permission-prompts", "none",
+            "--system-prompt", ClaudeSystemPrompt,
+            "--model", request.ModelId
+        ]);
+        if (request.ReasoningLevel is { } level)
+        {
+            arguments.AddRange(["--effort", LlmReasoningEffort.Word(level)]);
+        }
+        if (enforcement == LlmStructuredOutputEnforcement.ProviderJsonSchema)
+        {
+            arguments.AddRange(["--json-schema", request.StructuredOutput!.Schema.GetRawText()]);
+        }
+    }
+
+    private LlmChatResult BuildResult(
+        ClaudeTerminalResult? terminal,
+        LlmChatRequest request,
+        LlmStructuredOutputEnforcement? enforcement)
+    {
         if (terminal is null)
         {
             throw new LlmProviderException(
@@ -204,13 +294,6 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
             || string.Equals(terminal.Subtype, "refusal", StringComparison.OrdinalIgnoreCase);
         bool incomplete = string.Equals(terminal.StopReason, "max_tokens", StringComparison.OrdinalIgnoreCase)
             || string.Equals(terminal.TerminalReason, "max_tokens", StringComparison.OrdinalIgnoreCase);
-        if (!emittedText && terminal.Text.Length > 0)
-        {
-            yield return refused
-                ? new LlmRefusalDeltaEvent(terminal.Text)
-                : new LlmTextDeltaEvent(terminal.Text);
-        }
-
         LlmStructuredOutputValidation? validation = request.StructuredOutput is null
             ? null
             : refused
@@ -224,7 +307,7 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
                     request.StructuredOutput,
                     enforcement!.Value);
 
-        yield return new LlmChatCompletionEvent(new LlmChatResult
+        return new LlmChatResult
         {
             Text = refused ? string.Empty : terminal.Text,
             Refusal = refused ? terminal.Text : null,
@@ -239,7 +322,7 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
             ProviderResponseId = terminal.SessionId,
             StructuredOutput = validation,
             Diagnostics = new LlmProviderDiagnostics(200, null, null)
-        });
+        };
     }
 
     public bool RequiresFreshOAuthCredentialForStreaming(LlmConnection connection)

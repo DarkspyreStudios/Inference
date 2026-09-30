@@ -101,7 +101,7 @@ internal sealed class OpenAiCodexLlmClient(HttpClient http)
     }
 
     protected override JsonObject BuildPayload(
-        LlmConnection connection, LlmChatRequest request, LlmStructuredOutputEnforcement? enforcement)
+        LlmConnection connection, LlmChatRequest request, LlmStructuredOutputEnforcement? enforcement, bool stream)
     {
         if (request.MaxOutputTokens is not null)
         {
@@ -124,7 +124,7 @@ internal sealed class OpenAiCodexLlmClient(HttpClient http)
         {
             Messages = [.. request.Messages.Where(message => message.Role is not ("system" or "developer"))]
         };
-        JsonObject payload = base.BuildPayload(connection, projected, enforcement);
+        JsonObject payload = base.BuildPayload(connection, projected, enforcement, stream);
         payload["instructions"] = string.Join("\n\n", instructions);
         // Subscription reasoning is only streamed when summaries are explicitly requested.
         payload["reasoning"] ??= new JsonObject();

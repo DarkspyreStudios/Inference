@@ -14,11 +14,12 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
 
     public ContextEstimate? EstimateInputTokens(LlmConnection connection, LlmChatRequest request)
     {
-        ValidateRequest(connection, request, GetCapabilities(connection, request.ModelId));
+        LlmProviderCapabilities capabilities = GetCapabilities(connection, request.ModelId);
+        ValidateRequest(connection, request, capabilities);
         ValidateSampling(request);
         var enforcement = request.StructuredOutput is null ? (LlmStructuredOutputEnforcement?)null
-            : StructuredOutput.ResolveEnforcement(request.StructuredOutput, GetCapabilities(connection, request.ModelId));
-        JsonObject payload = BuildPayload(connection, request, enforcement);
+            : StructuredOutput.ResolveEnforcement(request.StructuredOutput, capabilities);
+        JsonObject payload = BuildPayload(connection, request, enforcement, capabilities.SupportsStreaming);
         RequestJson.ApplyProviderOptions(payload, connection, request);
 
         // The provider's own count covers the history up to the last response that reported one, including
@@ -50,7 +51,8 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
         // The reported input already includes that request's instructions and tools.
         JsonArray full = (JsonArray)payload["input"]!;
         int prefixItems = ((JsonArray)BuildPayload(connection,
-            request with { Messages = [.. request.Messages.Take(reported + 1)] }, enforcement)["input"]!).Count;
+            request with { Messages = [.. request.Messages.Take(reported + 1)] }, enforcement,
+            capabilities.SupportsStreaming)["input"]!).Count;
         var tail = new JsonArray([.. full.Skip(prefixItems).Select(item => item?.DeepClone())]);
         LlmContinuationState state = request.Messages[reported].ContinuationState!;
         return new ContextEstimate(state.InputTokens!.Value + state.OutputTokens!.Value
@@ -74,7 +76,7 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
             ? null
             : StructuredOutput.ResolveEnforcement(request.StructuredOutput, capabilities);
 
-        JsonObject payload = BuildPayload(connection, request, enforcement);
+        JsonObject payload = BuildPayload(connection, request, enforcement, capabilities.SupportsStreaming);
         RequestJson.ApplyProviderOptions(payload, connection, request);
         using var httpRequest = new HttpRequestMessage(
             HttpMethod.Post,
@@ -95,6 +97,18 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
             credential,
             "OpenAI Responses request",
             cancellationToken);
+
+        if (!capabilities.SupportsStreaming)
+        {
+            string body = await response.Content.ReadAsStringAsync(cancellationToken);
+            foreach (LlmStreamEvent completeEvent in ReadCompleteResponse(
+                         body, response, request, enforcement, credential, connection))
+            {
+                yield return completeEvent;
+            }
+
+            yield break;
+        }
 
         await using Stream stream = await response.Content.ReadAsStreamAsync(cancellationToken);
         var text = new StringBuilder();
@@ -252,10 +266,105 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
         }
     }
 
+    /// <summary>
+    /// Maps a response that arrived as one Response object. Reasoning comes from the reasoning items in output order.
+    /// </summary>
+    private IEnumerable<LlmStreamEvent> ReadCompleteResponse(
+        string body,
+        HttpResponseMessage response,
+        LlmChatRequest request,
+        LlmStructuredOutputEnforcement? enforcement,
+        LlmCredential? credential,
+        LlmConnection connection)
+    {
+        JsonDocument document;
+        try
+        {
+            document = JsonDocument.Parse(body);
+        }
+        catch (JsonException exception)
+        {
+            throw ProtocolException(
+                "OpenAI Responses returned a malformed response.",
+                response,
+                body,
+                credential,
+                exception);
+        }
+
+        using (document)
+        {
+            JsonElement root = document.RootElement;
+            if (root.ValueKind != JsonValueKind.Object)
+            {
+                throw ProtocolException("OpenAI Responses returned a malformed response.", response, body, credential);
+            }
+
+            if (LlmJson.GetString(root, "status") == "failed"
+                && LlmJson.GetObject(root, "error") is { } error
+                && LlmJson.GetString(error, "code") == "context_length_exceeded")
+            {
+                throw StreamError(root, response, body, credential);
+            }
+
+            LlmChatResult result = BuildResult(
+                root,
+                response,
+                body,
+                string.Empty,
+                string.Empty,
+                request.StructuredOutput,
+                enforcement,
+                credential,
+                connection,
+                request.ModelId);
+            return CompleteResponseEvents.From(result, ReadReasoning(root));
+        }
+    }
+
+    private static List<LlmReasoningText> ReadReasoning(JsonElement root)
+    {
+        var reasoning = new List<LlmReasoningText>();
+        if (!root.TryGetProperty("output", out JsonElement output) || output.ValueKind != JsonValueKind.Array)
+        {
+            return reasoning;
+        }
+
+        foreach (JsonElement item in output.EnumerateArray())
+        {
+            if (LlmJson.GetString(item, "type") != "reasoning")
+            {
+                continue;
+            }
+
+            AddReasoning(item, "summary", "summary_text", isSummary: true);
+            AddReasoning(item, "content", "reasoning_text", isSummary: false);
+        }
+
+        return reasoning;
+
+        void AddReasoning(JsonElement item, string property, string partType, bool isSummary)
+        {
+            if (!item.TryGetProperty(property, out JsonElement parts) || parts.ValueKind != JsonValueKind.Array)
+            {
+                return;
+            }
+
+            foreach (JsonElement part in parts.EnumerateArray())
+            {
+                if (LlmJson.GetString(part, "type") == partType && LlmJson.GetString(part, "text") is { } text)
+                {
+                    reasoning.Add(new LlmReasoningText(text, isSummary));
+                }
+            }
+        }
+    }
+
     protected virtual JsonObject BuildPayload(
         LlmConnection connection,
         LlmChatRequest request,
-        LlmStructuredOutputEnforcement? enforcement)
+        LlmStructuredOutputEnforcement? enforcement,
+        bool stream)
     {
         JsonArray input = OpenAiResponsesTools.BuildInput(
             request,
@@ -267,7 +376,7 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
         {
             ["model"] = request.ModelId,
             ["input"] = input,
-            ["stream"] = true,
+            ["stream"] = stream,
             ["store"] = false
         };
 

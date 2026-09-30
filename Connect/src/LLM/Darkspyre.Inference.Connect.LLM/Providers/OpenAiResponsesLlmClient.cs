@@ -12,6 +12,8 @@ internal sealed class OpenAiResponsesLlmClient(HttpClient http) : ResponsesLlmCl
 
     public override LlmProviderDefinition ProviderDefinition => ProviderDefinitions.OpenAiApiKey;
 
+    protected override bool OffersNonStreamingRequests => true;
+
     protected override LlmProviderCapabilities DefaultCapabilities { get; } = new()
     {
         OutputLimitEnforcement = Common.LLM.LlmOutputLimitEnforcement.ProviderEnforced,

@@ -216,6 +216,27 @@ public sealed class VertexProtocolTests
         Assert.Equal("Bearer test-token", Assert.Single(handler.Authorization));
     }
 
+    [Fact]
+    public async Task StreamingOffCallsTheCompleteOperations()
+    {
+        LlmConnection connection = Connection with { CapabilityOverrides = new() { SupportsStreaming = false } };
+        var claudeHandler = new Handler("""
+            {"id":"m","type":"message","role":"assistant","content":[{"type":"text","text":"OK"}],"stop_reason":"end_turn","usage":{"input_tokens":3,"output_tokens":1}}
+            """) { Json = true };
+        LlmChatResult claude = await Complete(new VertexLlmClient(new HttpClient(claudeHandler), new Authentication()), connection,
+            new() { ModelId = Claude, Messages = [new("user", "hello")] });
+        Assert.EndsWith("/publishers/anthropic/models/claude-sonnet-4-6:rawPredict", claudeHandler.Uris[0].AbsolutePath, StringComparison.Ordinal);
+        Assert.Equal(false, (bool?)JsonNode.Parse(claudeHandler.Bodies[0])?["stream"]);
+        Assert.Equal("OK", claude.Text);
+
+        var geminiHandler = new Handler("""{"candidates":[{"content":{"parts":[{"text":"hi"}]},"finishReason":"STOP"}]}""") { Json = true };
+        LlmChatResult gemini = await Complete(new VertexLlmClient(new HttpClient(geminiHandler), new Authentication()), connection,
+            new() { ModelId = Gemini, Messages = [new("user", "hello")] });
+        Assert.EndsWith("/publishers/google/models/gemini-3-flash-preview:generateContent", geminiHandler.Uris[0].AbsolutePath, StringComparison.Ordinal);
+        Assert.Equal(string.Empty, geminiHandler.Uris[0].Query);
+        Assert.Equal("hi", gemini.Text);
+    }
+
     [Theory]
     [InlineData(true, null)]
     [InlineData(false, false)]
@@ -283,6 +304,8 @@ public sealed class VertexProtocolTests
         public Queue<string> CatalogReplies { get; } = new();
         public List<Uri> CatalogUris { get; } = [];
         public HttpStatusCode Status { get; init; } = HttpStatusCode.OK;
+        /// <summary>True answers with the frames as one JSON body, as the complete operations do.</summary>
+        public bool Json { get; init; }
         public List<string> Bodies { get; } = [];
         public List<Uri> Uris { get; } = [];
         public List<string?> Authorization { get; } = [];
@@ -304,7 +327,13 @@ public sealed class VertexProtocolTests
             Uris.Add(request.RequestUri!);
             Authorization.Add(request.Headers.Authorization?.ToString());
             Bodies.Add(request.Content is null ? "" : await request.Content.ReadAsStringAsync(cancellationToken));
-            return new(HttpStatusCode.OK) { Content = new StringContent(string.Concat((Replies.Count > 0 ? Replies.Dequeue() : frames).Select(frame => "data: " + frame + "\n\n")), Encoding.UTF8, "text/event-stream") };
+            string[] reply = Replies.Count > 0 ? Replies.Dequeue() : frames;
+            return new(HttpStatusCode.OK)
+            {
+                Content = Json
+                    ? new StringContent(string.Concat(reply), Encoding.UTF8, "application/json")
+                    : new StringContent(string.Concat(reply.Select(frame => "data: " + frame + "\n\n")), Encoding.UTF8, "text/event-stream")
+            };
         }
     }
 }

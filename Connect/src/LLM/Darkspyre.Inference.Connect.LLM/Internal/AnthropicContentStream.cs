@@ -65,11 +65,14 @@ internal sealed class AnthropicContentStream
         }
     }
 
-    public LlmContinuationState? Encode(LlmConnection connection, string modelId) =>
-        _blocks.Count == 0 ? null : ProviderContinuationStateCodec.Encode(connection, modelId, BuildContent());
-
-    private JsonArray BuildContent()
+    /// <summary>The streamed content blocks in index order, or null when the stream carried none.</summary>
+    internal JsonArray? BuildContent()
     {
+        if (_blocks.Count == 0)
+        {
+            return null;
+        }
+
         foreach (int index in _toolArguments.Keys)
         {
             FinalizeToolInput(index);

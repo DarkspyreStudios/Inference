@@ -14,6 +14,9 @@ internal abstract class LlmClientBase(HttpClient http) : ILlmClient
 
     protected abstract LlmProviderCapabilities DefaultCapabilities { get; }
 
+    /// <summary>True when the provider has a non-streaming request that this adapter sends while streaming is off.</summary>
+    protected virtual bool OffersNonStreamingRequests => false;
+
     public virtual LlmProviderCapabilities GetCapabilities(LlmConnection connection, string? modelId = null)
     {
         EnsureTransport(connection);
@@ -108,9 +111,10 @@ internal abstract class LlmClientBase(HttpClient http) : ILlmClient
             throw new ArgumentException("A model id is required.", nameof(request));
         }
 
-        if (!capabilities.SupportsStreaming)
+        if (!capabilities.SupportsStreaming && !OffersNonStreamingRequests)
         {
-            throw new NotSupportedException("The selected connection does not support streaming.");
+            throw new NotSupportedException(
+                $"{ProviderDefinition.DisplayName} has no non-streaming request, so streaming cannot be turned off for this connection.");
         }
 
         if (request.Temperature is not null && !capabilities.SupportsTemperature)
