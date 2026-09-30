@@ -148,6 +148,7 @@ public sealed class CoordinatorTests
     {
         using var rig = new Rig();
         using var lease = await rig.Admit("qwen");
+        rig.Vram.Used = 20000;
         rig.Gpu.ObserveComfy(new(true, 1, 0));
         await rig.Gpu.StepAsync(CancellationToken.None);
         Assert.Equal("llm:qwen", rig.Gpu.Snapshot().Holder);
@@ -156,6 +157,37 @@ public sealed class CoordinatorTests
         Assert.Equal("comfy", rig.Gpu.Snapshot().Holder);
         Assert.Empty(rig.Gpu.Snapshot().Waiters);
         Assert.Contains("unload:qwen", rig.Llama.Calls);
+    }
+    [Fact]
+    public async Task DirectComfyClaimReconcilesBeforeBlockedLlmWaiterWithoutReorderingLlmRequests()
+    {
+        using var rig = new Rig();
+        using var lease = await rig.Admit("qwen");
+        var other = rig.Gpu.AcquireAsync(GpuTarget.Llm("other"), CancellationToken.None);
+        var qwen = rig.Gpu.AcquireAsync(GpuTarget.Llm("qwen"), CancellationToken.None);
+        rig.Vram.Used = 20000;
+        rig.Gpu.ObserveComfy(new(true, 1, 0));
+        await rig.Gpu.StepAsync(CancellationToken.None);
+        Assert.DoesNotContain("unload:qwen", rig.Llama.Calls);
+        lease.Dispose();
+        await rig.Gpu.StepAsync(CancellationToken.None);
+        Assert.Equal("comfy", rig.Gpu.Snapshot().Holder);
+        Assert.Equal(["llm:other", "llm:qwen"], rig.Gpu.Snapshot().Waiters.Select(w => w.Target));
+        Assert.False(other.IsCompleted);
+        Assert.False(qwen.IsCompleted);
+        await rig.Gpu.StepAsync(CancellationToken.None);
+        Assert.DoesNotContain("load:other", rig.Llama.Calls);
+        rig.Comfy.State = new(true, 0, 0);
+        rig.Gpu.ObserveComfy(rig.Comfy.State);
+        rig.Vram.Used = 700;
+        await rig.Gpu.StepAsync(CancellationToken.None);
+        using var admitted = await other;
+        Assert.False(qwen.IsCompleted);
+        Assert.Equal("llm:other", rig.Gpu.Snapshot().Holder);
+        Assert.Equal(2, rig.Comfy.Frees);
+        admitted.Dispose();
+        await rig.Gpu.StepAsync(CancellationToken.None);
+        using var next = await qwen;
     }
     [Fact]
     public async Task RouterExitCancelsLeasesAndWaitsForReadinessBeforeLoading()

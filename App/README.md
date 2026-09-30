@@ -22,9 +22,15 @@ model status after load and unload. Failed loads, load timeouts and release time
 Load errors include the reported router exit code or `unavailable` when no exit code is reported. Idle models
 remain loaded until another target requests the GPU.
 
-The ComfyUI watcher polls `/queue`. Direct submissions on 8188 can start before the LLM
-unloads. Submissions through 8189 wait before `/prompt` reaches ComfyUI. The proxy forwards
-other routes and websockets through YARP.
+Submit ComfyUI jobs through port 8189. These requests wait before `/prompt` reaches ComfyUI.
+The proxy forwards other routes and websockets through YARP.
+
+The ComfyUI watcher polls `/queue` to reconcile exceptional direct submissions on 8188.
+These jobs can allocate VRAM before the LLM unloads. The watcher waits for active LLM
+requests to drain and confirms model unload, then records ComfyUI as holder without the
+idle VRAM check. ComfyUI's own allocation can exceed that threshold. A blocked LLM waiter
+does not prevent this reconciliation; LLM waiters retain their order until ComfyUI drains.
+Gated prompts and LLM acquisitions retain the VRAM release check.
 
 ## HTTP interface
 

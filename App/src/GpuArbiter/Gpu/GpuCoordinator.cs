@@ -173,6 +173,10 @@ public sealed class GpuCoordinator(ILlamaRouterClient llama, IComfyClient comfy,
         {
             if (_switching || _waiters.Count == 0) return;
             head = _waiters[0];
+            // Direct jobs already occupy the GPU. Reconcile that holder before a blocked
+            // LLM waiter; the LLM waiters retain their order until ComfyUI drains.
+            if (head.Target.Model is not null && _comfy.Busy && _holder != GpuTarget.Comfy)
+                head = _waiters.FirstOrDefault(w => w.Kind == "watcher") ?? head;
             if (!_ready && (head.Target.Model is not null || head.Kind == "unload")) return;
             if (_llmInFlight > 0 && (head.Target != _holder || head.Kind == "unload")) return;
             if (_holder == GpuTarget.Comfy && ComfyBusy && head.Target != _holder) return;
@@ -217,7 +221,12 @@ public sealed class GpuCoordinator(ILlamaRouterClient llama, IComfyClient comfy,
                 // cannot meet an unloaded threshold. Owned models normally reach here unloaded.
                 var models = _ready ? await llama.ModelsAsync(cancellationToken).ConfigureAwait(false) : [];
                 var targetLoaded = head.Target.Model is not null && models.Any(m => m.Id == head.Target.Model && m.Status == "loaded");
-                if (!targetLoaded) await ConfirmReleaseAsync(cancellationToken).ConfigureAwait(false);
+                bool directComfyBusy;
+                lock (_gate) directComfyBusy = head.Target == GpuTarget.Comfy && _comfy.Busy;
+                // A direct 8188 job can allocate before the watcher observes it. Confirmed
+                // LLM unload is authoritative here; ComfyUI's own allocation cannot satisfy
+                // the idle threshold. Gated prompts and all LLM acquisitions still check it.
+                if (!targetLoaded && !directComfyBusy) await ConfirmReleaseAsync(cancellationToken).ConfigureAwait(false);
                 if (head.Target.Model is not null && !targetLoaded)
                 {
                     SetPhase($"switching: loading {head.Target.Model}");
