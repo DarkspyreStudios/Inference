@@ -18,7 +18,7 @@ The package also includes `Darkspyre.Inference.Connect.TTS` for external
 PocketTTS HTTP synthesis and `Darkspyre.Inference.Connect.Audio` for external TangoFlux generation.
 They are included in the Connect product project, not separate NuGets. See
 [PocketTTS integration](#pockettts-speech) and
-[TangoFlux integration](#tangoflux-audio). The coordinated package version is **11.13.0-rc.1**.
+[TangoFlux integration](#tangoflux-audio). The coordinated package version is **11.14.0-rc.1**.
 
 The packages target .NET 11. Credentials
 for direct API transports remain owned by the host through `ILlmConnectionSource`; the connector
@@ -577,10 +577,10 @@ excludes each CLI's own framing.
 
 ### Host-owned managed agent runtime
 
-**Accounting extension (11.13.0-rc.1):** the library includes
+**Accounting extension (11.14.0-rc.1):** the library includes
 `LlmProviderService.MeasureRequestAsync(connectionId, request, policy, ct)` and
 `ILlmAgentSession.MeasureContextAsync(proposedContext, ct)`, both returning `LlmRequestAccounting`.
-These APIs are introduced in the coordinated `11.13.0-rc.1` contract release.
+These APIs are introduced in the coordinated `11.14.0-rc.1` contract release.
 Standalone accounting resolves the selected connection read-only and may read its model catalog,
 but never refreshes/persists credentials or runs inference. Session accounting uses base settings
 while idle and the frozen executing model/instructions/tools while paused, including queued steering
@@ -709,7 +709,7 @@ uncertain outcome requires readback first. The
 [generic editor example](../Common/examples/Darkspyre.Inference.Setup.Examples/README.md) compiles the
 same renderer against both Connect and Tensor. No UI framework is shipped in these packages.
 
-These contracts are included in the 11.13.0-rc.1 family. The old LLM setup-input/action description
+These contracts are included in the 11.14.0-rc.1 family. The old LLM setup-input/action description
 types were replaced by Common setup contracts in the 11.3.0-rc.1 breaking-contract release.
 Settings objects carry provider-owned unsaved-change state, the current authentication interaction and
 explicit choice capabilities for the shared Settings editor.
@@ -1124,7 +1124,7 @@ can explicitly attach the optional browser-authorized catalog OAuth credential t
 ## Antigravity CLI subscription transport
 
 The [DSA-74 technical design](docs/antigravity-agent-tech-design.md) holds the evidence and mapping for
-native agent sessions. They are unreleased: the published 11.13.0-rc.1 adapter is chat-only.
+native agent sessions. They are unreleased: the published 11.14.0-rc.1 adapter is chat-only.
 
 `GoogleAntigravityCli` wraps the official [Antigravity CLI headless mode](https://antigravity.google/docs/cli/headless/). Darkspyre.Inference.Connect.LLM sends prompts over the documented stdin NDJSON protocol, consumes stdout events line by line, and emits model text and activity while the CLI is still running. It does not read, copy, or store Antigravity OAuth credentials.
 

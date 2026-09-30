@@ -1,6 +1,6 @@
 # Darkspyre.Inference.Tensor
 
-Version **11.13.0-rc.1** adopts the shared typed reasoning-level contract; Qwen supports `None` and `High`.
+Version **11.14.0-rc.1** adopts the shared typed reasoning-level contract; Qwen supports `None` and `High`.
 It includes Laya's CPU/GPU-only Core ML update and retains the ONNX and user-selected
 model-location/import contracts introduced in 11.4.0-rc.1.
 
@@ -261,7 +261,7 @@ the configuration and reconstruct registrations when composing the manager after
 does not perform that unload. Stop remains terminal, and an
 already-cancelled teardown action token reaches the engine as urgency rather than skipping cleanup.
 See the [shared editor example](../Common/examples/Darkspyre.Inference.Setup.Examples/README.md).
-These setup contracts are included in the synchronized 11.13.0-rc.1 package family, including
+These setup contracts are included in the synchronized 11.14.0-rc.1 package family, including
 provider-owned dirty state and explicit choice capabilities for the shared Settings editor.
 
 Qwen and Supra now load the definition selected by `LoadAsync(key)`, rather than requiring the
@@ -282,7 +282,7 @@ installs every declared shard beside the primary file under its numbered name, a
 TensorSharp the primary path; TensorSharp opens the sibling shards from the same directory. Shard
 count/names/numbering and duplicate tensors are checked before native allocation.
 
-**Capability addition (11.13.0-rc.1):** Qwen's Common `LlmCapabilities.OutputLimitEnforcement` is
+**Capability addition (11.14.0-rc.1):** Qwen's Common `LlmCapabilities.OutputLimitEnforcement` is
 `EngineEnforced`, describing its existing `MaxOutputTokens` runtime limit. This is separate from
 nullable discovered model limits and does not add a Tensor accounting/compaction service.
 
@@ -558,7 +558,7 @@ the Audio / SpeechTranscription task without provider-name renderer branches.
 
 ## Package dependency boundary
 
-Tensor depends on **Darkspyre.Inference.Common [11.13.0-rc.1]** and the **Darkspyre.TensorSharp.*
+Tensor depends on **Darkspyre.Inference.Common [11.14.0-rc.1]** and the **Darkspyre.TensorSharp.*
 2.8.6.7** dependency closure through NuGet. None of their DLLs is embedded in Tensor. TensorSharp
 2.8.6.7 loads model files from paths and provides bounded metadata inspection through its GGUF,
 safetensors and restricted PyTorch readers. `Darkspyre.TensorSharp.Backends.GGML` ships prebuilt GGML
