@@ -101,7 +101,8 @@ internal abstract class LlmClientBase(HttpClient http) : ILlmClient
     protected void ValidateRequest(
         LlmConnection connection,
         LlmChatRequest request,
-        LlmProviderCapabilities capabilities)
+        LlmProviderCapabilities capabilities,
+        IReadOnlySet<string>? nativeToolNames = null)
     {
         EnsureTransport(connection);
         if (string.IsNullOrWhiteSpace(request.ModelId))
@@ -148,7 +149,7 @@ internal abstract class LlmClientBase(HttpClient http) : ILlmClient
         }
 
         ValidatePromptAttachments(request, capabilities);
-        ValidateToolUse(request, capabilities);
+        ValidateToolUse(request, capabilities, nativeToolNames);
     }
 
     internal static void ValidateSampling(LlmChatRequest request, LlmProviderCapabilities capabilities)
@@ -205,7 +206,8 @@ internal abstract class LlmClientBase(HttpClient http) : ILlmClient
 
     internal static void ValidateToolUse(
         LlmChatRequest request,
-        LlmProviderCapabilities capabilities)
+        LlmProviderCapabilities capabilities,
+        IReadOnlySet<string>? nativeToolNames = null)
     {
         bool hasToolHistory = request.Messages.Any(message =>
             message.ToolCalls.Count > 0 || message.ToolResults.Count > 0);
@@ -244,6 +246,10 @@ internal abstract class LlmClientBase(HttpClient http) : ILlmClient
             }
         }
 
+        if (nativeToolNames is not null)
+            foreach (string name in nativeToolNames)
+                if (!toolNames.Add(name)) throw new ArgumentException("Tool names must be unique.", nameof(request));
+
         if (request.ToolChoice is { Mode: LlmToolChoiceMode.Specific } choice
             && (string.IsNullOrWhiteSpace(choice.Name) || !toolNames.Contains(choice.Name)))
         {
@@ -253,12 +259,12 @@ internal abstract class LlmClientBase(HttpClient http) : ILlmClient
         }
 
         if (request.ToolChoice is { Mode: not LlmToolChoiceMode.None }
-            && request.Tools.Count == 0)
+            && toolNames.Count == 0)
         {
             throw new ArgumentException("Tool choice requires at least one request tool.", nameof(request));
         }
 
-        if (request.AllowParallelToolCalls is not null && request.Tools.Count == 0)
+        if (request.AllowParallelToolCalls is not null && toolNames.Count == 0)
         {
             throw new ArgumentException(
                 "Parallel tool-call control requires at least one request tool.",

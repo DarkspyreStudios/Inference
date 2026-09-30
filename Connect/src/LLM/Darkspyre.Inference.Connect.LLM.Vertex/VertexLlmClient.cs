@@ -52,8 +52,8 @@ internal sealed class VertexLlmClient(HttpClient http, IVertexAuthentication aut
         ArgumentNullException.ThrowIfNull(request);
         VertexModelProfile profile = VertexModelProfiles.Get(request.ModelId, connection.Vertex?.Location ?? string.Empty);
         LlmProviderCapabilities capabilities = GetCapabilities(connection, request.ModelId);
-        ValidateRequest(connection, request, capabilities);
-        ValidateVertexRequest(request, profile, capabilities);
+        ValidateRequest(connection, request, capabilities, profile.IsClaude ? AnthropicTools.Resolve(connection, request).NativeNames : null);
+        ValidateVertexRequest(connection, request, profile, capabilities);
         VertexAccess access = await authentication.ResolveAsync(connection, cancellationToken).ConfigureAwait(false);
         if (connection.ResolvedContinuationScope is { } pinned && pinned != access.Scope)
         { throw new InvalidOperationException("The Google credential identity changed before dispatch."); }
@@ -177,8 +177,9 @@ internal sealed class VertexLlmClient(HttpClient http, IVertexAuthentication aut
     public ContextEstimate? EstimateInputTokens(LlmConnection connection, LlmChatRequest request)
     {
         LlmProviderCapabilities capabilities = GetCapabilities(connection, request.ModelId);
-        ValidateRequest(connection, request, capabilities);
-        ValidateVertexRequest(request, VertexModelProfiles.Get(request.ModelId, connection.Vertex!.Location), capabilities);
+        VertexModelProfile profile = VertexModelProfiles.Get(request.ModelId, connection.Vertex!.Location);
+        ValidateRequest(connection, request, capabilities, profile.IsClaude ? AnthropicTools.Resolve(connection, request).NativeNames : null);
+        ValidateVertexRequest(connection, request, profile, capabilities);
         if (request.Messages.Any(message => message.ContinuationState is not null || message.Attachments.Count != 0
             || message.ToolResults.Any(result => result.Output.Parts.Any(part => part is not LlmToolOutputText)))) { return null; }
         string projection = JsonSerializer.Serialize(request);
@@ -206,9 +207,10 @@ internal sealed class VertexLlmClient(HttpClient http, IVertexAuthentication aut
         }
     }
 
-    private static void ValidateVertexRequest(LlmChatRequest request, VertexModelProfile profile, LlmProviderCapabilities capabilities)
+    private static void ValidateVertexRequest(LlmConnection connection, LlmChatRequest request, VertexModelProfile profile, LlmProviderCapabilities capabilities)
     {
-        if (request.ProviderOptions.Count != 0) { throw new NotSupportedException("Vertex accepts only declared request controls."); }
+        if (connection.ProviderOptions.Keys.Concat(request.ProviderOptions.Keys).Any(name => !profile.IsClaude || name != AnthropicTools.OptionName))
+        { throw new NotSupportedException("Vertex accepts only declared request controls."); }
         if (profile.IsClaude)
         {
             AnthropicModelProfiles.ValidateSampling(request, AnthropicModelProfiles.Resolve(VertexEndpoints.ParseModel(request.ModelId).Model, null));

@@ -8,7 +8,8 @@ internal static class RequestJson
     public static void ApplyProviderOptions(
         JsonObject payload,
         LlmConnection connection,
-        LlmChatRequest request)
+        LlmChatRequest request,
+        string? consumedOption = null)
     {
         var options = new Dictionary<string, JsonElement>(connection.ProviderOptions, StringComparer.Ordinal);
         foreach ((string name, JsonElement value) in request.ProviderOptions)
@@ -18,6 +19,7 @@ internal static class RequestJson
 
         foreach ((string name, JsonElement value) in options)
         {
+            if (name == consumedOption) continue;
             if (payload.ContainsKey(name) || name is "top_p" or "top_k" or "seed" or "presence_penalty"
                 or "frequency_penalty" or "stop" or "stop_sequences")
             {

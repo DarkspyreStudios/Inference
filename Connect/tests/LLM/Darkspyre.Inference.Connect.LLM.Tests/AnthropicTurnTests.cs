@@ -38,6 +38,36 @@ public sealed class AnthropicTurnTests
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
+    public async Task AdvisorResultsRemainOpaqueAndReplayWithoutHostToolEvents(bool streaming)
+    {
+        const string content = """
+            [{"type":"server_tool_use","id":"srv_advisor","name":"advisor","input":{}},
+             {"type":"advisor_tool_result","tool_use_id":"srv_advisor","content":{"type":"advisor_redacted_result","encrypted_content":"protected-advice","stop_reason":"end_turn"}}]
+            """;
+        using var handler = new Handler(streaming, "end_turn") { ContentJson = content };
+        using var http = new HttpClient(handler);
+        var client = new AnthropicMessagesLlmClient(http);
+        var connection = Connection(streaming);
+        var request = Request with
+        {
+            ProviderOptions = new Dictionary<string, JsonElement>
+            { [AnthropicTools.OptionName] = JsonElement.Parse("""{"server_tools":[{"type":"advisor_20260301","name":"advisor","model":"claude-opus-4-6"}]}""") }
+        };
+        var events = await Read(client.StreamAsync(connection, request));
+        var result = Assert.Single(events.OfType<LlmChatCompletionEvent>()).Result;
+        Assert.Empty(result.ToolCalls);
+        Assert.Empty(events.OfType<LlmToolCallStartedEvent>());
+        Assert.Empty(events.OfType<LlmReasoningDeltaEvent>());
+        Assert.DoesNotContain("protected-advice", result.Text, StringComparison.Ordinal);
+        Assert.True(JsonNode.DeepEquals(JsonNode.Parse(content), AnthropicContinuation.ReadPayload(result.ContinuationState!.Payload).Content));
+        await Read(client.StreamAsync(connection, request with
+        { Messages = [request.Messages[0], new("assistant", result.Text) { ContinuationState = result.ContinuationState }, new("user", "next")] }));
+        Assert.True(JsonNode.DeepEquals(JsonNode.Parse(content), JsonNode.Parse(handler.Bodies[1])!["messages"]![1]!["content"]));
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
     public async Task ContainerIdentitySurvivesPausedCaptureSerializationReplayAndScopeChecks(bool streaming)
     {
         using var handler = new Handler(streaming, "pause_turn")
@@ -441,7 +471,8 @@ public sealed class AnthropicTurnTests
                     if (input is not null)
                     {
                         string json = input.ToJsonString();
-                        foreach (string part in new[] { json[..5], json[5..] })
+                        int split = Math.Min(5, json.Length);
+                        foreach (string part in new[] { json[..split], json[split..] })
                             events.Add(new()
                             {
                                 ["type"] = "content_block_delta",

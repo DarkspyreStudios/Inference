@@ -456,6 +456,32 @@ Only client calls emit tool events and reach a managed session's handler. Their 
 the retained ordered server/client content and container on the next request. A contradictory
 `pause_turn` response with pending client calls fails without returning a resumable completion.
 
+Anthropic Messages and Vertex Claude consume `ProviderOptions["anthropic_tools"]` as an adapter-owned
+object. `server_tools` is an array of native server definitions. `client_tools` is an object keyed
+by typed `Tools` names; its values accept `allowed_callers`, `defer_loading` and `input_examples`.
+Typed client schemas, names, descriptions and strictness remain authoritative. The request option
+replaces the entire connection option; an empty object clears it. Neither source is mutated.
+The adapter emits one combined `tools` array, not the `anthropic_tools` wrapper, for generation and
+provider counting. Typed tool choice and parallel controls apply to the combined names. Raw `tools`
+and `tool_choice` options fail even when the typed fields are absent. Vertex Gemini rejects this option.
+
+Native definitions accept the documented web search/fetch, code execution, tool search and advisor
+versions. Unknown types, client-executed native built-ins, duplicate names and native schema/strict
+overrides fail locally. Other native configuration stays opaque and unchanged; provider errors
+determine route/model availability and tool-specific parameter support. The adapter never rewrites
+definitions, retries an invalid configuration or switches tools. Advisor results, including encrypted
+advice, remain opaque ordered continuation content, not public reasoning or host tool events.
+Beta tools require the caller's provider beta header; the adapter does not enable paid tools implicitly.
+
+Client `allowed_callers` accepts nonempty unique lists of `direct`, `code_execution_20260120` and
+`code_execution_20260521`. A programmatic client requires a declared code-execution tool at either
+of these two versions. It cannot be strict or disable parallel tool use. A forced client choice
+must allow direct calling. Deferred clients require a declared tool-search tool. These checks do
+not establish live tool provisioning, complete tool-specific compiler validation or correct timing
+of programmatic continuation results. Provider restrictions still apply to retained-container
+continuation and the content of tool-result messages. See the
+[programmatic calling contract](https://platform.claude.com/docs/en/agents-and-tools/tool-use/programmatic-tool-calling).
+
 Managed sessions retain an Incomplete reply that carries continuation state and no host tool calls.
 They emit its message, finish the turn with Truncation, and preserve the state through capture/import
 for a caller-directed later turn. They do not automatically retry or execute server tools.

@@ -203,7 +203,7 @@ internal static class ProviderContinuationStateCodec
                 (LlmTransport.AnthropicMessages, "server_tool_use") => ["type", "id", "name", "input", "caller"],
                 (LlmTransport.AnthropicMessages, "web_search_tool_result" or "web_fetch_tool_result"
                     or "code_execution_tool_result" or "bash_code_execution_tool_result"
-                    or "text_editor_code_execution_tool_result" or "tool_search_tool_result") =>
+                    or "text_editor_code_execution_tool_result" or "tool_search_tool_result" or "advisor_tool_result") =>
                     ["type", "tool_use_id", "content", "caller"],
                 (LlmTransport.AwsBedrockConverse, "text") => ["type", "text"],
                 (LlmTransport.AwsBedrockConverse, "reasoning") => ["type", "text", "signature"],
@@ -270,7 +270,7 @@ internal static class ProviderContinuationStateCodec
             (_, "tool_use" or "server_tool_use") => ["id", "name", "input"],
             (LlmTransport.AnthropicMessages, "web_search_tool_result" or "web_fetch_tool_result"
                 or "code_execution_tool_result" or "bash_code_execution_tool_result"
-                or "text_editor_code_execution_tool_result" or "tool_search_tool_result") => ["tool_use_id", "content"],
+                or "text_editor_code_execution_tool_result" or "tool_search_tool_result" or "advisor_tool_result") => ["tool_use_id", "content"],
             (_, "thinking") => ["thinking", "signature"],
             (_, "redacted_thinking") => ["data"],
             (_, "text") => ["text"],

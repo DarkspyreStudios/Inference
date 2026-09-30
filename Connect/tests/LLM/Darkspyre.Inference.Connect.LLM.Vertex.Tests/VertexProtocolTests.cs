@@ -25,6 +25,75 @@ public sealed class VertexProtocolTests
         InputSchema = JsonElement.Parse("""{"type":"object","properties":{"command":{"type":"string"},"timeout":{"type":"integer"}},"required":["command"],"additionalProperties":false}""")
     };
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ClaudeNativeToolsShareGenerationAndCountDefinitions(bool streaming)
+    {
+        var handler = new Handler(ClaudeReply("[]", "end_turn", streaming)) { Json = !streaming };
+        using var http = new HttpClient(handler);
+        const string options = """
+            {"server_tools":[{"type":"code_execution_20260120","name":"code_execution"}],
+             "client_tools":{"run":{"allowed_callers":["code_execution_20260120"]}}}
+            """;
+        var connection = Connection with
+        {
+            ProviderOptions = new Dictionary<string, JsonElement> { [AnthropicTools.OptionName] = JsonElement.Parse(options) },
+            CapabilityOverrides = new() { SupportsStreaming = streaming }
+        };
+        var request = new LlmChatRequest { ModelId = Claude, Messages = [new("user", "hello")], Tools = [Tool] };
+        var authentication = new Authentication();
+        await Complete(new VertexLlmClient(http, authentication), connection, request);
+        JsonNode generated = JsonNode.Parse(Assert.Single(handler.Bodies))!;
+        Assert.Null(generated[AnthropicTools.OptionName]);
+        Assert.Equal("code_execution_20260120", (string?)generated["tools"]![0]!["allowed_callers"]![0]);
+        Assert.Equal("code_execution", (string?)generated["tools"]![1]!["name"]);
+        using var countHandler = new Handler("""{"input_tokens":37}""") { Json = true };
+        using var countHttp = new HttpClient(countHandler);
+        await new VertexLlmClient(countHttp, authentication).CountInputTokensAsync(connection, request);
+        Assert.True(JsonNode.DeepEquals(generated["tools"], JsonNode.Parse(Assert.Single(countHandler.Bodies))!["tools"]));
+        Assert.Equal(options, connection.ProviderOptions[AnthropicTools.OptionName].GetRawText());
+    }
+
+    [Theory]
+    [InlineData("""{"server_tools":[{"type":"custom","name":"raw","input_schema":{}}]}""")]
+    [InlineData("""{"client_tools":{"missing":{"allowed_callers":["direct"]}}}""")]
+    [InlineData("""{"client_tools":{"run":{"strict":false}}}""")]
+    [InlineData("""{"client_tools":{"run":{"allowed_callers":["code_execution_20260120"]}}}""")]
+    public async Task ClaudeMalformedNativeToolsFailBeforeAuthentication(string options)
+    {
+        using var handler = new Handler();
+        using var http = new HttpClient(handler);
+        var authentication = new Authentication();
+        var request = new LlmChatRequest
+        {
+            ModelId = Claude,
+            Tools = [Tool],
+            ProviderOptions =
+            new Dictionary<string, JsonElement> { [AnthropicTools.OptionName] = JsonElement.Parse(options) }
+        };
+        Exception? error = await Record.ExceptionAsync(() => Complete(new VertexLlmClient(http, authentication), Connection, request));
+        Assert.True(error is ArgumentException or NotSupportedException, error?.ToString());
+        Assert.Equal(0, authentication.Calls);
+        Assert.Empty(handler.Bodies);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task GeminiRejectsClaudeOptionsAtBothScopesBeforeAuthentication(bool connectionLevel)
+    {
+        using var handler = new Handler();
+        using var http = new HttpClient(handler);
+        var authentication = new Authentication();
+        var options = new Dictionary<string, JsonElement> { [AnthropicTools.OptionName] = JsonElement.Parse("{}") };
+        await Assert.ThrowsAsync<NotSupportedException>(() => Complete(new VertexLlmClient(http, authentication),
+            connectionLevel ? Connection with { ProviderOptions = options } : Connection,
+            new() { ModelId = Gemini, ProviderOptions = connectionLevel ? new Dictionary<string, JsonElement>() : options }));
+        Assert.Equal(0, authentication.Calls);
+        Assert.Empty(handler.Bodies);
+    }
+
     [Fact]
     public async Task SamplingRestrictionsFailBeforeAuthenticationAndClaudeUsesSharedWireFields()
     {

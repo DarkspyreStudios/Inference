@@ -108,7 +108,7 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
     {
         ArgumentNullException.ThrowIfNull(request);
         LlmProviderCapabilities capabilities = GetCapabilities(connection, request.ModelId);
-        ValidateRequest(connection, request, capabilities);
+        ValidateRequest(connection, request, capabilities, AnthropicTools.Resolve(connection, request).NativeNames);
         AnthropicModelProfiles.ValidateSampling(request, AnthropicModelProfiles.Resolve(
             ReasoningModelId(request.ModelId), ILlmCatalogCapabilities.EntryFor(connection, request.ModelId)));
         LlmStructuredOutputEnforcement? enforcement = AnthropicSchemas.Enforcement(request, capabilities);
@@ -790,33 +790,10 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
         if (request.TopK is { } topK) { payload["top_k"] = topK; }
         if (request.StopSequences.Count > 0) { payload["stop_sequences"] = JsonSerializer.SerializeToNode(request.StopSequences); }
 
-        if (request.Tools.Count > 0)
-        {
-            var tools = new JsonArray();
-            foreach (LlmToolDefinition definition in request.Tools)
-            {
-                var tool = new JsonObject
-                {
-                    ["name"] = definition.Name,
-                    ["input_schema"] = JsonNode.Parse(definition.InputSchema.GetRawText())
-                };
-                // Sent only for a strict tool: a model without strict schemas can reject the field even when false.
-                if (definition.Strict)
-                {
-                    tool["strict"] = true;
-                }
-                if (!string.IsNullOrWhiteSpace(definition.Description))
-                {
-                    tool["description"] = definition.Description;
-                }
+        JsonArray tools = AnthropicTools.Resolve(connection, request).Build(request.Tools);
+        if (tools.Count > 0) payload["tools"] = tools;
 
-                tools.Add(tool);
-            }
-
-            payload["tools"] = tools;
-        }
-
-        if (request.Tools.Count > 0
+        if (tools.Count > 0
             && (request.ToolChoice is not null || request.AllowParallelToolCalls is not null))
         {
             LlmToolChoice choice = request.ToolChoice ?? new LlmToolChoice();
@@ -843,7 +820,7 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
         if (connection.ProviderOptions.ContainsKey("output_config") || request.ProviderOptions.ContainsKey("output_config")
             || connection.ProviderOptions.ContainsKey("output_format") || request.ProviderOptions.ContainsKey("output_format"))
         { throw new NotSupportedException("Claude output configuration uses the typed reasoning and structured-output controls."); }
-        RequestJson.ApplyProviderOptions(payload, connection, request);
+        RequestJson.ApplyProviderOptions(payload, connection, request, AnthropicTools.OptionName);
         return payload;
     }
 
