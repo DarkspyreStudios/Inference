@@ -302,6 +302,29 @@ read the same list, and a failed listing is not kept. Common's `ILlmInference` c
 `ListModelsAsync` may answer from a kept list, and `RefreshModelsAsync` lists again. A service built by
 hand without the shared cache keeps its own.
 
+### Wrapped CLI processes
+
+Three transports start a local process: `AnthropicClaudeCli` starts the Claude CLI,
+`GoogleAntigravityCli` starts the Antigravity CLI, and `AppleFoundationModels` starts the Apple helper.
+
+On macOS and Linux each process leads its own session and process group and has no controlling
+terminal. A Ctrl+C typed in the terminal of a console host does not reach it. The host's cancellation
+and disposal paths end it.
+
+Cancellation and disposal send `SIGKILL` to the process group. Every descendant that stays in the group
+ends with the process. A descendant that calls `setsid` or `setpgid` leaves the group, and the kill does
+not reach it. On Windows, cancellation and disposal kill the process tree.
+
+After the kill, Connect waits at most 5 seconds for the runtime to report the exit. When the bound
+expires, the operation fails with a message that names the process ID:
+
+| Lane | Failure |
+| --- | --- |
+| Claude CLI chat | `LlmProviderException` with `ProviderCode` `claude_cli_exit_timeout` |
+| Antigravity CLI chat | `LlmProviderException` with `ProviderCode` `antigravity_cli_exit_timeout` |
+| Antigravity native agent session | The cancelled operation keeps its own outcome, and the session faults. Later calls throw `InvalidOperationException` with the reason. |
+| Apple helper | `InferenceException` with `InferenceFailureCode.ExecutionFailed` |
+
 ## Image provider integration
 
 Register the image capability and resolve its provider-neutral transport through
@@ -981,6 +1004,7 @@ The two Claude integrations are separate providers. `AnthropicMessages` is the d
 key or protected `x-api-key` header. It supports chat-style host tools and never launches the Claude
 CLI. `AnthropicClaudeCli` is the Claude subscription transport; it launches the official CLI, reports
 agent-tool support, and rejects API-key credentials. OAuth is never used to choose between them.
+The CLI process starts and ends as [Wrapped CLI processes](#wrapped-cli-processes) describes.
 
 Configure an API-key connection with the API endpoint and a host-owned credential:
 
@@ -1126,7 +1150,7 @@ can explicitly attach the optional browser-authorized catalog OAuth credential t
 The [DSA-74 technical design](docs/antigravity-agent-tech-design.md) holds the evidence and mapping for
 native agent sessions. They are unreleased: the published 11.14.0-rc.1 adapter is chat-only.
 
-`GoogleAntigravityCli` wraps the official [Antigravity CLI headless mode](https://antigravity.google/docs/cli/headless/). Darkspyre.Inference.Connect.LLM sends prompts over the documented stdin NDJSON protocol, consumes stdout events line by line, and emits model text and activity while the CLI is still running. It does not read, copy, or store Antigravity OAuth credentials.
+`GoogleAntigravityCli` wraps the official [Antigravity CLI headless mode](https://antigravity.google/docs/cli/headless/). Darkspyre.Inference.Connect.LLM sends prompts over the documented stdin NDJSON protocol, consumes stdout events line by line, and emits model text and activity while the CLI is still running. It does not read, copy, or store Antigravity OAuth credentials. The CLI process starts and ends as [Wrapped CLI processes](#wrapped-cli-processes) describes.
 
 Install the CLI and complete its interactive Google sign-in once:
 
@@ -1219,7 +1243,8 @@ See the [helper build/test instructions and process limits](tools/AppleFoundatio
 
 Supported: text/instructions, user/assistant semantic history, streaming, temperature in [0,1],
 provider-enforced output caps, host-executed chat tools and existing managed agent sessions.
-Each model operation owns one helper process. Tools and persistence remain with the host.
+Each model operation owns one helper process, which starts and ends as
+[Wrapped CLI processes](#wrapped-cli-processes) describes. Tools and persistence remain with the host.
 System/developer messages inside history, prompt images/documents, cloud/PCC, custom weights,
 account usage, reasoning controls and native resume/fork are unsupported. Put instructions in
 `Instructions`. Full input occupancy and token usage remain unknown.

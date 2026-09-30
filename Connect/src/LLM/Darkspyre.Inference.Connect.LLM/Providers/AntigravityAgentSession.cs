@@ -562,16 +562,53 @@ internal sealed class AntigravityAgentSession : ILlmAgentSession
         }
         if (process is not null)
         {
-            if (!graceful)
+            try
             {
-                await process.KillAsync().ConfigureAwait(false);
+                if (!graceful)
+                {
+                    await process.KillAsync().ConfigureAwait(false);
+                }
             }
-            await process.DisposeAsync().ConfigureAwait(false);
+            catch (CliProcessTerminationException exception)
+            {
+                FaultForTermination(exception);
+            }
+            try
+            {
+                await process.DisposeAsync().ConfigureAwait(false);
+            }
+            catch (CliProcessTerminationException exception)
+            {
+                FaultForTermination(exception);
+            }
             await _reader.ConfigureAwait(false);
         }
         if (schemaDirectory is not null)
         {
             CliInfrastructure.DeleteWorkingDirectory(schemaDirectory);
+        }
+    }
+
+    /// <summary>
+    /// Records a process that did not exit after it was killed. The operation that closed the process keeps its own
+    /// outcome, and later calls fail with a reason that names the process.
+    /// </summary>
+    private void FaultForTermination(CliProcessTerminationException exception)
+    {
+        lock (_sync)
+        {
+            if (_state == SessionState.Faulted)
+            {
+                // A cancelled turn has already faulted the session. The reason gains the process detail once.
+                if (_fault?.Contains(exception.Message, StringComparison.Ordinal) != true)
+                {
+                    _fault = $"{_fault} {exception.Message}";
+                }
+            }
+            else
+            {
+                FaultLocked(exception.Message);
+            }
         }
     }
 

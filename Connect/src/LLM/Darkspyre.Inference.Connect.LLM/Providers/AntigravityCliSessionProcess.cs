@@ -29,7 +29,10 @@ internal interface IAntigravityCliSessionProcess : IAsyncDisposable
     /// <summary>Waits for exit and returns the exit code and captured standard error.</summary>
     Task<(int ExitCode, string StandardError)> WaitForExitAsync(CancellationToken cancellationToken = default);
 
-    /// <summary>Terminates the process tree and waits until it has exited.</summary>
+    /// <summary>
+    /// Terminates the process group and waits at most <see cref="CliProcessTermination.ExitBound"/> for the exit.
+    /// </summary>
+    /// <exception cref="CliProcessTerminationException">The process was not reported as exited.</exception>
     Task KillAsync();
 }
 
@@ -78,6 +81,7 @@ internal sealed class AntigravityCliSessionProcessFactory : IAntigravityCliSessi
             UseShellExecute = false,
             CreateNoWindow = true
         };
+        CliProcessTermination.Isolate(startInfo);
 
         string extension = Path.GetExtension(executable);
         if (OperatingSystem.IsWindows()
@@ -136,7 +140,9 @@ internal sealed class AntigravityCliSessionProcess : IAntigravityCliSessionProce
     private static readonly TimeSpan GracefulExit = TimeSpan.FromSeconds(2);
 
     private readonly Process _process;
-    private readonly Task<string> _standardError;
+    private readonly Lock _standardErrorLock = new();
+    private readonly StringBuilder _standardErrorText = new();
+    private readonly Task _standardError;
     private readonly SemaphoreSlim _writeLock = new(1, 1);
     private int _disposed;
 
@@ -192,15 +198,19 @@ internal sealed class AntigravityCliSessionProcess : IAntigravityCliSessionProce
     public async Task<(int ExitCode, string StandardError)> WaitForExitAsync(CancellationToken cancellationToken = default)
     {
         await _process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
-        string error = await _standardError.WaitAsync(cancellationToken).ConfigureAwait(false);
-        return (_process.ExitCode, error);
+        try
+        {
+            // A descendant that left the process group can hold the pipe open after the process exits.
+            await _standardError.WaitAsync(CliProcessTermination.ExitBound, cancellationToken).ConfigureAwait(false);
+        }
+        catch (TimeoutException)
+        {
+            // The text captured so far is returned.
+        }
+        return (_process.ExitCode, CapturedStandardError());
     }
 
-    public async Task KillAsync()
-    {
-        TryKill();
-        await _process.WaitForExitAsync().ConfigureAwait(false);
-    }
+    public Task KillAsync() => CliProcessTermination.KillAsync(_process);
 
     public async ValueTask DisposeAsync()
     {
@@ -221,11 +231,17 @@ internal sealed class AntigravityCliSessionProcess : IAntigravityCliSessionProce
                 }
                 catch (OperationCanceledException)
                 {
-                    TryKill();
-                    await _process.WaitForExitAsync().ConfigureAwait(false);
+                    await CliProcessTermination.KillAsync(_process).ConfigureAwait(false);
                 }
             }
-            await _standardError.ConfigureAwait(false);
+            try
+            {
+                await _standardError.WaitAsync(CliProcessTermination.ExitBound).ConfigureAwait(false);
+            }
+            catch (TimeoutException)
+            {
+                // Disposal only releases resources. Disposing the process closes the pipe.
+            }
         }
         finally
         {
@@ -234,38 +250,28 @@ internal sealed class AntigravityCliSessionProcess : IAntigravityCliSessionProce
         }
     }
 
-    private static async Task<string> ReadBoundedAsync(StreamReader reader)
+    private async Task ReadBoundedAsync(StreamReader reader)
     {
-        var captured = new StringBuilder();
         char[] buffer = new char[4096];
         int read;
         while ((read = await reader.ReadAsync(buffer).ConfigureAwait(false)) > 0)
         {
-            int room = MaximumStandardErrorCharacters - captured.Length;
-            if (room > 0)
+            lock (_standardErrorLock)
             {
-                captured.Append(buffer, 0, Math.Min(room, read));
+                int room = MaximumStandardErrorCharacters - _standardErrorText.Length;
+                if (room > 0)
+                {
+                    _standardErrorText.Append(buffer, 0, Math.Min(room, read));
+                }
             }
         }
-        return captured.ToString();
     }
 
-    private void TryKill()
+    private string CapturedStandardError()
     {
-        try
+        lock (_standardErrorLock)
         {
-            if (!_process.HasExited)
-            {
-                _process.Kill(entireProcessTree: true);
-            }
-        }
-        catch (InvalidOperationException)
-        {
-            // The process exited between the state check and kill attempt.
-        }
-        catch (Win32Exception)
-        {
-            // The operating system has already torn down the process.
+            return _standardErrorText.ToString();
         }
     }
 }

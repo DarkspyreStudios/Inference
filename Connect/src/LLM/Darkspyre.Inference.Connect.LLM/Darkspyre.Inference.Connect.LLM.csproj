@@ -2,6 +2,8 @@
 
   <PropertyGroup>
     <IsPackable>false</IsPackable>
+    <!-- LibraryImport generates unsafe marshalling code for the process-group kill in CliProcessTermination. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <AssemblyName>Darkspyre.Inference.Connect.LLM</AssemblyName>
     <Description>Provider-neutral .NET client for OpenAI, compatible chat APIs, Anthropic, direct ChatGPT subscriptions, Claude and Antigravity CLIs, host-executed tools, managed and native agent sessions, structured output, streaming, model discovery, account usage, and embeddings.</Description>
     <PackageTags>llm;ai;openai;anthropic;claude;codex;gemini;antigravity;tool-use;structured-output</PackageTags>

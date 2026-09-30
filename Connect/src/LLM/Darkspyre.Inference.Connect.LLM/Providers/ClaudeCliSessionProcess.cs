@@ -117,13 +117,18 @@ internal sealed class ClaudeCliSessionProcess : IClaudeCliSessionProcess
                 }
                 catch (OperationCanceledException)
                 {
-                    ClaudeCliProcessRunner.TryKill(_process);
+                    await CliProcessTermination.KillAsync(_process);
                 }
             }
 
-            if (_process.HasExited)
+            try
             {
-                await _standardError;
+                // A descendant that left the process group can hold the pipe open after the kill.
+                await _standardError.WaitAsync(CliProcessTermination.ExitBound);
+            }
+            catch (TimeoutException)
+            {
+                // Disposal only releases resources. Disposing the process closes the pipe.
             }
         }
         finally

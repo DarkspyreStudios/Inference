@@ -85,6 +85,22 @@ adoption under the [DSA-75](https://darkspyre.atlassian.net/browse/DSA-75) epic.
 - Per-turn usage may be null. Cache-read and reasoning subsets are null for AGY.
 - See the [Connect README](../README.md#antigravity-native-agent-sessions) for the complete mapping.
 
+## Pending: connector conformance (DSA-104)
+
+These changes are unreleased.
+
+### Host-visible changes
+
+- On macOS and Linux the Claude CLI, the Antigravity CLI and the Apple helper lead their own sessions
+  and process groups, with no controlling terminal. A Ctrl+C typed in a console host's terminal no
+  longer reaches them; the host's cancellation and disposal still end them. Cancellation and disposal
+  send `SIGKILL` to the whole group, so descendants that stay in the group end too, and a descendant
+  that calls `setsid` or `setpgid` escapes. A process that is not reported as exited within 5 seconds
+  of the kill fails the operation instead of hanging it: Claude CLI chat raises `claude_cli_exit_timeout`,
+  Antigravity CLI chat raises `antigravity_cli_exit_timeout`, an Antigravity agent session faults with a
+  reason that names the process ID, and the Apple helper fails with `InferenceFailureCode.ExecutionFailed`.
+  Windows behaviour is unchanged. See [Wrapped CLI processes](../README.md#wrapped-cli-processes).
+
 ## Native background resources: 11.8.0-rc.1
 
 `11.8.0-rc.1` is a breaking-contract release: `ILlmAgentSession` gains members, so every implementation,

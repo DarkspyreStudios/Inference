@@ -38,6 +38,7 @@ internal sealed class AppleProcessRunner : IAppleProcessRunner
         };
         start.ArgumentList.Add("--max-frame-bytes");
         start.ArgumentList.Add(limits.MaximumFrameBytes.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        CliProcessTermination.Isolate(start);
         using var process = new Process { StartInfo = start };
         try { if (!process.Start()) throw new Win32Exception(); }
         catch (Win32Exception error)
@@ -91,12 +92,22 @@ internal sealed class AppleProcessRunner : IAppleProcessRunner
                     await process.WaitForExitAsync(grace.Token).ConfigureAwait(false);
                 }
                 catch (Exception error) when (error is IOException or InvalidOperationException or OperationCanceledException)
-                { Kill(process); }
-                if (!process.HasExited) Kill(process);
+                { CliProcessTermination.Signal(process); }
+                if (!process.HasExited) CliProcessTermination.Signal(process);
             }
-            await process.WaitForExitAsync(CancellationToken.None).ConfigureAwait(false);
-            await stderr.ConfigureAwait(false);
+            await SettleAsync(process, stderr).ConfigureAwait(false);
         }
+    }
+
+    /// <summary>Waits a bounded time for the helper's exit and then for its standard-error reader.</summary>
+    private static async Task SettleAsync(Process process, Task stderr)
+    {
+        try { await CliProcessTermination.WaitForExitAsync(process).ConfigureAwait(false); }
+        catch (CliProcessTerminationException error)
+        { throw new InferenceException(InferenceFailureCode.ExecutionFailed, "The Apple helper did not exit after it was stopped.", error); }
+        // A descendant that left the process group can hold the pipe open. Disposing the process closes it.
+        try { await stderr.WaitAsync(CliProcessTermination.ExitBound).ConfigureAwait(false); }
+        catch (TimeoutException) { /* Standard error is diagnostic only after the exit. */ }
     }
 
     private static async Task<string?> ReadAsync(AppleFrameReader reader, CancellationToken deadline, CancellationToken caller)
@@ -137,14 +148,8 @@ internal sealed class AppleProcessRunner : IAppleProcessRunner
             int count = await process.StandardError.BaseStream.ReadAsync(buffer).ConfigureAwait(false);
             if (count == 0) return true;
             total += count;
-            if (total > maximum) { Kill(process); return false; }
+            if (total > maximum) { CliProcessTermination.Signal(process); return false; }
         }
-    }
-
-    private static void Kill(Process process)
-    {
-        try { if (!process.HasExited) process.Kill(entireProcessTree: true); }
-        catch (InvalidOperationException) { /* The owned process exited concurrently. */ }
     }
 }
 

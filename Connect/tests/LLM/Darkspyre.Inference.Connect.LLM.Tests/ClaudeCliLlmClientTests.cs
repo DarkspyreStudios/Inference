@@ -366,6 +366,49 @@ public sealed class ClaudeCliLlmClientTests
         Assert.Equal("123", result.StandardOutput.Trim());
     }
 
+    [UnixFact]
+    public Task CancelledProcessRunnerEndsAStoppedDescendant() => CliProcessTerminationTests.Bounded(async () =>
+    {
+        var invocation = new ClaudeCliInvocation(
+            "/bin/sh",
+            ["-c", CliProcessTerminationTests.StoppedDescendantScript],
+            StandardInput: null,
+            Path.GetTempPath());
+        using var cancellation = new CancellationTokenSource();
+        int grandchild = 0;
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
+        {
+            await foreach (ClaudeCliProcessEvent processEvent in new ClaudeCliProcessRunner().StreamAsync(invocation, cancellation.Token))
+            {
+                grandchild = CliProcessTerminationTests.ParseProcessId(Assert.IsType<ClaudeCliOutputLine>(processEvent).Line);
+                await cancellation.CancelAsync();
+            }
+        });
+
+        await CliProcessTerminationTests.AssertGoneAsync(grandchild);
+    });
+
+    [Fact]
+    public async Task ProcessExitTimeoutIsAProviderFailure()
+    {
+        using var http = new HttpClient(new UnexpectedHttpHandler());
+        var client = new ClaudeCliLlmClient(http, new ExitTimeoutRunner());
+
+        LlmProviderException exception = await Assert.ThrowsAsync<LlmProviderException>(() =>
+            ReadAllAsync(client.StreamAsync(
+                CliConnection(),
+                new LlmChatRequest
+                {
+                    ModelId = "claude-test",
+                    Messages = [new LlmChatMessage("user", "test")]
+                })));
+
+        Assert.Equal("claude_cli_exit_timeout", exception.ProviderCode);
+        Assert.Contains(ExitTimeoutEvents<ClaudeCliProcessEvent>.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            exception.Message, StringComparison.Ordinal);
+    }
+
     [Fact]
     public async Task RejectsMinimalReasoningWithoutStartingTheCli()
     {
@@ -497,6 +540,19 @@ public sealed class ClaudeCliLlmClientTests
             throw new ClaudeCliUnavailableException(
                 invocation.Executable,
                 new InvalidOperationException("not installed"));
+    }
+
+    private sealed class ExitTimeoutRunner : IClaudeCliRunner
+    {
+        public Task<ClaudeCliProcessResult> RunAsync(
+            ClaudeCliInvocation invocation,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public IAsyncEnumerable<ClaudeCliProcessEvent> StreamAsync(
+            ClaudeCliInvocation invocation,
+            CancellationToken cancellationToken = default) =>
+            new ExitTimeoutEvents<ClaudeCliProcessEvent>();
     }
 
     private sealed class PausingStreamingRunner : IClaudeCliRunner

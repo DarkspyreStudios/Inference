@@ -210,6 +210,49 @@ public sealed class AntigravityCliLlmClientTests
         Assert.NotNull(result.StandardInputError);
     }
 
+    [UnixFact]
+    public Task CancelledProcessRunnerEndsAStoppedDescendant() => CliProcessTerminationTests.Bounded(async () =>
+    {
+        var invocation = new AntigravityCliInvocation(
+            "/bin/sh",
+            ["-c", CliProcessTerminationTests.StoppedDescendantScript],
+            StandardInput: null,
+            Path.GetTempPath());
+        var runner = new AntigravityCliProcessRunner(new AntigravityCliSessionProcessFactory());
+        using var cancellation = new CancellationTokenSource();
+        int grandchild = 0;
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
+        {
+            await foreach (AntigravityCliProcessEvent processEvent in runner.StreamAsync(invocation, cancellation.Token))
+            {
+                grandchild = CliProcessTerminationTests.ParseProcessId(Assert.IsType<AntigravityCliOutputLine>(processEvent).Line);
+                await cancellation.CancelAsync();
+            }
+        });
+
+        await CliProcessTerminationTests.AssertGoneAsync(grandchild);
+    });
+
+    [Fact]
+    public async Task ProcessExitTimeoutIsAProviderFailure()
+    {
+        var client = new AntigravityCliLlmClient(new ExitTimeoutRunner());
+
+        LlmProviderException exception = await Assert.ThrowsAsync<LlmProviderException>(() =>
+            ReadAllAsync(client.StreamAsync(
+                Connection(),
+                new LlmChatRequest
+                {
+                    ModelId = "auto",
+                    Messages = [new LlmChatMessage("user", "test")]
+                })));
+
+        Assert.Equal("antigravity_cli_exit_timeout", exception.ProviderCode);
+        Assert.Contains(ExitTimeoutEvents<AntigravityCliProcessEvent>.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            exception.Message, StringComparison.Ordinal);
+    }
+
     [Fact]
     public async Task ClosedInputFailureIncludesSafeCliDiagnostics()
     {
@@ -584,6 +627,19 @@ public sealed class AntigravityCliLlmClientTests
             throw new AntigravityCliUnavailableException(
                 invocation.Executable,
                 new InvalidOperationException("not installed"));
+    }
+
+    private sealed class ExitTimeoutRunner : IAntigravityCliRunner
+    {
+        public Task<AntigravityCliProcessResult> RunAsync(
+            AntigravityCliInvocation invocation,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public IAsyncEnumerable<AntigravityCliProcessEvent> StreamAsync(
+            AntigravityCliInvocation invocation,
+            CancellationToken cancellationToken = default) =>
+            new ExitTimeoutEvents<AntigravityCliProcessEvent>();
     }
 
     private sealed class PausingStreamingRunner : IAntigravityCliRunner

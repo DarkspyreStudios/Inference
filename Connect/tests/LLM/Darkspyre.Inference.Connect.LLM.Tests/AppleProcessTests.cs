@@ -16,6 +16,7 @@ public sealed class AppleProcessTests
     [InlineData("malformed", InferenceFailureCode.ProtocolFailure)]
     [InlineData("extra-terminal", InferenceFailureCode.ProtocolFailure)]
     [InlineData("exit", InferenceFailureCode.ExecutionFailed)]
+    [InlineData("stopped-child", InferenceFailureCode.TimedOut)]
     public async Task FailuresReapOwnedProcessAndNeverDeliverTerminal(string behavior, InferenceFailureCode code)
     {
         using var helper = new FakeHelper(behavior);
@@ -25,7 +26,7 @@ public sealed class AppleProcessTests
             await foreach (var frame in new AppleProcessRunner().RunAsync(helper.Path, new("generate", "r"),
                 new(StartupTimeoutSeconds: 1, RequestTimeoutSeconds: 2, CancellationGraceSeconds: 1, MaximumStderrBytes: 16)))
                 emitted.Add(frame);
-        });
+        }).WaitAsync(CliProcessTerminationTests.TestBound);
         Assert.Equal(code, error.Code);
         Assert.DoesNotContain(emitted, f => f.GetProperty("type").GetString() == "terminal");
         helper.AssertReaped();
@@ -89,6 +90,7 @@ public sealed class AppleProcessTests
                     "generation" => "read -r ignored\nexit 0\n",
                     "terminal-hang" => "echo '{\"type\":\"terminal\",\"id\":\"r\",\"sequence\":1}'\nread -r ignored\nexit 0\n",
                     "extra-terminal" => "echo '{\"type\":\"terminal\",\"id\":\"r\",\"sequence\":1}'\necho '{\"type\":\"terminal\",\"id\":\"r\",\"sequence\":2}'\n",
+                    "stopped-child" => "sleep 300 &\nkill -STOP $!\nsleep 300\n",
                     "cancel" => "echo '{\"type\":\"text\",\"id\":\"r\",\"sequence\":1,\"content\":\"partial\"}'\nread -r ignored\nexit 0\n",
                     _ => "echo '{\"type\":\"terminal\",\"id\":\"r\",\"sequence\":1,\"status\":\"unknown\",\"content\":\"\"}'\n"
                 }));
@@ -112,4 +114,8 @@ internal sealed class MacFactAttribute : FactAttribute
 internal sealed class MacTheoryAttribute : TheoryAttribute
 {
     public MacTheoryAttribute() { if (!MacFactAttribute.Supported) Skip = "Requires an Apple Silicon Mac running macOS 26 or later."; }
+}
+internal sealed class UnixFactAttribute : FactAttribute
+{
+    public UnixFactAttribute() { if (OperatingSystem.IsWindows()) Skip = "Requires macOS or Linux."; }
 }

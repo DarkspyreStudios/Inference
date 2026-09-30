@@ -295,8 +295,10 @@ version/publication remains separately authorized.
    usage is cumulative, so per-turn totals use the step ledger or a same-process cumulative difference.
    Cache/reasoning inclusion is still unestablished, so those subsets stay null. Maximum effort remains
    unadvertised until qualified.
-5. **Lifecycle:** cancellation kills and awaits the local process and faults the session; no claim is
-   made that it cancels persisted provider-side jobs. Output while no turn runs faults the session
+5. **Lifecycle:** cancellation kills the local process group, waits at most 5 seconds for the process
+   exit, and faults the session. When the process is not reported as exited within that bound, the
+   session fault reason names the process ID. No claim is made that cancellation stops persisted
+   provider-side jobs. Output while no turn runs faults the session
    instead of reaching the next turn.
 
 Windows and Linux have process and protocol fixtures only; they have no live qualification.

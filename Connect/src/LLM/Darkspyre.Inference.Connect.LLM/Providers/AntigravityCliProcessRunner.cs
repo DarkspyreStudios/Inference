@@ -74,11 +74,17 @@ internal sealed class AntigravityCliProcessRunner(IAntigravityCliSessionProcessF
         }
         finally
         {
-            if (!exited)
+            try
             {
-                await process.KillAsync();
+                if (!exited)
+                {
+                    await process.KillAsync();
+                }
             }
-            await process.DisposeAsync();
+            finally
+            {
+                await process.DisposeAsync();
+            }
         }
     }
 }

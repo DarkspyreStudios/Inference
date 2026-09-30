@@ -74,7 +74,7 @@ and cancellation. They do not invoke a model.
 The .NET project targets portable `net11.0`, is non-packable, has no package/project
 dependencies and is not part of the shipping solution. Each experiment runs in a
 fresh worker process with a 45-second parent timeout. The parent kills only the
-worker tree it started. Native request waits are bounded as well.
+worker process it started. Native request waits are bounded as well.
 
 The suite records availability/context size, UTF-8 completion, text streaming,
 transcript restoration, schema shapes, ordinary JSON Schema acceptance, output

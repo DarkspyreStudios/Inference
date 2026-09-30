@@ -76,7 +76,7 @@ internal sealed class ClaudeCliProcessRunner : IClaudeCliRunner
         {
             if (!process.HasExited)
             {
-                TryKill(process);
+                await CliProcessTermination.KillAsync(process);
             }
         }
     }
@@ -117,6 +117,7 @@ internal sealed class ClaudeCliProcessRunner : IClaudeCliRunner
             UseShellExecute = false,
             CreateNoWindow = true
         };
+        CliProcessTermination.Isolate(startInfo);
 
         string extension = Path.GetExtension(invocation.Executable);
         if (OperatingSystem.IsWindows()
@@ -185,25 +186,6 @@ internal sealed class ClaudeCliProcessRunner : IClaudeCliRunner
         catch (InvalidOperationException)
         {
             // The process has already exited and disposed the redirected stream.
-        }
-    }
-
-    internal static void TryKill(Process process)
-    {
-        try
-        {
-            if (!process.HasExited)
-            {
-                process.Kill(entireProcessTree: true);
-            }
-        }
-        catch (InvalidOperationException)
-        {
-            // The process exited between the state check and kill attempt.
-        }
-        catch (Win32Exception)
-        {
-            // Cancellation still wins when the operating system has already torn down the process.
         }
     }
 }

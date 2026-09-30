@@ -81,7 +81,8 @@ internal static class Program
             catch (TimeoutException)
             {
                 timedOut = true;
-                process.Kill(entireProcessTree: true);
+                // A root-only kill: the .NET 11 tree kill stops the tree first and can block the runtime child reaper.
+                process.Kill();
                 await process.WaitForExitAsync().ConfigureAwait(false);
             }
             string output = await stdout.ConfigureAwait(false);

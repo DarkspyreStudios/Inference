@@ -402,6 +402,31 @@ public sealed class AntigravityAgentClientTests : IDisposable
     }
 
     [Fact]
+    public async Task AProcessThatDoesNotExitAfterTheKillFaultsTheSessionWithItsPid()
+    {
+        var factory = new Factory { KillFailure = new CliProcessTerminationException(4242) };
+        factory.Turns.Enqueue(_ => [Step(0, "DONE", "user_input"), Step(1, "ACTIVE", "agent_response", "partial")]);
+        await using ILlmAgentSession session = await Client(factory).StartSessionAsync("c", Connection(), Options());
+        using var cancellation = new CancellationTokenSource();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
+        {
+            await foreach (LlmAgentEvent item in session.RunTurnAsync(Turn("x"), cancellation.Token))
+            {
+                if (item is LlmAgentTextDeltaEvent)
+                {
+                    await cancellation.CancelAsync();
+                }
+            }
+        });
+
+        Assert.True(factory.Processes[0].Disposed);
+        InvalidOperationException fault = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            Read(session.RunTurnAsync(Turn("again"))));
+        Assert.Contains("4242", fault.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task AbandonedEnumerationSettlesTheProcess()
     {
         var factory = new Factory();
@@ -573,6 +598,9 @@ public sealed class AntigravityAgentClientTests : IDisposable
 
         public bool EndBeforeInit { get; init; }
 
+        /// <summary>When set, killing a process fails with this exception after the process ends its output.</summary>
+        public Exception? KillFailure { get; init; }
+
         public IAntigravityCliSessionProcess Start(string executable, IReadOnlyList<string> arguments, string workingDirectory)
         {
             var process = new FakeProcess(this, Processes.Count + 1, [.. arguments], workingDirectory);
@@ -682,7 +710,7 @@ public sealed class AntigravityAgentClientTests : IDisposable
             Killed = true;
             _output.Writer.TryComplete();
             _exited.TrySetResult();
-            return Task.CompletedTask;
+            return factory.KillFailure is { } failure ? Task.FromException(failure) : Task.CompletedTask;
         }
 
         public ValueTask DisposeAsync()

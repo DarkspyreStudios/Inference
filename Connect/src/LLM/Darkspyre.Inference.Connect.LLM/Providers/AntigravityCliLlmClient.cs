@@ -355,6 +355,10 @@ internal sealed class AntigravityCliLlmClient(IAntigravityCliRunner runner)
                 providerCode: "antigravity_cli_not_found",
                 innerException: exception);
         }
+        catch (CliProcessTerminationException exception)
+        {
+            throw ExitTimeout(exception);
+        }
         finally
         {
             CliInfrastructure.DeleteWorkingDirectory(workingDirectory);
@@ -389,29 +393,39 @@ internal sealed class AntigravityCliLlmClient(IAntigravityCliRunner runner)
                     standardInput,
                     workingDirectory),
                 cancellationToken);
-            await using IAsyncEnumerator<AntigravityCliProcessEvent> enumerator =
-                events.GetAsyncEnumerator(cancellationToken);
-            while (true)
+            IAsyncEnumerator<AntigravityCliProcessEvent> enumerator = events.GetAsyncEnumerator(cancellationToken);
+            try
             {
-                AntigravityCliProcessEvent processEvent;
-                try
+                while (true)
                 {
-                    if (!await enumerator.MoveNextAsync())
+                    AntigravityCliProcessEvent processEvent;
+                    try
                     {
-                        break;
+                        if (!await enumerator.MoveNextAsync())
+                        {
+                            break;
+                        }
+                        processEvent = enumerator.Current;
                     }
-                    processEvent = enumerator.Current;
-                }
-                catch (AntigravityCliUnavailableException exception)
-                {
-                    throw new LlmProviderException(
-                        "Antigravity CLI was not found. Install agy, run it once, and complete Google sign-in.",
-                        Transport,
-                        providerCode: "antigravity_cli_not_found",
-                        innerException: exception);
-                }
+                    catch (AntigravityCliUnavailableException exception)
+                    {
+                        throw new LlmProviderException(
+                            "Antigravity CLI was not found. Install agy, run it once, and complete Google sign-in.",
+                            Transport,
+                            providerCode: "antigravity_cli_not_found",
+                            innerException: exception);
+                    }
+                    catch (CliProcessTerminationException exception)
+                    {
+                        throw ExitTimeout(exception);
+                    }
 
-                yield return processEvent;
+                    yield return processEvent;
+                }
+            }
+            finally
+            {
+                await DisposeRunnerAsync(enumerator);
             }
         }
         finally
@@ -419,6 +433,25 @@ internal sealed class AntigravityCliLlmClient(IAntigravityCliRunner runner)
             CliInfrastructure.DeleteWorkingDirectory(workingDirectory);
         }
     }
+
+    /// <summary>Disposes the runner's enumerator, which ends the process when the enumeration stops early.</summary>
+    private async ValueTask DisposeRunnerAsync(IAsyncEnumerator<AntigravityCliProcessEvent> enumerator)
+    {
+        try
+        {
+            await enumerator.DisposeAsync();
+        }
+        catch (CliProcessTerminationException exception)
+        {
+            throw ExitTimeout(exception);
+        }
+    }
+
+    private LlmProviderException ExitTimeout(CliProcessTerminationException exception) => new(
+        $"The Antigravity CLI did not exit after it was stopped. {exception.Message}",
+        Transport,
+        providerCode: "antigravity_cli_exit_timeout",
+        innerException: exception);
 
     private static LlmStructuredOutputEnforcement? ValidateRequest(
         LlmChatRequest request,

@@ -131,8 +131,11 @@ busy/disposal flag: the overlap probe found it false while a request was still a
 Host cancellation observed before terminal commitment wins over an unfinished handoff.
 Internal cancellation to return tools produces `RequiresAction`, not host cancellation.
 Drain native work before committing a terminal message. On timeout, broken pipe or failure
-to settle, terminate/reap only the owned helper process tree. Never automatically retry a
-turn: the host may already have executed tools in an earlier step.
+to settle, terminate/reap only the owned helper. On macOS the helper leads its own process
+group, and termination sends `SIGKILL` to that group. The runner then waits at most 5 seconds
+for the helper's exit; a helper that is not reported as exited fails the operation with
+`InferenceFailureCode.ExecutionFailed`. Never automatically retry a turn: the host may already
+have executed tools in an earlier step.
 
 ## 5. Chat tools, history and managed agents
 
