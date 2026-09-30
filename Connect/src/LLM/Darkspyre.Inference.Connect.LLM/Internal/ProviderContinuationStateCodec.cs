@@ -194,10 +194,15 @@ internal static class ProviderContinuationStateCodec
                     ["type", "id", "status", "summary", "content", "encrypted_content"],
                 (LlmTransport.OpenAiResponses or LlmTransport.OpenAiCodex, "function_call") =>
                     ["type", "id", "status", "call_id", "name", "arguments"],
-                (LlmTransport.AnthropicMessages, "text") => ["type", "text"],
+                (LlmTransport.AnthropicMessages, "text") => ["type", "text", "citations"],
                 (LlmTransport.AnthropicMessages, "thinking") => ["type", "thinking", "signature"],
                 (LlmTransport.AnthropicMessages, "redacted_thinking") => ["type", "data"],
                 (LlmTransport.AnthropicMessages, "tool_use") => ["type", "id", "name", "input"],
+                (LlmTransport.AnthropicMessages, "server_tool_use") => ["type", "id", "name", "input", "caller"],
+                (LlmTransport.AnthropicMessages, "web_search_tool_result" or "web_fetch_tool_result"
+                    or "code_execution_tool_result" or "bash_code_execution_tool_result"
+                    or "text_editor_code_execution_tool_result" or "tool_search_tool_result") =>
+                    ["type", "tool_use_id", "content", "caller"],
                 (LlmTransport.AwsBedrockConverse, "text") => ["type", "text"],
                 (LlmTransport.AwsBedrockConverse, "reasoning") => ["type", "text", "signature"],
                 (LlmTransport.AwsBedrockConverse, "redacted_reasoning") => ["type", "data"],
@@ -209,7 +214,21 @@ internal static class ProviderContinuationStateCodec
             {
                 if (item.TryGetPropertyValue(field, out JsonNode? value))
                 {
-                    if (field is "content" or "summary")
+                    if (transport == LlmTransport.AnthropicMessages && field == "citations")
+                    {
+                        if (value is not JsonArray citations || citations.Any(citation => citation is not JsonObject))
+                        { throw new ArgumentException("Assistant citations in continuation state must be ordered JSON objects."); }
+                        copy[field] = citations.DeepClone();
+                    }
+                    else if (transport == LlmTransport.AnthropicMessages && field is "content" or "caller")
+                    {
+                        // Provider-owned results/caller metadata are opaque replay data. Their strings,
+                        // URLs and code are never interpreted, executed or logged by the library.
+                        if (value is not JsonObject && (field != "content" || value is not JsonArray))
+                        { throw new ArgumentException("Server-tool continuation content must be a JSON object or ordered block array."); }
+                        copy[field] = value.DeepClone();
+                    }
+                    else if (field is "content" or "summary")
                     {
                         copy[field] = ProjectTextBlocks(value);
                     }
@@ -246,7 +265,10 @@ internal static class ProviderContinuationStateCodec
         {
             (_, "message") => ["content"],
             (_, "function_call") => ["call_id", "name", "arguments"],
-            (_, "tool_use") => ["id", "name", "input"],
+            (_, "tool_use" or "server_tool_use") => ["id", "name", "input"],
+            (LlmTransport.AnthropicMessages, "web_search_tool_result" or "web_fetch_tool_result"
+                or "code_execution_tool_result" or "bash_code_execution_tool_result"
+                or "text_editor_code_execution_tool_result" or "tool_search_tool_result") => ["tool_use_id", "content"],
             (_, "thinking") => ["thinking", "signature"],
             (_, "redacted_thinking") => ["data"],
             (_, "text") => ["text"],
@@ -256,12 +278,14 @@ internal static class ProviderContinuationStateCodec
             _ => []
         };
         if (required.Any(field => item[field] is null)
-            || (type is "function_call" or "tool_use"
-                && (string.IsNullOrWhiteSpace(item[type == "tool_use" ? "id" : "call_id"]!.GetValue<string>())
+            || (type is "function_call" or "tool_use" or "server_tool_use"
+                && (string.IsNullOrWhiteSpace(item[type == "function_call" ? "call_id" : "id"]!.GetValue<string>())
                     || string.IsNullOrWhiteSpace(item["name"]!.GetValue<string>()))))
         {
             throw new ArgumentException("Response state is missing required assistant output fields.");
         }
+        if (item["tool_use_id"] is { } toolUseId && string.IsNullOrWhiteSpace(toolUseId.GetValue<string>()))
+        { throw new ArgumentException("Server-tool continuation state requires a tool-use identity."); }
         if (type == "function_call" && JsonNode.Parse(item["arguments"]!.GetValue<string>()) is not JsonObject)
         {
             throw new ArgumentException("Response-state tool arguments must be a JSON object.");

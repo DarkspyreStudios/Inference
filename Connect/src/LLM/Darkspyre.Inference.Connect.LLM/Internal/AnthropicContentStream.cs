@@ -21,7 +21,7 @@ internal sealed class AnthropicContentStream
         }
 
         _blocks[index] = block;
-        if (LlmJson.GetString(contentBlock, "type") == "tool_use")
+        if (LlmJson.GetString(contentBlock, "type") is "tool_use" or "server_tool_use")
         {
             _toolArguments[index] = new StringBuilder();
         }
@@ -46,6 +46,14 @@ internal sealed class AnthropicContentStream
                 break;
             case "signature_delta":
                 Append(block, "signature", LlmJson.GetString(delta, "signature"));
+                break;
+            case "citations_delta":
+                if (LlmJson.GetObject(delta, "citation") is { } citation)
+                {
+                    if (block["citations"] is not JsonArray citations)
+                    { block["citations"] = citations = []; }
+                    citations.Add(JsonNode.Parse(citation.GetRawText()));
+                }
                 break;
             case "input_json_delta":
                 if (_toolArguments.TryGetValue(index, out StringBuilder? arguments))

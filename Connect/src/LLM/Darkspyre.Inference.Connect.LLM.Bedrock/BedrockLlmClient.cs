@@ -237,13 +237,6 @@ internal sealed class BedrockLlmClient(
         }
         if (family == BedrockModelFamily.AmazonNova2 && request.TopK > 128)
         { throw new ArgumentOutOfRangeException(nameof(request), "Nova 2 top-k cannot exceed 128."); }
-        if (family == BedrockModelFamily.AnthropicClaude
-            && request.ReasoningLevel is { } level && level != LlmReasoningLevel.None
-            && (request.Temperature is not null
-                || request.ToolChoice?.Mode is LlmToolChoiceMode.Required or LlmToolChoiceMode.Specific))
-        {
-            throw new NotSupportedException("Claude thinking cannot be combined with temperature or forced tool choice.");
-        }
         if (family == BedrockModelFamily.AmazonNova2
             && request.ReasoningLevel == LlmReasoningLevel.High
             && (request.Temperature is not null || request.MaxOutputTokens is not null || request.TopP is not null || request.TopK is not null))

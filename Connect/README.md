@@ -429,6 +429,23 @@ and older adaptive models retain their existing controls. Disabling display omit
 without changing explicit reasoning controls. Catalog evidence remains authoritative for thinking
 support. The qualified Vertex Sonnet 4.6 request body receives no new display field.
 
+Claude profiles reject temperature and forced tool choice while adaptive or budget thinking is
+active, including a profile's default thinking. Profiles that prohibit forced tool choice reject it
+at every level. Explicitly disabled thinking and effort-only reasoning keep the model's supported
+sampling/tool controls. Anthropic Messages, Vertex Claude and Bedrock Claude use this validation.
+
+Anthropic Messages and Vertex Claude report `pause_turn` as `Incomplete` with its native reason and
+opaque continuation state. Ordered server-tool calls, their result blocks, caller metadata and
+citations remain replay data; they do not become host tool actions. Streaming retains partial
+server-tool argument deltas before constructing that state. A caller replays a paused assistant
+message with its unchanged text and continuation state. Vertex accepts that opaque replay without
+allowing ordinary assistant prefilling. Unknown stop reasons stay Unknown;
+`model_context_window_exceeded` and `max_tokens` are Incomplete without paused-turn state.
+
+Managed sessions retain an Incomplete reply that carries continuation state and no host tool calls.
+They emit its message, finish the turn with Truncation, and preserve the state through capture/import
+for a caller-directed later turn. They do not automatically retry or execute server tools.
+
 `SupportsStreamingUsage` describes usage reported by completion. `SupportsUsageDeltas` describes
 running `LlmUsageDeltaEvent` observations and is mirrored on Common's capabilities. Each observation
 replaces the previous value for the entire call. Null counts remain unknown. Duplicate observations

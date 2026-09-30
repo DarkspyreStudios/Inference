@@ -40,7 +40,12 @@ public sealed class VertexProtocolTests
             new LlmChatRequest { ModelId = Gemini, PresencePenalty = 2 },
             new LlmChatRequest { ModelId = Gemini, FrequencyPenalty = -2.1 },
             new LlmChatRequest { ModelId = Claude, ReasoningLevel = LlmReasoningLevel.High, TopK = 17 },
-            new LlmChatRequest { ModelId = Claude, ReasoningLevel = LlmReasoningLevel.High, TopP = .94 }
+            new LlmChatRequest { ModelId = Claude, ReasoningLevel = LlmReasoningLevel.High, TopP = .94 },
+            new LlmChatRequest { ModelId = Claude, ReasoningLevel = LlmReasoningLevel.High, Temperature = .5 },
+            new LlmChatRequest { ModelId = Claude, ReasoningLevel = LlmReasoningLevel.High, Tools = [Tool],
+                ToolChoice = new() { Mode = LlmToolChoiceMode.Required } },
+            new LlmChatRequest { ModelId = Claude, ReasoningLevel = LlmReasoningLevel.High, Tools = [Tool],
+                ToolChoice = new() { Mode = LlmToolChoiceMode.Specific, Name = "run" } }
         })
         {
             if (request.ModelId == Claude)
@@ -56,6 +61,42 @@ public sealed class VertexProtocolTests
         Assert.Equal(.8, body.GetProperty("top_p").GetDouble());
         Assert.Equal(17, body.GetProperty("top_k").GetInt32());
         Assert.Equal("stop", body.GetProperty("stop_sequences")[0].GetString());
+    }
+
+    [Fact]
+    public async Task ClaudePauseRetainsServerToolStateAndAllowsOpaqueAssistantReplay()
+    {
+        var handler = new Handler(
+            """{"type":"message_start","message":{"id":"m"}}""",
+            """{"type":"content_block_start","index":0,"content_block":{"type":"text","text":"Working"}}""",
+            """{"type":"content_block_stop","index":0}""",
+            """{"type":"content_block_start","index":1,"content_block":{"type":"server_tool_use","id":"srv_1","name":"web_search","input":{}}}""",
+            """{"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\"query\":\"fixture\"}"}}""",
+            """{"type":"content_block_stop","index":1}""",
+            """{"type":"content_block_start","index":2,"content_block":{"type":"web_search_tool_result","tool_use_id":"srv_1","content":[]}}""",
+            """{"type":"content_block_stop","index":2}""",
+            """{"type":"message_delta","delta":{"stop_reason":"pause_turn"}}""",
+            """{"type":"message_stop"}""");
+        using var http = new HttpClient(handler);
+        var client = new VertexLlmClient(http, new Authentication());
+        var request = new LlmChatRequest { ModelId = Claude, Messages = [new("user", "start")] };
+        LlmChatResult paused = await Complete(client, Connection, request);
+        Assert.Equal(LlmCompletionStatus.Incomplete, paused.Status);
+        Assert.Equal("pause_turn", paused.IncompleteReason);
+        Assert.Empty(paused.ToolCalls);
+        LlmContinuationState state = Assert.IsType<LlmContinuationState>(paused.ContinuationState);
+        var replay = request with
+        { Messages = [request.Messages[0], new("assistant", paused.Text) { ContinuationState = state }] };
+        await Complete(client, Connection, replay);
+        JsonNode content = JsonNode.Parse(handler.Bodies[1])!["messages"]![1]!["content"]!;
+        Assert.True(JsonNode.DeepEquals(JsonNode.Parse(state.Payload!), content));
+        Assert.Equal("fixture", (string?)content[1]!["input"]!["query"]);
+        Assert.Null(JsonNode.Parse(handler.Bodies[1])!["model"]);
+        Assert.Equal(state, replay.Messages[1].ContinuationState);
+        Assert.Equal(2, handler.Bodies.Count);
+        await Assert.ThrowsAsync<NotSupportedException>(() => Complete(client, Connection, replay with
+        { Messages = [request.Messages[0], new("assistant", paused.Text)] }));
+        Assert.Equal(2, handler.Bodies.Count);
     }
 
     [Fact]

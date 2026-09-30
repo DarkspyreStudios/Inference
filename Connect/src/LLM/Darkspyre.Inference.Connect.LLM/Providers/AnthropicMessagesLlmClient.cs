@@ -436,7 +436,8 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
         LlmCredential? credential)
     {
         bool refused = string.Equals(stopReason, "refusal", StringComparison.Ordinal);
-        bool incomplete = string.Equals(stopReason, "max_tokens", StringComparison.Ordinal);
+        bool paused = string.Equals(stopReason, "pause_turn", StringComparison.Ordinal);
+        bool incomplete = paused || stopReason is "max_tokens" or "model_context_window_exceeded";
         bool requiresAction = toolCalls.Length > 0
             || string.Equals(stopReason, "tool_use", StringComparison.Ordinal);
         LlmCompletionStatus completionStatus = refused
@@ -469,7 +470,7 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
             Usage = usage,
             ProviderResponseId = responseId,
             ToolCalls = completionStatus == LlmCompletionStatus.RequiresAction ? toolCalls : [],
-            ContinuationState = completionStatus is LlmCompletionStatus.Completed or LlmCompletionStatus.RequiresAction
+            ContinuationState = (paused || completionStatus is LlmCompletionStatus.Completed or LlmCompletionStatus.RequiresAction)
                 && content is not null
                     ? ProviderContinuationStateCodec.Encode(connection, request.ModelId, content) : null,
             StructuredOutput = validation,

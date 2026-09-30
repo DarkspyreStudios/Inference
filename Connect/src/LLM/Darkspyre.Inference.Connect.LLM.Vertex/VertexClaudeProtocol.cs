@@ -26,10 +26,7 @@ internal sealed class VertexClaudeProtocol(HttpClient http, string token) : Anth
     protected override JsonObject BuildPayload(LlmConnection connection, LlmChatRequest request,
         Func<LlmToolOutput, ProjectedToolOutput> projectToolOutput, bool stream)
     {
-        if (request.ReasoningLevel is > LlmReasoningLevel.None
-            && (request.Temperature is not null || request.ToolChoice?.Mode is LlmToolChoiceMode.Required or LlmToolChoiceMode.Specific))
-        { throw new NotSupportedException("Claude thinking cannot be combined with sampling temperature or forced tool choice."); }
-        if (request.Messages.Count > 0 && request.Messages[^1].Role == "assistant")
+        if (request.Messages.Count > 0 && request.Messages[^1] is { Role: "assistant", ContinuationState: null })
         { throw new NotSupportedException("This Claude model does not accept assistant prefilling."); }
         JsonObject payload = base.BuildPayload(connection, request, projectToolOutput, stream);
         payload.Remove("model");

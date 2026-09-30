@@ -2,6 +2,7 @@ using System.Net;
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Darkspyre.Inference.Common.LLM;
 using Darkspyre.Inference.Connect.LLM.Internal;
 using LlmReasoningLevel = Darkspyre.Inference.Common.LLM.LlmReasoningLevel;
@@ -471,6 +472,48 @@ public sealed class ManagedAgentTests
         Assert.Equal(0, executions);
         Assert.Equal(LlmAgentTurnStatus.Failed, Assert.Single(events.OfType<LlmAgentTurnCompletedEvent>()).Status);
         Assert.Single((await session.CaptureContextAsync()).Entries);
+    }
+
+    [Fact]
+    public async Task ResumableIncompleteReplySurvivesCaptureImportWithoutAutomaticRetryOrToolExecution()
+    {
+        var harness = new Harness();
+        var connection = new LlmConnection
+        { Version = "1", Transport = LlmTransport.OpenAiCodex, Endpoint = "https://provider.test/codex" };
+        var state = ProviderContinuationStateCodec.Encode(connection, "test", JsonNode.Parse("""
+            [{"type":"message","role":"assistant","content":[{"type":"output_text","text":"paused"}]}]
+            """)!.AsArray());
+        harness.Results.Enqueue(new()
+        {
+            Diagnostics = new(200, null, null),
+            Text = "paused",
+            Status = LlmCompletionStatus.Incomplete,
+            FinishReason = "pause_turn",
+            IncompleteReason = "pause_turn",
+            ContinuationState = state,
+            Usage = new(7, 4, 11)
+        });
+        int executions = 0;
+        await using var session = harness.Create(ToolsOptions(_ => { executions++; return new(); }));
+        var events = await Read(session.RunTurnAsync(Turn("go")));
+        Assert.Single(harness.Requests);
+        Assert.Equal(0, executions);
+        Assert.Empty(events.OfType<LlmAgentToolEvent>());
+        Assert.Equal("paused", Assert.Single(events.OfType<LlmAgentMessageCompletedEvent>()).Text);
+        var completion = Assert.Single(events.OfType<LlmAgentTurnCompletedEvent>());
+        Assert.Equal(LlmAgentCompletionReason.Truncation, completion.Reason);
+        Assert.Equal(11, Assert.Single(events.OfType<LlmAgentUsageEvent>()).RunTotals!.TotalTokens);
+        LlmAgentContext captured = await session.CaptureContextAsync();
+        Assert.Equal(2, captured.Entries.Count);
+        Assert.Equal(state, captured.Entries[^1].Message.ContinuationState);
+
+        await using var restored = harness.Create(Options() with { Context = captured });
+        harness.Results.Enqueue(new() { Diagnostics = new(200, null, null), Text = "done", Status = LlmCompletionStatus.Completed });
+        await Read(restored.RunTurnAsync(Turn("continue")));
+        Assert.Equal(state, harness.Requests[1].Messages[1].ContinuationState);
+        Assert.Equal("paused", harness.Requests[1].Messages[1].Content);
+        Assert.Equal(2, harness.Requests.Count);
+        Assert.Equal(state, (await restored.CaptureContextAsync()).Entries[1].Message.ContinuationState);
     }
 
     [Fact]

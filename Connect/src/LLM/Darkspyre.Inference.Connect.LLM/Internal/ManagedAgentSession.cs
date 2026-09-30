@@ -441,6 +441,12 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
                 await writer.WriteAsync(new LlmAgentUsageEvent(ThreadId, run.Id, stepId, result.Usage, run.Usage), token);
                 if (result.Status is not (LlmCompletionStatus.Completed or LlmCompletionStatus.RequiresAction or LlmCompletionStatus.Unknown))
                 {
+                    if (result.Status == LlmCompletionStatus.Incomplete
+                        && result.ContinuationState is not null && result.ToolCalls.Count == 0)
+                    {
+                        AppendAssistant(stepId, run, result);
+                        await writer.WriteAsync(new LlmAgentMessageCompletedEvent(ThreadId, run.Id, stepId, result.Text), token);
+                    }
                     await CompleteAsync(run, writer, result.Status switch
                     {
                         LlmCompletionStatus.Refused => LlmAgentCompletionReason.Refusal,
@@ -454,13 +460,7 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
                     await CompleteAsync(run, writer, LlmAgentCompletionReason.ProviderFailure, token);
                     return;
                 }
-                var assistant = new LlmAgentContextEntry(stepId, run.Id, ManagedAgentContext.CopyMessage(new("assistant", result.Text)
-                {
-                    ToolCalls = result.ToolCalls,
-                    ContinuationState = result.ContinuationState
-                }));
-                ValidateCalls(result.ToolCalls);
-                lock (_sync) { _context = Append(_context, assistant); }
+                LlmAgentContextEntry assistant = AppendAssistant(stepId, run, result);
                 // Once calls enter context, every call must settle, even if an event write is cancelled.
                 if (result.ToolCalls.Count > 0)
                 {
@@ -508,6 +508,18 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
             lock (_sync) { if (run.PauseId is null) { run.Terminal = true; } }
             writer.TryComplete();
         }
+    }
+
+    private LlmAgentContextEntry AppendAssistant(string stepId, LiveRun run, LlmChatResult result)
+    {
+        var assistant = new LlmAgentContextEntry(stepId, run.Id, ManagedAgentContext.CopyMessage(new("assistant", result.Text)
+        {
+            ToolCalls = result.ToolCalls,
+            ContinuationState = result.ContinuationState
+        }));
+        ValidateCalls(result.ToolCalls);
+        lock (_sync) { _context = Append(_context, assistant); }
+        return assistant;
     }
 
     private async Task ExecuteToolsAsync(LiveRun run, IReadOnlyList<LlmToolCall> calls, string assistantId,

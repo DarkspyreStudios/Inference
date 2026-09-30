@@ -2,6 +2,7 @@ using System.Collections.Frozen;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using LlmReasoningLevel = Darkspyre.Inference.Common.LLM.LlmReasoningLevel;
+using LlmToolChoiceMode = Darkspyre.Inference.Common.LLM.LlmToolChoiceMode;
 
 namespace Darkspyre.Inference.Connect.LLM.Providers;
 
@@ -51,15 +52,29 @@ internal static class AnthropicModelProfiles
 {
     internal static void ValidateSampling(LlmChatRequest request, AnthropicModelProfile profile)
     {
+        ValidateThinkingAndToolChoice(request, profile);
         if (!profile.AllowsSampling && (request.Temperature is not null || request.TopP is not null || request.TopK is not null))
         { throw new NotSupportedException("This Claude model does not accept temperature, top-p or top-k."); }
         if (request.Temperature is < 0 or > 1)
         { throw new ArgumentOutOfRangeException(nameof(request), "Claude temperature must be between 0 and 1."); }
-        bool thinking = request.ReasoningLevel is > LlmReasoningLevel.None
-            || request.ReasoningLevel is null && profile.ThinksByDefault;
+        bool thinking = UsesThinking(request, profile);
         if (thinking && (request.TopK is not null || request.TopP is < 0.95))
         { throw new NotSupportedException("With thinking, Claude accepts top_p from 0.95 to 1 and no top_k."); }
     }
+
+    internal static void ValidateThinkingAndToolChoice(LlmChatRequest request, AnthropicModelProfile profile)
+    {
+        bool forcedTool = request.ToolChoice?.Mode is LlmToolChoiceMode.Required or LlmToolChoiceMode.Specific;
+        if (forcedTool && !profile.AllowsForcedToolChoice)
+        { throw new NotSupportedException("This Claude model does not accept forced tool choice."); }
+        if (UsesThinking(request, profile) && (request.Temperature is not null || forcedTool))
+        { throw new NotSupportedException("Claude thinking cannot be combined with sampling temperature or forced tool choice."); }
+    }
+
+    private static bool UsesThinking(LlmChatRequest request, AnthropicModelProfile profile) =>
+        profile.Thinking is AnthropicThinkingMode.Adaptive or AnthropicThinkingMode.Budget
+        && (request.ReasoningLevel is > LlmReasoningLevel.None
+            || request.ReasoningLevel is null && profile.ThinksByDefault);
 
     private sealed record FamilyRow(
         AnthropicThinkingMode Thinking,
