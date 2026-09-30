@@ -33,6 +33,11 @@ an append-only text fragment or a final schema validation. Use the terminal resu
 and `StructuredOutput` for the final representation and validation. Ordinary text uses
 `LlmTextDeltaEvent`.
 
+`LlmCapabilities.SupportsReasoningText` describes separate public `LlmReasoningDeltaEvent` output.
+It is independent of `ReasoningLevels`, which describe control over reasoning effort. The flag
+defaults to false. Engines set it only when they implement public reasoning output. SelfHost and
+the portable Connect binding preserve the selected adapter's flag.
+
 `LlmUsageDeltaEvent.Cumulative` reports running usage for the entire call. Each observation replaces
 the previous observation; never add them together. Null fields are unreported, not zero. Completion
 usage is authoritative and can differ from the last observation. An adapter emits changed observations

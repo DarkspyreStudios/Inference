@@ -261,6 +261,7 @@ public sealed class LlmSettings : InferenceSettings<LlmSetupChanges>
             Override("model-listing", "Model listing", current.SupportsModelListing, (value, selection) => value with { SupportsModelListing = selection }),
             Override("json-schema", "JSON schema output", current.SupportsJsonSchema, (value, selection) => value with { SupportsJsonSchema = selection }),
             Override("json-object", "JSON object output", current.SupportsJsonObject, (value, selection) => value with { SupportsJsonObject = selection }),
+            Override("reasoning-text", "Reasoning text", current.SupportsReasoningText, (value, selection) => value with { SupportsReasoningText = selection }),
             .. Enum.GetValues<LlmReasoningLevel>().Select(level => Override(
                 "reasoning-level-" + level.ToString().ToLowerInvariant(), "Reasoning level: " + level,
                 current.ReasoningLevels?.Contains(level),

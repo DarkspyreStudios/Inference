@@ -23,6 +23,7 @@ internal sealed class OpenAiCompatibleChatLlmClient(HttpClient http) : LlmClient
     protected override LlmProviderCapabilities DefaultCapabilities { get; } = new()
     {
         SupportsStreaming = true,
+        SupportsReasoningText = true,
         SupportsStreamingUsage = true,
         SupportsModelListing = true,
         SupportsJsonSchema = false,
@@ -100,7 +101,7 @@ internal sealed class OpenAiCompatibleChatLlmClient(HttpClient http) : LlmClient
         if (!capabilities.SupportsStreaming)
         {
             string body = await response.Content.ReadAsStringAsync(cancellationToken);
-            foreach (LlmStreamEvent completeEvent in ReadCompleteResponse(body, response, request, enforcement, credential, connection, omitted))
+            foreach (LlmStreamEvent completeEvent in ReadCompleteResponse(body, response, request, enforcement, credential, connection, omitted, capabilities.SupportsReasoningText))
             {
                 yield return completeEvent;
             }
@@ -175,7 +176,7 @@ internal sealed class OpenAiCompatibleChatLlmClient(HttpClient http) : LlmClient
                 }
 
                 string contentDelta = LlmJson.GetString(delta, "content") ?? string.Empty;
-                if (reasoning.Observe(delta) is { } reasoningDelta) { yield return reasoningDelta; }
+                if (reasoning.Observe(delta) is { } reasoningDelta && capabilities.SupportsReasoningText) { yield return reasoningDelta; }
                 if (contentDelta.Length > 0)
                 {
                     text.Append(contentDelta);
@@ -276,7 +277,8 @@ internal sealed class OpenAiCompatibleChatLlmClient(HttpClient http) : LlmClient
         LlmStructuredOutputEnforcement? enforcement,
         LlmCredential? credential,
         LlmConnection connection,
-        int omitted)
+        int omitted,
+        bool reasoningText)
     {
         JsonDocument document;
         try
@@ -347,7 +349,8 @@ internal sealed class OpenAiCompatibleChatLlmClient(HttpClient http) : LlmClient
                 connection,
                 reasoning,
                 omitted);
-            return [.. CompleteResponseEvents.From(result, observation is null ? [] : [new(observation.Delta, observation.IsSummary)])];
+            return [.. CompleteResponseEvents.From(result, observation is null || !reasoningText
+                ? [] : [new(observation.Delta, observation.IsSummary)])];
         }
     }
 

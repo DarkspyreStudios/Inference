@@ -11,6 +11,22 @@ namespace Darkspyre.Inference.Connect.LLM.Tests;
 public sealed class CompatibleChatReasoningTests
 {
     [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task DisplayOptOutKeepsReasoningAvailableForToolReplay(bool streaming)
+    {
+        var handler = new Handler(Reply("""{"content":"answer","reasoning_content":"private-thought","reasoning_details":[{"type":"reasoning.encrypted","data":"opaque"}]}""", streaming), streaming);
+        using var http = new HttpClient(handler);
+        var connection = Connection() with { CapabilityOverrides = new() { SupportsStreaming = streaming, SupportsReasoningText = false } };
+        var events = await Read(new OpenAiCompatibleChatLlmClient(http).StreamAsync(connection, Request()));
+        Assert.Empty(events.OfType<LlmReasoningDeltaEvent>());
+        var result = Assert.IsType<LlmChatCompletionEvent>(events[^1]).Result;
+        Assert.Equal("answer", result.Text);
+        Assert.Contains("private-thought", result.ContinuationState!.Payload, StringComparison.Ordinal);
+        Assert.Contains("opaque", result.ContinuationState.Payload, StringComparison.Ordinal);
+    }
+
+    [Theory]
     [InlineData("""{"reasoning_content":"thought"}""", false)]
     [InlineData("""{"reasoning":"thought"}""", false)]
     [InlineData("""{"reasoning_details":[{"type":"reasoning.text","text":"thought"}]}""", false)]

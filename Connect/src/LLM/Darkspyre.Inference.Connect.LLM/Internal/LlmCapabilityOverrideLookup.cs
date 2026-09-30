@@ -15,6 +15,10 @@ internal static class LlmCapabilityOverrideLookup
         {
             throw new NotSupportedException("This adapter does not implement running usage observations.");
         }
+        if (capabilities.SupportsReasoningText && !defaults.SupportsReasoningText)
+        {
+            throw new NotSupportedException("This adapter does not implement public reasoning text.");
+        }
         return capabilities;
     }
 

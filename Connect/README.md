@@ -321,6 +321,22 @@ the adapter sends it and emits the complete response as events after it arrives.
 has no non-streaming request rejects every request while streaming is off. Common's
 `LlmCapabilities.SupportsStreaming` carries the same flag to `ILlmInference` hosts.
 
+`SupportsReasoningText` describes public reasoning separately from reasoning-level control. Common
+mirrors the flag. The **Reasoning text** override disables public reasoning events and provider
+summary requests without dropping opaque continuation state. Model overrides take precedence over
+connection overrides. An override cannot enable a producer the adapter does not implement. Apple
+Foundation Models and Antigravity report false. SelfHost reports the loaded engine's flag.
+
+Responses requests `reasoning.summary = auto` when a positive level is selected or the resolved
+profile says the model reasons by default. An unprofiled API-key model gets no implicit summary
+request. An explicit `None` sends no summary request. Codex uses the same builder and display switch;
+its catalog supplies reasoning support, with the subscription adapter's default when absent.
+Gemini and Vertex Gemini request `includeThoughts` for active
+reasoning, including a thinking profile with no explicit level. Turning display off leaves effort,
+thinking levels and budgets unchanged. Claude CLI chat maps `thinking_delta` to public summaries
+and ignores signature deltas. AgentCore chat emits reasoning events, not activity text. Native
+Claude and AgentCore sessions honor the same display override.
+
 `SupportsStreamingUsage` describes usage reported by completion. `SupportsUsageDeltas` describes
 running `LlmUsageDeltaEvent` observations and is mirrored on Common's capabilities. Each observation
 replaces the previous value for the entire call. Null counts remain unknown. Duplicate observations

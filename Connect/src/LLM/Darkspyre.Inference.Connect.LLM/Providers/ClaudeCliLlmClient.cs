@@ -45,6 +45,7 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
         OutputLimitEnforcement = Common.LLM.LlmOutputLimitEnforcement.Unsupported,
         ToolHistory = LlmToolHistory.Text,
         SupportsStreaming = true,
+        SupportsReasoningText = true,
         SupportsStreamingUsage = true,
         SupportsUsageDeltas = true,
         SupportsModelListing = false,
@@ -169,6 +170,8 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
             }
 
             if (observation is not null) { yield return observation; }
+            if (capabilities.SupportsReasoningText && parsed.ReasoningDelta is { Length: > 0 } reasoning)
+            { yield return new LlmReasoningDeltaEvent(reasoning, IsSummary: true); }
             if (!string.IsNullOrEmpty(parsed.Activity))
             {
                 yield return new LlmActivityEvent(parsed.Activity);
@@ -628,10 +631,14 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
         if (string.Equals(type, "stream_event", StringComparison.Ordinal)
             && LlmJson.GetObject(root, "event") is { } streamEvent
             && string.Equals(LlmJson.GetString(streamEvent, "type"), "content_block_delta", StringComparison.Ordinal)
-            && LlmJson.GetObject(streamEvent, "delta") is { } delta
-            && string.Equals(LlmJson.GetString(delta, "type"), "text_delta", StringComparison.Ordinal))
+            && LlmJson.GetObject(streamEvent, "delta") is { } delta)
         {
-            return new ParsedClaudeLine(LlmJson.GetString(delta, "text"), null, null);
+            return LlmJson.GetString(delta, "type") switch
+            {
+                "text_delta" => new ParsedClaudeLine(LlmJson.GetString(delta, "text"), null, null),
+                "thinking_delta" => new ParsedClaudeLine(null, null, null) { ReasoningDelta = LlmJson.GetString(delta, "thinking") },
+                _ => new ParsedClaudeLine(null, null, null)
+            };
         }
         if (!string.Equals(type, "result", StringComparison.Ordinal))
         {
@@ -798,5 +805,8 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
     private sealed record ParsedClaudeLine(
         string? TextDelta,
         ClaudeTerminalResult? Terminal,
-        string? Activity);
+        string? Activity)
+    {
+        public string? ReasoningDelta { get; init; }
+    }
 }

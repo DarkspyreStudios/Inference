@@ -34,6 +34,7 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
     {
         OutputLimitEnforcement = Common.LLM.LlmOutputLimitEnforcement.ProviderEnforced,
         SupportsStreaming = true,
+        SupportsReasoningText = true,
         SupportsStreamingUsage = true,
         SupportsUsageDeltas = true,
         SupportsModelListing = true,
@@ -108,7 +109,7 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
         {
             string body = await response.Content.ReadAsStringAsync(cancellationToken);
             foreach (LlmStreamEvent completeEvent in ReadCompleteResponse(
-                         body, response, connection, request, enforcement, credential))
+                         body, response, connection, request, enforcement, credential, capabilities.SupportsReasoningText))
             {
                 yield return completeEvent;
             }
@@ -185,7 +186,7 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
                             && LlmJson.GetString(thinkingDelta, "type") == "thinking_delta"
                             && LlmJson.GetString(thinkingDelta, "thinking") is { Length: > 0 } thinking)
                         {
-                            yield return new LlmReasoningDeltaEvent(thinking, true);
+                            if (capabilities.SupportsReasoningText) { yield return new LlmReasoningDeltaEvent(thinking, true); }
                         }
                         else if (LlmJson.GetObject(root, "delta") is { } toolDelta
                             && LlmJson.GetString(toolDelta, "type") == "input_json_delta")
@@ -312,7 +313,8 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
         LlmConnection connection,
         LlmChatRequest request,
         LlmStructuredOutputEnforcement? enforcement,
-        LlmCredential? credential)
+        LlmCredential? credential,
+        bool reasoningText)
     {
         JsonDocument document;
         try
@@ -356,7 +358,8 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
                         text.Append(LlmJson.GetString(block, "text"));
                         break;
                     case "thinking" when LlmJson.GetString(block, "thinking") is { Length: > 0 } thinking:
-                        reasoning.Add(new LlmReasoningText(thinking, IsSummary: true));
+                        if (reasoningText)
+                        { reasoning.Add(new LlmReasoningText(thinking, IsSummary: true)); }
                         break;
                     case "tool_use":
                         string id = LlmJson.GetString(block, "id") ?? string.Empty;

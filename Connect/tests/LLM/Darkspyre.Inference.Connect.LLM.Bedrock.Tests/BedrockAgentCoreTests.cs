@@ -11,6 +11,36 @@ namespace Darkspyre.Inference.Connect.LLM.Bedrock.Tests;
 
 public sealed class BedrockAgentCoreTests
 {
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ChatAndNativeLanesApplyTheSameReasoningDisplayOverride(bool display)
+    {
+        IEventStreamEvent[] script =
+        [
+            new HarnessContentBlockDeltaEvent { ContentBlockIndex = 0, Delta = new() { ReasoningContent = new() { Text = "Plan." } } },
+            new HarnessContentBlockDeltaEvent { ContentBlockIndex = 1, Delta = new() { Text = "Answer." } },
+            new HarnessMessageStopEvent { StopReason = HarnessStopReason.End_turn }
+        ];
+        var connection = Connection() with
+        {
+            CapabilityOverrides = new() { SupportsReasoningText = !display },
+            ModelCapabilityOverrides = new Dictionary<string, LlmCapabilityOverrides>
+            { [BedrockAgentCoreLlmClient.DefaultModelId] = new() { SupportsReasoningText = display } }
+        };
+        var chat = await ToArrayAsync(new BedrockAgentCoreLlmClient(new StubInvoker(script)).StreamAsync(connection,
+            new() { ModelId = BedrockAgentCoreLlmClient.DefaultModelId, Messages = [new("user", "hi")] }));
+        Assert.Equal(display ? 1 : 0, chat.OfType<LlmReasoningDeltaEvent>().Count());
+        Assert.Empty(chat.OfType<LlmActivityEvent>());
+        Assert.Equal("Answer.", Assert.IsType<LlmChatCompletionEvent>(chat[^1]).Result.Text);
+
+        await using var session = await new BedrockAgentCoreLlmClient(new StubInvoker(script)).StartSessionAsync("connection", connection,
+            Options(LlmAgentSandboxMode.WorkspaceWrite, LlmAgentApprovalPolicy.OnRequest));
+        var native = await ToArrayAsync(session.RunTurnAsync(new() { Input = [new LlmAgentTextContent("hi")] }));
+        Assert.Equal(display ? 1 : 0, native.OfType<LlmAgentReasoningDeltaEvent>().Count());
+        Assert.Equal("Answer.", Assert.Single(native.OfType<LlmAgentTextDeltaEvent>()).Delta);
+    }
+
     [Fact]
     public async Task NativeContextAndInstructionRejectionsDoNotInvokeHarness()
     {

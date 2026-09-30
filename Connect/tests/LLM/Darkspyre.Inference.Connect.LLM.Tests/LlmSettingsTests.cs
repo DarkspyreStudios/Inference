@@ -214,10 +214,12 @@ public sealed class LlmSettingsTests
         Assert.Equal(SetupEditState.Invalid, Field("model-listing").SetValue("unexpected").State);
         Assert.Equal(SetupEditState.Applied, Field("model-listing").SetValue("disabled").State);
         Assert.Equal(SetupEditState.Applied, Field("temperature").SetValue("default").State);
+        Assert.Equal(SetupEditState.Applied, Field("reasoning-text").SetValue("disabled").State);
         Assert.Equal(SetupCommitState.Committed, (await manager.SaveAsync(settings)).State);
         LlmCapabilityOverrides overrides = target.Changes!.Configuration.Connection.CapabilityOverrides!;
         Assert.False(overrides.SupportsModelListing);
         Assert.Null(overrides.SupportsTemperature);
+        Assert.False(overrides.SupportsReasoningText);
         Assert.True(overrides.SupportsToolUse);
         Assert.True(target.Changes.RequiresRetest);
     }

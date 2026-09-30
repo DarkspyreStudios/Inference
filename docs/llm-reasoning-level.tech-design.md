@@ -267,3 +267,21 @@ The codec validates its format, field allowlist, visible text, tool-call identit
 objects before dispatch. Payloads are limited to 16 MiB of UTF-8. Tool-enabled requests replay
 structured details when present, otherwise retained `reasoning_content`. Requests without tools
 omit those replay fields. Failed, incomplete and refused responses never produce replayable state.
+
+### Public reasoning display
+
+Common and Connect capabilities carry `SupportsReasoningText`, independent of `ReasoningLevels`.
+The capability defaults to false. Connect applies provider defaults, connection overrides and model
+overrides in that order. The setup editor exposes `reasoning-text`. Disabling public display leaves
+effort controls and opaque assistant replay state intact. Native Claude and AgentCore sessions use
+the same resolved display switch. SelfHost mirrors the loaded engine; Qwen declares its existing
+registered thinking parser.
+
+Responses and Codex share summary selection: a positive explicit level or a reasoning profile
+requests `summary: auto`, unless display is disabled. Explicit `None` never requests a summary.
+An unprofiled API-key model gets no implicit summary request. Codex uses catalog evidence when
+present and retains the subscription adapter's declared reasoning default when absent.
+Gemini and Vertex Gemini share `ThinkingConfig`: display adds `includeThoughts` for active reasoning,
+including the profile's default when no level is selected. Disabling display leaves level and budget
+fields unchanged. Catalog evidence that a Gemini model does not think suppresses the default summary
+request.

@@ -65,13 +65,13 @@ internal sealed partial class GeminiApiLlmClient(HttpClient http)
             ? StructuredOutput.ResolveEnforcement(structured, capabilities)
             : GeminiSchemas.Enforcement(request.StructuredOutput, RouteName);
         JsonObject payload = GeminiRequest.Build(connection, request, enforcement, output => ProjectToolOutput(connection, request.ModelId, output),
-            Reasoning(connection, request.ModelId));
+            Reasoning(connection, request.ModelId), capabilities.SupportsReasoningText);
         string operation = capabilities.SupportsStreaming ? "streamGenerateContent?alt=sse" : "generateContent";
         var message = new HttpRequestMessage(HttpMethod.Post, $"{DefaultEndpoint}/v1beta/models/{model}:{operation}")
         { Content = JsonContent.Create(payload) };
         message.Headers.TryAddWithoutValidation(KeyHeader, Key(connection));
         IAsyncEnumerable<LlmStreamEvent> source = GeminiStream.ReadAsync(Http, message, Route, connection, request, enforcement,
-            capabilities.SupportsStreaming, capabilities.SupportsUsageDeltas, cancellationToken);
+            capabilities.SupportsStreaming, capabilities.SupportsUsageDeltas, capabilities.SupportsReasoningText, cancellationToken);
         await using IAsyncEnumerator<LlmStreamEvent> iterator = source.GetAsyncEnumerator(cancellationToken);
         while (true)
         {

@@ -12,6 +12,7 @@ internal static class GeminiCapabilities
         return new()
         {
             SupportsStreaming = true,
+            SupportsReasoningText = true,
             SupportsStreamingUsage = true,
             SupportsUsageDeltas = true,
             SupportsModelListing = true,

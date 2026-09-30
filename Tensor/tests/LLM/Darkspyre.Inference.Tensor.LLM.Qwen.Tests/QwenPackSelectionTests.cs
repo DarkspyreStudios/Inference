@@ -148,6 +148,7 @@ public sealed class QwenPackSelectionTests : IDisposable
         {
             List<LlmStreamEvent> events = await Collect(engine, Request(model) with { ReasoningLevel = LlmReasoningLevel.High });
             Assert.True(runtime.LastThinking);
+            Assert.True((await engine.GetCapabilitiesAsync(model)).SupportsReasoningText);
             Assert.Contains("Checking the question.", string.Concat(events.OfType<LlmReasoningDeltaEvent>().Select(item => item.Delta)), StringComparison.Ordinal);
             Assert.Equal("Hi there", string.Concat(events.OfType<LlmTextDeltaEvent>().Select(item => item.Delta)).Trim());
             Assert.Equal("Hi there", Assert.IsType<LlmCompletionEvent>(events[^1]).Result.Text.Trim());

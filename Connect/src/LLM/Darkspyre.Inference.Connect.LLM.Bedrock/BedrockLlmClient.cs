@@ -36,6 +36,7 @@ internal sealed class BedrockLlmClient(
     {
         OutputLimitEnforcement = Common.LLM.LlmOutputLimitEnforcement.ProviderEnforced,
         SupportsStreaming = true,
+        SupportsReasoningText = true,
         // ConverseStream reports usage in its final metadata event.
         SupportsStreamingUsage = true,
         SupportsModelListing = true,
@@ -135,6 +136,7 @@ internal sealed class BedrockLlmClient(
         {
             foreach (LlmStreamEvent item in accumulator.Observe(streamEvent))
             {
+                if (item is LlmReasoningDeltaEvent && !capabilities.SupportsReasoningText) { continue; }
                 yield return item;
             }
         }
@@ -271,7 +273,8 @@ internal sealed class BedrockLlmClient(
         LlmReasoningText[] reasoningText = [.. blocks.OfType<BedrockReasoningBlock>()
             .Where(block => block.Text.Length > 0)
             .Select(block => new LlmReasoningText(block.Text, IsSummary: false))];
-        return CompleteResponseEvents.From(result, reasoningText);
+        return CompleteResponseEvents.From(result,
+            LlmCapabilityOverrideLookup.Apply(Defaults, connection, request.ModelId).SupportsReasoningText ? reasoningText : []);
     }
 
     /// <summary>

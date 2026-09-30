@@ -8,7 +8,7 @@ internal static class GeminiRequest
 {
     public static JsonObject Build(LlmConnection connection, LlmChatRequest request,
         LlmStructuredOutputEnforcement? enforcement, Func<LlmToolOutput, ProjectedToolOutput> project,
-        GeminiReasoningProfile reasoning)
+        GeminiReasoningProfile reasoning, bool reasoningText)
     {
         var contents = new JsonArray();
         var calls = new Dictionary<string, (string Name, string? WireId)>(StringComparer.Ordinal);
@@ -87,9 +87,9 @@ internal static class GeminiRequest
         var generation = new JsonObject { ["candidateCount"] = 1 };
         if (request.MaxOutputTokens is int maximum) { generation["maxOutputTokens"] = maximum; }
         if (request.Temperature is double temperature) { generation["temperature"] = temperature; }
-        if (request.ReasoningLevel is { } level)
+        if (GeminiReasoning.ThinkingConfig(reasoning, request.ReasoningLevel, reasoningText) is { } thinking)
         {
-            generation["thinkingConfig"] = GeminiReasoning.ThinkingConfig(reasoning, level);
+            generation["thinkingConfig"] = thinking;
         }
         if (request.StructuredOutput is { } schema && enforcement == LlmStructuredOutputEnforcement.ProviderJsonSchema)
         {

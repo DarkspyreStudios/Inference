@@ -295,6 +295,10 @@ features, and a binary tool-result part fails as well. `ReasoningLevels` is `Non
 `High` (thinking on). With structured output and thinking on, the schema's grammar starts after the
 thinking block. Image input is off.
 
+Qwen reports `SupportsReasoningText = true` because its registered output parser emits thinking
+separately from the answer. Other engines keep the false capability default unless they implement
+that output. Running usage remains off for Tensor engines.
+
 A loaded Qwen model reports its usable context as `LlmModelInfo.MaxContextTokens`. Its
 `MaxOutputTokens` is null: Qwen declares no separate output limit, and a reply can use whatever context
 is left. TensorSharp resolves the declared context from the GGUF metadata and grows the

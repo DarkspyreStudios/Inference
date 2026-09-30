@@ -11,6 +11,19 @@ namespace Darkspyre.Inference.Connect.LLM.Bedrock.Tests;
 
 public sealed class BedrockStreamingTests
 {
+    [Fact]
+    public async Task DisplayOptOutKeepsSignedToolReplay()
+    {
+        var invoker = new StubConverseInvoker { Events = ReasoningTextAndTool() };
+        var connection = Connection() with { CapabilityOverrides = new() { SupportsReasoningText = false } };
+        var events = await StreamAsync(invoker, connection);
+        Assert.Empty(events.OfType<LlmReasoningDeltaEvent>());
+        var result = Completion(events);
+        Assert.Equal("Checking.", result.Text);
+        var replay = AssistantContent(BedrockLlmClient.BuildRequest(connection, FollowUp(result), Model));
+        Assert.Equal("sig-1", replay[0].ReasoningContent.ReasoningText.Signature);
+    }
+
     private const string Model = "us.anthropic.claude-sonnet-5-v1:0";
     private const string ToolInput = """{"path":"a.txt"}""";
 

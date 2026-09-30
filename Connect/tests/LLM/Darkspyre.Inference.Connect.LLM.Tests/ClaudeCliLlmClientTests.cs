@@ -10,6 +10,27 @@ namespace Darkspyre.Inference.Connect.LLM.Tests;
 
 public sealed class ClaudeCliLlmClientTests
 {
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ThinkingDeltasArePublicSummariesOnlyWhenDisplayIsEnabled(bool enabled)
+    {
+        var runner = new RecordingRunner(new ClaudeCliProcessResult(0,
+            """
+            {"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"thinking_delta","thinking":"Plan."}}}
+            {"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"signature_delta","signature":"opaque"}}}
+            {"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"Answer."}}}
+            {"type":"result","subtype":"success","is_error":false,"result":"Answer."}
+            """, string.Empty));
+        using var http = new HttpClient(new UnexpectedHttpHandler());
+        var events = await ReadAllAsync(new ClaudeCliLlmClient(http, runner).StreamAsync(CliConnection() with
+        { CapabilityOverrides = new() { SupportsReasoningText = enabled } }, new() { ModelId = "claude-test", Messages = [new("user", "hi")] }));
+        Assert.Equal(enabled ? 1 : 0, events.OfType<LlmReasoningDeltaEvent>().Count());
+        if (enabled) { Assert.Equal(new LlmReasoningDeltaEvent("Plan.", true), events[0]); }
+        Assert.Equal("Answer.", Assert.Single(events.OfType<LlmTextDeltaEvent>()).Delta);
+        Assert.DoesNotContain(events.OfType<LlmReasoningDeltaEvent>(), item => item.Delta.Contains("opaque", StringComparison.Ordinal));
+    }
+
     [Fact]
     public async Task CancellationAfterRunningUsageDoesNotDeliverABufferedCompletion()
     {

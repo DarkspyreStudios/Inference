@@ -20,6 +20,7 @@ internal sealed class BedrockAgentCoreLlmClient(IBedrockAgentCoreInvoker invoker
     private static readonly LlmProviderCapabilities Defaults = new()
     {
         SupportsStreaming = true,
+        SupportsReasoningText = true,
         SupportsStreamingUsage = true,
         SupportsModelListing = false,
         SupportsJsonSchema = false,
@@ -44,8 +45,11 @@ internal sealed class BedrockAgentCoreLlmClient(IBedrockAgentCoreInvoker invoker
         string? modelId = null)
     {
         ValidateConnection(connection);
-        return LlmCapabilityOverrideLookup.Apply(Defaults, connection, modelId);
+        return ResolveCapabilities(connection, modelId);
     }
+
+    internal static LlmProviderCapabilities ResolveCapabilities(LlmConnection connection, string? modelId) =>
+        LlmCapabilityOverrideLookup.Apply(Defaults, connection, modelId);
 
     public async IAsyncEnumerable<LlmStreamEvent> StreamAsync(
         LlmConnection connection,
@@ -83,7 +87,7 @@ internal sealed class BedrockAgentCoreLlmClient(IBedrockAgentCoreInvoker invoker
                 {
                     Delta.ReasoningContent.Text: { Length: > 0 } reasoning
                 }:
-                    yield return new LlmActivityEvent(reasoning);
+                    if (capabilities.SupportsReasoningText) { yield return new LlmReasoningDeltaEvent(reasoning, IsSummary: false); }
                     break;
                 case HarnessContentBlockStartEvent { Start.ToolUse: not null }:
                     throw new InvalidOperationException(
@@ -177,6 +181,7 @@ internal sealed class BedrockAgentCoreLlmClient(IBedrockAgentCoreInvoker invoker
             connection.Endpoint,
             sessionId,
             options.ModelId,
+            connection,
             options.Instructions,
             options.Tools,
             policy.Sandbox,
@@ -217,6 +222,7 @@ internal sealed class BedrockAgentCoreLlmClient(IBedrockAgentCoreInvoker invoker
             connection.Endpoint,
             threadId,
             modelId,
+            connection,
             options.Instructions,
             options.Tools,
             policy.Sandbox,

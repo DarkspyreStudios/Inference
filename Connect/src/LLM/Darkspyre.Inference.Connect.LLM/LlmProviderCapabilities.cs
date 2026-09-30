@@ -32,6 +32,9 @@ public sealed record LlmProviderCapabilities
     /// <summary>A streamed response can emit cumulative usage observations before completion.</summary>
     public bool SupportsUsageDeltas { get; init; }
 
+    /// <summary>Public reasoning text can arrive separately from the answer. False suppresses display, not retained state.</summary>
+    public bool SupportsReasoningText { get; init; }
+
     public bool SupportsModelListing { get; init; }
 
     public bool SupportsAccountUsage { get; init; }
@@ -99,6 +102,7 @@ public sealed record LlmProviderCapabilities
             SupportsStreaming = overrides.SupportsStreaming ?? SupportsStreaming,
             SupportsStreamingUsage = overrides.SupportsStreamingUsage ?? SupportsStreamingUsage,
             SupportsUsageDeltas = overrides.SupportsUsageDeltas ?? SupportsUsageDeltas,
+            SupportsReasoningText = overrides.SupportsReasoningText ?? SupportsReasoningText,
             SupportsModelListing = overrides.SupportsModelListing ?? SupportsModelListing,
             SupportsAccountUsage = overrides.SupportsAccountUsage ?? SupportsAccountUsage,
             SupportsJsonSchema = overrides.SupportsJsonSchema ?? SupportsJsonSchema,
@@ -147,6 +151,9 @@ public sealed record LlmCapabilityOverrides
 
     /// <summary>Enables continuous usage on a compatible endpoint, or disables an adapter's running usage events.</summary>
     public bool? SupportsUsageDeltas { get; init; }
+
+    /// <summary>False suppresses public reasoning events and summary requests without dropping continuation state.</summary>
+    public bool? SupportsReasoningText { get; init; }
 
     public bool? SupportsModelListing { get; init; }
 

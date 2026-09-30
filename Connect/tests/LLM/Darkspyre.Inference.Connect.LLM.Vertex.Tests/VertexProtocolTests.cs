@@ -126,7 +126,7 @@ public sealed class VertexProtocolTests
         };
         var payload = GeminiRequest.Build(prepared, request, null,
             output => ToolOutputProjector.Project(output, RichContentRoutes.TextOnly, RichContentRoutes.TextOnly),
-            GeminiReasoning.Get("gemini-3-flash-preview", catalogThinking: null));
+            GeminiReasoning.Get("gemini-3-flash-preview", catalogThinking: null), reasoningText: true);
         Assert.Equal("first-result", (string?)payload["contents"]?[1]?["parts"]?[0]?["functionResponse"]?["response"]?["output"]);
         Assert.Equal("second-result", (string?)payload["contents"]?[1]?["parts"]?[1]?["functionResponse"]?["response"]?["output"]);
     }
@@ -186,7 +186,7 @@ public sealed class VertexProtocolTests
             ModelId = Gemini,
             Messages = [new("user", "Run pwd"), assistant,
                 new("tool", "") { ToolResults = [new(first.ToolCalls[0].Id, new LlmToolOutput { Parts = [new LlmToolOutputText("/tmp")] })] }]
-        }, null, output => ToolOutputProjector.Project(output, new(), new()), GeminiReasoning.Get("gemini-3-flash-preview", catalogThinking: null));
+        }, null, output => ToolOutputProjector.Project(output, new(), new()), GeminiReasoning.Get("gemini-3-flash-preview", catalogThinking: null), reasoningText: true);
         Assert.Equal("signed", (string?)next["contents"]?[1]?["parts"]?[0]?["thoughtSignature"]);
         Assert.DoesNotContain("connectCallId", next.ToJsonString(), StringComparison.Ordinal);
         Assert.Equal("run", (string?)next["contents"]?[2]?["parts"]?[0]?["functionResponse"]?["name"]);

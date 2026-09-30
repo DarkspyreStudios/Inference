@@ -17,7 +17,7 @@ internal sealed record GeminiRoute(LlmTransport Transport, string Name, string C
 internal static class GeminiStream
 {
     public static async IAsyncEnumerable<LlmStreamEvent> ReadAsync(HttpClient http, HttpRequestMessage message, GeminiRoute route,
-        LlmConnection connection, LlmChatRequest request, LlmStructuredOutputEnforcement? enforcement, bool stream, bool usageDeltas,
+        LlmConnection connection, LlmChatRequest request, LlmStructuredOutputEnforcement? enforcement, bool stream, bool usageDeltas, bool reasoningText,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         using HttpRequestMessage owned = message;
@@ -80,7 +80,8 @@ internal static class GeminiStream
                     if (part["text"] is { } value)
                     {
                         string delta = value.GetValue<string>();
-                        if ((bool?)part["thought"] == true) { yield return new LlmReasoningDeltaEvent(delta, true); }
+                        if ((bool?)part["thought"] == true)
+                        { if (reasoningText) { yield return new LlmReasoningDeltaEvent(delta, true); } }
                         else { text.Append(delta); yield return new LlmTextDeltaEvent(delta); }
                     }
                     if (part["functionCall"] is JsonObject function)

@@ -17,6 +17,7 @@ internal sealed class BedrockAgentCoreSession : ILlmAgentSession
     private readonly LlmAwsCredentials _aws;
     private readonly string _harnessArn;
     private readonly string _initialModelId;
+    private readonly LlmConnection _connection;
     private readonly string? _instructions;
     private readonly IReadOnlyList<LlmAgentToolDefinition> _tools;
     private readonly Dictionary<string, LlmAgentToolDefinition> _toolsByName;
@@ -40,6 +41,7 @@ internal sealed class BedrockAgentCoreSession : ILlmAgentSession
         string harnessArn,
         string sessionId,
         string initialModelId,
+        LlmConnection connection,
         string? instructions,
         IReadOnlyList<LlmAgentToolDefinition> tools,
         LlmAgentSandboxMode sandbox,
@@ -56,6 +58,7 @@ internal sealed class BedrockAgentCoreSession : ILlmAgentSession
         _aws = aws;
         _harnessArn = harnessArn;
         _initialModelId = initialModelId;
+        _connection = connection;
         _instructions = instructions;
         _tools = tools;
         _toolsByName = tools.ToDictionary(tool => tool.Name, StringComparer.Ordinal);
@@ -137,6 +140,7 @@ internal sealed class BedrockAgentCoreSession : ILlmAgentSession
                 ? request.Input
                 : [new LlmAgentTextContent(opening.Text), .. request.Input]);
             string modelId = request.ModelId ?? _initialModelId;
+            bool reasoningText = BedrockAgentCoreLlmClient.ResolveCapabilities(_connection, modelId).SupportsReasoningText;
 
             for (int round = 0; round < MaximumInlineToolRounds; round++)
             {
@@ -187,7 +191,7 @@ internal sealed class BedrockAgentCoreSession : ILlmAgentSession
                         {
                             ContentBlockIndex: int index,
                             Delta.ReasoningContent.Text: { Length: > 0 } reasoning
-                        }:
+                        } when reasoningText:
                             yield return new LlmAgentReasoningDeltaEvent(
                                 ThreadId,
                                 turnId,

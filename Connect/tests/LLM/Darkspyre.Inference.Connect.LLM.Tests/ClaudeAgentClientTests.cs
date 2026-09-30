@@ -30,10 +30,12 @@ public sealed class ClaudeAgentClientTests
         Assert.Equal(LlmAgentNativeFork.CurrentPosition, (await session.GetCapabilitiesAsync()).NativeFork);
     }
 
-    [Fact]
-    public async Task SessionPublishesSdkMcpToolsAndExecutesHostCallback()
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task SessionPublishesSdkMcpToolsAndExecutesHostCallback(bool reasoningText)
     {
-        var process = new ScriptedSessionProcess();
+        var process = new ScriptedSessionProcess(reasoning: true);
         var factory = new RecordingSessionProcessFactory(process);
         var client = new ClaudeAgentClient(factory);
         LlmAgentToolCall? observedCall = null;
@@ -41,7 +43,7 @@ public sealed class ClaudeAgentClientTests
             """{"type":"object","properties":{"text":{"type":"string"}},"required":["text"]}""");
 
         await using ILlmAgentSession session = await client.StartSessionAsync(
-            "connection", Connection(),
+            "connection", Connection() with { CapabilityOverrides = new() { SupportsReasoningText = reasoningText } },
             new LlmAgentSessionOptions
             {
                 ModelId = "claude-test",
@@ -103,6 +105,7 @@ public sealed class ClaudeAgentClientTests
             }));
 
         Assert.NotNull(observedCall);
+        Assert.Equal(reasoningText ? 1 : 0, events.OfType<LlmAgentReasoningDeltaEvent>().Count());
         Assert.Equal("echo", observedCall.Name);
         Assert.Equal("hello", observedCall.Arguments.GetProperty("text").GetString());
         Assert.Equal("darkspyre-inference-connect", observedCall.Namespace);
@@ -369,7 +372,7 @@ public sealed class ClaudeAgentClientTests
         }
     }
 
-    private sealed class ScriptedSessionProcess : IClaudeCliSessionProcess
+    private sealed class ScriptedSessionProcess(bool reasoning = false) : IClaudeCliSessionProcess
     {
         private readonly Channel<string> _output = Channel.CreateUnbounded<string>();
         private bool _disposed;
@@ -410,6 +413,19 @@ public sealed class ClaudeAgentClientTests
             {
                 // The CLI echoes each host message when it starts processing it (--replay-user-messages).
                 Enqueue(new { type = "user", isReplay = true, uuid = root.GetProperty("uuid").GetString(), message = new { role = "user", content = "echo" } });
+                if (reasoning)
+                {
+                    Enqueue(new
+                    {
+                        type = "stream_event",
+                        @event = new
+                        {
+                            type = "content_block_delta",
+                            index = 0,
+                            delta = new { type = "thinking_delta", thinking = "Plan." }
+                        }
+                    });
+                }
                 Enqueue(new
                 {
                     type = "assistant",

@@ -559,14 +559,14 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
                 supportsDocuments: true,
                 parameterName: nameof(request));
 
-            bool usageDeltas = ClaudeCliLlmClient.ResolveCapabilities(
-                _connection, request.ModelId ?? _initialModelId).SupportsUsageDeltas;
+            LlmProviderCapabilities capabilities = ClaudeCliLlmClient.ResolveCapabilities(
+                _connection, request.ModelId ?? _initialModelId);
             if (!_turnGate.Wait(0, cancellationToken))
             {
                 throw new InvalidOperationException("The session is running or paused.");
             }
             string turnId = Guid.NewGuid().ToString();
-            var turn = new HostTurn(turnId, new ClaudeStreamUsage(usageDeltas, _accountedCalls));
+            var turn = new HostTurn(turnId, new ClaudeStreamUsage(capabilities.SupportsUsageDeltas, _accountedCalls), capabilities.SupportsReasoningText);
             bool completed = false;
             try
             {
@@ -1153,7 +1153,7 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             }
         }
 
-        private IEnumerable<LlmAgentEvent> MapStreamEvent(JsonElement root, string turnId)
+        private IEnumerable<LlmAgentEvent> MapStreamEvent(JsonElement root, string turnId, bool reasoningText)
         {
             if (!root.TryGetProperty("event", out JsonElement streamEvent)
                 || !string.Equals(
@@ -1177,7 +1177,7 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
                     yield return new LlmAgentTextDeltaEvent(ThreadId, turnId, itemId, value);
                 }
             }
-            else if (string.Equals(deltaType, "thinking_delta", StringComparison.Ordinal))
+            else if (reasoningText && string.Equals(deltaType, "thinking_delta", StringComparison.Ordinal))
             {
                 string value = OptionalString(delta, "thinking") ?? string.Empty;
                 if (value.Length > 0)
@@ -1327,7 +1327,7 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
                                 Emit(new LlmAgentUsageEvent(ThreadId, target.Id, $"usage-{target.Id}",
                                     observation.Cumulative, observation.Cumulative));
                             }
-                            foreach (LlmAgentEvent item in MapStreamEvent(root, target.Id))
+                            foreach (LlmAgentEvent item in MapStreamEvent(root, target.Id, target.ReasoningText))
                             {
                                 Emit(item);
                             }
@@ -1428,8 +1428,9 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
                 {
                     return running;
                 }
+                LlmProviderCapabilities capabilities = ClaudeCliLlmClient.ResolveCapabilities(_connection, _initialModelId);
                 _provider = new ProviderTurn(Guid.NewGuid().ToString(), new ClaudeStreamUsage(
-                    ClaudeCliLlmClient.ResolveCapabilities(_connection, _initialModelId).SupportsUsageDeltas, _accountedCalls));
+                    capabilities.SupportsUsageDeltas, _accountedCalls), capabilities.SupportsReasoningText);
                 _activeTurnId = _provider.Id;
                 _pendingToolCalls.Clear();
                 _sessionEvents.Writer.TryWrite(new LlmAgentProviderTurnStartedEvent(ThreadId, _provider.Id, _tasks.TakeLastReported()));
@@ -1545,15 +1546,16 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
         }
 
         /// <summary>A turn that receives routed events: a host turn, or one the runtime started.</summary>
-        private abstract class TurnTarget(string id, ClaudeStreamUsage usage)
+        private abstract class TurnTarget(string id, ClaudeStreamUsage usage, bool reasoningText)
         {
             public string Id { get; } = id;
             public ClaudeStreamUsage Usage { get; } = usage;
+            public bool ReasoningText { get; } = reasoningText;
 
             public HashSet<string> Completed { get; } = new(StringComparer.Ordinal);
         }
 
-        private sealed class HostTurn(string id, ClaudeStreamUsage usage) : TurnTarget(id, usage)
+        private sealed class HostTurn(string id, ClaudeStreamUsage usage, bool reasoningText) : TurnTarget(id, usage, reasoningText)
         {
             public Channel<LlmAgentEvent> Events { get; } = Channel.CreateUnbounded<LlmAgentEvent>(
                 new UnboundedChannelOptions { SingleReader = true });
@@ -1563,7 +1565,7 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             public bool Abandoned { get; set; }
         }
 
-        private sealed class ProviderTurn(string id, ClaudeStreamUsage usage) : TurnTarget(id, usage);
+        private sealed class ProviderTurn(string id, ClaudeStreamUsage usage, bool reasoningText) : TurnTarget(id, usage, reasoningText);
 
         /// <summary>A host tool call in flight, keyed by the CLI's JSON-RPC request ID so a cancellation can find it.</summary>
         private sealed class RunningToolCall(CancellationTokenSource cancellation)

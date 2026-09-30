@@ -18,6 +18,7 @@ internal sealed class OpenAiResponsesLlmClient(HttpClient http) : ResponsesLlmCl
     {
         OutputLimitEnforcement = Common.LLM.LlmOutputLimitEnforcement.ProviderEnforced,
         SupportsStreaming = true,
+        SupportsReasoningText = true,
         SupportsStreamingUsage = true,
         SupportsModelListing = true,
         SupportsJsonSchema = true,

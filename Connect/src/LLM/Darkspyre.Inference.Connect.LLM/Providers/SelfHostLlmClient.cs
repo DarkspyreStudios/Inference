@@ -129,6 +129,7 @@ internal sealed class SelfHostLlmClient(ILlmSelfHost host) : ILlmClient, ILlmCon
         OutputLimitEnforcement = capabilities.OutputLimitEnforcement,
         SupportsStreaming = capabilities.SupportsStreaming,
         SupportsUsageDeltas = capabilities.SupportsUsageDeltas,
+        SupportsReasoningText = capabilities.SupportsReasoningText,
         SupportsStreamingUsage = true,
         SupportsModelListing = capabilities.SupportsModelListing,
         SupportsJsonSchema = capabilities.SupportsJsonSchema,

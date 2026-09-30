@@ -12,6 +12,7 @@ public sealed class SelfHostTests
     private static readonly LlmCapabilities EngineCapabilities = new()
     {
         SupportsStreaming = true,
+        SupportsReasoningText = true,
         SupportsModelListing = true,
         SupportsJsonSchema = true,
         SupportsToolUse = true,
@@ -86,6 +87,8 @@ public sealed class SelfHostTests
         Assert.Equal(262_144, model.MaxContextTokens);
         LlmProviderCapabilities capabilities = await llms.GetModelCapabilitiesAsync("connection", "qwen");
         Assert.True(capabilities.SupportsToolUse);
+        Assert.True(capabilities.SupportsReasoningText);
+        Assert.True((await llms.Bind("connection").GetCapabilitiesAsync("qwen")).SupportsReasoningText);
         Assert.True(capabilities.SupportsAgentToolUse);
         Assert.Contains(LlmReasoningLevel.High, capabilities.ReasoningLevels);
         // Connect runs the managed lane, so the host owns context and compaction.

@@ -264,7 +264,7 @@ public sealed class ReasoningProfileTests
         Assert.Equal(levels, profile.Levels.Order());
         Assert.Equal(
             """{"thinkingLevel":"HIGH","includeThoughts":true}""",
-            GeminiReasoning.ThinkingConfig(profile, LlmReasoningLevel.High).ToJsonString());
+            GeminiReasoning.ThinkingConfig(profile, LlmReasoningLevel.High, requestReasoningText: true)!.ToJsonString());
     }
 
     [Fact]

@@ -19,6 +19,7 @@ internal sealed record VertexModelProfile(string Id, long ContextTokens, int Out
             return new()
             {
                 SupportsStreaming = true,
+                SupportsReasoningText = true,
                 SupportsStreamingUsage = true,
                 SupportsUsageDeltas = true,
                 SupportsModelListing = true,

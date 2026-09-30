@@ -43,6 +43,9 @@ public sealed record LlmCapabilities
     /// <summary>A streamed response can report cumulative usage before completion.</summary>
     public bool SupportsUsageDeltas { get; init; }
 
+    /// <summary>Public reasoning text can arrive separately from the answer. Independent of reasoning-level control.</summary>
+    public bool SupportsReasoningText { get; init; }
+
     public bool SupportsModelListing { get; init; }
 
     public bool SupportsJsonSchema { get; init; }

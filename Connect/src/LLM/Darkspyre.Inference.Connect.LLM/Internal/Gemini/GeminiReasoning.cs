@@ -77,21 +77,22 @@ internal static class GeminiReasoning
     /// The <c>thinkingConfig</c> for a level the profile offers. It never writes both <c>thinkingLevel</c> and
     /// <c>thinkingBudget</c>, which Gemini rejects.
     /// </summary>
-    public static JsonObject ThinkingConfig(GeminiReasoningProfile profile, LlmReasoningLevel level) => profile.Control switch
+    public static JsonObject? ThinkingConfig(GeminiReasoningProfile profile, LlmReasoningLevel? level, bool requestReasoningText)
     {
-        GeminiThinkingControl.Level => new JsonObject
+        JsonObject? config = level is null ? null : profile.Control switch
         {
-            ["thinkingLevel"] = level.ToString().ToUpperInvariant(),
-            ["includeThoughts"] = true
-        },
-        GeminiThinkingControl.Budget when level == LlmReasoningLevel.None => new JsonObject { ["thinkingBudget"] = 0 },
-        GeminiThinkingControl.Budget => new JsonObject
+            GeminiThinkingControl.Level => new JsonObject { ["thinkingLevel"] = level.Value.ToString().ToUpperInvariant() },
+            GeminiThinkingControl.Budget when level == LlmReasoningLevel.None => new JsonObject { ["thinkingBudget"] = 0 },
+            GeminiThinkingControl.Budget => new JsonObject { ["thinkingBudget"] = profile.Budgets[level.Value] },
+            _ => throw new ArgumentOutOfRangeException(nameof(profile), "The model takes no reasoning level.")
+        };
+        if (requestReasoningText && level != LlmReasoningLevel.None && profile.Control != GeminiThinkingControl.None)
         {
-            ["thinkingBudget"] = profile.Budgets[level],
-            ["includeThoughts"] = true
-        },
-        _ => throw new ArgumentOutOfRangeException(nameof(profile), "The model takes no reasoning level.")
-    };
+            config ??= new JsonObject();
+            config["includeThoughts"] = true;
+        }
+        return config;
+    }
 
     private static GeminiReasoningProfile Level(IReadOnlySet<LlmReasoningLevel> levels) =>
         new(GeminiThinkingControl.Level, levels, NoBudgets);

@@ -102,7 +102,7 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
         {
             string body = await response.Content.ReadAsStringAsync(cancellationToken);
             foreach (LlmStreamEvent completeEvent in ReadCompleteResponse(
-                         body, response, request, enforcement, credential, connection))
+                         body, response, request, enforcement, credential, connection, capabilities.SupportsReasoningText))
             {
                 yield return completeEvent;
             }
@@ -160,7 +160,7 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
 
                     case "response.reasoning_summary_text.delta":
                     case "response.reasoning_text.delta":
-                        if (LlmJson.GetString(root, "delta") is { Length: > 0 } reasoning)
+                        if (capabilities.SupportsReasoningText && LlmJson.GetString(root, "delta") is { Length: > 0 } reasoning)
                         {
                             yield return new LlmReasoningDeltaEvent(reasoning,
                                 type == "response.reasoning_summary_text.delta");
@@ -275,7 +275,8 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
         LlmChatRequest request,
         LlmStructuredOutputEnforcement? enforcement,
         LlmCredential? credential,
-        LlmConnection connection)
+        LlmConnection connection,
+        bool reasoningText)
     {
         JsonDocument document;
         try
@@ -318,7 +319,7 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
                 credential,
                 connection,
                 request.ModelId);
-            return CompleteResponseEvents.From(result, ReadReasoning(root));
+            return CompleteResponseEvents.From(result, reasoningText ? ReadReasoning(root) : []);
         }
     }
 
@@ -399,6 +400,13 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
         {
             payload["reasoning"] = new JsonObject { ["effort"] = LlmReasoningEffort.OpenAiWord(level) };
         }
+        if (GetCapabilities(connection, request.ModelId).SupportsReasoningText
+            && request.ReasoningLevel != LlmReasoningLevel.None
+            && (request.ReasoningLevel is not null || ReasonsByDefault(connection, request.ModelId)))
+        {
+            payload["reasoning"] ??= new JsonObject();
+            payload["reasoning"]!["summary"] = "auto";
+        }
 
         // Stateless ordinary responses need their reasoning state just as tool responses do.
         payload["include"] = new JsonArray("reasoning.encrypted_content");
@@ -429,6 +437,10 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
         }
         return payload;
     }
+
+    /// <summary>Only a verified API-key profile requests a default summary; fallback effort levels are not evidence.</summary>
+    protected virtual bool ReasonsByDefault(LlmConnection connection, string modelId) =>
+        OpenAiModelProfiles.Get(modelId) is { Verified: true, IsReasoning: true };
 
     private static JsonElement CompleteOutput(JsonElement root, SortedDictionary<int, JsonElement> completedOutput)
     {

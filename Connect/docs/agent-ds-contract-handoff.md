@@ -88,6 +88,11 @@ These changes are unreleased.
 
 ### Host-visible changes
 
+- Common `LlmCapabilities` and Connect `LlmProviderCapabilities` carry `SupportsReasoningText`.
+  It is independent of reasoning-level control. The Connect override suppresses public reasoning
+  and summary requests while retaining opaque replay state. SelfHost mirrors engine support;
+  Qwen reports its existing thinking parser. AgentCore chat reasoning arrives as
+  `LlmReasoningDeltaEvent`, not `LlmActivityEvent`.
 - On macOS and Linux the Claude CLI, the Antigravity CLI and the Apple helper lead their own sessions
   and process groups, with no controlling terminal. A Ctrl+C typed in a console host's terminal no
   longer reaches them; the host's cancellation and disposal still end them. Cancellation and disposal

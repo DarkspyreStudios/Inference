@@ -24,6 +24,7 @@ internal sealed class OpenAiCodexLlmClient(HttpClient http)
     {
         OutputLimitEnforcement = Common.LLM.LlmOutputLimitEnforcement.Unsupported,
         SupportsStreaming = true,
+        SupportsReasoningText = true,
         SupportsStreamingUsage = true,
         SupportsModelListing = true,
         SupportsAccountUsage = true,
@@ -126,11 +127,13 @@ internal sealed class OpenAiCodexLlmClient(HttpClient http)
         };
         JsonObject payload = base.BuildPayload(connection, projected, enforcement, stream);
         payload["instructions"] = string.Join("\n\n", instructions);
-        // Subscription reasoning is only streamed when summaries are explicitly requested.
-        payload["reasoning"] ??= new JsonObject();
-        payload["reasoning"]!["summary"] = "auto";
         return payload;
     }
+
+    protected override bool ReasonsByDefault(LlmConnection connection, string modelId) =>
+        CatalogLevels(ILlmCatalogCapabilities.EntryFor(connection, modelId)) is { } levels
+            ? levels.Any(level => level > LlmReasoningLevel.None)
+            : GetCapabilities(connection, modelId).SupportsReasoning;
 
     protected override void ApplyRequestHeaders(
         HttpRequestMessage message, LlmConnection connection, LlmChatRequest request)
