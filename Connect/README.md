@@ -356,6 +356,26 @@ so their owned calls can leave; an enumerator suspended at a yielded event still
 An adapter that ignores cancellation keeps retirement pending until its work leaves. Direct
 `ILlmAgentClient` callers own the sessions they create outside the facade.
 
+### Bedrock SDK lifetime
+
+`AddLlmConnectBedrock` registers one SDK client owner per container. It caches each runtime,
+control-plane and AgentCore client by an opaque fingerprint of region, profile, access key, secret
+and session token. Concurrent acquisition constructs one client; a failed construction can be
+retried. Changes to configured credential fields use a different client and logging-verification key.
+
+Every SDK call holds an owner lease. Streaming leases cover response reading and disposal, not
+just response creation. Owner retirement fences new acquisition, cancels active calls, waits for
+their leases, and disposes every cached client and explicitly resolved disposable credential.
+Response cleanup failures remain visible to the SDK owner. One disposal failure does not skip
+another resource. Logging verification also fences and drains its lookups and clears its cache.
+Use asynchronous container disposal while work is active.
+
+Clients use a private default AWS credential resolver and SDK-client-local HTTP caches. Retiring
+the SDK owner disposes the resolver and the SDK pipelines' HTTP pools. Runtime and AgentCore HTTP
+clients have infinite generation timeouts; control-plane clients retain their SDK timeout.
+An adapter that ignores cancellation keeps retirement pending until its call leaves. Consume or
+dispose open streaming responses and enumerators so their leases can leave.
+
 ### Streaming, reasoning text and usage
 
 `LlmProviderCapabilities.SupportsStreaming` says whether the adapter streams provider output as the model

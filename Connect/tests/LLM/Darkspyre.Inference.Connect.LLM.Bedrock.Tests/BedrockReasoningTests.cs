@@ -5,14 +5,24 @@ using Darkspyre.Inference.Common.LLM;
 
 namespace Darkspyre.Inference.Connect.LLM.Bedrock.Tests;
 
-public sealed class BedrockReasoningTests
+public sealed class BedrockReasoningTests : IDisposable
 {
     private const string ClaudeSonnet5 = "us.anthropic.claude-sonnet-5-v1:0";
     private const string ClaudeSonnet45 = "us.anthropic.claude-sonnet-4-5-20250929-v1:0";
     private const string Nova2 = "amazon.nova-2-lite-v1:0";
     private const string GptOss = "openai.gpt-oss-120b-1:0";
 
-    private readonly BedrockLlmClient _client = new(new BedrockClientFactory(), new BedrockLoggingGuard(), new StubConverseInvoker());
+    private readonly BedrockClientFactory _factory = new();
+    private readonly BedrockLoggingGuard _guard = new();
+    private readonly BedrockLlmClient _client;
+
+    public BedrockReasoningTests() => _client = new(_factory, _guard, new StubConverseInvoker());
+
+    public void Dispose()
+    {
+        _guard.Dispose();
+        _factory.Dispose();
+    }
 
     [Theory]
     [InlineData(ClaudeSonnet45, nameof(BedrockModelFamily.AnthropicClaude), "anthropic.claude-sonnet-4-5-20250929-v1:0")]

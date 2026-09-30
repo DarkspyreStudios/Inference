@@ -15,7 +15,9 @@ public sealed class BedrockSafetyTests
     [Fact]
     public void CapabilitiesAdvertiseHostExecutedTools()
     {
-        var client = new BedrockLlmClient(new BedrockClientFactory(), new BedrockLoggingGuard(), new StubConverseInvoker());
+        using var factory = new BedrockClientFactory();
+        using var guard = new BedrockLoggingGuard();
+        var client = new BedrockLlmClient(factory, guard, new StubConverseInvoker());
 
         LlmProviderCapabilities capabilities = client.GetCapabilities(Connection());
         Assert.True(capabilities.SupportsToolUse);
@@ -297,7 +299,7 @@ public sealed class BedrockSafetyTests
     [Fact]
     public async Task LoggingGuardCachesOnlyAllowedResultsWithinAnAccountScope()
     {
-        var guard = new BedrockLoggingGuard();
+        await using var guard = new BedrockLoggingGuard();
         int safeFetches = 0;
         string safeScope = ScopeKey(profile: "safe-account");
         Task<LoggingConfig?> Safe(CancellationToken _)
@@ -323,7 +325,7 @@ public sealed class BedrockSafetyTests
     [Fact]
     public async Task LoggingGuardDoesNotCacheARefusal()
     {
-        var guard = new BedrockLoggingGuard();
+        await using var guard = new BedrockLoggingGuard();
         int fetches = 0;
         Task<LoggingConfig?> Fetch(CancellationToken _)
         {
@@ -342,7 +344,7 @@ public sealed class BedrockSafetyTests
     [Fact]
     public async Task LoggingGuardFailsClosedButPreservesCancellation()
     {
-        var guard = new BedrockLoggingGuard();
+        await using var guard = new BedrockLoggingGuard();
         InvalidOperationException failure = await Assert.ThrowsAsync<InvalidOperationException>(() =>
             guard.EnsureLoggingDisabledAsync(
                 "unverifiable",

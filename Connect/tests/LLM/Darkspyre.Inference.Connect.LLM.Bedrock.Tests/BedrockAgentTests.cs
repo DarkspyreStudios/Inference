@@ -6,11 +6,21 @@ using Darkspyre.Inference.Connect.LLM.Internal;
 
 namespace Darkspyre.Inference.Connect.LLM.Bedrock.Tests;
 
-public sealed class BedrockAgentTests
+public sealed class BedrockAgentTests : IDisposable
 {
     private const string Model = "amazon.nova-lite-v1:0";
 
-    private readonly BedrockLlmClient _client = new(new BedrockClientFactory(), new BedrockLoggingGuard(), new StubConverseInvoker());
+    private readonly BedrockClientFactory _factory = new();
+    private readonly BedrockLoggingGuard _guard = new();
+    private readonly BedrockLlmClient _client;
+
+    public BedrockAgentTests() => _client = new(_factory, _guard, new StubConverseInvoker());
+
+    public void Dispose()
+    {
+        _guard.Dispose();
+        _factory.Dispose();
+    }
 
     [Fact]
     public void CapabilitiesOpenTheManagedAgentLaneOnTheConverseRoute()

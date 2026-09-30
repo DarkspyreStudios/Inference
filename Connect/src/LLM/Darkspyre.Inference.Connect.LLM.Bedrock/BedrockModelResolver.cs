@@ -11,6 +11,7 @@ internal sealed class BedrockModelResolver
         string requestedModelId,
         CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         if (LooksLikeInferenceProfile(requestedModelId))
         {
             return requestedModelId;
@@ -21,6 +22,7 @@ internal sealed class BedrockModelResolver
             GetFoundationModelResponse details = await control.GetFoundationModelAsync(
                 new GetFoundationModelRequest { ModelIdentifier = requestedModelId },
                 cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
             var types = details.ModelDetails?.InferenceTypesSupported ?? [];
             bool supportsOnDemand = types.Any(type => string.Equals(
                 type,
@@ -44,6 +46,7 @@ internal sealed class BedrockModelResolver
         }
         catch (AmazonBedrockException)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             return requestedModelId;
         }
     }
@@ -53,6 +56,7 @@ internal sealed class BedrockModelResolver
         string region,
         CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var byId = new Dictionary<string, LlmModel>(StringComparer.Ordinal);
         foreach (InferenceProfileSummary profile in await ListInferenceProfilesAsync(
                      control,
@@ -71,9 +75,11 @@ internal sealed class BedrockModelResolver
 
         try
         {
+            cancellationToken.ThrowIfCancellationRequested();
             ListFoundationModelsResponse models = await control.ListFoundationModelsAsync(
                 new ListFoundationModelsRequest(),
                 cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
             foreach (FoundationModelSummary model in models.ModelSummaries ?? [])
             {
                 if (!string.IsNullOrEmpty(model.ModelId) && !IsProvisionedOnly(model.InferenceTypesSupported))
@@ -86,6 +92,7 @@ internal sealed class BedrockModelResolver
         }
         catch (AmazonBedrockException)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             // Inference profiles alone remain useful when foundation-model listing is denied.
         }
 
@@ -134,13 +141,16 @@ internal sealed class BedrockModelResolver
     {
         try
         {
+            cancellationToken.ThrowIfCancellationRequested();
             ListInferenceProfilesResponse response = await control.ListInferenceProfilesAsync(
                 new ListInferenceProfilesRequest(),
                 cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
             return response.InferenceProfileSummaries ?? [];
         }
         catch (AmazonBedrockException)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             return [];
         }
     }

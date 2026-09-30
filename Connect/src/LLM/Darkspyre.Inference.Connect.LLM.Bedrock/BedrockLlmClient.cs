@@ -132,19 +132,23 @@ internal sealed class BedrockLlmClient(
             ? null
             : StructuredOutput.ResolveEnforcement(request.StructuredOutput, capabilities);
         LlmAwsCredentials aws = RequireAws(connection);
+        using BedrockClientFactory.Lease<Amazon.Bedrock.AmazonBedrockClient> control = factory.Control(aws, cancellationToken);
+        cancellationToken = control.Token;
         string modelId = await BedrockModelResolver.ResolveAsync(
-            factory.Control(aws),
+            control.Client,
             aws.Region!,
             request.ModelId,
             cancellationToken);
         await loggingGuard.EnsureLoggingDisabledAsync(
-            factory.Control(aws),
+            control.Client,
             aws,
             cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
         ConverseRequest built = BuildRequest(connection, request, modelId);
         if (!capabilities.SupportsStreaming)
         {
             ConverseResponse response = await invoker.ConverseAsync(aws, built, cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
             foreach (LlmStreamEvent item in MapResponse(connection, request, enforcement, response))
             {
                 yield return item;
@@ -159,6 +163,7 @@ internal sealed class BedrockLlmClient(
         var accumulator = new BedrockStreamAccumulator();
         await foreach (IEventStreamEvent streamEvent in stream.ReadAsync(cancellationToken))
         {
+            cancellationToken.ThrowIfCancellationRequested();
             foreach (LlmStreamEvent item in accumulator.Observe(streamEvent))
             {
                 if (item is LlmReasoningDeltaEvent && !capabilities.SupportsReasoningText) { continue; }
@@ -167,6 +172,7 @@ internal sealed class BedrockLlmClient(
         }
 
         // The completion follows the end of the stream, because the metadata event with usage follows message-stop.
+        cancellationToken.ThrowIfCancellationRequested();
         BedrockReply reply = accumulator.Complete(stream.RequestId);
         yield return new LlmChatCompletionEvent(BuildResult(connection, request, enforcement, reply));
     }
@@ -484,10 +490,13 @@ internal sealed class BedrockLlmClient(
     {
         EnsureTransport(connection);
         LlmAwsCredentials aws = RequireAws(connection);
-        return await BedrockModelResolver.ListAsync(
-            factory.Control(aws),
+        using BedrockClientFactory.Lease<Amazon.Bedrock.AmazonBedrockClient> control = factory.Control(aws, cancellationToken);
+        IReadOnlyList<LlmModel> models = await BedrockModelResolver.ListAsync(
+            control.Client,
             aws.Region!,
-            cancellationToken);
+            control.Token);
+        control.Token.ThrowIfCancellationRequested();
+        return models;
     }
 
     internal static ConverseRequest BuildRequest(

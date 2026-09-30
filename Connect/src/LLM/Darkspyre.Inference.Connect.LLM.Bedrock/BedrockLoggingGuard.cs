@@ -1,11 +1,13 @@
 using System.Collections.Concurrent;
 using Amazon.Bedrock;
 using Amazon.Bedrock.Model;
+using Darkspyre.Inference.Connect.LLM.Internal;
 
 namespace Darkspyre.Inference.Connect.LLM.Bedrock;
 
-internal sealed class BedrockLoggingGuard
+internal sealed class BedrockLoggingGuard : IDisposable, IAsyncDisposable
 {
+    private readonly LlmOperationLifetime _lifetime = new();
     internal static readonly TimeSpan CacheTtl = TimeSpan.FromMinutes(5);
     private readonly ConcurrentDictionary<string, DateTimeOffset> _verifiedAt = new(
         StringComparer.OrdinalIgnoreCase);
@@ -28,6 +30,8 @@ internal sealed class BedrockLoggingGuard
         Func<CancellationToken, Task<LoggingConfig?>> fetchLoggingConfig,
         CancellationToken cancellationToken = default)
     {
+        using LlmOperationLifetime.Lease operation = _lifetime.Enter(cancellationToken);
+        cancellationToken = operation.Token;
         if (_verifiedAt.TryGetValue(scopeKey, out DateTimeOffset verified)
             && DateTimeOffset.UtcNow - verified < CacheTtl)
         {
@@ -48,6 +52,7 @@ internal sealed class BedrockLoggingGuard
                 exception);
         }
 
+        cancellationToken.ThrowIfCancellationRequested();
         if (DescribeEnabledLogging(config) is { } detail)
         {
             throw new InvalidOperationException(
@@ -57,6 +62,14 @@ internal sealed class BedrockLoggingGuard
 
         _verifiedAt[scopeKey] = DateTimeOffset.UtcNow;
     }
+
+    public ValueTask DisposeAsync() => new(_lifetime.RetireAsync(() =>
+    {
+        _verifiedAt.Clear();
+        return Task.CompletedTask;
+    }));
+
+    public void Dispose() => DisposeAsync().AsTask().GetAwaiter().GetResult();
 
     internal static string? DescribeEnabledLogging(LoggingConfig? config)
     {

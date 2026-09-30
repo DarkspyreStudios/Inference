@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using Amazon.BedrockAgentCore;
 using Amazon.BedrockAgentCore.Model;
 using Amazon.Runtime.EventStreams;
 
@@ -20,13 +21,26 @@ internal sealed class BedrockAgentCoreInvoker(BedrockClientFactory factory)
         InvokeHarnessRequest request,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
-        using InvokeHarnessResponse response = await factory.AgentCore(aws).InvokeHarnessAsync(
+        using BedrockClientFactory.Lease<AmazonBedrockAgentCoreClient> lease = factory.AgentCore(aws, cancellationToken);
+        cancellationToken = lease.Token;
+        InvokeHarnessResponse response = await lease.Client.InvokeHarnessAsync(
             request,
             cancellationToken);
-        await foreach (IEventStreamEvent streamEvent in response.Stream.WithCancellation(
-                           cancellationToken))
+        using IDisposable ownedResponse = lease.OwnResponse(response);
+        cancellationToken.ThrowIfCancellationRequested();
+        await using IAsyncEnumerator<IEventStreamEvent> events = response.Stream.GetAsyncEnumerator(cancellationToken);
+        while (true)
         {
-            yield return streamEvent;
+            bool moved;
+            try { moved = await events.MoveNextAsync(); }
+            catch (BedrockAgentCoreEventStreamException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw new OperationCanceledException(cancellationToken);
+            }
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!moved) break;
+            yield return events.Current;
         }
+        cancellationToken.ThrowIfCancellationRequested();
     }
 }

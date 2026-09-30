@@ -9,8 +9,14 @@ using Darkspyre.Inference.Connect.LLM.Internal;
 
 namespace Darkspyre.Inference.Connect.LLM.Bedrock.Tests;
 
-public sealed class BedrockStreamingTests
+public sealed class BedrockStreamingTests : IDisposable
 {
+    private readonly List<IDisposable> _resources = [];
+
+    public void Dispose()
+    {
+        foreach (IDisposable resource in _resources) resource.Dispose();
+    }
     [Fact]
     public async Task DisplayOptOutKeepsSignedToolReplay()
     {
@@ -566,7 +572,7 @@ public sealed class BedrockStreamingTests
         ]
     };
 
-    private static async Task<List<LlmStreamEvent>> StreamAsync(StubConverseInvoker invoker, LlmConnection? connection = null) =>
+    private async Task<List<LlmStreamEvent>> StreamAsync(StubConverseInvoker invoker, LlmConnection? connection = null) =>
         await CollectAsync((await Client(invoker)).StreamAsync(connection ?? Connection(), Request()));
 
     private static async Task<List<LlmStreamEvent>> CollectAsync(IAsyncEnumerable<LlmStreamEvent> stream)
@@ -580,14 +586,17 @@ public sealed class BedrockStreamingTests
     }
 
     /// <summary>A client whose logging guard has already verified the scope, so no control-plane call is made.</summary>
-    private static async Task<BedrockLlmClient> Client(StubConverseInvoker invoker)
+    private async Task<BedrockLlmClient> Client(StubConverseInvoker invoker)
     {
         var guard = new BedrockLoggingGuard();
+        var factory = new BedrockClientFactory();
+        _resources.Add(guard);
+        _resources.Add(factory);
         await guard.EnsureLoggingDisabledAsync(
             BedrockClientFactory.ScopeKey(Aws),
             Aws.Region!,
             _ => Task.FromResult<Amazon.Bedrock.Model.LoggingConfig?>(null));
-        return new BedrockLlmClient(new BedrockClientFactory(), guard, invoker);
+        return new BedrockLlmClient(factory, guard, invoker);
     }
 
     private static LlmConnection Connection() => new()
