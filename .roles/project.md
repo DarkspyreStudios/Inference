@@ -18,7 +18,7 @@ specifications.
 | Version line | `<net>.<release>.<minor>`: .NET generation, breaking-contract release, compatible tweak/fix |
 | Release model | `Common`, `Connect`, `Tensor`, and `UI.Settings` publish together at the one version declared in `/Directory.Build.props` |
 | Primary branch | `master` |
-| Lifecycle stage | Four-package `11.13.0-rc.1` published privately |
+| Lifecycle stage | Four-package `11.14.0-rc.1` published privately |
 | Jira project and parent | TBD |
 | Jira subject label | TBD |
 
@@ -945,3 +945,12 @@ Authenticated restores, Debug/Release builds and tests, formatting, vulnerabilit
 archive boundaries and local/fresh-feed consumer checks passed. Downloaded archives match
 the verified local archives; feed readback confirms private visibility. Source is tagged
 `v11.13.0-rc.1`. No model weights or paid inference were used as verification gates.
+
+## Private release 11.14.0-rc.1
+
+Published all four packages from `2ac242d1cd0d4963f20e1c1035f8e3b1ffe80016`, following the `deploy-major.sh` steps by hand.
+Packages were uploaded through the GitHub Packages NuGet endpoint with credentials on standard
+input, and the fresh-feed cache lived under `artifacts/deploy/`. Authenticated restores, Debug/Release
+builds and tests, formatting, vulnerability audits, archive boundaries and local/fresh-feed consumer
+checks passed. Downloaded archives match the verified local archives; feed readback confirms private
+visibility. Source is tagged `v11.14.0-rc.1`. No model weights or paid inference were used as verification gates.
