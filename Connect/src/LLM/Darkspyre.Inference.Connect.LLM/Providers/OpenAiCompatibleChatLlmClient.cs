@@ -9,8 +9,10 @@ using Darkspyre.Inference.Connect.LLM.Internal;
 namespace Darkspyre.Inference.Connect.LLM.Providers;
 
 /// <summary>Streaming adapter for OpenAI-compatible Chat Completions endpoints.</summary>
-internal sealed class OpenAiCompatibleChatLlmClient(HttpClient http) : LlmClientBase(http)
+internal sealed class OpenAiCompatibleChatLlmClient(HttpClient http) : LlmClientBase(http), ILlmConnectionPreparation
 {
+    private static readonly OpenAiCompatibleChatContinuationCodec Codec = new();
+
     public override LlmTransport Transport => LlmTransport.OpenAiCompatibleChat;
 
     public override LlmProviderDefinition ProviderDefinition => ProviderDefinitions.OpenAiCompatible;
@@ -46,6 +48,21 @@ internal sealed class OpenAiCompatibleChatLlmClient(HttpClient http) : LlmClient
             RichContentSupported = RichContentRoutes.TextOnly
         };
 
+    public Task<LlmConnection> PrepareAsync(LlmConnection connection, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        _ = GetCapabilities(connection);
+        return Task.FromResult(Prepare(connection));
+    }
+
+    private static LlmConnection Prepare(LlmConnection connection)
+    {
+        string scope = ProviderContinuationStateCodec.Scope(connection with { ContinuationCodec = null, ResolvedContinuationScope = null });
+        if (connection.ResolvedContinuationScope is { } pinned && pinned != scope)
+        { throw new InvalidOperationException("The chat connection identity changed before dispatch."); }
+        return connection with { ContinuationCodec = Codec, ResolvedContinuationScope = scope };
+    }
+
     public override async IAsyncEnumerable<LlmStreamEvent> StreamAsync(
         LlmConnection connection,
         LlmChatRequest request,
@@ -53,6 +70,8 @@ internal sealed class OpenAiCompatibleChatLlmClient(HttpClient http) : LlmClient
     {
         LlmProviderCapabilities capabilities = GetCapabilities(connection, request.ModelId);
         ValidateRequest(connection, request, capabilities);
+        connection = Prepare(connection);
+        (request, int omitted) = ContinuationStateProjection.Project(request, connection);
         LlmStructuredOutputEnforcement? enforcement = request.StructuredOutput is null
             ? null
             : StructuredOutput.ResolveEnforcement(request.StructuredOutput, capabilities);
@@ -81,7 +100,7 @@ internal sealed class OpenAiCompatibleChatLlmClient(HttpClient http) : LlmClient
         if (!capabilities.SupportsStreaming)
         {
             string body = await response.Content.ReadAsStringAsync(cancellationToken);
-            foreach (LlmStreamEvent completeEvent in ReadCompleteResponse(body, response, request, enforcement, credential))
+            foreach (LlmStreamEvent completeEvent in ReadCompleteResponse(body, response, request, enforcement, credential, connection, omitted))
             {
                 yield return completeEvent;
             }
@@ -99,6 +118,7 @@ internal sealed class OpenAiCompatibleChatLlmClient(HttpClient http) : LlmClient
         bool sawDone = false;
         var toolCalls = new Dictionary<int, ToolCallBuilder>();
         var usageDeltas = new UsageDeltas(capabilities.SupportsUsageDeltas);
+        var reasoning = new ChatReasoning();
 
         await foreach (string data in Sse.ReadDataPayloadsAsync(stream, cancellationToken))
         {
@@ -155,6 +175,7 @@ internal sealed class OpenAiCompatibleChatLlmClient(HttpClient http) : LlmClient
                 }
 
                 string contentDelta = LlmJson.GetString(delta, "content") ?? string.Empty;
+                if (reasoning.Observe(delta) is { } reasoningDelta) { yield return reasoningDelta; }
                 if (contentDelta.Length > 0)
                 {
                     text.Append(contentDelta);
@@ -241,7 +262,10 @@ internal sealed class OpenAiCompatibleChatLlmClient(HttpClient http) : LlmClient
             completedToolCalls,
             response,
             lastEvent,
-            credential));
+            credential,
+            connection,
+            reasoning,
+            omitted));
     }
 
     /// <summary>Maps a response that arrived as one chat.completion object.</summary>
@@ -250,7 +274,9 @@ internal sealed class OpenAiCompatibleChatLlmClient(HttpClient http) : LlmClient
         HttpResponseMessage response,
         LlmChatRequest request,
         LlmStructuredOutputEnforcement? enforcement,
-        LlmCredential? credential)
+        LlmCredential? credential,
+        LlmConnection connection,
+        int omitted)
     {
         JsonDocument document;
         try
@@ -289,6 +315,8 @@ internal sealed class OpenAiCompatibleChatLlmClient(HttpClient http) : LlmClient
             }
 
             var toolCalls = new List<LlmToolCall>();
+            var reasoning = new ChatReasoning();
+            LlmReasoningDeltaEvent? observation = reasoning.Observe(message);
             if (message.TryGetProperty("tool_calls", out JsonElement calls) && calls.ValueKind == JsonValueKind.Array)
             {
                 foreach (JsonElement call in calls.EnumerateArray())
@@ -315,8 +343,11 @@ internal sealed class OpenAiCompatibleChatLlmClient(HttpClient http) : LlmClient
                 [.. toolCalls],
                 response,
                 body,
-                credential);
-            return [.. CompleteResponseEvents.From(result, [])];
+                credential,
+                connection,
+                reasoning,
+                omitted);
+            return [.. CompleteResponseEvents.From(result, observation is null ? [] : [new(observation.Delta, observation.IsSummary)])];
         }
     }
 
@@ -331,7 +362,10 @@ internal sealed class OpenAiCompatibleChatLlmClient(HttpClient http) : LlmClient
         LlmToolCall[] completedToolCalls,
         HttpResponseMessage response,
         string? rawFinal,
-        LlmCredential? credential)
+        LlmCredential? credential,
+        LlmConnection connection,
+        ChatReasoning reasoning,
+        int omitted)
     {
         LlmCompletionStatus status = finalRefusal.Length > 0 || finishReason == "content_filter"
             ? LlmCompletionStatus.Refused
@@ -365,6 +399,8 @@ internal sealed class OpenAiCompatibleChatLlmClient(HttpClient http) : LlmClient
             Usage = usage,
             ProviderResponseId = responseId,
             ToolCalls = completedToolCalls,
+            ContinuationState = EncodeReasoning(connection, request.ModelId, finalText, completedToolCalls, status, reasoning),
+            OmittedContinuationStateCount = omitted,
             StructuredOutput = validation,
             Diagnostics = new LlmProviderDiagnostics(
                 (int)response.StatusCode,
@@ -373,18 +409,31 @@ internal sealed class OpenAiCompatibleChatLlmClient(HttpClient http) : LlmClient
         };
     }
 
+    private static LlmContinuationState? EncodeReasoning(LlmConnection connection, string modelId, string text,
+        IReadOnlyList<LlmToolCall> toolCalls, LlmCompletionStatus status, ChatReasoning reasoning)
+    {
+        string? content = reasoning.ReasoningContent;
+        JsonArray? details = reasoning.ReasoningDetails;
+        if (status is not (LlmCompletionStatus.Completed or LlmCompletionStatus.RequiresAction) || content is null && details is null)
+        { return null; }
+        var item = new JsonObject
+        {
+            ["type"] = "chat_message",
+            ["text"] = text,
+            ["tool_calls"] = new JsonArray([.. toolCalls.Select(call => (JsonNode)new JsonObject
+            { ["id"] = call.Id, ["name"] = call.Name, ["arguments"] = call.ArgumentsJson })])
+        };
+        if (content is not null) { item["reasoning_content"] = content; }
+        if (details is not null) { item["reasoning_details"] = details; }
+        return Codec.Encode(connection, modelId, [item]);
+    }
+
     private static JsonObject BuildPayload(
         LlmConnection connection,
         LlmChatRequest request,
         LlmStructuredOutputEnforcement? enforcement,
         LlmProviderCapabilities capabilities)
     {
-        if (request.Messages.Any(message => message.ContinuationState is not null))
-        {
-            throw new NotSupportedException(
-                "OpenAI-compatible Chat Completions cannot import adapter continuation state.");
-        }
-
         var messages = new JsonArray();
         if (!string.IsNullOrWhiteSpace(request.Instructions))
         {
@@ -397,6 +446,8 @@ internal sealed class OpenAiCompatibleChatLlmClient(HttpClient http) : LlmClient
 
         foreach (LlmChatMessage message in request.Messages)
         {
+            JsonObject? retained = message.ContinuationState is null ? null
+                : (JsonObject)ProviderContinuationStateCodec.DecodeMessage(message, connection, request.ModelId)[0]!;
             if (message.ToolResults.Count > 0)
             {
                 foreach (LlmToolResult result in message.ToolResults)
@@ -442,6 +493,12 @@ internal sealed class OpenAiCompatibleChatLlmClient(HttpClient http) : LlmClient
                 }
 
                 mappedMessage["tool_calls"] = mappedCalls;
+            }
+
+            if (retained is not null && request.Tools.Count > 0)
+            {
+                if (retained["reasoning_details"] is { } details) { mappedMessage["reasoning_details"] = details.DeepClone(); }
+                else if (retained["reasoning_content"] is { } content) { mappedMessage["reasoning_content"] = content.DeepClone(); }
             }
 
             messages.Add(mappedMessage);

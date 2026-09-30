@@ -254,3 +254,16 @@ published from `500a572` after release verification; `.roles/project.md` records
 - `LlmProviderService` attaches the kept model list to the connection as `Catalog` for adapters that
   implement `ILlmCatalogCapabilities`: Anthropic Messages, the Gemini API and Codex. A failed listing
   leaves the family tables in charge.
+
+### Compatible chat reasoning and replay
+
+`ChatReasoning` separates public reasoning from retained wire fields. It emits one display delta
+per message or stream delta, using `reasoning_content`, `reasoning`, text details and summary details
+in that order. Consecutive text or summary details are assembled in type order. Encrypted details
+remain separate opaque values. An explicitly empty details array remains present for replay.
+
+`OpenAiCompatibleChatContinuationCodec` binds assistant state to the prepared connection and model.
+The codec validates its format, field allowlist, visible text, tool-call identities and argument
+objects before dispatch. Payloads are limited to 16 MiB of UTF-8. Tool-enabled requests replay
+structured details when present, otherwise retained `reasoning_content`. Requests without tools
+omit those replay fields. Failed, incomplete and refused responses never produce replayable state.

@@ -634,6 +634,8 @@ report matches the request. An omitted part never fails the request, the turn or
 changes `IsError`. Connect adds no notice for an omitted part. A host that wants one adds a text part
 and projects again.
 
+### Continuation state
+
 `LlmChatResult.ContinuationState` is opaque, versioned adapter state. Preserve it unchanged on that
 response's `LlmChatMessage.ContinuationState`, alongside its visible text and tool calls, on ordinary
 turns as well as tool turns. Keep every assistant record, not just the latest one. Responses adapters
@@ -644,7 +646,13 @@ in to omission, as described below. The former request-level `ContinuationToken`
 with no compatibility shim. Bedrock Converse state carries the reply's reported token counts. When the
 reply contains reasoning, it also carries the ordered reply with its reasoning signatures, and Connect
 replays that reply. A Converse request accepts only state bound to its own connection and model.
-Chat Completions, AgentCore and CLI chat do not import this opaque state.
+Compatible Chat Completions retains `reasoning_content` and supported `reasoning_details` in
+assistant state. Tool-enabled requests replay structured details when present, otherwise retained
+reasoning content. Requests without tools omit both replay fields. The codec validates the visible
+text and tool calls, connection identity, model and a 16 MiB UTF-8 payload bound before dispatch.
+Encrypted reasoning remains opaque and never becomes a public reasoning event. The adapter reads
+`reasoning_content`, `reasoning`, text details and summary details in that display order, so
+overlapping wire fields produce one event. AgentCore and CLI chat do not import this opaque state.
 
 ### Carrying history to another model or provider
 
