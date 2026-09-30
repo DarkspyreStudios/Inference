@@ -427,6 +427,11 @@ expires, the operation fails with a message that names the process ID:
 | Antigravity native agent session | The cancelled operation keeps its own outcome, and the session faults. Later calls throw `InvalidOperationException` with the reason. |
 | Apple helper | `InferenceException` with `InferenceFailureCode.ExecutionFailed` |
 
+Claude CLI chat owns the process during stdin writes as well as output reads. Cancellation during a
+blocked stdin write and early disposal of its output stream both terminate the owned process.
+Its stderr reader enforces a 16 MiB character limit while reading. A stderr read failure interrupts
+blocked stdin/stdout operations. Retirement cancels and observes that reader with a 5-second bound.
+
 ## Image provider integration
 
 Register the image capability and resolve its provider-neutral transport through

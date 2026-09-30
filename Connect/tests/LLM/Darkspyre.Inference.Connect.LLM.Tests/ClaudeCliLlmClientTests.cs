@@ -581,6 +581,96 @@ public sealed class ClaudeCliLlmClientTests
             exception.Message, StringComparison.Ordinal);
     }
 
+    [UnixFact]
+    public Task CancellationDuringStandardInputEndsTheProcess() => CliProcessTerminationTests.Bounded(async () =>
+    {
+        string directory = Directory.CreateTempSubdirectory("claude-stdin-").FullName;
+        string pidPath = Path.Combine(directory, "pid");
+        using var cancellation = new CancellationTokenSource();
+        var invocation = new ClaudeCliInvocation(
+            "/bin/sh",
+            ["-c", "printf '%s' \"$$\" > \"$1\"; exec sleep 300", "claude-test", pidPath],
+            new string('x', 4 * 1024 * 1024),
+            directory);
+        Task<ClaudeCliProcessResult> operation = new ClaudeCliProcessRunner().RunAsync(invocation, cancellation.Token);
+        try
+        {
+            int processId = 0;
+            using var ready = new CancellationTokenSource(CliProcessTermination.ExitBound);
+            while (processId == 0)
+            {
+                await Task.Delay(20, ready.Token);
+                if (File.Exists(pidPath))
+                {
+                    _ = int.TryParse(await File.ReadAllTextAsync(pidPath, ready.Token),
+                        System.Globalization.NumberStyles.Integer,
+                        System.Globalization.CultureInfo.InvariantCulture, out processId);
+                }
+            }
+
+            Assert.False(operation.IsCompleted);
+            await cancellation.CancelAsync();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => operation);
+            await CliProcessTerminationTests.AssertGoneAsync(processId);
+        }
+        finally
+        {
+            await cancellation.CancelAsync();
+            try
+            {
+                await operation.WaitAsync(CliProcessTermination.ExitBound);
+            }
+            catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
+            {
+            }
+            Directory.Delete(directory, recursive: true);
+        }
+    });
+
+    [UnixFact]
+    public Task StandardErrorOverflowInterruptsQuietStandardOutputAndEndsTheProcess() => CliProcessTerminationTests.Bounded(async () =>
+    {
+        var invocation = new ClaudeCliInvocation(
+            "/bin/sh",
+            ["-c", "echo $$; awk 'BEGIN { s=sprintf(\"%1024s\",\"x\"); for(i=0;i<16385;i++) printf \"%s\",s }' >&2; exec sleep 300"],
+            StandardInput: null,
+            Path.GetTempPath());
+        int processId = 0;
+
+        InvalidOperationException failure = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+        {
+            await foreach (ClaudeCliProcessEvent processEvent in new ClaudeCliProcessRunner().StreamAsync(invocation))
+            {
+                processId = CliProcessTerminationTests.ParseProcessId(Assert.IsType<ClaudeCliOutputLine>(processEvent).Line);
+            }
+        });
+
+        Assert.Contains("StandardError", failure.Message, StringComparison.Ordinal);
+        Assert.Contains("safety limit", failure.Message, StringComparison.Ordinal);
+        Assert.True(processId > 0);
+        await CliProcessTerminationTests.AssertGoneAsync(processId);
+    });
+
+    [UnixFact]
+    public Task DisposingTheStreamEarlyEndsTheProcessAndItsErrorReader() => CliProcessTerminationTests.Bounded(async () =>
+    {
+        var invocation = new ClaudeCliInvocation(
+            "/bin/sh", ["-c", "echo $$; exec sleep 300"], StandardInput: null, Path.GetTempPath());
+        IAsyncEnumerator<ClaudeCliProcessEvent> reader = new ClaudeCliProcessRunner().StreamAsync(invocation).GetAsyncEnumerator();
+        int processId;
+        try
+        {
+            Assert.True(await reader.MoveNextAsync());
+            processId = CliProcessTerminationTests.ParseProcessId(Assert.IsType<ClaudeCliOutputLine>(reader.Current).Line);
+        }
+        finally
+        {
+            await reader.DisposeAsync();
+        }
+
+        await CliProcessTerminationTests.AssertGoneAsync(processId);
+    });
+
     [Fact]
     public async Task RejectsMinimalReasoningWithoutStartingTheCli()
     {

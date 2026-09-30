@@ -35,37 +35,37 @@ internal sealed class ClaudeCliProcessRunner : IClaudeCliRunner
         ArgumentNullException.ThrowIfNull(invocation);
 
         using Process process = StartProcess(invocation);
-        Task<string> standardError = process.StandardError.ReadToEndAsync(cancellationToken);
+        using var reads = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        Task<string> standardError = ReadStandardErrorAsync(process.StandardError, reads);
         string? standardInputError = null;
-        try
-        {
-            if (invocation.StandardInput is not null)
-            {
-                await process.StandardInput.WriteAsync(
-                    invocation.StandardInput.AsMemory(),
-                    cancellationToken);
-            }
-            process.StandardInput.Close();
-        }
-        catch (IOException)
-        {
-            standardInputError =
-                "The Claude CLI closed standard input before the request was completely sent.";
-            TryCloseStandardInput(process);
-        }
-
         var output = new StringBuilder();
         try
         {
-            while (await process.StandardOutput.ReadLineAsync(cancellationToken) is { } line)
+            try
+            {
+                if (invocation.StandardInput is not null)
+                {
+                    await process.StandardInput.WriteAsync(
+                        invocation.StandardInput.AsMemory(),
+                        reads.Token);
+                }
+                process.StandardInput.Close();
+            }
+            catch (IOException)
+            {
+                standardInputError =
+                    "The Claude CLI closed standard input before the request was completely sent.";
+                TryCloseStandardInput(process);
+            }
+
+            while (await process.StandardOutput.ReadLineAsync(reads.Token) is { } line)
             {
                 output.AppendLine(line);
                 EnsureCaptureLimit(output.Length, nameof(process.StandardOutput));
                 yield return new ClaudeCliOutputLine(line);
             }
-            await process.WaitForExitAsync(cancellationToken);
-            string error = await standardError;
-            EnsureCaptureLimit(error.Length, nameof(process.StandardError));
+            await process.WaitForExitAsync(reads.Token);
+            string error = await standardError.WaitAsync(CliProcessTermination.ExitBound, reads.Token);
             yield return new ClaudeCliProcessCompleted(new ClaudeCliProcessResult(
                 process.ExitCode,
                 output.ToString(),
@@ -74,10 +74,49 @@ internal sealed class ClaudeCliProcessRunner : IClaudeCliRunner
         }
         finally
         {
-            if (!process.HasExited)
+            try
             {
-                await CliProcessTermination.KillAsync(process);
+                if (!process.HasExited)
+                {
+                    await CliProcessTermination.KillAsync(process);
+                }
             }
+            finally
+            {
+                await reads.CancelAsync();
+                try
+                {
+                    await standardError.WaitAsync(CliProcessTermination.ExitBound, CancellationToken.None);
+                }
+                catch (OperationCanceledException) when (reads.IsCancellationRequested)
+                {
+                    // Retirement cancels a pipe reader after the owned process is terminated.
+                }
+            }
+        }
+    }
+
+    private static async Task<string> ReadStandardErrorAsync(
+        StreamReader reader,
+        CancellationTokenSource reads)
+    {
+        var output = new StringBuilder();
+        var buffer = new char[4096];
+        try
+        {
+            int count;
+            while ((count = await reader.ReadAsync(buffer.AsMemory(), reads.Token)) != 0)
+            {
+                EnsureCaptureLimit(output.Length + count, "StandardError");
+                output.Append(buffer, 0, count);
+            }
+            return output.ToString();
+        }
+        catch (Exception error) when (error is IOException or InvalidOperationException or DecoderFallbackException)
+        {
+            // A failed stderr reader must also interrupt a blocked stdin/stdout operation.
+            await reads.CancelAsync();
+            throw;
         }
     }
 
