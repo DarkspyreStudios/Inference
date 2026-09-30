@@ -84,14 +84,16 @@ From the repository root, use the Connect ConsoleTester against a running arbite
 echo 'Reply only with OK.' | dotnet run --project Connect/tools/Darkspyre.Inference.Connect.ConsoleTester -- \
   prompt --provider openai-compatible-api --endpoint http://gpu-box:8080/v1 --model qwen3.8-27b
 
-echo 'Call darkspyre_inference_connect_echo with text Hello, then reply with its result.' | \
-  dotnet run --project Connect/tools/Darkspyre.Inference.Connect.ConsoleTester -- \
-  agent --provider openai-compatible-api --endpoint http://gpu-box:8080/v1 --model qwen3.8-27b
+dotnet run --project Connect/tools/Darkspyre.Inference.Connect.ConsoleTester -- \
+  models --provider openai-compatible-api --endpoint http://gpu-box:8080/v1
 ```
 
 The endpoint override is local to that process. It selects an anonymous endpoint without
 reading or writing stored credentials, so it also works in Windows SSH sessions.
 Use the machine's LAN or Tailscale IP if `gpu-box` is only an SSH alias.
+The compatible provider supports prompt streaming and model listing. The tester's `agent`
+command requires a provider with agent sessions. Tool-call verification uses OpenAI chat
+requests with `tools`, followed by a `tool` message carrying the returned call ID and result.
 
 ## Windows setup and deployment
 
