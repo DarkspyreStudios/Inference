@@ -1062,6 +1062,27 @@ non-streaming request, as [Streaming, reasoning text and usage](#streaming-reaso
 Existing provider JSON, headers and model-specific overrides are retained; the editor does not turn them into
 an arbitrary JSON settings payload.
 
+`XaiResponses` defines the Grok OAuth connection and settings contract. `LlmConnection.Xai` holds
+`XaiConnectionOptions`: `Global` selects `https://api.x.ai/v1`, and `UnitedStates` selects
+`https://us.api.x.ai/v1`. `GetEndpoint()` derives that fixed URL. Setup offers bounded region and
+`Default`/`Priority` service-tier choices, with no endpoint or API-key field. It retains unrelated
+headers, provider options and overrides. A kept OAuth access token or a completed draft sign-in
+satisfies Save; an API key or static secret header does not. Region edits replace the endpoint;
+tier edits require retesting but do not request reauthentication.
+
+`IXaiDeviceLogin` supplies the device grant to `StartXaiLoginAsync`, `CompleteXaiLoginAsync` and
+`SignInAsync`. Completion performs one token poll; interactive sign-in owns the polling loop.
+Setup continuation and interactive sign-in respect the device interval, provider-reported expiry,
+and the five-second increase on RFC 8628 `slow_down`. `LlmDeviceCode.ExpiresAt` is null for a provider
+that supplies no expiry. Device-code diagnostic text is redacted. Token saves use the captured
+connection version. Facade retirement cancels and drains sign-in and suppresses late results;
+it does not dispose the borrowed authenticator or undo a save already committed by the source.
+
+These contracts are inert without a registered xAI client and `IXaiDeviceLogin` implementation.
+`AddLlmConnect` does not register a Grok provider, authenticator or runtime client. The Grok protocol
+implementation remains open under DSA-127; this contract is not an enabled or live-qualified adapter.
+The region and tier premiums follow [xAI pricing](https://docs.x.ai/developers/pricing).
+
 `ImageProviderService.SetupDefinitions` and `CreateSettingsManager` provide the same editing surface for
 ComfyUI. Supply `IImageWorkflowChoiceSource` for host-owned saved workflows and a typed
 `ISetupCommitTarget<ImageSetupChanges>`. Header values remain protected, deletion is explicit, and

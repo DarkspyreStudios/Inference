@@ -35,6 +35,8 @@ public sealed record LlmConnection
 
     public LlmVertexConfiguration? Vertex { get; init; }
 
+    public XaiConnectionOptions? Xai { get; init; }
+
     /// <summary>Non-standard headers such as OpenRouter attribution headers.</summary>
     public IReadOnlyDictionary<string, string> AdditionalHeaders { get; init; } =
         new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);

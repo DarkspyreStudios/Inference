@@ -205,6 +205,11 @@ the gaps below are not a request to move the application's database or vault int
 `LlmConnectionAccess` owns runtime OAuth refresh for chat and embeddings. Its connection-bound
 `LlmConnectionAuthorization` supplies Common's neutral authorization header without exposing storage.
 
+The xAI connection contract supplies `XaiResponses`, typed region/tier options, fixed endpoints,
+and OAuth-only draft setup and sign-in routing. It does not register a Grok provider or implement
+the device protocol. [Connect's setup contract](../Connect/README.md#provider-setup-and-editing)
+describes this inert DSA-127 boundary; it is not an additional completed provider in the table below.
+
 | Provider | Current definition/behavior | Needed in the configuration contract |
 |---|---|---|
 | OpenAI API key / Responses | API-key setup, endpoint default, model and test steps | Typed key/endpoint inputs, validation and callable setup state; explicit test side effects |

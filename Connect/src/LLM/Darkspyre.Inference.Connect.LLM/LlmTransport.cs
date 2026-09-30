@@ -21,5 +21,8 @@ public enum LlmTransport
     GoogleVertexAi = 11,
 
     /// <summary>The Gemini API (Google AI Studio) with an API key.</summary>
-    GoogleGeminiApi = 12
+    GoogleGeminiApi = 12,
+
+    /// <summary>The xAI Responses API with a host-owned Grok OAuth credential.</summary>
+    XaiResponses = 13
 }

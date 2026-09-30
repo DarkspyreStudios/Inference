@@ -128,6 +128,11 @@ public sealed class LlmProviderService : IDisposable, IAsyncDisposable
         using var operation = _lifetime.Enter(cancellationToken);
         cancellationToken = operation.Token;
         LlmConnection? connection = await _connections.GetConnectionAsync(connectionId, cancellationToken);
+        LlmCredential? credential = LlmCredential.Parse(connection?.Credential);
+        if (connection?.Transport == LlmTransport.XaiResponses
+            && (string.IsNullOrWhiteSpace(credential?.OAuth?.AccessToken)
+                || !string.IsNullOrEmpty(credential.ApiKey) || credential.SecretHeaders.Count != 0))
+            return false;
         if (connection is not null
             && _clients.TryGetValue(connection.Transport, out ILlmClient? client)
             && client is IExternalLlmAuthenticationProbe externalProbe)
@@ -135,7 +140,8 @@ public sealed class LlmProviderService : IDisposable, IAsyncDisposable
             return await externalProbe.IsAuthenticatedAsync(connection, cancellationToken);
         }
 
-        LlmCredential? credential = LlmCredential.Parse(connection?.Credential);
+        if (connection?.Transport == LlmTransport.XaiResponses)
+            return true;
         return credential is not null
             && (!string.IsNullOrWhiteSpace(credential.ApiKey)
                 || !string.IsNullOrWhiteSpace(credential.OAuth?.AccessToken)
@@ -160,6 +166,8 @@ public sealed class LlmProviderService : IDisposable, IAsyncDisposable
             connectionId,
             expectedVersion,
             cancellationToken);
+        if (connection.Transport == LlmTransport.XaiResponses)
+            throw new NotSupportedException("Grok requires OAuth sign-in; an API key is not supported.");
         await _connections.SaveCredentialAsync(
             connectionId,
             new LlmCredential { ApiKey = apiKey }.Serialize(),
@@ -195,6 +203,37 @@ public sealed class LlmProviderService : IDisposable, IAsyncDisposable
             credential.Serialize(),
             connection.Version,
             cancellationToken);
+    }
+
+    /// <summary>Starts Grok device authorization. The xAI authenticator must be registered.</summary>
+    public async Task<LlmDeviceCode> StartXaiLoginAsync(CancellationToken cancellationToken = default)
+    {
+        using var operation = _lifetime.Enter(cancellationToken);
+        LlmDeviceCode code = await XaiLogin().StartAsync(operation.Token).ConfigureAwait(false);
+        operation.Token.ThrowIfCancellationRequested();
+        return code;
+    }
+
+    /// <summary>Performs one Grok token poll and saves only against the supplied connection version.</summary>
+    public async Task CompleteXaiLoginAsync(
+        string connectionId,
+        string deviceAuthId,
+        string userCode,
+        string expectedVersion,
+        CancellationToken cancellationToken = default)
+    {
+        using var operation = _lifetime.Enter(cancellationToken);
+        cancellationToken = operation.Token;
+        ArgumentException.ThrowIfNullOrWhiteSpace(deviceAuthId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(userCode);
+        LlmConnection connection = await RequireExpectedVersionAsync(connectionId, expectedVersion, cancellationToken)
+            .ConfigureAwait(false);
+        if (connection.Transport != LlmTransport.XaiResponses)
+            throw new InvalidOperationException("Grok OAuth can be attached only to an xAI connection.");
+        cancellationToken.ThrowIfCancellationRequested();
+        LlmCredential credential = await XaiLogin().CompleteAsync(deviceAuthId, userCode, cancellationToken)
+            .ConfigureAwait(false);
+        await SaveXaiCredentialAsync(connectionId, connection.Version, credential, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>Starts the optional OAuth flow used only for Claude subscription model discovery.</summary>
@@ -287,7 +326,7 @@ public sealed class LlmProviderService : IDisposable, IAsyncDisposable
     }
 
     /// <summary>
-    /// Runs the interactive sign-in flow for a Codex or Claude connection. The connection version is
+    /// Runs the interactive sign-in flow for a Codex, Grok or Claude connection. The connection version is
     /// captured before authentication starts, so a delayed result cannot overwrite a connection that
     /// the host changed or replaced while the user was signing in.
     /// </summary>
@@ -314,6 +353,15 @@ public sealed class LlmProviderService : IDisposable, IAsyncDisposable
                     codexCredential.Serialize(),
                     connection.Version,
                     cancellationToken);
+                break;
+
+            case LlmTransport.XaiResponses:
+                cancellationToken.ThrowIfCancellationRequested();
+                LlmDeviceCode xaiCode = await XaiLogin().StartAsync(cancellationToken).ConfigureAwait(false);
+                cancellationToken.ThrowIfCancellationRequested();
+                await prompt.ShowDeviceCodeAsync(xaiCode, cancellationToken).ConfigureAwait(false);
+                LlmCredential xaiCredential = await PollXaiAsync(xaiCode, cancellationToken).ConfigureAwait(false);
+                await SaveXaiCredentialAsync(connectionId, connection.Version, xaiCredential, cancellationToken).ConfigureAwait(false);
                 break;
 
             case LlmTransport.AnthropicClaudeCli:
@@ -754,6 +802,29 @@ public sealed class LlmProviderService : IDisposable, IAsyncDisposable
         }
     }
 
+    private async Task<LlmCredential> PollXaiAsync(LlmDeviceCode code, CancellationToken token)
+    {
+        while (true)
+        {
+            await XaiDevicePolling.WaitAsync(code, token).ConfigureAwait(false);
+            try
+            {
+                return await XaiLogin().CompleteAsync(code.DeviceAuthId, code.UserCode, token).ConfigureAwait(false);
+            }
+            catch (LlmAuthPendingException pending) { code = XaiDevicePolling.AfterPending(code, pending); }
+        }
+    }
+
+    private async Task SaveXaiCredentialAsync(string connectionId, string version, LlmCredential credential, CancellationToken token)
+    {
+        token.ThrowIfCancellationRequested();
+        if (string.IsNullOrWhiteSpace(credential.OAuth?.AccessToken)
+            || !string.IsNullOrEmpty(credential.ApiKey) || credential.SecretHeaders.Count != 0)
+            throw new InvalidOperationException("Grok sign-in did not return an OAuth credential.");
+        await _connections.SaveCredentialAsync(connectionId, credential.Serialize(), version, token).ConfigureAwait(false);
+        token.ThrowIfCancellationRequested();
+    }
+
     private ILlmClient ClientFor(LlmTransport transport) =>
         _clients.TryGetValue(transport, out ILlmClient? client)
             ? client
@@ -782,6 +853,12 @@ public sealed class LlmProviderService : IDisposable, IAsyncDisposable
             && authenticator is ICodexDeviceLogin login
                 ? login
                 : throw new NotSupportedException("Codex login is not registered.");
+
+    private IXaiDeviceLogin XaiLogin() =>
+        _authenticators.TryGetValue(LlmTransport.XaiResponses, out ILlmAuthenticator? authenticator)
+            && authenticator is IXaiDeviceLogin login
+                ? login
+                : throw new NotSupportedException("Grok login is not registered.");
 
     private IClaudePkceLogin ClaudeLogin() =>
         _authenticators.TryGetValue(LlmTransport.AnthropicClaudeCli, out ILlmAuthenticator? authenticator)
