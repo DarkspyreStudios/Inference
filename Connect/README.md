@@ -1281,8 +1281,9 @@ echo 'Reply only with OK.' | dotnet run --project tools/Darkspyre.Inference.Conn
   prompt --provider openai-compatible-api --endpoint http://gpu-box:8080/v1 --model qwen3.8-27b
 ```
 
-`models` and `agent` accept the same provider and endpoint options. An endpoint that permits
-unauthenticated access needs no login. The override is process-local and does not persist a connection.
+`models` and `agent` accept the same provider and endpoint options. The override selects an
+anonymous endpoint without reading or writing stored credentials. It is process-local and does
+not persist a connection. The default endpoint retains its stored credential.
 
 `tools/Darkspyre.Inference.Connect.ConsoleTester` exercises the public Darkspyre.Inference.Connect.LLM facade directly without a shim or
 consuming application. `providers` lists the registered adapters; `setup --provider <id>` displays

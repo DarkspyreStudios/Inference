@@ -793,6 +793,7 @@ internal static class Program
               echo 'Call darkspyre_inference_connect_attachment with kind document and quote its text.' | darkspyre-inference-connect-tester agent --provider claude --model sonnet
 
             providers and setup display adapter-owned metadata without generation or authentication.
+            OpenAI-compatible --endpoint selects an anonymous test endpoint without reading or writing stored credentials.
             Apple needs its separately built helper and a ready on-device model; no login is required.
             Apple defaults its model from provider metadata. --helper accepts a name on PATH or an absolute path.
             vertex-probe performs explicit metered cloud generation using ADC; missing access is reported as skipped.

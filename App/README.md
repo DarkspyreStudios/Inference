@@ -89,7 +89,8 @@ echo 'Call darkspyre_inference_connect_echo with text Hello, then reply with its
   agent --provider openai-compatible-api --endpoint http://gpu-box:8080/v1 --model qwen3.8-27b
 ```
 
-The endpoint override is local to that process. An unauthenticated endpoint requires no login.
+The endpoint override is local to that process. It selects an anonymous endpoint without
+reading or writing stored credentials, so it also works in Windows SSH sessions.
 Use the machine's LAN or Tailscale IP if `gpu-box` is only an SSH alias.
 
 ## Windows setup and deployment

@@ -24,7 +24,7 @@ public sealed class ConsoleTesterTests
     public async Task CompatibleEndpointCanBeInspectedAndUsedWithoutStoredCredentials()
     {
         ConsoleInvocation invocation = Parse(["status", "--provider", "openai-compatible-api", "--endpoint", "http://gpu-box:8080/v1"]);
-        var source = new SecureConnectionSource(new InMemoryCredentialStore(), Providers, invocation);
+        var source = new SecureConnectionSource(new UnavailableCredentialStore(), Providers, invocation);
         var services = new ServiceCollection();
         services.AddLlmConnect();
         services.ConfigureAll<Microsoft.Extensions.Http.HttpClientFactoryOptions>(options =>
@@ -36,6 +36,18 @@ public sealed class ConsoleTesterTests
         Assert.Equal(0, await ConsoleSetup.DescribeAsync(llms, invocation, description, CancellationToken.None));
         Assert.Contains("OpenAI-Compatible API", description.ToString(), StringComparison.Ordinal);
         Assert.Null((await source.GetConnectionAsync(invocation.Provider.ConnectionId))?.Credential);
+        await Assert.ThrowsAsync<NotSupportedException>(() => source.SaveCredentialAsync(
+            invocation.Provider.ConnectionId, "test", "test"));
+    }
+
+    private sealed class UnavailableCredentialStore : ICredentialStore
+    {
+        public ValueTask<string?> GetAsync(string name, CancellationToken cancellationToken = default) =>
+            throw new InvalidOperationException("The credential vault is unavailable in this session.");
+        public ValueTask SetAsync(string name, string secret, CancellationToken cancellationToken = default) =>
+            throw new InvalidOperationException("The credential vault is unavailable in this session.");
+        public ValueTask DeleteAsync(string name, CancellationToken cancellationToken = default) =>
+            throw new InvalidOperationException("The credential vault is unavailable in this session.");
     }
 
     private sealed class CompatibleModelHandler : HttpMessageHandler
