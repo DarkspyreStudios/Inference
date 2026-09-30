@@ -285,3 +285,14 @@ Gemini and Vertex Gemini share `ThinkingConfig`: display adds `includeThoughts` 
 including the profile's default when no level is selected. Disabling display leaves level and budget
 fields unchanged. Catalog evidence that a Gemini model does not think suppresses the default summary
 request.
+
+Anthropic profiles carry default-thinking and default-display metadata in the shared family table.
+Adaptive reasoning requests `display: summarized` only for omitted-default families when display is
+enabled. A null level on a default-thinking profile adds adaptive summarized display without an
+effort; negative catalog evidence prevents it. Budget, effort-only, `None` and older adaptive mappings
+retain their existing fields. Vertex Claude uses the same profile after removing its publisher prefix;
+the qualified Sonnet 4.6 body has no display field. Bedrock Converse keeps its existing model fields.
+
+Streaming Claude CLI chat requests `showThinkingSummaries` through a per-call settings file only
+when reasoning display is enabled. Completion, cancellation, failure and reader disposal remove that
+file with the working directory. Authentication probes and non-streaming calls do not use it.

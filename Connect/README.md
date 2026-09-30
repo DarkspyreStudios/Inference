@@ -335,7 +335,19 @@ Gemini and Vertex Gemini request `includeThoughts` for active
 reasoning, including a thinking profile with no explicit level. Turning display off leaves effort,
 thinking levels and budgets unchanged. Claude CLI chat maps `thinking_delta` to public summaries
 and ignores signature deltas. AgentCore chat emits reasoning events, not activity text. Native
-Claude and AgentCore sessions honor the same display override.
+Claude and AgentCore sessions honor the same display override. Streaming Claude CLI chat writes
+`showThinkingSummaries: true` to a per-call settings file and passes its path through `--settings`
+when display is enabled. The file is removed with the call's working directory on completion,
+cancellation, failure or reader disposal. Authentication probes and non-streaming calls receive no
+summary settings file. The setting requests summaries; it does not guarantee that the CLI returns them.
+
+Anthropic Messages and Vertex Claude share model profiles. Positive adaptive reasoning requests
+`thinking.display = summarized` on families whose default display is omitted. A null level requests
+only that display with adaptive thinking on the named default-thinking Opus 5, Sonnet 5, Fable and
+Mythos families; it invents no effort or budget. Explicit `None`, budget models, effort-only models
+and older adaptive models retain their existing controls. Disabling display omits the summary request
+without changing explicit reasoning controls. Catalog evidence remains authoritative for thinking
+support. The qualified Vertex Sonnet 4.6 request body receives no new display field.
 
 `SupportsStreamingUsage` describes usage reported by completion. `SupportsUsageDeltas` describes
 running `LlmUsageDeltaEvent` observations and is mirrored on Common's capabilities. Each observation

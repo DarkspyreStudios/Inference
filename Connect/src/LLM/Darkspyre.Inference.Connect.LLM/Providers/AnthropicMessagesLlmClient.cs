@@ -658,38 +658,36 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
             ["messages"] = messages,
             ["stream"] = stream
         };
-        if (request.ReasoningLevel is { } level)
+        AnthropicReasoningFields fields = AnthropicModelProfiles.Fields(
+            AnthropicModelProfiles.Resolve(
+                ReasoningModelId(request.ModelId),
+                ILlmCatalogCapabilities.EntryFor(connection, request.ModelId)),
+            request.ReasoningLevel,
+            request.MaxOutputTokens ?? DefaultMaxOutputTokens,
+            GetCapabilities(connection, request.ModelId).SupportsReasoningText);
+        if (fields.Thinking is { } thinking)
         {
-            AnthropicReasoningFields fields = AnthropicModelProfiles.Fields(
-                AnthropicModelProfiles.Resolve(
-                    ReasoningModelId(request.ModelId),
-                    ILlmCatalogCapabilities.EntryFor(connection, request.ModelId)),
-                level,
-                request.MaxOutputTokens ?? DefaultMaxOutputTokens);
-            if (fields.Thinking is { } thinking)
+            payload["thinking"] = thinking;
+        }
+        if (fields.OutputConfig is { } outputConfig)
+        {
+            if (payload["output_config"] is JsonObject existing)
             {
-                payload["thinking"] = thinking;
-            }
-            if (fields.OutputConfig is { } outputConfig)
-            {
-                if (payload["output_config"] is JsonObject existing)
+                // Keep fields another feature already wrote, such as a response format.
+                foreach ((string name, JsonNode? value) in outputConfig.ToArray())
                 {
-                    // Keep fields another feature already wrote, such as a response format.
-                    foreach ((string name, JsonNode? value) in outputConfig.ToArray())
-                    {
-                        outputConfig.Remove(name);
-                        existing[name] = value;
-                    }
-                }
-                else
-                {
-                    payload["output_config"] = outputConfig;
+                    outputConfig.Remove(name);
+                    existing[name] = value;
                 }
             }
-            if (fields.MaxTokens is int maxTokens)
+            else
             {
-                payload["max_tokens"] = maxTokens;
+                payload["output_config"] = outputConfig;
             }
+        }
+        if (fields.MaxTokens is int maxTokens)
+        {
+            payload["max_tokens"] = maxTokens;
         }
         if (system.Count > 0)
         {

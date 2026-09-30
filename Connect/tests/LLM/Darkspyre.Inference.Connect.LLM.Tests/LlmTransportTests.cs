@@ -652,9 +652,9 @@ public sealed class LlmTransportTests
 
     [Theory]
     [InlineData("claude-opus-4-7", LlmReasoningLevel.None, """{"type":"disabled"}""", null, 8192)]
-    [InlineData("claude-opus-4-7", LlmReasoningLevel.ExtraHigh, """{"type":"adaptive"}""", "xhigh", 8192)]
+    [InlineData("claude-opus-4-7", LlmReasoningLevel.ExtraHigh, """{"type":"adaptive","display":"summarized"}""", "xhigh", 8192)]
     [InlineData("claude-opus-5", LlmReasoningLevel.None, """{"type":"disabled"}""", null, 8192)]
-    [InlineData("claude-fable-5-1", LlmReasoningLevel.Low, """{"type":"adaptive"}""", "low", 8192)]
+    [InlineData("claude-fable-5-1", LlmReasoningLevel.Low, """{"type":"adaptive","display":"summarized"}""", "low", 8192)]
     [InlineData("claude-opus-4-6", LlmReasoningLevel.None, null, null, 8192)]
     [InlineData("claude-opus-4-6", LlmReasoningLevel.Maximum, """{"type":"adaptive"}""", "max", 8192)]
     [InlineData("claude-opus-4-5", LlmReasoningLevel.High, null, "high", 8192)]

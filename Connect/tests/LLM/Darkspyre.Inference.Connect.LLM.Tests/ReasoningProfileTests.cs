@@ -146,13 +146,13 @@ public sealed class ReasoningProfileTests
         Assert.Equal(offersNone ? [LlmReasoningLevel.None, .. LowToMaximum] : LowToMaximum, profile.ReasoningLevels.Order());
         Assert.Equal(forcedToolChoice, profile.AllowsForcedToolChoice);
         Assert.False(profile.AllowsSampling);
-        AnthropicReasoningFields high = AnthropicModelProfiles.Fields(profile, LlmReasoningLevel.High, 8192);
-        Assert.Equal("""{"type":"adaptive"}""", high.Thinking!.ToJsonString());
+        AnthropicReasoningFields high = AnthropicModelProfiles.Fields(profile, LlmReasoningLevel.High, 8192, true);
+        Assert.Equal("""{"type":"adaptive","display":"summarized"}""", high.Thinking!.ToJsonString());
         Assert.Equal("""{"effort":"high"}""", high.OutputConfig!.ToJsonString());
         Assert.Null(high.MaxTokens);
         if (offersNone)
         {
-            Assert.Equal("""{"type":"disabled"}""", AnthropicModelProfiles.Fields(profile, LlmReasoningLevel.None, 8192).Thinking!.ToJsonString());
+            Assert.Equal("""{"type":"disabled"}""", AnthropicModelProfiles.Fields(profile, LlmReasoningLevel.None, 8192, true).Thinking!.ToJsonString());
         }
     }
 
@@ -169,15 +169,15 @@ public sealed class ReasoningProfileTests
         Assert.Equal([LlmReasoningLevel.None, LlmReasoningLevel.Low, LlmReasoningLevel.Medium, LlmReasoningLevel.High], effortOnly.ReasoningLevels.Order());
         Assert.Equal([LlmReasoningLevel.None, .. LowToMaximum], budget.ReasoningLevels.Order());
         Assert.True(adaptive46.AllowsSampling && effortOnly.AllowsSampling && budget.AllowsSampling);
-        Assert.Equal(new AnthropicReasoningFields(null, null, null), AnthropicModelProfiles.Fields(adaptive46, LlmReasoningLevel.None, 8192));
-        AnthropicReasoningFields effort = AnthropicModelProfiles.Fields(effortOnly, LlmReasoningLevel.Medium, 8192);
+        Assert.Equal(new AnthropicReasoningFields(null, null, null), AnthropicModelProfiles.Fields(adaptive46, LlmReasoningLevel.None, 8192, true));
+        AnthropicReasoningFields effort = AnthropicModelProfiles.Fields(effortOnly, LlmReasoningLevel.Medium, 8192, true);
         Assert.Null(effort.Thinking);
         Assert.Equal("""{"effort":"medium"}""", effort.OutputConfig!.ToJsonString());
-        AnthropicReasoningFields budgeted = AnthropicModelProfiles.Fields(budget, LlmReasoningLevel.High, 8192);
+        AnthropicReasoningFields budgeted = AnthropicModelProfiles.Fields(budget, LlmReasoningLevel.High, 8192, true);
         Assert.Equal("""{"type":"enabled","budget_tokens":16384}""", budgeted.Thinking!.ToJsonString());
         Assert.Null(budgeted.OutputConfig);
         Assert.Equal(8192 + 16_384, budgeted.MaxTokens);
-        Assert.Equal(new AnthropicReasoningFields(null, null, null), AnthropicModelProfiles.Fields(budget, LlmReasoningLevel.None, 8192));
+        Assert.Equal(new AnthropicReasoningFields(null, null, null), AnthropicModelProfiles.Fields(budget, LlmReasoningLevel.None, 8192, true));
         Assert.Empty(AnthropicModelProfiles.Resolve("claude-test", null).ReasoningLevels);
     }
 

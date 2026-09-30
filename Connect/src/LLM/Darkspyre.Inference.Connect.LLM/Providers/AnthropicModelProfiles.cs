@@ -34,7 +34,11 @@ internal sealed record AnthropicModelProfile(
     bool AllowsForcedToolChoice,
     bool? SupportsStructuredOutputs,
     long? MaxInputTokens,
-    long? MaxOutputTokens);
+    long? MaxOutputTokens)
+{
+    public bool ThinksByDefault { get; init; }
+    public bool DisplayDefaultsToOmitted { get; init; }
+}
 
 /// <summary>The request fields a reasoning level adds: <c>thinking</c>, <c>output_config</c> and a raised <c>max_tokens</c>.</summary>
 internal sealed record AnthropicReasoningFields(JsonObject? Thinking, JsonObject? OutputConfig, int? MaxTokens);
@@ -50,7 +54,11 @@ internal static class AnthropicModelProfiles
         AnthropicNoneMapping NoneMapping,
         bool AllowsSampling,
         bool AllowsForcedToolChoice,
-        IReadOnlySet<LlmReasoningLevel> Levels);
+        IReadOnlySet<LlmReasoningLevel> Levels)
+    {
+        public bool ThinksByDefault { get; init; }
+        public bool DisplayDefaultsToOmitted { get; init; }
+    }
 
     private static readonly IReadOnlySet<LlmReasoningLevel> Effort = LlmReasoningEffort.Levels(
         LlmReasoningLevel.Low, LlmReasoningLevel.Medium, LlmReasoningLevel.High,
@@ -78,13 +86,18 @@ internal static class AnthropicModelProfiles
     }.ToFrozenDictionary();
 
     private static readonly FamilyRow AlwaysOnNoForcedTools = new(
-        AnthropicThinkingMode.Adaptive, AnthropicNoneMapping.Unsupported, false, false, Effort);
+        AnthropicThinkingMode.Adaptive, AnthropicNoneMapping.Unsupported, false, false, Effort)
+    { ThinksByDefault = true, DisplayDefaultsToOmitted = true };
 
     private static readonly FamilyRow AlwaysOn = new(
-        AnthropicThinkingMode.Adaptive, AnthropicNoneMapping.Unsupported, false, true, Effort);
+        AnthropicThinkingMode.Adaptive, AnthropicNoneMapping.Unsupported, false, true, Effort)
+    { ThinksByDefault = true, DisplayDefaultsToOmitted = true };
 
     private static readonly FamilyRow Disableable = new(
-        AnthropicThinkingMode.Adaptive, AnthropicNoneMapping.Disabled, false, true, EffortWithNone);
+        AnthropicThinkingMode.Adaptive, AnthropicNoneMapping.Disabled, false, true, EffortWithNone)
+    { ThinksByDefault = true, DisplayDefaultsToOmitted = true };
+
+    private static readonly FamilyRow AdaptiveOmitted = Disableable with { ThinksByDefault = false };
 
     private static readonly FamilyRow Adaptive46 = new(
         AnthropicThinkingMode.Adaptive, AnthropicNoneMapping.OmitThinking, true, true, Effort46);
@@ -107,8 +120,8 @@ internal static class AnthropicModelProfiles
         ("claude-sonnet-5-5", AlwaysOnNoForcedTools),
         ("claude-opus-5", Disableable),
         ("claude-sonnet-5", Disableable),
-        ("claude-opus-4-8", Disableable),
-        ("claude-opus-4-7", Disableable),
+        ("claude-opus-4-8", AdaptiveOmitted),
+        ("claude-opus-4-7", AdaptiveOmitted),
         ("claude-opus-4-6", Adaptive46),
         ("claude-sonnet-4-6", Adaptive46),
         ("claude-opus-4-5", EffortOnly),
@@ -149,22 +162,34 @@ internal static class AnthropicModelProfiles
                 row?.AllowsForcedToolChoice ?? true,
                 Supported(entry, "capabilities", "structured_outputs"),
                 Long(entry, "max_input_tokens"),
-                Long(entry, "max_tokens"));
+                Long(entry, "max_tokens"))
+            {
+                ThinksByDefault = thinking == AnthropicThinkingMode.Adaptive && row?.ThinksByDefault == true,
+                DisplayDefaultsToOmitted = row?.DisplayDefaultsToOmitted == true
+            };
         }
 
         return row is null
             ? Unknown
             : new AnthropicModelProfile(row.Thinking, row.NoneMapping, row.Levels, row.AllowsSampling,
-                row.AllowsForcedToolChoice, SupportsStructuredOutputs: null, MaxInputTokens: null, MaxOutputTokens: null);
+                row.AllowsForcedToolChoice, SupportsStructuredOutputs: null, MaxInputTokens: null, MaxOutputTokens: null)
+            { ThinksByDefault = row.ThinksByDefault, DisplayDefaultsToOmitted = row.DisplayDefaultsToOmitted };
     }
 
     /// <summary>
-    /// The fields a level adds. Validation has already confirmed the profile offers the level.
+    /// The fields a level or summary request adds. Validation has already confirmed the profile offers the level.
     /// <paramref name="maxOutputTokens"/> is the request's output allowance; a thinking budget is added to it so
     /// neither is reduced.
     /// </summary>
-    public static AnthropicReasoningFields Fields(AnthropicModelProfile profile, LlmReasoningLevel level, int maxOutputTokens)
+    public static AnthropicReasoningFields Fields(AnthropicModelProfile profile, LlmReasoningLevel? level,
+        int maxOutputTokens, bool requestReasoningText)
     {
+        if (level is null)
+        {
+            return profile.ThinksByDefault && requestReasoningText
+                ? new(AdaptiveThinking(profile, requestReasoningText), null, null)
+                : new(null, null, null);
+        }
         if (level == LlmReasoningLevel.None)
         {
             // Models that run without thinking when the field is absent need nothing; models that think by default
@@ -177,19 +202,26 @@ internal static class AnthropicModelProfiles
         return profile.Thinking switch
         {
             AnthropicThinkingMode.Adaptive => new(
-                new JsonObject { ["type"] = "adaptive" },
-                new JsonObject { ["effort"] = LlmReasoningEffort.Word(level) },
+                AdaptiveThinking(profile, requestReasoningText),
+                new JsonObject { ["effort"] = LlmReasoningEffort.Word(level.Value) },
                 null),
             AnthropicThinkingMode.EffortOnly => new(
                 null,
-                new JsonObject { ["effort"] = LlmReasoningEffort.Word(level) },
+                new JsonObject { ["effort"] = LlmReasoningEffort.Word(level.Value) },
                 null),
             AnthropicThinkingMode.Budget => new(
-                new JsonObject { ["type"] = "enabled", ["budget_tokens"] = Budgets[level] },
+                new JsonObject { ["type"] = "enabled", ["budget_tokens"] = Budgets[level.Value] },
                 null,
-                checked(maxOutputTokens + Budgets[level])),
+                checked(maxOutputTokens + Budgets[level.Value])),
             _ => new(null, null, null)
         };
+    }
+
+    private static JsonObject AdaptiveThinking(AnthropicModelProfile profile, bool requestReasoningText)
+    {
+        var thinking = new JsonObject { ["type"] = "adaptive" };
+        if (requestReasoningText && profile.DisplayDefaultsToOmitted) { thinking["display"] = "summarized"; }
+        return thinking;
     }
 
     private static FamilyRow? Family(string? modelId)

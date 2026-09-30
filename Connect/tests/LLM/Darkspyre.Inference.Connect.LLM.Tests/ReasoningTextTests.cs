@@ -1,5 +1,6 @@
 using System.Net;
 using System.Text;
+using System.Text.Json;
 using System.Text.Json.Nodes;
 using Darkspyre.Inference.Common.LLM;
 using Darkspyre.Inference.Connect.LLM.Internal;
@@ -104,9 +105,11 @@ public sealed class ReasoningTextTests
     }
 
     [Theory]
-    [InlineData(true)]
-    [InlineData(false)]
-    public async Task AnthropicDisplaySwitchPreservesSignedThinking(bool streaming)
+    [InlineData(true, true)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(false, false)]
+    public async Task AnthropicDisplaySwitchPreservesSignedThinking(bool streaming, bool display)
     {
         const string complete = """{"type":"message","content":[{"type":"thinking","thinking":"Plan.","signature":"signed"},{"type":"text","text":"Answer."}],"stop_reason":"end_turn"}""";
         const string streamed = """
@@ -133,12 +136,56 @@ public sealed class ReasoningTextTests
             """;
         var handler = new Handler(streaming ? streamed : complete, streaming);
         using var http = new HttpClient(handler);
-        var events = await Read(new AnthropicMessagesLlmClient(http).StreamAsync(Connection(LlmTransport.AnthropicMessages, streaming, false),
-            new() { ModelId = "claude-sonnet-4-6", Messages = [new("user", "hi")] }));
-        Assert.Empty(events.OfType<LlmReasoningDeltaEvent>());
+        var events = await Read(new AnthropicMessagesLlmClient(http).StreamAsync(Connection(LlmTransport.AnthropicMessages, streaming, display),
+            new() { ModelId = "claude-opus-5", Messages = [new("user", "hi")], ReasoningLevel = LlmReasoningLevel.High }));
+        Assert.Equal(display ? 1 : 0, events.OfType<LlmReasoningDeltaEvent>().Count());
         var result = Assert.IsType<LlmChatCompletionEvent>(events[^1]).Result;
         Assert.Equal("Answer.", result.Text);
         Assert.Contains("signed", result.ContinuationState!.Payload, StringComparison.Ordinal);
+        Assert.Equal("adaptive", (string?)handler.Body!["thinking"]!["type"]);
+        Assert.Equal(display ? "summarized" : null, (string?)handler.Body["thinking"]!["display"]);
+        Assert.Equal("high", (string?)handler.Body["output_config"]!["effort"]);
+    }
+
+    [Theory]
+    [InlineData("claude-fable-5", true)]
+    [InlineData("claude-fable-5-1", true)]
+    [InlineData("claude-mythos-preview", true)]
+    [InlineData("claude-mythos-5-1", true)]
+    [InlineData("claude-opus-5", true)]
+    [InlineData("claude-opus-5-5", true)]
+    [InlineData("claude-sonnet-5", true)]
+    [InlineData("claude-sonnet-5-5", true)]
+    [InlineData("claude-opus-4-8", false)]
+    [InlineData("claude-opus-4-7", false)]
+    [InlineData("claude-sonnet-4-6", false)]
+    [InlineData("claude-opus-4-5", false)]
+    [InlineData("claude-haiku-4-5", false)]
+    [InlineData("claude-unprofiled", false)]
+    public async Task AnthropicDefaultSummaryRequestsDoNotInventEffort(string model, bool thinksByDefault)
+    {
+        foreach (bool display in new[] { true, false })
+        {
+            var handler = new Handler("""{"type":"message","content":[],"stop_reason":"end_turn"}""", false);
+            using var http = new HttpClient(handler);
+            await Read(new AnthropicMessagesLlmClient(http).StreamAsync(Connection(LlmTransport.AnthropicMessages, false, display),
+                new() { ModelId = model, Messages = [new("user", "hi")] }));
+            JsonObject body = handler.Body!;
+            Assert.Null(body["output_config"]);
+            Assert.Equal(8192, (int?)body["max_tokens"]);
+            Assert.Equal(thinksByDefault && display ? "adaptive" : null, (string?)body["thinking"]?["type"]);
+            Assert.Equal(thinksByDefault && display ? "summarized" : null, (string?)body["thinking"]?["display"]);
+        }
+    }
+
+    [Fact]
+    public void AnthropicNegativeCatalogEvidenceDisablesDefaultThinking()
+    {
+        using JsonDocument catalog = JsonDocument.Parse("""{"capabilities":{"thinking":{"types":{"adaptive":{"supported":false},"enabled":{"supported":false}}},"effort":{"supported":false}}}""");
+        AnthropicModelProfile profile = AnthropicModelProfiles.Resolve("claude-opus-5", catalog.RootElement);
+        Assert.False(profile.ThinksByDefault);
+        Assert.Empty(profile.ReasoningLevels);
+        Assert.Equal(new AnthropicReasoningFields(null, null, null), AnthropicModelProfiles.Fields(profile, null, 8192, true));
     }
 
     [Fact]

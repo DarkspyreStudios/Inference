@@ -656,7 +656,8 @@ internal sealed class BedrockLlmClient(
                 AnthropicReasoningFields claude = AnthropicModelProfiles.Fields(
                     AnthropicModelProfiles.Resolve(BedrockModelFamilies.AnthropicModelId(baseModelId), catalogEntry: null),
                     level,
-                    maxOutputTokens ?? ClaudeDefaultMaxOutputTokens);
+                    maxOutputTokens ?? ClaudeDefaultMaxOutputTokens,
+                    requestReasoningText: false);
                 if (claude.Thinking is { } thinking)
                 {
                     fields["thinking"] = thinking;

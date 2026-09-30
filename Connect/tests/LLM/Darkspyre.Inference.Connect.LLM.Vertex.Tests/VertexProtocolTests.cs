@@ -216,6 +216,42 @@ public sealed class VertexProtocolTests
         Assert.Equal("Bearer test-token", Assert.Single(handler.Authorization));
     }
 
+    [Theory]
+    [InlineData(true, true)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(false, false)]
+    public async Task QualifiedClaudeProfileKeepsItsRequestAndSignedStateWithDisplayDisabled(bool streaming, bool display)
+    {
+        string[] reply = streaming
+            ? ["""{"type":"message_start","message":{"id":"m"}}""",
+                """{"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":"","signature":""}}""",
+                """{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"Plan."}}""",
+                """{"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"signed"}}""",
+                """{"type":"content_block_stop","index":0}""",
+                """{"type":"content_block_start","index":1,"content_block":{"type":"text","text":"Answer."}}""",
+                """{"type":"content_block_stop","index":1}""",
+                """{"type":"message_delta","delta":{"stop_reason":"end_turn"}}""",
+                """{"type":"message_stop"}"""]
+            : ["""{"type":"message","content":[{"type":"thinking","thinking":"Plan.","signature":"signed"},{"type":"text","text":"Answer."}],"stop_reason":"end_turn"}"""];
+        var handler = new Handler(reply) { Json = !streaming };
+        var client = new VertexLlmClient(new HttpClient(handler), new Authentication());
+        var events = new List<LlmStreamEvent>();
+        await foreach (LlmStreamEvent item in client.StreamAsync(Connection with
+        {
+            CapabilityOverrides = new() { SupportsStreaming = streaming, SupportsReasoningText = display }
+        }, new() { ModelId = Claude, Messages = [new("user", "hello")], ReasoningLevel = LlmReasoningLevel.High }))
+        { events.Add(item); }
+        Assert.Equal(display ? 1 : 0, events.OfType<LlmReasoningDeltaEvent>().Count());
+        LlmChatResult result = Assert.IsType<LlmChatCompletionEvent>(events[^1]).Result;
+        Assert.Equal("Answer.", result.Text);
+        Assert.Contains("signed", result.ContinuationState!.Payload, StringComparison.Ordinal);
+        JsonNode payload = JsonNode.Parse(Assert.Single(handler.Bodies))!;
+        Assert.Equal("adaptive", (string?)payload["thinking"]?["type"]);
+        Assert.Null(payload["thinking"]?["display"]);
+        Assert.Equal("high", (string?)payload["output_config"]?["effort"]);
+    }
+
     [Fact]
     public async Task StreamingOffCallsTheCompleteOperations()
     {

@@ -15,13 +15,35 @@ public sealed class ClaudeCliLlmClientTests
     [InlineData(false)]
     public async Task ThinkingDeltasArePublicSummariesOnlyWhenDisplayIsEnabled(bool enabled)
     {
+        string? settingsPath = null;
         var runner = new RecordingRunner(new ClaudeCliProcessResult(0,
             """
             {"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"thinking_delta","thinking":"Plan."}}}
             {"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"signature_delta","signature":"opaque"}}}
             {"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"Answer."}}}
             {"type":"result","subtype":"success","is_error":false,"result":"Answer."}
-            """, string.Empty));
+            """, string.Empty))
+        {
+            OnInvocation = invocation =>
+            {
+                Assert.True(Directory.Exists(invocation.WorkingDirectory));
+                if (enabled)
+                {
+                    int settingsIndex = invocation.Arguments.ToList().IndexOf("--settings");
+                    Assert.True(settingsIndex >= 0);
+                    settingsPath = invocation.Arguments[settingsIndex + 1];
+                    Assert.Equal(Path.Combine(invocation.WorkingDirectory, "claude-settings.json"), settingsPath);
+                    using JsonDocument settings = JsonDocument.Parse(File.ReadAllText(settingsPath));
+                    Assert.True(Assert.Single(settings.RootElement.EnumerateObject()).Value.GetBoolean());
+                    Assert.True(settings.RootElement.GetProperty("showThinkingSummaries").GetBoolean());
+                }
+                else
+                {
+                    Assert.DoesNotContain("--settings", invocation.Arguments);
+                    Assert.False(File.Exists(Path.Combine(invocation.WorkingDirectory, "claude-settings.json")));
+                }
+            }
+        };
         using var http = new HttpClient(new UnexpectedHttpHandler());
         var events = await ReadAllAsync(new ClaudeCliLlmClient(http, runner).StreamAsync(CliConnection() with
         { CapabilityOverrides = new() { SupportsReasoningText = enabled } }, new() { ModelId = "claude-test", Messages = [new("user", "hi")] }));
@@ -29,6 +51,8 @@ public sealed class ClaudeCliLlmClientTests
         if (enabled) { Assert.Equal(new LlmReasoningDeltaEvent("Plan.", true), events[0]); }
         Assert.Equal("Answer.", Assert.Single(events.OfType<LlmTextDeltaEvent>()).Delta);
         Assert.DoesNotContain(events.OfType<LlmReasoningDeltaEvent>(), item => item.Delta.Contains("opaque", StringComparison.Ordinal));
+        Assert.False(Directory.Exists(Assert.Single(runner.Invocations).WorkingDirectory));
+        Assert.False(settingsPath is not null && File.Exists(settingsPath));
     }
 
     [Fact]
@@ -47,6 +71,35 @@ public sealed class ClaudeCliLlmClientTests
         Assert.IsType<LlmUsageDeltaEvent>(iterator.Current);
         cancellation.Cancel();
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => iterator.MoveNextAsync().AsTask());
+        Assert.False(Directory.Exists(Assert.Single(runner.Invocations).WorkingDirectory));
+    }
+
+    [Fact]
+    public async Task SummarySettingsAreRemovedWhenStreamingOutputFails()
+    {
+        var runner = new RecordingRunner(new ClaudeCliProcessResult(0, "not-json", string.Empty))
+        {
+            OnInvocation = invocation => Assert.True(File.Exists(Path.Combine(invocation.WorkingDirectory, "claude-settings.json")))
+        };
+        using var http = new HttpClient(new UnexpectedHttpHandler());
+        await Assert.ThrowsAsync<LlmProviderException>(() => ReadAllAsync(new ClaudeCliLlmClient(http, runner)
+            .StreamAsync(CliConnection(), new() { ModelId = "claude-test", Messages = [new("user", "hi")] })));
+        Assert.False(Directory.Exists(Assert.Single(runner.Invocations).WorkingDirectory));
+    }
+
+    [Fact]
+    public async Task SummarySettingsAreRemovedWhenTheReaderStopsEarly()
+    {
+        var runner = new PausingStreamingRunner();
+        using var http = new HttpClient(new UnexpectedHttpHandler());
+        var iterator = new ClaudeCliLlmClient(http, runner).StreamAsync(CliConnection(),
+            new() { ModelId = "claude-test", Messages = [new("user", "hi")] }).GetAsyncEnumerator();
+        await using (iterator)
+        {
+            Assert.True(await iterator.MoveNextAsync());
+            Assert.True(File.Exists(Path.Combine(runner.Invocation!.WorkingDirectory, "claude-settings.json")));
+        }
+        Assert.False(Directory.Exists(runner.Invocation!.WorkingDirectory));
     }
 
     [Theory]
@@ -218,6 +271,7 @@ public sealed class ClaudeCliLlmClientTests
         Assert.DoesNotContain("--input-format", invocation.Arguments);
         Assert.DoesNotContain("--include-partial-messages", invocation.Arguments);
         Assert.DoesNotContain("--verbose", invocation.Arguments);
+        Assert.DoesNotContain("--settings", invocation.Arguments);
         Assert.Contains("Secret prompt text", invocation.StandardInput, StringComparison.Ordinal);
         Assert.DoesNotContain("Secret prompt text", string.Join(' ', invocation.Arguments), StringComparison.Ordinal);
         Assert.Collection(events,
@@ -311,6 +365,7 @@ public sealed class ClaudeCliLlmClientTests
         Assert.True(await client.IsAuthenticatedAsync(CliConnection()));
         Assert.Single(runner.Invocations);
         Assert.Equal(["auth", "status", "--json"], runner.Invocations[0].Arguments);
+        Assert.DoesNotContain("--settings", runner.Invocations[0].Arguments);
     }
 
     [Fact]
@@ -639,12 +694,14 @@ public sealed class ClaudeCliLlmClientTests
     private sealed class RecordingRunner(ClaudeCliProcessResult result) : IClaudeCliRunner
     {
         public List<ClaudeCliInvocation> Invocations { get; } = [];
+        public Action<ClaudeCliInvocation>? OnInvocation { get; init; }
 
         public Task<ClaudeCliProcessResult> RunAsync(
             ClaudeCliInvocation invocation,
             CancellationToken cancellationToken = default)
         {
             Invocations.Add(invocation);
+            OnInvocation?.Invoke(invocation);
             return Task.FromResult(result);
         }
     }
@@ -674,6 +731,7 @@ public sealed class ClaudeCliLlmClientTests
 
     private sealed class PausingStreamingRunner : IClaudeCliRunner
     {
+        public ClaudeCliInvocation? Invocation { get; private set; }
         public TaskCompletionSource WaitingForRelease { get; } =
             new(TaskCreationOptions.RunContinuationsAsynchronously);
 
@@ -689,6 +747,7 @@ public sealed class ClaudeCliLlmClientTests
             ClaudeCliInvocation invocation,
             [EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
+            Invocation = invocation;
             yield return new ClaudeCliOutputLine(
                 "{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"live-1\"}");
             yield return new ClaudeCliOutputLine(

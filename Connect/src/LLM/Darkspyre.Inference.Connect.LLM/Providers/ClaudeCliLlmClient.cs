@@ -2,6 +2,7 @@ using System.Net.Http.Headers;
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Darkspyre.Inference.Common.LLM;
 using Darkspyre.Inference.Connect.LLM.Internal;
 
@@ -135,6 +136,7 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
                            executable,
                            arguments,
                            standardInput,
+                           capabilities.SupportsReasoningText,
                            cancellationToken))
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -695,11 +697,19 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
         string executable,
         IReadOnlyList<string> arguments,
         string standardInput,
+        bool requestReasoningText,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         string workingDirectory = CliInfrastructure.CreateWorkingDirectory("claude");
         try
         {
+            if (requestReasoningText)
+            {
+                string settingsPath = Path.Combine(workingDirectory, "claude-settings.json");
+                var settings = new JsonObject { ["showThinkingSummaries"] = true };
+                await File.WriteAllTextAsync(settingsPath, settings.ToJsonString(), cancellationToken).ConfigureAwait(false);
+                arguments = [.. arguments, "--settings", settingsPath];
+            }
             IAsyncEnumerable<ClaudeCliProcessEvent> events = runner.StreamAsync(
                 new ClaudeCliInvocation(executable, arguments, standardInput, workingDirectory),
                 cancellationToken);
