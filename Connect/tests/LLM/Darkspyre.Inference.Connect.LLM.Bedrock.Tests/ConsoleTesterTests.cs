@@ -64,6 +64,18 @@ public sealed class ConsoleTesterTests
     }
 
     [Fact]
+    public void CompatibleEndpointOverrideIsValidatedAndRemovedFromPromptArguments()
+    {
+        ConsoleInvocation invocation = Parse(["prompt", "--provider", "openai-compatible-api",
+            "--endpoint", "http://gpu-box:8080/v1/", "--model", "qwen3.8-27b"]);
+        Assert.Equal("http://gpu-box:8080/v1", invocation.EndpointOverride);
+        Assert.Equal(["--model", "qwen3.8-27b"], invocation.CommandArguments);
+        Assert.Throws<ArgumentException>(() => Parse(["models", "--provider", "codex", "--endpoint", "http://gpu-box:8080/v1"]));
+        foreach (string value in new[] { "file:///model", "http://user:secret@gpu-box/v1", "http://gpu-box/v1?key=secret", "http://gpu-box/v1#x", "relative" })
+            Assert.Throws<ArgumentException>(() => Parse(["models", "--provider", "openai-compatible-api", "--endpoint", value]));
+    }
+
+    [Fact]
     public void InvocationRequiresAndResolvesProvider()
     {
         ConsoleInvocation invocation = Parse(

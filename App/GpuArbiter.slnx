@@ -1,0 +1,4 @@
+<Solution>
+  <Folder Name="/src/"><Project Path="src/GpuArbiter/GpuArbiter.csproj" /></Folder>
+  <Folder Name="/tests/"><Project Path="tests/GpuArbiter.Tests/GpuArbiter.Tests.csproj" /></Folder>
+</Solution>

@@ -925,3 +925,5 @@ artifacts/
 .claude/
 .codex/
 .secrets/
+# Task scratch output
+tmp/

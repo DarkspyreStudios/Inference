@@ -749,6 +749,8 @@ internal static class Program
             Darkspyre.Inference.Connect.ConsoleTester - direct Connect LLM smoke tests
 
             Usage:
+              darkspyre-inference-connect-tester prompt --provider openai-compatible-api --endpoint http://gpu-box:8080/v1 --model qwen3.8-27b
+              darkspyre-inference-connect-tester agent --provider openai-compatible-api --endpoint http://gpu-box:8080/v1 --model qwen3.8-27b
               darkspyre-inference-connect-tester providers
               darkspyre-inference-connect-tester setup --provider <provider-id-or-alias> [--helper <path>]
               darkspyre-inference-connect-tester status --provider apple [--helper <path>]

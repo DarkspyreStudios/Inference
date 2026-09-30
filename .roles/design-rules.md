@@ -12,6 +12,10 @@ configuration, package versions, documentation, tests, examples, and tools.
 `Connect`, `Tensor`, and `UI` are active workspaces in the unified 11.x family. Empty product roots do not
 justify placeholder projects or packages.
 
+`App/` owns the standalone GPU arbiter solution and its independent version, dependency pins,
+build configuration and Windows x64 deployment. It does not participate in the four-package
+Inference release. Its local MSBuild files isolate it from the package-family defaults.
+
 ## Capability layout
 
 Connect, Tensor, and UI group source assemblies and tests by capability:

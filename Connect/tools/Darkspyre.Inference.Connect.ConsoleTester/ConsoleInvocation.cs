@@ -21,6 +21,7 @@ internal sealed record ConsoleInvocation(
         string? providerId = null;
         string? harnessArn = null;
         string? helper = null;
+        string? endpoint = null;
         string? googleProject = null;
         string? googleLocation = null;
         var commandArguments = new List<string>();
@@ -64,6 +65,15 @@ internal sealed record ConsoleInvocation(
                 if (argument == "--google-project") { googleProject = args[index]; }
                 else { googleLocation = args[index]; }
             }
+            else if (argument == "--endpoint")
+            {
+                if (endpoint is not null || ++index >= args.Length
+                    || !Uri.TryCreate(args[index], UriKind.Absolute, out Uri? uri)
+                    || uri.Scheme is not ("http" or "https") || !string.IsNullOrEmpty(uri.UserInfo)
+                    || !string.IsNullOrEmpty(uri.Query) || !string.IsNullOrEmpty(uri.Fragment))
+                    throw new ArgumentException("--endpoint requires one HTTP(S) base URL without credentials, query or fragment.", nameof(args));
+                endpoint = uri.AbsoluteUri.TrimEnd('/');
+            }
             else if (argument == "--helper")
             {
                 if (helper is not null || ++index >= args.Length || string.IsNullOrWhiteSpace(args[index]))
@@ -101,6 +111,9 @@ internal sealed record ConsoleInvocation(
                 nameof(args));
         }
 
+        if (endpoint is not null && provider.Transport != LlmTransport.OpenAiCompatibleChat)
+            throw new ArgumentException("--endpoint is valid only for the OpenAI-compatible provider.", nameof(args));
+
         if (helper is not null && provider.Transport != LlmTransport.AppleFoundationModels)
             throw new ArgumentException("--helper is valid only for provider apple.", nameof(args));
         if (args[0] == "apple-probe" && provider.Transport != LlmTransport.AppleFoundationModels)
@@ -115,7 +128,7 @@ internal sealed record ConsoleInvocation(
             args[0],
             provider,
             [.. commandArguments],
-            helper ?? harnessArn)
+            endpoint ?? helper ?? harnessArn)
         {
             Vertex = provider.Transport == LlmTransport.GoogleVertexAi ? new()
             { ProjectId = googleProject ?? string.Empty, Location = googleLocation ?? string.Empty } : null
