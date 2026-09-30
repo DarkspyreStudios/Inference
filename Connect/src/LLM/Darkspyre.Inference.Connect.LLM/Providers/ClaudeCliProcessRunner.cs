@@ -8,9 +8,6 @@ namespace Darkspyre.Inference.Connect.LLM.Providers;
 internal sealed class ClaudeCliProcessRunner : IClaudeCliRunner
 {
     private const int MaximumCapturedCharacters = 16 * 1024 * 1024;
-    private static readonly Encoding Utf8WithoutPreamble = new UTF8Encoding(
-        encoderShouldEmitUTF8Identifier: false,
-        throwOnInvalidBytes: true);
 
     public async Task<ClaudeCliProcessResult> RunAsync(
         ClaudeCliInvocation invocation,
@@ -124,7 +121,7 @@ internal sealed class ClaudeCliProcessRunner : IClaudeCliRunner
     {
         var process = new Process
         {
-            StartInfo = CreateStartInfo(invocation)
+            StartInfo = CliProcessLauncher.CreateStartInfo(invocation.Executable, invocation.Arguments, invocation.WorkingDirectory)
         };
         try
         {
@@ -140,67 +137,6 @@ internal sealed class ClaudeCliProcessRunner : IClaudeCliRunner
             process.Dispose();
             throw new ClaudeCliUnavailableException(invocation.Executable, exception);
         }
-    }
-
-    internal static ProcessStartInfo CreateStartInfo(ClaudeCliInvocation invocation)
-    {
-        var startInfo = new ProcessStartInfo
-        {
-            WorkingDirectory = invocation.WorkingDirectory,
-            RedirectStandardInput = true,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            StandardInputEncoding = Utf8WithoutPreamble,
-            StandardOutputEncoding = Encoding.UTF8,
-            StandardErrorEncoding = Encoding.UTF8,
-            UseShellExecute = false,
-            CreateNoWindow = true
-        };
-        CliProcessTermination.Isolate(startInfo);
-
-        string extension = Path.GetExtension(invocation.Executable);
-        if (OperatingSystem.IsWindows()
-            && (string.Equals(extension, ".cmd", StringComparison.OrdinalIgnoreCase)
-                || string.Equals(extension, ".bat", StringComparison.OrdinalIgnoreCase)))
-        {
-            startInfo.FileName = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.System),
-                "cmd.exe");
-            startInfo.ArgumentList.Add("/d");
-            startInfo.ArgumentList.Add("/q");
-            startInfo.ArgumentList.Add("/v:off");
-            startInfo.ArgumentList.Add("/s");
-            startInfo.ArgumentList.Add("/c");
-            startInfo.ArgumentList.Add(BuildWindowsScriptCommand(invocation));
-            return startInfo;
-        }
-
-        startInfo.FileName = invocation.Executable;
-        foreach (string argument in invocation.Arguments)
-        {
-            startInfo.ArgumentList.Add(argument);
-        }
-
-        return startInfo;
-    }
-
-    private static string BuildWindowsScriptCommand(ClaudeCliInvocation invocation)
-    {
-        IEnumerable<string> values = new[] { invocation.Executable }.Concat(invocation.Arguments);
-        string[] quoted = [.. values.Select(QuoteWindowsScriptArgument)];
-        return $"\"{string.Join(' ', quoted)}\"";
-    }
-
-    private static string QuoteWindowsScriptArgument(string value)
-    {
-        if (value.IndexOfAny(['\"', '%', '!', '\r', '\n']) >= 0)
-        {
-            throw new ArgumentException(
-                "Claude CLI executable paths and arguments cannot contain quotes, percent signs, "
-                + "exclamation marks, or line breaks on Windows.");
-        }
-
-        return $"\"{value}\"";
     }
 
     internal static void EnsureCaptureLimit(int characterCount, string streamName)

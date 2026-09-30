@@ -33,6 +33,7 @@
     <Project Path="tests/TTS/Darkspyre.Inference.Connect.TTS.Tests/Darkspyre.Inference.Connect.TTS.Tests.csproj" />
   </Folder>
   <Folder Name="/tests/LLM/">
+    <Project Path="tests/LLM/Darkspyre.Inference.Connect.LLM.ProcessProbe/Darkspyre.Inference.Connect.LLM.ProcessProbe.csproj" />
     <Project Path="tests/LLM/Darkspyre.Inference.Connect.LLM.Bedrock.Tests/Darkspyre.Inference.Connect.LLM.Bedrock.Tests.csproj" />
     <Project Path="tests/LLM/Darkspyre.Inference.Connect.LLM.Vertex.Tests/Darkspyre.Inference.Connect.LLM.Vertex.Tests.csproj" />
     <Project Path="tests/LLM/Darkspyre.Inference.Connect.LLM.Tests/Darkspyre.Inference.Connect.LLM.Tests.csproj" />

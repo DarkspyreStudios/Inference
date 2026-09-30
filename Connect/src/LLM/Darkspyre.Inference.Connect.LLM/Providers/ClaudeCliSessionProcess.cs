@@ -18,7 +18,7 @@ internal sealed class ClaudeCliSessionProcessFactory : IClaudeCliSessionProcessF
             invocation.WorkingDirectory);
         var process = new Process
         {
-            StartInfo = ClaudeCliProcessRunner.CreateStartInfo(cliInvocation)
+            StartInfo = CliProcessLauncher.CreateStartInfo(cliInvocation.Executable, cliInvocation.Arguments, cliInvocation.WorkingDirectory)
         };
         try
         {

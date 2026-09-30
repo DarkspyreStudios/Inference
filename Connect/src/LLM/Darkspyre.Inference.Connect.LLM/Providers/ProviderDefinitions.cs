@@ -156,7 +156,7 @@ internal static class ProviderDefinitions
         DisplayName = "Claude Subscription",
         Description = "Use a Claude subscription through the separately authenticated official Claude CLI.",
         Transport = LlmTransport.AnthropicClaudeCli,
-        DefaultEndpoint = OperatingSystem.IsWindows() ? "claude.exe" : "claude",
+        DefaultEndpoint = "claude",
         DisplayOrder = 30,
         SetupSteps =
         [
@@ -202,7 +202,7 @@ internal static class ProviderDefinitions
         DisplayName = "Gemini Subscription",
         Description = "Use a Google subscription through the separately authenticated Antigravity CLI.",
         Transport = LlmTransport.GoogleAntigravityCli,
-        DefaultEndpoint = OperatingSystem.IsWindows() ? "agy.exe" : "agy",
+        DefaultEndpoint = "agy",
         DefaultModelId = "auto",
         DisplayOrder = 40,
         SetupSteps =

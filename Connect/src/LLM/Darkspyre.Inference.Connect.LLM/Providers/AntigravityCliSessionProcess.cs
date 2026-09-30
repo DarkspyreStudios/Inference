@@ -42,7 +42,7 @@ internal sealed class AntigravityCliSessionProcessFactory : IAntigravityCliSessi
     {
         var process = new Process
         {
-            StartInfo = CreateStartInfo(executable, arguments, workingDirectory)
+            StartInfo = CliProcessLauncher.CreateStartInfo(executable, arguments, workingDirectory)
         };
         try
         {
@@ -60,73 +60,6 @@ internal sealed class AntigravityCliSessionProcessFactory : IAntigravityCliSessi
         }
     }
 
-    private static readonly Encoding Utf8WithoutPreamble = new UTF8Encoding(
-        encoderShouldEmitUTF8Identifier: false,
-        throwOnInvalidBytes: true);
-
-    private static ProcessStartInfo CreateStartInfo(
-        string executable,
-        IReadOnlyList<string> arguments,
-        string workingDirectory)
-    {
-        var startInfo = new ProcessStartInfo
-        {
-            WorkingDirectory = workingDirectory,
-            RedirectStandardInput = true,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            StandardInputEncoding = Utf8WithoutPreamble,
-            StandardOutputEncoding = Encoding.UTF8,
-            StandardErrorEncoding = Encoding.UTF8,
-            UseShellExecute = false,
-            CreateNoWindow = true
-        };
-        CliProcessTermination.Isolate(startInfo);
-
-        string extension = Path.GetExtension(executable);
-        if (OperatingSystem.IsWindows()
-            && (string.Equals(extension, ".cmd", StringComparison.OrdinalIgnoreCase)
-                || string.Equals(extension, ".bat", StringComparison.OrdinalIgnoreCase)))
-        {
-            startInfo.FileName = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.System),
-                "cmd.exe");
-            startInfo.ArgumentList.Add("/d");
-            startInfo.ArgumentList.Add("/q");
-            startInfo.ArgumentList.Add("/v:off");
-            startInfo.ArgumentList.Add("/s");
-            startInfo.ArgumentList.Add("/c");
-            startInfo.ArgumentList.Add(BuildWindowsScriptCommand(executable, arguments));
-            return startInfo;
-        }
-
-        startInfo.FileName = executable;
-        foreach (string argument in arguments)
-        {
-            startInfo.ArgumentList.Add(argument);
-        }
-
-        return startInfo;
-    }
-
-    private static string BuildWindowsScriptCommand(string executable, IReadOnlyList<string> arguments)
-    {
-        IEnumerable<string> values = new[] { executable }.Concat(arguments);
-        string[] quoted = [.. values.Select(QuoteWindowsScriptArgument)];
-        return $"\"{string.Join(' ', quoted)}\"";
-    }
-
-    private static string QuoteWindowsScriptArgument(string value)
-    {
-        if (value.IndexOfAny(['\"', '%', '!', '\r', '\n']) >= 0)
-        {
-            throw new ArgumentException(
-                "Antigravity CLI executable paths and arguments cannot contain quotes, percent signs, "
-                + "exclamation marks, or line breaks on Windows.");
-        }
-
-        return $"\"{value}\"";
-    }
 }
 
 internal sealed class AntigravityCliSessionProcess : IAntigravityCliSessionProcess

@@ -51,7 +51,7 @@ public sealed class ProviderFacadeTests
     public void CliInfrastructureOwnsProviderExecutableResolution()
     {
         Assert.Equal(
-            OperatingSystem.IsWindows() ? "claude.exe" : "claude",
+            "claude",
             ClaudeCliConfiguration.ResolveExecutable("local://claude-cli"));
         Assert.Throws<ArgumentException>(() =>
             ClaudeCliConfiguration.ResolveExecutable("relative/claude"));

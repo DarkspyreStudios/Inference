@@ -16,7 +16,7 @@ internal static class CliInfrastructure
             || legacyEndpoints.Any(candidate =>
                 string.Equals(value, candidate, StringComparison.OrdinalIgnoreCase)))
         {
-            return OperatingSystem.IsWindows() ? $"{command}.exe" : command;
+            return command;
         }
 
         if (string.Equals(value, $"{command}.exe", StringComparison.OrdinalIgnoreCase)
