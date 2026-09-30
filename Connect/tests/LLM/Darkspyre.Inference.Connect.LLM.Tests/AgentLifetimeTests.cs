@@ -433,8 +433,15 @@ public sealed class AgentLifetimeTests
             {
                 using CancellationTokenRegistration registration = token.Register(() => Stopped.TrySetResult());
                 Started.TrySetResult();
-                if (IgnoreOpenCancellation) await Release.Task;
-                else await Release.Task.WaitAsync(token);
+                try
+                {
+                    if (IgnoreOpenCancellation) await Release.Task;
+                    else await Release.Task.WaitAsync(token);
+                }
+                finally
+                {
+                    if (token.IsCancellationRequested) Stopped.TrySetResult();
+                }
             }
             var session = new Session();
             Sessions.Enqueue(session);
@@ -490,8 +497,16 @@ public sealed class AgentLifetimeTests
                 OperationToken = token;
                 using CancellationTokenRegistration registration = token.Register(() => Stopped.TrySetResult());
                 Started.TrySetResult();
-                if (IgnoreCancellation) await Release.Task;
-                else await Release.Task.WaitAsync(token);
+                try
+                {
+                    if (IgnoreCancellation) await Release.Task;
+                    else await Release.Task.WaitAsync(token);
+                }
+                finally
+                {
+                    // WaitAsync can leave before CancelAsync invokes the registered callback.
+                    if (token.IsCancellationRequested) Stopped.TrySetResult();
+                }
             }
             return result;
         }

@@ -356,6 +356,23 @@ so their owned calls can leave; an enumerator suspended at a yielded event still
 An adapter that ignores cancellation keeps retirement pending until its work leaves. Direct
 `ILlmAgentClient` callers own the sessions they create outside the facade.
 
+### Vertex authentication lifetime
+
+`AddLlmConnectVertex` registers one authentication owner per container. Container disposal fences
+new authentication calls, cancels active calls, and awaits their completion before clearing cached
+credentials and credential-source callbacks. Concurrent disposal shares the same completion.
+Use asynchronous container disposal while authentication calls are active. Caller cancellation
+affects only that call. Tokens returned after caller or owner cancellation are rejected.
+
+Service-account and ADC-file acquisition share one credential constructor per key. Failed
+construction is removed from the cache and can be retried. ADC files are re-read on acquisition;
+replacement changes the credential and observation scope. SDK discovery without an ADC file stays
+inside its active call until discovery ends, because SDK cancellation only cancels the wait for
+that shared task. SDK/parser errors never expose credential diagnostics or inner exceptions.
+
+This owner releases its cache references. Google's shared ADC discovery cache and SDK-internal
+HTTP/refresh lifetimes are separate from these authentication-call retirement guarantees.
+
 ### Bedrock SDK lifetime
 
 `AddLlmConnectBedrock` registers one SDK client owner per container. It caches each runtime,

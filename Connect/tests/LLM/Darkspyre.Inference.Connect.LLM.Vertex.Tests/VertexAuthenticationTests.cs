@@ -21,7 +21,7 @@ public sealed class VertexAuthenticationTests
         {
             await File.WriteAllTextAsync(path, """{"type":"authorized_user","account":"first"}""");
             int created = 0;
-            var authentication = new VertexAuthentication((_, _) =>
+            await using var authentication = new VertexAuthentication((_, _) =>
             { Interlocked.Increment(ref created); return GoogleCredential.FromAccessToken("fixture-token"); }, () => (path, true));
             var first = await Task.WhenAll(Enumerable.Range(0, 12).Select(_ => authentication.ResolveAsync(Adc, default)));
             Assert.Single(first.Select(access => access.Scope).Distinct(StringComparer.Ordinal));
@@ -44,7 +44,7 @@ public sealed class VertexAuthenticationTests
     [Fact]
     public async Task CredentialErrorsNeverExposeSdkDiagnosticsOrTheKey()
     {
-        var authentication = new VertexAuthentication((_, _) => throw new InvalidOperationException("secret-sdk-diagnostic"),
+        await using var authentication = new VertexAuthentication((_, _) => throw new InvalidOperationException("secret-sdk-diagnostic"),
             () => ("unused", true));
         var connection = Adc with
         {
@@ -62,7 +62,7 @@ public sealed class VertexAuthenticationTests
     {
         using var cancelled = new CancellationTokenSource();
         cancelled.Cancel();
-        var authentication = new VertexAuthentication((_, _) => throw new InvalidOperationException("must not create"), () => ("unread", true));
+        await using var authentication = new VertexAuthentication((_, _) => throw new InvalidOperationException("must not create"), () => ("unread", true));
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => authentication.ResolveAsync(Adc, cancelled.Token));
     }
 }

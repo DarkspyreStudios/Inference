@@ -178,8 +178,16 @@ public sealed class EmbeddingLifetimeTests
             Started.TrySetResult();
             if (BlockResolution)
             {
-                if (IgnoreCancellation) await Release.Task;
-                else await Release.Task.WaitAsync(cancellationToken);
+                try
+                {
+                    if (IgnoreCancellation) await Release.Task;
+                    else await Release.Task.WaitAsync(cancellationToken);
+                }
+                finally
+                {
+                    // WaitAsync can leave before CancelAsync invokes the registered callback.
+                    if (cancellationToken.IsCancellationRequested) Stopped.TrySetResult();
+                }
             }
             return new() { Version = "v1", Transport = LlmTransport.OpenAiResponses, Endpoint = "https://provider.test/v1" };
         }
@@ -208,8 +216,15 @@ public sealed class EmbeddingLifetimeTests
             Tokens.Enqueue(cancellationToken);
             using CancellationTokenRegistration registration = cancellationToken.Register(() => Stopped.TrySetResult());
             Started.TrySetResult();
-            if (IgnoreCancellation) await Release.Task;
-            else await Release.Task.WaitAsync(cancellationToken);
+            try
+            {
+                if (IgnoreCancellation) await Release.Task;
+                else await Release.Task.WaitAsync(cancellationToken);
+            }
+            finally
+            {
+                if (cancellationToken.IsCancellationRequested) Stopped.TrySetResult();
+            }
             if (Fail) throw new InvalidOperationException("controlled embedding failure");
             return new() { Vectors = [new float[] { 1 }], Diagnostics = new(200, null, null) };
         }

@@ -52,8 +52,10 @@ public sealed class VertexRegistrationTests
     [Fact]
     public async Task VertexSetupKeepsProjectLocationAndProtectedCredentialSeparateAtSave()
     {
-        var client = new VertexLlmClient(new HttpClient(), new VertexAuthentication());
-        var service = new LlmProviderService(new UnusedSource(), [client], [], [new VertexSetupEnvironment()]);
+        using var http = new HttpClient();
+        await using var authentication = new VertexAuthentication();
+        var client = new VertexLlmClient(http, authentication);
+        await using var service = new LlmProviderService(new UnusedSource(), [client], [], [new VertexSetupEnvironment()]);
         var target = new Target();
         var manager = service.CreateSettingsManager(target);
         var settings = await manager.OpenAsync(LlmTransport.GoogleVertexAi, new(SetupChangeIntent.Create, "vertex", null));
