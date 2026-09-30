@@ -209,8 +209,9 @@ reference; its implementation owns cleanup. No distributed transaction is promis
 Creates require absence; edits require the same existing version. Neither silently upserts.
 
 LLM interactive setup uses a settings-local `ILlmConnectionSource`, so authentication completion updates
-the settings rather than saved credentials. Runtime refresh continues using the existing host
-`ILlmConnectionSource.SaveCredentialAsync` compare-and-replace seam unchanged. The final setup commit
+the settings rather than saved credentials. `LlmConnectionAccess` owns runtime refresh for chat and
+embeddings using the existing host `ILlmConnectionSource.SaveCredentialAsync` compare-and-replace seam
+unchanged. The final setup commit
 compares the original saved version, including credentials; a concurrent refresh can therefore cause
 a real conflict. Do not solve conflicts by overwriting newer credentials or replaying authorization.
 

@@ -202,6 +202,8 @@ currently supplies only ID, display name, help text, required and secret flags.
 capability and inference operations. `ILlmConnectionSource` is the existing host-owned credential
 seam: credential replacement compares an opaque version atomically and must not upsert. Keep it;
 the gaps below are not a request to move the application's database or vault into Connect.
+`LlmConnectionAccess` owns runtime OAuth refresh for chat and embeddings. Its connection-bound
+`LlmConnectionAuthorization` supplies Common's neutral authorization header without exposing storage.
 
 | Provider | Current definition/behavior | Needed in the configuration contract |
 |---|---|---|

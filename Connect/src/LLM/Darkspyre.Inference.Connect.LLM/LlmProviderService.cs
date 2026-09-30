@@ -17,6 +17,8 @@ public sealed class LlmProviderService : IDisposable, IAsyncDisposable
     private readonly IReadOnlyDictionary<LlmTransport, ILlmSetupEnvironment> _setupEnvironments;
     private readonly LlmModelListCache _modelLists;
     private readonly bool _ownsModelLists;
+    private readonly LlmConnectionAccess _connectionAccess;
+    private readonly bool _ownsConnectionAccess;
     private readonly LlmOperationLifetime _lifetime = new();
     private readonly Lock _disposeGate = new();
     private Task? _disposal;
@@ -33,10 +35,14 @@ public sealed class LlmProviderService : IDisposable, IAsyncDisposable
         IEnumerable<ILlmClient> clients,
         IEnumerable<ILlmAuthenticator> authenticators,
         IEnumerable<ILlmSetupEnvironment>? setupEnvironments = null,
-        LlmModelListCache? modelLists = null)
+        LlmModelListCache? modelLists = null,
+        LlmConnectionAccess? connectionAccess = null)
     {
         ArgumentNullException.ThrowIfNull(connections);
         ArgumentNullException.ThrowIfNull(clients);
+        ArgumentNullException.ThrowIfNull(authenticators);
+        if (connectionAccess is not null && !connectionAccess.UsesSource(connections))
+            throw new ArgumentException("Credential access must use the facade's connection source.", nameof(connectionAccess));
 
         _connections = connections;
         // A service built without the application's shared cache keeps its own lists.
@@ -71,7 +77,10 @@ public sealed class LlmProviderService : IDisposable, IAsyncDisposable
         _accountUsageClients = clientArray
             .OfType<ILlmAccountUsageClient>()
             .ToDictionary(client => client.Transport);
-        _authenticators = authenticators.ToDictionary(authenticator => authenticator.Transport);
+        ILlmAuthenticator[] authenticatorArray = [.. authenticators];
+        _authenticators = authenticatorArray.ToDictionary(authenticator => authenticator.Transport);
+        _connectionAccess = connectionAccess ?? new LlmConnectionAccess(connections, authenticatorArray, clientArray);
+        _ownsConnectionAccess = connectionAccess is null;
         _setupEnvironments = (setupEnvironments ?? []).ToDictionary(environment => environment.Transport);
         SupportedTransports = [.. _clients.Keys.OrderBy(transport => transport)];
         SupportedProviders =
@@ -353,7 +362,7 @@ public sealed class LlmProviderService : IDisposable, IAsyncDisposable
         if (client is not IStreamingCredentialRefreshPolicy refreshPolicy
             || refreshPolicy.RequiresFreshOAuthCredentialForStreaming(connection))
         {
-            connection = await RefreshConnectionAsync(
+            connection = await _connectionAccess.RefreshAsync(
                 connectionId,
                 connection,
                 cancellationToken);
@@ -406,7 +415,7 @@ public sealed class LlmProviderService : IDisposable, IAsyncDisposable
         ILlmClient client = ClientFor(connection.Transport);
         if (client is not ILlmProviderTokenCounter counter)
             throw new NotSupportedException("This route does not implement provider input-token counting.");
-        connection = await RefreshConnectionAsync(connectionId, connection, cancellationToken);
+        connection = await _connectionAccess.RefreshAsync(connectionId, connection, cancellationToken);
         if (client is ILlmConnectionPreparation preparation)
             connection = await preparation.PrepareAsync(connection, cancellationToken).ConfigureAwait(false);
         (request, int omitted) = ContinuationStateProjection.Project(request, connection);
@@ -602,7 +611,7 @@ public sealed class LlmProviderService : IDisposable, IAsyncDisposable
 
         if (connection.Transport == LlmTransport.OpenAiCodex)
         {
-            connection = await RefreshConnectionAsync(connectionId, connection, cancellationToken);
+            connection = await _connectionAccess.RefreshAsync(connectionId, connection, cancellationToken);
         }
         return await usageClient.GetAccountUsageAsync(connection, cancellationToken);
     }
@@ -700,39 +709,8 @@ public sealed class LlmProviderService : IDisposable, IAsyncDisposable
             _connections,
             connectionId,
             cancellationToken);
-        return await RefreshConnectionAsync(connectionId, connection, cancellationToken);
-    }
-
-    private async Task<LlmConnection> RefreshConnectionAsync(
-        string connectionId,
-        LlmConnection connection,
-        CancellationToken cancellationToken)
-    {
-        if (ClientFor(connection.Transport) is IIgnoresStoredCredential)
-        {
-            return connection;
-        }
-
-        LlmCredential? credential = LlmCredential.Parse(connection.Credential);
-        if (credential?.OAuth is null
-            || !_authenticators.TryGetValue(connection.Transport, out ILlmAuthenticator? authenticator))
-        {
-            return connection;
-        }
-
-        LlmCredential fresh = await authenticator.EnsureFreshAsync(credential, cancellationToken);
-        if (fresh == credential)
-        {
-            return connection;
-        }
-
-        string json = fresh.Serialize();
-        await _connections.SaveCredentialAsync(
-            connectionId,
-            json,
-            connection.Version,
-            cancellationToken);
-        return connection with { Credential = json };
+        _ = ClientFor(connection.Transport);
+        return await _connectionAccess.RefreshAsync(connectionId, connection, cancellationToken);
     }
 
     private async Task<LlmConnection> RequireExpectedVersionAsync(
@@ -823,13 +801,14 @@ public sealed class LlmProviderService : IDisposable, IAsyncDisposable
     private async Task RetireAsync()
     {
         Task operations = _lifetime.RetireAsync();
+        Task credentials = _ownsConnectionAccess ? _connectionAccess.DisposeAsync().AsTask() : Task.CompletedTask;
         try
         {
             if (_ownsModelLists) await _modelLists.DisposeAsync().ConfigureAwait(false);
         }
         finally
         {
-            await operations.ConfigureAwait(false);
+            await Task.WhenAll(operations, credentials).ConfigureAwait(false);
             _clients.Clear();
             _authenticators.Clear();
             _accountUsageClients.Clear();

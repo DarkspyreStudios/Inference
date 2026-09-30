@@ -7,16 +7,25 @@ public sealed class LlmEmbeddingProviderService : IDisposable, IAsyncDisposable
 {
     private readonly ILlmConnectionSource _connections;
     private readonly List<ILlmEmbeddingClient> _clients;
+    private readonly LlmConnectionAccess _connectionAccess;
+    private readonly bool _ownsConnectionAccess;
     private readonly LlmOperationLifetime _lifetime = new();
     private readonly Lock _disposeGate = new();
     private Task? _disposal;
 
     public LlmEmbeddingProviderService(
         ILlmConnectionSource connections,
-        IEnumerable<ILlmEmbeddingClient> clients)
+        IEnumerable<ILlmEmbeddingClient> clients,
+        IEnumerable<ILlmAuthenticator>? authenticators = null,
+        LlmConnectionAccess? connectionAccess = null)
     {
         _connections = connections ?? throw new ArgumentNullException(nameof(connections));
+        ArgumentNullException.ThrowIfNull(clients);
+        if (connectionAccess is not null && !connectionAccess.UsesSource(connections))
+            throw new ArgumentException("Credential access must use the facade's connection source.", nameof(connectionAccess));
         _clients = [.. clients];
+        _connectionAccess = connectionAccess ?? new LlmConnectionAccess(connections, authenticators ?? []);
+        _ownsConnectionAccess = connectionAccess is null;
     }
 
     public async Task<LlmEmbeddingResult> EmbedAsync(
@@ -40,6 +49,8 @@ public sealed class LlmEmbeddingProviderService : IDisposable, IAsyncDisposable
         ILlmEmbeddingClient client = _clients.SingleOrDefault(value => value.Supports(connection.Transport))
             ?? throw new NotSupportedException(
                 $"The configured {connection.Transport} provider does not support embeddings in this client.");
+        connection = await _connectionAccess.RefreshAsync(connectionId, connection, cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
         LlmEmbeddingResult result = await client.EmbedAsync(connection, request, cancellationToken);
         cancellationToken.ThrowIfCancellationRequested();
         return result;
@@ -53,7 +64,9 @@ public sealed class LlmEmbeddingProviderService : IDisposable, IAsyncDisposable
 
     private async Task RetireAsync()
     {
-        try { await _lifetime.RetireAsync().ConfigureAwait(false); }
+        Task operations = _lifetime.RetireAsync();
+        Task credentials = _ownsConnectionAccess ? _connectionAccess.DisposeAsync().AsTask() : Task.CompletedTask;
+        try { await Task.WhenAll(operations, credentials).ConfigureAwait(false); }
         finally { _clients.Clear(); }
     }
 

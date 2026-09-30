@@ -26,6 +26,13 @@ keeps. A question truncates the state when the first exceeds the second. Rich pr
 operations remain on their owning packages; Common is the portable inference lane, not a
 least-common-denominator replacement for implementation management.
 
+## Provider authorization
+
+`IProviderAuthorization.GetAsync` acquires authorization for one operation. The returned
+`ProviderAuthorizationHeader` carries its scheme and secret value without exposing credential storage.
+Its diagnostic string redacts both fields. Header values are not log, diagnostic or persistent data.
+The authorization implementation owns credential acquisition; a consumer borrows it.
+
 ## Sampling controls
 
 `LlmInferenceRequest` carries nullable `TopP`, `TopK`, `Seed`, `PresencePenalty` and

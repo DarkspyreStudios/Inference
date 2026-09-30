@@ -303,6 +303,28 @@ var result = await provider.CompleteAsync(
     cancellationToken);
 ```
 
+### Credential access
+
+`LlmConnectionAccess.AcquireAsync` resolves a connection and refreshes its OAuth credential through
+the registered authenticator. A changed credential is saved through `SaveCredentialAsync` with the
+resolved expected version. A rejected save fails the operation without retry or fallback. Adapters
+that ignore stored credentials retain that policy. Non-OAuth credentials remain unchanged.
+
+`AddLlmConnect` registers one scoped access owner shared by chat and embeddings. A facade built by
+hand without an injected access owner creates and retires its own. An injected owner must use the
+same connection source and remains borrowed. Retiring a facade cancels its credential operations
+without retiring a shared owner.
+
+Access retirement fences acquisition, cancels and drains resolution, refresh and saving, and clears
+borrowed authenticator references without disposing the authenticator or source. Late refreshes are
+not saved; late save results do not return credentials. Cancellation during a save can race a source
+commit, so retirement waits for that save and does not undo or retry it. The source remains responsible
+for atomic version checks and rejecting writes to changed or deleted connections.
+
+`LlmConnectionAuthorization` binds a connection ID to a borrowed access owner. Its
+`IProviderAuthorization.GetAsync` returns the current OAuth Bearer token after acquisition. Missing
+OAuth fails; API keys are not substituted. The returned header's diagnostic text redacts its fields.
+
 ### Model lists
 
 `LlmProviderService.ListModelsAsync` keeps each connection's model list in `LlmModelListCache`, which
@@ -315,8 +337,8 @@ hand without the shared cache keeps its own.
 
 `LlmProviderService` and `LlmModelListCache` implement `IDisposable` and `IAsyncDisposable`. Facade
 retirement fences new calls, cancels active calls and waits for them to leave. It retires a privately
-created cache, but not an injected shared cache. Clients, authenticators and the connection source
-remain borrowed and are not disposed by the facade.
+created cache and credential-access owner, but not injected shared owners. Clients, authenticators
+and the connection source remain borrowed and are not disposed by the facade.
 
 Cache retirement clears kept models, cancels provider listings through an owner token, and waits
 for every listing, including entries replaced by an edit or refresh. A cancelled caller only stops
@@ -331,8 +353,9 @@ containers does not transfer that responsibility to a scoped facade.
 ### Embedding lifetime
 
 `LlmEmbeddingProviderService` implements `IDisposable` and `IAsyncDisposable`. Its registration owner
-retires the facade. Retirement fences new requests, cancels connection lookup and provider calls,
-and awaits all active requests before releasing its adapter references. Supplied adapters and the
+retires the facade. Embeddings refresh OAuth through the same access implementation as chat before
+dispatch; unsupported embedding routes fail before refresh. Retirement fences new requests, cancels
+connection lookup and provider calls, and awaits all active requests before releasing its adapter references. Supplied adapters and the
 connection source remain borrowed and are not disposed by the facade. Caller cancellation affects
 only that request. A provider that ignores cancellation keeps retirement pending; its late result
 is rejected. Use asynchronous scope disposal while embedding requests are active.
