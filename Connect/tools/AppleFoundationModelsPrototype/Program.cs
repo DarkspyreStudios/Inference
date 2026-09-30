@@ -67,32 +67,18 @@ internal static class Program
         string assembly = Assembly.GetExecutingAssembly().Location;
         foreach (string experiment in experiments)
         {
-            var start = new ProcessStartInfo("dotnet") { RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false };
+            var start = new ProcessStartInfo("dotnet");
             start.ArgumentList.Add(assembly);
             start.ArgumentList.Add("worker");
             start.ArgumentList.Add(library);
             start.ArgumentList.Add(experiment);
-            using Process process = Process.Start(start) ?? throw new InvalidOperationException("Cannot start worker.");
-            Task<string> stdout = process.StandardOutput.ReadToEndAsync();
-            Task<string> stderr = process.StandardError.ReadToEndAsync();
-            bool timedOut = false;
-            var clock = Stopwatch.StartNew();
-            try { await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(45)).ConfigureAwait(false); }
-            catch (TimeoutException)
-            {
-                timedOut = true;
-                // A root-only kill: the .NET 11 tree kill stops the tree first and can block the runtime child reaper.
-                process.Kill();
-                await process.WaitForExitAsync().ConfigureAwait(false);
-            }
-            string output = await stdout.ConfigureAwait(false);
-            string error = await stderr.ConfigureAwait(false);
-            observations.Add(new { experiment, process.ExitCode, timedOut, seconds = clock.Elapsed.TotalSeconds, stdout = output, stderr = error });
-            Console.WriteLine($"{experiment}: exit={process.ExitCode}, timeout={timedOut}");
-            Console.Write(output);
-            if (error.Length != 0) Console.Error.Write(error);
-            if (timedOut || process.ExitCode is not (0 or 3)) errors++;
-            if (process.ExitCode == 3)
+            PrototypeProcessResult result = await PrototypeProcessRunner.RunAsync(start, TimeSpan.FromSeconds(45)).ConfigureAwait(false);
+            observations.Add(new { experiment, result.ExitCode, timedOut = result.TimedOut, seconds = result.Seconds, stdout = result.StandardOutput, stderr = result.StandardError });
+            Console.WriteLine($"{experiment}: exit={result.ExitCode}, timeout={result.TimedOut}");
+            Console.Write(result.StandardOutput);
+            if (result.StandardError.Length != 0) Console.Error.Write(result.StandardError);
+            if (result.TimedOut || result.ExitCode is not (0 or 3)) errors++;
+            if (result.ExitCode == 3)
             {
                 unavailable = true;
                 break; // An unavailable environment is never presented as passing.

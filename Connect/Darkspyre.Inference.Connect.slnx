@@ -41,6 +41,7 @@
     <Project Path="tests/Image/Darkspyre.Inference.Connect.Image.Tests/Darkspyre.Inference.Connect.Image.Tests.csproj" />
   </Folder>
   <Folder Name="/tools/">
+    <Project Path="tools/AppleFoundationModelsPrototype/AppleFoundationModelsPrototype.csproj" />
     <Project Path="tools/Darkspyre.Inference.Connect.ConsoleTester/Darkspyre.Inference.Connect.ConsoleTester.csproj" />
   </Folder>
 </Solution>

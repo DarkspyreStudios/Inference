@@ -1,6 +1,7 @@
 using System.Runtime.CompilerServices;
 
 [assembly: InternalsVisibleTo("Darkspyre.Inference.Connect.LLM.Tests")]
+[assembly: InternalsVisibleTo("AppleFoundationModelsPrototype")]
 [assembly: InternalsVisibleTo("Darkspyre.Inference.Connect.LLM.Bedrock")]
 [assembly: InternalsVisibleTo("Darkspyre.Inference.Connect.LLM.Bedrock.Tests")]
 

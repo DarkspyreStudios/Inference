@@ -19,6 +19,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\..\src\LLM\Darkspyre.Inference.Connect.LLM\Darkspyre.Inference.Connect.LLM.csproj" />
+    <ProjectReference Include="../../../tools/AppleFoundationModelsPrototype/AppleFoundationModelsPrototype.csproj" />
   </ItemGroup>
 
   <ItemGroup>

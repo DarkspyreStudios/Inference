@@ -71,10 +71,16 @@ and cancellation. They do not invoke a model.
 
 ## Experiments and output
 
-The .NET project targets portable `net11.0`, is non-packable, has no package/project
-dependencies and is not part of the shipping solution. Each experiment runs in a
-fresh worker process with a 45-second parent timeout. The parent kills only the
-worker process it started. Native request waits are bounded as well.
+The .NET project targets portable `net11.0` and is non-packable. It references
+Connect.LLM for the shared process termination helper. The Connect solution builds
+the tool, but no shipping package includes it. Each experiment runs in a fresh
+worker process with a 45-second parent timeout. On POSIX the worker leads its own
+detached process group. Timeout and cancellation terminate that group through the
+shared helper; Windows uses the same helper's process-tree termination. Exit waits
+and stdout/stderr drains each have a 5-second retirement bound. A retirement failure
+fails the operation; it is not recorded as a successful worker timeout. Native
+request waits are bounded as well. Deterministic process tests use shell fixtures
+without loading the bridge or invoking a model.
 
 The suite records availability/context size, UTF-8 completion, text streaming,
 transcript restoration, schema shapes, ordinary JSON Schema acceptance, output

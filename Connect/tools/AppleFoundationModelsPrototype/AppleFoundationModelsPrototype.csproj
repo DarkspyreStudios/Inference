@@ -4,4 +4,8 @@
     <IsPackable>false</IsPackable>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../src/LLM/Darkspyre.Inference.Connect.LLM/Darkspyre.Inference.Connect.LLM.csproj" />
+    <InternalsVisibleTo Include="Darkspyre.Inference.Connect.LLM.Tests" />
+  </ItemGroup>
 </Project>
