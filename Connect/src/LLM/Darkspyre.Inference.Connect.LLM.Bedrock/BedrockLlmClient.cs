@@ -1,10 +1,11 @@
 using System.Collections.Frozen;
 using System.Runtime.CompilerServices;
-using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Amazon.BedrockRuntime;
 using Amazon.BedrockRuntime.Model;
 using Amazon.Runtime.Documents;
+using Amazon.Runtime.EventStreams;
 using Darkspyre.Inference.Common.LLM;
 using Darkspyre.Inference.Connect.LLM.Internal;
 using Darkspyre.Inference.Connect.LLM.Providers;
@@ -13,7 +14,8 @@ namespace Darkspyre.Inference.Connect.LLM.Bedrock;
 
 internal sealed class BedrockLlmClient(
     BedrockClientFactory factory,
-    BedrockLoggingGuard loggingGuard) : ILlmClient, ILlmContextEstimator
+    BedrockLoggingGuard loggingGuard,
+    IBedrockConverseInvoker invoker) : ILlmClient, ILlmContextEstimator
 {
     internal const string RequestIdMetadataKey = "request-id";
 
@@ -23,7 +25,8 @@ internal sealed class BedrockLlmClient(
     {
         OutputLimitEnforcement = Common.LLM.LlmOutputLimitEnforcement.ProviderEnforced,
         SupportsStreaming = true,
-        SupportsStreamingUsage = false,
+        // ConverseStream reports usage in its final metadata event.
+        SupportsStreamingUsage = true,
         SupportsModelListing = true,
         SupportsJsonSchema = false,
         SupportsJsonObject = false,
@@ -32,7 +35,8 @@ internal sealed class BedrockLlmClient(
         Tools = new()
         {
             ChoiceModes = new[] { LlmToolChoiceMode.Auto, LlmToolChoiceMode.Required, LlmToolChoiceMode.Specific }.ToFrozenSet(),
-            SupportsParallelCalls = true
+            SupportsParallelCalls = true,
+            SupportsArgumentStreaming = true
         },
         SupportsPromptImages = true,
         SupportsPromptDocuments = true,
@@ -83,13 +87,33 @@ internal sealed class BedrockLlmClient(
             factory.Control(aws),
             aws,
             cancellationToken);
-        ConverseResponse response = await factory.Runtime(aws).ConverseAsync(
-            BuildRequest(connection, request, modelId),
-            cancellationToken);
-        foreach (LlmStreamEvent item in MapResponse(connection, request, enforcement, response))
+        ConverseRequest built = BuildRequest(connection, request, modelId);
+        if (!capabilities.SupportsStreaming)
         {
-            yield return item;
+            ConverseResponse response = await invoker.ConverseAsync(aws, built, cancellationToken);
+            foreach (LlmStreamEvent item in MapResponse(connection, request, enforcement, response))
+            {
+                yield return item;
+            }
+            yield break;
         }
+
+        await using IBedrockEventStream stream = await invoker.ConverseStreamAsync(
+            aws,
+            ToStreamRequest(built),
+            cancellationToken);
+        var accumulator = new BedrockStreamAccumulator();
+        await foreach (IEventStreamEvent streamEvent in stream.ReadAsync(cancellationToken))
+        {
+            foreach (LlmStreamEvent item in accumulator.Observe(streamEvent))
+            {
+                yield return item;
+            }
+        }
+
+        // The completion follows the end of the stream, because the metadata event with usage follows message-stop.
+        BedrockReply reply = accumulator.Complete(stream.RequestId);
+        yield return new LlmChatCompletionEvent(BuildResult(connection, request, enforcement, reply));
     }
 
     /// <summary>
@@ -145,7 +169,7 @@ internal sealed class BedrockLlmClient(
         LlmClientBase.ValidateToolUse(request, capabilities);
         foreach (LlmChatMessage message in request.Messages.Where(message => message.ContinuationState is not null))
         {
-            // Only this connection's own counts-only state is accepted; it adds nothing to the request.
+            // Only this connection's own state is accepted, and it must match the visible message.
             _ = ProviderContinuationStateCodec.DecodeMessage(message, connection, request.ModelId);
         }
 
@@ -166,8 +190,7 @@ internal sealed class BedrockLlmClient(
     }
 
     /// <summary>
-    /// Maps a Converse reply to stream events. A reply that reports both token counts carries them as
-    /// counts-only continuation state, so accounting can count the history it closes.
+    /// Maps a Converse reply to the events of a complete response: reasoning, text, tool calls, then the completion.
     /// </summary>
     internal static IEnumerable<LlmStreamEvent> MapResponse(
         LlmConnection connection,
@@ -175,78 +198,167 @@ internal sealed class BedrockLlmClient(
         LlmStructuredOutputEnforcement? enforcement,
         ConverseResponse response)
     {
-        var text = new StringBuilder();
-        var toolCalls = new List<LlmToolCall>();
+        var blocks = new List<BedrockBlock>();
         foreach (ContentBlock block in response.Output?.Message?.Content ?? [])
         {
-            if (!string.IsNullOrEmpty(block.Text))
+            if (block.Text is { } text)
             {
-                text.Append(block.Text);
+                blocks.Add(new BedrockTextBlock(text));
             }
-
-            if (block.ToolUse is { } toolUse
-                && !string.IsNullOrWhiteSpace(toolUse.ToolUseId)
-                && !string.IsNullOrWhiteSpace(toolUse.Name))
+            else if (block.ReasoningContent?.ReasoningText is { } reasoning)
             {
-                string arguments = SerializeDocument(toolUse.Input);
-                var call = new LlmToolCall(toolUse.ToolUseId, toolUse.Name, arguments);
-                int index = toolCalls.Count;
-                toolCalls.Add(call);
-                yield return new LlmToolCallStartedEvent(call.Id, call.Name, index);
-                yield return new LlmToolCallArgumentsDeltaEvent(call.Id, call.ArgumentsJson);
-                yield return new LlmToolCallCompletedEvent(call);
+                blocks.Add(new BedrockReasoningBlock(reasoning.Text ?? string.Empty, reasoning.Signature));
+            }
+            else if (block.ReasoningContent?.RedactedContent is { } redacted)
+            {
+                blocks.Add(new BedrockRedactedReasoningBlock(redacted.ToArray()));
+            }
+            else if (block.ToolUse is { } toolUse)
+            {
+                blocks.Add(new BedrockToolUseBlock(
+                    toolUse.ToolUseId ?? string.Empty,
+                    toolUse.Name ?? string.Empty,
+                    SerializeDocument(toolUse.Input),
+                    ValidArguments: true));
             }
         }
 
-        string finalText = text.ToString();
-        if (finalText.Length > 0)
+        var reply = new BedrockReply(blocks, response.StopReason?.Value, response.Usage, response.ResponseMetadata?.RequestId);
+        LlmChatResult result = BuildResult(connection, request, enforcement, reply);
+        LlmReasoningText[] reasoningText = [.. blocks.OfType<BedrockReasoningBlock>()
+            .Where(block => block.Text.Length > 0)
+            .Select(block => new LlmReasoningText(block.Text, IsSummary: false))];
+        return CompleteResponseEvents.From(result, reasoningText);
+    }
+
+    /// <summary>
+    /// Builds the result of a complete Converse reply, streamed or not. Tool calls return only with
+    /// <see cref="LlmCompletionStatus.RequiresAction"/>. A reply with reasoning keeps the ordered reply as continuation
+    /// state, so its signed reasoning is replayed on the next request; any other reply keeps its reported token counts.
+    /// </summary>
+    internal static LlmChatResult BuildResult(
+        LlmConnection connection,
+        LlmChatRequest request,
+        LlmStructuredOutputEnforcement? enforcement,
+        BedrockReply reply)
+    {
+        string text = string.Concat(reply.Blocks.OfType<BedrockTextBlock>().Select(block => block.Text));
+        BedrockToolUseBlock[] tools = [.. reply.Blocks.OfType<BedrockToolUseBlock>()];
+        LlmToolCall[] validCalls = [.. tools.Where(tool => tool.ValidArguments)
+            .Select(tool => new LlmToolCall(tool.Id, tool.Name, tool.ArgumentsJson))];
+        string? stopReason = reply.StopReason;
+        if (stopReason == "tool_use" && tools.Any(tool => !tool.ValidArguments))
         {
-            yield return new LlmTextDeltaEvent(finalText);
+            throw new LlmProviderException(
+                "Bedrock returned tool input that is not a JSON object.",
+                LlmTransport.AwsBedrockConverse,
+                requestId: reply.RequestId);
         }
 
-        string? stopReason = response.StopReason?.Value;
-        bool refused = stopReason is "content_filtered" or "guardrail_intervened";
-        bool incomplete = stopReason == "max_tokens";
-        bool requiresAction = toolCalls.Count > 0 || stopReason == "tool_use";
-        LlmCompletionStatus completionStatus = refused
-            ? LlmCompletionStatus.Refused
-            : incomplete
-                ? LlmCompletionStatus.Incomplete
-                : requiresAction
-                    ? LlmCompletionStatus.RequiresAction
-                    : LlmCompletionStatus.Completed;
+        LlmCompletionStatus status = stopReason switch
+        {
+            "end_turn" or "stop_sequence" => validCalls.Length > 0
+                ? LlmCompletionStatus.RequiresAction
+                : LlmCompletionStatus.Completed,
+            "tool_use" => LlmCompletionStatus.RequiresAction,
+            "max_tokens" or "model_context_window_exceeded" => LlmCompletionStatus.Incomplete,
+            "content_filtered" or "guardrail_intervened" => LlmCompletionStatus.Refused,
+            "malformed_model_output" or "malformed_tool_use" => LlmCompletionStatus.Failed,
+            _ => LlmCompletionStatus.Unknown
+        };
+        IReadOnlyList<LlmToolCall> toolCalls = status == LlmCompletionStatus.RequiresAction ? validCalls : [];
         LlmStructuredOutputValidation? validation = request.StructuredOutput is { } structured
             && enforcement is not null
-            && !requiresAction
-                ? refused
-                    ? new LlmStructuredOutputValidation(
+            && status != LlmCompletionStatus.RequiresAction
+                ? status switch
+                {
+                    LlmCompletionStatus.Refused => new LlmStructuredOutputValidation(
                         enforcement.Value,
                         false,
                         false,
-                        ["Structured output was not evaluated because the provider refused the request."])
-                    : StructuredOutput.Validate(finalText, structured, enforcement.Value)
+                        ["Structured output was not evaluated because the provider refused the request."]),
+                    LlmCompletionStatus.Failed => new LlmStructuredOutputValidation(
+                        enforcement.Value,
+                        false,
+                        false,
+                        ["Structured output was not evaluated because the provider reported malformed output."]),
+                    _ => StructuredOutput.Validate(text, structured, enforcement.Value)
+                }
                 : null;
-        LlmUsage? normalizedUsage = response.Usage is { } usage
-            ? AnthropicUsage.Create(usage.InputTokens, usage.OutputTokens, usage.CacheReadInputTokens, usage.CacheWriteInputTokens)
+        LlmUsage? usage = reply.Usage is { } reported
+            ? AnthropicUsage.Create(reported.InputTokens, reported.OutputTokens, reported.CacheReadInputTokens, reported.CacheWriteInputTokens)
             : null;
-        yield return new LlmChatCompletionEvent(new LlmChatResult
+        return new LlmChatResult
         {
-            Text = finalText,
-            Refusal = refused ? finalText : null,
-            Status = completionStatus,
+            Text = text,
+            Refusal = status == LlmCompletionStatus.Refused ? text : null,
+            Status = status,
             FinishReason = MapFinishReason(stopReason),
-            IncompleteReason = incomplete ? stopReason : null,
-            Usage = normalizedUsage,
-            ContinuationState = normalizedUsage is { InputTokens: { } input, OutputTokens: { } output }
-                ? ProviderContinuationStateCodec.EncodeCounts(connection, request.ModelId, input, output)
-                : null,
+            IncompleteReason = status == LlmCompletionStatus.Incomplete ? stopReason : null,
+            Usage = usage,
+            ContinuationState = status == LlmCompletionStatus.Failed
+                ? null
+                : EncodeState(connection, request.ModelId, reply, toolCalls, usage),
             ToolCalls = toolCalls,
             StructuredOutput = validation,
-            Diagnostics = new LlmProviderDiagnostics(
-                200,
-                response.ResponseMetadata?.RequestId,
-                RawFinalResponseJson: null)
-        });
+            Diagnostics = new LlmProviderDiagnostics(200, reply.RequestId, RawFinalResponseJson: null)
+        };
+    }
+
+    /// <summary>
+    /// The reply as ordered, replayable state when it contains reasoning, otherwise its reported counts. A tool block
+    /// is retained only when the result returns its call, so the state always matches the visible message.
+    /// </summary>
+    private static LlmContinuationState? EncodeState(
+        LlmConnection connection,
+        string modelId,
+        BedrockReply reply,
+        IReadOnlyList<LlmToolCall> toolCalls,
+        LlmUsage? usage)
+    {
+        if (!reply.Blocks.Any(block => block is BedrockReasoningBlock or BedrockRedactedReasoningBlock))
+        {
+            return usage is { InputTokens: { } counted, OutputTokens: { } generated }
+                ? ProviderContinuationStateCodec.EncodeCounts(connection, modelId, counted, generated)
+                : null;
+        }
+
+        var output = new JsonArray();
+        foreach (BedrockBlock block in reply.Blocks)
+        {
+            switch (block)
+            {
+                case BedrockTextBlock text:
+                    output.Add(new JsonObject { ["type"] = "text", ["text"] = text.Text });
+                    break;
+                case BedrockReasoningBlock reasoning:
+                    var item = new JsonObject { ["type"] = "reasoning", ["text"] = reasoning.Text };
+                    if (reasoning.Signature is not null)
+                    {
+                        item["signature"] = reasoning.Signature;
+                    }
+                    output.Add(item);
+                    break;
+                case BedrockRedactedReasoningBlock redacted:
+                    output.Add(new JsonObject { ["type"] = "redacted_reasoning", ["data"] = Convert.ToBase64String(redacted.Data) });
+                    break;
+                case BedrockToolUseBlock tool when toolCalls.Any(call => call.Id == tool.Id):
+                    output.Add(new JsonObject
+                    {
+                        ["type"] = "tool_use",
+                        ["id"] = tool.Id,
+                        ["name"] = tool.Name,
+                        ["input"] = JsonNode.Parse(tool.ArgumentsJson)
+                    });
+                    break;
+            }
+        }
+
+        return ProviderContinuationStateCodec.Encode(connection, modelId, output) with
+        {
+            InputTokens = usage?.InputTokens,
+            OutputTokens = usage?.OutputTokens
+        };
     }
 
     /// <summary>Content the local tokenizer cannot count: attachments and binary tool output.</summary>
@@ -311,6 +423,14 @@ internal sealed class BedrockLlmClient(
         var messages = new List<Message>();
         foreach (LlmChatMessage message in request.Messages)
         {
+            if (message.ContinuationState is not null
+                && ProviderContinuationStateCodec.DecodeMessage(message, connection, request.ModelId) is { Count: > 0 } retained)
+            {
+                // The decoded state already matches the visible text and tool calls, so it replaces them.
+                messages.Add(new Message { Role = ConversationRole.Assistant, Content = ReplayContent(retained) });
+                continue;
+            }
+
             if (string.IsNullOrEmpty(message.Content)
                 && message.ToolCalls.Count == 0
                 && message.ToolResults.Count == 0
@@ -462,6 +582,62 @@ internal sealed class BedrockLlmClient(
         return result;
     }
 
+    /// <summary>The ConverseStream form of a built request. It carries every property <see cref="BuildRequest"/> sets.</summary>
+    internal static ConverseStreamRequest ToStreamRequest(ConverseRequest request) => new()
+    {
+        ModelId = request.ModelId,
+        Messages = request.Messages,
+        System = request.System,
+        InferenceConfig = request.InferenceConfig,
+        ToolConfig = request.ToolConfig,
+        RequestMetadata = request.RequestMetadata,
+        AdditionalModelRequestFields = request.AdditionalModelRequestFields
+    };
+
+    /// <summary>The assistant content blocks of a retained Converse reply, in reply order.</summary>
+    private static List<ContentBlock> ReplayContent(JsonArray retained)
+    {
+        var content = new List<ContentBlock>();
+        foreach (JsonObject item in retained.OfType<JsonObject>())
+        {
+            content.Add(item["type"]!.GetValue<string>() switch
+            {
+                "text" => new ContentBlock { Text = item["text"]!.GetValue<string>() },
+                "reasoning" => new ContentBlock
+                {
+                    ReasoningContent = new ReasoningContentBlock
+                    {
+                        ReasoningText = new ReasoningTextBlock
+                        {
+                            Text = item["text"]!.GetValue<string>(),
+                            Signature = item["signature"]?.GetValue<string>()
+                        }
+                    }
+                },
+                "redacted_reasoning" => new ContentBlock
+                {
+                    ReasoningContent = new ReasoningContentBlock
+                    {
+                        RedactedContent = new MemoryStream(
+                            Convert.FromBase64String(item["data"]!.GetValue<string>()),
+                            writable: false)
+                    }
+                },
+                "tool_use" => new ContentBlock
+                {
+                    ToolUse = new ToolUseBlock
+                    {
+                        ToolUseId = item["id"]!.GetValue<string>(),
+                        Name = item["name"]!.GetValue<string>(),
+                        Input = DeserializeDocument(item["input"]!.ToJsonString())
+                    }
+                },
+                _ => throw new NotSupportedException("The adapter cannot replay this assistant output type.")
+            });
+        }
+        return content;
+    }
+
     private static ContentBlock BuildPromptAttachment(LlmAttachment attachment)
     {
         string mediaType = LlmAttachments.ResolveMediaType(attachment);
@@ -576,13 +752,13 @@ internal sealed class BedrockLlmClient(
         LlmCredential.Parse(connection.Credential)?.Aws
         ?? throw new InvalidOperationException("Bedrock requires AWS connection settings.");
 
-    internal static string MapFinishReason(string? reason) => reason switch
+    internal static string? MapFinishReason(string? reason) => reason switch
     {
         "end_turn" or "stop_sequence" => "stop",
         "max_tokens" => "length",
         "content_filtered" or "guardrail_intervened" => "content_filter",
         "tool_use" => "tool_calls",
-        _ => reason ?? "stop"
+        _ => reason
     };
 
     private static Document DeserializeDocument(string json) =>

@@ -15,7 +15,7 @@ public sealed class BedrockSafetyTests
     [Fact]
     public void CapabilitiesAdvertiseHostExecutedTools()
     {
-        var client = new BedrockLlmClient(new BedrockClientFactory(), new BedrockLoggingGuard());
+        var client = new BedrockLlmClient(new BedrockClientFactory(), new BedrockLoggingGuard(), new StubConverseInvoker());
 
         LlmProviderCapabilities capabilities = client.GetCapabilities(Connection());
         Assert.True(capabilities.SupportsToolUse);
@@ -246,8 +246,8 @@ public sealed class BedrockSafetyTests
     [InlineData("guardrail_intervened", "content_filter")]
     [InlineData("tool_use", "tool_calls")]
     [InlineData("unknown", "unknown")]
-    [InlineData(null, "stop")]
-    public void MapFinishReasonPreservesKnownSemantics(string? reason, string expected) =>
+    [InlineData(null, null)]
+    public void MapFinishReasonPreservesKnownSemantics(string? reason, string? expected) =>
         Assert.Equal(expected, BedrockLlmClient.MapFinishReason(reason));
 
     [Theory]

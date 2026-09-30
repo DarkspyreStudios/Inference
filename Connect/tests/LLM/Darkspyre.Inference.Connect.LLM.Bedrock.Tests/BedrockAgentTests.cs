@@ -10,7 +10,7 @@ public sealed class BedrockAgentTests
 {
     private const string Model = "amazon.nova-lite-v1:0";
 
-    private readonly BedrockLlmClient _client = new(new BedrockClientFactory(), new BedrockLoggingGuard());
+    private readonly BedrockLlmClient _client = new(new BedrockClientFactory(), new BedrockLoggingGuard(), new StubConverseInvoker());
 
     [Fact]
     public void CapabilitiesOpenTheManagedAgentLaneOnTheConverseRoute()

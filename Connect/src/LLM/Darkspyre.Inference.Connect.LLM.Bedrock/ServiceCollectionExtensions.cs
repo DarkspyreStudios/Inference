@@ -14,6 +14,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<BedrockClientFactory>();
         services.AddSingleton<BedrockLoggingGuard>();
         services.AddSingleton<IBedrockAgentCoreInvoker, BedrockAgentCoreInvoker>();
+        services.AddSingleton<IBedrockConverseInvoker, BedrockConverseInvoker>();
         services.AddSingleton<BedrockLlmClient>();
         services.AddSingleton<ILlmClient>(provider => provider.GetRequiredService<BedrockLlmClient>());
         services.AddTransient<ManagedBedrockAgentClient>();

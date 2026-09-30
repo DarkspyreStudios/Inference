@@ -44,9 +44,6 @@ contract guidance below remains the integration baseline until that coordinated 
 - Add typed Google project/location/authentication setup; protect service-account JSON in the host
   credential store. ADC remains owned by Google's credential discovery and refresh.
 
-DSA-69 separately tracks Bedrock signed-reasoning replay unlocked by the shared envelope; this
-implementation preserves Bedrock's current counts-only continuation behavior.
-
 ## Pending: runtime policy ownership and native tool observations (DSA-74 / DSA-76)
 
 This is a breaking public contract change. It is unreleased; the coordinated release version is chosen
@@ -100,6 +97,10 @@ These changes are unreleased.
   Antigravity CLI chat raises `antigravity_cli_exit_timeout`, an Antigravity agent session faults with a
   reason that names the process ID, and the Apple helper fails with `InferenceFailureCode.ExecutionFailed`.
   Windows behaviour is unchanged. See [Wrapped CLI processes](../README.md#wrapped-cli-processes).
+- Bedrock Converse streams through ConverseStream. Its continuation state can carry the ordered reply with
+  signed reasoning, which Connect replays; the host must keep that state unchanged on the assistant
+  message. Converse stop reasons now report `Incomplete` and `Failed`, and tool calls come only with
+  `RequiresAction`. See [AWS Bedrock AgentCore Harness transport](../README.md#aws-bedrock-agentcore-harness-transport).
 
 ## Native background resources: 11.8.0-rc.1
 

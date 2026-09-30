@@ -302,6 +302,12 @@ read the same list, and a failed listing is not kept. Common's `ILlmInference` c
 `ListModelsAsync` may answer from a kept list, and `RefreshModelsAsync` lists again. A service built by
 hand without the shared cache keeps its own.
 
+### Streaming, reasoning text and usage
+
+| Transport | Streams | With `SupportsStreaming = false` |
+| --- | --- | --- |
+| Bedrock Converse | ConverseStream | Converse |
+
 ### Wrapped CLI processes
 
 Three transports start a local process: `AnthropicClaudeCli` starts the Claude CLI,
@@ -567,8 +573,9 @@ retain ordered reasoning/text/calls; Anthropic retains thinking/signatures/conte
 replays state instead of duplicating the message's visible text/calls. State is bound to transport,
 model and account/connection scope; incompatible state fails before sending unless the request opts
 in to omission, as described below. The former request-level `ContinuationToken` has been removed,
-with no compatibility shim. Bedrock Converse state carries only the reply's reported token counts and
-no replayable output; a Converse request accepts only state bound to its own connection and model.
+with no compatibility shim. Bedrock Converse state carries the reply's reported token counts. When the
+reply contains reasoning, it also carries the ordered reply with its reasoning signatures, and Connect
+replays that reply. A Converse request accepts only state bound to its own connection and model.
 Chat Completions, AgentCore and CLI chat do not import this opaque state.
 
 ### Carrying history to another model or provider
@@ -939,6 +946,17 @@ model fails with Bedrock's own error.
 
 Converse sends no reasoning setting. It reports no reasoning levels, a capability override cannot add
 one, and a request with `ReasoningLevel` fails before the call.
+
+Converse streams through ConverseStream. A connection with `SupportsStreaming = false` sends Converse
+instead. Its events then arrive after generation ends, in the order reasoning, text, tool calls, then the
+completion. Reasoning text arrives as `LlmReasoningDeltaEvent` with `IsSummary = false`. A Claude model
+under its default `omitted` reasoning display streams no reasoning text. Usage arrives in the stream's
+final metadata event and reaches the host on the completion.
+
+Tool calls return only with `RequiresAction`. The stop reasons `max_tokens` and
+`model_context_window_exceeded` report `Incomplete`, `content_filtered` and `guardrail_intervened` report
+`Refused`, and `malformed_model_output` and `malformed_tool_use` report `Failed` with no tool calls and no
+continuation state. An unknown or missing stop reason reports `Unknown`.
 
 Converse model listing returns the region's inference profiles and its foundation models. It omits a
 foundation model whose only inference type is `PROVISIONED`, such as `amazon.nova-lite-v1:0:300k`.

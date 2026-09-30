@@ -22,19 +22,20 @@ internal static class ProviderContinuationStateCodec
             Payload = Project(output, connection.Transport).ToJsonString()
         };
 
-    /// <summary>Transports whose adapters keep continuation state.</summary>
+    /// <summary>
+    /// Transports whose adapters keep continuation state. Bedrock Converse state carries the token counts the provider
+    /// reported, and the ordered reply when the reply contains reasoning.
+    /// </summary>
     public static bool Retains(LlmTransport transport) =>
         transport is LlmTransport.OpenAiResponses or LlmTransport.OpenAiCodex or LlmTransport.AnthropicMessages
             or LlmTransport.AwsBedrockConverse;
 
-    /// <summary>
-    /// Bedrock Converse replays no adapter output. Its state carries only the token counts the provider reported,
-    /// so accounting can count the history it closes.
-    /// </summary>
-    public static bool CountsOnly(LlmTransport transport) => transport == LlmTransport.AwsBedrockConverse;
-
     private const string NoOutput = "[]";
 
+    /// <summary>
+    /// State with no replayable output. It carries the token counts the provider reported, so accounting can count
+    /// the history it closes. Bedrock Converse writes it for a reply without reasoning.
+    /// </summary>
     public static LlmContinuationState EncodeCounts(
         LlmConnection connection,
         string modelId,
@@ -64,11 +65,9 @@ internal static class ProviderContinuationStateCodec
         {
             throw new ArgumentException("Response state does not match this version, transport, model, or account scope.");
         }
-        if (CountsOnly(connection.Transport))
+        if (connection.Transport == LlmTransport.AwsBedrockConverse && state.Payload == NoOutput)
         {
-            return state.Payload == NoOutput
-                ? []
-                : throw new ArgumentException("Response state for this transport carries only reported token counts.");
+            return [];
         }
 
         try
@@ -109,11 +108,11 @@ internal static class ProviderContinuationStateCodec
             return codec.DecodeMessage(message, connection, modelId);
         }
         JsonArray output = Decode(message.ContinuationState!, connection, modelId);
-        if (CountsOnly(connection.Transport))
+        if (connection.Transport == LlmTransport.AwsBedrockConverse && output.Count == 0)
         {
             return output;
         }
-        string text = connection.Transport == LlmTransport.AnthropicMessages
+        string text = connection.Transport is LlmTransport.AnthropicMessages or LlmTransport.AwsBedrockConverse
             ? string.Concat(output.OfType<JsonObject>()
                 .Where(item => item["type"]?.GetValue<string>() == "text")
                 .Select(item => item["text"]?.GetValue<string>()))
@@ -199,6 +198,10 @@ internal static class ProviderContinuationStateCodec
                 (LlmTransport.AnthropicMessages, "thinking") => ["type", "thinking", "signature"],
                 (LlmTransport.AnthropicMessages, "redacted_thinking") => ["type", "data"],
                 (LlmTransport.AnthropicMessages, "tool_use") => ["type", "id", "name", "input"],
+                (LlmTransport.AwsBedrockConverse, "text") => ["type", "text"],
+                (LlmTransport.AwsBedrockConverse, "reasoning") => ["type", "text", "signature"],
+                (LlmTransport.AwsBedrockConverse, "redacted_reasoning") => ["type", "data"],
+                (LlmTransport.AwsBedrockConverse, "tool_use") => ["type", "id", "name", "input"],
                 _ => throw new NotSupportedException("The adapter cannot retain this assistant output type.")
             };
             var copy = new JsonObject();
@@ -230,23 +233,26 @@ internal static class ProviderContinuationStateCodec
             {
                 throw new ArgumentException("Response state cannot contain non-assistant messages.");
             }
-            ValidateItem(copy, type);
+            ValidateItem(copy, transport, type);
             projected.Add(copy);
         }
 
         return projected;
     }
 
-    private static void ValidateItem(JsonObject item, string type)
+    private static void ValidateItem(JsonObject item, LlmTransport transport, string type)
     {
-        string[] required = type switch
+        string[] required = (transport, type) switch
         {
-            "message" => ["content"],
-            "function_call" => ["call_id", "name", "arguments"],
-            "tool_use" => ["id", "name", "input"],
-            "thinking" => ["thinking", "signature"],
-            "redacted_thinking" => ["data"],
-            "text" => ["text"],
+            (_, "message") => ["content"],
+            (_, "function_call") => ["call_id", "name", "arguments"],
+            (_, "tool_use") => ["id", "name", "input"],
+            (_, "thinking") => ["thinking", "signature"],
+            (_, "redacted_thinking") => ["data"],
+            (_, "text") => ["text"],
+            // Bedrock reasoning text may be empty: a signed block under an omitted display carries none.
+            (LlmTransport.AwsBedrockConverse, "reasoning") => ["text"],
+            (LlmTransport.AwsBedrockConverse, "redacted_reasoning") => ["data"],
             _ => []
         };
         if (required.Any(field => item[field] is null)
@@ -259,6 +265,17 @@ internal static class ProviderContinuationStateCodec
         if (type == "function_call" && JsonNode.Parse(item["arguments"]!.GetValue<string>()) is not JsonObject)
         {
             throw new ArgumentException("Response-state tool arguments must be a JSON object.");
+        }
+        if (transport == LlmTransport.AwsBedrockConverse && type == "redacted_reasoning")
+        {
+            try
+            {
+                _ = Convert.FromBase64String(item["data"]!.GetValue<string>());
+            }
+            catch (FormatException)
+            {
+                throw new ArgumentException("Response-state redacted reasoning must be base64.");
+            }
         }
     }
 
