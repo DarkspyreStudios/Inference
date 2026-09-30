@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Darkspyre.Inference.Common.LLM;
+using Darkspyre.Inference.Connect.LLM.Internal;
 using Darkspyre.Inference.Connect.LLM.Providers;
 
 namespace Darkspyre.Inference.Connect.LLM.Vertex.Tests;
@@ -58,6 +59,31 @@ public sealed class GeminiWireParityTests
         Assert.True(JsonNode.DeepEquals(fromVertex, fromGemini));
         Assert.Equal("MEDIUM", (string?)fromGemini["generationConfig"]?["thinkingConfig"]?["thinkingLevel"]);
         Assert.NotNull(fromGemini["generationConfig"]?["responseJsonSchema"]);
+    }
+
+    [Fact]
+    public void BothRoutesOfferTheSharedGeminiReasoningLevels()
+    {
+        var vertex = new VertexLlmClient(new HttpClient(new Capture()), new FixedAuthentication());
+        var gemini = new GeminiApiLlmClient(new HttpClient(new Capture()));
+
+        IReadOnlySet<LlmReasoningLevel> fromVertex = vertex.GetCapabilities(new LlmConnection
+        {
+            Version = "1",
+            Transport = LlmTransport.GoogleVertexAi,
+            Endpoint = "https://aiplatform.googleapis.com",
+            Vertex = new() { ProjectId = "p", Location = "global" }
+        }, "google/gemini-3-flash-preview").ReasoningLevels;
+        IReadOnlySet<LlmReasoningLevel> fromGemini = gemini.GetCapabilities(new LlmConnection
+        {
+            Version = "1",
+            Transport = LlmTransport.GoogleGeminiApi,
+            Endpoint = GeminiApiLlmClient.DefaultEndpoint,
+            Credential = new LlmCredential { ApiKey = "k" }.Serialize()
+        }, "gemini-3-flash-preview").ReasoningLevels;
+
+        Assert.Equal(fromGemini.Order(), fromVertex.Order());
+        Assert.Equal(GeminiReasoning.Get("gemini-3-flash-preview", catalogThinking: null).Levels.Order(), fromVertex.Order());
     }
 
     private static async Task Drain(IAsyncEnumerable<LlmStreamEvent> events)

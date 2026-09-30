@@ -10,10 +10,12 @@ internal sealed class ManagedGeminiApiAgentClient(GeminiApiLlmClient client, Llm
     public async Task<ILlmAgentSession> StartSessionAsync(string connectionId, LlmConnection connection,
         LlmAgentSessionOptions options, CancellationToken cancellationToken = default)
     {
+        connection = await client.PrepareAsync(connection, cancellationToken).ConfigureAwait(false);
+        // The capability checks below and the session's per-model lookups read the provider catalog.
+        connection = await providers.AttachCatalogAsync(connectionId, connection, client, cancellationToken).ConfigureAwait(false);
         var capabilities = client.GetCapabilities(connection, options.ModelId);
         if (!capabilities.SupportsAgentSessions || options.Tools.Count > 0 && !capabilities.SupportsAgentToolUse)
         { throw new NotSupportedException("The selected Gemini API model disables the requested agent operation."); }
-        connection = await client.PrepareAsync(connection, cancellationToken).ConfigureAwait(false);
         var models = await providers.ListModelsAsync(connectionId, cancellationToken).ConfigureAwait(false);
         string scope = ProviderContinuationStateCodec.Scope(connection);
         return new ManagedAgentSession(connection, options, models, client,

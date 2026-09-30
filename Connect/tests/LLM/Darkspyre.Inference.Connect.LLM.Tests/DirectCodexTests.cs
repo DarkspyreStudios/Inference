@@ -432,7 +432,10 @@ public sealed class DirectCodexTests
             await Assert.ThrowsAsync<ArgumentException>(() => providers.CompleteAsync(
                 "codex", followup with { UnboundContinuationState = LlmUnboundContinuationState.Reject }));
 
-            Assert.Equal(before, handler.Calls);
+            // The refreshed connection version lists the Codex catalog once for per-model reasoning levels; no
+            // generation request is sent.
+            Assert.Equal(before + 1, handler.Calls);
+            Assert.Equal(HttpMethod.Get, handler.Method);
         }
     }
 

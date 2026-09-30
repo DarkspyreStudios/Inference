@@ -24,6 +24,9 @@ internal static class LlmReasoningEffort
         _ => throw new ArgumentOutOfRangeException(nameof(level), level, "The level has no effort word.")
     };
 
+    /// <summary>The OpenAI <c>reasoning.effort</c> spelling. Unlike <see cref="Word"/>, it spells None as <c>none</c>.</summary>
+    public static string OpenAiWord(LlmReasoningLevel level) => level == LlmReasoningLevel.None ? "none" : Word(level);
+
     /// <summary>Rejects a level the resolved model does not offer, before any provider call.</summary>
     public static void Validate(LlmReasoningLevel? level, LlmProviderCapabilities capabilities) =>
         Validate(level, capabilities.ReasoningLevels);

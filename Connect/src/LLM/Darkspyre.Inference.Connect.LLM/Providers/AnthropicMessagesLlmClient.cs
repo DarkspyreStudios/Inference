@@ -10,7 +10,11 @@ using Darkspyre.Inference.Connect.LLM.Internal;
 namespace Darkspyre.Inference.Connect.LLM.Providers;
 
 /// <summary>Direct Anthropic Messages API adapter for API-key connections.</summary>
-internal class AnthropicMessagesLlmClient : LlmClientBase
+/// <remarks>
+/// It reads the first-party Models API catalog for per-model reasoning levels. Vertex Claude, which derives from it,
+/// has no Models API; the service never attaches a catalog to a Vertex connection.
+/// </remarks>
+internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabilities
 {
     private const string AnthropicVersion = "2023-06-01";
     private const int DefaultMaxOutputTokens = 8192;
@@ -59,16 +63,14 @@ internal class AnthropicMessagesLlmClient : LlmClientBase
             throw new NotSupportedException(
                 "Anthropic Messages API connections accept only an API key or x-api-key secret header.");
         }
-        bool levelsOverridden = connection.CapabilityOverrides?.ReasoningLevels is not null
-            || (modelId is not null
-                && connection.ModelCapabilityOverrides.TryGetValue(modelId, out LlmCapabilityOverrides? modelOverrides)
-                && modelOverrides.ReasoningLevels is not null);
         return capabilities with
         {
             SupportsAccountUsage = false,
             SupportsAgentSessions = false,
             SupportsAgentToolUse = false,
-            ReasoningLevels = levelsOverridden ? capabilities.ReasoningLevels : AnthropicReasoning.Levels(modelId)
+            ReasoningLevels = LlmCapabilityOverrideLookup.Overrides(connection, modelId, overrides => overrides.ReasoningLevels)
+                ? capabilities.ReasoningLevels
+                : AnthropicModelProfiles.Resolve(modelId, ILlmCatalogCapabilities.EntryFor(connection, modelId)).ReasoningLevels
         };
     }
 
@@ -367,13 +369,24 @@ internal class AnthropicMessagesLlmClient : LlmClientBase
                     break;
                 }
 
-                models.AddRange(data.EnumerateArray()
-                    .Select(model => new LlmModel(
-                        LlmJson.GetString(model, "id") ?? string.Empty,
-                        LlmJson.GetString(model, "display_name")
-                            ?? LlmJson.GetString(model, "id")
-                            ?? string.Empty))
-                    .Where(model => model.Id.Length > 0));
+                foreach (JsonElement entry in data.EnumerateArray())
+                {
+                    string id = LlmJson.GetString(entry, "id") ?? string.Empty;
+                    if (id.Length == 0)
+                    {
+                        continue;
+                    }
+                    var model = new LlmModel(id, LlmJson.GetString(entry, "display_name") ?? id)
+                    {
+                        CatalogEntry = entry.Clone(),
+                        MaxContextTokens = entry.TryGetProperty("max_input_tokens", out JsonElement input)
+                            && input.ValueKind == JsonValueKind.Number && input.TryGetInt64(out long inputTokens) ? inputTokens : null,
+                        MaxOutputTokens = entry.TryGetProperty("max_tokens", out JsonElement output)
+                            && output.ValueKind == JsonValueKind.Number && output.TryGetInt64(out long outputTokens) ? outputTokens : null
+                    };
+                    // The listed capabilities come from this entry, as generation's do once the catalog is kept.
+                    models.Add(model with { Capabilities = GetCapabilities(connection with { Catalog = [model] }, id) });
+                }
 
                 // Anthropic pages model discovery. Without this the list stops at the first page.
                 bool hasMore = root.TryGetProperty("has_more", out JsonElement more)
@@ -482,7 +495,36 @@ internal class AnthropicMessagesLlmClient : LlmClientBase
         };
         if (request.ReasoningLevel is { } level)
         {
-            AnthropicReasoning.Apply(payload, ReasoningModelId(request.ModelId), level, request.MaxOutputTokens ?? DefaultMaxOutputTokens);
+            AnthropicReasoningFields fields = AnthropicModelProfiles.Fields(
+                AnthropicModelProfiles.Resolve(
+                    ReasoningModelId(request.ModelId),
+                    ILlmCatalogCapabilities.EntryFor(connection, request.ModelId)),
+                level,
+                request.MaxOutputTokens ?? DefaultMaxOutputTokens);
+            if (fields.Thinking is { } thinking)
+            {
+                payload["thinking"] = thinking;
+            }
+            if (fields.OutputConfig is { } outputConfig)
+            {
+                if (payload["output_config"] is JsonObject existing)
+                {
+                    // Keep fields another feature already wrote, such as a response format.
+                    foreach ((string name, JsonNode? value) in outputConfig.ToArray())
+                    {
+                        outputConfig.Remove(name);
+                        existing[name] = value;
+                    }
+                }
+                else
+                {
+                    payload["output_config"] = outputConfig;
+                }
+            }
+            if (fields.MaxTokens is int maxTokens)
+            {
+                payload["max_tokens"] = maxTokens;
+            }
         }
         if (system.Count > 0)
         {

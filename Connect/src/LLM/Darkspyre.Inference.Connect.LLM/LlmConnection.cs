@@ -12,6 +12,10 @@ public sealed record LlmConnection
     internal Internal.ILlmContinuationCodec? ContinuationCodec { get; init; }
     internal string? ResolvedContinuationScope { get; init; }
 
+    // The connection's model list from LlmModelListCache, published by the service for one operation.
+    // Never serialized or supplied by a host.
+    internal IReadOnlyList<LlmModel>? Catalog { get; init; }
+
     /// <summary>
     /// Opaque host concurrency token covering the connection and credential state. Every credential
     /// write must atomically compare this value before replacing the credential.

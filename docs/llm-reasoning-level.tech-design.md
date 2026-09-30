@@ -84,24 +84,70 @@ public enum LlmReasoningLevel
 
 | Adapter | Levels offered | Wire form |
 |---|---|---|
-| OpenAI Responses, OpenAI Codex | per connection: Minimal, Low, Medium, High, ExtraHigh; a connection's per-model capability overrides narrow the set for one model | `reasoning.effort`: `minimal`, `low`, `medium`, `high`, `xhigh` |
+| OpenAI Responses | per model, from `OpenAiModelProfiles` (table below); a model without a row offers Minimal to ExtraHigh | `reasoning.effort`: `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max` |
+| OpenAI Codex | per model: the `supported_reasoning_levels` of the model's Codex catalog entry; Minimal to ExtraHigh without one | `reasoning.effort` as for OpenAI Responses |
 | OpenAI-compatible chat | per connection, from the capability override (section 6) | `reasoning_effort`: the lower-case value for Low, Medium or High |
 | Claude CLI, Claude agent | Low, Medium, High, ExtraHigh, Maximum | `--effort` / `effortLevel`: `low`, `medium`, `high`, `xhigh`, `max` |
 | Antigravity CLI | Low, Medium, High | `--effort`: `low`, `medium`, `high` |
-| Anthropic Messages, adaptive-thinking models | per model: `None` where the model accepts disabled thinking, then Low to Maximum as the model's effort values allow | `None`: `thinking: {type: "disabled"}`. Otherwise `thinking: {type: "adaptive"}` and `output_config.effort`: `low`, `medium`, `high`, `xhigh`, `max` |
-| Anthropic Messages, budget-only models (Haiku 4.5, Sonnet 4.5) | None, Low, Medium, High, ExtraHigh, Maximum | `None`: no `thinking`. Otherwise `thinking: {type: "enabled", budget_tokens}` with 1,024, 4,096, 16,384, 32,768 or 64,000 |
-| Bedrock, Bedrock AgentCore | none | — |
+| Anthropic Messages, Vertex Claude, Bedrock Claude | per model, from `AnthropicModelProfiles` (table below); API-key connections derive levels from `GET /v1/models` | Adaptive: `thinking: {type: "adaptive"}` and `output_config.effort`: `low`, `medium`, `high`, `xhigh`, `max`. Effort only: `output_config.effort`. Budget: `thinking: {type: "enabled", budget_tokens}` with 1,024, 4,096, 16,384, 32,768 or 64,000. `None`: `thinking: {type: "disabled"}` or no `thinking`, per family |
+| Gemini API, Vertex Gemini | per model, from `GeminiReasoning` (tables below); a Gemini API catalog entry with `thinking: false` offers none | Gemini 3: `thinkingLevel`. Gemini 2.5: `thinkingBudget`, 0 for `None` |
+| Bedrock Converse | per family: Claude as Anthropic, Nova 2 None to High; gpt-oss, DeepSeek-R1 and unknown models none | `additionalModelRequestFields`: Claude `thinking` and `output_config`; Nova 2 `reasoningConfig` |
+| Bedrock AgentCore | none | — |
 | Tensor Qwen | None, High | `None`: `enableThinking: false`. `High`: `enableThinking: true` |
 
 Each adapter keeps its level set and mapping table beside its capability declaration. A model the
-adapter cannot classify reports an empty set.
+adapter cannot classify reports an empty set, except on OpenAI Responses and Codex, where it offers
+Minimal to ExtraHigh.
+
+OpenAI Responses profiles (`OpenAiModelProfiles`). OpenAI `None` maps to `none`. A verified reasoning model
+accepts temperature only with `None`; a null level counts as reasoning.
+
+| Prefix | Levels |
+|---|---|
+| `gpt-6.1-sol` | Low, Medium, High, ExtraHigh, Maximum |
+| `gpt-6-astra` | Minimal, Low, Medium, High, ExtraHigh, Maximum |
+| `gpt-6-luna` | None, Low, Medium, High, ExtraHigh, Maximum |
+| `gpt-5.6`, `gpt-5.5` | None, Minimal, Low, Medium, High, ExtraHigh, Maximum |
+| `gpt-4.1`, `gpt-4o` | none (non-reasoning; temperature accepted) |
+| no row | Minimal, Low, Medium, High, ExtraHigh (temperature accepted at any level) |
+
+Anthropic family table (`AnthropicModelProfiles`), longest prefix first:
+
+| Prefix | Thinking | None mapping | Sampling | Forced tool choice | Levels without catalog |
+|---|---|---|---|---|---|
+| `claude-fable-5-1`, `claude-mythos-5-1` | Adaptive | Unsupported | no | no | Low to Maximum |
+| `claude-fable-`, `claude-mythos-` | Adaptive | Unsupported | no | yes | Low to Maximum |
+| `claude-opus-5-5`, `claude-sonnet-5-5` | Adaptive | Unsupported | no | no | Low to Maximum |
+| `claude-opus-5`, `claude-sonnet-5`, `claude-opus-4-8`, `claude-opus-4-7` | Adaptive | Disabled | no | yes | None, Low to Maximum |
+| `claude-opus-4-6`, `claude-sonnet-4-6` | Adaptive | Omit thinking | yes | yes | None, Low, Medium, High, Maximum |
+| `claude-opus-4-5` | Effort only | Omit thinking | yes | yes | None, Low, Medium, High |
+| `claude-haiku-4-5`, `claude-sonnet-4-5`, `claude-opus-4-1`, `claude-opus-4`, `claude-sonnet-4`, `claude-3-7-sonnet` | Budget | Omit thinking | yes | yes | None, Low to Maximum |
+
+With a Models API entry, the entry sets the thinking mode and levels: adaptive thinking takes the effort
+levels marked supported, budget thinking alone takes Low to Maximum, and an effort without thinking takes
+the supported effort levels. `None` is added where the family's None mapping is not Unsupported. A
+catalog model without a family row uses None mapping Unsupported, no sampling and forced tool choice.
+
+Gemini levels (`GeminiReasoning`), longest prefix first:
+
+| Prefix | Control | Levels |
+|---|---|---|
+| `gemini-3.8-flash`, `gemini-3.7-flash` | `thinkingLevel` | Low, Medium, High |
+| `gemini-3.6-flash`, `gemini-3.5-flash-lite`, `gemini-3.5-flash`, `gemini-3.1-flash-lite`, `gemini-3-flash` | `thinkingLevel` | Minimal, Low, Medium, High |
+| `gemini-3.1-pro` | `thinkingLevel` | Low, Medium, High |
+| `gemini-3-pro` | `thinkingLevel` | Low, High |
+| `gemini-2.5-flash-lite`, `gemini-2.5-flash` | `thinkingBudget` 1,024 / 8,192 / 24,576; `None` sends 0 | None, Low, Medium, High |
+| `gemini-2.5-pro` | `thinkingBudget` 1,024 / 8,192 / 32,768 | Low, Medium, High |
+
+The adapter never sends `thinkingLevel` and `thinkingBudget` together.
 
 Anthropic rules that the per-model sets encode:
 
 - Minimal has no Anthropic equivalent, so no Anthropic model offers it.
 - ExtraHigh (`xhigh`) exists on Opus 4.7 and later, Sonnet 5 and Fable; Maximum (`max`) on Opus 4.6 and
   later. Opus 4.5 offers Low, Medium and High only.
-- `None` appears only where the model accepts disabled thinking. Fable and Opus 5.5 reject it. Opus 5
+- `None` appears only where the model accepts disabled thinking. Fable, Opus 5.5 and Sonnet 5.5 reject
+  it. Sonnet 5.5's lowest setting, `between_tools`, still reasons, so it is not `None`. Opus 5
   accepts it only at effort `high` or below, which a request carrying `None` satisfies because it sends
   no effort.
 - `budget_tokens` is rejected on current models and is used only for the budget-only models. There it
@@ -146,6 +192,19 @@ Consumers outside this repository migrate in their own units after the release:
    `SupportsReasoning` is false, so applications do not offer reasoning for it.
 3. **The full seven-level set.** It covers the union of today's provider vocabularies, and each model
    offers only the levels it honours.
+4. **OpenAI profiles are a table because the Models API reports no capabilities.** A model without a
+   verified row keeps the former Minimal to ExtraHigh set and temperature, so an unclassified model loses
+   no control it had.
+5. **Anthropic levels come from the Models API where available.** The family table supplies what the
+   catalog does not report: the None mapping, sampling and forced tool choice. Vertex Claude and Bedrock
+   Claude have no Models API and use the family table.
+6. **Gemini 2.5 budgets.** Low is 1,024 tokens, which meets every 2.5 model's minimum; High is the
+   model's maximum budget. `None` sends a budget of 0 only on Flash and Flash-Lite, which can disable
+   thinking.
+7. **Codex levels come from its model catalog.** The Codex `/models` entry lists each model's reasoning
+   efforts; an effort Connect has no level for is left out.
+8. **gpt-oss on Bedrock offers no level.** AWS does not name its reasoning field, and no live probe has
+   confirmed `reasoning_effort`.
 
 ## 10. Implementation record
 
@@ -180,3 +239,18 @@ change, package or publication is part of this unit; section 7's 11.5.0 release 
 The subsequent coordinated source-version update selects `11.5.0-rc.1`. The complete implementation
 and version update are committed together at the user's request. All four packages were subsequently
 published from `500a572` after release verification; `.roles/project.md` records the evidence.
+
+### Per-model reasoning profiles (DSA-109)
+
+- `AnthropicModelProfiles` replaces `AnthropicReasoning`. It resolves one profile per Claude model from
+  the Models API entry and the family table, and `Fields` returns the `thinking`, `output_config` and
+  `max_tokens` a level adds. Anthropic Messages, Vertex Claude and Bedrock Claude share it.
+- `OpenAiModelProfiles` sets OpenAI Responses levels and temperature per model.
+  `LlmReasoningEffort.OpenAiWord` spells `None` as `none`.
+- `GeminiReasoning` holds the Gemini 3 level and Gemini 2.5 budget tables for the Gemini API and Vertex
+  Gemini, and builds `thinkingConfig`.
+- `BedrockModelFamilies` classifies Bedrock model and inference-profile ids. Converse maps Claude and
+  Nova 2 levels to `additionalModelRequestFields`.
+- `LlmProviderService` attaches the kept model list to the connection as `Catalog` for adapters that
+  implement `ILlmCatalogCapabilities`: Anthropic Messages, the Gemini API and Codex. A failed listing
+  leaves the family tables in charge.

@@ -70,14 +70,23 @@ Every listed model has the shared Gemini capabilities: streaming with usage, too
 modes, text-only rich tool results, prompt images and documents, and managed agent sessions. Strict
 tool input is Unsupported. Parallel-call control and argument streaming are not offered.
 
-Reasoning control depends on the family, because the shared request sends `thinkingLevel`:
+Reasoning control comes from `GeminiReasoning`, which the Vertex Gemini route shares. Gemini 3 takes
+`thinkingLevel`; Gemini 2.5 takes `thinkingBudget`. The request never sends both.
 
-| Family | Reasoning levels | Provider JSON schema |
+| Prefix | Reasoning levels | Wire form |
 | --- | --- | --- |
-| `gemini-3*` with `flash` in the id | Minimal, Low, Medium, High | Yes |
-| other `gemini-3*` | Low, High | Yes |
-| `gemini-2.5*` | none, since it accepts only `thinkingBudget` | Yes |
-| any other family | none | No; structured output resolves through the local fallback rules |
+| `gemini-3.8-flash`, `gemini-3.7-flash` | Low, Medium, High | `thinkingLevel` |
+| `gemini-3.6-flash`, `gemini-3.5-flash-lite`, `gemini-3.5-flash`, `gemini-3.1-flash-lite`, `gemini-3-flash` | Minimal, Low, Medium, High | `thinkingLevel` |
+| `gemini-3.1-pro` | Low, Medium, High | `thinkingLevel` |
+| `gemini-3-pro` | Low, High | `thinkingLevel` |
+| `gemini-2.5-flash-lite`, `gemini-2.5-flash` | None, Low, Medium, High | `thinkingBudget` 0 / 1,024 / 8,192 / 24,576 |
+| `gemini-2.5-pro` | Low, Medium, High | `thinkingBudget` 1,024 / 8,192 / 32,768 |
+| any other model | none | none |
+
+The service keeps the catalog listing and attaches it to generation and capability queries. A catalog
+entry whose `thinking` flag is false offers no level, because `thinkingConfig` on a non-thinking model
+is an error. `gemini-3*` and `gemini-2.5*` models use provider JSON schema; any other family resolves
+structured output through the local fallback rules.
 
 Capability overrides cannot enable JSON object mode, account usage or a reasoning level the family
 lacks.

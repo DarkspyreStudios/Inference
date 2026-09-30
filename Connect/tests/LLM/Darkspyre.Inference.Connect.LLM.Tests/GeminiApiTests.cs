@@ -86,7 +86,7 @@ public sealed class GeminiApiTests
         Assert.Equal(65_536, flash.MaxOutputTokens);
         Assert.Equal(LlmModelAvailability.Unknown, flash.Availability);
         Assert.Contains(LlmReasoningLevel.Minimal, flash.Capabilities!.ReasoningLevels);
-        Assert.Empty(models[1].Capabilities!.ReasoningLevels);
+        Assert.Equal([LlmReasoningLevel.Low, LlmReasoningLevel.Medium, LlmReasoningLevel.High], models[1].Capabilities!.ReasoningLevels.Order());
         Assert.True(models[1].Capabilities!.SupportsJsonSchema);
         Assert.Empty(models[2].Capabilities!.ReasoningLevels);
         Assert.False(models[2].Capabilities!.SupportsJsonSchema);
@@ -202,7 +202,7 @@ public sealed class GeminiApiTests
         var client = new GeminiApiLlmClient(new HttpClient(handler));
         await Assert.ThrowsAsync<NotSupportedException>(() => Complete(client, Connection, new() { ModelId = Flash, Tools = [Tool with { Strict = true }] }));
         await Assert.ThrowsAsync<NotSupportedException>(() => Complete(client, Connection, new() { ModelId = Flash, Tools = [Tool], AllowParallelToolCalls = false }));
-        await Assert.ThrowsAnyAsync<Exception>(() => Complete(client, Connection, new() { ModelId = "gemini-2.5-pro", ReasoningLevel = LlmReasoningLevel.High }));
+        await Assert.ThrowsAnyAsync<Exception>(() => Complete(client, Connection, new() { ModelId = "gemini-2.5-pro", ReasoningLevel = LlmReasoningLevel.None }));
         await Assert.ThrowsAsync<NotSupportedException>(() => Complete(client, Connection, new()
         {
             ModelId = Flash,

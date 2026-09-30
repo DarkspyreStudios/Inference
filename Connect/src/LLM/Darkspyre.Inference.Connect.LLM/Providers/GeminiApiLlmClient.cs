@@ -10,7 +10,7 @@ namespace Darkspyre.Inference.Connect.LLM.Providers;
 
 /// <summary>The Gemini API (Google AI Studio) over generateContent, authenticated with an API key header.</summary>
 internal sealed partial class GeminiApiLlmClient(HttpClient http)
-    : LlmClientBase(http), ILlmConnectionPreparation, ILlmContextEstimator
+    : LlmClientBase(http), ILlmConnectionPreparation, ILlmContextEstimator, ILlmCatalogCapabilities
 {
     public const string DefaultEndpoint = "https://generativelanguage.googleapis.com";
     internal const string Owner = "darkspyre.connect.llm.gemini-api";
@@ -31,7 +31,7 @@ internal sealed partial class GeminiApiLlmClient(HttpClient http)
     public override LlmProviderCapabilities GetCapabilities(LlmConnection connection, string? modelId = null)
     {
         Validate(connection);
-        IReadOnlySet<LlmReasoningLevel> levels = modelId is null ? new HashSet<LlmReasoningLevel>() : ReasoningLevels(ParseModel(modelId));
+        IReadOnlySet<LlmReasoningLevel> levels = modelId is null ? new HashSet<LlmReasoningLevel>() : Reasoning(connection, modelId).Levels;
         LlmProviderCapabilities capabilities = GeminiCapabilities.Create(levels);
         if (modelId is not null && !IsReviewed(modelId)) { capabilities = capabilities with { SupportsJsonSchema = false }; }
         capabilities = capabilities.Apply(connection.CapabilityOverrides);
@@ -65,7 +65,8 @@ internal sealed partial class GeminiApiLlmClient(HttpClient http)
         LlmStructuredOutputEnforcement? enforcement = request.StructuredOutput is { } structured && !capabilities.SupportsJsonSchema
             ? StructuredOutput.ResolveEnforcement(structured, capabilities)
             : GeminiSchemas.Enforcement(request.StructuredOutput, RouteName);
-        JsonObject payload = GeminiRequest.Build(connection, request, enforcement, output => ProjectToolOutput(connection, request.ModelId, output));
+        JsonObject payload = GeminiRequest.Build(connection, request, enforcement, output => ProjectToolOutput(connection, request.ModelId, output),
+            Reasoning(connection, request.ModelId));
         var message = new HttpRequestMessage(HttpMethod.Post, $"{DefaultEndpoint}/v1beta/models/{model}:streamGenerateContent?alt=sse")
         { Content = JsonContent.Create(payload) };
         message.Headers.TryAddWithoutValidation(KeyHeader, Key(connection));
@@ -175,15 +176,16 @@ internal sealed partial class GeminiApiLlmClient(HttpClient http)
     internal static bool IsReviewed(string modelId) =>
         modelId.StartsWith("gemini-3", StringComparison.Ordinal) || modelId.StartsWith("gemini-2.5", StringComparison.Ordinal);
 
-    /// <summary>
-    /// The shared request sends thinkingLevel. Gemini 3 accepts it; Gemini 2.5 accepts only thinkingBudget, so it
-    /// offers no reasoning control here. Flash models accept Minimal through High; other Gemini 3 models Low and High.
-    /// </summary>
-    internal static IReadOnlySet<LlmReasoningLevel> ReasoningLevels(string modelId) =>
-        !modelId.StartsWith("gemini-3", StringComparison.Ordinal) ? new HashSet<LlmReasoningLevel>()
-        : modelId.Contains("flash", StringComparison.Ordinal)
-            ? new HashSet<LlmReasoningLevel> { LlmReasoningLevel.Minimal, LlmReasoningLevel.Low, LlmReasoningLevel.Medium, LlmReasoningLevel.High }
-            : new HashSet<LlmReasoningLevel> { LlmReasoningLevel.Low, LlmReasoningLevel.High };
+    /// <summary>The model's reasoning control, gated on the catalog's <c>thinking</c> flag when the catalog is kept.</summary>
+    private static GeminiReasoningProfile Reasoning(LlmConnection connection, string modelId) =>
+        GeminiReasoning.Get(ParseModel(modelId), CatalogThinking(connection, modelId));
+
+    private static bool? CatalogThinking(LlmConnection connection, string modelId) =>
+        ILlmCatalogCapabilities.EntryFor(connection, modelId) is { ValueKind: JsonValueKind.Object } entry
+        && entry.TryGetProperty("thinking", out JsonElement thinking)
+        && thinking.ValueKind is JsonValueKind.True or JsonValueKind.False
+            ? thinking.GetBoolean()
+            : null;
 
     private LlmModel? Describe(LlmConnection connection, JsonElement entry)
     {
@@ -194,14 +196,17 @@ internal sealed partial class GeminiApiLlmClient(HttpClient http)
         if (!entry.TryGetProperty("supportedGenerationMethods", out JsonElement methods) || methods.ValueKind != JsonValueKind.Array
             || !methods.EnumerateArray().Any(method => method.ValueKind == JsonValueKind.String && method.GetString() == "generateContent"))
         { return null; }
-        return new LlmModel(id, LlmJson.GetString(entry, "displayName") ?? id, "google", GetCapabilities(connection, id))
+        var model = new LlmModel(id, LlmJson.GetString(entry, "displayName") ?? id, "google")
         {
+            CatalogEntry = entry.Clone(),
             MaxContextTokens = LlmJson.GetInt(entry, "inputTokenLimit"),
             MaxOutputTokens = LlmJson.GetInt(entry, "outputTokenLimit"),
             Availability = LlmModelAvailability.Unknown,
             AvailabilityReason = IsReviewed(id) ? "Catalog entry; invocation access has not been tested."
                 : "Catalog entry in an unreviewed family; reasoning control and provider schema enforcement are not offered."
         };
+        // The listed capabilities come from this entry, as generation's do once the catalog is kept.
+        return model with { Capabilities = GetCapabilities(connection with { Catalog = [model] }, id) };
     }
 
     private static void ValidateGeminiRequest(LlmChatRequest request, LlmProviderCapabilities capabilities)

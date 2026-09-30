@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Darkspyre.Inference.Common.LLM;
 
 namespace Darkspyre.Inference.Connect.LLM;
@@ -18,4 +19,7 @@ public sealed record LlmModel(
     public DateTimeOffset? AvailabilityCheckedAt { get; init; }
 
     public string? AvailabilityReason { get; init; }
+
+    /// <summary>The provider's own catalog entry, kept for the adapter that listed it. Not part of the host contract.</summary>
+    internal JsonElement? CatalogEntry { get; init; }
 }

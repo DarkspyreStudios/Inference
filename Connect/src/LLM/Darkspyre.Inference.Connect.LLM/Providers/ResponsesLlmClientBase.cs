@@ -15,6 +15,7 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
     public ContextEstimate? EstimateInputTokens(LlmConnection connection, LlmChatRequest request)
     {
         ValidateRequest(connection, request, GetCapabilities(connection, request.ModelId));
+        ValidateSampling(request);
         var enforcement = request.StructuredOutput is null ? (LlmStructuredOutputEnforcement?)null
             : StructuredOutput.ResolveEnforcement(request.StructuredOutput, GetCapabilities(connection, request.ModelId));
         JsonObject payload = BuildPayload(connection, request, enforcement);
@@ -68,6 +69,7 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
     {
         LlmProviderCapabilities capabilities = GetCapabilities(connection, request.ModelId);
         ValidateRequest(connection, request, capabilities);
+        ValidateSampling(request);
         LlmStructuredOutputEnforcement? enforcement = request.StructuredOutput is null
             ? null
             : StructuredOutput.ResolveEnforcement(request.StructuredOutput, capabilities);
@@ -241,6 +243,15 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
             credential);
     }
 
+    /// <summary>OpenAI Responses applies its per-model sampling rule. Codex accepts no temperature at all.</summary>
+    private void ValidateSampling(LlmChatRequest request)
+    {
+        if (Transport == LlmTransport.OpenAiResponses)
+        {
+            OpenAiModelProfiles.ValidateSampling(request);
+        }
+    }
+
     protected virtual JsonObject BuildPayload(
         LlmConnection connection,
         LlmChatRequest request,
@@ -277,7 +288,7 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
 
         if (request.ReasoningLevel is { } level)
         {
-            payload["reasoning"] = new JsonObject { ["effort"] = LlmReasoningEffort.Word(level) };
+            payload["reasoning"] = new JsonObject { ["effort"] = LlmReasoningEffort.OpenAiWord(level) };
         }
 
         // Stateless ordinary responses need their reasoning state just as tool responses do.

@@ -19,6 +19,17 @@ internal sealed class BedrockLlmClient(
 {
     internal const string RequestIdMetadataKey = "request-id";
 
+    /// <summary>
+    /// The output allowance a Claude thinking budget is added to when the request sets none. It matches the
+    /// Anthropic Messages adapter's default.
+    /// </summary>
+    private const int ClaudeDefaultMaxOutputTokens = 8192;
+
+    private static readonly IReadOnlySet<LlmReasoningLevel> Nova2Levels = new[]
+    {
+        LlmReasoningLevel.None, LlmReasoningLevel.Low, LlmReasoningLevel.Medium, LlmReasoningLevel.High
+    }.ToFrozenSet();
+
     private static long _requestCounter;
 
     private static readonly LlmProviderCapabilities Defaults = new()
@@ -57,15 +68,37 @@ internal sealed class BedrockLlmClient(
         string? modelId = null)
     {
         EnsureTransport(connection);
-        LlmProviderCapabilities capabilities = Defaults.Apply(connection.CapabilityOverrides);
+        IReadOnlySet<LlmReasoningLevel> offered = modelId is null ? FrozenSet<LlmReasoningLevel>.Empty : ReasoningLevels(modelId);
+        LlmProviderCapabilities capabilities = (Defaults with { ReasoningLevels = offered }).Apply(connection.CapabilityOverrides);
         capabilities = modelId is not null
             && connection.ModelCapabilityOverrides.TryGetValue(
                 modelId,
                 out LlmCapabilityOverrides? modelOverrides)
                     ? capabilities.Apply(modelOverrides)
                     : capabilities;
-        // Converse sends no reasoning setting, so no override can offer a level.
-        return capabilities with { ReasoningLevels = FrozenSet<LlmReasoningLevel>.Empty };
+        // An override can narrow the model family's levels but never widen them: Converse maps no other level.
+        if (capabilities.ReasoningLevels.Any(level => !offered.Contains(level)))
+        {
+            throw new NotSupportedException(
+                "Bedrock capability overrides cannot offer a reasoning level the model family does not accept.");
+        }
+        return capabilities;
+    }
+
+    /// <summary>
+    /// The levels a model family takes through additional model request fields. gpt-oss, DeepSeek-R1 and unknown
+    /// models take none.
+    /// </summary>
+    internal static IReadOnlySet<LlmReasoningLevel> ReasoningLevels(string modelId)
+    {
+        (BedrockModelFamily family, string baseModelId) = BedrockModelFamilies.Classify(modelId);
+        return family switch
+        {
+            BedrockModelFamily.AnthropicClaude => AnthropicModelProfiles.Resolve(
+                BedrockModelFamilies.AnthropicModelId(baseModelId), catalogEntry: null).ReasoningLevels,
+            BedrockModelFamily.AmazonNova2 => Nova2Levels,
+            _ => FrozenSet<LlmReasoningLevel>.Empty
+        };
     }
 
     public async IAsyncEnumerable<LlmStreamEvent> StreamAsync(
@@ -165,6 +198,21 @@ internal sealed class BedrockLlmClient(
         }
 
         LlmReasoningEffort.Validate(request.ReasoningLevel, capabilities);
+        BedrockModelFamily family = BedrockModelFamilies.Classify(request.ModelId).Family;
+        if (family == BedrockModelFamily.AnthropicClaude
+            && request.ReasoningLevel is { } level && level != LlmReasoningLevel.None
+            && (request.Temperature is not null
+                || request.ToolChoice?.Mode is LlmToolChoiceMode.Required or LlmToolChoiceMode.Specific))
+        {
+            throw new NotSupportedException("Claude thinking cannot be combined with temperature or forced tool choice.");
+        }
+        if (family == BedrockModelFamily.AmazonNova2
+            && request.ReasoningLevel == LlmReasoningLevel.High
+            && (request.Temperature is not null || request.MaxOutputTokens is not null))
+        {
+            throw new NotSupportedException(
+                "Nova 2 high reasoning requires temperature and maximum output tokens to be unset.");
+        }
         LlmClientBase.ValidatePromptAttachments(request, capabilities);
         LlmClientBase.ValidateToolUse(request, capabilities);
         foreach (LlmChatMessage message in request.Messages.Where(message => message.ContinuationState is not null))
@@ -523,6 +571,20 @@ internal sealed class BedrockLlmClient(
             hasInference = true;
         }
 
+        if (request.ReasoningLevel is { } level
+            && ReasoningFields(request.ModelId, level, request.MaxOutputTokens) is var (fields, raisedMaxTokens))
+        {
+            if (fields.Count > 0)
+            {
+                result.AdditionalModelRequestFields = DeserializeDocument(fields.ToJsonString());
+            }
+            if (raisedMaxTokens is int raised)
+            {
+                inference.MaxTokens = raised;
+                hasInference = true;
+            }
+        }
+
         if (hasInference)
         {
             result.InferenceConfig = inference;
@@ -580,6 +642,40 @@ internal sealed class BedrockLlmClient(
         };
 
         return result;
+    }
+
+    /// <summary>
+    /// The additional model request fields a reasoning level adds, and the raised maximum output tokens a Claude
+    /// thinking budget needs. Validation has already confirmed the model family offers the level.
+    /// </summary>
+    private static (JsonObject Fields, int? MaxTokens) ReasoningFields(string modelId, LlmReasoningLevel level, int? maxOutputTokens)
+    {
+        (BedrockModelFamily family, string baseModelId) = BedrockModelFamilies.Classify(modelId);
+        var fields = new JsonObject();
+        switch (family)
+        {
+            case BedrockModelFamily.AnthropicClaude:
+                AnthropicReasoningFields claude = AnthropicModelProfiles.Fields(
+                    AnthropicModelProfiles.Resolve(BedrockModelFamilies.AnthropicModelId(baseModelId), catalogEntry: null),
+                    level,
+                    maxOutputTokens ?? ClaudeDefaultMaxOutputTokens);
+                if (claude.Thinking is { } thinking)
+                {
+                    fields["thinking"] = thinking;
+                }
+                if (claude.OutputConfig is { } outputConfig)
+                {
+                    fields["output_config"] = outputConfig;
+                }
+                return (fields, claude.MaxTokens);
+            case BedrockModelFamily.AmazonNova2:
+                fields["reasoningConfig"] = level == LlmReasoningLevel.None
+                    ? new JsonObject { ["type"] = "disabled" }
+                    : new JsonObject { ["type"] = "enabled", ["maxReasoningEffort"] = LlmReasoningEffort.Word(level) };
+                return (fields, null);
+            default:
+                return (fields, null);
+        }
     }
 
     /// <summary>The ConverseStream form of a built request. It carries every property <see cref="BuildRequest"/> sets.</summary>

@@ -20,10 +20,9 @@ internal sealed class OpenAiResponsesLlmClient(HttpClient http) : ResponsesLlmCl
         SupportsModelListing = true,
         SupportsJsonSchema = true,
         SupportsJsonObject = true,
-        ReasoningLevels = LlmReasoningEffort.Levels(
-            LlmReasoningLevel.Minimal, LlmReasoningLevel.Low, LlmReasoningLevel.Medium,
-            LlmReasoningLevel.High, LlmReasoningLevel.ExtraHigh),
-        SupportsTemperature = true,
+        // Reasoning levels and temperature are per model; GetCapabilities sets them from the model's profile.
+        ReasoningLevels = LlmReasoningEffort.Levels(),
+        SupportsTemperature = false,
         SupportsToolUse = true,
         Tools = new()
         {
@@ -38,4 +37,18 @@ internal sealed class OpenAiResponsesLlmClient(HttpClient http) : ResponsesLlmCl
         RichContentSupported = RichContentRoutes.Responses
     };
 
+    public override LlmProviderCapabilities GetCapabilities(LlmConnection connection, string? modelId = null)
+    {
+        LlmProviderCapabilities capabilities = base.GetCapabilities(connection, modelId);
+        OpenAiModelProfile profile = OpenAiModelProfiles.Get(modelId);
+        return capabilities with
+        {
+            ReasoningLevels = LlmCapabilityOverrideLookup.Overrides(connection, modelId, overrides => overrides.ReasoningLevels)
+                ? capabilities.ReasoningLevels
+                : profile.ReasoningLevels,
+            SupportsTemperature = LlmCapabilityOverrideLookup.Overrides(connection, modelId, overrides => overrides.SupportsTemperature)
+                ? capabilities.SupportsTemperature
+                : profile.AllowsSampling
+        };
+    }
 }

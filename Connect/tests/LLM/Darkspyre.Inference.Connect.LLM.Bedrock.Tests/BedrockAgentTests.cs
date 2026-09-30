@@ -87,15 +87,16 @@ public sealed class BedrockAgentTests
     }
 
     [Fact]
-    public void ARequestedReasoningLevelFailsBeforeTheCallAndOverridesCannotOfferOne()
+    public void AModelWithoutAReasoningFamilyRejectsALevelAndOverridesCannotOfferOne()
     {
         var overridden = Connection() with
         {
             CapabilityOverrides = new() { ReasoningLevels = new HashSet<Common.LLM.LlmReasoningLevel> { Common.LLM.LlmReasoningLevel.High } }
         };
 
-        Assert.Empty(_client.GetCapabilities(overridden, Model).ReasoningLevels);
-        Assert.Throws<Common.InferenceException>(() => _client.EstimateInputTokens(overridden,
+        Assert.Empty(_client.GetCapabilities(Connection(), Model).ReasoningLevels);
+        Assert.Throws<NotSupportedException>(() => _client.GetCapabilities(overridden, Model));
+        Assert.Throws<Common.InferenceException>(() => _client.EstimateInputTokens(Connection(),
             Request([new("user", "hello")]) with { ReasoningLevel = Common.LLM.LlmReasoningLevel.High }));
     }
 

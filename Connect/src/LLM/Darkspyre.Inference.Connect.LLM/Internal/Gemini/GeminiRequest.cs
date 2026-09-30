@@ -7,7 +7,8 @@ namespace Darkspyre.Inference.Connect.LLM.Internal;
 internal static class GeminiRequest
 {
     public static JsonObject Build(LlmConnection connection, LlmChatRequest request,
-        LlmStructuredOutputEnforcement? enforcement, Func<LlmToolOutput, ProjectedToolOutput> project)
+        LlmStructuredOutputEnforcement? enforcement, Func<LlmToolOutput, ProjectedToolOutput> project,
+        GeminiReasoningProfile reasoning)
     {
         var contents = new JsonArray();
         var calls = new Dictionary<string, (string Name, string? WireId)>(StringComparer.Ordinal);
@@ -88,8 +89,7 @@ internal static class GeminiRequest
         if (request.Temperature is double temperature) { generation["temperature"] = temperature; }
         if (request.ReasoningLevel is { } level)
         {
-            generation["thinkingConfig"] = new JsonObject
-            { ["thinkingLevel"] = level.ToString().ToUpperInvariant(), ["includeThoughts"] = true };
+            generation["thinkingConfig"] = GeminiReasoning.ThinkingConfig(reasoning, level);
         }
         if (request.StructuredOutput is { } schema && enforcement == LlmStructuredOutputEnforcement.ProviderJsonSchema)
         {

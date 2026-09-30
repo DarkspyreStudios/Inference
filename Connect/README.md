@@ -154,6 +154,17 @@ no adapter substitutes a nearby level. Each adapter owns the mapping to its prov
 and the setup editor exposes it as one Default/Enabled/Disabled choice per level. The design is
 `docs/llm-reasoning-level.tech-design.md` in the repository root.
 
+Anthropic API-key, Gemini API and ChatGPT subscription connections read each model's levels from the
+provider's model catalog, which `LlmModelListCache` keeps. The first capability query or generation on a
+new connection version therefore lists the connection's models once. When that listing fails, the adapter
+uses its own model-family table and the operation proceeds.
+
+OpenAI Responses levels are per model, from a table of verified model pages, because the OpenAI Models
+API reports no capabilities. `None` sends `reasoning.effort: "none"` and `Maximum` sends `"max"`. A
+verified reasoning model accepts `temperature` only with `ReasoningLevel = None`; a request without a
+level counts as reasoning, because these models default to effort `medium`. A model without a table row
+offers `Minimal` to `ExtraHigh` and accepts temperature at any level.
+
 ## PocketTTS speech
 
 `ITtsClient` accepts `TtsRequest` and returns `TtsResult` with WAV bytes and provenance. Register
@@ -782,7 +793,8 @@ copied, or used as a fallback. Former executable endpoints (`codex`, `local://co
 paths) now fail with migration guidance. Direct Codex settings have no endpoint field: they always
 use the official endpoint, so saving an edit replaces a former value. Save requires a completed
 ChatGPT sign-in, or a saved credential that the edit keeps. Model
-discovery uses the direct authenticated catalog.
+discovery uses the direct authenticated catalog. A model whose catalog entry lists
+`supported_reasoning_levels` offers exactly those levels; other models offer `Minimal` to `ExtraHigh`.
 
 Chat and managed agents share SSE request mapping, attachments, tool definitions, reasoning level,
 JSON Schema, and ordered opaque response-state replay. Requests use `store: false`; the library
@@ -944,8 +956,17 @@ Converse sends a tool's `strict` flag only when `LlmToolDefinition.Strict` is tr
 strict schemas, such as Amazon Nova, reject the field even when it is false; a strict tool on such a
 model fails with Bedrock's own error.
 
-Converse sends no reasoning setting. It reports no reasoning levels, a capability override cannot add
-one, and a request with `ReasoningLevel` fails before the call.
+Converse sends a reasoning level through `additionalModelRequestFields` for Claude and Nova 2 models,
+classified from the model or inference-profile id:
+
+| Family | Levels | Fields |
+| --- | --- | --- |
+| Claude (`anthropic.claude-*`) | The Anthropic Messages set for the same model | `thinking` and `output_config.effort`, or a thinking budget added to `inferenceConfig.maxTokens` (8,192 when the request sets none) |
+| Nova 2 (`amazon.nova-2-*`) | `None`, `Low`, `Medium`, `High` | `reasoningConfig` with `type: "disabled"`, or `type: "enabled"` and `maxReasoningEffort` |
+
+gpt-oss, DeepSeek-R1, other models and ARNs offer no level. A capability override can narrow a family's
+set but cannot widen it. A Claude request with a level above `None` rejects temperature and forced tool
+choice, and a Nova 2 request at `High` rejects temperature and `MaxOutputTokens`, before the call.
 
 Converse streams through ConverseStream. A connection with `SupportsStreaming = false` sends Converse
 instead. Its events then arrive after generation ends, in the order reasoning, text, tool calls, then the
@@ -1134,11 +1155,18 @@ new LlmConnection
 
 Direct API-key requests map a reasoning level per model. Current models take
 `thinking: {type: "adaptive"}` with `output_config.effort` (`low`, `medium`, `high`, `xhigh`, `max`),
-and `None` sends `thinking: {type: "disabled"}` where the model accepts it. Opus 4.6 and Sonnet 4.6
+and `None` sends `thinking: {type: "disabled"}` where the model accepts it. Sonnet 5.5, Opus 5.5 and
+Fable reject disabled thinking and offer no `None`. Opus 4.6 and Sonnet 4.6
 offer no `ExtraHigh`, and Opus 4.5 offers effort only up to `High`. Models without effort, such as
 Haiku 4.5, take a thinking budget of 1,024, 4,096, 16,384, 32,768 or 64,000 tokens for `Low` through
-`Maximum`, added to `max_tokens`. A model the adapter does not recognise accepts no level unless a
-capability override supplies the set.
+`Maximum`, added to `max_tokens`.
+
+The levels of an API-key connection come from `GET /v1/models`. A model that reports adaptive thinking
+offers the effort levels its entry marks supported; a model that reports only budget thinking offers
+`Low` to `Maximum`. `None` is added where the model family accepts disabled or omitted thinking. A model
+the catalog lists but the family table does not know therefore gains its reported effort levels without
+a library change. Without a catalog entry, the family table alone applies. A model with neither accepts
+no level unless a capability override supplies the set.
 
 ### Maximum output tokens
 
@@ -1156,7 +1184,8 @@ Direct API-key connections report `SupportsJsonSchema = false` and `SupportsJson
 
 ### Model discovery
 
-`AnthropicMessages.ListModelsAsync` uses the API key against `GET /v1/models`. The Claude CLI does not
+`AnthropicMessages.ListModelsAsync` uses the API key against `GET /v1/models`. Each listed model carries
+`max_input_tokens` and `max_tokens` as its limits, and the reasoning levels its entry reports. The Claude CLI does not
 expose an equivalent machine-readable catalog. A subscription connection therefore reports
 `SupportsModelListing = false` by default and the host may accept a manually entered model ID. A host
 can explicitly attach the optional browser-authorized catalog OAuth credential to the

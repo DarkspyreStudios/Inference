@@ -10,7 +10,8 @@ using LlmReasoningLevel = Darkspyre.Inference.Common.LLM.LlmReasoningLevel;
 namespace Darkspyre.Inference.Connect.LLM.Providers;
 
 /// <summary>Direct ChatGPT subscription transport; never reads CLI credentials.</summary>
-internal sealed class OpenAiCodexLlmClient(HttpClient http) : ResponsesLlmClientBase(http), ILlmAccountUsageClient
+internal sealed class OpenAiCodexLlmClient(HttpClient http)
+    : ResponsesLlmClientBase(http), ILlmAccountUsageClient, ILlmCatalogCapabilities
 {
     internal const string DefaultEndpoint = "https://chatgpt.com/backend-api/codex";
     private const string CodexCompatibilityVersion = "0.155.1";
@@ -27,6 +28,7 @@ internal sealed class OpenAiCodexLlmClient(HttpClient http) : ResponsesLlmClient
         SupportsModelListing = true,
         SupportsAccountUsage = true,
         SupportsJsonSchema = true,
+        // A model whose catalog entry lists its reasoning levels offers exactly those; see GetCapabilities.
         ReasoningLevels = LlmReasoningEffort.Levels(
             LlmReasoningLevel.Minimal, LlmReasoningLevel.Low, LlmReasoningLevel.Medium,
             LlmReasoningLevel.High, LlmReasoningLevel.ExtraHigh),
@@ -51,11 +53,51 @@ internal sealed class OpenAiCodexLlmClient(HttpClient http) : ResponsesLlmClient
     public override LlmProviderCapabilities GetCapabilities(LlmConnection connection, string? modelId = null)
     {
         ValidateConnection(connection);
-        return base.GetCapabilities(connection, modelId) with
+        LlmProviderCapabilities capabilities = base.GetCapabilities(connection, modelId);
+        return capabilities with
         {
             SupportsTemperature = false,
-            SupportsJsonObject = false
+            SupportsJsonObject = false,
+            ReasoningLevels = !LlmCapabilityOverrideLookup.Overrides(connection, modelId, overrides => overrides.ReasoningLevels)
+                && CatalogLevels(ILlmCatalogCapabilities.EntryFor(connection, modelId)) is { } catalog
+                    ? catalog
+                    : capabilities.ReasoningLevels
         };
+    }
+
+    /// <summary>
+    /// The levels a Codex catalog entry lists in <c>supported_reasoning_levels</c>, or null when the entry is absent
+    /// or does not list them. An effort Connect has no level for is left out.
+    /// </summary>
+    internal static IReadOnlySet<LlmReasoningLevel>? CatalogLevels(JsonElement? entry)
+    {
+        if (entry is not { } model
+            || !model.TryGetProperty("supported_reasoning_levels", out JsonElement presets)
+            || presets.ValueKind != JsonValueKind.Array)
+        {
+            return null;
+        }
+
+        var levels = new HashSet<LlmReasoningLevel>();
+        foreach (JsonElement preset in presets.EnumerateArray())
+        {
+            LlmReasoningLevel? level = (preset.ValueKind == JsonValueKind.Object ? LlmJson.GetString(preset, "effort") : null) switch
+            {
+                "none" => LlmReasoningLevel.None,
+                "minimal" => LlmReasoningLevel.Minimal,
+                "low" => LlmReasoningLevel.Low,
+                "medium" => LlmReasoningLevel.Medium,
+                "high" => LlmReasoningLevel.High,
+                "xhigh" => LlmReasoningLevel.ExtraHigh,
+                "max" => LlmReasoningLevel.Maximum,
+                _ => null
+            };
+            if (level is { } known)
+            {
+                levels.Add(known);
+            }
+        }
+        return levels.ToFrozenSet();
     }
 
     protected override JsonObject BuildPayload(
@@ -128,6 +170,7 @@ internal sealed class OpenAiCodexLlmClient(HttpClient http) : ResponsesLlmClient
             }
             result.Add(new LlmModel(id, LlmJson.GetString(model, "display_name") ?? id)
             {
+                CatalogEntry = model.Clone(),
                 MaxContextTokens = model.TryGetProperty("context_window", out var limit)
                     && limit.ValueKind == JsonValueKind.Number && limit.TryGetInt64(out long context) && context > 0 ? context : null
             });

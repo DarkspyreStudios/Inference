@@ -101,6 +101,11 @@ These changes are unreleased.
   signed reasoning, which Connect replays; the host must keep that state unchanged on the assistant
   message. Converse stop reasons now report `Incomplete` and `Failed`, and tool calls come only with
   `RequiresAction`. See [AWS Bedrock AgentCore Harness transport](../README.md#aws-bedrock-agentcore-harness-transport).
+- Reasoning sets vary per model. Unknown Anthropic models offer no level; OpenAI models without a
+  profile row keep `Minimal` to `ExtraHigh`. Hosts read `ReasoningLevels` per model. Sonnet 5.5 no
+  longer offers `None`. Bedrock Converse offers levels for Claude and Nova 2 models. Anthropic API-key,
+  Gemini API and ChatGPT subscription connections list their models once per connection version
+  before the first capability query or generation. See [Reasoning levels](../README.md#reasoning-levels).
 
 ## Native background resources: 11.8.0-rc.1
 

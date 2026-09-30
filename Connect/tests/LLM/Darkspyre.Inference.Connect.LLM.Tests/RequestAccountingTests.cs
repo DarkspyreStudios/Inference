@@ -103,7 +103,8 @@ public sealed class RequestAccountingTests
         Assert.Equal(LlmOutputLimitEnforcement.Unsupported,
             (await service.Bind("selected").GetCapabilitiesAsync("model")).OutputLimitEnforcement);
         await Assert.ThrowsAsync<NotSupportedException>(() => service.CompleteAsync("selected", request));
-        Assert.Empty(handler.Methods);
+        // Only model listings for the per-model reasoning levels; no generation request is sent.
+        Assert.All(handler.Methods, method => Assert.Equal(HttpMethod.Get, method));
     }
 
     [Fact]

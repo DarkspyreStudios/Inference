@@ -347,6 +347,7 @@ public sealed class LlmProviderService
             }
         }
         (request, int omitted) = ContinuationStateProjection.Project(request, connection);
+        connection = await AttachCatalogAsync(connectionId, connection, client, cancellationToken);
         await foreach (LlmStreamEvent streamEvent in client.StreamAsync(
                            connection,
                            request,
@@ -384,6 +385,7 @@ public sealed class LlmProviderService
         // Their nonmutating estimator reports unknown for opaque state instead of dropping it.
         if (client is not ILlmConnectionPreparation)
         { request = ContinuationStateProjection.Project(request, connection).Request; }
+        connection = await AttachCatalogAsync(connectionId, connection, client, cancellationToken);
         var capabilities = client.GetCapabilities(connection, request.ModelId);
         LlmRequestAccounting Unsupported(string diagnostic) => new()
         {
@@ -411,13 +413,22 @@ public sealed class LlmProviderService
         string? metadataDiagnostic = null;
         if (capabilities.SupportsModelListing)
         {
-            try
+            // A catalog-capability adapter already had its listing attached above; a failed one is not repeated.
+            IReadOnlyList<LlmModel>? models = connection.Catalog;
+            if (models is null && client is not ILlmCatalogCapabilities)
             {
-                model = (await _modelLists.GetAsync(connectionId, connection.Version,
-                        () => client.ListModelsAsync(connection, CancellationToken.None), cancellationToken))
-                    .FirstOrDefault(candidate => candidate.Id == request.ModelId);
+                try
+                {
+                    models = await _modelLists.GetAsync(connectionId, connection.Version,
+                        () => client.ListModelsAsync(connection, CancellationToken.None), cancellationToken);
+                }
+                catch (Exception error) when (error is HttpRequestException or LlmProviderException or NotSupportedException)
+                {
+                    models = null;
+                }
             }
-            catch (Exception error) when (error is HttpRequestException or LlmProviderException or NotSupportedException)
+            model = models?.FirstOrDefault(candidate => candidate.Id == request.ModelId);
+            if (models is null)
             {
                 metadataDiagnostic = "Model metadata is unavailable; provider limits remain unknown.";
             }
@@ -534,12 +545,15 @@ public sealed class LlmProviderService
         CancellationToken cancellationToken = default)
     {
         LlmConnection connection = await ResolveFreshConnectionAsync(connectionId, cancellationToken);
-        return ClientFor(connection.Transport).GetCapabilities(connection);
+        ILlmClient client = ClientFor(connection.Transport);
+        connection = await AttachCatalogAsync(connectionId, connection, client, cancellationToken);
+        return client.GetCapabilities(connection);
     }
 
     /// <summary>
     /// What one tool output sends on this connection, model and lane: one entry per part, in order. Reads the
-    /// connection and its capabilities only; it performs no network call and refreshes no credential.
+    /// connection and its capabilities only and refreshes no credential. An adapter whose capabilities depend on
+    /// its provider catalog may list the connection's models once, as generation does.
     /// </summary>
     public async Task<LlmToolOutputProjection> ProjectToolOutputAsync(
         string connectionId,
@@ -556,6 +570,7 @@ public sealed class LlmProviderService
         }
         LlmConnection connection = await LlmConnectionResolver.ResolveAsync(_connections, connectionId, cancellationToken);
         ILlmClient client = ClientFor(connection.Transport);
+        connection = await AttachCatalogAsync(connectionId, connection, client, cancellationToken);
         LlmProviderCapabilities route = client.GetCapabilities(connection);
         LlmProviderCapabilities model = client.GetCapabilities(connection, modelId);
         return lane == LlmToolOutputLane.Chat
@@ -569,7 +584,37 @@ public sealed class LlmProviderService
         CancellationToken cancellationToken = default)
     {
         LlmConnection connection = await ResolveFreshConnectionAsync(connectionId, cancellationToken);
-        return ClientFor(connection.Transport).GetCapabilities(connection, modelId);
+        ILlmClient client = ClientFor(connection.Transport);
+        connection = await AttachCatalogAsync(connectionId, connection, client, cancellationToken);
+        return client.GetCapabilities(connection, modelId);
+    }
+
+    /// <summary>
+    /// Publishes the connection's kept model list to an adapter whose capabilities depend on its provider catalog.
+    /// The list shares the cache entry <see cref="ListModelsAsync"/> uses, so the first call on a new connection
+    /// version lists once. A failed listing does not fail the operation: the adapter then uses its family table.
+    /// </summary>
+    internal async Task<LlmConnection> AttachCatalogAsync(
+        string connectionId,
+        LlmConnection connection,
+        ILlmClient client,
+        CancellationToken cancellationToken)
+    {
+        if (client is not ILlmCatalogCapabilities)
+        {
+            return connection;
+        }
+        try
+        {
+            IReadOnlyList<LlmModel> models = await _modelLists.GetAsync(connectionId,
+                connection.Version + connection.ResolvedContinuationScope,
+                () => client.ListModelsAsync(connection, CancellationToken.None), cancellationToken);
+            return connection with { Catalog = models };
+        }
+        catch (Exception error) when (error is HttpRequestException or LlmProviderException or System.Text.Json.JsonException)
+        {
+            return connection;
+        }
     }
 
     private async Task<LlmConnection> ResolveFreshConnectionAsync(

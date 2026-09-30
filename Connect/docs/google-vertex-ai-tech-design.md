@@ -167,7 +167,7 @@ protocol references [S2–S4]. Use a single candidate; our result contract repre
 | Text | Ordered text parts | Ordered text blocks |
 | Temperature | `generationConfig.temperature` | `temperature` |
 | Maximum output | `generationConfig.maxOutputTokens` | `max_tokens`; resolve a valid model-specific value when omitted |
-| Reasoning level | Profile maps to thinking level or budget | Profile maps to thinking mode/budget and applicable effort |
+| Reasoning level | `GeminiReasoning`, shared with the Gemini API, supplies the profile's levels and maps a level to `thinkingLevel` or `thinkingBudget` | `AnthropicModelProfiles` family table maps to thinking mode/budget and applicable effort |
 | Tool declarations (default non-strict) | `tools[].functionDeclarations`; profile selects supported `parametersJsonSchema` or lossless `parameters` representation | `tools` with `input_schema`; omit `strict` when false |
 | Tool choice Auto/None | `AUTO`/`NONE` | `auto`/`none`, subject to model support |
 | Tool choice Required/Specific | `ANY`; restrict allowed function names for Specific | `any`/`tool` plus name |
