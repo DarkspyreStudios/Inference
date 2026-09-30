@@ -1,5 +1,6 @@
 using System.Runtime.CompilerServices;
 using System.Text.Json;
+using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Common.LLM;
 using Darkspyre.Inference.Common.Setup;
 using Darkspyre.Inference.Connect.LLM.Providers;
@@ -205,13 +206,31 @@ public sealed class XaiConnectionSettingsTests
     public async Task TerminalDeviceFailureEndsTheSetupAttempt(string code)
     {
         var (manager, settings, target, auth, _) = await OpenAsync();
-        auth.Failure = new("Device authorization ended.", LlmTransport.XaiResponses, providerCode: code);
+        auth.Failure = new LlmProviderException("Device authorization ended.", LlmTransport.XaiResponses, providerCode: code);
         await manager.RunAsync(settings, "authorize");
         Assert.Equal(SetupActionState.Failed, (await manager.RunAsync(settings, "continue-authorization")).State);
         Assert.Null(settings.DeviceCode);
         Assert.Null(settings.Interaction);
         Assert.False(settings.CanSave);
         Assert.Equal(0, target.Calls);
+    }
+
+    [Theory]
+    [InlineData(InferenceFailureCode.AuthenticationRequired)]
+    [InlineData(InferenceFailureCode.AccessDenied)]
+    public async Task NamedAuthorizationFailureEndsSetupWithoutAnotherPoll(InferenceFailureCode code)
+    {
+        var (manager, settings, target, auth, _) = await OpenAsync();
+        auth.Failure = new InferenceException(code, "Authorization failed.");
+        await manager.RunAsync(settings, "authorize");
+        Assert.Equal(SetupActionState.Failed, (await manager.RunAsync(settings, "continue-authorization")).State);
+        Assert.Null(settings.DeviceCode);
+        Assert.Null(settings.Interaction);
+        Assert.False(settings.CanSave);
+        Assert.Equal(0, target.Calls);
+        Assert.Equal(1, auth.Completions);
+        Assert.Equal(SetupActionState.Unavailable, (await manager.RunAsync(settings, "continue-authorization")).State);
+        Assert.Equal(1, auth.Completions);
     }
 
     [Fact]
@@ -300,7 +319,7 @@ public sealed class XaiConnectionSettingsTests
         public int Starts { get; private set; }
         public int Completions { get; private set; }
         public LlmAuthPendingException? Pending { get; set; }
-        public LlmProviderException? Failure { get; set; }
+        public Exception? Failure { get; set; }
         public LlmDeviceCode Code { get; set; } = new("https://auth.x.ai/authorize", "user-code", "device-secret", 1)
         { ExpiresAt = DateTimeOffset.UtcNow.AddMinutes(5) };
         public Task<LlmDeviceCode> StartAsync(CancellationToken cancellationToken = default)

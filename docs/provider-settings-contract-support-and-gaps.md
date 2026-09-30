@@ -206,9 +206,11 @@ the gaps below are not a request to move the application's database or vault int
 `LlmConnectionAuthorization` supplies Common's neutral authorization header without exposing storage.
 
 The xAI connection contract supplies `XaiResponses`, typed region/tier options, fixed endpoints,
-and OAuth-only draft setup and sign-in routing. It does not register a Grok provider or implement
-the device protocol. [Connect's setup contract](../Connect/README.md#provider-setup-and-editing)
-describes this inert DSA-127 boundary; it is not an additional completed provider in the table below.
+and OAuth-only draft setup and sign-in routing. The internal authenticator implements the device
+protocol, refresh and `/v1/me`; the HTTP classifier does not yet recognize subscription-specific
+403 responses. `AddLlmConnect` does not register a Grok provider or authenticator.
+[Connect's setup contract](../Connect/README.md#provider-setup-and-editing) describes this unregistered
+boundary; it is not an additional completed or live-qualified provider in the table below.
 
 | Provider | Current definition/behavior | Needed in the configuration contract |
 |---|---|---|

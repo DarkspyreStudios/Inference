@@ -664,6 +664,12 @@ public sealed class LlmSettingsManager : InferenceSettingsManager<LlmSettings, L
                 settings.ClearAuthorization();
                 throw;
             }
+            catch (InferenceException error) when (settings.Transport == LlmTransport.XaiResponses
+                && error.Code is InferenceFailureCode.AuthenticationRequired or InferenceFailureCode.AccessDenied)
+            {
+                settings.ClearAuthorization();
+                throw;
+            }
         }
         else if (settings.BrowserAuthorization is { } authorization)
         {

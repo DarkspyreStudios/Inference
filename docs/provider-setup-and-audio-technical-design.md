@@ -260,12 +260,14 @@ services stay first-class and callable independently of a wizard.
 | Bedrock Converse | AWS profile and region choices, model | SDK-owned choices/checks in Bedrock assembly; standard credential chain remains owner |
 | AgentCore Harness | Profile, region, Harness ARN, optional model override | Validate ARN/region; default/manual override semantics; explicit session-based test |
 
-`XaiResponses` has an inert connection/setup contract tracked by DSA-127. Region and service-tier
+`XaiResponses` has an unregistered connection/setup contract tracked by DSA-127. Region and service-tier
 fields are bounded choices on `XaiConnectionOptions`. Setup derives the endpoint from the region
 and has no API-key field. A saved OAuth token or completed draft sign-in satisfies Save. Both setup
-continuation and facade interactive sign-in use the same expiry/interval/slow-down helper. No xAI
-client or authenticator is registered by `AddLlmConnect`, so this contract does not add an enabled
-provider to the table above.
+continuation and facade interactive sign-in use the same expiry/interval/slow-down helper. The internal
+`XaiAuthenticator` implements the device grant, token refresh and one `/v1/me` check. The shared
+`XaiErrorClassifier` sanitizes errors; subscription-specific 403 matching remains unqualified and is
+not implemented. No xAI client or authenticator is registered by `AddLlmConnect`, so this contract
+does not add an enabled provider to the table above.
 
 ComfyUI setup edits endpoint, timeout, protected headers and workflow selection. An
 `IImageWorkflowChoiceSource` supplied by the host provides paged/searchable workflow identities and

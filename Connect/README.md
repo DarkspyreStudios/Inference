@@ -1078,9 +1078,22 @@ that supplies no expiry. Device-code diagnostic text is redacted. Token saves us
 connection version. Facade retirement cancels and drains sign-in and suppresses late results;
 it does not dispose the borrowed authenticator or undo a save already committed by the source.
 
-These contracts are inert without a registered xAI client and `IXaiDeviceLogin` implementation.
-`AddLlmConnect` does not register a Grok provider, authenticator or runtime client. The Grok protocol
-implementation remains open under DSA-127; this contract is not an enabled or live-qualified adapter.
+The internal `XaiAuthenticator` implements the [RFC 8628](https://www.rfc-editor.org/rfc/rfc8628)
+device grant against `auth.x.ai` with form-encoded requests and a public client. A successful token
+exchange calls `GET https://api.x.ai/v1/me` once and requires a non-blocked account. Credentials contain
+only OAuth tokens. Expiry comes from `expires_in` or the access-token JWT; account identity comes from
+`/v1/me`, and the optional ID-token email is display metadata, not a locally verified identity claim.
+The shared OAuth pipeline refreshes within 60 seconds of expiry. It preserves account metadata,
+accepts rotated tokens and saves through `LlmConnectionAccess`'s version-conditional source seam.
+
+`XaiErrorClassifier` supplies one sanitized HTTP failure policy. It maps 401 and the specified
+token-validation 403 message to `AuthenticationRequired`, and 402 or a blocked account to the named
+entitlement failure (`AccessDenied`). Unknown 403 responses remain provider errors. Subscription-specific
+403 matching is not implemented or live-qualified. Errors never trigger a retry or refresh.
+Named authentication and entitlement failures clear the setup device attempt without saving a credential.
+
+`AddLlmConnect` does not register a Grok provider, authenticator or runtime client. The protocol
+implementation and setup contracts are not an enabled or live-qualified chat adapter.
 The region and tier premiums follow [xAI pricing](https://docs.x.ai/developers/pricing).
 
 `ImageProviderService.SetupDefinitions` and `CreateSettingsManager` provide the same editing surface for

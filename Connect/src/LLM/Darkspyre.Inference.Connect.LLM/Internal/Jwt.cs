@@ -35,11 +35,21 @@ internal static class Jwt
     public static DateTimeOffset? ReadExpiration(string? token)
     {
         JsonElement? payload = DecodePayload(token);
-        return payload is { } element
+        if (payload is { ValueKind: JsonValueKind.Object } element
             && element.TryGetProperty("exp", out JsonElement expiration)
             && expiration.ValueKind == JsonValueKind.Number
-            && expiration.TryGetInt64(out long seconds)
-                ? DateTimeOffset.FromUnixTimeSeconds(seconds)
-                : null;
+            && expiration.TryGetInt64(out long seconds))
+        {
+            try
+            {
+                return DateTimeOffset.FromUnixTimeSeconds(seconds);
+            }
+            catch (ArgumentOutOfRangeException)
+            {
+                return null;
+            }
+        }
+
+        return null;
     }
 }
