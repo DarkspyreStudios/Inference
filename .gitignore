@@ -925,3 +925,4 @@ artifacts/
 .claude/
 .codex/
 .secrets/
+tmp/
