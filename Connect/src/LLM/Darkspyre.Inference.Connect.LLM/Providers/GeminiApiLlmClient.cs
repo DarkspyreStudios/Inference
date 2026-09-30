@@ -10,7 +10,7 @@ namespace Darkspyre.Inference.Connect.LLM.Providers;
 
 /// <summary>The Gemini API (Google AI Studio) over generateContent, authenticated with an API key header.</summary>
 internal sealed partial class GeminiApiLlmClient(HttpClient http)
-    : LlmClientBase(http), ILlmConnectionPreparation, ILlmContextEstimator, ILlmCatalogCapabilities
+    : LlmClientBase(http), ILlmConnectionPreparation, ILlmContextEstimator, ILlmCatalogCapabilities, ILlmProviderTokenCounter
 {
     public const string DefaultEndpoint = "https://generativelanguage.googleapis.com";
     internal const string Owner = "darkspyre.connect.llm.gemini-api";
@@ -59,10 +59,12 @@ internal sealed partial class GeminiApiLlmClient(HttpClient http)
         return Task.FromResult(connection with { ContinuationCodec = Codec, ResolvedContinuationScope = KeyScope(connection) });
     }
 
-    public override async IAsyncEnumerable<LlmStreamEvent> StreamAsync(LlmConnection connection, LlmChatRequest request,
-        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    private (LlmConnection Connection, LlmChatRequest Request, LlmProviderCapabilities Capabilities,
+        LlmStructuredOutputEnforcement? Enforcement, JsonObject Payload, int Omitted) BuildRequest(
+        LlmConnection connection, LlmChatRequest request)
     {
-        string model = ParseModel(request.ModelId);
+        ArgumentNullException.ThrowIfNull(request);
+        _ = ParseModel(request.ModelId);
         LlmProviderCapabilities capabilities = GetCapabilities(connection, request.ModelId);
         ValidateRequest(connection, request, capabilities);
         ValidateGeminiRequest(request, capabilities);
@@ -76,9 +78,36 @@ internal sealed partial class GeminiApiLlmClient(HttpClient http)
             : GeminiSchemas.Enforcement(request.StructuredOutput, RouteName);
         JsonObject payload = GeminiRequest.Build(connection, request, enforcement, output => ProjectToolOutput(connection, request.ModelId, output),
             Reasoning(connection, request.ModelId), capabilities.SupportsReasoningText);
+        return (connection, request, capabilities, enforcement, payload, omitted);
+    }
+
+    public async Task<LlmProviderInputTokenCount> CountInputTokensAsync(LlmConnection connection, LlmChatRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var built = BuildRequest(connection, request);
+        built.Payload["model"] = "models/" + request.ModelId;
+        using var message = new HttpRequestMessage(HttpMethod.Post, $"{DefaultEndpoint}/v1beta/models/{request.ModelId}:countTokens")
+        { Content = JsonContent.Create(new JsonObject { ["generateContentRequest"] = built.Payload }) };
+        message.Headers.TryAddWithoutValidation(KeyHeader, Key(built.Connection));
+        LlmProviderInputTokenCount result = await ProviderTokenCounting.SendAsync(Http, message, Transport, request.ModelId, false,
+            cancellationToken).ConfigureAwait(false);
+        return result with { OmittedContinuationStateCount = built.Omitted };
+    }
+
+    public override async IAsyncEnumerable<LlmStreamEvent> StreamAsync(LlmConnection connection, LlmChatRequest request,
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        var built = BuildRequest(connection, request);
+        connection = built.Connection;
+        request = built.Request;
+        var capabilities = built.Capabilities;
+        var enforcement = built.Enforcement;
+        int omitted = built.Omitted;
+        string model = request.ModelId;
         string operation = capabilities.SupportsStreaming ? "streamGenerateContent?alt=sse" : "generateContent";
         var message = new HttpRequestMessage(HttpMethod.Post, $"{DefaultEndpoint}/v1beta/models/{model}:{operation}")
-        { Content = JsonContent.Create(payload) };
+        { Content = JsonContent.Create(built.Payload) };
         message.Headers.TryAddWithoutValidation(KeyHeader, Key(connection));
         IAsyncEnumerable<LlmStreamEvent> source = GeminiStream.ReadAsync(Http, message, Route, connection, request, enforcement,
             capabilities.SupportsStreaming, capabilities.SupportsUsageDeltas, capabilities.SupportsReasoningText, cancellationToken);

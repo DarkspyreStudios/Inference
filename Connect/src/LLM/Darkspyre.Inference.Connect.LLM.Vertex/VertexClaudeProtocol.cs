@@ -23,6 +23,15 @@ internal sealed class VertexClaudeProtocol(HttpClient http, string token) : Anth
         return result;
     }
 
+    protected override HttpRequestMessage CreateTokenCountRequest(LlmConnection connection, LlmChatRequest request, JsonObject payload)
+    {
+        payload["model"] = VertexEndpoints.ParseModel(request.ModelId).Model;
+        var result = new HttpRequestMessage(HttpMethod.Post, VertexEndpoints.CountTokens(connection, request.ModelId))
+        { Content = JsonContent.Create(payload) };
+        result.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        return result;
+    }
+
     protected override JsonObject BuildPayload(LlmConnection connection, LlmChatRequest request,
         Func<LlmToolOutput, ProjectedToolOutput> projectToolOutput, bool stream)
     {

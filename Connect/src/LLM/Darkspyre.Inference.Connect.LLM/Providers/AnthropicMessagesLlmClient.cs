@@ -14,7 +14,7 @@ namespace Darkspyre.Inference.Connect.LLM.Providers;
 /// It reads the first-party Models API catalog for per-model reasoning levels. Vertex Claude, which derives from it,
 /// has no Models API; the service never attaches a catalog to a Vertex connection.
 /// </remarks>
-internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabilities
+internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabilities, ILlmProviderTokenCounter
 {
     private const string AnthropicVersion = "2023-06-01";
     private const int DefaultMaxOutputTokens = 8192;
@@ -103,10 +103,8 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
         };
     }
 
-    public override async IAsyncEnumerable<LlmStreamEvent> StreamAsync(
-        LlmConnection connection,
-        LlmChatRequest request,
-        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    private (LlmProviderCapabilities Capabilities, LlmStructuredOutputEnforcement? Enforcement) ValidateMessagesRequest(
+        LlmConnection connection, LlmChatRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
         LlmProviderCapabilities capabilities = GetCapabilities(connection, request.ModelId);
@@ -115,6 +113,30 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
         AnthropicModelProfiles.ValidateSampling(request, AnthropicModelProfiles.Resolve(
             ReasoningModelId(request.ModelId), ILlmCatalogCapabilities.EntryFor(connection, request.ModelId)));
         LlmStructuredOutputEnforcement? enforcement = AnthropicSchemas.Enforcement(request.StructuredOutput, capabilities);
+        return (capabilities, enforcement);
+    }
+
+    public async Task<LlmProviderInputTokenCount> CountInputTokensAsync(LlmConnection connection, LlmChatRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        _ = ValidateMessagesRequest(connection, request);
+        JsonObject payload = BuildPayload(connection, request, output => ProjectToolOutput(connection, request.ModelId, output), false);
+        // Count APIs exclude generation-only controls; every prompt-bearing field remains unchanged.
+        foreach (string name in new[] { "max_tokens", "stream", "temperature", "top_p", "top_k", "stop_sequences", "service_tier", "anthropic_version" })
+            payload.Remove(name);
+        if (payload.Any(field => field.Key is not ("model" or "messages" or "system" or "tools" or "tool_choice" or "thinking" or "output_config" or "cache_control")))
+            throw new NotSupportedException("The Anthropic count API cannot represent one of the configured provider fields.");
+        using HttpRequestMessage message = CreateTokenCountRequest(connection, request, payload);
+        return await ProviderTokenCounting.SendAsync(Http, message, Transport, request.ModelId, true, cancellationToken).ConfigureAwait(false);
+    }
+
+    public override async IAsyncEnumerable<LlmStreamEvent> StreamAsync(
+        LlmConnection connection,
+        LlmChatRequest request,
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        var (capabilities, enforcement) = ValidateMessagesRequest(connection, request);
         LlmCredential? credential = LlmCredential.Parse(connection.Credential);
         bool stream = capabilities.SupportsStreaming;
         JsonObject payload = BuildPayload(connection, request, output => ProjectToolOutput(connection, request.ModelId, output), stream);
@@ -596,6 +618,14 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
     protected virtual HttpRequestMessage CreateHttpRequest(LlmConnection connection, LlmChatRequest request, JsonObject payload, bool stream)
     {
         var result = new HttpRequestMessage(HttpMethod.Post, BuildApiUri(connection, "messages")) { Content = JsonContent.Create(payload) };
+        ApplyAnthropicHeaders(result, connection, LlmCredential.Parse(connection.Credential));
+        return result;
+    }
+
+    protected virtual HttpRequestMessage CreateTokenCountRequest(LlmConnection connection, LlmChatRequest request, JsonObject payload)
+    {
+        var result = new HttpRequestMessage(HttpMethod.Post, BuildApiUri(connection, "messages/count_tokens"))
+        { Content = JsonContent.Create(payload) };
         ApplyAnthropicHeaders(result, connection, LlmCredential.Parse(connection.Credential));
         return result;
     }

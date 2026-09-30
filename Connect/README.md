@@ -835,6 +835,34 @@ calls and results already in the history reach their prompt as `[TOOL CALL id=â€
 chat estimate it with the bundled `o200k_base` tokenizer and say so in the diagnostic; the estimate
 excludes each CLI's own framing.
 
+### Provider input-token counting
+
+`LlmProviderService.CountInputTokensAsync(connectionId, request, ct)` explicitly calls the selected
+provider's count API. `ILlmProviderTokenCounter` is the optional adapter capability. Anthropic
+Messages, Gemini API, Vertex Gemini and Vertex Claude implement it. A route without it throws
+`NotSupportedException`; counting never substitutes a local estimate or creates a completion.
+`MeasureRequestAsync` remains local nonmutating accounting and does not call a count API.
+
+Counting refreshes and prepares the selected credential, binds continuation state, and attaches the
+same catalog as generation. It uses the canonical generation request builder. Anthropic excludes
+generation-only controls but preserves system/messages, tools, tool choice, thinking and output
+format. Gemini API wraps the complete request in `generateContentRequest`. Vertex Gemini sends
+the count API's input fields and generation config without `toolConfig`. Fields a count API cannot
+represent are rejected, not silently stripped from the prompt.
+
+`LlmProviderInputTokenCount` carries the resolved model, provider-reported input count, nullable
+cached-input and billable-character counts, modality breakdowns, and omitted continuation-state
+count. Unknown modalities retain their counts as `Unknown`. Missing optional values stay null;
+malformed, negative and overflowing counts fail. These are preflight provider counts, not actual
+generation usage, billing records or guaranteed admission. No output-token usage is invented.
+
+Each count HTTP operation has a 100-second deadline through response parsing. Caller cancellation
+remains cancellation. Service disposal cancels and drains active counts and rejects late results.
+Failures expose safe status/retry information without response bodies or nested transport diagnostics.
+Vertex Claude uses `count-tokens:rawPredict` with the bare model ID. Its count regions differ from
+generation regions; an unsupported selected location fails without rerouting or changing the model.
+The reviewed Vertex model allowlist remains unchanged.
+
 ### Host-owned managed agent runtime
 
 **Accounting extension (11.14.0-rc.1):** the library includes

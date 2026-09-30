@@ -392,6 +392,34 @@ public sealed class LlmProviderService : IDisposable, IAsyncDisposable
     }
 
     /// <summary>
+    /// Explicitly calls the provider's input-count API using generation's resolved connection and projection.
+    /// Unsupported adapters throw; this operation never substitutes an estimate or creates a completion.
+    /// </summary>
+    public async Task<LlmProviderInputTokenCount> CountInputTokensAsync(string connectionId, LlmChatRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        using var operation = _lifetime.Enter(cancellationToken);
+        cancellationToken = operation.Token;
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentException.ThrowIfNullOrWhiteSpace(request.ModelId);
+        LlmConnection connection = await LlmConnectionResolver.ResolveAsync(_connections, connectionId, cancellationToken);
+        ILlmClient client = ClientFor(connection.Transport);
+        if (client is not ILlmProviderTokenCounter counter)
+            throw new NotSupportedException("This route does not implement provider input-token counting.");
+        connection = await RefreshConnectionAsync(connectionId, connection, cancellationToken);
+        if (client is ILlmConnectionPreparation preparation)
+            connection = await preparation.PrepareAsync(connection, cancellationToken).ConfigureAwait(false);
+        (request, int omitted) = ContinuationStateProjection.Project(request, connection);
+        connection = await AttachCatalogAsync(connectionId, connection, client, cancellationToken);
+        LlmProviderInputTokenCount result;
+        try { result = await counter.CountInputTokensAsync(connection, request, cancellationToken).ConfigureAwait(false); }
+        catch (Exception) when (cancellationToken.IsCancellationRequested)
+        { throw new OperationCanceledException(cancellationToken); }
+        cancellationToken.ThrowIfCancellationRequested();
+        return result with { OmittedContinuationStateCount = checked(omitted + result.OmittedContinuationStateCount) };
+    }
+
+    /// <summary>
     /// Accounts a standalone request without generation, credential refresh, persistence or a session.
     /// May read model discovery metadata; unavailable limits remain unknown. The host source is read only.
     /// </summary>

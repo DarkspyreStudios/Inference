@@ -42,8 +42,6 @@ internal static partial class VertexEndpoints
     {
         Validate(connection);
         var (publisher, model) = ParseModel(modelId);
-        var config = connection.Vertex!;
-        string host = config.Location == "global" ? "aiplatform.googleapis.com" : $"{config.Location}-aiplatform.googleapis.com";
         string operation = (publisher, stream) switch
         {
             ("google", true) => "streamGenerateContent?alt=sse",
@@ -51,6 +49,27 @@ internal static partial class VertexEndpoints
             (_, true) => "streamRawPredict",
             _ => "rawPredict"
         };
+        return ModelOperation(connection, publisher, model, operation);
+    }
+
+    internal static Uri CountTokens(LlmConnection connection, string modelId)
+    {
+        Validate(connection);
+        var (publisher, model) = ParseModel(modelId);
+        _ = VertexModelProfiles.Get(modelId, connection.Vertex!.Location);
+        if (publisher == "anthropic")
+        {
+            if (connection.Vertex.Location is not ("global" or "us" or "eu" or "asia-southeast1"))
+                throw new NotSupportedException("Claude token counting is not supported in the selected Vertex location. The request is not rerouted.");
+            return ModelOperation(connection, publisher, "count-tokens", "rawPredict");
+        }
+        return ModelOperation(connection, publisher, model, "countTokens");
+    }
+
+    private static Uri ModelOperation(LlmConnection connection, string publisher, string model, string operation)
+    {
+        var config = connection.Vertex!;
+        string host = config.Location == "global" ? "aiplatform.googleapis.com" : $"{config.Location}-aiplatform.googleapis.com";
         return new($"https://{host}/v1/projects/{config.ProjectId}/locations/{config.Location}/publishers/{publisher}/models/{model}:{operation}");
     }
 

@@ -9,7 +9,7 @@ using Darkspyre.Inference.Connect.LLM.Providers;
 namespace Darkspyre.Inference.Connect.LLM.Vertex;
 
 internal sealed class VertexLlmClient(HttpClient http, IVertexAuthentication authentication)
-    : LlmClientBase(http), ILlmConnectionPreparation, ILlmContextEstimator
+    : LlmClientBase(http), ILlmConnectionPreparation, ILlmContextEstimator, ILlmProviderTokenCounter
 {
     public override LlmTransport Transport => LlmTransport.GoogleVertexAi;
     public override LlmProviderDefinition ProviderDefinition => VertexProviderDefinition.Value;
@@ -45,9 +45,11 @@ internal sealed class VertexLlmClient(HttpClient http, IVertexAuthentication aut
         return connection with { ContinuationCodec = new VertexContinuationCodec(), ResolvedContinuationScope = access.Scope };
     }
 
-    public override async IAsyncEnumerable<LlmStreamEvent> StreamAsync(LlmConnection connection, LlmChatRequest request,
-        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    private async Task<(VertexModelProfile Profile, LlmProviderCapabilities Capabilities, VertexAccess Access,
+        LlmConnection Connection, LlmChatRequest Request, LlmStructuredOutputEnforcement? Enforcement, int Omitted)> PrepareRequestAsync(
+        LlmConnection connection, LlmChatRequest request, CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(request);
         VertexModelProfile profile = VertexModelProfiles.Get(request.ModelId, connection.Vertex?.Location ?? string.Empty);
         LlmProviderCapabilities capabilities = GetCapabilities(connection, request.ModelId);
         ValidateRequest(connection, request, capabilities);
@@ -60,6 +62,40 @@ internal sealed class VertexLlmClient(HttpClient http, IVertexAuthentication aut
         LlmStructuredOutputEnforcement? enforcement = request.StructuredOutput is { } structured && !capabilities.SupportsJsonSchema
             ? StructuredOutput.ResolveEnforcement(structured, capabilities)
             : VertexSchemas.Enforcement(request.StructuredOutput, capabilities, profile.IsClaude);
+        return (profile, capabilities, access, connection, request, enforcement, omitted);
+    }
+
+    public async Task<LlmProviderInputTokenCount> CountInputTokensAsync(LlmConnection connection, LlmChatRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        ArgumentNullException.ThrowIfNull(request);
+        Uri endpoint = VertexEndpoints.CountTokens(connection, request.ModelId);
+        var built = await PrepareRequestAsync(connection, request, cancellationToken).ConfigureAwait(false);
+        LlmProviderInputTokenCount result;
+        if (built.Profile.IsClaude)
+            result = await new VertexClaudeProtocol(Http, built.Access.Token)
+                .CountInputTokensAsync(built.Connection, built.Request, cancellationToken).ConfigureAwait(false);
+        else
+        {
+            JsonObject payload = GeminiRequest.Build(built.Connection, built.Request, built.Enforcement,
+                output => ProjectToolOutput(built.Connection, request.ModelId, output),
+                GeminiModelProfiles.Get(VertexEndpoints.ParseModel(request.ModelId).Model, catalogThinking: null), built.Capabilities.SupportsReasoningText);
+            payload.Remove("toolConfig");
+            using var message = new HttpRequestMessage(HttpMethod.Post, endpoint) { Content = JsonContent.Create(payload) };
+            message.Headers.Authorization = new AuthenticationHeaderValue("Bearer", built.Access.Token);
+            result = await ProviderTokenCounting.SendAsync(Http, message, Transport, request.ModelId, false, cancellationToken).ConfigureAwait(false);
+        }
+        return result with { OmittedContinuationStateCount = checked(result.OmittedContinuationStateCount + built.Omitted) };
+    }
+
+    public override async IAsyncEnumerable<LlmStreamEvent> StreamAsync(LlmConnection connection, LlmChatRequest request,
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        var (profile, capabilities, access, prepared, projected, enforcement, omitted) =
+            await PrepareRequestAsync(connection, request, cancellationToken).ConfigureAwait(false);
+        connection = prepared;
+        request = projected;
         IAsyncEnumerable<LlmStreamEvent> source = profile.IsClaude
             ? new VertexClaudeProtocol(Http, access.Token).StreamAsync(connection, request, cancellationToken)
             : GeminiStream.ReadAsync(Http, GeminiMessage(connection, request,
