@@ -18,7 +18,8 @@ An explicit unload acts as an admission barrier. A disconnected waiter is remove
 A handoff waits for active LLM forwards or the ComfyUI queue and prompt forwards to drain.
 The coordinator unloads other router models, frees cached ComfyUI models before LLM
 acquisition, and checks VRAM release before loading the requested model. It polls asynchronous
-model status after load and unload. Failed loads and release timeouts return 503. Idle models
+model status after load and unload. Failed loads, load timeouts and release timeouts return 503.
+Load errors include the reported router exit code or `unavailable` when no exit code is reported. Idle models
 remain loaded until another target requests the GPU.
 
 The ComfyUI watcher polls `/queue`. Direct submissions on 8188 can start before the LLM

@@ -32,11 +32,12 @@ internal sealed class FakeLlama : ILlamaRouterClient
     { ["qwen"] = new("qwen", "unloaded", false, null), ["other"] = new("other", "unloaded", false, null) };
     public List<string> Calls { get; } = [];
     public bool FailLoad { get; set; }
+    public bool HangLoad { get; set; }
     public Task<IReadOnlyList<ModelState>> ModelsAsync(CancellationToken token) => Task.FromResult<IReadOnlyList<ModelState>>(Models.Values.ToArray());
     public Task LoadAsync(string model, CancellationToken token)
     {
         Calls.Add("load:" + model);
-        if (Models.ContainsKey(model)) Models[model] = new(model, FailLoad ? "unloaded" : "loaded", FailLoad, FailLoad ? 17 : null);
+        if (Models.ContainsKey(model)) Models[model] = new(model, FailLoad ? "unloaded" : HangLoad ? "loading" : "loaded", FailLoad, FailLoad ? 17 : null);
         return Task.CompletedTask;
     }
     public Task UnloadAsync(string model, CancellationToken token)

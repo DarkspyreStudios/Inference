@@ -284,16 +284,20 @@ public sealed class GpuCoordinator(ILlamaRouterClient llama, IComfyClient comfy,
     private async Task WaitModelAsync(string model, string status, double timeout, CancellationToken token)
     {
         var deadline = clock.GetUtcNow().AddSeconds(timeout);
+        int? lastExitCode = null;
         do
         {
             var state = (await llama.ModelsAsync(token).ConfigureAwait(false)).FirstOrDefault(m => m.Id == model);
             if (state is null) throw new GpuException("Unknown model");
+            lastExitCode = state.ExitCode;
             if (status == "loaded" && state.Failed)
                 throw new GpuException($"Model load failed; router exit code: {state.ExitCode?.ToString() ?? "unavailable"}");
             if (state.Status == status) return;
             await Task.Delay(TimeSpan.FromMilliseconds(500), clock, token).ConfigureAwait(false);
         } while (clock.GetUtcNow() < deadline);
-        throw new GpuException($"Timed out waiting for model to become {status}");
+        throw new GpuException(status == "loaded"
+            ? $"Model load timed out; router exit code: {lastExitCode?.ToString() ?? "unavailable"}"
+            : $"Timed out waiting for model to become {status}");
     }
 
     private async Task ConfirmReleaseAsync(CancellationToken token)

@@ -120,6 +120,30 @@ public sealed class CoordinatorTests
         Assert.Equal("none", rig.Gpu.Snapshot().Holder);
     }
     [Fact]
+    public async Task LoadTimeoutReportsUnavailableExitCodeAndFailsAllTargetWaiters()
+    {
+        using var rig = new Rig();
+        rig.Options.Llama.LoadTimeoutSeconds = 1;
+        rig.Llama.HangLoad = true;
+        var first = rig.Gpu.AcquireAsync(GpuTarget.Llm("qwen"), CancellationToken.None);
+        var second = rig.Gpu.AcquireAsync(GpuTarget.Llm("qwen"), CancellationToken.None);
+        var step = rig.Gpu.StepAsync(CancellationToken.None);
+        Assert.Equal(1, rig.Clock.TimersCreated);
+        Assert.Equal("switching", rig.Gpu.Snapshot().Phase);
+        rig.Clock.Advance(TimeSpan.FromSeconds(1));
+        await step.WaitAsync(TimeSpan.FromSeconds(5));
+        foreach (var waiter in new[] { first, second })
+        {
+            var failure = await Assert.ThrowsAsync<GpuException>(() => waiter);
+            Assert.Equal(503, failure.StatusCode);
+            Assert.Equal("Model load timed out; router exit code: unavailable", failure.Message);
+        }
+        Assert.Equal("none", rig.Gpu.Snapshot().Holder);
+        Assert.Empty(rig.Gpu.Snapshot().Waiters);
+        Assert.Equal(0, rig.Gpu.Snapshot().LlmInFlight);
+    }
+
+    [Fact]
     public async Task WatcherEvictsIdleLlmForDirectComfyWork()
     {
         using var rig = new Rig();
