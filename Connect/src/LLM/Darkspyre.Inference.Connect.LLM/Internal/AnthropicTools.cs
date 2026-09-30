@@ -14,8 +14,9 @@ internal sealed class AnthropicTools
 
     internal static AnthropicTools Resolve(LlmConnection connection, LlmChatRequest request)
     {
-        if (connection.ProviderOptions.Keys.Concat(request.ProviderOptions.Keys).Any(name => name is "tools" or "tool_choice"))
-            throw new NotSupportedException("Claude tools use typed Tools and anthropic_tools; tool choice uses typed controls.");
+        if (connection.ProviderOptions.Keys.Concat(request.ProviderOptions.Keys).Any(name => name is
+            "tools" or "tool_choice" or "thinking" or "output_config" or "output_format"))
+            throw new NotSupportedException("Claude tool, reasoning and output configuration use typed controls and anthropic_tools.");
         var result = new AnthropicTools();
         if (!request.ProviderOptions.TryGetValue(OptionName, out JsonElement options)
             && !connection.ProviderOptions.TryGetValue(OptionName, out options)) return result;

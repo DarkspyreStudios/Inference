@@ -94,6 +94,43 @@ public sealed class VertexProtocolTests
         Assert.Empty(handler.Bodies);
     }
 
+    [Theory]
+    [InlineData("text")]
+    [InlineData("partial")]
+    [InlineData("container")]
+    [InlineData("native")]
+    public async Task ClaudeContinuationChecksFollowScopeResolutionButPrecedeDispatch(string variant)
+    {
+        using var handler = new Handler();
+        using var http = new HttpClient(handler);
+        var authentication = new Authentication();
+        var client = new VertexLlmClient(http, authentication);
+        LlmConnection prepared = await client.PrepareAsync(Connection, default);
+        JsonArray content = JsonNode.Parse("""
+            [{"type":"server_tool_use","id":"srv_code","name":"code_execution","input":{"code":"protected-code"}},
+             {"type":"tool_use","id":"client_1","name":"run","input":{},"caller":{"type":"code_execution_20260120","tool_id":"srv_code"}}]
+            """)!.AsArray();
+        LlmContinuationState state = ProviderContinuationStateCodec.Encode(prepared, Claude, content);
+        if (variant != "container") state = AnthropicContinuation.WithContainer(state, "container-current");
+        var request = new LlmChatRequest
+        {
+            ModelId = Claude,
+            Tools = [Tool],
+            ProviderOptions = variant == "native" ? new Dictionary<string, JsonElement>() : new Dictionary<string, JsonElement>
+            { [AnthropicTools.OptionName] = JsonElement.Parse("""{"server_tools":[{"type":"code_execution_20260120","name":"code_execution"}]}""") },
+            Messages = [new("user", "start"), new("assistant", "") { ContinuationState = state, ToolCalls = [new("client_1", "run", "{}")] },
+                new("tool", variant == "text" ? "extra" : "")
+                { ToolResults = variant == "partial" ? [] : [new("client_1", LlmToolOutput.FromText("result"))] }]
+        };
+        var error = await Assert.ThrowsAsync<ArgumentException>(() => Complete(client, prepared, request));
+        Assert.Contains("Claude", error.Message, StringComparison.Ordinal);
+        Assert.Equal(2, authentication.Calls);
+        Assert.Empty(handler.Bodies);
+        Assert.DoesNotContain("protected-code", error.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain("test-token", error.ToString(), StringComparison.Ordinal);
+        Assert.Null(error.InnerException);
+    }
+
     [Fact]
     public async Task SamplingRestrictionsFailBeforeAuthenticationAndClaudeUsesSharedWireFields()
     {
@@ -466,7 +503,17 @@ public sealed class VertexProtocolTests
         handler.Replies.Enqueue(done);
         using var http = new HttpClient(handler);
         var client = new VertexLlmClient(http, new Authentication());
-        var connection = Connection with { CapabilityOverrides = new() { SupportsStreaming = streaming } };
+        var connection = Connection with
+        {
+            CapabilityOverrides = new() { SupportsStreaming = streaming },
+            ProviderOptions = new Dictionary<string, JsonElement>
+            {
+                [AnthropicTools.OptionName] = JsonElement.Parse("""
+                    {"server_tools":[{"type":"code_execution_20260120","name":"code_execution"}],
+                     "client_tools":{"run":{"allowed_callers":["code_execution_20260120"]}}}
+                    """)
+            }
+        };
         await using var providers = new LlmProviderService(new Source(connection), [client]);
         var agent = new ManagedVertexAgentClient(client, providers);
         int calls = 0;

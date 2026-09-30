@@ -477,10 +477,20 @@ Client `allowed_callers` accepts nonempty unique lists of `direct`, `code_execut
 `code_execution_20260521`. A programmatic client requires a declared code-execution tool at either
 of these two versions. It cannot be strict or disable parallel tool use. A forced client choice
 must allow direct calling. Deferred clients require a declared tool-search tool. These checks do
-not establish live tool provisioning, complete tool-specific compiler validation or correct timing
-of programmatic continuation results. Provider restrictions still apply to retained-container
-continuation and the content of tool-result messages. See the
+not establish live tool provisioning or complete tool-specific compiler validation. See the
 [programmatic calling contract](https://platform.claude.com/docs/en/agents-and-tools/tool-use/programmatic-tool-calling).
+
+The canonical Claude builder validates scoped, projected continuation before HTTP dispatch. Mixed
+turns with waiting native tools and programmatic turns require an immediate user message containing
+only results, exactly once for every waiting client call. Results can arrive in a different order.
+Programmatic results accept strings or text blocks only; direct client results retain supported rich
+content. Programmatic caller IDs must refer to retained code-execution invocations. An active result
+request requires its native tool definitions and a retained container for programmatic calls. Completed
+historical exchanges do not require those tools or a container to remain configured now. The adapter
+does not rewrite history, strip extra input or binaries, synthesize results, execute native tools or retry.
+This validation follows principal resolution and explicit unbound-state projection; Vertex resolves
+authentication before checking principal-bound history. Raw `thinking` cannot override typed reasoning,
+even when the typed setting leaves the native field absent.
 
 Managed sessions retain an Incomplete reply that carries continuation state and no host tool calls.
 They emit its message, finish the turn with Truncation, and preserve the state through capture/import

@@ -167,7 +167,17 @@ public sealed class AnthropicTurnTests
         using var http = new HttpClient(handler);
         var client = new AnthropicMessagesLlmClient(http);
         var connection = Connection(streaming);
-        var request = Request with { Tools = [Tool] };
+        var request = Request with
+        {
+            Tools = [Tool],
+            ProviderOptions = new Dictionary<string, JsonElement>
+            {
+                [AnthropicTools.OptionName] = JsonElement.Parse("""
+                    {"server_tools":[{"type":"code_execution_20260120","name":"code_execution"}],
+                     "client_tools":{"run":{"allowed_callers":["code_execution_20260120"]}}}
+                    """)
+            }
+        };
         var events = await Read(client.StreamAsync(connection, request));
         var result = Assert.Single(events.OfType<LlmChatCompletionEvent>()).Result;
         Assert.Equal(LlmCompletionStatus.RequiresAction, result.Status);

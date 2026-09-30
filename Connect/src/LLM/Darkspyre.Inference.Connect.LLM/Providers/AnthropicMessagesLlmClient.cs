@@ -817,9 +817,7 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
             payload["tool_choice"] = mappedChoice;
         }
 
-        if (connection.ProviderOptions.ContainsKey("output_config") || request.ProviderOptions.ContainsKey("output_config")
-            || connection.ProviderOptions.ContainsKey("output_format") || request.ProviderOptions.ContainsKey("output_format"))
-        { throw new NotSupportedException("Claude output configuration uses the typed reasoning and structured-output controls."); }
+        AnthropicToolContinuation.Validate(payload);
         RequestJson.ApplyProviderOptions(payload, connection, request, AnthropicTools.OptionName);
         return payload;
     }
