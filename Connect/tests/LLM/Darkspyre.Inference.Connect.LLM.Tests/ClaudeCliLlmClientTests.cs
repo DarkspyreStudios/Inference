@@ -10,6 +10,24 @@ namespace Darkspyre.Inference.Connect.LLM.Tests;
 
 public sealed class ClaudeCliLlmClientTests
 {
+    [Fact]
+    public async Task CancellationAfterRunningUsageDoesNotDeliverABufferedCompletion()
+    {
+        var runner = new RecordingRunner(new ClaudeCliProcessResult(0,
+            """
+            {"type":"stream_event","event":{"type":"message_start","message":{"id":"m1","usage":{"input_tokens":7,"output_tokens":1}}}}
+            {"type":"result","subtype":"success","is_error":false,"result":"done","usage":{"input_tokens":7,"output_tokens":2}}
+            """, string.Empty));
+        using var http = new HttpClient(new UnexpectedHttpHandler());
+        using var cancellation = new CancellationTokenSource();
+        await using var iterator = new ClaudeCliLlmClient(http, runner).StreamAsync(CliConnection(),
+            new() { ModelId = "claude-test", Messages = [new("user", "hi")] }, cancellation.Token).GetAsyncEnumerator();
+        Assert.True(await iterator.MoveNextAsync());
+        Assert.IsType<LlmUsageDeltaEvent>(iterator.Current);
+        cancellation.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => iterator.MoveNextAsync().AsTask());
+    }
+
     [Theory]
     [InlineData(true)]
     [InlineData(false)]

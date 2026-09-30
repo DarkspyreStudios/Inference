@@ -235,9 +235,13 @@ The existing wrapper drops `thinking_tokens` and `cache_read_tokens`. The live s
 cumulative totals on subsequent turns and resume. Public `RunTotals` belongs to one Connect turn,
 not the entire persisted AGY conversation.
 
-- Maintain a per-turn ledger of final step usage keyed by process generation and step index. Count
-  each completed step once. ACTIVE snapshots do not add tokens; identical repeated DONE is ignored;
-  conflicting final data is a protocol error. Include reported checkpoint work once.
+- Chat and native sessions use `AntigravityStepLedger` for completed `agent_response` and `checkpoint`
+  usage keyed by process generation and step index. ACTIVE snapshots, user-input steps, native-tool
+  steps and previously accounted steps add no tokens. A repeated DONE replaces that step's usage;
+  its text/tool content is not published twice. Conflicting final content is a protocol error.
+- Running usage observations replace the estimate for the current turn. A connection or selected-model
+  override can disable them. Native sessions use one request ID for the turn's running and final
+  observations. The final event replaces the estimate even when final usage is unknown.
 - Prefer the complete current-turn step ledger on the first turn after external resume. Do not charge
   the entire resumed cumulative total as new work. Without complete step evidence or a trusted prior
   cumulative baseline, affected values stay null.

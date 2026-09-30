@@ -133,8 +133,9 @@ public sealed class AntigravityAgentClientTests : IDisposable
         Assert.Contains(first, item => item is LlmAgentActivityEvent);
         Assert.Equal("OK\n", Assert.Single(first.OfType<LlmAgentMessageCompletedEvent>()).Text);
         Assert.Equal(LlmAgentTurnStatus.Completed, Assert.IsType<LlmAgentTurnCompletedEvent>(first[^1]).Status);
-        Assert.Equal(new LlmUsage(13077, 1, 13078), Assert.Single(first.OfType<LlmAgentUsageEvent>()).Usage);
-        LlmUsage secondUsage = Assert.Single(second.OfType<LlmAgentUsageEvent>()).Usage!;
+        Assert.Equal(2, first.OfType<LlmAgentUsageEvent>().Count());
+        Assert.Equal(new LlmUsage(13077, 1, 13078), first.OfType<LlmAgentUsageEvent>().Last().Usage);
+        LlmUsage secondUsage = second.OfType<LlmAgentUsageEvent>().Last().Usage!;
         Assert.Equal(new LlmUsage(13155, 1, 13156), secondUsage);
         Assert.Null(secondUsage.CachedInputTokens);
         Assert.Null(secondUsage.ReasoningOutputTokens);
@@ -147,6 +148,59 @@ public sealed class AntigravityAgentClientTests : IDisposable
         Assert.NotEqual(first[0].TurnId, second[0].TurnId);
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task RunningUsageReplacesStepsAndHonorsTheSelectedModelOverride(bool enabled)
+    {
+        var factory = new Factory();
+        string done = Step(1, "DONE", "agent_response", "x", 5, 1, 6);
+        factory.Turns.Enqueue(_ =>
+        [
+            Step(0, "DONE", "user_input", input: 999, output: 999, total: 1998),
+            done, done, Step(1, "DONE", "agent_response", "x", 5, 3, 8),
+            Step(2, "DONE", "checkpoint", input: 2, output: 1, total: 3),
+            Result("SUCCESS", "x", 10, 4, 14)
+        ]);
+        var connection = Connection() with
+        {
+            CapabilityOverrides = new() { SupportsUsageDeltas = !enabled },
+            ModelCapabilityOverrides = new Dictionary<string, LlmCapabilityOverrides>
+            { ["gemini-pro"] = new() { SupportsUsageDeltas = enabled } }
+        };
+        await using ILlmAgentSession session = await Client(factory).StartSessionAsync("c", connection, Options());
+        List<LlmAgentEvent> events = await Read(session.RunTurnAsync(Turn("one")));
+
+        LlmAgentUsageEvent[] usage = [.. events.OfType<LlmAgentUsageEvent>()];
+        Assert.Equal(enabled ? 4 : 1, usage.Length);
+        if (enabled) { Assert.Equal(new int?[] { 6, 8, 11, 14 }, usage.Select(item => item.Usage?.TotalTokens)); }
+        Assert.Equal(new LlmUsage(10, 4, 14), usage[^1].Usage);
+        Assert.All(usage, item =>
+        {
+            Assert.Equal(usage[0].RequestId, item.RequestId);
+            Assert.Equal(item.Usage, item.RunTotals);
+        });
+        Assert.Equal("x", Assert.Single(events.OfType<LlmAgentTextDeltaEvent>()).Delta);
+        Assert.IsType<LlmAgentTurnCompletedEvent>(events[^1]);
+    }
+
+    [Fact]
+    public async Task PreviouslyAccountedStepsDoNotEnterTheNextTurnUsage()
+    {
+        var factory = new Factory();
+        string old = Step(1, "DONE", "agent_response", "old", 5, 1, 6);
+        factory.Turns.Enqueue(_ => [Step(0, "DONE", "user_input"), old, Result("SUCCESS", "old", 5, 1, 6)]);
+        factory.Turns.Enqueue(_ => [Step(2, "DONE", "user_input"), old,
+            Step(3, "DONE", "agent_response", "new", 7, 2, 9), Result("SUCCESS", "new", 12, 3, 15)]);
+        await using ILlmAgentSession session = await Client(factory).StartSessionAsync("c", Connection(), Options());
+        await Read(session.RunTurnAsync(Turn("one")));
+        List<LlmAgentEvent> events = await Read(session.RunTurnAsync(Turn("two")));
+
+        Assert.Equal("new", Assert.Single(events.OfType<LlmAgentTextDeltaEvent>()).Delta);
+        Assert.Equal(2, events.OfType<LlmAgentUsageEvent>().Count());
+        Assert.All(events.OfType<LlmAgentUsageEvent>(), item => Assert.Equal(new LlmUsage(7, 2, 9), item.Usage));
+    }
+
     [Fact]
     public async Task TheFirstTurnAfterResumeUsesTheStepLedgerRatherThanTheCumulativeTotal()
     {
@@ -157,7 +211,8 @@ public sealed class AntigravityAgentClientTests : IDisposable
 
         List<LlmAgentEvent> events = await Read(session.RunTurnAsync(Turn("again")));
 
-        Assert.Equal(new LlmUsage(13155, 1, 13156), Assert.Single(events.OfType<LlmAgentUsageEvent>()).Usage);
+        Assert.Equal(2, events.OfType<LlmAgentUsageEvent>().Count());
+        Assert.All(events.OfType<LlmAgentUsageEvent>(), item => Assert.Equal(new LlmUsage(13155, 1, 13156), item.Usage));
     }
 
     [Fact]
@@ -171,7 +226,8 @@ public sealed class AntigravityAgentClientTests : IDisposable
 
         List<LlmAgentEvent> events = await Read(session.RunTurnAsync(Turn("two")));
 
-        Assert.DoesNotContain(events, item => item is LlmAgentUsageEvent);
+        Assert.Null(events.OfType<LlmAgentUsageEvent>().Last().Usage);
+        Assert.Null(events.OfType<LlmAgentUsageEvent>().Last().RunTotals);
         Assert.Contains(events, item => item is LlmAgentWarningEvent);
         Assert.Equal(LlmAgentTurnStatus.Completed, events.OfType<LlmAgentTurnCompletedEvent>().Single().Status);
     }

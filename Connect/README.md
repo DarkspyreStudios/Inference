@@ -332,6 +332,10 @@ and ignores replayed calls and subagent events. Its observations and final `resu
 main loop for the current turn, as described in the [Claude usage contract](https://code.claude.com/docs/en/agent-sdk/cost-tracking).
 Native sessions use one `LlmAgentUsageEvent.RequestId` for the turn's running and final observations.
 A final result without usage replaces the running estimate with unknown usage.
+Antigravity chat and native sessions share completed-step accounting. Model-response and checkpoint
+usage replaces earlier usage for the same step. ACTIVE snapshots, user-input steps, native-tool steps
+and previously accounted process-generation steps add no tokens. Native sessions reconcile final
+usage against a trusted same-process cumulative baseline without adding it to the step ledger.
 
 OpenAI-compatible connections default running usage off. The **Running usage** capability override
 opts a vLLM-compatible endpoint into `stream_options.continuous_usage_stats` when streaming usage
@@ -1304,7 +1308,7 @@ per open session, with an open standard input and one output reader.
   When they differ from the running process, the session closes that process while idle and reopens the
   same conversation with the new flags before sending the prompt.
 - A turn emits `LlmAgentActivityEvent` per step, `LlmAgentTextDeltaEvent` for `agent_response` deltas,
-  `LlmAgentToolEvent` for native tools with their reported output, one usage event and
+  `LlmAgentToolEvent` for native tools with their reported output, running usage observations and
   `LlmAgentMessageCompletedEvent`. A schema turn streams no text and publishes one
   `LlmAgentStructuredOutputSnapshotEvent` holding the validated canonical result.
 - `SUCCESS` completes the turn. `ERROR` and `INVALID` are provider failures. `CANCELED` and `INTERRUPTED`
@@ -1313,6 +1317,9 @@ per open session, with an open standard input and one output reader.
   one process, or the sum of the turn's completed step usage after a start or reopen. Decreasing
   counters make the turn total unavailable. Cache-read and reasoning subsets stay null until their
   inclusion in the input and output totals is established.
+  Running and final `LlmAgentUsageEvent` observations share one request ID. The final observation
+  replaces the estimate, including when the reconciled total is unknown. The running-usage override
+  controls interim observations; the final usage event is always emitted.
 - Cancelling or abandoning a turn kills the owned process and faults the session object. Output that
   arrives while no turn is running also faults it. Resume opens a fresh session. Connect does not stop
   work AGY may keep running on its side.

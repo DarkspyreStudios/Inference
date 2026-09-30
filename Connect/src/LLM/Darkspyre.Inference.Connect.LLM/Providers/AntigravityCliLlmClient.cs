@@ -23,6 +23,7 @@ internal sealed class AntigravityCliLlmClient(IAntigravityCliRunner runner)
         ToolHistory = LlmToolHistory.Text,
         SupportsStreaming = true,
         SupportsStreamingUsage = true,
+        SupportsUsageDeltas = true,
         SupportsModelListing = true,
         SupportsAccountUsage = true,
         SupportsJsonSchema = true,
@@ -41,6 +42,9 @@ internal sealed class AntigravityCliLlmClient(IAntigravityCliRunner runner)
     public LlmProviderDefinition ProviderDefinition => ProviderDefinitions.GeminiSubscription;
 
     public LlmProviderCapabilities GetCapabilities(LlmConnection connection, string? modelId = null)
+        => ResolveCapabilities(connection, modelId);
+
+    internal static LlmProviderCapabilities ResolveCapabilities(LlmConnection connection, string? modelId)
     {
         ValidateConnection(connection);
         LlmProviderCapabilities capabilities = LlmCapabilityOverrideLookup.Apply(Capabilities, connection, modelId);
@@ -105,6 +109,8 @@ internal sealed class AntigravityCliLlmClient(IAntigravityCliRunner runner)
         AntigravityCliProcessResult? processResult = null;
         LlmProviderException? parseException = null;
         bool emittedText = false;
+        var ledger = new AntigravityStepLedger();
+        var usageDeltas = new UsageDeltas(capabilities.SupportsUsageDeltas);
         await foreach (AntigravityCliProcessEvent processEvent in InvokeStreamingAsync(
                            executable,
                            arguments,
@@ -112,6 +118,7 @@ internal sealed class AntigravityCliLlmClient(IAntigravityCliRunner runner)
                            providerSchema,
                            cancellationToken))
         {
+            cancellationToken.ThrowIfCancellationRequested();
             if (processEvent is AntigravityCliProcessCompleted completion)
             {
                 processResult = completion.Result;
@@ -124,11 +131,23 @@ internal sealed class AntigravityCliLlmClient(IAntigravityCliRunner runner)
             }
 
             ParsedStreamLine parsed;
+            LlmUsageDeltaEvent? observation = null;
+            bool projectContent = true;
             try
             {
                 parsed = ParseStreamLine(
                     outputLine.Line,
                     preferStructuredOutput: providerSchema is not null);
+                if (response is null && parsed.Step is { } step)
+                {
+                    projectContent = ledger.Record(step);
+                    observation = usageDeltas.Next(ledger.Usage);
+                }
+            }
+            catch (InvalidDataException exception)
+            {
+                throw new LlmProviderException("Antigravity CLI reported conflicting step data.", Transport,
+                    providerCode: "antigravity_cli_invalid_response", innerException: exception);
             }
             catch (LlmProviderException exception)
                 when (string.Equals(
@@ -139,11 +158,12 @@ internal sealed class AntigravityCliLlmClient(IAntigravityCliRunner runner)
                 parseException ??= exception;
                 continue;
             }
-            if (!string.IsNullOrEmpty(parsed.Activity))
+            if (observation is not null) { yield return observation; }
+            if (projectContent && !string.IsNullOrEmpty(parsed.Activity))
             {
                 yield return new LlmActivityEvent(parsed.Activity);
             }
-            if (!string.IsNullOrEmpty(parsed.TextDelta))
+            if (projectContent && !string.IsNullOrEmpty(parsed.TextDelta))
             {
                 emittedText = true;
                 yield return new LlmTextDeltaEvent(parsed.TextDelta);
@@ -663,7 +683,7 @@ internal sealed class AntigravityCliLlmClient(IAntigravityCliRunner runner)
                     && string.Equals(step.StepType, "agent_response", StringComparison.Ordinal)
                         ? step.TextDelta
                         : null;
-                return new ParsedStreamLine(delta, null, $"Model activity: {step.StepType.Replace('_', ' ')}");
+                return new ParsedStreamLine(delta, null, $"Model activity: {step.StepType.Replace('_', ' ')}", step);
             case AntigravityResult result:
                 return new ParsedStreamLine(
                     null,
@@ -679,24 +699,7 @@ internal sealed class AntigravityCliLlmClient(IAntigravityCliRunner runner)
         preferStructuredOutput && result.StructuredOutput is { } structured ? structured.GetRawText() : result.Response,
         result.Status,
         result.ConversationId,
-        ReadUsage(result.Usage));
-
-    private static LlmUsage? ReadUsage(AntigravityUsage? usage)
-    {
-        if (usage is null)
-        {
-            return null;
-        }
-        int? input = ToInt32(usage.InputTokens);
-        int? output = ToInt32(usage.OutputTokens);
-        int? total = ToInt32(usage.TotalTokens)
-            ?? (input is not null && output is not null ? input + output : null);
-        return input is null && output is null && total is null
-            ? null
-            : new LlmUsage(input, output, total);
-    }
-
-    private static int? ToInt32(long? value) => value is >= 0 and <= int.MaxValue ? (int)value : null;
+        AntigravityStepLedger.Normalize(result.Usage));
 
     private static List<LlmModel> ParseModels(string output)
     {
@@ -808,5 +811,6 @@ internal sealed class AntigravityCliLlmClient(IAntigravityCliRunner runner)
     private sealed record ParsedStreamLine(
         string? TextDelta,
         ParsedResponse? Response,
-        string? Activity);
+        string? Activity,
+        AntigravityStep? Step = null);
 }

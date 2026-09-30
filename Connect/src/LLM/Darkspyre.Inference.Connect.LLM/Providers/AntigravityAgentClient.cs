@@ -36,6 +36,7 @@ internal sealed class AntigravityAgentClient(IAntigravityCliSessionProcessFactor
             CliInfrastructure.NormalizeWorkingDirectory(runtime.WorkingDirectory),
             new AntigravityLaunch(options.ModelId, null, null),
             conversationId: null,
+            connection,
             cancellationToken);
     }
 
@@ -64,6 +65,7 @@ internal sealed class AntigravityAgentClient(IAntigravityCliSessionProcessFactor
             CliInfrastructure.NormalizeWorkingDirectory(runtime.WorkingDirectory),
             new AntigravityLaunch(options.ModelId, null, null),
             conversationId,
+            connection,
             cancellationToken);
     }
 

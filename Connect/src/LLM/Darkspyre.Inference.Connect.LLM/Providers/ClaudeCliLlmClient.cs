@@ -136,6 +136,7 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
                            standardInput,
                            cancellationToken))
         {
+            cancellationToken.ThrowIfCancellationRequested();
             if (processEvent is ClaudeCliProcessCompleted completion)
             {
                 processResult = completion.Result;

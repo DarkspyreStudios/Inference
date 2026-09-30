@@ -11,6 +11,76 @@ namespace Darkspyre.Inference.Connect.LLM.Tests;
 public sealed class AntigravityCliLlmClientTests
 {
     [Fact]
+    public async Task CancellationAfterRunningUsageDoesNotDeliverABufferedCompletion()
+    {
+        var runner = new RecordingRunner(new AntigravityCliProcessResult(0,
+            """
+            {"event":"step_update","step_update":{"step_index":1,"state":"DONE","step_type":"checkpoint","usage":{"input_tokens":5,"output_tokens":1,"total_tokens":6}}}
+            {"event":"result","result":{"status":"SUCCESS","response":"done","usage":{"input_tokens":5,"output_tokens":1,"total_tokens":6}}}
+            """, string.Empty));
+        using var cancellation = new CancellationTokenSource();
+        await using var iterator = new AntigravityCliLlmClient(runner).StreamAsync(Connection(),
+            new() { ModelId = "auto", Messages = [new("user", "hi")] }, cancellation.Token).GetAsyncEnumerator();
+        Assert.True(await iterator.MoveNextAsync());
+        Assert.IsType<LlmUsageDeltaEvent>(iterator.Current);
+        cancellation.Cancel();
+        // The activity for this same step may already be available; no completion may follow cancellation.
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
+        {
+            while (await iterator.MoveNextAsync()) { Assert.IsNotType<LlmChatCompletionEvent>(iterator.Current); }
+        });
+    }
+
+    [Fact]
+    public async Task AProviderErrorKeepsRunningUsageWithoutFabricatingCompletion()
+    {
+        var runner = new RecordingRunner(new AntigravityCliProcessResult(0,
+            """
+            {"event":"step_update","step_update":{"step_index":1,"state":"DONE","step_type":"checkpoint","usage":{"input_tokens":5,"output_tokens":1,"total_tokens":6}}}
+            {"event":"result","result":{"status":"ERROR","response":"","usage":{"input_tokens":5,"output_tokens":1,"total_tokens":6}}}
+            """, string.Empty));
+        var seen = new List<LlmStreamEvent>();
+        await Assert.ThrowsAsync<LlmProviderException>(async () =>
+        {
+            await foreach (var item in new AntigravityCliLlmClient(runner).StreamAsync(Connection(),
+                new() { ModelId = "auto", Messages = [new("user", "hi")] })) { seen.Add(item); }
+        });
+        Assert.Equal(6, Assert.Single(seen.OfType<LlmUsageDeltaEvent>()).Cumulative.TotalTokens);
+        Assert.Empty(seen.OfType<LlmChatCompletionEvent>());
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task RunningUsageSharesTheStepLedgerAndKeepsTheResultAuthoritative(bool enabled)
+    {
+        var runner = new RecordingRunner(new AntigravityCliProcessResult(0,
+            """
+            {"event":"step_update","step_update":{"step_index":0,"state":"DONE","step_type":"user_input","usage":{"input_tokens":999,"output_tokens":999,"total_tokens":1998}}}
+            {"event":"step_update","step_update":{"step_index":1,"state":"ACTIVE","step_type":"agent_response","usage":{"input_tokens":999,"output_tokens":999,"total_tokens":1998}}}
+            {"event":"step_update","step_update":{"step_index":1,"state":"DONE","step_type":"agent_response","text_delta":"ok","usage":{"input_tokens":100,"output_tokens":10,"total_tokens":110}}}
+            {"event":"step_update","step_update":{"step_index":1,"state":"DONE","step_type":"agent_response","text_delta":"ok","usage":{"input_tokens":100,"output_tokens":10,"total_tokens":110}}}
+            {"event":"step_update","step_update":{"step_index":1,"state":"DONE","step_type":"agent_response","text_delta":"ok","usage":{"input_tokens":100,"output_tokens":12,"total_tokens":112}}}
+            {"event":"step_update","step_update":{"step_index":2,"state":"DONE","step_type":"checkpoint","usage":{"input_tokens":5,"output_tokens":2,"total_tokens":7}}}
+            {"event":"result","result":{"status":"SUCCESS","response":"ok","usage":{"input_tokens":90,"output_tokens":16,"total_tokens":106}}}
+            {"event":"step_update","step_update":{"step_index":3,"state":"DONE","step_type":"checkpoint","usage":{"input_tokens":999,"output_tokens":999,"total_tokens":1998}}}
+            """, string.Empty));
+        var connection = Connection() with
+        {
+            CapabilityOverrides = new() { SupportsUsageDeltas = !enabled },
+            ModelCapabilityOverrides = new Dictionary<string, LlmCapabilityOverrides>
+            { ["auto"] = new() { SupportsUsageDeltas = enabled } }
+        };
+        IReadOnlyList<LlmStreamEvent> events = await ReadAllAsync(new AntigravityCliLlmClient(runner).StreamAsync(
+            connection, new() { ModelId = "auto", Messages = [new("user", "hi")] }));
+        Assert.Equal("ok", Assert.Single(events.OfType<LlmTextDeltaEvent>()).Delta);
+        LlmUsageDeltaEvent[] usage = [.. events.OfType<LlmUsageDeltaEvent>()];
+        Assert.Equal(enabled ? 3 : 0, usage.Length);
+        if (enabled) { Assert.Equal(new int?[] { 110, 112, 119 }, usage.Select(item => item.Cumulative.TotalTokens)); }
+        Assert.Equal(new LlmUsage(90, 16, 106), Assert.IsType<LlmChatCompletionEvent>(events[^1]).Result.Usage);
+    }
+
+    [Fact]
     public async Task SendsPromptThroughStandardInputAndParsesTerminalResult()
     {
         var runner = new RecordingRunner(new AntigravityCliProcessResult(

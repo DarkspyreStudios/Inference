@@ -30,6 +30,8 @@ internal sealed class AntigravityAgentSession : ILlmAgentSession
     private readonly string _executable;
     private readonly string _workingDirectory;
     private readonly AntigravityLaunch _defaults;
+    private readonly LlmConnection _connection;
+    private readonly HashSet<(int Generation, int Index)> _accountedSteps = [];
     private readonly NoAgentResources _resources = new(LlmAgentResourceStopStatus.Unknown);
     private readonly Lock _sync = new();
 
@@ -53,12 +55,14 @@ internal sealed class AntigravityAgentSession : ILlmAgentSession
         IAntigravityCliSessionProcessFactory factory,
         string executable,
         string workingDirectory,
-        AntigravityLaunch defaults)
+        AntigravityLaunch defaults,
+        LlmConnection connection)
     {
         _factory = factory;
         _executable = executable;
         _workingDirectory = workingDirectory;
         _defaults = defaults;
+        _connection = connection;
         _launch = defaults;
     }
 
@@ -81,9 +85,11 @@ internal sealed class AntigravityAgentSession : ILlmAgentSession
         string workingDirectory,
         AntigravityLaunch launch,
         string? conversationId,
+        LlmConnection connection,
         CancellationToken cancellationToken)
     {
-        var session = new AntigravityAgentSession(factory, executable, workingDirectory, launch);
+        AntigravityCliLlmClient.ResolveCapabilities(connection, launch.ModelId);
+        var session = new AntigravityAgentSession(factory, executable, workingDirectory, launch, connection);
         try
         {
             await session.StartProcessAsync(launch, conversationId, cancellationToken).ConfigureAwait(false);
@@ -144,6 +150,7 @@ internal sealed class AntigravityAgentSession : ILlmAgentSession
     {
         ArgumentNullException.ThrowIfNull(request);
         (AntigravityLaunch launch, string prompt, JsonElement? schema) = Admit(request);
+        bool usageDeltas = AntigravityCliLlmClient.ResolveCapabilities(_connection, launch.ModelId).SupportsUsageDeltas;
         cancellationToken.ThrowIfCancellationRequested();
         lock (_sync)
         {
@@ -170,7 +177,7 @@ internal sealed class AntigravityAgentSession : ILlmAgentSession
                 await ReopenAsync(launch, cancellationToken).ConfigureAwait(false);
             }
 
-            var turn = new TurnMapper(this, turnId, schema, request.OutputSchema);
+            var turn = new TurnMapper(this, turnId, schema, request.OutputSchema, usageDeltas);
             lock (_sync)
             {
                 _expectingOutput = true;
@@ -189,6 +196,7 @@ internal sealed class AntigravityAgentSession : ILlmAgentSession
             ChannelReader<ProcessLine> lines = _lines.Reader;
             while (!turn.IsComplete)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 if (!lines.TryRead(out ProcessLine line))
                 {
                     if (!await lines.WaitToReadAsync(cancellationToken).ConfigureAwait(false))
@@ -395,6 +403,7 @@ internal sealed class AntigravityAgentSession : ILlmAgentSession
             _process = process;
             _lines = lines;
             generation = ++_generation;
+            _accountedSteps.Clear();
             _expectingOutput = true;
         }
         _reader = Task.Run(() => ReadAsync(process, lines.Writer, generation), CancellationToken.None);
@@ -642,7 +651,7 @@ internal sealed class AntigravityAgentSession : ILlmAgentSession
         new(message, LlmTransport.GoogleAntigravityCli, providerCode: code);
 
     /// <summary>Turn usage from the per-step ledger, reconciled with a trusted cumulative difference.</summary>
-    private (LlmUsage? Usage, string? Warning) SettleUsage(int generation, AntigravityUsage? cumulative, StepLedger ledger)
+    private (LlmUsage? Usage, string? Warning) SettleUsage(int generation, AntigravityUsage? cumulative, AntigravityStepLedger ledger)
     {
         LlmUsage? fromSteps = ledger.Usage;
         lock (_sync)
@@ -695,77 +704,16 @@ internal sealed class AntigravityAgentSession : ILlmAgentSession
         public bool IsEnd => Event is null && Error is null;
     }
 
-    /// <summary>Final usage of each completed step, counted once per process generation and step index.</summary>
-    private sealed class StepLedger
-    {
-        private readonly Dictionary<int, AntigravityStep> _done = [];
-
-        /// <summary>False for an identical repeated DONE; throws for conflicting final data.</summary>
-        public bool Record(AntigravityStep step)
-        {
-            if (!step.IsDone)
-            {
-                return true;
-            }
-            if (_done.TryGetValue(step.StepIndex, out AntigravityStep? existing))
-            {
-                return !Same(existing, step)
-                    ? throw new InvalidDataException("Antigravity CLI reported conflicting final data for one step.")
-                    : false;
-            }
-            _done.Add(step.StepIndex, step);
-            return true;
-        }
-
-        public LlmUsage? Usage
-        {
-            get
-            {
-                AntigravityUsage[] reported = [.. _done.Values.Select(step => step.Usage).OfType<AntigravityUsage>()];
-                if (reported.Length == 0 || reported.Any(usage => usage.Invalid))
-                {
-                    return null;
-                }
-                return new LlmUsage(Sum(reported, usage => usage.InputTokens), Sum(reported, usage => usage.OutputTokens),
-                    Sum(reported, usage => usage.TotalTokens));
-            }
-        }
-
-        private static int? Sum(AntigravityUsage[] reported, Func<AntigravityUsage, long?> field)
-        {
-            long total = 0;
-            foreach (AntigravityUsage usage in reported)
-            {
-                if (field(usage) is not { } value)
-                {
-                    return null;
-                }
-                total += value;
-                if (total > int.MaxValue)
-                {
-                    return null;
-                }
-            }
-            return (int)total;
-        }
-
-        private static bool Same(AntigravityStep left, AntigravityStep right) =>
-            left.StepType == right.StepType
-            && left.TextDelta == right.TextDelta
-            && left.Usage == right.Usage
-            && left.Tool?.Name == right.Tool?.Name
-            && left.Tool?.Output == right.Tool?.Output
-            && left.Tool?.ErrorMessage == right.Tool?.ErrorMessage;
-    }
-
     /// <summary>Maps one turn's protocol events to neutral agent events.</summary>
     private sealed class TurnMapper(
         AntigravityAgentSession session,
         string turnId,
         JsonElement? schema,
-        JsonElement? requestedSchema)
+        JsonElement? requestedSchema,
+        bool usageDeltas)
     {
-        private readonly StepLedger _ledger = new();
+        private readonly AntigravityStepLedger _ledger = new(session._generation, session._accountedSteps);
+        private readonly UsageDeltas _deltas = new(usageDeltas);
         private readonly HashSet<int> _announced = [];
         private readonly HashSet<int> _toolsStarted = [];
         private readonly int _generation = session._generation;
@@ -809,11 +757,13 @@ internal sealed class AntigravityAgentSession : ILlmAgentSession
             {
                 throw new InvalidDataException("Antigravity CLI reported a step for a different conversation.");
             }
-            if (!_ledger.Record(step))
-            {
-                return [];
-            }
+            bool projectContent = _ledger.Record(step);
             var events = new List<LlmAgentEvent>();
+            if (!projectContent)
+            {
+                if (_inputSeen) { ObserveUsage(events); }
+                return events;
+            }
             if (string.Equals(step.StepType, "user_input", StringComparison.Ordinal))
             {
                 _inputSeen = true;
@@ -824,6 +774,7 @@ internal sealed class AntigravityAgentSession : ILlmAgentSession
                 // Work reported before this turn's input boundary cannot be attributed to the host's request.
                 throw new InvalidDataException("Antigravity CLI reported work before this turn's input.");
             }
+            ObserveUsage(events);
 
             string itemId = $"{_generation}:{step.StepIndex}";
             if (_announced.Add(step.StepIndex))
@@ -857,6 +808,15 @@ internal sealed class AntigravityAgentSession : ILlmAgentSession
             return events;
         }
 
+        private void ObserveUsage(List<LlmAgentEvent> events)
+        {
+            if (_deltas.Next(_ledger.Usage) is { } observation)
+            {
+                events.Add(new LlmAgentUsageEvent(ThreadId, turnId, $"{_generation}:{turnId}",
+                    observation.Cumulative, observation.Cumulative));
+            }
+        }
+
         private List<LlmAgentEvent> MapResult(AntigravityResult result)
         {
             if (result.ConversationId is not null && !string.Equals(result.ConversationId, ThreadId, StringComparison.Ordinal))
@@ -870,10 +830,7 @@ internal sealed class AntigravityAgentSession : ILlmAgentSession
             {
                 events.Add(new LlmAgentWarningEvent(ThreadId, turnId, warning));
             }
-            if (usage is not null)
-            {
-                events.Add(new LlmAgentUsageEvent(ThreadId, turnId, $"{_generation}:{turnId}", usage, usage));
-            }
+            events.Add(new LlmAgentUsageEvent(ThreadId, turnId, $"{_generation}:{turnId}", usage, usage));
 
             string itemId = $"{_generation}:{turnId}:response";
             (LlmAgentCompletionReason reason, string? error) = result.Status switch
