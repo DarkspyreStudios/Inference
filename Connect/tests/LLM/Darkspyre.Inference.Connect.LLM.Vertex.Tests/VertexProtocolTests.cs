@@ -160,9 +160,72 @@ public sealed class VertexProtocolTests
     {
         var request = new LlmStructuredOutputRequest
         { Name = "result", Schema = JsonElement.Parse("""{"type":"string","pattern":"^a"}""") };
-        Assert.Throws<NotSupportedException>(() => VertexSchemas.Enforcement(request, new(), false));
+        Assert.Throws<NotSupportedException>(() => VertexSchemas.Enforcement(new() { ModelId = Gemini, StructuredOutput = request }, new(), false));
         Assert.Equal(LlmStructuredOutputEnforcement.LocalValidationOnly,
-            VertexSchemas.Enforcement(request with { Fallback = LlmStructuredOutputFallback.LocalValidation }, new(), false));
+            VertexSchemas.Enforcement(new() { ModelId = Gemini, StructuredOutput = request with { Fallback = LlmStructuredOutputFallback.LocalValidation } }, new(), false));
+    }
+
+    [Theory]
+    [InlineData(true, false)]
+    [InlineData(false, false)]
+    [InlineData(true, true)]
+    [InlineData(false, true)]
+    public async Task ClaudeCombinedSchemaBudgetPrecedesAuthenticationAndFallbackOmitsOnlyOutput(bool optional, bool fallback)
+    {
+        JsonElement Schema(int count)
+        {
+            var properties = new JsonObject();
+            var required = new JsonArray();
+            for (int index = 0; index < count; index++)
+            {
+                string name = "value_" + index;
+                properties[name] = new JsonObject { ["type"] = optional ? JsonValue.Create("string") : new JsonArray("string", "null") };
+                if (!optional) required.Add(name);
+            }
+            return JsonSerializer.SerializeToElement(new JsonObject
+            {
+                ["type"] = "object",
+                ["properties"] = properties,
+                ["required"] = required,
+                ["additionalProperties"] = false
+            });
+        }
+        JsonElement tools = Schema(optional ? 24 : 16);
+        JsonElement output = Schema(1);
+        var request = new LlmChatRequest
+        {
+            ModelId = Claude,
+            Messages = [new("user", "Return JSON")],
+            Tools = [Tool with { Strict = true, InputSchema = tools }],
+            StructuredOutput = new()
+            {
+                Name = "result",
+                Schema = output,
+                Fallback = fallback ? LlmStructuredOutputFallback.LocalValidation : LlmStructuredOutputFallback.None
+            }
+        };
+        var handler = new Handler("""{"type":"message","content":[{"type":"text","text":"{}"}],"stop_reason":"end_turn"}""") { Json = true };
+        using var http = new HttpClient(handler);
+        var authentication = new Authentication();
+        var client = new VertexLlmClient(http, authentication);
+        var connection = Connection with { CapabilityOverrides = new() { SupportsStreaming = false } };
+        if (!fallback)
+        {
+            await Assert.ThrowsAsync<NotSupportedException>(() => Complete(client, connection, request));
+            Assert.Equal(0, authentication.Calls);
+            Assert.Empty(handler.Bodies);
+        }
+        else
+        {
+            var result = await Complete(client, connection, request);
+            Assert.Equal(1, authentication.Calls);
+            Assert.Equal(LlmStructuredOutputEnforcement.LocalValidationOnly, result.StructuredOutput!.Enforcement);
+            JsonNode native = JsonNode.Parse(Assert.Single(handler.Bodies))!;
+            Assert.Null(native["output_config"]);
+            Assert.Equal(true, (bool?)native["tools"]![0]!["strict"]);
+            Assert.True(JsonNode.DeepEquals(JsonNode.Parse(tools.GetRawText()), native["tools"]![0]!["input_schema"]));
+        }
+        Assert.Equal(output.GetRawText(), request.StructuredOutput.Schema.GetRawText());
     }
 
     [Fact]

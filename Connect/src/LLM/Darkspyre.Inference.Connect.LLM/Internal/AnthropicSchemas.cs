@@ -18,52 +18,92 @@ internal static class AnthropicSchemas
     private static readonly HashSet<string> Formats = new(StringComparer.Ordinal)
     { "date-time", "time", "date", "duration", "email", "hostname", "uri", "ipv4", "ipv6", "uuid" };
 
-    internal static LlmStructuredOutputEnforcement? Enforcement(LlmStructuredOutputRequest? request,
+    internal static LlmStructuredOutputEnforcement? Enforcement(LlmChatRequest request,
         LlmProviderCapabilities capabilities)
     {
-        if (request is null) return null;
-        return StructuredOutput.ResolveEnforcement(request, capabilities with
+        SchemaCost tools = StrictToolCost(request);
+        if (request.StructuredOutput is not { } output) return null;
+        return StructuredOutput.ResolveEnforcement(output, capabilities with
         {
-            SupportsJsonSchema = capabilities.SupportsJsonSchema && Supports(request.Schema),
+            SupportsJsonSchema = capabilities.SupportsJsonSchema && Analyze(output.Schema, out SchemaCost cost)
+                && tools.Add(cost).Fits,
             SupportsJsonObject = false
         });
     }
 
-    internal static void ValidateTools(LlmChatRequest request)
+    private static SchemaCost StrictToolCost(LlmChatRequest request)
     {
         if (request.Tools.Count(tool => tool.Strict) > 20)
         { throw new NotSupportedException("Claude accepts at most 20 strict tools in one request."); }
-        if (request.Tools.Any(tool => tool.Strict && !Supports(tool.InputSchema)))
-        { throw new NotSupportedException("A strict tool schema contains constraints outside Claude's native subset. The tool schema is not weakened or sent as non-strict."); }
+        SchemaCost total = default;
+        foreach (LlmToolDefinition tool in request.Tools.Where(tool => tool.Strict))
+        {
+            if (!Analyze(tool.InputSchema, out SchemaCost cost))
+            { throw new NotSupportedException("A strict tool schema contains constraints outside Claude's native subset. The tool schema is not weakened or sent as non-strict."); }
+            total = total.Add(cost);
+            if (!total.Fits)
+            { throw new NotSupportedException("Claude accepts at most 24 optional parameters and 16 union parameters across strict schemas. Strict tools are not weakened to fit these limits."); }
+        }
+        return total;
     }
 
-    internal static bool Supports(JsonElement schema)
+    private static bool Analyze(JsonElement schema, out SchemaCost cost)
     {
+        cost = default;
         var active = new HashSet<SchemaNode>();
-        var visited = new HashSet<SchemaNode>();
-        var pending = new Stack<(SchemaNode Node, bool Leaving)>();
-        pending.Push((new(schema, false), false));
+        var analyzed = new Dictionary<SchemaNode, SchemaCost>();
+        var pending = new Stack<(SchemaNode Node, List<SchemaEdge>? Children)>();
+        var root = new SchemaNode(schema, false);
+        pending.Push((root, null));
         while (pending.TryPop(out var next))
         {
-            if (next.Leaving)
+            if (next.Children is { } children)
             {
+                SchemaCost current = SchemaCost.Local(next.Node.Schema);
+                foreach (SchemaEdge child in children.Where(child => child.Counts))
+                    current = current.Add(analyzed[child.Node]);
                 active.Remove(next.Node);
-                visited.Add(next.Node);
+                analyzed.Add(next.Node, current);
                 continue;
             }
-            if (visited.Contains(next.Node)) continue;
+            if (analyzed.ContainsKey(next.Node)) continue;
             if (!active.Add(next.Node)) return false;
-            var children = new List<SchemaNode>();
-            if (!Check(next.Node.Schema, schema, next.Node.InsideAllOf, children)) return false;
-            pending.Push((next.Node, true));
-            for (int index = children.Count - 1; index >= 0; index--) pending.Push((children[index], false));
+            var edges = new List<SchemaEdge>();
+            if (!Check(next.Node.Schema, schema, next.Node.InsideAllOf, edges)) return false;
+            pending.Push((next.Node, edges));
+            for (int index = edges.Count - 1; index >= 0; index--) pending.Push((edges[index].Node, null));
         }
+        cost = analyzed[root];
         return true;
     }
 
     private readonly record struct SchemaNode(JsonElement Schema, bool InsideAllOf);
+    private readonly record struct SchemaEdge(SchemaNode Node, bool Counts);
 
-    private static bool Check(JsonElement schema, JsonElement root, bool insideAllOf, List<SchemaNode> children)
+    private readonly record struct SchemaCost(int Optional, int Unions)
+    {
+        internal bool Fits => Optional <= 24 && Unions <= 16;
+
+        // Saturation bounds work even when a shared-reference graph expands exponentially.
+        internal SchemaCost Add(SchemaCost other) => new(Math.Min(25, Optional + other.Optional), Math.Min(17, Unions + other.Unions));
+
+        internal static SchemaCost Local(JsonElement schema)
+        {
+            int optional = 0;
+            if (schema.TryGetProperty("properties", out JsonElement properties))
+            {
+                var required = schema.TryGetProperty("required", out JsonElement names)
+                    ? names.EnumerateArray().Select(name => name.GetString()!).ToHashSet(StringComparer.Ordinal) : [];
+                foreach (JsonProperty property in properties.EnumerateObject())
+                    if (!required.Contains(property.Name) && ++optional > 24) break;
+            }
+            bool union = schema.TryGetProperty("anyOf", out _) || schema.TryGetProperty("type", out JsonElement type)
+                && type.ValueKind == JsonValueKind.Array;
+            return new(optional, union ? 1 : 0);
+        }
+    }
+
+    private static bool Check(JsonElement schema, JsonElement root, bool insideAllOf, List<SchemaEdge> children)
     {
         if (schema.ValueKind != JsonValueKind.Object || insideAllOf && schema.TryGetProperty("$ref", out _)) return false;
         bool isObject = schema.TryGetProperty("properties", out _);
@@ -91,21 +131,23 @@ internal static class AnthropicSchemas
                 case "$defs":
                 case "definitions":
                     if (value.ValueKind != JsonValueKind.Object) return false;
-                    foreach (JsonProperty child in value.EnumerateObject()) children.Add(new(child.Value, insideAllOf));
+                    foreach (JsonProperty child in value.EnumerateObject())
+                        children.Add(new(new(child.Value, insideAllOf), property.Name == "properties"));
                     break;
                 case "items":
-                    children.Add(new(value, insideAllOf));
+                    children.Add(new(new(value, insideAllOf), true));
                     break;
                 case "anyOf":
                 case "allOf":
                     if (value.ValueKind != JsonValueKind.Array || value.GetArrayLength() == 0) return false;
-                    foreach (JsonElement child in value.EnumerateArray()) children.Add(new(child, insideAllOf || property.Name == "allOf"));
+                    foreach (JsonElement child in value.EnumerateArray())
+                        children.Add(new(new(child, insideAllOf || property.Name == "allOf"), true));
                     break;
                 case "$ref":
                     if (value.ValueKind != JsonValueKind.String || value.GetString() is not { } reference
                         || !reference.StartsWith('#') || !JsonPointer.TryParse(reference, out JsonPointer pointer)
                         || pointer.Evaluate(root) is not { } target) return false;
-                    children.Add(new(target, insideAllOf));
+                    children.Add(new(new(target, insideAllOf), true));
                     break;
                 case "additionalProperties":
                     if (value.ValueKind != JsonValueKind.False) return false;
@@ -139,6 +181,7 @@ internal static class AnthropicSchemas
 
     private static bool SupportsPattern(string pattern)
     {
+        // Unpublished range and grammar-size limits remain provider errors; no cutoff is invented.
         try { _ = new Regex(pattern, RegexOptions.ECMAScript, TimeSpan.FromSeconds(1)); }
         catch (ArgumentException) { return false; }
         bool characterClass = false;

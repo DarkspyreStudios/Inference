@@ -109,10 +109,9 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
         ArgumentNullException.ThrowIfNull(request);
         LlmProviderCapabilities capabilities = GetCapabilities(connection, request.ModelId);
         ValidateRequest(connection, request, capabilities);
-        AnthropicSchemas.ValidateTools(request);
         AnthropicModelProfiles.ValidateSampling(request, AnthropicModelProfiles.Resolve(
             ReasoningModelId(request.ModelId), ILlmCatalogCapabilities.EntryFor(connection, request.ModelId)));
-        LlmStructuredOutputEnforcement? enforcement = AnthropicSchemas.Enforcement(request.StructuredOutput, capabilities);
+        LlmStructuredOutputEnforcement? enforcement = AnthropicSchemas.Enforcement(request, capabilities);
         return (capabilities, enforcement);
     }
 
@@ -767,7 +766,7 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
         {
             payload["max_tokens"] = maxTokens;
         }
-        if (AnthropicSchemas.Enforcement(request.StructuredOutput, GetCapabilities(connection, request.ModelId))
+        if (AnthropicSchemas.Enforcement(request, GetCapabilities(connection, request.ModelId))
             == LlmStructuredOutputEnforcement.ProviderJsonSchema)
         {
             JsonObject output = payload["output_config"]?.AsObject() ?? new JsonObject();

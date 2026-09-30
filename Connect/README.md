@@ -1471,6 +1471,20 @@ rejected before dispatch, not simplified or changed to non-strict. Unknown model
 permits an explicit strict attempt; a known unsupported profile rejects it. Provider options cannot
 replace the typed output config or supply the retired `output_format` field.
 
+The combined typed strict-tool and native-output budget permits at most 24 optional parameters and
+16 union parameters. A property's omission from its object's `required` list makes it optional;
+defaults do not make it required. `anyOf` or a type array consumes a union slot. The iterative
+analysis counts nested schemas and each use of an internal reference. Unused definitions are
+validated but do not spend the budget. Saturated costs prevent reference graphs from expanding
+or overflowing the counters. Non-strict tools and locally validated output schemas spend none of
+the native budget. An explicitly permitted `LocalValidation` fallback can omit the output format
+when it exceeds the combined budget; it cannot weaken over-budget strict tools.
+
+Regex preflight validates syntax and known unsupported features. It invents no numeric cutoff
+for unpublished range or compiled-grammar limits. Passing local checks does not guarantee provider
+compilation. Provider compilation failures propagate without retries, schema rewriting or an
+automatic switch to local validation.
+
 Subscription connections use the Claude CLI's native `--json-schema` contract and accept the `Low`,
 `Medium`, `High`, `ExtraHigh` and `Maximum` reasoning levels. Darkspyre.Inference.Connect.LLM uses
 the terminal event's canonical `structured_output` value and validates it locally before returning

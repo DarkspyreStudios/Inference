@@ -29,7 +29,7 @@ public sealed class AnthropicSchemaTests
     public void SupportedSchemasKeepTheirOriginalShape(string json)
     {
         JsonElement schema = JsonElement.Parse(json);
-        Assert.True(AnthropicSchemas.Supports(schema));
+        Assert.True(SupportsSchema(schema));
         Assert.Equal(json, schema.GetRawText());
     }
 
@@ -58,12 +58,12 @@ public sealed class AnthropicSchemaTests
     public void UnsupportedSchemasRequireAnExplicitLocalFallback(string json)
     {
         JsonElement schema = JsonElement.Parse(json);
-        Assert.False(AnthropicSchemas.Supports(schema));
+        Assert.False(SupportsSchema(schema));
         var request = new LlmStructuredOutputRequest { Name = "result", Schema = schema };
         var capabilities = new LlmProviderCapabilities { SupportsJsonSchema = true };
-        Assert.Throws<NotSupportedException>(() => AnthropicSchemas.Enforcement(request, capabilities));
+        Assert.Throws<NotSupportedException>(() => AnthropicSchemas.Enforcement(new() { ModelId = Model, StructuredOutput = request }, capabilities));
         Assert.Equal(LlmStructuredOutputEnforcement.LocalValidationOnly,
-            AnthropicSchemas.Enforcement(request with { Fallback = LlmStructuredOutputFallback.LocalValidation }, capabilities));
+            AnthropicSchemas.Enforcement(new() { ModelId = Model, StructuredOutput = request with { Fallback = LlmStructuredOutputFallback.LocalValidation } }, capabilities));
         Assert.Equal(json, schema.GetRawText());
     }
 
@@ -150,9 +150,9 @@ public sealed class AnthropicSchemaTests
             definitions["node_" + index] = new JsonObject { ["$ref"] = "#/$defs/node_" + (index + 1) };
         definitions["node_5000"] = new JsonObject { ["type"] = "string" };
         var schema = new JsonObject { ["$defs"] = definitions, ["$ref"] = "#/$defs/node_0" };
-        Assert.True(AnthropicSchemas.Supports(JsonSerializer.SerializeToElement(schema)));
+        Assert.True(SupportsSchema(JsonSerializer.SerializeToElement(schema)));
         definitions["node_5000"] = new JsonObject { ["$ref"] = "#/$defs/node_0" };
-        Assert.False(AnthropicSchemas.Supports(JsonSerializer.SerializeToElement(schema)));
+        Assert.False(SupportsSchema(JsonSerializer.SerializeToElement(schema)));
     }
 
     [Fact]
@@ -232,6 +232,269 @@ public sealed class AnthropicSchemaTests
         Assert.Empty(handler.Bodies);
     }
 
+    [Theory]
+    [InlineData(24, 0, true)]
+    [InlineData(25, 0, false)]
+    [InlineData(0, 16, true)]
+    [InlineData(0, 17, false)]
+    [InlineData(24, 16, true)]
+    public void IndividualSchemasRespectPublishedOptionalAndUnionLimits(int optional, int unions, bool supported)
+    {
+        JsonElement schema = ComplexitySchema(optional, unions);
+        string original = schema.GetRawText();
+        Assert.Equal(supported, SupportsSchema(schema));
+        Assert.Equal(original, schema.GetRawText());
+    }
+
+    [Theory]
+    [InlineData(true, 0, true)]
+    [InlineData(true, 1, true)]
+    [InlineData(false, 0, true)]
+    [InlineData(false, 1, true)]
+    [InlineData(true, 0, false)]
+    [InlineData(true, 1, false)]
+    [InlineData(false, 0, false)]
+    [InlineData(false, 1, false)]
+    public async Task ToolsAndNativeOutputShareOneBudgetWithoutCountingOrdinaryTools(bool optional, int extra, bool streaming)
+    {
+        JsonElement first = ComplexitySchema(optional ? 8 : 0, optional ? 0 : 5);
+        JsonElement second = ComplexitySchema(optional ? 8 : 0, optional ? 0 : 5);
+        JsonElement output = ComplexitySchema(optional ? 8 + extra : 0, optional ? 0 : 6 + extra);
+        var request = Request(output.GetRawText()) with
+        {
+            Tools = [
+            new() { Name = "first", Strict = true, InputSchema = first },
+            new() { Name = "second", Strict = true, InputSchema = second },
+            new() { Name = "ordinary", InputSchema = ComplexitySchema(25, 17) }]
+        };
+        string original = JsonSerializer.Serialize(request);
+        using var handler = new Handler(streaming, "{}");
+        using var http = new HttpClient(handler);
+        var client = new AnthropicMessagesLlmClient(http);
+        if (extra == 1)
+        {
+            await Assert.ThrowsAsync<NotSupportedException>(() => Complete(client, Connection(streaming), request));
+            await Assert.ThrowsAsync<NotSupportedException>(() => client.CountInputTokensAsync(Connection(streaming), request));
+            Assert.Empty(handler.Bodies);
+        }
+        else
+        {
+            var result = await Complete(client, Connection(streaming), request);
+            Assert.Equal(LlmStructuredOutputEnforcement.ProviderJsonSchema, result.StructuredOutput!.Enforcement);
+            JsonNode native = JsonNode.Parse(Assert.Single(handler.Bodies))!;
+            Assert.True(JsonNode.DeepEquals(JsonNode.Parse(output.GetRawText()), native["output_config"]!["format"]!["schema"]));
+            Assert.Equal(true, (bool?)native["tools"]![0]!["strict"]);
+            Assert.Null(native["tools"]![2]!["strict"]);
+            Assert.True(JsonNode.DeepEquals(JsonNode.Parse(request.Tools[2].InputSchema.GetRawText()), native["tools"]![2]!["input_schema"]));
+        }
+        Assert.Equal(original, JsonSerializer.Serialize(request));
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ExplicitLocalFallbackFreesOnlyTheOutputBudgetAndKeepsStrictTools(bool optional)
+    {
+        JsonElement tools = ComplexitySchema(optional ? 24 : 0, optional ? 0 : 16);
+        JsonElement output = ComplexitySchema(optional ? 1 : 0, optional ? 0 : 1);
+        var request = Request(output.GetRawText(), LlmStructuredOutputFallback.LocalValidation) with
+        { Tools = [new() { Name = "strict_run", Strict = true, InputSchema = tools }] };
+        string original = JsonSerializer.Serialize(request);
+        string validText = optional ? "{}" : "{\"union_0\":null}";
+        using var handler = new Handler(false, validText);
+        using var http = new HttpClient(handler);
+        var result = await Complete(new AnthropicMessagesLlmClient(http), Connection(false), request);
+        Assert.Equal(LlmStructuredOutputEnforcement.LocalValidationOnly, result.StructuredOutput!.Enforcement);
+        Assert.True(result.StructuredOutput.IsValid);
+        JsonNode native = JsonNode.Parse(Assert.Single(handler.Bodies))!;
+        Assert.Null(native["output_config"]);
+        Assert.Equal(true, (bool?)native["tools"]![0]!["strict"]);
+        Assert.True(JsonNode.DeepEquals(JsonNode.Parse(tools.GetRawText()), native["tools"]![0]!["input_schema"]));
+        Assert.Equal(original, JsonSerializer.Serialize(request));
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task LocalOutputFallbackCannotWeakenOverBudgetStrictTools(bool optional)
+    {
+        JsonElement schema = ComplexitySchema(optional ? 13 : 0, optional ? 0 : 9);
+        var request = Request(ClosedSchema, LlmStructuredOutputFallback.LocalValidation) with
+        {
+            Tools = [
+            new() { Name = "first", Strict = true, InputSchema = schema },
+            new() { Name = "second", Strict = true, InputSchema = schema }]
+        };
+        string original = JsonSerializer.Serialize(request);
+        using var handler = new Handler(false, "{}");
+        using var http = new HttpClient(handler);
+        var client = new AnthropicMessagesLlmClient(http);
+        await Assert.ThrowsAsync<NotSupportedException>(() => Complete(client, Connection(false), request));
+        await Assert.ThrowsAsync<NotSupportedException>(() => client.CountInputTokensAsync(Connection(false), request));
+        Assert.Empty(handler.Bodies);
+        Assert.Equal(original, JsonSerializer.Serialize(request));
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task OversizedOutputAloneRequiresLocalFallbackAndKeepsOriginalValidation(bool optional)
+    {
+        JsonElement schema = ComplexitySchema(optional ? 25 : 0, optional ? 0 : 17);
+        var request = Request(schema.GetRawText());
+        using var handler = new Handler(false, "{}");
+        using var http = new HttpClient(handler);
+        var client = new AnthropicMessagesLlmClient(http);
+        await Assert.ThrowsAsync<NotSupportedException>(() => Complete(client, Connection(false), request));
+        await Assert.ThrowsAsync<NotSupportedException>(() => Complete(client, Connection(false), request with
+        { StructuredOutput = request.StructuredOutput! with { Fallback = LlmStructuredOutputFallback.JsonObject } }));
+        Assert.Empty(handler.Bodies);
+        var local = await Complete(client, Connection(false), request with
+        { StructuredOutput = request.StructuredOutput! with { Fallback = LlmStructuredOutputFallback.LocalValidation } });
+        Assert.Equal(LlmStructuredOutputEnforcement.LocalValidationOnly, local.StructuredOutput!.Enforcement);
+        Assert.Equal(optional, local.StructuredOutput.IsValid);
+        Assert.Null(JsonNode.Parse(Assert.Single(handler.Bodies))!["output_config"]);
+        Assert.Equal(schema.GetRawText(), request.StructuredOutput!.Schema.GetRawText());
+    }
+
+    [Theory]
+    [InlineData(16, true)]
+    [InlineData(17, false)]
+    public void ReferencedUnionParametersCountAtEachUseWithoutCountingUnusedDefinitions(int count, bool supported)
+    {
+        var properties = new JsonObject();
+        var required = new JsonArray();
+        for (int index = 0; index < count; index++)
+        {
+            string name = "parameter_" + index;
+            properties[name] = new JsonObject { ["$ref"] = "#/$defs/union" };
+            required.Add(name);
+        }
+        var schema = new JsonObject
+        {
+            ["type"] = "object",
+            ["properties"] = properties,
+            ["required"] = required,
+            ["additionalProperties"] = false,
+            ["$defs"] = new JsonObject
+            {
+                ["union"] = JsonNode.Parse("""{"type":["string","null"]}"""),
+                ["unused"] = JsonNode.Parse(ComplexitySchema(25, 17).GetRawText())
+            }
+        };
+        Assert.Equal(supported, SupportsSchema(JsonSerializer.SerializeToElement(schema)));
+    }
+
+    [Fact]
+    public void NestedOptionalPropertiesCountThroughArrayItemsAndReferences()
+    {
+        JsonNode child = JsonNode.Parse(ComplexitySchema(12, 0).GetRawText())!;
+        var schema = new JsonObject
+        {
+            ["type"] = "object",
+            ["additionalProperties"] = false,
+            ["properties"] = new JsonObject
+            {
+                ["first"] = new JsonObject { ["$ref"] = "#/$defs/child" },
+                ["second"] = new JsonObject { ["type"] = "array", ["items"] = new JsonObject { ["$ref"] = "#/$defs/child" } }
+            },
+            ["required"] = new JsonArray("first", "second"),
+            ["$defs"] = new JsonObject { ["child"] = child }
+        };
+        Assert.True(SupportsSchema(JsonSerializer.SerializeToElement(schema)));
+        schema["required"] = new JsonArray("first");
+        Assert.False(SupportsSchema(JsonSerializer.SerializeToElement(schema)));
+    }
+
+    [Theory]
+    [InlineData(16, true)]
+    [InlineData(17, false)]
+    public void AnyOfAndTypeArrayOnTheSameParameterUseOneUnionSlot(int count, bool supported)
+    {
+        JsonObject schema = JsonNode.Parse(ComplexitySchema(0, count).GetRawText())!.AsObject();
+        foreach (JsonNode? parameter in schema["properties"]!.AsObject().Select(property => property.Value))
+            parameter!["anyOf"] = JsonNode.Parse("""[{"type":"string"},{"type":"null"}]""");
+        Assert.Equal(supported, SupportsSchema(JsonSerializer.SerializeToElement(schema)));
+    }
+
+    [Fact]
+    public void SharedReferenceGraphSaturatesCostsWithoutRecursionExpansionOrOverflow()
+    {
+        var definitions = new JsonObject { ["leaf"] = JsonNode.Parse(ComplexitySchema(1, 0).GetRawText()) };
+        string reference = "#/$defs/leaf";
+        for (int index = 0; index < 60; index++)
+        {
+            string name = "level_" + index;
+            definitions[name] = new JsonObject
+            {
+                ["type"] = "object",
+                ["additionalProperties"] = false,
+                ["required"] = new JsonArray("first", "second"),
+                ["properties"] = new JsonObject { ["first"] = new JsonObject { ["$ref"] = reference }, ["second"] = new JsonObject { ["$ref"] = reference } }
+            };
+            reference = "#/$defs/" + name;
+        }
+        var schema = new JsonObject { ["$defs"] = definitions, ["$ref"] = reference };
+        Assert.False(SupportsSchema(JsonSerializer.SerializeToElement(schema)));
+    }
+
+    [Theory]
+    [InlineData("a{1,1000000}")]
+    [InlineData("a{1000000}")]
+    [InlineData("a{1000000,}")]
+    public void UnpublishedRegexRangeLimitsDoNotInventALocalCutoff(string pattern)
+    {
+        JsonElement schema = JsonSerializer.SerializeToElement(new { type = "string", pattern });
+        Assert.True(SupportsSchema(schema));
+        Assert.Equal(pattern, schema.GetProperty("pattern").GetString());
+    }
+
+    [Theory]
+    [InlineData(LlmStructuredOutputFallback.None)]
+    [InlineData(LlmStructuredOutputFallback.LocalValidation)]
+    public async Task ProviderCompilationFailurePropagatesOnceWithoutWeakeningOrAutomaticFallback(LlmStructuredOutputFallback fallback)
+    {
+        const string schema = """{"type":"string","pattern":"a{1,1000000}"}""";
+        var request = Request(schema, fallback);
+        using var handler = new Handler(false, "") { CompilationFailure = true };
+        using var http = new HttpClient(handler);
+        var error = await Assert.ThrowsAsync<LlmProviderException>(() => Complete(new AnthropicMessagesLlmClient(http), Connection(false), request));
+        Assert.Equal(HttpStatusCode.BadRequest, error.StatusCode);
+        JsonNode payload = JsonNode.Parse(Assert.Single(handler.Bodies))!;
+        Assert.True(JsonNode.DeepEquals(JsonNode.Parse(schema), payload["output_config"]!["format"]!["schema"]));
+        Assert.Equal(schema, request.StructuredOutput!.Schema.GetRawText());
+    }
+
+    private static bool SupportsSchema(JsonElement schema)
+    {
+        try
+        {
+            return AnthropicSchemas.Enforcement(new() { ModelId = Model, StructuredOutput = new() { Name = "result", Schema = schema } },
+                new() { SupportsJsonSchema = true }) == LlmStructuredOutputEnforcement.ProviderJsonSchema;
+        }
+        catch (NotSupportedException) { return false; }
+    }
+
+    private static JsonElement ComplexitySchema(int optional, int unions)
+    {
+        var properties = new JsonObject();
+        for (int index = 0; index < optional; index++) properties["optional_" + index] = new JsonObject { ["type"] = "string" };
+        var required = new JsonArray();
+        for (int index = 0; index < unions; index++)
+        {
+            string name = "union_" + index;
+            properties[name] = new JsonObject { ["type"] = new JsonArray("string", "null") };
+            required.Add(name);
+        }
+        return JsonSerializer.SerializeToElement(new JsonObject
+        {
+            ["type"] = "object",
+            ["properties"] = properties,
+            ["required"] = required,
+            ["additionalProperties"] = false
+        });
+    }
+
     private static LlmConnection Connection(bool streaming = true) => new()
     {
         Version = "1",
@@ -260,9 +523,12 @@ public sealed class AnthropicSchemaTests
     private sealed class Handler(bool streaming, string text) : HttpMessageHandler
     {
         internal List<string> Bodies { get; } = [];
+        internal bool CompilationFailure { get; init; }
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             Bodies.Add(await request.Content!.ReadAsStringAsync(cancellationToken));
+            if (CompilationFailure) return new(HttpStatusCode.BadRequest)
+            { Content = new StringContent("""{"error":{"message":"Schema is too complex for compilation."}}""", Encoding.UTF8, "application/json") };
             string body = streaming
                 ? "data: " + new JsonObject { ["type"] = "content_block_delta", ["delta"] = new JsonObject { ["type"] = "text_delta", ["text"] = text } }.ToJsonString()
                     + "\n\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"}}\n\ndata: {\"type\":\"message_stop\"}\n\n"

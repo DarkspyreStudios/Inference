@@ -61,7 +61,7 @@ internal sealed class VertexLlmClient(HttpClient http, IVertexAuthentication aut
         (request, int omitted) = ContinuationStateProjection.Project(request, connection);
         LlmStructuredOutputEnforcement? enforcement = request.StructuredOutput is { } structured && !capabilities.SupportsJsonSchema
             ? StructuredOutput.ResolveEnforcement(structured, capabilities)
-            : VertexSchemas.Enforcement(request.StructuredOutput, capabilities, profile.IsClaude);
+            : VertexSchemas.Enforcement(request, capabilities, profile.IsClaude);
         return (profile, capabilities, access, connection, request, enforcement, omitted);
     }
 
@@ -212,8 +212,7 @@ internal sealed class VertexLlmClient(HttpClient http, IVertexAuthentication aut
         if (profile.IsClaude)
         {
             AnthropicModelProfiles.ValidateSampling(request, AnthropicModelProfiles.Resolve(VertexEndpoints.ParseModel(request.ModelId).Model, null));
-            AnthropicSchemas.ValidateTools(request);
-            _ = AnthropicSchemas.Enforcement(request.StructuredOutput, capabilities);
+            _ = AnthropicSchemas.Enforcement(request, capabilities);
         }
         else if (request.PresencePenalty is < -2 or >= 2 || request.FrequencyPenalty is < -2 or >= 2)
             throw new ArgumentOutOfRangeException(nameof(request), "Vertex Gemini penalties must be in [-2, 2).");
