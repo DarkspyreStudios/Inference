@@ -13,6 +13,16 @@ internal static class AnthropicToolContinuation
             ? tools.Where(tool => Text(tool!, "type") is not null).Select(tool => tool!).ToArray() : [];
         var declared = native.Select(tool => Text(tool, "name")).ToHashSet(StringComparer.Ordinal);
         bool hasProgrammaticRuntime = native.Any(tool => Text(tool, "type") is "code_execution_20260120" or "code_execution_20260521");
+        bool hasImplicitExecution = native.Any(tool => Text(tool, "type") is
+            "web_search_20260209" or "web_search_20260318" or "web_fetch_20260209" or "web_fetch_20260309" or "web_fetch_20260318");
+        bool hasExecutionSubtools = hasProgrammaticRuntime || hasImplicitExecution
+            || native.Any(tool => Text(tool, "type") == "code_execution_20250825");
+        bool ProvidesInvocation(string name) => name switch
+        {
+            "bash_code_execution" or "text_editor_code_execution" => hasExecutionSubtools,
+            "code_execution" => declared.Contains(name) || hasImplicitExecution,
+            _ => declared.Contains(name)
+        };
         for (int index = 0; index < messages.Count; index++)
         {
             JsonNode message = messages[index]!;
@@ -21,7 +31,15 @@ internal static class AnthropicToolContinuation
             JsonNode[] server = content.Where(block => Text(block!, "type") == "server_tool_use").Select(block => block!).ToArray();
             foreach (JsonNode invocation in server) invocations[Text(invocation, "id")!] = Text(invocation, "name")!;
             JsonNode[] clients = content.Where(block => Text(block!, "type") == "tool_use").Select(block => block!).ToArray();
-            if (clients.Length == 0) continue;
+            var answered = content.Select(block => Text(block!, "tool_use_id")).Where(id => id is not null).ToHashSet(StringComparer.Ordinal);
+            string[] pendingNative = server.Where(invocation => !answered.Contains(Text(invocation, "id")))
+                .Select(invocation => Text(invocation, "name")!).ToArray();
+            if (clients.Length == 0)
+            {
+                if (index == messages.Count - 1 && pendingNative.Any(name => !ProvidesInvocation(name)))
+                    throw Invalid("Active Claude continuation requires its native tool definitions.");
+                continue;
+            }
             var programmatic = new HashSet<string>(StringComparer.Ordinal);
             foreach (JsonNode client in clients)
             {
@@ -32,9 +50,6 @@ internal static class AnthropicToolContinuation
                     throw Invalid("Programmatic Claude callers require a retained code-execution invocation.");
                 programmatic.Add(Text(client, "id")!);
             }
-            var answered = content.Select(block => Text(block!, "tool_use_id")).Where(id => id is not null).ToHashSet(StringComparer.Ordinal);
-            string[] pendingNative = server.Where(invocation => !answered.Contains(Text(invocation, "id")))
-                .Select(invocation => Text(invocation, "name")!).ToArray();
             if (programmatic.Count == 0 && pendingNative.Length == 0) continue;
 
             if (index + 1 >= messages.Count || Text(messages[index + 1]!, "role") != "user"
@@ -69,7 +84,7 @@ internal static class AnthropicToolContinuation
             }
             if (programmatic.Count > 0 && string.IsNullOrWhiteSpace(Text(payload, "container")))
                 throw Invalid("Programmatic Claude continuation requires a retained container identity.");
-            if (pendingNative.Any(name => !declared.Contains(name)) || programmatic.Count > 0 && !hasProgrammaticRuntime)
+            if (pendingNative.Any(name => !ProvidesInvocation(name)) || programmatic.Count > 0 && !hasProgrammaticRuntime)
                 throw Invalid("Active Claude continuation requires its native tool definitions.");
         }
     }

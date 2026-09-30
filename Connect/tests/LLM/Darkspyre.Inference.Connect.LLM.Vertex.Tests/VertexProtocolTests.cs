@@ -131,6 +131,51 @@ public sealed class VertexProtocolTests
         Assert.Null(error.InnerException);
     }
 
+    [Theory]
+    [InlineData(true, true)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(false, false)]
+    public async Task ClaudePauseOnlyNativeProvisioningFollowsScopeResolution(bool streaming, bool declared)
+    {
+        const string content = """
+            [{"type":"server_tool_use","id":"srv_search","name":"web_search","input":{"query":"protected-query"}}]
+            """;
+        using var handler = new Handler(ClaudeReply("[]", "end_turn", streaming)) { Json = !streaming };
+        using var http = new HttpClient(handler);
+        var authentication = new Authentication();
+        var client = new VertexLlmClient(http, authentication);
+        var connection = Connection with { CapabilityOverrides = new() { SupportsStreaming = streaming } };
+        LlmConnection prepared = await client.PrepareAsync(connection, default);
+        var request = new LlmChatRequest
+        {
+            ModelId = Claude,
+            ProviderOptions = declared ? new Dictionary<string, JsonElement>
+            { [AnthropicTools.OptionName] = JsonElement.Parse("""{"server_tools":[{"type":"web_search_20250305","name":"web_search"}]}""") }
+                : new Dictionary<string, JsonElement>(),
+            Tools = declared ? [] : [Tool with { Name = "web_search" }],
+            Messages = [new("user", "start"), new("assistant", "")
+            { ContinuationState = ProviderContinuationStateCodec.Encode(prepared, Claude, JsonNode.Parse(content)!.AsArray()) }]
+        };
+        if (declared)
+        {
+            await Complete(client, prepared, request);
+            JsonNode payload = JsonNode.Parse(Assert.Single(handler.Bodies))!;
+            Assert.True(JsonNode.DeepEquals(JsonNode.Parse(content), payload["messages"]![1]!["content"]));
+            Assert.Equal("web_search_20250305", (string?)payload["tools"]![0]!["type"]);
+            Assert.Null(payload["container"]);
+        }
+        else
+        {
+            var error = await Assert.ThrowsAsync<ArgumentException>(() => Complete(client, prepared, request));
+            Assert.Contains("native tool definitions", error.Message, StringComparison.Ordinal);
+            Assert.DoesNotContain("protected-query", error.ToString(), StringComparison.Ordinal);
+            Assert.Null(error.InnerException);
+            Assert.Empty(handler.Bodies);
+        }
+        Assert.Equal(2, authentication.Calls);
+    }
+
     [Fact]
     public async Task SamplingRestrictionsFailBeforeAuthenticationAndClaudeUsesSharedWireFields()
     {

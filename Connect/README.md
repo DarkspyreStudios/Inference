@@ -485,7 +485,11 @@ turns with waiting native tools and programmatic turns require an immediate user
 only results, exactly once for every waiting client call. Results can arrive in a different order.
 Programmatic results accept strings or text blocks only; direct client results retain supported rich
 content. Programmatic caller IDs must refer to retained code-execution invocations. An active result
-request requires its native tool definitions and a retained container for programmatic calls. Completed
+request requires its native tool definitions and a retained container for programmatic calls. A terminal
+assistant message with waiting native calls and no client calls requires those native definitions too;
+a client tool with the same name cannot substitute. Bash and file-operation invocations use their
+owning code-execution definition. The documented dynamic-filtering web tools also provide native code
+execution without an extra definition. Native results match by `tool_use_id`, not position. Completed
 historical exchanges do not require those tools or a container to remain configured now. The adapter
 does not rewrite history, strip extra input or binaries, synthesize results, execute native tools or retry.
 This validation follows principal resolution and explicit unbound-state projection; Vertex resolves

@@ -45,6 +45,212 @@ public sealed class AnthropicToolContinuationTests
         };
     }
 
+    private const string Paused = """
+        [{"type":"server_tool_use","id":"srv_search","name":"web_search","input":{"query":"protected-query"}},
+         {"type":"server_tool_use","id":"srv_code","name":"code_execution","input":{"code":"protected-code"}}]
+        """;
+    private const string PausedTools = """
+        {"server_tools":[{"type":"web_search_20250305","name":"web_search"},
+                         {"type":"code_execution_20260120","name":"code_execution"}]}
+        """;
+
+    private static LlmChatRequest PauseRequest(LlmConnection connection, string content = Paused)
+    {
+        LlmChatRequest request = Request(connection, content);
+        return request with
+        {
+            Tools = [],
+            ProviderOptions = new Dictionary<string, JsonElement> { [AnthropicTools.OptionName] = JsonElement.Parse(PausedTools) },
+            Messages = [request.Messages[0], request.Messages[1] with
+            { ContinuationState = ProviderContinuationStateCodec.Encode(connection, Model, JsonNode.Parse(content)!.AsArray()) }]
+        };
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task PauseOnlyContinuationRetainsPendingNativeCallsWithoutClientResultsOrContainer(bool streaming)
+    {
+        using var handler = new Handler(streaming);
+        using var http = new HttpClient(handler);
+        var connection = Connection(streaming);
+        var request = PauseRequest(connection);
+        await Complete(new AnthropicMessagesLlmClient(http), connection, request);
+        JsonNode payload = JsonNode.Parse(Assert.Single(handler.Bodies))!;
+        Assert.True(JsonNode.DeepEquals(JsonNode.Parse(Paused), payload["messages"]![1]!["content"]));
+        Assert.Equal(2, payload["messages"]!.AsArray().Count);
+        Assert.Equal(2, payload["tools"]!.AsArray().Count);
+        Assert.Null(payload["container"]);
+        Assert.Equal(request.Messages[1].ContinuationState!.Payload,
+            ProviderContinuationStateCodec.Encode(connection, Model, JsonNode.Parse(Paused)!.AsArray()).Payload);
+    }
+
+    [Theory]
+    [InlineData(true, "absent")]
+    [InlineData(false, "absent")]
+    [InlineData(true, "partial")]
+    [InlineData(false, "partial")]
+    [InlineData(true, "client-spoof")]
+    [InlineData(false, "client-spoof")]
+    [InlineData(true, "clear")]
+    [InlineData(false, "clear")]
+    public async Task PauseOnlyMissingNativeDefinitionsFailBeforeDispatch(bool streaming, string variant)
+    {
+        using var handler = new Handler(streaming);
+        using var http = new HttpClient(handler);
+        var connection = Connection(streaming);
+        var request = PauseRequest(connection);
+        request = request with { ProviderOptions = new Dictionary<string, JsonElement>() };
+        if (variant == "partial") request = request with
+        { ProviderOptions = new Dictionary<string, JsonElement> { [AnthropicTools.OptionName] = JsonElement.Parse(Native) } };
+        if (variant == "client-spoof") request = request with
+        { Tools = [new() { Name = "web_search", InputSchema = JsonElement.Parse("{}") }, new() { Name = "code_execution", InputSchema = JsonElement.Parse("{}") }] };
+        if (variant == "clear")
+        {
+            connection = connection with { ProviderOptions = PauseRequest(connection).ProviderOptions };
+            request = request with { ProviderOptions = new Dictionary<string, JsonElement> { [AnthropicTools.OptionName] = JsonElement.Parse("{}") } };
+        }
+        var error = await Assert.ThrowsAsync<ArgumentException>(() => Complete(new AnthropicMessagesLlmClient(http), connection, request));
+        Assert.Contains("native tool definitions", error.Message, StringComparison.Ordinal);
+        Assert.Empty(handler.Bodies);
+        Assert.DoesNotContain("protected-", error.ToString(), StringComparison.Ordinal);
+        Assert.Null(error.InnerException);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task PauseOnlyResultsMatchIdentitiesNotPositionAndOnlyPendingDefinitionsRemainRequired(bool streaming)
+    {
+        using var handler = new Handler(streaming);
+        using var http = new HttpClient(handler);
+        var connection = Connection(streaming);
+        JsonArray content = JsonNode.Parse(Paused)!.AsArray();
+        content.Insert(0, JsonNode.Parse("""{"type":"web_search_tool_result","tool_use_id":"srv_search","content":[]}"""));
+        var request = PauseRequest(connection, content.ToJsonString()) with
+        { ProviderOptions = new Dictionary<string, JsonElement> { [AnthropicTools.OptionName] = JsonElement.Parse(Native) } };
+        var client = new AnthropicMessagesLlmClient(http);
+        await Complete(client, connection, request);
+        Assert.True(JsonNode.DeepEquals(content, JsonNode.Parse(handler.Bodies[0])!["messages"]![1]!["content"]));
+        content[0]!["tool_use_id"] = "unrelated";
+        var error = await Assert.ThrowsAsync<ArgumentException>(() => Complete(client, connection,
+            PauseRequest(connection, content.ToJsonString()) with { ProviderOptions = request.ProviderOptions }));
+        Assert.Contains("native tool definitions", error.Message, StringComparison.Ordinal);
+        Assert.Single(handler.Bodies);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task HistoricalOrCompletedNativeInvocationsDoNotRequireCurrentDefinitions(bool streaming)
+    {
+        using var handler = new Handler(streaming);
+        using var http = new HttpClient(handler);
+        var connection = Connection(streaming);
+        var request = PauseRequest(connection) with { ProviderOptions = new Dictionary<string, JsonElement>() };
+        var client = new AnthropicMessagesLlmClient(http);
+        await Complete(client, connection, request with { Messages = [.. request.Messages, new("user", "interrupt")] });
+        JsonArray content = JsonNode.Parse(Paused)!.AsArray();
+        content.Add(JsonNode.Parse("""{"type":"code_execution_tool_result","tool_use_id":"srv_code","content":{"type":"code_execution_result","stdout":"","stderr":"","return_code":0}}"""));
+        content.Add(JsonNode.Parse("""{"type":"web_search_tool_result","tool_use_id":"srv_search","content":[]}"""));
+        await Complete(client, connection, PauseRequest(connection, content.ToJsonString()) with { ProviderOptions = request.ProviderOptions });
+        Assert.Equal(2, handler.Bodies.Count);
+        Assert.All(handler.Bodies, body => Assert.Null(JsonNode.Parse(body)!["tools"]));
+        Assert.True(JsonNode.DeepEquals(content, JsonNode.Parse(handler.Bodies[1])!["messages"]![1]!["content"]));
+    }
+
+    [Fact]
+    public async Task PauseOnlyProviderCountingRejectsMissingNativeDefinitionsBeforeDispatch()
+    {
+        using var handler = new Handler(false);
+        using var http = new HttpClient(handler);
+        var connection = Connection();
+        var request = PauseRequest(connection) with { ProviderOptions = new Dictionary<string, JsonElement>() };
+        var error = await Assert.ThrowsAsync<ArgumentException>(() => new AnthropicMessagesLlmClient(http).CountInputTokensAsync(connection, request));
+        Assert.Contains("native tool definitions", error.Message, StringComparison.Ordinal);
+        Assert.Empty(handler.Bodies);
+    }
+
+    [Theory]
+    [InlineData("code_execution_20250825", "code_execution")]
+    [InlineData("code_execution_20260120", "code_execution")]
+    [InlineData("code_execution_20260521", "code_execution")]
+    [InlineData("web_search_20260209", "web_search")]
+    [InlineData("web_search_20260318", "web_search")]
+    [InlineData("web_fetch_20260209", "web_fetch")]
+    [InlineData("web_fetch_20260309", "web_fetch")]
+    [InlineData("web_fetch_20260318", "web_fetch")]
+    public async Task NativeExecutionSubtoolsUseDeclaredOrImplicitOwningRuntime(string type, string name)
+    {
+        using var handler = new Handler(false);
+        using var http = new HttpClient(handler);
+        var connection = Connection();
+        var content = new JsonArray();
+        foreach (string invocation in new[] { "bash_code_execution", "text_editor_code_execution" })
+            content.Add(new JsonObject
+            {
+                ["type"] = "server_tool_use",
+                ["id"] = "srv_" + invocation,
+                ["name"] = invocation,
+                ["input"] = new JsonObject()
+            });
+        if (name != "code_execution") content.Add(new JsonObject
+        {
+            ["type"] = "server_tool_use",
+            ["id"] = "srv_code",
+            ["name"] = "code_execution",
+            ["input"] = new JsonObject()
+        });
+        var options = new JsonObject { ["server_tools"] = new JsonArray(new JsonObject { ["type"] = type, ["name"] = name }) };
+        await Complete(new AnthropicMessagesLlmClient(http), connection, PauseRequest(connection, content.ToJsonString()) with
+        { ProviderOptions = new Dictionary<string, JsonElement> { [AnthropicTools.OptionName] = JsonElement.Parse(options.ToJsonString()) } });
+        JsonNode payload = JsonNode.Parse(Assert.Single(handler.Bodies))!;
+        Assert.True(JsonNode.DeepEquals(content, payload["messages"]![1]!["content"]));
+        Assert.Single(payload["tools"]!.AsArray());
+        Assert.Equal(type, (string?)payload["tools"]![0]!["type"]);
+    }
+
+    [Theory]
+    [InlineData("code_execution_20250522", "code_execution")]
+    [InlineData("web_search_20250305", "web_search")]
+    [InlineData("web_fetch_20250910", "web_fetch")]
+    public async Task OlderNativeToolsCannotProvisionExecutionSubtools(string type, string name)
+    {
+        using var handler = new Handler(false);
+        using var http = new HttpClient(handler);
+        var connection = Connection();
+        const string content = """
+            [{"type":"server_tool_use","id":"srv_bash","name":"bash_code_execution","input":{}},
+             {"type":"server_tool_use","id":"srv_file","name":"text_editor_code_execution","input":{}}]
+            """;
+        var options = new JsonObject { ["server_tools"] = new JsonArray(new JsonObject { ["type"] = type, ["name"] = name }) };
+        var request = PauseRequest(connection, content) with
+        {
+            Tools = [new() { Name = "bash_code_execution", InputSchema = JsonElement.Parse("{}") },
+                     new() { Name = "text_editor_code_execution", InputSchema = JsonElement.Parse("{}") }],
+            ProviderOptions = new Dictionary<string, JsonElement> { [AnthropicTools.OptionName] = JsonElement.Parse(options.ToJsonString()) }
+        };
+        await Assert.ThrowsAsync<ArgumentException>(() => Complete(new AnthropicMessagesLlmClient(http), connection, request));
+        Assert.Empty(handler.Bodies);
+    }
+
+    [Theory]
+    [InlineData("code_execution_20250825", "code_execution")]
+    [InlineData("web_fetch_20260318", "web_fetch")]
+    public async Task MixedDirectCallsUseTheSameExecutionSubtoolProvisioning(string type, string name)
+    {
+        using var handler = new Handler(false);
+        using var http = new HttpClient(handler);
+        var connection = Connection();
+        JsonArray content = JsonNode.Parse(Content)!.AsArray();
+        content[0]!["name"] = "bash_code_execution";
+        content[1]!["caller"] = new JsonObject { ["type"] = "direct" };
+        var options = new JsonObject { ["server_tools"] = new JsonArray(new JsonObject { ["type"] = type, ["name"] = name }) };
+        await Complete(new AnthropicMessagesLlmClient(http), connection, Request(connection, content.ToJsonString()) with
+        { ProviderOptions = new Dictionary<string, JsonElement> { [AnthropicTools.OptionName] = JsonElement.Parse(options.ToJsonString()) } });
+        Assert.True(JsonNode.DeepEquals(content, JsonNode.Parse(Assert.Single(handler.Bodies))!["messages"]![1]!["content"]));
+    }
+
     [Theory]
     [InlineData(true, false)]
     [InlineData(false, false)]
