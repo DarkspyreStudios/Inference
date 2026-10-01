@@ -1,5 +1,4 @@
 using System.Text.Json;
-using System.Text.Json.Serialization;
 
 namespace Darkspyre.Inference.Connect.LLM;
 
@@ -18,12 +17,7 @@ public sealed record LlmCredential
     public IReadOnlyDictionary<string, string> SecretHeaders { get; init; } =
         new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
-    private static readonly JsonSerializerOptions Options = new(JsonSerializerDefaults.Web)
-    {
-        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
-    };
-
-    public string Serialize() => JsonSerializer.Serialize(this, Options);
+    public string Serialize() => JsonSerializer.Serialize(this, ConnectLlmJson.Credential);
 
     public static LlmCredential? Parse(string? raw)
     {
@@ -34,7 +28,7 @@ public sealed record LlmCredential
 
         try
         {
-            return JsonSerializer.Deserialize<LlmCredential>(raw, Options);
+            return JsonSerializer.Deserialize(raw, ConnectLlmJson.Credential);
         }
         catch (JsonException)
         {

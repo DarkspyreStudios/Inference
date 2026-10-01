@@ -68,6 +68,20 @@ Connect messages/results as `ContinuationState`. Captures and envelopes use form
 before adoption; see [DSA-68 handoff](docs/agent-ds-contract-handoff.md). Explicit state omission is
 reported by `OmittedContinuationStateCount`; default handling rejects unbound state.
 
+### JSON metadata
+
+`ConnectLlmJson` exposes owned source-generated metadata for closed LLM connections, saved setup
+configuration, chat messages/requests/results and captured agent context. Pass the matching typed
+metadata to `JsonSerializer`. Credential `Serialize`/`Parse`, context-entry equivalence and continuation
+scope hashing use owned metadata. Credentials retain their camel-case Web format and null omission;
+captured context retains its property names, format 2 checks, Common tool-output discriminators and
+binary/null-versus-empty representations. Resolved internal services are never serialized.
+
+Contexts and scope helpers remain internal. The package installs no reflection fallback for these
+families. Runtime settings, one-way secret edits, executable handlers and undiscriminated agent/event
+bases are not persisted snapshots. Provider CLI/HTTP protocol writers remain separate owners;
+metadata for these closed families does not establish retirement of an active provider session.
+
 `LlmToolCapabilities.StrictInputSchema` reports Supported, Unsupported or Unknown. Unknown allows an
 explicit `Strict=true` request unchanged so the host can try it and handle the provider result.
 Known Unsupported rejects that request. Ordinary tools default to `Strict=false` independently.

@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Common.LLM;
 using Darkspyre.Inference.Connect.LLM.Internal;
 using Darkspyre.Inference.Connect.LLM.Providers;
@@ -44,14 +45,14 @@ public sealed class ContinuationMigrationTests
     [InlineData("""{"Role":"assistant","Content":"retained","ResponseState":{"FormatVersion":1}}""")]
     public void UnmigratedMessagesFailInsteadOfSilentlyDroppingState(string json)
     {
-        Assert.Throws<JsonException>(() => JsonSerializer.Deserialize<LlmChatMessage>(json));
-        Assert.Throws<JsonException>(() => JsonSerializer.Deserialize<LlmMessage>(json));
+        Assert.Throws<JsonException>(() => JsonSerializer.Deserialize(json, ConnectLlmJson.ChatMessage));
+        Assert.Throws<JsonException>(() => JsonSerializer.Deserialize(json, InferenceJson.LlmMessage));
     }
 
     [Fact]
     public void UnversionedCapturesRequireHostMigration()
     {
-        Assert.Throws<JsonException>(() => JsonSerializer.Deserialize<LlmAgentContext>("""{"Entries":[]}"""));
+        Assert.Throws<JsonException>(() => JsonSerializer.Deserialize("""{"Entries":[]}""", ConnectLlmJson.AgentContext));
         Assert.Throws<ArgumentException>(() => ManagedAgentContext.Import(new() { FormatVersion = 1 }, new()
         { Version = "1", Transport = LlmTransport.OpenAiResponses, Endpoint = "https://example.invalid" }, "model"));
     }
@@ -62,7 +63,7 @@ public sealed class ContinuationMigrationTests
         var state = new LlmContinuationState
         { ImplementationId = "engine.owner", ModelId = "model", ScopeId = "scope", Payload = "private-state", InputTokens = 9, OutputTokens = 3 };
         var message = new LlmMessage("assistant", "answer") { ContinuationState = state };
-        var copy = JsonSerializer.Deserialize<LlmMessage>(JsonSerializer.Serialize(message));
+        var copy = JsonSerializer.Deserialize(JsonSerializer.Serialize(message, InferenceJson.LlmMessage), InferenceJson.LlmMessage);
         Assert.Equal(state, copy!.ContinuationState);
         Assert.Equal(2, copy.ContinuationState!.FormatVersion);
         Assert.DoesNotContain("private-state", state.ToString(), StringComparison.Ordinal);

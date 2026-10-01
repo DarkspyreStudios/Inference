@@ -164,17 +164,13 @@ internal static class ProviderContinuationStateCodec
         LlmCredential? credential = LlmCredential.Parse(connection.Credential);
         // The concurrency Version and rotating OAuth tokens are not account identities. Missing an
         // OAuth account ID binds conservatively to its current token; never guess account equivalence.
-        string identity = JsonSerializer.Serialize(new
-        {
-            connection.Transport,
-            connection.Endpoint,
-            credential?.ApiKey,
-            OAuthIdentity = credential?.OAuth?.AccountId ?? credential?.OAuth?.AccessToken,
-            Headers = connection.AdditionalHeaders.OrderBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase)
-                .Select(pair => new { Name = pair.Key.ToLowerInvariant(), pair.Value }),
-            SecretHeaders = credential?.SecretHeaders.OrderBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase)
-                .Select(pair => new { Name = pair.Key.ToLowerInvariant(), pair.Value })
-        });
+        var identityValue = new ConnectContinuationScopeIdentity(connection.Transport, connection.Endpoint,
+            credential?.ApiKey, credential?.OAuth?.AccountId ?? credential?.OAuth?.AccessToken,
+            connection.AdditionalHeaders.OrderBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase)
+                .Select(pair => new ConnectContinuationScopeHeader(pair.Key.ToLowerInvariant(), pair.Value)).ToArray(),
+            credential?.SecretHeaders.OrderBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase)
+                .Select(pair => new ConnectContinuationScopeHeader(pair.Key.ToLowerInvariant(), pair.Value)).ToArray());
+        string identity = JsonSerializer.Serialize(identityValue, ConnectLlmJsonContext.Default.ConnectContinuationScopeIdentity);
         return Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(identity)));
     }
 
