@@ -1,10 +1,20 @@
 using System.Globalization;
+using System.Collections.Frozen;
+using System.Collections.ObjectModel;
+using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Runtime.CompilerServices;
+using System.Runtime.ExceptionServices;
+using Darkspyre.Inference.Common;
+using Darkspyre.Inference.Common.Image;
+using Darkspyre.Inference.Common.Media;
+using Darkspyre.Inference.Common.Resources;
+using Darkspyre.Inference.Connect.LLM;
 using Darkspyre.Inference.Connect.Image.Internal;
 using Microsoft.Extensions.Logging;
 
@@ -113,6 +123,8 @@ internal sealed class ComfyUiImageTransport(
     ];
 
     private readonly string _clientId = Guid.NewGuid().ToString("N", CultureInfo.InvariantCulture);
+    private readonly object _scopeGate = new();
+    private readonly ConditionalWeakTable<ImageConnection, ScopeEntry> _scopes = new();
 
     public ImageTransportDescriptor Descriptor { get; } = new(
         ImageTransport.ComfyUi,
@@ -123,6 +135,37 @@ internal sealed class ComfyUiImageTransport(
             SupportsReferenceImages: true,
             SupportsCancellation: true));
 
+    public Task<IReadOnlyList<ImageWorkflow>> GetWorkflowsAsync(
+        ImageConnection connection, XaiFamilyBinding? xai = null,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        ValidateConnection(connection, xai);
+        throw new InferenceException(InferenceFailureCode.UnsupportedFeature,
+            "ComfyUI workflows are supplied by the host; built-in workflow discovery is unavailable.");
+    }
+
+    public Task<ImageCapabilities> GetCapabilitiesAsync(
+        ImageConnection connection, ImageWorkflow workflow, string? modelId = null,
+        XaiFamilyBinding? xai = null, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        ValidateConnection(connection, xai);
+        ArgumentNullException.ThrowIfNull(workflow);
+        if (modelId is not null && !string.Equals(modelId, workflow.Id, StringComparison.Ordinal))
+            throw new InferenceException(InferenceFailureCode.ModelUnavailable, "The requested workflow is not bound.");
+        ValidateConfiguration(workflow, ReadConfiguration(workflow));
+        return Task.FromResult(new ImageCapabilities
+        {
+            SupportedSizes = [new(workflow.DefaultWidth, workflow.DefaultHeight)],
+            SupportsNegativePrompt = true,
+            SupportsSeed = true,
+            MaximumImageCount = 1,
+            SupportedReferenceKinds = new[] { InferenceMediaSourceKind.Binary, InferenceMediaSourceKind.Resource }.ToFrozenSet(),
+            MaximumReferences = 1
+        });
+    }
+
     public PreparedImageTransportRequest Prepare(ImageTransportPreparationRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -130,18 +173,18 @@ internal sealed class ComfyUiImageTransport(
         ComfyWorkflowConfiguration configuration = ReadConfiguration(request.Workflow);
         ValidateConfiguration(request.Workflow, configuration);
 
-        string referenceName = request.Reference is null
-            ? string.Empty
-            : BuildReferenceName(request.Reference);
+        ImagePreparedReference[] references = request.References.ToArray();
+        string referenceName = references.Length == 0 ? string.Empty : ReadUploadName(references[0].ProviderState);
         var values = new Dictionary<string, object>(StringComparer.Ordinal)
         {
             ["workflowId"] = request.Workflow.Id,
             ["workflowVersion"] = request.Workflow.Version,
             ["positivePrompt"] = request.PositivePrompt,
-            ["negativePrompt"] = request.NegativePrompt,
-            ["width"] = request.Width,
-            ["height"] = request.Height,
-            ["seed"] = request.Seed,
+            ["negativePrompt"] = request.NegativePrompt ?? request.Workflow.DefaultNegativePrompt,
+            ["width"] = request.Width ?? request.Workflow.DefaultWidth,
+            ["height"] = request.Height ?? request.Workflow.DefaultHeight,
+            ["seed"] = request.Seed ?? Random.Shared.NextInt64(),
+            ["count"] = request.Count,
             ["cacheKey"] = request.CacheKey,
             ["referenceImageName"] = referenceName,
             ["label"] = request.Label
@@ -160,15 +203,19 @@ internal sealed class ComfyUiImageTransport(
             values);
         values["fileName"] = $"{request.CacheKey}.{request.Workflow.OutputExtension.TrimStart('.')}";
         JsonObject renderedWorkflow = ComfyWorkflowRenderer.Render(configuration.Workflow, values);
-        return new PreparedImageTransportRequest(renderedWorkflow.ToJsonString());
+        return new PreparedImageTransportRequest(JsonSerializer.Serialize(
+            new ComfyPreparedEnvelope(JsonElement.Parse(renderedWorkflow.ToJsonString()),
+                Array.AsReadOnly(references.Select(reference => reference.Scope).ToArray())),
+            ComfyOutputJsonContext.Default.ComfyPreparedEnvelope));
     }
 
     public async Task<ImageProviderHealth> TestAsync(
         ImageConnection connection,
         ImageWorkflow? workflow = null,
+        XaiFamilyBinding? xai = null,
         CancellationToken cancellationToken = default)
     {
-        ValidateConnection(connection);
+        connection = CaptureConnection(connection, xai);
         try
         {
             using HttpClient client = CreateClient(connection);
@@ -236,9 +283,10 @@ internal sealed class ComfyUiImageTransport(
 
     public async Task<IImageTransportProgressConnection?> TryConnectProgressAsync(
         ImageConnection connection,
+        XaiFamilyBinding? xai = null,
         CancellationToken cancellationToken = default)
     {
-        ValidateConnection(connection);
+        connection = CaptureConnection(connection, xai);
         var socket = new ClientWebSocket();
         ApplyHeaders(socket.Options, connection);
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -258,15 +306,29 @@ internal sealed class ComfyUiImageTransport(
             socket.Dispose();
             return null;
         }
+        catch
+        {
+            socket.Dispose();
+            throw;
+        }
     }
 
-    public async Task UploadReferenceAsync(
+    public async Task<ImagePreparedReference> UploadReferenceAsync(
         ImageConnection connection,
         ImageReference reference,
         Stream content,
+        XaiFamilyBinding? xai = null,
         CancellationToken cancellationToken = default)
     {
-        ValidateConnection(connection);
+        cancellationToken.ThrowIfCancellationRequested();
+        (InferenceResourceScope scope, connection) = Admit(connection, xai);
+        return await UploadAdmittedAsync(connection, reference, content, scope, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<ImagePreparedReference> UploadAdmittedAsync(
+        ImageConnection connection, ImageReference reference, Stream content,
+        InferenceResourceScope scope, CancellationToken cancellationToken)
+    {
         ArgumentNullException.ThrowIfNull(reference);
         ArgumentNullException.ThrowIfNull(content);
         if (!content.CanRead)
@@ -277,8 +339,9 @@ internal sealed class ComfyUiImageTransport(
         string uploadName = BuildReferenceName(reference);
         using HttpClient client = CreateClient(connection);
         using var form = new MultipartFormDataContent();
-        using var image = new StreamContent(content);
-        image.Headers.ContentType = new MediaTypeHeaderValue(reference.ContentType);
+        using var image = new BorrowedStreamContent(content);
+        if (reference.ContentType is not null)
+            image.Headers.ContentType = new MediaTypeHeaderValue(reference.ContentType);
         form.Add(image, "image", uploadName);
         form.Add(new StringContent("true"), "overwrite");
         using HttpResponseMessage response = await client.PostAsync(
@@ -291,16 +354,114 @@ internal sealed class ComfyUiImageTransport(
             throw new InvalidOperationException(
                 $"ComfyUI rejected the reference image with HTTP {(int)response.StatusCode}: {ReadError(body)}");
         }
+        string responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
+        ComfyUploadImage uploaded = JsonSerializer.Deserialize(responseBody, ComfyOutputJsonContext.Default.ComfyUploadImage)
+            ?? throw new InferenceException(InferenceFailureCode.ExecutionFailed, "ComfyUI returned no uploaded image identity.");
+        _ = ReadUploadName(JsonSerializer.SerializeToElement(uploaded, ComfyOutputJsonContext.Default.ComfyUploadImage));
+        return new(reference with { FileName = uploaded.Name }, scope,
+            JsonSerializer.SerializeToElement(uploaded, ComfyOutputJsonContext.Default.ComfyUploadImage));
+    }
+
+    public async Task<ImagePreparedReference> ResolveReferenceAsync(
+        ImageConnection connection, InferenceMediaSource source,
+        XaiFamilyBinding? xai = null, IInferenceResourceAccess? resources = null,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        ValidateConnection(connection, xai);
+        ArgumentNullException.ThrowIfNull(source);
+        if (source is not (BinaryMediaSource or ResourceMediaSource))
+            throw new InferenceException(InferenceFailureCode.UnsupportedFeature, "ComfyUI accepts binary or logical resource reference images only.");
+        if (source is ResourceMediaSource && resources is null)
+            throw new InferenceException(InferenceFailureCode.UnsupportedFeature, "The resource source requires caller-owned access.");
+        (InferenceResourceScope scope, connection) = Admit(connection, xai);
+        if (source is BinaryMediaSource binary)
+        {
+            if (resources is null)
+            {
+                using var stream = new MemoryStream(binary.Data.ToArray(), writable: false);
+                return await UploadAdmittedAsync(connection, new ImageReference
+                { Id = Guid.NewGuid(), FileName = binary.FileName, ContentType = binary.ContentType },
+                    stream, scope, cancellationToken).ConfigureAwait(false);
+            }
+            InferenceResourceDescriptor committed = await ImageResourceOperations.CommitAsync(resources,
+                binary.FileName, binary.ContentType, binary.Data, token: cancellationToken).ConfigureAwait(false);
+            cancellationToken.ThrowIfCancellationRequested();
+            source = new ResourceMediaSource(committed.Reference);
+        }
+        if (source is ResourceMediaSource resource)
+        {
+            if (resources is null)
+                throw new InferenceException(InferenceFailureCode.UnsupportedFeature, "The resource source requires caller-owned access.");
+            IInferenceResourceReadHandle? reader = null;
+            ImagePreparedReference? result = null;
+            Exception? failure = null;
+            InferenceResourceOperationPhase phase = InferenceResourceOperationPhase.OpenRead;
+            long? bytesTransferred = null;
+            try
+            {
+                reader = await resources!.OpenReadAsync(resource.Resource, cancellationToken).ConfigureAwait(false);
+                cancellationToken.ThrowIfCancellationRequested();
+                if (reader.Resource.Reference != resource.Resource)
+                    throw new InferenceException(InferenceFailureCode.ProtocolFailure, "Resource access returned a different content identity.");
+                using var content = new MemoryStream();
+                phase = InferenceResourceOperationPhase.Read;
+                try { await reader.Content.CopyToAsync(content, cancellationToken).ConfigureAwait(false); }
+                catch (Exception error) when (error is not OutOfMemoryException) { bytesTransferred = content.Length; throw; }
+                bytesTransferred = content.Length;
+                cancellationToken.ThrowIfCancellationRequested();
+                content.Position = 0;
+                phase = InferenceResourceOperationPhase.Materialize;
+                bytesTransferred = null;
+                ImagePreparedReference receipt = await UploadAdmittedAsync(connection, new ImageReference
+                { Id = Guid.NewGuid(), FileName = reader.Resource.FileName, ContentType = reader.Resource.ContentType },
+                    content, scope, cancellationToken).ConfigureAwait(false);
+                cancellationToken.ThrowIfCancellationRequested();
+                result = receipt with { Resource = resource.Resource };
+            }
+            catch (Exception error) when (error is not OutOfMemoryException)
+            {
+                var facts = new InferenceResourceOperationFailure(phase, resource.Resource, InferenceResourceCommitOutcome.NotAttempted, bytesTransferred);
+                failure = error switch
+                {
+                    InferenceResourceOperationException or InferenceResourceOperationCanceledException => error,
+                    OperationCanceledException => new InferenceResourceOperationCanceledException(facts, cancellationToken, error),
+                    _ => new InferenceResourceOperationException(error is InferenceException provider ? provider.Code : InferenceFailureCode.ExecutionFailed,
+                        "The image reference resource operation failed.", facts, error)
+                };
+            }
+            if (reader is not null)
+            {
+                try { await reader.DisposeAsync().ConfigureAwait(false); }
+                catch (Exception cleanup) when (cleanup is not OutOfMemoryException)
+                {
+                    if (failure is not null) throw new AggregateException(failure, cleanup);
+                    throw new InferenceResourceOperationException(InferenceFailureCode.ExecutionFailed, "The image reference resource cleanup failed.",
+                        new(phase, resource.Resource, InferenceResourceCommitOutcome.NotAttempted, bytesTransferred), cleanup);
+                }
+            }
+            if (failure is not null) ExceptionDispatchInfo.Throw(failure);
+            return result!;
+        }
+        throw new InferenceException(InferenceFailureCode.UnsupportedFeature, "ComfyUI accepts binary or logical resource reference images only.");
     }
 
     public async Task<string> SubmitAsync(
         ImageConnection connection,
         PreparedImageTransportRequest request,
+        XaiFamilyBinding? xai = null,
         CancellationToken cancellationToken = default)
     {
-        ValidateConnection(connection);
+        cancellationToken.ThrowIfCancellationRequested();
+        (InferenceResourceScope scope, connection) = Admit(connection, xai);
         ArgumentNullException.ThrowIfNull(request);
-        JsonObject workflow = JsonNode.Parse(request.ProviderRequest)?.AsObject()
+        ComfyPreparedEnvelope envelope = JsonSerializer.Deserialize(request.ProviderRequest, ComfyOutputJsonContext.Default.ComfyPreparedEnvelope)
+            ?? throw new InvalidOperationException("The prepared ComfyUI request is empty.");
+        ArgumentNullException.ThrowIfNull(envelope.ReferenceScopes);
+        foreach (InferenceResourceScope referenceScope in envelope.ReferenceScopes)
+            ValidateScope(referenceScope, scope);
+        JsonObject workflow = JsonNode.Parse(envelope.Workflow.GetRawText())?.AsObject()
             ?? throw new InvalidOperationException("The prepared ComfyUI workflow is empty.");
         using HttpClient client = CreateClient(connection);
         using HttpResponseMessage response = await client.PostAsJsonAsync(
@@ -329,9 +490,10 @@ internal sealed class ComfyUiImageTransport(
         ImageConnection connection,
         string providerJobId,
         ImageWorkflow workflow,
+        XaiFamilyBinding? xai = null,
         CancellationToken cancellationToken = default)
     {
-        ValidateConnection(connection);
+        (InferenceResourceScope scope, connection) = Admit(connection, xai);
         ArgumentException.ThrowIfNullOrWhiteSpace(providerJobId);
         ArgumentNullException.ThrowIfNull(workflow);
         ComfyWorkflowConfiguration configuration = ReadConfiguration(workflow);
@@ -349,22 +511,27 @@ internal sealed class ComfyUiImageTransport(
             {
                 return new ImageTransportJobSnapshot(
                     ImageTransportJobState.Failed,
-                    Error: error,
-                    Diagnostics: JsonSerializer.Serialize(new ComfyHistoryDiagnostics("history", "failed"), ComfyProtocolJsonContext.Default.ComfyHistoryDiagnostics));
+                    Error: new InferenceResourceFailure(InferenceFailureCode.ExecutionFailed, null, error),
+                    Diagnostics: JsonSerializer.SerializeToElement(new ComfyHistoryDiagnostics("history", "failed"), ComfyProtocolJsonContext.Default.ComfyHistoryDiagnostics));
             }
 
-            ComfyOutputImage? output = FindOutput(promptHistory, configuration.OutputNodeId);
-            if (output is not null)
+            ReadOnlyCollection<ComfyOutputImage> outputs = FindOutputs(promptHistory, configuration.OutputNodeId);
+            if (outputs.Count > 0)
             {
                 return new ImageTransportJobSnapshot(
                     ImageTransportJobState.Completed,
-                    new ImageTransportOutput(output.FileName, JsonSerializer.Serialize(output, ComfyOutputJsonContext.Default.ComfyOutputImage)),
-                    Diagnostics: JsonSerializer.Serialize(new ComfyHistoryDiagnostics("history", "completed"), ComfyProtocolJsonContext.Default.ComfyHistoryDiagnostics));
+                    Array.AsReadOnly(outputs.Select(output => new ImageTransportOutput(output.FileName, scope,
+                        JsonSerializer.SerializeToElement(output, ComfyOutputJsonContext.Default.ComfyOutputImage))).ToArray()),
+                    Diagnostics: JsonSerializer.SerializeToElement(new ComfyHistoryDiagnostics("history", "completed"), ComfyProtocolJsonContext.Default.ComfyHistoryDiagnostics));
             }
+
+            if (promptHistory.TryGetProperty("status", out JsonElement status)
+                && status.TryGetProperty("completed", out JsonElement completed) && completed.ValueKind == JsonValueKind.True)
+                return new ImageTransportJobSnapshot(ImageTransportJobState.Completed, Array.Empty<ImageTransportOutput>());
 
             return new ImageTransportJobSnapshot(
                 ImageTransportJobState.Generating,
-                Diagnostics: JsonSerializer.Serialize(new ComfyHistoryDiagnostics("history", "generating"), ComfyProtocolJsonContext.Default.ComfyHistoryDiagnostics));
+                Diagnostics: JsonSerializer.SerializeToElement(new ComfyHistoryDiagnostics("history", "generating"), ComfyProtocolJsonContext.Default.ComfyHistoryDiagnostics));
         }
 
         using HttpResponseMessage queueResponse = await client.GetAsync(
@@ -377,33 +544,40 @@ internal sealed class ComfyUiImageTransport(
         bool pending = QueueContains(queue.RootElement, "queue_pending", providerJobId);
         return new ImageTransportJobSnapshot(
             running ? ImageTransportJobState.Generating : ImageTransportJobState.Queued,
-            Error: pending || running ? string.Empty : "The prompt is not present in ComfyUI history or queue.",
-            Diagnostics: JsonSerializer.Serialize(new ComfyQueueDiagnostics("queue", running, pending), ComfyProtocolJsonContext.Default.ComfyQueueDiagnostics));
+            Error: pending || running ? null : new InferenceResourceFailure(InferenceFailureCode.ExecutionFailed, null,
+                "The prompt is not present in ComfyUI history or queue."),
+            Diagnostics: JsonSerializer.SerializeToElement(new ComfyQueueDiagnostics("queue", running, pending), ComfyProtocolJsonContext.Default.ComfyQueueDiagnostics));
     }
 
-    public async Task<byte[]> DownloadAsync(
+    public async Task<ImageTransportDownload> DownloadAsync(
         ImageConnection connection,
         ImageTransportOutput output,
+        XaiFamilyBinding? xai = null,
         CancellationToken cancellationToken = default)
     {
-        ValidateConnection(connection);
+        (InferenceResourceScope scope, connection) = Admit(connection, xai);
         ArgumentNullException.ThrowIfNull(output);
+        ValidateScope(output.Scope, scope);
         ComfyOutputImage comfyOutput = JsonSerializer.Deserialize(output.ProviderState, ComfyOutputJsonContext.Default.ComfyOutputImage)
             ?? throw new InvalidOperationException("The ComfyUI output state is invalid.");
         string query = $"view?filename={Uri.EscapeDataString(comfyOutput.FileName)}" +
             $"&subfolder={Uri.EscapeDataString(comfyOutput.Subfolder)}" +
             $"&type={Uri.EscapeDataString(comfyOutput.Type)}";
         using HttpClient client = CreateClient(connection);
-        return await client.GetByteArrayAsync(BuildUri(connection, query), cancellationToken);
+        using HttpResponseMessage response = await client.GetAsync(BuildUri(connection, query), cancellationToken);
+        response.EnsureSuccessStatusCode();
+        return new ImageTransportDownload(response.Content.Headers.ContentType?.MediaType,
+            await response.Content.ReadAsByteArrayAsync(cancellationToken));
     }
 
     public async Task<bool> TryCancelAsync(
         ImageConnection connection,
         string providerJobId,
         bool interruptRunning,
+        XaiFamilyBinding? xai = null,
         CancellationToken cancellationToken = default)
     {
-        ValidateConnection(connection);
+        connection = CaptureConnection(connection, xai);
         ArgumentException.ThrowIfNullOrWhiteSpace(providerJobId);
         try
         {
@@ -532,28 +706,37 @@ internal sealed class ComfyUiImageTransport(
 
     private static void ValidatePreparation(ImageTransportPreparationRequest request)
     {
-        if (request.Width <= 0)
+        ArgumentNullException.ThrowIfNull(request.Workflow);
+        ArgumentNullException.ThrowIfNull(request.References);
+        if (request.Count != 1 || request.Steps is not null || request.GuidanceScale is not null
+            || request.References.Count > 1)
+            throw new InferenceException(InferenceFailureCode.UnsupportedFeature,
+                "ComfyUI supports one image and at most one reference, without step or guidance overrides.");
+        if ((request.Width ?? request.Workflow.DefaultWidth) <= 0)
         {
             throw new ArgumentOutOfRangeException(nameof(request), "Image width must be positive.");
         }
 
-        if (request.Height <= 0)
+        if ((request.Height ?? request.Workflow.DefaultHeight) <= 0)
         {
             throw new ArgumentOutOfRangeException(nameof(request), "Image height must be positive.");
         }
 
         ArgumentException.ThrowIfNullOrWhiteSpace(request.PositivePrompt);
         ArgumentException.ThrowIfNullOrWhiteSpace(request.CacheKey);
-        if (request.Workflow.RequiresReferenceImage && request.Reference is null)
+        if (request.Workflow.RequiresReferenceImage && request.References.Count == 0)
         {
             throw new InvalidOperationException(
                 $"Workflow '{request.Workflow.Label}' requires a reference image.");
         }
     }
 
-    private static void ValidateConnection(ImageConnection connection)
+    private static void ValidateConnection(ImageConnection connection, XaiFamilyBinding? xai = null)
     {
         ArgumentNullException.ThrowIfNull(connection);
+        if (connection.Authorization is not null || connection.Xai is not null || xai is not null)
+            throw new InferenceException(InferenceFailureCode.UnsupportedFeature,
+                "ComfyUI uses static protected request headers; dynamic authorization and xAI bindings are not qualified for this transport.");
         if (connection.Transport != ImageTransport.ComfyUi)
         {
             throw new InvalidOperationException(
@@ -562,7 +745,8 @@ internal sealed class ComfyUiImageTransport(
 
         if (!Uri.TryCreate(connection.Endpoint, UriKind.Absolute, out Uri? endpoint)
             || (!string.Equals(endpoint.Scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase)
-                && !string.Equals(endpoint.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase)))
+                && !string.Equals(endpoint.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase))
+            || endpoint.UserInfo.Length > 0 || endpoint.Query.Length > 0 || endpoint.Fragment.Length > 0)
         {
             throw new ArgumentException("ComfyUI requires an absolute HTTP or HTTPS endpoint.", nameof(connection));
         }
@@ -572,6 +756,53 @@ internal sealed class ComfyUiImageTransport(
             throw new ArgumentOutOfRangeException(nameof(connection), "Request timeout must be positive.");
         }
     }
+
+    private static ImageConnection CaptureConnection(ImageConnection connection, XaiFamilyBinding? xai)
+    {
+        ValidateConnection(connection, xai);
+        ArgumentNullException.ThrowIfNull(connection.AdditionalHeaders);
+        return connection with
+        {
+            Endpoint = new Uri(connection.Endpoint.TrimEnd('/') + "/").AbsoluteUri,
+            AdditionalHeaders = new ReadOnlyDictionary<string, string>(
+                connection.AdditionalHeaders.ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.OrdinalIgnoreCase))
+        };
+    }
+
+    private (InferenceResourceScope Scope, ImageConnection Snapshot) Admit(ImageConnection connection, XaiFamilyBinding? xai)
+    {
+        ImageConnection snapshot = CaptureConnection(connection, xai);
+        lock (_scopeGate)
+        {
+            if (_scopes.TryGetValue(connection, out ScopeEntry? entry)
+                && entry.Endpoint == snapshot.Endpoint
+                && entry.Headers.Count == snapshot.AdditionalHeaders.Count
+                && entry.Headers.All(header => snapshot.AdditionalHeaders.TryGetValue(header.Key, out string? value) && value == header.Value))
+                return (entry.Scope, snapshot);
+            _scopes.Remove(connection);
+            var scope = new InferenceResourceScope(snapshot.Endpoint, Guid.NewGuid().ToString("N"));
+            _scopes.Add(connection, new ScopeEntry(snapshot.Endpoint, snapshot.AdditionalHeaders, scope));
+            return (scope, snapshot);
+        }
+    }
+
+    private static void ValidateScope(InferenceResourceScope observed, InferenceResourceScope expected)
+    {
+        if (observed != expected)
+            throw new InferenceException(InferenceFailureCode.UnsupportedFeature,
+                "The native image receipt belongs to a different or changed transport owner. Reupload logical content under the current connection.");
+    }
+
+    private static string ReadUploadName(JsonElement state)
+    {
+        ComfyUploadImage uploaded = JsonSerializer.Deserialize(state, ComfyOutputJsonContext.Default.ComfyUploadImage)
+            ?? throw new InvalidOperationException("The uploaded ComfyUI image state is invalid.");
+        if (string.IsNullOrWhiteSpace(uploaded.Name) || uploaded.Subfolder is null || uploaded.Type is not "input")
+            throw new InvalidOperationException("The uploaded ComfyUI image identity is invalid.");
+        return uploaded.Subfolder.Length == 0 ? uploaded.Name : uploaded.Subfolder.TrimEnd('/') + "/" + uploaded.Name;
+    }
+
+    private sealed record ScopeEntry(string Endpoint, IReadOnlyDictionary<string, string> Headers, InferenceResourceScope Scope);
 
     private static string ReadRequiredString(
         JsonElement root,
@@ -650,9 +881,7 @@ internal sealed class ComfyUiImageTransport(
             throw new ArgumentException("A reference image id is required.", nameof(reference));
         }
 
-        ArgumentException.ThrowIfNullOrWhiteSpace(reference.FileName);
-        ArgumentException.ThrowIfNullOrWhiteSpace(reference.ContentType);
-        string extension = Path.GetExtension(reference.FileName);
+        string extension = Path.GetExtension(reference.FileName) ?? string.Empty;
         if (extension.Length > 16 || extension.Skip(1).Any(character => !char.IsAsciiLetterOrDigit(character)))
         {
             throw new ArgumentException("The reference image has an invalid file extension.", nameof(reference));
@@ -687,7 +916,7 @@ internal sealed class ComfyUiImageTransport(
         return false;
     }
 
-    private static ComfyOutputImage? FindOutput(JsonElement promptHistory, string outputNodeId)
+    private static ReadOnlyCollection<ComfyOutputImage> FindOutputs(JsonElement promptHistory, string outputNodeId)
     {
         if (!promptHistory.TryGetProperty("outputs", out JsonElement outputs)
             || outputs.ValueKind != JsonValueKind.Object
@@ -695,26 +924,27 @@ internal sealed class ComfyUiImageTransport(
             || !output.TryGetProperty("images", out JsonElement images)
             || images.ValueKind != JsonValueKind.Array)
         {
-            return null;
+            return Array.AsReadOnly(Array.Empty<ComfyOutputImage>());
         }
 
+        var result = new List<ComfyOutputImage>();
         foreach (JsonElement image in images.EnumerateArray())
         {
             if (image.TryGetProperty("filename", out JsonElement filename)
                 && filename.ValueKind == JsonValueKind.String)
             {
-                return new ComfyOutputImage(
+                result.Add(new ComfyOutputImage(
                     filename.GetString() ?? string.Empty,
                     image.TryGetProperty("subfolder", out JsonElement subfolder)
                         ? subfolder.GetString() ?? string.Empty
                         : string.Empty,
                     image.TryGetProperty("type", out JsonElement type)
                         ? type.GetString() ?? "output"
-                        : "output");
+                        : "output"));
             }
         }
 
-        return null;
+        return result.AsReadOnly();
     }
 
     private static string FindExecutionError(JsonElement promptHistory)
@@ -751,4 +981,22 @@ internal sealed class ComfyUiImageTransport(
 
     private static string SerializeDiagnostics(string status, string body) =>
         JsonSerializer.Serialize(new ComfyResponseDiagnostics(status, ReadError(body)), ComfyProtocolJsonContext.Default.ComfyResponseDiagnostics);
+
+    private sealed class BorrowedStreamContent(Stream source) : HttpContent
+    {
+        protected override Task SerializeToStreamAsync(Stream stream, TransportContext? context) =>
+            source.CopyToAsync(stream);
+
+        protected override Task SerializeToStreamAsync(
+            Stream stream,
+            TransportContext? context,
+            CancellationToken cancellationToken) =>
+            source.CopyToAsync(stream, cancellationToken);
+
+        protected override bool TryComputeLength(out long length)
+        {
+            length = 0;
+            return false;
+        }
+    }
 }

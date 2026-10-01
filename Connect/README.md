@@ -305,7 +305,7 @@ TtsResult clip = await speech.SpeakAsync(new TtsRequest
 The connector never starts a bridge, installs models, bypasses TLS validation or manages playback.
 The endpoint is external even on localhost. Multipart sends `text`, `output_format` and the
 configured voice field (default `voice_url`). It rejects non-default speed. BridgeJson sends `text`,
-`voice`, `speaker`, `speed` and `response_format`. Initially only WAV is advertised and accepted.
+`voice`, `speaker`, `speed` and `response_format`. PocketTTS advertises and accepts only WAV.
 Voice discovery uses `/voices`, falling back to `/health` only after a successful empty list. It
 preserves both voice-option objects and voice-name arrays; it never invents fallback voices.
 
@@ -324,6 +324,38 @@ or copied into errors. Registration disables automatic redirects and gives each 
 connection timeout. If constructing `PocketTtsHttpProvider` with your own `HttpClient`, disable
 automatic redirects yourself so custom secret headers cannot follow a redirect to another origin;
 the host owns that client's lifetime. Endpoint paths cannot select a different origin.
+
+### TTS data and streaming contracts
+
+`TtsRequest` and `TtsSetupConfiguration` carry optional language, sample rate in Hz, bit rate in
+bits per second, timestamp selection and typed `XaiTtsOptions`. The xAI options preserve nullable
+latency/normalization controls and an ordinal text-replacement map. Absent and explicit empty
+maps remain distinct. PocketTTS rejects every explicit new control, including `false`, before
+HTTP. Its settings preserve the controls but refuse unsupported test/save actions.
+
+`TtsResult` carries nullable duration and ordered `TtsTimestamp` observations. Each timestamp
+retains actual text and the observed start/end timeline; it does not invent text offsets.
+Streaming timestamps use the observed session timeline, not a per-chunk reset. Missing timing
+stays null; observed empty remains empty. Audio, timestamp lists and replacement maps are copied
+at their data boundary, including `with` updates. Diagnostic strings omit content and credentials.
+
+`ConnectTtsJson` exports exact type-name metadata getters for TTS connection, setup, request,
+capability, result, option and concrete event data. Its closed generated graph composes Common
+provenance/failure data without reflection fallback. Non-null runtime clients/providers/sessions
+refuse serialization and restoration without inspecting their callbacks; null remains null.
+The provider-private Pocket wire codec remains separate and preserves its existing request bytes.
+
+`ITtsStreamingClient` and `ITtsStreamingSession` declare reusable disposable streaming and one
+ephemeral iterator wrapper. Opens and wrappers require explicit positive `InferenceStreamLimits`
+for event count, buffered payload bytes and assembled message bytes. These caller-local budgets
+are not provider limits. Session commands complete after ordered transport send, not terminal
+acknowledgment or event consumption. One event consumer drains the feed; disposal closes the
+feed before draining admitted work. No automatic replay/reconnect is part of these contracts.
+
+These streaming interfaces are inert declarations. PocketTTS implements neither interface,
+advertises all new capability flags false and leaves unknown rate lists null. `XaiTts` is a
+declared transport identity without a registered provider. The current binding signature remains
+`Bind(TtsConnection)`; there is no xAI family-binding or resource-access argument on it.
 
 ## TangoFlux audio
 
@@ -896,6 +928,9 @@ var connection = new ImageConnection
     RequestTimeout = TimeSpan.FromMinutes(10)
 };
 
+ImagePreparedReference uploadedReference = await transport.UploadReferenceAsync(
+    connection, reference, content, cancellationToken: cancellationToken);
+
 PreparedImageTransportRequest prepared = transport.Prepare(new ImageTransportPreparationRequest
 {
     Workflow = workflow,
@@ -905,21 +940,59 @@ PreparedImageTransportRequest prepared = transport.Prepare(new ImageTransportPre
     Height = 832,
     Seed = seed,
     CacheKey = cacheKey,
-    Reference = reference
+    References = [uploadedReference]
 });
 
-string providerJobId = await transport.SubmitAsync(connection, prepared, cancellationToken);
+string providerJobId = await transport.SubmitAsync(connection, prepared, cancellationToken: cancellationToken);
 ImageTransportJobSnapshot status = await transport.GetJobAsync(
     connection,
     providerJobId,
     workflow,
-    cancellationToken);
+    cancellationToken: cancellationToken);
 ```
 
 `ImageWorkflow.TransportConfiguration`, `PreparedImageTransportRequest.ProviderRequest`, and
-`ImageTransportOutput.ProviderState` are opaque adapter-owned data. Consumers may round-trip them for
-durable recovery but must not interpret them as ComfyUI contracts. The package does not own an image
+`ImageTransportOutput.ProviderState` are opaque adapter-owned data. `UploadReferenceAsync` returns
+an immutable receipt; `Prepare` copies that receipt without authentication, reads, uploads, or native
+ID lookups. Consumers may round-trip prepared data but it does not prove authority to reuse a native
+reference. ComfyUI accepts native receipts only on the same unchanged transport/connection owner.
+Changed static headers, a different connection, or a different transport owner require reupload of
+logical content. The package does not own an image
 database, media library, workflow catalog, cache, or background worker.
+
+ComfyUI reference uploads borrow the input stream. Upload reads from its current position without
+rewinding, flushing, or disposing it, including cancellation and failed uploads. The caller owns
+the stream's eventual disposal.
+
+ComfyUI accepts static protected headers. Its newly optional dynamic `Authorization` and xAI binding
+members remain unqualified and refuse before callbacks or HTTP. Image generation accepts one binary
+reference or one logical resource resolved through caller-owned access. URL, native-file, multiple
+references, step/guidance overrides and Count greater than one refuse before effects. All observed
+outputs are retained. Download MIME comes from actual HTTP metadata, not a workflow default.
+Composite admission copies binary reference bytes before credential or capability awaits. Constructing
+a BinaryMediaSource still borrows caller memory; the operation owns its entered byte snapshot.
+
+When resource access is supplied, a binary reference is committed and selected for the caller's
+session before ComfyUI uploads the authorized logical resource. Resource reads and uploads retain
+the endpoint/header snapshot admitted before the first callback. Generated outputs are likewise
+committed and selected before the composite publishes completion. Typed failures preserve known
+content/selection outcomes; a dispatched commit with no matching response remains unknown.
+
+Image facades and settings managers fence new calls on disposal and drain admitted operations before
+releasing borrowed transports, workflow catalogs, binding factories, resource access and commit
+targets. Those collaborators are never disposed. Settings admission also applies through base and
+interface references. Draft edits invalidate pending health, choice and workflow results; an admitted
+conditional save still preserves the commit target's observed committed or uncertain result.
+
+`ConnectImageJson` exports exact type-name metadata for the complete public Image data graph.
+Runtime authority, bindings, resource handles and binding factories refuse non-null serialization.
+Download bytes reuse Common's exact required-data property converter: explicit JSON null is refused,
+while empty bytes and unknown MIME remain valid observations. This is not a global byte-memory policy.
+Workflow selection stores both `ImageWorkflowOrigin` and the exact ID. Host and built-in origins
+remain separate; ComfyUI does not advertise a built-in workflow catalog.
+
+The shared [`XaiFamilyBinding` contract](docs/media-bindings.md) uses explicit selection and the
+existing credential-access owner. It does not register or qualify an xAI Image transport.
 
 ## Host-executed tools
 
@@ -1053,6 +1126,37 @@ OpenAI Responses, direct Codex, Anthropic Messages, Claude CLI, and Bedrock use 
 image/document content blocks for prompt attachments. Direct Codex sends prompt attachments and
 tool-output binaries inline through Responses, with no CLI staging directory. The caller supplies kind,
 filename, and bytes; adapters own MIME detection, encoding, and wire representation.
+
+### Files and skills contracts
+
+`ILlmFileClient`, `IXaiFilePublicUrlClient` and `IXaiSkillClient` declare explicit native resource
+operations. Their metadata, options, pages, deletion results, transfer receipts and capability data
+have exact type-name getters on `ConnectLlmJson`. These are inert SDK contracts; the provider facade
+does not implement or register these interfaces. All new capability flags default to false.
+
+Files pages preserve their returned token and an explicit `IsKnownLastPage` fact. Skills pages
+preserve their distinct first/last-ID and `HasMore` observations. Required response values do not
+become zero or false when absent. File bytes may be zero; missing MIME and expiry observations stay
+null. Public URLs retain their actual strings in data serialization but are absent from diagnostics.
+Files and Skills list limits are 1 through 100, matching the
+[published parameter schemas](https://docs.x.ai/openapi.json). Optional file/URL lifetimes retain
+whole seconds between one hour and thirty days; absent values remain absent.
+
+`XaiFileStorageOptions` is separate provider-storage data. It preserves a required filename,
+optional whole-second expiry capped at thirty days, and explicit public-URL intent. It does not
+apply the standalone upload's one-hour minimum to storage. The closed public-URL union uses
+`flag` and `configuration` discriminators: absence, explicit false, explicit true and configured
+publication remain distinct. Configured publication reuses `XaiPublicUrlOptions` and its own
+expiry bounds. All four storage roots have exact `ConnectLlmJson` getters. These declarations
+do not upload content, publish a URL, authorize a request or enable a provider route.
+
+Skill uploads carry explicitly supplied borrowed streams and ordered directory entries. They do
+not enumerate paths, inspect archives, read streams or attach a skill to generation. Their runtime
+inputs and service interfaces have no public data-metadata getters; the owned serialization
+options reject non-null values without inspecting collaborators. Diagnostic strings omit paths,
+stream details and resource payloads. Operation-time path/duplicate/page consistency checks,
+transfer ownership, facade routing, native scope and provider qualification are not implemented
+by these declarations.
 
 ### Explicit cache contracts
 

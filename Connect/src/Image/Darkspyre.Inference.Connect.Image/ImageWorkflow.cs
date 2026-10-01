@@ -30,7 +30,11 @@ public sealed record ImageWorkflow
     public bool RequiresReferenceImage { get; init; }
 
     /// <summary>Opaque configuration interpreted only by the selected image transport.</summary>
-    public JsonElement TransportConfiguration { get; init; }
+    public JsonElement TransportConfiguration
+    {
+        get;
+        init => field = value.ValueKind == JsonValueKind.Undefined ? default : value.Clone();
+    }
 }
 
 /// <summary>Host-owned image metadata needed to prepare and upload a provider reference.</summary>
@@ -38,7 +42,11 @@ public sealed record ImageReference
 {
     public required Guid Id { get; init; }
 
-    public required string FileName { get; init; }
+    public string? FileName { get; init; }
 
-    public required string ContentType { get; init; }
+    public string? ContentType { get; init; }
 }
+
+public enum ImageWorkflowOrigin { Host = 0, BuiltIn = 1 }
+
+public sealed record ImageWorkflowSelection(ImageWorkflowOrigin Origin, string Id);

@@ -1,3 +1,6 @@
+using Darkspyre.Inference.Common.Resources;
+using Darkspyre.Inference.Connect.LLM;
+
 namespace Darkspyre.Inference.Connect.Image;
 
 /// <summary>Discovers and resolves the image transports registered by the host.</summary>
@@ -38,11 +41,23 @@ public sealed class ImageProviderService
     /// </summary>
     public ImageSettingsManager CreateSettingsManager(
         Common.Setup.ISetupCommitTarget<ImageSetupChanges> target,
-        IImageWorkflowChoiceSource? workflows = null) => new(this, target, workflows);
+        IImageWorkflowChoiceSource? workflows = null,
+        Func<XaiConnectionSelection, XaiFamilyBinding>? xaiBindings = null) => new(this, target, workflows, xaiBindings);
+
+    public Task<IReadOnlyList<ImageWorkflow>> GetWorkflowsAsync(ImageConnection connection,
+        XaiFamilyBinding? xai = null, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(connection);
+        cancellationToken.ThrowIfCancellationRequested();
+        ConnectImageInference.ValidateBinding(connection, xai);
+        return GetRequiredTransport(connection.Transport).GetWorkflowsAsync(connection, xai, cancellationToken);
+    }
 
     public Darkspyre.Inference.Common.Image.IImageInference Bind(
         ImageConnection connection,
         ImageWorkflow workflow,
+        XaiFamilyBinding? xai = null,
+        IInferenceResourceAccess? resources = null,
         TimeSpan? pollInterval = null)
     {
         ArgumentNullException.ThrowIfNull(connection);
@@ -56,6 +71,8 @@ public sealed class ImageProviderService
             GetRequiredTransport(connection.Transport),
             connection,
             workflow,
+            xai,
+            resources,
             pollInterval ?? TimeSpan.FromMilliseconds(250));
     }
 

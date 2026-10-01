@@ -22,12 +22,32 @@ public sealed class LlmConnectionAccess : IDisposable, IAsyncDisposable
     }
 
     /// <summary>Resolves a connection and saves a refreshed OAuth credential against its expected version.</summary>
-    public async Task<LlmConnection> AcquireAsync(string connectionId, CancellationToken cancellationToken = default)
+    public Task<LlmConnection> AcquireAsync(string connectionId, CancellationToken cancellationToken = default)
+        => AcquireCoreAsync(connectionId, null, cancellationToken);
+
+    // Family validation is effect-free and must precede credential refresh/save.
+    internal Task<LlmConnection> AcquireAsync(string connectionId, Action<LlmConnection> validate,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(validate);
+        return AcquireCoreAsync(connectionId, validate, cancellationToken);
+    }
+
+    private async Task<LlmConnection> AcquireCoreAsync(string connectionId, Action<LlmConnection>? validate,
+        CancellationToken cancellationToken)
     {
         using LlmOperationLifetime.Lease operation = _lifetime.Enter(cancellationToken);
         LlmConnection connection = await LlmConnectionResolver.ResolveAsync(Connections, connectionId, operation.Token);
         ThrowIfAcquisitionCanceled(operation.Token);
+        if (validate is not null)
+        {
+            connection = EmbeddingRequestData.Snapshot(connection);
+            validate(connection);
+        }
+        ThrowIfAcquisitionCanceled(operation.Token);
         connection = await RefreshCoreAsync(connectionId, connection, operation.Token);
+        ThrowIfAcquisitionCanceled(operation.Token);
+        validate?.Invoke(connection);
         ThrowIfAcquisitionCanceled(operation.Token);
         return connection;
     }

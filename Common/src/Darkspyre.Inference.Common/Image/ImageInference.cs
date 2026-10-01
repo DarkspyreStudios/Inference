@@ -1,4 +1,10 @@
+using Darkspyre.Inference.Common.Media;
+using Darkspyre.Inference.Common.Resources;
+using System.Text.Json.Serialization;
+
 namespace Darkspyre.Inference.Common.Image;
+
+public sealed record ImageSize([property: JsonRequired] int Width, [property: JsonRequired] int Height);
 
 public sealed record ImageGenerationRequest
 {
@@ -19,15 +25,25 @@ public sealed record ImageGenerationRequest
     public int? Steps { get; init; }
 
     public double? GuidanceScale { get; init; }
+
+    public IReadOnlyList<InferenceMediaSource> References { get; init; } = [];
 }
 
 public sealed record GeneratedImage
 {
-    public required string ContentType { get; init; }
+    public required string? ContentType { get; init; }
 
     public required ReadOnlyMemory<byte> Data { get; init; }
 
     public long? Seed { get; init; }
+
+    public ProviderFileReference? File { get; init; }
+
+    public InferenceResourceDescriptor? Resource { get; init; }
+
+    public int? Width { get; init; }
+
+    public int? Height { get; init; }
 }
 
 public sealed record ImageGenerationResult
@@ -53,7 +69,12 @@ public readonly record struct ImageGenerationProgress(
 
 public sealed record ImageCapabilities
 {
-    public required IReadOnlyList<(int Width, int Height)> SupportedSizes { get; init; }
+    public required IReadOnlyList<ImageSize> SupportedSizes { get; init; }
+
+    public IReadOnlySet<InferenceMediaSourceKind> SupportedReferenceKinds { get; init; } =
+        System.Collections.Frozen.FrozenSet<InferenceMediaSourceKind>.Empty;
+
+    public int? MaximumReferences { get; init; }
 
     public bool SupportsNegativePrompt { get; init; }
 

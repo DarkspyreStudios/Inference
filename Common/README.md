@@ -1,9 +1,35 @@
 # Darkspyre.Inference.Common
 
+`InferenceStreamLimits` supplies explicit positive caller-local event-count, buffered-payload-byte
+and assembled-message-byte budgets for streaming contracts. `InferenceJson.InferenceStreamLimits`
+owns its required data metadata. Omitted, null, zero and negative budgets refuse; no provider limit
+or hidden default is inferred. Constructor and `with` updates enforce the same data validity.
+
 Shared, implementation-neutral contracts for in-process Tensor inference and out-of-process Connect
 providers. The package contains semantic request, response, capability, progress, provenance, and
 failure types. It does not select an implementation or provide automatic fallback between local and
 external inference. The current synchronized package family targets .NET 11.
+
+## Hosted speech transcription
+
+`Darkspyre.Inference.Common.STT` contains hosted transcription data and client/session interfaces.
+Binary, URL and workspace-resource inputs form one closed union. Options preserve explicit false,
+nullable observations, raw signed numeric values, channel facts and ordered key terms. Sample rates
+use hertz. Timing fields use `TimeSpan`; absent duration, confidence, language and word/channel lists
+remain null. Empty lists and actual zero values remain distinct from absence.
+
+Binary data and collections are copied on construction and `with` updates. Owned `InferenceJson`
+getters cover the input union, options, word/channel/result data, concrete events and capabilities.
+Unknown input variants and undefined encodings refuse. Required factual properties cannot disappear
+through JSON defaults. Runtime clients and sessions refuse nonnull owned JSON serialization before
+callbacks or diagnostics run. There is no exported event-base JSON discriminator format.
+
+`ISpeechTranscriptionSession` exposes ordered audio, finalization and completion commands plus an
+event stream. Commands complete after send, not after a terminal event. The convenience stream
+contract owns one ephemeral session and its input enumerator with explicit `InferenceStreamLimits`.
+The contracts contain no hosted adapter, transport registration or runtime implementation.
+Capabilities default to unavailable, empty supported sets and unknown nullable lists. These hosted
+contracts do not replace Tensor's model-instance speech-transcription lifecycle or task identity.
 
 Applications choose an implementation explicitly and work with typed contracts:
 
@@ -27,6 +53,41 @@ operations remain on their owning packages; Common is the portable inference lan
 least-common-denominator replacement for implementation management.
 
 ## JSON metadata
+
+`Darkspyre.Inference.Common.Realtime` declares explicit session commands, configuration,
+conversation/content unions, scoped resumption references and concrete observations.
+`IRealtimeVoiceSession` supplies ten asynchronous commands and one ordered event sequence.
+`RealtimeVoice = 7` maps to the existing Audio capability. Common provides the data and
+runtime interface; the Connect provider owns session opening and protocol implementation.
+
+Realtime data roots have exact type-name getters on `InferenceJson`. Turn detection uses
+`manual`/`server-vad`, content uses `text`/`audio`, and conversation items use
+`message`/`function-call`/`function-output`. Concrete events use their individual getters;
+the event base has no portable discriminator. Native stage strings and nullable observed IDs,
+timing, status, configuration and usage are preserved. Omitted configuration values differ from
+explicit empty text/lists, and manual turn detection is distinct from omission.
+Input and output encoding sets are independent, frozen and empty by default; sample-rate lists
+remain nullable. All new support flags default to false. Collections/maps/audio data copy their
+inputs, diagnostics omit source content, and non-null live sessions or provider-specific options
+refuse Common serialization. Family metadata owns any fixed provider extensions. These declarations
+do not authorize native conversation reuse, reconnect, replay, tool execution or socket traffic.
+
+`Darkspyre.Inference.Common.Video` declares generation, edit and extension requests, typed
+keyframe/audio references, scoped native job/output receipts and capability observations.
+`IVideoInference` declares capability lookup, submit, one-poll lookup, caller-owned download streams
+and caller-resource materialization. These are inert contracts; Common provides no Video adapter.
+`VideoGeneration = 6` maps to `InferenceCapability.Video = 4`; earlier numeric identities are unchanged.
+
+Every Video data root has an exact type-name getter on `InferenceJson`. Request discriminators are
+`generation`, `edit` and `extension`; reference audio uses `voice` and `audio`. Common rejects all
+non-null provider options; extension-aware family metadata owns any admitted provider variants.
+Runtime inference instances have no data getter and refuse non-null owned serialization.
+Native receipts grant no resource authority. Diagnostics omit prompts, URLs and provider state.
+Outer collections are copied, capability sets are frozen and output JSON state is cloned on
+construction and `with` assignment. Input media bytes retain their existing borrowed semantics;
+an operation must snapshot them before effects. Owned binary-media metadata rejects explicit null
+bytes and preserves actual empty bytes. Nullable observations remain absent, including
+progress, duration, expiry and content type; zero and false remain actual values.
 
 `LlmExplicitCacheReference` carries a native cache resource name, model, opaque scope and optional
 observed expiry. `InferenceJson.LlmExplicitCacheReference` exports its data-only metadata. The
@@ -54,8 +115,10 @@ reflection resolver. Caller-defined types require caller-owned metadata.
 The stream-event base has no JSON discriminator. Serialize each concrete event with its matching
 metadata; this package does not invent a stream envelope. Callback-backed setup fields and abstract
 setup interactions are not transport contracts. `InferenceImplementationDescriptor` and the
-value-tuple sizes in `ImageCapabilities` have no round-trip JSON representation in this metadata
-surface. Generated metadata does not change those contracts or establish native runtime retirement.
+callback-backed setup interactions have no portable JSON representation in this metadata surface.
+`ImageCapabilities` uses the named `ImageSize` contract, not value tuples. Its exact typed metadata,
+`GeneratedImage`, and `ImageGenerationStage` are exported alongside the unchanged Image request,
+result and progress getters. Generated metadata does not establish native runtime retirement.
 
 `LlmUsage` preserves provider-reported decimal USD costs and independent hosted-tool/source counts.
 Its named hosted counts snapshot their input; negative hosted counts become unknown at assignment
@@ -77,7 +140,8 @@ Owned hosted metadata rejects missing observation identities, kind/phase facts a
 Explicit null image bytes are not an observed empty image; explicit empty bytes remain valid.
 The new phase/action enum roots reject undefined values without changing other enum policies.
 Caller-generated closed envelopes can compose the owned resolver and its fixed converters; the
-image-byte refusal applies only to the hosted image `Data` property, not every byte-memory field.
+image-byte refusal applies only to the hosted image and binary-media `Data` properties, not every
+byte-memory field.
 
 ## Session and workspace resources
 
@@ -148,8 +212,16 @@ the actual endpoint/route/account authority of native receipts, not portable con
 the closed `type` discriminators `binary`, `url`, `file` and `resource`; unknown variants refuse rather
 than invoking reflection or an extension registry. JSON decoding creates its own byte memory, while
 constructing a binary source preserves caller memory. These are standalone, data-only foundations,
-not yet wired into requests, Image transports, provider bindings or resource resolution. Operation
-boundaries must validate caller-authored IDs, URLs, scope and source support before effects.
+not provider bindings or automatic resource resolution. Image requests retain ordered source data;
+Connect ComfyUI supports zero/one binary reference or a logical resource resolved through borrowed
+access. Supra refuses supplied references before backend entry. Other ComfyUI source variants and
+multiple references refuse before source reads or upload.
+Operation boundaries validate caller-authored IDs, URLs, scope and source support before effects.
+
+Image capability sizes use `ImageSize` with actual reference-kind support and nullable known reference
+limits. A generated image retains bytes plus optional native file identity, committed resource
+descriptor and observed dimensions. Its required `ContentType` fact may be null when MIME is unknown;
+unknown MIME is not inferred from a workflow default or file extension.
 
 ## Provider authorization
 
@@ -216,7 +288,7 @@ Check validation separately and leave unreported finish reasons and usage unknow
 a settings manager that runs actions, lists choices and saves, validation, safe status observations and a
 version-checked host commit boundary. It does not store
 settings/secrets, execute an application loop, or wrap inference requests in a generic payload.
-Text, Image, Audio and Decision grouping comes from the implementation's declared `InferenceTask`
+Text, Image, Audio, Decision and Video grouping comes from the implementation's declared `InferenceTask`
 values; the three Audio tasks remain distinct.
 
 The [compile-checked generic editor example](examples/Darkspyre.Inference.Setup.Examples/README.md)

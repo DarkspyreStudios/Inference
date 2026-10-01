@@ -11,6 +11,30 @@ namespace Darkspyre.Inference.Connect.LLM;
 /// <summary>Connect-owned metadata for closed connection, request and captured-context contracts.</summary>
 public static class ConnectLlmJson
 {
+    public static JsonTypeInfo<XaiStoragePublicUrlRequest> XaiStoragePublicUrlRequest => Metadata<XaiStoragePublicUrlRequest>();
+    public static JsonTypeInfo<XaiStoragePublicUrlFlag> XaiStoragePublicUrlFlag => Metadata<XaiStoragePublicUrlFlag>();
+    public static JsonTypeInfo<XaiStoragePublicUrlConfiguration> XaiStoragePublicUrlConfiguration => Metadata<XaiStoragePublicUrlConfiguration>();
+    public static JsonTypeInfo<XaiFileStorageOptions> XaiFileStorageOptions => Metadata<XaiFileStorageOptions>();
+    public static JsonTypeInfo<XaiConnectionSelection> XaiConnectionSelection => Metadata<XaiConnectionSelection>();
+    public static JsonTypeInfo<LlmFileOrder> LlmFileOrder => Metadata<LlmFileOrder>();
+    public static JsonTypeInfo<LlmFileSort> LlmFileSort => Metadata<LlmFileSort>();
+    public static JsonTypeInfo<LlmFileContentFormat> LlmFileContentFormat => Metadata<LlmFileContentFormat>();
+    public static JsonTypeInfo<LlmProviderFile> LlmProviderFile => Metadata<LlmProviderFile>();
+    public static JsonTypeInfo<LlmFileUploadOptions> LlmFileUploadOptions => Metadata<LlmFileUploadOptions>();
+    public static JsonTypeInfo<LlmFileListRequest> LlmFileListRequest => Metadata<LlmFileListRequest>();
+    public static JsonTypeInfo<LlmFilePage> LlmFilePage => Metadata<LlmFilePage>();
+    public static JsonTypeInfo<LlmFileDeletion> LlmFileDeletion => Metadata<LlmFileDeletion>();
+    public static JsonTypeInfo<LlmFileDownloadOptions> LlmFileDownloadOptions => Metadata<LlmFileDownloadOptions>();
+    public static JsonTypeInfo<ResourceDownloadReceipt> ResourceDownloadReceipt => Metadata<ResourceDownloadReceipt>();
+    public static JsonTypeInfo<XaiPublicUrlOptions> XaiPublicUrlOptions => Metadata<XaiPublicUrlOptions>();
+    public static JsonTypeInfo<XaiPublicUrl> XaiPublicUrl => Metadata<XaiPublicUrl>();
+    public static JsonTypeInfo<XaiPublicUrlRevocation> XaiPublicUrlRevocation => Metadata<XaiPublicUrlRevocation>();
+    public static JsonTypeInfo<LlmFileCapabilities> LlmFileCapabilities => Metadata<LlmFileCapabilities>();
+    public static JsonTypeInfo<XaiSkill> XaiSkill => Metadata<XaiSkill>();
+    public static JsonTypeInfo<XaiSkillDeletion> XaiSkillDeletion => Metadata<XaiSkillDeletion>();
+    public static JsonTypeInfo<XaiSkillListRequest> XaiSkillListRequest => Metadata<XaiSkillListRequest>();
+    public static JsonTypeInfo<XaiSkillPage> XaiSkillPage => Metadata<XaiSkillPage>();
+    public static JsonTypeInfo<XaiSkillCapabilities> XaiSkillCapabilities => Metadata<XaiSkillCapabilities>();
     public static JsonTypeInfo<LlmContextCacheCreate> LlmContextCacheCreate => Metadata<LlmContextCacheCreate>();
     public static JsonTypeInfo<LlmContextCacheCreateCorrelation> LlmContextCacheCreateCorrelation => Metadata<LlmContextCacheCreateCorrelation>();
     public static JsonTypeInfo<LlmContextCache> LlmContextCache => Metadata<LlmContextCache>();
@@ -73,6 +97,16 @@ public static class ConnectLlmJson
         options.Converters.Add(new DocumentRagPipelineJsonConverter());
         options.Converters.Add(new CallerEnumConverter<LlmAgentCallerServiceKind>());
         options.Converters.Add(new CallerEnumConverter<LlmAgentPermissionChoiceKind>());
+        options.Converters.Add(new FileOrderJsonConverter());
+        options.Converters.Add(new FileSortJsonConverter());
+        options.Converters.Add(new FileContentFormatJsonConverter());
+        options.Converters.Add(new FileRuntimeJsonConverter<XaiSkillUpload>());
+        options.Converters.Add(new FileRuntimeJsonConverter<XaiSkillZipUpload>());
+        options.Converters.Add(new FileRuntimeJsonConverter<XaiSkillDirectoryFile>());
+        options.Converters.Add(new FileRuntimeJsonConverter<XaiSkillDirectoryUpload>());
+        options.Converters.Add(new FileRuntimeJsonConverter<ILlmFileClient>());
+        options.Converters.Add(new FileRuntimeJsonConverter<IXaiFilePublicUrlClient>());
+        options.Converters.Add(new FileRuntimeJsonConverter<IXaiSkillClient>());
         options.MakeReadOnly();
         return options;
     }
@@ -161,8 +195,31 @@ public static class ConnectLlmJson
 }
 
 [JsonSourceGenerationOptions(GenerationMode = JsonSourceGenerationMode.Metadata,
-    Converters = [typeof(LlmAgentContextJsonConverter)])]
+    Converters = [typeof(LlmAgentContextJsonConverter), typeof(XaiFamilyBindingJsonConverter)])]
 [JsonSerializable(typeof(LlmConnection))]
+[JsonSerializable(typeof(XaiStoragePublicUrlRequest))]
+[JsonSerializable(typeof(XaiStoragePublicUrlFlag))]
+[JsonSerializable(typeof(XaiStoragePublicUrlConfiguration))]
+[JsonSerializable(typeof(XaiFileStorageOptions))]
+[JsonSerializable(typeof(LlmFileOrder))]
+[JsonSerializable(typeof(LlmFileSort))]
+[JsonSerializable(typeof(LlmFileContentFormat))]
+[JsonSerializable(typeof(LlmProviderFile))]
+[JsonSerializable(typeof(LlmFileUploadOptions))]
+[JsonSerializable(typeof(LlmFileListRequest))]
+[JsonSerializable(typeof(LlmFilePage))]
+[JsonSerializable(typeof(LlmFileDeletion))]
+[JsonSerializable(typeof(LlmFileDownloadOptions))]
+[JsonSerializable(typeof(ResourceDownloadReceipt))]
+[JsonSerializable(typeof(XaiPublicUrlOptions))]
+[JsonSerializable(typeof(XaiPublicUrl))]
+[JsonSerializable(typeof(XaiPublicUrlRevocation))]
+[JsonSerializable(typeof(LlmFileCapabilities))]
+[JsonSerializable(typeof(XaiSkill))]
+[JsonSerializable(typeof(XaiSkillDeletion))]
+[JsonSerializable(typeof(XaiSkillListRequest))]
+[JsonSerializable(typeof(XaiSkillPage))]
+[JsonSerializable(typeof(XaiSkillCapabilities))]
 [JsonSerializable(typeof(LlmContextCacheCreate))]
 [JsonSerializable(typeof(LlmContextCacheCreateCorrelation))]
 [JsonSerializable(typeof(LlmContextCache))]
@@ -209,6 +266,7 @@ public static class ConnectLlmJson
 [JsonSerializable(typeof(LlmAgentClientToolDefinition))]
 [JsonSerializable(typeof(LlmAgentToolDefinition))]
 [JsonSerializable(typeof(LlmAgentShellTool))]
+[JsonSerializable(typeof(XaiConnectionSelection))]
 [JsonSerializable(typeof(LlmAccountUsageSnapshot))]
 [JsonSerializable(typeof(LlmSetupConfiguration))]
 [JsonSerializable(typeof(LlmChatRequest))]

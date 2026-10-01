@@ -2,6 +2,7 @@ using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Runtime.Loader;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
 using Darkspyre.Inference.Common.Resources;
 
@@ -87,15 +88,48 @@ public sealed class ResourceJsonTests
     }
 
     [Fact]
-    public void RuntimeAccessHandlesAndExceptionsHaveNoOwnedPortableMetadata()
+    public void ExceptionsHaveNoOwnedPortableMetadata()
     {
         var resolver = InferenceJson.InferenceResourceReference.Options.TypeInfoResolver!;
-        foreach (Type type in new[] { typeof(IInferenceResourceAccess), typeof(IInferenceResourceReadHandle),
-            typeof(IInferenceResourceWriteHandle), typeof(InferenceResourceOperationException),
+        foreach (Type type in new[] { typeof(InferenceResourceOperationException),
             typeof(InferenceResourceOperationCanceledException), typeof(InferenceResourceSelectionConflictException) })
         {
             Assert.Null(resolver.GetTypeInfo(type, InferenceJson.InferenceResourceReference.Options));
         }
+    }
+
+    [Fact]
+    public void RuntimeAuthorityRefusesDirectAndNestedSerializationWithoutEffects() => Assert.Equal(0, ExerciseRuntimeRefusal());
+
+    public static int ExerciseRuntimeRefusal()
+    {
+        var authority = new UntouchableAuthority();
+        JsonSerializerOptions options = InferenceJson.InferenceResourceReference.Options;
+        var consumerOptions = new JsonSerializerOptions(options) { TypeInfoResolver = ResourceRuntimeContext.Default };
+        consumerOptions.MakeReadOnly();
+        foreach (Type type in new[] { typeof(IInferenceResourceAccess), typeof(IInferenceResourceReadHandle), typeof(IInferenceResourceWriteHandle) })
+        {
+            JsonTypeInfo metadata = consumerOptions.GetTypeInfo(type);
+            Assert.Equal(JsonTypeInfoKind.None, metadata.Kind);
+            Assert.Same(typeof(InferenceJson).Assembly, metadata.Converter.GetType().Assembly);
+            Assert.Throws<NotSupportedException>(() => JsonSerializer.Serialize(authority, metadata));
+            Assert.Throws<NotSupportedException>(() => JsonSerializer.Deserialize("{}", metadata));
+            Assert.Equal("null", JsonSerializer.Serialize((object?)null, metadata));
+            Assert.Null(JsonSerializer.Deserialize("null", metadata));
+            Assert.Null(typeof(InferenceJson).GetProperty(type.Name));
+        }
+        JsonTypeInfo<ResourceRuntimeEnvelope> consumer = consumerOptions.GetTypeInfo<ResourceRuntimeEnvelope>();
+        foreach (ResourceRuntimeEnvelope envelope in new[]
+        {
+            new ResourceRuntimeEnvelope { Access = authority },
+            new ResourceRuntimeEnvelope { Read = authority },
+            new ResourceRuntimeEnvelope { Write = authority }
+        }) Assert.Throws<NotSupportedException>(() => JsonSerializer.Serialize(envelope, consumer));
+        foreach (string property in new[] { "Access", "Read", "Write" })
+            Assert.Throws<NotSupportedException>(() => JsonSerializer.Deserialize("{\"" + property + "\":{}}", consumer));
+        const string nulls = "{\"Access\":null,\"Read\":null,\"Write\":null}";
+        Assert.Equal(nulls, JsonSerializer.Serialize(JsonSerializer.Deserialize(nulls, consumer)!, consumer));
+        return authority.Effects;
     }
 
     [Theory]
@@ -116,7 +150,7 @@ public sealed class ResourceJsonTests
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static WeakReference ExerciseForeignGeneration(string name, string json)
     {
-        var generation = new AssemblyLoadContext("Common resource metadata", isCollectible: true);
+        var generation = new ResourceGeneration(Path.GetDirectoryName(typeof(InferenceJson).Assembly.Location)!);
         var weak = new WeakReference(generation);
         try
         {
@@ -131,6 +165,13 @@ public sealed class ResourceJsonTests
             object value = JsonSerializer.Deserialize(json, metadata)!;
             Assert.Same(assembly, value.GetType().Assembly);
             Assert.Equal(json, JsonSerializer.Serialize(value, metadata));
+            Assembly fixture = generation.LoadFromAssemblyPath(typeof(ResourceJsonTests).Assembly.Location);
+            Assert.NotSame(typeof(ResourceJsonTests).Assembly, fixture);
+            Assert.Equal(typeof(ResourceJsonTests).Assembly.ManifestModule.ModuleVersionId, fixture.ManifestModule.ModuleVersionId);
+            Assert.Same(generation, AssemblyLoadContext.GetLoadContext(fixture));
+            MethodInfo refusal = fixture.GetType(typeof(ResourceJsonTests).FullName!, true)!.GetMethod(nameof(ExerciseRuntimeRefusal))!;
+            Assert.Same(fixture, refusal.Module.Assembly);
+            Assert.Equal(0, refusal.Invoke(null, null));
         }
         finally
         {
@@ -145,4 +186,45 @@ public sealed class ResourceJsonTests
         Assert.NotNull(property);
         return Assert.IsAssignableFrom<JsonTypeInfo>(property.GetValue(null));
     }
+
+    private sealed class ResourceGeneration(string directory) : AssemblyLoadContext(isCollectible: true)
+    {
+        protected override Assembly? Load(AssemblyName name)
+        {
+            if (name.Name?.StartsWith("Darkspyre.Inference.", StringComparison.Ordinal) != true) return null;
+            string path = Path.Combine(directory, name.Name + ".dll");
+            return File.Exists(path) ? LoadFromAssemblyPath(path) : null;
+        }
+    }
+
+    private sealed class UntouchableAuthority : IInferenceResourceAccess, IInferenceResourceReadHandle, IInferenceResourceWriteHandle
+    {
+        public int Effects { get; private set; }
+        private InvalidOperationException Touched() { Effects++; return new("Runtime authority was inspected."); }
+        public string WorkspaceId => throw Touched();
+        public string SessionId => throw Touched();
+        public InferenceResourceDescriptor Resource => throw Touched();
+        public InferenceResourceReference Reference => throw Touched();
+        public Stream Content => throw Touched();
+        public Task<InferenceResourceDescriptor?> GetAsync(InferenceResourceReference reference, CancellationToken cancellationToken = default) => throw Touched();
+        public Task<IInferenceResourceReadHandle> OpenReadAsync(InferenceResourceReference reference, CancellationToken cancellationToken = default) => throw Touched();
+        public Task<IInferenceResourceWriteHandle> OpenWriteAsync(InferenceResourceCreate resource, CancellationToken cancellationToken = default) => throw Touched();
+        public Task<InferenceResourceSelection> GetSelectionAsync(CancellationToken cancellationToken = default) => throw Touched();
+        public Task<InferenceResourceSelection> SelectAsync(IReadOnlyList<InferenceResourceReference> references, CancellationToken cancellationToken = default) => throw Touched();
+        public Task<InferenceResourceSelection> ReplaceSelectionAsync(IReadOnlyList<InferenceResourceReference> references, long expectedRevision, CancellationToken cancellationToken = default) => throw Touched();
+        public Task<InferenceResourceCommitResult> CommitAsync(long bytesWritten, InferenceResourceCommitOptions? options = null, CancellationToken cancellationToken = default) => throw Touched();
+        public ValueTask DisposeAsync() => throw Touched();
+        public override string ToString() => throw Touched();
+    }
 }
+
+public sealed record ResourceRuntimeEnvelope
+{
+    public IInferenceResourceAccess? Access { get; init; }
+    public IInferenceResourceReadHandle? Read { get; init; }
+    public IInferenceResourceWriteHandle? Write { get; init; }
+}
+
+[JsonSourceGenerationOptions(GenerationMode = JsonSourceGenerationMode.Metadata)]
+[JsonSerializable(typeof(ResourceRuntimeEnvelope))]
+internal sealed partial class ResourceRuntimeContext : JsonSerializerContext;
