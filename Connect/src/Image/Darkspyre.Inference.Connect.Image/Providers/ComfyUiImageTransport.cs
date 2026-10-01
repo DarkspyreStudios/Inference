@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Net.WebSockets;
@@ -277,7 +278,7 @@ internal sealed class ComfyUiImageTransport(
         string uploadName = BuildReferenceName(reference);
         using HttpClient client = CreateClient(connection);
         using var form = new MultipartFormDataContent();
-        using var image = new StreamContent(content);
+        using var image = new BorrowedStreamContent(content);
         image.Headers.ContentType = new MediaTypeHeaderValue(reference.ContentType);
         form.Add(image, "image", uploadName);
         form.Add(new StringContent("true"), "overwrite");
@@ -751,4 +752,22 @@ internal sealed class ComfyUiImageTransport(
 
     private static string SerializeDiagnostics(string status, string body) =>
         JsonSerializer.Serialize(new ComfyResponseDiagnostics(status, ReadError(body)), ComfyProtocolJsonContext.Default.ComfyResponseDiagnostics);
+
+    private sealed class BorrowedStreamContent(Stream source) : HttpContent
+    {
+        protected override Task SerializeToStreamAsync(Stream stream, TransportContext? context) =>
+            source.CopyToAsync(stream);
+
+        protected override Task SerializeToStreamAsync(
+            Stream stream,
+            TransportContext? context,
+            CancellationToken cancellationToken) =>
+            source.CopyToAsync(stream, cancellationToken);
+
+        protected override bool TryComputeLength(out long length)
+        {
+            length = 0;
+            return false;
+        }
+    }
 }

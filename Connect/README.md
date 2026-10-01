@@ -855,6 +855,10 @@ ImageTransportJobSnapshot status = await transport.GetJobAsync(
 durable recovery but must not interpret them as ComfyUI contracts. The package does not own an image
 database, media library, workflow catalog, cache, or background worker.
 
+ComfyUI reference uploads borrow the input stream. Upload reads from its current position without
+rewinding, flushing, or disposing it, including cancellation and failed uploads. The caller owns
+the stream's eventual disposal.
+
 The shared [`XaiFamilyBinding` contract](docs/media-bindings.md) uses explicit selection and the
 existing credential-access owner. It does not register or qualify an xAI Image transport.
 
