@@ -824,6 +824,30 @@ Launcher tests exercise planning with filesystem fixtures and actual managed arg
 Windows batch execution, cancellation and installed-Node round trips are conditional tests. A
 non-Windows run reports them as skipped; it does not qualify Windows invocation.
 
+## Document search contracts
+
+`IDocumentSearchClient.SearchAsync` declares a connection-selected search over existing provider
+collections. Connect supplies the data contract and owned `ConnectLlmJson` metadata; it does not
+register a document-search implementation or advertise provider availability.
+
+`DocumentSearchRequest` carries ordered collection IDs, an opaque filter, optional grouping and a
+closed hybrid/semantic/keyword retrieval selection. Grouping supports `DocumentMinK` and
+`DocumentMaxK`. Hybrid retrieval accepts model or RRF rerankers; semantic and keyword retrieval
+accept model rerankers only. Optional values remain absent instead of inserting provider defaults.
+The typed xAI ranking and RAG options stay in Connect, not Common.
+
+The records copy supplied lists and metadata dictionaries, including assignments through `with`.
+They preserve order, duplicate collection IDs, raw strings and case-sensitive metadata keys.
+Grouping requires at least one key; aggregate keys may be empty. Aggregate K is positive,
+search multipliers are 1 through 100, and weights are finite values from 0 through 1.
+Weights are not normalized, and RRF K has no local lower bound.
+
+`DocumentSearchMatch` reports finite actual scores without range normalization. Missing `Fields`
+remains null; an observed empty map remains empty. JSON-looking field values remain strings, and
+page zero remains an actual value. Native file/chunk IDs and snippets do not establish workspace
+resource ownership or access to a complete source file. Serialization does not perform search,
+resolve credentials, fetch files, group results or evaluate filters.
+
 ## Image provider integration
 
 Register the image capability and resolve its provider-neutral transport through
