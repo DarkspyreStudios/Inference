@@ -329,6 +329,12 @@ for every listing, including entries replaced by an edit or refresh. A cancelled
 its own wait. A provider that ignores owner cancellation keeps retirement pending until its call
 ends; its late result is not published. Abandoned provider faults are observed.
 
+LLM settings actions and model-choice queries own the temporary provider facade they create. Each
+operation retires that facade and its private catalog cache before returning, including cancellation
+and failure paths. Cancelled discovery waits for its provider listing to drain; an ignoring provider
+keeps the operation pending until it returns. Injected clients and authenticators remain borrowed.
+Another settings operation creates a fresh facade and can reuse those clients.
+
 Use asynchronous disposal while provider work is active. Consume or dispose active stream
 enumerators so their owned operations can leave. Disposal does not report completion while an
 operation remains active. A registration owner disposes its shared cache; sharing a cache across

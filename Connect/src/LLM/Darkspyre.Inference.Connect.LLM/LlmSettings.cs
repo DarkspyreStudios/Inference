@@ -546,7 +546,7 @@ public sealed class LlmSettingsManager : InferenceSettingsManager<LlmSettings, L
     protected override async Task<SetupActionResult> RunCoreAsync(LlmSettings settings, SetupActionDescriptor action,
         IProgress<SetupProgress>? progress, CancellationToken cancellationToken)
     {
-        LlmProviderService service = Service(settings);
+        await using LlmProviderService service = Service(settings);
         switch (action.Id)
         {
             case "authorize":
@@ -583,16 +583,18 @@ public sealed class LlmSettingsManager : InferenceSettingsManager<LlmSettings, L
             case "aws-region" when environment is not null:
                 return InferenceSettings.Page(query, await environment.GetRegionsAsync(settings.AwsProfile, cancellationToken).ConfigureAwait(false));
             case "model":
-                LlmProviderService service = Service(settings);
-                LlmProviderCapabilities capabilities = await service.GetCapabilitiesAsync(settings.Identity.Id, cancellationToken).ConfigureAwait(false);
-                if (!capabilities.SupportsModelListing)
                 {
-                    return new([], State: SetupChoiceState.Unavailable,
-                        Issues: [new("manual-model", "This connection requires manual model entry.", "model", Severity: SetupIssueSeverity.Warning)]);
+                    await using LlmProviderService service = Service(settings);
+                    LlmProviderCapabilities capabilities = await service.GetCapabilitiesAsync(settings.Identity.Id, cancellationToken).ConfigureAwait(false);
+                    if (!capabilities.SupportsModelListing)
+                    {
+                        return new([], State: SetupChoiceState.Unavailable,
+                            Issues: [new("manual-model", "This connection requires manual model entry.", "model", Severity: SetupIssueSeverity.Warning)]);
+                    }
+                    IReadOnlyList<LlmModel> models = await service.ListModelsAsync(settings.Identity.Id, cancellationToken).ConfigureAwait(false);
+                    return InferenceSettings.Page(query, models.Select(model => new SetupChoice(model.Id, model.DisplayName, model.AvailabilityReason ?? model.OwnedBy))
+                        .OrderBy(choice => choice.Value, StringComparer.Ordinal));
                 }
-                IReadOnlyList<LlmModel> models = await service.ListModelsAsync(settings.Identity.Id, cancellationToken).ConfigureAwait(false);
-                return InferenceSettings.Page(query, models.Select(model => new SetupChoice(model.Id, model.DisplayName, model.AvailabilityReason ?? model.OwnedBy))
-                    .OrderBy(choice => choice.Value, StringComparer.Ordinal));
             default:
                 return new([], State: SetupChoiceState.Unavailable);
         }

@@ -412,6 +412,99 @@ public sealed class LlmSettingsTests
         }
     }
 
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public async Task FinishedSettingsOperationsRetireTheirPrivateCatalogOwner(bool query, bool fail)
+    {
+        var client = new ListingClient { ReleaseImmediately = true, Failure = fail ? new IOException("controlled listing failure") : null };
+        await using var provider = new LlmProviderService(new UnusedSource(), [client]);
+        var (manager, settings) = await OpenAsync(provider, client.Transport,
+            new(SetupChangeIntent.Edit, "id", "v1"), new Target(), Connection(client.Transport, "key"), "model");
+
+        if (query)
+            Assert.Equal(fail ? SetupChoiceState.Failed : SetupChoiceState.Completed, (await manager.QueryChoicesAsync(settings, "model", new())).State);
+        else
+            Assert.Equal(fail ? SetupActionState.Failed : SetupActionState.Completed, (await manager.RunAsync(settings, "check")).State);
+
+        CancellationToken token = await client.Entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.True(token.IsCancellationRequested);
+        Assert.False(client.Disposed);
+    }
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public async Task CancelledSettingsOperationsDrainTheirPrivateCatalogOwner(bool query, bool ignoreCancellation)
+    {
+        var client = new ListingClient { IgnoreCancellation = ignoreCancellation };
+        await using var provider = new LlmProviderService(new UnusedSource(), [client]);
+        var (manager, settings) = await OpenAsync(provider, client.Transport,
+            new(SetupChangeIntent.Edit, "id", "v1"), new Target(), Connection(client.Transport, "key"), "model");
+        using var caller = new CancellationTokenSource();
+        Task<SetupChoicePage>? choices = query ? manager.QueryChoicesAsync(settings, "model", new(), caller.Token) : null;
+        Task<SetupActionResult>? action = query ? null : manager.RunAsync(settings, "check", cancellationToken: caller.Token);
+        Task operation = (Task?)choices ?? action!;
+        CancellationToken token = await client.Entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.False(token.IsCancellationRequested);
+        try
+        {
+            await caller.CancelAsync();
+            using var bound = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            while (!token.IsCancellationRequested) await Task.Delay(10, bound.Token);
+            if (ignoreCancellation) Assert.False(operation.IsCompleted);
+            client.Release.TrySetResult();
+            await operation.WaitAsync(bound.Token);
+            if (query) Assert.Equal(SetupChoiceState.Cancelled, (await choices!).State);
+            else Assert.Equal(SetupActionState.Cancelled, (await action!).State);
+            Assert.False(client.Disposed);
+            Assert.NotEqual(true, settings.Status.Authenticated.Value);
+
+            Assert.Equal(SetupChoiceState.Completed, (await manager.QueryChoicesAsync(settings, "model", new())).State);
+            Assert.Equal(2, client.Calls);
+            Assert.False(client.Disposed);
+        }
+        finally
+        {
+            client.Release.TrySetResult();
+            await operation.WaitAsync(TimeSpan.FromSeconds(5));
+        }
+    }
+
+    private sealed class ListingClient : ILlmClient, IDisposable
+    {
+        public TaskCompletionSource<CancellationToken> Entered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public bool ReleaseImmediately { get; init; }
+        public bool IgnoreCancellation { get; init; }
+        public Exception? Failure { get; init; }
+        public bool Disposed { get; private set; }
+        public int Calls { get; private set; }
+        public LlmTransport Transport => LlmTransport.OpenAiResponses;
+        public LlmProviderDefinition ProviderDefinition => ProviderDefinitions.OpenAiApiKey;
+        public LlmProviderCapabilities GetCapabilities(LlmConnection connection, string? modelId = null) => new() { SupportsModelListing = true };
+
+        public async Task<IReadOnlyList<LlmModel>> ListModelsAsync(LlmConnection connection, CancellationToken cancellationToken = default)
+        {
+            Calls++;
+            Entered.TrySetResult(cancellationToken);
+            if (Failure is not null) throw Failure;
+            if (ReleaseImmediately) return [new("model", "Model")];
+            if (IgnoreCancellation) await Release.Task;
+            else await Release.Task.WaitAsync(cancellationToken);
+            return [new("model", "Model")];
+        }
+
+        public IAsyncEnumerable<LlmStreamEvent> StreamAsync(LlmConnection connection, LlmChatRequest request,
+            CancellationToken cancellationToken = default) => throw new NotSupportedException();
+
+        public void Dispose() => Disposed = true;
+    }
+
     private sealed class BrowserAuth : IClaudePkceLogin
     {
         public int Completed { get; private set; }
