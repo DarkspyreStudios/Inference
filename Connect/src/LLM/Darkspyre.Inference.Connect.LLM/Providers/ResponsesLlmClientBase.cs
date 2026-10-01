@@ -16,7 +16,7 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
     {
         LlmProviderCapabilities capabilities = GetCapabilities(connection, request.ModelId);
         ValidateRequest(connection, request, capabilities);
-        ValidateSampling(request);
+        ValidateModelSampling(connection, request);
         var enforcement = request.StructuredOutput is null ? (LlmStructuredOutputEnforcement?)null
             : StructuredOutput.ResolveEnforcement(request.StructuredOutput, capabilities);
         JsonObject payload = BuildPayload(connection, request, enforcement, capabilities.SupportsStreaming);
@@ -71,7 +71,7 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
     {
         LlmProviderCapabilities capabilities = GetCapabilities(connection, request.ModelId);
         ValidateRequest(connection, request, capabilities);
-        ValidateSampling(request);
+        ValidateModelSampling(connection, request);
         LlmStructuredOutputEnforcement? enforcement = request.StructuredOutput is null
             ? null
             : StructuredOutput.ResolveEnforcement(request.StructuredOutput, capabilities);
@@ -80,7 +80,7 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
         RequestJson.ApplyProviderOptions(payload, connection, request);
         using var httpRequest = new HttpRequestMessage(
             HttpMethod.Post,
-            ProviderHttp.BuildUri(connection, "responses"))
+            BuildRequestUri(connection, request))
         {
             Content = JsonContent.Create(payload)
         };
@@ -262,13 +262,16 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
         OpenAiRateLimitHeaders.Parse(response.Headers, DateTimeOffset.UtcNow);
 
     /// <summary>OpenAI Responses applies its per-model sampling rule. Codex accepts no temperature at all.</summary>
-    private void ValidateSampling(LlmChatRequest request)
+    protected virtual void ValidateModelSampling(LlmConnection connection, LlmChatRequest request)
     {
         if (Transport == LlmTransport.OpenAiResponses)
         {
             OpenAiModelProfiles.ValidateSampling(request);
         }
     }
+
+    protected virtual Uri BuildRequestUri(LlmConnection connection, LlmChatRequest request) =>
+        ProviderHttp.BuildUri(connection, "responses");
 
     /// <summary>
     /// Maps a response that arrived as one Response object. Reasoning comes from the reasoning items in output order.
