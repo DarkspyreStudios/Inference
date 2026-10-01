@@ -18,6 +18,42 @@ public static class ConnectLlmJson
     public static JsonTypeInfo<LlmContextCacheList> LlmContextCacheList => Metadata<LlmContextCacheList>();
     public static JsonTypeInfo<LlmContextCachePage> LlmContextCachePage => Metadata<LlmContextCachePage>();
     public static JsonTypeInfo<LlmContextCacheDeleteResult> LlmContextCacheDeleteResult => Metadata<LlmContextCacheDeleteResult>();
+    public static JsonTypeInfo<LlmAgentShellRequest> LlmAgentShellRequest => Metadata<LlmAgentShellRequest>();
+    public static JsonTypeInfo<LlmAgentCallerServiceKind> LlmAgentCallerServiceKind => Metadata<LlmAgentCallerServiceKind>();
+    public static JsonTypeInfo<LlmAgentPermissionChoiceKind> LlmAgentPermissionChoiceKind => Metadata<LlmAgentPermissionChoiceKind>();
+    public static JsonTypeInfo<LlmAgentPermissionResult> LlmAgentPermissionResult => Metadata<LlmAgentPermissionResult>();
+    public static JsonTypeInfo<LlmAgentToolPresentationContent> LlmAgentToolPresentationContent => Metadata<LlmAgentToolPresentationContent>();
+    public static JsonTypeInfo<LlmAgentPresentedContentBlock> LlmAgentPresentedContentBlock => Metadata<LlmAgentPresentedContentBlock>();
+    public static JsonTypeInfo<LlmAgentPresentedResourceBody> LlmAgentPresentedResourceBody => Metadata<LlmAgentPresentedResourceBody>();
+    public static JsonTypeInfo<LlmAgentPermissionCancelled> LlmAgentPermissionCancelled => Metadata<LlmAgentPermissionCancelled>();
+    public static JsonTypeInfo<LlmAgentCallbackScope> LlmAgentCallbackScope => Metadata<LlmAgentCallbackScope>();
+    public static JsonTypeInfo<LlmAgentPermissionChoice> LlmAgentPermissionChoice => Metadata<LlmAgentPermissionChoice>();
+    public static JsonTypeInfo<LlmAgentPermissionRequest> LlmAgentPermissionRequest => Metadata<LlmAgentPermissionRequest>();
+    public static JsonTypeInfo<LlmAgentPermissionSelected> LlmAgentPermissionSelected => Metadata<LlmAgentPermissionSelected>();
+    public static JsonTypeInfo<LlmAgentToolLocation> LlmAgentToolLocation => Metadata<LlmAgentToolLocation>();
+    public static JsonTypeInfo<LlmAgentToolPresentedContent> LlmAgentToolPresentedContent => Metadata<LlmAgentToolPresentedContent>();
+    public static JsonTypeInfo<LlmAgentToolPresentedDiff> LlmAgentToolPresentedDiff => Metadata<LlmAgentToolPresentedDiff>();
+    public static JsonTypeInfo<LlmAgentToolPresentedTerminal> LlmAgentToolPresentedTerminal => Metadata<LlmAgentToolPresentedTerminal>();
+    public static JsonTypeInfo<LlmAgentContentAnnotations> LlmAgentContentAnnotations => Metadata<LlmAgentContentAnnotations>();
+    public static JsonTypeInfo<LlmAgentPresentedText> LlmAgentPresentedText => Metadata<LlmAgentPresentedText>();
+    public static JsonTypeInfo<LlmAgentPresentedImage> LlmAgentPresentedImage => Metadata<LlmAgentPresentedImage>();
+    public static JsonTypeInfo<LlmAgentPresentedAudio> LlmAgentPresentedAudio => Metadata<LlmAgentPresentedAudio>();
+    public static JsonTypeInfo<LlmAgentPresentedResourceLink> LlmAgentPresentedResourceLink => Metadata<LlmAgentPresentedResourceLink>();
+    public static JsonTypeInfo<LlmAgentPresentedResourceText> LlmAgentPresentedResourceText => Metadata<LlmAgentPresentedResourceText>();
+    public static JsonTypeInfo<LlmAgentPresentedResourceBytes> LlmAgentPresentedResourceBytes => Metadata<LlmAgentPresentedResourceBytes>();
+    public static JsonTypeInfo<LlmAgentPresentedEmbeddedResource> LlmAgentPresentedEmbeddedResource => Metadata<LlmAgentPresentedEmbeddedResource>();
+    public static JsonTypeInfo<LlmAgentTextFileReadRequest> LlmAgentTextFileReadRequest => Metadata<LlmAgentTextFileReadRequest>();
+    public static JsonTypeInfo<LlmAgentTextFileWriteRequest> LlmAgentTextFileWriteRequest => Metadata<LlmAgentTextFileWriteRequest>();
+    public static JsonTypeInfo<LlmAgentTextFileWriteResult> LlmAgentTextFileWriteResult => Metadata<LlmAgentTextFileWriteResult>();
+    public static JsonTypeInfo<LlmAgentEnvironmentVariable> LlmAgentEnvironmentVariable => Metadata<LlmAgentEnvironmentVariable>();
+    public static JsonTypeInfo<LlmAgentTerminalCreateRequest> LlmAgentTerminalCreateRequest => Metadata<LlmAgentTerminalCreateRequest>();
+    public static JsonTypeInfo<LlmAgentTerminalExit> LlmAgentTerminalExit => Metadata<LlmAgentTerminalExit>();
+    public static JsonTypeInfo<LlmAgentTerminalOutput> LlmAgentTerminalOutput => Metadata<LlmAgentTerminalOutput>();
+    public static JsonTypeInfo<LlmAgentToolPresentation> LlmAgentToolPresentation => Metadata<LlmAgentToolPresentation>();
+    public static JsonTypeInfo<LlmAgentRuntimePolicy> LlmAgentRuntimePolicy => Metadata<LlmAgentRuntimePolicy>();
+    public static JsonTypeInfo<LlmAgentHostRuntimePolicy> LlmAgentHostRuntimePolicy => Metadata<LlmAgentHostRuntimePolicy>();
+    public static JsonTypeInfo<LlmAgentProviderRuntimePolicy> LlmAgentProviderRuntimePolicy => Metadata<LlmAgentProviderRuntimePolicy>();
+    public static JsonTypeInfo<LlmAgentRuntimePolicyKind> LlmAgentRuntimePolicyKind => Metadata<LlmAgentRuntimePolicyKind>();
     public static JsonTypeInfo<LlmAgentClientToolDefinition> LlmAgentClientToolDefinition => Metadata<LlmAgentClientToolDefinition>();
     public static JsonTypeInfo<LlmAgentToolDefinition> LlmAgentToolDefinition => Metadata<LlmAgentToolDefinition>();
     public static JsonTypeInfo<LlmAgentShellTool> LlmAgentShellTool => Metadata<LlmAgentShellTool>();
@@ -35,6 +71,8 @@ public static class ConnectLlmJson
         }
         options.Converters.Add(new DocumentRankingMetricJsonConverter());
         options.Converters.Add(new DocumentRagPipelineJsonConverter());
+        options.Converters.Add(new CallerEnumConverter<LlmAgentCallerServiceKind>());
+        options.Converters.Add(new CallerEnumConverter<LlmAgentPermissionChoiceKind>());
         options.MakeReadOnly();
         return options;
     }
@@ -43,12 +81,24 @@ public static class ConnectLlmJson
     {
         public JsonTypeInfo? GetTypeInfo(Type type, JsonSerializerOptions options)
         {
+            if (LlmAgentCallerJson.RuntimeMetadata(type, options) is { } runtime) return runtime;
             var metadata = ((IJsonTypeInfoResolver)ConnectLlmJsonContext.Default).GetTypeInfo(type, options);
+            if (type == typeof(LlmAgentRuntimePolicy) && metadata is not null)
+                metadata.PolymorphismOptions = new JsonPolymorphismOptions
+                {
+                    TypeDiscriminatorPropertyName = "type",
+                    DerivedTypes =
+                    {
+                        new JsonDerivedType(typeof(LlmAgentHostRuntimePolicy), "host-controlled"),
+                        new JsonDerivedType(typeof(LlmAgentProviderRuntimePolicy), "provider-configured")
+                    }
+                };
             if (type == typeof(LlmHostedTool) && metadata?.PolymorphismOptions is { } polymorphism)
             {
                 polymorphism.DerivedTypes.Add(new JsonDerivedType(typeof(XaiXSearchTool), "xai-x-search"));
             }
-            if (type == typeof(LlmHostedImageOutput) && metadata is not null)
+            if (metadata is not null && (type == typeof(LlmHostedImageOutput) || type == typeof(LlmAgentPresentedImage)
+                || type == typeof(LlmAgentPresentedAudio) || type == typeof(LlmAgentPresentedResourceBytes)))
                 metadata.Properties.Single(property => property.Name == "Data").CustomConverter =
                     InferenceJson.LlmHostedImageOutput.Properties.Single(property => property.Name == "Data").CustomConverter;
             if (metadata is not null && (type == typeof(LlmAgentHostedToolCallStartedEvent) || type == typeof(LlmAgentHostedToolCallProgressEvent)
@@ -119,6 +169,42 @@ public static class ConnectLlmJson
 [JsonSerializable(typeof(LlmContextCacheList))]
 [JsonSerializable(typeof(LlmContextCachePage))]
 [JsonSerializable(typeof(LlmContextCacheDeleteResult))]
+[JsonSerializable(typeof(LlmAgentShellRequest))]
+[JsonSerializable(typeof(LlmAgentCallerServiceKind))]
+[JsonSerializable(typeof(LlmAgentPermissionChoiceKind))]
+[JsonSerializable(typeof(LlmAgentPermissionResult))]
+[JsonSerializable(typeof(LlmAgentToolPresentationContent))]
+[JsonSerializable(typeof(LlmAgentPresentedContentBlock))]
+[JsonSerializable(typeof(LlmAgentPresentedResourceBody))]
+[JsonSerializable(typeof(LlmAgentPermissionCancelled))]
+[JsonSerializable(typeof(LlmAgentCallbackScope))]
+[JsonSerializable(typeof(LlmAgentPermissionChoice))]
+[JsonSerializable(typeof(LlmAgentPermissionRequest))]
+[JsonSerializable(typeof(LlmAgentPermissionSelected))]
+[JsonSerializable(typeof(LlmAgentToolLocation))]
+[JsonSerializable(typeof(LlmAgentToolPresentedContent))]
+[JsonSerializable(typeof(LlmAgentToolPresentedDiff))]
+[JsonSerializable(typeof(LlmAgentToolPresentedTerminal))]
+[JsonSerializable(typeof(LlmAgentContentAnnotations))]
+[JsonSerializable(typeof(LlmAgentPresentedText))]
+[JsonSerializable(typeof(LlmAgentPresentedImage))]
+[JsonSerializable(typeof(LlmAgentPresentedAudio))]
+[JsonSerializable(typeof(LlmAgentPresentedResourceLink))]
+[JsonSerializable(typeof(LlmAgentPresentedResourceText))]
+[JsonSerializable(typeof(LlmAgentPresentedResourceBytes))]
+[JsonSerializable(typeof(LlmAgentPresentedEmbeddedResource))]
+[JsonSerializable(typeof(LlmAgentTextFileReadRequest))]
+[JsonSerializable(typeof(LlmAgentTextFileWriteRequest))]
+[JsonSerializable(typeof(LlmAgentTextFileWriteResult))]
+[JsonSerializable(typeof(LlmAgentEnvironmentVariable))]
+[JsonSerializable(typeof(LlmAgentTerminalCreateRequest))]
+[JsonSerializable(typeof(LlmAgentTerminalExit))]
+[JsonSerializable(typeof(LlmAgentTerminalOutput))]
+[JsonSerializable(typeof(LlmAgentToolPresentation))]
+[JsonSerializable(typeof(LlmAgentRuntimePolicy))]
+[JsonSerializable(typeof(LlmAgentHostRuntimePolicy))]
+[JsonSerializable(typeof(LlmAgentProviderRuntimePolicy))]
+[JsonSerializable(typeof(LlmAgentRuntimePolicyKind))]
 [JsonSerializable(typeof(LlmAgentClientToolDefinition))]
 [JsonSerializable(typeof(LlmAgentToolDefinition))]
 [JsonSerializable(typeof(LlmAgentShellTool))]

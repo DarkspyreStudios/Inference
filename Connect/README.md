@@ -1074,6 +1074,26 @@ implement dispatch tracking, automatic retries, reconciliation or paid cache cre
 
 ### Tool output
 
+`LlmAgentCallerServices` groups borrowed permission, text-file, terminal-factory, shell-executor
+and resource-access interfaces. The typed callback DTOs preserve actual session/turn scope,
+informational content/diffs/locations, raw JSON, ordered permission choices and artifact descriptors.
+New DTOs copy lists, binary data and JSON values on constructor/init/with assignment. Diagnostic
+strings omit callback contents, paths and environment values. File read StartLine is one-based;
+MaxLines=0 remains zero. Terminal OutputByteLimit preserves nullable/zero/64-bit values.
+Absolute POSIX, Windows drive-rooted and server/share UNC path text survives across decoding hosts
+without normalization or filesystem access. File URLs and relative paths are not operational paths.
+
+Factories and caller services remain borrowed. A returned terminal handle is owned by its session;
+Kill preserves readability, while DisposeAsync must kill/drain and invalidate that handle. These
+interfaces contain no filesystem, process or shell implementation. Current Start/Resume options do
+not yet accept the composition, and no runtime advertises these services.
+
+`ConnectLlmJson` exports the callback data through exact type-name getters and closed fixed unions.
+Runtime services have no public metadata getters. Their internal owned codecs refuse all non-null
+read/write without invoking callbacks or diagnostic methods. Start/Resume are not data-codec roots.
+Callback RuntimePolicy uses fixed `host-controlled` and `provider-configured` variants. Scope data
+freezes caller-selected policy roots and does not grant filesystem or resource access.
+
 `LlmAgentClientToolDefinition` is a closed function/shell data union. The existing
 `LlmAgentToolDefinition` retains its schema, strictness, deferred-loading and sequential-execution
 fields. `LlmAgentShellTool` wraps the Common shell definition. `ConnectLlmJson` exports these three
