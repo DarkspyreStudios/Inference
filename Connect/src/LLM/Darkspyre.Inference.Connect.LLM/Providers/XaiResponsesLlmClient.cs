@@ -1,5 +1,6 @@
 using System.Collections.Frozen;
 using System.Net.Http.Headers;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Darkspyre.Inference.Common;
@@ -9,7 +10,7 @@ using Darkspyre.Inference.Connect.LLM.Internal;
 namespace Darkspyre.Inference.Connect.LLM.Providers;
 
 /// <summary>OAuth-only Grok Responses adapter. The facade owns its published chat catalog.</summary>
-internal sealed class XaiResponsesLlmClient(HttpClient http) : ResponsesLlmClientBase(http), ILlmCatalogCapabilities
+internal sealed class XaiResponsesLlmClient(HttpClient http) : ResponsesLlmClientBase(http), ILlmCatalogCapabilities, ILlmTextTokenizerClient
 {
     private const int MaxImageBytes = 20 * 1024 * 1024;
     private static readonly FrozenSet<string> ReservedOptions = new[]
@@ -125,6 +126,64 @@ internal sealed class XaiResponsesLlmClient(HttpClient http) : ResponsesLlmClien
 
     protected override void ApplyRequestHeaders(HttpRequestMessage message, LlmConnection connection, LlmChatRequest request) =>
         ApplyHeaders(message, connection, message.Method == HttpMethod.Post && GetCapabilities(connection, request.ModelId).SupportsStreaming);
+
+    public async Task<LlmTokenization> TokenizeAsync(LlmConnection connection, string modelId, string text,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        ArgumentException.ThrowIfNullOrWhiteSpace(modelId);
+        ArgumentNullException.ThrowIfNull(text);
+        _ = Authorization(connection);
+        using var request = new HttpRequestMessage(HttpMethod.Post, ProviderHttp.BuildUri(connection, "tokenize-text"));
+        ApplyHeaders(request, connection, false);
+        // Plain text and model identity are opaque data; changing either changes the provider's tokens.
+        var payload = new JsonObject { ["model"] = modelId, ["text"] = text };
+        request.Content = new StringContent(payload.ToJsonString(), Encoding.UTF8, "application/json");
+        using HttpResponseMessage response = await Http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken)
+            .ConfigureAwait(false);
+        cancellationToken.ThrowIfCancellationRequested();
+        await XaiErrorClassifier.ThrowIfUnsuccessfulAsync(response, LlmCredential.Parse(connection.Credential), [], cancellationToken)
+            .ConfigureAwait(false);
+        cancellationToken.ThrowIfCancellationRequested();
+        string body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+        cancellationToken.ThrowIfCancellationRequested();
+        try
+        {
+            using JsonDocument document = JsonDocument.Parse(body);
+            if (document.RootElement.ValueKind != JsonValueKind.Object
+                || !document.RootElement.TryGetProperty("token_ids", out JsonElement entries)
+                || entries.ValueKind != JsonValueKind.Array)
+                throw InvalidTokens();
+            var tokens = new List<LlmToken>(entries.GetArrayLength());
+            foreach (JsonElement entry in entries.EnumerateArray())
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (entry.ValueKind != JsonValueKind.Object
+                    || !entry.TryGetProperty("token_id", out JsonElement id) || !id.TryGetUInt32(out uint number)
+                    || !entry.TryGetProperty("string_token", out JsonElement display) || display.ValueKind != JsonValueKind.String
+                    || !entry.TryGetProperty("token_bytes", out JsonElement bytes) || bytes.ValueKind != JsonValueKind.Array)
+                    throw InvalidTokens();
+                var data = new byte[bytes.GetArrayLength()];
+                int index = 0;
+                foreach (JsonElement item in bytes.EnumerateArray())
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    if (!item.TryGetByte(out byte value)) throw InvalidTokens();
+                    data[index++] = value;
+                }
+                tokens.Add(new(number, display.GetString()!, data));
+            }
+            cancellationToken.ThrowIfCancellationRequested();
+            return new(tokens.ToArray());
+        }
+        catch (Exception error) when (error is JsonException or InvalidOperationException or FormatException)
+        {
+            throw InvalidTokens();
+        }
+
+        LlmProviderException InvalidTokens() => ProtocolException(
+            "Grok tokenization returned an invalid token sequence.", response, string.Empty, LlmCredential.Parse(connection.Credential));
+    }
 
     public override async Task<IReadOnlyList<LlmModel>> ListModelsAsync(LlmConnection connection, CancellationToken cancellationToken = default)
     {

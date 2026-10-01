@@ -8,7 +8,7 @@ namespace Darkspyre.Inference.Connect.LLM;
 /// Resolves one configured connection and dispatches to exactly one matching transport. It never
 /// retries against, or falls back to, another provider.
 /// </summary>
-public sealed class LlmProviderService : IDisposable, IAsyncDisposable
+public sealed class LlmProviderService : ILlmTextTokenizer, IDisposable, IAsyncDisposable
 {
     private readonly ILlmConnectionSource _connections;
     private readonly Dictionary<LlmTransport, ILlmClient> _clients;
@@ -215,7 +215,7 @@ public sealed class LlmProviderService : IDisposable, IAsyncDisposable
     {
         using var operation = _lifetime.Enter(cancellationToken);
         LlmDeviceCode code = await XaiLogin().StartAsync(operation.Token).ConfigureAwait(false);
-        ThrowIfXaiOperationCanceled(operation.Token);
+        ThrowIfOperationCanceled(operation.Token);
         return code;
     }
 
@@ -233,14 +233,14 @@ public sealed class LlmProviderService : IDisposable, IAsyncDisposable
         ArgumentException.ThrowIfNullOrWhiteSpace(userCode);
         LlmConnection connection = await RequireExpectedVersionAsync(connectionId, expectedVersion, cancellationToken)
             .ConfigureAwait(false);
-        ThrowIfXaiOperationCanceled(cancellationToken);
+        ThrowIfOperationCanceled(cancellationToken);
         if (connection.Transport != LlmTransport.XaiResponses)
             throw new InvalidOperationException("Grok OAuth can be attached only to an xAI connection.");
         LlmCredential credential = await XaiLogin().CompleteAsync(deviceAuthId, userCode, cancellationToken)
             .ConfigureAwait(false);
-        ThrowIfXaiOperationCanceled(cancellationToken);
+        ThrowIfOperationCanceled(cancellationToken);
         await SaveXaiCredentialAsync(connectionId, connection.Version, credential, cancellationToken).ConfigureAwait(false);
-        ThrowIfXaiOperationCanceled(cancellationToken);
+        ThrowIfOperationCanceled(cancellationToken);
     }
 
     /// <summary>Starts the optional OAuth flow used only for Claude subscription model discovery.</summary>
@@ -363,15 +363,15 @@ public sealed class LlmProviderService : IDisposable, IAsyncDisposable
                 break;
 
             case LlmTransport.XaiResponses:
-                ThrowIfXaiOperationCanceled(cancellationToken);
+                ThrowIfOperationCanceled(cancellationToken);
                 LlmDeviceCode xaiCode = await XaiLogin().StartAsync(cancellationToken).ConfigureAwait(false);
-                ThrowIfXaiOperationCanceled(cancellationToken);
+                ThrowIfOperationCanceled(cancellationToken);
                 await prompt.ShowDeviceCodeAsync(xaiCode, cancellationToken).ConfigureAwait(false);
-                ThrowIfXaiOperationCanceled(cancellationToken);
+                ThrowIfOperationCanceled(cancellationToken);
                 LlmCredential xaiCredential = await PollXaiAsync(xaiCode, cancellationToken).ConfigureAwait(false);
-                ThrowIfXaiOperationCanceled(cancellationToken);
+                ThrowIfOperationCanceled(cancellationToken);
                 await SaveXaiCredentialAsync(connectionId, connection.Version, xaiCredential, cancellationToken).ConfigureAwait(false);
-                ThrowIfXaiOperationCanceled(cancellationToken);
+                ThrowIfOperationCanceled(cancellationToken);
                 break;
 
             case LlmTransport.AnthropicClaudeCli:
@@ -484,6 +484,33 @@ public sealed class LlmProviderService : IDisposable, IAsyncDisposable
                 : streamEvent;
         }
         cancellationToken.ThrowIfCancellationRequested();
+    }
+
+    /// <summary>Tokenizes only the supplied plain text. No request projection, catalog, usage or estimate is substituted.</summary>
+    public async Task<LlmTokenization> TokenizeAsync(string connectionId, string modelId, string text,
+        CancellationToken cancellationToken = default)
+    {
+        using var operation = _lifetime.Enter(cancellationToken);
+        cancellationToken = operation.Token;
+        ArgumentException.ThrowIfNullOrWhiteSpace(connectionId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(modelId);
+        ArgumentNullException.ThrowIfNull(text);
+        LlmConnection connection = await LlmConnectionResolver.ResolveAsync(_connections, connectionId, cancellationToken);
+        ThrowIfOperationCanceled(cancellationToken);
+        ILlmClient client = ClientFor(connection.Transport);
+        if (client is not ILlmTextTokenizerClient tokenizer)
+            throw new NotSupportedException("This route does not implement plain-text tokenization.");
+        connection = await _connectionAccess.RefreshAsync(connectionId, connection, cancellationToken);
+        ThrowIfOperationCanceled(cancellationToken);
+        LlmTokenization result;
+        try { result = await tokenizer.TokenizeAsync(connection, modelId, text, cancellationToken).ConfigureAwait(false); }
+        catch
+        {
+            ThrowIfOperationCanceled(cancellationToken);
+            throw;
+        }
+        ThrowIfOperationCanceled(cancellationToken);
+        return result;
     }
 
     /// <summary>
@@ -855,44 +882,44 @@ public sealed class LlmProviderService : IDisposable, IAsyncDisposable
     {
         while (true)
         {
-            ThrowIfXaiOperationCanceled(token);
+            ThrowIfOperationCanceled(token);
             await XaiDevicePolling.WaitAsync(code, token).ConfigureAwait(false);
-            ThrowIfXaiOperationCanceled(token);
+            ThrowIfOperationCanceled(token);
             try
             {
                 LlmCredential credential = await XaiLogin().CompleteAsync(code.DeviceAuthId, code.UserCode, token).ConfigureAwait(false);
-                ThrowIfXaiOperationCanceled(token);
+                ThrowIfOperationCanceled(token);
                 return credential;
             }
             catch (LlmAuthPendingException pending)
             {
-                ThrowIfXaiOperationCanceled(token);
+                ThrowIfOperationCanceled(token);
                 code = XaiDevicePolling.AfterPending(code, pending);
             }
         }
     }
 
-    private void ThrowIfXaiOperationCanceled(CancellationToken token)
+    private void ThrowIfOperationCanceled(CancellationToken token)
     {
         token.ThrowIfCancellationRequested();
         // The owner fence is synchronous; linked stop-token callbacks can still be pending.
         try { _lifetime.ThrowIfStopping(); }
         catch (ObjectDisposedException error)
         {
-            throw new OperationCanceledException("Grok sign-in was canceled by facade retirement.", error, token);
+            throw new OperationCanceledException("The operation was canceled by facade retirement.", error, token);
         }
     }
 
     private async Task SaveXaiCredentialAsync(string connectionId, string version, LlmCredential credential, CancellationToken token)
     {
-        ThrowIfXaiOperationCanceled(token);
+        ThrowIfOperationCanceled(token);
         if (string.IsNullOrWhiteSpace(credential.OAuth?.AccessToken)
             || !string.IsNullOrEmpty(credential.ApiKey) || credential.SecretHeaders.Count != 0)
             throw new InvalidOperationException("Grok sign-in did not return an OAuth credential.");
         string serialized = credential.Serialize();
-        ThrowIfXaiOperationCanceled(token);
+        ThrowIfOperationCanceled(token);
         await _connections.SaveCredentialAsync(connectionId, serialized, version, token).ConfigureAwait(false);
-        ThrowIfXaiOperationCanceled(token);
+        ThrowIfOperationCanceled(token);
     }
 
     private ILlmClient ClientFor(LlmTransport transport) =>
