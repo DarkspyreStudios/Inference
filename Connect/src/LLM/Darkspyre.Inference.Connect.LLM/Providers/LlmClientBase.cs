@@ -197,6 +197,7 @@ internal abstract class LlmClientBase(HttpClient http) : ILlmClient
         LlmChatRequest request,
         LlmProviderCapabilities capabilities)
     {
+        LlmAttachments.ValidateReferences(request);
         foreach (LlmChatMessage message in request.Messages)
         {
             if (message.Attachments.Count > 0

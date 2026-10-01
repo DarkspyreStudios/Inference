@@ -355,6 +355,10 @@ Qwen-owned metadata, not the supplier's chat parser or a loaded native runtime g
 collectible tool test calls the real Qwen writer with Common tool definitions loaded in the same
 foreign generation and checks their assembly provenance and exact serialized schema order.
 
+Qwen rejects referenced prompt files, workspace tool-output resources and non-null request resource
+authority before model access or native execution. It does not materialize those inputs and reports
+`SupportsFileReferences = false`.
+
 Qwen reports `SupportsStreamingUsage = true` because streamed completions report final usage.
 Qwen reports no automatic prompt caching, cache-hint acceptance or supported cache retentions in
 `LlmCapabilities.PromptCache`. It ignores the advisory `LlmInferenceRequest.PromptCache` hint.

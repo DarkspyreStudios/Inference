@@ -12,6 +12,11 @@ namespace Darkspyre.Inference.Common;
 /// <summary>Common-owned metadata for closed data contracts. No reflection fallback is installed.</summary>
 public static class InferenceJson
 {
+    public static JsonTypeInfo<LlmMessageAttachment> LlmMessageAttachment => InferenceJsonContext.Default.LlmMessageAttachment;
+    public static JsonTypeInfo<LlmAttachment> LlmAttachment => InferenceJsonContext.Default.LlmAttachment;
+    public static JsonTypeInfo<LlmFileReference> LlmFileReference => InferenceJsonContext.Default.LlmFileReference;
+    public static JsonTypeInfo<LlmResourceAttachment> LlmResourceAttachment => InferenceJsonContext.Default.LlmResourceAttachment;
+    public static JsonTypeInfo<LlmToolOutputSessionResource> LlmToolOutputSessionResource => InferenceJsonContext.Default.LlmToolOutputSessionResource;
     public static JsonTypeInfo<InferenceMediaSourceKind> InferenceMediaSourceKind => InferenceJsonContext.Default.InferenceMediaSourceKind;
     public static JsonTypeInfo<InferenceMediaSource> InferenceMediaSource => InferenceJsonContext.Default.InferenceMediaSource;
     public static JsonTypeInfo<BinaryMediaSource> BinaryMediaSource => InferenceJsonContext.Default.BinaryMediaSource;
@@ -87,6 +92,11 @@ public static class InferenceJson
 [JsonSerializable(typeof(LlmInferenceRequest))]
 [JsonSerializable(typeof(LlmInferenceResult))]
 [JsonSerializable(typeof(LlmMessage))]
+[JsonSerializable(typeof(LlmMessageAttachment))]
+[JsonSerializable(typeof(LlmAttachment))]
+[JsonSerializable(typeof(LlmFileReference))]
+[JsonSerializable(typeof(LlmResourceAttachment))]
+[JsonSerializable(typeof(LlmToolOutputSessionResource))]
 [JsonSerializable(typeof(LlmContinuationState))]
 [JsonSerializable(typeof(LlmCapabilities))]
 [JsonSerializable(typeof(LlmModelInfo))]

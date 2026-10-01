@@ -141,7 +141,8 @@ internal sealed class ConnectLlmInference(
         AllowParallelToolCalls = request.AllowParallelToolCalls,
         UnboundContinuationState = request.UnboundContinuationState,
         ConversationKey = request.ConversationKey,
-        PromptCache = request.PromptCache
+        PromptCache = request.PromptCache,
+        Resources = request.Resources
     };
 
     private static CommonLlm.LlmCapabilities ToCommon(LlmProviderCapabilities capabilities) => new()
@@ -166,7 +167,8 @@ internal sealed class ConnectLlmInference(
         SupportsToolUse = capabilities.SupportsToolUse,
         Tools = capabilities.Tools,
         SupportsPromptImages = capabilities.SupportsPromptImages,
-        SupportsPromptDocuments = capabilities.SupportsPromptDocuments
+        SupportsPromptDocuments = capabilities.SupportsPromptDocuments,
+        SupportsFileReferences = capabilities.SupportsFileReferences
     };
 
     private static Common.InferenceException ToCommonException(Exception exception) => exception switch

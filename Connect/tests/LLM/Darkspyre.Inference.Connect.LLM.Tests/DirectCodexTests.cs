@@ -211,7 +211,7 @@ public sealed class DirectCodexTests
         Assert.Null(client.EstimateInputTokens(Connection(), Request() with
         {
             Messages = [new("user", "read")
-        { Attachments = [new() { Kind = LlmBinaryKind.Document, FileName = "x.txt", Data = "text"u8.ToArray() }] }]
+        { Attachments = [new LlmAttachment { Kind = LlmBinaryKind.Document, FileName = "x.txt", Data = "text"u8.ToArray() }] }]
         }));
     }
 

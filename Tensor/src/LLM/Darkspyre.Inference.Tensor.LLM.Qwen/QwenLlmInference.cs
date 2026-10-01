@@ -593,6 +593,8 @@ public sealed class QwenLlmInference : ITensorLlmInference
 
     private static void ValidateRequest(LlmInferenceRequest request)
     {
+        if (request.Resources is not null)
+            throw new InferenceException(InferenceFailureCode.UnsupportedFeature, "Qwen does not materialize caller-owned resources.");
         if (request.Messages.Count == 0 && string.IsNullOrWhiteSpace(request.Instructions))
         {
             throw new InferenceException(InferenceFailureCode.InvalidRequest, "At least one instruction or message is required.");
@@ -638,7 +640,8 @@ public sealed class QwenLlmInference : ITensorLlmInference
             throw new InferenceException(InferenceFailureCode.UnsupportedFeature, "Qwen does not support a tool choice or parallel-call control.");
         }
 
-        if (request.Messages.Any(static message => message.Attachments.Count > 0))
+        if (request.Messages.Any(static message => message.Attachments.Count > 0
+            || message.ToolResults.Any(static result => result.Output.Parts.Any(static part => part is LlmToolOutputSessionResource))))
         {
             throw new InferenceException(InferenceFailureCode.UnsupportedFeature, "Qwen accepts text messages only.");
         }

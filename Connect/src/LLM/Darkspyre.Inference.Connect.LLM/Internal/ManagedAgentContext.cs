@@ -6,12 +6,18 @@ namespace Darkspyre.Inference.Connect.LLM.Internal;
 /// <summary>Single snapshot validation/copy boundary, used for import, capture and replacement.</summary>
 internal static class ManagedAgentContext
 {
-    public static LlmAgentContext Import(LlmAgentContext context, LlmConnection connection, string modelId) =>
-        Validate(context, message =>
+    /// <summary>Validates portable data without decoding provider state or invoking resource authority.</summary>
+    internal static LlmAgentContext ValidatePortable(LlmAgentContext context) => Validate(context, static message => message);
+
+    public static LlmAgentContext Import(LlmAgentContext context, LlmConnection connection, string modelId)
+    {
+        ValidateRuntimeResources(context);
+        return Validate(context, message =>
         {
             _ = ProviderContinuationStateCodec.DecodeMessage(message, connection, modelId);
             return message;
         });
+    }
 
     /// <summary>Imports a start context; with Omit, state this target cannot replay is removed and counted.</summary>
     public static (LlmAgentContext Context, int Omitted) Import(
@@ -25,6 +31,7 @@ internal static class ManagedAgentContext
         {
             return (Import(context, connection, modelId), 0);
         }
+        ValidateRuntimeResources(context);
         int omitted = 0;
         LlmAgentContext imported = Validate(context, message =>
         {
@@ -45,6 +52,7 @@ internal static class ManagedAgentContext
     /// </summary>
     public static (LlmAgentContext Context, int Omitted) WithoutContinuationState(LlmAgentContext context)
     {
+        ValidateRuntimeResources(context);
         int omitted = 0;
         LlmAgentContext validated = Validate(context, message =>
         {
@@ -54,6 +62,18 @@ internal static class ManagedAgentContext
         return (validated, omitted);
     }
 
+    internal static void ValidateRuntimeResources(LlmAgentContext context)
+    {
+        context = ValidatePortable(context);
+        if (context.SelectedResources.Count > 0 || context.ResourceSelectionVersion is not null)
+            throw new NotSupportedException("This runtime does not bind caller-owned resource selections.");
+        LlmAttachments.ValidateReferences(new LlmChatRequest
+        {
+            ModelId = string.Empty,
+            Messages = context.Entries.Select(entry => entry.Message).ToArray()
+        });
+    }
+
     /// <summary>
     /// One structural pass over a context. <paramref name="continuationState"/> validates or rewrites each message
     /// that carries continuation state.
@@ -61,7 +81,9 @@ internal static class ManagedAgentContext
     private static LlmAgentContext Validate(LlmAgentContext context, Func<LlmChatMessage, LlmChatMessage> continuationState)
     {
         ArgumentNullException.ThrowIfNull(context);
-        if (context.FormatVersion != 2 || context.Revision < 0)
+        context.ValidateResourceSelection();
+        ArgumentNullException.ThrowIfNull(context.Entries);
+        if (context.FormatVersion != 3 || context.Revision < 0)
         {
             throw new ArgumentException("Unsupported context format or revision.");
         }
@@ -71,11 +93,17 @@ internal static class ManagedAgentContext
         var entries = new List<LlmAgentContextEntry>(context.Entries.Count);
         foreach (var entry in context.Entries)
         {
+            ArgumentNullException.ThrowIfNull(entry);
+            ArgumentNullException.ThrowIfNull(entry.Message);
             if (string.IsNullOrWhiteSpace(entry.Id) || !ids.Add(entry.Id) || string.IsNullOrWhiteSpace(entry.TurnId))
             {
                 throw new ArgumentException("Context entries require unique IDs and a turn identity.");
             }
             var message = entry.Message;
+            ArgumentNullException.ThrowIfNull(message.Attachments);
+            ArgumentNullException.ThrowIfNull(message.ToolCalls);
+            ArgumentNullException.ThrowIfNull(message.ToolResults);
+            ArgumentNullException.ThrowIfNull(message.OmittedAttachments);
             if (message.Role is not ("user" or "assistant" or "system" or "developer")
                 || message.Content is null || (message.ToolCalls.Count > 0 && message.Role != "assistant")
                 || (message.ToolResults.Count > 0 && message.Role != "user")
@@ -90,6 +118,7 @@ internal static class ManagedAgentContext
             entries.Add(entry with { Message = message });
             foreach (var call in message.ToolCalls)
             {
+                ArgumentNullException.ThrowIfNull(call);
                 if (string.IsNullOrWhiteSpace(call.Id) || string.IsNullOrWhiteSpace(call.Name) || !calls.Add(call.Id))
                 {
                     throw new ArgumentException("Context tool-call IDs must be unique and names nonempty.");
@@ -103,6 +132,11 @@ internal static class ManagedAgentContext
             }
             foreach (var result in message.ToolResults)
             {
+                ArgumentNullException.ThrowIfNull(result);
+                ArgumentNullException.ThrowIfNull(result.Output);
+                ArgumentNullException.ThrowIfNull(result.Output.Parts);
+                foreach (var part in result.Output.Parts)
+                    ArgumentNullException.ThrowIfNull(part);
                 if (!pending.Remove(result.ToolCallId))
                 {
                     throw new ArgumentException("Each tool result must match exactly one preceding call.");
@@ -111,12 +145,21 @@ internal static class ManagedAgentContext
             var omissions = new HashSet<(string?, int)>();
             foreach (var omitted in message.OmittedAttachments)
             {
+                ArgumentNullException.ThrowIfNull(omitted);
                 if (!Enum.IsDefined(omitted.Kind) || string.IsNullOrWhiteSpace(omitted.FileName)
                     || omitted.Index < 0 || !omissions.Add((omitted.ToolCallId, omitted.Index))
                     || (omitted.ToolCallId is not null && !message.ToolResults.Any(result => result.ToolCallId == omitted.ToolCallId)))
                 {
                     throw new ArgumentException("Invalid omitted-attachment descriptor.");
                 }
+            }
+            foreach (var group in message.OmittedAttachments.GroupBy(omitted => omitted.ToolCallId))
+            {
+                int retained = group.Key is null ? message.Attachments.Count
+                    : message.ToolResults.Single(result => result.ToolCallId == group.Key).Output.Parts.Count;
+                long conceptualCount = (long)retained + group.Count();
+                if (group.Any(omitted => omitted.Index >= conceptualCount))
+                    throw new ArgumentException("Omitted-attachment positions must refer to the original ordered content.");
             }
         }
         if (pending.Count > 0)
@@ -128,6 +171,8 @@ internal static class ManagedAgentContext
 
     public static LlmAgentContext Copy(LlmAgentContext context, bool includeAttachmentData) => context with
     {
+        SelectedResources = context.SelectedResources,
+        ResourceSelectionVersion = context.ResourceSelectionVersion,
         Entries = Array.AsReadOnly(context.Entries.Select(entry => entry with
         {
             Message = CopyMessage(entry.Message, includeAttachmentData)
@@ -137,28 +182,34 @@ internal static class ManagedAgentContext
     public static LlmChatMessage CopyMessage(LlmChatMessage message, bool includeAttachmentData = true)
     {
         var omitted = message.OmittedAttachments.ToList();
-        IReadOnlyList<LlmAttachment> CopyAttachments(IReadOnlyList<LlmAttachment> attachments, string? toolId)
+        IReadOnlyList<LlmMessageAttachment> CopyAttachments(IReadOnlyList<LlmMessageAttachment> attachments, string? toolId)
         {
             if (includeAttachmentData)
             {
-                return Array.AsReadOnly(attachments.Select(attachment => attachment with { Data = attachment.Data.ToArray() }).ToArray());
+                return Array.AsReadOnly(attachments.Select(LlmAttachments.Copy).ToArray());
             }
+            var retained = new List<LlmMessageAttachment>();
             int index = 0;
             for (int i = 0; i < attachments.Count; i++)
             {
                 while (omitted.Any(item => item.ToolCallId == toolId && item.Index == index)) { index++; }
-                LlmBinaryKind kind = attachments[i].Kind == LlmBinaryKind.Image ? LlmBinaryKind.Image : LlmBinaryKind.Document;
-                omitted.Add(new(kind, attachments[i].FileName, index++, toolId));
+                if (attachments[i] is LlmAttachment binary)
+                    omitted.Add(new(binary.Kind, binary.FileName, index, toolId));
+                else
+                    retained.Add(LlmAttachments.Copy(attachments[i]));
+                index++;
             }
-            return [];
+            return Array.AsReadOnly(retained.ToArray());
         }
         // Without attachment data, byte-bearing parts leave the output and are recorded by their position.
         LlmToolOutput StripOutput(LlmToolOutput output, string toolCallId)
         {
             var parts = new List<LlmToolOutputPart>(output.Parts.Count);
-            for (int index = 0; index < output.Parts.Count; index++)
+            int index = 0;
+            foreach (var current in output.Parts)
             {
-                switch (output.Parts[index])
+                while (omitted.Any(item => item.ToolCallId == toolCallId && item.Index == index)) { index++; }
+                switch (current)
                 {
                     case LlmToolOutputBinary binary:
                         omitted.Add(new(binary.Kind, binary.FileName ?? "attachment", index, toolCallId));
@@ -166,10 +217,14 @@ internal static class ManagedAgentContext
                     case LlmToolOutputResource { BodyKind: { } kind } resource:
                         omitted.Add(new(kind, resource.Name ?? resource.Uri, index, toolCallId));
                         break;
+                    case LlmToolOutputSessionResource resource:
+                        parts.Add(new LlmToolOutputSessionResource(LlmAttachments.CopyResource(resource.Resource)));
+                        break;
                     case var part:
                         parts.Add(part);
                         break;
                 }
+                index++;
             }
             return output with { Parts = Array.AsReadOnly(parts.ToArray()), StructuredContent = output.StructuredContent?.Clone() };
         }
@@ -194,6 +249,7 @@ internal static class ManagedAgentContext
         {
             LlmToolOutputBinary binary => binary with { Data = binary.Data.ToArray() },
             LlmToolOutputResource { Data: { } data } resource => resource with { Data = data.ToArray() },
+            LlmToolOutputSessionResource resource => new LlmToolOutputSessionResource(LlmAttachments.CopyResource(resource.Resource)),
             _ => part
         }).ToArray()),
         StructuredContent = output.StructuredContent?.Clone()

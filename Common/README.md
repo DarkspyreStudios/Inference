@@ -87,8 +87,20 @@ refusal converters for the three resource interfaces: null is allowed, but non-n
 before any collaborator callback. A closed caller-owned JSON context can compose those exact
 converters from `InferenceJson.InferenceResourceReference.Options.Converters` by the known interface
 type's `CanConvert` match before construction. This is not a global serializer policy or support for
-arbitrary caller CLR graphs. Resource references are not yet part of LLM attachments or requests;
-these standalone contracts do not establish automatic provider switching.
+arbitrary caller CLR graphs.
+
+LLM messages use one ordered `LlmMessageAttachment` union: `LlmAttachment` carries binary data,
+`LlmFileReference` carries a provider-native file ID, and `LlmResourceAttachment` carries a workspace
+reference. Their JSON discriminators are `binary`, `file` and `workspace-resource`.
+`LlmToolOutputSessionResource` adds a workspace reference to tool output without changing the
+existing `resource` URI/body variant. `InferenceJson` exports each concrete attachment and the base
+union under its exact type name. No reference contains invented bytes or grants access.
+
+`LlmInferenceRequest.Resources` borrows caller authority. Non-null authority refuses owned JSON
+serialization and deserialization; null remains portable. Request diagnostics do not traverse it.
+`SupportsFileReferences` defaults to false and describes native file input, not automatic workspace
+materialization. Current built-in LLM routes reject unimplemented reference inputs before provider
+effects. These contracts do not yet establish automatic provider switching.
 
 ## Media source data
 

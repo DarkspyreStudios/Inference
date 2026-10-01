@@ -316,7 +316,7 @@ public sealed class AnthropicToolContinuationTests
             case "duplicate": reply = reply with { ToolResults = [Result("client_1"), Result("client_1")] }; break;
             case "unknown": reply = reply with { ToolResults = [Result("client_1"), Result("unknown")] }; break;
             case "text": reply = reply with { Content = "extra" }; break;
-            case "attachment": reply = reply with { Role = "user", Attachments = [new() { Kind = LlmBinaryKind.Image, FileName = "fixture.png", MediaType = "image/png", Data = new byte[] { 1 } }] }; break;
+            case "attachment": reply = reply with { Role = "user", Attachments = [new LlmAttachment { Kind = LlmBinaryKind.Image, FileName = "fixture.png", MediaType = "image/png", Data = new byte[] { 1 } }] }; break;
             case "intervening": request = request with { Messages = [request.Messages[0], request.Messages[1], new("user", "intervening"), reply] }; break;
             case "extra-user": request = request with { Messages = [.. request.Messages, new("user", "extra")] }; break;
             case "image-result":

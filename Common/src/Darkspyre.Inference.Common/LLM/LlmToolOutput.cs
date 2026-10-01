@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Darkspyre.Inference.Common.Resources;
 
 namespace Darkspyre.Inference.Common.LLM;
 
@@ -8,7 +9,12 @@ namespace Darkspyre.Inference.Common.LLM;
 [JsonDerivedType(typeof(LlmToolOutputText), "text")]
 [JsonDerivedType(typeof(LlmToolOutputBinary), "binary")]
 [JsonDerivedType(typeof(LlmToolOutputResource), "resource")]
+[JsonDerivedType(typeof(LlmToolOutputSessionResource), "workspace-resource")]
 public abstract record LlmToolOutputPart;
+
+/// <summary>Committed caller-owned content. Resolution requires the current operation's resource access.</summary>
+[JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
+public sealed record LlmToolOutputSessionResource([property: JsonRequired] InferenceResourceReference Resource) : LlmToolOutputPart;
 
 public sealed record LlmToolOutputText(string Text) : LlmToolOutputPart;
 

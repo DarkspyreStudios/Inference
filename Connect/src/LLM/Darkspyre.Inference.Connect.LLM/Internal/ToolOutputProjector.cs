@@ -36,7 +36,8 @@ internal sealed record ProjectedToolOutput(
 
 /// <summary>
 /// Applies a route's <see cref="LlmRichContentSupported"/> to one output. Adapters serialize through it, so
-/// the report describes exactly what is sent. It holds no state and never throws for content it cannot carry.
+/// the report describes exactly what is sent. Unresolved workspace content requires a materializing route;
+/// it cannot be silently omitted like an unsupported inline display part.
 /// </summary>
 internal static class ToolOutputProjector
 {
@@ -73,6 +74,7 @@ internal static class ToolOutputProjector
                 LlmToolOutputText text => Add(sent, new SentText(text.Text), LlmToolPartDelivery.Delivered),
                 LlmToolOutputBinary binary => Binary(sent, binary.Kind, binary.MediaType, binary.Data, binary.FileName, route, model),
                 LlmToolOutputResource resource => Resource(sent, resource, route, model),
+                LlmToolOutputSessionResource => throw new NotSupportedException("This route cannot materialize workspace tool content."),
                 _ => new LlmToolPartProjection(LlmToolPartDelivery.Omitted, LlmToolPartOmission.InvalidContent)
             });
         }
