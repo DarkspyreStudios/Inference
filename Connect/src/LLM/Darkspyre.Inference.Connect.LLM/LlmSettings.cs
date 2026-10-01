@@ -70,7 +70,7 @@ public sealed class LlmSettings : InferenceSettings<LlmSetupChanges>
         // Direct Codex has one official endpoint and no endpoint field. A saved former value, such as a
         // CLI executable, differs from the baseline, so the next save replaces it.
         _draft = UsesFixedEndpoint(transport) ? opened with { Endpoint = definition.DefaultEndpoint } : opened;
-        _model = _originalModel = modelId ?? existing?.Azure?.DeploymentId ?? definition.DefaultModelId;
+        _model = _originalModel = modelId ?? (UsesAzure ? existing?.Azure?.DeploymentId : null) ?? definition.DefaultModelId;
         if (UsesAzure && _draft.Azure is null) _draft = _draft with { Azure = new() { DeploymentId = _model } };
         _baseline = opened;
         Status = new() { Configured = SetupObservation.Known(existing is not null), Authenticated = SetupObservation.Unknown };

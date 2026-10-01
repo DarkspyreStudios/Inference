@@ -1,9 +1,50 @@
 using Darkspyre.Inference.Common.Setup;
+using Darkspyre.Inference.Connect.LLM.Providers;
 
 namespace Darkspyre.Inference.Connect.LLM.Azure.Tests;
 
 public sealed class AzureSettingsTests
 {
+    [Theory]
+    [InlineData(LlmTransport.OpenAiResponses)]
+    [InlineData(LlmTransport.OpenAiCompatibleChat)]
+    [InlineData(LlmTransport.GoogleGeminiApi)]
+    public void InertAzureConfigurationDoesNotSelectAnotherProvidersModel(LlmTransport transport)
+    {
+        LlmProviderDefinition definition = transport switch
+        {
+            LlmTransport.OpenAiResponses => ProviderDefinitions.OpenAiApiKey,
+            LlmTransport.OpenAiCompatibleChat => ProviderDefinitions.OpenAiCompatible,
+            _ => ProviderDefinitions.GeminiApi
+        };
+        LlmConnection connection = new()
+        {
+            Version = "v1",
+            Transport = transport,
+            Endpoint = definition.DefaultEndpoint,
+            Credential = new LlmCredential { ApiKey = "protected-key" }.Serialize(),
+            Azure = new() { DeploymentId = "inert-azure-deployment" }
+        };
+        var settings = new LlmSettings(definition, transport, new(SetupChangeIntent.Edit, "id", "v1"), connection, null, null);
+        Assert.Equal(definition.DefaultModelId, Assert.IsType<SetupChoiceField>(Field(settings, "model")).Value);
+        Assert.False(settings.HasUnsavedChanges);
+        var explicitSelection = new LlmSettings(definition, transport, new(SetupChangeIntent.Edit, "id", "v1"), connection, "explicit-model", null);
+        Assert.Equal("explicit-model", Assert.IsType<SetupChoiceField>(Field(explicitSelection, "model")).Value);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void AzureSettingsStillUseTheSavedDeploymentWhenNoModelWasSelected(bool responses)
+    {
+        LlmConnection connection = AzureProtocolTests.Connection(responses, false);
+        LlmProviderDefinition definition = responses ? AzureProviderDefinition.Responses : AzureProviderDefinition.Chat;
+        var settings = new LlmSettings(definition, connection.Transport, new(SetupChangeIntent.Edit, "id", "v1"), connection, null, new AzureSetupEnvironment(connection.Transport));
+        Assert.Equal("deployment-alias", Assert.IsType<SetupChoiceField>(Field(settings, "model")).Value);
+        Assert.True(settings.Validate().IsValid);
+        Assert.False(settings.HasUnsavedChanges);
+    }
+
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
