@@ -26,6 +26,21 @@ keeps. A question truncates the state when the first exceeds the second. Rich pr
 operations remain on their owning packages; Common is the portable inference lane, not a
 least-common-denominator replacement for implementation management.
 
+## JSON metadata
+
+`InferenceJson` supplies Common-owned source-generated metadata for closed LLM, decision and image
+request/result contracts, capabilities, tool output, continuation state, concrete stream events and
+data-only setup observations, choices and outcomes. Pass its typed metadata to `JsonSerializer`.
+The metadata preserves the existing property names, numeric enum values, binary encodings,
+required members, unknown-member rules and decision/tool-output discriminators. It installs no
+reflection resolver. Caller-defined types require caller-owned metadata.
+
+The stream-event base has no JSON discriminator. Serialize each concrete event with its matching
+metadata; this package does not invent a stream envelope. Callback-backed setup fields and abstract
+setup interactions are not transport contracts. `InferenceImplementationDescriptor` and the
+value-tuple sizes in `ImageCapabilities` have no round-trip JSON representation in this metadata
+surface. Generated metadata does not change those contracts or establish native runtime retirement.
+
 ## Sampling controls
 
 `LlmInferenceRequest` carries nullable `TopP`, `TopK`, `Seed`, `PresencePenalty` and
