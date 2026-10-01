@@ -1,4 +1,6 @@
+using System.Reflection;
 using System.Runtime.CompilerServices;
+using System.Runtime.Loader;
 using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Common.LLM;
 using Darkspyre.Inference.Connect.LLM.Internal;
@@ -200,6 +202,137 @@ public sealed class ConnectionAccessTests
         finally { gate.Release.TrySetResult(); }
     }
 
+    [Theory]
+    [InlineData("acquire", "resolve")]
+    [InlineData("acquire", "refresh")]
+    [InlineData("acquire", "save")]
+    [InlineData("refresh", "refresh")]
+    [InlineData("refresh", "save")]
+    [InlineData("authorization", "save")]
+    public async Task AccessOwnerRejectsLateResultsWhileLinkedCancellationPropagationIsBlocked(string entry, string boundary)
+    {
+        var anchorGate = new Gate { Boundary = "resolve", IgnoreCancellation = true };
+        var targetGate = new Gate { Boundary = boundary, IgnoreCancellation = true };
+        using var source = new Source(targetGate) { AnchorGate = anchorGate, IgnoreCommitCancellation = true };
+        using var auth = new Authenticator(targetGate);
+        using var caller = new CancellationTokenSource();
+        using var unblockCancellation = new ManualResetEventSlim();
+        var cancellationEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using var access = new LlmConnectionAccess(source, [auth]);
+        Task anchor = access.AcquireAsync("connection");
+        await anchorGate.Entered.Task.WaitAsync(Bound);
+        CancellationToken ownerStop = source.LastReadToken;
+        Task operation = entry switch
+        {
+            "refresh" => access.RefreshAsync("connection", Connection, caller.Token),
+            "authorization" => new LlmConnectionAuthorization("connection", access).GetAsync(caller.Token).AsTask(),
+            _ => access.AcquireAsync("connection", caller.Token)
+        };
+        Task? retirement = null;
+        CancellationTokenRegistration blocker = default;
+        try
+        {
+            await targetGate.Entered.Task.WaitAsync(Bound);
+            CancellationToken linked = boundary switch
+            {
+                "resolve" => source.LastReadToken,
+                "refresh" => auth.LastRefreshToken,
+                _ => source.LastSaveToken
+            };
+            blocker = ownerStop.Register(() =>
+            {
+                cancellationEntered.TrySetResult();
+                if (!unblockCancellation.Wait(Bound))
+                    throw new TimeoutException("The controlled access cancellation callback was not released.");
+            });
+            retirement = access.DisposeAsync().AsTask();
+            await cancellationEntered.Task.WaitAsync(Bound);
+            Assert.True(ownerStop.IsCancellationRequested);
+            Assert.False(linked.IsCancellationRequested);
+            Assert.False(retirement.IsCompleted);
+            Assert.Same(retirement, access.DisposeAsync().AsTask());
+            await Assert.ThrowsAsync<ObjectDisposedException>(() => access.AcquireAsync("connection"));
+            targetGate.Release.TrySetResult();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => operation.WaitAsync(Bound));
+            Assert.False(linked.IsCancellationRequested);
+            Assert.False(retirement.IsCompleted);
+            Assert.Equal(boundary == "resolve" ? 0 : 1, auth.Calls);
+            Assert.Equal(boundary == "save" ? 1 : 0, source.Writes);
+            Assert.Equal(boundary == "save" ? "protected-fresh" : "protected-old", LlmCredential.Parse(source.Current!.Credential)!.OAuth!.AccessToken);
+            Assert.False(source.Disposed);
+            Assert.False(auth.Disposed);
+        }
+        finally
+        {
+            unblockCancellation.Set();
+            targetGate.Release.TrySetResult();
+            anchorGate.Release.TrySetResult();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => anchor.WaitAsync(Bound));
+            await (retirement ?? access.DisposeAsync().AsTask()).WaitAsync(Bound);
+            blocker.Dispose();
+        }
+    }
+
+    [Fact]
+    public void ActualForeignCredentialAccessRetiresAndReleasesItsGenerationWithDelayedPropagation()
+    {
+        WeakReference generation = ExerciseGeneration();
+        for (int attempt = 0; generation.IsAlive && attempt < 20; attempt++)
+        {
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+            GC.Collect();
+            Thread.Sleep(10);
+        }
+        Assert.False(generation.IsAlive, "The actual retired credential-access generation remains rooted.");
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static WeakReference ExerciseGeneration()
+    {
+        string directory = Path.GetDirectoryName(typeof(ConnectionAccessTests).Assembly.Location)!;
+        var generation = new ConnectGeneration(directory);
+        var weak = new WeakReference(generation);
+        try
+        {
+            Assembly connect = generation.LoadFromAssemblyPath(typeof(LlmConnectionAccess).Assembly.Location);
+            Assembly common = generation.LoadFromAssemblyPath(typeof(ProviderAuthorizationHeader).Assembly.Location);
+            Assembly fixture = generation.LoadFromAssemblyPath(typeof(ConnectionAccessTests).Assembly.Location);
+            Assert.Same(generation, AssemblyLoadContext.GetLoadContext(connect));
+            Assert.Same(generation, AssemblyLoadContext.GetLoadContext(common));
+            Assert.Same(generation, AssemblyLoadContext.GetLoadContext(fixture));
+            Type caller = fixture.GetType(typeof(ConnectionAccessTests).FullName!, true)!;
+            var operation = (Task)caller.GetMethod(nameof(ForeignCallerAsync), BindingFlags.NonPublic | BindingFlags.Static)!.Invoke(null, null)!;
+            operation.WaitAsync(TimeSpan.FromSeconds(10)).GetAwaiter().GetResult();
+        }
+        finally { generation.Unload(); }
+        return weak;
+    }
+
+    private static async Task ForeignCallerAsync()
+    {
+        AssemblyLoadContext generation = AssemblyLoadContext.GetLoadContext(typeof(ConnectionAccessTests).Assembly)!;
+        Assert.True(generation.IsCollectible);
+        Assert.Same(generation, AssemblyLoadContext.GetLoadContext(typeof(LlmConnectionAccess).Assembly));
+        Assert.Same(generation, AssemblyLoadContext.GetLoadContext(typeof(ProviderAuthorizationHeader).Assembly));
+        var fixture = new ConnectionAccessTests();
+        foreach (string boundary in new[] { "resolve", "refresh", "save" })
+            await fixture.AccessOwnerRejectsLateResultsWhileLinkedCancellationPropagationIsBlocked("acquire", boundary);
+        await fixture.AccessOwnerRejectsLateResultsWhileLinkedCancellationPropagationIsBlocked("refresh", "refresh");
+        await fixture.AccessOwnerRejectsLateResultsWhileLinkedCancellationPropagationIsBlocked("refresh", "save");
+        await fixture.AccessOwnerRejectsLateResultsWhileLinkedCancellationPropagationIsBlocked("authorization", "save");
+    }
+
+    private sealed class ConnectGeneration(string directory) : AssemblyLoadContext(isCollectible: true)
+    {
+        protected override Assembly? Load(AssemblyName name)
+        {
+            if (name.Name?.StartsWith("Darkspyre.Inference.", StringComparison.Ordinal) != true) return null;
+            string path = Path.Combine(directory, name.Name + ".dll");
+            return File.Exists(path) ? LoadFromAssemblyPath(path) : null;
+        }
+    }
+
     [Fact]
     public async Task EmbeddingsUseTheSameRefreshAndVersionSaveAsChat()
     {
@@ -369,16 +502,21 @@ public sealed class ConnectionAccessTests
     private sealed class Source(Gate gate) : ILlmConnectionSource, IDisposable
     {
         internal LlmConnection? Current { get; set; } = Connection;
+        internal Gate? AnchorGate { get; init; }
         internal bool IgnoreCommitCancellation { get; init; }
         internal int Reads { get; private set; }
         internal int Writes { get; private set; }
         internal List<string> ExpectedVersions { get; } = [];
         internal bool Disposed { get; private set; }
+        internal CancellationToken LastReadToken { get; private set; }
+        internal CancellationToken LastSaveToken { get; private set; }
 
         public async Task<LlmConnection?> GetConnectionAsync(string connectionId, CancellationToken cancellationToken = default)
         {
             Assert.Equal("connection", connectionId);
             Reads++;
+            LastReadToken = cancellationToken;
+            if (Reads == 1 && AnchorGate is { } anchor) await anchor.WaitAsync("resolve", cancellationToken);
             await gate.WaitAsync("resolve", cancellationToken);
             return Current;
         }
@@ -386,6 +524,7 @@ public sealed class ConnectionAccessTests
         public async Task SaveCredentialAsync(string connectionId, string credentialJson, string expectedVersion, CancellationToken cancellationToken = default)
         {
             Assert.Equal("connection", connectionId);
+            LastSaveToken = cancellationToken;
             ExpectedVersions.Add(expectedVersion);
             await gate.WaitAsync("save", cancellationToken);
             if (!IgnoreCommitCancellation) cancellationToken.ThrowIfCancellationRequested();
@@ -402,11 +541,13 @@ public sealed class ConnectionAccessTests
         internal bool Rotate { get; init; } = true;
         internal int Calls { get; private set; }
         internal bool Disposed { get; private set; }
+        internal CancellationToken LastRefreshToken { get; private set; }
         public LlmTransport Transport => LlmTransport.OpenAiCodex;
 
         public async Task<LlmCredential> EnsureFreshAsync(LlmCredential credential, CancellationToken cancellationToken = default)
         {
             Calls++;
+            LastRefreshToken = cancellationToken;
             await gate.WaitAsync("refresh", cancellationToken);
             return !Rotate || credential.OAuth!.AccessToken == "protected-fresh"
                 ? credential : credential with { OAuth = credential.OAuth with { AccessToken = "protected-fresh", RefreshToken = "protected-rotated" } };

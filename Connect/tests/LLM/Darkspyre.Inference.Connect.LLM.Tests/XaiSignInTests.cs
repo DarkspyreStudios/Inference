@@ -229,6 +229,82 @@ public sealed class XaiSignInTests
     [InlineData("resolve")]
     [InlineData("poll")]
     [InlineData("save")]
+    [InlineData("prompt")]
+    [InlineData("interactive-poll")]
+    [InlineData("interactive-save")]
+    public async Task OwnerRetirementRejectsLateSignInWhileLinkedCancellationPropagationIsBlocked(string boundary)
+    {
+        var anchorGate = new Gate();
+        var targetGate = new Gate();
+        var source = new Source
+        {
+            ResolveGate = boundary == "resolve" ? targetGate : null,
+            SaveGate = boundary is "save" or "interactive-save" ? targetGate : null
+        };
+        var auth = new Authenticator
+        {
+            StartGate = anchorGate,
+            PollGate = boundary is "poll" or "interactive-poll" ? targetGate : null
+        };
+        using var caller = new CancellationTokenSource();
+        using var unblockCancellation = new ManualResetEventSlim();
+        var cancellationEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using var service = new LlmProviderService(source, [], [auth]);
+        Task anchor = service.StartXaiLoginAsync();
+        await anchorGate.Entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        CancellationToken ownerStop = auth.LastStartToken;
+        auth.StartGate = boundary == "start" ? targetGate : null;
+        Task operation = boundary switch
+        {
+            "start" => service.StartXaiLoginAsync(caller.Token),
+            "prompt" or "interactive-poll" or "interactive-save" => service.SignInAsync("id",
+                new Prompt(_ => { }, boundary == "prompt" ? targetGate : null), caller.Token),
+            _ => CompleteAsync(service, auth.Code, caller.Token)
+        };
+        Task? retirement = null;
+        CancellationTokenRegistration blocker = default;
+        try
+        {
+            await targetGate.Entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            CancellationToken linked = boundary == "start" ? auth.LastStartToken : source.LastResolveToken;
+            // Cancellation callbacks run newest first. Hold the owner callback before the linked lease callback.
+            blocker = ownerStop.Register(() =>
+            {
+                cancellationEntered.TrySetResult();
+                if (!unblockCancellation.Wait(TimeSpan.FromSeconds(10)))
+                    throw new TimeoutException("The controlled owner cancellation callback was not released.");
+            });
+            retirement = service.DisposeAsync().AsTask();
+            await cancellationEntered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            Assert.True(ownerStop.IsCancellationRequested);
+            Assert.False(linked.IsCancellationRequested);
+            Assert.False(retirement.IsCompleted);
+            await Assert.ThrowsAsync<ObjectDisposedException>(() => service.StartXaiLoginAsync());
+            targetGate.Release.TrySetResult();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => operation.WaitAsync(TimeSpan.FromSeconds(10)));
+            Assert.False(linked.IsCancellationRequested);
+            Assert.False(retirement.IsCompleted);
+            bool saveEntered = boundary is "save" or "interactive-save";
+            Assert.Equal(saveEntered ? 1 : 0, source.Saves);
+            Assert.Equal(saveEntered ? "access-token" : null, LlmCredential.Parse(source.Saved)?.OAuth?.AccessToken);
+            Assert.False(auth.Disposed);
+        }
+        finally
+        {
+            unblockCancellation.Set();
+            targetGate.Release.TrySetResult();
+            anchorGate.Release.TrySetResult();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => anchor.WaitAsync(TimeSpan.FromSeconds(10)));
+            await (retirement ?? service.DisposeAsync().AsTask()).WaitAsync(TimeSpan.FromSeconds(10));
+            blocker.Dispose();
+        }
+    }
+
+    [Theory]
+    [InlineData("start")]
+    [InlineData("resolve")]
+    [InlineData("poll")]
+    [InlineData("save")]
     public async Task CallerCancellationRejectsLateResultsWithoutRetiringTheFacade(string boundary)
     {
         var gate = new Gate();
@@ -280,8 +356,9 @@ public sealed class XaiSignInTests
         public int Saves { get; private set; }
         public string? ExpectedVersion { get; private set; }
         public string? Saved { get; private set; }
+        public CancellationToken LastResolveToken { get; private set; }
         public async Task<LlmConnection?> GetConnectionAsync(string connectionId, CancellationToken cancellationToken = default)
-        { Assert.Equal("id", connectionId); if (ResolveGate is { } gate) await gate.WaitAsync(); return Connection; }
+        { LastResolveToken = cancellationToken; Assert.Equal("id", connectionId); if (ResolveGate is { } gate) await gate.WaitAsync(); return Connection; }
         public async Task SaveCredentialAsync(string connectionId, string credentialJson, string expectedVersion, CancellationToken cancellationToken = default)
         {
             Assert.Equal("id", connectionId);
@@ -298,14 +375,15 @@ public sealed class XaiSignInTests
         public LlmTransport Transport => LlmTransport.XaiResponses;
         public LlmDeviceCode Code { get; init; } = XaiSignInTests.Code();
         public LlmCredential Credential { get; init; } = new() { OAuth = new() { AccessToken = "access-token" } };
-        public Gate? StartGate { get; init; }
+        public Gate? StartGate { get; set; }
         public Gate? PollGate { get; init; }
         public LlmAuthPendingException? Pending { get; init; }
         public int Starts { get; private set; }
         public int Polls { get; private set; }
         public bool Disposed { get; private set; }
+        public CancellationToken LastStartToken { get; private set; }
         public async Task<LlmDeviceCode> StartAsync(CancellationToken cancellationToken = default)
-        { Starts++; if (StartGate is { } gate) await gate.WaitAsync(); return Code; }
+        { LastStartToken = cancellationToken; Starts++; if (StartGate is { } gate) await gate.WaitAsync(); return Code; }
         public async Task<LlmCredential> CompleteAsync(string deviceAuthId, string userCode, CancellationToken cancellationToken = default)
         {
             Assert.Equal(Code.DeviceAuthId, deviceAuthId);
