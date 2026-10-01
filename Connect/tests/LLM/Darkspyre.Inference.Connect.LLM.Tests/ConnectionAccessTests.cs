@@ -301,6 +301,9 @@ public sealed class ConnectionAccessTests
             Assert.Same(generation, AssemblyLoadContext.GetLoadContext(connect));
             Assert.Same(generation, AssemblyLoadContext.GetLoadContext(common));
             Assert.Same(generation, AssemblyLoadContext.GetLoadContext(fixture));
+            Assert.Equal(typeof(LlmConnectionAccess).Assembly.ManifestModule.ModuleVersionId, connect.ManifestModule.ModuleVersionId);
+            Assert.Equal(typeof(ProviderAuthorizationHeader).Assembly.ManifestModule.ModuleVersionId, common.ManifestModule.ModuleVersionId);
+            Assert.Equal(typeof(ConnectionAccessTests).Assembly.ManifestModule.ModuleVersionId, fixture.ManifestModule.ModuleVersionId);
             Type caller = fixture.GetType(typeof(ConnectionAccessTests).FullName!, true)!;
             var operation = (Task)caller.GetMethod(nameof(ForeignCallerAsync), BindingFlags.NonPublic | BindingFlags.Static)!.Invoke(null, null)!;
             operation.WaitAsync(TimeSpan.FromSeconds(10)).GetAwaiter().GetResult();
