@@ -241,6 +241,60 @@ public sealed class LlmSettingsTests
         Assert.Equal(12, Assert.Single(Fields(reopened).OfType<SetupIntegerField>()).Value);
         Assert.True(target.Changes.RequiresRetest);
     }
+    [Theory]
+    [InlineData("max_tokens", LlmChatCompletionsOutputLimitField.MaxTokens, "enabled", true)]
+    [InlineData("max_completion_tokens", LlmChatCompletionsOutputLimitField.MaxCompletionTokens, "disabled", false)]
+    public async Task CompatibleProtocolChoicesRoundTripAndRequireRetest(string field, LlmChatCompletionsOutputLimitField expected,
+        string cache, bool enabled)
+    {
+        var target = new Target();
+        var provider = new LlmProviderService(new UnusedSource(), [new Client(ProviderDefinitions.OpenAiCompatible)]);
+        LlmConnection original = Connection(LlmTransport.OpenAiCompatibleChat, "saved");
+        var (manager, settings) = await OpenAsync(provider, original.Transport,
+            new(SetupChangeIntent.Edit, "id", "v1"), target, original, "model");
+        SetupChoiceField Field(string id) => Assert.Single(Fields(settings).OfType<SetupChoiceField>(), item => item.Description.Id == id);
+        Assert.Equal("default", Field("output-limit-field").Value);
+        Assert.Equal("default", Field("prompt-cache-key").Value);
+        Assert.Equal(SetupEditState.Invalid, Field("output-limit-field").SetValue("invalid").State);
+        Assert.Equal(SetupEditState.Invalid, Field("prompt-cache-key").SetValue("invalid").State);
+        Assert.False(settings.HasUnsavedChanges);
+        Assert.Equal(SetupEditState.Applied, Field("output-limit-field").SetValue(field).State);
+        Assert.Equal(SetupEditState.Applied, Field("prompt-cache-key").SetValue(cache).State);
+        Assert.True(settings.HasUnsavedChanges);
+        await manager.SaveAsync(settings);
+        Assert.Equal(new LlmChatCompletionsConfiguration { OutputLimitField = expected, UsePromptCacheKey = enabled },
+            target.Changes!.Configuration.Connection.ChatCompletions);
+        Assert.True(target.Changes.RequiresRetest);
+        Assert.False(target.Changes.RequiresReauthentication);
+        Assert.Null(original.ChatCompletions);
+        var (_, reopened) = await OpenAsync(provider, original.Transport,
+            new(SetupChangeIntent.Edit, "id", "v2"), new Target(), target.Changes.Configuration.Connection with { Version = "v2" }, "model");
+        Assert.Equal(field, Assert.Single(Fields(reopened).OfType<SetupChoiceField>(), item => item.Description.Id == "output-limit-field").Value);
+        Assert.Equal(cache, Assert.Single(Fields(reopened).OfType<SetupChoiceField>(), item => item.Description.Id == "prompt-cache-key").Value);
+    }
+
+    [Fact]
+    public async Task CompatibleProtocolDefaultsRestoreNullAndPreserveIndependentOptions()
+    {
+        var target = new Target();
+        var provider = new LlmProviderService(new UnusedSource(), [new Client(ProviderDefinitions.OpenAiCompatible)]);
+        LlmConnection original = Connection(LlmTransport.OpenAiCompatibleChat, "saved") with
+        { ChatCompletions = new() { OutputLimitField = LlmChatCompletionsOutputLimitField.MaxTokens, UsePromptCacheKey = true } };
+        var (manager, settings) = await OpenAsync(provider, original.Transport,
+            new(SetupChangeIntent.Edit, "id", "v1"), target, original, "model");
+        SetupChoiceField Field(string id) => Assert.Single(Fields(settings).OfType<SetupChoiceField>(), item => item.Description.Id == id);
+        Field("output-limit-field").SetValue("default");
+        Assert.True(settings.HasUnsavedChanges);
+        Assert.True(settings.CurrentConnection().ChatCompletions!.UsePromptCacheKey);
+        Field("output-limit-field").SetValue("max_tokens");
+        Assert.False(settings.HasUnsavedChanges);
+        Field("output-limit-field").SetValue("default");
+        Field("prompt-cache-key").SetValue("default");
+        await manager.SaveAsync(settings);
+        Assert.Null(target.Changes!.Configuration.Connection.ChatCompletions);
+        Assert.True(target.Changes.RequiresRetest);
+    }
+
     private static async Task<(LlmSettingsManager Manager, LlmSettings Settings)> OpenAsync(LlmProviderService provider, LlmTransport transport,
         SetupConfigurationIdentity identity, Target target, LlmConnection? existing = null, string? modelId = null)
     {

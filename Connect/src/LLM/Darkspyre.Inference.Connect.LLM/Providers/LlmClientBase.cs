@@ -82,7 +82,13 @@ internal abstract class LlmClientBase(HttpClient http) : ILlmClient
                 string displayName = LlmJson.GetString(model, "name")
                     ?? LlmJson.GetString(model, "display_name")
                     ?? id;
-                results.Add(new LlmModel(id, displayName, LlmJson.GetString(model, "owned_by")));
+                results.Add(new LlmModel(id, displayName, LlmJson.GetString(model, "owned_by"))
+                {
+                    MaxContextTokens = PositiveLong(model, "context_length")
+                        ?? PositiveLong(LlmJson.GetObject(model, "top_provider"), "context_length")
+                        ?? PositiveLong(model, "max_model_len"),
+                    MaxOutputTokens = PositiveLong(LlmJson.GetObject(model, "top_provider"), "max_completion_tokens")
+                });
             }
 
             return [.. results.OrderBy(model => model.DisplayName, StringComparer.OrdinalIgnoreCase)];
@@ -97,6 +103,10 @@ internal abstract class LlmClientBase(HttpClient http) : ILlmClient
                 exception);
         }
     }
+
+    private static long? PositiveLong(JsonElement? value, string field) =>
+        value is { ValueKind: JsonValueKind.Object } item && item.TryGetProperty(field, out JsonElement number)
+        && number.ValueKind == JsonValueKind.Number && number.TryGetInt64(out long count) && count > 0 ? count : null;
 
     protected void ValidateRequest(
         LlmConnection connection,

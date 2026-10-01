@@ -88,6 +88,13 @@ These changes are unreleased.
 
 ### Host-visible changes
 
+- Persist `LlmConnection.ChatCompletions` with compatible-chat connections. Its nullable
+  `OutputLimitField` and `UsePromptCacheKey` select endpoint-aware defaults when null. Explicit
+  output-field choices and cache-key switches override those defaults. `api.openai.com` defaults to
+  `max_completion_tokens` and conversation-key mapping; other endpoints default to `max_tokens`
+  and no mapping. Prompt-media overrides carry images, PDFs and UTF-8 text documents; tool results
+  stay text-only. Preserve generated tool-call IDs unchanged when the provider omits them.
+
 - SelfHost generation and accounting reject provider options, HTTP headers and capability overrides.
   Remove these from saved SelfHost connections before adoption. Discovery remains available and
   settings cannot save unsupported options. Common `LlmCapabilities.SupportsStreamingUsage` describes

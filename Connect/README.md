@@ -305,6 +305,10 @@ var result = await provider.CompleteAsync(
 
 ### Model lists
 
+OpenAI-style discovery preserves positive integer `context_length`, `top_provider.context_length`,
+`top_provider.max_completion_tokens` and `max_model_len` limits when reported. Missing or invalid
+values remain unknown. The adapter does not invent limits for OpenAI model-list entries.
+
 `LlmProviderService.ListModelsAsync` keeps each connection's model list in `LlmModelListCache`, which
 `AddLlmConnect` registers once for the registration owner's lifetime. A list stays until the connection's `Version` changes,
 which every connection or credential edit does, or until `RefreshModelsAsync` lists again and replaces it.
@@ -703,7 +707,7 @@ own authorization and side-effect policy.
 | Transport | Chat tools | Agent tools | Prompt images | Prompt documents |
 |---|---:|---:|---:|---:|
 | OpenAI Responses | Yes | No | Yes | Yes |
-| OpenAI-compatible Chat Completions | Yes | No | No | No |
+| OpenAI-compatible Chat Completions | Yes | No | Override | Override |
 | ChatGPT Codex subscription | Yes | Yes | Yes | Yes |
 | Anthropic Messages with API key | Yes | No | Yes | Yes |
 | Claude subscription via official CLI | No | Yes | Yes | Yes |
@@ -714,6 +718,10 @@ own authorization and side-effect policy.
 | Antigravity CLI | No | No | No | No |
 
 Tool-result content support is declared per route and lane; see [Tool output](#tool-output).
+
+OpenAI-compatible calls emit their tool start before argument deltas. Missing provider tool-call IDs
+receive distinct Connect-generated IDs. Preserve these IDs unchanged in assistant history and tool
+results; a late provider ID does not replace an already published generated ID.
 
 Define tools on the request and branch on `RequiresAction`:
 
@@ -1068,6 +1076,17 @@ Auth interactions, dynamic choices, validation and explicit model tests use one 
 OpenAI-compatible remains an advanced provider with explicit manual-model support and typed
 default/enabled/disabled capability overrides. Disabling the `Streaming` override selects the endpoint's
 non-streaming request, as [Streaming, reasoning text and usage](#streaming-reasoning-text-and-usage) describes.
+Prompt-image overrides send `image_url` data-URL parts. Prompt-document overrides send PDFs as
+`file` parts and valid UTF-8 `text/*` documents as text parts. Other document formats fail before
+dispatch. Tool results remain text-only; prompt overrides do not enable binary tool results.
+
+`LlmConnection.ChatCompletions` stores two non-secret protocol choices. A null `OutputLimitField`
+selects `max_completion_tokens` for `api.openai.com` and `max_tokens` elsewhere; an explicit
+`MaxTokens` or `MaxCompletionTokens` wins. A null `UsePromptCacheKey` maps a nonempty
+`ConversationKey` to `prompt_cache_key` only for `api.openai.com`. Other endpoints require explicit
+true; explicit false disables the mapping on any endpoint. The advanced settings expose both
+choices and require retesting after edits. Provider options cannot replace a standard field written
+by the typed request. Conversation affinity is a hint, not an explicit billed cache resource.
 Existing provider JSON, headers and model-specific overrides are retained; the editor does not turn them into
 an arbitrary JSON settings payload.
 

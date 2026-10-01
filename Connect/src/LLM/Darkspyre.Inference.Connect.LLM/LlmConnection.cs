@@ -35,6 +35,9 @@ public sealed record LlmConnection
 
     public LlmVertexConfiguration? Vertex { get; init; }
 
+    /// <summary>Chat Completions protocol choices; null selects endpoint-aware defaults.</summary>
+    public LlmChatCompletionsConfiguration? ChatCompletions { get; init; }
+
     /// <summary>Non-standard headers such as OpenRouter attribution headers.</summary>
     public IReadOnlyDictionary<string, string> AdditionalHeaders { get; init; } =
         new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
