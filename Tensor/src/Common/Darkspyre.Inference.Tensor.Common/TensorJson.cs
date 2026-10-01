@@ -11,6 +11,8 @@ public static class TensorJson
     public static JsonTypeInfo<TensorModelPackDefinition> ModelPack => TensorJsonContext.Default.TensorModelPackDefinition;
     public static JsonTypeInfo<TensorModelPackStatus> PackStatus => TensorJsonContext.Default.TensorModelPackStatus;
     public static JsonTypeInfo<TensorModelObservation> ModelObservation => TensorJsonContext.Default.TensorModelObservation;
+    public static JsonTypeInfo<TensorBackendProbeRequest> BackendProbeRequest => TensorJsonContext.Default.TensorBackendProbeRequest;
+    public static JsonTypeInfo<TensorBackendAvailability> BackendAvailability => TensorJsonContext.Default.TensorBackendAvailability;
 }
 
 [JsonSourceGenerationOptions(GenerationMode = JsonSourceGenerationMode.Metadata)]
@@ -19,6 +21,8 @@ public static class TensorJson
 [JsonSerializable(typeof(TensorModelPackDefinition))]
 [JsonSerializable(typeof(TensorModelPackStatus))]
 [JsonSerializable(typeof(TensorModelObservation))]
+[JsonSerializable(typeof(TensorBackendProbeRequest))]
+[JsonSerializable(typeof(TensorBackendAvailability))]
 [JsonSerializable(typeof(PersistedModelManifest))]
 [JsonSerializable(typeof(TensorManifestFingerprint))]
 internal sealed partial class TensorJsonContext : JsonSerializerContext;

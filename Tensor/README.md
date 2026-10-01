@@ -269,7 +269,7 @@ These setup contracts are included in the synchronized 11.14.0-rc.1 package fami
 provider-owned dirty state and explicit choice capabilities for the shared Settings editor.
 
 `TensorJson` exports assembly-owned `JsonTypeInfo<T>` for `SetupConfiguration`, `SetupChanges`,
-`ModelPack`, `PackStatus` and `ModelObservation`. Consumers pass these typed metadata properties to
+`ModelPack`, `PackStatus`, `ModelObservation`, `BackendProbeRequest` and `BackendAvailability`. Consumers pass these typed metadata properties to
 `JsonSerializer` when reading or writing Tensor-owned data. The metadata belongs to the Tensor
 assembly generation; consumers release their references when that generation retires. The pack
 manager uses the same source-generated context for installed manifests. Manifest fingerprinting
@@ -277,6 +277,25 @@ also uses generated metadata and retains the established canonical bytes. These 
 their property names, numeric enum values and null/empty distinctions. Unknown properties are
 ignored; model validation remains separate from JSON parsing. Serializer tests load the real Tensor
 assembly into a collectible context and verify collection after each owned family retires.
+
+`ITensorBackendProbe.CheckAsync` takes a `TensorBackendProbeRequest`. The request carries an operation
+ID, implementation ID, requested backend, target RID, optional exact TensorSharp build identity and
+an ordered native candidate list. `TensorSharpBuildIdentity` keeps the package version, native ABI
+hash and pinned GGML commit separate. Each candidate carries its own ID, absolute bridge path,
+variant, build and RID. A bound probe supplies its trusted runtime plan. Settings never supply
+executable paths; the manager sends its implementation/backend identity and a fresh operation ID.
+Null candidates select ordinary package probing; an empty candidate list never falls through to
+ambient native discovery. The local defaults return an explicit Unknown observation for a nonempty
+native plan they cannot execute, instead of treating it as permission to probe an ambient runtime.
+
+`TensorBackendAvailability.State` is Unknown, Unsupported, Unavailable, Available or
+RequiresProcessRestart. `IsAvailable` derives from State. Detected device capabilities, candidate
+presence and successful initialization are separate observations. `ActualBackend` identifies a
+successfully initialized runtime, not a suggested selection. Prerequisite checks leave actual
+backend, initialization and loaded-candidate identity unknown. Diagnostics preserve candidate
+order and report phase, safe code/message and possible surviving native state. The settings manager
+rejects a result for another operation, implementation or requested backend. Restart-required and
+unsupported results are not retryable. No observation guarantees future model allocation.
 
 Qwen and Supra now load the definition selected by `LoadAsync(key)`, rather than requiring the
 built-in key. Register complete, immutable definitions in the same manager used by the engine.

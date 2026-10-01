@@ -69,6 +69,8 @@ public sealed class TensorJsonTests
         { "ModelPack", PackJson },
         { "PackStatus", "{\"Key\":{\"ModelId\":\"model\",\"Revision\":\"r1\"},\"State\":0,\"Detail\":null}" },
         { "ModelObservation", "{\"Model\":null,\"Backend\":null,\"State\":5,\"ObservedAt\":\"1970-01-01T00:00:00+00:00\"}" },
+        { "BackendProbeRequest", "{\"OperationId\":\"11111111-1111-1111-1111-111111111111\",\"ImplementationId\":\"test\",\"RequestedBackend\":2,\"TargetRid\":\"linux-x64\",\"ExpectedTensorSharpBuild\":null,\"NativeCandidates\":[]}" },
+        { "BackendAvailability", "{\"OperationId\":\"11111111-1111-1111-1111-111111111111\",\"ImplementationId\":\"test\",\"RequestedBackend\":2,\"State\":4,\"Reason\":\"restart required\",\"ObservedAt\":\"1970-01-01T00:00:00+00:00\",\"TargetRid\":\"linux-x64\",\"ActualBackend\":null,\"TensorSharpBuild\":null,\"LoadedCandidateId\":null,\"IsInitialized\":false,\"DetectedDeviceCapabilities\":[],\"CandidatePresence\":[],\"CandidateDiagnostics\":[{\"CandidateId\":\"cpu\",\"Phase\":2,\"Code\":\"initialization-failed\",\"Message\":\"restart required\",\"NativeStateMayRemain\":true}]}" },
         { "PersistedModelManifest", "{\"ModelId\":\"model\",\"Revision\":\"r1\",\"Artifacts\":[{\"Role\":\"model\",\"RelativePath\":\"model.bin\",\"Length\":1,\"Sha256\":\"hash\"}]}" },
         { "TensorManifestFingerprint", "{\"SourceId\":\"fixture\",\"Repository\":null,\"Variant\":\"model.bin\",\"architecture\":\"fixture\",\"capability\":1,\"Backends\":[1],\"Artifacts\":[]}" }
     };

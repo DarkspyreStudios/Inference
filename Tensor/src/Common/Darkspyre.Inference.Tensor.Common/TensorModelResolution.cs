@@ -26,13 +26,6 @@ public interface ITensorModelResolver
     Task<TensorModelResolution> ResolveAsync(TensorModelSelection selection, CancellationToken cancellationToken = default);
 }
 
-/// <summary>Actual runtime prerequisites, separately observed from a pack's supported backend declarations.</summary>
-public sealed record TensorBackendAvailability(TensorBackendKind Backend, bool? IsAvailable, string Reason, DateTimeOffset ObservedAt);
-public interface ITensorBackendProbe
-{
-    Task<TensorBackendAvailability> CheckAsync(TensorBackendKind backend, CancellationToken cancellationToken = default);
-}
-
 /// <summary>One identity rule shared by engine resolvers. Does not register or install the definition.</summary>
 public static class TensorResolvedPack
 {

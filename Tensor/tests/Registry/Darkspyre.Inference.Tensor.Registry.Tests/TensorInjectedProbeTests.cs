@@ -31,8 +31,12 @@ public sealed class TensorInjectedProbeTests
     [MemberData(nameof(Observations))]
     public async Task InjectedProbeIsExclusiveLazyAndReadOnly(string engine, bool useProvider, bool? available)
     {
-        var probe = new RecordingProbe((backend, _) => Task.FromResult(new TensorBackendAvailability(
-            backend, available, "remote-observation", DateTimeOffset.UnixEpoch)));
+        var probe = new RecordingProbe((request, _) => Task.FromResult(TensorBackendAvailability.Observe(request, available switch
+        {
+            true => TensorBackendAvailabilityState.Available,
+            false => TensorBackendAvailabilityState.Unavailable,
+            null => TensorBackendAvailabilityState.Unknown
+        }, "remote-observation")));
         var packs = new RecordingPacks();
         var target = new RecordingTarget();
         TensorSettingsManager manager = Create(engine, useProvider, target, packs, probe);
@@ -47,6 +51,12 @@ public sealed class TensorInjectedProbeTests
         SetupActionResult result = await manager.RunAsync(settings, "backend-check");
         Assert.Equal(available == true ? SetupActionState.Completed : SetupActionState.Failed, result.State);
         Assert.Equal(TensorBackendKind.Auto, Assert.Single(probe.Backends));
+        TensorBackendProbeRequest request = Assert.Single(probe.Requests);
+        Assert.NotEqual(Guid.Empty, request.OperationId);
+        Assert.Equal(settings.Definition.Implementation.Id, request.ImplementationId);
+        Assert.Equal(System.Runtime.InteropServices.RuntimeInformation.RuntimeIdentifier, request.TargetRid);
+        Assert.Null(request.NativeCandidates);
+        Assert.Null(request.ExpectedTensorSharpBuild);
         Assert.Equal("remote-observation", Observation(settings));
         Assert.Empty(packs.Calls);
         Assert.Null(target.Changes);
@@ -56,6 +66,7 @@ public sealed class TensorInjectedProbeTests
         Assert.Contains("Unknown", Observation(settings), StringComparison.Ordinal);
         await manager.RunAsync(settings, "backend-check");
         Assert.Equal([TensorBackendKind.Auto, TensorBackendKind.Auto], probe.Backends);
+        Assert.NotEqual(probe.Requests[0].OperationId, probe.Requests[1].OperationId);
     }
 
     [Theory]
@@ -78,11 +89,11 @@ public sealed class TensorInjectedProbeTests
     public async Task CancelledInjectedProbeDoesNotPublishLateAvailableObservation(string engine, bool useProvider)
     {
         using var cancellation = new CancellationTokenSource();
-        var probe = new RecordingProbe((backend, token) =>
+        var probe = new RecordingProbe((request, token) =>
         {
             Assert.Equal(cancellation.Token, token);
             cancellation.Cancel();
-            return Task.FromResult(new TensorBackendAvailability(backend, true, "late success", DateTimeOffset.UnixEpoch));
+            return Task.FromResult(TensorBackendAvailability.Observe(request, TensorBackendAvailabilityState.Available, "late success"));
         });
         TensorSettingsManager manager = Create(engine, useProvider, new RecordingTarget(), new RecordingPacks(), probe);
         TensorSettings settings = await manager.OpenAsync(new(SetupChangeIntent.Create, "entry", null));
@@ -117,6 +128,45 @@ public sealed class TensorInjectedProbeTests
         return provider.CreateSettingsManager(target, packs, [], backendProbe: probe);
     }
 
+    [Theory]
+    [MemberData(nameof(Routes))]
+    public async Task MismatchedRemoteObservationsNeverPublish(string engine, bool useProvider)
+    {
+        foreach (string mismatch in new[] { "operation", "implementation", "backend" })
+        {
+            var probe = new RecordingProbe((request, _) => Task.FromResult(TensorBackendAvailability.Observe(new(
+                mismatch == "operation" ? Guid.NewGuid() : request.OperationId,
+                mismatch == "implementation" ? "another-implementation" : request.ImplementationId,
+                mismatch == "backend" ? TensorBackendKind.Cpu : request.RequestedBackend, request.TargetRid),
+                TensorBackendAvailabilityState.Available, "mismatched success")));
+            TensorSettingsManager manager = Create(engine, useProvider, new RecordingTarget(), new RecordingPacks(), probe);
+            TensorSettings settings = await manager.OpenAsync(new(SetupChangeIntent.Create, "entry", null));
+            SetupActionResult result = await manager.RunAsync(settings, "backend-check");
+            Assert.Equal(SetupActionState.Failed, result.State);
+            Assert.Equal("backend-probe-mismatch", Assert.Single(result.Issues!).Code);
+            Assert.Contains("Unknown", Observation(settings), StringComparison.Ordinal);
+            Assert.False(result.IsRetryable);
+        }
+    }
+
+    [Theory]
+    [MemberData(nameof(Routes))]
+    public async Task RestartRequiredAndUnsupportedAreNotRetryable(string engine, bool useProvider)
+    {
+        foreach (TensorBackendAvailabilityState state in new[] { TensorBackendAvailabilityState.RequiresProcessRestart, TensorBackendAvailabilityState.Unsupported })
+        {
+            var probe = new RecordingProbe((request, _) => Task.FromResult(TensorBackendAvailability.Observe(request, state, "safe diagnosis")));
+            TensorSettingsManager manager = Create(engine, useProvider, new RecordingTarget(), new RecordingPacks(), probe);
+            TensorSettings settings = await manager.OpenAsync(new(SetupChangeIntent.Create, "entry", null));
+            SetupActionResult result = await manager.RunAsync(settings, "backend-check");
+            Assert.Equal(SetupActionState.Failed, result.State);
+            Assert.Equal(state == TensorBackendAvailabilityState.RequiresProcessRestart ? "backend-process-restart" : "backend-unsupported",
+                Assert.Single(result.Issues!).Code);
+            Assert.False(result.IsRetryable);
+            Assert.Null(settings.Status.Ready.Value);
+        }
+    }
+
     private static void SelectBackend(TensorSettings settings, TensorBackendKind backend) => Assert.Equal(SetupEditState.Applied,
         settings.Steps.SelectMany(step => step.Sections).SelectMany(section => section.Fields).OfType<SetupChoiceField>()
             .Single(field => field.Description.Id == "backend").SetValue(backend.ToString()).State);
@@ -124,13 +174,14 @@ public sealed class TensorInjectedProbeTests
     private static string Observation(TensorSettings settings) => settings.Steps.SelectMany(step => step.Sections)
         .SelectMany(section => section.Fields).OfType<SetupTextField>().Single(field => field.Description.Id == "backend-availability").Value;
 
-    private sealed class RecordingProbe(Func<TensorBackendKind, CancellationToken, Task<TensorBackendAvailability>> check) : ITensorBackendProbe
+    private sealed class RecordingProbe(Func<TensorBackendProbeRequest, CancellationToken, Task<TensorBackendAvailability>> check) : ITensorBackendProbe
     {
-        public List<TensorBackendKind> Backends { get; } = [];
-        public Task<TensorBackendAvailability> CheckAsync(TensorBackendKind backend, CancellationToken cancellationToken = default)
+        public List<TensorBackendProbeRequest> Requests { get; } = [];
+        public IReadOnlyList<TensorBackendKind> Backends => Requests.Select(request => request.RequestedBackend).ToArray();
+        public Task<TensorBackendAvailability> CheckAsync(TensorBackendProbeRequest request, CancellationToken cancellationToken = default)
         {
-            Backends.Add(backend);
-            return check(backend, cancellationToken);
+            Requests.Add(request);
+            return check(request, cancellationToken);
         }
     }
 }
