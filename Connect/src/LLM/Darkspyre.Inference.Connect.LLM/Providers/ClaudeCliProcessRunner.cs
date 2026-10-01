@@ -36,6 +36,8 @@ internal sealed class ClaudeCliProcessRunner : IClaudeCliRunner
         Task<string> standardError = ReadStandardErrorAsync(process.StandardError, reads);
         string? standardInputError = null;
         var output = new StringBuilder();
+        var lines = new CliLineReader(process.StandardOutput, MaximumCapturedCharacters,
+            $"Claude CLI StandardOutput exceeded the {MaximumCapturedCharacters}-character safety limit.");
         try
         {
             try
@@ -55,10 +57,10 @@ internal sealed class ClaudeCliProcessRunner : IClaudeCliRunner
                 TryCloseStandardInput(process);
             }
 
-            while (await process.StandardOutput.ReadLineAsync(reads.Token) is { } line)
+            while (await lines.ReadLineAsync(reads.Token) is { } line)
             {
+                EnsureCaptureLimit(output.Length + line.Length + Environment.NewLine.Length, nameof(process.StandardOutput));
                 output.AppendLine(line);
-                EnsureCaptureLimit(output.Length, nameof(process.StandardOutput));
                 yield return new ClaudeCliOutputLine(line);
             }
             await process.WaitForExitAsync(reads.Token);
@@ -71,6 +73,7 @@ internal sealed class ClaudeCliProcessRunner : IClaudeCliRunner
         }
         finally
         {
+            lines.ReleaseBufferedText();
             try
             {
                 if (!process.HasExited)

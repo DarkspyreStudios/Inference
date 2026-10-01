@@ -670,6 +670,8 @@ Claude CLI chat owns the process during stdin writes as well as output reads. Ca
 blocked stdin write and early disposal of its output stream both terminate the owned process.
 Its stderr reader enforces a 16 MiB character limit while reading. A stderr read failure interrupts
 blocked stdin/stdout operations. Retirement cancels and observes that reader with a 5-second bound.
+Its stdout reader rejects a decoded line above 16 MiB characters before receiving a newline.
+Total captured stdout is checked before a line and its normalized newline are appended.
 
 Claude and Antigravity native session processes share one pipe-operation owner. Retirement fences new
 reads, writes and exit waits, cancels active and queued operations, and waits for them to leave before
@@ -680,8 +682,11 @@ Antigravity rejects closing stdin while another write is active.
 
 Native Claude stderr capture rejects input above 16 MiB characters during reading. Native Antigravity
 keeps the first 64 KiB characters and drains the remaining stderr without retaining it. A capture
-failure interrupts pending pipe operations. Both wrappers reject stdout lines above 16 MiB characters
-after the line is read; this check does not bound a partially received line's allocation.
+failure interrupts pending pipe operations. Both wrappers and Claude chat share a stdout line reader
+that rejects decoded lines above 16 MiB characters during receipt. It preserves the pipe's encoding,
+CR/LF/CRLF delimiters and an unterminated final line at EOF. Caller cancellation retains received
+partial text for the next read. An oversized line faults the reader; later reads report the same
+failure without truncating or resynchronizing its content.
 
 Native-session disposal allows up to 2 seconds for graceful exit after closing stdin, then signals an
 owned process that remains alive. The process exit and stderr EOF share a subsequent 5-second bound.

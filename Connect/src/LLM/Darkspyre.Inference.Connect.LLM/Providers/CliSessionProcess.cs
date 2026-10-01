@@ -12,6 +12,7 @@ internal sealed class CliSessionProcess : IAsyncDisposable
     private static readonly TimeSpan GracefulExit = TimeSpan.FromSeconds(2);
     internal const int MaximumLineCharacters = 16 * 1024 * 1024;
     private readonly Process _process;
+    private readonly CliLineReader _standardOutput;
     private readonly string _name;
     private readonly int _maximumErrorCharacters;
     private readonly bool _truncateError;
@@ -27,6 +28,8 @@ internal sealed class CliSessionProcess : IAsyncDisposable
     {
         _process = process;
         _name = name;
+        _standardOutput = new(process.StandardOutput, MaximumLineCharacters,
+            $"{name} output exceeded the {MaximumLineCharacters}-character line limit.");
         _maximumErrorCharacters = maximumErrorCharacters;
         _truncateError = truncateError;
         _standardError = CaptureErrorAsync();
@@ -73,9 +76,7 @@ internal sealed class CliSessionProcess : IAsyncDisposable
             await _readLock.WaitAsync(cancellation.Token).ConfigureAwait(false);
             try
             {
-                string? line = await _process.StandardOutput.ReadLineAsync(cancellation.Token).ConfigureAwait(false);
-                if (line is { Length: > MaximumLineCharacters })
-                    throw new InvalidOperationException($"{_name} output exceeded the {MaximumLineCharacters}-character line limit.");
+                string? line = await _standardOutput.ReadLineAsync(cancellation.Token).ConfigureAwait(false);
                 cancellation.Token.ThrowIfCancellationRequested();
                 return line;
             }
@@ -181,6 +182,7 @@ internal sealed class CliSessionProcess : IAsyncDisposable
             }
             _writeLock.Dispose();
             _readLock.Dispose();
+            _standardOutput.ReleaseBufferedText();
             try { _process.Dispose(); }
             catch (Exception error) { failures.Add(error); }
             _errorRead.Dispose();
