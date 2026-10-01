@@ -19,6 +19,9 @@ internal sealed record GeminiModelProfile(
     IReadOnlyDictionary<LlmReasoningLevel, int> Budgets)
 {
     public bool AllowsSampling { get; init; } = true;
+    public bool MultimodalFunctionResponses { get; init; }
+    public bool RequiresThoughtSignatures { get; init; }
+    public bool StreamedFunctionArguments { get; init; }
 }
 
 /// <summary>Per-model Gemini reasoning controls, shared by the Gemini API and Vertex Gemini routes.</summary>
@@ -75,7 +78,14 @@ internal static class GeminiModelProfiles
         bool ignoredSampling = segments is ["gemini", var versionText, "flash", ..]
             && Version.TryParse(versionText.Contains('.') ? versionText : versionText + ".0", out Version? version)
             && version >= new Version(3, 6);
-        return resolved with { AllowsSampling = !ignoredSampling };
+        bool gemini3 = bareModelId.StartsWith("gemini-3", StringComparison.Ordinal);
+        return resolved with
+        {
+            AllowsSampling = !ignoredSampling,
+            MultimodalFunctionResponses = gemini3,
+            RequiresThoughtSignatures = gemini3,
+            StreamedFunctionArguments = gemini3 && !bareModelId.StartsWith("gemini-3.1-flash-lite", StringComparison.Ordinal)
+        };
     }
 
     /// <summary>

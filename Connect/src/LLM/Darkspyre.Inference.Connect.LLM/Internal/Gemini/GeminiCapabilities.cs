@@ -8,7 +8,8 @@ internal static class GeminiCapabilities
 {
     public static LlmProviderCapabilities Create(GeminiModelProfile profile, bool supportsTopK)
     {
-        LlmRichContentSupported rich = RichContentRoutes.TextOnly with { ErrorFlag = LlmRichContentCarriage.Native };
+        LlmRichContentSupported rich = profile.MultimodalFunctionResponses ? RichContentRoutes.GeminiFunctionResponse
+            : RichContentRoutes.TextOnly with { ErrorFlag = LlmRichContentCarriage.Native };
         return new()
         {
             SupportsStreaming = true,

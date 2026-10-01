@@ -67,7 +67,9 @@ and `outputTokenLimit` to the model's limits. Availability is Unknown.
 ## Capabilities
 
 Every listed model has the shared Gemini capabilities: streaming with usage, tool use with all choice
-modes, text-only rich tool results, prompt images and documents, and managed agent sessions. Strict
+modes, prompt images and documents, and managed agent sessions. Gemini 3 tool results carry PNG,
+JPEG, WebP and PDF parts natively up to 7 MiB per binary part. Earlier models omit these unsupported
+binary results through the projection report. Text documents remain text-carried. Strict
 tool input is Unsupported. Parallel-call control and argument streaming are not offered.
 
 Reasoning control comes from `GeminiModelProfiles`, which the Vertex Gemini route shares. Gemini 3 takes
@@ -115,6 +117,12 @@ The stream mapping is the shared Gemini mapping described in
 [the Vertex design](google-vertex-ai-tech-design.md#8-stream-and-terminal-mapping). Synthesized call ids
 start with `gemini_`. Output tokens are `candidatesTokenCount` plus `thoughtsTokenCount`.
 `ReasoningOutputTokens` is `thoughtsTokenCount` and `CachedInputTokens` is `cachedContentTokenCount`.
+Input tokens add `toolUsePromptTokenCount` to a known `promptTokenCount`; a missing prompt count
+remains unknown. Running observations replace prior counts and final usage remains authoritative.
+
+`MALFORMED_FUNCTION_CALL`, `UNEXPECTED_TOOL_CALL` and `TOO_MANY_TOOL_CALLS` complete with Failed,
+preserving emitted text but no completed tool calls or continuation state. `IMAGE_SAFETY` and prompt
+blocks, including `JAILBREAK`, complete with Refused. `MISSING_THOUGHT_SIGNATURE` is a protocol error.
 
 An HTTP failure raises `LlmProviderException` with the status code and `Retry-After`. The message
 depends only on the status. The response body is not read. Other stream failures raise a generic
@@ -126,10 +134,24 @@ Retained state keeps Gemini parts in order with `thoughtSignature` on its origin
 the hash of the transport, endpoint and API key. A different key cannot replay stored state. A
 connection pinned to one scope fails before dispatch when its key changes.
 
+Explicit `UnboundContinuationState.Omit` imports visible foreign tool calls without native state.
+Gemini 3 adds the documented `skip_thought_signature_validator` value to the first call in each
+imported assistant group. Earlier models need no dummy signature. Default Reject still requires
+native continuation. Parallel results follow their original call order, not host arrival order.
+Native signatures are never replaced by a dummy signature.
+
+Gemini 3 function responses carry images and PDFs inside `functionResponse.parts.inlineData`.
+Their response object references each binary through one `$ref` in its `attachments` array.
+Display names have unique ordinal prefixes, contain only ASCII letters/digits and `._-`, and are
+limited to 128 characters. Text and binary channels do not preserve the original cross-kind order.
+
 ## Context estimate
 
 `EstimateInputTokens` is a local text estimate. It returns null for requests with continuation state,
-attachments or non-text tool output. The connector does not call `countTokens`.
+attachments or non-text tool output. The estimate never calls `countTokens`.
+`CountInputTokensAsync` uses the canonical generation request in `generateContentRequest`, including
+its model, to call the provider count endpoint. Provider counts remain separate from local estimates
+and never fabricate generation output usage.
 
 ## Tests and live qualification
 

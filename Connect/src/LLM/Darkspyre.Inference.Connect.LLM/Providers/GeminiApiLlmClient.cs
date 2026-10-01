@@ -32,7 +32,9 @@ internal sealed partial class GeminiApiLlmClient(HttpClient http)
     public override LlmProviderCapabilities GetCapabilities(LlmConnection connection, string? modelId = null)
     {
         Validate(connection);
-        GeminiModelProfile profile = modelId is null ? GeminiModelProfiles.Get(string.Empty, null) : Reasoning(connection, modelId);
+        GeminiModelProfile profile = modelId is null
+            ? GeminiModelProfiles.Get(string.Empty, null) with { MultimodalFunctionResponses = true }
+            : Reasoning(connection, modelId);
         bool supportsTopK = modelId is not null && ILlmCatalogCapabilities.EntryFor(connection, modelId) is { ValueKind: JsonValueKind.Object } entry
             && entry.TryGetProperty("topK", out JsonElement topK) && topK.ValueKind == JsonValueKind.Number
             && topK.TryGetInt32(out int defaultTopK) && defaultTopK > 0;

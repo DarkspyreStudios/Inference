@@ -872,6 +872,12 @@ without it; its visible text, tool calls, tool results and attachments are kept.
 `Reject`, fails before any request. The caller's messages are not modified, so the original state
 stays in host storage.
 
+Gemini API and Vertex Gemini accept visible foreign tool-call groups with explicit Omit. Gemini 3
+places the documented dummy thought signature on the first imported call; original bound native
+signatures remain unchanged. Tool results follow their original call order. Gemini 3 carries PNG,
+JPEG, WebP and PDF tool results as nested function-response media, bounded at 7 MiB per binary.
+Earlier Gemini models omit those unsupported binary results through the existing projection report.
+
 Claude CLI chat and Antigravity CLI chat report `LlmProviderCapabilities.ToolHistory = Text`. Tool
 calls and results already in the history reach their prompt as `[TOOL CALL id=… name=…]` and
 `[TOOL RESULT id=… status=ok|error]` blocks. Offering tools to these routes still fails.

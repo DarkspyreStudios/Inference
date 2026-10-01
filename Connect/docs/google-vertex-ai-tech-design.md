@@ -254,6 +254,20 @@ Advertise native image/document tool results only after qualification. Resource 
 Connect does not fetch them. Claude document support on Google Cloud requires base64 sources [S7].
 MIME types, payload limits and attachment completeness are validated before dispatch.
 
+The Gemini 3 profile carries PNG, JPEG, WebP and PDF tool results as nested
+`functionResponse.parts.inlineData`, with one matching `$ref` per binary in the response's
+`attachments` array. Each binary is bounded at 7 MiB. Display names use a unique ordinal prefix,
+ASCII letters/digits and `._-`, capped at 128 characters. Text documents remain text-carried;
+cross-kind order is not preserved. Projection reports retain omitted-part information.
+Explicit Omit imports foreign visible call groups with the documented dummy thought signature on
+their first call; default Reject still requires original native state. Native signed state is replayed
+unchanged, and parallel responses follow original call order.
+
+Gemini input usage includes tool-use prompt tokens when the provider reports a prompt count.
+Malformed, unexpected and excessive tool-call finish reasons yield Failed with preserved text,
+no completed calls and no continuation. Missing thought signatures remain protocol errors.
+Image safety and prompt blocks yield Refused. Unknown finish reasons stay Unknown.
+
 ## 6. Required continuation contract change
 
 Before DSA-61, `LlmChatMessage`/`LlmChatResult` carried the Connect-only `LlmProviderResponseState`; Common's `LlmMessage`

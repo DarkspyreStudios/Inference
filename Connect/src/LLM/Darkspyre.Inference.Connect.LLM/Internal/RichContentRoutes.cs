@@ -74,6 +74,17 @@ internal static class RichContentRoutes
         AllowsEmpty = false
     };
 
+    /// <summary>Gemini 3 functionResponse media referenced by nested inlineData display names.</summary>
+    public static LlmRichContentSupported GeminiFunctionResponse { get; } = TextOnly with
+    {
+        Images = LlmRichContentCarriage.Native,
+        ImageMediaTypes = new[] { "image/png", "image/jpeg", "image/webp" }.ToFrozenSet(StringComparer.Ordinal),
+        PdfDocuments = LlmRichContentCarriage.Native,
+        ErrorFlag = LlmRichContentCarriage.Native,
+        PreservesOrder = false,
+        MaxBinaryBytes = 7 * 1024 * 1024
+    };
+
     /// <summary>
     /// The Claude CLI agent's MCP result. The CLI writes binary resources to disk and gives the model a path
     /// note, so PDFs and other binaries are unsupported; it drops text parts when MCP structured content is
