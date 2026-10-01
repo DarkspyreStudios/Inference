@@ -63,6 +63,7 @@ internal sealed class AnthropicTools
                         throw new ArgumentException("Programmatic Claude clients require a compatible code-execution tool.");
                     if (programmatic && definition.Strict)
                         throw new NotSupportedException("Programmatic Claude client tools do not support strict input schemas.");
+                    if (programmatic) AnthropicProgrammaticSchemas.Validate(definition.InputSchema);
                     if (request.ToolChoice is { Mode: LlmToolChoiceMode.Specific } choice && choice.Name == field.Name
                         && !callers.EnumerateArray().Any(caller => caller.GetString() == "direct"))
                         throw new NotSupportedException("A forced Claude client tool must allow direct calling.");
