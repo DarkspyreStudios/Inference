@@ -125,6 +125,31 @@ public sealed class GeminiProtocolConformanceTests
     [InlineData(false, true)]
     [InlineData(true, false)]
     [InlineData(true, true)]
+    public async Task LocalSchemaFallbackRetainsOriginalConstraintsWithoutNativeFormat(bool vertex, bool stream)
+    {
+        const string reply = """{"candidates":[{"content":{"parts":[{"text":"\"b\""}]},"finishReason":"STOP"}]}""";
+        using var handler = new Handler(reply, stream);
+        using var http = new HttpClient(handler);
+        var request = new LlmChatRequest
+        {
+            ModelId = vertex ? "google/" + Model : Model,
+            StructuredOutput = new() { Name = "result", Schema = JsonElement.Parse("{\"type\":\"string\",\"pattern\":\"^a\"}"), Fallback = LlmStructuredOutputFallback.LocalValidation }
+        };
+        var events = await Drain(Client(http, vertex).StreamAsync(Connection(vertex, stream), request));
+        LlmStructuredOutputValidation validation = Assert.Single(events.OfType<LlmChatCompletionEvent>()).Result.StructuredOutput!;
+        Assert.Equal(LlmStructuredOutputEnforcement.LocalValidationOnly, validation.Enforcement);
+        Assert.True(validation.WasEvaluated);
+        Assert.False(validation.IsValid);
+        Assert.NotEmpty(validation.Errors);
+        Assert.Null(JsonNode.Parse(handler.Bodies[0])!["generationConfig"]!["responseFormat"]);
+        Assert.Equal("^a", request.StructuredOutput.Schema.GetProperty("pattern").GetString());
+    }
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
     public async Task ExplicitImportedParallelHistoryUsesOneSignatureAndNativeMedia(bool vertex, bool stream)
     {
         using var handler = new Handler(Reply, stream);

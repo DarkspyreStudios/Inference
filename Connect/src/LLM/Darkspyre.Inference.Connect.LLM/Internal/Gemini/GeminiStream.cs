@@ -29,6 +29,9 @@ internal static class GeminiStream
         var calls = new List<LlmToolCall>();
         var callIds = new HashSet<string>(StringComparer.Ordinal);
         bool invalidCall = false;
+        var argumentStream = new GeminiArgumentStream();
+        bool streamedArguments = route.Transport == LlmTransport.GoogleVertexAi && stream && request.Tools.Count > 0
+            && GeminiModelProfiles.Get(request.ModelId[(request.ModelId.LastIndexOf('/') + 1)..], null).StreamedFunctionArguments;
         string? finish = null;
         string? blocked = null;
         string? responseId = null;
@@ -76,6 +79,7 @@ internal static class GeminiStream
                     || !content.TryGetProperty("parts", out JsonElement received)) { continue; }
                 foreach (JsonElement item in received.EnumerateArray())
                 {
+                    cancellationToken.ThrowIfCancellationRequested();
                     JsonObject part = JsonNode.Parse(item.GetRawText())!.AsObject();
                     if (part.Any(field => field.Key is not ("text" or "thought" or "thoughtSignature" or "functionCall")))
                     { throw Failure($"{route.Name} returned unsupported assistant content."); }
@@ -89,6 +93,22 @@ internal static class GeminiStream
                     if (part["functionCall"] is JsonObject function)
                     {
                         if (finish is "MALFORMED_FUNCTION_CALL" or "UNEXPECTED_TOOL_CALL" or "TOO_MANY_TOOL_CALLS") { continue; }
+                        if (argumentStream.IsOpen || function.ContainsKey("partialArgs") || function.ContainsKey("willContinue") || function.Count == 0)
+                        {
+                            if (!streamedArguments || part.Any(field => field.Key is not ("functionCall" or "thoughtSignature")))
+                            { throw Failure($"{route.Name} returned unexpected streamed function arguments."); }
+                            var observation = argumentStream.Observe(part, () => route.CallIdPrefix + Guid.NewGuid().ToString("N"), cancellationToken);
+                            if (observation.Started)
+                            {
+                                string streamedId = (string)observation.Part["connectCallId"]!;
+                                string streamedName = (string)observation.Part["functionCall"]!["name"]!;
+                                if (!callIds.Add(streamedId)) { throw Failure($"{route.Name} returned a duplicate function identity."); }
+                                parts.Add(observation.Part);
+                                yield return new LlmToolCallStartedEvent(streamedId, streamedName, calls.Count);
+                            }
+                            if (observation.Completed is { } completed) { calls.Add(completed); }
+                            continue;
+                        }
                         string? name = function["name"] is JsonValue nameValue && nameValue.TryGetValue<string>(out string? foundName) ? foundName : null;
                         if (string.IsNullOrWhiteSpace(name) || function["args"] is not JsonObject arguments)
                         {
@@ -116,6 +136,8 @@ internal static class GeminiStream
             : finish == "MAX_TOKENS" ? LlmCompletionStatus.Incomplete
             : finish == "STOP" ? calls.Count > 0 ? LlmCompletionStatus.RequiresAction : LlmCompletionStatus.Completed
             : LlmCompletionStatus.Unknown;
+        if (argumentStream.IsOpen && status is LlmCompletionStatus.Completed or LlmCompletionStatus.RequiresAction)
+        { throw Failure($"{route.Name} returned incomplete function arguments."); }
         LlmToolCall[] completeCalls = status == LlmCompletionStatus.RequiresAction ? calls.ToArray() : [];
         foreach (LlmToolCall call in completeCalls) { yield return new LlmToolCallCompletedEvent(call); }
         int? input = Input();

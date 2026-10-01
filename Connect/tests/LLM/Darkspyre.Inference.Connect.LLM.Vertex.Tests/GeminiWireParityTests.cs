@@ -8,7 +8,7 @@ using Darkspyre.Inference.Connect.LLM.Providers;
 
 namespace Darkspyre.Inference.Connect.LLM.Vertex.Tests;
 
-/// <summary>The Vertex Gemini route and the Gemini API send the same generateContent body for the same portable request.</summary>
+/// <summary>The Gemini routes share portable fields while retaining their native formats and preview controls.</summary>
 public sealed class GeminiWireParityTests
 {
     private const string Reply = """{"candidates":[{"content":{"parts":[{"text":"{\"ok\":true}"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":2,"candidatesTokenCount":1,"totalTokenCount":3}}""";
@@ -76,6 +76,8 @@ public sealed class GeminiWireParityTests
         Assert.True(JsonNode.DeepEquals(vertexFormat, geminiFormat));
         fromVertex["generationConfig"]!.AsObject().Remove("responseFormat");
         fromGemini["generationConfig"]!.AsObject().Remove("responseFormat");
+        Assert.Equal(stream ? true : null, (bool?)fromVertex["toolConfig"]?["functionCallingConfig"]?["streamFunctionCallArguments"]);
+        fromVertex["toolConfig"]!["functionCallingConfig"]!.AsObject().Remove("streamFunctionCallArguments");
         Assert.True(JsonNode.DeepEquals(fromVertex, fromGemini));
         Assert.Equal("MEDIUM", (string?)fromGemini["generationConfig"]?["thinkingConfig"]?["thinkingLevel"]);
         Assert.Equal("APPLICATION_JSON", (string?)geminiFormat["text"]?["mimeType"]);

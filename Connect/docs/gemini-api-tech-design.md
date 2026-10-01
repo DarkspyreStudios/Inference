@@ -36,6 +36,8 @@ route both use:
 
 Both routes share the portable request body except their native `responseFormat` shapes.
 Gemini API uses an object; Vertex uses a single-item array (`GeminiWireParityTests`).
+Vertex streaming additionally requests its preview path-based function arguments for supported
+Gemini 3 profiles; Gemini API does not send that control.
 
 ## Authentication and setup
 
@@ -178,6 +180,8 @@ runs the live cases. Live qualification must confirm:
 - which catalog models accept `thinkingLevel`, and which accept only `thinkingBudget`;
 - the inline request size limit for images and PDFs;
 - whether the Gemini API enforces schema keywords beyond the allowlist.
+- whether the selected API revision accepts nested function-response `displayName` references;
+- whether native `responseFormat` accepts the preserved schema shapes.
 
 ## Out of scope
 

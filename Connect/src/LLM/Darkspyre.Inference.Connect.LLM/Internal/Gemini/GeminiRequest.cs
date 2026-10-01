@@ -9,7 +9,7 @@ internal static class GeminiRequest
     internal const string DummyThoughtSignature = "skip_thought_signature_validator";
     public static JsonObject Build(LlmConnection connection, LlmChatRequest request,
         LlmStructuredOutputEnforcement? enforcement, Func<LlmToolOutput, ProjectedToolOutput> project,
-        GeminiModelProfile reasoning, bool reasoningText)
+        GeminiModelProfile reasoning, bool reasoningText, bool streamArguments = false)
     {
         var contents = new JsonArray();
         var calls = new Dictionary<string, (string Name, string? WireId)>(StringComparer.Ordinal);
@@ -169,6 +169,11 @@ internal static class GeminiRequest
             };
             if (choice.Mode == LlmToolChoiceMode.Specific) { config["allowedFunctionNames"] = new JsonArray(choice.Name); }
             payload["toolConfig"] = new JsonObject { ["functionCallingConfig"] = config };
+        }
+        if (streamArguments && reasoning.StreamedFunctionArguments && request.Tools.Count > 0)
+        {
+            payload["toolConfig"] ??= new JsonObject { ["functionCallingConfig"] = new JsonObject() };
+            payload["toolConfig"]!["functionCallingConfig"]!["streamFunctionCallArguments"] = true;
         }
         return payload;
 
