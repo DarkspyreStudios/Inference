@@ -97,6 +97,10 @@ metadata. Prompt/delete requests and diagnostic payloads use their own Web-forma
 JSON remains opaque DOM data, including nulls and unknown node fields. Serialization does not change
 workflow interpretation or progress/cancellation lifetime.
 
+Claude and Codex's private OAuth JSON requests are written as DOM data, not reflection over anonymous
+library types. Their field names/order, escaping and explicit null fields remain unchanged; Codex's
+authorization-code exchange remains form encoded. This does not change either authentication flow.
+
 `LlmToolCapabilities.StrictInputSchema` reports Supported, Unsupported or Unknown. Unknown allows an
 explicit `Strict=true` request unchanged so the host can try it and handle the provider result.
 Known Unsupported rejects that request. Ordinary tools default to `Strict=false` independently.
