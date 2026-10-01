@@ -47,6 +47,37 @@ public sealed class RuntimeInventoryTests
         Assert.False(inventory.HasTransitiveGgmlNatives);
     }
 
+    [Theory]
+    [InlineData("Darkspyre.TensorSharp.Backends.GGML.Native.linux-arm64")]
+    [InlineData("Darkspyre.TensorSharp.Backends.GGML.Native.linux-arm64.cuda13")]
+    public void NativePackageIdentityRejectsManagedClosureWithoutPayload(string id)
+    {
+        RuntimeInventory inventory = RuntimeInventory.Read(Fixture(id, "1.0.0", []), Commit);
+        Assert.Empty(inventory.NativeAssets);
+        Assert.True(inventory.HasTransitiveGgmlNatives);
+        Assert.Equal("NotRun", inventory.RuntimeQualification);
+    }
+
+    [Fact]
+    public void OptionalVariantDirectoryBindsItsPackageRidAndHashesActualFiles()
+    {
+        const string id = "Darkspyre.TensorSharp.Backends.GGML.Native.linux-arm64.cuda13";
+        RuntimeInventory inventory = RuntimeInventory.Read(Fixture(id, "1.0.0",
+            ["ggml/cuda13/libGgmlOps.so", "ggml/cuda13/libcudart.so.13"]), Commit);
+        Assert.Equal(2, inventory.NativeAssets.Count);
+        Assert.All(inventory.NativeAssets, asset =>
+        {
+            Assert.Equal("linux-arm64", asset.Rid);
+            Assert.Equal("NativeLibrary", asset.Kind);
+            Assert.Equal(Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes("fixture bytes"))), asset.Sha256);
+            Assert.Equal("NotRun", asset.RuntimeQualification);
+        });
+        Assert.True(inventory.HasTransitiveGgmlNatives);
+        Assert.Equal("AssetsPresent", inventory.Coverage.Single(item => item.Family == "Ggml" && item.Rid == "linux-arm64").State);
+        Assert.Equal(25, inventory.Coverage.Count);
+        Assert.All(inventory.Coverage, coverage => Assert.Equal("NotRun", coverage.RuntimeQualification));
+    }
+
     [Fact]
     public void AnyCpuNativeAssetIsNotClassifiedAsManagedOnly()
     {
