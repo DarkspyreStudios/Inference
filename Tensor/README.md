@@ -277,6 +277,12 @@ also uses generated metadata and retains the established canonical bytes. These 
 their property names, numeric enum values and null/empty distinctions. Unknown properties are
 ignored; model validation remains separate from JSON parsing. Serializer tests load the real Tensor
 assembly into a collectible context and verify collection after each owned family retires.
+Controlled caller tests also run canonical fingerprinting and the real pack manager in a foreign
+generation. Tiny local fixtures exercise installation, asynchronous manifest writes and reads,
+verification, artifact lease release, removal and disposal. Exact manifest bytes retain artifact
+order and hashes. Malformed JSON, null manifests and mismatched identities report Invalid; unknown
+manifest properties remain ignored. The settled caller graph retires after owned metadata and
+operation locals are released. These tests execute no native runtime and download no models.
 
 `ITensorBackendProbe.CheckAsync` takes a `TensorBackendProbeRequest`. The request carries an operation
 ID, implementation ID, requested backend, target RID, optional exact TensorSharp build identity and
@@ -344,7 +350,9 @@ supplier's CLR strings, string arrays, numeric/boolean primitives and nested JSO
 object arrays, lists and dictionaries. Arbitrary CLR model objects are not a tool-argument wire
 contract. Tool schemas retain their exact JSON; a missing description becomes an empty string.
 The tool-conversion path does not use a default reflection serializer. Its collectible tests cover
-Qwen-owned metadata, not the supplier's chat parser or a loaded native runtime generation.
+Qwen-owned metadata, not the supplier's chat parser or a loaded native runtime generation. The
+collectible tool test calls the real Qwen writer with Common tool definitions loaded in the same
+foreign generation and checks their assembly provenance and exact serialized schema order.
 
 Qwen reports `SupportsStreamingUsage = true` because streamed completions report final usage.
 Qwen reports no automatic prompt caching, cache-hint acceptance or supported cache retentions in

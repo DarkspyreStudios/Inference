@@ -119,13 +119,11 @@ public sealed class QwenJsonTests
             }
             else
             {
-                Type context = qwen.GetType("Darkspyre.Inference.Tensor.LLM.Qwen.QwenJsonContext", throwOnError: true)!;
-                object instance = context.GetProperty("Default")!.GetValue(null)!;
-                var metadata = (JsonTypeInfo)context.GetProperty("QwenToolJsonArray")!.GetValue(instance)!;
-                Assert.Same(generation, AssemblyLoadContext.GetLoadContext(metadata.Options.TypeInfoResolver!.GetType().Assembly));
-                const string json = "[{\"name\":\"function\",\"description\":\"\",\"parameters\":{\"type\":\"object\"}}]";
-                object value = JsonSerializer.Deserialize(json, metadata)!;
-                Assert.Equal(json, JsonSerializer.Serialize(value, metadata));
+                Assembly fixture = generation.LoadFromAssemblyPath(typeof(QwenJsonTests).Assembly.Location);
+                Type caller = fixture.GetType(typeof(QwenJsonTests).FullName!, throwOnError: true)!;
+                const string expected = "[{\"name\":\"function\",\"description\":\"\",\"parameters\":{\"type\":\"object\",\"properties\":{},\"additionalProperties\":false}},"
+                    + "{\"name\":\"second\",\"description\":\"description\",\"parameters\":{\"type\":\"object\",\"properties\":{},\"additionalProperties\":false}}]";
+                Assert.Equal(expected, caller.GetMethod(nameof(WriteForeignTools), BindingFlags.Static | BindingFlags.NonPublic)!.Invoke(null, null));
             }
         }
         finally
@@ -133,6 +131,24 @@ public sealed class QwenJsonTests
             generation.Unload();
         }
         return weak;
+    }
+
+    private static string WriteForeignTools()
+    {
+        AssemblyLoadContext generation = AssemblyLoadContext.GetLoadContext(typeof(QwenJsonTests).Assembly)!;
+        Assert.True(generation.IsCollectible);
+        Assert.NotSame(AssemblyLoadContext.Default, generation);
+        Assert.Same(generation, AssemblyLoadContext.GetLoadContext(typeof(QwenJson).Assembly));
+        Assert.Same(generation, AssemblyLoadContext.GetLoadContext(typeof(LlmToolDefinition).Assembly));
+        JsonTypeInfo metadata = QwenJsonContext.Default.QwenToolJsonArray;
+        Assert.Same(generation, AssemblyLoadContext.GetLoadContext(metadata.Type.Assembly));
+        Assert.Same(generation, AssemblyLoadContext.GetLoadContext(metadata.Options.TypeInfoResolver!.GetType().Assembly));
+        using JsonDocument schema = JsonDocument.Parse("{\"type\":\"object\",\"properties\":{},\"additionalProperties\":false}");
+        LlmToolDefinition[] tools = [new() { Name = "function", InputSchema = schema.RootElement },
+            new() { Name = "second", Description = "description", InputSchema = schema.RootElement, Strict = true }];
+        Assert.All(tools, tool => Assert.Same(generation, AssemblyLoadContext.GetLoadContext(tool.GetType().Assembly)));
+        Assert.Equal("[]", QwenJson.WriteTools([]));
+        return QwenJson.WriteTools(tools);
     }
 
     private sealed class QwenGeneration(string directory) : AssemblyLoadContext(isCollectible: true)
