@@ -11,7 +11,8 @@ public enum InferenceCapability
     Text,
     Image,
     Audio,
-    Decision
+    Decision,
+    Video = 4
 }
 
 public enum InferenceTask
@@ -21,7 +22,8 @@ public enum InferenceTask
     SpeechSynthesis,
     AudioGeneration,
     SpeechTranscription,
-    Decision
+    Decision,
+    VideoGeneration = 6
 }
 
 public static class InferenceTaskExtensions
@@ -33,6 +35,7 @@ public static class InferenceTaskExtensions
         InferenceTask.SpeechSynthesis or InferenceTask.AudioGeneration or InferenceTask.SpeechTranscription
             => InferenceCapability.Audio,
         InferenceTask.Decision => InferenceCapability.Decision,
+        InferenceTask.VideoGeneration => InferenceCapability.Video,
         _ => throw new ArgumentOutOfRangeException(nameof(task))
     };
 }

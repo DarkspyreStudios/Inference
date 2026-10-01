@@ -28,6 +28,22 @@ least-common-denominator replacement for implementation management.
 
 ## JSON metadata
 
+`Darkspyre.Inference.Common.Video` declares generation, edit and extension requests, typed
+keyframe/audio references, scoped native job/output receipts and capability observations.
+`IVideoInference` declares capability lookup, submit, one-poll lookup, caller-owned download streams
+and caller-resource materialization. These are inert contracts; Common provides no Video adapter.
+`VideoGeneration = 6` maps to `InferenceCapability.Video = 4`; earlier numeric identities are unchanged.
+
+Every Video data root has an exact type-name getter on `InferenceJson`. Request discriminators are
+`generation`, `edit` and `extension`; reference audio uses `voice` and `audio`. Common rejects all
+non-null provider options; extension-aware family metadata owns any admitted provider variants.
+Runtime inference instances have no data getter and refuse non-null owned serialization.
+Native receipts grant no resource authority. Diagnostics omit prompts, URLs and provider state.
+Outer collections are copied, capability sets are frozen and output JSON state is cloned on
+construction and `with` assignment. Input media bytes retain their existing borrowed semantics;
+an operation must snapshot them before effects. Nullable observations remain absent, including
+progress, duration, expiry and content type; zero and false remain actual values.
+
 `LlmExplicitCacheReference` carries a native cache resource name, model, opaque scope and optional
 observed expiry. `InferenceJson.LlmExplicitCacheReference` exports its data-only metadata. The
 reference grants no authority and is not yet a generation-request selection.
@@ -216,7 +232,7 @@ Check validation separately and leave unreported finish reasons and usage unknow
 a settings manager that runs actions, lists choices and saves, validation, safe status observations and a
 version-checked host commit boundary. It does not store
 settings/secrets, execute an application loop, or wrap inference requests in a generic payload.
-Text, Image, Audio and Decision grouping comes from the implementation's declared `InferenceTask`
+Text, Image, Audio, Decision and Video grouping comes from the implementation's declared `InferenceTask`
 values; the three Audio tasks remain distinct.
 
 The [compile-checked generic editor example](examples/Darkspyre.Inference.Setup.Examples/README.md)

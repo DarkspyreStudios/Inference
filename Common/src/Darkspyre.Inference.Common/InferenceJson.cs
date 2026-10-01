@@ -7,12 +7,28 @@ using Darkspyre.Inference.Common.LLM;
 using Darkspyre.Inference.Common.Media;
 using Darkspyre.Inference.Common.Resources;
 using Darkspyre.Inference.Common.Setup;
+using Darkspyre.Inference.Common.Video;
 
 namespace Darkspyre.Inference.Common;
 
 /// <summary>Common-owned metadata for closed data contracts. No reflection fallback is installed.</summary>
 public static class InferenceJson
 {
+    public static JsonTypeInfo<VideoProviderOptions> VideoProviderOptions => Metadata<VideoProviderOptions>();
+    public static JsonTypeInfo<VideoRequest> VideoRequest => Metadata<VideoRequest>();
+    public static JsonTypeInfo<VideoGenerationRequest> VideoGenerationRequest => Metadata<VideoGenerationRequest>();
+    public static JsonTypeInfo<VideoEditRequest> VideoEditRequest => Metadata<VideoEditRequest>();
+    public static JsonTypeInfo<VideoExtensionRequest> VideoExtensionRequest => Metadata<VideoExtensionRequest>();
+    public static JsonTypeInfo<VideoKeyframe> VideoKeyframe => Metadata<VideoKeyframe>();
+    public static JsonTypeInfo<VideoReferenceAudio> VideoReferenceAudio => Metadata<VideoReferenceAudio>();
+    public static JsonTypeInfo<VideoVoiceReference> VideoVoiceReference => Metadata<VideoVoiceReference>();
+    public static JsonTypeInfo<VideoAudioReference> VideoAudioReference => Metadata<VideoAudioReference>();
+    public static JsonTypeInfo<VideoJobState> VideoJobState => Metadata<VideoJobState>();
+    public static JsonTypeInfo<VideoOperation> VideoOperation => Metadata<VideoOperation>();
+    public static JsonTypeInfo<VideoJob> VideoJob => Metadata<VideoJob>();
+    public static JsonTypeInfo<VideoOutput> VideoOutput => Metadata<VideoOutput>();
+    public static JsonTypeInfo<VideoJobSnapshot> VideoJobSnapshot => Metadata<VideoJobSnapshot>();
+    public static JsonTypeInfo<VideoCapabilities> VideoCapabilities => Metadata<VideoCapabilities>();
     public static JsonTypeInfo<LlmExplicitCacheReference> LlmExplicitCacheReference => Metadata<LlmExplicitCacheReference>();
     public static JsonTypeInfo<LlmClientToolDefinition> LlmClientToolDefinition => Metadata<LlmClientToolDefinition>();
     public static JsonTypeInfo<LlmShellSkill> LlmShellSkill => Metadata<LlmShellSkill>();
@@ -35,6 +51,10 @@ public static class InferenceJson
     private static JsonSerializerOptions CreateOptions()
     {
         var options = new JsonSerializerOptions(InferenceJsonContext.Default.Options) { TypeInfoResolver = new HostedTypeInfoResolver() };
+        options.Converters.Add(new VideoJobStateJsonConverter());
+        options.Converters.Add(new VideoOperationJsonConverter());
+        options.Converters.Add(new VideoProviderOptionsJsonConverter());
+        options.Converters.Add(new VideoInferenceJsonConverter());
         options.MakeReadOnly();
         return options;
     }
@@ -142,6 +162,21 @@ public static class InferenceJson
 [JsonSourceGenerationOptions(GenerationMode = JsonSourceGenerationMode.Metadata,
     Converters = [typeof(ResourceAccessJsonConverter), typeof(ResourceReadHandleJsonConverter), typeof(ResourceWriteHandleJsonConverter), typeof(ProviderAuthorizationJsonConverter), typeof(HostedToolPhaseJsonConverter), typeof(ImageGenerationActionJsonConverter)])]
 [JsonSerializable(typeof(InferenceProvenance))]
+[JsonSerializable(typeof(VideoProviderOptions))]
+[JsonSerializable(typeof(VideoRequest))]
+[JsonSerializable(typeof(VideoGenerationRequest))]
+[JsonSerializable(typeof(VideoEditRequest))]
+[JsonSerializable(typeof(VideoExtensionRequest))]
+[JsonSerializable(typeof(VideoKeyframe))]
+[JsonSerializable(typeof(VideoReferenceAudio))]
+[JsonSerializable(typeof(VideoVoiceReference))]
+[JsonSerializable(typeof(VideoAudioReference))]
+[JsonSerializable(typeof(VideoJobState))]
+[JsonSerializable(typeof(VideoOperation))]
+[JsonSerializable(typeof(VideoJob))]
+[JsonSerializable(typeof(VideoOutput))]
+[JsonSerializable(typeof(VideoJobSnapshot))]
+[JsonSerializable(typeof(VideoCapabilities))]
 [JsonSerializable(typeof(InferenceMediaSourceKind))]
 [JsonSerializable(typeof(InferenceMediaSource))]
 [JsonSerializable(typeof(BinaryMediaSource))]
