@@ -10,6 +10,9 @@ namespace Darkspyre.Inference.Connect.LLM;
 /// <summary>Connect-owned metadata for closed connection, request and captured-context contracts.</summary>
 public static class ConnectLlmJson
 {
+    public static JsonTypeInfo<LlmAgentClientToolDefinition> LlmAgentClientToolDefinition => Metadata<LlmAgentClientToolDefinition>();
+    public static JsonTypeInfo<LlmAgentToolDefinition> LlmAgentToolDefinition => Metadata<LlmAgentToolDefinition>();
+    public static JsonTypeInfo<LlmAgentShellTool> LlmAgentShellTool => Metadata<LlmAgentShellTool>();
     private static readonly JsonSerializerOptions OwnedOptions = CreateOptions();
 
     private static JsonTypeInfo<T> Metadata<T>() => OwnedOptions.GetTypeInfo<T>();
@@ -64,6 +67,9 @@ public static class ConnectLlmJson
 [JsonSourceGenerationOptions(GenerationMode = JsonSourceGenerationMode.Metadata,
     Converters = [typeof(LlmAgentContextJsonConverter)])]
 [JsonSerializable(typeof(LlmConnection))]
+[JsonSerializable(typeof(LlmAgentClientToolDefinition))]
+[JsonSerializable(typeof(LlmAgentToolDefinition))]
+[JsonSerializable(typeof(LlmAgentShellTool))]
 [JsonSerializable(typeof(LlmAccountUsageSnapshot))]
 [JsonSerializable(typeof(LlmSetupConfiguration))]
 [JsonSerializable(typeof(LlmChatRequest))]

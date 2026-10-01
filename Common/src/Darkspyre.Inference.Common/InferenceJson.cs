@@ -12,6 +12,20 @@ namespace Darkspyre.Inference.Common;
 /// <summary>Common-owned metadata for closed data contracts. No reflection fallback is installed.</summary>
 public static class InferenceJson
 {
+    public static JsonTypeInfo<LlmClientToolDefinition> LlmClientToolDefinition => InferenceJsonContext.Default.LlmClientToolDefinition;
+    public static JsonTypeInfo<LlmShellSkill> LlmShellSkill => InferenceJsonContext.Default.LlmShellSkill;
+    public static JsonTypeInfo<LlmShellTool> LlmShellTool => InferenceJsonContext.Default.LlmShellTool;
+    public static JsonTypeInfo<LlmClientToolCall> LlmClientToolCall => InferenceJsonContext.Default.LlmClientToolCall;
+    public static JsonTypeInfo<LlmToolCall> LlmToolCall => InferenceJsonContext.Default.LlmToolCall;
+    public static JsonTypeInfo<LlmShellCall> LlmShellCall => InferenceJsonContext.Default.LlmShellCall;
+    public static JsonTypeInfo<LlmClientToolResult> LlmClientToolResult => InferenceJsonContext.Default.LlmClientToolResult;
+    public static JsonTypeInfo<LlmToolResult> LlmToolResult => InferenceJsonContext.Default.LlmToolResult;
+    public static JsonTypeInfo<LlmShellCommandResult> LlmShellCommandResult => InferenceJsonContext.Default.LlmShellCommandResult;
+    public static JsonTypeInfo<LlmShellCallResult> LlmShellCallResult => InferenceJsonContext.Default.LlmShellCallResult;
+    public static JsonTypeInfo<LlmShellOutcome> LlmShellOutcome => InferenceJsonContext.Default.LlmShellOutcome;
+    public static JsonTypeInfo<LlmShellExitedOutcome> LlmShellExitedOutcome => InferenceJsonContext.Default.LlmShellExitedOutcome;
+    public static JsonTypeInfo<LlmShellTimedOutOutcome> LlmShellTimedOutOutcome => InferenceJsonContext.Default.LlmShellTimedOutOutcome;
+    public static JsonTypeInfo<LlmShellCallEvent> LlmShellCallEvent => InferenceJsonContext.Default.LlmShellCallEvent;
     public static JsonTypeInfo<LlmMessageAttachment> LlmMessageAttachment => InferenceJsonContext.Default.LlmMessageAttachment;
     public static JsonTypeInfo<LlmAttachment> LlmAttachment => InferenceJsonContext.Default.LlmAttachment;
     public static JsonTypeInfo<LlmFileReference> LlmFileReference => InferenceJsonContext.Default.LlmFileReference;
@@ -101,6 +115,20 @@ public static class InferenceJson
 [JsonSerializable(typeof(LlmCapabilities))]
 [JsonSerializable(typeof(LlmModelInfo))]
 [JsonSerializable(typeof(LlmToolDefinition))]
+[JsonSerializable(typeof(LlmClientToolDefinition))]
+[JsonSerializable(typeof(LlmShellSkill))]
+[JsonSerializable(typeof(LlmShellTool))]
+[JsonSerializable(typeof(LlmClientToolCall))]
+[JsonSerializable(typeof(LlmToolCall))]
+[JsonSerializable(typeof(LlmShellCall))]
+[JsonSerializable(typeof(LlmClientToolResult))]
+[JsonSerializable(typeof(LlmToolResult))]
+[JsonSerializable(typeof(LlmShellCommandResult))]
+[JsonSerializable(typeof(LlmShellCallResult))]
+[JsonSerializable(typeof(LlmShellOutcome))]
+[JsonSerializable(typeof(LlmShellExitedOutcome))]
+[JsonSerializable(typeof(LlmShellTimedOutOutcome))]
+[JsonSerializable(typeof(LlmShellCallEvent))]
 [JsonSerializable(typeof(LlmToolOutput))]
 [JsonSerializable(typeof(LlmToolOutputPart))]
 [JsonSerializable(typeof(LlmTextDeltaEvent))]

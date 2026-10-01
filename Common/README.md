@@ -28,6 +28,18 @@ least-common-denominator replacement for implementation management.
 
 ## JSON metadata
 
+`LlmClientToolDefinition`, `LlmClientToolCall` and `LlmClientToolResult` are closed
+function/shell data unions. Existing function record names and constructors remain intact.
+Shell data preserves ordered commands and outputs, nullable raw 64-bit timeout milliseconds,
+nullable raw 32-bit output length, optional stdout/stderr and explicit exit/timeout outcomes.
+Lists copy their inputs at construction and `with` assignment. Skills contain caller paths;
+constructing or serializing them does not read files or execute commands.
+
+The existing request, message and result collections still accept only function records.
+The standalone shell metadata is an inert contract foundation, not an execution capability.
+`InferenceJson` exposes every fixed shell record and each mixed union with its exact type-name
+getter. Union discriminators are `function` and `shell`; outcomes use `exit` and `timeout`.
+
 `InferenceJson` supplies Common-owned source-generated metadata for closed LLM, decision and image
 request/result contracts, capabilities, tool output, continuation state, concrete stream events and
 data-only setup observations, choices and outcomes. Pass its typed metadata to `JsonSerializer`.
