@@ -16,6 +16,10 @@ public sealed class TensorJsonTests
     private const string ConfigurationJson = """
         {"ImplementationId":"test.tensor","Model":{"ModelId":"model","Revision":"r1"},"Backend":6}
         """;
+    private const string RuntimeBuildJson = "{\"Version\":\"version\",\"NativeAbi\":\"abi\",\"GgmlCommit\":\"ggml-commit\"}";
+    private const string RuntimeFileJson = "{\"RelativePath\":\"bridge.so\",\"Size\":1,\"Sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}";
+    private const string RuntimeCandidateJson = "{\"Identity\":{\"Id\":\"cpu\",\"AbsoluteBridgePath\":\"/unused/bridge.so\",\"Variant\":\"cpu\",\"Build\":"
+        + RuntimeBuildJson + ",\"TargetRid\":\"linux-x64\"},\"Backend\":2,\"Files\":[" + RuntimeFileJson + "]}";
 
     [Fact]
     public void FingerprintPreservesEstablishedCanonicalBytes()
@@ -71,6 +75,14 @@ public sealed class TensorJsonTests
         { "ModelObservation", "{\"Model\":null,\"Backend\":null,\"State\":5,\"ObservedAt\":\"1970-01-01T00:00:00+00:00\"}" },
         { "BackendProbeRequest", "{\"OperationId\":\"11111111-1111-1111-1111-111111111111\",\"ImplementationId\":\"test\",\"RequestedBackend\":2,\"TargetRid\":\"linux-x64\",\"ExpectedTensorSharpBuild\":null,\"NativeCandidates\":[]}" },
         { "BackendAvailability", "{\"OperationId\":\"11111111-1111-1111-1111-111111111111\",\"ImplementationId\":\"test\",\"RequestedBackend\":2,\"State\":4,\"Reason\":\"restart required\",\"ObservedAt\":\"1970-01-01T00:00:00+00:00\",\"TargetRid\":\"linux-x64\",\"ActualBackend\":null,\"TensorSharpBuild\":null,\"LoadedCandidateId\":null,\"IsInitialized\":false,\"DetectedDeviceCapabilities\":[],\"CandidatePresence\":[],\"CandidateDiagnostics\":[{\"CandidateId\":\"cpu\",\"Phase\":2,\"Code\":\"initialization-failed\",\"Message\":\"restart required\",\"NativeStateMayRemain\":true}]}" },
+        { "TensorRuntimeNativeFile", RuntimeFileJson },
+        { "TensorRuntimeCandidate", RuntimeCandidateJson },
+        { "TensorRuntimePlan", "{\"Build\":" + RuntimeBuildJson + ",\"TargetRid\":\"linux-x64\",\"Candidates\":[" + RuntimeCandidateJson + "]}" },
+        { "TensorRuntimeBackendIdentity", "{\"Backend\":2,\"Build\":" + RuntimeBuildJson + ",\"TargetRid\":\"linux-x64\",\"Variant\":\"cpu\",\"CandidateId\":null,\"NativeSourceCommit\":\"native-source\"}" },
+        { "TensorRuntimeState", "4" },
+        { "TensorRuntimeShutdownState", "3" },
+        { "TensorRuntimeDiagnostic", "{\"Code\":\"native-state-remains\",\"Message\":\"Restart is required.\"}" },
+        { "TensorRuntimeShutdownResult", "{\"State\":2,\"OperationId\":\"11111111-1111-1111-1111-111111111111\",\"ObservedAt\":\"1970-01-01T00:00:00+00:00\",\"OutstandingLeases\":2,\"NativeStateMayRemain\":true,\"Diagnostics\":[{\"Code\":\"busy\",\"Message\":\"Owned operations remain active.\"}]}" },
         { "PersistedModelManifest", "{\"ModelId\":\"model\",\"Revision\":\"r1\",\"Artifacts\":[{\"Role\":\"model\",\"RelativePath\":\"model.bin\",\"Length\":1,\"Sha256\":\"hash\"}]}" },
         { "TensorManifestFingerprint", "{\"SourceId\":\"fixture\",\"Repository\":null,\"Variant\":\"model.bin\",\"architecture\":\"fixture\",\"capability\":1,\"Backends\":[1],\"Artifacts\":[]}" }
     };
@@ -99,22 +111,30 @@ public sealed class TensorJsonTests
         try
         {
             Assembly tensor = generation.LoadFromAssemblyPath(assemblyPath);
+            Assert.NotSame(typeof(TensorJson).Assembly, tensor);
+            Assert.Equal(typeof(TensorJson).Assembly.ManifestModule.ModuleVersionId, tensor.ManifestModule.ModuleVersionId);
+            Assert.Same(generation, AssemblyLoadContext.GetLoadContext(tensor));
             Type owner = tensor.GetType("Darkspyre.Inference.Tensor.Common.TensorJson", throwOnError: true)!;
             JsonTypeInfo metadata;
             if (owner.GetProperty(family) is { } exported)
             {
+                Assert.Equal(tensor.ManifestModule.ModuleVersionId, exported.GetMethod!.Module.ModuleVersionId);
                 metadata = (JsonTypeInfo)exported.GetValue(null)!;
             }
             else
             {
+                Assert.DoesNotContain("TensorRuntime", family, StringComparison.Ordinal);
                 Type context = tensor.GetType("Darkspyre.Inference.Tensor.Common.TensorJsonContext", throwOnError: true)!;
                 object instance = context.GetProperty("Default")!.GetValue(null)!;
                 metadata = (JsonTypeInfo)context.GetProperty(family)!.GetValue(instance)!;
             }
             Assert.Same(generation, AssemblyLoadContext.GetLoadContext(metadata.Type.Assembly));
+            Assert.Same(tensor, metadata.Type.Assembly);
             Assert.Equal("TensorJsonContext", metadata.Options.TypeInfoResolver!.GetType().Name);
+            Assert.Same(tensor, metadata.Options.TypeInfoResolver.GetType().Assembly);
             object value = JsonSerializer.Deserialize(json, metadata)!;
             string written = JsonSerializer.Serialize(value, metadata);
+            if (family.StartsWith("TensorRuntime", StringComparison.Ordinal)) Assert.Equal(json, written);
             Assert.NotNull(JsonSerializer.Deserialize(written, metadata));
         }
         finally

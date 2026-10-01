@@ -13,6 +13,14 @@ public static class TensorJson
     public static JsonTypeInfo<TensorModelObservation> ModelObservation => TensorJsonContext.Default.TensorModelObservation;
     public static JsonTypeInfo<TensorBackendProbeRequest> BackendProbeRequest => TensorJsonContext.Default.TensorBackendProbeRequest;
     public static JsonTypeInfo<TensorBackendAvailability> BackendAvailability => TensorJsonContext.Default.TensorBackendAvailability;
+    public static JsonTypeInfo<TensorRuntimeNativeFile> TensorRuntimeNativeFile => TensorJsonContext.Default.TensorRuntimeNativeFile;
+    public static JsonTypeInfo<TensorRuntimeCandidate> TensorRuntimeCandidate => TensorJsonContext.Default.TensorRuntimeCandidate;
+    public static JsonTypeInfo<TensorRuntimePlan> TensorRuntimePlan => TensorJsonContext.Default.TensorRuntimePlan;
+    public static JsonTypeInfo<TensorRuntimeBackendIdentity> TensorRuntimeBackendIdentity => TensorJsonContext.Default.TensorRuntimeBackendIdentity;
+    public static JsonTypeInfo<TensorRuntimeState> TensorRuntimeState => TensorJsonContext.Default.TensorRuntimeState;
+    public static JsonTypeInfo<TensorRuntimeShutdownState> TensorRuntimeShutdownState => TensorJsonContext.Default.TensorRuntimeShutdownState;
+    public static JsonTypeInfo<TensorRuntimeDiagnostic> TensorRuntimeDiagnostic => TensorJsonContext.Default.TensorRuntimeDiagnostic;
+    public static JsonTypeInfo<TensorRuntimeShutdownResult> TensorRuntimeShutdownResult => TensorJsonContext.Default.TensorRuntimeShutdownResult;
 }
 
 [JsonSourceGenerationOptions(GenerationMode = JsonSourceGenerationMode.Metadata)]
@@ -23,6 +31,14 @@ public static class TensorJson
 [JsonSerializable(typeof(TensorModelObservation))]
 [JsonSerializable(typeof(TensorBackendProbeRequest))]
 [JsonSerializable(typeof(TensorBackendAvailability))]
+[JsonSerializable(typeof(TensorRuntimeNativeFile))]
+[JsonSerializable(typeof(TensorRuntimeCandidate))]
+[JsonSerializable(typeof(TensorRuntimePlan))]
+[JsonSerializable(typeof(TensorRuntimeBackendIdentity))]
+[JsonSerializable(typeof(TensorRuntimeState))]
+[JsonSerializable(typeof(TensorRuntimeShutdownState))]
+[JsonSerializable(typeof(TensorRuntimeDiagnostic))]
+[JsonSerializable(typeof(TensorRuntimeShutdownResult))]
 [JsonSerializable(typeof(PersistedModelManifest))]
 [JsonSerializable(typeof(TensorManifestFingerprint))]
 internal sealed partial class TensorJsonContext : JsonSerializerContext;
