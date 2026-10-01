@@ -256,7 +256,7 @@ public sealed class InferenceJsonTests
             Type owner = assembly.GetType("Darkspyre.Inference.Common.InferenceJson", throwOnError: true)!;
             var metadata = (JsonTypeInfo)owner.GetProperty(family)!.GetValue(null)!;
             Assert.Same(generation, AssemblyLoadContext.GetLoadContext(metadata.Type.Assembly));
-            Assert.Equal("InferenceJsonContext", metadata.Options.TypeInfoResolver!.GetType().Name);
+            Assert.Equal("HostedTypeInfoResolver", metadata.Options.TypeInfoResolver!.GetType().Name);
             object value = JsonSerializer.Deserialize(json, metadata)!;
             string written = JsonSerializer.Serialize(value, metadata);
             Assert.NotNull(JsonSerializer.Deserialize(written, metadata));

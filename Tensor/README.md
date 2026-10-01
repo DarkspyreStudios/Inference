@@ -372,6 +372,9 @@ features, and a binary tool-result part fails as well. `ReasoningLevels` is `Non
 `High` (thinking on). With structured output and thinking on, the schema's grammar starts after the
 thinking block. Image input is off.
 
+Qwen's hosted-tool capability set is empty. Supplied `HostedTools` or `MaxHostedTurns` fails as
+`UnsupportedFeature` before model/runtime materialization; client functions remain a separate lane.
+
 Qwen uses assembly-owned generated metadata for its tool definitions and argument conversion.
 Parsed arguments remain `JsonElement` values or null. The owned metadata also preserves the
 supplier's CLR strings, string arrays, numeric/boolean primitives and nested JSON-value

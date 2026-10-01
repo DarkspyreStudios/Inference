@@ -184,6 +184,10 @@ public sealed record LlmInferenceRequest
 
     public IReadOnlyList<LlmToolDefinition> Tools { get; init; } = [];
 
+    public IReadOnlyList<LlmHostedTool> HostedTools { get; init; } = [];
+
+    public int? MaxHostedTurns { get; init; }
+
     public LlmToolChoice? ToolChoice { get; init; }
 
     public bool? AllowParallelToolCalls { get; init; }
@@ -262,6 +266,8 @@ public sealed record LlmInferenceResult
     public LlmUsage? Usage { get; init; }
 
     public IReadOnlyList<LlmToolCall> ToolCalls { get; init; } = [];
+
+    public IReadOnlyList<LlmCitation> Citations { get; init; } = [];
 
     public LlmStructuredOutputValidation? StructuredOutput { get; init; }
 

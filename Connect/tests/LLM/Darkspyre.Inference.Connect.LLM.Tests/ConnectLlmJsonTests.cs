@@ -321,7 +321,9 @@ public sealed class ConnectLlmJsonTests
                 metadata = (JsonTypeInfo)context.GetProperty(family)!.GetValue(instance)!;
             }
             Assert.Same(generation, AssemblyLoadContext.GetLoadContext(metadata.Type.Assembly));
-            Assert.Equal(family == "Credential" ? "LlmCredentialJsonContext" : "ConnectLlmJsonContext", metadata.Options.TypeInfoResolver!.GetType().Name);
+            Assert.Same(connect, metadata.Options.TypeInfoResolver!.GetType().Assembly);
+            Assert.Equal(family == "Credential" ? "LlmCredentialJsonContext"
+                : owner.GetProperty(family) is null ? "ConnectLlmJsonContext" : "HostedTypeInfoResolver", metadata.Options.TypeInfoResolver.GetType().Name);
             object value = JsonSerializer.Deserialize(json, metadata)!;
             string written = JsonSerializer.Serialize(value, metadata);
             Assert.NotNull(JsonSerializer.Deserialize(written, metadata));

@@ -14,6 +14,7 @@ internal sealed class ManagedBedrockAgentClient(BedrockLlmClient client, LlmProv
         ArgumentNullException.ThrowIfNull(options);
         cancellationToken.ThrowIfCancellationRequested();
         if (options.Context is not null) { ManagedAgentContext.ValidateRuntimeResources(options.Context); }
+        HostedTools.Validate(options.HostedTools, options.MaxHostedTurns, client.GetCapabilities(connection, options.ModelId).HostedTools);
         var capabilities = client.GetCapabilities(connection, options.ModelId);
         if (!capabilities.SupportsAgentSessions || (options.Tools.Count > 0 && !capabilities.SupportsAgentToolUse))
         {

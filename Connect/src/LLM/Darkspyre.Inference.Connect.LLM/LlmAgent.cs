@@ -164,6 +164,10 @@ public sealed record LlmAgentSessionOptions
 
     public IReadOnlyList<LlmAgentToolDefinition> Tools { get; init; } = [];
 
+    public IReadOnlyList<LlmHostedTool> HostedTools { get; init; } = [];
+
+    public int? MaxHostedTurns { get; init; }
+
     public LlmAgentToolHandler? ToolHandler { get; init; }
 
     /// <summary>Output Connect retains per resource when the runtime keeps none; the earliest cursor advances past it.</summary>
@@ -189,6 +193,10 @@ public sealed record LlmAgentResumeOptions
     /// stored definitions when this collection is empty.
     /// </summary>
     public IReadOnlyList<LlmAgentToolDefinition> Tools { get; init; } = [];
+
+    public IReadOnlyList<LlmHostedTool> HostedTools { get; init; } = [];
+
+    public int? MaxHostedTurns { get; init; }
 
     public LlmAgentToolHandler? ToolHandler { get; init; }
 

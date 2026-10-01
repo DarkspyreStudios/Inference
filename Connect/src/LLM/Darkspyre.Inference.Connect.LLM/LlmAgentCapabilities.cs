@@ -1,4 +1,5 @@
 using System.Collections.Frozen;
+using Darkspyre.Inference.Common.LLM;
 
 namespace Darkspyre.Inference.Connect.LLM;
 
@@ -52,6 +53,8 @@ public enum LlmAgentToolExecutionOwnership
 /// </summary>
 public sealed record LlmAgentCapabilities
 {
+    public IReadOnlySet<LlmHostedToolKind> HostedTools { get; init => field = value.ToFrozenSet(); } = FrozenSet<LlmHostedToolKind>.Empty;
+
     public LlmAgentOwnership ContextOwnership { get; init; }
 
     /// <summary>How a session start accepts <see cref="LlmAgentSessionOptions.Context"/>.</summary>
@@ -94,8 +97,8 @@ public sealed record LlmAgentCapabilities
         FrozenSet<LlmAgentRuntimePolicyKind>.Empty;
 
     /// <summary>True when no agent operation is declared.</summary>
-    internal bool IsNone => SupportedRuntimePolicies.Count == 0
-        && this with { SupportedRuntimePolicies = NoRuntimePolicies } == new LlmAgentCapabilities();
+    internal bool IsNone => SupportedRuntimePolicies.Count == 0 && HostedTools.Count == 0
+        && this with { SupportedRuntimePolicies = NoRuntimePolicies, HostedTools = FrozenSet<LlmHostedToolKind>.Empty } == new LlmAgentCapabilities();
 
     internal void Validate()
     {
@@ -103,6 +106,7 @@ public sealed record LlmAgentCapabilities
             || !Enum.IsDefined(NativeFork) || !Enum.IsDefined(Steering)
             || !Enum.IsDefined(ToolExecutionOwnership)
             || SupportedRuntimePolicies is null || SupportedRuntimePolicies.Any(kind => !Enum.IsDefined(kind))
+            || HostedTools.Any(kind => !Enum.IsDefined(kind))
             || (ContextOwnership == LlmAgentOwnership.None && !IsNone)
             || (ContextOwnership == LlmAgentOwnership.Host && SupportedRuntimePolicies.Count > 0)
             || (SupportsCompactionHandoff && (ContextOwnership != LlmAgentOwnership.Host

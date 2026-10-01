@@ -65,6 +65,10 @@ public sealed record LlmChatRequest
 
     public IReadOnlyList<LlmToolDefinition> Tools { get; init; } = [];
 
+    public IReadOnlyList<LlmHostedTool> HostedTools { get; init; } = [];
+
+    public int? MaxHostedTurns { get; init; }
+
     public LlmToolChoice? ToolChoice { get; init; }
 
     /// <summary>Requests or disables parallel tool calls when the provider supports that control.</summary>
@@ -117,6 +121,8 @@ public sealed record LlmChatResult
     public string? ProviderResponseId { get; init; }
 
     public IReadOnlyList<LlmToolCall> ToolCalls { get; init; } = [];
+
+    public IReadOnlyList<LlmCitation> Citations { get; init; } = [];
 
     /// <summary>Preserve unchanged on this response's assistant message, including ordinary turns.</summary>
     public LlmContinuationState? ContinuationState { get; init; }

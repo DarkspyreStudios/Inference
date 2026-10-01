@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
 using Darkspyre.Inference.Common;
+using Darkspyre.Inference.Common.LLM;
 using Darkspyre.Inference.Common.Resources;
 using Darkspyre.Inference.Connect.LLM.Internal;
 
@@ -19,17 +20,54 @@ public static class ConnectLlmJson
 
     private static JsonSerializerOptions CreateOptions()
     {
-        // Retain the generated context converter and reuse Common's live-authority refusal policy.
-        var options = new JsonSerializerOptions(ConnectLlmJsonContext.Default.Options)
-        { TypeInfoResolver = ConnectLlmJsonContext.Default };
-        foreach (Type type in new[] { typeof(IInferenceResourceAccess), typeof(IInferenceResourceReadHandle), typeof(IInferenceResourceWriteHandle) })
+        // Retain generated converters and compose Common's exact live-authority refusal policy.
+        var options = new JsonSerializerOptions(ConnectLlmJsonContext.Default.Options) { TypeInfoResolver = new HostedTypeInfoResolver() };
+        foreach (var type in new[] { typeof(IInferenceResourceAccess), typeof(IInferenceResourceReadHandle), typeof(IInferenceResourceWriteHandle), typeof(IProviderAuthorization), typeof(LlmHostedToolPhase), typeof(LlmImageGenerationAction) })
+        {
             options.Converters.Add(InferenceJson.InferenceResourceReference.Options.Converters.Single(converter => converter.CanConvert(type)));
+        }
         options.Converters.Add(new DocumentRankingMetricJsonConverter());
         options.Converters.Add(new DocumentRagPipelineJsonConverter());
         options.MakeReadOnly();
         return options;
     }
 
+    private sealed class HostedTypeInfoResolver : IJsonTypeInfoResolver
+    {
+        public JsonTypeInfo? GetTypeInfo(Type type, JsonSerializerOptions options)
+        {
+            var metadata = ((IJsonTypeInfoResolver)ConnectLlmJsonContext.Default).GetTypeInfo(type, options);
+            if (type == typeof(LlmHostedTool) && metadata?.PolymorphismOptions is { } polymorphism)
+            {
+                polymorphism.DerivedTypes.Add(new JsonDerivedType(typeof(XaiXSearchTool), "xai-x-search"));
+            }
+            if (type == typeof(LlmHostedImageOutput) && metadata is not null)
+                metadata.Properties.Single(property => property.Name == "Data").CustomConverter =
+                    InferenceJson.LlmHostedImageOutput.Properties.Single(property => property.Name == "Data").CustomConverter;
+            if (metadata is not null && (type == typeof(LlmAgentHostedToolCallStartedEvent) || type == typeof(LlmAgentHostedToolCallProgressEvent)
+                || type == typeof(LlmAgentHostedToolCallCompletedEvent) || type == typeof(LlmAgentCitationEvent) || type == typeof(LlmAgentCompactedEvent)))
+            {
+                metadata.Properties.Single(property => property.Name == nameof(LlmAgentEvent.ThreadId)).IsRequired = true;
+                metadata.Properties.Single(property => property.Name == nameof(LlmAgentEvent.TurnId)).IsRequired = true;
+                static void ValidateScope(object value)
+                {
+                    var item = (LlmAgentEvent)value;
+                    HostedEventFacts.Identity(item.ThreadId); HostedEventFacts.Identity(item.TurnId);
+                }
+                metadata.OnSerializing = ValidateScope;
+                metadata.OnDeserialized = ValidateScope;
+            }
+            return metadata;
+        }
+    }
+
+    public static JsonTypeInfo<LlmInferenceRequest> PortableRequest => Metadata<LlmInferenceRequest>();
+    public static JsonTypeInfo<XaiXSearchTool> XaiXSearchTool => Metadata<XaiXSearchTool>();
+    public static JsonTypeInfo<LlmAgentHostedToolCallStartedEvent> LlmAgentHostedToolCallStartedEvent => Metadata<LlmAgentHostedToolCallStartedEvent>();
+    public static JsonTypeInfo<LlmAgentHostedToolCallProgressEvent> LlmAgentHostedToolCallProgressEvent => Metadata<LlmAgentHostedToolCallProgressEvent>();
+    public static JsonTypeInfo<LlmAgentHostedToolCallCompletedEvent> LlmAgentHostedToolCallCompletedEvent => Metadata<LlmAgentHostedToolCallCompletedEvent>();
+    public static JsonTypeInfo<LlmAgentCitationEvent> LlmAgentCitationEvent => Metadata<LlmAgentCitationEvent>();
+    public static JsonTypeInfo<LlmAgentCompactedEvent> LlmAgentCompactedEvent => Metadata<LlmAgentCompactedEvent>();
     public static JsonTypeInfo<LlmCredential> Credential => LlmCredentialJsonContext.Default.LlmCredential;
     public static JsonTypeInfo<LlmAccountUsageSnapshot> AccountUsageSnapshot => Metadata<LlmAccountUsageSnapshot>();
     public static JsonTypeInfo<LlmConnection> Connection => Metadata<LlmConnection>();
@@ -73,6 +111,14 @@ public static class ConnectLlmJson
 [JsonSerializable(typeof(LlmAccountUsageSnapshot))]
 [JsonSerializable(typeof(LlmSetupConfiguration))]
 [JsonSerializable(typeof(LlmChatRequest))]
+[JsonSerializable(typeof(LlmInferenceRequest))]
+[JsonSerializable(typeof(LlmHostedTool))]
+[JsonSerializable(typeof(XaiXSearchTool))]
+[JsonSerializable(typeof(LlmAgentHostedToolCallStartedEvent))]
+[JsonSerializable(typeof(LlmAgentHostedToolCallProgressEvent))]
+[JsonSerializable(typeof(LlmAgentHostedToolCallCompletedEvent))]
+[JsonSerializable(typeof(LlmAgentCitationEvent))]
+[JsonSerializable(typeof(LlmAgentCompactedEvent))]
 [JsonSerializable(typeof(LlmChatResult))]
 [JsonSerializable(typeof(LlmChatMessage))]
 [JsonSerializable(typeof(LlmTokenization))]

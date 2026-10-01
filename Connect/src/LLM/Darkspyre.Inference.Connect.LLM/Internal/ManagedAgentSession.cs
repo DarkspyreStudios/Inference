@@ -18,6 +18,8 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
     private readonly Func<string, LlmProviderCapabilities> _capabilities;
     private readonly Func<LlmChatRequest, CancellationToken, IAsyncEnumerable<LlmStreamEvent>> _stream;
     private readonly Dictionary<string, LlmAgentToolDefinition> _tools;
+    private IReadOnlyList<LlmHostedTool> _hostedTools;
+    private Task? _retirement;
     private LlmAgentContext _context;
     // Messages whose continuation state was left out at start; reported once, on the first turn.
     private int _startOmittedContinuationStates;
@@ -48,6 +50,8 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
         _estimator = estimator;
         _stream = stream;
         _capabilities = capabilities;
+        HostedTools.Validate(options.HostedTools, options.MaxHostedTurns, capabilities(options.ModelId).HostedTools);
+        _hostedTools = HostedTools.Snapshot(options.HostedTools);
         ManagedAgentPolicy.Validate(_execution, Model(options.ModelId));
         if (options.Tools.Any(tool => tool.DeferLoading))
         {
@@ -60,6 +64,7 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
         _options = options with
         {
             Tools = Array.AsReadOnly(options.Tools.Select(tool => tool with { InputSchema = tool.InputSchema.Clone() }).ToArray()),
+            HostedTools = [],
             Context = null
         };
         _tools = _options.Tools.ToDictionary(tool => tool.Name, StringComparer.Ordinal);
@@ -301,26 +306,39 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
         return _resources.StopAsync();
     }
 
-    public async ValueTask DisposeAsync()
+    public ValueTask DisposeAsync()
+    {
+        lock (_sync) { return new(_retirement ??= RetireAsync()); }
+    }
+
+    private async Task RetireAsync()
     {
         LiveRun? run;
         Task producer;
         Task cancellation;
         lock (_sync)
         {
-            if (_disposed) { return; }
             _disposed = true;
             _resources.Dispose();
             run = _run;
             producer = _producer;
             cancellation = run?.Cancellation.CancelAsync() ?? Task.CompletedTask;
         }
-        await cancellation;
-        await producer;
-        lock (_sync)
+        Task retirement = Task.WhenAll(cancellation, producer);
+        try { await retirement.ConfigureAwait(false); }
+        catch
         {
-            _run = null;
-            if (!_segmentActive) { run?.Dispose(); }
+            if (retirement.Exception is { InnerExceptions.Count: > 1 } failures) throw failures;
+            throw;
+        }
+        finally
+        {
+            lock (_sync)
+            {
+                _hostedTools = [];
+                _run = null;
+                if (!_segmentActive) { run?.Dispose(); }
+            }
         }
     }
 
@@ -422,6 +440,22 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
                             case LlmReasoningDeltaEvent reasoning:
                                 await writer.WriteAsync(new LlmAgentReasoningDeltaEvent(ThreadId, run.Id, stepId,
                                     reasoning.Delta, reasoning.IsSummary), token);
+                                break;
+                            case LlmHostedToolCallStartedEvent hosted:
+                                await writer.WriteAsync(new LlmAgentHostedToolCallStartedEvent(
+                                    ThreadId, run.Id, stepId, hosted.CallId, hosted.Kind, hosted.Name), token);
+                                break;
+                            case LlmHostedToolCallProgressEvent hosted:
+                                await writer.WriteAsync(new LlmAgentHostedToolCallProgressEvent(
+                                    ThreadId, run.Id, stepId, hosted.CallId, hosted.Phase), token);
+                                break;
+                            case LlmHostedToolCallCompletedEvent hosted:
+                                await writer.WriteAsync(new LlmAgentHostedToolCallCompletedEvent(
+                                    ThreadId, run.Id, stepId, HostedTools.Snapshot(hosted.Call)), token);
+                                break;
+                            case LlmCitationEvent citation:
+                                await writer.WriteAsync(new LlmAgentCitationEvent(
+                                    ThreadId, run.Id, stepId, citation.Citation), token);
                                 break;
                             case LlmChatCompletionEvent completion:
                                 if (result is not null) { throw new InvalidOperationException("Duplicate model completion."); }
@@ -641,7 +675,9 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
             Description = tool.Description,
             InputSchema = tool.InputSchema,
             Strict = tool.Strict
-        }).ToArray()
+        }).ToArray(),
+        HostedTools = _hostedTools,
+        MaxHostedTurns = _options.MaxHostedTurns
     };
 
     private LlmAgentContextStatus Measure(LlmAgentContext context, LlmAgentTurnRequest turn)
@@ -665,6 +701,7 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
         _ = TextContent(turn.Input);
         LlmAttachments.Validate(turn.Attachments, true, true, nameof(turn));
         var capabilities = _capabilities(turn.ModelId ?? _options.ModelId);
+        HostedTools.Validate(_hostedTools, _options.MaxHostedTurns, capabilities.HostedTools);
         if (!capabilities.SupportsAgentSessions || (_tools.Count > 0 && !capabilities.SupportsAgentToolUse)
             || (turn.Instructions is not null && !capabilities.SupportsAgentTurnInstructions))
         {
@@ -680,7 +717,14 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
     }
 
     private LlmAgentTurnRequest BaseTurn() => new() { Input = [], ModelId = _options.ModelId };
-    private LlmAgentCapabilities Capabilities => _capabilities(_run?.Turn.ModelId ?? _options.ModelId).Agent;
+    private LlmAgentCapabilities Capabilities
+    {
+        get
+        {
+            var capabilities = _capabilities(_run?.Turn.ModelId ?? _options.ModelId);
+            return capabilities.Agent with { HostedTools = capabilities.HostedTools };
+        }
+    }
     private static void RequireCapability(bool supported)
     {
         if (!supported) { throw new NotSupportedException("The selected connection disables this agent operation."); }
