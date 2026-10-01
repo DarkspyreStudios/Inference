@@ -84,6 +84,24 @@ public sealed class BedrockAgentCoreUsageTests
     }
 
     [Fact]
+    public async Task TwoHostToolFollowUpsSettleThreeDistinctInvocations()
+    {
+        var invoker = new Invoker([.. Tool(), Metadata(4, 1, 5)],
+            [.. Tool(), Metadata(4, 1, 5), Metadata(4, 1, 5)], [Stop(), Metadata(4, 1, 5)]);
+        LlmConnection connection = Connection() with { CapabilityOverrides = new() { SupportsUsageDeltas = false } };
+        await using ILlmAgentSession session = await Client(invoker).StartSessionAsync("c", connection, Options(tools: true));
+        LlmAgentEvent[] events = await ReadAsync(session.RunTurnAsync(Turn));
+        LlmAgentUsageEvent[] usage = events.OfType<LlmAgentUsageEvent>().ToArray();
+        Assert.Equal(3, usage.Length);
+        Assert.Equal(3, usage.Select(item => item.RequestId).Distinct(StringComparer.Ordinal).Count());
+        Assert.All(usage, item => Assert.Equal(new LlmUsage(4, 1, 5), item.Usage));
+        Assert.Equal([new LlmUsage(4, 1, 5), new LlmUsage(8, 2, 10), new LlmUsage(12, 3, 15)], usage.Select(item => item.RunTotals));
+        Assert.Equal(3, invoker.Requests.Count);
+        Assert.All(invoker.Requests, request => Assert.Equal(session.SessionId, request.RuntimeSessionId));
+        Assert.IsType<LlmAgentTurnCompletedEvent>(events[^1]);
+    }
+
+    [Fact]
     public async Task MissingRoundUsageRemainsUnknownAndTheNextTurnStartsANewLedger()
     {
         var invoker = new Invoker([Stop()], [Stop(), Metadata(0, 0, 0)]);
