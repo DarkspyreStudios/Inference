@@ -389,6 +389,9 @@ borrowed authenticator references without disposing the authenticator or source.
 not saved; late save results do not return credentials. Cancellation during a save can race a source
 commit, so retirement waits for that save and does not undo or retry it. The source remains responsible
 for atomic version checks and rejecting writes to changed or deleted connections.
+Entered acquisition and refresh operations check the synchronous owner fence after awaited work,
+before saving and before returning. They reject late results while linked cancellation callbacks
+are pending. New operations reject an already retired owner.
 
 `LlmConnectionAuthorization` binds a connection ID to a borrowed access owner. Its
 `IProviderAuthorization.GetAsync` returns the current OAuth Bearer token after acquisition. Missing
