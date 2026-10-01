@@ -91,6 +91,7 @@ public static class ServiceCollectionExtensions
         services.AddTransient<ILlmEmbeddingClient>(provider =>
             provider.GetRequiredService<OpenAiEmbeddingClient>());
         services.AddSingleton<LlmModelListCache>();
+        services.AddSingleton<LlmAccountUsageObservations>();
         services.AddScoped<LlmProviderService>();
         services.AddScoped<LlmAgentProviderService>();
         services.AddScoped<LlmEmbeddingProviderService>();

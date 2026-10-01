@@ -88,6 +88,12 @@ These changes are unreleased.
 
 ### Host-visible changes
 
+- `LlmProviderService.GetObservedAccountUsageAsync` polls passive account/quota evidence without a
+  provider call. Queried usage stays separate. Standalone chat and native-agent facades share one
+  explicit `LlmAccountUsageObservations`, owned and disposed by their dependency generation.
+  `AddLlmConnect` supplies that shared store inside its owning generation service provider.
+  `LlmCreditBalance.IsUnlimited` is nullable: missing provider evidence is not false.
+
 - Persist `LlmConnection.ChatCompletions` with compatible-chat connections. Its nullable
   `OutputLimitField` and `UsePromptCacheKey` select endpoint-aware defaults when null. Explicit
   output-field choices and cache-key switches override those defaults. `api.openai.com` defaults to

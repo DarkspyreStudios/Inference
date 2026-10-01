@@ -28,7 +28,7 @@ internal static class CodexAccountUsageParser
                 DisplayName = "Workspace credits",
                 Remaining = Decimal(balance, "balance"),
                 HasCredits = Boolean(balance, "has_credits"),
-                IsUnlimited = Boolean(balance, "unlimited") == true
+                IsUnlimited = Boolean(balance, "unlimited")
             });
         }
         if (Number(Object(root, "rate_limit_reset_credits"), "available_count") is long count && count >= 0)

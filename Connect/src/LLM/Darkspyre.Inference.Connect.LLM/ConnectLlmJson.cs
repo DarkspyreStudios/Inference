@@ -8,6 +8,7 @@ namespace Darkspyre.Inference.Connect.LLM;
 public static class ConnectLlmJson
 {
     public static JsonTypeInfo<LlmCredential> Credential => LlmCredentialJsonContext.Default.LlmCredential;
+    public static JsonTypeInfo<LlmAccountUsageSnapshot> AccountUsageSnapshot => ConnectLlmJsonContext.Default.LlmAccountUsageSnapshot;
     public static JsonTypeInfo<LlmConnection> Connection => ConnectLlmJsonContext.Default.LlmConnection;
     public static JsonTypeInfo<LlmSetupConfiguration> SetupConfiguration => ConnectLlmJsonContext.Default.LlmSetupConfiguration;
     public static JsonTypeInfo<LlmChatRequest> ChatRequest => ConnectLlmJsonContext.Default.LlmChatRequest;
@@ -20,6 +21,7 @@ public static class ConnectLlmJson
 
 [JsonSourceGenerationOptions(GenerationMode = JsonSourceGenerationMode.Metadata)]
 [JsonSerializable(typeof(LlmConnection))]
+[JsonSerializable(typeof(LlmAccountUsageSnapshot))]
 [JsonSerializable(typeof(LlmSetupConfiguration))]
 [JsonSerializable(typeof(LlmChatRequest))]
 [JsonSerializable(typeof(LlmChatResult))]

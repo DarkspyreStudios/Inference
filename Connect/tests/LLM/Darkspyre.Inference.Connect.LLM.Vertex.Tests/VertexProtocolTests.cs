@@ -10,6 +10,22 @@ namespace Darkspyre.Inference.Connect.LLM.Vertex.Tests;
 
 public sealed class VertexProtocolTests
 {
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task VertexClaudeNeverInheritsAnthropicQuotaHeaders(bool streaming)
+    {
+        using var handler = new QuotaHeaders(new Handler(ClaudeReply("[]", "end_turn", streaming)) { Json = !streaming });
+        using var http = new HttpClient(handler);
+        var client = new VertexLlmClient(http, new Authentication());
+        var events = new List<LlmStreamEvent>();
+        await foreach (LlmStreamEvent item in client.StreamAsync(Connection with
+        { CapabilityOverrides = new() { SupportsStreaming = streaming } }, new() { ModelId = Claude, Messages = [new("user", "hello")] }))
+        { events.Add(item); }
+        Assert.Single(events.OfType<LlmChatCompletionEvent>());
+        Assert.DoesNotContain(events, item => item is AccountUsageObservedEvent);
+    }
+
     [Fact]
     public void VertexRejectsForeignChatConfiguration() =>
         Assert.Throws<NotSupportedException>(() => VertexEndpoints.Validate(Connection with { ChatCompletions = new() }));
@@ -795,6 +811,16 @@ public sealed class VertexProtocolTests
         public int Calls { get; private set; }
         public Task<VertexAccess> ResolveAsync(LlmConnection connection, CancellationToken cancellationToken)
         { cancellationToken.ThrowIfCancellationRequested(); Calls++; return Task.FromResult(new VertexAccess("test-token", Scope)); }
+    }
+
+    private sealed class QuotaHeaders(HttpMessageHandler inner) : DelegatingHandler(inner)
+    {
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            HttpResponseMessage response = await base.SendAsync(request, cancellationToken);
+            response.Headers.TryAddWithoutValidation("anthropic-ratelimit-requests-remaining", "0");
+            return response;
+        }
     }
 
     private sealed class Handler(params string[] frames) : HttpMessageHandler

@@ -9,7 +9,7 @@ using Darkspyre.Inference.Connect.LLM.Internal;
 namespace Darkspyre.Inference.Connect.LLM.Providers;
 
 /// <summary>Streaming adapter for OpenAI-compatible Chat Completions endpoints.</summary>
-internal sealed class OpenAiCompatibleChatLlmClient(HttpClient http) : LlmClientBase(http), ILlmConnectionPreparation
+internal sealed class OpenAiCompatibleChatLlmClient(HttpClient http) : LlmClientBase(http), ILlmConnectionPreparation, ILlmAccountUsageClient
 {
     private static readonly OpenAiCompatibleChatContinuationCodec Codec = new();
 
@@ -54,7 +54,32 @@ internal sealed class OpenAiCompatibleChatLlmClient(HttpClient http) : LlmClient
     {
         if (connection.ChatCompletions?.OutputLimitField is { } field && !Enum.IsDefined(field))
             throw new ArgumentOutOfRangeException(nameof(connection), "The Chat Completions output-limit field is invalid.");
-        return base.GetCapabilities(connection, modelId);
+        bool openRouter = IsOpenRouter(connection);
+        if (!openRouter && (connection.CapabilityOverrides?.SupportsAccountUsage == true
+            || modelId is not null && connection.ModelCapabilityOverrides.TryGetValue(modelId, out var overrides)
+            && overrides.SupportsAccountUsage == true))
+        { throw new NotSupportedException("Account usage is implemented only for OpenRouter endpoints."); }
+        LlmProviderCapabilities capabilities = base.GetCapabilities(connection, modelId);
+        bool enabled = openRouter;
+        if (connection.CapabilityOverrides?.SupportsAccountUsage is { } routeEnabled) { enabled = routeEnabled; }
+        if (modelId is not null && connection.ModelCapabilityOverrides.TryGetValue(modelId, out var modelOverrides)
+            && modelOverrides.SupportsAccountUsage is { } modelEnabled) { enabled = modelEnabled; }
+        return capabilities with { SupportsAccountUsage = enabled };
+    }
+
+    private static bool IsOpenRouter(LlmConnection connection) => Uri.TryCreate(connection.Endpoint, UriKind.Absolute, out Uri? endpoint)
+        && endpoint.Host.Equals("openrouter.ai", StringComparison.OrdinalIgnoreCase);
+
+    public async Task<LlmAccountUsageSnapshot> GetAccountUsageAsync(LlmConnection connection, CancellationToken cancellationToken = default)
+    {
+        if (!GetCapabilities(connection).SupportsAccountUsage) { throw new NotSupportedException("This connection does not expose account usage."); }
+        using var request = new HttpRequestMessage(HttpMethod.Get, ProviderHttp.BuildUri(connection, "key"));
+        ProviderHttp.ApplyHeaders(request, connection);
+        using HttpResponseMessage response = await Http.SendAsync(request, cancellationToken);
+        await ProviderHttp.ThrowIfUnsuccessfulAsync(response, Transport, LlmCredential.Parse(connection.Credential),
+            "OpenRouter key usage", cancellationToken);
+        using JsonDocument document = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(cancellationToken), cancellationToken: cancellationToken);
+        return OpenRouterAccountUsageParser.Parse(document.RootElement, DateTimeOffset.UtcNow, LlmCredential.Parse(connection.Credential));
     }
 
     public Task<LlmConnection> PrepareAsync(LlmConnection connection, CancellationToken cancellationToken)
@@ -99,6 +124,8 @@ internal sealed class OpenAiCompatibleChatLlmClient(HttpClient http) : LlmClient
             httpRequest,
             HttpCompletionOption.ResponseHeadersRead,
             cancellationToken);
+        if (OpenAiRateLimitHeaders.Parse(response.Headers, DateTimeOffset.UtcNow) is { } observed)
+        { yield return new AccountUsageObservedEvent(observed); }
         await ProviderHttp.ThrowIfUnsuccessfulAsync(
             response,
             Transport,
