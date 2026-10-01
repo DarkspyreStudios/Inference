@@ -3,6 +3,7 @@ using System.Runtime.CompilerServices;
 using System.Runtime.Loader;
 using System.Text.Json;
 using System.Text.Json.Serialization.Metadata;
+using Darkspyre.Inference.Common.Resources;
 
 namespace Darkspyre.Inference.Common.Tests;
 
@@ -17,6 +18,7 @@ public sealed class ResourceJsonTests
     {
         { "InferenceResourceReference", ReferenceJson },
         { "InferenceResourceDescriptor", DescriptorJson },
+        { "InferenceResourceDescriptor", "{\"Reference\":" + ReferenceJson + ",\"SessionId\":\"session\",\"FileName\":\"report\\u0022\\\\line\\n.json\",\"ContentType\":\"application/\\u003Cjson\\u003E\",\"Bytes\":9223372036854775807}" },
         { "InferenceResourceCreate", "{\"SessionId\":null,\"FileName\":null,\"ContentType\":null,\"ExpectedBytes\":null}" },
         { "InferenceResourceSelectionVersion", VersionJson },
         { "InferenceResourceSelection", SelectionJson },
@@ -36,6 +38,64 @@ public sealed class ResourceJsonTests
         Assert.Same(typeof(InferenceJson).Assembly, metadata.Type.Assembly);
         object value = JsonSerializer.Deserialize(json, metadata)!;
         Assert.Equal(json, JsonSerializer.Serialize(value, metadata));
+    }
+
+    [Theory]
+    [InlineData("InferenceResourceReference", "{\"Id\":\"id\"}")]
+    [InlineData("InferenceResourceReference", "{\"WorkspaceId\":\"workspace\"}")]
+    [InlineData("InferenceResourceSelectionVersion", "{\"WorkspaceId\":\"workspace\",\"SessionId\":\"session\"}")]
+    [InlineData("InferenceResourceSelection", "{\"WorkspaceId\":\"workspace\",\"SessionId\":\"session\",\"Revision\":0}")]
+    [InlineData("InferenceResourceOperationFailure", "{\"CommitOutcome\":3}")]
+    [InlineData("InferenceResourceOperationFailure", "{\"Phase\":4}")]
+    [InlineData("InferenceResourceCommitResult", "{\"Selection\":null}")]
+    public void MissingRequiredResourceFactsRefuseInsteadOfInventingDefaults(string name, string json)
+    {
+        JsonTypeInfo metadata = PublicMetadata(typeof(InferenceJson), name);
+        Assert.Throws<JsonException>(() => JsonSerializer.Deserialize(json, metadata));
+    }
+
+    [Fact]
+    public void InvalidResourceJsonRefusesNegativeCountsNullAndCrossScopeMembership()
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() => JsonSerializer.Deserialize("{\"SessionId\":null,\"ExpectedBytes\":-1}", InferenceJson.InferenceResourceCreate));
+        Assert.Throws<ArgumentOutOfRangeException>(() => JsonSerializer.Deserialize("{\"WorkspaceId\":\"workspace\",\"SessionId\":\"session\",\"Revision\":-1}", InferenceJson.InferenceResourceSelectionVersion));
+        Assert.Throws<ArgumentNullException>(() => JsonSerializer.Deserialize("{\"Resource\":null,\"Selection\":null}", InferenceJson.InferenceResourceCommitResult));
+        Assert.Throws<ArgumentNullException>(() => JsonSerializer.Deserialize("{\"WorkspaceId\":\"workspace\",\"SessionId\":\"session\",\"Revision\":0,\"SelectedResources\":null}", InferenceJson.InferenceResourceSelection));
+        Assert.Throws<ArgumentException>(() => JsonSerializer.Deserialize("{\"WorkspaceId\":\"workspace\",\"SessionId\":\"session\",\"Revision\":0,\"SelectedResources\":[{\"WorkspaceId\":\"other\",\"Id\":\"id\"}]}", InferenceJson.InferenceResourceSelection));
+        Assert.Throws<ArgumentException>(() => JsonSerializer.Deserialize("{\"WorkspaceId\":\"workspace\",\"SessionId\":\"session\",\"Revision\":0,\"SelectedResources\":[" + ReferenceJson + "," + ReferenceJson + "]}", InferenceJson.InferenceResourceSelection));
+    }
+
+    [Fact]
+    public void EmptySelectionUnknownCountsAndScopedFailureRemainExact()
+    {
+        const string empty = "{\"WorkspaceId\":\"workspace\",\"SessionId\":\"session\",\"Revision\":0,\"SelectedResources\":[]}";
+        var selection = JsonSerializer.Deserialize(empty, InferenceJson.InferenceResourceSelection)!;
+        Assert.Empty(selection.SelectedResources);
+        Assert.Equal(empty, JsonSerializer.Serialize(selection, InferenceJson.InferenceResourceSelection));
+        var descriptor = JsonSerializer.Deserialize(DescriptorJson.Replace("\"Bytes\":0", "\"Bytes\":null", StringComparison.Ordinal), InferenceJson.InferenceResourceDescriptor)!;
+        Assert.Null(descriptor.Bytes);
+        Assert.Null(JsonSerializer.Deserialize("{}", InferenceJson.InferenceResourceCreate)!.ExpectedBytes);
+        Assert.False(JsonSerializer.Deserialize("{}", InferenceJson.InferenceResourceCommitOptions)!.SelectForSession);
+        var failure = new InferenceResourceOperationFailure(InferenceResourceOperationPhase.Select, null, InferenceResourceCommitOutcome.NotAttempted)
+        {
+            SelectionOutcome = InferenceResourceCommitOutcome.Committed,
+            SelectionVersion = new("workspace", "session", 0)
+        };
+        string json = JsonSerializer.Serialize(failure, InferenceJson.InferenceResourceOperationFailure);
+        Assert.Equal("{\"Phase\":7,\"Reference\":null,\"CommitOutcome\":0,\"BytesTransferred\":null,\"SelectionOutcome\":2,\"SelectionVersion\":{\"WorkspaceId\":\"workspace\",\"SessionId\":\"session\",\"Revision\":0}}", json);
+        Assert.Equal(failure, JsonSerializer.Deserialize(json, InferenceJson.InferenceResourceOperationFailure));
+    }
+
+    [Fact]
+    public void RuntimeAccessHandlesAndExceptionsHaveNoOwnedPortableMetadata()
+    {
+        var resolver = InferenceJson.InferenceResourceReference.Options.TypeInfoResolver!;
+        foreach (Type type in new[] { typeof(IInferenceResourceAccess), typeof(IInferenceResourceReadHandle),
+            typeof(IInferenceResourceWriteHandle), typeof(InferenceResourceOperationException),
+            typeof(InferenceResourceOperationCanceledException), typeof(InferenceResourceSelectionConflictException) })
+        {
+            Assert.Null(resolver.GetTypeInfo(type, InferenceJson.InferenceResourceReference.Options));
+        }
     }
 
     [Theory]

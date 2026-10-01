@@ -3,6 +3,7 @@ using System.Text.Json.Serialization.Metadata;
 using Darkspyre.Inference.Common.Decision;
 using Darkspyre.Inference.Common.Image;
 using Darkspyre.Inference.Common.LLM;
+using Darkspyre.Inference.Common.Resources;
 using Darkspyre.Inference.Common.Setup;
 
 namespace Darkspyre.Inference.Common;
@@ -47,9 +48,20 @@ public static class InferenceJson
     public static JsonTypeInfo<SetupActionDescriptor> SetupAction => InferenceJsonContext.Default.SetupActionDescriptor;
     public static JsonTypeInfo<SetupProgress> SetupProgress => InferenceJsonContext.Default.SetupProgress;
     public static JsonTypeInfo<SetupChoicePage> SetupChoices => InferenceJsonContext.Default.SetupChoicePage;
+    public static JsonTypeInfo<InferenceResourceReference> InferenceResourceReference => InferenceJsonContext.Default.InferenceResourceReference;
+    public static JsonTypeInfo<InferenceResourceDescriptor> InferenceResourceDescriptor => InferenceJsonContext.Default.InferenceResourceDescriptor;
+    public static JsonTypeInfo<InferenceResourceCreate> InferenceResourceCreate => InferenceJsonContext.Default.InferenceResourceCreate;
+    public static JsonTypeInfo<InferenceResourceSelectionVersion> InferenceResourceSelectionVersion => InferenceJsonContext.Default.InferenceResourceSelectionVersion;
+    public static JsonTypeInfo<InferenceResourceSelection> InferenceResourceSelection => InferenceJsonContext.Default.InferenceResourceSelection;
+    public static JsonTypeInfo<InferenceResourceCommitOptions> InferenceResourceCommitOptions => InferenceJsonContext.Default.InferenceResourceCommitOptions;
+    public static JsonTypeInfo<InferenceResourceCommitResult> InferenceResourceCommitResult => InferenceJsonContext.Default.InferenceResourceCommitResult;
+    public static JsonTypeInfo<InferenceResourceOperationPhase> InferenceResourceOperationPhase => InferenceJsonContext.Default.InferenceResourceOperationPhase;
+    public static JsonTypeInfo<InferenceResourceCommitOutcome> InferenceResourceCommitOutcome => InferenceJsonContext.Default.InferenceResourceCommitOutcome;
+    public static JsonTypeInfo<InferenceResourceOperationFailure> InferenceResourceOperationFailure => InferenceJsonContext.Default.InferenceResourceOperationFailure;
 }
 
-[JsonSourceGenerationOptions(GenerationMode = JsonSourceGenerationMode.Metadata)]
+[JsonSourceGenerationOptions(GenerationMode = JsonSourceGenerationMode.Metadata,
+    Converters = [typeof(ResourceAccessJsonConverter), typeof(ResourceReadHandleJsonConverter), typeof(ResourceWriteHandleJsonConverter)])]
 [JsonSerializable(typeof(InferenceProvenance))]
 [JsonSerializable(typeof(LlmInferenceRequest))]
 [JsonSerializable(typeof(LlmInferenceResult))]
@@ -87,4 +99,14 @@ public static class InferenceJson
 [JsonSerializable(typeof(SetupActionDescriptor))]
 [JsonSerializable(typeof(SetupProgress))]
 [JsonSerializable(typeof(SetupChoicePage))]
+[JsonSerializable(typeof(InferenceResourceReference))]
+[JsonSerializable(typeof(InferenceResourceDescriptor))]
+[JsonSerializable(typeof(InferenceResourceCreate))]
+[JsonSerializable(typeof(InferenceResourceSelectionVersion))]
+[JsonSerializable(typeof(InferenceResourceSelection))]
+[JsonSerializable(typeof(InferenceResourceCommitOptions))]
+[JsonSerializable(typeof(InferenceResourceCommitResult))]
+[JsonSerializable(typeof(InferenceResourceOperationPhase))]
+[JsonSerializable(typeof(InferenceResourceCommitOutcome))]
+[JsonSerializable(typeof(InferenceResourceOperationFailure))]
 internal sealed partial class InferenceJsonContext : JsonSerializerContext;
