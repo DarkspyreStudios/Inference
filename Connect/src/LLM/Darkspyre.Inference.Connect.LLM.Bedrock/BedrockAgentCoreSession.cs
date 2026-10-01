@@ -30,7 +30,7 @@ internal sealed class BedrockAgentCoreSession : ILlmAgentSession
     // The runtime's tool-output support after the connection's overrides, and after the model's too.
     private readonly LlmRichContentSupported _richRoute;
     private readonly LlmRichContentSupported _richContent;
-    private bool _disposed;
+    private readonly LlmOperationLifetime _lifetime = new();
 
     // AgentCore's own background work is not measured; nothing is reported and stop is Unknown.
     private readonly NoAgentResources _resources = new(LlmAgentResourceStopStatus.Unknown);
@@ -75,16 +75,16 @@ internal sealed class BedrockAgentCoreSession : ILlmAgentSession
 
     public Task<LlmAgentCapabilities> GetCapabilitiesAsync(CancellationToken cancellationToken = default)
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
-        cancellationToken.ThrowIfCancellationRequested();
+        using LlmOperationLifetime.Lease operation = _lifetime.Enter(cancellationToken);
+        operation.Token.ThrowIfCancellationRequested();
         return Task.FromResult(NativeAgentContract.AgentCore);
     }
 
     public Task<LlmRequestAccounting> MeasureContextAsync(LlmAgentContext proposedContext,
         CancellationToken cancellationToken = default)
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
-        cancellationToken.ThrowIfCancellationRequested();
+        using LlmOperationLifetime.Lease operation = _lifetime.Enter(cancellationToken);
+        operation.Token.ThrowIfCancellationRequested();
         ArgumentNullException.ThrowIfNull(proposedContext);
         return Task.FromResult(new LlmRequestAccounting
         {
@@ -119,22 +119,26 @@ internal sealed class BedrockAgentCoreSession : ILlmAgentSession
         LlmAgentTurnRequest request,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
+        using LlmOperationLifetime.Lease operation = _lifetime.Enter(cancellationToken);
+        CancellationToken token = operation.Token;
         ArgumentNullException.ThrowIfNull(request);
         NativeAgentContract.ValidateTurn(request);
         ValidateTurn(request);
-        if (!_turnGate.Wait(0, cancellationToken))
+        if (!_turnGate.Wait(0, token))
         {
             throw new InvalidOperationException("The session is running or paused.");
         }
         string turnId = $"turn-{Guid.NewGuid():N}";
         try
         {
+            token.ThrowIfCancellationRequested();
             yield return new LlmAgentTurnStartedEvent(ThreadId, turnId);
+            token.ThrowIfCancellationRequested();
             AgentOpeningContext? opening = _opening;
             if (opening is not null)
             {
                 yield return new LlmAgentWarningEvent(ThreadId, turnId, opening.Notice);
+                token.ThrowIfCancellationRequested();
             }
             List<HarnessMessage> messages = BuildInitialMessages(opening is null
                 ? request.Input
@@ -144,6 +148,7 @@ internal sealed class BedrockAgentCoreSession : ILlmAgentSession
 
             for (int round = 0; round < MaximumInlineToolRounds; round++)
             {
+                token.ThrowIfCancellationRequested();
                 InvokeHarnessRequest invokeRequest = BuildRequest(messages, modelId);
                 var text = new StringBuilder();
                 var pendingTools = new Dictionary<int, PendingToolUse>();
@@ -152,8 +157,9 @@ internal sealed class BedrockAgentCoreSession : ILlmAgentSession
                 await foreach (IEventStreamEvent streamEvent in _invoker.InvokeAsync(
                                    _aws,
                                    invokeRequest,
-                                   cancellationToken))
+                                   token))
                 {
+                    token.ThrowIfCancellationRequested();
                     _opening = null;
                     switch (streamEvent)
                     {
@@ -203,8 +209,10 @@ internal sealed class BedrockAgentCoreSession : ILlmAgentSession
                             stopReason = stopped.StopReason?.Value;
                             break;
                     }
+                    token.ThrowIfCancellationRequested();
                 }
 
+                token.ThrowIfCancellationRequested();
                 if (text.Length > 0)
                 {
                     yield return new LlmAgentMessageCompletedEvent(
@@ -212,6 +220,7 @@ internal sealed class BedrockAgentCoreSession : ILlmAgentSession
                         turnId,
                         $"message-{round}-{turnId}",
                         text.ToString());
+                    token.ThrowIfCancellationRequested();
                 }
 
                 if (stopReason is null)
@@ -221,6 +230,7 @@ internal sealed class BedrockAgentCoreSession : ILlmAgentSession
                         turnId,
                         LlmAgentCompletionReason.ProviderFailure,
                         "AgentCore ended the Harness stream without a message-stop event.");
+                    token.ThrowIfCancellationRequested();
                     yield break;
                 }
 
@@ -232,6 +242,7 @@ internal sealed class BedrockAgentCoreSession : ILlmAgentSession
                         turnId,
                         reason,
                         error);
+                    token.ThrowIfCancellationRequested();
                     yield break;
                 }
 
@@ -242,6 +253,7 @@ internal sealed class BedrockAgentCoreSession : ILlmAgentSession
                         turnId,
                         LlmAgentCompletionReason.ProviderFailure,
                         "AgentCore stopped for tool use without returning a tool call.");
+                    token.ThrowIfCancellationRequested();
                     yield break;
                 }
 
@@ -250,6 +262,7 @@ internal sealed class BedrockAgentCoreSession : ILlmAgentSession
                              .OrderBy(entry => entry.Key)
                              .Select(entry => entry.Value))
                 {
+                    token.ThrowIfCancellationRequested();
                     JsonElement? parsedArguments = TryParseArguments(pending.Input);
                     if (parsedArguments is null)
                     {
@@ -258,6 +271,7 @@ internal sealed class BedrockAgentCoreSession : ILlmAgentSession
                             turnId,
                             LlmAgentCompletionReason.ProviderFailure,
                             $"AgentCore returned invalid JSON for tool '{pending.Name}'.");
+                        token.ThrowIfCancellationRequested();
                         yield break;
                     }
                     JsonElement arguments = parsedArguments.Value;
@@ -274,13 +288,15 @@ internal sealed class BedrockAgentCoreSession : ILlmAgentSession
                         arguments,
                         null,
                         "inProgress");
+                    token.ThrowIfCancellationRequested();
 
                     LlmToolOutput result = await ExecuteToolAsync(
                         turnId,
                         callId,
                         pending,
                         arguments,
-                        cancellationToken);
+                        token);
+                    token.ThrowIfCancellationRequested();
                     yield return new LlmAgentToolEvent(
                         ThreadId,
                         turnId,
@@ -291,6 +307,7 @@ internal sealed class BedrockAgentCoreSession : ILlmAgentSession
                         !result.IsError,
                         result.IsError ? "failed" : "completed",
                         result);
+                    token.ThrowIfCancellationRequested();
                     results.Add(new CompletedToolUse(
                         callId,
                         pending.Name,
@@ -303,11 +320,13 @@ internal sealed class BedrockAgentCoreSession : ILlmAgentSession
                 messages = BuildToolResultMessages(results);
             }
 
+            token.ThrowIfCancellationRequested();
             yield return new LlmAgentTurnCompletedEvent(
                 ThreadId,
                 turnId,
                 LlmAgentCompletionReason.IterationLimit,
                 $"AgentCore exceeded {MaximumInlineToolRounds} host tool rounds.");
+            token.ThrowIfCancellationRequested();
         }
         finally
         {
@@ -323,7 +342,7 @@ internal sealed class BedrockAgentCoreSession : ILlmAgentSession
         _ = turnId;
         _ = input;
         _ = cancellationToken;
-        ObjectDisposedException.ThrowIf(_disposed, this);
+        _lifetime.ThrowIfStopping();
         throw new NotSupportedException("AgentCore Harness does not support steering an active turn.");
     }
 
@@ -333,7 +352,7 @@ internal sealed class BedrockAgentCoreSession : ILlmAgentSession
     {
         _ = turnId;
         _ = cancellationToken;
-        ObjectDisposedException.ThrowIf(_disposed, this);
+        _lifetime.ThrowIfStopping();
         throw new NotSupportedException(
             "AgentCore Harness does not expose a remote turn-interrupt operation. Cancel RunTurnAsync instead.");
     }
@@ -341,7 +360,8 @@ internal sealed class BedrockAgentCoreSession : ILlmAgentSession
     public async IAsyncEnumerable<LlmAgentEvent> ObserveAsync(
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
+        using LlmOperationLifetime.Lease operation = _lifetime.Enter(cancellationToken);
+        // Owner retirement closes the feed normally; caller cancellation still cancels its read.
         await foreach (LlmAgentEvent item in _resources.ObserveAsync(cancellationToken))
         {
             yield return item;
@@ -350,34 +370,39 @@ internal sealed class BedrockAgentCoreSession : ILlmAgentSession
 
     public Task<IReadOnlyList<LlmAgentResource>> GetResourcesAsync(CancellationToken cancellationToken = default)
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
-        cancellationToken.ThrowIfCancellationRequested();
+        using LlmOperationLifetime.Lease operation = _lifetime.Enter(cancellationToken);
+        operation.Token.ThrowIfCancellationRequested();
         return NoAgentResources.GetAsync();
     }
 
     public Task<LlmAgentResourceOutput> ReadResourceOutputAsync(string resourceId, string? cursor,
         CancellationToken cancellationToken = default)
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
+        using LlmOperationLifetime.Lease operation = _lifetime.Enter(cancellationToken);
         ArgumentException.ThrowIfNullOrWhiteSpace(resourceId);
-        cancellationToken.ThrowIfCancellationRequested();
+        operation.Token.ThrowIfCancellationRequested();
         return NoAgentResources.ReadAsync();
     }
 
     public Task<LlmAgentResourceStopStatus> StopResourceAsync(string resourceId, CancellationToken cancellationToken = default)
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
+        using LlmOperationLifetime.Lease operation = _lifetime.Enter(cancellationToken);
         ArgumentException.ThrowIfNullOrWhiteSpace(resourceId);
-        cancellationToken.ThrowIfCancellationRequested();
+        operation.Token.ThrowIfCancellationRequested();
         return _resources.StopAsync();
     }
 
     public ValueTask DisposeAsync()
     {
-        _disposed = true;
+        Task retirement = _lifetime.RetireAsync(ReleaseAsync);
         _resources.Dispose();
+        return new(retirement);
+    }
+
+    private Task ReleaseAsync()
+    {
         _turnGate.Dispose();
-        return ValueTask.CompletedTask;
+        return Task.CompletedTask;
     }
 
     internal InvokeHarnessRequest BuildRequest(
