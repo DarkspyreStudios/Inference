@@ -1826,6 +1826,15 @@ The neutral request carries `TopP`, `TopK`, `Seed`, `PresencePenalty`, `Frequenc
 before dispatch. `SupportsTopP`, `SupportsTopK`, `SupportsSeed`, `SupportsPresencePenalty` and
 `SupportsFrequencyPenalty` default to false; `MaxStopSequences` defaults to zero.
 
+Raw provider options cannot carry `temperature`, `top_p`, `top_k`, `seed`, `presence_penalty`,
+`frequency_penalty`, `stop`, `stop_sequences`, or Gemini's `topP`, `topK`, `presencePenalty`,
+`frequencyPenalty` and `stopSequences`. The guard applies to connection and request options even
+when the typed control is absent. The facade checks the resolved connection before credential
+refresh, connection preparation or model discovery. Its shared guard throws `InvalidOperationException`,
+including for xAI sampling options. Direct Anthropic and Vertex Claude validation retains its
+`NotSupportedException` for raw temperature. Other xAI protocol options retain their adapter errors.
+Nonstandard extension options retain request-over-connection precedence.
+
 | Route | Sampling mapping |
 |---|---|
 | OpenAI Responses | `top_p` on sampling-capable profiles; reasoning models require `ReasoningLevel.None` |
