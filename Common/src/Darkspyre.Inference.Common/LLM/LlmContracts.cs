@@ -1,5 +1,6 @@
 using System.Collections.Frozen;
 using System.Text.Json;
+using Darkspyre.Inference.Common.Resources;
 
 namespace Darkspyre.Inference.Common.LLM;
 
@@ -8,7 +9,7 @@ public sealed record LlmMessage(string Role, string Content)
 {
     public LlmContinuationState? ContinuationState { get; init; }
 
-    public IReadOnlyList<LlmAttachment> Attachments { get; init; } = [];
+    public IReadOnlyList<LlmMessageAttachment> Attachments { get; init; } = [];
 
     public IReadOnlyList<LlmToolCall> ToolCalls { get; init; } = [];
 
@@ -20,7 +21,8 @@ public sealed record LlmMessage(string Role, string Content)
 /// provider content-block representation. A set <see cref="MediaType"/> is used as given; otherwise the
 /// adapter detects the type from the bytes.
 /// </summary>
-public sealed record LlmAttachment
+[System.Text.Json.Serialization.JsonUnmappedMemberHandling(System.Text.Json.Serialization.JsonUnmappedMemberHandling.Disallow)]
+public sealed record LlmAttachment : LlmMessageAttachment
 {
     public required LlmBinaryKind Kind { get; init; }
 
@@ -31,7 +33,7 @@ public sealed record LlmAttachment
     public required ReadOnlyMemory<byte> Data { get; init; }
 }
 
-public sealed record LlmToolDefinition
+public sealed record LlmToolDefinition : LlmClientToolDefinition
 {
     public required string Name { get; init; }
 
@@ -62,10 +64,10 @@ public sealed record LlmToolChoice
     public string? Name { get; init; }
 }
 
-public sealed record LlmToolCall(string Id, string Name, string ArgumentsJson);
+public sealed record LlmToolCall(string Id, string Name, string ArgumentsJson) : LlmClientToolCall(Id);
 
 /// <summary>The output of a tool invocation executed by the host application.</summary>
-public sealed record LlmToolResult(string ToolCallId, LlmToolOutput Output);
+public sealed record LlmToolResult(string ToolCallId, LlmToolOutput Output) : LlmClientToolResult(ToolCallId);
 
 public enum LlmStructuredOutputFallback
 {
@@ -140,6 +142,11 @@ public sealed record LlmPromptCacheCapabilities
 
 public sealed record LlmInferenceRequest
 {
+    /// <summary>Borrowed caller-owned resource authority. Never part of a portable request.</summary>
+    public IInferenceResourceAccess? Resources { get; init; }
+
+    public override string ToString() => nameof(LlmInferenceRequest);
+
     public LlmUnboundContinuationState UnboundContinuationState { get; init; }
 
     public required string ModelId { get; init; }
@@ -176,6 +183,10 @@ public sealed record LlmInferenceRequest
     public LlmStructuredOutputRequest? StructuredOutput { get; init; }
 
     public IReadOnlyList<LlmToolDefinition> Tools { get; init; } = [];
+
+    public IReadOnlyList<LlmHostedTool> HostedTools { get; init; } = [];
+
+    public int? MaxHostedTurns { get; init; }
 
     public LlmToolChoice? ToolChoice { get; init; }
 
@@ -255,6 +266,8 @@ public sealed record LlmInferenceResult
     public LlmUsage? Usage { get; init; }
 
     public IReadOnlyList<LlmToolCall> ToolCalls { get; init; } = [];
+
+    public IReadOnlyList<LlmCitation> Citations { get; init; } = [];
 
     public LlmStructuredOutputValidation? StructuredOutput { get; init; }
 

@@ -314,6 +314,33 @@ and Common identities in one foreign generation. It settles injected checks and 
 round-trips saved changes through owned metadata, then releases the graph and verifies collection.
 This test does not initialize a native runtime or qualify an active model/session generation.
 
+`ITensorRuntimeOwner` declares generation runtime control alongside `ITensorBackendProbe`. It exposes
+the immutable `TensorRuntimePlan`, the runtime state, the nullable actual backend identity and a
+structured shutdown observation. Tensor.Common supplies these contracts, not a Qwen runtime owner
+implementation or a composed execution path. Constructing or serializing a plan never resolves a
+package catalog, inspects files, initializes a backend or establishes availability.
+
+Plans deep-snapshot ordered GGML candidates and their file declarations. Each candidate has a
+distinct ID, exact build/RID and concrete GGML backend. Null candidates retain the standard-package
+policy; an empty list admits no candidates. File declarations require nonempty portable relative
+paths, nonnegative sizes and exact lowercase SHA-256 hashes. Constructor checks are lexical/data
+checks only. These checks do not prove actual links, bytes, trusted package provenance or exact
+entry-library binding to the complete file closure. A nonempty declaration is not execution evidence.
+The four runtime records retain positional construction, named arguments, deconstruction and `with`
+copies. Validated init accessors reject invalid copies and snapshot nested builds and diagnostics.
+Owned JSON requires every mandatory runtime fact, including zero sizes, observation timestamps,
+shutdown counts/state/flags and an explicitly nullable actual candidate ID. Missing facts refuse;
+they do not become zero, false, Completed or a default timestamp. Plan candidates remain optional.
+
+`TensorRuntimeShutdownResult` snapshots its ordered safe diagnostics and carries the actual
+observation time, operation ID, outstanding owner leases and possible surviving native state.
+Completed, AlreadyStopped, Busy and FailedRequiresProcessExit remain distinct observations.
+The control contract cancels the caller's shutdown wait, not shared terminal cleanup. No native
+lease, handle or runtime-owner object has a JSON root. `TensorJson` exports the eight exact
+`TensorRuntime*` data/enum getters through its assembly-owned generated metadata. Controlled tests
+round-trip all eight through the real collectible Tensor.Common generation and verify collection
+after the metadata and operation locals retire; these tests perform no native execution.
+
 Qwen and Supra now load the definition selected by `LoadAsync(key)`, rather than requiring the
 built-in key. Register complete, immutable definitions in the same manager used by the engine.
 Neither Save nor a prompt installs/loads weights. Requests, execution coordination, observations
@@ -345,6 +372,9 @@ features, and a binary tool-result part fails as well. `ReasoningLevels` is `Non
 `High` (thinking on). With structured output and thinking on, the schema's grammar starts after the
 thinking block. Image input is off.
 
+Qwen's hosted-tool capability set is empty. Supplied `HostedTools` or `MaxHostedTurns` fails as
+`UnsupportedFeature` before model/runtime materialization; client functions remain a separate lane.
+
 Qwen uses assembly-owned generated metadata for its tool definitions and argument conversion.
 Parsed arguments remain `JsonElement` values or null. The owned metadata also preserves the
 supplier's CLR strings, string arrays, numeric/boolean primitives and nested JSON-value
@@ -354,6 +384,10 @@ The tool-conversion path does not use a default reflection serializer. Its colle
 Qwen-owned metadata, not the supplier's chat parser or a loaded native runtime generation. The
 collectible tool test calls the real Qwen writer with Common tool definitions loaded in the same
 foreign generation and checks their assembly provenance and exact serialized schema order.
+
+Qwen rejects referenced prompt files, workspace tool-output resources and non-null request resource
+authority before model access or native execution. It does not materialize those inputs and reports
+`SupportsFileReferences = false`.
 
 Qwen reports `SupportsStreamingUsage = true` because streamed completions report final usage.
 Qwen reports no automatic prompt caching, cache-hint acceptance or supported cache retentions in

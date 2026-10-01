@@ -161,7 +161,7 @@ public sealed class AzureProtocolTests
         };
         LlmChatRequest request = Request with
         {
-            Messages = [new("user", "question") { Attachments = [new() { Kind = LlmBinaryKind.Image, Data = new byte[] { 1 }, MediaType = "image/png", FileName = "x.png" }] }],
+            Messages = [new("user", "question") { Attachments = [new LlmAttachment { Kind = LlmBinaryKind.Image, Data = new byte[] { 1 }, MediaType = "image/png", FileName = "x.png" }] }],
             StructuredOutput = new() { Name = "answer", Schema = JsonSerializer.SerializeToElement(new { type = "object", additionalProperties = false, properties = new { } }) }
         };
         await Complete(Client(http, responses), connection, request);

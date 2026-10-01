@@ -610,7 +610,7 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
     private static string BuildClaudeStandardInput(LlmChatRequest request, string prompt)
     {
         var content = new JsonArray { new JsonObject { ["type"] = "text", ["text"] = prompt } };
-        foreach (LlmAttachment attachment in request.Messages.SelectMany(item => item.Attachments))
+        foreach (LlmAttachment attachment in request.Messages.SelectMany(item => item.Attachments).Select(LlmAttachments.RequireBinary))
         {
             content.Add(AnthropicAttachments.BuildContentBlock(attachment));
         }

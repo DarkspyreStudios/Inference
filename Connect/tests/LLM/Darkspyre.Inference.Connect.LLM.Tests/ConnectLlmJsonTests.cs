@@ -29,7 +29,7 @@ public sealed class ConnectLlmJsonTests
     private const string XaiUnitedStatesPriorityJson = "{\"Region\":1,\"ServiceTier\":1}";
     private const string XaiFutureModesJson = "{\"Region\":999,\"ServiceTier\":999}";
     private const string StateJson = "{\"FormatVersion\":2,\"ImplementationId\":\"fixture\",\"ModelId\":\"model\",\"ScopeId\":\"scope\",\"Payload\":\"opaque\"}";
-    private const string MessageJson = "{\"Role\":\"user\",\"Content\":\"text\",\"Attachments\":[{\"Kind\":0,\"FileName\":\"image.png\",\"Data\":\"AQID\"}],\"ToolResults\":[{\"ToolCallId\":\"call\",\"Output\":{\"Parts\":[{\"type\":\"text\",\"Text\":\"text\"},{\"type\":\"binary\",\"Kind\":2,\"MediaType\":\"audio/wav\",\"Data\":\"BA==\"},{\"type\":\"resource\",\"Uri\":\"urn:test\",\"Data\":\"\"}]}}]}";
+    private const string MessageJson = "{\"Role\":\"user\",\"Content\":\"text\",\"Attachments\":[{\"type\":\"binary\",\"Kind\":0,\"FileName\":\"image.png\",\"Data\":\"AQID\"}],\"ToolResults\":[{\"ToolCallId\":\"call\",\"Output\":{\"Parts\":[{\"type\":\"text\",\"Text\":\"text\"},{\"type\":\"binary\",\"Kind\":2,\"MediaType\":\"audio/wav\",\"Data\":\"BA==\"},{\"type\":\"resource\",\"Uri\":\"urn:test\",\"Data\":\"\"}]}}]}";
     private const string EntryJson = "{\"Id\":\"entry\",\"TurnId\":\"turn\",\"Message\":" + MessageJson + "}";
 
     [Fact]
@@ -127,7 +127,7 @@ public sealed class ConnectLlmJsonTests
     public void ClosedMessageMetadataPreservesCommonDiscriminatorsBinaryBytesAndEmptyBodies()
     {
         LlmChatMessage message = JsonSerializer.Deserialize(MessageJson, ConnectLlmJson.ChatMessage)!;
-        Assert.Equal(new byte[] { 1, 2, 3 }, message.Attachments[0].Data.ToArray());
+        Assert.Equal(new byte[] { 1, 2, 3 }, Assert.IsType<LlmAttachment>(message.Attachments[0]).Data.ToArray());
         Assert.IsType<LlmToolOutputText>(message.ToolResults[0].Output.Parts[0]);
         Assert.Equal(new byte[] { 4 }, Assert.IsType<LlmToolOutputBinary>(message.ToolResults[0].Output.Parts[1]).Data.ToArray());
         Assert.True(Assert.IsType<LlmToolOutputResource>(message.ToolResults[0].Output.Parts[2]).Data.HasValue);
@@ -275,7 +275,7 @@ public sealed class ConnectLlmJsonTests
         { "LlmEmbeddingResult", "{\"Vectors\":[[0,1],[2,3]],\"Usage\":{\"InputTokens\":0,\"TotalTokens\":null},\"Diagnostics\":{\"HttpStatusCode\":200}}" },
         { "LlmEmbeddingUsage", "{\"InputTokens\":null,\"TotalTokens\":0}" },
         { "ChatResult", "{\"Text\":\"done\",\"Status\":0,\"Usage\":{\"InputTokens\":0,\"OutputTokens\":null,\"TotalTokens\":null,\"ProviderReportedCostUsd\":0.0000000001,\"HostedToolCalls\":{\"WebSearch\":2},\"HostedToolCallCount\":5,\"HostedSourcesUsed\":0},\"Diagnostics\":{\"HttpStatusCode\":200}}" },
-        { "AgentContext", "{\"FormatVersion\":2,\"Entries\":[" + EntryJson + "]}" },
+        { "AgentContext", "{\"FormatVersion\":3,\"SelectedResources\":[],\"Entries\":[{\"Id\":\"entry\",\"TurnId\":\"turn\",\"Message\":{\"Role\":\"user\",\"Content\":\"text\",\"Attachments\":[{\"type\":\"binary\",\"Kind\":0,\"FileName\":\"image.png\",\"Data\":\"AQID\"}]}}]}" },
         { "AgentContextEntry", EntryJson },
         { "AgentContextStatus", "{\"ModelId\":\"model\",\"ContextRevision\":1,\"Source\":0}" },
         { "ConnectContinuationScopeIdentity", "{\"Transport\":0,\"Endpoint\":\"https://provider.invalid\",\"ApiKey\":null,\"OAuthIdentity\":null,\"Headers\":[],\"SecretHeaders\":null}" }
@@ -321,7 +321,9 @@ public sealed class ConnectLlmJsonTests
                 metadata = (JsonTypeInfo)context.GetProperty(family)!.GetValue(instance)!;
             }
             Assert.Same(generation, AssemblyLoadContext.GetLoadContext(metadata.Type.Assembly));
-            Assert.Equal(family == "Credential" ? "LlmCredentialJsonContext" : "ConnectLlmJsonContext", metadata.Options.TypeInfoResolver!.GetType().Name);
+            Assert.Same(connect, metadata.Options.TypeInfoResolver!.GetType().Assembly);
+            Assert.Equal(family == "Credential" ? "LlmCredentialJsonContext"
+                : owner.GetProperty(family) is null ? "ConnectLlmJsonContext" : "HostedTypeInfoResolver", metadata.Options.TypeInfoResolver.GetType().Name);
             object value = JsonSerializer.Deserialize(json, metadata)!;
             string written = JsonSerializer.Serialize(value, metadata);
             Assert.NotNull(JsonSerializer.Deserialize(written, metadata));

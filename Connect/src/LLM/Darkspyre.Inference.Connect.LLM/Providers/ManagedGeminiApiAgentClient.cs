@@ -10,6 +10,10 @@ internal sealed class ManagedGeminiApiAgentClient(GeminiApiLlmClient client, Llm
     public async Task<ILlmAgentSession> StartSessionAsync(string connectionId, LlmConnection connection,
         LlmAgentSessionOptions options, CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(options);
+        cancellationToken.ThrowIfCancellationRequested();
+        if (options.Context is not null) { ManagedAgentContext.ValidateRuntimeResources(options.Context); }
+        HostedTools.Validate(options.HostedTools, options.MaxHostedTurns, client.GetCapabilities(connection, options.ModelId).HostedTools);
         connection = await client.PrepareAsync(connection, cancellationToken).ConfigureAwait(false);
         // The capability checks below and the session's per-model lookups read the provider catalog.
         connection = await providers.AttachCatalogAsync(connectionId, connection, client, cancellationToken).ConfigureAwait(false);

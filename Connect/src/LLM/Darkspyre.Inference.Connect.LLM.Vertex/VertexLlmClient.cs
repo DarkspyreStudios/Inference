@@ -250,7 +250,7 @@ internal sealed class VertexLlmClient(HttpClient http, IVertexAuthentication aut
         { throw new NotSupportedException("This model does not offer strict tool-schema enforcement. Ordinary non-strict tools are supported."); }
         if (request.AllowParallelToolCalls is not null && !capabilities.Tools.SupportsParallelCallControl)
         { throw new NotSupportedException("This route cannot enforce parallel tool-call control."); }
-        foreach (LlmAttachment attachment in request.Messages.SelectMany(message => message.Attachments))
+        foreach (LlmAttachment attachment in request.Messages.SelectMany(message => message.Attachments).Select(LlmAttachments.RequireBinary))
         {
             if (!profile.IsClaude)
             {

@@ -400,7 +400,7 @@ public sealed class XaiResponsesClientTests
         using var http = new HttpClient(handler);
         byte[] bytes = overLimit ? new byte[20 * 1024 * 1024 + 1] : [1, 2, 3];
         LlmConnection connection = WithImageCatalog(supportsImages);
-        var request = Request() with { Messages = [new("user", "image") { Attachments = [new() { Kind = LlmBinaryKind.Image, FileName = "image.png", MediaType = "image/png", Data = bytes }] }] };
+        var request = Request() with { Messages = [new("user", "image") { Attachments = [new LlmAttachment { Kind = LlmBinaryKind.Image, FileName = "image.png", MediaType = "image/png", Data = bytes }] }] };
         if (overLimit)
             await Assert.ThrowsAsync<ArgumentException>(() => Read(new XaiResponsesLlmClient(http).StreamAsync(connection, request)));
         else
@@ -417,8 +417,8 @@ public sealed class XaiResponsesClientTests
         var request = Request() with
         {
             Messages = [new("user", "inspect") { Attachments = [
-            new() { Kind = LlmBinaryKind.Image, FileName = "image.png", MediaType = "image/png", Data = new byte[] { 1, 2 } },
-            new() { Kind = LlmBinaryKind.Document, FileName = "document.pdf", MediaType = "application/pdf", Data = new byte[] { 3, 4 } }
+            new LlmAttachment { Kind = LlmBinaryKind.Image, FileName = "image.png", MediaType = "image/png", Data = new byte[] { 1, 2 } },
+            new LlmAttachment { Kind = LlmBinaryKind.Document, FileName = "document.pdf", MediaType = "application/pdf", Data = new byte[] { 3, 4 } }
         ] }]
         };
         await Read(new XaiResponsesLlmClient(http).StreamAsync(WithImageCatalog(true), request));

@@ -246,6 +246,13 @@ public static class ResourceAuthorityFixture
             catch (NotSupportedException) { }
         }
         if (authority.Touched != 0) { throw new InvalidOperationException("Serialization invoked borrowed resource authority."); }
+        var request = new Darkspyre.Inference.Common.LLM.LlmInferenceRequest { ModelId = "model", Resources = authority };
+        try { JsonSerializer.Serialize(request, InferenceJson.LlmRequest); throw new InvalidOperationException("Request authority serialized."); }
+        catch (NotSupportedException) { }
+        try { JsonSerializer.Deserialize("""{"ModelId":"model","Resources":{}}""", InferenceJson.LlmRequest); throw new InvalidOperationException("Request authority deserialized."); }
+        catch (NotSupportedException) { }
+        _ = request.ToString();
+        if (authority.Touched != 0) { throw new InvalidOperationException("Request codec or diagnostics invoked resource authority."); }
         return "refused-without-callbacks";
     }
 

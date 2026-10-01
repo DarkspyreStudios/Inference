@@ -14,7 +14,7 @@ internal sealed class OpenAiCodexLlmClient(HttpClient http)
     : ResponsesLlmClientBase(http), ILlmAccountUsageClient, ILlmCatalogCapabilities
 {
     internal const string DefaultEndpoint = "https://chatgpt.com/backend-api/codex";
-    private const string CodexCompatibilityVersion = "0.155.1";
+    private const string CodexCompatibilityVersion = "0.159.3";
 
     public override LlmTransport Transport => LlmTransport.OpenAiCodex;
 
@@ -180,11 +180,15 @@ internal sealed class OpenAiCodexLlmClient(HttpClient http)
             {
                 continue;
             }
+            if (!model.TryGetProperty("context_window", out JsonElement limit) || limit.ValueKind == JsonValueKind.Null)
+            {
+                model.TryGetProperty("max_context_window", out limit);
+            }
             result.Add(new LlmModel(id, LlmJson.GetString(model, "display_name") ?? id)
             {
                 CatalogEntry = model.Clone(),
-                MaxContextTokens = model.TryGetProperty("context_window", out var limit)
-                    && limit.ValueKind == JsonValueKind.Number && limit.TryGetInt64(out long context) && context > 0 ? context : null
+                MaxContextTokens = limit.ValueKind == JsonValueKind.Number
+                    && limit.TryGetInt64(out long context) && context > 0 ? context : null
             });
         }
         return result;
@@ -220,6 +224,12 @@ internal sealed class OpenAiCodexLlmClient(HttpClient http)
 
     private static void ValidateConnection(LlmConnection connection)
     {
+        if (connection.AdditionalHeaders.Keys.Any(name =>
+                string.Equals(name, "version", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(name, "User-Agent", StringComparison.OrdinalIgnoreCase)))
+        {
+            throw new InvalidOperationException("Codex version and User-Agent headers are reserved for the selected protocol compatibility version.");
+        }
         if (!Uri.TryCreate(connection.Endpoint, UriKind.Absolute, out var uri)
             || uri.Scheme != Uri.UriSchemeHttps)
         {

@@ -74,6 +74,8 @@ public sealed record LlmProviderCapabilities
 
     public LlmToolCapabilities Tools { get; init; } = new();
 
+    public IReadOnlySet<LlmHostedToolKind> HostedTools { get; init => field = value.ToFrozenSet(); } = FrozenSet<LlmHostedToolKind>.Empty;
+
     /// <summary>How tool calls and results already in the history reach the provider.</summary>
     public LlmToolHistory ToolHistory { get; init; }
 
@@ -92,6 +94,9 @@ public sealed record LlmProviderCapabilities
 
     /// <summary>User prompts can include provider-neutral document attachments.</summary>
     public bool SupportsPromptDocuments { get; init; }
+
+    /// <summary>The selected route accepts provider-native file references. Overrides cannot enable an unimplemented route.</summary>
+    public bool SupportsFileReferences { get; init; }
 
     /// <summary>How the route carries each kind of tool-output content.</summary>
     public LlmRichContentSupported RichContentSupported { get; init; } = new();

@@ -220,6 +220,7 @@ internal sealed class BedrockLlmClient(
         }
 
         LlmProviderCapabilities capabilities = GetCapabilities(connection, request.ModelId);
+        HostedTools.Validate(request, capabilities);
         if (request.Temperature is not null && !capabilities.SupportsTemperature)
         {
             throw new NotSupportedException("This Bedrock connection does not support temperature.");
@@ -552,7 +553,7 @@ internal sealed class BedrockLlmClient(
                     content.Add(new ContentBlock { Text = message.Content });
                 }
 
-                foreach (LlmAttachment attachment in message.Attachments)
+                foreach (LlmAttachment attachment in message.Attachments.Select(LlmAttachments.RequireBinary))
                 {
                     content.Add(BuildPromptAttachment(attachment));
                 }

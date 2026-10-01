@@ -44,7 +44,7 @@ internal static class GeminiRequest
             {
                 parts = new JsonArray();
                 if (message.Content.Length > 0) { parts.Add(Text(message.Content)); }
-                foreach (LlmAttachment attachment in message.Attachments)
+        foreach (LlmAttachment attachment in message.Attachments.Select(LlmAttachments.RequireBinary))
                 {
                     string mime = LlmAttachments.ResolveMediaType(attachment);
                     parts.Add(new JsonObject

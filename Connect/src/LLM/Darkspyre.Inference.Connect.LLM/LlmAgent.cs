@@ -21,7 +21,7 @@ public enum LlmAgentApprovalPolicy
 }
 
 /// <summary>A host-implemented dynamic tool exposed to an agent session.</summary>
-public sealed record LlmAgentToolDefinition
+public sealed record LlmAgentToolDefinition : LlmAgentClientToolDefinition
 {
     public required string Name { get; init; }
 
@@ -164,6 +164,10 @@ public sealed record LlmAgentSessionOptions
 
     public IReadOnlyList<LlmAgentToolDefinition> Tools { get; init; } = [];
 
+    public IReadOnlyList<LlmHostedTool> HostedTools { get; init; } = [];
+
+    public int? MaxHostedTurns { get; init; }
+
     public LlmAgentToolHandler? ToolHandler { get; init; }
 
     /// <summary>Output Connect retains per resource when the runtime keeps none; the earliest cursor advances past it.</summary>
@@ -190,6 +194,10 @@ public sealed record LlmAgentResumeOptions
     /// </summary>
     public IReadOnlyList<LlmAgentToolDefinition> Tools { get; init; } = [];
 
+    public IReadOnlyList<LlmHostedTool> HostedTools { get; init; } = [];
+
+    public int? MaxHostedTurns { get; init; }
+
     public LlmAgentToolHandler? ToolHandler { get; init; }
 
     /// <summary>Output Connect retains per resource when the runtime keeps none; the earliest cursor advances past it.</summary>
@@ -208,7 +216,7 @@ public sealed record LlmAgentTurnRequest
     public required IReadOnlyList<LlmAgentContent> Input { get; init; }
 
     /// <summary>Provider-neutral binary content supplied with this turn.</summary>
-    public IReadOnlyList<LlmAttachment> Attachments { get; init; } = [];
+    public IReadOnlyList<LlmMessageAttachment> Attachments { get; init; } = [];
 
     public string? ModelId { get; init; }
 

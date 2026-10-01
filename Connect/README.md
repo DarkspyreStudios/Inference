@@ -76,21 +76,63 @@ qualification remains.
 ### Contract migration
 
 Continuation state is now Common's opaque `LlmContinuationState`, carried by both portable and
-Connect messages/results as `ContinuationState`. Captures and envelopes use format 2; old
+Connect messages/results as `ContinuationState`. Continuation envelopes use format 2; context captures
+use format 3. The owned context codec accepts the closed format-2 binary/function shape and upgrades
+it without changing transcript revision, IDs, order, bytes, omissions or opaque continuation. Old
 `ResponseState` JSON members and unversioned captures are rejected. Hosts must migrate stored records
 before adoption; see [DSA-68 handoff](docs/agent-ds-contract-handoff.md). Explicit state omission is
 reported by `OmittedContinuationStateCount`; default handling rejects unbound state.
 
 ### JSON metadata
 
+`ConnectLlmJson.PortableRequest` closes the Common request graph with the fixed `XaiXSearchTool`
+variant, also supported by `ChatRequest` metadata. It adds no arbitrary CLR subtype registry and
+does not change Common's metadata. Owned options compose Common's exact runtime-resource and
+authorization refusal converters; live authorization cannot be serialized or reconstructed as
+data, and serialization never invokes its callback. The separate credential codec keeps its
+existing Web names and null omission.
+
+Hosted request tools and turn limits are unavailable on the built-in adapters. Direct and facade
+generation, counting and estimation reject them before provider authentication, discovery, CLI
+startup or model materialization. Native start/resume also rejects these unmapped options. Existing
+Anthropic server-tool configuration is separate and does not advertise the new hosted API.
+Managed sessions snapshot hosted data, borrow authorization and preserve actual streamed hosted
+and citation observations under the invocation RequestId; they never route hosted observations to
+the host function handler. Terminal chat/portable results preserve ordered citation lists.
+Facade generation, input counting and request measurement freeze hosted descriptors before the
+first connection-source await. Later caller mutations cannot change admitted filters or headers;
+authorization stays borrowed. Owned hosted-event metadata requires actual scope and observation
+facts, including explicitly reported compaction revisions. Nested hosted image output retains
+Common's property-specific null-byte refusal and its new closed phase/action enum policies.
+Managed disposal shares its completion across callers, drains the producer even after cancellation
+callback failure, then releases borrowed hosted authorization without disposing it. Cleanup failures
+remain visible to every disposer. These controlled contracts do not qualify provider wire mappings
+or native execution. Terminal-only citations have no managed-agent projection; streamed citation
+observations are not deduplicated against terminal copies.
+
 `ConnectLlmJson` exposes owned source-generated metadata for closed LLM connections, saved setup
 configuration, chat messages/requests/results and captured agent context. Pass the matching typed
 metadata to `JsonSerializer`. Credential `Serialize`/`Parse`, context-entry equivalence and continuation
 scope hashing use owned metadata. Credentials retain their camel-case Web format and null omission;
-captured context retains its property names, format 2 checks, Common tool-output discriminators and
+captured context retains its property names, Common tool-output discriminators and
 binary/null-versus-empty representations. Resolved internal services are never serialized.
 Connection and setup metadata retain typed Vertex, Azure, Chat Completions and xAI options, including
 unknown numeric modes for validation by their owning adapter; writing them does not enable a provider.
+
+Format-3 context requires an explicit `SelectedResources` list. Its optional
+`ResourceSelectionVersion` records the caller's workspace, logical session and selection revision,
+independently of transcript revision. The codec copies and validates this data without accessing
+storage. Legacy captures upgrade to empty membership with unknown provenance, not revision zero.
+Byte-excluded captures retain logical references and the selection snapshot. Current session
+implementations reject selections they cannot bind; import never silently installs or deletes caller
+membership.
+
+Chat messages and turns use the Common ordered binary/native-file/workspace-resource attachment
+union. `LlmChatRequest.Resources` and its Common projection preserve the same borrowed authority.
+Owned request JSON refuses non-null authority and request diagnostics never traverse it.
+Current built-in routes reject unimplemented references and authority before refresh, catalog,
+provider, process or model execution. `SupportsFileReferences` defaults to false; capability overrides
+cannot enable a missing native-file route.
 
 Gemini API and Vertex local text estimates serialize requests with `ConnectLlmJson.ChatRequest`.
 The projection retains default property names/order, numeric enums, explicit nulls and escaping.
@@ -807,6 +849,30 @@ Launcher tests exercise planning with filesystem fixtures and actual managed arg
 Windows batch execution, cancellation and installed-Node round trips are conditional tests. A
 non-Windows run reports them as skipped; it does not qualify Windows invocation.
 
+## Document search contracts
+
+`IDocumentSearchClient.SearchAsync` declares a connection-selected search over existing provider
+collections. Connect supplies the data contract and owned `ConnectLlmJson` metadata; it does not
+register a document-search implementation or advertise provider availability.
+
+`DocumentSearchRequest` carries ordered collection IDs, an opaque filter, optional grouping and a
+closed hybrid/semantic/keyword retrieval selection. Grouping supports `DocumentMinK` and
+`DocumentMaxK`. Hybrid retrieval accepts model or RRF rerankers; semantic and keyword retrieval
+accept model rerankers only. Optional values remain absent instead of inserting provider defaults.
+The typed xAI ranking and RAG options stay in Connect, not Common.
+
+The records copy supplied lists and metadata dictionaries, including assignments through `with`.
+They preserve order, duplicate collection IDs, raw strings and case-sensitive metadata keys.
+Grouping requires at least one key; aggregate keys may be empty. Aggregate K is positive,
+search multipliers are 1 through 100, and weights are finite values from 0 through 1.
+Weights are not normalized, and RRF K has no local lower bound.
+
+`DocumentSearchMatch` reports finite actual scores without range normalization. Missing `Fields`
+remains null; an observed empty map remains empty. JSON-looking field values remain strings, and
+page zero remains an actual value. Native file/chunk IDs and snippets do not establish workspace
+resource ownership or access to a complete source file. Serialization does not perform search,
+resolve credentials, fetch files, group results or evaluate filters.
+
 ## Image provider integration
 
 Register the image capability and resolve its provider-neutral transport through
@@ -991,7 +1057,7 @@ Version 2.0 replaces `LlmToolAttachment` with `LlmAttachment`, removes caller-su
 type name, delete `MediaType` initializers, and gate prompt inputs with `SupportsPromptImages` or
 `SupportsPromptDocuments`.
 
-Prompt messages carry attachments as a provider-neutral binary value. The host supplies only the
+The binary variant of a prompt attachment is a provider-neutral value. The host supplies the
 high-level kind, filename, and bytes; Darkspyre.Inference.Connect.LLM detects the media type and owns base64 encoding,
 temporary-file staging, sandbox roots, and every provider wire shape:
 
@@ -1025,7 +1091,32 @@ image/document content blocks for prompt attachments. Direct Codex sends prompt 
 tool-output binaries inline through Responses, with no CLI staging directory. The caller supplies kind,
 filename, and bytes; adapters own MIME detection, encoding, and wire representation.
 
+### Explicit cache contracts
+
+`ILlmContextCacheClient` declares explicit create, get, one-page list, expiry update and delete
+operations. Its request, correlation, receipt, usage, page and delete-result records have exact
+type-name getters on `ConnectLlmJson`. These declarations are inert: no facade cache binding or
+provider cache implementation is registered. They do not enable cached generation.
+
+Receipts require observed expiry and preserve unknown usage/timestamps as null. List page size is
+explicit and positive; a short page with a continuation token remains nonterminal. Collection
+properties copy their lists, without claiming an admitted operation's deep prefix snapshot.
+Create's optional `Resources` is borrowed runtime authority: non-null serialization fails and
+diagnostics do not inspect it. The request does not validate a provider's lifetime or scope.
+
+`LlmContextCacheCreateCancelledException` and `LlmContextCacheCreateUncertainException` retain
+correlation, the actual request ID and an optional observed receipt without declaring success or
+rollback. They are runtime exceptions, not portable metadata roots. Their presence does not
+implement dispatch tracking, automatic retries, reconciliation or paid cache creation.
+
 ### Tool output
+
+`LlmAgentClientToolDefinition` is a closed function/shell data union. The existing
+`LlmAgentToolDefinition` retains its schema, strictness, deferred-loading and sequential-execution
+fields. `LlmAgentShellTool` wraps the Common shell definition. `ConnectLlmJson` exports these three
+types with exact type-name getters and fixed `function`/`shell` discriminators. Current Start/Resume
+tool collections remain function-only. These declarations do not enable shell execution or change
+provider capabilities.
 
 A tool result carries one `LlmToolOutput`: ordered parts, optional structured JSON, and an error flag.
 A chat request sends it as `new LlmToolResult(call.Id, output)`, and an agent `ToolHandler` returns it.
@@ -1530,6 +1621,30 @@ use the official endpoint, so saving an edit replaces a former value. Save requi
 ChatGPT sign-in, or a saved credential that the edit keeps. Model
 discovery uses the direct authenticated catalog. A model whose catalog entry lists
 `supported_reasoning_levels` offers exactly those levels; other models offer `Minimal` to `ExtraHigh`.
+
+The adapter targets Codex CLI `0.159.3`, independently of the Inference package version.
+Its `User-Agent`, `version` header and catalog `client_version` use that same version for discovery,
+generation and account usage. Additional `version` and `User-Agent` headers are reserved on this
+transport; other custom headers retain their existing policy. The reviewed upstream baseline is
+[`rust-v0.159.3`](https://github.com/openai/codex/releases/tag/rust-v0.159.3), source commit
+`01fc69f4026735edfdf6789820549727a4867b11`. Catalog limits use `context_window`, falling back to
+`max_context_window` only when the former is absent or null. Positive reported limits are physical
+context limits, not an invented usable-context or compaction budget. Unknown limits remain null.
+Matching the version does not establish full CLI tooling or endpoint parity.
+
+Upstream defines the release number in `codex-rs/Cargo.toml` under `[workspace.package]`.
+The [main-branch source](https://github.com/openai/codex/blob/2635431edbd43279a4da9c1199456758fbbc8ad3/codex-rs/Cargo.toml#L161-L162)
+contains the placeholder `0.0.0`; the
+[selected release source](https://github.com/openai/codex/blob/01fc69f4026735edfdf6789820549727a4867b11/codex-rs/Cargo.toml#L160-L161)
+contains `0.159.3`. The
+[release workflow](https://github.com/openai/codex/blob/2635431edbd43279a4da9c1199456758fbbc8ad3/.github/workflows/rust-release.yml#L11-L55)
+runs on `rust-v*.*.*` tags and blocks the build unless the tag without `rust-v` exactly matches
+the Cargo package version. Cargo supplies that package metadata to `env!("CARGO_PKG_VERSION")`,
+which upstream uses for its
+[User-Agent](https://github.com/openai/codex/blob/01fc69f4026735edfdf6789820549727a4867b11/codex-rs/login/src/auth/default_client.rs#L156-L165)
+and [version header](https://github.com/openai/codex/blob/01fc69f4026735edfdf6789820549727a4867b11/codex-rs/model-provider-info/src/lib.rs#L532-L535).
+There is no separate release-version build override in this path. Connect's compatibility pin
+matches the selected release metadata, not main's placeholder or the Inference package version.
 
 Chat and managed agents share SSE request mapping, attachments, tool definitions, reasoning level,
 JSON Schema, and ordered opaque response-state replay. Requests use `store: false`; the library

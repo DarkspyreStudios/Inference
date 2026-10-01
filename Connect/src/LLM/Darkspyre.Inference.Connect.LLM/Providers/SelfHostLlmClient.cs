@@ -57,8 +57,11 @@ internal sealed class SelfHostLlmClient(ILlmSelfHost host) : ILlmClient, ILlmCon
         ArgumentNullException.ThrowIfNull(connection);
         ArgumentNullException.ThrowIfNull(request);
         ValidateOptions(connection, request);
+        HostedTools.Validate(request, GetCapabilities(connection, request.ModelId));
         CommonLlm.ILlmInference engine = await host.GetInferenceAsync(connection.Endpoint, cancellationToken).ConfigureAwait(false);
-        LlmClientBase.ValidateSampling(request, ToConnect(await engine.GetCapabilitiesAsync(request.ModelId, cancellationToken).ConfigureAwait(false)));
+        var capabilities = ToConnect(await engine.GetCapabilitiesAsync(request.ModelId, cancellationToken).ConfigureAwait(false));
+        LlmClientBase.ValidateSampling(request, capabilities);
+        HostedTools.Validate(request, capabilities);
         await foreach (CommonLlm.LlmStreamEvent item in engine.StreamAsync(ToCommon(request), cancellationToken).ConfigureAwait(false))
         {
             // Common's events pass through; only the completion carries Connect's result.
@@ -72,6 +75,7 @@ internal sealed class SelfHostLlmClient(ILlmSelfHost host) : ILlmClient, ILlmCon
         ArgumentNullException.ThrowIfNull(connection);
         ArgumentNullException.ThrowIfNull(request);
         ValidateOptions(connection, request);
+        HostedTools.Validate(request, GetCapabilities(connection, request.ModelId));
         LlmClientBase.ValidateSampling(request, GetCapabilities(connection, request.ModelId));
         var text = new StringBuilder(request.Instructions);
         foreach (LlmChatMessage message in request.Messages)
@@ -97,6 +101,11 @@ internal sealed class SelfHostLlmClient(ILlmSelfHost host) : ILlmClient, ILlmCon
 
     internal static (string Code, string Message)? UnsupportedOptions(LlmConnection connection, LlmChatRequest? request = null)
     {
+        if (request?.Resources is not null)
+        { return ("self-host-resource-authority", "SelfHost does not materialize caller-owned resources."); }
+        if (request?.Messages.Any(message => message.Attachments.Any(attachment => attachment is not CommonLlm.LlmAttachment)
+            || message.ToolResults.Any(result => result.Output.Parts.Any(part => part is CommonLlm.LlmToolOutputSessionResource))) is true)
+        { return ("self-host-resource-references", "SelfHost does not materialize referenced prompt or tool content."); }
         if (connection.ProviderOptions.Count > 0 || request?.ProviderOptions.Count > 0)
         { return ("self-host-provider-options", "A SelfHost engine accepts no provider request options. Remove ProviderOptions from the connection and request."); }
         if (connection.AdditionalHeaders.Count > 0)
@@ -128,11 +137,14 @@ internal sealed class SelfHostLlmClient(ILlmSelfHost host) : ILlmClient, ILlmCon
         ReasoningLevel = request.ReasoningLevel,
         StructuredOutput = request.StructuredOutput,
         Tools = request.Tools,
+        HostedTools = request.HostedTools,
+        MaxHostedTurns = request.MaxHostedTurns,
         ToolChoice = request.ToolChoice,
         AllowParallelToolCalls = request.AllowParallelToolCalls,
         UnboundContinuationState = request.UnboundContinuationState,
         ConversationKey = request.ConversationKey,
-        PromptCache = request.PromptCache
+        PromptCache = request.PromptCache,
+        Resources = request.Resources
     };
 
     private static LlmChatResult ToConnect(CommonLlm.LlmInferenceResult result) => new()
@@ -147,6 +159,7 @@ internal sealed class SelfHostLlmClient(ILlmSelfHost host) : ILlmClient, ILlmCon
         ContinuationState = result.ContinuationState,
         OmittedContinuationStateCount = result.OmittedContinuationStateCount,
         ToolCalls = result.ToolCalls,
+        Citations = result.Citations,
         StructuredOutput = result.StructuredOutput,
         // An in-process call has no HTTP exchange; 200 records that it completed.
         Diagnostics = new(200, null, null)
@@ -173,11 +186,13 @@ internal sealed class SelfHostLlmClient(ILlmSelfHost host) : ILlmClient, ILlmCon
         MaxStopSequences = capabilities.MaxStopSequences,
         SupportsToolUse = capabilities.SupportsToolUse,
         Tools = capabilities.Tools,
+        HostedTools = capabilities.HostedTools,
         ToolHistory = LlmToolHistory.Structured,
         SupportsAgentSessions = true,
         SupportsAgentToolUse = capabilities.SupportsToolUse,
         Agent = Agent,
         SupportsPromptImages = capabilities.SupportsPromptImages,
-        SupportsPromptDocuments = capabilities.SupportsPromptDocuments
+        SupportsPromptDocuments = capabilities.SupportsPromptDocuments,
+        SupportsFileReferences = capabilities.SupportsFileReferences
     };
 }

@@ -94,7 +94,7 @@ internal sealed class XaiResponsesLlmClient(HttpClient http) : ResponsesLlmClien
             throw new NotSupportedException("Grok accepts at most 350 client tools.");
         if (request.Tools.Any(tool => tool.Name == "web_search"))
             throw new ArgumentException("A Grok client function cannot be named web_search.", nameof(request));
-        foreach (LlmAttachment attachment in request.Messages.SelectMany(message => message.Attachments))
+        foreach (LlmAttachment attachment in request.Messages.SelectMany(message => message.Attachments).Select(LlmAttachments.RequireBinary))
             if (attachment.Kind == LlmBinaryKind.Image && attachment.Data.Length > MaxImageBytes)
                 throw new ArgumentException("Grok input images must not exceed 20 MiB.", nameof(request));
         if (GetCapabilities(connection, request.ModelId).RichContentSupported.Images == LlmRichContentCarriage.Native)

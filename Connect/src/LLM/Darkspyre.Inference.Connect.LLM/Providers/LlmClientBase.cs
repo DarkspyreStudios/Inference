@@ -116,6 +116,7 @@ internal abstract class LlmClientBase(HttpClient http) : ILlmClient
     {
         EnsureTransport(connection);
         RequestJson.ValidateSamplingOptions(connection, request);
+        HostedTools.Validate(request, capabilities);
         if (string.IsNullOrWhiteSpace(request.ModelId))
         {
             throw new ArgumentException("A model id is required.", nameof(request));
@@ -197,6 +198,7 @@ internal abstract class LlmClientBase(HttpClient http) : ILlmClient
         LlmChatRequest request,
         LlmProviderCapabilities capabilities)
     {
+        LlmAttachments.ValidateReferences(request);
         foreach (LlmChatMessage message in request.Messages)
         {
             if (message.Attachments.Count > 0

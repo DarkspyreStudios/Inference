@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Darkspyre.Inference.Common.LLM;
+using Darkspyre.Inference.Common.Resources;
 
 namespace Darkspyre.Inference.Connect.LLM;
 
@@ -11,8 +12,8 @@ public sealed record LlmChatMessage(string Role, string Content)
 
     public IReadOnlyList<LlmOmittedAttachment> OmittedAttachments { get; init; } = [];
 
-    /// <summary>Provider-neutral binary content supplied with this user message.</summary>
-    public IReadOnlyList<LlmAttachment> Attachments { get; init; } = [];
+    /// <summary>Ordered inline content, provider files or workspace resources supplied with this message.</summary>
+    public IReadOnlyList<LlmMessageAttachment> Attachments { get; init; } = [];
 
     /// <summary>Tool calls previously requested by the assistant.</summary>
     public IReadOnlyList<LlmToolCall> ToolCalls { get; init; } = [];
@@ -24,6 +25,11 @@ public sealed record LlmChatMessage(string Role, string Content)
 /// <summary>Provider-neutral generation request. The model is selected per request.</summary>
 public sealed record LlmChatRequest
 {
+    /// <summary>Borrowed caller-owned resource authority. Never part of a portable request.</summary>
+    public IInferenceResourceAccess? Resources { get; init; }
+
+    public override string ToString() => nameof(LlmChatRequest);
+
     public required string ModelId { get; init; }
 
     public string? Instructions { get; init; }
@@ -58,6 +64,10 @@ public sealed record LlmChatRequest
     public LlmStructuredOutputRequest? StructuredOutput { get; init; }
 
     public IReadOnlyList<LlmToolDefinition> Tools { get; init; } = [];
+
+    public IReadOnlyList<LlmHostedTool> HostedTools { get; init; } = [];
+
+    public int? MaxHostedTurns { get; init; }
 
     public LlmToolChoice? ToolChoice { get; init; }
 
@@ -111,6 +121,8 @@ public sealed record LlmChatResult
     public string? ProviderResponseId { get; init; }
 
     public IReadOnlyList<LlmToolCall> ToolCalls { get; init; } = [];
+
+    public IReadOnlyList<LlmCitation> Citations { get; init; } = [];
 
     /// <summary>Preserve unchanged on this response's assistant message, including ordinary turns.</summary>
     public LlmContinuationState? ContinuationState { get; init; }

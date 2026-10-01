@@ -28,6 +28,22 @@ least-common-denominator replacement for implementation management.
 
 ## JSON metadata
 
+`LlmExplicitCacheReference` carries a native cache resource name, model, opaque scope and optional
+observed expiry. `InferenceJson.LlmExplicitCacheReference` exports its data-only metadata. The
+reference grants no authority and is not yet a generation-request selection.
+
+`LlmClientToolDefinition`, `LlmClientToolCall` and `LlmClientToolResult` are closed
+function/shell data unions. Existing function record names and constructors remain intact.
+Shell data preserves ordered commands and outputs, nullable raw 64-bit timeout milliseconds,
+nullable raw 32-bit output length, optional stdout/stderr and explicit exit/timeout outcomes.
+Lists copy their inputs at construction and `with` assignment. Skills contain caller paths;
+constructing or serializing them does not read files or execute commands.
+
+The existing request, message and result collections still accept only function records.
+The standalone shell metadata is an inert contract foundation, not an execution capability.
+`InferenceJson` exposes every fixed shell record and each mixed union with its exact type-name
+getter. Union discriminators are `function` and `shell`; outcomes use `exit` and `timeout`.
+
 `InferenceJson` supplies Common-owned source-generated metadata for closed LLM, decision and image
 request/result contracts, capabilities, tool output, continuation state, concrete stream events and
 data-only setup observations, choices and outcomes. Pass its typed metadata to `JsonSerializer`.
@@ -48,6 +64,22 @@ Its named hosted counts snapshot their input; negative hosted counts become unkn
 and owned JSON import. `InferenceJson.LlmUsage` and `InferenceJson.LlmHostedToolKind` expose the exact
 typed metadata, also composed into existing result and usage-event graphs. These facts do not enable
 provider features or infer totals from partial observations.
+
+Hosted tools use a closed `type` union, separate from caller-executed functions. Requests carry
+ordered `HostedTools` and optional positive `MaxHostedTurns`; capability sets are frozen and empty
+by default. Hosted calls retain actual status, optional input/output and ordered source/log/error
+facts. Citation offsets are nullable UTF-16 positions in emitted text, with an exclusive end.
+Unknown positions and optional output remain absent, not inferred. Concrete hosted/citation events
+have exact-name `InferenceJson` getters; their event base has no discriminator. Live remote-MCP
+authorization is borrowed and refuses non-null owned JSON read/write without invoking its callback.
+Null authorization roundtrips; explicitly serialized header data remains secret data, while
+remote-MCP diagnostics are redacted. Common's union rejects caller-defined variants; Connect owns
+the fixed xAI search extension and its extension-aware portable metadata.
+Owned hosted metadata rejects missing observation identities, kind/phase facts and image bytes.
+Explicit null image bytes are not an observed empty image; explicit empty bytes remain valid.
+The new phase/action enum roots reject undefined values without changing other enum policies.
+Caller-generated closed envelopes can compose the owned resolver and its fixed converters; the
+image-byte refusal applies only to the hosted image `Data` property, not every byte-memory field.
 
 ## Session and workspace resources
 
@@ -89,8 +121,20 @@ refusal converters for the three resource interfaces: null is allowed, but non-n
 before any collaborator callback. A closed caller-owned JSON context can compose those exact
 converters from `InferenceJson.InferenceResourceReference.Options.Converters` by the known interface
 type's `CanConvert` match before construction. This is not a global serializer policy or support for
-arbitrary caller CLR graphs. Resource references are not yet part of LLM attachments or requests;
-these standalone contracts do not establish automatic provider switching.
+arbitrary caller CLR graphs.
+
+LLM messages use one ordered `LlmMessageAttachment` union: `LlmAttachment` carries binary data,
+`LlmFileReference` carries a provider-native file ID, and `LlmResourceAttachment` carries a workspace
+reference. Their JSON discriminators are `binary`, `file` and `workspace-resource`.
+`LlmToolOutputSessionResource` adds a workspace reference to tool output without changing the
+existing `resource` URI/body variant. `InferenceJson` exports each concrete attachment and the base
+union under its exact type name. No reference contains invented bytes or grants access.
+
+`LlmInferenceRequest.Resources` borrows caller authority. Non-null authority refuses owned JSON
+serialization and deserialization; null remains portable. Request diagnostics do not traverse it.
+`SupportsFileReferences` defaults to false and describes native file input, not automatic workspace
+materialization. Current built-in LLM routes reject unimplemented reference inputs before provider
+effects. These contracts do not yet establish automatic provider switching.
 
 ## Media source data
 
