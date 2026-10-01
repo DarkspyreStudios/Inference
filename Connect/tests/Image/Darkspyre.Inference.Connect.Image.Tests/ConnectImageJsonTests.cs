@@ -142,7 +142,7 @@ public sealed class ConnectImageJsonTests
         Assert.Throws<JsonException>(() => JsonSerializer.Deserialize("{\"Request\":{\"ModelId\":\"one\",\"Prompt\":\"draw\",\"References\":[{\"type\":\"binary\",\"ContentType\":null,\"Data\":null}]}}", metadata));
         ImageSourceEnvelope empty = JsonSerializer.Deserialize("{\"Request\":{\"ModelId\":\"one\",\"Prompt\":\"draw\",\"References\":[{\"type\":\"binary\",\"ContentType\":null,\"Data\":\"\"}]}}", metadata)!;
         Assert.True(Assert.IsType<BinaryMediaSource>(Assert.Single(empty.Request.References)).Data.IsEmpty);
-        Assert.Same(InferenceJson.LlmHostedImageOutput.Properties.Single(property => property.Name == "Data").CustomConverter,
+        Assert.Same(InferenceJson.BinaryMediaSource.Properties.Single(property => property.Name == "Data").CustomConverter,
             options.GetTypeInfo<BinaryMediaSource>().Properties.Single(property => property.Name == "Data").CustomConverter);
     }
 

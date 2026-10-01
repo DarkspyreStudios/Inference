@@ -31,7 +31,8 @@ public static class ConnectImageJson
             JsonTypeInfo? metadata = ((IJsonTypeInfoResolver)ConnectImageJsonContext.Default).GetTypeInfo(type, options);
             if ((type == typeof(ImageTransportDownload) || type == typeof(BinaryMediaSource)) && metadata is not null)
                 metadata.Properties.Single(property => property.Name == "Data").CustomConverter =
-                    InferenceJson.LlmHostedImageOutput.Properties.Single(property => property.Name == "Data").CustomConverter;
+                    (type == typeof(BinaryMediaSource) ? InferenceJson.BinaryMediaSource : (JsonTypeInfo)InferenceJson.LlmHostedImageOutput)
+                    .Properties.Single(property => property.Name == "Data").CustomConverter;
             return metadata;
         }
     }
