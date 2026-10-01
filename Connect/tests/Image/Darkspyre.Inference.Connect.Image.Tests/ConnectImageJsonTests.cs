@@ -11,6 +11,43 @@ namespace Darkspyre.Inference.Connect.Image.Tests;
 public sealed class ConnectImageJsonTests
 {
     [Theory]
+    [InlineData("job-missing")]
+    [InlineData("download-missing")]
+    [InlineData("download-null")]
+    [InlineData("size-missing")]
+    public void RequiredImageFactsDoNotSynthesizeMissingOrNullValues(string kind)
+    {
+        Assert.Throws<JsonException>(() =>
+        {
+            switch (kind)
+            {
+                case "job-missing": JsonSerializer.Deserialize("{}", ConnectImageJson.ImageTransportJobSnapshot); break;
+                case "download-missing": JsonSerializer.Deserialize("{}", ConnectImageJson.ImageTransportDownload); break;
+                case "download-null": JsonSerializer.Deserialize("{\"Data\":null}", ConnectImageJson.ImageTransportDownload); break;
+                default: JsonSerializer.Deserialize("{}", InferenceJson.ImageSize); break;
+            }
+        });
+        Assert.Empty(JsonSerializer.Deserialize("{\"Data\":\"\"}", ConnectImageJson.ImageTransportDownload)!.Data.ToArray());
+        Assert.Null(JsonSerializer.Deserialize("{\"Data\":\"\",\"ContentType\":null}", ConnectImageJson.ImageTransportDownload)!.ContentType);
+    }
+
+    [Theory]
+    [InlineData("metadata")]
+    [InlineData("receipt-scope")]
+    [InlineData("output-scope")]
+    public void RequiredImageFactsRefuseNullWithMutation(string kind)
+    {
+        var receipt = new ImagePreparedReference(new() { Id = Guid.NewGuid() }, new("owner", "identity"), JsonElement.Parse("{}"));
+        var output = new ImageTransportOutput(null, receipt.Scope, receipt.ProviderState);
+        Assert.Throws<ArgumentNullException>(() =>
+        {
+            if (kind == "metadata") _ = receipt with { Metadata = null! };
+            else if (kind == "receipt-scope") _ = receipt with { Scope = null! };
+            else _ = output with { Scope = null! };
+        });
+    }
+
+    [Theory]
     [InlineData("ImageConnection", "{\"Transport\":0,\"Endpoint\":\"http://provider.invalid\",\"Authorization\":null}")]
     [InlineData("ImageTransport", "0")]
     [InlineData("ImageTransportCapabilities", "{\"SupportsProgress\":true,\"SupportsReferenceImages\":true,\"SupportsCancellation\":true}")]
