@@ -163,6 +163,12 @@ must move in the same change that restores this version.
 
 Semantics and route carriages are in the [canonical design](enhancements.md#rich-tool-results).
 
+Gemini 3 chat and managed-agent routes carry PNG, JPEG, WebP and PDF tool-result binaries natively
+inside referenced function-response parts, with a 7 MiB per-part bound. Earlier Gemini models report
+unsupported binary parts through the projector. Malformed, unexpected and excessive function-call
+finish reasons return Failed without completed calls or continuation state. Explicit Omit permits
+foreign call history with the documented dummy signature; default Reject retains native-state checks.
+
 ## Bounded-compaction accounting extension: 11.6.0-rc.1
 
 The user authorized the coordinated `11.6.0-rc.1` contract release after the initial source-only hold.

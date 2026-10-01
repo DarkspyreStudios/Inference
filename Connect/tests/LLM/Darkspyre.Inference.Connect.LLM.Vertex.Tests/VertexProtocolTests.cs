@@ -424,7 +424,7 @@ public sealed class VertexProtocolTests
 
     [Theory]
     [InlineData("""{"error":{"message":"private-provider-error"}}""")]
-    [InlineData("""{"candidates":[{"finishReason":"MALFORMED_FUNCTION_CALL"}]}""")]
+    [InlineData("""{"candidates":[{"finishReason":"MISSING_THOUGHT_SIGNATURE"}]}""")]
     [InlineData("not-json")]
     public async Task InvalidStreamsFailWithoutRawProviderContent(string frame)
     {

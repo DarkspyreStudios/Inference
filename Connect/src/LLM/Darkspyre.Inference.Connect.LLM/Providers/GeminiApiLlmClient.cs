@@ -32,7 +32,9 @@ internal sealed partial class GeminiApiLlmClient(HttpClient http)
     public override LlmProviderCapabilities GetCapabilities(LlmConnection connection, string? modelId = null)
     {
         Validate(connection);
-        GeminiModelProfile profile = modelId is null ? GeminiModelProfiles.Get(string.Empty, null) : Reasoning(connection, modelId);
+        GeminiModelProfile profile = modelId is null
+            ? GeminiModelProfiles.Get(string.Empty, null) with { MultimodalFunctionResponses = true }
+            : Reasoning(connection, modelId);
         bool supportsTopK = modelId is not null && ILlmCatalogCapabilities.EntryFor(connection, modelId) is { ValueKind: JsonValueKind.Object } entry
             && entry.TryGetProperty("topK", out JsonElement topK) && topK.ValueKind == JsonValueKind.Number
             && topK.TryGetInt32(out int defaultTopK) && defaultTopK > 0;
@@ -75,7 +77,7 @@ internal sealed partial class GeminiApiLlmClient(HttpClient http)
         (request, int omitted) = ContinuationStateProjection.Project(request, connection);
         LlmStructuredOutputEnforcement? enforcement = request.StructuredOutput is { } structured && !capabilities.SupportsJsonSchema
             ? StructuredOutput.ResolveEnforcement(structured, capabilities)
-            : GeminiSchemas.Enforcement(request.StructuredOutput, RouteName);
+            : GeminiSchemas.Enforcement(request.StructuredOutput, RouteName, GeminiSchemaDialect.GeminiApi);
         JsonObject payload = GeminiRequest.Build(connection, request, enforcement, output => ProjectToolOutput(connection, request.ModelId, output),
             Reasoning(connection, request.ModelId), capabilities.SupportsReasoningText);
         return (connection, request, capabilities, enforcement, payload, omitted);
@@ -181,9 +183,9 @@ internal sealed partial class GeminiApiLlmClient(HttpClient http)
     {
         if (connection.Transport != LlmTransport.GoogleGeminiApi) { throw new ArgumentException("Wrong Gemini API connection transport."); }
         if (connection.Endpoint.TrimEnd('/') != DefaultEndpoint || connection.AdditionalHeaders.Count != 0
-            || connection.ProviderOptions.Count != 0 || connection.Vertex is not null || connection.ChatCompletions is not null)
+            || connection.Vertex is not null || connection.ChatCompletions is not null)
         {
-            throw new NotSupportedException("The Gemini API owns endpoint routing, headers and request fields.");
+            throw new NotSupportedException("The Gemini API owns endpoint routing and headers; provider options go into generationConfig.");
         }
         LlmCredential? credential = LlmCredential.Parse(connection.Credential);
         if (credential is { } c && (c.OAuth is not null || c.Aws is not null || c.Google is not null || c.SecretHeaders.Count != 0))
@@ -251,7 +253,8 @@ internal sealed partial class GeminiApiLlmClient(HttpClient http)
 
     private static void ValidateGeminiRequest(LlmChatRequest request, LlmProviderCapabilities capabilities)
     {
-        if (request.ProviderOptions.Count != 0) { throw new NotSupportedException("The Gemini API accepts only declared request controls."); }
+        if (request.ProviderOptions.ContainsKey(AnthropicTools.OptionName))
+        { throw new NotSupportedException("Gemini does not accept Anthropic tool configuration."); }
         if (request.Temperature is < 0 or > 2) { throw new ArgumentException("The temperature exceeds the Gemini range of 0 to 2."); }
         if (request.Tools.Any(tool => tool.Strict) && capabilities.Tools.StrictInputSchema == LlmStrictInputSchemaSupport.Unsupported)
         { throw new NotSupportedException("This model does not offer strict tool-schema enforcement. Ordinary non-strict tools are supported."); }

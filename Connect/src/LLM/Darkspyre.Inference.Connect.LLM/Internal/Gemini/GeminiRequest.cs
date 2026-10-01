@@ -6,9 +6,10 @@ namespace Darkspyre.Inference.Connect.LLM.Internal;
 /// <summary>Builds the Gemini generateContent body shared by the Gemini API and Vertex AI routes.</summary>
 internal static class GeminiRequest
 {
+    internal const string DummyThoughtSignature = "skip_thought_signature_validator";
     public static JsonObject Build(LlmConnection connection, LlmChatRequest request,
         LlmStructuredOutputEnforcement? enforcement, Func<LlmToolOutput, ProjectedToolOutput> project,
-        GeminiModelProfile reasoning, bool reasoningText)
+        GeminiModelProfile reasoning, bool reasoningText, bool streamArguments = false)
     {
         var contents = new JsonArray();
         var calls = new Dictionary<string, (string Name, string? WireId)>(StringComparer.Ordinal);
@@ -52,11 +53,19 @@ internal static class GeminiRequest
                         { ["mimeType"] = mime, ["data"] = LlmAttachments.ToBase64(attachment) }
                     });
                 }
+                bool first = true;
                 foreach (LlmToolCall call in message.ToolCalls)
                 {
-                    // Gemini 3 signed tool turns cannot be reconstructed from the visible call alone.
-                    _ = call;
-                    throw new ArgumentException("Gemini tool-call history requires its original continuation state.");
+                    if (request.UnboundContinuationState != LlmUnboundContinuationState.Omit)
+                    { throw new ArgumentException("Gemini tool-call history requires its original continuation state."); }
+                    var part = new JsonObject
+                    {
+                        ["functionCall"] = new JsonObject { ["name"] = call.Name, ["args"] = JsonNode.Parse(call.ArgumentsJson) }
+                    };
+                    if (first && reasoning.RequiresThoughtSignatures) { part["thoughtSignature"] = DummyThoughtSignature; }
+                    first = false;
+                    AddCall(call.Id, call.Name, null);
+                    parts.Add(part);
                 }
             }
             // Without native call IDs, Gemini associates repeated names by their original order.
@@ -75,6 +84,30 @@ internal static class GeminiRequest
                     ["name"] = call.Name,
                     ["response"] = new JsonObject { [output.IsError ? "error" : "output"] = output.Text }
                 };
+                var nested = new JsonArray();
+                var references = new JsonArray();
+                foreach (SentToolPart part in output.Parts)
+                {
+                    (string? mime, ReadOnlyMemory<byte> data, string? name) = part switch
+                    {
+                        SentImage image => (image.MediaType, image.Data, image.FileName),
+                        SentFile { IsPdf: true } file => (file.MediaType, file.Data, file.FileName),
+                        _ => (null, default, null)
+                    };
+                    if (mime is null) { continue; }
+                    string displayName = DisplayName(nested.Count + 1, name);
+                    nested.Add(new JsonObject
+                    {
+                        ["inlineData"] = new JsonObject
+                        { ["displayName"] = displayName, ["mimeType"] = mime, ["data"] = Convert.ToBase64String(data.Span) }
+                    });
+                    references.Add(new JsonObject { ["$ref"] = displayName });
+                }
+                if (nested.Count > 0)
+                {
+                    function["parts"] = nested;
+                    function["response"]!["attachments"] = references;
+                }
                 if (call.WireId is not null) { function["id"] = call.WireId; }
                 parts.Add(new JsonObject { ["functionResponse"] = function });
             }
@@ -99,9 +132,15 @@ internal static class GeminiRequest
         }
         if (request.StructuredOutput is { } schema && enforcement == LlmStructuredOutputEnforcement.ProviderJsonSchema)
         {
-            generation["responseMimeType"] = "application/json";
-            generation["responseJsonSchema"] = JsonNode.Parse(schema.Schema.GetRawText());
+            var format = new JsonObject
+            {
+                ["text"] = new JsonObject { ["mimeType"] = "APPLICATION_JSON", ["schema"] = JsonNode.Parse(schema.Schema.GetRawText()) }
+            };
+            generation["responseFormat"] = connection.Transport == LlmTransport.GoogleVertexAi ? new JsonArray(format) : format;
         }
+        if (connection.ProviderOptions.ContainsKey(AnthropicTools.OptionName) || request.ProviderOptions.ContainsKey(AnthropicTools.OptionName))
+        { throw new NotSupportedException("Gemini does not accept Anthropic tool configuration."); }
+        RequestJson.ApplyProviderOptions(generation, connection, request);
         var payload = new JsonObject { ["contents"] = contents, ["generationConfig"] = generation };
         if (system.Count > 0) { payload["systemInstruction"] = new JsonObject { ["parts"] = system }; }
         if (request.Tools.Count > 0)
@@ -131,6 +170,11 @@ internal static class GeminiRequest
             if (choice.Mode == LlmToolChoiceMode.Specific) { config["allowedFunctionNames"] = new JsonArray(choice.Name); }
             payload["toolConfig"] = new JsonObject { ["functionCallingConfig"] = config };
         }
+        if (streamArguments && reasoning.StreamedFunctionArguments && request.Tools.Count > 0)
+        {
+            payload["toolConfig"] ??= new JsonObject { ["functionCallingConfig"] = new JsonObject() };
+            payload["toolConfig"]!["functionCallingConfig"]!["streamFunctionCallArguments"] = true;
+        }
         return payload;
 
         void AddCall(string id, string name, string? wireId)
@@ -141,4 +185,11 @@ internal static class GeminiRequest
     }
 
     private static JsonObject Text(string text) => new() { ["text"] = text };
+
+    private static string DisplayName(int ordinal, string? name)
+    {
+        string value = ordinal.ToString(System.Globalization.CultureInfo.InvariantCulture) + "-" + (name ?? "attachment");
+        return new string(value.Take(128).Select(character => char.IsAsciiLetterOrDigit(character)
+            || character is '.' or '_' or '-' ? character : '_').ToArray());
+    }
 }

@@ -254,6 +254,41 @@ Advertise native image/document tool results only after qualification. Resource 
 Connect does not fetch them. Claude document support on Google Cloud requires base64 sources [S7].
 MIME types, payload limits and attachment completeness are validated before dispatch.
 
+The Gemini 3 profile carries PNG, JPEG, WebP and PDF tool results as nested
+`functionResponse.parts.inlineData`, with one matching `$ref` per binary in the response's
+`attachments` array. Each binary is bounded at 7 MiB. Display names use a unique ordinal prefix,
+ASCII letters/digits and `._-`, capped at 128 characters. Text documents remain text-carried;
+cross-kind order is not preserved. Projection reports retain omitted-part information.
+Explicit Omit imports foreign visible call groups with the documented dummy thought signature on
+their first call; default Reject still requires original native state. Native signed state is replayed
+unchanged, and parallel responses follow original call order.
+
+Gemini input usage includes tool-use prompt tokens when the provider reports a prompt count.
+Malformed, unexpected and excessive tool-call finish reasons yield Failed with preserved text,
+no completed calls and no continuation. Missing thought signatures remain protocol errors.
+Image safety and prompt blocks yield Refused. Unknown finish reasons stay Unknown.
+
+Gemini connection and request provider options go into `generationConfig`. Request options override
+connection options. Options cannot replace standard fields written by the canonical builder.
+Anthropic tool configuration is rejected on Gemini. Vertex Gemini retains its existing output-schema
+keyword allowlist. Unsupported constraints require explicit local validation without schema rewriting.
+Native structured output uses a single-item `generationConfig.responseFormat` array containing
+`text: { mimeType: "APPLICATION_JSON", schema: ... }`. Gemini API uses the corresponding object.
+Neither route writes the deprecated response schema or MIME fields. Counting uses this same builder.
+
+Vertex Gemini streaming requests preview `streamFunctionCallArguments` for Gemini 3 profiles other
+than 3.1 Flash-Lite when tools are present. Non-streaming and counting do not enable the control.
+The stream emits the call name at its first fragment. It reconstructs `partialArgs` by root,
+property and array-index paths, appends string fragments, and retains one complete call with its
+original thought signature. Unsupported paths fail with a fixed protocol diagnostic. The parser
+accepts only single-target paths, not filters, slices or wildcards. String end markers and an empty
+function-call terminator close pending fragments. Sparse array expansion is bounded by the existing
+continuation wire-size limit and reconstruction depth matches the JSON serializer's 64-level limit.
+Successful terminal replies require all opened calls to be complete; truncation, refusal and failed
+model outcomes never expose unfinished calls as executable tools or continuation state.
+`SupportsArgumentStreaming` remains false because typed path fragments are not JSON-text deltas.
+Preview availability and the reconstructed wire replay require real-provider release qualification.
+
 ## 6. Required continuation contract change
 
 Before DSA-61, `LlmChatMessage`/`LlmChatResult` carried the Connect-only `LlmProviderResponseState`; Common's `LlmMessage`

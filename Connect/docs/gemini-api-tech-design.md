@@ -34,14 +34,17 @@ route both use:
 - `GeminiCapabilities` declares the capabilities the protocol implements and the inline attachment
   rules.
 
-The same portable request produces an identical body on both routes (`GeminiWireParityTests`).
+Both routes share the portable request body except their native `responseFormat` shapes.
+Gemini API uses an object; Vertex uses a single-item array (`GeminiWireParityTests`).
+Vertex streaming additionally requests its preview path-based function arguments for supported
+Gemini 3 profiles; Gemini API does not send that control.
 
 ## Authentication and setup
 
 The key is stored in `LlmCredential.ApiKey` by the host's protected credential store. It travels only in
 the `x-goog-api-key` header. It never appears in a URL, a request body, an exception or a diagnostic.
 `LlmSettings` draws the existing API-key secret field and no endpoint field. A connection rejects an
-edited endpoint, additional headers, provider options, a Vertex configuration and any credential other
+edited endpoint, additional headers, a Vertex configuration and any credential other
 than an API key.
 
 The connection test lists models with the key. Success proves Google accepts the key. It does not
@@ -67,7 +70,9 @@ and `outputTokenLimit` to the model's limits. Availability is Unknown.
 ## Capabilities
 
 Every listed model has the shared Gemini capabilities: streaming with usage, tool use with all choice
-modes, text-only rich tool results, prompt images and documents, and managed agent sessions. Strict
+modes, prompt images and documents, and managed agent sessions. Gemini 3 tool results carry PNG,
+JPEG, WebP and PDF parts natively up to 7 MiB per binary part. Earlier models omit these unsupported
+binary results through the projection report. Text documents remain text-carried. Strict
 tool input is Unsupported. Parallel-call control and argument streaming are not offered.
 
 Reasoning control comes from `GeminiModelProfiles`, which the Vertex Gemini route shares. Gemini 3 takes
@@ -102,12 +107,23 @@ These fail before dispatch:
 
 - `Strict=true` tools;
 - `AllowParallelToolCalls`;
-- provider options;
 - temperature outside 0 to 2;
 - attachments other than PNG, JPEG or WebP images up to 7 MiB, PDFs up to 50 MiB and plain text up to
   7 MiB;
 - an output schema with a keyword outside the allowlist, unless the request sets the local validation
   fallback.
+
+Connection and request `ProviderOptions` map into `generationConfig`, not the top-level request.
+Request options override connection options. An option cannot replace a standard field that the
+builder writes. The adapter rejects Anthropic's declared tool configuration on either scope.
+Native output schemas use `responseFormat.text` with `mimeType = APPLICATION_JSON` and the original
+schema. The adapter does not send deprecated `responseJsonSchema` or `responseMimeType` fields.
+
+Gemini API accepts `$id`, `$anchor`, internal `$ref`, `$defs`, `prefixItems`, `oneOf` and string-array
+types alongside the shared keyword set. A `$ref` schema permits only `$`-prefixed siblings.
+Definitions and composition children use the same recursive keyword validation. The adapter does
+not rewrite schemas or expand references. Vertex retains its narrower keyword set; unsupported
+keywords on either route require explicit local validation.
 
 ## Stream mapping, usage and errors
 
@@ -115,6 +131,12 @@ The stream mapping is the shared Gemini mapping described in
 [the Vertex design](google-vertex-ai-tech-design.md#8-stream-and-terminal-mapping). Synthesized call ids
 start with `gemini_`. Output tokens are `candidatesTokenCount` plus `thoughtsTokenCount`.
 `ReasoningOutputTokens` is `thoughtsTokenCount` and `CachedInputTokens` is `cachedContentTokenCount`.
+Input tokens add `toolUsePromptTokenCount` to a known `promptTokenCount`; a missing prompt count
+remains unknown. Running observations replace prior counts and final usage remains authoritative.
+
+`MALFORMED_FUNCTION_CALL`, `UNEXPECTED_TOOL_CALL` and `TOO_MANY_TOOL_CALLS` complete with Failed,
+preserving emitted text but no completed tool calls or continuation state. `IMAGE_SAFETY` and prompt
+blocks, including `JAILBREAK`, complete with Refused. `MISSING_THOUGHT_SIGNATURE` is a protocol error.
 
 An HTTP failure raises `LlmProviderException` with the status code and `Retry-After`. The message
 depends only on the status. The response body is not read. Other stream failures raise a generic
@@ -126,10 +148,24 @@ Retained state keeps Gemini parts in order with `thoughtSignature` on its origin
 the hash of the transport, endpoint and API key. A different key cannot replay stored state. A
 connection pinned to one scope fails before dispatch when its key changes.
 
+Explicit `UnboundContinuationState.Omit` imports visible foreign tool calls without native state.
+Gemini 3 adds the documented `skip_thought_signature_validator` value to the first call in each
+imported assistant group. Earlier models need no dummy signature. Default Reject still requires
+native continuation. Parallel results follow their original call order, not host arrival order.
+Native signatures are never replaced by a dummy signature.
+
+Gemini 3 function responses carry images and PDFs inside `functionResponse.parts.inlineData`.
+Their response object references each binary through one `$ref` in its `attachments` array.
+Display names have unique ordinal prefixes, contain only ASCII letters/digits and `._-`, and are
+limited to 128 characters. Text and binary channels do not preserve the original cross-kind order.
+
 ## Context estimate
 
 `EstimateInputTokens` is a local text estimate. It returns null for requests with continuation state,
-attachments or non-text tool output. The connector does not call `countTokens`.
+attachments or non-text tool output. The estimate never calls `countTokens`.
+`CountInputTokensAsync` uses the canonical generation request in `generateContentRequest`, including
+its model, to call the provider count endpoint. Provider counts remain separate from local estimates
+and never fabricate generation output usage.
 
 ## Tests and live qualification
 
@@ -144,6 +180,8 @@ runs the live cases. Live qualification must confirm:
 - which catalog models accept `thinkingLevel`, and which accept only `thinkingBudget`;
 - the inline request size limit for images and PDFs;
 - whether the Gemini API enforces schema keywords beyond the allowlist.
+- whether the selected API revision accepts nested function-response `displayName` references;
+- whether native `responseFormat` accepts the preserved schema shapes.
 
 ## Out of scope
 

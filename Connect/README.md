@@ -56,7 +56,9 @@ profiles and limits. Live cloud qualification remains; the shared contract requi
 The Gemini API (Google AI Studio) adapter is registered by `AddLlmConnect` under the provider id
 `gemini-api` and transport `GoogleGeminiApi`. It needs only an API key, sent in the `x-goog-api-key`
 header, and a fixed endpoint. It shares the Gemini request, stream, schema and continuation code with the
-Vertex Gemini route, so both send the same generateContent body. See the
+Vertex Gemini route. Both routes use native `responseFormat` with their documented object/array
+shapes; Vertex retains its narrower schema keyword allowlist. Provider options go into
+`generationConfig` and cannot replace fields written by the canonical builder. See the
 [Gemini API design](docs/gemini-api-tech-design.md) for model discovery, capabilities and limits. Live
 qualification remains.
 
@@ -913,6 +915,15 @@ without it; its visible text, tool calls, tool results and attachments are kept.
 `OmittedContinuationStateCount` reports how many messages were sent without state. The default,
 `Reject`, fails before any request. The caller's messages are not modified, so the original state
 stays in host storage.
+
+Gemini API and Vertex Gemini accept visible foreign tool-call groups with explicit Omit. Gemini 3
+places the documented dummy thought signature on the first imported call; original bound native
+signatures remain unchanged. Tool results follow their original call order. Gemini 3 carries PNG,
+JPEG, WebP and PDF tool results as nested function-response media, bounded at 7 MiB per binary.
+Earlier Gemini models omit those unsupported binary results through the existing projection report.
+Vertex's supported Gemini 3 streaming profiles request preview path-based function arguments and
+emit the tool name early. They retain complete reconstructed calls for replay; the route does not
+advertise JSON-text argument streaming. Gemini API and non-streaming requests do not send that flag.
 
 Claude CLI chat and Antigravity CLI chat report `LlmProviderCapabilities.ToolHistory = Text`. Tool
 calls and results already in the history reach their prompt as `[TOOL CALL id=… name=…]` and

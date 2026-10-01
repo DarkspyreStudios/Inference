@@ -100,7 +100,8 @@ internal sealed class VertexLlmClient(HttpClient http, IVertexAuthentication aut
             ? new VertexClaudeProtocol(Http, access.Token).StreamAsync(connection, request, cancellationToken)
             : GeminiStream.ReadAsync(Http, GeminiMessage(connection, request,
                 GeminiRequest.Build(connection, request, enforcement, output => ProjectToolOutput(connection, request.ModelId, output),
-                    GeminiModelProfiles.Get(VertexEndpoints.ParseModel(request.ModelId).Model, catalogThinking: null), capabilities.SupportsReasoningText),
+                    GeminiModelProfiles.Get(VertexEndpoints.ParseModel(request.ModelId).Model, catalogThinking: null), capabilities.SupportsReasoningText,
+                    streamArguments: capabilities.SupportsStreaming),
                 access.Token, capabilities.SupportsStreaming), GeminiRoute, connection, request, enforcement,
                 capabilities.SupportsStreaming, capabilities.SupportsUsageDeltas, capabilities.SupportsReasoningText, cancellationToken);
         await using IAsyncEnumerator<LlmStreamEvent> iterator = source.GetAsyncEnumerator(cancellationToken);
@@ -209,7 +210,8 @@ internal sealed class VertexLlmClient(HttpClient http, IVertexAuthentication aut
 
     private static void ValidateVertexRequest(LlmConnection connection, LlmChatRequest request, VertexModelProfile profile, LlmProviderCapabilities capabilities)
     {
-        if (connection.ProviderOptions.Keys.Concat(request.ProviderOptions.Keys).Any(name => !profile.IsClaude || name != AnthropicTools.OptionName))
+        if (profile.IsClaude && connection.ProviderOptions.Keys.Concat(request.ProviderOptions.Keys).Any(name => name != AnthropicTools.OptionName)
+            || !profile.IsClaude && (connection.ProviderOptions.ContainsKey(AnthropicTools.OptionName) || request.ProviderOptions.ContainsKey(AnthropicTools.OptionName)))
         { throw new NotSupportedException("Vertex accepts only declared request controls."); }
         if (profile.IsClaude)
         {

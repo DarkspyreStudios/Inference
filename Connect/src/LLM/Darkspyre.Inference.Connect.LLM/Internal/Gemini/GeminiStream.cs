@@ -28,10 +28,14 @@ internal static class GeminiStream
         var parts = new JsonArray();
         var calls = new List<LlmToolCall>();
         var callIds = new HashSet<string>(StringComparer.Ordinal);
+        bool invalidCall = false;
+        var argumentStream = new GeminiArgumentStream();
+        bool streamedArguments = route.Transport == LlmTransport.GoogleVertexAi && stream && request.Tools.Count > 0
+            && GeminiModelProfiles.Get(request.ModelId[(request.ModelId.LastIndexOf('/') + 1)..], null).StreamedFunctionArguments;
         string? finish = null;
         string? blocked = null;
         string? responseId = null;
-        int? input = null, visibleOutput = null, thoughts = null, cached = null, total = null;
+        int? prompt = null, toolPrompt = null, visibleOutput = null, thoughts = null, cached = null, total = null;
         var deltas = new UsageDeltas(stream && usageDeltas);
         // A generateContent response is one GenerateContentResponse, the same type as each streamed chunk.
         IAsyncEnumerable<string> payloads = stream
@@ -45,12 +49,13 @@ internal static class GeminiStream
             responseId = LlmJson.GetString(root, "responseId") ?? responseId;
             if (LlmJson.GetObject(root, "usageMetadata") is { } usage)
             {
-                input = LlmJson.GetInt(usage, "promptTokenCount") ?? input;
+                prompt = LlmJson.GetInt(usage, "promptTokenCount") ?? prompt;
+                toolPrompt = LlmJson.GetInt(usage, "toolUsePromptTokenCount") ?? toolPrompt;
                 visibleOutput = LlmJson.GetInt(usage, "candidatesTokenCount") ?? visibleOutput;
                 thoughts = LlmJson.GetInt(usage, "thoughtsTokenCount") ?? thoughts;
                 cached = LlmJson.GetInt(usage, "cachedContentTokenCount") ?? cached;
                 total = LlmJson.GetInt(usage, "totalTokenCount") ?? total;
-                if (deltas.Next(Usage(input, visibleOutput, thoughts, cached, total)) is { } observation)
+                if (deltas.Next(Usage(Input(), visibleOutput, thoughts, cached, total)) is { } observation)
                 {
                     yield return observation;
                 }
@@ -74,6 +79,7 @@ internal static class GeminiStream
                     || !content.TryGetProperty("parts", out JsonElement received)) { continue; }
                 foreach (JsonElement item in received.EnumerateArray())
                 {
+                    cancellationToken.ThrowIfCancellationRequested();
                     JsonObject part = JsonNode.Parse(item.GetRawText())!.AsObject();
                     if (part.Any(field => field.Key is not ("text" or "thought" or "thoughtSignature" or "functionCall")))
                     { throw Failure($"{route.Name} returned unsupported assistant content."); }
@@ -86,8 +92,29 @@ internal static class GeminiStream
                     }
                     if (part["functionCall"] is JsonObject function)
                     {
-                        string name = (string?)function["name"] ?? throw Failure($"{route.Name} returned an unnamed function call.");
-                        if (function["args"] is not JsonObject arguments) { throw Failure($"{route.Name} returned incomplete function arguments."); }
+                        if (finish is "MALFORMED_FUNCTION_CALL" or "UNEXPECTED_TOOL_CALL" or "TOO_MANY_TOOL_CALLS") { continue; }
+                        if (argumentStream.IsOpen || function.ContainsKey("partialArgs") || function.ContainsKey("willContinue") || function.Count == 0)
+                        {
+                            if (!streamedArguments || part.Any(field => field.Key is not ("functionCall" or "thoughtSignature")))
+                            { throw Failure($"{route.Name} returned unexpected streamed function arguments."); }
+                            var observation = argumentStream.Observe(part, () => route.CallIdPrefix + Guid.NewGuid().ToString("N"), cancellationToken);
+                            if (observation.Started)
+                            {
+                                string streamedId = (string)observation.Part["connectCallId"]!;
+                                string streamedName = (string)observation.Part["functionCall"]!["name"]!;
+                                if (!callIds.Add(streamedId)) { throw Failure($"{route.Name} returned a duplicate function identity."); }
+                                parts.Add(observation.Part);
+                                yield return new LlmToolCallStartedEvent(streamedId, streamedName, calls.Count);
+                            }
+                            if (observation.Completed is { } completed) { calls.Add(completed); }
+                            continue;
+                        }
+                        string? name = function["name"] is JsonValue nameValue && nameValue.TryGetValue<string>(out string? foundName) ? foundName : null;
+                        if (string.IsNullOrWhiteSpace(name) || function["args"] is not JsonObject arguments)
+                        {
+                            invalidCall = true;
+                            continue;
+                        }
                         string id = (string?)function["id"] ?? route.CallIdPrefix + Guid.NewGuid().ToString("N");
                         if (string.IsNullOrWhiteSpace(id) || string.IsNullOrWhiteSpace(name) || !callIds.Add(id))
                         { throw Failure($"{route.Name} returned an invalid or duplicate function identity."); }
@@ -101,14 +128,19 @@ internal static class GeminiStream
         }
         cancellationToken.ThrowIfCancellationRequested();
         if (finish is null && blocked is null) { throw Failure($"{route.Name} ended without a terminal reason."); }
-        if (finish is "MALFORMED_FUNCTION_CALL" or "UNEXPECTED_TOOL_CALL") { throw Failure($"{route.Name} could not produce a valid function call."); }
-        bool refused = blocked is not null || finish is "SAFETY" or "RECITATION" or "BLOCKLIST" or "PROHIBITED_CONTENT" or "SPII" or "MODEL_ARMOR";
-        LlmCompletionStatus status = refused ? LlmCompletionStatus.Refused
+        if (finish == "MISSING_THOUGHT_SIGNATURE") { throw Failure($"{route.Name} rejected a tool turn without its thought signature."); }
+        bool failed = finish is "MALFORMED_FUNCTION_CALL" or "UNEXPECTED_TOOL_CALL" or "TOO_MANY_TOOL_CALLS";
+        if (invalidCall && !failed) { throw Failure($"{route.Name} returned an invalid function call."); }
+        bool refused = blocked is not null || finish is "SAFETY" or "RECITATION" or "BLOCKLIST" or "PROHIBITED_CONTENT" or "SPII" or "MODEL_ARMOR" or "IMAGE_SAFETY";
+        LlmCompletionStatus status = failed ? LlmCompletionStatus.Failed : refused ? LlmCompletionStatus.Refused
             : finish == "MAX_TOKENS" ? LlmCompletionStatus.Incomplete
             : finish == "STOP" ? calls.Count > 0 ? LlmCompletionStatus.RequiresAction : LlmCompletionStatus.Completed
             : LlmCompletionStatus.Unknown;
+        if (argumentStream.IsOpen && status is LlmCompletionStatus.Completed or LlmCompletionStatus.RequiresAction)
+        { throw Failure($"{route.Name} returned incomplete function arguments."); }
         LlmToolCall[] completeCalls = status == LlmCompletionStatus.RequiresAction ? calls.ToArray() : [];
         foreach (LlmToolCall call in completeCalls) { yield return new LlmToolCallCompletedEvent(call); }
+        int? input = Input();
         LlmUsage? counts = Usage(input, visibleOutput, thoughts, cached, total);
         LlmContinuationState? state = status is LlmCompletionStatus.Completed or LlmCompletionStatus.RequiresAction
             ? route.Encode(connection, request.ModelId, parts) with { InputTokens = input, OutputTokens = counts?.OutputTokens } : null;
@@ -128,6 +160,8 @@ internal static class GeminiStream
                 ? StructuredOutput.Validate(text.ToString(), schema, mode) : null,
             Diagnostics = new((int)response.StatusCode, null, null)
         });
+
+        int? Input() => prompt is int known ? checked(known + (toolPrompt ?? 0)) : null;
     }
 
     private static LlmUsage? Usage(int? input, int? visibleOutput, int? thoughts, int? cached, int? total)

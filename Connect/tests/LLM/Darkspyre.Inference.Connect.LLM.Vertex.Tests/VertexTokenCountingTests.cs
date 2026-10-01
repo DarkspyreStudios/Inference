@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Darkspyre.Inference.Common.LLM;
+using Darkspyre.Inference.Connect.LLM.Internal;
 using Darkspyre.Inference.Connect.LLM.Vertex;
 
 namespace Darkspyre.Inference.Connect.LLM.Vertex.Tests;
@@ -104,7 +105,12 @@ public sealed class VertexTokenCountingTests
         var auth = new Authentication();
         var client = new VertexLlmClient(http, auth);
         await Assert.ThrowsAsync<NotSupportedException>(() => client.CountInputTokensAsync(Connection,
-            new() { ModelId = model, ProviderOptions = new Dictionary<string, JsonElement> { ["foreign"] = JsonElement.Parse("true") } }));
+            new()
+            {
+                ModelId = model,
+                ProviderOptions = new Dictionary<string, JsonElement>
+                { [model == Claude ? "foreign" : AnthropicTools.OptionName] = JsonElement.Parse("true") }
+            }));
         Assert.Empty(handler.Bodies);
         Assert.Equal(0, auth.Calls);
     }

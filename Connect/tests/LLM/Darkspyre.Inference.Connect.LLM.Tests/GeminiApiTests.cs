@@ -153,6 +153,10 @@ public sealed class GeminiApiTests
     [InlineData("STOP", LlmCompletionStatus.Completed)]
     [InlineData("MAX_TOKENS", LlmCompletionStatus.Incomplete)]
     [InlineData("SAFETY", LlmCompletionStatus.Refused)]
+    [InlineData("IMAGE_SAFETY", LlmCompletionStatus.Refused)]
+    [InlineData("MALFORMED_FUNCTION_CALL", LlmCompletionStatus.Failed)]
+    [InlineData("UNEXPECTED_TOOL_CALL", LlmCompletionStatus.Failed)]
+    [InlineData("TOO_MANY_TOOL_CALLS", LlmCompletionStatus.Failed)]
     [InlineData("NEW_REASON", LlmCompletionStatus.Unknown)]
     public async Task TerminalReasonsRemainDistinct(string reason, LlmCompletionStatus expected)
     {
@@ -165,7 +169,7 @@ public sealed class GeminiApiTests
 
     [Theory]
     [InlineData("""{"error":{"message":"private-provider-error"}}""")]
-    [InlineData("""{"candidates":[{"finishReason":"MALFORMED_FUNCTION_CALL"}]}""")]
+    [InlineData("""{"candidates":[{"finishReason":"MISSING_THOUGHT_SIGNATURE"}]}""")]
     [InlineData("""{"candidates":[{"content":{"parts":[{"text":"partial"}]}}]}""")]
     [InlineData("not-json")]
     public async Task InvalidStreamsFailWithoutProviderContent(string frame)
