@@ -49,9 +49,10 @@ public interface IVideoTransport
     Task<VideoJob> SubmitAsync(VideoConnection connection, VideoRequest request,
         XaiFamilyBinding? xai = null, IInferenceResourceAccess? resources = null,
         CancellationToken cancellationToken = default);
+    /// <summary>Validates known receipt incompatibilities before acquiring or refreshing the borrowed binding.</summary>
     Task<VideoJobSnapshot> GetAsync(VideoConnection connection, VideoJob job,
         XaiFamilyBinding? xai = null, CancellationToken cancellationToken = default);
-    /// <summary>Returns an owned stream. OAuth must not be forwarded to unqualified destinations.</summary>
+    /// <summary>Validates known receipt incompatibilities before refresh. Returns an owned stream; OAuth never follows unqualified destinations.</summary>
     Task<Stream> DownloadAsync(VideoConnection connection, VideoOutput output,
         XaiFamilyBinding? xai = null, CancellationToken cancellationToken = default);
 }

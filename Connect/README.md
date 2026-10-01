@@ -1011,10 +1011,15 @@ transports, bindings and resource access. Callers can dispose the bound facade t
 upload destinations and explicit user data. Common metadata refuses these provider options;
 `ConnectVideoJson` owns their complete generation/edit/extension and scoped receipt graph.
 Serialized job/output scope is data, not proof of authority. Each implemented transport owns
-receipt validation and download-origin authorization before effects. Extension requests refuse
-an explicit `User` instead of dropping it. New settings carry an explicit xAI connection selection;
+receipt validation and download-origin authorization before effects. Lookup and download receive
+the same borrowed binding for adapter-owned validation before acquisition or refresh.
+Materialization performs one download, not a second credential acquisition. Extension requests
+refuse an explicit `User` instead of dropping it. New settings carry an explicit xAI connection selection;
 rendering, opening and saving do not acquire credentials. Only the explicit capability action
 uses the supplied borrowed binding factory. Header changes use the typed protected commit target.
+The existing LLM header parser rejects reserved or malformed explicit and acquired-snapshot
+headers before credential refresh. The bound facade copies source bytes at operation admission;
+the shared `BinaryMediaSource` data constructor still borrows its input.
 
 `AddVideoConnect` registers the family service only. No xAI Video transport is registered, so
 binding or opening settings for that unimplemented transport fails as unsupported. The data and

@@ -111,6 +111,11 @@ public sealed class VideoSettings : InferenceSettings<VideoSetupChanges>
         if (string.IsNullOrWhiteSpace(_selection)) issues.Add(new("selection-required", "Select the protected xAI connection.", "xai-connection"));
         if (_headers.Any(header => string.IsNullOrWhiteSpace(header.Name)) || _headers.Select(header => header.Name).Distinct(StringComparer.OrdinalIgnoreCase).Count() != _headers.Count)
             issues.Add(new("headers-invalid", "HTTP header names must be nonempty and distinct.", "headers"));
+        if (issues.Count == 0)
+        {
+            try { ProviderHttp.ValidateAdditionalHeaders(Connection().AdditionalHeaders); }
+            catch (InvalidOperationException) { issues.Add(new("headers-invalid", "Use valid nonreserved HTTP headers.", "headers")); }
+        }
         return new(issues.AsReadOnly());
     }
     protected override bool IsDraftDirty => _endpoint?.AbsoluteUri.TrimEnd('/') != _baseline.Connection.Endpoint.TrimEnd('/')
@@ -203,7 +208,12 @@ public sealed class VideoSettingsManager : InferenceSettingsManager<VideoSetting
         settings.Status = settings.Status with { Verified = SetupObservation.Known(capabilities.Operations.Count > 0) };
         return SetupActionResult.Completed;
     }
-    private void Fence(CancellationToken token) { token.ThrowIfCancellationRequested(); _lifetime.ThrowIfStopping(); }
+    private void Fence(CancellationToken token)
+    {
+        token.ThrowIfCancellationRequested();
+        try { _lifetime.ThrowIfStopping(); }
+        catch (ObjectDisposedException error) { throw new OperationCanceledException("The video setup owner is retiring.", error, token); }
+    }
     public void Dispose() => Retire().GetAwaiter().GetResult();
     public ValueTask DisposeAsync() => new(Retire());
     private Task Retire() => _lifetime.RetireAsync(() => { _service = null; _bindings = null; DetachCommitTarget(); return Task.CompletedTask; });
