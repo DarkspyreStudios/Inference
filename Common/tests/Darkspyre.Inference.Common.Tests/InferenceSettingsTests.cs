@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using Darkspyre.Inference.Common.Setup;
 
 namespace Darkspyre.Inference.Common.Tests;
@@ -260,6 +261,68 @@ public sealed class InferenceSettingsTests
         await Assert.ThrowsAsync<ArgumentException>(() => manager.SaveAsync(new OtherSettings()));
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ExistingOperationsDispatchThroughDerivedOwnershipForBaseAndInterfaceReferences(bool throughInterface)
+    {
+        var target = new Target();
+        var owner = new OwnedManager(target);
+        InferenceSettingsManager<TestSettings, Changes> manager = owner;
+        var settings = new TestSettings();
+        if (throughInterface)
+        {
+            IInferenceSettingsManager contract = manager;
+            Assert.Equal(SetupActionState.Completed, (await contract.RunAsync(settings, "test")).State);
+            Assert.Equal(3, (await contract.QueryChoicesAsync(settings, "size", new())).Choices.Count);
+            Assert.Equal(SetupCommitState.Committed, (await contract.SaveAsync(settings)).State);
+        }
+        else
+        {
+            Assert.Equal(SetupActionState.Completed, (await manager.RunAsync(settings, "test")).State);
+            Assert.Equal(3, (await manager.QueryChoicesAsync(settings, "size", new())).Choices.Count);
+            Assert.Equal(SetupCommitState.Committed, (await manager.SaveAsync(settings)).State);
+        }
+        Assert.Equal((1, 1, 1), (owner.RunEntries, owner.QueryEntries, owner.SaveEntries));
+        Assert.Equal(1, target.Calls);
+    }
+
+    [Fact]
+    public async Task DetachedCommitTargetRefusesSaveWithoutFabricatingAnUncertainCommit()
+    {
+        var target = new Target();
+        var manager = new OwnedManager(target);
+        manager.ReleaseTarget();
+        manager.ReleaseTarget();
+        var settings = new TestSettings();
+        await Assert.ThrowsAsync<ObjectDisposedException>(() => manager.SaveAsync(settings));
+        Assert.Equal(0, target.Calls);
+        Assert.Equal(0, target.Disposals);
+        Assert.False(settings.IsSaved);
+        Assert.False(settings.SaveOutcomeUncertain);
+    }
+
+    [Fact]
+    public void RetainedManagerDoesNotRetainItsDetachedBorrowedCommitTarget()
+    {
+        (OwnedManager manager, WeakReference target) = CreateDetachedManager();
+        for (int attempt = 0; target.IsAlive && attempt < 20; attempt++)
+        {
+            GC.Collect(); GC.WaitForPendingFinalizers(); GC.Collect(); Thread.Sleep(10);
+        }
+        Assert.False(target.IsAlive);
+        GC.KeepAlive(manager);
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static (OwnedManager, WeakReference) CreateDetachedManager()
+    {
+        var target = new Target();
+        var manager = new OwnedManager(target);
+        manager.ReleaseTarget();
+        return (manager, new WeakReference(target));
+    }
+
     private static SetupTextField Name(TestSettings settings) =>
         Assert.IsType<SetupTextField>(settings.Steps[0].Sections[0].Fields[0]);
 
@@ -268,10 +331,12 @@ public sealed class InferenceSettingsTests
 
     private sealed record Changes(string Name, string? Secret);
 
-    private sealed class Target : ISetupCommitTarget<Changes>
+    private sealed class Target : ISetupCommitTarget<Changes>, IDisposable
     {
         public Changes? Changes { get; private set; }
         public int Calls { get; private set; }
+        public int Disposals { get; private set; }
+        public void Dispose() => Disposals++;
         public Func<CancellationToken, Task<SetupCommitResult>> Commit { get; init; } =
             _ => Task.FromResult(new SetupCommitResult(SetupCommitState.Committed, "v2"));
         public Task<SetupCommitResult> CommitAsync(Changes changes, CancellationToken cancellationToken = default)
@@ -353,5 +418,36 @@ public sealed class InferenceSettingsTests
             QueryCalls++;
             return Query(cancellationToken);
         }
+    }
+
+    private sealed class OwnedManager(Target target) : InferenceSettingsManager<TestSettings, Changes>(target)
+    {
+        public int RunEntries { get; private set; }
+        public int QueryEntries { get; private set; }
+        public int SaveEntries { get; private set; }
+        public void ReleaseTarget() => DetachCommitTarget();
+
+        public override Task<SetupActionResult> RunAsync(InferenceSettings settings, string actionId,
+            IProgress<SetupProgress>? progress = null, CancellationToken cancellationToken = default)
+        {
+            RunEntries++;
+            return base.RunAsync(settings, actionId, progress, cancellationToken);
+        }
+
+        public override Task<SetupChoicePage> QueryChoicesAsync(InferenceSettings settings, string fieldId,
+            SetupChoiceQuery query, CancellationToken cancellationToken = default)
+        {
+            QueryEntries++;
+            return base.QueryChoicesAsync(settings, fieldId, query, cancellationToken);
+        }
+
+        public override Task<SetupCommitResult> SaveAsync(InferenceSettings settings, CancellationToken cancellationToken = default)
+        {
+            SaveEntries++;
+            return base.SaveAsync(settings, cancellationToken);
+        }
+
+        protected override Task<SetupActionResult> RunCoreAsync(TestSettings settings, SetupActionDescriptor action,
+            IProgress<SetupProgress>? progress, CancellationToken cancellationToken) => Task.FromResult(SetupActionResult.Completed);
     }
 }
