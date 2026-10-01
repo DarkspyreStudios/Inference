@@ -15,7 +15,6 @@ namespace Darkspyre.Inference.Connect.TTS;
 /// </summary>
 public sealed class PocketTtsHttpProvider(HttpClient httpClient) : ITtsProvider
 {
-    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     public TtsTransport Transport => TtsTransport.PocketTtsHttp;
     public InferenceSetupDefinition SetupDefinition { get; } = new(
         new("darkspyre.connect.pockettts", "PocketTTS HTTP", InferenceImplementationKind.Connect, InferenceTask.SpeechSynthesis),
@@ -77,7 +76,7 @@ public sealed class PocketTtsHttpProvider(HttpClient httpClient) : ITtsProvider
         private Task<IReadOnlyList<TtsVoice>> ListAsync(string path, CancellationToken cancellationToken) =>
             SendAsync(HttpMethod.Get, path, null, async (response, token) =>
             {
-                VoiceList? list = await response.Content.ReadFromJsonAsync<VoiceList>(JsonOptions, token).ConfigureAwait(false);
+                PocketTtsVoiceList? list = await response.Content.ReadFromJsonAsync(PocketTtsJsonContext.Default.PocketTtsVoiceList, token).ConfigureAwait(false);
                 IEnumerable<TtsVoice> voices = list?.VoiceOptions is { Count: > 0 }
                     ? list.VoiceOptions.Where(option => option is not null).Select(option =>
                         new TtsVoice(option.Id ?? option.Name ?? string.Empty, option.Name ?? option.Id ?? string.Empty, Description: option.Category))
@@ -117,14 +116,8 @@ public sealed class PocketTtsHttpProvider(HttpClient httpClient) : ITtsProvider
         {
             if (connection.PocketTts.Protocol == PocketTtsProtocol.BridgeJson)
             {
-                return JsonContent.Create(new
-                {
-                    text = request.Text,
-                    voice = request.VoiceId,
-                    speaker = request.VoiceId,
-                    speed = request.Speed ?? 1,
-                    response_format = "wav"
-                });
+                return JsonContent.Create(new PocketTtsBridgePayload(request.Text, request.VoiceId,
+                    request.VoiceId, request.Speed ?? 1, "wav"), PocketTtsJsonContext.Default.PocketTtsBridgePayload);
             }
             var form = new MultipartFormDataContent
             {
@@ -186,6 +179,4 @@ public sealed class PocketTtsHttpProvider(HttpClient httpClient) : ITtsProvider
         if (!format || !data || offset != bytes.Length) { throw Protocol(); }
     }
 
-    private sealed record VoiceList(List<string>? Voices, List<VoiceOption>? VoiceOptions);
-    private sealed record VoiceOption(string? Id, string? Name, string? Category);
 }

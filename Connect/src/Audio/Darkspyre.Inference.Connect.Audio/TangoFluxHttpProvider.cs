@@ -3,7 +3,6 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Net;
 using System.Net.Http.Json;
-using System.Text.Json.Serialization;
 using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Common.Setup;
 
@@ -81,8 +80,8 @@ public sealed class TangoFluxHttpProvider(HttpClient httpClient) : IAudioProvide
             using var message = new HttpRequestMessage(HttpMethod.Post,
                 new Uri(new Uri(connection.Endpoint.AbsoluteUri.TrimEnd('/') + "/"), connection.TangoFlux.GeneratePath.TrimStart('/')))
             {
-                Content = JsonContent.Create(new GeneratePayload(request.Prompt, request.Duration.TotalSeconds,
-                    request.Steps ?? 10, request.GuidanceScale ?? 4.5, request.Seed, request.UseCache))
+                Content = JsonContent.Create(new TangoFluxGeneratePayload(request.Prompt, request.Duration.TotalSeconds,
+                    request.Steps ?? 10, request.GuidanceScale ?? 4.5, request.Seed, request.UseCache), TangoFluxJsonContext.Default.TangoFluxGeneratePayload)
             };
             foreach ((string name, string value) in connection.Headers)
             { if (!message.Headers.TryAddWithoutValidation(name, value)) { throw Invalid("A configured header cannot be used on this request."); } }
@@ -150,7 +149,4 @@ public sealed class TangoFluxHttpProvider(HttpClient httpClient) : IAudioProvide
         if (!format || !data || offset != bytes.Length) { throw Protocol(); }
     }
 
-    private sealed record GeneratePayload(string Prompt, double Duration, int Steps, double GuidanceScale,
-        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? Seed,
-        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? UseCache);
 }

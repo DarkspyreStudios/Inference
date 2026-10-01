@@ -87,6 +87,11 @@ including the recursive typed schema plan. The helper protocol retains its camel
 null omission, escaping, sampling fields and maximum JSON depth of 128. No helper/session lifetime
 behavior or Apple private framework format is changed by this serialization boundary.
 
+PocketTTS voice responses and JSON bridge requests, and TangoFlux generation requests, use their
+provider-owned internal generated metadata. PocketTTS retains explicit null voice/speaker fields;
+TangoFlux still omits absent seed/cache fields while preserving explicit zero/false values. These
+private wire types do not add public request contracts or change HTTP/cancellation behavior.
+
 `LlmToolCapabilities.StrictInputSchema` reports Supported, Unsupported or Unknown. Unknown allows an
 explicit `Strict=true` request unchanged so the host can try it and handle the provider result.
 Known Unsupported rejects that request. Ordinary tools default to `Strict=false` independently.
