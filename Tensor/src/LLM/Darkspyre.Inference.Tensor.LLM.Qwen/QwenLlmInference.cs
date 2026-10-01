@@ -521,7 +521,7 @@ public sealed class QwenLlmInference : ITensorLlmInference
                     {
                         Id = call.Id,
                         Name = call.Name,
-                        Arguments = JsonSerializer.Deserialize<Dictionary<string, object?>>(call.ArgumentsJson) ?? [],
+                        Arguments = QwenJson.ReadArguments(call.ArgumentsJson),
                         Index = index
                     }).ToList()
                 });
@@ -558,12 +558,7 @@ public sealed class QwenLlmInference : ITensorLlmInference
         }
 
         // TensorSharp builds its tool functions from the same JSON-schema shape an OpenAI client sends.
-        string json = JsonSerializer.Serialize(tools.Select(static tool => new Dictionary<string, object?>
-        {
-            ["name"] = tool.Name,
-            ["description"] = tool.Description ?? string.Empty,
-            ["parameters"] = tool.InputSchema
-        }));
+        string json = QwenJson.WriteTools(tools);
         return ToolFunction.ParseList(json);
     }
 
@@ -588,7 +583,7 @@ public sealed class QwenLlmInference : ITensorLlmInference
 
         foreach (ToolCall call in part.ToolCalls ?? [])
         {
-            var completed = new LlmToolCall(call.Id ?? $"call_{Guid.NewGuid():N}", call.Name, JsonSerializer.Serialize(call.Arguments));
+            var completed = new LlmToolCall(call.Id ?? $"call_{Guid.NewGuid():N}", call.Name, QwenJson.WriteArguments(call.Arguments));
             yield return new LlmToolCallStartedEvent(completed.Id, completed.Name, toolCalls.Count);
             yield return new LlmToolCallArgumentsDeltaEvent(completed.Id, completed.ArgumentsJson);
             yield return new LlmToolCallCompletedEvent(completed);

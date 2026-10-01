@@ -309,6 +309,14 @@ features, and a binary tool-result part fails as well. `ReasoningLevels` is `Non
 `High` (thinking on). With structured output and thinking on, the schema's grammar starts after the
 thinking block. Image input is off.
 
+Qwen uses assembly-owned generated metadata for its tool definitions and argument conversion.
+Parsed arguments remain `JsonElement` values or null. The owned metadata also preserves the
+supplier's CLR strings, string arrays, numeric/boolean primitives and nested JSON-value
+object arrays, lists and dictionaries. Arbitrary CLR model objects are not a tool-argument wire
+contract. Tool schemas retain their exact JSON; a missing description becomes an empty string.
+The tool-conversion path does not use a default reflection serializer. Its collectible tests cover
+Qwen-owned metadata, not the supplier's chat parser or a loaded native runtime generation.
+
 Qwen reports `SupportsStreamingUsage = true` because streamed completions report final usage.
 Qwen supports top-p, top-k, seed, presence and frequency penalties, and up to 16 non-empty stop
 strings. The Common request maps directly to TensorSharp's `SamplingConfig`, including requests
