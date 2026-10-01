@@ -298,7 +298,7 @@ internal sealed class BedrockLlmClient(
                     toolUse.ToolUseId ?? string.Empty,
                     toolUse.Name ?? string.Empty,
                     SerializeDocument(toolUse.Input),
-                    ValidArguments: true));
+                    ValidArguments: toolUse.Input.IsDictionary()));
             }
         }
 

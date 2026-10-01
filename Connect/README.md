@@ -1433,6 +1433,10 @@ Tool calls return only with `RequiresAction`. The stop reasons `max_tokens` and
 `Refused`, and `malformed_model_output` and `malformed_tool_use` report `Failed` with no tool calls and no
 continuation state. An unknown or missing stop reason reports `Unknown`.
 
+A `tool_use` reply with null, scalar or array tool input throws `LlmProviderException` in both
+Converse modes. Non-streaming mapping rejects it before publishing response events. Empty object
+input remains valid, and provider-reported malformed stop reasons keep their `Failed` result.
+
 Converse model listing returns the region's inference profiles and its foundation models. It omits a
 foundation model whose only inference type is `PROVISIONED`, such as `amazon.nova-lite-v1:0:300k`.
 Such a model runs only through purchased provisioned throughput, so a connection cannot invoke it by
