@@ -5,6 +5,8 @@ namespace Darkspyre.Inference.Connect.LLM;
 /// <summary>Credential shape serialized into the host's protected secret store.</summary>
 public sealed record LlmCredential
 {
+    public override string ToString() => "LlmCredential { [redacted] }";
+
     public string? ApiKey { get; init; }
 
     public LlmOAuthTokens? OAuth { get; init; }
@@ -40,6 +42,8 @@ public sealed record LlmCredential
 /// <summary>OAuth token fields shared by subscription-backed transports.</summary>
 public sealed record LlmOAuthTokens
 {
+    public override string ToString() => "LlmOAuthTokens { [redacted] }";
+
     public required string AccessToken { get; init; }
 
     public string? RefreshToken { get; init; }

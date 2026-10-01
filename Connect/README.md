@@ -28,6 +28,11 @@ never owns an application database or secret store. Wrapped CLI transports inste
 CLI's existing login, which Darkspyre.Inference.Connect.LLM never reads or copies. Optional Claude catalog OAuth is a
 separate model-discovery credential; it never selects or enables the Claude CLI transport.
 
+`LlmCredential` and `LlmOAuthTokens` return constant redacted diagnostic strings. Formatting either
+record exposes no credential values or account metadata. Their properties, record copies and
+protected-store `Serialize`/`Parse` wire format retain the original values. Serialized credential
+JSON remains secret and is not a diagnostic representation.
+
 Every returned `LlmConnection` includes a required opaque `Version`. The version must cover both
 connection metadata and credential state. `SaveCredentialAsync` must atomically compare
 `expectedVersion` and replace only the credential when it still matches; it must reject changed,
