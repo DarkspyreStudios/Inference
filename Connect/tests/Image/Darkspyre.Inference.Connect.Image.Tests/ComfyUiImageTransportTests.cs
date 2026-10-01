@@ -158,6 +158,45 @@ public sealed class ComfyUiImageTransportTests
     }
 
     [Theory]
+    [InlineData("success")]
+    [InlineData("http-failure")]
+    [InlineData("read-failure")]
+    [InlineData("cancel")]
+    public async Task ReferenceUploadPreservesBorrowedStreamWithoutRewindOrFlush(string outcome)
+    {
+        using var cancellation = new CancellationTokenSource();
+        using var content = new BorrowedInputStream(outcome == "read-failure");
+        byte[]? payload = null;
+        var handler = new StubHandler(async request =>
+        {
+            payload = await request.Content!.ReadAsByteArrayAsync(cancellation.Token);
+            if (outcome == "cancel")
+            {
+                cancellation.Cancel();
+                cancellation.Token.ThrowIfCancellationRequested();
+            }
+            return outcome == "http-failure" ? NotFound() : JsonResponse("{}");
+        });
+        Task upload = CreateTransport(handler).UploadReferenceAsync(Connection(), Reference(), content, cancellation.Token);
+        if (outcome == "success")
+            await upload;
+        else
+            await Assert.ThrowsAnyAsync<Exception>(() => upload);
+        Assert.Equal(0, content.Disposals);
+        Assert.True(content.CanRead);
+        Assert.Equal(0, content.Seeks);
+        Assert.Equal(0, content.Flushes);
+        if (outcome != "read-failure")
+        {
+            Assert.NotNull(payload);
+            Assert.DoesNotContain((byte)3, payload);
+            Assert.Contains((byte)4, payload);
+            Assert.Contains((byte)5, payload);
+            Assert.Contains((byte)6, payload);
+        }
+    }
+
+    [Theory]
     [InlineData("{\"type\":\"executing\",\"data\":{\"prompt_id\":\"job\",\"node\":\"1\"}}", "Executing")]
     [InlineData("{\"type\":\"executing\",\"data\":{\"prompt_id\":\"job\",\"node\":null}}", "Finished")]
     [InlineData("{\"type\":\"execution_success\",\"data\":{\"prompt_id\":\"job\"}}", "Finished")]
@@ -262,6 +301,32 @@ public sealed class ComfyUiImageTransportTests
                 header => string.Join(",", header.Value),
                 StringComparer.OrdinalIgnoreCase));
             return await _response(request);
+        }
+    }
+
+    private sealed class BorrowedInputStream(bool refuseRead) : Stream
+    {
+        private readonly MemoryStream _inner = new([3, 4, 5, 6]) { Position = 1 };
+        public int Disposals { get; private set; }
+        public int Seeks { get; private set; }
+        public int Flushes { get; private set; }
+        public override bool CanRead => _inner.CanRead;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => throw new NotSupportedException();
+        public override long Position { get => throw new NotSupportedException(); set { Seeks++; throw new NotSupportedException(); } }
+        public override int Read(byte[] buffer, int offset, int count)
+            => refuseRead ? throw new IOException("Controlled input read refusal.") : _inner.Read(buffer, offset, count);
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+            => refuseRead ? ValueTask.FromException<int>(new IOException("Controlled input read refusal.")) : _inner.ReadAsync(buffer, cancellationToken);
+        public override long Seek(long offset, SeekOrigin origin) { Seeks++; throw new NotSupportedException(); }
+        public override void Flush() { Flushes++; throw new NotSupportedException(); }
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing) { Disposals++; _inner.Dispose(); }
+            base.Dispose(disposing);
         }
     }
 }
