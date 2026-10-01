@@ -139,25 +139,29 @@ public sealed class VideoOperationTests
         var callbackEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var stream = new HeldStream(); var transport = new FixtureTransport { Download = stream, ReleaseGet = new() };
         IVideoInference facade = new VideoProviderService([transport]).Bind(Connection, new(new("connection"), access));
-        Task<VideoJobSnapshot> anchor = facade.GetAsync(new("job", Scope));
-        await transport.Entered.Task.WaitAsync(Bound);
-        CancellationToken stop = transport.LastGetToken;
-        Stream owned = await facade.DownloadAsync(Output, caller.Token);
-        Task<int> pending = mode switch
-        {
-            "array" => Task.Run(() => owned.Read(new byte[1], 0, 1)),
-            "span" => Task.Run(() => owned.Read(new byte[1].AsSpan())),
-            _ => owned.ReadAsync(new byte[1]).AsTask()
-        };
-        await stream.Entered.Task.WaitAsync(Bound);
-        CancellationTokenRegistration blocker = stop.Register(() =>
-        {
-            callbackEntered.TrySetResult();
-            if (!unblock.Wait(Bound)) throw new TimeoutException("The controlled cancellation callback was not released.");
-        });
+        Task<VideoJobSnapshot>? anchor = null;
+        Task<int>? pending = null;
+        Stream? owned = null;
+        CancellationTokenRegistration blocker = default;
         Task? retirement = null;
         try
         {
+            anchor = facade.GetAsync(new("job", Scope));
+            await transport.Entered.Task.WaitAsync(Bound);
+            CancellationToken stop = transport.LastGetToken;
+            owned = await facade.DownloadAsync(Output, caller.Token);
+            pending = mode switch
+            {
+                "array" => Task.Run(() => owned.Read(new byte[1], 0, 1)),
+                "span" => Task.Run(() => owned.Read(new byte[1].AsSpan())),
+                _ => owned.ReadAsync(new byte[1]).AsTask()
+            };
+            await stream.Entered.Task.WaitAsync(Bound);
+            blocker = stop.Register(() =>
+            {
+                callbackEntered.TrySetResult();
+                if (!unblock.Wait(Bound)) throw new TimeoutException("The controlled cancellation callback was not released.");
+            });
             retirement = ((IAsyncDisposable)facade).DisposeAsync().AsTask();
             await callbackEntered.Task.WaitAsync(Bound);
             Assert.True(stop.IsCancellationRequested); Assert.False(stream.LastReadToken.IsCancellationRequested);
@@ -169,10 +173,14 @@ public sealed class VideoOperationTests
         }
         finally
         {
-            unblock.Set(); stream.Release.TrySetResult(); transport.ReleaseGet.TrySetResult();
             retirement ??= ((IAsyncDisposable)facade).DisposeAsync().AsTask();
-            try { await Task.WhenAll(Record.ExceptionAsync(() => anchor), Record.ExceptionAsync(() => pending)); }
-            finally { try { await retirement.WaitAsync(Bound); await owned.DisposeAsync(); } finally { blocker.Dispose(); } }
+            unblock.Set(); stream.Release.TrySetResult(); transport.ReleaseGet.TrySetResult();
+            try { await Task.WhenAll(new Task?[] { anchor, pending }.OfType<Task>().Select(task => Record.ExceptionAsync(() => task))); }
+            finally
+            {
+                try { await retirement.WaitAsync(Bound); }
+                finally { try { if (owned is not null) await owned.DisposeAsync(); } finally { blocker.Dispose(); } }
+            }
         }
         Assert.Equal(1, stream.Disposes);
     }
@@ -256,11 +264,13 @@ public sealed class VideoOperationTests
         var source = new Source(); await using var access = new LlmConnectionAccess(source, []);
         var resources = new Resources { ReleaseCleanup = new() };
         IVideoInference facade = new VideoProviderService([new FixtureTransport()]).Bind(Connection, new(new("connection"), access), resources);
-        Task<InferenceResourceDescriptor> pending = facade.MaterializeAsync(Output);
-        await resources.Writer!.CleanupEntered.Task.WaitAsync(Bound);
-        Task retirement = ((IAsyncDisposable)facade).DisposeAsync().AsTask();
+        Task<InferenceResourceDescriptor>? pending = null;
+        Task? retirement = null;
         try
         {
+            pending = facade.MaterializeAsync(Output);
+            await resources.Writer!.CleanupEntered.Task.WaitAsync(Bound);
+            retirement = ((IAsyncDisposable)facade).DisposeAsync().AsTask();
             Assert.False(retirement.IsCompleted); resources.ReleaseCleanup.TrySetResult();
             InferenceResourceOperationCanceledException error = await Assert.ThrowsAsync<InferenceResourceOperationCanceledException>(() => pending.WaitAsync(Bound));
             Assert.Equal(resources.Writer.Reference, error.Failure.Reference);
@@ -269,8 +279,14 @@ public sealed class VideoOperationTests
             Assert.Equal(new InferenceResourceSelectionVersion("w", "s", 1), error.Failure.SelectionVersion);
             Assert.Equal(3, error.Failure.BytesTransferred); Assert.Equal(1, resources.Writer.Commits);
         }
-        finally { resources.ReleaseCleanup.TrySetResult(); try { await Record.ExceptionAsync(() => pending); } finally { await retirement.WaitAsync(Bound); } }
-        Assert.Equal(1, resources.Writer.Disposes); Assert.Equal(0, resources.Disposes);
+        finally
+        {
+            retirement ??= ((IAsyncDisposable)facade).DisposeAsync().AsTask();
+            resources.ReleaseCleanup.TrySetResult();
+            try { if (pending is not null) await Record.ExceptionAsync(() => pending); }
+            finally { await retirement.WaitAsync(Bound); }
+        }
+        Assert.Equal(1, resources.Writer!.Disposes); Assert.Equal(0, resources.Disposes);
     }
 
     [Fact]
