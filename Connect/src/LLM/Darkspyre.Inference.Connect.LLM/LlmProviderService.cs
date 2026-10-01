@@ -414,6 +414,8 @@ public sealed class LlmProviderService : ILlmTextTokenizer, IDisposable, IAsyncD
     {
         using var operation = _lifetime.Enter(cancellationToken);
         cancellationToken = operation.Token;
+        ArgumentNullException.ThrowIfNull(request);
+        request = request with { HostedTools = HostedTools.Snapshot(request.HostedTools) };
         LlmAccountUsageObservations.Reservation observationReservation = _observations.Reserve(connectionId);
         LlmConnection connection = await LlmConnectionResolver.ResolveAsync(
             Connections,
@@ -530,6 +532,7 @@ public sealed class LlmProviderService : ILlmTextTokenizer, IDisposable, IAsyncD
         cancellationToken = operation.Token;
         ArgumentNullException.ThrowIfNull(request);
         ArgumentException.ThrowIfNullOrWhiteSpace(request.ModelId);
+        request = request with { HostedTools = HostedTools.Snapshot(request.HostedTools) };
         LlmConnection connection = await LlmConnectionResolver.ResolveAsync(Connections, connectionId, cancellationToken);
         ThrowIfOperationCanceled(cancellationToken);
         RequestJson.ValidateSamplingOptions(connection, request);
@@ -569,6 +572,7 @@ public sealed class LlmProviderService : ILlmTextTokenizer, IDisposable, IAsyncD
         if (request.MaxOutputTokens is <= 0) { throw new ArgumentOutOfRangeException(nameof(request)); }
         policy ??= new();
         ManagedAgentPolicy.Validate(new() { ContextPolicy = policy }, null);
+        request = request with { HostedTools = HostedTools.Snapshot(request.HostedTools) };
         var connection = await LlmConnectionResolver.ResolveAsync(Connections, connectionId, cancellationToken);
         ThrowIfOperationCanceled(cancellationToken);
         RequestJson.ValidateSamplingOptions(connection, request);

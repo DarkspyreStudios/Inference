@@ -40,7 +40,9 @@ public sealed record LlmImageGenerationTool(LlmImageGenerationAction Action = Ll
 
 public sealed record LlmDocumentSearchTool(IReadOnlyList<string> CollectionIds, int? MaxResults = null) : LlmHostedTool
 {
-    public IReadOnlyList<string> CollectionIds { get; init; } = HostedSnapshot.List(CollectionIds)!;
+    [JsonRequired]
+    public IReadOnlyList<string> CollectionIds { get; init => field = HostedSnapshot.List(HostedSnapshot.Required(value))!; }
+        = HostedSnapshot.List(HostedSnapshot.Required(CollectionIds))!;
     [JsonIgnore] public override LlmHostedToolKind Kind => LlmHostedToolKind.DocumentSearch;
 }
 
@@ -49,6 +51,10 @@ public sealed record LlmRemoteMcpTool(
     IReadOnlyList<string>? AllowedTools = null, IProviderAuthorization? Authorization = null,
     IReadOnlyDictionary<string, string>? Headers = null, bool DeferLoading = false) : LlmHostedTool
 {
+    [JsonRequired]
+    public string ServerUrl { get; init => field = HostedSnapshot.Identity(value); } = HostedSnapshot.Identity(ServerUrl);
+    [JsonRequired]
+    public string ServerLabel { get; init => field = HostedSnapshot.Identity(value); } = HostedSnapshot.Identity(ServerLabel);
     public IReadOnlyList<string>? AllowedTools { get; init; } = HostedSnapshot.List(AllowedTools);
     public IReadOnlyDictionary<string, string>? Headers { get; init; } = Headers is null ? null
         : new System.Collections.ObjectModel.ReadOnlyDictionary<string, string>(new Dictionary<string, string>(Headers, StringComparer.Ordinal));
@@ -68,7 +74,11 @@ public abstract record LlmHostedToolOutput
     public IReadOnlyList<InferenceResourceDescriptor>? Resources { get; init; }
 }
 
-public sealed record LlmHostedSearchSource(string Url, string? Title = null);
+public sealed record LlmHostedSearchSource(string Url, string? Title = null)
+{
+    [JsonRequired]
+    public string Url { get; init => field = HostedSnapshot.Required(value); } = HostedSnapshot.Required(Url);
+}
 public sealed record LlmHostedSearchOutput(IReadOnlyList<LlmHostedSearchSource>? Sources) : LlmHostedToolOutput
 {
     public IReadOnlyList<LlmHostedSearchSource>? Sources { get; init; } = HostedSnapshot.List(Sources);
@@ -78,7 +88,11 @@ public sealed record LlmHostedCodeOutput(string? Code, IReadOnlyList<string>? Lo
     public IReadOnlyList<string>? Logs { get; init; } = HostedSnapshot.List(Logs);
     public IReadOnlyList<string>? ImageUrls { get; init; } = HostedSnapshot.List(ImageUrls);
 }
-public sealed record LlmHostedDocumentMatch(string FileId, string? FileName, double? Score, string? Text);
+public sealed record LlmHostedDocumentMatch(string FileId, string? FileName, double? Score, string? Text)
+{
+    [JsonRequired]
+    public string FileId { get; init => field = HostedSnapshot.Required(value); } = HostedSnapshot.Required(FileId);
+}
 public sealed record LlmHostedDocumentSearchOutput(IReadOnlyList<LlmHostedDocumentMatch>? Results) : LlmHostedToolOutput
 {
     public IReadOnlyList<LlmHostedDocumentMatch>? Results { get; init; } = HostedSnapshot.List(Results);
@@ -91,24 +105,67 @@ public sealed record LlmHostedMcpOutput(JsonElement? Arguments, JsonElement? Out
 }
 public sealed record LlmHostedImageOutput(ReadOnlyMemory<byte> Data, string MediaType) : LlmHostedToolOutput
 {
+    [JsonRequired]
     public ReadOnlyMemory<byte> Data { get; init; } = Data.ToArray();
+    [JsonRequired]
+    public string MediaType { get; init => field = HostedSnapshot.Required(value); } = HostedSnapshot.Required(MediaType);
 }
-public sealed record LlmHostedToolCall(string CallId, LlmHostedToolKind Kind, string Name, string Status,
+public sealed record LlmHostedToolCall(string CallId, LlmHostedToolKind Kind,
+    string Name, string Status,
     JsonElement? Input, LlmHostedToolOutput? Output)
 {
+    [JsonRequired]
+    public string CallId { get; init => field = HostedSnapshot.Identity(value); } = HostedSnapshot.Identity(CallId);
+    [JsonRequired]
+    public LlmHostedToolKind Kind { get; init => field = HostedSnapshot.Defined(value); } = HostedSnapshot.Defined(Kind);
+    [JsonRequired]
+    public string Name { get; init => field = HostedSnapshot.Identity(value); } = HostedSnapshot.Identity(Name);
+    [JsonRequired]
+    public string Status { get; init => field = HostedSnapshot.Required(value); } = HostedSnapshot.Required(Status);
     public JsonElement? Input { get; init; } = Input?.Clone();
 }
-public sealed record LlmHostedToolCallStartedEvent(string CallId, LlmHostedToolKind Kind, string Name) : LlmStreamEvent;
-public sealed record LlmHostedToolCallProgressEvent(string CallId, LlmHostedToolPhase Phase) : LlmStreamEvent;
-public sealed record LlmHostedToolCallCompletedEvent(LlmHostedToolCall Call) : LlmStreamEvent;
+public sealed record LlmHostedToolCallStartedEvent(string CallId,
+    LlmHostedToolKind Kind, string Name) : LlmStreamEvent
+{
+    [JsonRequired]
+    public string CallId { get; init => field = HostedSnapshot.Identity(value); } = HostedSnapshot.Identity(CallId);
+    [JsonRequired]
+    public LlmHostedToolKind Kind { get; init => field = HostedSnapshot.Defined(value); } = HostedSnapshot.Defined(Kind);
+    [JsonRequired]
+    public string Name { get; init => field = HostedSnapshot.Identity(value); } = HostedSnapshot.Identity(Name);
+}
+public sealed record LlmHostedToolCallProgressEvent(string CallId,
+    LlmHostedToolPhase Phase) : LlmStreamEvent
+{
+    [JsonRequired]
+    public string CallId { get; init => field = HostedSnapshot.Identity(value); } = HostedSnapshot.Identity(CallId);
+    [JsonRequired]
+    public LlmHostedToolPhase Phase { get; init => field = HostedSnapshot.Defined(value); } = HostedSnapshot.Defined(Phase);
+}
+public sealed record LlmHostedToolCallCompletedEvent(LlmHostedToolCall Call) : LlmStreamEvent
+{
+    [JsonRequired]
+    public LlmHostedToolCall Call { get; init => field = HostedSnapshot.Required(value); } = HostedSnapshot.Required(Call);
+}
 
 /// <summary>Offsets, when reported, are UTF-16 positions in emitted text; EndIndex is exclusive.</summary>
-public sealed record LlmCitation(string Url, string? Title = null, int? StartIndex = null, int? EndIndex = null);
-public sealed record LlmCitationEvent(LlmCitation Citation) : LlmStreamEvent;
+public sealed record LlmCitation(string Url, string? Title = null, int? StartIndex = null, int? EndIndex = null)
+{
+    [JsonRequired]
+    public string Url { get; init => field = HostedSnapshot.Required(value); } = HostedSnapshot.Required(Url);
+}
+public sealed record LlmCitationEvent(LlmCitation Citation) : LlmStreamEvent
+{
+    [JsonRequired]
+    public LlmCitation Citation { get; init => field = HostedSnapshot.Required(value); } = HostedSnapshot.Required(Citation);
+}
 
 internal static class HostedSnapshot
 {
     internal static IReadOnlyList<T>? List<T>(IReadOnlyList<T>? value) => value is null ? null : Array.AsReadOnly(value.ToArray());
+    internal static T Required<T>(T? value) where T : class { ArgumentNullException.ThrowIfNull(value); return value; }
+    internal static string Identity(string value) { ArgumentException.ThrowIfNullOrWhiteSpace(value); return value; }
+    internal static T Defined<T>(T value) where T : struct, Enum => Enum.IsDefined(value) ? value : throw new ArgumentOutOfRangeException(nameof(value));
 }
 
 internal sealed class ProviderAuthorizationJsonConverter : JsonConverter<IProviderAuthorization>

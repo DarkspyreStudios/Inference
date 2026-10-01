@@ -57,6 +57,11 @@ authorization is borrowed and refuses non-null owned JSON read/write without inv
 Null authorization roundtrips; explicitly serialized header data remains secret data, while
 remote-MCP diagnostics are redacted. Common's union rejects caller-defined variants; Connect owns
 the fixed xAI search extension and its extension-aware portable metadata.
+Owned hosted metadata rejects missing observation identities, kind/phase facts and image bytes.
+Explicit null image bytes are not an observed empty image; explicit empty bytes remain valid.
+The new phase/action enum roots reject undefined values without changing other enum policies.
+Caller-generated closed envelopes can compose the owned resolver and its fixed converters; the
+image-byte refusal applies only to the hosted image `Data` property, not every byte-memory field.
 
 ## Session and workspace resources
 

@@ -19,7 +19,7 @@ public static class ConnectLlmJson
     {
         // Retain generated converters and compose Common's exact live-authority refusal policy.
         var options = new JsonSerializerOptions(ConnectLlmJsonContext.Default.Options) { TypeInfoResolver = new HostedTypeInfoResolver() };
-        foreach (var type in new[] { typeof(IInferenceResourceAccess), typeof(IInferenceResourceReadHandle), typeof(IInferenceResourceWriteHandle), typeof(IProviderAuthorization) })
+        foreach (var type in new[] { typeof(IInferenceResourceAccess), typeof(IInferenceResourceReadHandle), typeof(IInferenceResourceWriteHandle), typeof(IProviderAuthorization), typeof(LlmHostedToolPhase), typeof(LlmImageGenerationAction) })
         {
             options.Converters.Add(InferenceJson.InferenceResourceReference.Options.Converters.Single(converter => converter.CanConvert(type)));
         }
@@ -35,6 +35,22 @@ public static class ConnectLlmJson
             if (type == typeof(LlmHostedTool) && metadata?.PolymorphismOptions is { } polymorphism)
             {
                 polymorphism.DerivedTypes.Add(new JsonDerivedType(typeof(XaiXSearchTool), "xai-x-search"));
+            }
+            if (type == typeof(LlmHostedImageOutput) && metadata is not null)
+                metadata.Properties.Single(property => property.Name == "Data").CustomConverter =
+                    InferenceJson.LlmHostedImageOutput.Properties.Single(property => property.Name == "Data").CustomConverter;
+            if (metadata is not null && (type == typeof(LlmAgentHostedToolCallStartedEvent) || type == typeof(LlmAgentHostedToolCallProgressEvent)
+                || type == typeof(LlmAgentHostedToolCallCompletedEvent) || type == typeof(LlmAgentCitationEvent) || type == typeof(LlmAgentCompactedEvent)))
+            {
+                metadata.Properties.Single(property => property.Name == nameof(LlmAgentEvent.ThreadId)).IsRequired = true;
+                metadata.Properties.Single(property => property.Name == nameof(LlmAgentEvent.TurnId)).IsRequired = true;
+                static void ValidateScope(object value)
+                {
+                    var item = (LlmAgentEvent)value;
+                    HostedEventFacts.Identity(item.ThreadId); HostedEventFacts.Identity(item.TurnId);
+                }
+                metadata.OnSerializing = ValidateScope;
+                metadata.OnDeserialized = ValidateScope;
             }
             return metadata;
         }

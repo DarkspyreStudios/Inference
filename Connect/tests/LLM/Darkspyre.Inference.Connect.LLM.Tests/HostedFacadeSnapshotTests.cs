@@ -83,8 +83,13 @@ public sealed class HostedFacadeSnapshotTests
         public async Task<LlmConnection?> GetConnectionAsync(string connectionId, CancellationToken cancellationToken = default)
         {
             await gate.WaitAsync(0, cancellationToken);
-            return new() { Transport = LlmTransport.OpenAiResponses, Version = "1", Endpoint = "https://example.test",
-                Credential = new LlmCredential { OAuth = new() { AccessToken = "controlled" } }.Serialize() };
+            return new()
+            {
+                Transport = LlmTransport.OpenAiResponses,
+                Version = "1",
+                Endpoint = "https://example.test",
+                Credential = new LlmCredential { OAuth = new() { AccessToken = "controlled" } }.Serialize()
+            };
         }
         public Task SaveCredentialAsync(string connectionId, string credentialJson, string expectedVersion, CancellationToken cancellationToken = default)
             => throw new InvalidOperationException("The unchanged fixture credential cannot be persisted.");
@@ -103,8 +108,15 @@ public sealed class HostedFacadeSnapshotTests
     private sealed class Client(Gate gate) : ILlmClient, ILlmCatalogCapabilities, ILlmProviderTokenCounter, ILlmContextEstimator
     {
         public LlmTransport Transport => LlmTransport.OpenAiResponses;
-        public LlmProviderDefinition ProviderDefinition => new() { Id = "controlled", DisplayName = "Controlled", Description = "Controlled",
-            Transport = Transport, DefaultEndpoint = "https://example.test", SetupSteps = [] };
+        public LlmProviderDefinition ProviderDefinition => new()
+        {
+            Id = "controlled",
+            DisplayName = "Controlled",
+            Description = "Controlled",
+            Transport = Transport,
+            DefaultEndpoint = "https://example.test",
+            SetupSteps = []
+        };
         internal LlmChatRequest? Sent { get; private set; }
         public LlmProviderCapabilities GetCapabilities(LlmConnection connection, string? modelId = null) => new()
         { SupportsStreaming = true, SupportsModelListing = true, HostedTools = new HashSet<LlmHostedToolKind> { LlmHostedToolKind.RemoteMcp, LlmHostedToolKind.CodeExecution } };

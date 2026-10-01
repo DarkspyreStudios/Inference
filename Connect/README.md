@@ -99,6 +99,11 @@ Anthropic server-tool configuration is separate and does not advertise the new h
 Managed sessions snapshot hosted data, borrow authorization and preserve actual streamed hosted
 and citation observations under the invocation RequestId; they never route hosted observations to
 the host function handler. Terminal chat/portable results preserve ordered citation lists.
+Facade generation, input counting and request measurement freeze hosted descriptors before the
+first connection-source await. Later caller mutations cannot change admitted filters or headers;
+authorization stays borrowed. Owned hosted-event metadata requires actual scope and observation
+facts, including explicitly reported compaction revisions. Nested hosted image output retains
+Common's property-specific null-byte refusal and its new closed phase/action enum policies.
 Managed disposal shares its completion across callers, drains the producer even after cancellation
 callback failure, then releases borrowed hosted authorization without disposing it. Cleanup failures
 remain visible to every disposer. These controlled contracts do not qualify provider wire mappings
