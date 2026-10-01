@@ -13,6 +13,7 @@ public sealed class InferenceSettingsTests
     [InlineData(InferenceTask.SpeechTranscription, InferenceCapability.Audio)]
     [InlineData(InferenceTask.Decision, InferenceCapability.Decision)]
     [InlineData(InferenceTask.VideoGeneration, InferenceCapability.Video)]
+    [InlineData(InferenceTask.RealtimeVoice, InferenceCapability.Audio)]
     public void TasksHaveOneCanonicalGroup(InferenceTask task, InferenceCapability capability) =>
         Assert.Equal(capability, task.GetCapability());
 

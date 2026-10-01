@@ -136,7 +136,7 @@ public sealed class VideoContractTests
     public void VideoTaskAppendsExistingIdentitiesAndDescriptorUsesTheSameMapping()
     {
         Assert.Equal(6, (int)InferenceTask.VideoGeneration); Assert.Equal(4, (int)InferenceCapability.Video);
-        Assert.Equal(Enumerable.Range(0, 7), Enum.GetValues<InferenceTask>().Select(value => (int)value));
+        Assert.Equal(Enumerable.Range(0, 8), Enum.GetValues<InferenceTask>().Select(value => (int)value));
         Assert.Equal(Enumerable.Range(0, 5), Enum.GetValues<InferenceCapability>().Select(value => (int)value));
         var descriptor = new InferenceImplementationDescriptor("video", "Video", InferenceImplementationKind.Connect, InferenceTask.VideoGeneration);
         Assert.Equal(InferenceCapability.Video, Assert.Single(descriptor.Tasks).GetCapability());
