@@ -1545,6 +1545,20 @@ transport; other custom headers retain their existing policy. The reviewed upstr
 context limits, not an invented usable-context or compaction budget. Unknown limits remain null.
 Matching the version does not establish full CLI tooling or endpoint parity.
 
+Upstream defines the release number in `codex-rs/Cargo.toml` under `[workspace.package]`.
+The [main-branch source](https://github.com/openai/codex/blob/2635431edbd43279a4da9c1199456758fbbc8ad3/codex-rs/Cargo.toml#L161-L162)
+contains the placeholder `0.0.0`; the
+[selected release source](https://github.com/openai/codex/blob/01fc69f4026735edfdf6789820549727a4867b11/codex-rs/Cargo.toml#L160-L161)
+contains `0.159.3`. The
+[release workflow](https://github.com/openai/codex/blob/2635431edbd43279a4da9c1199456758fbbc8ad3/.github/workflows/rust-release.yml#L11-L55)
+runs on `rust-v*.*.*` tags and blocks the build unless the tag without `rust-v` exactly matches
+the Cargo package version. Cargo supplies that package metadata to `env!("CARGO_PKG_VERSION")`,
+which upstream uses for its
+[User-Agent](https://github.com/openai/codex/blob/01fc69f4026735edfdf6789820549727a4867b11/codex-rs/login/src/auth/default_client.rs#L156-L165)
+and [version header](https://github.com/openai/codex/blob/01fc69f4026735edfdf6789820549727a4867b11/codex-rs/model-provider-info/src/lib.rs#L532-L535).
+There is no separate release-version build override in this path. Connect's compatibility pin
+matches the selected release metadata, not main's placeholder or the Inference package version.
+
 Chat and managed agents share SSE request mapping, attachments, tool definitions, reasoning level,
 JSON Schema, and ordered opaque response-state replay. Requests use `store: false`; the library
 does not retrieve server history or send `previous_response_id`. `ConversationKey` provides cache
