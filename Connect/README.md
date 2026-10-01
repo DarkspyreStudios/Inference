@@ -1312,6 +1312,20 @@ is not an enabled or live-qualified provider. Cross-family catalog ownership and
 controls are not wired; the multi-agent profile records agent counts separately from reasoning levels.
 The region and tier premiums follow [xAI pricing](https://docs.x.ai/developers/pricing).
 
+`LlmProviderService` implements Connect's `ILlmTextTokenizer`. `TokenizeAsync` accepts a connection
+ID, model ID and one plain string. Empty text is valid. Unsupported adapters fail before credential
+refresh. The Grok adapter sends only `model` and `text` to the selected region's
+[`/v1/tokenize-text`](https://docs.x.ai/developers/rest-api-reference/inference/other) endpoint.
+`LlmTokenization.Tokens` retains provider order, duplicate `uint` IDs, exact display text and copied
+bytes. A token's bytes need not decode independently as UTF-8 and are never reconstructed from its
+display text. Missing fields and invalid integer/byte representations fail with fixed protocol errors
+without retaining raw bodies. `ConnectLlmJson.Tokenization` and `Token` own result serialization.
+The facade drains active tokenization during retirement and rejects late results through its
+synchronous owner fence. Injected access and clients remain borrowed. Tokenization does not count
+instructions, tool schemas, media or protocol framing. It does not report request occupancy, generated
+usage or billing, and it does not implement `ILlmProviderTokenCounter`. Grok is not registered.
+OAuth access to its tokenizer endpoint has not been live-qualified.
+
 `ImageProviderService.SetupDefinitions` and `CreateSettingsManager` provide the same editing surface for
 ComfyUI. Supply `IImageWorkflowChoiceSource` for host-owned saved workflows and a typed
 `ISetupCommitTarget<ImageSetupChanges>`. Header values remain protected, deletion is explicit, and
