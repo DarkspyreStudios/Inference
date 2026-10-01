@@ -45,6 +45,21 @@ public sealed class PackageVerificationTests
     }
 
     [Theory]
+    [InlineData("Darkspyre.Inference.Connect.STT", "dll")]
+    [InlineData("Darkspyre.Inference.Connect.STT", "xml")]
+    [InlineData("Darkspyre.Inference.Connect.Video", "dll")]
+    [InlineData("Darkspyre.Inference.Connect.Video", "xml")]
+    [InlineData("Darkspyre.Inference.Connect.Realtime", "dll")]
+    [InlineData("Darkspyre.Inference.Connect.Realtime", "xml")]
+    public void HostedSpeechAndVideoOutputsBelongToTheConnectBoundary(string assembly, string extension)
+    {
+        const string connect = "Darkspyre.Inference.Connect";
+        Assert.Contains(assembly, PackageVerification.Owned[connect]);
+        Assert.Throws<InvalidDataException>(() => Verify(connect,
+            files => files.Remove("lib/net11.0/" + assembly + "." + extension)));
+    }
+
+    [Theory]
     [InlineData("native/libforeign.so")]
     [InlineData("native/libforeign.so.1")]
     [InlineData("native/libforeign.SO.1.2")]

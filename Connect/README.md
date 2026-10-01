@@ -1,5 +1,29 @@
 # Darkspyre.Inference.Connect
 
+## Hosted STT bindings
+
+`Darkspyre.Inference.Connect.STT` binds a host-selected `SttConnection` to the Common hosted
+`ISpeechTranscriptionClient`. `SttProviderService` resolves registered `ISttProvider` adapters.
+`AddSttConnect()` registers the facade only. It registers no xAI adapter, advertises no setup
+definitions without an adapter, and refuses an unregistered transport before credential or resource
+effects. Hosted STT does not replace Tensor's model-instance transcription API.
+
+The connection carries a durable `XaiConnectionSelection`, optional borrowed authorization and copied
+case-insensitive protected headers. `Bind(connection, xai, resources)` passes the matching borrowed
+`XaiFamilyBinding` and caller workspace access to the selected adapter. These collaborators remain
+caller-owned. A session owns its streaming transport; Common clients gain no additional disposal API.
+The adapter acquires one validated snapshot for each operation and validates known incompatibilities
+before credential refresh or source effects. The five-minute request timeout is a library default,
+not a provider limit.
+
+`ConnectSttJson` exports exact connection/transport/setup data getters with a complete generated graph.
+Live authorization, family bindings, factories, services and sessions refuse nonnull portable JSON.
+Diagnostics hide connection and header values. Setup preserves all nullable transcription/streaming
+defaults and explicit stream budgets; omitted limits remain omitted. Commands still require explicit
+valid budgets before opening a stream. Field edits are effect-free. Only registered adapters supply
+capability checks. The disposable settings manager fences and drains admitted operations and saves,
+then releases borrowed targets/factories/access without disposing them.
+
 > **Proprietary software.** Copyright © 2026 Brandon Mathis. All rights reserved.
 > No permission is granted to use, copy, modify, or distribute this software
 > without prior written authorization. See [LICENSE.md](LICENSE.md).

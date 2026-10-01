@@ -24,6 +24,15 @@
   <Folder Name="/src/TTS/">
     <Project Path="src/TTS/Darkspyre.Inference.Connect.TTS/Darkspyre.Inference.Connect.TTS.csproj" />
   </Folder>
+  <Folder Name="/src/STT/">
+    <Project Path="src/STT/Darkspyre.Inference.Connect.STT/Darkspyre.Inference.Connect.STT.csproj" />
+  </Folder>
+  <Folder Name="/src/Realtime/">
+    <Project Path="src/Realtime/Darkspyre.Inference.Connect.Realtime/Darkspyre.Inference.Connect.Realtime.csproj" />
+  </Folder>
+  <Folder Name="/src/Video/">
+    <Project Path="src/Video/Darkspyre.Inference.Connect.Video/Darkspyre.Inference.Connect.Video.csproj" />
+  </Folder>
   <Folder Name="/src/Audio/">
     <Project Path="src/Audio/Darkspyre.Inference.Connect.Audio/Darkspyre.Inference.Connect.Audio.csproj" />
   </Folder>
@@ -32,6 +41,15 @@
   </Folder>
   <Folder Name="/tests/TTS/">
     <Project Path="tests/TTS/Darkspyre.Inference.Connect.TTS.Tests/Darkspyre.Inference.Connect.TTS.Tests.csproj" />
+  </Folder>
+  <Folder Name="/tests/STT/">
+    <Project Path="tests/STT/Darkspyre.Inference.Connect.STT.Tests/Darkspyre.Inference.Connect.STT.Tests.csproj" />
+  </Folder>
+  <Folder Name="/tests/Realtime/">
+    <Project Path="tests/Realtime/Darkspyre.Inference.Connect.Realtime.Tests/Darkspyre.Inference.Connect.Realtime.Tests.csproj" />
+  </Folder>
+  <Folder Name="/tests/Video/">
+    <Project Path="tests/Video/Darkspyre.Inference.Connect.Video.Tests/Darkspyre.Inference.Connect.Video.Tests.csproj" />
   </Folder>
   <Folder Name="/tests/LLM/">
     <Project Path="tests/LLM/Darkspyre.Inference.Connect.LLM.Azure.Tests/Darkspyre.Inference.Connect.LLM.Azure.Tests.csproj" />
