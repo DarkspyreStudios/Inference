@@ -23,7 +23,7 @@ internal sealed class AppleProcessRunner : IAppleProcessRunner
         if (!OperatingSystem.IsMacOSVersionAtLeast(26) || RuntimeInformation.ProcessArchitecture != Architecture.Arm64)
             throw new InferenceException(InferenceFailureCode.BackendUnavailable, "Apple Foundation Models requires macOS 26 or later on Apple Silicon.");
         cancellationToken.ThrowIfCancellationRequested();
-        string payload = JsonSerializer.Serialize(command, AppleProtocol.Json);
+        string payload = JsonSerializer.Serialize(command, AppleProtocolJsonContext.Default.AppleCommand);
         if (Encoding.UTF8.GetByteCount(payload) > limits.MaximumFrameBytes)
             throw new ArgumentException("The Apple request exceeds the configured frame limit.");
         var start = new ProcessStartInfo(executable)
@@ -88,7 +88,7 @@ internal sealed class AppleProcessRunner : IAppleProcessRunner
                 try
                 {
                     await process.StandardInput.WriteLineAsync(JsonSerializer.Serialize(
-                        new AppleCommand("cancel", command.Id), AppleProtocol.Json).AsMemory(), grace.Token).ConfigureAwait(false);
+                        new AppleCommand("cancel", command.Id), AppleProtocolJsonContext.Default.AppleCommand).AsMemory(), grace.Token).ConfigureAwait(false);
                     await process.StandardInput.FlushAsync(grace.Token).ConfigureAwait(false);
                     await process.WaitForExitAsync(grace.Token).ConfigureAwait(false);
                 }

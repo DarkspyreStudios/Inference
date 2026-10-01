@@ -27,7 +27,7 @@ public sealed class AppleFoundationModelsTests
         AppleGeneration generation = Assert.Single(runner.Requests).Request!;
         Assert.Equal(.8, generation.TopP);
         Assert.Equal(42, generation.Seed);
-        JsonElement serialized = JsonSerializer.SerializeToElement(generation, AppleProtocol.Json);
+        JsonElement serialized = JsonSerializer.SerializeToElement(generation, AppleProtocolJsonContext.Default.AppleGeneration);
         Assert.Equal(.8, serialized.GetProperty("topP").GetDouble());
         Assert.Equal(42, serialized.GetProperty("seed").GetInt32());
         await Read(client.StreamAsync(Connection, Request with { TopK = 17 }));
@@ -394,7 +394,13 @@ public sealed class AppleFoundationModelsTests
 
     internal static JsonElement Frame(string type, string content) => JsonSerializer.SerializeToElement(new { type, content });
     internal static JsonElement Terminal(string content, string status = "unknown") => JsonSerializer.SerializeToElement(new { type = "terminal", content, status });
-    internal static JsonElement Batch(params AppleCall[] calls) => JsonSerializer.SerializeToElement(new { type = "batch", calls }, AppleProtocol.Json);
+    internal static JsonElement Batch(params AppleCall[] calls)
+    {
+        var items = new System.Text.Json.Nodes.JsonArray();
+        foreach (AppleCall call in calls)
+            items.Add(JsonSerializer.SerializeToNode(call, AppleProtocolJsonContext.Default.AppleCall));
+        return JsonSerializer.SerializeToElement(new System.Text.Json.Nodes.JsonObject { ["type"] = "batch", ["calls"] = items });
+    }
     internal static async Task<List<T>> Read<T>(IAsyncEnumerable<T> source)
     { var result = new List<T>(); await foreach (var item in source) result.Add(item); return result; }
 

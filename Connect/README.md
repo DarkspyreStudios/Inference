@@ -82,6 +82,11 @@ families. Runtime settings, one-way secret edits, executable handlers and undisc
 bases are not persisted snapshots. Provider CLI/HTTP protocol writers remain separate owners;
 metadata for these closed families does not establish retirement of an active provider session.
 
+Apple helper generation and cancellation commands use their own internal generated metadata,
+including the recursive typed schema plan. The helper protocol retains its camel-case Web names,
+null omission, escaping, sampling fields and maximum JSON depth of 128. No helper/session lifetime
+behavior or Apple private framework format is changed by this serialization boundary.
+
 `LlmToolCapabilities.StrictInputSchema` reports Supported, Unsupported or Unknown. Unknown allows an
 explicit `Strict=true` request unchanged so the host can try it and handle the provider result.
 Known Unsupported rejects that request. Ordinary tools default to `Strict=false` independently.
