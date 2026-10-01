@@ -100,6 +100,53 @@ public sealed class SttBindingTests
         Assert.Equal(1, provider.Binds);
         Assert.Throws<ArgumentException>(() => new SttProviderService([provider, provider]));
     }
+    public static TheoryData<string, string> InvalidHeaders => new()
+    {
+        { "aUtHoRiZaTiOn", "secret" }, { "Accept", "application/json" }, { "Content-Type", "audio/wav" },
+        { "Host", "outside.invalid" }, { "bad name", "value" }, { "X-Bad\rName", "value" },
+        { "X-Value", "value\r\ninjected: true" }, { "X-Value", "value\ninjected: true" }
+    };
+    [Theory, MemberData(nameof(InvalidHeaders))]
+    public void SharedHeaderPolicyRefusesBeforeProviderBinding(string name, string value)
+    {
+        var provider = new ControlledProvider(); var service = new SttProviderService([provider]);
+        using var access = new LlmConnectionAccess(new UntouchableSource(), []); var binding = new XaiFamilyBinding(new("selected"), access);
+        Assert.ThrowsAny<Exception>(() => service.Bind(Connection with
+        { AdditionalHeaders = new Dictionary<string, string> { [name] = value } }, binding));
+        Assert.Equal(0, provider.Binds);
+    }
+    [Theory, MemberData(nameof(InvalidHeaders))]
+    public async Task InvalidDraftHeadersRefuseBeforeFactoryProviderOrCommit(string name, string value)
+    {
+        var provider = new ControlledProvider(); var target = new Target(); int factories = 0;
+        using var access = new LlmConnectionAccess(new UntouchableSource(), []); var binding = new XaiFamilyBinding(new("selected"), access);
+        await using SttSettingsManager manager = new SttProviderService([provider]).CreateSettingsManager(target, _ => { factories++; return binding; });
+        SttSettings settings = await manager.OpenAsync(SttTransport.XaiStt, new(SetupChangeIntent.Edit, "stt", "version"), Populated());
+        SetupFieldRow header = Assert.Single(Edit<SetupRepeatableGroupField>(settings, "headers").Rows);
+        ((SetupTextField)header.Fields[0]).SetValue(name); ((SetupSecretField)header.Fields[1]).SetValue(SetupSecretEdit.Replace(value));
+        Assert.False(settings.CanSave);
+        Assert.NotEqual(SetupActionState.Completed, (await manager.RunAsync(settings, "check")).State);
+        Assert.NotEqual(SetupCommitState.Committed, (await manager.SaveAsync(settings)).State);
+        Assert.Equal(0, factories); Assert.Equal(0, provider.Binds); Assert.Null(target.Changes);
+    }
+    [Fact]
+    public async Task BorrowedAuthorityWorksForCheckButNeverEntersPortableChanges()
+    {
+        var provider = new ControlledProvider(); var target = new Target();
+        using var access = new LlmConnectionAccess(new UntouchableSource(), []); var binding = new XaiFamilyBinding(new("selected"), access);
+        await using SttSettingsManager manager = new SttProviderService([provider]).CreateSettingsManager(target, _ => binding);
+        SttSetupConfiguration existing = Populated() with { Connection = Connection with { Authorization = binding.Authorization } };
+        SttSettings settings = await manager.OpenAsync(SttTransport.XaiStt, new(SetupChangeIntent.Edit, "stt", "version"), existing);
+        Assert.False(settings.HasUnsavedChanges); Assert.True(settings.CanSave);
+        Assert.Equal(SetupActionState.Completed, (await manager.RunAsync(settings, "check")).State);
+        Assert.Same(binding.Authorization, provider.Connection!.Authorization); Assert.Same(binding, provider.Binding);
+        Assert.Equal(SetupCommitState.Committed, (await manager.SaveAsync(settings)).State);
+        Assert.Null(target.Changes!.Configuration.Connection.Authorization);
+        Assert.Equal("selected", target.Changes.Configuration.Connection.Xai!.ConnectionId);
+        string json = JsonSerializer.Serialize(target.Changes, ConnectSttJson.SttSetupChanges);
+        Assert.Null(JsonSerializer.Deserialize(json, ConnectSttJson.SttSetupChanges)!.Configuration.Connection.Authorization);
+        Assert.False(provider.Disposed);
+    }
     [Fact]
     public void LiveAuthoritiesAndRuntimeServicesRefuseWithoutCallbacksOrDiagnostics()
     {
