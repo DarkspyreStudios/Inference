@@ -12,6 +12,26 @@ namespace Darkspyre.Inference.Connect.LLM.Tests;
 public sealed class ManagedAgentTests
 {
     [Fact]
+    public async Task EveryManagedTurnAndProjectionUsesTheDefaultConversationCacheHint()
+    {
+        var harness = new Harness();
+        await using var session = harness.Create(Options());
+        await session.MeasureContextAsync(History("prior"));
+        for (int turn = 0; turn < 2; turn++)
+        {
+            harness.Results.Enqueue(new() { Text = "done", Status = LlmCompletionStatus.Completed, Diagnostics = new(200, null, null) });
+            await Read(session.RunTurnAsync(Turn("hello")));
+        }
+        Assert.Equal(2, harness.Requests.Count);
+        Assert.NotEmpty(harness.Estimates);
+        Assert.All(harness.Requests.Concat(harness.Estimates), request =>
+        {
+            Assert.Equal(LlmPromptCacheScope.Conversation, request.PromptCache!.Scope);
+            Assert.Equal(LlmPromptCacheRetention.Default, request.PromptCache.Retention);
+        });
+    }
+
+    [Fact]
     public async Task SessionOwnerRetiresAnActiveManagedToolAndObservationFeed()
     {
         var harness = new Harness();

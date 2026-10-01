@@ -54,6 +54,18 @@ and `int.MaxValue` when the adapter imposes no limit. Connect bindings and SelfH
 controls and capabilities across the portable boundary. Qwen requires a positive temperature for
 top-p, top-k and seed; stops and penalties also work during greedy decoding.
 
+## Prompt caching
+
+`LlmInferenceRequest.PromptCache` carries an advisory `LlmPromptCacheHint`. `Prefix` asks to cache
+tools and instructions. `Conversation` also includes the conversation prefix through its last message
+and is the default scope. `Default` uses the provider's standard lifetime. `Extended` asks for its
+longer lifetime, which can increase cache-write charges.
+
+`LlmCapabilities.PromptCache` declares automatic caching, hint acceptance and supported retentions.
+Unsupported implementations ignore the hint and report `AcceptsHints = false`. An unsupported
+retention falls back to `Default`. A hint does not promise a cache hit or create a billed cache resource.
+Connect bindings and SelfHost preserve the hint and capability declaration.
+
 ## Streaming and terminal results
 
 `LlmStructuredOutputSnapshotEvent.Content` replaces the previous JSON snapshot; it is not

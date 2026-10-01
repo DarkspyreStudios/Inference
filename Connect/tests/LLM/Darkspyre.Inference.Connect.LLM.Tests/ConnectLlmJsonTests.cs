@@ -214,6 +214,7 @@ public sealed class ConnectLlmJsonTests
         { "SetupConfiguration", "{\"Connection\":" + VertexConnectionJson(VertexServiceAccountJson) + ",\"ModelId\":\"model\"}" },
         { "SetupConfiguration", "{\"Connection\":" + VertexConnectionJson(VertexExpressJson) + ",\"ModelId\":\"model\"}" },
         { "ChatRequest", "{\"ModelId\":\"model\",\"Messages\":[" + MessageJson + "]}" },
+        { "ChatRequest", "{\"ModelId\":\"model\",\"PromptCache\":{\"Scope\":0,\"Retention\":1},\"Messages\":[" + MessageJson + "]}" },
         { "ChatResult", "{\"Text\":\"text\",\"Status\":0,\"ContinuationState\":" + StateJson + ",\"Diagnostics\":{\"HttpStatusCode\":200}}" },
         { "ChatMessage", MessageJson },
         { "AgentContext", "{\"FormatVersion\":2,\"Entries\":[" + EntryJson + "]}" },
@@ -262,6 +263,15 @@ public sealed class ConnectLlmJsonTests
             object value = JsonSerializer.Deserialize(json, metadata)!;
             string written = JsonSerializer.Serialize(value, metadata);
             Assert.NotNull(JsonSerializer.Deserialize(written, metadata));
+            if (json.Contains("\"PromptCache\"", StringComparison.Ordinal))
+            {
+                object hint = value.GetType().GetProperty("PromptCache")!.GetValue(value)!;
+                Assert.Same(common, hint.GetType().Assembly);
+                Assert.Same(generation, AssemblyLoadContext.GetLoadContext(hint.GetType().Assembly));
+                using JsonDocument expected = JsonDocument.Parse(json);
+                using JsonDocument actual = JsonDocument.Parse(written);
+                Assert.Equal(expected.RootElement.GetProperty("PromptCache").GetRawText(), actual.RootElement.GetProperty("PromptCache").GetRawText());
+            }
             if (json.Contains("\"ChatCompletions\"", StringComparison.Ordinal))
             {
                 using JsonDocument document = JsonDocument.Parse(written);

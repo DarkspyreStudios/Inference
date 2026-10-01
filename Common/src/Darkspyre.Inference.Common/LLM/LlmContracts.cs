@@ -1,3 +1,4 @@
+using System.Collections.Frozen;
 using System.Text.Json;
 
 namespace Darkspyre.Inference.Common.LLM;
@@ -93,6 +94,50 @@ public sealed record LlmStructuredOutputRequest
     public LlmStructuredOutputFallback Fallback { get; init; }
 }
 
+/// <summary>Which part of the prompt a cache hint asks the provider to keep.</summary>
+public enum LlmPromptCacheScope
+{
+    /// <summary>Tools and instructions.</summary>
+    Prefix,
+
+    /// <summary>Tools, instructions and the conversation through its last message.</summary>
+    Conversation
+}
+
+/// <summary>How long a cached prefix should live.</summary>
+public enum LlmPromptCacheRetention
+{
+    /// <summary>The provider's standard lifetime.</summary>
+    Default,
+
+    /// <summary>The provider's longer lifetime. Cache writes can cost more.</summary>
+    Extended
+}
+
+/// <summary>
+/// An advisory request to cache part of the prompt. Unsupported routes ignore it. Routes without the
+/// requested retention use <see cref="LlmPromptCacheRetention.Default"/>.
+/// </summary>
+public sealed record LlmPromptCacheHint
+{
+    public LlmPromptCacheScope Scope { get; init; } = LlmPromptCacheScope.Conversation;
+
+    public LlmPromptCacheRetention Retention { get; init; }
+}
+
+/// <summary>How a route caches prompts. Hints do not guarantee a cache hit.</summary>
+public sealed record LlmPromptCacheCapabilities
+{
+    /// <summary>The provider caches repeated prefixes without a hint.</summary>
+    public bool Automatic { get; init; }
+
+    /// <summary>The route converts cache hints into provider cache markers.</summary>
+    public bool AcceptsHints { get; init; }
+
+    /// <summary>Retentions the route honours for a hint. Empty when it accepts no hints.</summary>
+    public IReadOnlySet<LlmPromptCacheRetention> Retentions { get; init; } = FrozenSet<LlmPromptCacheRetention>.Empty;
+}
+
 public sealed record LlmInferenceRequest
 {
     public LlmUnboundContinuationState UnboundContinuationState { get; init; }
@@ -137,6 +182,8 @@ public sealed record LlmInferenceRequest
     public bool? AllowParallelToolCalls { get; init; }
 
     public string? ConversationKey { get; init; }
+
+    public LlmPromptCacheHint? PromptCache { get; init; }
 }
 
 public sealed record LlmUsage(int? InputTokens, int? OutputTokens, int? TotalTokens)

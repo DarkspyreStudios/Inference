@@ -131,7 +131,8 @@ internal sealed class SelfHostLlmClient(ILlmSelfHost host) : ILlmClient, ILlmCon
         ToolChoice = request.ToolChoice,
         AllowParallelToolCalls = request.AllowParallelToolCalls,
         UnboundContinuationState = request.UnboundContinuationState,
-        ConversationKey = request.ConversationKey
+        ConversationKey = request.ConversationKey,
+        PromptCache = request.PromptCache
     };
 
     private static LlmChatResult ToConnect(CommonLlm.LlmInferenceResult result) => new()
@@ -161,6 +162,7 @@ internal sealed class SelfHostLlmClient(ILlmSelfHost host) : ILlmClient, ILlmCon
         SupportsModelListing = capabilities.SupportsModelListing,
         SupportsJsonSchema = capabilities.SupportsJsonSchema,
         SupportsJsonObject = capabilities.SupportsJsonObject,
+        PromptCache = capabilities.PromptCache,
         ReasoningLevels = capabilities.ReasoningLevels,
         SupportsTemperature = capabilities.SupportsTemperature,
         SupportsTopP = capabilities.SupportsTopP,

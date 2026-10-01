@@ -30,6 +30,7 @@ public sealed class InferenceJsonTests
             FrequencyPenalty = 0.2,
             StopSequences = ["stop"],
             ReasoningLevel = LlmReasoningLevel.High,
+            PromptCache = new() { Scope = LlmPromptCacheScope.Prefix, Retention = LlmPromptCacheRetention.Extended },
             StructuredOutput = new() { Name = "answer", Schema = Json("{\"type\":\"object\"}") },
             Tools = [new() { Name = "tool", InputSchema = Json("{\"type\":\"object\"}"), Strict = true }],
             Messages = [new("assistant", "text")
@@ -50,6 +51,7 @@ public sealed class InferenceJsonTests
         LlmInferenceRequest restored = JsonSerializer.Deserialize(json, InferenceJson.LlmRequest)!;
         Assert.Equal(json, JsonSerializer.Serialize(restored, InferenceJson.LlmRequest));
         Assert.Equal(original.StopSequences, restored.StopSequences);
+        Assert.Equal(original.PromptCache, restored.PromptCache);
         Assert.Equal("opaque", restored.Messages[0].ContinuationState!.Payload);
         Assert.Equal(new byte[] { 1, 2, 3 }, restored.Messages[0].Attachments[0].Data.ToArray());
         Assert.True(restored.Tools[0].Strict);
@@ -106,12 +108,16 @@ public sealed class InferenceJsonTests
     {
         var original = new LlmCapabilities
         {
+            PromptCache = new() { Automatic = true, AcceptsHints = true, Retentions = new HashSet<LlmPromptCacheRetention> { LlmPromptCacheRetention.Default, LlmPromptCacheRetention.Extended } },
             ReasoningLevels = new HashSet<LlmReasoningLevel> { LlmReasoningLevel.None, LlmReasoningLevel.High },
             Tools = new() { ChoiceModes = new HashSet<LlmToolChoiceMode> { LlmToolChoiceMode.Auto, LlmToolChoiceMode.Required } }
         };
         LlmCapabilities restored = JsonSerializer.Deserialize(JsonSerializer.Serialize(original, InferenceJson.LlmCapabilities), InferenceJson.LlmCapabilities)!;
         Assert.True(restored.ReasoningLevels.SetEquals(original.ReasoningLevels));
         Assert.True(restored.Tools.ChoiceModes.SetEquals(original.Tools.ChoiceModes));
+        Assert.True(restored.PromptCache.Automatic);
+        Assert.True(restored.PromptCache.AcceptsHints);
+        Assert.True(restored.PromptCache.Retentions.SetEquals(original.PromptCache.Retentions));
         DecisionCapabilities decisions = JsonSerializer.Deserialize("{\"SupportedQuestionKinds\":[0,1,2]}", InferenceJson.DecisionCapabilities)!;
         Assert.Equal(3, decisions.SupportedQuestionKinds.Count);
         Assert.Null(decisions.MaximumQuestions);
@@ -155,10 +161,12 @@ public sealed class InferenceJsonTests
     {
         { "Provenance", ProvenanceJson },
         { "LlmRequest", "{\"ModelId\":\"model\",\"Messages\":[{\"Role\":\"assistant\",\"Content\":\"text\",\"ContinuationState\":" + ContinuationJson + "}]}" },
+        { "LlmRequest", "{\"ModelId\":\"model\",\"PromptCache\":{\"Scope\":0,\"Retention\":1}}" },
         { "LlmResult", ResultJson },
         { "LlmMessage", "{\"Role\":\"user\",\"Content\":\"text\"}" },
         { "ContinuationState", ContinuationJson },
         { "LlmCapabilities", "{\"ReasoningLevels\":[0,4],\"Tools\":{\"ChoiceModes\":[0,2]}}" },
+        { "LlmCapabilities", "{\"PromptCache\":{\"Automatic\":true,\"AcceptsHints\":true,\"Retentions\":[0,1]}}" },
         { "LlmModel", "{\"Id\":\"model\",\"DisplayName\":\"Model\"}" },
         { "ToolDefinition", "{\"Name\":\"tool\",\"InputSchema\":{\"type\":\"object\"}}" },
         { "ToolOutput", "{\"Parts\":[{\"type\":\"text\",\"Text\":\"text\"},{\"type\":\"binary\",\"Kind\":0,\"MediaType\":\"image/png\",\"Data\":\"AQID\"},{\"type\":\"resource\",\"Uri\":\"urn:test\",\"Data\":\"\"}]}" },
@@ -222,6 +230,15 @@ public sealed class InferenceJsonTests
             object value = JsonSerializer.Deserialize(json, metadata)!;
             string written = JsonSerializer.Serialize(value, metadata);
             Assert.NotNull(JsonSerializer.Deserialize(written, metadata));
+            if (json.Contains("\"PromptCache\"", StringComparison.Ordinal))
+            {
+                object cache = value.GetType().GetProperty("PromptCache")!.GetValue(value)!;
+                Assert.Same(assembly, cache.GetType().Assembly);
+                Assert.Same(generation, AssemblyLoadContext.GetLoadContext(cache.GetType().Assembly));
+                using JsonDocument expected = JsonDocument.Parse(json);
+                using JsonDocument actual = JsonDocument.Parse(written);
+                Assert.Equal(expected.RootElement.GetProperty("PromptCache").GetRawText(), actual.RootElement.GetProperty("PromptCache").GetRawText());
+            }
         }
         finally
         {

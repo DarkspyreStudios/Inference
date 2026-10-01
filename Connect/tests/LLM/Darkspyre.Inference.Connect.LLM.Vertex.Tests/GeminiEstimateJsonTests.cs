@@ -15,7 +15,7 @@ namespace Darkspyre.Inference.Connect.LLM.Vertex.Tests;
 public sealed class GeminiEstimateJsonTests
 {
     private const string EmptyProjection = """
-        {"ModelId":"model","Instructions":null,"Messages":[],"Temperature":null,"MaxOutputTokens":null,"TopP":null,"TopK":null,"Seed":null,"PresencePenalty":null,"FrequencyPenalty":null,"StopSequences":[],"ReasoningLevel":null,"StructuredOutput":null,"Tools":[],"ToolChoice":null,"AllowParallelToolCalls":null,"ConversationKey":null,"ProviderOptions":{},"UnboundContinuationState":0}
+        {"ModelId":"model","Instructions":null,"Messages":[],"Temperature":null,"MaxOutputTokens":null,"TopP":null,"TopK":null,"Seed":null,"PresencePenalty":null,"FrequencyPenalty":null,"StopSequences":[],"ReasoningLevel":null,"StructuredOutput":null,"Tools":[],"ToolChoice":null,"AllowParallelToolCalls":null,"ConversationKey":null,"PromptCache":null,"ProviderOptions":{},"UnboundContinuationState":0}
         """;
 
     [Fact]
@@ -135,6 +135,7 @@ public sealed class GeminiEstimateJsonTests
         MaxOutputTokens = 1,
         ReasoningLevel = LlmReasoningLevel.Medium,
         ConversationKey = string.Empty,
+        PromptCache = new() { Scope = LlmPromptCacheScope.Prefix, Retention = LlmPromptCacheRetention.Extended },
         Tools = tools ? [new() { Name = "lookup", Description = null, InputSchema = JsonElement.Parse("{\"type\":\"object\"}") }] : [],
         ToolChoice = tools ? new() { Mode = LlmToolChoiceMode.Auto } : null,
         ProviderOptions = new Dictionary<string, JsonElement> { ["opaque"] = JsonElement.Parse("{\"b\":false,\"a\":null}") }
@@ -164,6 +165,9 @@ public sealed class GeminiEstimateJsonTests
             object request = JsonSerializer.Deserialize(projection, requestMetadata)!;
             object connection = JsonSerializer.Deserialize(JsonSerializer.Serialize(Connection(vertex), ConnectLlmJson.Connection), connectionMetadata)!;
             Assert.Same(connect, request.GetType().Assembly);
+            object hint = request.GetType().GetProperty("PromptCache")!.GetValue(request)!;
+            Assert.Same(common, hint.GetType().Assembly);
+            Assert.Same(generation, AssemblyLoadContext.GetLoadContext(hint.GetType().Assembly));
             if (tools)
             {
                 object tool = Assert.Single(((IEnumerable)request.GetType().GetProperty("Tools")!.GetValue(request)!).Cast<object>());

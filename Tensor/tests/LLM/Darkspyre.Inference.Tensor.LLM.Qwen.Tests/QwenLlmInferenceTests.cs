@@ -6,15 +6,18 @@ namespace Darkspyre.Inference.Tensor.LLM.Qwen.Tests;
 
 public sealed class QwenLlmInferenceTests
 {
-    [Fact]
-    public async Task ValidRequestNeverLoadsAHiddenModel()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ValidRequestNeverLoadsAHiddenModel(bool cacheHint)
     {
         await using var inference = new QwenLlmInference(new MissingPackManager());
         await inference.StartAndWaitAsync();
         var request = new LlmInferenceRequest
         {
             ModelId = TensorLlmModels.Qwen3FourBillionQ4Km.Key.ModelId,
-            Messages = [new LlmMessage("user", "hello")]
+            Messages = [new LlmMessage("user", "hello")],
+            PromptCache = cacheHint ? new() { Scope = LlmPromptCacheScope.Conversation, Retention = LlmPromptCacheRetention.Extended } : null
         };
 
         InferenceException exception = await Assert.ThrowsAsync<InferenceException>(async () =>
@@ -43,6 +46,9 @@ public sealed class QwenLlmInferenceTests
         Assert.False(capabilities.SupportsPromptImages);
         Assert.Equal([LlmReasoningLevel.None, LlmReasoningLevel.High], capabilities.ReasoningLevels.Order());
         Assert.True(capabilities.SupportsReasoning);
+        Assert.False(capabilities.PromptCache.Automatic);
+        Assert.False(capabilities.PromptCache.AcceptsHints);
+        Assert.Empty(capabilities.PromptCache.Retentions);
     }
 
     [Fact]

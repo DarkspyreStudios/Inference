@@ -140,7 +140,8 @@ internal sealed class ConnectLlmInference(
         ToolChoice = request.ToolChoice,
         AllowParallelToolCalls = request.AllowParallelToolCalls,
         UnboundContinuationState = request.UnboundContinuationState,
-        ConversationKey = request.ConversationKey
+        ConversationKey = request.ConversationKey,
+        PromptCache = request.PromptCache
     };
 
     private static CommonLlm.LlmCapabilities ToCommon(LlmProviderCapabilities capabilities) => new()
@@ -153,6 +154,7 @@ internal sealed class ConnectLlmInference(
         SupportsModelListing = capabilities.SupportsModelListing,
         SupportsJsonSchema = capabilities.SupportsJsonSchema,
         SupportsJsonObject = capabilities.SupportsJsonObject,
+        PromptCache = capabilities.PromptCache,
         ReasoningLevels = capabilities.ReasoningLevels,
         SupportsTemperature = capabilities.SupportsTemperature,
         SupportsTopP = capabilities.SupportsTopP,
