@@ -1054,6 +1054,24 @@ image/document content blocks for prompt attachments. Direct Codex sends prompt 
 tool-output binaries inline through Responses, with no CLI staging directory. The caller supplies kind,
 filename, and bytes; adapters own MIME detection, encoding, and wire representation.
 
+### Explicit cache contracts
+
+`ILlmContextCacheClient` declares explicit create, get, one-page list, expiry update and delete
+operations. Its request, correlation, receipt, usage, page and delete-result records have exact
+type-name getters on `ConnectLlmJson`. These declarations are inert: no facade cache binding or
+provider cache implementation is registered. They do not enable cached generation.
+
+Receipts require observed expiry and preserve unknown usage/timestamps as null. List page size is
+explicit and positive; a short page with a continuation token remains nonterminal. Collection
+properties copy their lists, without claiming an admitted operation's deep prefix snapshot.
+Create's optional `Resources` is borrowed runtime authority: non-null serialization fails and
+diagnostics do not inspect it. The request does not validate a provider's lifetime or scope.
+
+`LlmContextCacheCreateCancelledException` and `LlmContextCacheCreateUncertainException` retain
+correlation, the actual request ID and an optional observed receipt without declaring success or
+rollback. They are runtime exceptions, not portable metadata roots. Their presence does not
+implement dispatch tracking, automatic retries, reconciliation or paid cache creation.
+
 ### Tool output
 
 `LlmAgentClientToolDefinition` is a closed function/shell data union. The existing

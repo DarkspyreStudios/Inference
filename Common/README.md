@@ -28,6 +28,10 @@ least-common-denominator replacement for implementation management.
 
 ## JSON metadata
 
+`LlmExplicitCacheReference` carries a native cache resource name, model, opaque scope and optional
+observed expiry. `InferenceJson.LlmExplicitCacheReference` exports its data-only metadata. The
+reference grants no authority and is not yet a generation-request selection.
+
 `LlmClientToolDefinition`, `LlmClientToolCall` and `LlmClientToolResult` are closed
 function/shell data unions. Existing function record names and constructors remain intact.
 Shell data preserves ordered commands and outputs, nullable raw 64-bit timeout milliseconds,
