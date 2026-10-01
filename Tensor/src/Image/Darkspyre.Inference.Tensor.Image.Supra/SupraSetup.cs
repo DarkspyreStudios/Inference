@@ -13,12 +13,13 @@ public static class SupraSetup
     /// <summary>Creates the settings manager for Supra packs over the host's pack manager and optional live instance.</summary>
     public static TensorSettingsManager CreateSettingsManager(ISetupCommitTarget<TensorSetupChanges> target,
         ITensorModelPackManager packs, ITensorImageInference? instance = null,
-        IReadOnlyList<TensorModelPackDefinition>? offeredModels = null, ITensorModelSource? source = null, ITensorArtifactReader? reader = null)
+        IReadOnlyList<TensorModelPackDefinition>? offeredModels = null, ITensorModelSource? source = null, ITensorArtifactReader? reader = null,
+        ITensorBackendProbe? backendProbe = null)
     {
         IReadOnlyList<TensorModelPackDefinition> models = offeredModels ?? [TensorImageModels.Supra2Image];
         foreach (TensorModelPackDefinition model in models) { SupraModelCompatibility.Validate(model); }
         return new(Definition, target, models, packs, instance,
-            TensorBackendProbes.CpuCuda(global::TensorSharp.Cuda.CudaBackend.IsAvailable),
+            backendProbe ?? TensorBackendProbes.CpuCuda(global::TensorSharp.Cuda.CudaBackend.IsAvailable),
             new SupraModelResolver(source, reader));
     }
 }

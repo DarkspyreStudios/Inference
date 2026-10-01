@@ -80,8 +80,10 @@ public interface ITensorEngineProvider
     /// <summary>
     /// Creates the engine's settings manager through its existing setup factory. The live instance is
     /// optional; a supplied instance must belong to this implementation and capability.
+    /// A supplied backend probe replaces the local probe. Probe creation does not load native code;
+    /// only the explicit backend-check action invokes it. The manager borrows the probe.
     /// </summary>
     TensorSettingsManager CreateSettingsManager(ISetupCommitTarget<TensorSetupChanges> target, ITensorModelPackManager packs,
         IReadOnlyList<TensorModelPackDefinition> offeredModels, ITensorModelInstance? instance = null,
-        ITensorModelSource? source = null, ITensorArtifactReader? reader = null);
+        ITensorModelSource? source = null, ITensorArtifactReader? reader = null, ITensorBackendProbe? backendProbe = null);
 }

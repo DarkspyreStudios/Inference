@@ -172,10 +172,14 @@ A provider exposes four operations:
   `ITensorLlmInference`, `ITensorImageInference`, `ITensorDecisionInference` or
   `ITensorSpeechToTextInference`. Creation does not Start, Load or download anything. The engines'
   public constructors remain available for compositions that supply their own coordinator.
-- `CreateSettingsManager(target, packs, offeredModels, instance, source, reader)` delegates to the
+- `CreateSettingsManager(target, packs, offeredModels, instance, source, reader, backendProbe)` delegates to the
   engine's `*Setup.CreateSettingsManager`. The instance is optional. A supplied instance must
   implement the engine's capability interface and report the provider's implementation ID;
-  otherwise the call throws `ArgumentException`.
+  otherwise the call throws `ArgumentException`. The final optional `ITensorBackendProbe` replaces
+  the local probe. The setup factories accept the same optional parameter. The manager borrows the
+  probe and invokes it only through the explicit backend-check action. Opening, editing and browsing
+  settings never invoke it. An injected probe's failure or cancellation never falls back to a local
+  native check. Passing null retains the engine's lazy local probe.
 
 `TensorEngineRegistry` (`Darkspyre.Inference.Tensor.Registry`) takes every registered provider and
 reads each definition once. It rejects a missing provider or definition, two providers with the

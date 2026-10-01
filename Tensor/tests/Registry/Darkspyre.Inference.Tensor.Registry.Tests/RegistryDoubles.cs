@@ -65,8 +65,8 @@ internal sealed class SyntheticLlmProvider : ITensorEngineProvider
 
     public TensorSettingsManager CreateSettingsManager(ISetupCommitTarget<TensorSetupChanges> target, ITensorModelPackManager packs,
         IReadOnlyList<TensorModelPackDefinition> offeredModels, ITensorModelInstance? instance = null,
-        ITensorModelSource? source = null, ITensorArtifactReader? reader = null) =>
-        new(Definition.Setup, target, offeredModels, packs, instance);
+        ITensorModelSource? source = null, ITensorArtifactReader? reader = null, ITensorBackendProbe? backendProbe = null) =>
+        new(Definition.Setup, target, offeredModels, packs, instance, backendProbe);
 }
 
 /// <summary>A provider whose definition is set by the test, for collision checks.</summary>
@@ -81,7 +81,7 @@ internal sealed class StubProvider(TensorEngineDefinition? definition) : ITensor
 
     public TensorSettingsManager CreateSettingsManager(ISetupCommitTarget<TensorSetupChanges> target, ITensorModelPackManager packs,
         IReadOnlyList<TensorModelPackDefinition> offeredModels, ITensorModelInstance? instance = null,
-        ITensorModelSource? source = null, ITensorArtifactReader? reader = null) => throw new NotSupportedException();
+        ITensorModelSource? source = null, ITensorArtifactReader? reader = null, ITensorBackendProbe? backendProbe = null) => throw new NotSupportedException();
 
     public static StubProvider Create(string id, string storeKey, InferenceTask task = InferenceTask.TextGeneration, int displayOrder = 0) =>
         new(new(new(new(id, id, InferenceImplementationKind.Tensor, task), "Stub", displayOrder), storeKey));

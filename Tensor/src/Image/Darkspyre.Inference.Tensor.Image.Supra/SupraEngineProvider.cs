@@ -25,7 +25,7 @@ public sealed class SupraEngineProvider : ITensorEngineProvider
 
     public TensorSettingsManager CreateSettingsManager(ISetupCommitTarget<TensorSetupChanges> target, ITensorModelPackManager packs,
         IReadOnlyList<TensorModelPackDefinition> offeredModels, ITensorModelInstance? instance = null,
-        ITensorModelSource? source = null, ITensorArtifactReader? reader = null)
+        ITensorModelSource? source = null, ITensorArtifactReader? reader = null, ITensorBackendProbe? backendProbe = null)
     {
         ArgumentNullException.ThrowIfNull(offeredModels);
         ITensorImageInference? live = instance switch
@@ -34,6 +34,6 @@ public sealed class SupraEngineProvider : ITensorEngineProvider
             ITensorImageInference image when image.Descriptor.Id == Definition.Setup.Implementation.Id => image,
             _ => throw new ArgumentException("The instance does not belong to the Supra implementation.", nameof(instance))
         };
-        return SupraSetup.CreateSettingsManager(target, packs, live, offeredModels, source, reader);
+        return SupraSetup.CreateSettingsManager(target, packs, live, offeredModels, source, reader, backendProbe);
     }
 }

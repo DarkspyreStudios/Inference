@@ -13,10 +13,11 @@ public static class QwenSetup
     /// <summary>Creates the settings manager for Qwen packs over the host's pack manager and optional live instance.</summary>
     public static TensorSettingsManager CreateSettingsManager(ISetupCommitTarget<TensorSetupChanges> target,
         ITensorModelPackManager packs, ITensorLlmInference? instance = null,
-        IReadOnlyList<TensorModelPackDefinition>? offeredModels = null, ITensorModelSource? source = null, ITensorArtifactReader? reader = null)
+        IReadOnlyList<TensorModelPackDefinition>? offeredModels = null, ITensorModelSource? source = null, ITensorArtifactReader? reader = null,
+        ITensorBackendProbe? backendProbe = null)
     {
         IReadOnlyList<TensorModelPackDefinition> models = offeredModels ?? [TensorLlmModels.Qwen3FourBillionQ4Km];
         foreach (TensorModelPackDefinition model in models) { QwenModelCompatibility.Validate(model); }
-        return new(Definition, target, models, packs, instance, new QwenBackendProbe(), new QwenModelResolver(source, reader));
+        return new(Definition, target, models, packs, instance, backendProbe ?? new QwenBackendProbe(), new QwenModelResolver(source, reader));
     }
 }
