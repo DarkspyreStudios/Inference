@@ -27,6 +27,8 @@ public sealed class VertexBreadthTests
     [Theory]
     [InlineData("google/gemini-3.1-pro-preview", LlmReasoningLevel.Medium)]
     [InlineData("google/gemini-2.5-flash", LlmReasoningLevel.Low)]
+    [InlineData("google/gemini-3-flash-future", LlmReasoningLevel.Medium)]
+    [InlineData("google/gemini-3-flash-preview-unproven", LlmReasoningLevel.Medium)]
     [InlineData("anthropic/claude-opus-4-7@20260101", LlmReasoningLevel.ExtraHigh)]
     public void SharedProfilesAcceptModelsOutsideTheOriginalPair(string model, LlmReasoningLevel level)
     {
@@ -71,7 +73,7 @@ public sealed class VertexBreadthTests
         using var http = new HttpClient(handler);
         var client = new VertexLlmClient(http, new Authentication());
         var models = await client.ListModelsAsync(Standard with { Vertex = Standard.Vertex! with { Location = "us-central1" } });
-        Assert.Equal(partnerStatus == HttpStatusCode.OK ? 3 : 2, models.Count);
+        Assert.Equal(partnerStatus == HttpStatusCode.OK ? 5 : 4, models.Count);
         Assert.All(models, model => Assert.Equal(LlmModelAvailability.Unknown, model.Availability));
         var pro = models.Single(model => model.Id == "google/gemini-3.1-pro-preview");
         Assert.Null(pro.MaxContextTokens);
@@ -80,6 +82,12 @@ public sealed class VertexBreadthTests
         var flash = models.Single(model => model.Id == "google/gemini-3-flash-preview");
         Assert.Equal(1_048_576, flash.MaxContextTokens);
         Assert.Equal(65_536, flash.MaxOutputTokens);
+        foreach (string id in new[] { "google/gemini-3-flash-future", "google/gemini-3-flash-preview-unproven" })
+        {
+            var unproven = models.Single(model => model.Id == id);
+            Assert.Null(unproven.MaxContextTokens);
+            Assert.Null(unproven.MaxOutputTokens);
+        }
         Assert.Equal(3, handler.Uris.Count);
         Assert.Contains("pageToken=page%2Btwo", handler.Uris[1].Query, StringComparison.Ordinal);
     }
@@ -135,17 +143,43 @@ public sealed class VertexBreadthTests
         Assert.Equal("vertex-2023-10-16", (string?)payload["anthropic_version"]);
     }
 
-    [Fact]
-    public async Task OnlyDocumentedOutputLimitsGateRequests()
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task OnlyDocumentedOutputLimitsGateRequests(bool stream)
     {
         using var handler = new Handler();
         using var http = new HttpClient(handler);
         var client = new VertexLlmClient(http, new Authentication());
-        await Assert.ThrowsAsync<ArgumentException>(() => Complete(client, Standard,
+        var connection = Standard with { CapabilityOverrides = new() { SupportsStreaming = stream } };
+        await Assert.ThrowsAsync<ArgumentException>(() => Complete(client, connection,
             new() { ModelId = "google/gemini-3-flash-preview", MaxOutputTokens = 65_537 }));
         Assert.Empty(handler.Uris);
-        await Complete(client, Standard, new() { ModelId = "google/gemini-future-text", MaxOutputTokens = 1_000_000 });
-        Assert.Single(handler.Uris);
+        await Complete(client, connection, new() { ModelId = "google/gemini-3-flash-preview", MaxOutputTokens = 65_536 });
+        Assert.Equal(65_536, (int?)JsonNode.Parse(Assert.Single(handler.Bodies))!["generationConfig"]?["maxOutputTokens"]);
+        await Complete(client, connection, new() { ModelId = "google/gemini-future-text", MaxOutputTokens = 1_000_000 });
+        Assert.Equal(2, handler.Uris.Count);
+    }
+
+    [Theory]
+    [InlineData("google/gemini-3-flash-future", true)]
+    [InlineData("google/gemini-3-flash-future", false)]
+    [InlineData("google/gemini-3-flash-preview-unproven", true)]
+    [InlineData("google/gemini-3-flash-preview-unproven", false)]
+    public async Task SamePrefixUnprovenModelsHaveNoInventedOutputCap(string model, bool stream)
+    {
+        using var handler = new Handler();
+        using var http = new HttpClient(handler);
+        var client = new VertexLlmClient(http, new Authentication());
+        var connection = Standard with { CapabilityOverrides = new() { SupportsStreaming = stream } };
+        LlmChatResult result = await Complete(client, connection, new()
+        { ModelId = model, MaxOutputTokens = 65_537, ReasoningLevel = LlmReasoningLevel.Medium });
+        Assert.Equal(LlmCompletionStatus.Completed, result.Status);
+        Uri uri = Assert.Single(handler.Uris);
+        Assert.Contains("/models/" + model.Split('/')[1] + ":", uri.AbsolutePath, StringComparison.Ordinal);
+        JsonNode payload = JsonNode.Parse(Assert.Single(handler.Bodies))!;
+        Assert.Equal(65_537, (int?)payload["generationConfig"]?["maxOutputTokens"]);
+        Assert.Equal("MEDIUM", (string?)payload["generationConfig"]?["thinkingConfig"]?["thinkingLevel"]);
     }
 
     [Theory]
@@ -312,7 +346,7 @@ public sealed class VertexBreadthTests
                 string catalog = partner
                     ? """{"publisherModels":[{"name":"publishers/anthropic/models/claude-opus-4-7@20260101","launchStage":"GA"}]}"""
                     : request.RequestUri.Query.Contains("pageToken", StringComparison.Ordinal)
-                        ? """{"publisherModels":[{"name":"publishers/google/models/gemini-3-flash-preview","launchStage":"GA"}]}"""
+                        ? """{"publisherModels":[{"name":"publishers/google/models/gemini-3-flash-preview","launchStage":"GA"},{"name":"publishers/google/models/gemini-3-flash-future"},{"name":"publishers/google/models/gemini-3-flash-preview-unproven"}]}"""
                         : """{"publisherModels":[{"name":"publishers/google/models/gemini-3.1-pro-preview","versionId":"7","launchStage":"PUBLIC_PREVIEW"},{"name":"publishers/google/models/gemini-3.1-flash-image-preview"}],"nextPageToken":"page+two"}""";
                 return Json(catalog);
             }

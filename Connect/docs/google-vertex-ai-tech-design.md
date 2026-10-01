@@ -19,8 +19,9 @@ No paid/live inference calls were used.
 
 Gemini text and Claude model IDs use the shared Gemini and Anthropic profiles. The adapter has no
 two-model or regional allowlist. Gemini TTS, image, live, native-audio and embedding models are excluded
-from this text-chat adapter. Gemini 3 Flash's documented limits are 1,048,576 input and 65,536 output
-tokens. Other unavailable limits remain null. Claude's catalog-free strict-schema evidence remains
+from this text-chat adapter. The native `gemini-3-flash-preview` ID has documented limits of
+1,048,576 input and 65,536 output tokens. Other unavailable limits remain null, including unproven
+same-prefix variants. Claude's catalog-free strict-schema evidence remains
 Unknown; ordinary non-strict tools work independently, and explicit schema capability overrides are
 supported. Discovery uses `v1beta1/publishers/{publisher}/models`, paginates both publishers and filters
 to text-chat families. Returned availability stays Unknown. Google.Apis.Auth 1.76.0 owns token

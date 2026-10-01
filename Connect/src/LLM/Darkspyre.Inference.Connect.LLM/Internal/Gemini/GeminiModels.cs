@@ -7,7 +7,7 @@ internal static class GeminiModels
     internal static bool IsTextChat(string modelId) => modelId.StartsWith("gemini-", StringComparison.Ordinal)
         && !NonTextMarkers.Any(marker => modelId.Contains(marker, StringComparison.Ordinal));
 
-    // Vertex's Gemini 3 Flash model card states these limits. Unknown families retain unknown limits.
+    // The model card establishes limits for this native ID, not every same-prefix variant.
     internal static (long? Context, int? Output) VertexLimits(string modelId) =>
-        modelId.StartsWith("gemini-3-flash", StringComparison.Ordinal) ? (1_048_576, 65_536) : (null, null);
+        modelId == "gemini-3-flash-preview" ? (1_048_576, 65_536) : (null, null);
 }
