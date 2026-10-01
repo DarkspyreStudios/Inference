@@ -182,6 +182,33 @@ public sealed class ImageOperationTests
         Assert.Equal(0, transport.Disposals);
     }
 
+    [Fact]
+    public async Task EnteredBinaryBytesSurviveHeldBindingAcquisitionBeforeResolution()
+    {
+        byte[] bytes = [1, 2, 3];
+        var entered = new TaskCompletionSource();
+        var release = new TaskCompletionSource<LlmConnection?>();
+        var source = new XaiSource { ReadProvider = () => { entered.SetResult(); return release.Task; } };
+        await using var access = new LlmConnectionAccess(source, []);
+        var binding = new XaiFamilyBinding(new("chosen"), access);
+        var transport = new ImageTestTransport { Kind = ImageTransport.XaiImagine };
+        IImageInference inference = new ImageProviderService([transport]).Bind(
+            new() { Transport = ImageTransport.XaiImagine, Endpoint = "https://api.x.ai/v1", Xai = binding.Selection,
+                AdditionalHeaders = new Dictionary<string, string> { ["X-Test"] = "initial" } },
+            Workflow() with { Transport = ImageTransport.XaiImagine }, binding, pollInterval: TimeSpan.Zero);
+        try
+        {
+            Task pending = inference.GenerateAsync(Request() with { References = [new BinaryMediaSource(null, bytes)] });
+            await entered.Task.WaitAsync(Bound);
+            bytes[0] = 9;
+            release.SetResult(source.Current);
+            await pending.WaitAsync(Bound);
+            Assert.Equal(new byte[] { 1, 2, 3 }, Assert.Single(transport.ResolvedBinaryBytes));
+            Assert.Equal(1, source.Reads);
+        }
+        finally { await ((IAsyncDisposable)inference).DisposeAsync(); }
+    }
+
     internal static ImageConnection Connection() => new() { Transport = ImageTransport.ComfyUi, Endpoint = "http://provider.invalid" };
     internal static ImageWorkflow Workflow() => new() { Id = "workflow", Label = "Workflow", Transport = ImageTransport.ComfyUi, TransportConfiguration = JsonElement.Parse("{}") };
     internal static ImageGenerationRequest Request() => new() { ModelId = "workflow", Prompt = "draw" };
@@ -198,6 +225,9 @@ internal sealed class ImageTestTransport : IImageTransport, IDisposable
     public ImageTransport Kind { get; init; } = ImageTransport.ComfyUi;
     public XaiSource? ChangedSource { get; init; }
     public Dictionary<string, string>? CallerHeaders { get; set; }
+    public Func<Task>? CapabilityPause { get; init; }
+    public IImageTransport? ReferenceMaterializer { get; init; }
+    public List<byte[]> ResolvedBinaryBytes { get; } = [];
     public ImageTransportPreparationRequest? Prepared { get; private set; }
     public int Downloads { get; private set; }
     public int Cancellations { get; private set; }
@@ -212,6 +242,7 @@ internal sealed class ImageTestTransport : IImageTransport, IDisposable
         => throw new NotSupportedException();
     public async Task<ImageCapabilities> GetCapabilitiesAsync(ImageConnection connection, ImageWorkflow workflow, string? modelId = null, XaiFamilyBinding? xai = null, CancellationToken cancellationToken = default)
     {
+        if (CapabilityPause is not null) await CapabilityPause();
         await ObserveAsync(connection, xai);
         if (ChangedSource is not null) ChangedSource.Current = ChangedSource.Current with { Version = "v2", Endpoint = "https://us.api.x.ai/v1", Xai = new() { Region = XaiRegion.UnitedStates } };
         if (CallerHeaders is not null) CallerHeaders["X-Test"] = "changed";
@@ -223,7 +254,12 @@ internal sealed class ImageTestTransport : IImageTransport, IDisposable
     public Task<IImageTransportProgressConnection?> TryConnectProgressAsync(ImageConnection connection, XaiFamilyBinding? xai = null, CancellationToken cancellationToken = default) => Task.FromResult<IImageTransportProgressConnection?>(null);
     public Task<ImagePreparedReference> UploadReferenceAsync(ImageConnection connection, ImageReference reference, Stream content, XaiFamilyBinding? xai = null, CancellationToken cancellationToken = default) => throw new NotSupportedException();
     public async Task<ImagePreparedReference> ResolveReferenceAsync(ImageConnection connection, InferenceMediaSource source, XaiFamilyBinding? xai = null, IInferenceResourceAccess? resources = null, CancellationToken cancellationToken = default)
-    { await ObserveAsync(connection, xai); return new(new() { Id = Guid.NewGuid() }, new("owner", "identity"), JsonElement.Parse("{}")); }
+    {
+        await ObserveAsync(connection, xai);
+        if (source is BinaryMediaSource binary) ResolvedBinaryBytes.Add(binary.Data.ToArray());
+        if (ReferenceMaterializer is not null) return await ReferenceMaterializer.ResolveReferenceAsync(connection, source, xai, resources, cancellationToken);
+        return new(new() { Id = Guid.NewGuid() }, new("owner", "identity"), JsonElement.Parse("{}"));
+    }
     public async Task<string> SubmitAsync(ImageConnection connection, PreparedImageTransportRequest request, XaiFamilyBinding? xai = null, CancellationToken cancellationToken = default)
     { await ObserveAsync(connection, xai); return "job"; }
     public async Task<ImageTransportJobSnapshot> GetJobAsync(ImageConnection connection, string providerJobId, ImageWorkflow workflow, XaiFamilyBinding? xai = null, CancellationToken cancellationToken = default)
@@ -252,7 +288,8 @@ internal sealed class XaiSource : ILlmConnectionSource, IDisposable
     public int Reads { get; private set; }
     public int Saves { get; private set; }
     public int Disposals { get; private set; }
-    public Task<LlmConnection?> GetConnectionAsync(string connectionId, CancellationToken cancellationToken = default) { Reads++; return Task.FromResult<LlmConnection?>(Current); }
+    public Func<Task<LlmConnection?>>? ReadProvider { get; init; }
+    public Task<LlmConnection?> GetConnectionAsync(string connectionId, CancellationToken cancellationToken = default) { Reads++; return ReadProvider?.Invoke() ?? Task.FromResult<LlmConnection?>(Current); }
     public Task SaveCredentialAsync(string connectionId, string credential, string expectedVersion, CancellationToken cancellationToken = default) { Saves++; return Task.CompletedTask; }
     public void Dispose() => Disposals++;
 }
