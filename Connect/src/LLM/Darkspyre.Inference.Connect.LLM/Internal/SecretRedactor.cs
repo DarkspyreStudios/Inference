@@ -21,6 +21,7 @@ internal static class SecretRedactor
         "session_token",
         "device_code",
         "user_code",
+        "encrypted_content",
         "secret_access_key"
     ];
 
@@ -83,12 +84,38 @@ internal static class SecretRedactor
         try
         {
             JsonNode? root = JsonNode.Parse(body);
+            secrets = secrets.Concat(NamedSecrets(root)).Distinct(StringComparer.Ordinal)
+                .OrderByDescending(value => value.Length).ToArray();
             root = RedactNode(root, secrets);
             return root?.ToJsonString(new JsonSerializerOptions(JsonSerializerDefaults.Web));
         }
         catch (JsonException)
         {
-            return null;
+            // A truncated JSON envelope can contain a secret whose value cannot be located safely.
+            string prefix = body.TrimStart();
+            return prefix.StartsWith('{') || prefix.StartsWith('[') || prefix.StartsWith('"')
+                ? "Provider returned invalid JSON." : null;
+        }
+    }
+
+    private static IEnumerable<string> NamedSecrets(JsonNode? node, bool sensitive = false)
+    {
+        switch (node)
+        {
+            case JsonObject objectNode:
+                foreach ((string name, JsonNode? value) in objectNode)
+                    foreach (string secret in NamedSecrets(value, sensitive || SensitiveNameFragments.Any(fragment =>
+                                 name.Contains(fragment, StringComparison.OrdinalIgnoreCase))))
+                        yield return secret;
+                break;
+            case JsonArray arrayNode:
+                foreach (JsonNode? value in arrayNode)
+                    foreach (string secret in NamedSecrets(value, sensitive)) yield return secret;
+                break;
+            case JsonValue valueNode when sensitive && valueNode.TryGetValue(out string? value)
+                && !string.IsNullOrWhiteSpace(value):
+                yield return value;
+                break;
         }
     }
 

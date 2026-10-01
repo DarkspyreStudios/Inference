@@ -1092,8 +1092,20 @@ entitlement failure (`AccessDenied`). Unknown 403 responses remain provider erro
 403 matching is not implemented or live-qualified. Errors never trigger a retry or refresh.
 Named authentication and entitlement failures clear the setup device attempt without saving a credential.
 
+The shared Responses pipeline retains xAI output as an ordered deep clone, including hosted-tool
+items and encrypted metadata. Continuation is bound to the transport, endpoint, account and model;
+token rotation on the same account does not break that binding. The terminal output is authoritative,
+including an empty array. Function completions use terminal calls, and a call without streamed arguments
+still emits its arguments once. Known terminal statuses map to completion, action, refusal, failure or
+incomplete results. The [xAI response schema](https://docs.x.ai/developers/rest-api-reference/inference/responses)
+names `max_output_tokens`, `max_prompt_tokens` and `max_time_limit`; each maps to `Incomplete`.
+Unknown statuses and incomplete reasons map to `Unknown`. Context exhaustion returns
+`Incomplete` without retrying. Encrypted context stays opaque; diagnostics redact its named values and
+reflections, and malformed JSON does not retain a parser exception containing provider text.
+
 `AddLlmConnect` does not register a Grok provider, authenticator or runtime client. The protocol
-implementation and setup contracts are not an enabled or live-qualified chat adapter.
+implementation, shared response handling and setup contracts are not a concrete, enabled or
+live-qualified chat adapter.
 The region and tier premiums follow [xAI pricing](https://docs.x.ai/developers/pricing).
 
 `ImageProviderService.SetupDefinitions` and `CreateSettingsManager` provide the same editing surface for

@@ -209,6 +209,9 @@ The xAI connection contract supplies `XaiResponses`, typed region/tier options, 
 and OAuth-only draft setup and sign-in routing. The internal authenticator implements the device
 protocol, refresh and `/v1/me`; the HTTP classifier does not yet recognize subscription-specific
 403 responses. `AddLlmConnect` does not register a Grok provider or authenticator.
+The shared Responses pipeline handles terminal-authoritative output and function completion,
+account-bound opaque replay, context-exhaustion results and encrypted-context diagnostic redaction.
+There is no concrete xAI chat adapter.
 [Connect's setup contract](../Connect/README.md#provider-setup-and-editing) describes this unregistered
 boundary; it is not an additional completed or live-qualified provider in the table below.
 

@@ -267,7 +267,10 @@ continuation and facade interactive sign-in use the same expiry/interval/slow-do
 `XaiAuthenticator` implements the device grant, token refresh and one `/v1/me` check. The shared
 `XaiErrorClassifier` sanitizes errors; subscription-specific 403 matching remains unqualified and is
 not implemented. No xAI client or authenticator is registered by `AddLlmConnect`, so this contract
-does not add an enabled provider to the table above.
+does not add an enabled provider to the table above. The shared Responses pipeline retains ordered
+xAI output verbatim, binds replay to the account/endpoint/model, uses terminal output for function
+completion and maps context exhaustion to an incomplete result. Encrypted replay data remains opaque
+and is redacted from diagnostics. This shared handling is not a concrete xAI chat adapter.
 
 ComfyUI setup edits endpoint, timeout, protected headers and workflow selection. An
 `IImageWorkflowChoiceSource` supplied by the host provides paged/searchable workflow identities and
