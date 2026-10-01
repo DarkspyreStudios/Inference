@@ -19,6 +19,9 @@ public sealed class ConnectLlmJsonTests
     private const string ConnectionJson = "{\"Version\":\"1\",\"Transport\":0,\"Endpoint\":\"https://provider.invalid\"}";
     private const string ChatConfigurationJson = "{\"OutputLimitField\":1,\"UsePromptCacheKey\":false}";
     private const string ChatConnectionJson = "{\"Version\":\"1\",\"Transport\":0,\"Endpoint\":\"https://provider.invalid\",\"ChatCompletions\":" + ChatConfigurationJson + "}";
+    private const string VertexAdcJson = "{\"ProjectId\":\"project\",\"Location\":\"us-east5\",\"AuthenticationMode\":0}";
+    private const string VertexServiceAccountJson = "{\"ProjectId\":\"project\",\"Location\":\"global\",\"AuthenticationMode\":1}";
+    private const string VertexExpressJson = "{\"ProjectId\":null,\"Location\":null,\"AuthenticationMode\":2}";
     private const string StateJson = "{\"FormatVersion\":2,\"ImplementationId\":\"fixture\",\"ModelId\":\"model\",\"ScopeId\":\"scope\",\"Payload\":\"opaque\"}";
     private const string MessageJson = "{\"Role\":\"user\",\"Content\":\"text\",\"Attachments\":[{\"Kind\":0,\"FileName\":\"image.png\",\"Data\":\"AQID\"}],\"ToolResults\":[{\"ToolCallId\":\"call\",\"Output\":{\"Parts\":[{\"type\":\"text\",\"Text\":\"text\"},{\"type\":\"binary\",\"Kind\":2,\"MediaType\":\"audio/wav\",\"Data\":\"BA==\"},{\"type\":\"resource\",\"Uri\":\"urn:test\",\"Data\":\"\"}]}}]}";
     private const string EntryJson = "{\"Id\":\"entry\",\"TurnId\":\"turn\",\"Message\":" + MessageJson + "}";
@@ -175,13 +178,41 @@ public sealed class ConnectLlmJsonTests
         }
     }
 
+    [Theory]
+    [InlineData(VertexAdcJson)]
+    [InlineData(VertexServiceAccountJson)]
+    [InlineData(VertexExpressJson)]
+    public void ConnectionAndSetupMetadataRetainVertexScopeAndNumericAuthentication(string configuration)
+    {
+        LlmConnection connection = JsonSerializer.Deserialize(VertexConnectionJson(configuration), ConnectLlmJson.Connection)!;
+        Assert.Equal(LlmTransport.GoogleVertexAi, connection.Transport);
+        using JsonDocument written = JsonDocument.Parse(JsonSerializer.Serialize(connection, ConnectLlmJson.Connection));
+        Assert.Equal(configuration, written.RootElement.GetProperty("Vertex").GetRawText());
+        var setup = new LlmSetupConfiguration(connection, "google/gemini-3-flash-preview");
+        string setupJson = JsonSerializer.Serialize(setup, ConnectLlmJson.SetupConfiguration);
+        using JsonDocument setupWritten = JsonDocument.Parse(setupJson);
+        Assert.Equal(configuration, setupWritten.RootElement.GetProperty("Connection").GetProperty("Vertex").GetRawText());
+        LlmSetupConfiguration restored = JsonSerializer.Deserialize(setupJson, ConnectLlmJson.SetupConfiguration)!;
+        Assert.Equal(connection.Vertex, restored.Connection.Vertex);
+        Assert.Equal(setup.ModelId, restored.ModelId);
+    }
+
+    private static string VertexConnectionJson(string configuration) =>
+        "{\"Version\":\"1\",\"Transport\":11,\"Endpoint\":\"https://aiplatform.googleapis.com\",\"Vertex\":" + configuration + "}";
+
     public static TheoryData<string, string> CollectibleFamilies => new()
     {
         { "Credential", CredentialJson },
         { "Connection", ConnectionJson },
         { "Connection", ChatConnectionJson },
+        { "Connection", VertexConnectionJson(VertexAdcJson) },
+        { "Connection", VertexConnectionJson(VertexServiceAccountJson) },
+        { "Connection", VertexConnectionJson(VertexExpressJson) },
         { "SetupConfiguration", "{\"Connection\":" + ConnectionJson + ",\"ModelId\":\"model\"}" },
         { "SetupConfiguration", "{\"Connection\":" + ChatConnectionJson + ",\"ModelId\":\"model\"}" },
+        { "SetupConfiguration", "{\"Connection\":" + VertexConnectionJson(VertexAdcJson) + ",\"ModelId\":\"model\"}" },
+        { "SetupConfiguration", "{\"Connection\":" + VertexConnectionJson(VertexServiceAccountJson) + ",\"ModelId\":\"model\"}" },
+        { "SetupConfiguration", "{\"Connection\":" + VertexConnectionJson(VertexExpressJson) + ",\"ModelId\":\"model\"}" },
         { "ChatRequest", "{\"ModelId\":\"model\",\"Messages\":[" + MessageJson + "]}" },
         { "ChatResult", "{\"Text\":\"text\",\"Status\":0,\"ContinuationState\":" + StateJson + ",\"Diagnostics\":{\"HttpStatusCode\":200}}" },
         { "ChatMessage", MessageJson },
@@ -238,6 +269,17 @@ public sealed class ConnectLlmJsonTests
                 Assert.Equal(ChatConfigurationJson, connection.GetProperty("ChatCompletions").GetRawText());
                 object owningConnection = family == "Connection" ? value : value.GetType().GetProperty("Connection")!.GetValue(value)!;
                 object configuration = owningConnection.GetType().GetProperty("ChatCompletions")!.GetValue(owningConnection)!;
+                Assert.Same(connect, configuration.GetType().Assembly);
+            }
+            if (json.Contains("\"Vertex\"", StringComparison.Ordinal))
+            {
+                using JsonDocument original = JsonDocument.Parse(json);
+                using JsonDocument document = JsonDocument.Parse(written);
+                JsonElement expectedConnection = family == "Connection" ? original.RootElement : original.RootElement.GetProperty("Connection");
+                JsonElement connection = family == "Connection" ? document.RootElement : document.RootElement.GetProperty("Connection");
+                Assert.Equal(expectedConnection.GetProperty("Vertex").GetRawText(), connection.GetProperty("Vertex").GetRawText());
+                object owningConnection = family == "Connection" ? value : value.GetType().GetProperty("Connection")!.GetValue(value)!;
+                object configuration = owningConnection.GetType().GetProperty("Vertex")!.GetValue(owningConnection)!;
                 Assert.Same(connect, configuration.GetType().Assembly);
             }
             if (family == "ChatMessage")

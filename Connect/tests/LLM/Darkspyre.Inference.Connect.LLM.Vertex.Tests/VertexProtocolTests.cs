@@ -262,7 +262,7 @@ public sealed class VertexProtocolTests
             """{"type":"message_delta","delta":{"stop_reason":"end_turn"}}""",
             """{"type":"message_stop"}""");
         var client = new VertexLlmClient(new HttpClient(handler), new Authentication());
-        await Complete(client, Connection, new()
+        await Complete(client, Connection with { CapabilityOverrides = new() { SupportsJsonSchema = true } }, new()
         {
             ModelId = Claude,
             Messages = [new("user", "hello")],
@@ -384,7 +384,7 @@ public sealed class VertexProtocolTests
     }
 
     [Fact]
-    public async Task CatalogPaginationKeepsAccessUnknownAndFiltersUnreviewedModels()
+    public async Task CatalogPaginationKeepsAccessUnknownAndFiltersNonChatModels()
     {
         var handler = new Handler();
         handler.CatalogReplies.Enqueue("""{"publisherModels":[{"name":"publishers/google/models/unreviewed"}],"nextPageToken":"page+2"}""");
@@ -667,7 +667,7 @@ public sealed class VertexProtocolTests
     [InlineData(true, false)]
     [InlineData(false, true)]
     [InlineData(false, false)]
-    public async Task QualifiedClaudeProfileKeepsItsRequestAndSignedStateWithDisplayDisabled(bool streaming, bool display)
+    public async Task SharedClaudeProfileKeepsItsRequestAndSignedStateWithDisplayDisabled(bool streaming, bool display)
     {
         string[] reply = streaming
             ? ["""{"type":"message_start","message":{"id":"m"}}""",

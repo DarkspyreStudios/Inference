@@ -5,75 +5,66 @@ using Darkspyre.Inference.Connect.LLM.Providers;
 
 namespace Darkspyre.Inference.Connect.LLM.Vertex;
 
-/// <summary>Explicitly reviewed model profiles; catalog membership never grants a future model these capabilities.</summary>
-internal sealed record VertexModelProfile(string Id, long ContextTokens, int OutputTokens, IReadOnlySet<string> Locations,
-    IReadOnlySet<LlmReasoningLevel> ReasoningLevels)
+internal sealed record VertexModelProfile(string Id, long? ContextTokens, int? OutputTokens, LlmProviderCapabilities Capabilities)
 {
     public bool IsClaude => Id.StartsWith("anthropic/", StringComparison.Ordinal);
-    public LlmProviderCapabilities Capabilities => IsClaude ? ClaudeCapabilities
-        : GeminiCapabilities.Create(GeminiModelProfiles.Get(Id["google/".Length..], null), supportsTopK: true) with { ReasoningLevels = ReasoningLevels };
-
-    private LlmProviderCapabilities ClaudeCapabilities
-    {
-        get
-        {
-            LlmRichContentSupported rich = RichContentRoutes.Anthropic with { MaxBinaryBytes = 5 * 1024 * 1024 };
-            bool allowsSampling = AnthropicModelProfiles.Resolve(Id["anthropic/".Length..], null).AllowsSampling;
-            return new()
-            {
-                SupportsStreaming = true,
-                SupportsReasoningText = true,
-                SupportsStreamingUsage = true,
-                SupportsUsageDeltas = true,
-                SupportsModelListing = true,
-                OutputLimitEnforcement = LlmOutputLimitEnforcement.ProviderEnforced,
-                SupportsJsonSchema = true,
-                SupportsTemperature = allowsSampling,
-                SupportsTopP = allowsSampling,
-                SupportsTopK = allowsSampling,
-                MaxStopSequences = int.MaxValue,
-                SupportsToolUse = true,
-                Tools = new()
-                {
-                    ChoiceModes = Enum.GetValues<LlmToolChoiceMode>().ToFrozenSet(),
-                    StrictInputSchema = LlmStrictInputSchemaSupport.Supported,
-                    SupportsParallelCalls = true,
-                    SupportsParallelCallControl = true,
-                    SupportsArgumentStreaming = true
-                },
-                ReasoningLevels = ReasoningLevels,
-                SupportsPromptImages = true,
-                SupportsPromptDocuments = true,
-                RichContentSupported = rich,
-                SupportsAgentSessions = true,
-                SupportsAgentToolUse = true,
-                SupportsAgentTurnInstructions = true,
-                Agent = ManagedAgentPolicy.Capabilities with { RichContentSupported = rich }
-            };
-        }
-    }
+    public IReadOnlySet<LlmReasoningLevel> ReasoningLevels => Capabilities.ReasoningLevels;
 }
 
 internal static class VertexModelProfiles
 {
-    // Limits and locations are documented qualification, not evidence of this project's access.
-    public static IReadOnlyList<VertexModelProfile> All { get; } =
-    [
-        new("google/gemini-3-flash-preview", 1_048_576, 65_536,
-            new[] { "global" }.ToFrozenSet(StringComparer.Ordinal),
-            GeminiModelProfiles.Get("gemini-3-flash-preview", catalogThinking: null).Levels),
-        new("anthropic/claude-sonnet-4-6", 1_000_000, 128_000,
-            new[] { "global", "us-east5", "europe-west1", "asia-southeast1" }.ToFrozenSet(StringComparer.Ordinal),
-            new[] { LlmReasoningLevel.None, LlmReasoningLevel.Low, LlmReasoningLevel.Medium, LlmReasoningLevel.High }.ToFrozenSet())
-    ];
-
-    public static VertexModelProfile Get(string modelId, string location)
+    public static VertexModelProfile Get(string modelId)
     {
-        _ = VertexEndpoints.ParseModel(modelId);
-        VertexModelProfile profile = All.SingleOrDefault(model => model.Id == modelId)
-            ?? throw new NotSupportedException("This Vertex model has no qualified Connect profile.");
-        if (!profile.Locations.Contains(location))
-        { throw new NotSupportedException("The selected Vertex model is not qualified in this location."); }
-        return profile;
+        var (publisher, model) = VertexEndpoints.ParseModel(modelId);
+        if (publisher == "google" && GeminiModels.IsTextChat(model))
+        {
+            var (context, output) = GeminiModels.VertexLimits(model);
+            return new(modelId, context, output,
+                GeminiCapabilities.Create(GeminiModelProfiles.Get(model, catalogThinking: null), supportsTopK: true));
+        }
+        if (publisher != "anthropic" || !model.StartsWith("claude-", StringComparison.Ordinal))
+            throw new NotSupportedException("Vertex serves google/gemini-* and anthropic/claude-* text models.");
+
+        AnthropicModelProfile profile = AnthropicModelProfiles.Resolve(model.Split('@')[0], null);
+        LlmRichContentSupported rich = RichContentRoutes.Anthropic with { MaxBinaryBytes = 5 * 1024 * 1024 };
+        var capabilities = new LlmProviderCapabilities
+        {
+            SupportsStreaming = true,
+            SupportsReasoningText = true,
+            SupportsStreamingUsage = true,
+            SupportsUsageDeltas = true,
+            SupportsModelListing = true,
+            OutputLimitEnforcement = LlmOutputLimitEnforcement.ProviderEnforced,
+            SupportsJsonSchema = profile.SupportsStructuredOutputs == true,
+            SupportsTemperature = profile.AllowsSampling,
+            SupportsTopP = profile.AllowsSampling,
+            SupportsTopK = profile.AllowsSampling,
+            MaxStopSequences = int.MaxValue,
+            SupportsToolUse = true,
+            Tools = new()
+            {
+                ChoiceModes = Enum.GetValues<LlmToolChoiceMode>()
+                    .Where(mode => profile.AllowsForcedToolChoice || mode is not (LlmToolChoiceMode.Required or LlmToolChoiceMode.Specific)).ToFrozenSet(),
+                StrictInputSchema = profile.SupportsStructuredOutputs switch
+                {
+                    true => LlmStrictInputSchemaSupport.Supported,
+                    false => LlmStrictInputSchemaSupport.Unsupported,
+                    null => LlmStrictInputSchemaSupport.Unknown
+                },
+                SupportsParallelCalls = true,
+                SupportsParallelCallControl = true,
+                SupportsArgumentStreaming = true
+            },
+            ReasoningLevels = profile.ReasoningLevels,
+            SupportsPromptImages = true,
+            SupportsPromptDocuments = true,
+            RichContentSupported = rich,
+            SupportsAgentSessions = true,
+            SupportsAgentToolUse = true,
+            SupportsAgentTurnInstructions = true,
+            Agent = ManagedAgentPolicy.Capabilities with { RichContentSupported = rich }
+        };
+        return new(modelId, profile.MaxInputTokens,
+            profile.MaxOutputTokens is > 0 and <= int.MaxValue ? (int)profile.MaxOutputTokens.Value : null, capabilities);
     }
 }

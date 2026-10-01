@@ -19,6 +19,8 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
     private const string AnthropicVersion = "2023-06-01";
     private const int DefaultMaxOutputTokens = 8192;
     private const int ModelPageSize = 1000;
+    private static readonly string[] CountExcludedFields =
+        ["max_tokens", "stream", "temperature", "top_p", "top_k", "stop_sequences", "service_tier", "anthropic_version"];
 
     public AnthropicMessagesLlmClient(HttpClient http) : base(http)
     {
@@ -119,16 +121,28 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
         CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        ValidateTokenCountOptions(connection, request);
         _ = ValidateMessagesRequest(connection, request);
         JsonObject payload = BuildPayload(connection, request, output => ProjectToolOutput(connection, request.ModelId, output), false);
         // Count APIs exclude generation-only controls; every prompt-bearing field remains unchanged.
-        foreach (string name in new[] { "max_tokens", "stream", "temperature", "top_p", "top_k", "stop_sequences", "service_tier", "anthropic_version" })
+        foreach (string name in CountExcludedFields)
             payload.Remove(name);
-        if (payload.Any(field => field.Key is not ("model" or "messages" or "system" or "tools" or "tool_choice" or "thinking" or "output_config" or "cache_control")))
+        if (payload.Any(field => !IsTokenCountField(field.Key)))
             throw new NotSupportedException("The Anthropic count API cannot represent one of the configured provider fields.");
         using HttpRequestMessage message = CreateTokenCountRequest(connection, request, payload);
         return await ProviderTokenCounting.SendAsync(Http, message, Transport, request.ModelId, true, cancellationToken).ConfigureAwait(false);
     }
+
+    internal static void ValidateTokenCountOptions(LlmConnection connection, LlmChatRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (connection.ProviderOptions.Keys.Concat(request.ProviderOptions.Keys).Any(name => name != AnthropicTools.OptionName
+            && !IsTokenCountField(name) && !CountExcludedFields.Contains(name, StringComparer.Ordinal)))
+            throw new NotSupportedException("The Anthropic count API cannot represent one of the configured provider fields.");
+    }
+
+    private static bool IsTokenCountField(string name) => name is
+        "model" or "messages" or "system" or "tools" or "tool_choice" or "thinking" or "output_config" or "cache_control";
 
     public override async IAsyncEnumerable<LlmStreamEvent> StreamAsync(
         LlmConnection connection,

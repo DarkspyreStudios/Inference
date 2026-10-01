@@ -67,11 +67,15 @@ internal static class ConsoleSetup
         }
         if (invocation.Vertex is { } google)
         {
+            var authentication = settings.Steps.SelectMany(step => step.Sections).SelectMany(section => section.Fields)
+                .OfType<SetupChoiceField>().Single(field => field.Description.Id == "google-authentication");
+            _ = authentication.SetValue(google.AuthenticationMode.ToString());
+            if (google.AuthenticationMode == LlmGoogleAuthenticationMode.ApiKey) return (manager, settings);
             foreach (var (id, value) in new[] { ("google-project", google.ProjectId), ("google-location", google.Location) })
             {
                 var field = settings.Steps.SelectMany(step => step.Sections).SelectMany(section => section.Fields)
                     .OfType<SetupTextField>().Single(field => field.Description.Id == id);
-                _ = field.SetValue(value);
+                _ = field.SetValue(value ?? string.Empty);
             }
         }
         return (manager, settings);

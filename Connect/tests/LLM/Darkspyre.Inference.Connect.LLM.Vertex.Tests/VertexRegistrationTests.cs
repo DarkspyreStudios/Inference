@@ -98,6 +98,35 @@ public sealed class VertexRegistrationTests
     private static T Field<T>(LlmSettings settings, string id) where T : SetupField =>
         Assert.IsType<T>(settings.Steps.SelectMany(step => step.Sections).SelectMany(section => section.Fields).Single(field => field.Description.Id == id));
 
+    [Fact]
+    public async Task ExpressSetupHidesProjectLocationAndSavesOnlyItsProtectedKey()
+    {
+        using var http = new HttpClient();
+        await using var authentication = new VertexAuthentication();
+        var client = new VertexLlmClient(http, authentication);
+        await using var service = new LlmProviderService(new UnusedSource(), [client], [], [new VertexSetupEnvironment()]);
+        var target = new Target();
+        var manager = service.CreateSettingsManager(target);
+        var settings = await manager.OpenAsync(LlmTransport.GoogleVertexAi, new(SetupChangeIntent.Create, "vertex", null));
+        Field<SetupTextField>(settings, "google-project").SetValue("project");
+        Field<SetupTextField>(settings, "google-location").SetValue("global");
+        Field<SetupChoiceField>(settings, "google-authentication").SetValue(nameof(LlmGoogleAuthenticationMode.ApiKey));
+        var fields = settings.Steps.SelectMany(step => step.Sections).SelectMany(section => section.Fields).ToArray();
+        Assert.DoesNotContain(fields, field => field.Description.Id is "google-project" or "google-location" or "google-service-account");
+        Assert.True(Field<SetupSecretField>(settings, "api-key").Description.IsRequired);
+        Field<SetupChoiceField>(settings, "model").SetValue("google/gemini-2.5-flash");
+        Assert.False(settings.Validate().IsValid);
+        Field<SetupSecretField>(settings, "api-key").SetValue(SetupSecretEdit.Replace("protected-express-key"));
+        Assert.True(settings.Validate().IsValid);
+        Assert.Equal(SetupCommitState.Committed, (await manager.SaveAsync(settings)).State);
+        Assert.Null(target.Changes!.Configuration.Connection.Vertex!.ProjectId);
+        Assert.Null(target.Changes.Configuration.Connection.Vertex.Location);
+        Assert.Equal(LlmGoogleAuthenticationMode.ApiKey, target.Changes.Configuration.Connection.Vertex.AuthenticationMode);
+        Assert.Null(target.Changes.Configuration.Connection.Credential);
+        Assert.Equal("protected-express-key", LlmCredential.Parse(target.Changes.Credential.Value)!.ApiKey);
+        Assert.Null(settings.Status.Ready.Value);
+    }
+
     private sealed class Target : ISetupCommitTarget<LlmSetupChanges>
     {
         public LlmSetupChanges? Changes { get; private set; }

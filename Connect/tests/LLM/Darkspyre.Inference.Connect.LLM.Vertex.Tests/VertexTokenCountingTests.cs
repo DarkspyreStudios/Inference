@@ -34,7 +34,8 @@ public sealed class VertexTokenCountingTests
             StructuredOutput = new() { Name = "result", Schema = JsonElement.Parse(Schema) },
             ReasoningLevel = LlmReasoningLevel.Low
         };
-        var count = await client.CountInputTokensAsync(Connection, request);
+        LlmConnection connection = Connection with { CapabilityOverrides = new() { SupportsStreaming = false, SupportsJsonSchema = true } };
+        var count = await client.CountInputTokensAsync(connection, request);
         Assert.Equal(model, count.ModelId);
         Assert.Equal(12, count.InputTokens);
         Assert.Single(handler.Bodies);
@@ -43,7 +44,7 @@ public sealed class VertexTokenCountingTests
         Assert.EndsWith(model == Claude ? "/publishers/anthropic/models/count-tokens:rawPredict"
             : "/publishers/google/models/gemini-3-flash-preview:countTokens", handler.Uris[0].AbsoluteUri, StringComparison.Ordinal);
         Assert.Equal("aiplatform.googleapis.com", handler.Uris[0].Host);
-        await foreach (var _ in client.StreamAsync(Connection, request)) { }
+        await foreach (var _ in client.StreamAsync(connection, request)) { }
         JsonObject generation = JsonNode.Parse(handler.Bodies[1])!.AsObject();
         JsonObject counted = JsonNode.Parse(handler.Bodies[0])!.AsObject();
         if (model == Claude)

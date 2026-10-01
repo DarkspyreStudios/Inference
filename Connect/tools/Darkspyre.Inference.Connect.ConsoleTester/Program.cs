@@ -179,15 +179,23 @@ internal static class Program
             return 0;
         }
 
-        if (invocation.Provider.Transport == LlmTransport.GoogleGeminiApi)
+        if (invocation.Provider.Transport == LlmTransport.GoogleGeminiApi
+            || invocation.Provider.Transport == LlmTransport.GoogleVertexAi && invocation.Vertex?.AuthenticationMode == LlmGoogleAuthenticationMode.ApiKey)
         {
             RequireNoCommandArguments(invocation);
             // The key is read from the environment so it never appears in a command argument or shell history.
-            string key = Environment.GetEnvironmentVariable("GEMINI_API_KEY") is { Length: > 0 } value ? value
-                : throw new ArgumentException("Set GEMINI_API_KEY to the Google AI Studio key, then run login --provider gemini.");
+            bool express = invocation.Provider.Transport == LlmTransport.GoogleVertexAi;
+            string variable = express ? "VERTEX_API_KEY" : "GEMINI_API_KEY";
+            string key = Environment.GetEnvironmentVariable(variable) is { Length: > 0 } value ? value
+                : throw new ArgumentException($"Set {variable} to the {(express ? "Google Cloud" : "Google AI Studio")} key before login.");
             LlmConnection current = await connections.GetConnectionAsync(invocation.Provider.ConnectionId, cancellationToken)
                 ?? throw new InvalidOperationException($"Connection '{invocation.Provider.ConnectionId}' is not configured.");
             await llms.SetApiKeyAsync(invocation.Provider.ConnectionId, key, current.Version, cancellationToken);
+            if (express)
+            {
+                Console.WriteLine("Vertex express key is stored in the operating system vault. Select a Gemini text model manually; invocation access is not verified.");
+                return 0;
+            }
             IReadOnlyList<LlmModel> models = await llms.ListModelsAsync(invocation.Provider.ConnectionId, cancellationToken);
             Console.WriteLine($"{invocation.Provider.DisplayName} key is stored in the operating system vault; discovered {models.Count} model(s).");
             return 0;
@@ -231,6 +239,12 @@ internal static class Program
     private static async Task<bool> CheckReadyAsync(LlmProviderService llms,
         ConsoleInvocation invocation, CancellationToken cancellationToken)
     {
+        if (invocation.Provider.Transport == LlmTransport.GoogleVertexAi && invocation.Vertex?.AuthenticationMode == LlmGoogleAuthenticationMode.ApiKey)
+        {
+            _ = await llms.GetCapabilitiesAsync(invocation.Provider.ConnectionId, cancellationToken);
+            Console.Error.WriteLine("Vertex express configuration is valid. The requested generation checks model access.");
+            return true;
+        }
         if (invocation.Provider.Transport is LlmTransport.AppleFoundationModels or LlmTransport.GoogleVertexAi)
             return await ConsoleSetup.CheckAsync(llms, invocation, Console.Error, cancellationToken) == SetupActionState.Completed;
         bool ready = await llms.IsAuthenticatedAsync(invocation.Provider.ConnectionId, cancellationToken);
@@ -787,7 +801,8 @@ internal static class Program
             providers and setup display adapter-owned metadata without generation or authentication.
             Apple needs its separately built helper and a ready on-device model; no login is required.
             Apple defaults its model from provider metadata. --helper accepts a name on PATH or an absolute path.
-            vertex-probe performs explicit metered cloud generation using ADC; missing access is reported as skipped.
+            vertex-probe performs explicit metered cloud generation with the configured Google authentication mode.
+            --google-authentication ApiKey selects projectless express mode; login reads VERTEX_API_KEY and stores it in the vault.
             gemini-probe performs explicit metered Gemini API generation with the key that login --provider gemini stored from GEMINI_API_KEY.
             apple-probe performs explicit local generation, reports each case and never retries a failed case.
             agy-probe runs explicit subscription turns through the Antigravity native session in a temporary

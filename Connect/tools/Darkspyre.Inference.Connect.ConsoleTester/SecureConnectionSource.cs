@@ -121,7 +121,7 @@ internal sealed class SecureConnectionSource(
                 ? invocation.EndpointOverride
                 : provider.Endpoint;
         return provider.CreateConnection(
-            ComputeVersion(provider, endpoint + invocation?.Vertex?.ProjectId + "/" + invocation?.Vertex?.Location, credential), credential) with
+            ComputeVersion(provider, endpoint + invocation?.Vertex?.ProjectId + "/" + invocation?.Vertex?.Location + "/" + invocation?.Vertex?.AuthenticationMode, credential), credential) with
         { Endpoint = endpoint, Vertex = invocation?.Vertex };
     }
 
@@ -149,5 +149,6 @@ internal sealed class SecureConnectionSource(
         or LlmTransport.AnthropicMessages
         or LlmTransport.AwsBedrockConverse
         or LlmTransport.AwsBedrockAgentCore
-        or LlmTransport.GoogleGeminiApi;
+        or LlmTransport.GoogleGeminiApi
+        or LlmTransport.GoogleVertexAi;
 }
