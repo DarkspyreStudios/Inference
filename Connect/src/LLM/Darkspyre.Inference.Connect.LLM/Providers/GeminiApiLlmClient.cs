@@ -175,7 +175,7 @@ internal sealed partial class GeminiApiLlmClient(HttpClient http)
         ValidateRequest(connection, request, GetCapabilities(connection, request.ModelId));
         if (request.Messages.Any(message => message.ContinuationState is not null || message.Attachments.Count != 0
             || message.ToolResults.Any(result => result.Output.Parts.Any(part => part is not LlmToolOutputText)))) { return null; }
-        return new(LocalTokenCount.Count(JsonSerializer.Serialize(request)));
+        return new(LocalTokenCount.Count(JsonSerializer.Serialize(request, ConnectLlmJson.ChatRequest)));
     }
 
     internal static void Validate(LlmConnection connection)
