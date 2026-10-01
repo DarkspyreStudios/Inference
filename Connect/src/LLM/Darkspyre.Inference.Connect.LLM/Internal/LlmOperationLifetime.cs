@@ -51,7 +51,13 @@ internal sealed class LlmOperationLifetime : IDisposable, IAsyncDisposable
         {
             Task cancellation = _stop.CancelAsync();
             Task retirement = DrainAndReleaseAsync(release);
-            await Task.WhenAll(cancellation, retirement).ConfigureAwait(false);
+            Task both = Task.WhenAll(cancellation, retirement);
+            try { await both.ConfigureAwait(false); }
+            catch
+            {
+                if (both.Exception is { InnerExceptions.Count: > 1 } failures) throw failures;
+                throw;
+            }
             _stop.Dispose();
             completion.TrySetResult();
         }

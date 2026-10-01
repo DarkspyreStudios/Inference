@@ -189,6 +189,31 @@ public sealed class LlmLifetimeTests
         Assert.Throws<ObjectDisposedException>(() => lifetime.Enter(CancellationToken.None));
     }
 
+    [Fact]
+    public async Task RetirementPreservesCancellationAndReleaseFailuresForEveryDisposer()
+    {
+        var lifetime = new LlmOperationLifetime();
+        using LlmOperationLifetime.Lease lease = lifetime.Enter(CancellationToken.None);
+        var stopped = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var cancellationFailure = new InvalidOperationException("controlled cancellation failure");
+        var releaseFailure = new IOException("controlled release failure");
+        using CancellationTokenRegistration registration = lease.Token.Register(() =>
+        {
+            stopped.TrySetResult();
+            throw cancellationFailure;
+        });
+        Task retirement = lifetime.RetireAsync(() => Task.FromException(releaseFailure));
+        await stopped.Task.WaitAsync(Bound);
+        Assert.False(retirement.IsCompleted);
+        Assert.Same(retirement, lifetime.RetireAsync());
+        lease.Dispose();
+
+        AggregateException failure = await Assert.ThrowsAsync<AggregateException>(() => retirement.WaitAsync(Bound));
+        Assert.Contains(cancellationFailure, failure.Flatten().InnerExceptions);
+        Assert.Contains(releaseFailure, failure.Flatten().InnerExceptions);
+        Assert.Same(retirement, lifetime.RetireAsync());
+    }
+
     private static async Task ReadAsync(IAsyncEnumerable<LlmStreamEvent> stream)
     {
         await foreach (LlmStreamEvent _ in stream) { }

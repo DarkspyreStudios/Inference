@@ -451,6 +451,237 @@ public sealed class ClaudeAgentResourcesTests : IDisposable
         Assert.Equal(LlmOperationSupport.Unsupported, ManagedAgentPolicy.Capabilities.ResourceObservation);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task SessionRetirementIsSharedFencesOperationsAndPreservesProcessFailure(bool fail)
+    {
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var processFailure = new IOException("controlled process retirement failure");
+        var process = new ManualProcess { DisposalRelease = release.Task, DisposalFailure = fail ? processFailure : null };
+        ILlmAgentSession session = await Start(process);
+        await using IAsyncEnumerator<LlmAgentEvent> feed = session.ObserveAsync().GetAsyncEnumerator();
+        Task<bool> observation = feed.MoveNextAsync().AsTask();
+        Task retirement = session.DisposeAsync().AsTask();
+        try
+        {
+            await process.DisposalEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.False(retirement.IsCompleted);
+            Assert.Same(retirement, session.DisposeAsync().AsTask());
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => observation);
+            await Assert.ThrowsAsync<ObjectDisposedException>(() => session.GetCapabilitiesAsync());
+            await Assert.ThrowsAsync<ObjectDisposedException>(() => session.GetResourcesAsync());
+            await Assert.ThrowsAsync<ObjectDisposedException>(() => session.StopResourceAsync("missing"));
+            await Assert.ThrowsAsync<ObjectDisposedException>(() => session.ReadResourceOutputAsync("missing", null));
+            await Assert.ThrowsAsync<ObjectDisposedException>(() => Collect(session.RunTurnAsync(new() { Input = [new LlmAgentTextContent("late")] })));
+            release.TrySetResult();
+            if (fail) Assert.Same(processFailure, await Assert.ThrowsAsync<IOException>(() => retirement.WaitAsync(TimeSpan.FromSeconds(5))));
+            else await retirement.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.Equal(1, process.Disposals);
+            Assert.Same(retirement, session.DisposeAsync().AsTask());
+        }
+        finally
+        {
+            release.TrySetResult();
+            _ = await Record.ExceptionAsync(() => retirement.WaitAsync(TimeSpan.FromSeconds(5)));
+        }
+    }
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public async Task RetirementWaitsForIgnoringHostToolsAndPreservesCleanupFailures(bool failProcess, bool failCallback)
+    {
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var stopped = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var processFailure = new IOException("controlled process failure");
+        var callbackFailure = new InvalidOperationException("controlled callback failure");
+        var process = new ManualProcess { DisposalFailure = failProcess ? processFailure : null };
+        ILlmAgentSession session = await StartWithTool(process, async (_, token) =>
+        {
+            using CancellationTokenRegistration registration = token.Register(() =>
+            {
+                stopped.TrySetResult();
+                if (failCallback) throw callbackFailure;
+            });
+            entered.TrySetResult();
+            await release.Task;
+            return LlmToolOutput.FromText("late");
+        });
+        process.Push(ToolUse("tu1"));
+        process.Push(ToolCall("c1", 9));
+        await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        Task retirement = session.DisposeAsync().AsTask();
+        try
+        {
+            await stopped.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.False(retirement.IsCompleted);
+            Assert.Equal(0, process.Disposals);
+            Assert.Same(retirement, session.DisposeAsync().AsTask());
+            release.TrySetResult();
+            Exception? failure = await Record.ExceptionAsync(() => retirement.WaitAsync(TimeSpan.FromSeconds(5)));
+            if (!failProcess && !failCallback) Assert.Null(failure);
+            else
+            {
+                Assert.NotNull(failure);
+                IReadOnlyCollection<Exception> errors = failure is AggregateException aggregate ? aggregate.Flatten().InnerExceptions : [failure];
+                if (failProcess) Assert.Contains(processFailure, errors);
+                if (failCallback) Assert.Contains(callbackFailure, errors);
+            }
+            Assert.Equal(1, process.Disposals);
+            Assert.DoesNotContain(process.Writes(), root => root.GetProperty("type").GetString() == "control_response");
+        }
+        finally
+        {
+            release.TrySetResult();
+            _ = await Record.ExceptionAsync(() => retirement.WaitAsync(TimeSpan.FromSeconds(5)));
+        }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task RetirementWaitsForTheFullHostToolResponseWrite(bool fail)
+    {
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var writeFailure = new IOException("controlled tool response failure");
+        var process = new ManualProcess { ToolWriteRelease = release.Task, ToolWriteFailure = fail ? writeFailure : null };
+        ILlmAgentSession session = await StartWithTool(process, (_, _) => Task.FromResult(LlmToolOutput.FromText("done")));
+        process.Push(ToolUse("tu1"));
+        process.Push(ToolCall("c1", 9));
+        await process.ToolWriteEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        Task retirement = session.DisposeAsync().AsTask();
+        try
+        {
+            Assert.False(retirement.IsCompleted);
+            Assert.Equal(0, process.Disposals);
+            Assert.Same(retirement, session.DisposeAsync().AsTask());
+            release.TrySetResult();
+            if (fail) Assert.Same(writeFailure, await Assert.ThrowsAsync<IOException>(() => retirement.WaitAsync(TimeSpan.FromSeconds(5))));
+            else await retirement.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.Equal(1, process.Disposals);
+        }
+        finally
+        {
+            release.TrySetResult();
+            _ = await Record.ExceptionAsync(() => retirement.WaitAsync(TimeSpan.FromSeconds(5)));
+        }
+    }
+
+    [Fact]
+    public async Task RetirementWaitsForAPausedTurnEnumeratorBeforeDisposingItsGate()
+    {
+        var process = new ManualProcess();
+        ILlmAgentSession session = await Start(process);
+        IAsyncEnumerator<LlmAgentEvent> turn = session.RunTurnAsync(new() { Input = [new LlmAgentTextContent("hi")] }).GetAsyncEnumerator();
+        Assert.True(await turn.MoveNextAsync());
+        Task retirement = session.DisposeAsync().AsTask();
+        try
+        {
+            Assert.False(retirement.IsCompleted);
+            Assert.Equal(0, process.Disposals);
+            await turn.DisposeAsync();
+            await retirement.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.DoesNotContain(process.Writes(), root => root.GetProperty("type").GetString() == "user");
+        }
+        finally
+        {
+            await turn.DisposeAsync();
+            await retirement.WaitAsync(TimeSpan.FromSeconds(5));
+        }
+    }
+
+    [Fact]
+    public async Task NumericAndStringToolRequestIdsHaveIndependentCancellation()
+    {
+        var entered = new ConcurrentDictionary<string, CancellationToken>();
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var process = new ManualProcess();
+        await using ILlmAgentSession session = await StartWithTool(process, async (call, token) =>
+        {
+            entered.TryAdd(call.CallId, token);
+            await release.Task;
+            return LlmToolOutput.FromText("done");
+        });
+        try
+        {
+            process.Push(ToolUse("tu1"));
+            process.Push(ToolCall("c1", 9.0m));
+            process.Push(ToolUse("tu2"));
+            process.Push(ToolCall("c2", "9"));
+            await WaitFor(() => entered.Count == 2);
+            process.Push(Cancelled("cancel", 9));
+            await AnswerFor(process, "cancel");
+            Assert.True(entered["tu1"].IsCancellationRequested);
+            Assert.False(entered["tu2"].IsCancellationRequested);
+            release.TrySetResult();
+            Assert.True((await AnswerFor(process, "c1")).GetProperty("result").GetProperty("isError").GetBoolean());
+            JsonElement answer = await AnswerFor(process, "c2");
+            Assert.Equal("9", answer.GetProperty("id").GetString());
+            Assert.Equal("done", answer.GetProperty("result").GetProperty("content")[0].GetProperty("text").GetString());
+        }
+        finally { release.TrySetResult(); }
+    }
+
+    [Fact]
+    public async Task RetirementCancelsAnActiveHostTurnAndItsPendingResourceStop()
+    {
+        var process = new ManualProcess { WithholdStopReplies = true };
+        ILlmAgentSession session = await Start(process);
+        using var limit = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        Task<List<LlmAgentEvent>> turn = Collect(session.RunTurnAsync(new() { Input = [new LlmAgentTextContent("hi")] }));
+        string uuid = await process.WaitForUserMessage(limit.Token);
+        process.Push(new { type = "user", isReplay = true, uuid, message = new { role = "user", content = "hi" } });
+        process.Push(new { type = "system", subtype = "task_started", task_id = "s1", tool_use_id = "tu-s1", description = "server", is_backgrounded = true, task_type = "local_bash" });
+        await WaitFor(() => session.GetResourcesAsync().GetAwaiter().GetResult().Any(item => item.ResourceId == "s1"));
+        Task<LlmAgentResourceStopStatus> stopping = session.StopResourceAsync("s1");
+        await WaitFor(() => process.Requests().Any(request => request.GetProperty("subtype").GetString() == "stop_task"));
+
+        await session.DisposeAsync().AsTask().WaitAsync(limit.Token);
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => turn);
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => stopping);
+        Assert.Equal(1, process.Disposals);
+    }
+
+    [Fact]
+    public async Task DuplicateActiveToolRequestIdsFailWithoutLosingTheFirstCallback()
+    {
+        var entered = new TaskCompletionSource<CancellationToken>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var process = new ManualProcess();
+        int invocations = 0;
+        ILlmAgentSession session = await StartWithTool(process, async (_, token) =>
+        {
+            Interlocked.Increment(ref invocations);
+            entered.TrySetResult(token);
+            await release.Task;
+            return LlmToolOutput.FromText("late");
+        });
+        process.Push(ToolUse("tu1"));
+        process.Push(ToolCall("c1", 9));
+        CancellationToken token = await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        process.Push(ToolUse("tu2"));
+        process.Push(ToolCall("c2", 9));
+        try
+        {
+            await WaitFor(() => token.IsCancellationRequested);
+            Assert.Equal(1, Volatile.Read(ref invocations));
+            Task retirement = session.DisposeAsync().AsTask();
+            Assert.False(retirement.IsCompleted);
+            release.TrySetResult();
+            await retirement.WaitAsync(TimeSpan.FromSeconds(5));
+        }
+        finally
+        {
+            release.TrySetResult();
+            await session.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5));
+        }
+    }
+
     private Task<ILlmAgentSession> Start(ManualProcess process, LlmConnection? connection = null) =>
         new ClaudeAgentClient(new Factory(process)).StartSessionAsync("connection", connection ?? Connection(), new() { ModelId = "claude-test", Runtime = new() { WorkingDirectory = _directory } });
 
@@ -469,14 +700,14 @@ public sealed class ClaudeAgentResourcesTests : IDisposable
         message = new { id = "m-" + id, content = new object[] { new { type = "tool_use", id, name = "mcp__darkspyre-inference-connect__hold", input = new { } } } },
     };
 
-    private static object ToolCall(string requestId, int id) => new
+    private static object ToolCall(string requestId, object id) => new
     {
         type = "control_request",
         request_id = requestId,
         request = new { subtype = "mcp_message", server_name = "darkspyre-inference-connect", message = new { method = "tools/call", @params = new { name = "hold", arguments = new { } }, jsonrpc = "2.0", id } },
     };
 
-    private static object Cancelled(string requestId, int id) => new
+    private static object Cancelled(string requestId, object id) => new
     {
         type = "control_request",
         request_id = requestId,
@@ -543,19 +774,34 @@ public sealed class ClaudeAgentResourcesTests : IDisposable
         private readonly Channel<string> _output = Channel.CreateUnbounded<string>();
         private readonly ConcurrentQueue<string> _writes = new();
 
+        public Task? DisposalRelease { get; init; }
+        public Exception? DisposalFailure { get; init; }
+        public Task? ToolWriteRelease { get; init; }
+        public Exception? ToolWriteFailure { get; init; }
+        public bool WithholdStopReplies { get; init; }
+        public TaskCompletionSource DisposalEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource ToolWriteEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public int Disposals { get; private set; }
+
         public void Push(object value) => _output.Writer.TryWrite(JsonSerializer.Serialize(value));
 
-        public ValueTask WriteLineAsync(string line, CancellationToken cancellationToken = default)
+        public async ValueTask WriteLineAsync(string line, CancellationToken cancellationToken = default)
         {
-            _writes.Enqueue(line);
             using JsonDocument document = JsonDocument.Parse(line);
             JsonElement root = document.RootElement;
+            if (ToolWriteRelease is not null && root.GetProperty("type").GetString() == "control_response")
+            {
+                ToolWriteEntered.TrySetResult();
+                await ToolWriteRelease;
+                if (ToolWriteFailure is not null) throw ToolWriteFailure;
+            }
+            _writes.Enqueue(line);
             if (root.GetProperty("type").GetString() == "control_request"
-                && root.GetProperty("request").GetProperty("subtype").GetString() != "interrupt")
+                && root.GetProperty("request").GetProperty("subtype").GetString() != "interrupt"
+                && !(WithholdStopReplies && root.GetProperty("request").GetProperty("subtype").GetString() == "stop_task"))
             {
                 Push(new { type = "control_response", response = new { subtype = "success", request_id = root.GetProperty("request_id").GetString(), response = new { } } });
             }
-            return ValueTask.CompletedTask;
         }
 
         public IEnumerable<JsonElement> Writes() => _writes.Select(line => JsonSerializer.Deserialize<JsonElement>(line));
@@ -597,10 +843,13 @@ public sealed class ClaudeAgentResourcesTests : IDisposable
         public Task<ClaudeCliProcessResult> WaitForExitAsync(CancellationToken cancellationToken = default) =>
             Task.FromResult(new ClaudeCliProcessResult(0, string.Empty, string.Empty));
 
-        public ValueTask DisposeAsync()
+        public async ValueTask DisposeAsync()
         {
+            Disposals++;
+            DisposalEntered.TrySetResult();
             _output.Writer.TryComplete();
-            return ValueTask.CompletedTask;
+            if (DisposalRelease is not null) await DisposalRelease;
+            if (DisposalFailure is not null) throw DisposalFailure;
         }
     }
 }

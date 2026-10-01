@@ -1,4 +1,6 @@
 using System.Runtime.CompilerServices;
+using System.Diagnostics.CodeAnalysis;
+using System.Runtime.ExceptionServices;
 using System.Text.Json;
 using System.Threading.Channels;
 using Darkspyre.Inference.Common.LLM;
@@ -410,7 +412,8 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
         private readonly SemaphoreSlim _turnGate = new(1, 1);
         private readonly SemaphoreSlim _writeLock = new(1, 1);
         private readonly List<PendingToolCall> _pendingToolCalls = [];
-        private readonly Dictionary<string, RunningToolCall> _toolCalls = new(StringComparer.Ordinal);
+        private readonly List<RunningToolCall> _toolCalls = [];
+        private readonly List<Exception> _toolFailures = [];
         // Everything below is read for the session's lifetime by one reader; _route guards turn routing.
         private readonly Lock _route = new();
         private readonly Channel<LlmAgentEvent> _sessionEvents = Channel.CreateUnbounded<LlmAgentEvent>(
@@ -420,6 +423,7 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
         private readonly List<HostTurn> _written = [];
         private readonly ClaudeBackgroundTasks _tasks;
         private readonly CancellationTokenSource _readerStop = new();
+        private readonly LlmOperationLifetime _lifetime = new();
         private Task _reader = Task.CompletedTask;
         private HostTurn? _host;
         private ProviderTurn? _provider;
@@ -464,16 +468,14 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
 
         public Task<LlmAgentCapabilities> GetCapabilitiesAsync(CancellationToken cancellationToken = default)
         {
-            ObjectDisposedException.ThrowIf(_disposed, this);
-            cancellationToken.ThrowIfCancellationRequested();
+            using LlmOperationLifetime.Lease operation = _lifetime.Enter(cancellationToken);
             return Task.FromResult(NativeAgentContract.Claude);
         }
 
         public Task<LlmRequestAccounting> MeasureContextAsync(LlmAgentContext proposedContext,
             CancellationToken cancellationToken = default)
         {
-            ObjectDisposedException.ThrowIf(_disposed, this);
-            cancellationToken.ThrowIfCancellationRequested();
+            using LlmOperationLifetime.Lease operation = _lifetime.Enter(cancellationToken);
             ArgumentNullException.ThrowIfNull(proposedContext);
             return Task.FromResult(new LlmRequestAccounting
             {
@@ -484,24 +486,36 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
 
         public Task<LlmAgentContextStatus> GetContextStatusAsync(
             LlmAgentTurnRequest? prospectiveTurn = null,
-            CancellationToken cancellationToken = default) =>
-            throw NativeAgentContract.UnsupportedContext(cancellationToken);
+            CancellationToken cancellationToken = default)
+        {
+            using LlmOperationLifetime.Lease operation = _lifetime.Enter(cancellationToken);
+            throw NativeAgentContract.UnsupportedContext(operation.Token);
+        }
 
         public Task<LlmAgentContext> CaptureContextAsync(
             LlmAgentContextCaptureOptions? options = null,
-            CancellationToken cancellationToken = default) =>
-            throw NativeAgentContract.UnsupportedContext(cancellationToken);
+            CancellationToken cancellationToken = default)
+        {
+            using LlmOperationLifetime.Lease operation = _lifetime.Enter(cancellationToken);
+            throw NativeAgentContract.UnsupportedContext(operation.Token);
+        }
 
         public Task ReplaceContextAsync(
             LlmAgentContext context,
             long expectedRevision,
-            CancellationToken cancellationToken = default) =>
-            throw NativeAgentContract.UnsupportedContext(cancellationToken);
+            CancellationToken cancellationToken = default)
+        {
+            using LlmOperationLifetime.Lease operation = _lifetime.Enter(cancellationToken);
+            throw NativeAgentContract.UnsupportedContext(operation.Token);
+        }
 
         public IAsyncEnumerable<LlmAgentEvent> ContinueTurnAsync(
             LlmAgentTurnContinuation continuation,
-            CancellationToken cancellationToken = default) =>
-            NativeAgentContract.UnsupportedContinuation(cancellationToken);
+            CancellationToken cancellationToken = default)
+        {
+            using LlmOperationLifetime.Lease operation = _lifetime.Enter(cancellationToken);
+            return NativeAgentContract.UnsupportedContinuation(operation.Token);
+        }
 
 
         /// <summary>Starts reading the CLI for the session's lifetime; control requests need it running.</summary>
@@ -511,6 +525,8 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             string? instructions,
             CancellationToken cancellationToken)
         {
+            using LlmOperationLifetime.Lease operation = _lifetime.Enter(cancellationToken);
+            cancellationToken = operation.Token;
             var request = new Dictionary<string, object?>
             {
                 ["subtype"] = "initialize",
@@ -533,13 +549,15 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             }
 
             await SendControlRequestAsync(request, cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
         }
 
         public async IAsyncEnumerable<LlmAgentEvent> RunTurnAsync(
             LlmAgentTurnRequest request,
             [EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
-            ObjectDisposedException.ThrowIf(_disposed, this);
+            using LlmOperationLifetime.Lease operation = _lifetime.Enter(cancellationToken);
+            cancellationToken = operation.Token;
             ArgumentNullException.ThrowIfNull(request);
             NativeAgentContract.ValidateTurn(request);
             if (request.Input.Count == 0 && request.Attachments.Count == 0)
@@ -589,11 +607,14 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
                         cancellationToken);
                 }
 
+                cancellationToken.ThrowIfCancellationRequested();
                 yield return new LlmAgentTurnStartedEvent(ThreadId, turnId);
+                cancellationToken.ThrowIfCancellationRequested();
                 AgentOpeningContext? opening = _opening;
                 if (opening is not null)
                 {
                     yield return new LlmAgentWarningEvent(ThreadId, turnId, opening.Notice);
+                    cancellationToken.ThrowIfCancellationRequested();
                 }
                 lock (_route)
                 {
@@ -623,7 +644,9 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
                 // The reader routes this turn's events here once the CLI echoes the message back.
                 await foreach (LlmAgentEvent item in turn.Events.Reader.ReadAllAsync(cancellationToken))
                 {
+                    cancellationToken.ThrowIfCancellationRequested();
                     yield return item;
+                    cancellationToken.ThrowIfCancellationRequested();
                     if (item is LlmAgentTurnCompletedEvent)
                     {
                         completed = true;
@@ -647,7 +670,7 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             IReadOnlyList<LlmAgentContent> input,
             CancellationToken cancellationToken = default)
         {
-            ObjectDisposedException.ThrowIf(_disposed, this);
+            using LlmOperationLifetime.Lease operation = _lifetime.Enter(cancellationToken);
             throw new NotSupportedException(
                 "Claude CLI does not expose mid-turn steering through this adapter.");
         }
@@ -656,7 +679,8 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             string turnId,
             CancellationToken cancellationToken = default)
         {
-            ObjectDisposedException.ThrowIf(_disposed, this);
+            using LlmOperationLifetime.Lease operation = _lifetime.Enter(cancellationToken);
+            cancellationToken = operation.Token;
             lock (_route)
             {
                 if (_written.FirstOrDefault(turn => turn.Id == turnId) is { } queued)
@@ -674,12 +698,14 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             await WriteControlRequestWithoutWaitingAsync(
                 new { subtype = "interrupt", cancel_queued = false },
                 cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
         }
 
         public async IAsyncEnumerable<LlmAgentEvent> ObserveAsync(
             [EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
-            ObjectDisposedException.ThrowIf(_disposed, this);
+            using LlmOperationLifetime.Lease operation = _lifetime.Enter(cancellationToken);
+            cancellationToken = operation.Token;
             if (Interlocked.Exchange(ref _observing, 1) == 1)
             {
                 throw new InvalidOperationException("The session feed has one reader at a time.");
@@ -688,7 +714,9 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             {
                 await foreach (LlmAgentEvent item in _sessionEvents.Reader.ReadAllAsync(cancellationToken))
                 {
+                    cancellationToken.ThrowIfCancellationRequested();
                     yield return item;
+                    cancellationToken.ThrowIfCancellationRequested();
                 }
             }
             finally
@@ -699,26 +727,28 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
 
         public Task<IReadOnlyList<LlmAgentResource>> GetResourcesAsync(CancellationToken cancellationToken = default)
         {
-            ObjectDisposedException.ThrowIf(_disposed, this);
-            cancellationToken.ThrowIfCancellationRequested();
+            using LlmOperationLifetime.Lease operation = _lifetime.Enter(cancellationToken);
             return Task.FromResult(_tasks.Snapshot());
         }
 
-        public Task<LlmAgentResourceOutput> ReadResourceOutputAsync(
+        public async Task<LlmAgentResourceOutput> ReadResourceOutputAsync(
             string resourceId,
             string? cursor,
             CancellationToken cancellationToken = default)
         {
-            ObjectDisposedException.ThrowIf(_disposed, this);
+            using LlmOperationLifetime.Lease operation = _lifetime.Enter(cancellationToken);
             ArgumentException.ThrowIfNullOrWhiteSpace(resourceId);
-            return _tasks.ReadAsync(resourceId, cursor, cancellationToken);
+            LlmAgentResourceOutput output = await _tasks.ReadAsync(resourceId, cursor, operation.Token);
+            operation.Token.ThrowIfCancellationRequested();
+            return output;
         }
 
         public async Task<LlmAgentResourceStopStatus> StopResourceAsync(
             string resourceId,
             CancellationToken cancellationToken = default)
         {
-            ObjectDisposedException.ThrowIf(_disposed, this);
+            using LlmOperationLifetime.Lease operation = _lifetime.Enter(cancellationToken);
+            cancellationToken = operation.Token;
             ArgumentException.ThrowIfNullOrWhiteSpace(resourceId);
             if (!_tasks.TryGet(resourceId, out LlmAgentResource resource))
             {
@@ -731,6 +761,7 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             try
             {
                 await SendControlRequestAsync(new { subtype = "stop_task", task_id = resourceId }, cancellationToken);
+                cancellationToken.ThrowIfCancellationRequested();
                 // The request is not the exit; the resource reports Stopped when the CLI confirms.
                 return LlmAgentResourceStopStatus.Requested;
             }
@@ -740,33 +771,46 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             }
         }
 
-        public async ValueTask DisposeAsync()
+        public ValueTask DisposeAsync()
         {
-            if (_disposed)
-            {
-                return;
-            }
+            lock (_route) { _disposed = true; }
+            return new(_lifetime.RetireAsync(RetireSessionAsync));
+        }
 
-            _disposed = true;
-            await _readerStop.CancelAsync();
-            await _process.DisposeAsync();
-            try
-            {
-                await _reader;
-            }
-            catch (OperationCanceledException)
-            {
-                // The reader stops with the session.
-            }
-            await _tasks.DisposeAsync();
-            // Stopping the reader cancelled every host tool call; wait for them before releasing the writer.
+        [SuppressMessage("Design", "CA1031", Justification = "Retirement drains every owned stage and preserves its failures for all disposal callers.")]
+        private async Task RetireSessionAsync()
+        {
+            var failures = new List<Exception>();
+            try { await _readerStop.CancelAsync(); }
+            catch (Exception error) { failures.Add(error); }
+            try { await _process.DisposeAsync(); }
+            catch (Exception error) { failures.Add(error); }
+            try { await _reader; }
+            catch (OperationCanceledException) when (_readerStop.IsCancellationRequested) { }
+            catch (Exception error) { failures.Add(error); }
+            try { await _tasks.DisposeAsync(); }
+            catch (Exception error) { failures.Add(error); }
+            // The stopped reader admits no new calls. Retain each call through its response write.
             Task[] calls;
-            lock (_route) { calls = [.. _toolCalls.Values.Select(call => call.Completion)]; }
-            await Task.WhenAll(calls);
+            lock (_route)
+            {
+                calls = [.. _toolCalls.Select(call => call.Completion)];
+                failures.AddRange(_toolFailures);
+                _toolFailures.Clear();
+            }
+            Task allCalls = Task.WhenAll(calls);
+            try { await allCalls; }
+            catch (Exception error)
+            {
+                if (allCalls.Exception is { } aggregate) failures.AddRange(aggregate.InnerExceptions);
+                else failures.Add(error);
+            }
             _sessionEvents.Writer.TryComplete();
             _readerStop.Dispose();
             _turnGate.Dispose();
             _writeLock.Dispose();
+            if (failures.Count == 1) ExceptionDispatchInfo.Throw(failures[0]);
+            if (failures.Count > 1) throw new AggregateException("The Claude CLI session did not retire cleanly.", failures);
         }
 
         private async Task<JsonElement> SendControlRequestAsync(
@@ -939,54 +983,76 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
         private void StartToolCall(LlmAgentToolCall call, JsonElement id, string requestId, CancellationToken cancellationToken)
         {
             TurnTarget? origin = CurrentTarget();
-            string key = ReadJsonRpcId(id) ?? requestId;
-            var running = new RunningToolCall(CancellationTokenSource.CreateLinkedTokenSource(cancellationToken));
-            lock (_route)
-            {
-                _toolCalls[key] = running;
-                running.Completion = Task.Run(() => CompleteToolCallAsync(call, id, requestId, key, running, origin), CancellationToken.None);
-            }
-        }
-
-        private async Task CompleteToolCallAsync(LlmAgentToolCall call, JsonElement id, string requestId, string key,
-            RunningToolCall running, TurnTarget? origin)
-        {
-            McpResponse response;
+            LlmOperationLifetime.Lease operation = _lifetime.Enter(cancellationToken);
+            JsonElement identity = id.ValueKind is JsonValueKind.Number or JsonValueKind.String ? id.Clone() : JsonSerializer.SerializeToElement(requestId);
+            var running = new RunningToolCall(identity, CancellationTokenSource.CreateLinkedTokenSource(operation.Token));
             try
-            {
-                response = await RunToolCallAsync(call, id, running.Cancellation.Token);
-            }
-            catch (OperationCanceledException) when (running.Cancellation.IsCancellationRequested)
-            {
-                // The CLI cancelled the call, or the session ended. The call's control request is still answered.
-                response = new McpResponse(McpResult(id, new
-                {
-                    content = new[] { new { type = "text", text = "The tool call was cancelled." } },
-                    isError = true
-                }), null);
-            }
-            finally
-            {
-                lock (_route) { _toolCalls.Remove(key); }
-                running.Cancellation.Dispose();
-            }
-            if (response.ToolEvent is { } toolEvent)
-            {
-                // Emitted before the answer: the CLI continues only after it, so the event precedes the turn's later output.
-                EmitFor(origin, toolEvent);
-            }
-            try
-            {
-                await WriteMcpResponseAsync(requestId, response.Message, _readerStop.Token);
-            }
-            catch (Exception failure)
             {
                 lock (_route)
                 {
-                    // A session that has ended has no process to take the answer.
-                    if (_disposed || _failure is not null) { return; }
+                    if (_toolCalls.Any(active => JsonElement.DeepEquals(active.Id, identity)))
+                        throw ProtocolFailure("Claude CLI repeated an active host tool request ID.");
+                    _toolCalls.Add(running);
+                    running.Completion = Task.Run(() => CompleteToolCallAsync(call, id, requestId, running, origin, operation), CancellationToken.None);
                 }
-                Fail(ProtocolFailure("Claude CLI did not accept a host tool result.", failure));
+            }
+            catch
+            {
+                running.Cancellation.Dispose();
+                operation.Dispose();
+                throw;
+            }
+        }
+
+        [SuppressMessage("Design", "CA1031", Justification = "Background failures are observed and retained for session retirement, not abandoned as task faults.")]
+        private async Task CompleteToolCallAsync(LlmAgentToolCall call, JsonElement id, string requestId,
+            RunningToolCall running, TurnTarget? origin, LlmOperationLifetime.Lease operation)
+        {
+            try
+            {
+                McpResponse response;
+                try
+                {
+                    response = await RunToolCallAsync(call, id, running.Cancellation.Token);
+                }
+                catch (OperationCanceledException) when (running.Cancellation.IsCancellationRequested)
+                {
+                    // The CLI cancelled the call, or the session ended. The call's control request is still answered.
+                    response = new McpResponse(McpResult(id, new
+                    {
+                        content = new[] { new { type = "text", text = "The tool call was cancelled." } },
+                        isError = true
+                    }), null);
+                }
+                operation.Token.ThrowIfCancellationRequested();
+                if (response.ToolEvent is { } toolEvent)
+                {
+                    // Emitted before the answer: the CLI continues only after it, so the event precedes the turn's later output.
+                    EmitFor(origin, toolEvent);
+                }
+                await WriteMcpResponseAsync(requestId, response.Message, operation.Token);
+            }
+            catch (OperationCanceledException) when (operation.Token.IsCancellationRequested) { }
+            catch (Exception failure)
+            {
+                bool failSession;
+                lock (_route)
+                {
+                    _toolFailures.Add(failure);
+                    failSession = !_disposed && _failure is null;
+                }
+                if (!failSession) return;
+                try { Fail(ProtocolFailure("Claude CLI did not accept a host tool result.", failure)); }
+                catch (Exception cleanup)
+                {
+                    lock (_route) { _toolFailures.Add(cleanup); }
+                }
+            }
+            finally
+            {
+                lock (_route) { _toolCalls.Remove(running); }
+                running.Cancellation.Dispose();
+                operation.Dispose();
             }
         }
 
@@ -1006,6 +1072,7 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
                 output = LlmToolOutput.FromText("The host tool failed.", isError: true);
             }
 
+            cancellationToken.ThrowIfCancellationRequested();
             // Unsupported parts are omitted by the projection; they never fail the tool or the turn.
             ProjectedToolOutput projected = ToolOutputProjector.Project(output, _richRoute, _richContent);
             var toolEvent = new LlmAgentToolEvent(
@@ -1034,12 +1101,12 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
         {
             if (!message.TryGetProperty("params", out JsonElement parameters)
                 || !parameters.TryGetProperty("requestId", out JsonElement requested)
-                || ReadJsonRpcId(requested) is not { } key)
+                || requested.ValueKind is not (JsonValueKind.String or JsonValueKind.Number))
             {
                 return;
             }
             RunningToolCall? running;
-            lock (_route) { _toolCalls.TryGetValue(key, out running); }
+            lock (_route) { running = _toolCalls.FirstOrDefault(active => JsonElement.DeepEquals(active.Id, requested)); }
             Cancel(running);
         }
 
@@ -1232,6 +1299,7 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             try
             {
                 await _process.WriteLineAsync(line, cancellationToken);
+                cancellationToken.ThrowIfCancellationRequested();
             }
             finally
             {
@@ -1501,7 +1569,7 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
                 _failure = failure;
                 turns = [.. _written, .. _host is null ? [] : new[] { _host }];
                 waiters = [.. _controlWaiters.Values];
-                calls = [.. _toolCalls.Values];
+                calls = [.. _toolCalls];
                 _written.Clear();
                 _host = null;
                 _provider = null;
@@ -1567,9 +1635,10 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
 
         private sealed class ProviderTurn(string id, ClaudeStreamUsage usage, bool reasoningText) : TurnTarget(id, usage, reasoningText);
 
-        /// <summary>A host tool call in flight, keyed by the CLI's JSON-RPC request ID so a cancellation can find it.</summary>
-        private sealed class RunningToolCall(CancellationTokenSource cancellation)
+        /// <summary>A host tool call in flight, matched by its typed JSON-RPC ID so cancellation reaches only that call.</summary>
+        private sealed class RunningToolCall(JsonElement id, CancellationTokenSource cancellation)
         {
+            public JsonElement Id { get; } = id;
             public CancellationTokenSource Cancellation { get; } = cancellation;
 
             public Task Completion { get; set; } = Task.CompletedTask;

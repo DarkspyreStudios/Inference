@@ -605,6 +605,16 @@ retirement. Antigravity drains its session reader even when process disposal fai
 Antigravity session disposal also shares one retirement completion across callers. It reports
 termination and pipe-drain failures to those callers and closes its observation feed even on failure.
 
+Direct Claude native sessions fence operational calls when retirement starts. Retirement cancels
+and drains active turns, observation enumerations, control requests and host tool callbacks before
+disposing their process, reader, resource poller and gates. A host tool remains owned through result
+projection and the response write. An ignoring callback or write keeps retirement pending until it
+returns; a cancelled late callback result is not emitted. Consumers must dispose enumerators paused
+at a yielded event. Concurrent disposers share the completion and its cleanup failures. A failed
+process disposal does not skip the reader or resource poller. Cancellation and cleanup failures are
+retained together. Tool cancellation matches the typed JSON-RPC ID; numeric and string IDs remain
+distinct, and repeating an active ID fails the session without abandoning its first callback.
+
 Claude and Antigravity share one launcher for chat and native sessions. Their default commands are
 `claude` and `agy`. On Windows the launcher searches absolute PATH directories in order for `.exe`,
 `.com`, `.cmd` and `.bat` entries. An explicit executable path keeps its configured target.
