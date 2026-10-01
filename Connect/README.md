@@ -937,6 +937,8 @@ members remain unqualified and refuse before callbacks or HTTP. Image generation
 reference or one logical resource resolved through caller-owned access. URL, native-file, multiple
 references, step/guidance overrides and Count greater than one refuse before effects. All observed
 outputs are retained. Download MIME comes from actual HTTP metadata, not a workflow default.
+Composite admission copies binary reference bytes before credential or capability awaits. Constructing
+a BinaryMediaSource still borrows caller memory; the operation owns its entered byte snapshot.
 
 When resource access is supplied, a binary reference is committed and selected for the caller's
 session before ComfyUI uploads the authorized logical resource. Resource reads and uploads retain

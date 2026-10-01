@@ -59,7 +59,8 @@ internal sealed class ConnectImageInference : IImageInference, IDisposable, IAsy
         ImageConnection connection = CaptureConnection(_connection!);
         XaiFamilyBinding? xai = _xai;
         IInferenceResourceAccess? resources = _resources;
-        InferenceMediaSource[] references = request.References.ToArray();
+        InferenceMediaSource[] references = request.References.Select(source => source is BinaryMediaSource binary
+            ? binary with { Data = binary.Data.ToArray() } : source).ToArray();
         ValidateBinding(connection, xai);
         if (!string.Equals(request.ModelId, workflow.Id, StringComparison.Ordinal))
             throw new InferenceException(InferenceFailureCode.ModelUnavailable, "The requested workflow is not bound.");
