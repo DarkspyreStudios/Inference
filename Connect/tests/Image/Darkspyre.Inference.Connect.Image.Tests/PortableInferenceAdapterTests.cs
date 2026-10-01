@@ -1,3 +1,8 @@
+using System.Text.Json;
+using Darkspyre.Inference.Common.Image;
+using Darkspyre.Inference.Common.Media;
+using Darkspyre.Inference.Common.Resources;
+using Darkspyre.Inference.Connect.LLM;
 using CommonImage = Darkspyre.Inference.Common.Image;
 
 namespace Darkspyre.Inference.Connect.Image.Tests;
@@ -42,7 +47,7 @@ public sealed class PortableInferenceAdapterTests
                 DefaultHeight = 768,
                 OutputContentType = "image/png"
             },
-            TimeSpan.Zero);
+            pollInterval: TimeSpan.Zero);
 
         CommonImage.ImageGenerationResult result = await inference.GenerateAsync(
             new CommonImage.ImageGenerationRequest
@@ -74,6 +79,14 @@ public sealed class PortableInferenceAdapterTests
             "Test transport",
             new ImageTransportCapabilities(false, false, false));
 
+
+        public Task<IReadOnlyList<ImageWorkflow>> GetWorkflowsAsync(ImageConnection connection, XaiFamilyBinding? xai = null, CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+        public Task<ImageCapabilities> GetCapabilitiesAsync(ImageConnection connection, ImageWorkflow workflow, string? modelId = null, XaiFamilyBinding? xai = null, CancellationToken cancellationToken = default)
+            => Task.FromResult(new ImageCapabilities { SupportedSizes = [new(workflow.DefaultWidth, workflow.DefaultHeight)], SupportsNegativePrompt = true, SupportsSeed = true });
+        public Task<ImagePreparedReference> ResolveReferenceAsync(ImageConnection connection, InferenceMediaSource source, XaiFamilyBinding? xai = null, IInferenceResourceAccess? resources = null, CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+
         public PreparedImageTransportRequest Prepare(ImageTransportPreparationRequest request)
         {
             Prepared = request;
@@ -83,43 +96,43 @@ public sealed class PortableInferenceAdapterTests
         public Task<string> SubmitAsync(
             ImageConnection connection,
             PreparedImageTransportRequest request,
-            CancellationToken cancellationToken = default) => Task.FromResult("job-1");
+            XaiFamilyBinding? xai = null, CancellationToken cancellationToken = default) => Task.FromResult("job-1");
 
         public Task<ImageTransportJobSnapshot> GetJobAsync(
             ImageConnection connection,
             string providerJobId,
             ImageWorkflow workflow,
-            CancellationToken cancellationToken = default) =>
+            XaiFamilyBinding? xai = null, CancellationToken cancellationToken = default) =>
             Task.FromResult(_pollCount++ == 0
                 ? new ImageTransportJobSnapshot(ImageTransportJobState.Generating)
                 : new ImageTransportJobSnapshot(
                     ImageTransportJobState.Completed,
-                    new ImageTransportOutput("result.png", "{}")));
+                    [new ImageTransportOutput("result.png", new("owner", "identity"), JsonElement.Parse("{}"))]));
 
-        public Task<byte[]> DownloadAsync(
+        public Task<ImageTransportDownload> DownloadAsync(
             ImageConnection connection,
             ImageTransportOutput output,
-            CancellationToken cancellationToken = default) => Task.FromResult(new byte[] { 1, 2, 3 });
+            XaiFamilyBinding? xai = null, CancellationToken cancellationToken = default) => Task.FromResult(new ImageTransportDownload("image/jpeg", new byte[] { 1, 2, 3 }));
 
         public Task<ImageProviderHealth> TestAsync(
             ImageConnection connection,
             ImageWorkflow? workflow = null,
-            CancellationToken cancellationToken = default) => throw new NotSupportedException();
+            XaiFamilyBinding? xai = null, CancellationToken cancellationToken = default) => throw new NotSupportedException();
 
         public Task<IImageTransportProgressConnection?> TryConnectProgressAsync(
             ImageConnection connection,
-            CancellationToken cancellationToken = default) => throw new NotSupportedException();
+            XaiFamilyBinding? xai = null, CancellationToken cancellationToken = default) => throw new NotSupportedException();
 
-        public Task UploadReferenceAsync(
+        public Task<ImagePreparedReference> UploadReferenceAsync(
             ImageConnection connection,
             ImageReference reference,
             Stream content,
-            CancellationToken cancellationToken = default) => throw new NotSupportedException();
+            XaiFamilyBinding? xai = null, CancellationToken cancellationToken = default) => throw new NotSupportedException();
 
         public Task<bool> TryCancelAsync(
             ImageConnection connection,
             string providerJobId,
             bool interruptRunning,
-            CancellationToken cancellationToken = default) => Task.FromResult(true);
+            XaiFamilyBinding? xai = null, CancellationToken cancellationToken = default) => Task.FromResult(true);
     }
 }

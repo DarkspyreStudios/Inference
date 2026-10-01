@@ -1,6 +1,8 @@
 using System.Net;
 using System.Text;
 using System.Text.Json;
+using Darkspyre.Inference.Common;
+using Darkspyre.Inference.Common.Media;
 using Darkspyre.Inference.Connect.Image.Providers;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -8,6 +10,103 @@ namespace Darkspyre.Inference.Connect.Image.Tests;
 
 public sealed class ComfyUiImageTransportTests
 {
+    [Theory]
+    [InlineData("unchanged")]
+    [InlineData("headers")]
+    [InlineData("connection")]
+    [InlineData("transport")]
+    public async Task NativeReceiptRequiresUnchangedObservedOwnerBeforeSubmit(string change)
+    {
+        var headers = new Dictionary<string, string> { ["X-Account"] = "one" };
+        ImageConnection connection = Connection() with { AdditionalHeaders = headers };
+        var handler = new StubHandler(request => request.RequestUri!.AbsolutePath == "/upload/image"
+            ? JsonResponse("{\"name\":\"server.png\",\"subfolder\":\"actual\",\"type\":\"input\"}")
+            : JsonResponse("{\"prompt_id\":\"job\"}"));
+        ComfyUiImageTransport transport = CreateTransport(handler);
+        using var input = new MemoryStream([1, 2, 3]);
+        ImagePreparedReference receipt = await transport.UploadReferenceAsync(connection, Reference(), input);
+        Assert.Equal("server.png", receipt.Metadata.FileName);
+        PreparedImageTransportRequest prepared = transport.Prepare(Request(Workflow(true)) with { References = [receipt] });
+        prepared = JsonSerializer.Deserialize(JsonSerializer.Serialize(prepared, ConnectImageJson.PreparedImageTransportRequest),
+            ConnectImageJson.PreparedImageTransportRequest)!;
+        Assert.Single(handler.Headers);
+        if (change == "headers") headers["X-Account"] = "two";
+        if (change == "connection") connection = connection with { };
+        if (change == "transport") transport = CreateTransport(handler);
+        if (change == "unchanged")
+        {
+            Assert.Equal("job", await transport.SubmitAsync(connection, prepared));
+            Assert.Equal(2, handler.Headers.Count);
+        }
+        else
+        {
+            InferenceException error = await Assert.ThrowsAsync<InferenceException>(() => transport.SubmitAsync(connection, prepared));
+            Assert.Equal(InferenceFailureCode.UnsupportedFeature, error.Code);
+            Assert.Single(handler.Headers);
+        }
+    }
+
+    [Fact]
+    public async Task DynamicAuthorizationAndUnsupportedSourcesRefuseBeforeCallbacksOrHttp()
+    {
+        var authority = new RefusingAuthorization();
+        var handler = new StubHandler((Func<HttpRequestMessage, HttpResponseMessage>)(_ => throw new InvalidOperationException("HTTP must not be entered.")));
+        ComfyUiImageTransport transport = CreateTransport(handler);
+        ImageConnection dynamic = Connection() with { Authorization = authority };
+        using var input = new MemoryStream([1]);
+        await Assert.ThrowsAsync<InferenceException>(() => transport.UploadReferenceAsync(dynamic, Reference(), input));
+        await Assert.ThrowsAsync<InferenceException>(() => transport.GetWorkflowsAsync(Connection()));
+        await Assert.ThrowsAsync<InferenceException>(() => transport.ResolveReferenceAsync(Connection(), new UrlMediaSource(new("https://unread.invalid/image"))));
+        Assert.Equal(0, authority.Calls);
+        Assert.Empty(handler.Headers);
+    }
+
+    [Fact]
+    public async Task EveryOutputAndObservedDownloadMimeSurviveWithoutWorkflowGuessing()
+    {
+        var handler = new StubHandler(request => request.RequestUri!.AbsolutePath == "/history/job"
+            ? JsonResponse("{\"job\":{\"outputs\":{\"10\":{\"images\":[{\"filename\":\"first.png\"},{\"filename\":\"second.png\"}]}}}}")
+            : new HttpResponseMessage(HttpStatusCode.OK)
+            { Content = new ByteArrayContent([7]) { Headers = { ContentType = new("image/webp") } } });
+        ComfyUiImageTransport transport = CreateTransport(handler);
+        ImageConnection connection = Connection();
+        ImageTransportJobSnapshot snapshot = await transport.GetJobAsync(connection, "job", Workflow());
+        Assert.Equal("first.png", snapshot.Outputs![0].FileName);
+        Assert.Equal("second.png", snapshot.Outputs[1].FileName);
+        Assert.Equal(2, snapshot.Outputs.Count);
+        foreach (ImageTransportOutput output in snapshot.Outputs)
+        {
+            Assert.Null(output.ContentType);
+            ImageTransportDownload download = await transport.DownloadAsync(connection, output);
+            Assert.Equal("image/webp", download.ContentType);
+            Assert.Equal(new byte[] { 7 }, download.Data.ToArray());
+        }
+    }
+
+    [Fact]
+    public void PreparationCopiesReceiptStateWithoutCallbacksAndRejectsUnqualifiedControls()
+    {
+        var handler = new StubHandler((Func<HttpRequestMessage, HttpResponseMessage>)(_ => throw new InvalidOperationException("Prepare must not perform HTTP.")));
+        ComfyUiImageTransport transport = CreateTransport(handler);
+        using JsonDocument state = JsonDocument.Parse("{\"name\":\"native.png\",\"subfolder\":\"\",\"type\":\"input\"}");
+        var receipt = new ImagePreparedReference(Reference(), new("owner", "identity"), state.RootElement);
+        var supplied = new List<ImagePreparedReference> { receipt };
+        ImageTransportPreparationRequest request = Request(Workflow(true)) with { References = supplied };
+        supplied.Clear();
+        state.Dispose();
+        Assert.Contains("native.png", transport.Prepare(request).ProviderRequest, StringComparison.Ordinal);
+        Assert.Empty(handler.Headers);
+        Assert.Throws<InferenceException>(() => transport.Prepare(request with { Count = 2 }));
+        Assert.Throws<InferenceException>(() => transport.Prepare(request with { Steps = 3 }));
+    }
+
+    private sealed class RefusingAuthorization : IProviderAuthorization
+    {
+        public int Calls { get; private set; }
+        public ValueTask<ProviderAuthorizationHeader> GetAsync(CancellationToken cancellationToken = default)
+        { Calls++; throw new InvalidOperationException("Authorization must not be acquired."); }
+    }
+
     [Fact]
     public void PrepareRendersWorkflowAndProviderNeutralReference()
     {
@@ -24,18 +123,18 @@ public sealed class ComfyUiImageTransportTests
             Seed = 42,
             CacheKey = "cache-key",
             Label = "Neon scene",
-            Reference = reference
+            References = [new(reference, new("owner", "identity"), Json("{\"name\":\"actual.png\",\"subfolder\":\"folder\",\"type\":\"input\"}"))]
         });
 
         using JsonDocument document = JsonDocument.Parse(prepared.ProviderRequest);
-        JsonElement inputs = document.RootElement.GetProperty("1").GetProperty("inputs");
+        JsonElement inputs = document.RootElement.GetProperty("Workflow").GetProperty("1").GetProperty("inputs");
         Assert.Equal("A rainy neon street.", inputs.GetProperty("positive").GetString());
         Assert.Equal("captions", inputs.GetProperty("negative").GetString());
         Assert.Equal(1_216, inputs.GetProperty("width").GetInt32());
         Assert.Equal(832, inputs.GetProperty("height").GetInt32());
         Assert.Equal(42, inputs.GetProperty("seed").GetInt64());
         Assert.Equal(20, inputs.GetProperty("steps").GetInt32());
-        Assert.Equal($"darkspyre-reference-{reference.Id:N}.png", inputs.GetProperty("reference").GetString());
+        Assert.Equal("folder/actual.png", inputs.GetProperty("reference").GetString());
         Assert.Equal("cache-key-42", inputs.GetProperty("prefix").GetString());
     }
 
@@ -118,20 +217,21 @@ public sealed class ComfyUiImageTransportTests
 
         string jobId = await transport.SubmitAsync(connection, prepared);
         ImageTransportJobSnapshot snapshot = await transport.GetJobAsync(connection, jobId, Workflow());
-        byte[] bytes = await transport.DownloadAsync(connection, Assert.IsType<ImageTransportOutput>(snapshot.Output));
+        ImageTransportDownload download = await transport.DownloadAsync(connection, Assert.Single(snapshot.Outputs!));
         bool cancelled = await transport.TryCancelAsync(connection, jobId, interruptRunning: true);
 
         Assert.Equal("job-1", jobId);
         Assert.Equal(ImageTransportJobState.Completed, snapshot.State);
-        Assert.Equal("result.png", snapshot.Output?.FileName);
-        Assert.Equal([1, 2, 3], bytes);
+        Assert.Equal("result.png", Assert.Single(snapshot.Outputs!).FileName);
+        Assert.Equal([1, 2, 3], download.Data.ToArray());
+        Assert.Null(download.ContentType);
         Assert.True(cancelled);
         Assert.Contains("/view?filename=result.png&subfolder=generated&type=output", paths);
         Assert.Contains("/queue", paths);
         Assert.Contains("/interrupt", paths);
         Assert.Contains(bodies, body => body.Contains("\"client_id\"", StringComparison.Ordinal));
         Assert.All(handler.Headers, headers => Assert.Equal("present", headers["X-Test-Connection"]));
-        Assert.DoesNotContain("outputs", snapshot.Diagnostics, StringComparison.Ordinal);
+        Assert.DoesNotContain("outputs", snapshot.Diagnostics!.Value.GetRawText(), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -143,7 +243,7 @@ public sealed class ComfyUiImageTransportTests
         {
             body = await request.Content!.ReadAsStringAsync();
             contentType = request.Content.Headers.ContentType?.MediaType;
-            return JsonResponse("{}");
+            return JsonResponse("{\"name\":\"actual-upload.png\",\"subfolder\":\"\",\"type\":\"input\"}");
         });
         ComfyUiImageTransport transport = CreateTransport(handler);
         ImageReference reference = Reference();
@@ -175,9 +275,9 @@ public sealed class ComfyUiImageTransportTests
                 cancellation.Cancel();
                 cancellation.Token.ThrowIfCancellationRequested();
             }
-            return outcome == "http-failure" ? NotFound() : JsonResponse("{}");
+            return outcome == "http-failure" ? NotFound() : JsonResponse("{\"name\":\"actual-upload.png\",\"subfolder\":\"\",\"type\":\"input\"}");
         });
-        Task upload = CreateTransport(handler).UploadReferenceAsync(Connection(), Reference(), content, cancellation.Token);
+        Task upload = CreateTransport(handler).UploadReferenceAsync(Connection(), Reference(), content, cancellationToken: cancellation.Token);
         if (outcome == "success")
             await upload;
         else

@@ -1,6 +1,7 @@
 using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Common.Image;
 using Darkspyre.Inference.Common.Setup;
+using Darkspyre.Inference.Connect.LLM;
 
 namespace Darkspyre.Inference.Connect.Image;
 
@@ -10,7 +11,10 @@ public interface IImageWorkflowChoiceSource
     Task<ImageWorkflow?> GetWorkflowAsync(string workflowId, CancellationToken cancellationToken = default);
 }
 
-public sealed record ImageSetupConfiguration(ImageTransport Transport, Uri Endpoint, TimeSpan RequestTimeout, string WorkflowId);
+public sealed record ImageSetupConfiguration(ImageTransport Transport, Uri Endpoint, TimeSpan RequestTimeout, ImageWorkflowSelection Workflow)
+{
+    public XaiConnectionSelection? Xai { get; init; }
+}
 
 /// <summary>Protected header mutations; omission is not deletion.</summary>
 public sealed record ImageSetupHeaderChanges(IReadOnlyDictionary<string, string> Set, IReadOnlyList<string> Remove);
@@ -27,10 +31,13 @@ public sealed class ImageSettings : InferenceSettings<ImageSetupChanges>
     private Uri? _endpoint;
     private long? _timeoutSeconds;
     private string _workflowId;
-    private readonly (Uri? Endpoint, long? Timeout, string Workflow) _baseline;
+    private ImageWorkflowOrigin _origin;
+    private string _xaiConnectionId;
+    private long _generation;
+    private readonly (Uri? Endpoint, long? Timeout, string Workflow, ImageWorkflowOrigin Origin, string Xai) _baseline;
 
     internal ImageSettings(ImageTransportDescriptor transport, SetupConfigurationIdentity identity,
-        bool hasWorkflowCatalog, ImageConnection? existing, string? workflowId)
+        bool hasWorkflowCatalog, ImageConnection? existing, ImageWorkflowSelection? workflow)
         : base(DefinitionFor(transport), identity)
     {
         if ((identity.Intent == SetupChangeIntent.Edit) != (existing is not null)
@@ -42,8 +49,10 @@ public sealed class ImageSettings : InferenceSettings<ImageSetupChanges>
         _hasWorkflowCatalog = hasWorkflowCatalog;
         _endpoint = Uri.TryCreate(existing?.Endpoint ?? "http://127.0.0.1:8188", UriKind.Absolute, out Uri? endpoint) ? endpoint : null;
         _timeoutSeconds = (long)(existing?.RequestTimeout ?? TimeSpan.FromMinutes(10)).TotalSeconds;
-        _workflowId = workflowId ?? string.Empty;
-        _baseline = (_endpoint, _timeoutSeconds, _workflowId);
+        _workflowId = workflow?.Id ?? string.Empty;
+        _origin = workflow?.Origin ?? ImageWorkflowOrigin.Host;
+        _xaiConnectionId = existing?.Xai?.ConnectionId ?? string.Empty;
+        _baseline = (_endpoint, _timeoutSeconds, _workflowId, _origin, _xaiConnectionId);
         foreach ((string name, string value) in existing?.AdditionalHeaders ?? new Dictionary<string, string>())
         {
             _headers.Add(new(name, value));
@@ -54,9 +63,21 @@ public sealed class ImageSettings : InferenceSettings<ImageSetupChanges>
     internal ImageTransport Transport { get; }
 
     internal string WorkflowId => _workflowId;
+    internal ImageWorkflowOrigin Origin => _origin;
+    internal long Generation => _generation;
 
     /// <summary>The workflow the validate action resolved for <see cref="WorkflowId"/>.</summary>
     internal ImageWorkflow? Workflow { get; set; }
+
+    protected override void OnDraftEdited()
+    {
+        _generation++;
+        Workflow = null;
+        base.OnDraftEdited();
+    }
+
+    protected override SetupChoicePage? GetLocalChoices(string fieldId, SetupChoiceQuery query)
+        => fieldId == "workflow-origin" ? Page(query, [new("Host", "Host"), new("BuiltIn", "Built-in")]) : null;
 
     internal static InferenceSetupDefinition DefinitionFor(ImageTransportDescriptor descriptor) => new(
         new("darkspyre.connect.image." + descriptor.Transport.ToString().ToLowerInvariant(), descriptor.DisplayName,
@@ -75,12 +96,16 @@ public sealed class ImageSettings : InferenceSettings<ImageSetupChanges>
             ]),
             new("advanced", "Advanced", [HeaderField()], IsAdvanced: true)
         ]),
-        new("workflow", "Workflow", "Select a host-owned workflow, then validate the selection.",
+        new("workflow", "Workflow", "Select a workflow origin and validate the selection.",
         [new("workflow", "Workflow",
-        [new SetupChoiceField(new("workflow", "Workflow") { IsRequired = true, IsEnabled = _hasWorkflowCatalog,
-            HelpText = !_hasWorkflowCatalog ? "The host must supply a workflow catalog." : "Saved workflows supplied by the host." },
+        [new SetupChoiceField(new("workflow-origin", "Workflow origin"), _origin.ToString(), "Host",
+            value => Edit(() => { _origin = Enum.Parse<ImageWorkflowOrigin>(value); _workflowId = string.Empty; Workflow = null; }), false),
+        new SetupChoiceField(new("workflow", "Workflow") { IsRequired = true, IsEnabled = _origin == ImageWorkflowOrigin.BuiltIn || _hasWorkflowCatalog,
+            HelpText = _origin == ImageWorkflowOrigin.Host && !_hasWorkflowCatalog ? "The host must supply a workflow catalog." : string.Empty },
             _workflowId, string.Empty, value => Edit(() => { _workflowId = value; Workflow = null; }), false,
-            capabilities: SetupChoiceCapabilities.Searchable)])]),
+            capabilities: SetupChoiceCapabilities.Searchable),
+        new SetupTextField(new("xai-connection", "xAI connection") { IsEnabled = Transport == ImageTransport.XaiImagine },
+            _xaiConnectionId, string.Empty, value => Edit(() => { _xaiConnectionId = value; Workflow = null; }))])]),
         new("verify", "Check and test", "Checking health does not generate an image. The separate generation test can consume provider resources.", [])
     ];
 
@@ -104,8 +129,9 @@ public sealed class ImageSettings : InferenceSettings<ImageSetupChanges>
     protected override IReadOnlyList<SetupActionDescriptor> CreateActions() =>
     [
         new("validate-workflow", "Validate workflow selection", SetupActionPurpose.CheckPrerequisites,
-            SetupSideEffect.None, _hasWorkflowCatalog && _workflowId.Length > 0,
-            !_hasWorkflowCatalog ? "The host has not supplied a workflow catalog." : null),
+            _origin == ImageWorkflowOrigin.BuiltIn ? SetupSideEffect.Network : SetupSideEffect.None,
+            (_origin == ImageWorkflowOrigin.BuiltIn || _hasWorkflowCatalog) && _workflowId.Length > 0,
+            _origin == ImageWorkflowOrigin.Host && !_hasWorkflowCatalog ? "The host has not supplied a workflow catalog." : null),
         new("health", "Check provider health", SetupActionPurpose.CheckReadiness,
             SetupSideEffect.Network, ConnectionIssues().Count == 0),
         new("generate-test", "Generate a test image", SetupActionPurpose.Test,
@@ -127,6 +153,9 @@ public sealed class ImageSettings : InferenceSettings<ImageSetupChanges>
     internal List<SetupIssue> ConnectionIssues()
     {
         var issues = new List<SetupIssue>();
+        if (!Enum.IsDefined(_origin)) issues.Add(new("workflow-origin-invalid", "Select a defined workflow origin.", "workflow-origin"));
+        if (Transport == ImageTransport.XaiImagine && _xaiConnectionId.Length == 0)
+            issues.Add(new("xai-selection-required", "Select the xAI connection.", "xai-connection"));
         if (_endpoint is not { IsAbsoluteUri: true } || _endpoint.Scheme is not ("http" or "https")
             || _endpoint.UserInfo.Length > 0 || _endpoint.Fragment.Length > 0 || _endpoint.Query.Length > 0)
         {
@@ -155,10 +184,11 @@ public sealed class ImageSettings : InferenceSettings<ImageSetupChanges>
         Endpoint = _endpoint!.AbsoluteUri,
         RequestTimeout = TimeSpan.FromSeconds(_timeoutSeconds!.Value),
         AdditionalHeaders = _headers.Where(header => header.Value is not null)
-            .ToDictionary(header => header.Name, header => header.Value!, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(header => header.Name, header => header.Value!, StringComparer.OrdinalIgnoreCase),
+        Xai = Transport == ImageTransport.XaiImagine && _xaiConnectionId.Length > 0 ? new(_xaiConnectionId) : null
     };
 
-    protected override bool IsDraftDirty => (_endpoint, _timeoutSeconds, _workflowId) != _baseline
+    protected override bool IsDraftDirty => (_endpoint, _timeoutSeconds, _workflowId, _origin, _xaiConnectionId) != _baseline
         || _removedHeaders.Count != 0 || _headers.Any(header => header.OriginalName.Length == 0
             || header.Name != header.OriginalName || header.Change.Kind != SetupSecretEditKind.Keep);
 
@@ -174,7 +204,7 @@ public sealed class ImageSettings : InferenceSettings<ImageSetupChanges>
         }
         // A rename into a removed name is an explicit set, not an ambiguous delete-and-set pair.
         removed.ExceptWith(set.Keys);
-        return new(Identity, new(Transport, _endpoint!, TimeSpan.FromSeconds(_timeoutSeconds!.Value), _workflowId),
+        return new(Identity, new(Transport, _endpoint!, TimeSpan.FromSeconds(_timeoutSeconds!.Value), new(_origin, _workflowId)) { Xai = Connection().Xai },
             new(set, removed.ToArray()));
     }
 
@@ -201,22 +231,24 @@ public sealed class ImageSettingsManager : InferenceSettingsManager<ImageSetting
 {
     private readonly ImageProviderService _service;
     private readonly IImageWorkflowChoiceSource? _workflows;
+    private readonly Func<XaiConnectionSelection, XaiFamilyBinding>? _xaiBindings;
 
     internal ImageSettingsManager(ImageProviderService service, ISetupCommitTarget<ImageSetupChanges> target,
-        IImageWorkflowChoiceSource? workflows)
+        IImageWorkflowChoiceSource? workflows, Func<XaiConnectionSelection, XaiFamilyBinding>? xaiBindings)
         : base(target)
     {
         _service = service;
         _workflows = workflows;
+        _xaiBindings = xaiBindings;
     }
 
     /// <summary>Returns settings for <paramref name="transport"/>, blank or from the saved entry.</summary>
     public Task<ImageSettings> OpenAsync(ImageTransport transport, SetupConfigurationIdentity identity,
-        ImageConnection? existing = null, string? workflowId = null, CancellationToken cancellationToken = default)
+        ImageConnection? existing = null, ImageWorkflowSelection? workflow = null, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
         return Task.FromResult(new ImageSettings(_service.GetRequiredTransport(transport).Descriptor, identity,
-            _workflows is not null, existing, workflowId));
+            _workflows is not null, existing, workflow));
     }
 
     protected override async Task<SetupActionResult> RunCoreAsync(ImageSettings settings, SetupActionDescriptor action,
@@ -229,15 +261,45 @@ public sealed class ImageSettingsManager : InferenceSettingsManager<ImageSetting
         };
 
     protected override async Task<SetupChoicePage> QueryProviderChoicesAsync(ImageSettings settings, string fieldId,
-        SetupChoiceQuery query, CancellationToken cancellationToken) =>
-        fieldId == "workflow" && _workflows is not null
-            ? await _workflows.GetChoicesAsync(settings.Transport, query, cancellationToken).ConfigureAwait(false)
-            : new([], State: SetupChoiceState.Unavailable);
+        SetupChoiceQuery query, CancellationToken cancellationToken)
+    {
+        if (fieldId == "workflow-origin") return new([new("Host", "Host"), new("BuiltIn", "Built-in")]);
+        if (fieldId != "workflow") return new([], State: SetupChoiceState.Unavailable);
+        long generation = settings.Generation;
+        if (settings.Origin == ImageWorkflowOrigin.Host)
+        {
+            if (_workflows is null) return new([], State: SetupChoiceState.Unavailable);
+            SetupChoicePage page = await _workflows.GetChoicesAsync(settings.Transport, query, cancellationToken).ConfigureAwait(false);
+            if (page.Choices.GroupBy(choice => choice.Value, StringComparer.Ordinal).Any(group => group.Count() > 1))
+                throw new InvalidOperationException("The host workflow choices contain duplicate identities.");
+            if (settings.Generation != generation) return new([], State: SetupChoiceState.Cancelled);
+            return page;
+        }
+        ImageConnection connection = settings.Connection();
+        IReadOnlyList<ImageWorkflow> available = await _service.GetWorkflowsAsync(connection, Binding(connection), cancellationToken).ConfigureAwait(false);
+        ValidateWorkflowIds(available);
+        if (settings.Generation != generation) return new([], State: SetupChoiceState.Cancelled);
+        return InferenceSettings.Page(query, available.Select(workflow => new SetupChoice(workflow.Id, workflow.Label)));
+    }
 
     private async Task<SetupActionResult> ResolveWorkflowAsync(ImageSettings settings, CancellationToken token)
     {
         string workflowId = settings.WorkflowId;
-        ImageWorkflow? workflow = await _workflows!.GetWorkflowAsync(workflowId, token).ConfigureAwait(false);
+        long generation = settings.Generation;
+        ImageWorkflowOrigin origin = settings.Origin;
+        ImageTransport transport = settings.Transport;
+        ImageWorkflow? workflow;
+        if (origin == ImageWorkflowOrigin.Host)
+            workflow = _workflows is null ? null : await _workflows.GetWorkflowAsync(workflowId, token).ConfigureAwait(false);
+        else
+        {
+            ImageConnection connection = settings.Connection();
+            IReadOnlyList<ImageWorkflow> available = await _service.GetWorkflowsAsync(connection, Binding(connection), token).ConfigureAwait(false);
+            ValidateWorkflowIds(available);
+            workflow = available.SingleOrDefault(item => item.Id == workflowId);
+        }
+        if (settings.Generation != generation || settings.WorkflowId != workflowId || settings.Origin != origin || settings.Transport != transport)
+            return new(SetupActionState.Cancelled);
         if (workflow is null || workflow.Id != workflowId || workflow.Transport != settings.Transport)
         {
             return new(SetupActionState.Failed, [new("workflow-unavailable", "Select a workflow for this transport.", "workflow")]);
@@ -250,7 +312,7 @@ public sealed class ImageSettingsManager : InferenceSettingsManager<ImageSetting
     {
         settings.Status = settings.Status with { Verified = SetupObservation.Unknown, Ready = SetupObservation.Unknown };
         ImageProviderHealth result = await _service.GetRequiredTransport(settings.Transport)
-            .TestAsync(settings.Connection(), settings.Workflow, token).ConfigureAwait(false);
+            .TestAsync(settings.Connection(), settings.Workflow, Binding(settings.Connection()), token).ConfigureAwait(false);
         settings.Status = settings.Status with { Verified = SetupObservation.Known(result.IsHealthy) };
         return result.IsHealthy ? SetupActionResult.Completed
             : new(SetupActionState.Failed, [new("health-failed", "The provider or selected workflow did not pass its health check.")], IsRetryable: true);
@@ -267,11 +329,27 @@ public sealed class ImageSettingsManager : InferenceSettingsManager<ImageSetting
             return new(SetupActionState.Unavailable, [new("reference-required", "This test needs a reference image.")]);
         }
         progress?.Report(new("generating", "Generating one test image."));
-        ImageGenerationResult result = await _service.Bind(settings.Connection(), workflow).GenerateAsync(
+        ImageGenerationResult result = await _service.Bind(settings.Connection(), workflow, Binding(settings.Connection())).GenerateAsync(
             new() { ModelId = workflow.Id, Prompt = "A small blue circle on a white background.", Seed = 42 },
             cancellationToken: token).ConfigureAwait(false);
         bool ready = result.Images.Count > 0 && result.Images.All(image => !image.Data.IsEmpty);
         settings.Status = settings.Status with { Ready = SetupObservation.Known(ready) };
         return ready ? SetupActionResult.Completed : new(SetupActionState.Failed, [new("empty-image", "The provider returned no image.")]);
+    }
+
+    private XaiFamilyBinding? Binding(ImageConnection connection)
+    {
+        if (connection.Transport != ImageTransport.XaiImagine) return null;
+        if (connection.Xai is null || _xaiBindings is null)
+            throw new InvalidOperationException("The selected image connection requires a borrowed xAI binding factory.");
+        XaiFamilyBinding binding = _xaiBindings(connection.Xai);
+        ConnectImageInference.ValidateBinding(connection, binding);
+        return binding;
+    }
+
+    private static void ValidateWorkflowIds(IReadOnlyList<ImageWorkflow> workflows)
+    {
+        if (workflows.GroupBy(workflow => workflow.Id, StringComparer.Ordinal).Any(group => group.Count() > 1))
+            throw new InvalidOperationException("The built-in workflows contain duplicate identities.");
     }
 }

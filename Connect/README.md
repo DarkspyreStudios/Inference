@@ -830,6 +830,9 @@ var connection = new ImageConnection
     RequestTimeout = TimeSpan.FromMinutes(10)
 };
 
+ImagePreparedReference uploadedReference = await transport.UploadReferenceAsync(
+    connection, reference, content, cancellationToken: cancellationToken);
+
 PreparedImageTransportRequest prepared = transport.Prepare(new ImageTransportPreparationRequest
 {
     Workflow = workflow,
@@ -839,25 +842,40 @@ PreparedImageTransportRequest prepared = transport.Prepare(new ImageTransportPre
     Height = 832,
     Seed = seed,
     CacheKey = cacheKey,
-    Reference = reference
+    References = [uploadedReference]
 });
 
-string providerJobId = await transport.SubmitAsync(connection, prepared, cancellationToken);
+string providerJobId = await transport.SubmitAsync(connection, prepared, cancellationToken: cancellationToken);
 ImageTransportJobSnapshot status = await transport.GetJobAsync(
     connection,
     providerJobId,
     workflow,
-    cancellationToken);
+    cancellationToken: cancellationToken);
 ```
 
 `ImageWorkflow.TransportConfiguration`, `PreparedImageTransportRequest.ProviderRequest`, and
-`ImageTransportOutput.ProviderState` are opaque adapter-owned data. Consumers may round-trip them for
-durable recovery but must not interpret them as ComfyUI contracts. The package does not own an image
+`ImageTransportOutput.ProviderState` are opaque adapter-owned data. `UploadReferenceAsync` returns
+an immutable receipt; `Prepare` copies that receipt without authentication, reads, uploads, or native
+ID lookups. Consumers may round-trip prepared data but it does not prove authority to reuse a native
+reference. ComfyUI accepts native receipts only on the same unchanged transport/connection owner.
+Changed static headers, a different connection, or a different transport owner require reupload of
+logical content. The package does not own an image
 database, media library, workflow catalog, cache, or background worker.
 
 ComfyUI reference uploads borrow the input stream. Upload reads from its current position without
 rewinding, flushing, or disposing it, including cancellation and failed uploads. The caller owns
 the stream's eventual disposal.
+
+ComfyUI accepts static protected headers. Its newly optional dynamic `Authorization` and xAI binding
+members remain unqualified and refuse before callbacks or HTTP. Image generation accepts one binary
+reference or one logical resource resolved through caller-owned access. URL, native-file, multiple
+references, step/guidance overrides and Count greater than one refuse before effects. All observed
+outputs are retained. Download MIME comes from actual HTTP metadata, not a workflow default.
+
+`ConnectImageJson` exports exact type-name metadata for the complete public Image data graph.
+Runtime authority, bindings, resource handles and binding factories refuse non-null serialization.
+Workflow selection stores both `ImageWorkflowOrigin` and the exact ID. Host and built-in origins
+remain separate; ComfyUI does not advertise a built-in workflow catalog.
 
 The shared [`XaiFamilyBinding` contract](docs/media-bindings.md) uses explicit selection and the
 existing credential-access owner. It does not register or qualify an xAI Image transport.
