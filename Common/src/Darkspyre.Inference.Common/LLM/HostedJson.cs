@@ -27,7 +27,7 @@ internal sealed class HostedImageDataJsonConverter(JsonConverter<ReadOnlyMemory<
     public override bool HandleNull => true;
     public override ReadOnlyMemory<byte> Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
     {
-        if (reader.TokenType == JsonTokenType.Null) { throw new JsonException("Hosted image bytes cannot be null."); }
+        if (reader.TokenType == JsonTokenType.Null) { throw new JsonException("Required binary data cannot be null."); }
         return dataConverter.Read(ref reader, typeToConvert, options);
     }
 
