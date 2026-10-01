@@ -21,7 +21,11 @@ public sealed class XaiResponsesClientTests
     [InlineData(false, XaiRegion.UnitedStates, XaiServiceTier.Priority)]
     public async Task ConcreteClientUsesOAuthFixedRegionAndTypedPayload(bool streaming, XaiRegion region, XaiServiceTier tier)
     {
-        using var handler = new Handler(_ => Response(streaming));
+        using var handler = new Handler(sent =>
+        {
+            Assert.Equal("request", sent.Headers.GetValues("x-client-request-id").Single());
+            return Response(streaming);
+        });
         using var http = new HttpClient(handler);
         var client = new XaiResponsesLlmClient(http);
         LlmConnection connection = Connection(streaming, region, tier) with
@@ -98,6 +102,32 @@ public sealed class XaiResponsesClientTests
         Assert.Equal(InferenceFailureCode.AuthenticationRequired, exception.Code);
         Assert.DoesNotContain("not-used", exception.ToString());
         Assert.DoesNotContain("bad token", exception.ToString());
+        Assert.Equal(0, handler.Calls);
+    }
+
+    [Theory]
+    [InlineData(false, "x-api-key")]
+    [InlineData(true, "x-api-key")]
+    [InlineData(false, "X-Static-Secret")]
+    [InlineData(true, "X-Static-Secret")]
+    [InlineData(false, "authorization")]
+    [InlineData(true, "authorization")]
+    public async Task MixedOAuthAndStaticSecretHeadersFailBeforeNetwork(bool streaming, string header)
+    {
+        using var handler = new Handler(_ => Response(streaming));
+        using var http = new HttpClient(handler);
+        LlmConnection connection = Connection(streaming) with
+        {
+            Credential = new LlmCredential
+            {
+                OAuth = new() { AccessToken = "oauth-token", AccountId = "account" },
+                SecretHeaders = new Dictionary<string, string> { [header] = "static-secret" }
+            }.Serialize()
+        };
+        var error = await Assert.ThrowsAsync<InferenceException>(() => Read(new XaiResponsesLlmClient(http).StreamAsync(connection, Request())));
+        Assert.Equal(InferenceFailureCode.AuthenticationRequired, error.Code);
+        Assert.DoesNotContain("static-secret", error.ToString());
+        Assert.DoesNotContain("oauth-token", error.ToString());
         Assert.Equal(0, handler.Calls);
     }
 
