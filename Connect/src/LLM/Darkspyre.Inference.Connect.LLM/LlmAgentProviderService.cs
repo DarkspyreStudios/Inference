@@ -50,6 +50,7 @@ public sealed class LlmAgentProviderService : IDisposable, IAsyncDisposable
     {
         using LlmOperationLifetime.Lease operation = Enter(cancellationToken);
         cancellationToken = operation.Token;
+        options = ClientTools.Snapshot(options);
         LlmAccountUsageObservations.Reservation reservation = _observations.Reserve(connectionId);
         LlmConnection connection = await LlmConnectionResolver.ResolveAsync(
             Connections,
@@ -73,6 +74,7 @@ public sealed class LlmAgentProviderService : IDisposable, IAsyncDisposable
     {
         using LlmOperationLifetime.Lease operation = Enter(cancellationToken);
         cancellationToken = operation.Token;
+        options = options is null ? null : ClientTools.Snapshot(options);
         LlmAccountUsageObservations.Reservation reservation = _observations.Reserve(connectionId);
         LlmConnection connection = await LlmConnectionResolver.ResolveAsync(
             Connections,
@@ -98,6 +100,7 @@ public sealed class LlmAgentProviderService : IDisposable, IAsyncDisposable
     {
         using LlmOperationLifetime.Lease operation = Enter(cancellationToken);
         cancellationToken = operation.Token;
+        options = options is null ? null : ClientTools.Snapshot(options);
         LlmAccountUsageObservations.Reservation reservation = _observations.Reserve(connectionId);
         LlmConnection connection = await LlmConnectionResolver.ResolveAsync(
             Connections,

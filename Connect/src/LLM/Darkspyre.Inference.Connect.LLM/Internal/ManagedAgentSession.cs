@@ -46,6 +46,7 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
                 "Managed sessions run no provider-owned runtime, so they reject native runtime options.");
         }
         AgentResourceOptions.Validate(ManagedAgentPolicy.Capabilities, allowRuntimeBackgroundWork: false, options.ResourceOutputRetentionBytes);
+        options = ClientTools.Snapshot(options);
         _connection = connection;
         _execution = options.ExecutionOptions ?? new();
         _models = Array.AsReadOnly(models.ToArray());
@@ -54,7 +55,7 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
         _capabilities = capabilities;
         HostedTools.Validate(options.HostedTools, options.MaxHostedTurns, capabilities(options.ModelId).HostedTools);
         ClientTools.ValidateManagedOpening(options, capabilities(options.ModelId));
-        _hostedTools = HostedTools.Snapshot(options.HostedTools);
+        _hostedTools = options.HostedTools;
         ManagedAgentPolicy.Validate(_execution, Model(options.ModelId));
         if (options.Tools.Any(tool => tool is LlmAgentToolDefinition { DeferLoading: true }))
         {
@@ -68,12 +69,6 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
         _callerServices = options.CallerServices;
         _options = options with
         {
-            Tools = Array.AsReadOnly(options.Tools.Select(tool => tool switch
-            {
-                LlmAgentToolDefinition function => (LlmAgentClientToolDefinition)(function with { InputSchema = function.InputSchema.Clone() }),
-                LlmAgentShellTool shell => shell with { Tool = shell.Tool with { Skills = shell.Tool.Skills } },
-                _ => throw new NotSupportedException("Unknown agent tool definition.")
-            }).ToArray()),
             ToolHandler = null,
             CallerServices = null,
             HostedTools = [],

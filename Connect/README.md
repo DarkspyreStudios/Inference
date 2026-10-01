@@ -1206,7 +1206,10 @@ fields. `LlmAgentShellTool` wraps the Common shell definition. `ConnectLlmJson` 
 types with exact type-name getters and fixed `function`/`shell` discriminators. Start/Resume definitions
 and Common/Connect request, history and terminal collections preserve one ordered function/shell
 union. Unsupported shell definitions/history refuse before refresh, catalog, provider counting or
-native entry. Facades freeze the new tool graphs before their first awaited resolution. Shell results
+native entry. Facades freeze the new tool graphs before their first awaited resolution. Agent
+Start/Resume/Fork freezes definitions before connection resolution. Managed openers freeze definitions
+and supplied context before preparation or catalog awaits. Schemas and context bytes are copied;
+handlers and caller services stay borrowed. Shell results
 match actual preceding calls; output limits remain on that call, not duplicated on the result.
 
 `LlmAgentEvent.TurnId` is nullable for actual session-only observations. Concrete turn-scoped events

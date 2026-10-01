@@ -1,4 +1,5 @@
 using System.Collections.Frozen;
+using System.Collections.ObjectModel;
 using Darkspyre.Inference.Common.LLM;
 
 namespace Darkspyre.Inference.Connect.LLM.Internal;
@@ -48,6 +49,31 @@ internal static class ClientTools
     };
 
     internal static LlmShellCallResult Snapshot(LlmShellCallResult result) => result with { Output = result.Output };
+
+    internal static LlmAgentSessionOptions Snapshot(LlmAgentSessionOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        return options with
+        {
+            Tools = Snapshot(options.Tools),
+            HostedTools = HostedTools.Snapshot(options.HostedTools),
+            Context = options.Context is null ? null : ManagedAgentContext.Copy(options.Context, includeAttachmentData: true)
+        };
+    }
+
+    internal static LlmAgentResumeOptions Snapshot(LlmAgentResumeOptions options) => options with
+    {
+        Tools = Snapshot(options.Tools),
+        HostedTools = HostedTools.Snapshot(options.HostedTools)
+    };
+
+    private static ReadOnlyCollection<LlmAgentClientToolDefinition> Snapshot(IReadOnlyList<LlmAgentClientToolDefinition> tools) =>
+        Array.AsReadOnly(tools.Select(tool => tool switch
+        {
+            LlmAgentToolDefinition function => (LlmAgentClientToolDefinition)(function with { InputSchema = function.InputSchema.Clone() }),
+            LlmAgentShellTool shell => shell with { Tool = shell.Tool with { Skills = shell.Tool.Skills } },
+            _ => throw new NotSupportedException("Unknown agent tool definition.")
+        }).ToArray());
 
     internal static LlmChatRequest Snapshot(LlmChatRequest request) => request with
     {
