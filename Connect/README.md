@@ -576,8 +576,10 @@ by typed `Tools` names; its values accept `allowed_callers`, `defer_loading` and
 Typed client schemas, names, descriptions and strictness remain authoritative. The request option
 replaces the entire connection option; an empty object clears it. Neither source is mutated.
 The adapter emits one combined `tools` array, not the `anthropic_tools` wrapper, for generation and
-provider counting. Typed tool choice and parallel controls apply to the combined names. Raw `tools`
-and `tool_choice` options fail even when the typed fields are absent. Vertex Gemini rejects this option.
+provider counting. Typed tool choice and parallel controls apply to the combined names. Raw `tools`,
+`tool_choice` and `temperature` options fail even when the typed fields are absent. The temperature
+guard applies to generation and counting before Vertex authentication. Vertex Gemini rejects
+`anthropic_tools`.
 
 Native definitions accept the documented web search/fetch, code execution, tool search and advisor
 versions. Unknown types, client-executed native built-ins, duplicate names and native schema/strict
