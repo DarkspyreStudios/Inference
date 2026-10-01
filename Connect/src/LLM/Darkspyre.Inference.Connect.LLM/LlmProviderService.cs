@@ -8,7 +8,8 @@ namespace Darkspyre.Inference.Connect.LLM;
 /// Resolves one configured connection and dispatches to exactly one matching transport. It never
 /// retries against, or falls back to, another provider.
 /// </summary>
-public sealed class LlmProviderService : ILlmTextTokenizer, IDisposable, IAsyncDisposable
+public sealed class LlmProviderService : ILlmTextTokenizer, ILlmFileClient, IXaiFilePublicUrlClient,
+    IXaiSkillClient, IDisposable, IAsyncDisposable
 {
     private ILlmConnectionSource? _connections;
     private ILlmConnectionSource Connections => _connections ?? throw new ObjectDisposedException(nameof(LlmProviderService));
@@ -126,6 +127,52 @@ public sealed class LlmProviderService : ILlmTextTokenizer, IDisposable, IAsyncD
         _lifetime.ThrowIfStopping();
         ArgumentException.ThrowIfNullOrWhiteSpace(connectionId);
         return new ConnectLlmInference(this, connectionId);
+    }
+
+    /// <summary>Native file operations remain unavailable until a resource adapter implements this route.</summary>
+    public Task<LlmProviderFile> UploadAsync(string connectionId, Stream source, string fileName,
+        LlmFileUploadOptions? options = null, CancellationToken cancellationToken = default) =>
+        UnavailableResourceAsync<LlmProviderFile>(cancellationToken);
+
+    public Task<LlmFilePage> ListAsync(string connectionId, LlmFileListRequest request,
+        CancellationToken cancellationToken = default) => UnavailableResourceAsync<LlmFilePage>(cancellationToken);
+
+    public Task<LlmProviderFile> GetAsync(string connectionId, string fileId,
+        CancellationToken cancellationToken = default) => UnavailableResourceAsync<LlmProviderFile>(cancellationToken);
+
+    public Task<ResourceDownloadReceipt> DownloadAsync(string connectionId, string fileId, Stream destination,
+        LlmFileDownloadOptions? options = null, CancellationToken cancellationToken = default) =>
+        UnavailableResourceAsync<ResourceDownloadReceipt>(cancellationToken);
+
+    public Task<LlmFileDeletion> DeleteAsync(string connectionId, string fileId,
+        CancellationToken cancellationToken = default) => UnavailableResourceAsync<LlmFileDeletion>(cancellationToken);
+
+    public Task<XaiPublicUrl> CreatePublicUrlAsync(string connectionId, string fileId,
+        XaiPublicUrlOptions? options = null, CancellationToken cancellationToken = default) =>
+        UnavailableResourceAsync<XaiPublicUrl>(cancellationToken);
+
+    public Task<XaiPublicUrlRevocation> RevokePublicUrlAsync(string connectionId, string fileId,
+        CancellationToken cancellationToken = default) => UnavailableResourceAsync<XaiPublicUrlRevocation>(cancellationToken);
+
+    Task<XaiSkill> IXaiSkillClient.UploadAsync(string connectionId, XaiSkillUpload upload,
+        CancellationToken cancellationToken) => UnavailableResourceAsync<XaiSkill>(cancellationToken);
+
+    Task<XaiSkillPage> IXaiSkillClient.ListAsync(string connectionId, XaiSkillListRequest request,
+        CancellationToken cancellationToken) => UnavailableResourceAsync<XaiSkillPage>(cancellationToken);
+
+    Task<XaiSkill> IXaiSkillClient.GetAsync(string connectionId, string skillId,
+        CancellationToken cancellationToken) => UnavailableResourceAsync<XaiSkill>(cancellationToken);
+
+    Task<ResourceDownloadReceipt> IXaiSkillClient.DownloadAsync(string connectionId, string skillId, Stream destination,
+        CancellationToken cancellationToken) => UnavailableResourceAsync<ResourceDownloadReceipt>(cancellationToken);
+
+    Task<XaiSkillDeletion> IXaiSkillClient.DeleteAsync(string connectionId, string skillId,
+        CancellationToken cancellationToken) => UnavailableResourceAsync<XaiSkillDeletion>(cancellationToken);
+
+    private Task<T> UnavailableResourceAsync<T>(CancellationToken cancellationToken)
+    {
+        using var operation = _lifetime.Enter(cancellationToken);
+        return Task.FromException<T>(new NotSupportedException("No Files or Skills resource adapter is implemented."));
     }
 
     public async Task<bool> IsAuthenticatedAsync(

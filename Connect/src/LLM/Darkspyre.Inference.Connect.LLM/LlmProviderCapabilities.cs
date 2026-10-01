@@ -101,6 +101,12 @@ public sealed record LlmProviderCapabilities
     /// <summary>The selected route accepts provider-native file references. Overrides cannot enable an unimplemented route.</summary>
     public bool SupportsFileReferences { get; init; }
 
+    /// <summary>Native file resource operations, independently of generation attachment support.</summary>
+    public LlmFileCapabilities Files { get; init; } = new();
+
+    /// <summary>Skill resource operations and generation attachment are separate availability facts.</summary>
+    public XaiSkillCapabilities Skills { get; init; } = new();
+
     /// <summary>How the route carries each kind of tool-output content.</summary>
     public LlmRichContentSupported RichContentSupported { get; init; } = new();
 

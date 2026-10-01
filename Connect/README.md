@@ -532,6 +532,21 @@ enumerators so their owned operations can leave. Disposal does not report comple
 operation remains active. A registration owner disposes its shared cache; sharing a cache across
 containers does not transfer that responsibility to a scoped facade.
 
+### Files and Skills facade
+
+`LlmProviderService` exposes `ILlmFileClient`, `IXaiFilePublicUrlClient` and
+`IXaiSkillClient`. `AddLlmConnect` registers those interfaces as aliases of the same scoped facade.
+The facade owns their admission and retirement; resolving an interface does not create another
+connection source or credential owner. Skills methods use the `IXaiSkillClient` interface to
+distinguish skill IDs and results from file IDs and results.
+
+`LlmProviderCapabilities.Files` and `.Skills` report separate resource-operation facts. Every
+current adapter leaves those facts false. No Files or Skills adapter implements these operations;
+the facade rejects them before resolving connections, refreshing credentials or inspecting caller
+streams. Caller cancellation and retired-facade admission retain the existing lifetime behavior.
+Upload and download streams remain borrowed, including on rejection and facade disposal. These
+resource interfaces do not enable native-file prompt references or skill generation attachment.
+
 ### Embedding lifetime
 
 `LlmEmbeddingProviderService` implements `IDisposable` and `IAsyncDisposable`. Its registration owner

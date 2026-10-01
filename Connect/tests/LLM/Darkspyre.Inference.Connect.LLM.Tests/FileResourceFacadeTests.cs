@@ -1,3 +1,8 @@
+using System.Reflection;
+using System.Runtime.CompilerServices;
+using System.Runtime.Loader;
+using System.Text.Json;
+using Darkspyre.Inference.Common;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Darkspyre.Inference.Connect.LLM.Tests;
@@ -17,13 +22,24 @@ public sealed class FileResourceFacadeTests
         Assert.Same(facade, scope.ServiceProvider.GetRequiredService<ILlmFileClient>());
         Assert.Same(facade, scope.ServiceProvider.GetRequiredService<IXaiFilePublicUrlClient>());
         Assert.Same(facade, scope.ServiceProvider.GetRequiredService<IXaiSkillClient>());
+        await using AsyncServiceScope other = provider.CreateAsyncScope();
+        Assert.NotSame(facade, other.ServiceProvider.GetRequiredService<ILlmFileClient>());
         Assert.Equal(0, source.Calls);
     }
 
     [Theory]
-    [InlineData(0)] [InlineData(1)] [InlineData(2)] [InlineData(3)]
-    [InlineData(4)] [InlineData(5)] [InlineData(6)] [InlineData(7)]
-    [InlineData(8)] [InlineData(9)] [InlineData(10)] [InlineData(11)]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(2)]
+    [InlineData(3)]
+    [InlineData(4)]
+    [InlineData(5)]
+    [InlineData(6)]
+    [InlineData(7)]
+    [InlineData(8)]
+    [InlineData(9)]
+    [InlineData(10)]
+    [InlineData(11)]
     public async Task UnimplementedOperationsRejectBeforeSourceOrBorrowedStreamEffects(int operation)
     {
         var source = new UnusedSource();
@@ -41,6 +57,7 @@ public sealed class FileResourceFacadeTests
             await facade.DisposeAsync();
             await Assert.ThrowsAsync<ObjectDisposedException>(() => Invoke(facade, operation, stream));
             Assert.Equal(0, source.Calls);
+            Assert.False(source.Disposed);
             Assert.Equal(0, stream.Calls);
             Assert.False(stream.Disposed);
         }
@@ -55,22 +72,69 @@ public sealed class FileResourceFacadeTests
     public void CapabilityNestingIsInertAndApplyPreservesResourceFacts()
     {
         var defaults = new LlmProviderCapabilities();
-        foreach (string name in new[] { "Files", "Skills" })
+        Assert.Equal(new LlmFileCapabilities(), defaults.Files);
+        Assert.Equal(new XaiSkillCapabilities(), defaults.Skills);
+        var supplied = new LlmProviderCapabilities
         {
-            object facts = typeof(LlmProviderCapabilities).GetProperty(name)!.GetValue(defaults)!;
-            foreach (var fact in facts.GetType().GetProperties()) Assert.Equal(false, fact.GetValue(facts));
-        }
-        var supplied = new LlmProviderCapabilities();
-        typeof(LlmProviderCapabilities).GetProperty("Files")!.SetValue(supplied, new LlmFileCapabilities { Upload = true, PublicUrls = true });
-        typeof(LlmProviderCapabilities).GetProperty("Skills")!.SetValue(supplied, new XaiSkillCapabilities { ResourceOperations = true });
+            Files = new() { Upload = true, PublicUrls = true },
+            Skills = new() { ResourceOperations = true }
+        };
         LlmProviderCapabilities applied = supplied.Apply(new() { SupportsStreaming = true });
-        var files = (LlmFileCapabilities)typeof(LlmProviderCapabilities).GetProperty("Files")!.GetValue(applied)!;
-        var skills = (XaiSkillCapabilities)typeof(LlmProviderCapabilities).GetProperty("Skills")!.GetValue(applied)!;
+        LlmFileCapabilities files = JsonSerializer.Deserialize(
+            JsonSerializer.Serialize(applied.Files, ConnectLlmJson.LlmFileCapabilities), ConnectLlmJson.LlmFileCapabilities)!;
+        XaiSkillCapabilities skills = JsonSerializer.Deserialize(
+            JsonSerializer.Serialize(applied.Skills, ConnectLlmJson.XaiSkillCapabilities), ConnectLlmJson.XaiSkillCapabilities)!;
         Assert.True(files.Upload);
         Assert.True(files.PublicUrls);
         Assert.True(skills.ResourceOperations);
         Assert.False(skills.GenerationAttachment);
         Assert.False(applied.SupportsFileReferences);
+    }
+
+    [Fact]
+    public void ActualForeignFacadeCallsAndOwnedCapabilitiesRetire()
+    {
+        WeakReference generation = ExerciseForeign();
+        for (int attempt = 0; generation.IsAlive && attempt < 20; attempt++)
+        { GC.Collect(); GC.WaitForPendingFinalizers(); GC.Collect(); Thread.Sleep(10); }
+        Assert.False(generation.IsAlive);
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static WeakReference ExerciseForeign()
+    {
+        var generation = new Generation(Path.GetDirectoryName(typeof(FileResourceFacadeTests).Assembly.Location)!);
+        var weak = new WeakReference(generation);
+        try
+        {
+            foreach (Assembly original in new[] { typeof(ConnectLlmJson).Assembly, typeof(InferenceJson).Assembly, typeof(FileResourceFacadeTests).Assembly })
+            {
+                Assembly loaded = generation.LoadFromAssemblyPath(original.Location);
+                Assert.NotSame(original, loaded);
+                Assert.Equal(original.ManifestModule.ModuleVersionId, loaded.ManifestModule.ModuleVersionId);
+                Assert.Same(generation, AssemblyLoadContext.GetLoadContext(loaded));
+            }
+            Type caller = generation.Assemblies.Single(assembly => assembly.GetName().Name == typeof(FileResourceFacadeTests).Assembly.GetName().Name)
+                .GetType(typeof(FileResourceFacadeTests).FullName!, true)!;
+            var operation = (Task)caller.GetMethod(nameof(ForeignCallerAsync), BindingFlags.NonPublic | BindingFlags.Static)!.Invoke(null, null)!;
+            operation.WaitAsync(TimeSpan.FromSeconds(10)).GetAwaiter().GetResult();
+        }
+        finally { generation.Unload(); }
+        return weak;
+    }
+
+    private static async Task ForeignCallerAsync()
+    {
+        AssemblyLoadContext? generation = AssemblyLoadContext.GetLoadContext(typeof(FileResourceFacadeTests).Assembly);
+        Assert.True(generation!.IsCollectible);
+        Assert.Same(generation, AssemblyLoadContext.GetLoadContext(typeof(LlmProviderService).Assembly));
+        Assert.Same(generation, AssemblyLoadContext.GetLoadContext(typeof(InferenceJson).Assembly));
+        Assert.Same(typeof(LlmProviderService).Assembly, ConnectLlmJson.LlmFileCapabilities.Type.Assembly);
+        Assert.Same(typeof(LlmProviderService).Assembly, ConnectLlmJson.XaiSkillCapabilities.Type.Assembly);
+        var fixture = new FileResourceFacadeTests();
+        for (int operation = 0; operation < 12; operation++)
+            await fixture.UnimplementedOperationsRejectBeforeSourceOrBorrowedStreamEffects(operation);
+        fixture.CapabilityNestingIsInertAndApplyPreservesResourceFacts();
     }
 
     private static Task Invoke(LlmProviderService facade, int operation, Stream stream,
@@ -91,14 +155,16 @@ public sealed class FileResourceFacadeTests
             _ => throw new ArgumentOutOfRangeException(nameof(operation))
         };
 
-    private sealed class UnusedSource : ILlmConnectionSource
+    private sealed class UnusedSource : ILlmConnectionSource, IDisposable
     {
         internal int Calls { get; private set; }
+        internal bool Disposed { get; private set; }
         public Task<LlmConnection?> GetConnectionAsync(string connectionId, CancellationToken cancellationToken = default)
         { Calls++; throw new InvalidOperationException("Resource refusal must precede source resolution."); }
         public Task SaveCredentialAsync(string connectionId, string credentialJson, string expectedVersion,
             CancellationToken cancellationToken = default)
         { Calls++; throw new InvalidOperationException("Resource refusal must precede credential changes."); }
+        public void Dispose() => Disposed = true;
     }
 
     private sealed class BorrowedStream : Stream
@@ -117,5 +183,15 @@ public sealed class FileResourceFacadeTests
         public override void Write(byte[] buffer, int offset, int count) => Fail<bool>();
         protected override void Dispose(bool disposing) { Disposed = true; base.Dispose(disposing); }
         private T Fail<T>() { Calls++; throw new InvalidOperationException("Resource refusal must not inspect or use borrowed streams."); }
+    }
+
+    private sealed class Generation(string directory) : AssemblyLoadContext(isCollectible: true)
+    {
+        protected override Assembly? Load(AssemblyName name)
+        {
+            if (!name.Name!.StartsWith("Darkspyre.Inference.", StringComparison.Ordinal)) return null;
+            string path = Path.Combine(directory, name.Name + ".dll");
+            return File.Exists(path) ? LoadFromAssemblyPath(path) : null;
+        }
     }
 }
