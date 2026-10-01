@@ -61,13 +61,14 @@ if (-not $sddl.Contains($ace)) {
 
 foreach ($port in @(8080, 8189)) {
     $rule = @{
-        DisplayName = "GPU arbiter TCP $port"; Direction = 'Inbound'; Action = 'Allow'; Protocol = 'TCP'
+        Direction = 'Inbound'; Action = 'Allow'; Protocol = 'TCP'
         LocalPort = $port; RemoteAddress = @('LocalSubnet', '100.64.0.0/10'); Profile = 'Any'
     }
+    # With -Name, Set-NetFirewallRule treats -DisplayName as a selector and takes -NewDisplayName.
     if (Get-NetFirewallRule -Name "gpu-arbiter-$port" -ErrorAction SilentlyContinue) {
-        Set-NetFirewallRule -Name "gpu-arbiter-$port" @rule
+        Set-NetFirewallRule -Name "gpu-arbiter-$port" -NewDisplayName "GPU arbiter TCP $port" @rule
     } else {
-        New-NetFirewallRule -Name "gpu-arbiter-$port" @rule | Out-Null
+        New-NetFirewallRule -Name "gpu-arbiter-$port" -DisplayName "GPU arbiter TCP $port" @rule | Out-Null
     }
 }
 
