@@ -1036,7 +1036,10 @@ actual nullable MIME, duration and expiry instead of inferring them from request
 Returned download streams hold their operation lease until closure. Facade disposal closes
 owned downloads, fences new operations and drains admitted work before detaching borrowed
 transports, bindings and resource access. Callers can dispose the bound facade through
-`IDisposable` or `IAsyncDisposable`.
+`IDisposable` or `IAsyncDisposable`. Returned-stream operations check the synchronous owner
+fence before effects and before returning, even when linked cancellation propagation is delayed.
+Cancellation during successful materialization cleanup retains the observed committed reference,
+session-selection outcome and revision in `InferenceResourceOperationCanceledException`.
 
 `XaiVideoOptions` is the fixed Video-owned subtype for Files-owned storage controls, signed
 upload destinations and explicit user data. Common metadata refuses these provider options;
