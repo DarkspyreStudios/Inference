@@ -268,6 +268,16 @@ See the [shared editor example](../Common/examples/Darkspyre.Inference.Setup.Exa
 These setup contracts are included in the synchronized 11.14.0-rc.1 package family, including
 provider-owned dirty state and explicit choice capabilities for the shared Settings editor.
 
+`TensorJson` exports assembly-owned `JsonTypeInfo<T>` for `SetupConfiguration`, `SetupChanges`,
+`ModelPack`, `PackStatus` and `ModelObservation`. Consumers pass these typed metadata properties to
+`JsonSerializer` when reading or writing Tensor-owned data. The metadata belongs to the Tensor
+assembly generation; consumers release their references when that generation retires. The pack
+manager uses the same source-generated context for installed manifests. Manifest fingerprinting
+also uses generated metadata and retains the established canonical bytes. These formats retain
+their property names, numeric enum values and null/empty distinctions. Unknown properties are
+ignored; model validation remains separate from JSON parsing. Serializer tests load the real Tensor
+assembly into a collectible context and verify collection after each owned family retires.
+
 Qwen and Supra now load the definition selected by `LoadAsync(key)`, rather than requiring the
 built-in key. Register complete, immutable definitions in the same manager used by the engine.
 Neither Save nor a prompt installs/loads weights. Requests, execution coordination, observations

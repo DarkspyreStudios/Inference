@@ -145,8 +145,9 @@ public sealed class TensorModelPackManager : ITensorModelPackManager, IDisposabl
 
         try
         {
-            PersistedModelManifest? manifest = await JsonSerializer.DeserializeAsync<PersistedModelManifest>(
+            PersistedModelManifest? manifest = await JsonSerializer.DeserializeAsync(
                 content,
+                TensorJsonContext.Default.PersistedModelManifest,
                 cancellationToken: cancellationToken).ConfigureAwait(false);
             return manifest is not null && ManifestMatches(definition, manifest)
                 ? new TensorModelPackStatus(key, TensorModelPackState.Installed)
@@ -241,6 +242,7 @@ public sealed class TensorModelPackManager : ITensorModelPackManager, IDisposabl
             await JsonSerializer.SerializeAsync(
                 manifestContent,
                 manifest,
+                TensorJsonContext.Default.PersistedModelManifest,
                 cancellationToken: cancellationToken).ConfigureAwait(false);
             manifestContent.Position = 0;
             await _directory.SaveAsync(
@@ -625,24 +627,6 @@ public sealed class TensorModelPackManager : ITensorModelPackManager, IDisposabl
     }
 
     private void ThrowIfDisposed() => ObjectDisposedException.ThrowIf(_disposed, this);
-
-    private sealed record PersistedArtifact(string Role, string RelativePath, long Length, string Sha256);
-
-    private sealed record PersistedModelManifest(
-        string ModelId,
-        string Revision,
-        IReadOnlyList<PersistedArtifact> Artifacts)
-    {
-        public static PersistedModelManifest Create(TensorModelPackDefinition definition) =>
-            new(
-                definition.Key.ModelId,
-                definition.Key.Revision,
-                definition.Artifacts.Select(static artifact => new PersistedArtifact(
-                    artifact.Role,
-                    artifact.RelativePath,
-                    artifact.Length,
-                    artifact.Sha256.ToLowerInvariant())).ToArray());
-    }
 
     private sealed class ResponseStream(Stream content, HttpResponseMessage response) : Stream
     {

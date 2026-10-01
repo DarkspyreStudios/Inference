@@ -50,24 +50,13 @@ public static class TensorResolvedPack
             Sources = artifact.Sources.OrderBy(uri => uri.AbsoluteUri, StringComparer.Ordinal).ToArray()
         }).ToArray();
         // Canonical field order and artifact order make the identity independent of source enumeration order.
-        byte[] manifest = JsonSerializer.SerializeToUtf8Bytes(new
-        {
-            candidate.SourceId,
-            candidate.Selection.Repository,
-            candidate.Selection.Variant,
-            architecture,
-            capability,
-            Backends = backends.Order(),
-            Artifacts = artifacts.OrderBy(artifact => artifact.Role, StringComparer.Ordinal).Select(artifact => new
-            {
-                artifact.Role,
-                artifact.RelativePath,
-                artifact.Length,
-                Sha256 = artifact.Sha256.ToLowerInvariant(),
-                artifact.Provenance,
-                Sources = artifact.Sources.Select(uri => uri.AbsoluteUri).Order(StringComparer.Ordinal)
-            })
-        });
+        byte[] manifest = JsonSerializer.SerializeToUtf8Bytes(new TensorManifestFingerprint(
+            candidate.SourceId, candidate.Selection.Repository, candidate.Selection.Variant, architecture, capability,
+            backends.Order().ToArray(), artifacts.OrderBy(artifact => artifact.Role, StringComparer.Ordinal)
+                .Select(artifact => new TensorFingerprintArtifact(artifact.Role, artifact.RelativePath, artifact.Length,
+                    artifact.Sha256.ToLowerInvariant(), artifact.Provenance,
+                    artifact.Sources.Select(uri => uri.AbsoluteUri).Order(StringComparer.Ordinal).ToArray())).ToArray()),
+            TensorJsonContext.Default.TensorManifestFingerprint);
         string fingerprint = Convert.ToHexStringLower(SHA256.HashData(manifest));
         var definition = new TensorModelPackDefinition
         {
