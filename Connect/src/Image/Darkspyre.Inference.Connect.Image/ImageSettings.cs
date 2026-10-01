@@ -2,6 +2,7 @@ using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Common.Image;
 using Darkspyre.Inference.Common.Setup;
 using Darkspyre.Inference.Connect.LLM;
+using Darkspyre.Inference.Connect.LLM.Internal;
 
 namespace Darkspyre.Inference.Connect.Image;
 
@@ -227,11 +228,12 @@ public sealed class ImageSettings : InferenceSettings<ImageSetupChanges>
 /// Opens, acts on and saves image-provider settings. The host's workflow catalog answers the workflow
 /// choices and resolves the selected workflow; health and generation tests call the provider.
 /// </summary>
-public sealed class ImageSettingsManager : InferenceSettingsManager<ImageSettings, ImageSetupChanges>
+public sealed class ImageSettingsManager : InferenceSettingsManager<ImageSettings, ImageSetupChanges>, IDisposable, IAsyncDisposable
 {
-    private readonly ImageProviderService _service;
-    private readonly IImageWorkflowChoiceSource? _workflows;
-    private readonly Func<XaiConnectionSelection, XaiFamilyBinding>? _xaiBindings;
+    private readonly LlmOperationLifetime _lifetime = new();
+    private ImageProviderService? _service;
+    private IImageWorkflowChoiceSource? _workflows;
+    private Func<XaiConnectionSelection, XaiFamilyBinding>? _xaiBindings;
 
     internal ImageSettingsManager(ImageProviderService service, ISetupCommitTarget<ImageSetupChanges> target,
         IImageWorkflowChoiceSource? workflows, Func<XaiConnectionSelection, XaiFamilyBinding>? xaiBindings)
@@ -246,9 +248,30 @@ public sealed class ImageSettingsManager : InferenceSettingsManager<ImageSetting
     public Task<ImageSettings> OpenAsync(ImageTransport transport, SetupConfigurationIdentity identity,
         ImageConnection? existing = null, ImageWorkflowSelection? workflow = null, CancellationToken cancellationToken = default)
     {
-        cancellationToken.ThrowIfCancellationRequested();
-        return Task.FromResult(new ImageSettings(_service.GetRequiredTransport(transport).Descriptor, identity,
+        using LlmOperationLifetime.Lease lease = _lifetime.Enter(cancellationToken);
+        return Task.FromResult(new ImageSettings(_service!.GetRequiredTransport(transport).Descriptor, identity,
             _workflows is not null, existing, workflow));
+    }
+
+    public override async Task<SetupActionResult> RunAsync(InferenceSettings settings, string actionId,
+        IProgress<SetupProgress>? progress = null, CancellationToken cancellationToken = default)
+    {
+        using LlmOperationLifetime.Lease lease = _lifetime.Enter(cancellationToken);
+        return await base.RunAsync(settings, actionId, progress, lease.Token).ConfigureAwait(false);
+    }
+
+    public override async Task<SetupChoicePage> QueryChoicesAsync(InferenceSettings settings, string fieldId,
+        SetupChoiceQuery query, CancellationToken cancellationToken = default)
+    {
+        using LlmOperationLifetime.Lease lease = _lifetime.Enter(cancellationToken);
+        return await base.QueryChoicesAsync(settings, fieldId, query, lease.Token).ConfigureAwait(false);
+    }
+
+    public override async Task<SetupCommitResult> SaveAsync(InferenceSettings settings, CancellationToken cancellationToken = default)
+    {
+        using LlmOperationLifetime.Lease lease = _lifetime.Enter(cancellationToken);
+        // An admitted conditional commit preserves its observed committed or uncertain result.
+        return await base.SaveAsync(settings, lease.Token).ConfigureAwait(false);
     }
 
     protected override async Task<SetupActionResult> RunCoreAsync(ImageSettings settings, SetupActionDescriptor action,
@@ -270,13 +293,18 @@ public sealed class ImageSettingsManager : InferenceSettingsManager<ImageSetting
         {
             if (_workflows is null) return new([], State: SetupChoiceState.Unavailable);
             SetupChoicePage page = await _workflows.GetChoicesAsync(settings.Transport, query, cancellationToken).ConfigureAwait(false);
+            Fence(cancellationToken);
             if (page.Choices.GroupBy(choice => choice.Value, StringComparer.Ordinal).Any(group => group.Count() > 1))
                 throw new InvalidOperationException("The host workflow choices contain duplicate identities.");
             if (settings.Generation != generation) return new([], State: SetupChoiceState.Cancelled);
             return page;
         }
         ImageConnection connection = settings.Connection();
-        IReadOnlyList<ImageWorkflow> available = await _service.GetWorkflowsAsync(connection, Binding(connection), cancellationToken).ConfigureAwait(false);
+        XaiFamilyBinding? binding = Binding(connection);
+        Fence(cancellationToken);
+        if (settings.Generation != generation) return new([], State: SetupChoiceState.Cancelled);
+        IReadOnlyList<ImageWorkflow> available = await _service!.GetWorkflowsAsync(connection, binding, cancellationToken).ConfigureAwait(false);
+        Fence(cancellationToken);
         ValidateWorkflowIds(available);
         if (settings.Generation != generation) return new([], State: SetupChoiceState.Cancelled);
         return InferenceSettings.Page(query, available.Select(workflow => new SetupChoice(workflow.Id, workflow.Label)));
@@ -294,10 +322,15 @@ public sealed class ImageSettingsManager : InferenceSettingsManager<ImageSetting
         else
         {
             ImageConnection connection = settings.Connection();
-            IReadOnlyList<ImageWorkflow> available = await _service.GetWorkflowsAsync(connection, Binding(connection), token).ConfigureAwait(false);
+            XaiFamilyBinding? binding = Binding(connection);
+            Fence(token);
+            if (settings.Generation != generation) return new(SetupActionState.Cancelled);
+            IReadOnlyList<ImageWorkflow> available = await _service!.GetWorkflowsAsync(connection, binding, token).ConfigureAwait(false);
+            Fence(token);
             ValidateWorkflowIds(available);
             workflow = available.SingleOrDefault(item => item.Id == workflowId);
         }
+        Fence(token);
         if (settings.Generation != generation || settings.WorkflowId != workflowId || settings.Origin != origin || settings.Transport != transport)
             return new(SetupActionState.Cancelled);
         if (workflow is null || workflow.Id != workflowId || workflow.Transport != settings.Transport)
@@ -311,8 +344,16 @@ public sealed class ImageSettingsManager : InferenceSettingsManager<ImageSetting
     private async Task<SetupActionResult> CheckHealthAsync(ImageSettings settings, CancellationToken token)
     {
         settings.Status = settings.Status with { Verified = SetupObservation.Unknown, Ready = SetupObservation.Unknown };
-        ImageProviderHealth result = await _service.GetRequiredTransport(settings.Transport)
-            .TestAsync(settings.Connection(), settings.Workflow, Binding(settings.Connection()), token).ConfigureAwait(false);
+        long generation = settings.Generation;
+        ImageConnection connection = settings.Connection();
+        ImageWorkflow? workflow = settings.Workflow;
+        XaiFamilyBinding? binding = Binding(connection);
+        Fence(token);
+        if (settings.Generation != generation) return new(SetupActionState.Cancelled);
+        ImageProviderHealth result = await _service!.GetRequiredTransport(settings.Transport)
+            .TestAsync(connection, workflow, binding, token).ConfigureAwait(false);
+        Fence(token);
+        if (settings.Generation != generation) return new(SetupActionState.Cancelled);
         settings.Status = settings.Status with { Verified = SetupObservation.Known(result.IsHealthy) };
         return result.IsHealthy ? SetupActionResult.Completed
             : new(SetupActionState.Failed, [new("health-failed", "The provider or selected workflow did not pass its health check.")], IsRetryable: true);
@@ -328,10 +369,28 @@ public sealed class ImageSettingsManager : InferenceSettingsManager<ImageSetting
         {
             return new(SetupActionState.Unavailable, [new("reference-required", "This test needs a reference image.")]);
         }
+        long generation = settings.Generation;
+        ImageConnection connection = settings.Connection();
         progress?.Report(new("generating", "Generating one test image."));
-        ImageGenerationResult result = await _service.Bind(settings.Connection(), workflow, Binding(settings.Connection())).GenerateAsync(
-            new() { ModelId = workflow.Id, Prompt = "A small blue circle on a white background.", Seed = 42 },
-            cancellationToken: token).ConfigureAwait(false);
+        Fence(token);
+        if (settings.Generation != generation) return new(SetupActionState.Cancelled);
+        XaiFamilyBinding? binding = Binding(connection);
+        Fence(token);
+        if (settings.Generation != generation) return new(SetupActionState.Cancelled);
+        IImageInference inference = _service!.Bind(connection, workflow, binding);
+        ImageGenerationResult result;
+        try { result = await inference.GenerateAsync(
+            new() { ModelId = workflow.Id, Prompt = "A small blue circle on a white background.", Seed = connection.Transport == ImageTransport.ComfyUi ? 42 : null },
+            cancellationToken: token).ConfigureAwait(false); }
+        catch (Exception original)
+        {
+            try { await ((IAsyncDisposable)inference).DisposeAsync().ConfigureAwait(false); }
+            catch (Exception cleanup) { throw new AggregateException(original, cleanup); }
+            throw;
+        }
+        await ((IAsyncDisposable)inference).DisposeAsync().ConfigureAwait(false);
+        Fence(token);
+        if (settings.Generation != generation) return new(SetupActionState.Cancelled);
         bool ready = result.Images.Count > 0 && result.Images.All(image => !image.Data.IsEmpty);
         settings.Status = settings.Status with { Ready = SetupObservation.Known(ready) };
         return ready ? SetupActionResult.Completed : new(SetupActionState.Failed, [new("empty-image", "The provider returned no image.")]);
@@ -352,4 +411,15 @@ public sealed class ImageSettingsManager : InferenceSettingsManager<ImageSetting
         if (workflows.GroupBy(workflow => workflow.Id, StringComparer.Ordinal).Any(group => group.Count() > 1))
             throw new InvalidOperationException("The built-in workflows contain duplicate identities.");
     }
+
+    private void Fence(CancellationToken token) { token.ThrowIfCancellationRequested(); _lifetime.ThrowIfStopping(); }
+
+    public void Dispose() => RetireAsync().GetAwaiter().GetResult();
+    public ValueTask DisposeAsync() => new(RetireAsync());
+    private Task RetireAsync() => _lifetime.RetireAsync(() =>
+    {
+        _service = null; _workflows = null; _xaiBindings = null;
+        DetachCommitTarget();
+        return Task.CompletedTask;
+    });
 }

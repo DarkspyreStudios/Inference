@@ -1,12 +1,12 @@
 using System.Collections.ObjectModel;
 using System.Diagnostics;
-using System.Runtime.ExceptionServices;
 using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Common.Image;
 using Darkspyre.Inference.Common.Media;
 using Darkspyre.Inference.Common.Resources;
 using Darkspyre.Inference.Connect.LLM;
 using Darkspyre.Inference.Connect.LLM.Internal;
+using Darkspyre.Inference.Connect.Image.Internal;
 
 namespace Darkspyre.Inference.Connect.Image;
 
@@ -137,7 +137,7 @@ internal sealed class ConnectImageInference : IImageInference, IDisposable, IAsy
                             string? contentType = download.ContentType ?? output.ContentType;
                             InferenceResourceDescriptor? resource = output.Resource;
                             if (resources is not null)
-                                resource = await CommitOutputAsync(resources, output.FileName, contentType, bytes, lease.Token).ConfigureAwait(false);
+                                resource = await ImageResourceOperations.CommitAsync(resources, output.FileName, contentType, bytes, Fence, lease.Token).ConfigureAwait(false);
                             Fence(lease.Token);
                             images.Add(new GeneratedImage
                             { ContentType = contentType, Data = bytes, Seed = seed, File = output.File, Resource = resource });
@@ -154,6 +154,9 @@ internal sealed class ConnectImageInference : IImageInference, IDisposable, IAsy
                             }
                         };
                     case ImageTransportJobState.Failed:
+                        if (snapshot.Error?.Resource is { } resourceFailure)
+                            throw new InferenceResourceOperationException(snapshot.Error.Code,
+                                "The image provider reported a resource operation failure.", resourceFailure);
                         throw new InferenceException(snapshot.Error?.Code ?? InferenceFailureCode.ExecutionFailed,
                             snapshot.Error?.Message ?? "The image provider failed the generation job.");
                     default:
@@ -169,64 +172,6 @@ internal sealed class ConnectImageInference : IImageInference, IDisposable, IAsy
             catch (Exception cleanup) when (cleanup is not OutOfMemoryException) { throw new AggregateException(error, cleanup); }
             throw;
         }
-    }
-
-    private async Task<InferenceResourceDescriptor> CommitOutputAsync(IInferenceResourceAccess resources,
-        string? fileName, string? contentType, byte[] bytes, CancellationToken token)
-    {
-        IInferenceResourceWriteHandle? writer = null;
-        Exception? failure = null;
-        InferenceResourceOperationPhase phase = InferenceResourceOperationPhase.OpenWrite;
-        InferenceResourceCommitOutcome outcome = InferenceResourceCommitOutcome.NotAttempted;
-        long? written = 0;
-        InferenceResourceCommitOutcome selectionOutcome = InferenceResourceCommitOutcome.NotAttempted;
-        InferenceResourceSelectionVersion? selectionVersion = null;
-        InferenceResourceDescriptor? result = null;
-        try
-        {
-            writer = await resources.OpenWriteAsync(new(resources.SessionId, fileName, contentType, bytes.Length), token).ConfigureAwait(false);
-            Fence(token);
-            phase = InferenceResourceOperationPhase.Write;
-            written = null;
-            await writer.Content.WriteAsync(bytes, token).ConfigureAwait(false);
-            written = bytes.Length;
-            Fence(token);
-            phase = InferenceResourceOperationPhase.Commit;
-            outcome = InferenceResourceCommitOutcome.Unknown;
-            selectionOutcome = InferenceResourceCommitOutcome.Unknown;
-            InferenceResourceCommitResult committed = await writer.CommitAsync(written.Value,
-                new InferenceResourceCommitOptions { SelectForSession = true }, token).ConfigureAwait(false);
-            if (committed.Resource.Reference != writer.Reference || committed.Resource.Reference.WorkspaceId != resources.WorkspaceId
-                || committed.Resource.SessionId != resources.SessionId)
-                throw new InferenceException(InferenceFailureCode.ProtocolFailure, "Resource commit returned a mismatched content identity.");
-            outcome = InferenceResourceCommitOutcome.Committed;
-            if (committed.Selection is null || committed.Selection.WorkspaceId != resources.WorkspaceId
-                || committed.Selection.SessionId != resources.SessionId || !committed.Selection.SelectedResources.Contains(writer.Reference))
-                throw new InferenceException(InferenceFailureCode.ProtocolFailure, "Resource commit returned mismatched content or session selection.");
-            selectionOutcome = InferenceResourceCommitOutcome.Committed;
-            selectionVersion = new(committed.Selection.WorkspaceId, committed.Selection.SessionId, committed.Selection.Revision);
-            Fence(token);
-            result = committed.Resource;
-        }
-        catch (Exception error) when (error is not OutOfMemoryException)
-        {
-            var facts = new InferenceResourceOperationFailure(phase, writer?.Reference, outcome, written)
-            { SelectionOutcome = selectionOutcome, SelectionVersion = selectionVersion };
-            failure = error is OperationCanceledException
-                ? new InferenceResourceOperationCanceledException(facts, token, error)
-                : new InferenceResourceOperationException(InferenceFailureCode.ExecutionFailed, "The image output resource operation failed.", facts, error);
-        }
-        if (writer is not null)
-        {
-            try { await writer.DisposeAsync().ConfigureAwait(false); }
-            catch (Exception cleanup) when (cleanup is not OutOfMemoryException)
-            {
-                if (failure is not null) throw new AggregateException(failure, cleanup);
-                throw;
-            }
-        }
-        if (failure is not null) ExceptionDispatchInfo.Throw(failure);
-        return result!;
     }
 
     private static void ValidateCapabilities(ImageGenerationRequest request, InferenceMediaSource[] references, ImageCapabilities capabilities)

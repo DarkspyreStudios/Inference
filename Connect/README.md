@@ -872,6 +872,18 @@ reference or one logical resource resolved through caller-owned access. URL, nat
 references, step/guidance overrides and Count greater than one refuse before effects. All observed
 outputs are retained. Download MIME comes from actual HTTP metadata, not a workflow default.
 
+When resource access is supplied, a binary reference is committed and selected for the caller's
+session before ComfyUI uploads the authorized logical resource. Resource reads and uploads retain
+the endpoint/header snapshot admitted before the first callback. Generated outputs are likewise
+committed and selected before the composite publishes completion. Typed failures preserve known
+content/selection outcomes; a dispatched commit with no matching response remains unknown.
+
+Image facades and settings managers fence new calls on disposal and drain admitted operations before
+releasing borrowed transports, workflow catalogs, binding factories, resource access and commit
+targets. Those collaborators are never disposed. Settings admission also applies through base and
+interface references. Draft edits invalidate pending health, choice and workflow results; an admitted
+conditional save still preserves the commit target's observed committed or uncertain result.
+
 `ConnectImageJson` exports exact type-name metadata for the complete public Image data graph.
 Runtime authority, bindings, resource handles and binding factories refuse non-null serialization.
 Workflow selection stores both `ImageWorkflowOrigin` and the exact ID. Host and built-in origins

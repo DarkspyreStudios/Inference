@@ -43,9 +43,11 @@ public sealed record ImagePreparedReference(ImageReference Metadata,
     InferenceResourceReference? Resource = null)
 {
     [JsonRequired]
-    public ImageReference Metadata { get; init; } = Metadata ?? throw new ArgumentNullException(nameof(Metadata));
+    public ImageReference Metadata { get; init => field = value ?? throw new ArgumentNullException(nameof(value)); }
+        = Metadata ?? throw new ArgumentNullException(nameof(Metadata));
     [JsonRequired]
-    public InferenceResourceScope Scope { get; init; } = Scope ?? throw new ArgumentNullException(nameof(Scope));
+    public InferenceResourceScope Scope { get; init => field = value ?? throw new ArgumentNullException(nameof(value)); }
+        = Scope ?? throw new ArgumentNullException(nameof(Scope));
     [JsonRequired]
     public JsonElement ProviderState { get; init => field = value.Clone(); } = ProviderState.Clone();
 }
@@ -68,7 +70,8 @@ public sealed record ImageTransportOutput(string? FileName,
     InferenceResourceDescriptor? Resource = null)
 {
     [JsonRequired]
-    public InferenceResourceScope Scope { get; init; } = Scope ?? throw new ArgumentNullException(nameof(Scope));
+    public InferenceResourceScope Scope { get; init => field = value ?? throw new ArgumentNullException(nameof(value)); }
+        = Scope ?? throw new ArgumentNullException(nameof(Scope));
     [JsonRequired]
     public JsonElement ProviderState { get; init => field = value.Clone(); } = ProviderState.Clone();
 }
@@ -80,7 +83,7 @@ public sealed record ImageTransportDownload(string? ContentType, ReadOnlyMemory<
 }
 
 public sealed record ImageTransportJobSnapshot(
-    ImageTransportJobState State,
+    [property: JsonRequired] ImageTransportJobState State,
     IReadOnlyList<ImageTransportOutput>? Outputs = null,
     InferenceResourceFailure? Error = null,
     JsonElement? Diagnostics = null)

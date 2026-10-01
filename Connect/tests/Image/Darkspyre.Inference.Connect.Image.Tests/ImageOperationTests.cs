@@ -233,10 +233,20 @@ internal sealed class ImageTestResources : IInferenceResourceAccess, IDisposable
     public TaskCompletionSource CommitEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
     public TaskCompletionSource? CommitRelease { get; init; }
     public List<Writer> Writers { get; } = [];
+    public Func<InferenceResourceReference, CancellationToken, Task<IInferenceResourceReadHandle>>? ReadProvider { get; set; }
+    public Dictionary<InferenceResourceReference, (InferenceResourceDescriptor Resource, byte[] Data)> Committed { get; } = [];
+    public List<Reader> Readers { get; } = [];
     public int Disposals { get; private set; }
     public int SeparateSelectionCalls { get; private set; }
     public Task<InferenceResourceDescriptor?> GetAsync(InferenceResourceReference reference, CancellationToken cancellationToken = default) => throw new NotSupportedException();
-    public Task<IInferenceResourceReadHandle> OpenReadAsync(InferenceResourceReference reference, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+    public Task<IInferenceResourceReadHandle> OpenReadAsync(InferenceResourceReference reference, CancellationToken cancellationToken = default)
+    {
+        if (ReadProvider is not null) return ReadProvider(reference, cancellationToken);
+        var stored = Committed[reference];
+        var reader = new Reader(stored.Resource, new MemoryStream(stored.Data, writable: false));
+        Readers.Add(reader);
+        return Task.FromResult<IInferenceResourceReadHandle>(reader);
+    }
     public Task<IInferenceResourceWriteHandle> OpenWriteAsync(InferenceResourceCreate resource, CancellationToken cancellationToken = default)
     {
         if (Outcome == "open") throw OperationFailure;
@@ -270,7 +280,9 @@ internal sealed class ImageTestResources : IInferenceResourceAccess, IDisposable
             if (_owner.CommitRelease is not null) await _owner.CommitRelease.Task;
             if (_owner.Outcome is "commit" or "commit-cleanup") throw _owner.OperationFailure;
             Selected = options?.SelectForSession == true;
-            return new(new(Reference, _create.SessionId, _create.FileName, _create.ContentType, bytesWritten),
+            var descriptor = new InferenceResourceDescriptor(Reference, _create.SessionId, _create.FileName, _create.ContentType, bytesWritten);
+            _owner.Committed[Reference] = (descriptor, Bytes.ToArray());
+            return new(descriptor,
                 _owner.Outcome == "selection" ? null : new(_owner.WorkspaceId, _owner.SessionId, _revision, [Reference]));
         }
         public ValueTask DisposeAsync()
@@ -279,6 +291,19 @@ internal sealed class ImageTestResources : IInferenceResourceAccess, IDisposable
             if (_owner.Outcome == "commit-cleanup") return ValueTask.FromException(_owner.CleanupFailure);
             Content.Dispose();
             return ValueTask.CompletedTask;
+        }
+    }
+    internal sealed class Reader(InferenceResourceDescriptor resource, Stream content) : IInferenceResourceReadHandle
+    {
+        public InferenceResourceDescriptor Resource { get; } = resource;
+        public Stream Content { get; } = content;
+        public int Disposals { get; private set; }
+        public Exception? CleanupFailure { get; init; }
+        public ValueTask DisposeAsync()
+        {
+            Disposals++;
+            Content.Dispose();
+            return CleanupFailure is null ? ValueTask.CompletedTask : ValueTask.FromException(CleanupFailure);
         }
     }
     private sealed class OutputStream(ImageTestResources owner) : MemoryStream

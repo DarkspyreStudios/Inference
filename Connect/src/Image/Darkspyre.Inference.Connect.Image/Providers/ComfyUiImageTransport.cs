@@ -317,6 +317,13 @@ internal sealed class ComfyUiImageTransport(
     {
         cancellationToken.ThrowIfCancellationRequested();
         (InferenceResourceScope scope, connection) = Admit(connection, xai);
+        return await UploadAdmittedAsync(connection, reference, content, scope, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<ImagePreparedReference> UploadAdmittedAsync(
+        ImageConnection connection, ImageReference reference, Stream content,
+        InferenceResourceScope scope, CancellationToken cancellationToken)
+    {
         ArgumentNullException.ThrowIfNull(reference);
         ArgumentNullException.ThrowIfNull(content);
         if (!content.CanRead)
@@ -359,12 +366,24 @@ internal sealed class ComfyUiImageTransport(
         cancellationToken.ThrowIfCancellationRequested();
         ValidateConnection(connection, xai);
         ArgumentNullException.ThrowIfNull(source);
+        if (source is not (BinaryMediaSource or ResourceMediaSource))
+            throw new InferenceException(InferenceFailureCode.UnsupportedFeature, "ComfyUI accepts binary or logical resource reference images only.");
+        if (source is ResourceMediaSource && resources is null)
+            throw new InferenceException(InferenceFailureCode.UnsupportedFeature, "The resource source requires caller-owned access.");
+        (InferenceResourceScope scope, connection) = Admit(connection, xai);
         if (source is BinaryMediaSource binary)
         {
-            using var stream = new MemoryStream(binary.Data.ToArray(), writable: false);
-            return await UploadReferenceAsync(connection, new ImageReference
-            { Id = Guid.NewGuid(), FileName = binary.FileName, ContentType = binary.ContentType },
-                stream, xai, cancellationToken).ConfigureAwait(false);
+            if (resources is null)
+            {
+                using var stream = new MemoryStream(binary.Data.ToArray(), writable: false);
+                return await UploadAdmittedAsync(connection, new ImageReference
+                { Id = Guid.NewGuid(), FileName = binary.FileName, ContentType = binary.ContentType },
+                    stream, scope, cancellationToken).ConfigureAwait(false);
+            }
+            InferenceResourceDescriptor committed = await ImageResourceOperations.CommitAsync(resources,
+                binary.FileName, binary.ContentType, binary.Data, token: cancellationToken).ConfigureAwait(false);
+            cancellationToken.ThrowIfCancellationRequested();
+            source = new ResourceMediaSource(committed.Reference);
         }
         if (source is ResourceMediaSource resource)
         {
@@ -374,22 +393,30 @@ internal sealed class ComfyUiImageTransport(
             ImagePreparedReference? result = null;
             Exception? failure = null;
             InferenceResourceOperationPhase phase = InferenceResourceOperationPhase.OpenRead;
+            long? bytesTransferred = null;
             try
             {
-                reader = await resources.OpenReadAsync(resource.Resource, cancellationToken).ConfigureAwait(false);
+                reader = await resources!.OpenReadAsync(resource.Resource, cancellationToken).ConfigureAwait(false);
                 cancellationToken.ThrowIfCancellationRequested();
                 if (reader.Resource.Reference != resource.Resource)
                     throw new InferenceException(InferenceFailureCode.ProtocolFailure, "Resource access returned a different content identity.");
+                using var content = new MemoryStream();
+                phase = InferenceResourceOperationPhase.Read;
+                try { await reader.Content.CopyToAsync(content, cancellationToken).ConfigureAwait(false); }
+                catch (Exception error) when (error is not OutOfMemoryException) { bytesTransferred = content.Length; throw; }
+                cancellationToken.ThrowIfCancellationRequested();
+                content.Position = 0;
                 phase = InferenceResourceOperationPhase.Materialize;
-                ImagePreparedReference receipt = await UploadReferenceAsync(connection, new ImageReference
+                bytesTransferred = null;
+                ImagePreparedReference receipt = await UploadAdmittedAsync(connection, new ImageReference
                 { Id = Guid.NewGuid(), FileName = reader.Resource.FileName, ContentType = reader.Resource.ContentType },
-                    reader.Content, xai, cancellationToken).ConfigureAwait(false);
+                    content, scope, cancellationToken).ConfigureAwait(false);
                 cancellationToken.ThrowIfCancellationRequested();
                 result = receipt with { Resource = resource.Resource };
             }
             catch (Exception error) when (error is not OutOfMemoryException)
             {
-                var facts = new InferenceResourceOperationFailure(phase, resource.Resource, InferenceResourceCommitOutcome.NotAttempted);
+                var facts = new InferenceResourceOperationFailure(phase, resource.Resource, InferenceResourceCommitOutcome.NotAttempted, bytesTransferred);
                 failure = error is OperationCanceledException
                     ? new InferenceResourceOperationCanceledException(facts, cancellationToken, error)
                     : new InferenceResourceOperationException(InferenceFailureCode.ExecutionFailed,

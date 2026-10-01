@@ -7,7 +7,7 @@ using Darkspyre.Inference.Common.Setup;
 
 namespace Darkspyre.Inference.Connect.Image.Tests;
 
-public sealed class ImageSetupTests
+public sealed partial class ImageSetupTests
 {
     [Fact]
     public async Task MissingWorkflowCatalogIsUnavailableNotAnEmptySuccessfulPicker()
@@ -104,9 +104,10 @@ public sealed class ImageSetupTests
 
     private sealed class Target : ISetupCommitTarget<ImageSetupChanges>
     {
+        public Func<ImageSetupChanges, Task<SetupCommitResult>>? OnCommit { get; init; }
         public ImageSetupChanges? Changes { get; private set; }
         public Task<SetupCommitResult> CommitAsync(ImageSetupChanges changes, CancellationToken cancellationToken = default)
-        { Changes = changes; return Task.FromResult(new SetupCommitResult(SetupCommitState.Committed, "v2")); }
+        { Changes = changes; return OnCommit?.Invoke(changes) ?? Task.FromResult(new SetupCommitResult(SetupCommitState.Committed, "v2")); }
     }
 
     private sealed class Workflows : IImageWorkflowChoiceSource
@@ -119,9 +120,12 @@ public sealed class ImageSetupTests
 
     private sealed class Transport : IImageTransport
     {
+        public ImageTransport Kind { get; init; } = ImageTransport.ComfyUi;
+        public Func<ImageConnection, Task<ImageProviderHealth>>? OnHealth { get; init; }
+        public ImageTransportPreparationRequest? Prepared { get; private set; }
         public int HealthCalls { get; private set; }
         public int SubmitCalls { get; private set; }
-        public ImageTransportDescriptor Descriptor { get; } = new(ImageTransport.ComfyUi, "ComfyUI", "Test", new(false, false, false));
+        public ImageTransportDescriptor Descriptor => new(Kind, "Controlled transport", "Managed fixture", new(false, false, false));
 
         public Task<IReadOnlyList<ImageWorkflow>> GetWorkflowsAsync(ImageConnection connection, XaiFamilyBinding? xai = null, CancellationToken cancellationToken = default)
             => throw new NotSupportedException();
@@ -130,9 +134,9 @@ public sealed class ImageSetupTests
         public Task<ImagePreparedReference> ResolveReferenceAsync(ImageConnection connection, InferenceMediaSource source, XaiFamilyBinding? xai = null, IInferenceResourceAccess? resources = null, CancellationToken cancellationToken = default)
             => throw new NotSupportedException();
 
-        public PreparedImageTransportRequest Prepare(ImageTransportPreparationRequest request) => new("{}");
+        public PreparedImageTransportRequest Prepare(ImageTransportPreparationRequest request) { Prepared = request; return new("{}"); }
         public Task<ImageProviderHealth> TestAsync(ImageConnection connection, ImageWorkflow? workflow = null, XaiFamilyBinding? xai = null, CancellationToken cancellationToken = default)
-        { HealthCalls++; return Task.FromResult(new ImageProviderHealth(true, "OK")); }
+        { HealthCalls++; return OnHealth?.Invoke(connection) ?? Task.FromResult(new ImageProviderHealth(true, "OK")); }
         public Task<string> SubmitAsync(ImageConnection connection, PreparedImageTransportRequest request, XaiFamilyBinding? xai = null, CancellationToken cancellationToken = default)
         { SubmitCalls++; return Task.FromResult("job"); }
         public Task<ImageTransportJobSnapshot> GetJobAsync(ImageConnection connection, string providerJobId, ImageWorkflow workflow, XaiFamilyBinding? xai = null, CancellationToken cancellationToken = default)

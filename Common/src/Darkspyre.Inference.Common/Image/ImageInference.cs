@@ -1,9 +1,10 @@
 using Darkspyre.Inference.Common.Media;
 using Darkspyre.Inference.Common.Resources;
+using System.Text.Json.Serialization;
 
 namespace Darkspyre.Inference.Common.Image;
 
-public sealed record ImageSize(int Width, int Height);
+public sealed record ImageSize([property: JsonRequired] int Width, [property: JsonRequired] int Height);
 
 public sealed record ImageGenerationRequest
 {

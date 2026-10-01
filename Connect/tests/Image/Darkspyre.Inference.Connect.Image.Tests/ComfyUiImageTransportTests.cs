@@ -8,7 +8,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Darkspyre.Inference.Connect.Image.Tests;
 
-public sealed class ComfyUiImageTransportTests
+public sealed partial class ComfyUiImageTransportTests
 {
     [Theory]
     [InlineData("unchanged")]
