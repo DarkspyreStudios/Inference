@@ -3,6 +3,7 @@ using System.Text.Json.Serialization.Metadata;
 using Darkspyre.Inference.Common.Decision;
 using Darkspyre.Inference.Common.Image;
 using Darkspyre.Inference.Common.LLM;
+using Darkspyre.Inference.Common.Media;
 using Darkspyre.Inference.Common.Resources;
 using Darkspyre.Inference.Common.Setup;
 
@@ -11,6 +12,15 @@ namespace Darkspyre.Inference.Common;
 /// <summary>Common-owned metadata for closed data contracts. No reflection fallback is installed.</summary>
 public static class InferenceJson
 {
+    public static JsonTypeInfo<InferenceMediaSourceKind> InferenceMediaSourceKind => InferenceJsonContext.Default.InferenceMediaSourceKind;
+    public static JsonTypeInfo<InferenceMediaSource> InferenceMediaSource => InferenceJsonContext.Default.InferenceMediaSource;
+    public static JsonTypeInfo<BinaryMediaSource> BinaryMediaSource => InferenceJsonContext.Default.BinaryMediaSource;
+    public static JsonTypeInfo<UrlMediaSource> UrlMediaSource => InferenceJsonContext.Default.UrlMediaSource;
+    public static JsonTypeInfo<ProviderFileReference> ProviderFileReference => InferenceJsonContext.Default.ProviderFileReference;
+    public static JsonTypeInfo<FileMediaSource> FileMediaSource => InferenceJsonContext.Default.FileMediaSource;
+    public static JsonTypeInfo<ResourceMediaSource> ResourceMediaSource => InferenceJsonContext.Default.ResourceMediaSource;
+    public static JsonTypeInfo<InferenceResourceScope> InferenceResourceScope => InferenceJsonContext.Default.InferenceResourceScope;
+    public static JsonTypeInfo<InferenceResourceFailure> InferenceResourceFailure => InferenceJsonContext.Default.InferenceResourceFailure;
     public static JsonTypeInfo<InferenceProvenance> Provenance => InferenceJsonContext.Default.InferenceProvenance;
     public static JsonTypeInfo<LlmInferenceRequest> LlmRequest => InferenceJsonContext.Default.LlmInferenceRequest;
     public static JsonTypeInfo<LlmInferenceResult> LlmResult => InferenceJsonContext.Default.LlmInferenceResult;
@@ -65,6 +75,15 @@ public static class InferenceJson
 [JsonSourceGenerationOptions(GenerationMode = JsonSourceGenerationMode.Metadata,
     Converters = [typeof(ResourceAccessJsonConverter), typeof(ResourceReadHandleJsonConverter), typeof(ResourceWriteHandleJsonConverter)])]
 [JsonSerializable(typeof(InferenceProvenance))]
+[JsonSerializable(typeof(InferenceMediaSourceKind))]
+[JsonSerializable(typeof(InferenceMediaSource))]
+[JsonSerializable(typeof(BinaryMediaSource))]
+[JsonSerializable(typeof(UrlMediaSource))]
+[JsonSerializable(typeof(ProviderFileReference))]
+[JsonSerializable(typeof(FileMediaSource))]
+[JsonSerializable(typeof(ResourceMediaSource))]
+[JsonSerializable(typeof(InferenceResourceScope))]
+[JsonSerializable(typeof(InferenceResourceFailure))]
 [JsonSerializable(typeof(LlmInferenceRequest))]
 [JsonSerializable(typeof(LlmInferenceResult))]
 [JsonSerializable(typeof(LlmMessage))]

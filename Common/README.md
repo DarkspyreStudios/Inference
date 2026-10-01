@@ -90,6 +90,23 @@ type's `CanConvert` match before construction. This is not a global serializer p
 arbitrary caller CLR graphs. Resource references are not yet part of LLM attachments or requests;
 these standalone contracts do not establish automatic provider switching.
 
+## Media source data
+
+`Darkspyre.Inference.Common.Media` distinguishes binary input, provider-fetch URLs, provider-native
+file IDs and portable workspace resource references. Binary input memory is borrowed, not cloned;
+callers must not mutate it during an entered request. The DTOs and their JSON codecs never fetch
+URLs, read resources, refresh authority or upload bytes. File and URL variants contain no fabricated
+empty binary data. Native file IDs grant no access or ownership; `InferenceResourceScope` describes
+the actual endpoint/route/account authority of native receipts, not portable content ownership.
+`InferenceResourceFailure` composes the existing resource operation facts without live exceptions.
+
+`InferenceJson` exports exact type-name metadata for all nine media data roots. The source union uses
+the closed `type` discriminators `binary`, `url`, `file` and `resource`; unknown variants refuse rather
+than invoking reflection or an extension registry. JSON decoding creates its own byte memory, while
+constructing a binary source preserves caller memory. These are standalone, data-only foundations,
+not yet wired into requests, Image transports, provider bindings or resource resolution. Operation
+boundaries must validate caller-authored IDs, URLs, scope and source support before effects.
+
 ## Provider authorization
 
 `IProviderAuthorization.GetAsync` acquires authorization for one operation. The returned
