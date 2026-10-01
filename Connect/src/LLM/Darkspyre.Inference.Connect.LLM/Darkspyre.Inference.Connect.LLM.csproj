@@ -23,6 +23,7 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="Darkspyre.Inference.Connect.Image" />
+    <InternalsVisibleTo Include="Darkspyre.Inference.Connect.Realtime" />
   </ItemGroup>
 
 </Project>
