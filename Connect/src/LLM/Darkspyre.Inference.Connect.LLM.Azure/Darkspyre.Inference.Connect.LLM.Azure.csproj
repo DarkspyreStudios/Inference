@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <Description>Azure resource OpenAI Responses and Chat Completions adapters.</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../Darkspyre.Inference.Connect.LLM/Darkspyre.Inference.Connect.LLM.csproj" />
+    <InternalsVisibleTo Include="Darkspyre.Inference.Connect.LLM.Azure.Tests" />
+  </ItemGroup>
+</Project>

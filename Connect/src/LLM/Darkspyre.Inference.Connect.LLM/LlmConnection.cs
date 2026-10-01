@@ -36,6 +36,8 @@ public sealed record LlmConnection
 
     public LlmVertexConfiguration? Vertex { get; init; }
 
+    public LlmAzureConfiguration? Azure { get; init; }
+
     /// <summary>Chat Completions protocol choices; null selects endpoint-aware defaults.</summary>
     public LlmChatCompletionsConfiguration? ChatCompletions { get; init; }
 

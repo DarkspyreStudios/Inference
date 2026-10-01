@@ -39,5 +39,6 @@ internal sealed partial class LlmCredentialJsonContext : JsonSerializerContext;
 
 internal sealed record ConnectContinuationScopeIdentity(LlmTransport Transport, string Endpoint, string? ApiKey,
     string? OAuthIdentity, IReadOnlyList<ConnectContinuationScopeHeader> Headers,
-    IReadOnlyList<ConnectContinuationScopeHeader>? SecretHeaders);
+    IReadOnlyList<ConnectContinuationScopeHeader>? SecretHeaders,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] LlmAzureConfiguration? Azure = null);
 internal sealed record ConnectContinuationScopeHeader(string Name, string Value);

@@ -13,6 +13,8 @@ host-executed tools, managed agents, structured output, streaming, discovery, ac
 embeddings. The `Darkspyre.Inference.Connect.Image` assembly supplies the image-provider contracts
 and built-in ComfyUI HTTP/WebSocket transport. AWS Bedrock Converse and AgentCore Harness remain
 isolated in the `Darkspyre.Inference.Connect.LLM.Bedrock` assembly.
+Azure resource OpenAI v1 Responses and Chat Completions use the optional
+`Darkspyre.Inference.Connect.LLM.Azure` assembly inside this same package.
 
 The package also includes `Darkspyre.Inference.Connect.TTS` for external
 PocketTTS HTTP synthesis and `Darkspyre.Inference.Connect.Audio` for external TangoFlux generation.
@@ -1200,7 +1202,7 @@ Prompt-image overrides send `image_url` data-URL parts. Prompt-document override
 `file` parts and valid UTF-8 `text/*` documents as text parts. Other document formats fail before
 dispatch. Tool results remain text-only; prompt overrides do not enable binary tool results.
 
-`LlmConnection.ChatCompletions` stores two non-secret protocol choices. A null `OutputLimitField`
+For OpenAI-compatible connections, `LlmConnection.ChatCompletions` stores two non-secret protocol choices. A null `OutputLimitField`
 selects `max_completion_tokens` for `api.openai.com` and `max_tokens` elsewhere; an explicit
 `MaxTokens` or `MaxCompletionTokens` wins. A null `UsePromptCacheKey` maps a nonempty
 `ConversationKey` to `prompt_cache_key` only for `api.openai.com`. Other endpoints require explicit
@@ -1228,6 +1230,44 @@ These contracts are included in the 11.14.0-rc.1 family. The old LLM setup-input
 types were replaced by Common setup contracts in the 11.3.0-rc.1 breaking-contract release.
 Settings objects carry provider-owned unsaved-change state, the current authentication interaction and
 explicit choice capabilities for the shared Settings editor.
+
+### Azure Resource OpenAI v1
+
+`AddLlmConnectAzure()` registers the optional Azure assembly after `AddLlmConnect()`.
+`AzureOpenAiResponses` and `AzureOpenAiChat` select distinct wire protocols. Set `Endpoint` to the
+HTTPS resource authority, such as `https://resource.openai.azure.com` or
+`https://resource.services.ai.azure.com`. Paths, credentials, queries and fragments are rejected.
+The adapter constructs `/openai/v1/responses` or `/openai/v1/chat/completions`.
+
+`LlmConnection.Azure` contains the explicit `V1` API mode, `ApiKey` authentication mode,
+`DeploymentId` and optional `ModelProfileId`. The request's `ModelId` must match `DeploymentId`.
+The underlying profile selects existing model reasoning and sampling validation. It never replaces
+the wire deployment or proves Azure availability. Manual deployment entry requires no discovery or
+management-plane privileges. Deployment discovery and queried account usage are not implemented.
+This adapter does not discover context/output limits or deployment availability.
+
+Unknown profiles advertise no media, structured-output, reasoning-level or sampling support.
+Implemented paths can be selected through supported explicit connection/model overrides; model
+overrides take precedence. Tool schema strictness remains Unknown without evidence. The Azure
+settings expose the deployment, optional profile and supported explicit capability corrections.
+The settings keep credentials separate from configuration and save only through the host's
+version-conditional commit target. Checking key presence does not verify deployment invocation.
+
+API-key mode sends only the protected resource key in `api-key`. Other credential schemes and
+`Authorization`/`api-key` entries in additional or secret header bags are rejected case-insensitively.
+The adapter does not acquire Entra tokens or send legacy versioned routes. Responses and Chat
+retain their existing shared codecs; opaque state is bound to authority, protocol, deployment,
+configuration and protected-key principal. State from public OpenAI or another scope is rejected.
+
+Azure Chat defaults to `max_completion_tokens`. An explicit Chat output-limit field wins.
+Conversation cache keys are omitted by default on Azure Chat and require explicit opt-in.
+Prompt/tool binary and schema conversions use the shared matching protocol builders.
+
+The registered Azure HTTP clients have no generation timeout and disable automatic redirects.
+The adapter refuses 3xx responses without retry. Replacing the named Azure clients' handlers
+transfers redirect-policy responsibility to the caller; response checks cannot undo credential
+forwarding by a handler that already followed a redirect. The Azure clients have no public
+constructor accepting an arbitrary borrowed `HttpClient`.
 
 ## Account usage
 

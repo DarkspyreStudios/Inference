@@ -21,5 +21,11 @@ public enum LlmTransport
     GoogleVertexAi = 11,
 
     /// <summary>The Gemini API (Google AI Studio) with an API key.</summary>
-    GoogleGeminiApi = 12
+    GoogleGeminiApi = 12,
+
+    /// <summary>Azure resource OpenAI Responses, with explicit deployment and authentication configuration.</summary>
+    AzureOpenAiResponses = 14,
+
+    /// <summary>Azure resource OpenAI Chat Completions, with explicit deployment and authentication configuration.</summary>
+    AzureOpenAiChat = 15
 }

@@ -10,6 +10,7 @@
     <Project Path="examples/Darkspyre.Inference.Connect.LLM.Examples/Darkspyre.Inference.Connect.LLM.Examples.csproj" />
   </Folder>
   <Folder Name="/src/LLM/">
+    <Project Path="src/LLM/Darkspyre.Inference.Connect.LLM.Azure/Darkspyre.Inference.Connect.LLM.Azure.csproj" />
     <Project Path="src/LLM/Darkspyre.Inference.Connect.LLM.Bedrock/Darkspyre.Inference.Connect.LLM.Bedrock.csproj" />
     <Project Path="src/LLM/Darkspyre.Inference.Connect.LLM.Vertex/Darkspyre.Inference.Connect.LLM.Vertex.csproj" />
     <Project Path="src/LLM/Darkspyre.Inference.Connect.LLM/Darkspyre.Inference.Connect.LLM.csproj" />
@@ -33,6 +34,7 @@
     <Project Path="tests/TTS/Darkspyre.Inference.Connect.TTS.Tests/Darkspyre.Inference.Connect.TTS.Tests.csproj" />
   </Folder>
   <Folder Name="/tests/LLM/">
+    <Project Path="tests/LLM/Darkspyre.Inference.Connect.LLM.Azure.Tests/Darkspyre.Inference.Connect.LLM.Azure.Tests.csproj" />
     <Project Path="tests/LLM/Darkspyre.Inference.Connect.LLM.ProcessProbe/Darkspyre.Inference.Connect.LLM.ProcessProbe.csproj" />
     <Project Path="tests/LLM/Darkspyre.Inference.Connect.LLM.Bedrock.Tests/Darkspyre.Inference.Connect.LLM.Bedrock.Tests.csproj" />
     <Project Path="tests/LLM/Darkspyre.Inference.Connect.LLM.Vertex.Tests/Darkspyre.Inference.Connect.LLM.Vertex.Tests.csproj" />

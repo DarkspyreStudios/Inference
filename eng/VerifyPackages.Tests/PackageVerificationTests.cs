@@ -33,6 +33,18 @@ public sealed class PackageVerificationTests
     public void FourArchiveBoundariesAndGeneratedUiImportsRemainValid(string id) => Verify(id);
 
     [Theory]
+    [InlineData("dll")]
+    [InlineData("xml")]
+    public void AzureAssemblyAndDocumentationAreRequiredByTheConnectBoundary(string extension)
+    {
+        const string connect = "Darkspyre.Inference.Connect";
+        const string azure = "Darkspyre.Inference.Connect.LLM.Azure";
+        Assert.Contains(azure, PackageVerification.Owned[connect]);
+        Assert.Throws<InvalidDataException>(() => Verify(connect,
+            files => files.Remove("lib/net11.0/" + azure + "." + extension)));
+    }
+
+    [Theory]
     [InlineData("native/libforeign.so")]
     [InlineData("native/libforeign.so.1")]
     [InlineData("native/libforeign.SO.1.2")]

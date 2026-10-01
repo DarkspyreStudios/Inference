@@ -121,7 +121,7 @@ internal abstract class ChatCompletionsLlmClientBase(HttpClient http) : LlmClien
             httpRequest,
             HttpCompletionOption.ResponseHeadersRead,
             cancellationToken);
-        if (OpenAiRateLimitHeaders.Parse(response.Headers, DateTimeOffset.UtcNow) is { } observed)
+        if (ObserveAccountUsage(response) is { } observed)
         { yield return new AccountUsageObservedEvent(observed); }
         await ProviderHttp.ThrowIfUnsuccessfulAsync(
             response,
@@ -590,7 +590,7 @@ internal abstract class ChatCompletionsLlmClientBase(HttpClient http) : LlmClien
 
         if (request.ReasoningLevel is { } level)
         {
-            payload["reasoning_effort"] = LlmReasoningEffort.Word(level);
+            payload["reasoning_effort"] = ReasoningWord(level);
         }
 
         if (request.Tools.Count > 0)
@@ -680,6 +680,11 @@ internal abstract class ChatCompletionsLlmClientBase(HttpClient http) : LlmClien
         ProviderHttp.ApplyHeaders(message, connection);
 
     protected virtual void ValidateModelSampling(LlmConnection connection, LlmChatRequest request) { }
+
+    protected virtual string ReasoningWord(LlmReasoningLevel level) => LlmReasoningEffort.Word(level);
+
+    protected virtual LlmAccountUsageSnapshot? ObserveAccountUsage(HttpResponseMessage response) =>
+        OpenAiRateLimitHeaders.Parse(response.Headers, DateTimeOffset.UtcNow);
 
     protected virtual LlmChatCompletionsOutputLimitField OutputLimitField(LlmConnection connection) =>
         connection.ChatCompletions?.OutputLimitField

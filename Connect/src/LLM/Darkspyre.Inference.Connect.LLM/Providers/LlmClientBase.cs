@@ -353,7 +353,7 @@ internal abstract class LlmClientBase(HttpClient http) : ILlmClient
             sanitizedResponseBody: SecretRedactor.Sanitize(rawBody, credential),
             innerException: innerException);
 
-    private void EnsureTransport(LlmConnection connection)
+    protected void EnsureTransport(LlmConnection connection)
     {
         if (connection.Transport != Transport)
         {
