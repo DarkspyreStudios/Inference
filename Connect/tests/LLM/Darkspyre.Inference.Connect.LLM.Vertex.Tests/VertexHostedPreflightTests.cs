@@ -23,7 +23,9 @@ public sealed class VertexHostedPreflightTests
         var client = new VertexLlmClient(http, authentication);
         var connection = new LlmConnection
         {
-            Transport = LlmTransport.GoogleVertexAi, Version = "1", Endpoint = "https://aiplatform.googleapis.com",
+            Transport = LlmTransport.GoogleVertexAi,
+            Version = "1",
+            Endpoint = "https://aiplatform.googleapis.com",
             Vertex = new() { ProjectId = "project", Location = "global" },
             CapabilityOverrides = new() { SupportsStreaming = operation == 0 }
         };
@@ -31,7 +33,9 @@ public sealed class VertexHostedPreflightTests
         {
             ModelId = claude ? "anthropic/claude-sonnet-4-6" : "google/gemini-2.5-flash",
             ReasoningLevel = claude ? LlmReasoningLevel.None : null,
-            Messages = [new("user", "hello")], HostedTools = limitOnly ? [] : [new LlmWebSearchTool()], MaxHostedTurns = limitOnly ? 1 : null
+            Messages = [new("user", "hello")],
+            HostedTools = limitOnly ? [] : [new LlmWebSearchTool()],
+            MaxHostedTurns = limitOnly ? 1 : null
         };
         await Assert.ThrowsAsync<NotSupportedException>(async () =>
         {

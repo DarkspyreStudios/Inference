@@ -41,7 +41,8 @@ public sealed class HostedBorrowedAuthorizationTests
             new() { ModelId = "model", HostedTools = [new LlmRemoteMcpTool("https://example.test", "server", Authorization: authorization)] },
             [], harness, harness.Stream, _ => new()
             {
-                SupportsAgentSessions = true, HostedTools = new HashSet<LlmHostedToolKind> { LlmHostedToolKind.RemoteMcp },
+                SupportsAgentSessions = true,
+                HostedTools = new HashSet<LlmHostedToolKind> { LlmHostedToolKind.RemoteMcp },
                 Agent = ManagedAgentPolicy.Capabilities
             });
         Task turn = Read(session.RunTurnAsync(new() { Input = [new LlmAgentTextContent("hello")] }));

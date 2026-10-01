@@ -553,7 +553,7 @@ internal sealed class BedrockLlmClient(
                     content.Add(new ContentBlock { Text = message.Content });
                 }
 
-        foreach (LlmAttachment attachment in message.Attachments.Select(LlmAttachments.RequireBinary))
+                foreach (LlmAttachment attachment in message.Attachments.Select(LlmAttachments.RequireBinary))
                 {
                     content.Add(BuildPromptAttachment(attachment));
                 }

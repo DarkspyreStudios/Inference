@@ -83,7 +83,13 @@ internal static class HostedTools
     }
 
     private static JsonElement? Clone(JsonElement? value) => value?.Clone();
-    private static System.Collections.ObjectModel.ReadOnlyCollection<T>? Copy<T>(IReadOnlyList<T>? values) => values is null ? null : Array.AsReadOnly(values.ToArray());
+    private static System.Collections.ObjectModel.ReadOnlyCollection<T>? Copy<T>(IReadOnlyList<T>? values)
+    {
+        if (values is null) { return null; }
+        T[] snapshot = values.ToArray();
+        if (snapshot.Any(value => value is null)) { throw new ArgumentException("Hosted lists cannot contain null entries.", nameof(values)); }
+        return Array.AsReadOnly(snapshot);
+    }
     private static void Strings(IReadOnlyList<string>? values)
     {
         if (values?.Any(value => value is null) is true) { throw new ArgumentException("Hosted filters cannot contain null entries."); }

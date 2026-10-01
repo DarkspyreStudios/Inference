@@ -44,7 +44,8 @@ public sealed class BedrockHostedPreflightTests
         var client = new BedrockAgentCoreLlmClient(invoker);
         var connection = new LlmConnection
         {
-            Version = "1", Transport = LlmTransport.AwsBedrockAgentCore,
+            Version = "1",
+            Transport = LlmTransport.AwsBedrockAgentCore,
             Endpoint = "arn:aws:bedrock-agentcore:us-east-1:123456789012:harness/test",
             Credential = new LlmCredential { Aws = new() { Region = "us-east-1", Profile = "fixture" } }.Serialize()
         };

@@ -71,7 +71,8 @@ public sealed class HostedManagedProjectionTests
             new() { Transport = LlmTransport.OpenAiResponses, Version = "1", Endpoint = "https://example.test" },
             options, [], this, Stream, model => new()
             {
-                SupportsAgentSessions = true, Agent = ManagedAgentPolicy.Capabilities,
+                SupportsAgentSessions = true,
+                Agent = ManagedAgentPolicy.Capabilities,
                 HostedTools = model == "unsupported" ? new HashSet<LlmHostedToolKind>() : new HashSet<LlmHostedToolKind> { LlmHostedToolKind.WebSearch }
             });
         public string? EstimateDiagnostic => null;
