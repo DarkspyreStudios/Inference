@@ -18,6 +18,14 @@ public sealed class BedrockAgentCoreUsageTests
         Assert.Null(Assert.IsType<LlmChatCompletionEvent>(events[^1]).Result.Usage);
     }
 
+    [Fact]
+    public async Task ChatReemitsKnownUsageAfterUnknownMetadataWithoutInventingAnUnknownEvent()
+    {
+        LlmStreamEvent[] events = await ChatAsync(new Invoker([Metadata(4, 1, 5), new HarnessMetadataEvent(), Metadata(4, 1, 5), Stop()]));
+        Assert.Equal([new LlmUsage(4, 1, 5), new LlmUsage(4, 1, 5)], events.OfType<LlmUsageDeltaEvent>().Select(item => item.Cumulative));
+        Assert.Equal(new LlmUsage(4, 1, 5), Assert.IsType<LlmChatCompletionEvent>(events[^1]).Result.Usage);
+    }
+
     [Theory]
     [InlineData(null, null, null)]
     [InlineData(0, 0, 0)]
@@ -50,14 +58,15 @@ public sealed class BedrockAgentCoreUsageTests
     }
 
     [Theory]
-    [InlineData(false, false)]
-    [InlineData(true, false)]
-    [InlineData(false, true)]
-    public async Task TwoInvocationsSumOnlyDistinctSettledRounds(bool missing, bool overflow)
+    [InlineData(false, false, false)]
+    [InlineData(true, false, false)]
+    [InlineData(false, true, false)]
+    [InlineData(false, false, true)]
+    public async Task TwoInvocationsSumOnlyDistinctSettledRounds(bool missing, bool overflow, bool missingFirst)
     {
         int input = overflow ? int.MaxValue : 4;
         var invoker = new Invoker(
-            [.. Tool(), Metadata(input, 1, input), Metadata(input, 1, input)],
+            missingFirst ? Tool() : [.. Tool(), Metadata(input, 1, input), Metadata(input, 1, input)],
             missing ? [Stop()] : [Stop(), Metadata(input, 1, input)]);
         LlmConnection connection = Connection() with { CapabilityOverrides = new() { SupportsUsageDeltas = false } };
         await using ILlmAgentSession session = await Client(invoker).StartSessionAsync("c", connection, Options(tools: true));
@@ -65,9 +74,9 @@ public sealed class BedrockAgentCoreUsageTests
         LlmAgentUsageEvent[] usage = events.OfType<LlmAgentUsageEvent>().ToArray();
         Assert.Equal(2, usage.Length);
         Assert.Equal(2, usage.Select(item => item.RequestId).Distinct(StringComparer.Ordinal).Count());
-        Assert.Equal(new LlmUsage(input, 1, input), usage[0].Usage);
+        Assert.Equal(missingFirst ? null : new LlmUsage(input, 1, input), usage[0].Usage);
         Assert.Equal(missing ? null : new LlmUsage(input, 1, input), usage[1].Usage);
-        Assert.Equal(missing ? null : new LlmUsage(overflow ? null : 8, 2, overflow ? null : 8), usage[1].RunTotals);
+        Assert.Equal(missing || missingFirst ? null : new LlmUsage(overflow ? null : 8, 2, overflow ? null : 8), usage[1].RunTotals);
         Assert.Equal(2, invoker.Requests.Count);
         Assert.All(invoker.Requests, request => Assert.Equal(session.SessionId, request.RuntimeSessionId));
         Assert.Equal("call-1", invoker.Requests[1].Messages[0].Content[0].ToolUse.ToolUseId);
@@ -139,6 +148,35 @@ public sealed class BedrockAgentCoreUsageTests
         }
     }
 
+    [Fact]
+    public void SettlingTheSameRoundTwiceDoesNotAddItsUsageTwice()
+    {
+        var usage = new BedrockHarnessUsage(true);
+        usage.Observe(Metadata(4, 1, 5));
+        Assert.Equal(new LlmUsage(4, 1, 5), usage.Settle());
+        Assert.Equal(new LlmUsage(4, 1, 5), usage.Settle());
+        usage.BeginRound();
+        usage.Observe(Metadata(4, 1, 5));
+        Assert.Equal(new LlmUsage(8, 2, 10), usage.Settle());
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task FailedTerminalStillSettlesActualUsageBeforeTurnCompletion(bool missingStop)
+    {
+        IEventStreamEvent[] response = missingStop ? [Metadata(4, 1, 19)]
+            : [new HarnessMessageStopEvent { StopReason = HarnessStopReason.Max_tokens }, Metadata(4, 1, 19)];
+        await using ILlmAgentSession session = await Client(new(response)).StartSessionAsync("c",
+            Connection() with { CapabilityOverrides = new() { SupportsUsageDeltas = false } }, Options());
+        LlmAgentEvent[] events = await ReadAsync(session.RunTurnAsync(Turn));
+        LlmAgentUsageEvent usage = Assert.Single(events.OfType<LlmAgentUsageEvent>());
+        Assert.Equal(new LlmUsage(4, 1, 19), usage.Usage);
+        Assert.Equal(usage.Usage, usage.RunTotals);
+        Assert.Equal(LlmAgentCompletionReason.ProviderFailure, Assert.IsType<LlmAgentTurnCompletedEvent>(events[^1]).Reason);
+        Assert.True(Array.IndexOf(events, usage) < events.Length - 1);
+    }
+
     private static LlmAgentTurnRequest Turn => new() { Input = [new LlmAgentTextContent("hello")] };
     private static BedrockAgentCoreLlmClient Client(Invoker invoker) => new(invoker);
     private static LlmChatRequest ChatRequest(string model = "default") => new() { ModelId = model, Messages = [new("user", "hello")] };
@@ -157,7 +195,8 @@ public sealed class BedrockAgentCoreUsageTests
     ];
     private static LlmConnection Connection() => new()
     {
-        Version = "v1", Transport = LlmTransport.AwsBedrockAgentCore,
+        Version = "v1",
+        Transport = LlmTransport.AwsBedrockAgentCore,
         Endpoint = "arn:aws:bedrock-agentcore:us-east-1:123456789012:harness/test-harness",
         Credential = new LlmCredential { Aws = new() { Region = "us-east-1", Profile = "test-profile" } }.Serialize()
     };
