@@ -101,6 +101,11 @@ Claude and Codex's private OAuth JSON requests are written as DOM data, not refl
 library types. Their field names/order, escaping and explicit null fields remain unchanged; Codex's
 authorization-code exchange remains form encoded. This does not change either authentication flow.
 
+Claude CLI input envelopes and Antigravity chat/agent stdin envelopes use DOM writers with the same
+field order, escaping, explicit null fields and final newline. Claude input keeps text before ordered
+attachments. Missing Antigravity tool parameters and failed managed-tool parameters remain empty JSON
+objects. These writers do not serialize library-owned anonymous types or change process/session lifetime.
+
 `LlmToolCapabilities.StrictInputSchema` reports Supported, Unsupported or Unknown. Unknown allows an
 explicit `Strict=true` request unchanged so the host can try it and handle the provider result.
 Known Unsupported rejects that request. Ordinary tools default to `Strict=false` independently.

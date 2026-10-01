@@ -478,11 +478,7 @@ internal sealed class AntigravityAgentSession : ILlmAgentSession
     private async Task<string?> WritePromptAsync(string prompt, CancellationToken cancellationToken)
     {
         IAntigravityCliSessionProcess process = _process ?? throw new InvalidOperationException("The session has no process.");
-        string line = JsonSerializer.Serialize(new
-        {
-            @event = "user",
-            message = new { content = prompt }
-        }) + "\n";
+        string line = AntigravityProtocol.WriteUserInput(prompt);
         try
         {
             await process.WriteAsync(line, cancellationToken).ConfigureAwait(false);

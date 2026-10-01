@@ -142,6 +142,8 @@ public sealed class AntigravityAgentClientTests : IDisposable
 
         FakeProcess process = Assert.Single(factory.Processes);
         Assert.Equal(2, process.Written.Count);
+        Assert.Equal("{\"event\":\"user\",\"message\":{\"content\":\"Reply OK\"}}\n", process.Written[0]);
+        Assert.Equal("{\"event\":\"user\",\"message\":{\"content\":\"Reply YES\"}}\n", process.Written[1]);
         using JsonDocument prompt = JsonDocument.Parse(process.Written[0]);
         Assert.Equal("user", prompt.RootElement.GetProperty("event").GetString());
         Assert.Equal("Reply OK", prompt.RootElement.GetProperty("message").GetProperty("content").GetString());

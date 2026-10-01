@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 
 namespace Darkspyre.Inference.Connect.LLM.Providers;
 
@@ -51,10 +52,16 @@ internal sealed record AntigravityUsage(
     long? TotalTokens,
     bool Invalid);
 
-/// <summary>Parses the stream-json protocol once for the chat and agent paths.</summary>
+/// <summary>Reads and writes the shared stream-json protocol for the chat and agent paths.</summary>
 internal static class AntigravityProtocol
 {
     private const int MaximumConversationIdLength = 128;
+
+    public static string WriteUserInput(string prompt) => new JsonObject
+    {
+        ["event"] = "user",
+        ["message"] = new JsonObject { ["content"] = prompt }
+    }.ToJsonString() + "\n";
 
     public static AntigravityEvent Parse(string line)
     {
@@ -138,7 +145,7 @@ internal static class AntigravityProtocol
                 && info.TryGetProperty("parameters", out JsonElement parameterElement)
                 && parameterElement.ValueKind == JsonValueKind.Object
                     ? parameterElement.Clone()
-                    : JsonSerializer.SerializeToElement(new { });
+                    : JsonElement.Parse("{}");
             string? output = info.ValueKind == JsonValueKind.Object ? String(info, "output") : null;
             string? error = null;
             JsonElement errorSource = info.ValueKind == JsonValueKind.Object ? info : step;

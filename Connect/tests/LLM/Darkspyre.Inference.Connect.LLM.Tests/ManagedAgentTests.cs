@@ -455,6 +455,7 @@ public sealed class ManagedAgentTests
         var events = await Read(session.RunTurnAsync(Turn("go")));
         Assert.Equal(0, executions);
         Assert.Contains(events.OfType<LlmAgentToolEvent>(), item => item.Status == "failed" && item.Output is { IsError: true });
+        Assert.Equal("{}", Assert.Single(events.OfType<LlmAgentToolEvent>(), item => item.Status == "failed").Arguments.GetRawText());
         Assert.True((await session.CaptureContextAsync()).Entries[2].Message.ToolResults[0].Output.IsError);
     }
 
