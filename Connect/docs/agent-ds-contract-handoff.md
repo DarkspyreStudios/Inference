@@ -21,7 +21,7 @@ access evidence must survive each supported boundary. Non-strict tool defaults r
 [DSA-68](https://darkspyre.atlassian.net/browse/DSA-68) owns the host/shell adoption: package/plugin
 references, transcript and capture persistence, explicit state omission on switching, compaction,
 capability-driven controls, usage display and provider-owned Google setup with protected credentials.
-It also owns the consumer inventory and stored-format migration. The approved format is version 2;
+It also owns the consumer inventory and stored-format migration. The released baseline uses version 2;
 the coordinated release version is 11.12.0-rc.1. Existing released
 contract guidance below remains the integration baseline until that coordinated migration.
 
@@ -30,11 +30,13 @@ contract guidance below remains the integration baseline until that coordinated 
 - Replace `LlmProviderResponseState` / `ResponseState` with Common `LlmContinuationState` /
   `ContinuationState` throughout transcript, capture, import/export and compaction paths.
 - Preserve `ImplementationId`, `ModelId`, `ScopeId`, `Payload` and reported counts verbatim after
-  migration. Hosts must not decode or rebuild opaque provider payloads. The new envelope and
-  `LlmAgentContext` require `FormatVersion = 2`.
+  migration. Hosts must not decode or rebuild opaque provider payloads. Continuation envelopes use
+  `FormatVersion = 2`. Current context captures emit version 3; the owned codec upgrades the closed
+  version-2 binary/function context shape without invoking resource authority. Version 3 includes
+  required selected-resource data and an optional independently scoped selection version.
 - Migrate version-1 records in the host before calling Connect. Preserve original records and reject
   ambiguous ownership; changing a format number alone does not establish valid scope or ownership.
-  There is no Connect fallback reader for old records.
+  The format-2 context upgrade does not admit version-1 records or invent their ownership.
 - Carry `UnboundContinuationState` through requests and surface `OmittedContinuationStateCount`.
   Reject is the default; discarding incompatible state requires explicit Omit policy.
 - Use `Tools.StrictInputSchema` independently of ordinary `SupportsToolUse`. Unknown remains

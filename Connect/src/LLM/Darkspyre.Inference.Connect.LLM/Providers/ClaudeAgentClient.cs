@@ -1657,7 +1657,7 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
 
         private static JsonArray SerializeInput(
             IReadOnlyList<LlmAgentContent> content,
-            IReadOnlyList<LlmAttachment> attachments) => new(
+            IReadOnlyList<LlmMessageAttachment> attachments) => new(
         [
             .. content.Select(item => item switch
             {
@@ -1667,7 +1667,7 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
                     $"Unsupported agent content type '{item.GetType().Name}'.",
                     nameof(content))
             }),
-            .. attachments.Select(AnthropicAttachments.BuildContentBlock)
+            .. attachments.Select(LlmAttachments.RequireBinary).Select(AnthropicAttachments.BuildContentBlock)
         ]);
 
         private static JsonObject SerializeImageInput(string imageUrl)

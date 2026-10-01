@@ -84,7 +84,7 @@ internal static class OpenAiResponsesTools
             });
         }
 
-        foreach (LlmAttachment attachment in message.Attachments)
+        foreach (LlmAttachment attachment in message.Attachments.Select(LlmAttachments.RequireBinary))
         {
             content.Add(BuildAttachment(attachment));
         }

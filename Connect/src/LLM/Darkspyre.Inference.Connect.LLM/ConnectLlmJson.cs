@@ -4,6 +4,7 @@ using System.Text.Json.Serialization.Metadata;
 using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Common.LLM;
 using Darkspyre.Inference.Common.Resources;
+using Darkspyre.Inference.Connect.LLM.Internal;
 
 namespace Darkspyre.Inference.Connect.LLM;
 
@@ -16,6 +17,7 @@ public static class ConnectLlmJson
 
     private static JsonSerializerOptions CreateOptions()
     {
+        // Retain generated converters and compose Common's exact live-authority refusal policy.
         var options = new JsonSerializerOptions(ConnectLlmJsonContext.Default.Options) { TypeInfoResolver = new HostedTypeInfoResolver() };
         foreach (var type in new[] { typeof(IInferenceResourceAccess), typeof(IInferenceResourceReadHandle), typeof(IInferenceResourceWriteHandle), typeof(IProviderAuthorization) })
         {
@@ -62,7 +64,8 @@ public static class ConnectLlmJson
     public static JsonTypeInfo<LlmAgentContextStatus> AgentContextStatus => Metadata<LlmAgentContextStatus>();
 }
 
-[JsonSourceGenerationOptions(GenerationMode = JsonSourceGenerationMode.Metadata)]
+[JsonSourceGenerationOptions(GenerationMode = JsonSourceGenerationMode.Metadata,
+    Converters = [typeof(LlmAgentContextJsonConverter)])]
 [JsonSerializable(typeof(LlmConnection))]
 [JsonSerializable(typeof(LlmAccountUsageSnapshot))]
 [JsonSerializable(typeof(LlmSetupConfiguration))]
@@ -83,6 +86,8 @@ public static class ConnectLlmJson
 [JsonSerializable(typeof(LlmEmbeddingResult))]
 [JsonSerializable(typeof(LlmEmbeddingUsage))]
 [JsonSerializable(typeof(LlmAgentContext))]
+[JsonSerializable(typeof(AgentContextFormat3))]
+[JsonSerializable(typeof(LegacyAgentContext))]
 [JsonSerializable(typeof(LlmAgentContextEntry))]
 [JsonSerializable(typeof(LlmAgentContextStatus))]
 [JsonSerializable(typeof(ConnectContinuationScopeIdentity))]

@@ -1,5 +1,6 @@
 using System.Collections.Frozen;
 using System.Text.Json;
+using Darkspyre.Inference.Common.Resources;
 
 namespace Darkspyre.Inference.Common.LLM;
 
@@ -8,7 +9,7 @@ public sealed record LlmMessage(string Role, string Content)
 {
     public LlmContinuationState? ContinuationState { get; init; }
 
-    public IReadOnlyList<LlmAttachment> Attachments { get; init; } = [];
+    public IReadOnlyList<LlmMessageAttachment> Attachments { get; init; } = [];
 
     public IReadOnlyList<LlmToolCall> ToolCalls { get; init; } = [];
 
@@ -20,7 +21,8 @@ public sealed record LlmMessage(string Role, string Content)
 /// provider content-block representation. A set <see cref="MediaType"/> is used as given; otherwise the
 /// adapter detects the type from the bytes.
 /// </summary>
-public sealed record LlmAttachment
+[System.Text.Json.Serialization.JsonUnmappedMemberHandling(System.Text.Json.Serialization.JsonUnmappedMemberHandling.Disallow)]
+public sealed record LlmAttachment : LlmMessageAttachment
 {
     public required LlmBinaryKind Kind { get; init; }
 
@@ -140,6 +142,11 @@ public sealed record LlmPromptCacheCapabilities
 
 public sealed record LlmInferenceRequest
 {
+    /// <summary>Borrowed caller-owned resource authority. Never part of a portable request.</summary>
+    public IInferenceResourceAccess? Resources { get; init; }
+
+    public override string ToString() => nameof(LlmInferenceRequest);
+
     public LlmUnboundContinuationState UnboundContinuationState { get; init; }
 
     public required string ModelId { get; init; }

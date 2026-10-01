@@ -95,6 +95,9 @@ public sealed record LlmProviderCapabilities
     /// <summary>User prompts can include provider-neutral document attachments.</summary>
     public bool SupportsPromptDocuments { get; init; }
 
+    /// <summary>The selected route accepts provider-native file references. Overrides cannot enable an unimplemented route.</summary>
+    public bool SupportsFileReferences { get; init; }
+
     /// <summary>How the route carries each kind of tool-output content.</summary>
     public LlmRichContentSupported RichContentSupported { get; init; } = new();
 

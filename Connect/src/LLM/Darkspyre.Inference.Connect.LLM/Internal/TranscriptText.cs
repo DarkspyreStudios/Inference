@@ -40,7 +40,7 @@ internal static class TranscriptText
                     }
                 }
             }
-            string[] attachments = [.. message.Attachments.Select(attachment => attachment.FileName), .. omittedNames];
+            string[] attachments = [.. message.Attachments.Select(attachment => LlmAttachments.RequireBinary(attachment).FileName), .. omittedNames];
             if (attachments.Length > 0)
             {
                 text.Append("[ATTACHMENTS: ").Append(string.Join(", ", attachments)).AppendLine("]");

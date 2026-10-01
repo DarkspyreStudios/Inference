@@ -216,7 +216,7 @@ public sealed record LlmAgentTurnRequest
     public required IReadOnlyList<LlmAgentContent> Input { get; init; }
 
     /// <summary>Provider-neutral binary content supplied with this turn.</summary>
-    public IReadOnlyList<LlmAttachment> Attachments { get; init; } = [];
+    public IReadOnlyList<LlmMessageAttachment> Attachments { get; init; } = [];
 
     public string? ModelId { get; init; }
 

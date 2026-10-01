@@ -1,5 +1,7 @@
 using System.Text;
 using Darkspyre.Inference.Common.LLM;
+using Darkspyre.Inference.Common.Media;
+using Darkspyre.Inference.Common.Resources;
 
 namespace Darkspyre.Inference.Connect.LLM.Internal;
 
@@ -13,19 +15,46 @@ internal static class LlmAttachments
     private static readonly byte[] ZipSpannedSignature = [0x50, 0x4b, 0x07, 0x08];
     private static readonly byte[] OleSignature = [0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1];
 
+    /// <summary>Refuses unimplemented reference routes before authentication, catalog or provider effects.</summary>
+    public static void ValidateReferences(LlmChatRequest request, Func<bool>? supportsFileReferences = null)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (request.Resources is not null)
+            throw new NotSupportedException("This route does not materialize caller-owned resources.");
+        bool? acceptsFiles = null;
+        foreach (var message in request.Messages)
+        {
+            foreach (var attachment in message.Attachments)
+            {
+                if (attachment is LlmAttachment) { continue; }
+                if (attachment is LlmFileReference { File: { } file }
+                    && (acceptsFiles ??= supportsFileReferences?.Invoke() ?? false))
+                {
+                    ArgumentException.ThrowIfNullOrWhiteSpace(file.FileId);
+                    continue;
+                }
+                _ = RequireBinary(attachment);
+            }
+            if (message.ToolResults.Any(result => result.Output.Parts.Any(part => part is LlmToolOutputSessionResource)))
+                throw new NotSupportedException("This route cannot materialize workspace tool content.");
+        }
+    }
+
     public static void Validate(
-        IReadOnlyList<LlmAttachment> attachments,
+        IReadOnlyList<LlmMessageAttachment> attachments,
         bool supportsImages,
         bool supportsDocuments,
         string parameterName)
     {
         ArgumentNullException.ThrowIfNull(attachments, parameterName);
-        foreach (LlmAttachment attachment in attachments)
+        foreach (LlmMessageAttachment value in attachments)
         {
-            if (attachment is null)
+            if (value is null)
             {
                 throw new ArgumentException("Attachments cannot contain null entries.", parameterName);
             }
+
+            LlmAttachment attachment = RequireBinary(value);
 
             if (attachment.Kind is not (LlmBinaryKind.Image or LlmBinaryKind.Document))
             {
@@ -62,6 +91,33 @@ internal static class LlmAttachments
 
             _ = ResolveMediaType(attachment);
         }
+    }
+
+    public static LlmAttachment RequireBinary(LlmMessageAttachment attachment) => attachment switch
+    {
+        LlmAttachment binary => binary,
+        null => throw new ArgumentException("Attachments cannot contain null entries.", nameof(attachment)),
+        _ => throw new NotSupportedException("This route does not support referenced attachments.")
+    };
+
+    public static LlmMessageAttachment Copy(LlmMessageAttachment attachment) => attachment switch
+    {
+        LlmAttachment binary => binary with { Data = binary.Data.ToArray() },
+        LlmFileReference { File: { } file } => new LlmFileReference(CopyFile(file)),
+        LlmResourceAttachment { Resource: { } resource } => new LlmResourceAttachment(CopyResource(resource)),
+        _ => throw new ArgumentException("Unknown or invalid attachment.", nameof(attachment))
+    };
+
+    public static InferenceResourceReference CopyResource(InferenceResourceReference resource)
+    {
+        ArgumentNullException.ThrowIfNull(resource);
+        return new(resource.WorkspaceId, resource.Id);
+    }
+
+    private static ProviderFileReference CopyFile(ProviderFileReference file)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(file.FileId);
+        return new(file.FileId);
     }
 
     /// <summary>The attachment's given media type, or the type detected from its bytes.</summary>

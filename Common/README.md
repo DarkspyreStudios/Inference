@@ -98,8 +98,37 @@ refusal converters for the three resource interfaces: null is allowed, but non-n
 before any collaborator callback. A closed caller-owned JSON context can compose those exact
 converters from `InferenceJson.InferenceResourceReference.Options.Converters` by the known interface
 type's `CanConvert` match before construction. This is not a global serializer policy or support for
-arbitrary caller CLR graphs. Resource references are not yet part of LLM attachments or requests;
-these standalone contracts do not establish automatic provider switching.
+arbitrary caller CLR graphs.
+
+LLM messages use one ordered `LlmMessageAttachment` union: `LlmAttachment` carries binary data,
+`LlmFileReference` carries a provider-native file ID, and `LlmResourceAttachment` carries a workspace
+reference. Their JSON discriminators are `binary`, `file` and `workspace-resource`.
+`LlmToolOutputSessionResource` adds a workspace reference to tool output without changing the
+existing `resource` URI/body variant. `InferenceJson` exports each concrete attachment and the base
+union under its exact type name. No reference contains invented bytes or grants access.
+
+`LlmInferenceRequest.Resources` borrows caller authority. Non-null authority refuses owned JSON
+serialization and deserialization; null remains portable. Request diagnostics do not traverse it.
+`SupportsFileReferences` defaults to false and describes native file input, not automatic workspace
+materialization. Current built-in LLM routes reject unimplemented reference inputs before provider
+effects. These contracts do not yet establish automatic provider switching.
+
+## Media source data
+
+`Darkspyre.Inference.Common.Media` distinguishes binary input, provider-fetch URLs, provider-native
+file IDs and portable workspace resource references. Binary input memory is borrowed, not cloned;
+callers must not mutate it during an entered request. The DTOs and their JSON codecs never fetch
+URLs, read resources, refresh authority or upload bytes. File and URL variants contain no fabricated
+empty binary data. Native file IDs grant no access or ownership; `InferenceResourceScope` describes
+the actual endpoint/route/account authority of native receipts, not portable content ownership.
+`InferenceResourceFailure` composes the existing resource operation facts without live exceptions.
+
+`InferenceJson` exports exact type-name metadata for all nine media data roots. The source union uses
+the closed `type` discriminators `binary`, `url`, `file` and `resource`; unknown variants refuse rather
+than invoking reflection or an extension registry. JSON decoding creates its own byte memory, while
+constructing a binary source preserves caller memory. These are standalone, data-only foundations,
+not yet wired into requests, Image transports, provider bindings or resource resolution. Operation
+boundaries must validate caller-authored IDs, URLs, scope and source support before effects.
 
 ## Provider authorization
 

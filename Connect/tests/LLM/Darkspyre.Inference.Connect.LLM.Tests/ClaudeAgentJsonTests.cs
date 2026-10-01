@@ -60,8 +60,8 @@ public sealed class ClaudeAgentJsonTests
         LlmAgentContent[] input = [new LlmAgentTextContent(null!), new LlmAgentImageContent("data:image/png;base64,AQID"), new LlmAgentTextContent("<&>\n")];
         LlmAttachment[] attachments =
         [
-            new() { Kind = LlmBinaryKind.Document, FileName = "notes.txt", MediaType = "text/plain", Data = "notes"u8.ToArray() },
-            new() { Kind = LlmBinaryKind.Image, FileName = "image.png", MediaType = "image/png", Data = new byte[] { 1, 2, 3 } }
+            new LlmAttachment { Kind = LlmBinaryKind.Document, FileName = "notes.txt", MediaType = "text/plain", Data = "notes"u8.ToArray() },
+            new LlmAttachment { Kind = LlmBinaryKind.Image, FileName = "image.png", MediaType = "image/png", Data = new byte[] { 1, 2, 3 } }
         ];
         Assert.Equal("""
             [{"type":"text","text":null},{"type":"image","source":{"type":"base64","media_type":"image/png","data":"AQID"}},{"type":"text","text":"\u003C\u0026\u003E\n"},{"type":"document","source":{"type":"text","media_type":"text/plain","data":"notes"},"title":"notes.txt"},{"type":"image","source":{"type":"base64","media_type":"image/png","data":"AQID"}}]
@@ -136,7 +136,7 @@ public sealed class ClaudeAgentJsonTests
                 ModelId = "other",
                 ReasoningLevel = LlmReasoningLevel.High,
                 Input = [new LlmAgentTextContent("<&>\n"), new LlmAgentImageContent("data:image/png;base64,AQID")],
-                Attachments = [new() { Kind = LlmBinaryKind.Document, FileName = "notes.txt", MediaType = "text/plain", Data = "notes"u8.ToArray() }]
+                Attachments = [new LlmAttachment { Kind = LlmBinaryKind.Document, FileName = "notes.txt", MediaType = "text/plain", Data = "notes"u8.ToArray() }]
             }))
             {
                 if (item is LlmAgentToolEvent { Status: "inProgress" } tool) Assert.Equal("{}", tool.Arguments.GetRawText());

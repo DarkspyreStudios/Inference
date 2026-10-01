@@ -372,7 +372,7 @@ public sealed class ManagedAgentTests
         await using var session = harness.Create();
         await Read(session.RunTurnAsync(Turn("read") with
         {
-            Attachments = [new() { Kind = LlmBinaryKind.Document,
+            Attachments = [new LlmAttachment { Kind = LlmBinaryKind.Document,
             FileName = "input.txt", Data = data }]
         }));
         data[0] = 0;
@@ -380,7 +380,7 @@ public sealed class ManagedAgentTests
         Assert.Empty(lightweight.Entries[0].Message.Attachments);
         Assert.Equal("input.txt", Assert.Single(lightweight.Entries[0].Message.OmittedAttachments).FileName);
         var full = await session.CaptureContextAsync(new() { IncludeAttachmentData = true });
-        Assert.Equal("document", Encoding.UTF8.GetString(full.Entries[0].Message.Attachments[0].Data.Span));
+        Assert.Equal("document", Encoding.UTF8.GetString(Assert.IsType<LlmAttachment>(full.Entries[0].Message.Attachments[0]).Data.Span));
         var serialized = JsonSerializer.Serialize(full, ConnectLlmJson.AgentContext);
         await using var reopened = harness.Create(Options() with
         {

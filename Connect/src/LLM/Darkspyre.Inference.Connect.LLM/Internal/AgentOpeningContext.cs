@@ -38,7 +38,7 @@ internal sealed record AgentOpeningContext(string Text, IReadOnlyList<LlmAttachm
         LlmToolOutputPart[] toolBytes = [.. context.Entries.SelectMany(entry => entry.Message.ToolResults)
             .SelectMany(result => result.Output.Parts)
             .Where(part => part is LlmToolOutputBinary or LlmToolOutputResource { Data: not null })];
-        LlmAttachment[] attachments = [.. context.Entries.SelectMany(entry => entry.Message.Attachments),
+        LlmAttachment[] attachments = [.. context.Entries.SelectMany(entry => entry.Message.Attachments).Select(LlmAttachments.RequireBinary),
             .. toolBytes.OfType<LlmToolOutputBinary>()
                 .Where(binary => binary.Kind is LlmBinaryKind.Image or LlmBinaryKind.Document)
                 .Select(binary => new LlmAttachment

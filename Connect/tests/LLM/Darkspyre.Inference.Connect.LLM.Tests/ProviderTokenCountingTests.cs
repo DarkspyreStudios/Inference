@@ -237,7 +237,7 @@ public sealed class ProviderTokenCountingTests
         Instructions = "Return JSON.",
         MaxOutputTokens = 100,
         Messages = [new("system", "Be precise."), new("user", "Inspect this image.")
-        { Attachments = [new() { Kind = LlmBinaryKind.Image, FileName = "picture.png", MediaType = "image/png", Data = new byte[] { 1, 2, 3 } }] }],
+        { Attachments = [new LlmAttachment { Kind = LlmBinaryKind.Image, FileName = "picture.png", MediaType = "image/png", Data = new byte[] { 1, 2, 3 } }] }],
         Tools = [new() { Name = "run", InputSchema = JsonElement.Parse(Schema) }],
         ToolChoice = new() { Mode = LlmToolChoiceMode.Auto },
         StructuredOutput = new() { Name = "result", Schema = JsonElement.Parse(Schema) }

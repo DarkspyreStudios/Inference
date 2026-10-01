@@ -1,4 +1,6 @@
+using System.Collections.ObjectModel;
 using Darkspyre.Inference.Common.LLM;
+using Darkspyre.Inference.Common.Resources;
 
 namespace Darkspyre.Inference.Connect.LLM;
 
@@ -10,11 +12,64 @@ public sealed record LlmAgentContextEntry(string Id, string TurnId, LlmChatMessa
 public sealed record LlmAgentContext
 {
     [System.Text.Json.Serialization.JsonRequired]
-    public int FormatVersion { get; init; } = 2;
+    public int FormatVersion { get; init; } = 3;
 
     public long Revision { get; init; }
 
     public IReadOnlyList<LlmAgentContextEntry> Entries { get; init; } = [];
+
+    private IReadOnlyList<InferenceResourceReference> _selectedResources = [];
+
+    /// <summary>Copied caller-owned membership, not an independently mutable selection catalog.</summary>
+    [System.Text.Json.Serialization.JsonRequired]
+    public IReadOnlyList<InferenceResourceReference> SelectedResources
+    {
+        get => _selectedResources;
+        init => _selectedResources = CopySelection(value);
+    }
+
+    private InferenceResourceSelectionVersion? _resourceSelectionVersion;
+
+    /// <summary>Null means no observed caller version, not revision zero or replacement authority.</summary>
+    public InferenceResourceSelectionVersion? ResourceSelectionVersion
+    {
+        get => _resourceSelectionVersion;
+        init
+        {
+            if (value is null) { _resourceSelectionVersion = null; return; }
+            ArgumentException.ThrowIfNullOrEmpty(value.WorkspaceId);
+            ArgumentException.ThrowIfNullOrEmpty(value.SessionId);
+            ArgumentOutOfRangeException.ThrowIfNegative(value.Revision);
+            _resourceSelectionVersion = new(value.WorkspaceId, value.SessionId, value.Revision);
+        }
+    }
+
+    internal void ValidateResourceSelection()
+    {
+        if (ResourceSelectionVersion is { } version
+            && SelectedResources.Any(reference => !string.Equals(reference.WorkspaceId, version.WorkspaceId, StringComparison.Ordinal)))
+            throw new ArgumentException("Context resource selection belongs to a different workspace.");
+    }
+
+    private static ReadOnlyCollection<InferenceResourceReference> CopySelection(IReadOnlyList<InferenceResourceReference> references)
+    {
+        ArgumentNullException.ThrowIfNull(references);
+        var seen = new HashSet<InferenceResourceReference>();
+        var snapshot = new InferenceResourceReference[references.Count];
+        string? workspaceId = null;
+        for (int index = 0; index < references.Count; index++)
+        {
+            InferenceResourceReference reference = references[index];
+            ArgumentNullException.ThrowIfNull(reference);
+            ArgumentException.ThrowIfNullOrEmpty(reference.WorkspaceId);
+            ArgumentException.ThrowIfNullOrEmpty(reference.Id);
+            workspaceId ??= reference.WorkspaceId;
+            if (!string.Equals(workspaceId, reference.WorkspaceId, StringComparison.Ordinal) || !seen.Add(reference))
+                throw new ArgumentException("Context selection must contain unique references from one workspace.", nameof(references));
+            snapshot[index] = new(reference.WorkspaceId, reference.Id);
+        }
+        return Array.AsReadOnly(snapshot);
+    }
 }
 
 public sealed record LlmAgentContextCaptureOptions

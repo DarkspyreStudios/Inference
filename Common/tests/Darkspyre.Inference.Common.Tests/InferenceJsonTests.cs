@@ -61,7 +61,7 @@ public sealed class InferenceJsonTests
             Messages = [new("assistant", "text")
             {
                 ContinuationState = JsonSerializer.Deserialize(ContinuationJson, InferenceJson.ContinuationState),
-                Attachments = [new() { Kind = LlmBinaryKind.Image, FileName = "image.png", Data = new byte[] { 1, 2, 3 } }],
+                Attachments = [new LlmAttachment { Kind = LlmBinaryKind.Image, FileName = "image.png", Data = new byte[] { 1, 2, 3 } }],
                 ToolCalls = [new("call", "tool", "{}")],
                 ToolResults = [new("call", new()
                 {
@@ -78,7 +78,7 @@ public sealed class InferenceJsonTests
         Assert.Equal(original.StopSequences, restored.StopSequences);
         Assert.Equal(original.PromptCache, restored.PromptCache);
         Assert.Equal("opaque", restored.Messages[0].ContinuationState!.Payload);
-        Assert.Equal(new byte[] { 1, 2, 3 }, restored.Messages[0].Attachments[0].Data.ToArray());
+        Assert.Equal(new byte[] { 1, 2, 3 }, Assert.IsType<LlmAttachment>(restored.Messages[0].Attachments[0]).Data.ToArray());
         Assert.True(restored.Tools[0].Strict);
         Assert.Equal(original.Tools[0].InputSchema.GetRawText(), restored.Tools[0].InputSchema.GetRawText());
         LlmToolOutput output = restored.Messages[0].ToolResults[0].Output;
