@@ -95,6 +95,27 @@ public sealed class HostedContractTests
         Assert.Throws<ArgumentException>(() => HostedTools.Snapshot(call with { Output = new LlmHostedImageOutput(ReadOnlyMemory<byte>.Empty, "image/png") }));
     }
 
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(2)]
+    [InlineData(3)]
+    [InlineData(4)]
+    public void ObservedOutputListsRejectNullEntriesBeforePublication(int shape)
+    {
+        (LlmHostedToolKind kind, LlmHostedToolOutput output) = shape switch
+        {
+            0 => (LlmHostedToolKind.WebSearch, (LlmHostedToolOutput)new LlmHostedSearchOutput([null!])),
+            1 => (LlmHostedToolKind.CodeExecution, new LlmHostedCodeOutput(null, [null!], null)),
+            2 => (LlmHostedToolKind.CodeExecution, new LlmHostedCodeOutput(null, null, [null!])),
+            3 => (LlmHostedToolKind.DocumentSearch, new LlmHostedDocumentSearchOutput([null!])),
+            _ => (LlmHostedToolKind.RemoteMcp, new LlmHostedMcpOutput(null, null, null) { Resources = [null!] })
+        };
+        var call = new LlmHostedToolCall("call", kind, "actual", "actual-status", null, output);
+        Assert.Throws<ArgumentException>(() => HostedTools.Snapshot(call));
+        Assert.Same(output, call.Output);
+    }
+
     [Fact]
     public void ManagedSnapshotsPreserveEmptyFiltersAndBorrowAuthority()
     {
