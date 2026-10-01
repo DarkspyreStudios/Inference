@@ -95,6 +95,9 @@ public sealed class VideoContractTests
         var request = JsonSerializer.Deserialize(
             "{\"ModelId\":\"m\",\"FirstFrame\":{\"type\":\"binary\",\"Data\":\"\"}}", InferenceJson.VideoGenerationRequest)!;
         Assert.True(Assert.IsType<BinaryMediaSource>(request.FirstFrame).Data.IsEmpty);
+        Assert.Same(InferenceJson.LlmHostedImageOutput.Properties.Single(property => property.Name == "Data").CustomConverter,
+            InferenceJson.BinaryMediaSource.Properties.Single(property => property.Name == "Data").CustomConverter);
+        Assert.True(JsonSerializer.Deserialize("null", InferenceJson.VideoOutput.Options.GetTypeInfo<ReadOnlyMemory<byte>>()).IsEmpty);
     }
 
     [Fact]
@@ -178,6 +181,13 @@ public sealed class VideoContractTests
             Assert.Same(generation, AssemblyLoadContext.GetLoadContext(common));
             JsonTypeInfo metadata = Metadata(common.GetType(typeof(InferenceJson).FullName!, true)!, name);
             Assert.Same(common, metadata.Type.Assembly); Assert.Same(common, metadata.Options.TypeInfoResolver!.GetType().Assembly);
+            if (name == nameof(VideoGenerationRequest))
+            {
+                Assert.Throws<JsonException>(() => JsonSerializer.Deserialize(
+                    "{\"ModelId\":\"m\",\"FirstFrame\":{\"type\":\"binary\",\"Data\":null}}", metadata));
+                JsonTypeInfo binary = Metadata(common.GetType(typeof(InferenceJson).FullName!, true)!, nameof(BinaryMediaSource));
+                Assert.Same(common, binary.Properties.Single(property => property.Name == "Data").CustomConverter!.GetType().Assembly);
+            }
             object? result = RoundTrip(json, metadata);
             if (result is not null) AssertOwned(result, common);
             Assembly fixture = generation.LoadFromAssemblyPath(typeof(VideoContractTests).Assembly.Location);

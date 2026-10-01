@@ -66,7 +66,7 @@ public static class InferenceJson
         public JsonTypeInfo? GetTypeInfo(Type type, JsonSerializerOptions options)
         {
             var metadata = ((IJsonTypeInfoResolver)InferenceJsonContext.Default).GetTypeInfo(type, options);
-            if (type == typeof(LlmHostedImageOutput) && metadata is not null)
+            if ((type == typeof(LlmHostedImageOutput) || type == typeof(BinaryMediaSource)) && metadata is not null)
                 metadata.Properties.Single(property => property.Name == "Data").CustomConverter = imageData;
             return metadata;
         }

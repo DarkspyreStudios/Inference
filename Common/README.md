@@ -41,7 +41,8 @@ Runtime inference instances have no data getter and refuse non-null owned serial
 Native receipts grant no resource authority. Diagnostics omit prompts, URLs and provider state.
 Outer collections are copied, capability sets are frozen and output JSON state is cloned on
 construction and `with` assignment. Input media bytes retain their existing borrowed semantics;
-an operation must snapshot them before effects. Nullable observations remain absent, including
+an operation must snapshot them before effects. Owned binary-media metadata rejects explicit null
+bytes and preserves actual empty bytes. Nullable observations remain absent, including
 progress, duration, expiry and content type; zero and false remain actual values.
 
 `LlmExplicitCacheReference` carries a native cache resource name, model, opaque scope and optional
@@ -93,7 +94,8 @@ Owned hosted metadata rejects missing observation identities, kind/phase facts a
 Explicit null image bytes are not an observed empty image; explicit empty bytes remain valid.
 The new phase/action enum roots reject undefined values without changing other enum policies.
 Caller-generated closed envelopes can compose the owned resolver and its fixed converters; the
-image-byte refusal applies only to the hosted image `Data` property, not every byte-memory field.
+image-byte refusal applies only to the hosted image and binary-media `Data` properties, not every
+byte-memory field.
 
 ## Session and workspace resources
 
