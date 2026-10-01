@@ -346,7 +346,8 @@ public sealed class LlmTextTokenizerTests
             if (boundary != Boundary) return;
             using CancellationTokenRegistration registration = token.Register(() => Stopped.TrySetResult());
             Entered.TrySetResult();
-            await Release.Task.WaitAsync(IgnoreCancellation ? CancellationToken.None : token);
+            try { await Release.Task.WaitAsync(IgnoreCancellation ? CancellationToken.None : token); }
+            finally { if (token.IsCancellationRequested) Stopped.TrySetResult(); }
         }
     }
 
