@@ -1,5 +1,10 @@
 # Darkspyre.Inference.Common
 
+`InferenceStreamLimits` supplies explicit positive caller-local event-count, buffered-payload-byte
+and assembled-message-byte budgets for streaming contracts. `InferenceJson.InferenceStreamLimits`
+owns its required data metadata. Omitted, null, zero and negative budgets refuse; no provider limit
+or hidden default is inferred. Constructor and `with` updates enforce the same data validity.
+
 Shared, implementation-neutral contracts for in-process Tensor inference and out-of-process Connect
 providers. The package contains semantic request, response, capability, progress, provenance, and
 failure types. It does not select an implementation or provide automatic fallback between local and

@@ -20,16 +20,17 @@ public sealed record PocketTtsEndpointOptions
 public sealed record TtsConnection
 {
     public TtsTransport Transport { get; init; } = TtsTransport.PocketTtsHttp;
-    public required Uri Endpoint { get; init; }
+    public required Uri Endpoint { get; init => field = TtsData.Required(value); }
     public TimeSpan RequestTimeout { get; init; } = TimeSpan.FromMinutes(5);
     /// <summary>Short-lived protected values supplied by the host. Never log or display this map.</summary>
     public IReadOnlyDictionary<string, string> Headers { get; init; } = new Dictionary<string, string>();
     public PocketTtsEndpointOptions PocketTts { get; init; } = new();
+    public override string ToString() => "TtsConnection { <data> }";
 }
 
 public sealed record TtsRequest
 {
-    public required string Text { get; init; }
+    public required string Text { get; init => field = TtsData.Required(value); }
     public string? VoiceId { get; init; }
     public double? Speed { get; init; }
     public TtsAudioFormat Format { get; init; } = TtsAudioFormat.Wav;
@@ -41,7 +42,12 @@ public sealed record TtsRequest
     public override string ToString() => "TtsRequest { <data> }";
 }
 
-public sealed record TtsVoice(string Id, string DisplayName, string? Locale = null, string? Description = null);
+public sealed record TtsVoice(string Id, string DisplayName, string? Locale = null, string? Description = null)
+{
+    [JsonRequired] public string Id { get; init => field = TtsData.Required(value); } = TtsData.Required(Id);
+    [JsonRequired] public string DisplayName { get; init => field = TtsData.Required(value); } = TtsData.Required(DisplayName);
+    public override string ToString() => "TtsVoice { <data> }";
+}
 public sealed record TtsCapabilities(bool SupportsVoiceListing, bool SupportsSpeed, IReadOnlyList<TtsAudioFormat> Formats)
 {
     [JsonRequired] public bool SupportsVoiceListing { get; init; } = SupportsVoiceListing;

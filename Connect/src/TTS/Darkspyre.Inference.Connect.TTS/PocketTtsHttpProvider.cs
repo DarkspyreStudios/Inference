@@ -55,6 +55,18 @@ public sealed class PocketTtsHttpProvider(HttpClient httpClient) : ITtsProvider
     private static InferenceException Invalid(string message) => new(InferenceFailureCode.InvalidRequest, message);
     private static InferenceException Protocol() => new(InferenceFailureCode.ProtocolFailure, "PocketTTS returned an invalid response.");
 
+    internal static void ValidateRequest(TtsConnection connection, TtsRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (string.IsNullOrWhiteSpace(request.Text) || request.Speed is { } speed && (!double.IsFinite(speed) || speed <= 0))
+        { throw Invalid("Supply text and a positive finite speed."); }
+        if (request.Format != TtsAudioFormat.Wav || connection.PocketTts.Protocol == PocketTtsProtocol.Multipart && request.Speed is not (null or 1))
+        { throw new InferenceException(InferenceFailureCode.UnsupportedFeature, "This protocol supports WAV; multipart does not support non-default speed."); }
+        if (request.Language is not null || request.SampleRate is not null || request.BitRate is not null
+            || request.IncludeTimestamps is not null || request.Xai is not null)
+        { throw new InferenceException(InferenceFailureCode.UnsupportedFeature, "PocketTTS does not implement these explicit speech controls."); }
+    }
+
     private sealed class Client(PocketTtsHttpProvider provider, TtsConnection connection) : ITtsClient
     {
         public InferenceImplementationDescriptor Descriptor => provider.SetupDefinition.Implementation;
@@ -87,11 +99,7 @@ public sealed class PocketTtsHttpProvider(HttpClient httpClient) : ITtsProvider
 
         public async Task<TtsResult> SpeakAsync(TtsRequest request, CancellationToken cancellationToken = default)
         {
-            ArgumentNullException.ThrowIfNull(request);
-            if (string.IsNullOrWhiteSpace(request.Text) || request.Speed is { } speed && (!double.IsFinite(speed) || speed <= 0))
-            { throw Invalid("Supply text and a positive finite speed."); }
-            if (request.Format != TtsAudioFormat.Wav || connection.PocketTts.Protocol == PocketTtsProtocol.Multipart && request.Speed is not (null or 1))
-            { throw new InferenceException(InferenceFailureCode.UnsupportedFeature, "This protocol supports WAV; multipart does not support non-default speed."); }
+            ValidateRequest(connection, request);
             long started = Stopwatch.GetTimestamp();
             using HttpContent body = CreateContent(request);
             byte[] audio = await SendAsync(HttpMethod.Post, connection.PocketTts.SpeakPath, body, async (response, token) =>

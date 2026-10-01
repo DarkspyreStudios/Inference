@@ -1,13 +1,46 @@
 using System.Globalization;
+using System.Text.Json.Serialization;
 using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Common.Setup;
 
 namespace Darkspyre.Inference.Connect.TTS;
 
 public sealed record TtsSetupConfiguration(TtsConnection Connection, string? VoiceId = null,
-    double? Speed = null, TtsAudioFormat Format = TtsAudioFormat.Wav);
-public sealed record TtsSetupHeaderChanges(IReadOnlyDictionary<string, string> Set, IReadOnlyList<string> Remove);
-public sealed record TtsSetupChanges(SetupConfigurationIdentity Identity, TtsSetupConfiguration Configuration, TtsSetupHeaderChanges Headers);
+    double? Speed = null, TtsAudioFormat Format = TtsAudioFormat.Wav)
+{
+    [JsonRequired] public TtsConnection Connection { get; init => field = TtsData.Required(value); } = TtsData.Required(Connection);
+    public string? Language { get; init; }
+    public int? SampleRate { get; init; }
+    public int? BitRate { get; init; }
+    public bool? IncludeTimestamps { get; init; }
+    public XaiTtsOptions? Xai { get; init; }
+    internal TtsRequest Request(string text) => new()
+    {
+        Text = text,
+        VoiceId = VoiceId,
+        Speed = Speed,
+        Format = Format,
+        Language = Language,
+        SampleRate = SampleRate,
+        BitRate = BitRate,
+        IncludeTimestamps = IncludeTimestamps,
+        Xai = Xai
+    };
+    public override string ToString() => "TtsSetupConfiguration { <data> }";
+}
+public sealed record TtsSetupHeaderChanges(IReadOnlyDictionary<string, string> Set, IReadOnlyList<string> Remove)
+{
+    [JsonRequired] public IReadOnlyDictionary<string, string> Set { get; init => field = TtsData.Copy(TtsData.Required(value), StringComparer.OrdinalIgnoreCase)!; } = TtsData.Copy(TtsData.Required(Set), StringComparer.OrdinalIgnoreCase)!;
+    [JsonRequired] public IReadOnlyList<string> Remove { get; init => field = TtsData.Copy(value); } = TtsData.Copy(Remove);
+    public override string ToString() => "TtsSetupHeaderChanges { <data> }";
+}
+public sealed record TtsSetupChanges(SetupConfigurationIdentity Identity, TtsSetupConfiguration Configuration, TtsSetupHeaderChanges Headers)
+{
+    [JsonRequired] public SetupConfigurationIdentity Identity { get; init => field = TtsData.Required(value); } = TtsData.Required(Identity);
+    [JsonRequired] public TtsSetupConfiguration Configuration { get; init => field = TtsData.Required(value); } = TtsData.Required(Configuration);
+    [JsonRequired] public TtsSetupHeaderChanges Headers { get; init => field = TtsData.Required(value); } = TtsData.Required(Headers);
+    public override string ToString() => "TtsSetupChanges { <data> }";
+}
 
 /// <summary>Editable PocketTTS settings. Plain data: edits change only this object.</summary>
 public sealed class TtsSettings : InferenceSettings<TtsSetupChanges>
@@ -133,12 +166,17 @@ public sealed class TtsSettings : InferenceSettings<TtsSetupChanges>
             || _draft.Connection.PocketTts.Protocol == PocketTtsProtocol.Multipart && speed != 1))
         { issues.Add(new("speed-invalid", "Use a positive speed supported by the selected protocol.", "speed")); }
         if (_draft.Format != TtsAudioFormat.Wav) { issues.Add(new("format-unsupported", "Only WAV is supported.", "format")); }
+        if (_draft.Language is not null || _draft.SampleRate is not null || _draft.BitRate is not null
+            || _draft.IncludeTimestamps is not null || _draft.Xai is not null)
+        { issues.Add(new("controls-unsupported", "PocketTTS does not implement these explicit speech controls.", StepId: "speech")); }
         return new(issues.AsReadOnly());
     }
 
     protected override bool IsDraftDirty => _draft.Connection != _baseline.Connection
         || (_draft.VoiceId ?? string.Empty) != (_baseline.VoiceId ?? string.Empty)
         || _draft.Speed != _baseline.Speed || _draft.Format != _baseline.Format || _endpoint != _baseline.Connection.Endpoint
+        || _draft.Language != _baseline.Language || _draft.SampleRate != _baseline.SampleRate
+        || _draft.BitRate != _baseline.BitRate || _draft.IncludeTimestamps != _baseline.IncludeTimestamps || _draft.Xai != _baseline.Xai
         || _timeout != (long)_baseline.Connection.RequestTimeout.TotalSeconds || _removed.Count != 0
         || _headers.Any(header => header.OriginalName.Length == 0 || header.Name != header.OriginalName
             || header.Edit.Kind != SetupSecretEditKind.Keep);
@@ -180,13 +218,14 @@ public sealed class TtsSettingsManager : InferenceSettingsManager<TtsSettings, T
         TtsSetupConfiguration? existing = null, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        ITtsProvider provider = _providers[transport];
+        ITtsProvider provider = TtsProviderService.RequiredProvider(_providers, transport);
         return Task.FromResult(new TtsSettings(provider.SetupDefinition, provider.Transport, identity, existing));
     }
 
     protected override async Task<SetupActionResult> RunCoreAsync(TtsSettings settings, SetupActionDescriptor action,
         IProgress<SetupProgress>? progress, CancellationToken cancellationToken)
     {
+        if (action.Id == "test") PocketTtsHttpProvider.ValidateRequest(settings.Connection(), settings.Draft.Request("This is a speech test."));
         ITtsClient client = _providers[settings.Transport].Bind(settings.Connection());
         switch (action.Id)
         {
@@ -198,7 +237,7 @@ public sealed class TtsSettingsManager : InferenceSettingsManager<TtsSettings, T
             case "test":
                 settings.Status = settings.Status with { Ready = SetupObservation.Unknown };
                 TtsSetupConfiguration draft = settings.Draft;
-                await client.SpeakAsync(new() { Text = "This is a speech test.", VoiceId = draft.VoiceId, Speed = draft.Speed, Format = draft.Format },
+                await client.SpeakAsync(draft.Request("This is a speech test."),
                     cancellationToken).ConfigureAwait(false);
                 settings.Status = settings.Status with { Ready = SetupObservation.Known(true), Verified = SetupObservation.Known(true) };
                 return SetupActionResult.Completed;

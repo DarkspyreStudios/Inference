@@ -81,10 +81,10 @@ internal static class TtsData
         return Array.AsReadOnly(items);
     }
 
-    internal static ReadOnlyDictionary<string, string>? Copy(IReadOnlyDictionary<string, string>? value)
+    internal static ReadOnlyDictionary<string, string>? Copy(IReadOnlyDictionary<string, string>? value, StringComparer? comparer = null)
     {
         if (value is null) return null;
-        var items = new Dictionary<string, string>(StringComparer.Ordinal);
+        var items = new Dictionary<string, string>(comparer ?? StringComparer.Ordinal);
         foreach ((string key, string item) in value) items.Add(Required(key), Required(item));
         return new(items);
     }
