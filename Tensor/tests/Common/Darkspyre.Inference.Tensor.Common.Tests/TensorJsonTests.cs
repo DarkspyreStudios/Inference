@@ -4,6 +4,7 @@ using System.Runtime.Loader;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.Json.Serialization.Metadata;
 
 namespace Darkspyre.Inference.Tensor.Common.Tests;
@@ -134,7 +135,19 @@ public sealed class TensorJsonTests
             Assert.Same(tensor, metadata.Options.TypeInfoResolver.GetType().Assembly);
             object value = JsonSerializer.Deserialize(json, metadata)!;
             string written = JsonSerializer.Serialize(value, metadata);
-            if (family.StartsWith("TensorRuntime", StringComparison.Ordinal)) Assert.Equal(json, written);
+            if (family.StartsWith("TensorRuntime", StringComparison.Ordinal))
+            {
+                Assert.Equal(json, written);
+                foreach (JsonPropertyInfo property in metadata.Properties)
+                {
+                    bool required = family != "TensorRuntimePlan" || property.Name != "Candidates";
+                    Assert.Equal(required, property.IsRequired);
+                    if (!required) continue;
+                    JsonObject incomplete = JsonNode.Parse(json)!.AsObject();
+                    Assert.True(incomplete.Remove(property.Name));
+                    Assert.Throws<JsonException>(() => JsonSerializer.Deserialize(incomplete.ToJsonString(), metadata));
+                }
+            }
             Assert.NotNull(JsonSerializer.Deserialize(written, metadata));
         }
         finally

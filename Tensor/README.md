@@ -326,6 +326,11 @@ policy; an empty list admits no candidates. File declarations require nonempty p
 paths, nonnegative sizes and exact lowercase SHA-256 hashes. Constructor checks are lexical/data
 checks only. These checks do not prove actual links, bytes, trusted package provenance or exact
 entry-library binding to the complete file closure. A nonempty declaration is not execution evidence.
+The four runtime records retain positional construction, named arguments, deconstruction and `with`
+copies. Validated init accessors reject invalid copies and snapshot nested builds and diagnostics.
+Owned JSON requires every mandatory runtime fact, including zero sizes, observation timestamps,
+shutdown counts/state/flags and an explicitly nullable actual candidate ID. Missing facts refuse;
+they do not become zero, false, Completed or a default timestamp. Plan candidates remain optional.
 
 `TensorRuntimeShutdownResult` snapshots its ordered safe diagnostics and carries the actual
 observation time, operation ID, outstanding owner leases and possible surviving native state.

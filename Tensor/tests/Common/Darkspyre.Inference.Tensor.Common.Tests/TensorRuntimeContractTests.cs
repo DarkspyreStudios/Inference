@@ -77,6 +77,16 @@ public sealed class TensorRuntimeContractTests
     [InlineData("native\\bridge.dll")]
     [InlineData("native/bridge.so:stream")]
     [InlineData("native/bridge\0.so")]
+    [InlineData("native/<bridge.so")]
+    [InlineData("native/>bridge.so")]
+    [InlineData("native/\"bridge.so")]
+    [InlineData("native/bridge|.so")]
+    [InlineData("native/bridge?.so")]
+    [InlineData("native/bridge*.so")]
+    [InlineData("native/bridge.so.")]
+    [InlineData("native/bridge.so ")]
+    [InlineData("native./bridge.so")]
+    [InlineData("native /bridge.so")]
     public void UnsafePortableFilePathsRefuseWithoutFilesystemWork(string path) =>
         Assert.Throws<ArgumentException>(() => new TensorRuntimeNativeFile(path, 0, Hash));
 
@@ -163,17 +173,135 @@ public sealed class TensorRuntimeContractTests
     }
 
     [Fact]
-    public void RuntimeDataHasNoMutablePublicPropertiesOrOwnerMetadataRoot()
+    public void RuntimeDataOnlyExposesValidatedInitOrReadOnlyPropertiesAndNoOwnerMetadataRoot()
     {
-        Type[] data = [typeof(TensorRuntimeNativeFile), typeof(TensorRuntimeCandidate), typeof(TensorRuntimePlan),
-            typeof(TensorRuntimeBackendIdentity), typeof(TensorRuntimeDiagnostic), typeof(TensorRuntimeShutdownResult)];
-        foreach (Type type in data)
-            Assert.All(type.GetProperties(), static property => Assert.Null(property.SetMethod));
+        foreach (Type type in new[] { typeof(TensorRuntimeCandidate), typeof(TensorRuntimePlan) })
+            Assert.All(type.GetProperties(), static property => Assert.False(property.SetMethod?.IsPublic is true));
+        foreach (Type type in new[] { typeof(TensorRuntimeNativeFile), typeof(TensorRuntimeBackendIdentity),
+            typeof(TensorRuntimeDiagnostic), typeof(TensorRuntimeShutdownResult) })
+            Assert.All(type.GetProperties(), static property => Assert.Contains(typeof(System.Runtime.CompilerServices.IsExternalInit),
+                property.SetMethod!.ReturnParameter.GetRequiredCustomModifiers()));
         Assert.True(typeof(ITensorBackendProbe).IsAssignableFrom(typeof(ITensorRuntimeOwner)));
         Assert.True(typeof(IAsyncDisposable).IsAssignableFrom(typeof(ITensorRuntimeOwner)));
         Assert.Null(TensorJson.TensorRuntimePlan.Options.TypeInfoResolver!.GetTypeInfo(typeof(ITensorRuntimeOwner), TensorJson.TensorRuntimePlan.Options));
         Assert.Equal([0, 1, 2, 3, 4, 5, 6], Enum.GetValues<TensorRuntimeState>().Select(static state => (int)state).ToArray());
         Assert.Equal([0, 1, 2, 3], Enum.GetValues<TensorRuntimeShutdownState>().Select(static state => (int)state).ToArray());
+    }
+
+    [Fact]
+    public void PositionalRecordsPreserveNamedArgumentsDeconstructionAndValidatedWithCopies()
+    {
+        var file = new TensorRuntimeNativeFile(RelativePath: "bridge.so", Size: 0, Sha256: Hash);
+        (string path, long size, string hash) = file;
+        Assert.Equal("bridge.so", path);
+        Assert.Equal(0, size);
+        Assert.Equal(Hash, hash);
+        Assert.Equal(1, (file with { Size = 1 }).Size);
+        Assert.Equal(0, file.Size);
+        Assert.Throws<ArgumentOutOfRangeException>(() => file with { Size = -1 });
+        Assert.Throws<ArgumentException>(() => file with { RelativePath = "../bridge.so" });
+        Assert.Throws<ArgumentException>(() => file with { Sha256 = "hash" });
+
+        var actual = new TensorRuntimeBackendIdentity(Backend: TensorBackendKind.GgmlCpu, Build: Build,
+            TargetRid: "linux-x64", Variant: "cpu", CandidateId: null, NativeSourceCommit: "native-source");
+        (TensorBackendKind backend, TensorSharpBuildIdentity build, string rid, string variant, string? candidateId, string commit) = actual;
+        Assert.Equal(TensorBackendKind.GgmlCpu, backend);
+        Assert.Equal(Build, build);
+        Assert.NotSame(Build, build);
+        Assert.Equal("linux-x64", rid);
+        Assert.Equal("cpu", variant);
+        Assert.Null(candidateId);
+        Assert.Equal("native-source", commit);
+        var changed = actual with { Build = Build, CandidateId = "cpu" };
+        Assert.NotSame(Build, changed.Build);
+        Assert.Null(actual.CandidateId);
+        Assert.Throws<ArgumentOutOfRangeException>(() => actual with { Backend = TensorBackendKind.Auto });
+        Assert.Throws<ArgumentException>(() => actual with { Build = Build with { NativeAbi = "" } });
+        Assert.Throws<ArgumentException>(() => actual with { TargetRid = "" });
+        Assert.Throws<ArgumentException>(() => actual with { Variant = "" });
+        Assert.Throws<ArgumentException>(() => actual with { CandidateId = "" });
+        Assert.Throws<ArgumentException>(() => actual with { NativeSourceCommit = "" });
+
+        var diagnostic = new TensorRuntimeDiagnostic(Code: "safe", Message: "Safe observation.");
+        (string code, string message) = diagnostic;
+        Assert.Equal("safe", code);
+        Assert.Equal("Safe observation.", message);
+        Assert.Equal("changed", (diagnostic with { Code = "changed" }).Code);
+        Assert.Throws<ArgumentException>(() => diagnostic with { Code = "" });
+        Assert.Throws<ArgumentException>(() => diagnostic with { Message = "" });
+
+        TensorRuntimeDiagnostic[] diagnostics = [diagnostic];
+        Guid operation = Guid.NewGuid();
+        var shutdown = new TensorRuntimeShutdownResult(State: TensorRuntimeShutdownState.Completed, OperationId: operation,
+            ObservedAt: DateTimeOffset.UnixEpoch, OutstandingLeases: 0, NativeStateMayRemain: false, Diagnostics: diagnostics);
+        (TensorRuntimeShutdownState state, Guid id, DateTimeOffset observedAt, int leases, bool nativeMayRemain,
+            IReadOnlyList<TensorRuntimeDiagnostic> observedDiagnostics) = shutdown;
+        Assert.Equal(TensorRuntimeShutdownState.Completed, state);
+        Assert.Equal(operation, id);
+        Assert.Equal(DateTimeOffset.UnixEpoch, observedAt);
+        Assert.Equal(0, leases);
+        Assert.False(nativeMayRemain);
+        Assert.NotSame(diagnostics, observedDiagnostics);
+        Assert.NotSame(diagnostic, observedDiagnostics[0]);
+        var copy = shutdown with { Diagnostics = diagnostics, OutstandingLeases = 1, NativeStateMayRemain = true };
+        diagnostics[0] = diagnostic with { Code = "changed" };
+        Assert.Equal("safe", copy.Diagnostics[0].Code);
+        Assert.Equal("safe", shutdown.Diagnostics[0].Code);
+        Assert.NotSame(copy.Diagnostics[0], shutdown.Diagnostics[0]);
+        Assert.Throws<ArgumentOutOfRangeException>(() => shutdown with { State = (TensorRuntimeShutdownState)999 });
+        Assert.Throws<ArgumentException>(() => shutdown with { OperationId = Guid.Empty });
+        Assert.Throws<ArgumentOutOfRangeException>(() => shutdown with { OutstandingLeases = -1 });
+        Assert.Throws<ArgumentNullException>(() => shutdown with { Diagnostics = null! });
+        Assert.Throws<ArgumentException>(() => shutdown with { Diagnostics = [null!] });
+        Assert.Throws<NotSupportedException>(() => ((IList<TensorRuntimeDiagnostic>)copy.Diagnostics)[0] = diagnostic);
+    }
+
+    [Fact]
+    public void OptionalPlanCandidatesStillPermitOmissionButActualNullCandidateIdentityIsExplicit()
+    {
+        (string planJson, JsonTypeInfo planMetadata) = RuntimeFixture("Plan");
+        JsonObject plan = JsonNode.Parse(planJson)!.AsObject();
+        Assert.True(plan.Remove("Candidates"));
+        Assert.Null(((TensorRuntimePlan)JsonSerializer.Deserialize(plan.ToJsonString(), planMetadata)!).Candidates);
+        (string backendJson, JsonTypeInfo backendMetadata) = RuntimeFixture("Backend");
+        Assert.Null(((TensorRuntimeBackendIdentity)JsonSerializer.Deserialize(backendJson, backendMetadata)!).CandidateId);
+    }
+
+    [Fact]
+    public void PopulatedOwnedJsonCannotBypassCandidateAndPlanValidationOrReplaceSnapshots()
+    {
+        (string candidateJson, JsonTypeInfo candidateMetadata) = RuntimeFixture("Candidate");
+        JsonObject invalid = JsonNode.Parse(candidateJson)!.AsObject();
+        invalid["Backend"] = (int)TensorBackendKind.Cpu;
+        Assert.Throws<ArgumentOutOfRangeException>(() => JsonSerializer.Deserialize(invalid.ToJsonString(), candidateMetadata));
+        invalid = JsonNode.Parse(candidateJson)!.AsObject();
+        invalid["Files"] = new JsonArray();
+        Assert.Throws<ArgumentException>(() => JsonSerializer.Deserialize(invalid.ToJsonString(), candidateMetadata));
+        invalid = JsonNode.Parse(candidateJson)!.AsObject();
+        invalid["Files"] = new JsonArray((JsonNode?)null);
+        Assert.Throws<ArgumentException>(() => JsonSerializer.Deserialize(invalid.ToJsonString(), candidateMetadata));
+        invalid = JsonNode.Parse(candidateJson)!.AsObject();
+        invalid["Identity"]!["Id"] = "";
+        Assert.Throws<ArgumentException>(() => JsonSerializer.Deserialize(invalid.ToJsonString(), candidateMetadata));
+
+        var original = new TensorRuntimePlan(Build, "linux-x64", [Candidate()]);
+        string planJson = JsonSerializer.Serialize(original, TensorJson.TensorRuntimePlan);
+        invalid = JsonNode.Parse(planJson)!.AsObject();
+        invalid["Candidates"]![0]!["Identity"]!["TargetRid"] = "other-rid";
+        Assert.Throws<ArgumentException>(() => JsonSerializer.Deserialize(invalid.ToJsonString(), TensorJson.TensorRuntimePlan));
+        invalid = JsonNode.Parse(planJson)!.AsObject();
+        invalid["Candidates"]![0]!["Identity"]!["Build"]!["NativeAbi"] = "other-abi";
+        Assert.Throws<ArgumentException>(() => JsonSerializer.Deserialize(invalid.ToJsonString(), TensorJson.TensorRuntimePlan));
+        invalid = JsonNode.Parse(planJson)!.AsObject();
+        invalid["Candidates"]!.AsArray().Add(invalid["Candidates"]![0]!.DeepClone());
+        Assert.Throws<ArgumentException>(() => JsonSerializer.Deserialize(invalid.ToJsonString(), TensorJson.TensorRuntimePlan));
+
+        TensorRuntimePlan restored = JsonSerializer.Deserialize(planJson, TensorJson.TensorRuntimePlan)!;
+        IReadOnlyList<TensorRuntimeCandidate> candidates = restored.Candidates!;
+        Assert.Throws<NotSupportedException>(() => ((IList<TensorRuntimeCandidate>)candidates)[0] = Candidate());
+        Assert.Throws<NotSupportedException>(() => ((IList<TensorRuntimeNativeFile>)candidates[0].Files)[0] = new("changed.so", 0, Hash));
+        TensorRuntimeShutdownResult shutdown = (TensorRuntimeShutdownResult)JsonSerializer.Deserialize(RuntimeFixture("Shutdown").Json, TensorJson.TensorRuntimeShutdownResult)!;
+        Assert.Throws<NotSupportedException>(() => ((IList<TensorRuntimeDiagnostic>)shutdown.Diagnostics).Add(new("changed", "Changed.")));
     }
 
     private static TensorRuntimeCandidate Candidate(string id = "first", TensorBackendKind backend = TensorBackendKind.GgmlCpu,
