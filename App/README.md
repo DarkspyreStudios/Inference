@@ -120,10 +120,14 @@ idle after `/free`, set `ReleasedMaxUsedMiB` to idle usage plus 1024 MiB.
 
 Copy the Windows publish output into `G:\AI\gpu-arbiter\app` and the measured presets
 into `G:\AI\models\presets.ini`. The user runs `deploy/install.ps1` once from an elevated
-PowerShell. It prompts for the existing `h3x1e\gpu-inference` account password, grants its
-service logon right and filesystem permissions, registers delayed automatic start, grants
-service start/stop/query access, and opens ports 8080 and 8189 to LocalSubnet and Tailscale.
-The password is never written to a configuration file.
+PowerShell. The service runs as its virtual account, `NT SERVICE\gpu-arbiter`, which has
+no password. The script registers the service, or reconfigures an existing registration,
+with delayed automatic start and restart-on-failure recovery. It grants the virtual account
+read and execute on `G:\AI\gpu-arbiter`, the llama.cpp runtime and the models directory, and
+modify on the log directory. It grants `h3x1e\gpu-inference` modify on `G:\AI\gpu-arbiter`
+and query/start/stop access on the service. It opens ports 8080 and 8189 to LocalSubnet and
+Tailscale, starts the service, and waits for `GET /gpu` to answer. The script is safe to run
+again.
 
 Later updates use `deploy/deploy.sh [ssh-host]`. The script publishes Windows x64, copies
 the app into `app-new`, and invokes `deploy.ps1` to stop, swap and restart the service.
