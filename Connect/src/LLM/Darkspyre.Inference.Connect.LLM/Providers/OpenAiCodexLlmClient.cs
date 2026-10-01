@@ -18,6 +18,9 @@ internal sealed class OpenAiCodexLlmClient(HttpClient http)
 
     public override LlmTransport Transport => LlmTransport.OpenAiCodex;
 
+    protected override LlmAccountUsageSnapshot? ObserveAccountUsage(HttpResponseMessage response) =>
+        CodexRateLimitHeaders.Parse(response.Headers, DateTimeOffset.UtcNow);
+
     public override LlmProviderDefinition ProviderDefinition => ProviderDefinitions.ChatGptSubscription;
 
     protected override LlmProviderCapabilities DefaultCapabilities { get; } = new()

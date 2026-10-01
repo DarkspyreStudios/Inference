@@ -159,9 +159,13 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
 
             ParsedClaudeLine parsed;
             LlmUsageDeltaEvent? observation;
+            LlmAccountUsageSnapshot? accountObservation;
             try
             {
                 using JsonDocument document = JsonDocument.Parse(outputLine.Line);
+                accountObservation = LlmJson.GetString(document.RootElement, "type") == "rate_limit_event"
+                    && document.RootElement.TryGetProperty("rate_limit_info", out JsonElement info)
+                    ? ClaudeRateLimitEvent.Parse(info, DateTimeOffset.UtcNow) : null;
                 observation = usage.Observe(document.RootElement);
                 parsed = ParseClaudeLine(
                     document.RootElement,
@@ -177,6 +181,7 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
                 continue;
             }
 
+            if (accountObservation is not null) { yield return new AccountUsageObservedEvent(accountObservation); }
             if (observation is not null) { yield return observation; }
             if (capabilities.SupportsReasoningText && parsed.ReasoningDelta is { Length: > 0 } reasoning)
             { yield return new LlmReasoningDeltaEvent(reasoning, IsSummary: true); }

@@ -13,6 +13,7 @@ internal sealed class VertexClaudeProtocol(HttpClient http, VertexAccess access)
     public override LlmProviderCapabilities GetCapabilities(LlmConnection connection, string? modelId = null) =>
         VertexLlmClient.Capabilities(connection, modelId);
     protected override string ReasoningModelId(string modelId) => VertexEndpoints.ParseModel(modelId).Model;
+    protected override LlmAccountUsageSnapshot? ObserveAccountUsage(HttpResponseMessage response) => null;
 
     protected override HttpRequestMessage CreateHttpRequest(LlmConnection connection, LlmChatRequest request, JsonObject payload, bool stream)
     {

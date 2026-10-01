@@ -8,6 +8,8 @@ public sealed class LlmAgentProviderService : IDisposable, IAsyncDisposable
 {
     private readonly ILlmConnectionSource _connections;
     private readonly Dictionary<LlmTransport, ILlmAgentClient> _clients;
+    private readonly LlmAccountUsageObservations _observations;
+    private readonly bool _ownsObservations;
     private readonly LlmOperationLifetime _lifetime = new();
     private readonly Lock _gate = new();
     private readonly HashSet<OwnedLlmAgentSession> _sessions = [];
@@ -16,11 +18,14 @@ public sealed class LlmAgentProviderService : IDisposable, IAsyncDisposable
 
     public LlmAgentProviderService(
         ILlmConnectionSource connections,
-        IEnumerable<ILlmAgentClient> clients)
+        IEnumerable<ILlmAgentClient> clients,
+        LlmAccountUsageObservations? observations = null)
     {
         ArgumentNullException.ThrowIfNull(connections);
         ArgumentNullException.ThrowIfNull(clients);
         _connections = connections;
+        _observations = observations ?? new();
+        _ownsObservations = observations is null;
         ILlmAgentClient[] clientArray = [.. clients];
         IGrouping<LlmTransport, ILlmAgentClient>? duplicate = clientArray
             .GroupBy(client => client.Transport)
@@ -44,10 +49,12 @@ public sealed class LlmAgentProviderService : IDisposable, IAsyncDisposable
     {
         using LlmOperationLifetime.Lease operation = Enter(cancellationToken);
         cancellationToken = operation.Token;
+        LlmAccountUsageObservations.Reservation reservation = _observations.Reserve(connectionId);
         LlmConnection connection = await LlmConnectionResolver.ResolveAsync(
             _connections,
             connectionId,
             cancellationToken);
+        connection = connection with { AccountUsageObservationBinding = reservation.Bind(connection) };
         cancellationToken.ThrowIfCancellationRequested();
         ILlmAgentSession session = await ClientFor(connection.Transport).StartSessionAsync(
             connectionId,
@@ -65,10 +72,12 @@ public sealed class LlmAgentProviderService : IDisposable, IAsyncDisposable
     {
         using LlmOperationLifetime.Lease operation = Enter(cancellationToken);
         cancellationToken = operation.Token;
+        LlmAccountUsageObservations.Reservation reservation = _observations.Reserve(connectionId);
         LlmConnection connection = await LlmConnectionResolver.ResolveAsync(
             _connections,
             connectionId,
             cancellationToken);
+        connection = connection with { AccountUsageObservationBinding = reservation.Bind(connection) };
         cancellationToken.ThrowIfCancellationRequested();
         ILlmAgentSession session = await ClientFor<ILlmAgentResumeClient>(connection.Transport, "resume").ResumeSessionAsync(
             connectionId,
@@ -88,10 +97,12 @@ public sealed class LlmAgentProviderService : IDisposable, IAsyncDisposable
     {
         using LlmOperationLifetime.Lease operation = Enter(cancellationToken);
         cancellationToken = operation.Token;
+        LlmAccountUsageObservations.Reservation reservation = _observations.Reserve(connectionId);
         LlmConnection connection = await LlmConnectionResolver.ResolveAsync(
             _connections,
             connectionId,
             cancellationToken);
+        connection = connection with { AccountUsageObservationBinding = reservation.Bind(connection) };
         cancellationToken.ThrowIfCancellationRequested();
         ILlmAgentSession session = await ClientFor<ILlmAgentForkClient>(connection.Transport, "fork").ForkSessionAsync(
             connectionId,
@@ -161,6 +172,7 @@ public sealed class LlmAgentProviderService : IDisposable, IAsyncDisposable
             {
                 lock (_gate) { _sessions.Clear(); }
                 _clients.Clear();
+                if (_ownsObservations) { _observations.Dispose(); }
             }
             completion.TrySetResult();
         }

@@ -91,6 +91,7 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
             httpRequest,
             HttpCompletionOption.ResponseHeadersRead,
             cancellationToken);
+        if (ObserveAccountUsage(response) is { } observed) { yield return new AccountUsageObservedEvent(observed); }
         await ProviderHttp.ThrowIfUnsuccessfulAsync(
             response,
             Transport,
@@ -256,6 +257,9 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
             string.Empty,
             credential);
     }
+
+    protected virtual LlmAccountUsageSnapshot? ObserveAccountUsage(HttpResponseMessage response) =>
+        OpenAiRateLimitHeaders.Parse(response.Headers, DateTimeOffset.UtcNow);
 
     /// <summary>OpenAI Responses applies its per-model sampling rule. Codex accepts no temperature at all.</summary>
     private void ValidateSampling(LlmChatRequest request)
