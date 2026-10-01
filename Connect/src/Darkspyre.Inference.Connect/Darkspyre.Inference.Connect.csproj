@@ -14,6 +14,7 @@
     <ProjectReference Include="..\LLM\Darkspyre.Inference.Connect.LLM\Darkspyre.Inference.Connect.LLM.csproj" PrivateAssets="all" />
     <ProjectReference Include="..\LLM\Darkspyre.Inference.Connect.LLM.Bedrock\Darkspyre.Inference.Connect.LLM.Bedrock.csproj" PrivateAssets="all" />
     <ProjectReference Include="..\LLM\Darkspyre.Inference.Connect.LLM.Vertex\Darkspyre.Inference.Connect.LLM.Vertex.csproj" PrivateAssets="all" />
+    <ProjectReference Include="..\LLM\Darkspyre.Inference.Connect.LLM.Azure\Darkspyre.Inference.Connect.LLM.Azure.csproj" PrivateAssets="all" />
   </ItemGroup>
 
   <ItemGroup>
@@ -44,5 +45,7 @@
     <None Include="..\LLM\Darkspyre.Inference.Connect.LLM.Vertex\bin\$(Configuration)\$(TargetFramework)\Darkspyre.Inference.Connect.LLM.Vertex.dll" Pack="true" PackagePath="lib\$(TargetFramework)" />
     <None Include="..\LLM\Darkspyre.Inference.Connect.LLM.Bedrock\bin\$(Configuration)\$(TargetFramework)\Darkspyre.Inference.Connect.LLM.Bedrock.xml" Pack="true" PackagePath="lib\$(TargetFramework)" />
     <None Include="..\LLM\Darkspyre.Inference.Connect.LLM.Vertex\bin\$(Configuration)\$(TargetFramework)\Darkspyre.Inference.Connect.LLM.Vertex.xml" Pack="true" PackagePath="lib\$(TargetFramework)" />
+    <None Include="..\LLM\Darkspyre.Inference.Connect.LLM.Azure\bin\$(Configuration)\$(TargetFramework)\Darkspyre.Inference.Connect.LLM.Azure.dll" Pack="true" PackagePath="lib\$(TargetFramework)" />
+    <None Include="..\LLM\Darkspyre.Inference.Connect.LLM.Azure\bin\$(Configuration)\$(TargetFramework)\Darkspyre.Inference.Connect.LLM.Azure.xml" Pack="true" PackagePath="lib\$(TargetFramework)" />
   </ItemGroup>
 </Project>

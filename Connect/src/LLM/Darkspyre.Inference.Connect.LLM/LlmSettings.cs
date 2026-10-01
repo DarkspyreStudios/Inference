@@ -70,7 +70,8 @@ public sealed class LlmSettings : InferenceSettings<LlmSetupChanges>
         // Direct Codex has one official endpoint and no endpoint field. A saved former value, such as a
         // CLI executable, differs from the baseline, so the next save replaces it.
         _draft = UsesFixedEndpoint(transport) ? opened with { Endpoint = definition.DefaultEndpoint } : opened;
-        _model = _originalModel = modelId ?? definition.DefaultModelId;
+        _model = _originalModel = modelId ?? existing?.Azure?.DeploymentId ?? definition.DefaultModelId;
+        if (UsesAzure && _draft.Azure is null) _draft = _draft with { Azure = new() { DeploymentId = _model } };
         _baseline = opened;
         Status = new() { Configured = SetupObservation.Known(existing is not null), Authenticated = SetupObservation.Unknown };
     }
@@ -100,14 +101,15 @@ public sealed class LlmSettings : InferenceSettings<LlmSetupChanges>
 
     private static bool UsesFixedEndpoint(LlmTransport transport) => transport is LlmTransport.OpenAiCodex or LlmTransport.GoogleVertexAi or LlmTransport.GoogleGeminiApi;
     private bool UsesVertex => _draft.Transport == LlmTransport.GoogleVertexAi;
+    private bool UsesAzure => _draft.Transport is LlmTransport.AzureOpenAiResponses or LlmTransport.AzureOpenAiChat;
     private LlmVertexConfiguration Vertex => _draft.Vertex ?? new();
     private bool UsesAws => _draft.Transport is LlmTransport.AwsBedrockConverse or LlmTransport.AwsBedrockAgentCore;
     private bool UsesApiKey => _draft.Transport is LlmTransport.OpenAiResponses or LlmTransport.OpenAiCompatibleChat or LlmTransport.AnthropicMessages
-        or LlmTransport.GoogleGeminiApi || UsesVertex && Vertex.AuthenticationMode == LlmGoogleAuthenticationMode.ApiKey;
+        or LlmTransport.GoogleGeminiApi || UsesVertex && Vertex.AuthenticationMode == LlmGoogleAuthenticationMode.ApiKey || UsesAzure;
     private LlmCredential Credential => LlmCredential.Parse(_draft.Credential) ?? new();
 
     protected override bool IsDraftDirty =>
-        _draft.Endpoint != _baseline.Endpoint || _draft.Vertex != _baseline.Vertex || _draft.ChatCompletions != _baseline.ChatCompletions || _model != _originalModel
+        _draft.Endpoint != _baseline.Endpoint || _draft.Vertex != _baseline.Vertex || _draft.Azure != _baseline.Azure || _draft.ChatCompletions != _baseline.ChatCompletions || _model != _originalModel
             || (_draft.CapabilityOverrides ?? new()) != (_baseline.CapabilityOverrides ?? new()) || _callback.Length != 0
             || (UsesAws ? NormalizeAws(Credential.Aws) != NormalizeAws(LlmCredential.Parse(_baseline.Credential)?.Aws)
                 : _credentialChange != SetupSecretEditKind.Keep);
@@ -231,16 +233,22 @@ public sealed class LlmSettings : InferenceSettings<LlmSetupChanges>
         SetupStep connectionStep = _definition.SetupSteps.Count > 0 ? _definition.SetupSteps[0] : new("connection", "Connection", "Configure the provider.", []);
         SetupStep modelStep = _definition.SetupSteps.Count > 1 ? _definition.SetupSteps[^2] : new("model", "Model", "Select a model.", []);
         SetupStep testStep = _definition.SetupSteps.Count > 2 ? _definition.SetupSteps[^1] : new("test", "Test", "Explicitly test the model.", []);
+        if (UsesAzure)
+        {
+            fields.Add(new SetupTextField(new("azure-model-profile", "Underlying model profile"),
+                _draft.Azure?.ModelProfileId ?? string.Empty, string.Empty,
+                value => Edit(() => _draft = _draft with { Azure = (_draft.Azure ?? new()) with { ModelProfileId = string.IsNullOrWhiteSpace(value) ? null : value } })));
+        }
         return
         [
-            connectionStep with { Sections = _draft.Transport == LlmTransport.OpenAiCompatibleChat
+            connectionStep with { Sections = _draft.Transport == LlmTransport.OpenAiCompatibleChat || UsesAzure
                 ? [new("connection", "Connection", fields.AsReadOnly()), AdvancedCapabilities()]
                 : fields.Count == 0 ? [] : [new("connection", "Connection", fields.AsReadOnly())] },
             modelStep with { Sections = [new("model", "Model",
-            [new SetupChoiceField(new("model", "Model") { IsRequired = true,
-                HelpText = "Discover available models where supported, or enter an exact model ID." }, _model,
-                _definition.DefaultModelId, value => Edit(() => _model = value), true,
-                UsesApple ? SetupSideEffect.LocalVerification | SetupSideEffect.ExternalCli : UsesSelfHost ? SetupSideEffect.None : SetupSideEffect.Network | (UsesCli ? SetupSideEffect.ExternalCli : SetupSideEffect.None),
+            [new SetupChoiceField(new("model", UsesAzure ? "Deployment" : "Model") { IsRequired = true,
+                HelpText = UsesAzure ? "Enter the exact Azure deployment name, not its underlying public model ID." : "Discover available models where supported, or enter an exact model ID." }, _model,
+                _definition.DefaultModelId, value => Edit(() => SetModel(value)), true,
+                UsesApple ? SetupSideEffect.LocalVerification | SetupSideEffect.ExternalCli : UsesSelfHost || UsesAzure ? SetupSideEffect.None : SetupSideEffect.Network | (UsesCli ? SetupSideEffect.ExternalCli : SetupSideEffect.None),
                 SetupChoiceCapabilities.Searchable)])] },
             testStep
         ];
@@ -263,10 +271,10 @@ public sealed class LlmSettings : InferenceSettings<LlmSetupChanges>
                     { CapabilityOverrides = update(_draft.CapabilityOverrides ?? new(), selection == "default" ? null : selection == "enabled") });
                 }, false);
         }
-        return new("capabilities", "Endpoint capability overrides",
+        SetupSection section = new("capabilities", "Endpoint capability overrides",
         [
             new SetupChoiceField(new("output-limit-field", "Output-limit field")
-                { HelpText = "Default uses max_completion_tokens on api.openai.com and max_tokens elsewhere." },
+                { HelpText = UsesAzure ? "Default uses max_completion_tokens on Azure v1." : "Default uses max_completion_tokens on api.openai.com and max_tokens elsewhere." },
                 _draft.ChatCompletions?.OutputLimitField switch
                 {
                     LlmChatCompletionsOutputLimitField.MaxTokens => "max_tokens",
@@ -283,7 +291,7 @@ public sealed class LlmSettings : InferenceSettings<LlmSetupChanges>
                     }));
                 }, false),
             new SetupChoiceField(new("prompt-cache-key", "Conversation cache key")
-                { HelpText = "Default sends the conversation key only to api.openai.com. Enable only when the endpoint supports prompt_cache_key." },
+                { HelpText = UsesAzure ? "Default omits the conversation cache key. Enable only when the deployment supports prompt_cache_key." : "Default sends the conversation key only to api.openai.com. Enable only when the endpoint supports prompt_cache_key." },
                 _draft.ChatCompletions?.UsePromptCacheKey is { } cacheKey ? cacheKey ? "enabled" : "disabled" : "default",
                 "default", selection =>
                 {
@@ -325,6 +333,11 @@ public sealed class LlmSettings : InferenceSettings<LlmSetupChanges>
             Override("tool-result-images", "Tool-result images", current.SupportsToolResultImages, (value, selection) => value with { SupportsToolResultImages = selection }),
             Override("tool-result-documents", "Tool-result documents", current.SupportsToolResultDocuments, (value, selection) => value with { SupportsToolResultDocuments = selection })
         ], IsAdvanced: true);
+        return !UsesAzure ? section : section with
+        {
+            Fields = [.. section.Fields.Where(field => field.Description.Id != "model-listing"
+                && (_draft.Transport != LlmTransport.AzureOpenAiResponses || field.Description.Id is not ("output-limit-field" or "prompt-cache-key")))]
+        };
     }
 
     /// <summary>
@@ -350,6 +363,12 @@ public sealed class LlmSettings : InferenceSettings<LlmSetupChanges>
     private void SetChatCompletions(LlmChatCompletionsConfiguration configuration) =>
         _draft = _draft with { ChatCompletions = configuration.OutputLimitField is null && configuration.UsePromptCacheKey is null ? null : configuration };
 
+    private void SetModel(string value)
+    {
+        _model = value;
+        if (UsesAzure) _draft = _draft with { Azure = (_draft.Azure ?? new()) with { DeploymentId = value } };
+    }
+
     protected override SetupChoicePage? GetLocalChoices(string fieldId, SetupChoiceQuery query)
     {
         _ = CreateSteps(); // Registers the override field IDs for the current transport.
@@ -357,9 +376,9 @@ public sealed class LlmSettings : InferenceSettings<LlmSetupChanges>
             ? Page(query, [new(LlmGoogleAuthenticationMode.ApplicationDefault.ToString(), "Application default credentials"),
                 new(LlmGoogleAuthenticationMode.ServiceAccount.ToString(), "Service-account key"),
                 new(LlmGoogleAuthenticationMode.ApiKey.ToString(), "API key (express mode)")])
-            : fieldId == "output-limit-field" && _draft.Transport == LlmTransport.OpenAiCompatibleChat
+            : fieldId == "output-limit-field" && _draft.Transport is LlmTransport.OpenAiCompatibleChat or LlmTransport.AzureOpenAiChat
                 ? Page(query, [new("default", "Default"), new("max_tokens", "max_tokens"), new("max_completion_tokens", "max_completion_tokens")])
-            : fieldId == "prompt-cache-key" && _draft.Transport == LlmTransport.OpenAiCompatibleChat ? Page(query, OverrideChoices)
+            : fieldId == "prompt-cache-key" && _draft.Transport is LlmTransport.OpenAiCompatibleChat or LlmTransport.AzureOpenAiChat ? Page(query, OverrideChoices)
             : _overrideFields.Contains(fieldId) ? Page(query, OverrideChoices) : null;
     }
 
@@ -500,7 +519,9 @@ public sealed class LlmSettings : InferenceSettings<LlmSetupChanges>
         if (UsesApiKey && _draft.Transport != LlmTransport.OpenAiCompatibleChat
             && string.IsNullOrWhiteSpace(Credential.ApiKey) && Credential.SecretHeaders.Count == 0)
         { issues.Add(new("key-required", "An API credential is required.", "api-key")); }
-        if (UsesAws || UsesVertex)
+        if (UsesAzure && _draft.Azure?.DeploymentId != _model)
+            issues.Add(new("azure-deployment-conflict", "The selected model must match the configured Azure deployment.", "model"));
+        if (UsesAws || UsesVertex || UsesAzure)
         {
             if (_validateEnvironment is null) { issues.Add(new("setup-environment-missing", "Register the provider's setup support.")); }
             else { issues.AddRange(_validateEnvironment(CurrentConnection()).Issues); }
@@ -522,8 +543,8 @@ public sealed class LlmSettings : InferenceSettings<LlmSetupChanges>
         new(_draft with { Credential = null, Version = Identity.ExpectedVersion ?? string.Empty }, _model),
         _credentialChange == SetupSecretEditKind.Keep ? SetupSecretEdit.Keep
             : _draft.Credential is null ? SetupSecretEdit.Clear : SetupSecretEdit.Replace(_draft.Credential),
-        _original is not null && (_original.Endpoint != _draft.Endpoint || _original.Vertex != _draft.Vertex),
-        _original is null || _original.Endpoint != _draft.Endpoint || _original.Vertex != _draft.Vertex || _originalModel != _model
+        _original is not null && (_original.Endpoint != _draft.Endpoint || _original.Vertex != _draft.Vertex || _original.Azure != _draft.Azure),
+        _original is null || _original.Endpoint != _draft.Endpoint || _original.Vertex != _draft.Vertex || _original.Azure != _draft.Azure || _originalModel != _model
             || _original.ChatCompletions != _draft.ChatCompletions || _original.CapabilityOverrides != _draft.CapabilityOverrides || _credentialChange != SetupSecretEditKind.Keep);
 }
 
@@ -680,7 +701,7 @@ public sealed class LlmSettingsManager : InferenceSettingsManager<LlmSettings, L
             await service.ListModelsAsync(settings.Identity.Id, token).ConfigureAwait(false);
             authenticated = true;
         }
-        settings.Status = settings.Status with { Authenticated = SetupObservation.Known(authenticated), Verified = settings.Transport == LlmTransport.GoogleVertexAi ? SetupObservation.Unknown : SetupObservation.Known(authenticated) };
+        settings.Status = settings.Status with { Authenticated = SetupObservation.Known(authenticated), Verified = settings.Transport is LlmTransport.GoogleVertexAi or LlmTransport.AzureOpenAiResponses or LlmTransport.AzureOpenAiChat ? SetupObservation.Unknown : SetupObservation.Known(authenticated) };
         settings.CliPrerequisite = !authenticated;
         settings.RefreshInteraction();
         return authenticated ? SetupActionResult.Completed : new(SetupActionState.NeedsInteraction, Interaction: settings.Interaction);

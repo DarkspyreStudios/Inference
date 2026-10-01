@@ -22,6 +22,9 @@ public sealed class ConnectLlmJsonTests
     private const string VertexAdcJson = "{\"ProjectId\":\"project\",\"Location\":\"us-east5\",\"AuthenticationMode\":0}";
     private const string VertexServiceAccountJson = "{\"ProjectId\":\"project\",\"Location\":\"global\",\"AuthenticationMode\":1}";
     private const string VertexExpressJson = "{\"ProjectId\":null,\"Location\":null,\"AuthenticationMode\":2}";
+    private const string AzureProfileJson = "{\"ApiMode\":0,\"AuthenticationMode\":0,\"DeploymentId\":\"alias\",\"ModelProfileId\":\"gpt-4o\"}";
+    private const string AzureUnknownProfileJson = "{\"ApiMode\":0,\"AuthenticationMode\":0,\"DeploymentId\":\"alias\",\"ModelProfileId\":null}";
+    private const string AzureFutureModesJson = "{\"ApiMode\":999,\"AuthenticationMode\":999,\"DeploymentId\":\"alias\",\"ModelProfileId\":null}";
     private const string StateJson = "{\"FormatVersion\":2,\"ImplementationId\":\"fixture\",\"ModelId\":\"model\",\"ScopeId\":\"scope\",\"Payload\":\"opaque\"}";
     private const string MessageJson = "{\"Role\":\"user\",\"Content\":\"text\",\"Attachments\":[{\"Kind\":0,\"FileName\":\"image.png\",\"Data\":\"AQID\"}],\"ToolResults\":[{\"ToolCallId\":\"call\",\"Output\":{\"Parts\":[{\"type\":\"text\",\"Text\":\"text\"},{\"type\":\"binary\",\"Kind\":2,\"MediaType\":\"audio/wav\",\"Data\":\"BA==\"},{\"type\":\"resource\",\"Uri\":\"urn:test\",\"Data\":\"\"}]}}]}";
     private const string EntryJson = "{\"Id\":\"entry\",\"TurnId\":\"turn\",\"Message\":" + MessageJson + "}";
@@ -200,6 +203,24 @@ public sealed class ConnectLlmJsonTests
     private static string VertexConnectionJson(string configuration) =>
         "{\"Version\":\"1\",\"Transport\":11,\"Endpoint\":\"https://aiplatform.googleapis.com\",\"Vertex\":" + configuration + "}";
 
+    private static string AzureConnectionJson(string configuration) =>
+        "{\"Version\":\"1\",\"Transport\":14,\"Endpoint\":\"https://resource.openai.azure.com\",\"Azure\":" + configuration + "}";
+
+    [Theory]
+    [InlineData(AzureProfileJson)]
+    [InlineData(AzureUnknownProfileJson)]
+    [InlineData(AzureFutureModesJson)]
+    public void ConnectionAndSetupMetadataRetainAzureDeploymentProfileAndNumericModes(string configuration)
+    {
+        LlmConnection connection = JsonSerializer.Deserialize(AzureConnectionJson(configuration), ConnectLlmJson.Connection)!;
+        using JsonDocument written = JsonDocument.Parse(JsonSerializer.Serialize(connection, ConnectLlmJson.Connection));
+        Assert.Equal(configuration, written.RootElement.GetProperty("Azure").GetRawText());
+        string setupJson = JsonSerializer.Serialize(new LlmSetupConfiguration(connection, "alias"), ConnectLlmJson.SetupConfiguration);
+        LlmSetupConfiguration restored = JsonSerializer.Deserialize(setupJson, ConnectLlmJson.SetupConfiguration)!;
+        Assert.Equal(connection.Azure, restored.Connection.Azure);
+        Assert.Equal("alias", restored.ModelId);
+    }
+
     public static TheoryData<string, string> CollectibleFamilies => new()
     {
         { "Credential", CredentialJson },
@@ -208,11 +229,17 @@ public sealed class ConnectLlmJsonTests
         { "Connection", VertexConnectionJson(VertexAdcJson) },
         { "Connection", VertexConnectionJson(VertexServiceAccountJson) },
         { "Connection", VertexConnectionJson(VertexExpressJson) },
+        { "Connection", AzureConnectionJson(AzureProfileJson) },
+        { "Connection", AzureConnectionJson(AzureUnknownProfileJson) },
+        { "Connection", AzureConnectionJson(AzureFutureModesJson) },
         { "SetupConfiguration", "{\"Connection\":" + ConnectionJson + ",\"ModelId\":\"model\"}" },
         { "SetupConfiguration", "{\"Connection\":" + ChatConnectionJson + ",\"ModelId\":\"model\"}" },
         { "SetupConfiguration", "{\"Connection\":" + VertexConnectionJson(VertexAdcJson) + ",\"ModelId\":\"model\"}" },
         { "SetupConfiguration", "{\"Connection\":" + VertexConnectionJson(VertexServiceAccountJson) + ",\"ModelId\":\"model\"}" },
         { "SetupConfiguration", "{\"Connection\":" + VertexConnectionJson(VertexExpressJson) + ",\"ModelId\":\"model\"}" },
+        { "SetupConfiguration", "{\"Connection\":" + AzureConnectionJson(AzureProfileJson) + ",\"ModelId\":\"alias\"}" },
+        { "SetupConfiguration", "{\"Connection\":" + AzureConnectionJson(AzureUnknownProfileJson) + ",\"ModelId\":\"alias\"}" },
+        { "SetupConfiguration", "{\"Connection\":" + AzureConnectionJson(AzureFutureModesJson) + ",\"ModelId\":\"alias\"}" },
         { "ChatRequest", "{\"ModelId\":\"model\",\"Messages\":[" + MessageJson + "]}" },
         { "ChatRequest", "{\"ModelId\":\"model\",\"PromptCache\":{\"Scope\":0,\"Retention\":1},\"Messages\":[" + MessageJson + "]}" },
         { "ChatResult", "{\"Text\":\"text\",\"Status\":0,\"ContinuationState\":" + StateJson + ",\"Diagnostics\":{\"HttpStatusCode\":200}}" },
@@ -281,15 +308,16 @@ public sealed class ConnectLlmJsonTests
                 object configuration = owningConnection.GetType().GetProperty("ChatCompletions")!.GetValue(owningConnection)!;
                 Assert.Same(connect, configuration.GetType().Assembly);
             }
-            if (json.Contains("\"Vertex\"", StringComparison.Ordinal))
+            foreach (string configurationName in new[] { "Vertex", "Azure" })
             {
+                if (!json.Contains("\"" + configurationName + "\"", StringComparison.Ordinal)) continue;
                 using JsonDocument original = JsonDocument.Parse(json);
                 using JsonDocument document = JsonDocument.Parse(written);
                 JsonElement expectedConnection = family == "Connection" ? original.RootElement : original.RootElement.GetProperty("Connection");
                 JsonElement connection = family == "Connection" ? document.RootElement : document.RootElement.GetProperty("Connection");
-                Assert.Equal(expectedConnection.GetProperty("Vertex").GetRawText(), connection.GetProperty("Vertex").GetRawText());
+                Assert.Equal(expectedConnection.GetProperty(configurationName).GetRawText(), connection.GetProperty(configurationName).GetRawText());
                 object owningConnection = family == "Connection" ? value : value.GetType().GetProperty("Connection")!.GetValue(value)!;
-                object configuration = owningConnection.GetType().GetProperty("Vertex")!.GetValue(owningConnection)!;
+                object configuration = owningConnection.GetType().GetProperty(configurationName)!.GetValue(owningConnection)!;
                 Assert.Same(connect, configuration.GetType().Assembly);
             }
             if (family == "ChatMessage")

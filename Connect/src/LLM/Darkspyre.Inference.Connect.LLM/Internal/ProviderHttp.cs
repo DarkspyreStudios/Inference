@@ -89,7 +89,7 @@ internal static class ProviderHttp
 
     public static string? ReadRequestId(HttpResponseMessage response)
     {
-        foreach (string headerName in new[] { "x-request-id", "request-id", "x-trace-id" })
+        foreach (string headerName in new[] { "x-request-id", "request-id", "x-trace-id", "apim-request-id" })
         {
             if (response.Headers.TryGetValues(headerName, out IEnumerable<string>? values))
             {

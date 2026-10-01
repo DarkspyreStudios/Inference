@@ -9,10 +9,9 @@ namespace Darkspyre.Inference.Connect.LLM.Internal;
 internal sealed class OpenAiCompatibleChatContinuationCodec : ILlmContinuationCodec
 {
     private const int MaximumPayloadBytes = 16 * 1024 * 1024;
-    private static readonly string Owner = ProviderContinuationStateCodec.ImplementationId(LlmTransport.OpenAiCompatibleChat);
 
     public bool IsBound(LlmContinuationState state, LlmConnection connection, string modelId) =>
-        state.FormatVersion == 2 && state.ImplementationId == Owner && state.ModelId == modelId
+        state.FormatVersion == 2 && state.ImplementationId == ProviderContinuationStateCodec.ImplementationId(connection.Transport) && state.ModelId == modelId
         && connection.ResolvedContinuationScope is { } scope && state.ScopeId == scope;
 
     public LlmContinuationState Encode(LlmConnection connection, string modelId, JsonArray content)
@@ -21,7 +20,7 @@ internal sealed class OpenAiCompatibleChatContinuationCodec : ILlmContinuationCo
         if (Encoding.UTF8.GetByteCount(payload) > MaximumPayloadBytes) { throw Invalid(); }
         return new()
         {
-            ImplementationId = Owner,
+            ImplementationId = ProviderContinuationStateCodec.ImplementationId(connection.Transport),
             ModelId = modelId,
             ScopeId = connection.ResolvedContinuationScope ?? throw new InvalidOperationException("Chat continuation identity is unresolved."),
             Payload = payload

@@ -29,7 +29,7 @@ internal static class ProviderContinuationStateCodec
     /// reported, and the ordered reply when the reply contains reasoning.
     /// </summary>
     public static bool Retains(LlmTransport transport) =>
-        transport is LlmTransport.OpenAiResponses or LlmTransport.OpenAiCodex or LlmTransport.AnthropicMessages
+        transport is LlmTransport.OpenAiResponses or LlmTransport.OpenAiCodex or LlmTransport.AzureOpenAiResponses or LlmTransport.AnthropicMessages
             or LlmTransport.AwsBedrockConverse;
 
     private const string NoOutput = "[]";
@@ -164,12 +164,15 @@ internal static class ProviderContinuationStateCodec
         LlmCredential? credential = LlmCredential.Parse(connection.Credential);
         // The concurrency Version and rotating OAuth tokens are not account identities. Missing an
         // OAuth account ID binds conservatively to its current token; never guess account equivalence.
-        var identityValue = new ConnectContinuationScopeIdentity(connection.Transport, connection.Endpoint,
+        bool azure = connection.Transport is LlmTransport.AzureOpenAiResponses or LlmTransport.AzureOpenAiChat;
+        string endpoint = azure ? new Uri(connection.Endpoint, UriKind.Absolute).GetLeftPart(UriPartial.Authority) : connection.Endpoint;
+        var identityValue = new ConnectContinuationScopeIdentity(connection.Transport, endpoint,
             credential?.ApiKey, credential?.OAuth?.AccountId ?? credential?.OAuth?.AccessToken,
             connection.AdditionalHeaders.OrderBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase)
                 .Select(pair => new ConnectContinuationScopeHeader(pair.Key.ToLowerInvariant(), pair.Value)).ToArray(),
             credential?.SecretHeaders.OrderBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase)
-                .Select(pair => new ConnectContinuationScopeHeader(pair.Key.ToLowerInvariant(), pair.Value)).ToArray());
+                .Select(pair => new ConnectContinuationScopeHeader(pair.Key.ToLowerInvariant(), pair.Value)).ToArray(),
+            azure ? connection.Azure : null);
         string identity = JsonSerializer.Serialize(identityValue, ConnectLlmJsonContext.Default.ConnectContinuationScopeIdentity);
         return Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(identity)));
     }
@@ -186,11 +189,11 @@ internal static class ProviderContinuationStateCodec
 
             string[] fields = (transport, type) switch
             {
-                (LlmTransport.OpenAiResponses or LlmTransport.OpenAiCodex, "message") =>
+                (LlmTransport.OpenAiResponses or LlmTransport.OpenAiCodex or LlmTransport.AzureOpenAiResponses, "message") =>
                     ["type", "id", "role", "status", "phase", "content"],
-                (LlmTransport.OpenAiResponses or LlmTransport.OpenAiCodex, "reasoning") =>
+                (LlmTransport.OpenAiResponses or LlmTransport.OpenAiCodex or LlmTransport.AzureOpenAiResponses, "reasoning") =>
                     ["type", "id", "status", "summary", "content", "encrypted_content"],
-                (LlmTransport.OpenAiResponses or LlmTransport.OpenAiCodex, "function_call") =>
+                (LlmTransport.OpenAiResponses or LlmTransport.OpenAiCodex or LlmTransport.AzureOpenAiResponses, "function_call") =>
                     ["type", "id", "status", "call_id", "name", "arguments"],
                 (LlmTransport.AnthropicMessages, "text") => ["type", "text", "citations"],
                 (LlmTransport.AnthropicMessages, "thinking") => ["type", "thinking", "signature"],
