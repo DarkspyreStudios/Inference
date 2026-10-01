@@ -618,6 +618,8 @@ at a yielded event. Concurrent disposers share the completion and its cleanup fa
 process disposal does not skip the reader or resource poller. Cancellation and cleanup failures are
 retained together. Tool cancellation matches the typed JSON-RPC ID; numeric and string IDs remain
 distinct, and repeating an active ID fails the session without abandoning its first callback.
+If a tool's cancellation callback throws when the process exits, the session retains that failure
+for retirement, cancels the remaining tools, ends reported resources and closes its observation feed.
 
 Claude and Antigravity share one launcher for chat and native sessions. Their default commands are
 `claude` and `agy`. On Windows the launcher searches absolute PATH directories in order for `.exe`,

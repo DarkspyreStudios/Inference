@@ -682,6 +682,52 @@ public sealed class ClaudeAgentResourcesTests : IDisposable
         }
     }
 
+    [Fact]
+    public async Task ProcessExitCancelsEveryToolAndClosesObservationDespiteAThrowingCallback()
+    {
+        var entered = new ConcurrentDictionary<string, CancellationToken>();
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var callbackFailure = new InvalidOperationException("controlled live cancellation failure");
+        var process = new ManualProcess();
+        ILlmAgentSession session = await StartWithTool(process, async (call, token) =>
+        {
+            using CancellationTokenRegistration registration = token.Register(() =>
+            {
+                if (call.CallId == "tu1") throw callbackFailure;
+            });
+            entered.TryAdd(call.CallId, token);
+            await release.Task;
+            return LlmToolOutput.FromText("late");
+        });
+        Task<List<LlmAgentEvent>> observation = Collect(session.ObserveAsync());
+        try
+        {
+            process.Push(ToolUse("tu1"));
+            process.Push(ToolCall("c1", 1));
+            process.Push(ToolUse("tu2"));
+            process.Push(ToolCall("c2", 2));
+            process.Push(new { type = "system", subtype = "task_started", task_id = "s1", tool_use_id = "tu-s1", description = "server", is_backgrounded = true, task_type = "local_bash" });
+            await WaitFor(() => entered.Count == 2 && session.GetResourcesAsync().GetAwaiter().GetResult().Count == 1);
+            process.Exit();
+
+            List<LlmAgentEvent> events = await observation.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.All(entered.Values, token => Assert.True(token.IsCancellationRequested));
+            Assert.Contains(events, item => item is LlmAgentResourceEvent { Resource.State: LlmAgentResourceState.Unknown, Resource.Ended: not null });
+            Task retirement = session.DisposeAsync().AsTask();
+            Assert.False(retirement.IsCompleted);
+            release.TrySetResult();
+            AggregateException failure = await Assert.ThrowsAsync<AggregateException>(() => retirement.WaitAsync(TimeSpan.FromSeconds(5)));
+            Assert.Contains(callbackFailure, failure.Flatten().InnerExceptions);
+            Assert.Same(retirement, session.DisposeAsync().AsTask());
+        }
+        finally
+        {
+            release.TrySetResult();
+            _ = await Record.ExceptionAsync(() => session.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5)));
+            _ = await Record.ExceptionAsync(() => observation.WaitAsync(TimeSpan.FromSeconds(5)));
+        }
+    }
+
     private Task<ILlmAgentSession> Start(ManualProcess process, LlmConnection? connection = null) =>
         new ClaudeAgentClient(new Factory(process)).StartSessionAsync("connection", connection ?? Connection(), new() { ModelId = "claude-test", Runtime = new() { WorkingDirectory = _directory } });
 

@@ -1110,12 +1110,17 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             Cancel(running);
         }
 
-        private static void Cancel(RunningToolCall? running)
+        private void Cancel(RunningToolCall? running)
         {
             try { running?.Cancellation.Cancel(); }
             catch (ObjectDisposedException)
             {
                 // The call finished as the cancellation arrived.
+            }
+            catch (AggregateException failure)
+            {
+                // A throwing callback cannot prevent cancellation of other calls or closing the feed.
+                lock (_route) { _toolFailures.Add(failure); }
             }
         }
 
