@@ -36,18 +36,18 @@ internal sealed class DependencyPolicy
 
     internal static DependencyPolicy Read(XDocument document)
     {
-        PackageVerification.Require(document.Root?.Name.LocalName == "Project", "Expected central package Project XML.");
-        PackageVerification.Require(!document.Descendants().Any(element => element.Name.LocalName is "Import" or "Choose" or "Target" or "UsingTask"),
+        PackageVerification.Require(document.Root?.Name.LocalName.Equals("Project", StringComparison.OrdinalIgnoreCase) == true, "Expected central package Project XML.");
+        PackageVerification.Require(!document.Descendants().Any(element => element.Name.LocalName.ToUpperInvariant() is "IMPORT" or "CHOOSE" or "TARGET" or "USINGTASK"),
             "Imported, conditional or executable central package inputs are unsupported.");
         var versions = new Dictionary<string, NuGetVersion>(StringComparer.OrdinalIgnoreCase);
-        foreach (XElement item in document.Descendants().Where(element => element.Name.LocalName == "PackageVersion"))
+        foreach (XElement item in document.Descendants().Where(element => element.Name.LocalName.Equals("PackageVersion", StringComparison.OrdinalIgnoreCase)))
         {
-            string? id = (string?)item.Attribute("Include");
-            string? value = (string?)item.Attribute("Version");
+            string? id = PackageVerification.ReadAttribute(item, "Include");
+            string? value = PackageVerification.ReadAttribute(item, "Version");
             PackageVerification.Require(!string.IsNullOrWhiteSpace(id)
                 && id.All(character => char.IsAsciiLetterOrDigit(character) || character is '.' or '-' or '_') && !item.HasElements
-                && item.Attribute("Update") is null && item.Attribute("Remove") is null
-                && !item.AncestorsAndSelf().Any(element => element.Attribute("Condition") is not null)
+                && PackageVerification.ReadAttribute(item, "Update") is null && PackageVerification.ReadAttribute(item, "Remove") is null
+                && !item.AncestorsAndSelf().Any(element => PackageVerification.ReadAttribute(element, "Condition") is not null)
                 && value is not null && NuGetVersion.TryParse(value, out _),
                 "Central PackageVersion inputs must be unconditional literal identities and versions.");
             PackageVerification.Require(versions.TryAdd(id!, NuGetVersion.Parse(value!)), $"Ambiguous central package version: {id}.");
@@ -192,22 +192,22 @@ internal static class PackageVerification
         foreach (XElement element in document.Descendants())
         {
             string name = element.Name.LocalName.ToUpperInvariant();
-            string? targetName = BuildAttribute(element, "Name");
+            string? targetName = ReadAttribute(element, "Name");
             Require(name != "DOWNLOADFILE", $"{path}: build-time artifact acquisition is not allowed");
             Require(name != "TARGET" || targetName is null || !CliName.IsMatch(targetName) || !AcquisitionName.IsMatch(targetName),
                 $"{path}: CLI acquisition target is not allowed");
-            Require(name is not ("PACKAGEDOWNLOAD" or "PACKAGEREFERENCE") || !CliAcquisitionPackages.Contains(BuildAttribute(element, "Include") ?? string.Empty),
+            Require(name is not ("PACKAGEDOWNLOAD" or "PACKAGEREFERENCE") || !CliAcquisitionPackages.Contains(ReadAttribute(element, "Include") ?? string.Empty),
                 $"{path}: CLI acquisition package item is not allowed");
-            if (name == "IMPORT" && Uri.TryCreate(BuildAttribute(element, "Project"), UriKind.Absolute, out Uri? import))
+            if (name == "IMPORT" && Uri.TryCreate(ReadAttribute(element, "Project"), UriKind.Absolute, out Uri? import))
                 Require(import.Scheme is not ("http" or "https"), $"{path}: remote build import is not allowed");
             if (name == "EXEC")
-                Require(!AcquisitionCommand.IsMatch(BuildAttribute(element, "Command") ?? string.Empty), $"{path}: acquisition command is not allowed");
+                Require(!AcquisitionCommand.IsMatch(ReadAttribute(element, "Command") ?? string.Empty), $"{path}: acquisition command is not allowed");
             if (name == "CODE" || element.Parent?.Name.LocalName.Equals("PropertyGroup", StringComparison.OrdinalIgnoreCase) == true)
                 Require(!AcquisitionCommand.IsMatch(element.Value), $"{path}: indirect acquisition command is not allowed");
         }
     }
 
-    private static string? BuildAttribute(XElement element, string name)
+    internal static string? ReadAttribute(XElement element, string name)
     {
         XAttribute[] attributes = element.Attributes().Where(attribute => attribute.Name.LocalName.Equals(name, StringComparison.OrdinalIgnoreCase)).ToArray();
         Require(attributes.Length <= 1, $"Ambiguous MSBuild attribute: {name}.");

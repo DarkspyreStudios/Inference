@@ -84,7 +84,9 @@ compiled shaders and GPU code alongside native binaries.
 
 `VerifyPackages` reads expected dependency versions from `Directory.Packages.props` in its own
 source context, found from the verifier assembly's directory. It rejects missing, duplicate,
-conditional, imported or computed central version inputs. NuGet's version parser validates Tensor's
+conditional, imported or computed central version inputs. MSBuild element and attribute names use
+ordinal case-insensitive comparisons. Differently cased duplicate attributes are ambiguous and
+rejected. NuGet's version parser validates Tensor's
 required dependency declarations against these inputs. TensorSharp declarations use one synchronized
 version. ONNX, both Whisper packages and NAudio remain required. Whisper runtime includes all build
 assets. A matching minimum declaration is not an exact restore pin: restored versions are checked
