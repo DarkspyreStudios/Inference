@@ -23,7 +23,8 @@ public enum InferenceTask
     AudioGeneration,
     SpeechTranscription,
     Decision,
-    VideoGeneration = 6
+    VideoGeneration = 6,
+    RealtimeVoice = 7
 }
 
 public static class InferenceTaskExtensions
@@ -32,7 +33,7 @@ public static class InferenceTaskExtensions
     {
         InferenceTask.TextGeneration => InferenceCapability.Text,
         InferenceTask.ImageGeneration => InferenceCapability.Image,
-        InferenceTask.SpeechSynthesis or InferenceTask.AudioGeneration or InferenceTask.SpeechTranscription
+        InferenceTask.SpeechSynthesis or InferenceTask.AudioGeneration or InferenceTask.SpeechTranscription or InferenceTask.RealtimeVoice
             => InferenceCapability.Audio,
         InferenceTask.Decision => InferenceCapability.Decision,
         InferenceTask.VideoGeneration => InferenceCapability.Video,

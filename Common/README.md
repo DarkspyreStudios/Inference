@@ -54,6 +54,24 @@ least-common-denominator replacement for implementation management.
 
 ## JSON metadata
 
+`Darkspyre.Inference.Common.Realtime` declares explicit session commands, configuration,
+conversation/content unions, scoped resumption references and concrete observations.
+`IRealtimeVoiceSession` supplies ten asynchronous commands and one ordered event sequence.
+`RealtimeVoice = 7` maps to the existing Audio capability. Common provides the data and
+runtime interface; the Connect provider owns session opening and protocol implementation.
+
+Realtime data roots have exact type-name getters on `InferenceJson`. Turn detection uses
+`manual`/`server-vad`, content uses `text`/`audio`, and conversation items use
+`message`/`function-call`/`function-output`. Concrete events use their individual getters;
+the event base has no portable discriminator. Native stage strings and nullable observed IDs,
+timing, status, configuration and usage are preserved. Omitted configuration values differ from
+explicit empty text/lists, and manual turn detection is distinct from omission.
+Input and output encoding sets are independent, frozen and empty by default; sample-rate lists
+remain nullable. All new support flags default to false. Collections/maps/audio data copy their
+inputs, diagnostics omit source content, and non-null live sessions or provider-specific options
+refuse Common serialization. Family metadata owns any fixed provider extensions. These declarations
+do not authorize native conversation reuse, reconnect, replay, tool execution or socket traffic.
+
 `Darkspyre.Inference.Common.Video` declares generation, edit and extension requests, typed
 keyframe/audio references, scoped native job/output receipts and capability observations.
 `IVideoInference` declares capability lookup, submit, one-poll lookup, caller-owned download streams

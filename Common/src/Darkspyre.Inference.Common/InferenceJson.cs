@@ -6,6 +6,7 @@ using Darkspyre.Inference.Common.Image;
 using Darkspyre.Inference.Common.LLM;
 using Darkspyre.Inference.Common.Media;
 using Darkspyre.Inference.Common.Resources;
+using Darkspyre.Inference.Common.Realtime;
 using Darkspyre.Inference.Common.Setup;
 using Darkspyre.Inference.Common.STT;
 using Darkspyre.Inference.Common.Video;
@@ -31,6 +32,45 @@ public static class InferenceJson
     public static JsonTypeInfo<SpeechTranscriptErrorEvent> SpeechTranscriptErrorEvent => Metadata<SpeechTranscriptErrorEvent>();
     public static JsonTypeInfo<SpeechTranscriptionCapabilities> SpeechTranscriptionCapabilities => Metadata<SpeechTranscriptionCapabilities>();
     public static JsonTypeInfo<SpeechTranscriptionModeCapabilities> SpeechTranscriptionModeCapabilities => Metadata<SpeechTranscriptionModeCapabilities>();
+    public static JsonTypeInfo<RealtimeAudioEncoding> RealtimeAudioEncoding => Metadata<RealtimeAudioEncoding>();
+    public static JsonTypeInfo<RealtimeAudioTransport> RealtimeAudioTransport => Metadata<RealtimeAudioTransport>();
+    public static JsonTypeInfo<RealtimeModality> RealtimeModality => Metadata<RealtimeModality>();
+    public static JsonTypeInfo<RealtimeMessageRole> RealtimeMessageRole => Metadata<RealtimeMessageRole>();
+    public static JsonTypeInfo<RealtimeAudioConfig> RealtimeAudioConfig => Metadata<RealtimeAudioConfig>();
+    public static JsonTypeInfo<RealtimeTurnDetection> RealtimeTurnDetection => Metadata<RealtimeTurnDetection>();
+    public static JsonTypeInfo<RealtimeManualTurnDetection> RealtimeManualTurnDetection => Metadata<RealtimeManualTurnDetection>();
+    public static JsonTypeInfo<RealtimeServerVad> RealtimeServerVad => Metadata<RealtimeServerVad>();
+    public static JsonTypeInfo<RealtimeConversationReference> RealtimeConversationReference => Metadata<RealtimeConversationReference>();
+    public static JsonTypeInfo<RealtimeResumptionOptions> RealtimeResumptionOptions => Metadata<RealtimeResumptionOptions>();
+    public static JsonTypeInfo<RealtimeProviderOptions> RealtimeProviderOptions => Metadata<RealtimeProviderOptions>();
+    public static JsonTypeInfo<RealtimeSessionConfig> RealtimeSessionConfig => Metadata<RealtimeSessionConfig>();
+    public static JsonTypeInfo<RealtimeContent> RealtimeContent => Metadata<RealtimeContent>();
+    public static JsonTypeInfo<RealtimeTextContent> RealtimeTextContent => Metadata<RealtimeTextContent>();
+    public static JsonTypeInfo<RealtimeAudioContent> RealtimeAudioContent => Metadata<RealtimeAudioContent>();
+    public static JsonTypeInfo<RealtimeConversationItem> RealtimeConversationItem => Metadata<RealtimeConversationItem>();
+    public static JsonTypeInfo<RealtimeMessageItem> RealtimeMessageItem => Metadata<RealtimeMessageItem>();
+    public static JsonTypeInfo<RealtimeFunctionCallItem> RealtimeFunctionCallItem => Metadata<RealtimeFunctionCallItem>();
+    public static JsonTypeInfo<RealtimeFunctionOutputItem> RealtimeFunctionOutputItem => Metadata<RealtimeFunctionOutputItem>();
+    public static JsonTypeInfo<RealtimeResponseOptions> RealtimeResponseOptions => Metadata<RealtimeResponseOptions>();
+    public static JsonTypeInfo<RealtimeToolResult> RealtimeToolResult => Metadata<RealtimeToolResult>();
+    public static JsonTypeInfo<RealtimeCapabilities> RealtimeCapabilities => Metadata<RealtimeCapabilities>();
+    public static JsonTypeInfo<RealtimeEventIdentity> RealtimeEventIdentity => Metadata<RealtimeEventIdentity>();
+    public static JsonTypeInfo<RealtimeSessionEvent> RealtimeSessionEvent => Metadata<RealtimeSessionEvent>();
+    public static JsonTypeInfo<RealtimeConversationCreatedEvent> RealtimeConversationCreatedEvent => Metadata<RealtimeConversationCreatedEvent>();
+    public static JsonTypeInfo<RealtimeInputSpeechEvent> RealtimeInputSpeechEvent => Metadata<RealtimeInputSpeechEvent>();
+    public static JsonTypeInfo<RealtimeInputBufferEvent> RealtimeInputBufferEvent => Metadata<RealtimeInputBufferEvent>();
+    public static JsonTypeInfo<RealtimeItemEvent> RealtimeItemEvent => Metadata<RealtimeItemEvent>();
+    public static JsonTypeInfo<RealtimeContentPartEvent> RealtimeContentPartEvent => Metadata<RealtimeContentPartEvent>();
+    public static JsonTypeInfo<RealtimeTranscriptEvent> RealtimeTranscriptEvent => Metadata<RealtimeTranscriptEvent>();
+    public static JsonTypeInfo<RealtimeAudioDeltaEvent> RealtimeAudioDeltaEvent => Metadata<RealtimeAudioDeltaEvent>();
+    public static JsonTypeInfo<RealtimeAudioDoneEvent> RealtimeAudioDoneEvent => Metadata<RealtimeAudioDoneEvent>();
+    public static JsonTypeInfo<RealtimeTextDeltaEvent> RealtimeTextDeltaEvent => Metadata<RealtimeTextDeltaEvent>();
+    public static JsonTypeInfo<RealtimeFunctionArgumentsEvent> RealtimeFunctionArgumentsEvent => Metadata<RealtimeFunctionArgumentsEvent>();
+    public static JsonTypeInfo<RealtimeHostedStartedEvent> RealtimeHostedStartedEvent => Metadata<RealtimeHostedStartedEvent>();
+    public static JsonTypeInfo<RealtimeHostedProgressEvent> RealtimeHostedProgressEvent => Metadata<RealtimeHostedProgressEvent>();
+    public static JsonTypeInfo<RealtimeHostedCompletedEvent> RealtimeHostedCompletedEvent => Metadata<RealtimeHostedCompletedEvent>();
+    public static JsonTypeInfo<RealtimeResponseEvent> RealtimeResponseEvent => Metadata<RealtimeResponseEvent>();
+    public static JsonTypeInfo<RealtimeErrorEvent> RealtimeErrorEvent => Metadata<RealtimeErrorEvent>();
     public static JsonTypeInfo<VideoProviderOptions> VideoProviderOptions => Metadata<VideoProviderOptions>();
     public static JsonTypeInfo<VideoRequest> VideoRequest => Metadata<VideoRequest>();
     public static JsonTypeInfo<VideoGenerationRequest> VideoGenerationRequest => Metadata<VideoGenerationRequest>();
@@ -76,6 +116,12 @@ public static class InferenceJson
         options.Converters.Add(new SpeechAudioEncodingJsonConverter());
         options.Converters.Add(new SpeechTranscriptionClientJsonConverter());
         options.Converters.Add(new SpeechTranscriptionSessionJsonConverter());
+        options.Converters.Add(new RealtimeEnumJsonConverter<RealtimeAudioEncoding>());
+        options.Converters.Add(new RealtimeEnumJsonConverter<RealtimeAudioTransport>());
+        options.Converters.Add(new RealtimeEnumJsonConverter<RealtimeModality>());
+        options.Converters.Add(new RealtimeEnumJsonConverter<RealtimeMessageRole>());
+        options.Converters.Add(new RealtimeProviderOptionsJsonConverter());
+        options.Converters.Add(new RealtimeSessionJsonConverter());
         options.MakeReadOnly();
         return options;
     }
@@ -91,6 +137,8 @@ public static class InferenceJson
             var metadata = ((IJsonTypeInfoResolver)InferenceJsonContext.Default).GetTypeInfo(type, options);
             if ((type == typeof(LlmHostedImageOutput) || type == typeof(BinaryMediaSource) || type == typeof(BinarySpeechInput)) && metadata is not null)
                 metadata.Properties.Single(property => property.Name == "Data").CustomConverter = imageData;
+            if ((type == typeof(RealtimeAudioContent) || type == typeof(RealtimeAudioDeltaEvent)) && metadata is not null)
+                metadata.Properties.Single(property => property.Name == "Audio").CustomConverter = imageData;
             return metadata;
         }
     }
@@ -201,6 +249,45 @@ public static class InferenceJson
 [JsonSerializable(typeof(SpeechTranscriptErrorEvent))]
 [JsonSerializable(typeof(SpeechTranscriptionCapabilities))]
 [JsonSerializable(typeof(SpeechTranscriptionModeCapabilities))]
+[JsonSerializable(typeof(RealtimeAudioEncoding))]
+[JsonSerializable(typeof(RealtimeAudioTransport))]
+[JsonSerializable(typeof(RealtimeModality))]
+[JsonSerializable(typeof(RealtimeMessageRole))]
+[JsonSerializable(typeof(RealtimeAudioConfig))]
+[JsonSerializable(typeof(RealtimeTurnDetection))]
+[JsonSerializable(typeof(RealtimeManualTurnDetection))]
+[JsonSerializable(typeof(RealtimeServerVad))]
+[JsonSerializable(typeof(RealtimeConversationReference))]
+[JsonSerializable(typeof(RealtimeResumptionOptions))]
+[JsonSerializable(typeof(RealtimeProviderOptions))]
+[JsonSerializable(typeof(RealtimeSessionConfig))]
+[JsonSerializable(typeof(RealtimeContent))]
+[JsonSerializable(typeof(RealtimeTextContent))]
+[JsonSerializable(typeof(RealtimeAudioContent))]
+[JsonSerializable(typeof(RealtimeConversationItem))]
+[JsonSerializable(typeof(RealtimeMessageItem))]
+[JsonSerializable(typeof(RealtimeFunctionCallItem))]
+[JsonSerializable(typeof(RealtimeFunctionOutputItem))]
+[JsonSerializable(typeof(RealtimeResponseOptions))]
+[JsonSerializable(typeof(RealtimeToolResult))]
+[JsonSerializable(typeof(RealtimeCapabilities))]
+[JsonSerializable(typeof(RealtimeEventIdentity))]
+[JsonSerializable(typeof(RealtimeSessionEvent))]
+[JsonSerializable(typeof(RealtimeConversationCreatedEvent))]
+[JsonSerializable(typeof(RealtimeInputSpeechEvent))]
+[JsonSerializable(typeof(RealtimeInputBufferEvent))]
+[JsonSerializable(typeof(RealtimeItemEvent))]
+[JsonSerializable(typeof(RealtimeContentPartEvent))]
+[JsonSerializable(typeof(RealtimeTranscriptEvent))]
+[JsonSerializable(typeof(RealtimeAudioDeltaEvent))]
+[JsonSerializable(typeof(RealtimeAudioDoneEvent))]
+[JsonSerializable(typeof(RealtimeTextDeltaEvent))]
+[JsonSerializable(typeof(RealtimeFunctionArgumentsEvent))]
+[JsonSerializable(typeof(RealtimeHostedStartedEvent))]
+[JsonSerializable(typeof(RealtimeHostedProgressEvent))]
+[JsonSerializable(typeof(RealtimeHostedCompletedEvent))]
+[JsonSerializable(typeof(RealtimeResponseEvent))]
+[JsonSerializable(typeof(RealtimeErrorEvent))]
 [JsonSerializable(typeof(VideoProviderOptions))]
 [JsonSerializable(typeof(VideoRequest))]
 [JsonSerializable(typeof(VideoGenerationRequest))]
