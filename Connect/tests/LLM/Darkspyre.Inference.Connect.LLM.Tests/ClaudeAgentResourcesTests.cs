@@ -303,6 +303,8 @@ public sealed class ClaudeAgentResourcesTests : IDisposable
         Assert.Contains(process.Requests(), request => request.GetProperty("subtype").GetString() == "interrupt");
         Assert.Contains(process.Requests(), request => request.GetProperty("subtype").GetString() == "stop_task"
             && request.GetProperty("task_id").GetString() == "s1");
+        AssertControlWire(process, "interrupt", "{\"subtype\":\"interrupt\",\"cancel_queued\":false}");
+        AssertControlWire(process, "stop_task", "{\"subtype\":\"stop_task\",\"task_id\":\"s1\"}");
         Assert.Equal(LlmAgentResourceState.Stopped, Assert.Single(await session.GetResourcesAsync(limit.Token)).State);
     }
 
@@ -336,6 +338,8 @@ public sealed class ClaudeAgentResourcesTests : IDisposable
         Assert.True(answer.GetProperty("result").GetProperty("isError").GetBoolean());
         Assert.Equal("The tool call was cancelled.", answer.GetProperty("result").GetProperty("content")[0].GetProperty("text").GetString());
         Assert.Equal(JsonValueKind.Object, (await AnswerFor(process, "c2")).GetProperty("result").ValueKind);
+        AssertMcpWire(process, "c1", "{\"jsonrpc\":\"2.0\",\"id\":7,\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"The tool call was cancelled.\"}],\"isError\":true}}");
+        AssertMcpWire(process, "c2", "{\"jsonrpc\":\"2.0\",\"id\":0,\"result\":{}}");
 
         process.Push(new { type = "result", subtype = "success", is_error = false, result = "" });
         List<LlmAgentEvent> turn = await ReadUntil(feed, item => item is LlmAgentTurnCompletedEvent);
@@ -594,8 +598,10 @@ public sealed class ClaudeAgentResourcesTests : IDisposable
         }
     }
 
-    [Fact]
-    public async Task NumericAndStringToolRequestIdsHaveIndependentCancellation()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task NumericAndStringToolRequestIdsHaveIndependentCancellation(bool cancelString)
     {
         var entered = new ConcurrentDictionary<string, CancellationToken>();
         var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -613,15 +619,22 @@ public sealed class ClaudeAgentResourcesTests : IDisposable
             process.Push(ToolUse("tu2"));
             process.Push(ToolCall("c2", "9"));
             await WaitFor(() => entered.Count == 2);
-            process.Push(Cancelled("cancel", 9));
+            process.Push(Cancelled("cancel", cancelString ? "9" : (object)9));
             await AnswerFor(process, "cancel");
-            Assert.True(entered["tu1"].IsCancellationRequested);
-            Assert.False(entered["tu2"].IsCancellationRequested);
+            Assert.Equal(!cancelString, entered["tu1"].IsCancellationRequested);
+            Assert.Equal(cancelString, entered["tu2"].IsCancellationRequested);
             release.TrySetResult();
-            Assert.True((await AnswerFor(process, "c1")).GetProperty("result").GetProperty("isError").GetBoolean());
-            JsonElement answer = await AnswerFor(process, "c2");
-            Assert.Equal("9", answer.GetProperty("id").GetString());
+            string cancelledControlId = cancelString ? "c2" : "c1";
+            string successfulControlId = cancelString ? "c1" : "c2";
+            string cancelledId = cancelString ? "\"9\"" : "9.0";
+            string successfulId = cancelString ? "9.0" : "\"9\"";
+            Assert.True((await AnswerFor(process, cancelledControlId)).GetProperty("result").GetProperty("isError").GetBoolean());
+            JsonElement answer = await AnswerFor(process, successfulControlId);
+            Assert.Equal(successfulId, answer.GetProperty("id").GetRawText());
             Assert.Equal("done", answer.GetProperty("result").GetProperty("content")[0].GetProperty("text").GetString());
+            AssertMcpWire(process, "cancel", "{\"jsonrpc\":\"2.0\",\"id\":0,\"result\":{}}");
+            AssertMcpWire(process, cancelledControlId, "{\"jsonrpc\":\"2.0\",\"id\":" + cancelledId + ",\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"The tool call was cancelled.\"}],\"isError\":true}}");
+            AssertMcpWire(process, successfulControlId, "{\"jsonrpc\":\"2.0\",\"id\":" + successfulId + ",\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"done\"}],\"isError\":false}}");
         }
         finally { release.TrySetResult(); }
     }
@@ -777,6 +790,32 @@ public sealed class ClaudeAgentResourcesTests : IDisposable
 
     private static LlmConnection Connection() => new() { Version = "v1", Transport = LlmTransport.AnthropicClaudeCli, Endpoint = "claude" };
 
+    private static void AssertControlWire(ManualProcess process, string subtype, string request)
+    {
+        string wire = Assert.Single(process.RawWrites(), line =>
+        {
+            JsonElement root = JsonElement.Parse(line);
+            return root.GetProperty("type").GetString() == "control_request"
+                && root.GetProperty("request").GetProperty("subtype").GetString() == subtype;
+        });
+        string id = JsonElement.Parse(wire).GetProperty("request_id").GetRawText();
+        Assert.Equal("{\"type\":\"control_request\",\"request_id\":" + id + ",\"request\":" + request + "}", wire);
+        Assert.DoesNotContain('\n', wire);
+    }
+
+    private static void AssertMcpWire(ManualProcess process, string controlRequestId, string message)
+    {
+        string wire = Assert.Single(process.RawWrites(), line =>
+        {
+            JsonElement root = JsonElement.Parse(line);
+            return root.GetProperty("type").GetString() == "control_response"
+                && root.GetProperty("response").GetProperty("request_id").GetString() == controlRequestId;
+        });
+        string id = JsonElement.Parse(wire).GetProperty("response").GetProperty("request_id").GetRawText();
+        Assert.Equal("{\"type\":\"control_response\",\"response\":{\"subtype\":\"success\",\"request_id\":" + id + ",\"response\":{\"mcp_response\":" + message + "}}}", wire);
+        Assert.DoesNotContain('\n', wire);
+    }
+
     private static JsonElement Json(object value) => JsonSerializer.SerializeToElement(value);
 
     private static async Task WaitFor(Func<bool> condition)
@@ -851,6 +890,8 @@ public sealed class ClaudeAgentResourcesTests : IDisposable
         }
 
         public IEnumerable<JsonElement> Writes() => _writes.Select(line => JsonSerializer.Deserialize<JsonElement>(line));
+
+        public string[] RawWrites() => [.. _writes];
 
         /// <summary>The CLI exits: its output ends.</summary>
         public void Exit() => _output.Writer.TryComplete();
