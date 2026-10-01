@@ -305,7 +305,7 @@ TtsResult clip = await speech.SpeakAsync(new TtsRequest
 The connector never starts a bridge, installs models, bypasses TLS validation or manages playback.
 The endpoint is external even on localhost. Multipart sends `text`, `output_format` and the
 configured voice field (default `voice_url`). It rejects non-default speed. BridgeJson sends `text`,
-`voice`, `speaker`, `speed` and `response_format`. Initially only WAV is advertised and accepted.
+`voice`, `speaker`, `speed` and `response_format`. PocketTTS advertises and accepts only WAV.
 Voice discovery uses `/voices`, falling back to `/health` only after a successful empty list. It
 preserves both voice-option objects and voice-name arrays; it never invents fallback voices.
 
@@ -324,6 +324,38 @@ or copied into errors. Registration disables automatic redirects and gives each 
 connection timeout. If constructing `PocketTtsHttpProvider` with your own `HttpClient`, disable
 automatic redirects yourself so custom secret headers cannot follow a redirect to another origin;
 the host owns that client's lifetime. Endpoint paths cannot select a different origin.
+
+### TTS data and streaming contracts
+
+`TtsRequest` and `TtsSetupConfiguration` carry optional language, sample rate in Hz, bit rate in
+bits per second, timestamp selection and typed `XaiTtsOptions`. The xAI options preserve nullable
+latency/normalization controls and an ordinal text-replacement map. Absent and explicit empty
+maps remain distinct. PocketTTS rejects every explicit new control, including `false`, before
+HTTP. Its settings preserve the controls but refuse unsupported test/save actions.
+
+`TtsResult` carries nullable duration and ordered `TtsTimestamp` observations. Each timestamp
+retains actual text and the observed start/end timeline; it does not invent text offsets.
+Streaming timestamps use the observed session timeline, not a per-chunk reset. Missing timing
+stays null; observed empty remains empty. Audio, timestamp lists and replacement maps are copied
+at their data boundary, including `with` updates. Diagnostic strings omit content and credentials.
+
+`ConnectTtsJson` exports exact type-name metadata getters for TTS connection, setup, request,
+capability, result, option and concrete event data. Its closed generated graph composes Common
+provenance/failure data without reflection fallback. Non-null runtime clients/providers/sessions
+refuse serialization and restoration without inspecting their callbacks; null remains null.
+The provider-private Pocket wire codec remains separate and preserves its existing request bytes.
+
+`ITtsStreamingClient` and `ITtsStreamingSession` declare reusable disposable streaming and one
+ephemeral iterator wrapper. Opens and wrappers require explicit positive `InferenceStreamLimits`
+for event count, buffered payload bytes and assembled message bytes. These caller-local budgets
+are not provider limits. Session commands complete after ordered transport send, not terminal
+acknowledgment or event consumption. One event consumer drains the feed; disposal closes the
+feed before draining admitted work. No automatic replay/reconnect is part of these contracts.
+
+These streaming interfaces are inert declarations. PocketTTS implements neither interface,
+advertises all new capability flags false and leaves unknown rate lists null. `XaiTts` is a
+declared transport identity without a registered provider. The current binding signature remains
+`Bind(TtsConnection)`; there is no xAI family-binding or resource-access argument on it.
 
 ## TangoFlux audio
 

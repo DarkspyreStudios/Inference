@@ -1,4 +1,5 @@
 using Darkspyre.Inference.Common.Setup;
+using Darkspyre.Inference.Common;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Darkspyre.Inference.Connect.TTS;
@@ -15,7 +16,13 @@ public sealed class TtsProviderService
     public ITtsClient Bind(TtsConnection connection)
     {
         ArgumentNullException.ThrowIfNull(connection);
-        return _providers[connection.Transport].Bind(connection);
+        return RequiredProvider(_providers, connection.Transport).Bind(connection);
+    }
+    internal static ITtsProvider RequiredProvider(IReadOnlyDictionary<TtsTransport, ITtsProvider> providers, TtsTransport transport)
+    {
+        if (!Enum.IsDefined(transport)) throw new InferenceException(InferenceFailureCode.InvalidRequest, "Unknown TTS transport.");
+        return providers.TryGetValue(transport, out ITtsProvider? provider) ? provider
+            : throw new InferenceException(InferenceFailureCode.UnsupportedFeature, "The selected TTS transport is not registered.");
     }
     /// <summary>Creates the settings manager that opens, acts on and saves TTS settings through <paramref name="target"/>.</summary>
     public TtsSettingsManager CreateSettingsManager(ISetupCommitTarget<TtsSetupChanges> target) => new(_providers, target);

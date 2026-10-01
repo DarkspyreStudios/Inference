@@ -29,6 +29,7 @@ public static class InferenceJson
     public static JsonTypeInfo<VideoOutput> VideoOutput => Metadata<VideoOutput>();
     public static JsonTypeInfo<VideoJobSnapshot> VideoJobSnapshot => Metadata<VideoJobSnapshot>();
     public static JsonTypeInfo<VideoCapabilities> VideoCapabilities => Metadata<VideoCapabilities>();
+    public static JsonTypeInfo<InferenceStreamLimits> InferenceStreamLimits => Metadata<InferenceStreamLimits>();
     public static JsonTypeInfo<LlmExplicitCacheReference> LlmExplicitCacheReference => Metadata<LlmExplicitCacheReference>();
     public static JsonTypeInfo<LlmClientToolDefinition> LlmClientToolDefinition => Metadata<LlmClientToolDefinition>();
     public static JsonTypeInfo<LlmShellSkill> LlmShellSkill => Metadata<LlmShellSkill>();
@@ -177,6 +178,7 @@ public static class InferenceJson
 [JsonSerializable(typeof(VideoOutput))]
 [JsonSerializable(typeof(VideoJobSnapshot))]
 [JsonSerializable(typeof(VideoCapabilities))]
+[JsonSerializable(typeof(InferenceStreamLimits))]
 [JsonSerializable(typeof(InferenceMediaSourceKind))]
 [JsonSerializable(typeof(InferenceMediaSource))]
 [JsonSerializable(typeof(BinaryMediaSource))]
