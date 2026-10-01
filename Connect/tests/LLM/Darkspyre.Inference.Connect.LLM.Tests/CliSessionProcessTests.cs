@@ -123,6 +123,56 @@ public sealed class CliSessionProcessTests
         await CliProcessTerminationTests.AssertGoneAsync(fixture.ProcessId);
     });
 
+    [UnixTheory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public Task UnterminatedStdoutOverflowIsRejectedBeforeCallerTimeout(bool claude) => Bounded(async () =>
+    {
+        await using var fixture = new SessionFixture(claude,
+            "head -c 16777217 /dev/zero | tr '\\000' x; exec sleep 300");
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+
+        InvalidOperationException failure = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => fixture.ReadAsync(cancellation.Token));
+
+        Assert.Contains("line limit", failure.Message, StringComparison.Ordinal);
+        Assert.False(cancellation.IsCancellationRequested);
+        await fixture.RetireAsync();
+        await CliProcessTerminationTests.AssertGoneAsync(fixture.ProcessId);
+    });
+
+    [UnixTheory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public Task CompleteAlignedStdoutLineReturnsWhileTheProcessWaits(bool claude) => Bounded(async () =>
+    {
+        await using var fixture = new SessionFixture(claude,
+            "head -c 1023 /dev/zero | tr '\\000' x; printf '\\n'; exec sleep 300");
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        Assert.Equal(new string('x', 1023), await fixture.ReadAsync(cancellation.Token));
+        Assert.False(cancellation.IsCancellationRequested);
+        await fixture.RetireAsync();
+        await CliProcessTerminationTests.AssertGoneAsync(fixture.ProcessId);
+    });
+
+    [UnixTheory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public Task ExactStdoutLimitWithoutNewlineReturnsAtRealProcessEof(bool claude) => Bounded(async () =>
+    {
+        await using var fixture = new SessionFixture(claude,
+            "head -c 16777216 /dev/zero | tr '\\000' x; exit 0");
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        string line = Assert.IsType<string>(await fixture.ReadAsync(cancellation.Token));
+        Assert.Equal(CliSessionProcess.MaximumLineCharacters, line.Length);
+        Assert.Equal('x', line[0]);
+        Assert.Equal('x', line[^1]);
+        Assert.Null(await fixture.ReadAsync(cancellation.Token));
+        Assert.Equal((0, string.Empty), await fixture.WaitAsync(cancellation.Token));
+        await fixture.RetireAsync();
+        await CliProcessTerminationTests.AssertGoneAsync(fixture.ProcessId);
+    });
+
     [UnixFact]
     public Task ClaudeStderrOverflowInterruptsAnAlreadyBlockedWrite() => Bounded(async () =>
     {
