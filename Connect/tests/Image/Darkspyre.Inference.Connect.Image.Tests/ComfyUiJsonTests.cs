@@ -128,8 +128,8 @@ public sealed class ComfyUiJsonTests
         object connection = Activator.CreateInstance(connectionType)!;
         connectionType.GetProperty("Endpoint")!.SetValue(connection, "https://provider.invalid");
         Type preparedType = image.GetType(typeof(PreparedImageTransportRequest).FullName!, throwOnError: true)!;
-        object prepared = Activator.CreateInstance(preparedType, "{\"future\":null}")!;
-        Assert.Equal("job", Result(transportType.GetMethod("SubmitAsync")!.Invoke(transport, [connection, prepared, CancellationToken.None])!));
+        object prepared = Activator.CreateInstance(preparedType, "{\"Workflow\":{\"future\":null},\"ReferenceScopes\":[]}")!;
+        Assert.Equal("job", Result(transportType.GetMethod("SubmitAsync")!.Invoke(transport, [connection, prepared, null, CancellationToken.None])!));
         Type workflowType = image.GetType(typeof(ImageWorkflow).FullName!, throwOnError: true)!;
         object workflow = Activator.CreateInstance(workflowType)!;
         workflowType.GetProperty("Id")!.SetValue(workflow, "workflow");
@@ -137,13 +137,14 @@ public sealed class ComfyUiJsonTests
         workflowType.GetProperty("TransportConfiguration")!.SetValue(workflow, JsonElement.Parse("""
             {"outputNodeId":"10","filenamePrefixTemplate":"prefix","defaultParameters":{},"workflow":{}}
             """));
-        object snapshot = Result(transportType.GetMethod("GetJobAsync")!.Invoke(transport, [connection, "job", workflow, CancellationToken.None])!)!;
+        object snapshot = Result(transportType.GetMethod("GetJobAsync")!.Invoke(transport, [connection, "job", workflow, null, CancellationToken.None])!)!;
         Assert.Same(image, snapshot.GetType().Assembly);
-        object output = snapshot.GetType().GetProperty("Output")!.GetValue(snapshot)!;
-        Assert.Equal(OutputState, output.GetType().GetProperty("ProviderState")!.GetValue(output));
-        Assert.Equal("{\"source\":\"history\",\"status\":\"completed\"}", snapshot.GetType().GetProperty("Diagnostics")!.GetValue(snapshot));
-        Assert.Equal(new byte[] { 1, 2, 3 }, Result(transportType.GetMethod("DownloadAsync")!.Invoke(transport, [connection, output, CancellationToken.None])!));
-        Assert.Equal(true, Result(transportType.GetMethod("TryCancelAsync")!.Invoke(transport, [connection, "job", true, CancellationToken.None])!));
+        object output = ((System.Collections.IEnumerable)snapshot.GetType().GetProperty("Outputs")!.GetValue(snapshot)!).Cast<object>().Single();
+        Assert.Equal(OutputState, ((JsonElement)output.GetType().GetProperty("ProviderState")!.GetValue(output)!).GetRawText());
+        Assert.Equal("{\"source\":\"history\",\"status\":\"completed\"}", ((JsonElement)snapshot.GetType().GetProperty("Diagnostics")!.GetValue(snapshot)!).GetRawText());
+        object download = Result(transportType.GetMethod("DownloadAsync")!.Invoke(transport, [connection, output, null, CancellationToken.None])!)!;
+        Assert.Equal(new byte[] { 1, 2, 3 }, ((ReadOnlyMemory<byte>)download.GetType().GetProperty("Data")!.GetValue(download)!).ToArray());
+        Assert.Equal(true, Result(transportType.GetMethod("TryCancelAsync")!.Invoke(transport, [connection, "job", true, null, CancellationToken.None])!));
         Assert.Equal(5, handler.Calls);
     }
 

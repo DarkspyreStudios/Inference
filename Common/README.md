@@ -115,8 +115,10 @@ reflection resolver. Caller-defined types require caller-owned metadata.
 The stream-event base has no JSON discriminator. Serialize each concrete event with its matching
 metadata; this package does not invent a stream envelope. Callback-backed setup fields and abstract
 setup interactions are not transport contracts. `InferenceImplementationDescriptor` and the
-value-tuple sizes in `ImageCapabilities` have no round-trip JSON representation in this metadata
-surface. Generated metadata does not change those contracts or establish native runtime retirement.
+callback-backed setup interactions have no portable JSON representation in this metadata surface.
+`ImageCapabilities` uses the named `ImageSize` contract, not value tuples. Its exact typed metadata,
+`GeneratedImage`, and `ImageGenerationStage` are exported alongside the unchanged Image request,
+result and progress getters. Generated metadata does not establish native runtime retirement.
 
 `LlmUsage` preserves provider-reported decimal USD costs and independent hosted-tool/source counts.
 Its named hosted counts snapshot their input; negative hosted counts become unknown at assignment
@@ -210,8 +212,16 @@ the actual endpoint/route/account authority of native receipts, not portable con
 the closed `type` discriminators `binary`, `url`, `file` and `resource`; unknown variants refuse rather
 than invoking reflection or an extension registry. JSON decoding creates its own byte memory, while
 constructing a binary source preserves caller memory. These are standalone, data-only foundations,
-not yet wired into requests, Image transports, provider bindings or resource resolution. Operation
-boundaries must validate caller-authored IDs, URLs, scope and source support before effects.
+not provider bindings or automatic resource resolution. Image requests retain ordered source data;
+Connect ComfyUI supports zero/one binary reference or a logical resource resolved through borrowed
+access. Supra refuses supplied references before backend entry. Other ComfyUI source variants and
+multiple references refuse before source reads or upload.
+Operation boundaries validate caller-authored IDs, URLs, scope and source support before effects.
+
+Image capability sizes use `ImageSize` with actual reference-kind support and nullable known reference
+limits. A generated image retains bytes plus optional native file identity, committed resource
+descriptor and observed dimensions. Its required `ContentType` fact may be null when MIME is unknown;
+unknown MIME is not inferred from a workflow default or file extension.
 
 ## Provider authorization
 

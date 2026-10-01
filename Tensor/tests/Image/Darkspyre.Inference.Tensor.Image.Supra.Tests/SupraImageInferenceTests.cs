@@ -32,7 +32,9 @@ public sealed class SupraImageInferenceTests
         ImageCapabilities capabilities = await inference.GetCapabilitiesAsync(
             TensorImageModels.Supra2Image.Key.ModelId);
 
-        Assert.Equal([(256, 256)], capabilities.SupportedSizes);
+        Assert.Equal([new ImageSize(256, 256)], capabilities.SupportedSizes);
+        Assert.Empty(capabilities.SupportedReferenceKinds);
+        Assert.Null(capabilities.MaximumReferences);
         Assert.False(capabilities.SupportsNegativePrompt);
         Assert.True(capabilities.SupportsSeed);
         Assert.True(capabilities.SupportsSteps);
@@ -62,6 +64,19 @@ public sealed class SupraImageInferenceTests
             () => inference.GenerateAsync(request));
 
         Assert.Equal(InferenceFailureCode.UnsupportedFeature, exception.Code);
+    }
+
+    [Fact]
+    public async Task ReferenceRefusalPrecedesModelAndSourceEffects()
+    {
+        await using var inference = new SupraImageInference(new MissingPackManager());
+        InferenceException error = await Assert.ThrowsAsync<InferenceException>(() => inference.GenerateAsync(new()
+        {
+            ModelId = TensorImageModels.Supra2Image.Key.ModelId,
+            Prompt = "test",
+            References = [new Darkspyre.Inference.Common.Media.ResourceMediaSource(new("workspace", "unread"))]
+        }));
+        Assert.Equal(InferenceFailureCode.UnsupportedFeature, error.Code);
     }
 
     [Fact]

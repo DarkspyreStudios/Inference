@@ -15,6 +15,7 @@ public static class ConnectLlmJson
     public static JsonTypeInfo<XaiStoragePublicUrlFlag> XaiStoragePublicUrlFlag => Metadata<XaiStoragePublicUrlFlag>();
     public static JsonTypeInfo<XaiStoragePublicUrlConfiguration> XaiStoragePublicUrlConfiguration => Metadata<XaiStoragePublicUrlConfiguration>();
     public static JsonTypeInfo<XaiFileStorageOptions> XaiFileStorageOptions => Metadata<XaiFileStorageOptions>();
+    public static JsonTypeInfo<XaiConnectionSelection> XaiConnectionSelection => Metadata<XaiConnectionSelection>();
     public static JsonTypeInfo<LlmFileOrder> LlmFileOrder => Metadata<LlmFileOrder>();
     public static JsonTypeInfo<LlmFileSort> LlmFileSort => Metadata<LlmFileSort>();
     public static JsonTypeInfo<LlmFileContentFormat> LlmFileContentFormat => Metadata<LlmFileContentFormat>();
@@ -143,7 +144,7 @@ public static class ConnectLlmJson
 }
 
 [JsonSourceGenerationOptions(GenerationMode = JsonSourceGenerationMode.Metadata,
-    Converters = [typeof(LlmAgentContextJsonConverter)])]
+    Converters = [typeof(LlmAgentContextJsonConverter), typeof(XaiFamilyBindingJsonConverter)])]
 [JsonSerializable(typeof(LlmConnection))]
 [JsonSerializable(typeof(XaiStoragePublicUrlRequest))]
 [JsonSerializable(typeof(XaiStoragePublicUrlFlag))]
@@ -178,6 +179,7 @@ public static class ConnectLlmJson
 [JsonSerializable(typeof(LlmAgentClientToolDefinition))]
 [JsonSerializable(typeof(LlmAgentToolDefinition))]
 [JsonSerializable(typeof(LlmAgentShellTool))]
+[JsonSerializable(typeof(XaiConnectionSelection))]
 [JsonSerializable(typeof(LlmAccountUsageSnapshot))]
 [JsonSerializable(typeof(LlmSetupConfiguration))]
 [JsonSerializable(typeof(LlmChatRequest))]

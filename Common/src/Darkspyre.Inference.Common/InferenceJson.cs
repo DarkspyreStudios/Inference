@@ -228,6 +228,10 @@ public static class InferenceJson
     public static JsonTypeInfo<InferenceResourceOperationPhase> InferenceResourceOperationPhase => Metadata<InferenceResourceOperationPhase>();
     public static JsonTypeInfo<InferenceResourceCommitOutcome> InferenceResourceCommitOutcome => Metadata<InferenceResourceCommitOutcome>();
     public static JsonTypeInfo<InferenceResourceOperationFailure> InferenceResourceOperationFailure => Metadata<InferenceResourceOperationFailure>();
+    public static JsonTypeInfo<ImageSize> ImageSize => Metadata<ImageSize>();
+    public static JsonTypeInfo<ImageCapabilities> ImageCapabilities => Metadata<ImageCapabilities>();
+    public static JsonTypeInfo<GeneratedImage> GeneratedImage => Metadata<GeneratedImage>();
+    public static JsonTypeInfo<ImageGenerationStage> ImageGenerationStage => Metadata<ImageGenerationStage>();
 }
 
 [JsonSourceGenerationOptions(GenerationMode = JsonSourceGenerationMode.Metadata,
@@ -385,6 +389,10 @@ public static class InferenceJson
 [JsonSerializable(typeof(ImageGenerationRequest))]
 [JsonSerializable(typeof(ImageGenerationResult))]
 [JsonSerializable(typeof(ImageGenerationProgress))]
+[JsonSerializable(typeof(ImageSize))]
+[JsonSerializable(typeof(ImageCapabilities))]
+[JsonSerializable(typeof(GeneratedImage))]
+[JsonSerializable(typeof(ImageGenerationStage))]
 [JsonSerializable(typeof(SetupStatus))]
 [JsonSerializable(typeof(SetupValidation))]
 [JsonSerializable(typeof(SetupConfigurationIdentity))]
