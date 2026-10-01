@@ -1,4 +1,6 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
+using System.Text.Json.Serialization.Metadata;
 
 namespace Darkspyre.Inference.Tensor.Common.Tests;
 
@@ -6,6 +8,28 @@ public sealed class TensorRuntimeContractTests
 {
     private static readonly TensorSharpBuildIdentity Build = new("version", "abi", "ggml-commit");
     private const string Hash = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
+    public static TheoryData<string, string> RequiredRuntimeFacts => new()
+    {
+        { "File", "RelativePath" }, { "File", "Size" }, { "File", "Sha256" },
+        { "Candidate", "Identity" }, { "Candidate", "Backend" }, { "Candidate", "Files" },
+        { "Plan", "Build" }, { "Plan", "TargetRid" },
+        { "Backend", "Backend" }, { "Backend", "Build" }, { "Backend", "TargetRid" },
+        { "Backend", "Variant" }, { "Backend", "CandidateId" }, { "Backend", "NativeSourceCommit" },
+        { "Diagnostic", "Code" }, { "Diagnostic", "Message" },
+        { "Shutdown", "State" }, { "Shutdown", "OperationId" }, { "Shutdown", "ObservedAt" },
+        { "Shutdown", "OutstandingLeases" }, { "Shutdown", "NativeStateMayRemain" }, { "Shutdown", "Diagnostics" }
+    };
+
+    [Theory]
+    [MemberData(nameof(RequiredRuntimeFacts))]
+    public void OwnedRuntimeMetadataRejectsEveryMissingRequiredFact(string family, string fact)
+    {
+        (string json, JsonTypeInfo metadata) = RuntimeFixture(family);
+        JsonObject incomplete = JsonNode.Parse(json)!.AsObject();
+        Assert.True(incomplete.Remove(fact));
+        Assert.Throws<JsonException>(() => JsonSerializer.Deserialize(incomplete.ToJsonString(), metadata));
+    }
 
     [Fact]
     public void PlansDeepSnapshotOrderedCandidatesFilesAndBuildIdentities()
@@ -155,4 +179,17 @@ public sealed class TensorRuntimeContractTests
     private static TensorRuntimeCandidate Candidate(string id = "first", TensorBackendKind backend = TensorBackendKind.GgmlCpu,
         IReadOnlyList<TensorRuntimeNativeFile>? files = null) => new(new(id, "/unused/bridge.so", "cpu", Build, "linux-x64"),
         backend, files ?? [new("bridge.so", 1, Hash)]);
+
+    private static (string Json, JsonTypeInfo Metadata) RuntimeFixture(string family) => family switch
+    {
+        "File" => (JsonSerializer.Serialize(new TensorRuntimeNativeFile("bridge.so", 0, Hash), TensorJson.TensorRuntimeNativeFile), TensorJson.TensorRuntimeNativeFile),
+        "Candidate" => (JsonSerializer.Serialize(Candidate(), TensorJson.TensorRuntimeCandidate), TensorJson.TensorRuntimeCandidate),
+        "Plan" => (JsonSerializer.Serialize(new TensorRuntimePlan(Build, "linux-x64"), TensorJson.TensorRuntimePlan), TensorJson.TensorRuntimePlan),
+        "Backend" => (JsonSerializer.Serialize(new TensorRuntimeBackendIdentity(TensorBackendKind.GgmlCpu, Build, "linux-x64", "cpu", null, "native-source"),
+            TensorJson.TensorRuntimeBackendIdentity), TensorJson.TensorRuntimeBackendIdentity),
+        "Diagnostic" => (JsonSerializer.Serialize(new TensorRuntimeDiagnostic("safe", "Safe observation."), TensorJson.TensorRuntimeDiagnostic), TensorJson.TensorRuntimeDiagnostic),
+        "Shutdown" => (JsonSerializer.Serialize(new TensorRuntimeShutdownResult(TensorRuntimeShutdownState.Completed, Guid.NewGuid(), DateTimeOffset.UnixEpoch, 0, false, []),
+            TensorJson.TensorRuntimeShutdownResult), TensorJson.TensorRuntimeShutdownResult),
+        _ => throw new ArgumentOutOfRangeException(nameof(family))
+    };
 }
