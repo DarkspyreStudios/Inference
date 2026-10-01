@@ -669,11 +669,7 @@ internal sealed class AntigravityCliLlmClient(IAntigravityCliRunner runner)
         return prompt.ToString();
     }
 
-    private static string BuildStandardInput(string prompt) => JsonSerializer.Serialize(new
-    {
-        @event = "user",
-        message = new { content = prompt }
-    }) + "\n";
+    private static string BuildStandardInput(string prompt) => AntigravityProtocol.WriteUserInput(prompt);
 
     /// <summary>
     /// Maps one protocol event for chat. Only <c>agent_response</c> deltas are answer text; a schema turn

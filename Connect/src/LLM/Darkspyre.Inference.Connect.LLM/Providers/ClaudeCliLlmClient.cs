@@ -604,17 +604,17 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
 
     private static string BuildClaudeStandardInput(LlmChatRequest request, string prompt)
     {
-        var content = new List<object> { new { type = "text", text = prompt } };
+        var content = new JsonArray { new JsonObject { ["type"] = "text", ["text"] = prompt } };
         foreach (LlmAttachment attachment in request.Messages.SelectMany(item => item.Attachments))
         {
             content.Add(AnthropicAttachments.BuildContentBlock(attachment));
         }
 
-        return JsonSerializer.Serialize(new
+        return new JsonObject
         {
-            type = "user",
-            message = new { role = "user", content }
-        }) + "\n";
+            ["type"] = "user",
+            ["message"] = new JsonObject { ["role"] = "user", ["content"] = content }
+        }.ToJsonString() + "\n";
     }
 
     private static ParsedClaudeLine ParseClaudeLine(string line, bool preferStructuredOutput)

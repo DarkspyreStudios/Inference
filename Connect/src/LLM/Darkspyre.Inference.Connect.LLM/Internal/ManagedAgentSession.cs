@@ -539,7 +539,7 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
                     try
                     {
                         await writer.WriteAsync(new LlmAgentToolEvent(ThreadId, run.Id, call.Id, null,
-                        call.Name, JsonSerializer.SerializeToElement(new { }), false, "failed",
+                        call.Name, JsonElement.Parse("{}"), false, "failed",
                         LlmToolOutput.FromText(message, isError: true)), token);
                     }
                     catch (OperationCanceledException) when (token.IsCancellationRequested) { }

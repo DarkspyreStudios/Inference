@@ -72,12 +72,15 @@ internal sealed class WhisperLoader : IWhisperLoader
 
 internal sealed class WhisperBackendProbe(Func<string?>? runtimeInfo = null) : ITensorBackendProbe
 {
-    public Task<TensorBackendAvailability> CheckAsync(TensorBackendKind backend, CancellationToken cancellationToken = default)
+    public Task<TensorBackendAvailability> CheckAsync(TensorBackendProbeRequest request, CancellationToken cancellationToken = default)
         => Task.Run(() =>
         {
             cancellationToken.ThrowIfCancellationRequested();
+            if (TensorBackendProbes.ValidateLocalRequest(request, WhisperSetup.Definition.Implementation.Id) is { } invalid) return invalid;
+            TensorBackendKind backend = request.RequestedBackend;
             if (backend is not (TensorBackendKind.Cpu or TensorBackendKind.Auto))
-                return new TensorBackendAvailability(backend, false, "This adapter supplies CPU inference only.", DateTimeOffset.UtcNow);
+                return TensorBackendAvailability.Observe(request, TensorBackendAvailabilityState.Unsupported, "This adapter supplies CPU inference only.");
+            if (TensorBackendProbes.RejectUnboundNativePlan(request) is { } unbound) return unbound;
             bool? available;
             string reason;
             try
@@ -90,6 +93,11 @@ internal sealed class WhisperBackendProbe(Func<string?>? runtimeInfo = null) : I
             catch (Exception exception) when (exception is not OperationCanceledException and not OutOfMemoryException)
             { available = false; reason = "The Whisper native runtime could not be initialized on this machine."; }
             cancellationToken.ThrowIfCancellationRequested();
-            return new TensorBackendAvailability(backend, available, reason, DateTimeOffset.UtcNow);
+            return TensorBackendAvailability.Observe(request, available switch
+            {
+                true => TensorBackendAvailabilityState.Available,
+                false => TensorBackendAvailabilityState.Unavailable,
+                null => TensorBackendAvailabilityState.Unknown
+            }, reason);
         }, cancellationToken);
 }

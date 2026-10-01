@@ -1,4 +1,5 @@
 using Darkspyre.Inference.Common.Setup;
+using System.Runtime.InteropServices;
 
 namespace Darkspyre.Inference.Tensor.Common;
 
@@ -501,11 +502,23 @@ public sealed class TensorSettingsManager : InferenceSettingsManager<TensorSetti
 
     private async Task<SetupActionResult> CheckBackendAsync(TensorSettings settings, CancellationToken token)
     {
-        TensorBackendAvailability observation = await _backendProbe!.CheckAsync(settings.Backend, token).ConfigureAwait(false);
+        var request = new TensorBackendProbeRequest(Guid.NewGuid(), _definition.Implementation.Id,
+            settings.Backend, RuntimeInformation.RuntimeIdentifier);
+        TensorBackendAvailability observation = await _backendProbe!.CheckAsync(request, token).ConfigureAwait(false);
         token.ThrowIfCancellationRequested();
+        if (observation.OperationId != request.OperationId || observation.ImplementationId != request.ImplementationId
+            || observation.RequestedBackend != request.RequestedBackend)
+            return new(SetupActionState.Failed, [new("backend-probe-mismatch", "The probe returned an observation for another request.", "backend")]);
         settings.BackendAvailability = observation;
-        return observation.IsAvailable == true ? SetupActionResult.Completed : new(SetupActionState.Failed,
-            [new(observation.IsAvailable == false ? "backend-unavailable" : "backend-unverified", observation.Reason, "backend")], IsRetryable: true);
+        return observation.IsAvailable ? SetupActionResult.Completed : new(SetupActionState.Failed,
+            [new(observation.State switch
+            {
+                TensorBackendAvailabilityState.Unsupported => "backend-unsupported",
+                TensorBackendAvailabilityState.RequiresProcessRestart => "backend-process-restart",
+                TensorBackendAvailabilityState.Unknown => "backend-unverified",
+                _ => "backend-unavailable"
+            }, observation.Reason, "backend")],
+            IsRetryable: observation.State is TensorBackendAvailabilityState.Unknown or TensorBackendAvailabilityState.Unavailable);
     }
 
     private async Task<SetupActionResult> CheckAsync(TensorSettings settings, CancellationToken token)

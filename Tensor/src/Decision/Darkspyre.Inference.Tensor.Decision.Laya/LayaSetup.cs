@@ -17,11 +17,12 @@ public static class LayaSetup
     /// </summary>
     public static TensorSettingsManager CreateSettingsManager(ISetupCommitTarget<TensorSetupChanges> target,
         ITensorModelPackManager packs, IReadOnlyList<TensorModelPackDefinition> offeredModels,
-        ITensorDecisionInference? instance = null, ITensorModelSource? source = null, ITensorArtifactReader? reader = null)
+        ITensorDecisionInference? instance = null, ITensorModelSource? source = null, ITensorArtifactReader? reader = null,
+        ITensorBackendProbe? backendProbe = null)
     {
         ArgumentNullException.ThrowIfNull(packs);
         ArgumentNullException.ThrowIfNull(offeredModels);
         foreach (TensorModelPackDefinition definition in offeredModels) { LayaModelCompatibility.Validate(definition); }
-        return new(Definition, target, offeredModels, packs, instance, new LayaBackendProbe(), new LayaModelResolver(source, reader));
+        return new(Definition, target, offeredModels, packs, instance, backendProbe ?? new LayaBackendProbe(), new LayaModelResolver(source, reader));
     }
 }

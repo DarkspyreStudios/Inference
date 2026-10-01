@@ -1,5 +1,6 @@
 using System.Net;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Darkspyre.Inference.Connect.LLM.Internal;
 
 namespace Darkspyre.Inference.Connect.LLM.Providers;
@@ -22,7 +23,7 @@ internal sealed class CodexAuthenticator(HttpClient http)
             HttpMethod.Post,
             $"{AuthBaseUrl}/api/accounts/deviceauth/usercode")
         {
-            Content = JsonContent.Create(new { client_id = ClientId })
+            Content = JsonContent.Create(new JsonObject { ["client_id"] = ClientId })
         };
         using HttpResponseMessage response = await Http.SendAsync(request, cancellationToken);
         await ThrowIfUnsuccessfulAsync(response, "ChatGPT login code request", cancellationToken);
@@ -53,10 +54,10 @@ internal sealed class CodexAuthenticator(HttpClient http)
             HttpMethod.Post,
             $"{AuthBaseUrl}/api/accounts/deviceauth/token")
         {
-            Content = JsonContent.Create(new
+            Content = JsonContent.Create(new JsonObject
             {
-                device_auth_id = deviceAuthId,
-                user_code = userCode
+                ["device_auth_id"] = deviceAuthId,
+                ["user_code"] = userCode
             })
         };
         using HttpResponseMessage response = await Http.SendAsync(request, cancellationToken);
@@ -83,11 +84,11 @@ internal sealed class CodexAuthenticator(HttpClient http)
     protected override HttpRequestMessage BuildRefreshRequest(LlmOAuthTokens tokens) =>
         new(HttpMethod.Post, TokenEndpoint)
         {
-            Content = JsonContent.Create(new
+            Content = JsonContent.Create(new JsonObject
             {
-                client_id = ClientId,
-                grant_type = "refresh_token",
-                refresh_token = tokens.RefreshToken
+                ["client_id"] = ClientId,
+                ["grant_type"] = "refresh_token",
+                ["refresh_token"] = tokens.RefreshToken
             })
         };
 

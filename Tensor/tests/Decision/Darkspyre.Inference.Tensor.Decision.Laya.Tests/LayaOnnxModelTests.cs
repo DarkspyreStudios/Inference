@@ -74,15 +74,18 @@ public sealed class LayaOnnxModelTests
     {
         var probe = new LayaBackendProbe();
 
-        Assert.True((await probe.CheckAsync(TensorBackendKind.Cpu)).IsAvailable);
-        Assert.False((await probe.CheckAsync(TensorBackendKind.Cuda)).IsAvailable);
+        Assert.True((await probe.CheckAsync(ProbeRequest(TensorBackendKind.Cpu))).IsAvailable);
+        Assert.False((await probe.CheckAsync(ProbeRequest(TensorBackendKind.Cuda))).IsAvailable);
         Assert.Equal(OperatingSystem.IsMacOS() ? TensorBackendKind.CoreMl : TensorBackendKind.Cpu,
             LayaDecisionInference.ResolveBackend(TensorBackendKind.Auto));
         if (OperatingSystem.IsMacOS())
         {
-            Assert.True((await probe.CheckAsync(TensorBackendKind.Auto)).IsAvailable);
+            Assert.True((await probe.CheckAsync(ProbeRequest(TensorBackendKind.Auto))).IsAvailable);
         }
     }
+
+    private static TensorBackendProbeRequest ProbeRequest(TensorBackendKind backend) =>
+        new(Guid.NewGuid(), LayaSetup.Definition.Implementation.Id, backend, System.Runtime.InteropServices.RuntimeInformation.RuntimeIdentifier);
 
     private static LayaOnnxModel Create(string fixture, int configuredLength = FixtureLength)
     {

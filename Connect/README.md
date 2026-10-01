@@ -70,6 +70,44 @@ Connect messages/results as `ContinuationState`. Captures and envelopes use form
 before adoption; see [DSA-68 handoff](docs/agent-ds-contract-handoff.md). Explicit state omission is
 reported by `OmittedContinuationStateCount`; default handling rejects unbound state.
 
+### JSON metadata
+
+`ConnectLlmJson` exposes owned source-generated metadata for closed LLM connections, saved setup
+configuration, chat messages/requests/results and captured agent context. Pass the matching typed
+metadata to `JsonSerializer`. Credential `Serialize`/`Parse`, context-entry equivalence and continuation
+scope hashing use owned metadata. Credentials retain their camel-case Web format and null omission;
+captured context retains its property names, format 2 checks, Common tool-output discriminators and
+binary/null-versus-empty representations. Resolved internal services are never serialized.
+
+Contexts and scope helpers remain internal. The package installs no reflection fallback for these
+families. Runtime settings, one-way secret edits, executable handlers and undiscriminated agent/event
+bases are not persisted snapshots. Provider CLI/HTTP protocol writers remain separate owners;
+metadata for these closed families does not establish retirement of an active provider session.
+
+Apple helper generation and cancellation commands use their own internal generated metadata,
+including the recursive typed schema plan. The helper protocol retains its camel-case Web names,
+null omission, escaping, sampling fields and maximum JSON depth of 128. No helper/session lifetime
+behavior or Apple private framework format is changed by this serialization boundary.
+
+PocketTTS voice responses and JSON bridge requests, and TangoFlux generation requests, use their
+provider-owned internal generated metadata. PocketTTS retains explicit null voice/speaker fields;
+TangoFlux still omits absent seed/cache fields while preserving explicit zero/false values. These
+private wire types do not add public request contracts or change HTTP/cancellation behavior.
+
+ComfyUI output state retains its existing Pascal-case persisted format through separate owned
+metadata. Prompt/delete requests and diagnostic payloads use their own Web-format metadata; workflow
+JSON remains opaque DOM data, including nulls and unknown node fields. Serialization does not change
+workflow interpretation or progress/cancellation lifetime.
+
+Claude and Codex's private OAuth JSON requests are written as DOM data, not reflection over anonymous
+library types. Their field names/order, escaping and explicit null fields remain unchanged; Codex's
+authorization-code exchange remains form encoded. This does not change either authentication flow.
+
+Claude CLI input envelopes and Antigravity chat/agent stdin envelopes use DOM writers with the same
+field order, escaping, explicit null fields and final newline. Claude input keeps text before ordered
+attachments. Missing Antigravity tool parameters and failed managed-tool parameters remain empty JSON
+objects. These writers do not serialize library-owned anonymous types or change process/session lifetime.
+
 `LlmToolCapabilities.StrictInputSchema` reports Supported, Unsupported or Unknown. Unknown allows an
 explicit `Strict=true` request unchanged so the host can try it and handle the provider result.
 Known Unsupported rejects that request. Ordinary tools default to `Strict=false` independently.

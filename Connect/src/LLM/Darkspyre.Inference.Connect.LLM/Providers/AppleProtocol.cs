@@ -14,12 +14,22 @@ internal sealed record AppleGeneration(string? Instructions, IReadOnlyList<Apple
     double? TopP, int? TopK, int? Seed);
 internal sealed record AppleCommand(string Command, string Id, AppleGeneration? Request = null);
 
+[JsonSourceGenerationOptions(JsonSerializerDefaults.Web, GenerationMode = JsonSourceGenerationMode.Metadata,
+    DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull, MaxDepth = 128)]
+[JsonSerializable(typeof(AppleCommand))]
+[JsonSerializable(typeof(AppleGeneration))]
+[JsonSerializable(typeof(AppleMessage))]
+[JsonSerializable(typeof(AppleCall))]
+[JsonSerializable(typeof(AppleResult))]
+[JsonSerializable(typeof(AppleTool))]
+[JsonSerializable(typeof(AppleSchemaNode))]
+[JsonSerializable(typeof(AppleSchemaProperty))]
+internal sealed partial class AppleProtocolJsonContext : JsonSerializerContext;
+
 internal static class AppleProtocol
 {
     internal const string Name = "darkspyre.apple-fm";
     internal const string ModelId = "apple-system-default";
-    internal static JsonSerializerOptions Json { get; } = new(JsonSerializerDefaults.Web)
-    { DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull, MaxDepth = 128 };
 
     internal static InferenceException Failure(string message) => new(InferenceFailureCode.ProtocolFailure, message);
 

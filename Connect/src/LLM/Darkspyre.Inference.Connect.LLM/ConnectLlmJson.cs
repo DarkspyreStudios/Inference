@@ -1,0 +1,41 @@
+using System.Text.Json;
+using System.Text.Json.Serialization;
+using System.Text.Json.Serialization.Metadata;
+
+namespace Darkspyre.Inference.Connect.LLM;
+
+/// <summary>Connect-owned metadata for closed connection, request and captured-context contracts.</summary>
+public static class ConnectLlmJson
+{
+    public static JsonTypeInfo<LlmCredential> Credential => LlmCredentialJsonContext.Default.LlmCredential;
+    public static JsonTypeInfo<LlmConnection> Connection => ConnectLlmJsonContext.Default.LlmConnection;
+    public static JsonTypeInfo<LlmSetupConfiguration> SetupConfiguration => ConnectLlmJsonContext.Default.LlmSetupConfiguration;
+    public static JsonTypeInfo<LlmChatRequest> ChatRequest => ConnectLlmJsonContext.Default.LlmChatRequest;
+    public static JsonTypeInfo<LlmChatResult> ChatResult => ConnectLlmJsonContext.Default.LlmChatResult;
+    public static JsonTypeInfo<LlmChatMessage> ChatMessage => ConnectLlmJsonContext.Default.LlmChatMessage;
+    public static JsonTypeInfo<LlmAgentContext> AgentContext => ConnectLlmJsonContext.Default.LlmAgentContext;
+    public static JsonTypeInfo<LlmAgentContextEntry> AgentContextEntry => ConnectLlmJsonContext.Default.LlmAgentContextEntry;
+    public static JsonTypeInfo<LlmAgentContextStatus> AgentContextStatus => ConnectLlmJsonContext.Default.LlmAgentContextStatus;
+}
+
+[JsonSourceGenerationOptions(GenerationMode = JsonSourceGenerationMode.Metadata)]
+[JsonSerializable(typeof(LlmConnection))]
+[JsonSerializable(typeof(LlmSetupConfiguration))]
+[JsonSerializable(typeof(LlmChatRequest))]
+[JsonSerializable(typeof(LlmChatResult))]
+[JsonSerializable(typeof(LlmChatMessage))]
+[JsonSerializable(typeof(LlmAgentContext))]
+[JsonSerializable(typeof(LlmAgentContextEntry))]
+[JsonSerializable(typeof(LlmAgentContextStatus))]
+[JsonSerializable(typeof(ConnectContinuationScopeIdentity))]
+internal sealed partial class ConnectLlmJsonContext : JsonSerializerContext;
+
+[JsonSourceGenerationOptions(JsonSerializerDefaults.Web, GenerationMode = JsonSourceGenerationMode.Metadata,
+    DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)]
+[JsonSerializable(typeof(LlmCredential))]
+internal sealed partial class LlmCredentialJsonContext : JsonSerializerContext;
+
+internal sealed record ConnectContinuationScopeIdentity(LlmTransport Transport, string Endpoint, string? ApiKey,
+    string? OAuthIdentity, IReadOnlyList<ConnectContinuationScopeHeader> Headers,
+    IReadOnlyList<ConnectContinuationScopeHeader>? SecretHeaders);
+internal sealed record ConnectContinuationScopeHeader(string Name, string Value);

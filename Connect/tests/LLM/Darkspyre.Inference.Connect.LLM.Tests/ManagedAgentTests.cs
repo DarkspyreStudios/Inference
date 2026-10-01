@@ -62,7 +62,7 @@ public sealed class ManagedAgentTests
         { ModelId = "other", Instructions = "run", ReasoningLevel = LlmReasoningLevel.High }))).OfType<LlmAgentCompactionRequiredEvent>());
         await session.SteerAsync(pause.TurnId, [new LlmAgentTextContent("queued")]);
         var captured = await session.CaptureContextAsync(new() { IncludeAttachmentData = true });
-        var originalBytes = JsonSerializer.Serialize(captured);
+        var originalBytes = JsonSerializer.Serialize(captured, ConnectLlmJson.AgentContext);
         var proposal = captured with { Revision = 999, Entries = captured.Entries.Skip(1).ToArray() };
         var result = await session.MeasureContextAsync(proposal);
         var projected = harness.Estimates.Last();
@@ -75,12 +75,12 @@ public sealed class ManagedAgentTests
         Assert.Equal("run", projected.Instructions);
         Assert.Equal(LlmReasoningLevel.High, projected.ReasoningLevel);
         Assert.Single(projected.Tools);
-        Assert.Equal(originalBytes, JsonSerializer.Serialize(await session.CaptureContextAsync(new() { IncludeAttachmentData = true })));
+        Assert.Equal(originalBytes, JsonSerializer.Serialize(await session.CaptureContextAsync(new() { IncludeAttachmentData = true }), ConnectLlmJson.AgentContext));
         Assert.Empty(harness.Requests);
         Assert.Equal(result, await session.MeasureContextAsync(proposal));
         harness.Results.Enqueue(new() { Text = "done", Status = LlmCompletionStatus.Completed, Diagnostics = new(200, null, null) });
         await Read(session.ContinueTurnAsync(new(pause.TurnId, pause.PauseId, captured.Revision, proposal)));
-        Assert.Equal(JsonSerializer.Serialize(projected), JsonSerializer.Serialize(Assert.Single(harness.Requests)));
+        Assert.Equal(JsonSerializer.Serialize(projected, ConnectLlmJson.ChatRequest), JsonSerializer.Serialize(Assert.Single(harness.Requests), ConnectLlmJson.ChatRequest));
     }
 
     [Fact]
@@ -88,7 +88,7 @@ public sealed class ManagedAgentTests
     {
         var harness = new Harness();
         await using var session = harness.Create(Options() with { Instructions = "base", Context = History("original") });
-        var before = JsonSerializer.Serialize(await session.CaptureContextAsync());
+        var before = JsonSerializer.Serialize(await session.CaptureContextAsync(), ConnectLlmJson.AgentContext);
         var proposal = History("replacement");
         var result = await session.MeasureContextAsync(proposal);
         Assert.Equal(15, result.UsedContextTokens);
@@ -105,7 +105,7 @@ public sealed class ManagedAgentTests
         using var cancelled = new CancellationTokenSource();
         cancelled.Cancel();
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => session.MeasureContextAsync(proposal, cancelled.Token));
-        Assert.Equal(before, JsonSerializer.Serialize(await session.CaptureContextAsync()));
+        Assert.Equal(before, JsonSerializer.Serialize(await session.CaptureContextAsync(), ConnectLlmJson.AgentContext));
         Assert.Empty(harness.Requests);
     }
 
@@ -295,10 +295,10 @@ public sealed class ManagedAgentTests
         Assert.Equal("input.txt", Assert.Single(lightweight.Entries[0].Message.OmittedAttachments).FileName);
         var full = await session.CaptureContextAsync(new() { IncludeAttachmentData = true });
         Assert.Equal("document", Encoding.UTF8.GetString(full.Entries[0].Message.Attachments[0].Data.Span));
-        var serialized = JsonSerializer.Serialize(full);
+        var serialized = JsonSerializer.Serialize(full, ConnectLlmJson.AgentContext);
         await using var reopened = harness.Create(Options() with
         {
-            Context = JsonSerializer.Deserialize<LlmAgentContext>(serialized),
+            Context = JsonSerializer.Deserialize(serialized, ConnectLlmJson.AgentContext),
             ThreadId = session.ThreadId,
             SessionId = session.SessionId
         });
@@ -455,6 +455,7 @@ public sealed class ManagedAgentTests
         var events = await Read(session.RunTurnAsync(Turn("go")));
         Assert.Equal(0, executions);
         Assert.Contains(events.OfType<LlmAgentToolEvent>(), item => item.Status == "failed" && item.Output is { IsError: true });
+        Assert.Equal("{}", Assert.Single(events.OfType<LlmAgentToolEvent>(), item => item.Status == "failed").Arguments.GetRawText());
         Assert.True((await session.CaptureContextAsync()).Entries[2].Message.ToolResults[0].Output.IsError);
     }
 

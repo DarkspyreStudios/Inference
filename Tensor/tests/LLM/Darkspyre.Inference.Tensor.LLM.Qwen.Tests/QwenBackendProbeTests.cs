@@ -7,9 +7,11 @@ public sealed class QwenBackendProbeTests
     [Fact]
     public async Task CpuPrerequisiteCheckDoesNotRequireNativeGpuLibrariesOrAResidentModel()
     {
-        TensorBackendAvailability result = await new QwenBackendProbe().CheckAsync(TensorBackendKind.Cpu);
+        TensorBackendAvailability result = await new QwenBackendProbe().CheckAsync(Request(TensorBackendKind.Cpu));
         Assert.True(result.IsAvailable);
-        Assert.Equal(TensorBackendKind.Cpu, result.Backend);
+        Assert.Equal(TensorBackendKind.Cpu, result.RequestedBackend);
+        Assert.Null(result.ActualBackend);
+        Assert.Null(result.IsInitialized);
         Assert.Contains("allocation is not guaranteed", result.Reason, StringComparison.Ordinal);
     }
 
@@ -17,8 +19,37 @@ public sealed class QwenBackendProbeTests
     public async Task CancellationPreventsNativeInitializationAndUnknownBackendIsUnavailable()
     {
         var probe = new QwenBackendProbe();
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => probe.CheckAsync(TensorBackendKind.Auto, new(true)));
-        Assert.False((await probe.CheckAsync((TensorBackendKind)999)).IsAvailable);
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => probe.CheckAsync(Request(TensorBackendKind.Auto), new(true)));
+        Assert.False((await probe.CheckAsync(Request((TensorBackendKind)999))).IsAvailable);
+    }
+
+    private static TensorBackendProbeRequest Request(TensorBackendKind backend) =>
+        new(Guid.NewGuid(), QwenSetup.Definition.Implementation.Id, backend, System.Runtime.InteropServices.RuntimeInformation.RuntimeIdentifier);
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ExplicitNativeCandidatesDoNotFallThroughToAmbientGgml(bool empty)
+    {
+        TensorBackendProbeRequest original = Request(TensorBackendKind.GgmlCpu);
+        var build = new TensorSharpBuildIdentity("package-version", new('a', 64), new('b', 40));
+        TensorNativeCandidate[] candidates = empty ? [] : [new("candidate", "/private/native/bridge", "cpu", build, original.TargetRid)];
+        var request = new TensorBackendProbeRequest(original.OperationId, original.ImplementationId, original.RequestedBackend,
+            original.TargetRid, build, candidates);
+        TensorBackendAvailability result = await new QwenBackendProbe().CheckAsync(request);
+        Assert.Equal(empty ? TensorBackendAvailabilityState.Unavailable : TensorBackendAvailabilityState.Unknown, result.State);
+        Assert.Null(result.ActualBackend);
+        Assert.Null(result.LoadedCandidateId);
+        Assert.Null(result.IsInitialized);
+        Assert.DoesNotContain("private", result.Reason, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task WrongImplementationIsUnsupportedBeforeBackendEntry()
+    {
+        var request = new TensorBackendProbeRequest(Guid.NewGuid(), "another", TensorBackendKind.GgmlCpu,
+            System.Runtime.InteropServices.RuntimeInformation.RuntimeIdentifier);
+        Assert.Equal(TensorBackendAvailabilityState.Unsupported, (await new QwenBackendProbe().CheckAsync(request)).State);
     }
 
     [Fact]

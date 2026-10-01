@@ -342,7 +342,7 @@ a listener's exception.
 | `ITensorModelInstance.GetObservationAsync` | Async; replaces the `Observation` property. `TensorModelObservation` carries `State` in place of `IsStopped`. |
 | `ITensorModelInstance.DisposeAsync` | Completes after native work has released model memory. |
 | `TensorModelLifetime` | Takes its engine as owner; `AcceptAsync` queues lifecycle work and `WhenIdleAsync` awaits it. |
-| `ITensorBackendProbe.CheckAsync` implementations | Run on a background thread; no check starts a backend. |
+| `ITensorBackendProbe.CheckAsync` implementations | Use structured requests/results. Synchronous native prerequisite checks run on a background thread and recheck cancellation before publishing. An injected probe remains exclusive. |
 | `TensorMetadataReader.ReadAsync` | Downloads ranges asynchronously and reruns the parser over downloaded bytes. |
 | `TensorModelCatalog`, `TensorModelDefinitionValidator.Validate`, `TensorResolvedPack.Create` | Synchronous; work on values in hand. |
 | Engine requests (`StreamAsync`, `GenerateAsync`, `DecideAsync`, `MeasureAsync`, `TranscribeAsync`) | Unchanged signatures; native and CPU work runs on a background thread. |

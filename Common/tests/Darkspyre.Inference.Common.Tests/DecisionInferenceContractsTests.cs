@@ -19,8 +19,8 @@ public sealed class DecisionInferenceContractsTests
             ]
         };
 
-        string json = JsonSerializer.Serialize(original);
-        DecisionQuestion? restored = JsonSerializer.Deserialize<DecisionQuestion>(json);
+        string json = JsonSerializer.Serialize(original, InferenceJson.DecisionQuestion);
+        DecisionQuestion? restored = JsonSerializer.Deserialize(json, InferenceJson.DecisionQuestion);
 
         ChoiceDecisionQuestion choice = Assert.IsType<ChoiceDecisionQuestion>(restored);
         Assert.Equal(DecisionQuestionKind.Choice, choice.Kind);
@@ -39,8 +39,8 @@ public sealed class DecisionInferenceContractsTests
             ActionProbability = 0.25
         };
 
-        string json = JsonSerializer.Serialize(original);
-        DecisionAnswer? restored = JsonSerializer.Deserialize<DecisionAnswer>(json);
+        string json = JsonSerializer.Serialize(original, InferenceJson.DecisionAnswer);
+        DecisionAnswer? restored = JsonSerializer.Deserialize(json, InferenceJson.DecisionAnswer);
 
         BooleanDecisionAnswer answer = Assert.IsType<BooleanDecisionAnswer>(restored);
         Assert.True(answer.Value);

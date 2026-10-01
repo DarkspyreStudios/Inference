@@ -1,6 +1,10 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Reflection;
+using System.Runtime.CompilerServices;
+using System.Runtime.Loader;
 using System.Text.Json;
+using System.Text.Json.Serialization.Metadata;
 using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Common.Setup;
 using Microsoft.Extensions.DependencyInjection;
@@ -11,6 +15,117 @@ public sealed class PocketTtsTests
 {
     private static readonly string[] ServerVoices = ["server-voice"];
     private static readonly string[] TestVoices = ["voice"];
+
+    [Theory]
+    [InlineData(null, null, "{\"text\":\"\\u003C\\u0026\\u003E\",\"voice\":null,\"speaker\":null,\"speed\":1,\"response_format\":\"wav\"}")]
+    [InlineData("", 1.25, "{\"text\":\"\\u003C\\u0026\\u003E\",\"voice\":\"\",\"speaker\":\"\",\"speed\":1.25,\"response_format\":\"wav\"}")]
+    public async Task BridgeJsonRetainsExactWireBytesAndNullVersusEmptyVoice(string? voice, double? speed, string expected)
+    {
+        using var handler = new Handler(async (request, token) =>
+        {
+            Assert.Equal(expected, await request.Content!.ReadAsStringAsync(token));
+            Assert.Equal("application/json", request.Content.Headers.ContentType!.MediaType);
+            return Wave();
+        });
+        using var http = new HttpClient(handler);
+        await new PocketTtsHttpProvider(http).Bind(Connection() with { PocketTts = new() { Protocol = PocketTtsProtocol.BridgeJson } })
+            .SpeakAsync(new() { Text = "<&>", VoiceId = voice, Speed = speed });
+    }
+
+    [Fact]
+    public async Task VoiceMetadataRetainsWebCaseInsensitivityUnknownMembersAndNullEntries()
+    {
+        using var handler = new Handler((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent("""{"VoiceOptions":[null,{"ID":"voice-id","Name":"A voice","Category":null}],"future":true}""",
+                System.Text.Encoding.UTF8, "application/json")
+        }));
+        using var http = new HttpClient(handler);
+        TtsVoice voice = Assert.Single(await new PocketTtsHttpProvider(http).Bind(Connection()).ListVoicesAsync());
+        Assert.Equal("voice-id", voice.Id);
+        Assert.Equal("A voice", voice.DisplayName);
+        Assert.Null(voice.Description);
+    }
+
+    [Theory]
+    [InlineData("PocketTtsVoiceList", "{\"voices\":[],\"voiceOptions\":[{\"id\":\"voice\",\"name\":null,\"category\":null}]}")]
+    [InlineData("PocketTtsVoiceOption", "{\"id\":\"voice\",\"name\":null,\"category\":null}")]
+    [InlineData("PocketTtsBridgePayload", "{\"text\":\"text\",\"voice\":null,\"speaker\":null,\"speed\":1,\"response_format\":\"wav\"}")]
+    [InlineData("ProviderPipeline", "")]
+    public void ActualCollectiblePocketTtsMetadataAndHttpCallersRetire(string family, string json)
+    {
+        WeakReference generation = ExercisePocketGeneration(family, json);
+        for (int attempt = 0; generation.IsAlive && attempt < 20; attempt++)
+        {
+            GC.Collect(); GC.WaitForPendingFinalizers(); GC.Collect(); Thread.Sleep(10);
+        }
+        Assert.False(generation.IsAlive, "PocketTTS metadata or settled HTTP callers retain the collectible generation.");
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static WeakReference ExercisePocketGeneration(string family, string json)
+    {
+        string path = typeof(PocketTtsHttpProvider).Assembly.Location;
+        var generation = new PocketGeneration(Path.GetDirectoryName(path)!);
+        var weak = new WeakReference(generation);
+        try
+        {
+            Assembly tts = generation.LoadFromAssemblyPath(path);
+            if (family != "ProviderPipeline")
+            {
+                Type owner = tts.GetType("Darkspyre.Inference.Connect.TTS.PocketTtsJsonContext", throwOnError: true)!;
+                object context = owner.GetProperty("Default")!.GetValue(null)!;
+                JsonTypeInfo metadata = (JsonTypeInfo)owner.GetProperty(family)!.GetValue(context)!;
+                Assert.Same(generation, AssemblyLoadContext.GetLoadContext(metadata.Type.Assembly));
+                Assert.Same(context, metadata.Options.TypeInfoResolver);
+                object value = JsonSerializer.Deserialize(json, metadata)!;
+                Assert.NotNull(JsonSerializer.Deserialize(JsonSerializer.Serialize(value, metadata), metadata));
+            }
+            else
+            {
+                using var handler = new Handler(async (request, token) =>
+                {
+                    if (request.Method == HttpMethod.Get)
+                        return new(HttpStatusCode.OK) { Content = new StringContent("{\"voices\":[\"voice\"]}", System.Text.Encoding.UTF8, "application/json") };
+                    Assert.Equal("{\"text\":\"text\",\"voice\":null,\"speaker\":null,\"speed\":1,\"response_format\":\"wav\"}", await request.Content!.ReadAsStringAsync(token));
+                    return Wave();
+                });
+                using var http = new HttpClient(handler);
+                Type providerType = tts.GetType(typeof(PocketTtsHttpProvider).FullName!, throwOnError: true)!;
+                object provider = Activator.CreateInstance(providerType, http)!;
+                Type connectionType = tts.GetType(typeof(TtsConnection).FullName!, throwOnError: true)!;
+                object connection = Activator.CreateInstance(connectionType)!;
+                connectionType.GetProperty("Endpoint")!.SetValue(connection, new Uri("https://provider.invalid"));
+                object options = connectionType.GetProperty("PocketTts")!.GetValue(connection)!;
+                PropertyInfo protocol = options.GetType().GetProperty("Protocol")!;
+                protocol.SetValue(options, Enum.Parse(protocol.PropertyType, "BridgeJson"));
+                object client = providerType.GetMethod("Bind")!.Invoke(provider, [connection])!;
+                ((Task)client.GetType().GetMethod("ListVoicesAsync")!.Invoke(client, [CancellationToken.None])!).GetAwaiter().GetResult();
+                Type requestType = tts.GetType(typeof(TtsRequest).FullName!, throwOnError: true)!;
+                object request = Activator.CreateInstance(requestType)!;
+                requestType.GetProperty("Text")!.SetValue(request, "text");
+                Task operation = (Task)client.GetType().GetMethod("SpeakAsync")!.Invoke(client, [request, CancellationToken.None])!;
+                operation.GetAwaiter().GetResult();
+                object result = operation.GetType().GetProperty("Result")!.GetValue(operation)!;
+                object provenance = result.GetType().GetProperty("Provenance")!.GetValue(result)!;
+                Assert.Same(generation, AssemblyLoadContext.GetLoadContext(provenance.GetType().Assembly));
+                Assert.Equal(2, handler.Calls);
+            }
+        }
+        finally { generation.Unload(); }
+        return weak;
+    }
+
+    private sealed class PocketGeneration(string directory) : AssemblyLoadContext(isCollectible: true)
+    {
+        protected override Assembly? Load(AssemblyName assemblyName)
+        {
+            if (assemblyName.Name?.StartsWith("Darkspyre.Inference.", StringComparison.Ordinal) != true) return null;
+            string path = Path.Combine(directory, assemblyName.Name + ".dll");
+            return File.Exists(path) ? LoadFromAssemblyPath(path) : null;
+        }
+    }
+
     [Fact]
     public async Task VoiceOptionsPreserveServerIdentifiersAndDescriptions()
     {

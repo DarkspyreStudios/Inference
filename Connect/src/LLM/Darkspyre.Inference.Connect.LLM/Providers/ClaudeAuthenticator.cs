@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Darkspyre.Inference.Connect.LLM.Internal;
 
 namespace Darkspyre.Inference.Connect.LLM.Providers;
@@ -63,14 +64,14 @@ internal sealed class ClaudeAuthenticator(HttpClient http)
 
         using var request = new HttpRequestMessage(HttpMethod.Post, TokenEndpoint)
         {
-            Content = JsonContent.Create(new
+            Content = JsonContent.Create(new JsonObject
             {
-                grant_type = "authorization_code",
-                code,
-                redirect_uri = session.RedirectUri,
-                client_id = ClientId,
-                code_verifier = session.CodeVerifier,
-                state
+                ["grant_type"] = "authorization_code",
+                ["code"] = code,
+                ["redirect_uri"] = session.RedirectUri,
+                ["client_id"] = ClientId,
+                ["code_verifier"] = session.CodeVerifier,
+                ["state"] = state
             })
         };
         using HttpResponseMessage response = await Http.SendAsync(request, cancellationToken);
@@ -82,12 +83,12 @@ internal sealed class ClaudeAuthenticator(HttpClient http)
     protected override HttpRequestMessage BuildRefreshRequest(LlmOAuthTokens tokens) =>
         new(HttpMethod.Post, TokenEndpoint)
         {
-            Content = JsonContent.Create(new
+            Content = JsonContent.Create(new JsonObject
             {
-                grant_type = "refresh_token",
-                refresh_token = tokens.RefreshToken,
-                client_id = ClientId,
-                scope = Scopes
+                ["grant_type"] = "refresh_token",
+                ["refresh_token"] = tokens.RefreshToken,
+                ["client_id"] = ClientId,
+                ["scope"] = Scopes
             })
         };
 

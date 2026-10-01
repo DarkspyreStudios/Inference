@@ -114,13 +114,46 @@ public sealed class WhisperMetadataTests
         int calls = 0;
         var probe = new WhisperBackendProbe(() => { calls++; return "runtime is callable"; });
         Assert.Equal(0, calls);
-        Assert.True((await probe.CheckAsync(TensorBackendKind.Cpu)).IsAvailable);
-        Assert.True((await probe.CheckAsync(TensorBackendKind.Auto)).IsAvailable);
-        Assert.False((await probe.CheckAsync(TensorBackendKind.Cuda)).IsAvailable);
+        Assert.True((await probe.CheckAsync(ProbeRequest(TensorBackendKind.Cpu))).IsAvailable);
+        Assert.True((await probe.CheckAsync(ProbeRequest(TensorBackendKind.Auto))).IsAvailable);
+        Assert.False((await probe.CheckAsync(ProbeRequest(TensorBackendKind.Cuda))).IsAvailable);
         Assert.Equal(2, calls);
-        Assert.False((await new WhisperBackendProbe(() => throw new DllNotFoundException()).CheckAsync(TensorBackendKind.Cpu)).IsAvailable);
-        Assert.Null((await new WhisperBackendProbe(() => null).CheckAsync(TensorBackendKind.Cpu)).IsAvailable);
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => probe.CheckAsync(TensorBackendKind.Cpu, new(true)));
+        Assert.False((await new WhisperBackendProbe(() => throw new DllNotFoundException()).CheckAsync(ProbeRequest(TensorBackendKind.Cpu))).IsAvailable);
+        Assert.Equal(TensorBackendAvailabilityState.Unknown, (await new WhisperBackendProbe(() => null).CheckAsync(ProbeRequest(TensorBackendKind.Cpu))).State);
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => probe.CheckAsync(ProbeRequest(TensorBackendKind.Cpu), new(true)));
+    }
+
+    private static TensorBackendProbeRequest ProbeRequest(TensorBackendKind backend) =>
+        new(Guid.NewGuid(), WhisperSetup.Definition.Implementation.Id, backend, System.Runtime.InteropServices.RuntimeInformation.RuntimeIdentifier);
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ExplicitCandidatePlanNeverInvokesUnboundWhisperRuntime(bool empty)
+    {
+        int nativeCalls = 0;
+        var probe = new WhisperBackendProbe(() => { nativeCalls++; return "available"; });
+        TensorBackendProbeRequest original = ProbeRequest(TensorBackendKind.Cpu);
+        var build = new TensorSharpBuildIdentity("package-version", new('a', 64), new('b', 40));
+        TensorNativeCandidate[] candidates = empty ? [] : [new("candidate", "/private/native/bridge", "cpu", build, original.TargetRid)];
+        var request = new TensorBackendProbeRequest(original.OperationId, original.ImplementationId, original.RequestedBackend,
+            original.TargetRid, build, candidates);
+        TensorBackendAvailability result = await probe.CheckAsync(request);
+        Assert.Equal(empty ? TensorBackendAvailabilityState.Unavailable : TensorBackendAvailabilityState.Unknown, result.State);
+        Assert.Equal(0, nativeCalls);
+    }
+
+    [Fact]
+    public async Task WrongImplementationOrForeignRidNeverInvokesWhisperRuntime()
+    {
+        int nativeCalls = 0;
+        var probe = new WhisperBackendProbe(() => { nativeCalls++; return "available"; });
+        TensorBackendProbeRequest original = ProbeRequest(TensorBackendKind.Cpu);
+        Assert.Equal(TensorBackendAvailabilityState.Unsupported, (await probe.CheckAsync(new(Guid.NewGuid(), "another",
+            original.RequestedBackend, original.TargetRid))).State);
+        Assert.Equal(TensorBackendAvailabilityState.Unsupported, (await probe.CheckAsync(new(Guid.NewGuid(), original.ImplementationId,
+            original.RequestedBackend, "another-rid"))).State);
+        Assert.Equal(0, nativeCalls);
     }
 
     private static SetupChoiceField Field(TensorSettings settings, string id) => Assert.IsType<SetupChoiceField>(

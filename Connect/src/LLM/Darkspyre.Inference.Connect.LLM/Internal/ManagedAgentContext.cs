@@ -200,5 +200,6 @@ internal static class ManagedAgentContext
     };
 
     public static bool Equivalent(LlmAgentContextEntry left, LlmAgentContextEntry right) =>
-        JsonElement.DeepEquals(JsonSerializer.SerializeToElement(left), JsonSerializer.SerializeToElement(right));
+        JsonElement.DeepEquals(JsonSerializer.SerializeToElement(left, ConnectLlmJson.AgentContextEntry),
+            JsonSerializer.SerializeToElement(right, ConnectLlmJson.AgentContextEntry));
 }

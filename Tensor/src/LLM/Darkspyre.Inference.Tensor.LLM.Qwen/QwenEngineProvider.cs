@@ -25,7 +25,7 @@ public sealed class QwenEngineProvider : ITensorEngineProvider
 
     public TensorSettingsManager CreateSettingsManager(ISetupCommitTarget<TensorSetupChanges> target, ITensorModelPackManager packs,
         IReadOnlyList<TensorModelPackDefinition> offeredModels, ITensorModelInstance? instance = null,
-        ITensorModelSource? source = null, ITensorArtifactReader? reader = null)
+        ITensorModelSource? source = null, ITensorArtifactReader? reader = null, ITensorBackendProbe? backendProbe = null)
     {
         ArgumentNullException.ThrowIfNull(offeredModels);
         ITensorLlmInference? live = instance switch
@@ -34,6 +34,6 @@ public sealed class QwenEngineProvider : ITensorEngineProvider
             ITensorLlmInference llm when llm.Descriptor.Id == Definition.Setup.Implementation.Id => llm,
             _ => throw new ArgumentException("The instance does not belong to the Qwen implementation.", nameof(instance))
         };
-        return QwenSetup.CreateSettingsManager(target, packs, live, offeredModels, source, reader);
+        return QwenSetup.CreateSettingsManager(target, packs, live, offeredModels, source, reader, backendProbe);
     }
 }

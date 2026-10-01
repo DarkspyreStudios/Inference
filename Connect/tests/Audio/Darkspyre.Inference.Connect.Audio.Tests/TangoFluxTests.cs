@@ -1,5 +1,9 @@
 using System.Net;
+using System.Reflection;
+using System.Runtime.CompilerServices;
+using System.Runtime.Loader;
 using System.Text.Json;
+using System.Text.Json.Serialization.Metadata;
 using Darkspyre.Inference.Common;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -7,6 +11,93 @@ namespace Darkspyre.Inference.Connect.Audio.Tests;
 
 public sealed class TangoFluxTests
 {
+    [Theory]
+    [InlineData(null, null, "{\"prompt\":\"\\u003C\\u0026\\u003E\",\"duration\":2.5,\"steps\":10,\"guidanceScale\":4.5}")]
+    [InlineData(0, false, "{\"prompt\":\"\\u003C\\u0026\\u003E\",\"duration\":2.5,\"steps\":10,\"guidanceScale\":4.5,\"seed\":0,\"useCache\":false}")]
+    public async Task GeneratedPayloadPreservesExactWebWireBytesAndOptionalNullOmission(int? seed, bool? cache, string expected)
+    {
+        using var handler = new Handler(async (request, token) =>
+        {
+            Assert.Equal(expected, await request.Content!.ReadAsStringAsync(token));
+            Assert.Equal("application/json", request.Content.Headers.ContentType!.MediaType);
+            return Wave();
+        });
+        using var http = new HttpClient(handler);
+        await new TangoFluxHttpProvider(http).Bind(Connection()).GenerateAsync(new()
+        { Prompt = "<&>", Duration = TimeSpan.FromSeconds(2.5), Seed = seed, UseCache = cache });
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ActualCollectibleTangoFluxMetadataAndHttpCallerRetire(bool exerciseCaller)
+    {
+        WeakReference generation = ExerciseTangoGeneration(exerciseCaller);
+        for (int attempt = 0; generation.IsAlive && attempt < 20; attempt++)
+        {
+            GC.Collect(); GC.WaitForPendingFinalizers(); GC.Collect(); Thread.Sleep(10);
+        }
+        Assert.False(generation.IsAlive, "TangoFlux metadata or settled HTTP callers retain the collectible generation.");
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static WeakReference ExerciseTangoGeneration(bool exerciseCaller)
+    {
+        string path = typeof(TangoFluxHttpProvider).Assembly.Location;
+        var generation = new TangoGeneration(Path.GetDirectoryName(path)!);
+        var weak = new WeakReference(generation);
+        try
+        {
+            Assembly audio = generation.LoadFromAssemblyPath(path);
+            Type owner = audio.GetType("Darkspyre.Inference.Connect.Audio.TangoFluxJsonContext", throwOnError: true)!;
+            object context = owner.GetProperty("Default")!.GetValue(null)!;
+            JsonTypeInfo metadata = (JsonTypeInfo)owner.GetProperty("TangoFluxGeneratePayload")!.GetValue(context)!;
+            Assert.Same(generation, AssemblyLoadContext.GetLoadContext(metadata.Type.Assembly));
+            Assert.Same(context, metadata.Options.TypeInfoResolver);
+            object payload = JsonSerializer.Deserialize("""
+                {"PROMPT":"text","duration":"5","steps":"10","guidanceScale":"4.5","seed":null,"useCache":false,"future":true}
+                """, metadata)!;
+            Assert.Equal("{\"prompt\":\"text\",\"duration\":5,\"steps\":10,\"guidanceScale\":4.5,\"useCache\":false}", JsonSerializer.Serialize(payload, metadata));
+            if (exerciseCaller)
+            {
+                using var handler = new Handler(async (request, token) =>
+                {
+                    Assert.Equal("{\"prompt\":\"text\",\"duration\":5,\"steps\":10,\"guidanceScale\":4.5}", await request.Content!.ReadAsStringAsync(token));
+                    return Wave();
+                });
+                using var http = new HttpClient(handler);
+                Type providerType = audio.GetType(typeof(TangoFluxHttpProvider).FullName!, throwOnError: true)!;
+                object provider = Activator.CreateInstance(providerType, http)!;
+                Type connectionType = audio.GetType(typeof(AudioConnection).FullName!, throwOnError: true)!;
+                object connection = Activator.CreateInstance(connectionType)!;
+                connectionType.GetProperty("Endpoint")!.SetValue(connection, new Uri("https://provider.invalid"));
+                object client = providerType.GetMethod("Bind")!.Invoke(provider, [connection])!;
+                Type requestType = audio.GetType(typeof(AudioGenerationRequest).FullName!, throwOnError: true)!;
+                object request = Activator.CreateInstance(requestType)!;
+                requestType.GetProperty("Prompt")!.SetValue(request, "text");
+                requestType.GetProperty("Duration")!.SetValue(request, TimeSpan.FromSeconds(5));
+                Task operation = (Task)client.GetType().GetMethod("GenerateAsync")!.Invoke(client, [request, CancellationToken.None])!;
+                operation.GetAwaiter().GetResult();
+                object result = operation.GetType().GetProperty("Result")!.GetValue(operation)!;
+                object provenance = result.GetType().GetProperty("Provenance")!.GetValue(result)!;
+                Assert.Same(generation, AssemblyLoadContext.GetLoadContext(provenance.GetType().Assembly));
+                Assert.Equal(1, handler.Calls);
+            }
+        }
+        finally { generation.Unload(); }
+        return weak;
+    }
+
+    private sealed class TangoGeneration(string directory) : AssemblyLoadContext(isCollectible: true)
+    {
+        protected override Assembly? Load(AssemblyName assemblyName)
+        {
+            if (assemblyName.Name?.StartsWith("Darkspyre.Inference.", StringComparison.Ordinal) != true) return null;
+            string path = Path.Combine(directory, assemblyName.Name + ".dll");
+            return File.Exists(path) ? LoadFromAssemblyPath(path) : null;
+        }
+    }
+
     [Fact]
     public async Task MapsExplicitGenerationParametersAndReturnsAudioWithoutInventingDuration()
     {

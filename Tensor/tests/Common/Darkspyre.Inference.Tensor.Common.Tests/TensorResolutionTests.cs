@@ -56,13 +56,13 @@ public sealed class TensorResolutionTests
         int calls = 0;
         ITensorBackendProbe probe = TensorBackendProbes.CpuCuda(() => { calls++; return available; });
         Assert.Equal(0, calls);
-        Assert.True((await probe.CheckAsync(TensorBackendKind.Auto)).IsAvailable);
-        Assert.True((await probe.CheckAsync(TensorBackendKind.Cpu)).IsAvailable);
+        Assert.True((await probe.CheckAsync(Request(TensorBackendKind.Auto))).IsAvailable);
+        Assert.True((await probe.CheckAsync(Request(TensorBackendKind.Cpu))).IsAvailable);
         Assert.Equal(0, calls);
-        Assert.Equal(available, (await probe.CheckAsync(TensorBackendKind.Cuda)).IsAvailable);
+        Assert.Equal(available, (await probe.CheckAsync(Request(TensorBackendKind.Cuda))).IsAvailable);
         Assert.Equal(1, calls);
-        Assert.False((await probe.CheckAsync(TensorBackendKind.Mlx)).IsAvailable);
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => probe.CheckAsync(TensorBackendKind.Cuda, new(true)));
+        Assert.False((await probe.CheckAsync(Request(TensorBackendKind.Mlx))).IsAvailable);
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => probe.CheckAsync(Request(TensorBackendKind.Cuda), new(true)));
         Assert.Equal(1, calls);
     }
 
@@ -71,15 +71,18 @@ public sealed class TensorResolutionTests
     {
         var unavailable = TensorBackendProbes.CpuCuda(() => throw new DllNotFoundException("private runtime path"));
         var unknown = TensorBackendProbes.CpuCuda(() => throw new IOException("private runtime path"));
-        TensorBackendAvailability missing = await unavailable.CheckAsync(TensorBackendKind.Cuda);
-        TensorBackendAvailability undecided = await unknown.CheckAsync(TensorBackendKind.Cuda);
+        TensorBackendAvailability missing = await unavailable.CheckAsync(Request(TensorBackendKind.Cuda));
+        TensorBackendAvailability undecided = await unknown.CheckAsync(Request(TensorBackendKind.Cuda));
         Assert.False(missing.IsAvailable);
-        Assert.Null(undecided.IsAvailable);
+        Assert.Equal(TensorBackendAvailabilityState.Unknown, undecided.State);
         Assert.DoesNotContain("private runtime path", missing.Reason + undecided.Reason, StringComparison.Ordinal);
     }
 
     private static TensorModelPackDefinition Pack(IReadOnlyList<TensorModelArtifactDefinition> artifacts) =>
         TensorResolvedPack.Create(Candidate, TensorCapability.Image, "test", new HashSet<TensorBackendKind> { TensorBackendKind.Cpu }, artifacts);
+
+    private static TensorBackendProbeRequest Request(TensorBackendKind backend) =>
+        new(Guid.NewGuid(), "test", backend, System.Runtime.InteropServices.RuntimeInformation.RuntimeIdentifier);
 
     private static TensorModelArtifactDefinition Artifact(string role) => new()
     {

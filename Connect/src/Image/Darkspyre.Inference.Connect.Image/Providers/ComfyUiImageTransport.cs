@@ -26,8 +26,6 @@ internal readonly record struct ComfySignal(
     int? Value = null,
     int? Maximum = null);
 
-internal sealed record ComfyOutputImage(string FileName, string Subfolder, string Type);
-
 internal sealed record ComfyWorkflowConfiguration(
     string OutputNodeId,
     string FilenamePrefixTemplate,
@@ -218,13 +216,8 @@ internal sealed class ComfyUiImageTransport(
             string[] missingNodeTypes = requiredNodeTypes
                 .Where(classType => !objectInfo.RootElement.TryGetProperty(classType, out _))
                 .ToArray();
-            string diagnostics = JsonSerializer.Serialize(new
-            {
-                workflowId = workflow.Id,
-                workflowVersion = workflow.Version,
-                requiredNodeTypes,
-                missingNodeTypes
-            });
+            string diagnostics = JsonSerializer.Serialize(new ComfyWorkflowDiagnostics(workflow.Id, workflow.Version,
+                requiredNodeTypes, missingNodeTypes), ComfyProtocolJsonContext.Default.ComfyWorkflowDiagnostics);
             return missingNodeTypes.Length == 0
                 ? new ImageProviderHealth(
                     true,
@@ -312,7 +305,7 @@ internal sealed class ComfyUiImageTransport(
         using HttpClient client = CreateClient(connection);
         using HttpResponseMessage response = await client.PostAsJsonAsync(
             BuildUri(connection, "prompt"),
-            new { prompt = workflow, client_id = _clientId },
+            new ComfyPromptRequest(workflow, _clientId), ComfyProtocolJsonContext.Default.ComfyPromptRequest,
             cancellationToken);
         string body = await response.Content.ReadAsStringAsync(cancellationToken);
         if (!response.IsSuccessStatusCode)
@@ -357,7 +350,7 @@ internal sealed class ComfyUiImageTransport(
                 return new ImageTransportJobSnapshot(
                     ImageTransportJobState.Failed,
                     Error: error,
-                    Diagnostics: JsonSerializer.Serialize(new { source = "history", status = "failed" }));
+                    Diagnostics: JsonSerializer.Serialize(new ComfyHistoryDiagnostics("history", "failed"), ComfyProtocolJsonContext.Default.ComfyHistoryDiagnostics));
             }
 
             ComfyOutputImage? output = FindOutput(promptHistory, configuration.OutputNodeId);
@@ -365,13 +358,13 @@ internal sealed class ComfyUiImageTransport(
             {
                 return new ImageTransportJobSnapshot(
                     ImageTransportJobState.Completed,
-                    new ImageTransportOutput(output.FileName, JsonSerializer.Serialize(output)),
-                    Diagnostics: JsonSerializer.Serialize(new { source = "history", status = "completed" }));
+                    new ImageTransportOutput(output.FileName, JsonSerializer.Serialize(output, ComfyOutputJsonContext.Default.ComfyOutputImage)),
+                    Diagnostics: JsonSerializer.Serialize(new ComfyHistoryDiagnostics("history", "completed"), ComfyProtocolJsonContext.Default.ComfyHistoryDiagnostics));
             }
 
             return new ImageTransportJobSnapshot(
                 ImageTransportJobState.Generating,
-                Diagnostics: JsonSerializer.Serialize(new { source = "history", status = "generating" }));
+                Diagnostics: JsonSerializer.Serialize(new ComfyHistoryDiagnostics("history", "generating"), ComfyProtocolJsonContext.Default.ComfyHistoryDiagnostics));
         }
 
         using HttpResponseMessage queueResponse = await client.GetAsync(
@@ -385,7 +378,7 @@ internal sealed class ComfyUiImageTransport(
         return new ImageTransportJobSnapshot(
             running ? ImageTransportJobState.Generating : ImageTransportJobState.Queued,
             Error: pending || running ? string.Empty : "The prompt is not present in ComfyUI history or queue.",
-            Diagnostics: JsonSerializer.Serialize(new { source = "queue", running, pending }));
+            Diagnostics: JsonSerializer.Serialize(new ComfyQueueDiagnostics("queue", running, pending), ComfyProtocolJsonContext.Default.ComfyQueueDiagnostics));
     }
 
     public async Task<byte[]> DownloadAsync(
@@ -395,7 +388,7 @@ internal sealed class ComfyUiImageTransport(
     {
         ValidateConnection(connection);
         ArgumentNullException.ThrowIfNull(output);
-        ComfyOutputImage comfyOutput = JsonSerializer.Deserialize<ComfyOutputImage>(output.ProviderState)
+        ComfyOutputImage comfyOutput = JsonSerializer.Deserialize(output.ProviderState, ComfyOutputJsonContext.Default.ComfyOutputImage)
             ?? throw new InvalidOperationException("The ComfyUI output state is invalid.");
         string query = $"view?filename={Uri.EscapeDataString(comfyOutput.FileName)}" +
             $"&subfolder={Uri.EscapeDataString(comfyOutput.Subfolder)}" +
@@ -417,7 +410,7 @@ internal sealed class ComfyUiImageTransport(
             using HttpClient client = CreateClient(connection);
             using HttpResponseMessage queueResponse = await client.PostAsJsonAsync(
                 BuildUri(connection, "queue"),
-                new { delete = new[] { providerJobId } },
+                new ComfyDeleteRequest([providerJobId]), ComfyProtocolJsonContext.Default.ComfyDeleteRequest,
                 cancellationToken);
             queueResponse.EnsureSuccessStatusCode();
             if (interruptRunning)
@@ -757,5 +750,5 @@ internal sealed class ComfyUiImageTransport(
     }
 
     private static string SerializeDiagnostics(string status, string body) =>
-        JsonSerializer.Serialize(new { status, response = ReadError(body) });
+        JsonSerializer.Serialize(new ComfyResponseDiagnostics(status, ReadError(body)), ComfyProtocolJsonContext.Default.ComfyResponseDiagnostics);
 }
