@@ -11,6 +11,10 @@ namespace Darkspyre.Inference.Connect.LLM;
 /// <summary>Connect-owned metadata for closed connection, request and captured-context contracts.</summary>
 public static class ConnectLlmJson
 {
+    public static JsonTypeInfo<XaiStoragePublicUrlRequest> XaiStoragePublicUrlRequest => Metadata<XaiStoragePublicUrlRequest>();
+    public static JsonTypeInfo<XaiStoragePublicUrlFlag> XaiStoragePublicUrlFlag => Metadata<XaiStoragePublicUrlFlag>();
+    public static JsonTypeInfo<XaiStoragePublicUrlConfiguration> XaiStoragePublicUrlConfiguration => Metadata<XaiStoragePublicUrlConfiguration>();
+    public static JsonTypeInfo<XaiFileStorageOptions> XaiFileStorageOptions => Metadata<XaiFileStorageOptions>();
     public static JsonTypeInfo<LlmFileOrder> LlmFileOrder => Metadata<LlmFileOrder>();
     public static JsonTypeInfo<LlmFileSort> LlmFileSort => Metadata<LlmFileSort>();
     public static JsonTypeInfo<LlmFileContentFormat> LlmFileContentFormat => Metadata<LlmFileContentFormat>();
@@ -141,6 +145,10 @@ public static class ConnectLlmJson
 [JsonSourceGenerationOptions(GenerationMode = JsonSourceGenerationMode.Metadata,
     Converters = [typeof(LlmAgentContextJsonConverter)])]
 [JsonSerializable(typeof(LlmConnection))]
+[JsonSerializable(typeof(XaiStoragePublicUrlRequest))]
+[JsonSerializable(typeof(XaiStoragePublicUrlFlag))]
+[JsonSerializable(typeof(XaiStoragePublicUrlConfiguration))]
+[JsonSerializable(typeof(XaiFileStorageOptions))]
 [JsonSerializable(typeof(LlmFileOrder))]
 [JsonSerializable(typeof(LlmFileSort))]
 [JsonSerializable(typeof(LlmFileContentFormat))]

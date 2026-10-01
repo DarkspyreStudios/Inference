@@ -1069,6 +1069,14 @@ Files and Skills list limits are 1 through 100, matching the
 [published parameter schemas](https://docs.x.ai/openapi.json). Optional file/URL lifetimes retain
 whole seconds between one hour and thirty days; absent values remain absent.
 
+`XaiFileStorageOptions` is separate provider-storage data. It preserves a required filename,
+optional whole-second expiry capped at thirty days, and explicit public-URL intent. It does not
+apply the standalone upload's one-hour minimum to storage. The closed public-URL union uses
+`flag` and `configuration` discriminators: absence, explicit false, explicit true and configured
+publication remain distinct. Configured publication reuses `XaiPublicUrlOptions` and its own
+expiry bounds. All four storage roots have exact `ConnectLlmJson` getters. These declarations
+do not upload content, publish a URL, authorize a request or enable a provider route.
+
 Skill uploads carry explicitly supplied borrowed streams and ordered directory entries. They do
 not enumerate paths, inspect archives, read streams or attach a skill to generation. Their runtime
 inputs and service interfaces have no public data-metadata getters; the owned serialization
