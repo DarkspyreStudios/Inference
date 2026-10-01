@@ -84,6 +84,8 @@ metadata to `JsonSerializer`. Credential `Serialize`/`Parse`, context-entry equi
 scope hashing use owned metadata. Credentials retain their camel-case Web format and null omission;
 captured context retains its property names, format 2 checks, Common tool-output discriminators and
 binary/null-versus-empty representations. Resolved internal services are never serialized.
+Connection and setup metadata retain typed Vertex, Azure, Chat Completions and xAI options, including
+unknown numeric modes for validation by their owning adapter; writing them does not enable a provider.
 
 Gemini API and Vertex local text estimates serialize requests with `ConnectLlmJson.ChatRequest`.
 The projection retains default property names/order, numeric enums, explicit nulls and escaping.
@@ -1289,6 +1291,8 @@ The numeric schema preflight follows schema positions and local references, not 
 above 2048 string characters, 256 array items or 64 properties require explicitly authorized local
 validation against the original schema. Strict tool schemas beyond those bounds fail without weakening.
 This numeric check does not implement the provider's complete regex and schema subset.
+The client does not interpret unqualified xAI headers as OpenAI account-usage evidence. Its usage
+header names and units require separate provider qualification; no quota snapshot is fabricated.
 
 `AddLlmConnect` does not register a Grok provider, authenticator or runtime client. This internal client
 is not an enabled or live-qualified provider. Cross-family catalog ownership and multi-agent setup

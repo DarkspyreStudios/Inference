@@ -40,7 +40,7 @@ public sealed class XaiConnectionSettingsTests
         var options = new XaiConnectionOptions { Region = region, ServiceTier = XaiServiceTier.Priority };
         Assert.Equal(endpoint, options.GetEndpoint());
         LlmConnection original = Saved() with { Xai = options, Endpoint = endpoint };
-        LlmConnection restored = JsonSerializer.Deserialize<LlmConnection>(JsonSerializer.Serialize(original))!;
+        LlmConnection restored = JsonSerializer.Deserialize(JsonSerializer.Serialize(original, ConnectLlmJson.Connection), ConnectLlmJson.Connection)!;
         Assert.Equal(options, restored.Xai);
         Assert.Empty(restored.ProviderOptions);
         Assert.Equal(endpoint, restored.Xai!.GetEndpoint());

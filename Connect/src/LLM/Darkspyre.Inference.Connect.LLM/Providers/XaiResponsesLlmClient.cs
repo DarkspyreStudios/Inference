@@ -25,6 +25,9 @@ internal sealed class XaiResponsesLlmClient(HttpClient http) : ResponsesLlmClien
     protected override bool OffersNonStreamingRequests => true;
     protected override bool OffersUsageDeltas => false;
 
+    // xAI quota names and units require its own qualified evidence; OpenAI provenance is not interchangeable.
+    protected override LlmAccountUsageSnapshot? ObserveAccountUsage(HttpResponseMessage response) => null;
+
     protected override LlmProviderCapabilities DefaultCapabilities { get; } = new()
     {
         OutputLimitEnforcement = LlmOutputLimitEnforcement.ProviderEnforced,
