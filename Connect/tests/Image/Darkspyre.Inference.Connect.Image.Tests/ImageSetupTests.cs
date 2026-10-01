@@ -112,23 +112,25 @@ public sealed partial class ImageSetupTests
 
     private sealed class Workflows : IImageWorkflowChoiceSource
     {
+        public ImageTransport Kind { get; init; } = ImageTransport.ComfyUi;
         public Task<SetupChoicePage> GetChoicesAsync(ImageTransport transport, SetupChoiceQuery query, CancellationToken cancellationToken = default)
             => Task.FromResult(new SetupChoicePage([new("workflow", "Workflow")]));
         public Task<ImageWorkflow?> GetWorkflowAsync(string workflowId, CancellationToken cancellationToken = default) => Task.FromResult<ImageWorkflow?>(new()
-        { Id = workflowId, Label = "Workflow", Transport = ImageTransport.ComfyUi, TransportConfiguration = JsonSerializer.SerializeToElement(new { }) });
+        { Id = workflowId, Label = "Workflow", Transport = Kind, TransportConfiguration = JsonSerializer.SerializeToElement(new { }) });
     }
 
     private sealed class Transport : IImageTransport
     {
         public ImageTransport Kind { get; init; } = ImageTransport.ComfyUi;
         public Func<ImageConnection, Task<ImageProviderHealth>>? OnHealth { get; init; }
+        public IReadOnlyList<ImageWorkflow> BuiltInWorkflows { get; init; } = [];
         public ImageTransportPreparationRequest? Prepared { get; private set; }
         public int HealthCalls { get; private set; }
         public int SubmitCalls { get; private set; }
         public ImageTransportDescriptor Descriptor => new(Kind, "Controlled transport", "Managed fixture", new(false, false, false));
 
         public Task<IReadOnlyList<ImageWorkflow>> GetWorkflowsAsync(ImageConnection connection, XaiFamilyBinding? xai = null, CancellationToken cancellationToken = default)
-            => throw new NotSupportedException();
+            => Task.FromResult(BuiltInWorkflows);
         public Task<ImageCapabilities> GetCapabilitiesAsync(ImageConnection connection, ImageWorkflow workflow, string? modelId = null, XaiFamilyBinding? xai = null, CancellationToken cancellationToken = default)
             => Task.FromResult(new ImageCapabilities { SupportedSizes = [new(workflow.DefaultWidth, workflow.DefaultHeight)], SupportsNegativePrompt = true, SupportsSeed = true });
         public Task<ImagePreparedReference> ResolveReferenceAsync(ImageConnection connection, InferenceMediaSource source, XaiFamilyBinding? xai = null, IInferenceResourceAccess? resources = null, CancellationToken cancellationToken = default)

@@ -2,6 +2,8 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
 using Darkspyre.Inference.Common;
+using Darkspyre.Inference.Common.Image;
+using Darkspyre.Inference.Common.Media;
 using Darkspyre.Inference.Common.Resources;
 using Darkspyre.Inference.Connect.LLM;
 
@@ -10,34 +12,57 @@ namespace Darkspyre.Inference.Connect.Image;
 /// <summary>Image-owned metadata for portable contracts. Native receipt data grants no authority.</summary>
 public static class ConnectImageJson
 {
-    public static JsonTypeInfo<ImageConnection> ImageConnection => ConnectImageJsonContext.Default.ImageConnection;
-    public static JsonTypeInfo<ImageTransport> ImageTransport => ConnectImageJsonContext.Default.ImageTransport;
-    public static JsonTypeInfo<ImageTransportCapabilities> ImageTransportCapabilities => ConnectImageJsonContext.Default.ImageTransportCapabilities;
-    public static JsonTypeInfo<ImageTransportDescriptor> ImageTransportDescriptor => ConnectImageJsonContext.Default.ImageTransportDescriptor;
-    public static JsonTypeInfo<ImageWorkflow> ImageWorkflow => ConnectImageJsonContext.Default.ImageWorkflow;
-    public static JsonTypeInfo<ImageReference> ImageReference => ConnectImageJsonContext.Default.ImageReference;
-    public static JsonTypeInfo<ImageWorkflowOrigin> ImageWorkflowOrigin => ConnectImageJsonContext.Default.ImageWorkflowOrigin;
-    public static JsonTypeInfo<ImageWorkflowSelection> ImageWorkflowSelection => ConnectImageJsonContext.Default.ImageWorkflowSelection;
-    public static JsonTypeInfo<ImageSetupConfiguration> ImageSetupConfiguration => ConnectImageJsonContext.Default.ImageSetupConfiguration;
-    public static JsonTypeInfo<ImageSetupHeaderChanges> ImageSetupHeaderChanges => ConnectImageJsonContext.Default.ImageSetupHeaderChanges;
-    public static JsonTypeInfo<ImageSetupChanges> ImageSetupChanges => ConnectImageJsonContext.Default.ImageSetupChanges;
-    public static JsonTypeInfo<ImageTransportPreparationRequest> ImageTransportPreparationRequest => ConnectImageJsonContext.Default.ImageTransportPreparationRequest;
-    public static JsonTypeInfo<ImagePreparedReference> ImagePreparedReference => ConnectImageJsonContext.Default.ImagePreparedReference;
-    public static JsonTypeInfo<PreparedImageTransportRequest> PreparedImageTransportRequest => ConnectImageJsonContext.Default.PreparedImageTransportRequest;
-    public static JsonTypeInfo<ImageTransportOutput> ImageTransportOutput => ConnectImageJsonContext.Default.ImageTransportOutput;
-    public static JsonTypeInfo<ImageTransportDownload> ImageTransportDownload => ConnectImageJsonContext.Default.ImageTransportDownload;
-    public static JsonTypeInfo<ImageTransportJobState> ImageTransportJobState => ConnectImageJsonContext.Default.ImageTransportJobState;
-    public static JsonTypeInfo<ImageTransportJobSnapshot> ImageTransportJobSnapshot => ConnectImageJsonContext.Default.ImageTransportJobSnapshot;
-    public static JsonTypeInfo<ImageTransportProgressKind> ImageTransportProgressKind => ConnectImageJsonContext.Default.ImageTransportProgressKind;
-    public static JsonTypeInfo<ImageTransportProgress> ImageTransportProgress => ConnectImageJsonContext.Default.ImageTransportProgress;
-    public static JsonTypeInfo<ImageProviderHealth> ImageProviderHealth => ConnectImageJsonContext.Default.ImageProviderHealth;
+    private static readonly JsonSerializerOptions OwnedOptions = CreateOptions();
+    private static JsonTypeInfo<T> Metadata<T>() => OwnedOptions.GetTypeInfo<T>();
+
+    private static JsonSerializerOptions CreateOptions()
+    {
+        var options = new JsonSerializerOptions(ConnectImageJsonContext.Default.Options) { TypeInfoResolver = new ImageTypeInfoResolver() };
+        foreach (Type type in new[] { typeof(IProviderAuthorization), typeof(IInferenceResourceAccess), typeof(IInferenceResourceReadHandle), typeof(IInferenceResourceWriteHandle) })
+            options.Converters.Add(InferenceJson.InferenceResourceReference.Options.Converters.Single(converter => converter.CanConvert(type)));
+        options.MakeReadOnly();
+        return options;
+    }
+
+    private sealed class ImageTypeInfoResolver : IJsonTypeInfoResolver
+    {
+        public JsonTypeInfo? GetTypeInfo(Type type, JsonSerializerOptions options)
+        {
+            JsonTypeInfo? metadata = ((IJsonTypeInfoResolver)ConnectImageJsonContext.Default).GetTypeInfo(type, options);
+            if ((type == typeof(ImageTransportDownload) || type == typeof(BinaryMediaSource)) && metadata is not null)
+                metadata.Properties.Single(property => property.Name == "Data").CustomConverter =
+                    InferenceJson.LlmHostedImageOutput.Properties.Single(property => property.Name == "Data").CustomConverter;
+            return metadata;
+        }
+    }
+
+    public static JsonTypeInfo<ImageConnection> ImageConnection => Metadata<ImageConnection>();
+    public static JsonTypeInfo<ImageTransport> ImageTransport => Metadata<ImageTransport>();
+    public static JsonTypeInfo<ImageTransportCapabilities> ImageTransportCapabilities => Metadata<ImageTransportCapabilities>();
+    public static JsonTypeInfo<ImageTransportDescriptor> ImageTransportDescriptor => Metadata<ImageTransportDescriptor>();
+    public static JsonTypeInfo<ImageWorkflow> ImageWorkflow => Metadata<ImageWorkflow>();
+    public static JsonTypeInfo<ImageReference> ImageReference => Metadata<ImageReference>();
+    public static JsonTypeInfo<ImageWorkflowOrigin> ImageWorkflowOrigin => Metadata<ImageWorkflowOrigin>();
+    public static JsonTypeInfo<ImageWorkflowSelection> ImageWorkflowSelection => Metadata<ImageWorkflowSelection>();
+    public static JsonTypeInfo<ImageSetupConfiguration> ImageSetupConfiguration => Metadata<ImageSetupConfiguration>();
+    public static JsonTypeInfo<ImageSetupHeaderChanges> ImageSetupHeaderChanges => Metadata<ImageSetupHeaderChanges>();
+    public static JsonTypeInfo<ImageSetupChanges> ImageSetupChanges => Metadata<ImageSetupChanges>();
+    public static JsonTypeInfo<ImageTransportPreparationRequest> ImageTransportPreparationRequest => Metadata<ImageTransportPreparationRequest>();
+    public static JsonTypeInfo<ImagePreparedReference> ImagePreparedReference => Metadata<ImagePreparedReference>();
+    public static JsonTypeInfo<PreparedImageTransportRequest> PreparedImageTransportRequest => Metadata<PreparedImageTransportRequest>();
+    public static JsonTypeInfo<ImageTransportOutput> ImageTransportOutput => Metadata<ImageTransportOutput>();
+    public static JsonTypeInfo<ImageTransportDownload> ImageTransportDownload => Metadata<ImageTransportDownload>();
+    public static JsonTypeInfo<ImageTransportJobState> ImageTransportJobState => Metadata<ImageTransportJobState>();
+    public static JsonTypeInfo<ImageTransportJobSnapshot> ImageTransportJobSnapshot => Metadata<ImageTransportJobSnapshot>();
+    public static JsonTypeInfo<ImageTransportProgressKind> ImageTransportProgressKind => Metadata<ImageTransportProgressKind>();
+    public static JsonTypeInfo<ImageTransportProgress> ImageTransportProgress => Metadata<ImageTransportProgress>();
+    public static JsonTypeInfo<ImageProviderHealth> ImageProviderHealth => Metadata<ImageProviderHealth>();
 }
 
 [JsonSourceGenerationOptions(GenerationMode = JsonSourceGenerationMode.Metadata,
-    Converters = [typeof(ImageAuthorizationJsonConverter), typeof(ImageBindingJsonConverter),
-        typeof(ImageResourceAccessJsonConverter), typeof(ImageResourceReadJsonConverter),
-        typeof(ImageResourceWriteJsonConverter), typeof(ImageBindingFactoryJsonConverter)])]
+    Converters = [typeof(ImageBindingJsonConverter), typeof(ImageBindingFactoryJsonConverter)])]
 [JsonSerializable(typeof(ImageConnection))]
+[JsonSerializable(typeof(ImageGenerationRequest))]
 [JsonSerializable(typeof(ImageTransport))]
 [JsonSerializable(typeof(ImageTransportCapabilities))]
 [JsonSerializable(typeof(ImageTransportDescriptor))]
@@ -71,9 +96,5 @@ internal abstract class ImageRuntimeJsonConverter<T> : JsonConverter<T> where T 
         else throw new NotSupportedException("Live image collaborators are not portable data.");
     }
 }
-internal sealed class ImageAuthorizationJsonConverter : ImageRuntimeJsonConverter<IProviderAuthorization>;
 internal sealed class ImageBindingJsonConverter : ImageRuntimeJsonConverter<XaiFamilyBinding>;
-internal sealed class ImageResourceAccessJsonConverter : ImageRuntimeJsonConverter<IInferenceResourceAccess>;
-internal sealed class ImageResourceReadJsonConverter : ImageRuntimeJsonConverter<IInferenceResourceReadHandle>;
-internal sealed class ImageResourceWriteJsonConverter : ImageRuntimeJsonConverter<IInferenceResourceWriteHandle>;
 internal sealed class ImageBindingFactoryJsonConverter : ImageRuntimeJsonConverter<Func<XaiConnectionSelection, XaiFamilyBinding>>;

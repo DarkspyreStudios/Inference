@@ -952,6 +952,8 @@ conditional save still preserves the commit target's observed committed or uncer
 
 `ConnectImageJson` exports exact type-name metadata for the complete public Image data graph.
 Runtime authority, bindings, resource handles and binding factories refuse non-null serialization.
+Download bytes reuse Common's exact required-data property converter: explicit JSON null is refused,
+while empty bytes and unknown MIME remain valid observations. This is not a global byte-memory policy.
 Workflow selection stores both `ImageWorkflowOrigin` and the exact ID. Host and built-in origins
 remain separate; ComfyUI does not advertise a built-in workflow catalog.
 

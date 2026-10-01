@@ -151,7 +151,9 @@ the closed `type` discriminators `binary`, `url`, `file` and `resource`; unknown
 than invoking reflection or an extension registry. JSON decoding creates its own byte memory, while
 constructing a binary source preserves caller memory. These are standalone, data-only foundations,
 not provider bindings or automatic resource resolution. Image requests retain ordered source data;
-the current portable Connect and Supra adapters refuse supplied references before generation effects.
+Connect ComfyUI supports zero/one binary reference or a logical resource resolved through borrowed
+access. Supra refuses supplied references before backend entry. Other ComfyUI source variants and
+multiple references refuse before source reads or upload.
 Operation boundaries validate caller-authored IDs, URLs, scope and source support before effects.
 
 Image capability sizes use `ImageSize` with actual reference-kind support and nullable known reference

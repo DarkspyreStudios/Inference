@@ -124,4 +124,52 @@ public sealed partial class ComfyUiImageTransportTests
         Assert.Empty(handler.Headers);
         Assert.Equal(0, resources.Disposals);
     }
+
+    [Fact]
+    public async Task MismatchedReadIdentityRefusesBeforeStreamOrHttpAndKeepsProtocolFailure()
+    {
+        var requested = new InferenceResourceReference("workspace", "requested");
+        var reader = new ImageTestResources.Reader(new(new("workspace", "other"), "session", null, null, 0), new MemoryStream());
+        var resources = new ImageTestResources { ReadProvider = (_, _) => Task.FromResult<IInferenceResourceReadHandle>(reader) };
+        var handler = new StubHandler((Func<HttpRequestMessage, HttpResponseMessage>)(_ => throw new InvalidOperationException("No HTTP expected.")));
+        InferenceResourceOperationException error = await Assert.ThrowsAsync<InferenceResourceOperationException>(() =>
+            CreateTransport(handler).ResolveReferenceAsync(Connection(), new ResourceMediaSource(requested), resources: resources));
+        Assert.Equal(InferenceFailureCode.ProtocolFailure, error.Code);
+        Assert.Equal(requested, error.Failure.Reference);
+        Assert.Equal(InferenceResourceOperationPhase.OpenRead, error.Failure.Phase);
+        Assert.Equal(1, reader.Disposals);
+        Assert.Empty(handler.Headers);
+    }
+
+    [Fact]
+    public async Task PartialResourceReadAndReaderCleanupFailuresRemainSeparatelyObservable()
+    {
+        var requested = new InferenceResourceReference("workspace", "requested");
+        var readFailure = new IOException("Controlled partial read failure.");
+        var cleanupFailure = new IOException("Controlled reader cleanup failure.");
+        var stream = new PartialReadStream(readFailure);
+        var reader = new ImageTestResources.Reader(new(requested, "session", null, null, 5), stream) { CleanupFailure = cleanupFailure };
+        var resources = new ImageTestResources { ReadProvider = (_, _) => Task.FromResult<IInferenceResourceReadHandle>(reader) };
+        var handler = new StubHandler((Func<HttpRequestMessage, HttpResponseMessage>)(_ => throw new InvalidOperationException("No HTTP expected.")));
+        AggregateException error = await Assert.ThrowsAsync<AggregateException>(() =>
+            CreateTransport(handler).ResolveReferenceAsync(Connection(), new ResourceMediaSource(requested), resources: resources));
+        Assert.Equal(2, error.InnerExceptions.Count);
+        InferenceResourceOperationException operation = Assert.IsType<InferenceResourceOperationException>(error.InnerExceptions[0]);
+        Assert.Same(readFailure, operation.InnerException);
+        Assert.Same(cleanupFailure, error.InnerExceptions[1]);
+        Assert.Equal(2, operation.Failure.BytesTransferred);
+        Assert.Equal(InferenceResourceOperationPhase.Read, operation.Failure.Phase);
+        Assert.Equal(InferenceResourceCommitOutcome.NotAttempted, operation.Failure.CommitOutcome);
+        Assert.Equal(1, reader.Disposals);
+        Assert.Empty(handler.Headers);
+    }
+
+    private sealed class PartialReadStream(Exception failure) : MemoryStream
+    {
+        public override async Task CopyToAsync(Stream destination, int bufferSize, CancellationToken cancellationToken)
+        {
+            await destination.WriteAsync(new byte[] { 4, 5 }, cancellationToken);
+            throw failure;
+        }
+    }
 }

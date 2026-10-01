@@ -116,6 +116,40 @@ public sealed class ImageOperationTests
     }
 
     [Fact]
+    public async Task AuthoritativeCommitRefusalRetainsItsExactTypedFactsAndIdentity()
+    {
+        var resources = new ImageTestResources { Outcome = "commit-refused" };
+        IImageInference inference = new ImageProviderService([new ImageTestTransport()]).Bind(Connection(), Workflow(), resources: resources, pollInterval: TimeSpan.Zero);
+        try
+        {
+            InferenceResourceOperationException failure = await Assert.ThrowsAsync<InferenceResourceOperationException>(() => inference.GenerateAsync(Request()));
+            Assert.Same(resources.AuthoritativeCommitFailure, failure);
+            Assert.Equal(InferenceResourceCommitOutcome.NotCommitted, failure.Failure.CommitOutcome);
+            Assert.Equal(InferenceResourceCommitOutcome.NotAttempted, failure.Failure.SelectionOutcome);
+            Assert.Equal(1, resources.Writers[0].Disposals);
+        }
+        finally { await ((IAsyncDisposable)inference).DisposeAsync(); }
+    }
+
+    [Fact]
+    public async Task CleanupFailureAfterSuccessfulCommitPreservesCommittedSelectionFacts()
+    {
+        var resources = new ImageTestResources { Outcome = "cleanup" };
+        IImageInference inference = new ImageProviderService([new ImageTestTransport()]).Bind(Connection(), Workflow(), resources: resources, pollInterval: TimeSpan.Zero);
+        try
+        {
+            InferenceResourceOperationException failure = await Assert.ThrowsAsync<InferenceResourceOperationException>(() => inference.GenerateAsync(Request()));
+            Assert.Same(resources.CleanupFailure, failure.InnerException);
+            Assert.Equal(InferenceResourceCommitOutcome.Committed, failure.Failure.CommitOutcome);
+            Assert.Equal(InferenceResourceCommitOutcome.Committed, failure.Failure.SelectionOutcome);
+            Assert.Equal(new InferenceResourceSelectionVersion("workspace", "session", 1), failure.Failure.SelectionVersion);
+            Assert.Equal(2, failure.Failure.BytesTransferred);
+            Assert.Equal(1, resources.Writers[0].Disposals);
+        }
+        finally { await ((IAsyncDisposable)inference).DisposeAsync(); }
+    }
+
+    [Fact]
     public async Task XaiCompositeUsesOneSnapshotThroughEveryNestedCallAndForwardsControls()
     {
         var source = new XaiSource();
@@ -230,6 +264,8 @@ internal sealed class ImageTestResources : IInferenceResourceAccess, IDisposable
     public string Outcome { get; init; } = "success";
     public IOException OperationFailure { get; } = new("Controlled resource failure.");
     public IOException CleanupFailure { get; } = new("Controlled cleanup failure.");
+    public InferenceResourceOperationException AuthoritativeCommitFailure { get; } = new(InferenceFailureCode.AuthenticationRequired,
+        "Controlled authoritative refusal.", new(InferenceResourceOperationPhase.Commit, new("workspace", "output-1"), InferenceResourceCommitOutcome.NotCommitted, 2));
     public TaskCompletionSource CommitEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
     public TaskCompletionSource? CommitRelease { get; init; }
     public List<Writer> Writers { get; } = [];
@@ -279,6 +315,7 @@ internal sealed class ImageTestResources : IInferenceResourceAccess, IDisposable
             _owner.CommitEntered.TrySetResult();
             if (_owner.CommitRelease is not null) await _owner.CommitRelease.Task;
             if (_owner.Outcome is "commit" or "commit-cleanup") throw _owner.OperationFailure;
+            if (_owner.Outcome == "commit-refused") throw _owner.AuthoritativeCommitFailure;
             Selected = options?.SelectForSession == true;
             var descriptor = new InferenceResourceDescriptor(Reference, _create.SessionId, _create.FileName, _create.ContentType, bytesWritten);
             _owner.Committed[Reference] = (descriptor, Bytes.ToArray());
@@ -288,7 +325,7 @@ internal sealed class ImageTestResources : IInferenceResourceAccess, IDisposable
         public ValueTask DisposeAsync()
         {
             Disposals++;
-            if (_owner.Outcome == "commit-cleanup") return ValueTask.FromException(_owner.CleanupFailure);
+            if (_owner.Outcome is "commit-cleanup" or "cleanup") return ValueTask.FromException(_owner.CleanupFailure);
             Content.Dispose();
             return ValueTask.CompletedTask;
         }

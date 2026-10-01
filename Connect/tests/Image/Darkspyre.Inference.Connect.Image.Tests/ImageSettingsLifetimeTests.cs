@@ -126,6 +126,72 @@ public sealed partial class ImageSetupTests
     private static T Field<T>(ImageSettings settings, string id) where T : SetupField
         => Assert.IsType<T>(Assert.Single(Fields(settings), field => field.Description.Id == id));
 
+    [Fact]
+    public async Task ExplicitWorkflowOriginSeparatesCollidingHostAndBuiltInIds()
+    {
+        var builtin = ImageOperationTests.Workflow() with { Label = "Provider-built-in" };
+        var transport = new Transport { BuiltInWorkflows = [builtin] };
+        var target = new Target();
+        var (manager, settings) = await NewAsync(transport, target);
+        await using (manager)
+        {
+            Field<SetupChoiceField>(settings, "workflow").SetValue("workflow");
+            Assert.Equal("Workflow", Assert.Single((await manager.QueryChoicesAsync(settings, "workflow", new())).Choices).DisplayName);
+            Field<SetupChoiceField>(settings, "workflow-origin").SetValue("BuiltIn");
+            Field<SetupChoiceField>(settings, "workflow").SetValue("workflow");
+            Assert.Equal("Provider-built-in", Assert.Single((await manager.QueryChoicesAsync(settings, "workflow", new())).Choices).DisplayName);
+            Assert.Equal(SetupActionState.Completed, (await manager.RunAsync(settings, "validate-workflow")).State);
+            Assert.Equal(SetupCommitState.Committed, (await manager.SaveAsync(settings)).State);
+            Assert.Equal(ImageWorkflowOrigin.BuiltIn, target.Changes!.Configuration.Workflow.Origin);
+        }
+    }
+
+    [Fact]
+    public async Task AmbiguousBuiltInIdentityCannotInstallOrSaveAWorkflow()
+    {
+        var workflow = ImageOperationTests.Workflow();
+        var (manager, settings) = await NewAsync(new Transport { BuiltInWorkflows = [workflow, workflow with { Label = "Other" }] }, new Target());
+        await using (manager)
+        {
+            Field<SetupChoiceField>(settings, "workflow-origin").SetValue("BuiltIn");
+            Field<SetupChoiceField>(settings, "workflow").SetValue("workflow");
+            Assert.Equal(SetupChoiceState.Failed, (await manager.QueryChoicesAsync(settings, "workflow", new())).State);
+            Assert.Equal(SetupActionState.Failed, (await manager.RunAsync(settings, "validate-workflow")).State);
+            Assert.Equal(SetupCommitState.Invalid, (await manager.SaveAsync(settings)).State);
+        }
+    }
+
+    [Fact]
+    public async Task XaiGenerationTestPreservesNullSeedAndOpenRenderSaveNeverInvokeBindingFactory()
+    {
+        var transport = new Transport { Kind = ImageTransport.XaiImagine };
+        var source = new XaiSource();
+        await using var access = new LlmConnectionAccess(source, []);
+        int calls = 0;
+        string? selected = null;
+        ImageSettingsManager manager = new ImageProviderService([transport]).CreateSettingsManager(new Target(), new Workflows { Kind = ImageTransport.XaiImagine }, selection =>
+        { calls++; selected = selection.ConnectionId; return new(selection, access); });
+        await using (manager)
+        {
+            ImageSettings draft = await manager.OpenAsync(ImageTransport.XaiImagine, new(SetupChangeIntent.Edit, "id", "v1"),
+                new() { Transport = ImageTransport.XaiImagine, Endpoint = "https://api.x.ai/v1", Xai = new("saved") }, new(ImageWorkflowOrigin.Host, "workflow"));
+            Field<SetupTextField>(draft, "xai-connection").SetValue("unsaved");
+            _ = draft.Steps;
+            _ = draft.Actions;
+            Assert.Equal(SetupCommitState.Invalid, (await manager.SaveAsync(draft)).State);
+            Assert.Equal(SetupActionState.Completed, (await manager.RunAsync(draft, "validate-workflow")).State);
+            Assert.Equal(0, calls);
+            Assert.Equal(SetupActionState.Completed, (await manager.RunAsync(draft, "generate-test")).State);
+            Assert.Equal("unsaved", selected);
+            Assert.Equal(1, calls);
+            Assert.Equal(1, source.Reads);
+            Assert.Null(transport.Prepared!.Seed);
+            Assert.True(draft.Status.Ready.Value);
+            Assert.Equal(SetupCommitState.Committed, (await manager.SaveAsync(draft)).State);
+            Assert.Equal(1, calls);
+        }
+    }
+
     private sealed class HeldWorkflows : IImageWorkflowChoiceSource, IDisposable
     {
         public TaskCompletionSource Entered { get; } = new();

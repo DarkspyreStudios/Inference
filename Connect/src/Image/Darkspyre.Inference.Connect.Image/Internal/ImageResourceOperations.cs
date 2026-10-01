@@ -52,9 +52,13 @@ internal static class ImageResourceOperations
         {
             var facts = new InferenceResourceOperationFailure(phase, writer?.Reference, outcome, written)
             { SelectionOutcome = selectionOutcome, SelectionVersion = selectionVersion };
-            failure = error is OperationCanceledException
-                ? new InferenceResourceOperationCanceledException(facts, token, error)
-                : new InferenceResourceOperationException(InferenceFailureCode.ExecutionFailed, "The image resource operation failed.", facts, error);
+            failure = error switch
+            {
+                InferenceResourceOperationException or InferenceResourceOperationCanceledException => error,
+                OperationCanceledException => new InferenceResourceOperationCanceledException(facts, token, error),
+                _ => new InferenceResourceOperationException(error is InferenceException provider ? provider.Code : InferenceFailureCode.ExecutionFailed,
+                    "The image resource operation failed.", facts, error)
+            };
         }
         if (writer is not null)
         {
@@ -62,7 +66,8 @@ internal static class ImageResourceOperations
             catch (Exception cleanup) when (cleanup is not OutOfMemoryException)
             {
                 if (failure is not null) throw new AggregateException(failure, cleanup);
-                throw;
+                throw new InferenceResourceOperationException(InferenceFailureCode.ExecutionFailed, "The image resource cleanup failed.",
+                    new(phase, writer.Reference, outcome, written) { SelectionOutcome = selectionOutcome, SelectionVersion = selectionVersion }, cleanup);
             }
         }
         if (failure is not null) ExceptionDispatchInfo.Throw(failure);

@@ -5,6 +5,8 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
 using Darkspyre.Inference.Common;
+using Darkspyre.Inference.Common.Image;
+using Darkspyre.Inference.Common.Media;
 
 namespace Darkspyre.Inference.Connect.Image.Tests;
 
@@ -45,6 +47,25 @@ public sealed class ConnectImageJsonTests
             else if (kind == "receipt-scope") _ = receipt with { Scope = null! };
             else _ = output with { Scope = null! };
         });
+    }
+
+    [Theory]
+    [InlineData("metadata", false)]
+    [InlineData("metadata", true)]
+    [InlineData("receipt-scope", false)]
+    [InlineData("receipt-scope", true)]
+    [InlineData("output-scope", false)]
+    [InlineData("output-scope", true)]
+    public void RequiredReceiptFactsRefuseMissingAndExplicitNullOwnedJson(string kind, bool missing)
+    {
+        string metadata = missing ? "" : "\"Metadata\":null,";
+        string scope = missing ? "" : "\"Scope\":null,";
+        JsonTypeInfo root = kind == "output-scope" ? ConnectImageJson.ImageTransportOutput : ConnectImageJson.ImagePreparedReference;
+        string json = kind == "metadata"
+            ? "{" + metadata + "\"Scope\":{\"Owner\":\"owner\",\"Identity\":\"identity\"},\"ProviderState\":{}}"
+            : "{" + scope + (kind == "receipt-scope" ? "\"Metadata\":{\"Id\":\"7ec55b60-b1f5-4e71-b2de-aa8accfd2ef0\"}," : "") + "\"ProviderState\":{}}";
+        if (missing) Assert.Throws<JsonException>(() => JsonSerializer.Deserialize(json, root));
+        else Assert.Throws<ArgumentNullException>(() => JsonSerializer.Deserialize(json, root));
     }
 
     [Theory]
@@ -96,6 +117,36 @@ public sealed class ConnectImageJsonTests
     }
 
     [Fact]
+    public void DownloadReusesExactCommonPropertyPolicyWithoutChangingOtherBinaryMemory()
+    {
+        Assert.Same(InferenceJson.LlmHostedImageOutput.Properties.Single(property => property.Name == "Data").CustomConverter,
+            ConnectImageJson.ImageTransportDownload.Properties.Single(property => property.Name == "Data").CustomConverter);
+        var options = new JsonSerializerOptions(ConnectImageJson.ImageTransportDownload.Options)
+        { TypeInfoResolver = JsonTypeInfoResolver.Combine(ConnectImageJson.ImageTransportDownload.Options.TypeInfoResolver!, ImageConsumerJsonContext.Default) };
+        options.MakeReadOnly();
+        JsonTypeInfo<ImageDownloadEnvelope> metadata = options.GetTypeInfo<ImageDownloadEnvelope>();
+        Assert.Throws<JsonException>(() => JsonSerializer.Deserialize("{\"Download\":{\"Data\":null},\"Other\":null}", metadata));
+        ImageDownloadEnvelope empty = JsonSerializer.Deserialize("{\"Download\":{\"Data\":\"\",\"ContentType\":null},\"Other\":null}", metadata)!;
+        Assert.True(empty.Download.Data.IsEmpty);
+        Assert.True(empty.Other.IsEmpty);
+        Assert.Null(empty.Download.ContentType);
+    }
+
+    [Fact]
+    public void NestedImageSourceUsesTargetedCommonRequiredDataPolicy()
+    {
+        var options = new JsonSerializerOptions(ConnectImageJson.ImageConnection.Options)
+        { TypeInfoResolver = JsonTypeInfoResolver.Combine(ConnectImageJson.ImageConnection.Options.TypeInfoResolver!, ImageConsumerJsonContext.Default) };
+        options.MakeReadOnly();
+        JsonTypeInfo<ImageSourceEnvelope> metadata = options.GetTypeInfo<ImageSourceEnvelope>();
+        Assert.Throws<JsonException>(() => JsonSerializer.Deserialize("{\"Request\":{\"ModelId\":\"one\",\"Prompt\":\"draw\",\"References\":[{\"type\":\"binary\",\"ContentType\":null,\"Data\":null}]}}", metadata));
+        ImageSourceEnvelope empty = JsonSerializer.Deserialize("{\"Request\":{\"ModelId\":\"one\",\"Prompt\":\"draw\",\"References\":[{\"type\":\"binary\",\"ContentType\":null,\"Data\":\"\"}]}}", metadata)!;
+        Assert.True(Assert.IsType<BinaryMediaSource>(Assert.Single(empty.Request.References)).Data.IsEmpty);
+        Assert.Same(InferenceJson.LlmHostedImageOutput.Properties.Single(property => property.Name == "Data").CustomConverter,
+            options.GetTypeInfo<BinaryMediaSource>().Properties.Single(property => property.Name == "Data").CustomConverter);
+    }
+
+    [Fact]
     public void ReceiptOutputAndDownloadOwnTheirSnapshotsIncludingWithUpdates()
     {
         using var state = JsonDocument.Parse("{\"opaque\":[1,null]}");
@@ -141,6 +192,17 @@ public sealed class ConnectImageJsonTests
                 Assert.Same(generation, AssemblyLoadContext.GetLoadContext(scope.GetType().Assembly));
                 Assert.Equal("Darkspyre.Inference.Common", scope.GetType().Assembly.GetName().Name);
             }
+            if (root == "ImageTransportDownload")
+            {
+                JsonConverter converter = metadata.Properties.Single(property => property.Name == "Data").CustomConverter!;
+                Assert.Same(generation, AssemblyLoadContext.GetLoadContext(converter.GetType().Assembly));
+                Assert.Equal("Darkspyre.Inference.Common", converter.GetType().Assembly.GetName().Name);
+                Assert.Throws<JsonException>(() => JsonSerializer.Deserialize("{\"Data\":null}", metadata));
+                JsonTypeInfo binary = metadata.Options.GetTypeInfo(image.GetType("Darkspyre.Inference.Common.Media.BinaryMediaSource", false)
+                    ?? generation.Assemblies.Single(item => item.GetName().Name == "Darkspyre.Inference.Common").GetType(typeof(BinaryMediaSource).FullName!, true)!);
+                Assert.Same(generation, AssemblyLoadContext.GetLoadContext(binary.Type.Assembly));
+                Assert.Throws<JsonException>(() => JsonSerializer.Deserialize("{\"ContentType\":null,\"Data\":null}", binary));
+            }
         }
         finally { generation.Unload(); }
         return weak;
@@ -165,5 +227,9 @@ public sealed class ConnectImageJsonTests
 }
 
 internal sealed record ImageRuntimeEnvelope(IProviderAuthorization? Authority);
+internal sealed record ImageDownloadEnvelope(ImageTransportDownload Download, ReadOnlyMemory<byte> Other);
+internal sealed record ImageSourceEnvelope(ImageGenerationRequest Request);
 [JsonSerializable(typeof(ImageRuntimeEnvelope))]
+[JsonSerializable(typeof(ImageDownloadEnvelope))]
+[JsonSerializable(typeof(ImageSourceEnvelope))]
 internal sealed partial class ImageConsumerJsonContext : JsonSerializerContext;

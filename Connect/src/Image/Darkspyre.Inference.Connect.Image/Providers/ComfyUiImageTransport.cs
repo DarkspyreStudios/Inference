@@ -306,6 +306,11 @@ internal sealed class ComfyUiImageTransport(
             socket.Dispose();
             return null;
         }
+        catch
+        {
+            socket.Dispose();
+            throw;
+        }
     }
 
     public async Task<ImagePreparedReference> UploadReferenceAsync(
@@ -404,6 +409,7 @@ internal sealed class ComfyUiImageTransport(
                 phase = InferenceResourceOperationPhase.Read;
                 try { await reader.Content.CopyToAsync(content, cancellationToken).ConfigureAwait(false); }
                 catch (Exception error) when (error is not OutOfMemoryException) { bytesTransferred = content.Length; throw; }
+                bytesTransferred = content.Length;
                 cancellationToken.ThrowIfCancellationRequested();
                 content.Position = 0;
                 phase = InferenceResourceOperationPhase.Materialize;
@@ -417,10 +423,13 @@ internal sealed class ComfyUiImageTransport(
             catch (Exception error) when (error is not OutOfMemoryException)
             {
                 var facts = new InferenceResourceOperationFailure(phase, resource.Resource, InferenceResourceCommitOutcome.NotAttempted, bytesTransferred);
-                failure = error is OperationCanceledException
-                    ? new InferenceResourceOperationCanceledException(facts, cancellationToken, error)
-                    : new InferenceResourceOperationException(InferenceFailureCode.ExecutionFailed,
-                        "The image reference resource operation failed.", facts, error);
+                failure = error switch
+                {
+                    InferenceResourceOperationException or InferenceResourceOperationCanceledException => error,
+                    OperationCanceledException => new InferenceResourceOperationCanceledException(facts, cancellationToken, error),
+                    _ => new InferenceResourceOperationException(error is InferenceException provider ? provider.Code : InferenceFailureCode.ExecutionFailed,
+                        "The image reference resource operation failed.", facts, error)
+                };
             }
             if (reader is not null)
             {
@@ -428,7 +437,8 @@ internal sealed class ComfyUiImageTransport(
                 catch (Exception cleanup) when (cleanup is not OutOfMemoryException)
                 {
                     if (failure is not null) throw new AggregateException(failure, cleanup);
-                    throw;
+                    throw new InferenceResourceOperationException(InferenceFailureCode.ExecutionFailed, "The image reference resource cleanup failed.",
+                        new(phase, resource.Resource, InferenceResourceCommitOutcome.NotAttempted, bytesTransferred), cleanup);
                 }
             }
             if (failure is not null) ExceptionDispatchInfo.Throw(failure);
