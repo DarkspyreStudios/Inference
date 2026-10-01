@@ -855,6 +855,9 @@ ImageTransportJobSnapshot status = await transport.GetJobAsync(
 durable recovery but must not interpret them as ComfyUI contracts. The package does not own an image
 database, media library, workflow catalog, cache, or background worker.
 
+The shared [`XaiFamilyBinding` contract](docs/media-bindings.md) uses explicit selection and the
+existing credential-access owner. It does not register or qualify an xAI Image transport.
+
 ## Host-executed tools
 
 For complete, compile-checked implementations for every supported provider, including connection

@@ -7,6 +7,7 @@ namespace Darkspyre.Inference.Connect.LLM;
 /// <summary>Connect-owned metadata for closed connection, request and captured-context contracts.</summary>
 public static class ConnectLlmJson
 {
+    public static JsonTypeInfo<XaiConnectionSelection> XaiConnectionSelection => ConnectLlmJsonContext.Default.XaiConnectionSelection;
     public static JsonTypeInfo<LlmCredential> Credential => LlmCredentialJsonContext.Default.LlmCredential;
     public static JsonTypeInfo<LlmAccountUsageSnapshot> AccountUsageSnapshot => ConnectLlmJsonContext.Default.LlmAccountUsageSnapshot;
     public static JsonTypeInfo<LlmConnection> Connection => ConnectLlmJsonContext.Default.LlmConnection;
@@ -24,8 +25,10 @@ public static class ConnectLlmJson
     public static JsonTypeInfo<LlmAgentContextStatus> AgentContextStatus => ConnectLlmJsonContext.Default.LlmAgentContextStatus;
 }
 
-[JsonSourceGenerationOptions(GenerationMode = JsonSourceGenerationMode.Metadata)]
+[JsonSourceGenerationOptions(GenerationMode = JsonSourceGenerationMode.Metadata,
+    Converters = [typeof(XaiFamilyBindingJsonConverter)])]
 [JsonSerializable(typeof(LlmConnection))]
+[JsonSerializable(typeof(XaiConnectionSelection))]
 [JsonSerializable(typeof(LlmAccountUsageSnapshot))]
 [JsonSerializable(typeof(LlmSetupConfiguration))]
 [JsonSerializable(typeof(LlmChatRequest))]
