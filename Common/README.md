@@ -209,6 +209,14 @@ against the current values. `QueryChoicesAsync` lists choices for one choice fie
 validates the object and calls the host's typed commit target once. One object saves once; a later
 edit opens the entry again at its new saved version.
 
+The shared `InferenceSettingsManager` operations are virtual. A derived lifetime owner can admit and
+drain calls around the existing base workflow, including calls through `IInferenceSettingsManager`
+or the base class. After fencing and draining all admitted operations, it can call the protected
+`DetachCommitTarget` to release its borrowed commit target. Detachment does not dispose the target
+or implement retirement for the derived manager. A subsequent base save rejects before creating
+changes or reporting an uncertain commit. Ordinary action, choice, cancellation and save-result
+policies remain in the base workflow.
+
 `HasUnsavedChanges` reports changes against the opened values, including explicit secret changes.
 Checks and progress do not make the object dirty; reverting edits restores clean state. `CanSave` is
 true when every visible required field has a value and any required sign-in has succeeded.

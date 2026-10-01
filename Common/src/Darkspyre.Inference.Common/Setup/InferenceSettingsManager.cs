@@ -34,7 +34,7 @@ public interface IInferenceSettingsStatusSource
 public abstract class InferenceSettingsManager<TSettings, TChanges> : IInferenceSettingsManager
     where TSettings : InferenceSettings<TChanges>
 {
-    private readonly ISetupCommitTarget<TChanges> _target;
+    private ISetupCommitTarget<TChanges>? _target;
 
     protected InferenceSettingsManager(ISetupCommitTarget<TChanges> target)
     {
@@ -42,7 +42,7 @@ public abstract class InferenceSettingsManager<TSettings, TChanges> : IInference
         _target = target;
     }
 
-    public async Task<SetupActionResult> RunAsync(InferenceSettings settings, string actionId,
+    public virtual async Task<SetupActionResult> RunAsync(InferenceSettings settings, string actionId,
         IProgress<SetupProgress>? progress = null, CancellationToken cancellationToken = default)
     {
         TSettings typed = Typed(settings);
@@ -74,7 +74,7 @@ public abstract class InferenceSettingsManager<TSettings, TChanges> : IInference
         }
     }
 
-    public async Task<SetupChoicePage> QueryChoicesAsync(InferenceSettings settings, string fieldId,
+    public virtual async Task<SetupChoicePage> QueryChoicesAsync(InferenceSettings settings, string fieldId,
         SetupChoiceQuery query, CancellationToken cancellationToken = default)
     {
         TSettings typed = Typed(settings);
@@ -106,8 +106,9 @@ public abstract class InferenceSettingsManager<TSettings, TChanges> : IInference
         }
     }
 
-    public async Task<SetupCommitResult> SaveAsync(InferenceSettings settings, CancellationToken cancellationToken = default)
+    public virtual async Task<SetupCommitResult> SaveAsync(InferenceSettings settings, CancellationToken cancellationToken = default)
     {
+        ISetupCommitTarget<TChanges> target = _target ?? throw new ObjectDisposedException(GetType().Name);
         TSettings typed = Typed(settings);
         if (typed.IsSaved)
         {
@@ -125,7 +126,7 @@ public abstract class InferenceSettingsManager<TSettings, TChanges> : IInference
         TChanges changes = typed.CreateChanges();
         try
         {
-            SetupCommitResult result = await _target.CommitAsync(changes, cancellationToken).ConfigureAwait(false);
+            SetupCommitResult result = await target.CommitAsync(changes, cancellationToken).ConfigureAwait(false);
             if (result.State is SetupCommitState.Committed or SetupCommitState.Uncertain)
             {
                 // One settings object commits once; a later edit opens the entry at its new saved version.
@@ -153,6 +154,12 @@ public abstract class InferenceSettingsManager<TSettings, TChanges> : IInference
             return new(SetupCommitState.Uncertain, Issues: [new("commit-outcome-unknown", "Read the saved configuration before retrying.")]);
         }
     }
+
+    /// <summary>
+    /// Releases the borrowed commit target without disposing it. A derived lifetime owner calls this
+    /// only after fencing new operations and draining every admitted operation, including saves.
+    /// </summary>
+    protected void DetachCommitTarget() => Interlocked.Exchange(ref _target, null);
 
     /// <summary>Runs one enabled action against the settings' current values.</summary>
     protected abstract Task<SetupActionResult> RunCoreAsync(TSettings settings, SetupActionDescriptor action,
