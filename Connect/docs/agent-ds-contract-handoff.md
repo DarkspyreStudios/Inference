@@ -127,6 +127,13 @@ These changes are unreleased.
   longer offers `None`. Bedrock Converse offers levels for Claude and Nova 2 models. Anthropic API-key,
   Gemini API and ChatGPT subscription connections list their models once per connection version
   before the first capability query or generation. See [Reasoning levels](../README.md#reasoning-levels).
+- Vertex accepts any syntactically valid Gemini text or Claude ID without a local two-model/location
+  allowlist. The provider verifies invocation access and regional availability. Shared profiles supply
+  capabilities; missing limits and strict-schema evidence remain unknown. Claude accepts the shared
+  top-level `ProviderOptions`. `LlmGoogleAuthenticationMode.ApiKey` selects Gemini-only projectless
+  express mode. Store its Google Cloud key as the API-key credential and set `ProjectId` and `Location`
+  to null. Both fields are nullable in the coordinated breaking release. Express mode has no listing;
+  hosts permit manual Gemini model entry and offer an explicit inference test.
 
 ## Native background resources: 11.8.0-rc.1
 

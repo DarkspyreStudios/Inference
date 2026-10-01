@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Darkspyre.Inference.Common.LLM;
 using Darkspyre.Inference.Connect.ConsoleTester;
+using Darkspyre.Inference.Connect.LLM.Vertex;
 using SecureStore;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -16,6 +17,7 @@ public sealed class ConsoleTesterTests
         var services = new ServiceCollection();
         services.AddLlmConnect();
         services.AddLlmConnectBedrock();
+        services.AddLlmConnectVertex();
         using var container = services.BuildServiceProvider();
         return new(container.GetServices<ILlmClient>());
     }
@@ -122,6 +124,37 @@ public sealed class ConsoleTesterTests
         Assert.Equal("us-east-1", options.Region);
         Assert.Throws<ArgumentException>(() =>
             Program.ParseBedrockLoginOptions(["--profile", "test"]));
+    }
+
+    [Fact]
+    public void VertexExpressInvocationRequiresNoProjectAndRejectsForeignAuthenticationOptions()
+    {
+        ConsoleInvocation express = Parse(["login", "--provider", "vertex", "--google-authentication", "ApiKey"]);
+        Assert.Equal(LlmGoogleAuthenticationMode.ApiKey, express.Vertex!.AuthenticationMode);
+        Assert.Null(express.Vertex.ProjectId);
+        Assert.Null(express.Vertex.Location);
+        Assert.Empty(express.CommandArguments);
+        Assert.Throws<ArgumentException>(() => Parse(["status", "--provider", "vertex"]));
+        Assert.Throws<ArgumentException>(() => Parse(["status", "--provider", "vertex", "--google-authentication", "ApiKey", "--google-project", "project"]));
+        Assert.Throws<ArgumentException>(() => Parse(["status", "--provider", "vertex", "--google-authentication", "ApiKey", "--google-location", "global"]));
+        Assert.Throws<ArgumentException>(() => Parse(["status", "--provider", "gemini", "--google-authentication", "ApiKey"]));
+        Assert.Throws<ArgumentException>(() => Parse(["status", "--provider", "vertex", "--google-authentication", "Bad"]));
+    }
+
+    [Fact]
+    public async Task VertexExpressHarnessStoresProtectedCredentialsAndIncludesAuthModeInVersion()
+    {
+        var vault = new InMemoryCredentialStore();
+        var express = Parse(["login", "--provider", "vertex", "--google-authentication", "ApiKey"]);
+        var source = new SecureConnectionSource(vault, Providers, express);
+        LlmConnection original = (await source.GetConnectionAsync(express.Provider.ConnectionId))!;
+        string secret = new LlmCredential { ApiKey = "protected-key" }.Serialize();
+        await source.SaveCredentialAsync(express.Provider.ConnectionId, secret, original.Version);
+        LlmConnection saved = (await source.GetConnectionAsync(express.Provider.ConnectionId))!;
+        Assert.Equal("protected-key", LlmCredential.Parse(saved.Credential)!.ApiKey);
+        Assert.NotEqual(original.Version, saved.Version);
+        var standard = Parse(["status", "--provider", "vertex", "--google-project", "project", "--google-location", "global"]);
+        Assert.NotEqual(saved.Version, (await new SecureConnectionSource(vault, Providers, standard).GetConnectionAsync(express.Provider.ConnectionId))!.Version);
     }
 
     [Fact]

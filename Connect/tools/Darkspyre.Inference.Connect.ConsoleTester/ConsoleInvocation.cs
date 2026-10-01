@@ -23,6 +23,7 @@ internal sealed record ConsoleInvocation(
         string? helper = null;
         string? googleProject = null;
         string? googleLocation = null;
+        LlmGoogleAuthenticationMode? googleAuthentication = null;
         var commandArguments = new List<string>();
         for (int index = 1; index < args.Length; index++)
         {
@@ -56,6 +57,13 @@ internal sealed record ConsoleInvocation(
                         nameof(args));
                 }
                 harnessArn = args[index];
+            }
+            else if (argument == "--google-authentication")
+            {
+                if (googleAuthentication is not null || ++index >= args.Length
+                    || !Enum.TryParse(args[index], out LlmGoogleAuthenticationMode mode) || !Enum.IsDefined(mode))
+                    throw new ArgumentException("--google-authentication requires one supported Google authentication mode.", nameof(args));
+                googleAuthentication = mode;
             }
             else if (argument is "--google-project" or "--google-location")
             {
@@ -106,9 +114,11 @@ internal sealed record ConsoleInvocation(
         if (args[0] == "apple-probe" && provider.Transport != LlmTransport.AppleFoundationModels)
             throw new ArgumentException("apple-probe requires --provider apple.", nameof(args));
 
-        if (provider.Transport != LlmTransport.GoogleVertexAi && (googleProject is not null || googleLocation is not null))
+        if (provider.Transport != LlmTransport.GoogleVertexAi && (googleProject is not null || googleLocation is not null || googleAuthentication is not null))
             throw new ArgumentException("Google configuration options require the Vertex provider.", nameof(args));
-        if (provider.Transport == LlmTransport.GoogleVertexAi && args[0] != "setup"
+        if (googleAuthentication == LlmGoogleAuthenticationMode.ApiKey && (googleProject is not null || googleLocation is not null))
+            throw new ArgumentException("Vertex express mode accepts no project or location.", nameof(args));
+        if (provider.Transport == LlmTransport.GoogleVertexAi && args[0] != "setup" && googleAuthentication != LlmGoogleAuthenticationMode.ApiKey
             && (googleProject is null || googleLocation is null))
             throw new ArgumentException("Vertex requires --google-project and --google-location. Configure ADC outside the harness.", nameof(args));
         return new ConsoleInvocation(
@@ -118,7 +128,7 @@ internal sealed record ConsoleInvocation(
             helper ?? harnessArn)
         {
             Vertex = provider.Transport == LlmTransport.GoogleVertexAi ? new()
-            { ProjectId = googleProject ?? string.Empty, Location = googleLocation ?? string.Empty } : null
+            { ProjectId = googleProject, Location = googleLocation, AuthenticationMode = googleAuthentication ?? LlmGoogleAuthenticationMode.ApplicationDefault } : null
         };
     }
 }

@@ -47,11 +47,15 @@ The Apple on-device adapter is registered by `AddLlmConnect`. Its separately bui
 helper and release gates are described in the [connector design](docs/apple-foundation-models-design.md).
 This source implementation has not been published as a signed helper release.
 
-Google Vertex AI support for Gemini and Claude is implemented in source under DSA-61.
+Google Vertex AI accepts Gemini text and Claude model IDs through shared provider profiles.
 Register `AddLlmConnectVertex()` alongside `AddLlmConnect()` and supply a typed `LlmConnection.Vertex`
-with project, location and authentication mode. The adapter assembly is included by the Connect
-package project. See the [technical mapping](docs/google-vertex-ai-tech-design.md) for reviewed model
-profiles and limits. Live cloud qualification remains; the shared contract requires host migration.
+with project, location and ADC or service-account authentication. `ApiKey` selects global projectless
+express mode for Gemini only; `ProjectId` and `Location` are null and the protected credential holds
+the Google Cloud API key. Express mode has no model listing. Catalog entries report unknown invocation
+access, not regional eligibility or permissions. Unknown limits and Claude strict-schema support stay
+unknown; an explicit schema capability override enables a native schema attempt. The adapter assembly
+is included by the Connect package project. See the [technical mapping](docs/google-vertex-ai-tech-design.md).
+Live cloud qualification remains; the shared contract requires host migration.
 
 The Gemini API (Google AI Studio) adapter is registered by `AddLlmConnect` under the provider id
 `gemini-api` and transport `GoogleGeminiApi`. It needs only an API key, sent in the `x-goog-api-key`
@@ -87,6 +91,16 @@ Use `anthropic/claude-sonnet-4-6` to exercise the Claude route. Cases are `text`
 `agent` and `cancel`. Calls are explicitly metered; failed cases are not retried. Unavailable auth or
 catalog discovery produces a visible skip. The existing `prompt --image` and `prompt --document`
 commands cover attachment experiments separately. These live probes are not normal test gates.
+
+Express mode reads `VERTEX_API_KEY` during explicit login and stores it in the operating system vault.
+The key never appears in a URL or command argument. Do not pass a project or location in this mode:
+
+```bash
+dotnet run --project Connect/tools/Darkspyre.Inference.Connect.ConsoleTester -- login --provider vertex --google-authentication ApiKey
+dotnet run --project Connect/tools/Darkspyre.Inference.Connect.ConsoleTester -- vertex-probe --provider vertex --google-authentication ApiKey --model google/gemini-3-flash-preview --case all --repeat 1 --timeout-seconds 120
+```
+
+The express status check validates configuration only. Generation verifies remote model access.
 
 ### Gemini API ConsoleTester
 
@@ -433,7 +447,7 @@ only that display with adaptive thinking on the named default-thinking Opus 5, S
 Mythos families; it invents no effort or budget. Explicit `None`, budget models, effort-only models
 and older adaptive models retain their existing controls. Disabling display omits the summary request
 without changing explicit reasoning controls. Catalog evidence remains authoritative for thinking
-support. The qualified Vertex Sonnet 4.6 request body receives no new display field.
+support. Vertex Sonnet 4.6 receives no new display field.
 
 Claude profiles reject temperature and forced tool choice while adaptive or budget thinking is
 active, including a profile's default thinking. Profiles that prohibit forced tool choice reject it
@@ -968,7 +982,8 @@ remains cancellation. Service disposal cancels and drains active counts and reje
 Failures expose safe status/retry information without response bodies or nested transport diagnostics.
 Vertex Claude uses `count-tokens:rawPredict` with the bare model ID. Its count regions differ from
 generation regions; an unsupported selected location fails without rerouting or changing the model.
-The reviewed Vertex model allowlist remains unchanged.
+Vertex accepts Gemini text and Claude model IDs without a local model or generation-location allowlist.
+Express mode counts Gemini input with its projectless API-key endpoint.
 
 ### Host-owned managed agent runtime
 
@@ -1515,7 +1530,7 @@ before dispatch. `SupportsTopP`, `SupportsTopK`, `SupportsSeed`, `SupportsPresen
 | Anthropic and Vertex Claude | Profile-owned temperature/top-p/top-k, `stop_sequences` without an invented Connect limit; thinking permits top-p from 0.95 to 1 and no top-k |
 | Bedrock Converse | `inferenceConfig.topP` and `stopSequences`; Claude `top_k`, Nova 2 `inferenceConfig.topK` up to 128, merged with reasoning fields; stop limit 2500, or 10 for DeepSeek R1 |
 | AgentCore | `BedrockModelConfig.TopP` on an explicit Bedrock model ID; the harness-default route cannot carry it |
-| Gemini API and Vertex Gemini | `generationConfig` sampling fields and penalties, up to five stops; Gemini API top-k requires a catalog default, Vertex uses its qualified profile |
+| Gemini API and Vertex Gemini | `generationConfig` sampling fields and penalties, up to five stops; Gemini API top-k requires a catalog default, Vertex uses its shared model profile |
 | Apple Foundation Models | Top-p or top-k random mode with optional seed; seed alone selects top-p 1; no stops or penalties |
 | Claude CLI, Antigravity CLI and Codex | All six controls rejected; capability overrides cannot enable an unmapped control |
 | SelfHost | All six controls and support flags pass to the selected Common engine; unsupported engine controls fail before its stream starts |

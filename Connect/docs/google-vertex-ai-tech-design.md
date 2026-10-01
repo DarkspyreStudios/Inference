@@ -1,9 +1,7 @@
 # Google Vertex AI connector: technical mapping
 
 **Ticket:** [DSA-61](https://darkspyre.atlassian.net/browse/DSA-61), under DSA-57.  
-**Date:** 2026-09-28. **Phase:** merged to master; 11.12.0-rc.1 release authorized; live qualification outstanding.
-**Authorization:** implementation and contract changes required for parity are authorized.
-The host must migrate persisted history (confirmed by the user). Publication is authorized for host migration testing.
+**Scope:** current Vertex routing, configuration and protocol mapping. Live qualification is outstanding.
 
 ### Implementation checkpoint
 
@@ -11,23 +9,21 @@ The source implementation includes the Common continuation envelope, all existin
 projections, typed Google setup, Vertex authentication/routing, Gemini/Claude protocols and the
 ConsoleTester probe. Deterministic tests cover protocol and migration behavior. Live Vertex
 qualification has not been run; catalog visibility does not establish invocation access.
-The coordinated breaking-contract release target is 11.12.0-rc.1. Publication evidence is recorded in `.roles/project.md`.
+The nullable express-mode configuration is a breaking contract in the synchronized package family.
+Publication evidence for published versions is recorded in `.roles/project.md`.
 
 Verification (2026-09-28): Connect 553 passed / 3 existing conditional skips (27 Vertex fixtures);
 Tensor 346 passed; UI 65 passed. Shared Common tests occur in each solution. All three solutions
 passed restore, zero-warning build, format verification and transitive dependency vulnerability audit.
 No paid/live inference calls were used.
 
-Initial reviewed profiles:
-
-| Model ID | Locations | Input / output token limits | Strict tools |
-| --- | --- | --- | --- |
-| `google/gemini-3-flash-preview` | `global` | 1,048,576 / 65,536 | Unsupported |
-| `anthropic/claude-sonnet-4-6` | `global`, `us-east5`, `europe-west1`, `asia-southeast1` | 1,000,000 / 128,000 | Supported |
-
-Other catalog entries are not advertised until their model profiles are implemented. Discovery uses
-`v1beta1/publishers/{publisher}/models`, paginates both publishers and filters to reviewed profiles
-for the configured location. Returned availability stays Unknown. Google.Apis.Auth 1.76.0 owns token
+Gemini text and Claude model IDs use the shared Gemini and Anthropic profiles. The adapter has no
+two-model or regional allowlist. Gemini TTS, image, live, native-audio and embedding models are excluded
+from this text-chat adapter. Gemini 3 Flash's documented limits are 1,048,576 input and 65,536 output
+tokens. Other unavailable limits remain null. Claude's catalog-free strict-schema evidence remains
+Unknown; ordinary non-strict tools work independently, and explicit schema capability overrides are
+supported. Discovery uses `v1beta1/publishers/{publisher}/models`, paginates both publishers and filters
+to text-chat families. Returned availability stays Unknown. Google.Apis.Auth 1.76.0 owns token
 acquisition and refresh; deterministic tests cover credential-owner caching, concurrent resolution,
 file replacement and cancellation, not Google's live token exchange.
 
@@ -86,8 +82,10 @@ route through the direct Anthropic client by fabricating an API-key connection.
 
 ## 3. Connection, credentials and setup
 
-Use a typed optional `LlmConnection.Vertex` configuration containing `ProjectId`, `Location`
-and `AuthenticationMode` (`ApplicationDefault` or `ServiceAccount`). These belong to the owning
+Use a typed optional `LlmConnection.Vertex` configuration containing nullable `ProjectId`, `Location`
+and `AuthenticationMode` (`ApplicationDefault`, `ServiceAccount` or `ApiKey`). ADC and service accounts
+require a validated project and explicit location. `ApiKey` requires null project/location and an
+API-key-only `LlmCredential`. These belong to the owning
 connector contract, not Common. Add a protected Google service-account credential shape to
 `LlmCredential`; do not place a private key in `ProviderOptions` or `AdditionalHeaders`.
 The host remains the credential-store owner. `Version` continues to cover configuration and secrets.
@@ -108,13 +106,13 @@ use a conservative credential-instance scope; never infer equivalence from proje
 Build HTTPS endpoints from validated project/location/model identifiers. Gemini uses the Google
 publisher generation route; Claude uses the Anthropic publisher prediction route. Regional/global
 host selection belongs to the adapter. Reject an arbitrary endpoint override or authorization header;
-disable redirects that could forward credentials. Location eligibility belongs to each model profile.
+disable redirects that could forward credentials. The provider verifies location eligibility.
 No automatic regional fallback, model substitution, impersonation or Cloud resource creation.
 
 Provider-owned setup steps:
 
-1. Select ADC or explicit service-account authentication; explain the external prerequisites.
-2. Enter project and location. No permission or residency assumptions from a default location.
+1. Select ADC, explicit service-account authentication or Gemini-only express API-key mode.
+2. Enter project and location for ADC/service accounts. Express mode hides both fields and requires an API key.
 3. Resolve credentials and validate configuration without running inference.
 4. Discover/select a model, showing catalog versus verified-access status.
 5. Offer an explicit metered connection test, with its side effect declared in setup metadata.
@@ -124,6 +122,14 @@ Extend `LlmSettings`, its draft/change projection and manager for these fields. 
 its `SetupDefinition`; ConsoleTester and UI.Settings consume it. Do not create a second setup flow.
 Authentication success, catalog access and inference permission are separate reported results.
 
+Express mode uses `https://aiplatform.googleapis.com/v1/publishers/google/models/{model}` with
+`generateContent`, `streamGenerateContent?alt=sse` or `countTokens`. Authentication uses only the
+`x-goog-api-key` header. The API key never enters the URL, payload, diagnostics or continuation state.
+No Google SDK/ADC discovery runs in this mode. Claude is unsupported. Model listing returns an empty
+list without HTTP and reports `SupportsModelListing = false`; the host permits manual model entry.
+The API-key hash scopes continuation state. Changing keys invalidates that state; same-key replay
+preserves the existing format and model binding. Setup does not create a project or run inference.
+
 ## 4. Model identity and discovery
 
 Use canonical request IDs `google/<native-model-id>` and `anthropic/<native-model-id>`. Preserve
@@ -132,8 +138,8 @@ segments; callers cannot inject project/location/operation paths through a model
 
 Each adapter-owned model profile records native ID, protocol, endpoint eligibility, context/output
 limits, capabilities, supported MIME types, schema rules, reasoning mapping and known parameter
-combination restrictions. Unknown values stay unknown. Do not infer capabilities solely from a
-name prefix or treat every future Gemini/Claude model as equivalent.
+combination restrictions. Shared family profiles provide known controls without treating every future
+Gemini/Claude model as equivalent. Missing schema evidence and limits remain unknown.
 
 Propose optional neutral model metadata on `LlmModel` and `LlmModelInfo`:
 
@@ -145,8 +151,12 @@ Propose optional neutral model metadata on `LlmModel` and `LlmModelInfo`:
 An inaccessible catalog must not be returned as an empty successful list. Cache identity includes
 project, location and auth scope, with explicit refresh through the existing service.
 
-**Discovery remains a qualification item:** select the supported Google publisher-catalog endpoint,
-its version and IAM requirements, then reconcile its metadata with owned capability profiles.
+Discovery uses the paged `v1beta1/publishers/{publisher}/models` endpoint for Google and Anthropic.
+It retains each native resource name, `versionId` and `launchStage`. A catalog revision does not alter
+the invocation model ID. Launch stage appears in availability diagnostics only for recognized enum
+values. The adapter filters to Gemini text and Claude families. An Anthropic publisher-list 403 or
+404 contributes no entries; other catalog failures remain errors. Manual Claude IDs remain usable.
+Actual endpoint permissions and regional applicability remain qualification items.
 Claude's native Models endpoint is not available on this platform [S2]. Do not substitute the
 project's custom-trained-model registry. If an owned catalog is necessary, label its provenance and
 unknown access accurately; do not claim a live authorized-model inventory.
@@ -179,6 +189,12 @@ protocol references [S2–S4]. Use a single candidate; our result contract repre
 | Schema output | JSON MIME type plus supported schema field | Supported `output_config.format` JSON-schema configuration |
 | Image/document bytes | Supported inline data parts | Supported base64 image/document blocks |
 | Conversation key | Host affinity only | Host affinity only |
+
+Vertex Claude accepts the shared Anthropic top-level `ProviderOptions`. Request options override
+connection options. The shared request builder owns tool, thinking, sampling and schema controls;
+the Vertex adapter owns the body protocol version and URL model. Count requests reuse the shared
+projection and field preflight. A top-level field that the count API cannot represent fails before
+credential resolution and HTTP. Generation does not silently drop that field.
 
 Do not flatten signed assistant output into visible text/calls. Preserve sequence and per-part
 association through the continuation envelope in section 6. Keep original wire call IDs; if Gemini
@@ -517,7 +533,7 @@ tools throughout. Features already representable by current contracts are separa
 | Area | Qualification evidence |
 | --- | --- |
 | Model catalog | Exact endpoint/version, auth requirements, pagination, regional applicability, and catalog/access distinction |
-| Initial supported profiles | Explicit Gemini and Claude IDs with documented limits and endpoint availability; fixtures per profile |
+| Shared model families | Gemini text and Claude IDs, truthful shared capabilities/limits, native version suffixes and provider regional errors |
 | Reasoning mapping | Supported neutral levels mapped to valid native values; temperature/output/tool-choice combinations verified |
 | Ordinary tool schemas | Actual provider declaration requirements; optional properties/open objects preserved; omission of unsupported strict fields |
 | Opt-in strict tools and structured replies | Separate supported subsets/guarantees, mixed strict/non-strict tools, Auto semantics and schema-plus-tools combinations |
@@ -540,7 +556,7 @@ Auto remaining Auto; Required without explicit Strict; supported explicit true a
 failure; mixed strict/non-strict tools; structured output leaving tools non-strict; and invalid returned
 arguments causing no handler execution. Ordinary tool support must pass independently of strict support.
 
-Live qualification is explicit and bounded: one selected model per publisher, text, schema, image/PDF,
+Live qualification is explicit and bounded: selected shared families and express API-key mode, text, schema, image/PDF,
 two-step tool continuation, reasoning state, cancellation and managed capture/import. Normal tests use
 doubles and no paid calls. Missing credentials produce a visible skip, never a passing live test.
 Use the existing ConsoleTester; a separate prototype is justified only for an unresolved protocol
@@ -565,6 +581,8 @@ Official documentation inspected for this mapping (2026-09-28):
 - [S14: Gemini generation schema contract](https://docs.cloud.google.com/dotnet/docs/reference/Google.Cloud.AIPlatform.V1/latest/Google.Cloud.AIPlatform.V1.GenerationConfig).
 - [S15: Bedrock cache usage accounting](https://docs.aws.amazon.com/us_en/bedrock/latest/userguide/prompt-caching.html).
 - [S10: Claude optional tool definition properties](https://platform.claude.com/docs/en/agents-and-tools/tool-use/tool-reference).
+- [S16: Vertex express mode](https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/start/express-mode/overview).
+- [S17: Publisher catalog fields](https://docs.cloud.google.com/gemini-enterprise-agent-platform/reference/rest/v1beta1/publishers.models).
 
 Repository baseline: [managed-agent design](enhancements.md),
 [Connect integration contract](../README.md),

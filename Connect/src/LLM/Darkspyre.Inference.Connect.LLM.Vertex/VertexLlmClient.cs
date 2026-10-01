@@ -1,4 +1,4 @@
-using System.Net.Http.Headers;
+using System.Net;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -21,8 +21,12 @@ internal sealed class VertexLlmClient(HttpClient http, IVertexAuthentication aut
     {
         VertexEndpoints.Validate(connection);
         LlmProviderCapabilities capabilities = modelId is null
-            ? VertexModelProfiles.All[0].Capabilities with { RichContentSupported = RichContentRoutes.Anthropic }
-            : VertexModelProfiles.Get(modelId, connection.Vertex!.Location).Capabilities;
+            ? VertexModelProfiles.Get("google/gemini-3-flash-preview").Capabilities with { RichContentSupported = RichContentRoutes.Anthropic }
+            : VertexModelProfiles.Get(modelId).Capabilities;
+        bool express = connection.Vertex!.AuthenticationMode == LlmGoogleAuthenticationMode.ApiKey;
+        if (express && modelId is not null && VertexModelProfiles.Get(modelId).IsClaude)
+            throw new NotSupportedException("Vertex express mode serves Gemini models only.");
+        if (express) capabilities = capabilities with { SupportsModelListing = false };
         LlmProviderCapabilities implemented = capabilities;
         capabilities = LlmCapabilityOverrideLookup.Apply(capabilities, connection, modelId);
         if (capabilities.SupportsJsonObject || capabilities.SupportsAccountUsage
@@ -34,7 +38,8 @@ internal sealed class VertexLlmClient(HttpClient http, IVertexAuthentication aut
             || capabilities.SupportsFrequencyPenalty && !implemented.SupportsFrequencyPenalty
             || capabilities.MaxStopSequences > implemented.MaxStopSequences
             || modelId is not null && capabilities.ReasoningLevels.Any(level =>
-                !VertexModelProfiles.Get(modelId, connection.Vertex!.Location).ReasoningLevels.Contains(level)))
+                !VertexModelProfiles.Get(modelId).ReasoningLevels.Contains(level))
+            || express && capabilities.SupportsModelListing)
         { throw new NotSupportedException("Vertex capability overrides cannot enable unimplemented controls."); }
         return capabilities;
     }
@@ -50,7 +55,7 @@ internal sealed class VertexLlmClient(HttpClient http, IVertexAuthentication aut
         LlmConnection connection, LlmChatRequest request, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
-        VertexModelProfile profile = VertexModelProfiles.Get(request.ModelId, connection.Vertex?.Location ?? string.Empty);
+        VertexModelProfile profile = VertexModelProfiles.Get(request.ModelId);
         LlmProviderCapabilities capabilities = GetCapabilities(connection, request.ModelId);
         ValidateRequest(connection, request, capabilities, profile.IsClaude ? AnthropicTools.Resolve(connection, request).NativeNames : null);
         ValidateVertexRequest(connection, request, profile, capabilities);
@@ -71,10 +76,11 @@ internal sealed class VertexLlmClient(HttpClient http, IVertexAuthentication aut
         cancellationToken.ThrowIfCancellationRequested();
         ArgumentNullException.ThrowIfNull(request);
         Uri endpoint = VertexEndpoints.CountTokens(connection, request.ModelId);
+        if (VertexModelProfiles.Get(request.ModelId).IsClaude) AnthropicMessagesLlmClient.ValidateTokenCountOptions(connection, request);
         var built = await PrepareRequestAsync(connection, request, cancellationToken).ConfigureAwait(false);
         LlmProviderInputTokenCount result;
         if (built.Profile.IsClaude)
-            result = await new VertexClaudeProtocol(Http, built.Access.Token)
+            result = await new VertexClaudeProtocol(Http, built.Access)
                 .CountInputTokensAsync(built.Connection, built.Request, cancellationToken).ConfigureAwait(false);
         else
         {
@@ -83,7 +89,7 @@ internal sealed class VertexLlmClient(HttpClient http, IVertexAuthentication aut
                 GeminiModelProfiles.Get(VertexEndpoints.ParseModel(request.ModelId).Model, catalogThinking: null), built.Capabilities.SupportsReasoningText);
             payload.Remove("toolConfig");
             using var message = new HttpRequestMessage(HttpMethod.Post, endpoint) { Content = JsonContent.Create(payload) };
-            message.Headers.Authorization = new AuthenticationHeaderValue("Bearer", built.Access.Token);
+            built.Access.Authorize(message);
             result = await ProviderTokenCounting.SendAsync(Http, message, Transport, request.ModelId, false, cancellationToken).ConfigureAwait(false);
         }
         return result with { OmittedContinuationStateCount = checked(result.OmittedContinuationStateCount + built.Omitted) };
@@ -97,12 +103,12 @@ internal sealed class VertexLlmClient(HttpClient http, IVertexAuthentication aut
         connection = prepared;
         request = projected;
         IAsyncEnumerable<LlmStreamEvent> source = profile.IsClaude
-            ? new VertexClaudeProtocol(Http, access.Token).StreamAsync(connection, request, cancellationToken)
+            ? new VertexClaudeProtocol(Http, access).StreamAsync(connection, request, cancellationToken)
             : GeminiStream.ReadAsync(Http, GeminiMessage(connection, request,
                 GeminiRequest.Build(connection, request, enforcement, output => ProjectToolOutput(connection, request.ModelId, output),
                     GeminiModelProfiles.Get(VertexEndpoints.ParseModel(request.ModelId).Model, catalogThinking: null), capabilities.SupportsReasoningText,
                     streamArguments: capabilities.SupportsStreaming),
-                access.Token, capabilities.SupportsStreaming), GeminiRoute, connection, request, enforcement,
+                access, capabilities.SupportsStreaming), GeminiRoute, connection, request, enforcement,
                 capabilities.SupportsStreaming, capabilities.SupportsUsageDeltas, capabilities.SupportsReasoningText, cancellationToken);
         await using IAsyncEnumerator<LlmStreamEvent> iterator = source.GetAsyncEnumerator(cancellationToken);
         while (true)
@@ -128,10 +134,13 @@ internal sealed class VertexLlmClient(HttpClient http, IVertexAuthentication aut
 
     public override async Task<IReadOnlyList<LlmModel>> ListModelsAsync(LlmConnection connection, CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
+        VertexEndpoints.Validate(connection);
+        if (connection.Vertex!.AuthenticationMode == LlmGoogleAuthenticationMode.ApiKey) return [];
         VertexAccess access = await authentication.ResolveAsync(connection, cancellationToken).ConfigureAwait(false);
         if (connection.ResolvedContinuationScope is { } pinned && pinned != access.Scope)
         { throw new InvalidOperationException("The Google credential identity changed before model discovery."); }
-        var names = new HashSet<string>(StringComparer.Ordinal);
+        var catalog = new Dictionary<string, JsonElement>(StringComparer.Ordinal);
         foreach (string publisher in new[] { "google", "anthropic" })
         {
             string? page = null;
@@ -141,8 +150,9 @@ internal sealed class VertexLlmClient(HttpClient http, IVertexAuthentication aut
                 string path = $"{VertexEndpoints.BaseEndpoint}/v1beta1/publishers/{publisher}/models?pageSize=100"
                     + (page is null ? string.Empty : "&pageToken=" + Uri.EscapeDataString(page));
                 using var request = new HttpRequestMessage(HttpMethod.Get, path);
-                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", access.Token);
+                access.Authorize(request);
                 using HttpResponseMessage response = await Http.SendAsync(request, cancellationToken).ConfigureAwait(false);
+                if (publisher == "anthropic" && response.StatusCode is HttpStatusCode.Forbidden or HttpStatusCode.NotFound) break;
                 CheckStatus(response);
                 try
                 {
@@ -154,7 +164,10 @@ internal sealed class VertexLlmClient(HttpClient http, IVertexAuthentication aut
                         {
                             string? name = LlmJson.GetString(model, "name");
                             string prefix = $"publishers/{publisher}/models/";
-                            if (name?.StartsWith(prefix, StringComparison.Ordinal) == true) { names.Add(publisher + "/" + name[prefix.Length..]); }
+                            if (name?.StartsWith(prefix, StringComparison.Ordinal) == true)
+                            {
+                                catalog[publisher + "/" + name[prefix.Length..]] = model.Clone();
+                            }
                         }
                     }
                     page = LlmJson.GetString(root, "nextPageToken");
@@ -164,21 +177,32 @@ internal sealed class VertexLlmClient(HttpClient http, IVertexAuthentication aut
                 { throw new LlmProviderException("Vertex model discovery returned an invalid catalog page.", Transport); }
             } while (!string.IsNullOrEmpty(page));
         }
-        return VertexModelProfiles.All.Where(profile => names.Contains(profile.Id) && profile.Locations.Contains(connection.Vertex!.Location))
-            .Select(profile => new LlmModel(profile.Id, profile.Id, VertexEndpoints.ParseModel(profile.Id).Publisher, GetCapabilities(connection, profile.Id))
+        var result = new List<LlmModel>();
+        foreach (var (id, entry) in catalog.OrderBy(entry => entry.Key, StringComparer.Ordinal))
+        {
+            VertexModelProfile profile;
+            try { profile = VertexModelProfiles.Get(id); }
+            catch (Exception error) when (error is ArgumentException or NotSupportedException) { continue; }
+            string? stage = LlmJson.GetString(entry, "launchStage");
+            string? safeStage = stage is "EXPERIMENTAL" or "PRIVATE_PREVIEW" or "PUBLIC_PREVIEW" or "GA" ? stage : null;
+            result.Add(new LlmModel(profile.Id, profile.Id, VertexEndpoints.ParseModel(profile.Id).Publisher, GetCapabilities(connection, profile.Id))
             {
                 MaxContextTokens = profile.ContextTokens,
                 MaxOutputTokens = profile.OutputTokens,
+                CatalogEntry = entry,
                 Availability = LlmModelAvailability.Unknown,
-                AvailabilityReason = "Publisher catalog entry; invocation access has not been tested."
-            }).ToArray();
+                AvailabilityReason = safeStage is null ? "Publisher catalog entry; invocation access has not been tested."
+                    : $"Publisher catalog entry ({safeStage}); invocation access has not been tested."
+            });
+        }
+        return result;
     }
 
     public string? EstimateDiagnostic => "Local text estimate; opaque reasoning and media occupancy are unknown. This is not a provider admission check.";
     public ContextEstimate? EstimateInputTokens(LlmConnection connection, LlmChatRequest request)
     {
         LlmProviderCapabilities capabilities = GetCapabilities(connection, request.ModelId);
-        VertexModelProfile profile = VertexModelProfiles.Get(request.ModelId, connection.Vertex!.Location);
+        VertexModelProfile profile = VertexModelProfiles.Get(request.ModelId);
         ValidateRequest(connection, request, capabilities, profile.IsClaude ? AnthropicTools.Resolve(connection, request).NativeNames : null);
         ValidateVertexRequest(connection, request, profile, capabilities);
         if (request.Messages.Any(message => message.ContinuationState is not null || message.Attachments.Count != 0
@@ -190,12 +214,12 @@ internal sealed class VertexLlmClient(HttpClient http, IVertexAuthentication aut
     private static readonly GeminiRoute GeminiRoute = new(LlmTransport.GoogleVertexAi, "Vertex", "vertex_", CheckStatus,
         (connection, modelId, parts) => new VertexContinuationCodec().Encode(connection, modelId, parts));
 
-    private static HttpRequestMessage GeminiMessage(LlmConnection connection, LlmChatRequest request, JsonObject payload, string token,
+    private static HttpRequestMessage GeminiMessage(LlmConnection connection, LlmChatRequest request, JsonObject payload, VertexAccess access,
         bool stream)
     {
         var message = new HttpRequestMessage(HttpMethod.Post, VertexEndpoints.Generation(connection, request.ModelId, stream))
         { Content = JsonContent.Create(payload) };
-        message.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        access.Authorize(message);
         return message;
     }
 
@@ -210,8 +234,7 @@ internal sealed class VertexLlmClient(HttpClient http, IVertexAuthentication aut
 
     private static void ValidateVertexRequest(LlmConnection connection, LlmChatRequest request, VertexModelProfile profile, LlmProviderCapabilities capabilities)
     {
-        if (profile.IsClaude && connection.ProviderOptions.Keys.Concat(request.ProviderOptions.Keys).Any(name => name != AnthropicTools.OptionName)
-            || !profile.IsClaude && (connection.ProviderOptions.ContainsKey(AnthropicTools.OptionName) || request.ProviderOptions.ContainsKey(AnthropicTools.OptionName)))
+        if (!profile.IsClaude && (connection.ProviderOptions.ContainsKey(AnthropicTools.OptionName) || request.ProviderOptions.ContainsKey(AnthropicTools.OptionName)))
         { throw new NotSupportedException("Vertex accepts only declared request controls."); }
         if (profile.IsClaude)
         {

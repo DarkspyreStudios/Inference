@@ -3,14 +3,16 @@ namespace Darkspyre.Inference.Connect.LLM;
 public enum LlmGoogleAuthenticationMode
 {
     ApplicationDefault,
-    ServiceAccount
+    ServiceAccount,
+    /// <summary>Global projectless Vertex express mode with a Google Cloud API key. Gemini only; no model listing.</summary>
+    ApiKey
 }
 
 /// <summary>Non-secret Google Cloud connection selection. Credentials remain in LlmCredential.</summary>
 public sealed record LlmVertexConfiguration
 {
-    public required string ProjectId { get; init; }
-    public required string Location { get; init; }
+    public string? ProjectId { get; init; }
+    public string? Location { get; init; }
     public LlmGoogleAuthenticationMode AuthenticationMode { get; init; }
 }
 

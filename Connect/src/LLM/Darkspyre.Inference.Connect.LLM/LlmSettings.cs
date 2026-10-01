@@ -100,10 +100,10 @@ public sealed class LlmSettings : InferenceSettings<LlmSetupChanges>
 
     private static bool UsesFixedEndpoint(LlmTransport transport) => transport is LlmTransport.OpenAiCodex or LlmTransport.GoogleVertexAi or LlmTransport.GoogleGeminiApi;
     private bool UsesVertex => _draft.Transport == LlmTransport.GoogleVertexAi;
-    private LlmVertexConfiguration Vertex => _draft.Vertex ?? new() { ProjectId = string.Empty, Location = string.Empty };
+    private LlmVertexConfiguration Vertex => _draft.Vertex ?? new();
     private bool UsesAws => _draft.Transport is LlmTransport.AwsBedrockConverse or LlmTransport.AwsBedrockAgentCore;
     private bool UsesApiKey => _draft.Transport is LlmTransport.OpenAiResponses or LlmTransport.OpenAiCompatibleChat or LlmTransport.AnthropicMessages
-        or LlmTransport.GoogleGeminiApi;
+        or LlmTransport.GoogleGeminiApi || UsesVertex && Vertex.AuthenticationMode == LlmGoogleAuthenticationMode.ApiKey;
     private LlmCredential Credential => LlmCredential.Parse(_draft.Credential) ?? new();
 
     protected override bool IsDraftDirty =>
@@ -171,22 +171,34 @@ public sealed class LlmSettings : InferenceSettings<LlmSetupChanges>
         }
         if (UsesVertex)
         {
-            fields.Add(new SetupTextField(new("google-project", "Google Cloud project") { IsRequired = true }, Vertex.ProjectId,
-                string.Empty, value => Edit(() => _draft = _draft with { Vertex = Vertex with { ProjectId = value } })));
-            fields.Add(new SetupTextField(new("google-location", "Location")
+            if (Vertex.AuthenticationMode != LlmGoogleAuthenticationMode.ApiKey)
             {
-                IsRequired = true,
-                HelpText = "Enter an explicit region or global. Global routing does not pin processing to one region."
-            }, Vertex.Location,
-                string.Empty, value => Edit(() => _draft = _draft with { Vertex = Vertex with { Location = value } })));
+                fields.Add(new SetupTextField(new("google-project", "Google Cloud project") { IsRequired = true }, Vertex.ProjectId ?? string.Empty,
+                    string.Empty, value => Edit(() => _draft = _draft with { Vertex = Vertex with { ProjectId = value } })));
+                fields.Add(new SetupTextField(new("google-location", "Location")
+                {
+                    IsRequired = true,
+                    HelpText = "Enter an explicit region or global. Global routing does not pin processing to one region."
+                }, Vertex.Location ?? string.Empty,
+                    string.Empty, value => Edit(() => _draft = _draft with { Vertex = Vertex with { Location = value } })));
+            }
             fields.Add(new SetupChoiceField(new("google-authentication", "Authentication"), Vertex.AuthenticationMode.ToString(),
                 LlmGoogleAuthenticationMode.ApplicationDefault.ToString(), value =>
                 {
                     if (!Enum.TryParse<LlmGoogleAuthenticationMode>(value, out var mode) || !Enum.IsDefined(mode))
                     { return new(SetupEditState.Invalid, [new("google-authentication-invalid", "Select a Google authentication mode.")]); }
-                    return Edit(() => _draft = _draft with { Vertex = Vertex with { AuthenticationMode = mode } });
+                    return Edit(() =>
+                    {
+                        _draft = _draft with
+                        {
+                            Vertex = mode == LlmGoogleAuthenticationMode.ApiKey
+                                ? Vertex with { AuthenticationMode = mode, ProjectId = null, Location = null }
+                                : Vertex with { AuthenticationMode = mode }
+                        };
+                    });
                 }, false));
-            if (Vertex.AuthenticationMode == LlmGoogleAuthenticationMode.ServiceAccount || Credential.Google is not null)
+            if (Vertex.AuthenticationMode != LlmGoogleAuthenticationMode.ApiKey
+                && (Vertex.AuthenticationMode == LlmGoogleAuthenticationMode.ServiceAccount || Credential.Google is not null))
             {
                 fields.Add(new SetupSecretField(new("google-service-account", "Service-account JSON key")
                 {
@@ -343,7 +355,8 @@ public sealed class LlmSettings : InferenceSettings<LlmSetupChanges>
         _ = CreateSteps(); // Registers the override field IDs for the current transport.
         return fieldId == "google-authentication" && UsesVertex
             ? Page(query, [new(LlmGoogleAuthenticationMode.ApplicationDefault.ToString(), "Application default credentials"),
-                new(LlmGoogleAuthenticationMode.ServiceAccount.ToString(), "Service-account key")])
+                new(LlmGoogleAuthenticationMode.ServiceAccount.ToString(), "Service-account key"),
+                new(LlmGoogleAuthenticationMode.ApiKey.ToString(), "API key (express mode)")])
             : fieldId == "output-limit-field" && _draft.Transport == LlmTransport.OpenAiCompatibleChat
                 ? Page(query, [new("default", "Default"), new("max_tokens", "max_tokens"), new("max_completion_tokens", "max_completion_tokens")])
             : fieldId == "prompt-cache-key" && _draft.Transport == LlmTransport.OpenAiCompatibleChat ? Page(query, OverrideChoices)

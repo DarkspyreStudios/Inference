@@ -8,7 +8,7 @@ internal static class VertexProviderDefinition
     {
         Id = "google-vertex-ai",
         DisplayName = "Google Vertex AI",
-        Description = "Gemini and Claude through Google Cloud, using application default credentials or a service account.",
+        Description = "Gemini and Claude through Google Cloud with ADC or a service account; projectless Gemini express mode with an API key.",
         Transport = LlmTransport.GoogleVertexAi,
         DefaultEndpoint = VertexEndpoints.BaseEndpoint,
         DisplayOrder = 55,
@@ -17,14 +17,14 @@ internal static class VertexProviderDefinition
             new SetupStep
             {
                 Id = "configure-google", Title = "Google Cloud authentication and location",
-                Instructions = "Enable the Vertex AI API and grant the chosen principal model invocation access. Select application default credentials configured outside this application, or supply a protected Google service-account key. Enter the project and an explicit location; global routing has different residency semantics from a region.",
-                CompletionRequirement = "Resolve the configured Google credential and load the publisher catalog. Catalog access does not verify model invocation permission.",
+                Instructions = "Select application default credentials, a protected service-account key, or a Google Cloud API key for Gemini-only express mode. ADC and service accounts require a project and explicit location. Express mode uses the global projectless endpoint and has no model listing. Global routing does not pin processing to a region.",
+                CompletionRequirement = "Supply the selected authentication configuration. Catalog access does not verify model invocation permission; express mode requires an explicit inference test.",
                 Troubleshooting = "Check ADC configuration or the service-account key, project, enabled API, IAM permissions, and publisher model access."
             },
             new SetupStep
             {
                 Id = "select-model", Title = "Choose a publisher model",
-                Instructions = "Choose a qualified google/model or anthropic/model ID. Catalog entries have unknown invocation access until tested.",
+                Instructions = "Choose a google/gemini-* text model or anthropic/claude-* model ID. Express mode requires manual Gemini model entry. Catalog entries have unknown invocation access until tested.",
                 CompletionRequirement = "Select a supported model in the configured location.",
                 Troubleshooting = "Model Garden catalog membership does not guarantee access in this project or region."
             },

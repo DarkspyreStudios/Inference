@@ -1,4 +1,3 @@
-using System.Net.Http.Headers;
 using System.Text.Json.Nodes;
 using Darkspyre.Inference.Common.LLM;
 using Darkspyre.Inference.Connect.LLM.Internal;
@@ -7,7 +6,7 @@ using Darkspyre.Inference.Connect.LLM.Providers;
 namespace Darkspyre.Inference.Connect.LLM.Vertex;
 
 /// <summary>Shared Messages protocol with Vertex-owned routing and authentication.</summary>
-internal sealed class VertexClaudeProtocol(HttpClient http, string token) : AnthropicMessagesLlmClient(http)
+internal sealed class VertexClaudeProtocol(HttpClient http, VertexAccess access) : AnthropicMessagesLlmClient(http)
 {
     public override LlmTransport Transport => LlmTransport.GoogleVertexAi;
     public override LlmProviderDefinition ProviderDefinition => VertexProviderDefinition.Value;
@@ -19,7 +18,7 @@ internal sealed class VertexClaudeProtocol(HttpClient http, string token) : Anth
     {
         var result = new HttpRequestMessage(HttpMethod.Post, VertexEndpoints.Generation(connection, request.ModelId, stream))
         { Content = JsonContent.Create(payload) };
-        result.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        access.Authorize(result);
         return result;
     }
 
@@ -28,7 +27,7 @@ internal sealed class VertexClaudeProtocol(HttpClient http, string token) : Anth
         payload["model"] = VertexEndpoints.ParseModel(request.ModelId).Model;
         var result = new HttpRequestMessage(HttpMethod.Post, VertexEndpoints.CountTokens(connection, request.ModelId))
         { Content = JsonContent.Create(payload) };
-        result.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        access.Authorize(result);
         return result;
     }
 

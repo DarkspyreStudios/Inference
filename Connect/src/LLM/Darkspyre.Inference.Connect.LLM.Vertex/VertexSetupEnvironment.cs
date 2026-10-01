@@ -22,7 +22,10 @@ internal sealed class VertexSetupEnvironment : ILlmSetupEnvironment
         }
         catch (Exception error) when (error is ArgumentException or NotSupportedException or System.Text.Json.JsonException or InvalidOperationException or KeyNotFoundException)
         {
-            return new([new("vertex-configuration-invalid", "Enter a valid Google project, explicit location and matching authentication configuration.")]);
+            string message = connection.Vertex?.AuthenticationMode == LlmGoogleAuthenticationMode.ApiKey
+                ? "Enter a Google Cloud API key without a project, location or other credential. Express mode serves Gemini only."
+                : "Enter a valid Google project, explicit location and matching authentication configuration.";
+            return new([new("vertex-configuration-invalid", message)]);
         }
     }
 }

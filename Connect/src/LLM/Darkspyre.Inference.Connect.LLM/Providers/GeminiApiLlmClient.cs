@@ -22,7 +22,6 @@ internal sealed partial class GeminiApiLlmClient(HttpClient http)
         (connection, modelId, parts) => Codec.Encode(connection, modelId, parts));
 
     // Catalog entries whose output is not text chat. They answer generateContent but not with this protocol's parts.
-    private static readonly string[] NonTextMarkers = ["-tts", "-image", "-live", "native-audio", "embedding"];
 
     public override LlmTransport Transport => LlmTransport.GoogleGeminiApi;
     public override LlmProviderDefinition ProviderDefinition => ProviderDefinitions.GeminiApi;
@@ -234,7 +233,7 @@ internal sealed partial class GeminiApiLlmClient(HttpClient http)
         string? name = LlmJson.GetString(entry, "name");
         if (name?.StartsWith("models/gemini-", StringComparison.Ordinal) != true) { return null; }
         string id = name["models/".Length..];
-        if (!ModelSegment().IsMatch(id) || NonTextMarkers.Any(marker => id.Contains(marker, StringComparison.Ordinal))) { return null; }
+        if (!ModelSegment().IsMatch(id) || !GeminiModels.IsTextChat(id)) { return null; }
         if (!entry.TryGetProperty("supportedGenerationMethods", out JsonElement methods) || methods.ValueKind != JsonValueKind.Array
             || !methods.EnumerateArray().Any(method => method.ValueKind == JsonValueKind.String && method.GetString() == "generateContent"))
         { return null; }

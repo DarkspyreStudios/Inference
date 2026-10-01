@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Net.Http.Headers;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -7,8 +8,14 @@ using Google.Apis.Auth.OAuth2;
 
 namespace Darkspyre.Inference.Connect.LLM.Vertex;
 
-internal sealed record VertexAccess(string Token, string Scope)
+internal sealed record VertexAccess(string? Token, string Scope)
 {
+    public string? ApiKey { get; init; }
+    public void Authorize(HttpRequestMessage request)
+    {
+        if (ApiKey is not null) request.Headers.Add("x-goog-api-key", ApiKey);
+        else request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", Token);
+    }
     public override string ToString() => "VertexAccess { protected }";
 }
 
@@ -73,6 +80,12 @@ internal sealed class VertexAuthentication : IVertexAuthentication, IDisposable,
         using var operation = _lifetime.Enter(cancellationToken);
         CancellationToken token = operation.Token;
         VertexEndpoints.Validate(connection);
+        if (connection.Vertex!.AuthenticationMode == LlmGoogleAuthenticationMode.ApiKey)
+        {
+            string apiKey = LlmCredential.Parse(connection.Credential)!.ApiKey!;
+            token.ThrowIfCancellationRequested();
+            return new(null, Hash("api-key\n" + apiKey)) { ApiKey = apiKey };
+        }
         try
         {
             string key;
