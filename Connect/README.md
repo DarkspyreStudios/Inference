@@ -92,6 +92,11 @@ provider-owned internal generated metadata. PocketTTS retains explicit null voic
 TangoFlux still omits absent seed/cache fields while preserving explicit zero/false values. These
 private wire types do not add public request contracts or change HTTP/cancellation behavior.
 
+ComfyUI output state retains its existing Pascal-case persisted format through separate owned
+metadata. Prompt/delete requests and diagnostic payloads use their own Web-format metadata; workflow
+JSON remains opaque DOM data, including nulls and unknown node fields. Serialization does not change
+workflow interpretation or progress/cancellation lifetime.
+
 `LlmToolCapabilities.StrictInputSchema` reports Supported, Unsupported or Unknown. Unknown allows an
 explicit `Strict=true` request unchanged so the host can try it and handle the provider result.
 Known Unsupported rejects that request. Ordinary tools default to `Strict=false` independently.
