@@ -121,6 +121,29 @@ public sealed class QwenPackSelectionTests : IDisposable
     }
 
     [Fact]
+    public async Task ReferencedInputsFailBeforeAnUnloadedModelOrNativeRuntimeIsEntered()
+    {
+        using var http = new HttpClient(new Handler());
+        using var packs = Manager(http, Pack("host/references"));
+        var runtime = new Runtime();
+        await using var engine = new QwenLlmInference(packs, runtime, TensorBackendKind.Cpu);
+        LlmMessage[] messages =
+        [
+            new("user", "inspect") { Attachments = [new LlmFileReference(new("native"))] },
+            new("user", "inspect") { Attachments = [new LlmResourceAttachment(new("workspace", "original"))] },
+            new("user", "inspect") { ToolResults = [new("call", new() { Parts = [new LlmToolOutputSessionResource(new("workspace", "generated"))] })] }
+        ];
+        foreach (var message in messages)
+        {
+            var error = await Assert.ThrowsAsync<InferenceException>(() => Collect(engine,
+                Request("host/references") with { Messages = [message] }));
+            Assert.Equal(InferenceFailureCode.UnsupportedFeature, error.Code);
+        }
+        Assert.Empty(runtime.Keys);
+        Assert.Null(runtime.LastSampling);
+    }
+
+    [Fact]
     public async Task SetupSavesCustomSelectionWithoutInstalling()
     {
         TensorModelPackDefinition pack = Pack("host/custom");

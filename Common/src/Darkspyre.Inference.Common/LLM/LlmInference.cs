@@ -85,6 +85,9 @@ public sealed record LlmCapabilities
     public bool SupportsPromptImages { get; init; }
 
     public bool SupportsPromptDocuments { get; init; }
+
+    /// <summary>The selected route accepts provider-native file references.</summary>
+    public bool SupportsFileReferences { get; init; }
 }
 
 public sealed record LlmModelInfo(

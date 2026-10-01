@@ -29,7 +29,7 @@ public sealed class ConnectLlmJsonTests
     private const string XaiUnitedStatesPriorityJson = "{\"Region\":1,\"ServiceTier\":1}";
     private const string XaiFutureModesJson = "{\"Region\":999,\"ServiceTier\":999}";
     private const string StateJson = "{\"FormatVersion\":2,\"ImplementationId\":\"fixture\",\"ModelId\":\"model\",\"ScopeId\":\"scope\",\"Payload\":\"opaque\"}";
-    private const string MessageJson = "{\"Role\":\"user\",\"Content\":\"text\",\"Attachments\":[{\"Kind\":0,\"FileName\":\"image.png\",\"Data\":\"AQID\"}],\"ToolResults\":[{\"ToolCallId\":\"call\",\"Output\":{\"Parts\":[{\"type\":\"text\",\"Text\":\"text\"},{\"type\":\"binary\",\"Kind\":2,\"MediaType\":\"audio/wav\",\"Data\":\"BA==\"},{\"type\":\"resource\",\"Uri\":\"urn:test\",\"Data\":\"\"}]}}]}";
+    private const string MessageJson = "{\"Role\":\"user\",\"Content\":\"text\",\"Attachments\":[{\"type\":\"binary\",\"Kind\":0,\"FileName\":\"image.png\",\"Data\":\"AQID\"}],\"ToolResults\":[{\"ToolCallId\":\"call\",\"Output\":{\"Parts\":[{\"type\":\"text\",\"Text\":\"text\"},{\"type\":\"binary\",\"Kind\":2,\"MediaType\":\"audio/wav\",\"Data\":\"BA==\"},{\"type\":\"resource\",\"Uri\":\"urn:test\",\"Data\":\"\"}]}}]}";
     private const string EntryJson = "{\"Id\":\"entry\",\"TurnId\":\"turn\",\"Message\":" + MessageJson + "}";
 
     [Fact]
@@ -127,7 +127,7 @@ public sealed class ConnectLlmJsonTests
     public void ClosedMessageMetadataPreservesCommonDiscriminatorsBinaryBytesAndEmptyBodies()
     {
         LlmChatMessage message = JsonSerializer.Deserialize(MessageJson, ConnectLlmJson.ChatMessage)!;
-        Assert.Equal(new byte[] { 1, 2, 3 }, message.Attachments[0].Data.ToArray());
+        Assert.Equal(new byte[] { 1, 2, 3 }, Assert.IsType<LlmAttachment>(message.Attachments[0]).Data.ToArray());
         Assert.IsType<LlmToolOutputText>(message.ToolResults[0].Output.Parts[0]);
         Assert.Equal(new byte[] { 4 }, Assert.IsType<LlmToolOutputBinary>(message.ToolResults[0].Output.Parts[1]).Data.ToArray());
         Assert.True(Assert.IsType<LlmToolOutputResource>(message.ToolResults[0].Output.Parts[2]).Data.HasValue);
@@ -271,7 +271,11 @@ public sealed class ConnectLlmJsonTests
         { "ChatRequest", "{\"ModelId\":\"model\",\"PromptCache\":{\"Scope\":0,\"Retention\":1},\"Messages\":[" + MessageJson + "]}" },
         { "ChatResult", "{\"Text\":\"text\",\"Status\":0,\"ContinuationState\":" + StateJson + ",\"Diagnostics\":{\"HttpStatusCode\":200}}" },
         { "ChatMessage", MessageJson },
-        { "AgentContext", "{\"FormatVersion\":2,\"Entries\":[" + EntryJson + "]}" },
+        { "LlmEmbeddingRequest", "{\"ModelId\":\"unknown-model\",\"Inputs\":[\"first\",\"second\"],\"Dimensions\":2,\"ProviderOptions\":{\"custom\":{\"nested\":true}}}" },
+        { "LlmEmbeddingResult", "{\"Vectors\":[[0,1],[2,3]],\"Usage\":{\"InputTokens\":0,\"TotalTokens\":null},\"Diagnostics\":{\"HttpStatusCode\":200}}" },
+        { "LlmEmbeddingUsage", "{\"InputTokens\":null,\"TotalTokens\":0}" },
+        { "ChatResult", "{\"Text\":\"done\",\"Status\":0,\"Usage\":{\"InputTokens\":0,\"OutputTokens\":null,\"TotalTokens\":null,\"ProviderReportedCostUsd\":0.0000000001,\"HostedToolCalls\":{\"WebSearch\":2},\"HostedToolCallCount\":5,\"HostedSourcesUsed\":0},\"Diagnostics\":{\"HttpStatusCode\":200}}" },
+        { "AgentContext", "{\"FormatVersion\":3,\"SelectedResources\":[],\"Entries\":[{\"Id\":\"entry\",\"TurnId\":\"turn\",\"Message\":{\"Role\":\"user\",\"Content\":\"text\",\"Attachments\":[{\"type\":\"binary\",\"Kind\":0,\"FileName\":\"image.png\",\"Data\":\"AQID\"}]}}]}" },
         { "AgentContextEntry", EntryJson },
         { "AgentContextStatus", "{\"ModelId\":\"model\",\"ContextRevision\":1,\"Source\":0}" },
         { "ConnectContinuationScopeIdentity", "{\"Transport\":0,\"Endpoint\":\"https://provider.invalid\",\"ApiKey\":null,\"OAuthIdentity\":null,\"Headers\":[],\"SecretHeaders\":null}" }
@@ -302,8 +306,12 @@ public sealed class ConnectLlmJsonTests
         {
             Assembly connect = generation.LoadFromAssemblyPath(path);
             Assembly common = generation.LoadFromAssemblyPath(typeof(InferenceJson).Assembly.Location);
+            Assert.Equal(typeof(ConnectLlmJson).Assembly.ManifestModule.ModuleVersionId, connect.ManifestModule.ModuleVersionId);
+            Assert.Equal(typeof(InferenceJson).Assembly.ManifestModule.ModuleVersionId, common.ManifestModule.ModuleVersionId);
+            Assert.Same(generation, AssemblyLoadContext.GetLoadContext(connect));
             Assert.Same(generation, AssemblyLoadContext.GetLoadContext(common));
             Type owner = connect.GetType("Darkspyre.Inference.Connect.LLM.ConnectLlmJson", throwOnError: true)!;
+            if (family.StartsWith("LlmEmbedding", StringComparison.Ordinal)) Assert.NotNull(owner.GetProperty(family));
             JsonTypeInfo metadata;
             if (owner.GetProperty(family) is { } exported) metadata = (JsonTypeInfo)exported.GetValue(null)!;
             else
@@ -317,6 +325,18 @@ public sealed class ConnectLlmJsonTests
             object value = JsonSerializer.Deserialize(json, metadata)!;
             string written = JsonSerializer.Serialize(value, metadata);
             Assert.NotNull(JsonSerializer.Deserialize(written, metadata));
+            if (json.Contains("\"ProviderReportedCostUsd\"", StringComparison.Ordinal))
+            {
+                object usage = value.GetType().GetProperty("Usage")!.GetValue(value)!;
+                Assert.Same(common, usage.GetType().Assembly);
+                var map = (System.Collections.IEnumerable)usage.GetType().GetProperty("HostedToolCalls")!.GetValue(usage)!;
+                object entry = Assert.Single(map.Cast<object>());
+                Assert.Same(common, entry.GetType().GetProperty("Key")!.GetValue(entry)!.GetType().Assembly);
+                using JsonDocument expected = JsonDocument.Parse(json);
+                using JsonDocument actual = JsonDocument.Parse(written);
+                foreach (string name in new[] { "ProviderReportedCostUsd", "HostedToolCalls", "HostedToolCallCount", "HostedSourcesUsed" })
+                    Assert.True(JsonElement.DeepEquals(expected.RootElement.GetProperty("Usage").GetProperty(name), actual.RootElement.GetProperty("Usage").GetProperty(name)), name);
+            }
             if (json.Contains("\"PromptCache\"", StringComparison.Ordinal))
             {
                 object hint = value.GetType().GetProperty("PromptCache")!.GetValue(value)!;

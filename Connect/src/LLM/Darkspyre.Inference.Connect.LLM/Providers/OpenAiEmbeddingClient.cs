@@ -6,21 +6,43 @@ namespace Darkspyre.Inference.Connect.LLM.Providers;
 
 internal sealed class OpenAiEmbeddingClient(HttpClient http) : ILlmEmbeddingClient
 {
-    private static readonly string[] ReservedFields = ["model", "input"];
+    private static readonly string[] ReservedFields = ["model", "input", "dimensions"];
 
     public bool Supports(LlmTransport transport) => transport is
         LlmTransport.OpenAiResponses or LlmTransport.OpenAiCompatibleChat;
+
+    public void ValidateRequest(LlmConnection connection, LlmEmbeddingRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(connection);
+        ArgumentNullException.ThrowIfNull(request);
+        if (!Supports(connection.Transport))
+            throw new NotSupportedException("The configured transport does not support this embedding client.");
+        if (string.IsNullOrWhiteSpace(request.ModelId))
+            throw new ArgumentException("An embedding model is required.", nameof(request));
+        ArgumentNullException.ThrowIfNull(request.Inputs);
+        if (request.Inputs.Count == 0 || request.Inputs.Any(string.IsNullOrWhiteSpace))
+            throw new ArgumentException("At least one non-empty embedding input is required.", nameof(request));
+        if (request.Dimensions is <= 0)
+            throw new ArgumentOutOfRangeException(nameof(request), "Embedding dimensions must be positive.");
+        ValidateOptions(connection.ProviderOptions);
+        ValidateOptions(request.ProviderOptions);
+    }
 
     public async Task<LlmEmbeddingResult> EmbedAsync(
         LlmConnection connection,
         LlmEmbeddingRequest request,
         CancellationToken cancellationToken = default)
     {
+        request = EmbeddingRequestData.Snapshot(request);
+        connection = EmbeddingRequestData.Snapshot(connection);
+        ValidateRequest(connection, request);
+        cancellationToken.ThrowIfCancellationRequested();
         var payload = new JsonObject
         {
             ["model"] = request.ModelId,
-            ["input"] = JsonSerializer.SerializeToNode(request.Inputs)
+            ["input"] = new JsonArray(request.Inputs.Select(value => (JsonNode?)JsonValue.Create(value)).ToArray())
         };
+        if (request.Dimensions is { } dimensions) payload["dimensions"] = dimensions;
         ApplyOptions(payload, connection.ProviderOptions);
         ApplyOptions(payload, request.ProviderOptions);
         using var httpRequest = new HttpRequestMessage(
@@ -43,26 +65,38 @@ internal sealed class OpenAiEmbeddingClient(HttpClient http) : ILlmEmbeddingClie
         {
             using JsonDocument document = JsonDocument.Parse(raw);
             JsonElement root = document.RootElement;
-            if (!root.TryGetProperty("data", out JsonElement data) || data.ValueKind != JsonValueKind.Array)
+            if (root.ValueKind != JsonValueKind.Object
+                || !root.TryGetProperty("data", out JsonElement data) || data.ValueKind != JsonValueKind.Array)
             {
                 throw new JsonException("Embedding response did not contain a data array.");
             }
 
             List<(int Index, float[] Vector)> indexed = [];
+            var indexes = new HashSet<int>();
             foreach (JsonElement item in data.EnumerateArray())
             {
-                if (!item.TryGetProperty("index", out JsonElement indexElement)
+                if (item.ValueKind != JsonValueKind.Object
+                    || !item.TryGetProperty("index", out JsonElement indexElement)
+                    || indexElement.ValueKind != JsonValueKind.Number
                     || !indexElement.TryGetInt32(out int index)
+                    || index < 0 || index >= request.Inputs.Count || !indexes.Add(index)
                     || !item.TryGetProperty("embedding", out JsonElement embedding)
                     || embedding.ValueKind != JsonValueKind.Array)
                 {
                     throw new JsonException("Embedding response contained an invalid item.");
                 }
 
-                float[] vector = embedding.EnumerateArray().Select(value => value.GetSingle()).ToArray();
-                if (vector.Length == 0 || vector.Any(value => !float.IsFinite(value)))
+                var vector = new float[embedding.GetArrayLength()];
+                int offset = 0;
+                foreach (JsonElement value in embedding.EnumerateArray())
                 {
-                    throw new JsonException("Embedding vectors must contain finite numeric values.");
+                    if (value.ValueKind != JsonValueKind.Number || !value.TryGetSingle(out float number) || !float.IsFinite(number))
+                        throw new JsonException("Embedding vectors must contain finite numeric values.");
+                    vector[offset++] = number;
+                }
+                if (vector.Length == 0 || (request.Dimensions is { } expected && vector.Length != expected))
+                {
+                    throw new JsonException("Embedding vector dimensions did not match the request.");
                 }
 
                 indexed.Add((index, vector));
@@ -109,18 +143,24 @@ internal sealed class OpenAiEmbeddingClient(HttpClient http) : ILlmEmbeddingClie
     private static void ApplyOptions(JsonObject payload, IReadOnlyDictionary<string, JsonElement> options)
     {
         foreach ((string key, JsonElement value) in options)
+            payload[key] = JsonNode.Parse(value.GetRawText());
+    }
+
+    private static void ValidateOptions(IReadOnlyDictionary<string, JsonElement> options)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        foreach (string key in options.Keys)
         {
             if (ReservedFields.Contains(key, StringComparer.Ordinal))
             {
                 throw new InvalidOperationException($"Embedding provider option '{key}' is reserved.");
             }
-
-            payload[key] = JsonNode.Parse(value.GetRawText());
         }
     }
 
     private static int? ReadInt(JsonElement value, string name) =>
-        value.TryGetProperty(name, out JsonElement property) && property.TryGetInt32(out int result)
+        value.TryGetProperty(name, out JsonElement property) && property.ValueKind == JsonValueKind.Number
+            && property.TryGetInt32(out int result) && result >= 0
             ? result
             : null;
 }

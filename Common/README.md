@@ -41,6 +41,84 @@ setup interactions are not transport contracts. `InferenceImplementationDescript
 value-tuple sizes in `ImageCapabilities` have no round-trip JSON representation in this metadata
 surface. Generated metadata does not change those contracts or establish native runtime retirement.
 
+`LlmUsage` preserves provider-reported decimal USD costs and independent hosted-tool/source counts.
+Its named hosted counts snapshot their input; negative hosted counts become unknown at assignment
+and owned JSON import. `InferenceJson.LlmUsage` and `InferenceJson.LlmHostedToolKind` expose the exact
+typed metadata, also composed into existing result and usage-event graphs. These facts do not enable
+provider features or infer totals from partial observations.
+
+## Session and workspace resources
+
+`Darkspyre.Inference.Common.Resources` defines immutable content references, observed descriptors,
+ordered selection snapshots and primitive operation-failure facts. A reference identifies workspace
+content but grants no access. A selection version belongs to one logical workspace/session, not a
+provider thread. Selection snapshots copy their ordered unique membership; empty means no selected
+resources. Nullable byte counts distinguish unknown from zero. Constructors reject missing IDs,
+negative counts and malformed selection membership; access implementations also validate inputs,
+authorization and current scope at each operation boundary.
+Positional-record `with` assignments can bypass scalar constructor checks, including changing a
+selection's scope without changing its copied membership. Data objects are not authorization or
+intrinsic-validity proofs: operation boundaries must revalidate every caller-supplied value, including
+`with` copies. Owned JSON import checks constructor inputs and required facts; serialization alone
+does not validate authorization or the current store version.
+
+`IInferenceResourceAccess` is borrowed caller-owned authority. Its single-result methods return
+`Task<T>`. Opened read/write handles are operation-owned `IAsyncDisposable` values and own their
+streams. Dispose the handle, not its stream separately. The caller implements storage, retention and
+authorization; this package supplies no store or provider materialization.
+
+`SelectAsync` atomically appends authorized committed references. `ReplaceSelectionAsync` is an
+explicit revision-checked replacement; removing membership does not delete content. A write handle's
+single commit publishes complete immutable content. With `SelectForSession = true`, content and
+additive selection must publish atomically in the same caller store transaction; separate commit then
+select is not equivalent. Null/default options do not select content. These are implementation
+obligations of the caller-owned authority, not an implementation supplied by Common.
+
+Cancellation or a lost acknowledgment does not prove rollback. Primitive content and selection
+outcomes preserve unknown effects independently. Reconcile the known reference and current selection
+after the attempt is terminal, without automatic retry or inferred historical outcomes. Runtime
+operation exceptions preserve the original inner exception; cancellation remains an
+`OperationCanceledException`. Exceptions, authority and handles are not portable data.
+
+`InferenceJson` exports typed metadata named after each resource data contract, including the scoped
+selection version, commit result and failure facts. Required scope, revision and membership fields
+cannot disappear into defaults during JSON import. Its metadata options also contain fixed internal
+refusal converters for the three resource interfaces: null is allowed, but non-null values refuse
+before any collaborator callback. A closed caller-owned JSON context can compose those exact
+converters from `InferenceJson.InferenceResourceReference.Options.Converters` by the known interface
+type's `CanConvert` match before construction. This is not a global serializer policy or support for
+arbitrary caller CLR graphs.
+
+LLM messages use one ordered `LlmMessageAttachment` union: `LlmAttachment` carries binary data,
+`LlmFileReference` carries a provider-native file ID, and `LlmResourceAttachment` carries a workspace
+reference. Their JSON discriminators are `binary`, `file` and `workspace-resource`.
+`LlmToolOutputSessionResource` adds a workspace reference to tool output without changing the
+existing `resource` URI/body variant. `InferenceJson` exports each concrete attachment and the base
+union under its exact type name. No reference contains invented bytes or grants access.
+
+`LlmInferenceRequest.Resources` borrows caller authority. Non-null authority refuses owned JSON
+serialization and deserialization; null remains portable. Request diagnostics do not traverse it.
+`SupportsFileReferences` defaults to false and describes native file input, not automatic workspace
+materialization. Current built-in LLM routes reject unimplemented reference inputs before provider
+effects. These contracts do not yet establish automatic provider switching.
+
+## Media source data
+
+`Darkspyre.Inference.Common.Media` distinguishes binary input, provider-fetch URLs, provider-native
+file IDs and portable workspace resource references. Binary input memory is borrowed, not cloned;
+callers must not mutate it during an entered request. The DTOs and their JSON codecs never fetch
+URLs, read resources, refresh authority or upload bytes. File and URL variants contain no fabricated
+empty binary data. Native file IDs grant no access or ownership; `InferenceResourceScope` describes
+the actual endpoint/route/account authority of native receipts, not portable content ownership.
+`InferenceResourceFailure` composes the existing resource operation facts without live exceptions.
+
+`InferenceJson` exports exact type-name metadata for all nine media data roots. The source union uses
+the closed `type` discriminators `binary`, `url`, `file` and `resource`; unknown variants refuse rather
+than invoking reflection or an extension registry. JSON decoding creates its own byte memory, while
+constructing a binary source preserves caller memory. These are standalone, data-only foundations,
+not yet wired into requests, Image transports, provider bindings or resource resolution. Operation
+boundaries must validate caller-authored IDs, URLs, scope and source support before effects.
+
 ## Provider authorization
 
 `IProviderAuthorization.GetAsync` acquires authorization for one operation. The returned

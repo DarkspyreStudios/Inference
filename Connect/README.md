@@ -76,7 +76,9 @@ qualification remains.
 ### Contract migration
 
 Continuation state is now Common's opaque `LlmContinuationState`, carried by both portable and
-Connect messages/results as `ContinuationState`. Captures and envelopes use format 2; old
+Connect messages/results as `ContinuationState`. Continuation envelopes use format 2; context captures
+use format 3. The owned context codec accepts the closed format-2 binary/function shape and upgrades
+it without changing transcript revision, IDs, order, bytes, omissions or opaque continuation. Old
 `ResponseState` JSON members and unversioned captures are rejected. Hosts must migrate stored records
 before adoption; see [DSA-68 handoff](docs/agent-ds-contract-handoff.md). Explicit state omission is
 reported by `OmittedContinuationStateCount`; default handling rejects unbound state.
@@ -87,10 +89,25 @@ reported by `OmittedContinuationStateCount`; default handling rejects unbound st
 configuration, chat messages/requests/results and captured agent context. Pass the matching typed
 metadata to `JsonSerializer`. Credential `Serialize`/`Parse`, context-entry equivalence and continuation
 scope hashing use owned metadata. Credentials retain their camel-case Web format and null omission;
-captured context retains its property names, format 2 checks, Common tool-output discriminators and
+captured context retains its property names, Common tool-output discriminators and
 binary/null-versus-empty representations. Resolved internal services are never serialized.
 Connection and setup metadata retain typed Vertex, Azure, Chat Completions and xAI options, including
 unknown numeric modes for validation by their owning adapter; writing them does not enable a provider.
+
+Format-3 context requires an explicit `SelectedResources` list. Its optional
+`ResourceSelectionVersion` records the caller's workspace, logical session and selection revision,
+independently of transcript revision. The codec copies and validates this data without accessing
+storage. Legacy captures upgrade to empty membership with unknown provenance, not revision zero.
+Byte-excluded captures retain logical references and the selection snapshot. Current session
+implementations reject selections they cannot bind; import never silently installs or deletes caller
+membership.
+
+Chat messages and turns use the Common ordered binary/native-file/workspace-resource attachment
+union. `LlmChatRequest.Resources` and its Common projection preserve the same borrowed authority.
+Owned request JSON refuses non-null authority and request diagnostics never traverse it.
+Current built-in routes reject unimplemented references and authority before refresh, catalog,
+provider, process or model execution. `SupportsFileReferences` defaults to false; capability overrides
+cannot enable a missing native-file route.
 
 Gemini API and Vertex local text estimates serialize requests with `ConnectLlmJson.ChatRequest`.
 The projection retains default property names/order, numeric enums, explicit nulls and escaping.
@@ -462,11 +479,22 @@ containers does not transfer that responsibility to a scoped facade.
 
 `LlmEmbeddingProviderService` implements `IDisposable` and `IAsyncDisposable`. Its registration owner
 retires the facade. Embeddings refresh OAuth through the same access implementation as chat before
-dispatch; unsupported embedding routes fail before refresh. Retirement fences new requests, cancels
+dispatch. Every `ILlmEmbeddingClient` supplies an effect-free `ValidateRequest`; the facade calls it
+before refresh, and the direct adapter validates before HTTP. `LlmEmbeddingRequest.Dimensions` is
+nullable and positive when supplied. Raw `dimensions`, `model` and `input` are reserved in both
+connection and request options. Unknown model-specific limits remain provider decisions. Requests
+snapshot inputs and JSON options before asynchronous work; connections snapshot embedding options
+and headers before refresh. OpenAI-compatible responses require one unique in-range index per input,
+finite nonempty vectors and the requested dimensions. The three embedding data types expose owned
+metadata through their exact type-name getters on `ConnectLlmJson`.
+
+Retirement fences new requests, cancels
 connection lookup and provider calls, and awaits all active requests before releasing its adapter references. Supplied adapters and the
 connection source remain borrowed and are not disposed by the facade. Caller cancellation affects
 only that request. A provider that ignores cancellation keeps retirement pending; its late result
 is rejected. Use asynchronous scope disposal while embedding requests are active.
+Post-await boundaries check the synchronous retirement fence even when a cancellation callback
+delays propagation to a request's linked token.
 
 ### Agent-session lifetime
 
@@ -646,6 +674,14 @@ for a caller-directed later turn. They do not automatically retry or execute ser
 running `LlmUsageDeltaEvent` observations and is mirrored on Common's capabilities. Each observation
 replaces the previous value for the entire call. Null counts remain unknown. Duplicate observations
 are suppressed. Only completion usage is authoritative, including when it corrects an earlier value.
+`LlmUsage` also carries nullable `ProviderReportedCostUsd`, `HostedToolCallCount`, `HostedSourcesUsed`
+and a frozen `HostedToolCalls` map keyed by `LlmHostedToolKind`. These are independent provider facts;
+no local price calculation or named-count sum invents an unreported total. Distinct completed calls
+sum a field only when every contributor reports it without overflow. Named counts use the intersection
+of reported valid keys; null maps remain unknown and empty maps report no named detail. Assignment and
+owned JSON import normalize negative hosted counts to unknown, retaining explicit zero. Interim usage
+replaces the current request's observation. These shared fields do not enable a hosted-tool capability
+or claim a provider mapping that has not been implemented.
 Anthropic and Vertex Claude report observations from `message_start` and `message_delta`. Gemini
 and Vertex Gemini report normalized `usageMetadata`, including reasoning output tokens.
 Claude CLI chat and native sessions share a ledger keyed by API message ID. It sums distinct calls
@@ -935,7 +971,7 @@ Version 2.0 replaces `LlmToolAttachment` with `LlmAttachment`, removes caller-su
 type name, delete `MediaType` initializers, and gate prompt inputs with `SupportsPromptImages` or
 `SupportsPromptDocuments`.
 
-Prompt messages carry attachments as a provider-neutral binary value. The host supplies only the
+The binary variant of a prompt attachment is a provider-neutral value. The host supplies the
 high-level kind, filename, and bytes; Darkspyre.Inference.Connect.LLM detects the media type and owns base64 encoding,
 temporary-file staging, sandbox roots, and every provider wire shape:
 

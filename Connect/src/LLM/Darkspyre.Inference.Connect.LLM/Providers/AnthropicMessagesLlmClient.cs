@@ -716,7 +716,7 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
                     content.Add(new JsonObject { ["type"] = "text", ["text"] = message.Content });
                 }
 
-                foreach (LlmAttachment attachment in message.Attachments)
+        foreach (LlmAttachment attachment in message.Attachments.Select(LlmAttachments.RequireBinary))
                 {
                     content.Add(attachment.Kind switch
                     {

@@ -423,6 +423,7 @@ public sealed class LlmProviderService : ILlmTextTokenizer, IDisposable, IAsyncD
         RequestJson.ValidateSamplingOptions(connection, request);
         ILlmClient client = ClientFor(connection.Transport);
         string? resolvedCredential = connection.Credential;
+        LlmAttachments.ValidateReferences(request, () => client.GetCapabilities(connection, request.ModelId).SupportsFileReferences);
         if (client is not IStreamingCredentialRefreshPolicy refreshPolicy
             || refreshPolicy.RequiresFreshOAuthCredentialForStreaming(connection))
         {
@@ -534,6 +535,7 @@ public sealed class LlmProviderService : ILlmTextTokenizer, IDisposable, IAsyncD
         ILlmClient client = ClientFor(connection.Transport);
         if (client is not ILlmProviderTokenCounter counter)
             throw new NotSupportedException("This route does not implement provider input-token counting.");
+        LlmAttachments.ValidateReferences(request, () => client.GetCapabilities(connection, request.ModelId).SupportsFileReferences);
         connection = await ConnectionAccess.RefreshAsync(connectionId, connection, cancellationToken);
         if (client is ILlmConnectionPreparation preparation)
             connection = await preparation.PrepareAsync(connection, cancellationToken).ConfigureAwait(false);
@@ -570,6 +572,7 @@ public sealed class LlmProviderService : ILlmTextTokenizer, IDisposable, IAsyncD
         RequestJson.ValidateSamplingOptions(connection, request);
         var client = ClientFor(connection.Transport);
         // Measure what would be sent: the same projection as the request path.
+        LlmAttachments.ValidateReferences(request, () => client.GetCapabilities(connection, request.ModelId).SupportsFileReferences);
         // Ambient-credential adapters cannot decide state binding without resolving identity.
         // Their nonmutating estimator reports unknown for opaque state instead of dropping it.
         if (client is not ILlmConnectionPreparation)

@@ -35,10 +35,12 @@ The host decides its policy, and AgentDS defaults to "try and see if it works". 
 rejects explicit strict requests. Ordinary tools remain non-strict and are never gated by strict
 support. Existing compatible-chat, Anthropic and Bedrock opt-in wire behavior is preserved.
 
-**Approved persistence policy:** capture/envelope format 2 replaces format 1. Unversioned captures
+**Persistence policy:** continuation envelope format 2 replaces format 1. Current context captures
+emit format 3; the owned codec upgrades the closed format-2 binary/function context without changing
+transcript or continuation facts and without invoking resource authority. Unversioned captures
 and messages containing the former `ResponseState` member are rejected, not silently accepted with
 lost state. DSA-68 owns migration before host package adoption and preservation of original records.
-No library dual-reader or compatibility shim is planned.
+The format-2 context upgrade does not admit format-1 records.
 
 ## 1. Scope and evidence
 

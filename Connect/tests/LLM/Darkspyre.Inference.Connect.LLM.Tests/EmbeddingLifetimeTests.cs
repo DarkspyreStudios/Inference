@@ -78,6 +78,49 @@ public sealed class EmbeddingLifetimeTests
     }
 
     [Fact]
+    public async Task SynchronousRetirementFenceRejectsLateResultBeforeLinkedCancellationPropagates()
+    {
+        using var source = new Source();
+        using var client = new Client { IgnoreCancellation = true };
+        var facade = new LlmEmbeddingProviderService(source, [client]);
+        using var caller = new CancellationTokenSource();
+        using var releaseCallback = new ManualResetEventSlim();
+        var callbackEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        Task<LlmEmbeddingResult> first = facade.EmbedAsync("connection", Request());
+        Task<LlmEmbeddingResult> second = facade.EmbedAsync("connection", Request(), caller.Token);
+        CancellationTokenRegistration registration = default;
+        try
+        {
+            CancellationToken[] tokens = client.Tokens.ToArray();
+            Assert.Equal(2, tokens.Length);
+            registration = tokens[0].Register(() =>
+            {
+                callbackEntered.TrySetResult();
+                if (!releaseCallback.Wait(Bound)) throw new TimeoutException("Controlled cancellation callback was not released.");
+            });
+            Task retirement = facade.DisposeAsync().AsTask();
+            await callbackEntered.Task.WaitAsync(Bound);
+            Assert.False(tokens[1].IsCancellationRequested);
+            client.Release.TrySetResult();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => second.WaitAsync(Bound));
+            Assert.False(retirement.IsCompleted);
+        }
+        finally
+        {
+            releaseCallback.Set();
+            client.Release.TrySetResult();
+            Task retirement = facade.DisposeAsync().AsTask();
+            try { await Task.WhenAll(first, second).WaitAsync(Bound); }
+            catch (OperationCanceledException) { }
+            finally
+            {
+                await retirement.WaitAsync(Bound);
+                registration.Dispose();
+            }
+        }
+    }
+
+    [Fact]
     public async Task CallerCancellationDoesNotRetireOtherRequestsOrTheFacade()
     {
         using var source = new Source();
@@ -209,6 +252,8 @@ public sealed class EmbeddingLifetimeTests
         internal TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         public bool Supports(LlmTransport transport) => transport == LlmTransport.OpenAiResponses;
+
+        public void ValidateRequest(LlmConnection connection, LlmEmbeddingRequest request) => Assert.NotEmpty(request.Inputs);
 
         public async Task<LlmEmbeddingResult> EmbedAsync(LlmConnection connection, LlmEmbeddingRequest request,
             CancellationToken cancellationToken = default)

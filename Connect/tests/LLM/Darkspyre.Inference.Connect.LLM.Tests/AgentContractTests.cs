@@ -45,11 +45,11 @@ public sealed class AgentContractTests
             ]
         };
         LlmAgentContext copy = RoundTrip(context);
-        Assert.Equal(2, copy.FormatVersion);
+        Assert.Equal(3, copy.FormatVersion);
         Assert.Equal(7, copy.Revision);
         Assert.Equal(context.Entries.Select(entry => entry.Id), copy.Entries.Select(entry => entry.Id));
         Assert.Equal(State(), copy.Entries[1].Message.ContinuationState);
-        Assert.Equal("hello"u8.ToArray(), copy.Entries[0].Message.Attachments[0].Data.ToArray());
+        Assert.Equal("hello"u8.ToArray(), Assert.IsType<LlmAttachment>(copy.Entries[0].Message.Attachments[0]).Data.ToArray());
         LlmToolOutput output = copy.Entries[2].Message.ToolResults[0].Output;
         Assert.Equal("done", Assert.IsType<LlmToolOutputText>(output.Parts[0]).Text);
         var binary = Assert.IsType<LlmToolOutputBinary>(output.Parts[1]);

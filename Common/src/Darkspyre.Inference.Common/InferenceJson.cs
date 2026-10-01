@@ -3,6 +3,8 @@ using System.Text.Json.Serialization.Metadata;
 using Darkspyre.Inference.Common.Decision;
 using Darkspyre.Inference.Common.Image;
 using Darkspyre.Inference.Common.LLM;
+using Darkspyre.Inference.Common.Media;
+using Darkspyre.Inference.Common.Resources;
 using Darkspyre.Inference.Common.Setup;
 
 namespace Darkspyre.Inference.Common;
@@ -10,6 +12,20 @@ namespace Darkspyre.Inference.Common;
 /// <summary>Common-owned metadata for closed data contracts. No reflection fallback is installed.</summary>
 public static class InferenceJson
 {
+    public static JsonTypeInfo<LlmMessageAttachment> LlmMessageAttachment => InferenceJsonContext.Default.LlmMessageAttachment;
+    public static JsonTypeInfo<LlmAttachment> LlmAttachment => InferenceJsonContext.Default.LlmAttachment;
+    public static JsonTypeInfo<LlmFileReference> LlmFileReference => InferenceJsonContext.Default.LlmFileReference;
+    public static JsonTypeInfo<LlmResourceAttachment> LlmResourceAttachment => InferenceJsonContext.Default.LlmResourceAttachment;
+    public static JsonTypeInfo<LlmToolOutputSessionResource> LlmToolOutputSessionResource => InferenceJsonContext.Default.LlmToolOutputSessionResource;
+    public static JsonTypeInfo<InferenceMediaSourceKind> InferenceMediaSourceKind => InferenceJsonContext.Default.InferenceMediaSourceKind;
+    public static JsonTypeInfo<InferenceMediaSource> InferenceMediaSource => InferenceJsonContext.Default.InferenceMediaSource;
+    public static JsonTypeInfo<BinaryMediaSource> BinaryMediaSource => InferenceJsonContext.Default.BinaryMediaSource;
+    public static JsonTypeInfo<UrlMediaSource> UrlMediaSource => InferenceJsonContext.Default.UrlMediaSource;
+    public static JsonTypeInfo<ProviderFileReference> ProviderFileReference => InferenceJsonContext.Default.ProviderFileReference;
+    public static JsonTypeInfo<FileMediaSource> FileMediaSource => InferenceJsonContext.Default.FileMediaSource;
+    public static JsonTypeInfo<ResourceMediaSource> ResourceMediaSource => InferenceJsonContext.Default.ResourceMediaSource;
+    public static JsonTypeInfo<InferenceResourceScope> InferenceResourceScope => InferenceJsonContext.Default.InferenceResourceScope;
+    public static JsonTypeInfo<InferenceResourceFailure> InferenceResourceFailure => InferenceJsonContext.Default.InferenceResourceFailure;
     public static JsonTypeInfo<InferenceProvenance> Provenance => InferenceJsonContext.Default.InferenceProvenance;
     public static JsonTypeInfo<LlmInferenceRequest> LlmRequest => InferenceJsonContext.Default.LlmInferenceRequest;
     public static JsonTypeInfo<LlmInferenceResult> LlmResult => InferenceJsonContext.Default.LlmInferenceResult;
@@ -29,6 +45,8 @@ public static class InferenceJson
     public static JsonTypeInfo<LlmToolCallArgumentsDeltaEvent> ToolCallArgumentsDelta => InferenceJsonContext.Default.LlmToolCallArgumentsDeltaEvent;
     public static JsonTypeInfo<LlmToolCallCompletedEvent> ToolCallCompleted => InferenceJsonContext.Default.LlmToolCallCompletedEvent;
     public static JsonTypeInfo<LlmUsageDeltaEvent> UsageDelta => InferenceJsonContext.Default.LlmUsageDeltaEvent;
+    public static JsonTypeInfo<LlmUsage> LlmUsage => InferenceJsonContext.Default.LlmUsage;
+    public static JsonTypeInfo<LlmHostedToolKind> LlmHostedToolKind => InferenceJsonContext.Default.LlmHostedToolKind;
     public static JsonTypeInfo<LlmCompletionEvent> Completion => InferenceJsonContext.Default.LlmCompletionEvent;
     public static JsonTypeInfo<DecisionQuestion> DecisionQuestion => InferenceJsonContext.Default.DecisionQuestion;
     public static JsonTypeInfo<DecisionAnswer> DecisionAnswer => InferenceJsonContext.Default.DecisionAnswer;
@@ -47,13 +65,38 @@ public static class InferenceJson
     public static JsonTypeInfo<SetupActionDescriptor> SetupAction => InferenceJsonContext.Default.SetupActionDescriptor;
     public static JsonTypeInfo<SetupProgress> SetupProgress => InferenceJsonContext.Default.SetupProgress;
     public static JsonTypeInfo<SetupChoicePage> SetupChoices => InferenceJsonContext.Default.SetupChoicePage;
+    public static JsonTypeInfo<InferenceResourceReference> InferenceResourceReference => InferenceJsonContext.Default.InferenceResourceReference;
+    public static JsonTypeInfo<InferenceResourceDescriptor> InferenceResourceDescriptor => InferenceJsonContext.Default.InferenceResourceDescriptor;
+    public static JsonTypeInfo<InferenceResourceCreate> InferenceResourceCreate => InferenceJsonContext.Default.InferenceResourceCreate;
+    public static JsonTypeInfo<InferenceResourceSelectionVersion> InferenceResourceSelectionVersion => InferenceJsonContext.Default.InferenceResourceSelectionVersion;
+    public static JsonTypeInfo<InferenceResourceSelection> InferenceResourceSelection => InferenceJsonContext.Default.InferenceResourceSelection;
+    public static JsonTypeInfo<InferenceResourceCommitOptions> InferenceResourceCommitOptions => InferenceJsonContext.Default.InferenceResourceCommitOptions;
+    public static JsonTypeInfo<InferenceResourceCommitResult> InferenceResourceCommitResult => InferenceJsonContext.Default.InferenceResourceCommitResult;
+    public static JsonTypeInfo<InferenceResourceOperationPhase> InferenceResourceOperationPhase => InferenceJsonContext.Default.InferenceResourceOperationPhase;
+    public static JsonTypeInfo<InferenceResourceCommitOutcome> InferenceResourceCommitOutcome => InferenceJsonContext.Default.InferenceResourceCommitOutcome;
+    public static JsonTypeInfo<InferenceResourceOperationFailure> InferenceResourceOperationFailure => InferenceJsonContext.Default.InferenceResourceOperationFailure;
 }
 
-[JsonSourceGenerationOptions(GenerationMode = JsonSourceGenerationMode.Metadata)]
+[JsonSourceGenerationOptions(GenerationMode = JsonSourceGenerationMode.Metadata,
+    Converters = [typeof(ResourceAccessJsonConverter), typeof(ResourceReadHandleJsonConverter), typeof(ResourceWriteHandleJsonConverter)])]
 [JsonSerializable(typeof(InferenceProvenance))]
+[JsonSerializable(typeof(InferenceMediaSourceKind))]
+[JsonSerializable(typeof(InferenceMediaSource))]
+[JsonSerializable(typeof(BinaryMediaSource))]
+[JsonSerializable(typeof(UrlMediaSource))]
+[JsonSerializable(typeof(ProviderFileReference))]
+[JsonSerializable(typeof(FileMediaSource))]
+[JsonSerializable(typeof(ResourceMediaSource))]
+[JsonSerializable(typeof(InferenceResourceScope))]
+[JsonSerializable(typeof(InferenceResourceFailure))]
 [JsonSerializable(typeof(LlmInferenceRequest))]
 [JsonSerializable(typeof(LlmInferenceResult))]
 [JsonSerializable(typeof(LlmMessage))]
+[JsonSerializable(typeof(LlmMessageAttachment))]
+[JsonSerializable(typeof(LlmAttachment))]
+[JsonSerializable(typeof(LlmFileReference))]
+[JsonSerializable(typeof(LlmResourceAttachment))]
+[JsonSerializable(typeof(LlmToolOutputSessionResource))]
 [JsonSerializable(typeof(LlmContinuationState))]
 [JsonSerializable(typeof(LlmCapabilities))]
 [JsonSerializable(typeof(LlmModelInfo))]
@@ -69,6 +112,8 @@ public static class InferenceJson
 [JsonSerializable(typeof(LlmToolCallArgumentsDeltaEvent))]
 [JsonSerializable(typeof(LlmToolCallCompletedEvent))]
 [JsonSerializable(typeof(LlmUsageDeltaEvent))]
+[JsonSerializable(typeof(LlmUsage))]
+[JsonSerializable(typeof(LlmHostedToolKind))]
 [JsonSerializable(typeof(LlmCompletionEvent))]
 [JsonSerializable(typeof(DecisionQuestion))]
 [JsonSerializable(typeof(DecisionAnswer))]
@@ -87,4 +132,14 @@ public static class InferenceJson
 [JsonSerializable(typeof(SetupActionDescriptor))]
 [JsonSerializable(typeof(SetupProgress))]
 [JsonSerializable(typeof(SetupChoicePage))]
+[JsonSerializable(typeof(InferenceResourceReference))]
+[JsonSerializable(typeof(InferenceResourceDescriptor))]
+[JsonSerializable(typeof(InferenceResourceCreate))]
+[JsonSerializable(typeof(InferenceResourceSelectionVersion))]
+[JsonSerializable(typeof(InferenceResourceSelection))]
+[JsonSerializable(typeof(InferenceResourceCommitOptions))]
+[JsonSerializable(typeof(InferenceResourceCommitResult))]
+[JsonSerializable(typeof(InferenceResourceOperationPhase))]
+[JsonSerializable(typeof(InferenceResourceCommitOutcome))]
+[JsonSerializable(typeof(InferenceResourceOperationFailure))]
 internal sealed partial class InferenceJsonContext : JsonSerializerContext;

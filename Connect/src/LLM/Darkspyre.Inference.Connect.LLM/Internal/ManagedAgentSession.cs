@@ -674,7 +674,7 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
         {
             ModelId = turn.ModelId ?? _options.ModelId,
             Input = Array.AsReadOnly(turn.Input.ToArray()),
-            Attachments = Array.AsReadOnly(turn.Attachments.Select(attachment => attachment with { Data = attachment.Data.ToArray() }).ToArray()),
+            Attachments = Array.AsReadOnly(turn.Attachments.Select(LlmAttachments.Copy).ToArray()),
             OutputSchema = turn.OutputSchema?.Clone()
         };
     }

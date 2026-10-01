@@ -261,6 +261,7 @@ public sealed class RetirementFailureTests
         internal int Calls { get; private set; }
         internal bool Disposed { get; private set; }
         public bool Supports(LlmTransport transport) => transport == LlmTransport.OpenAiCompatibleChat;
+        public void ValidateRequest(LlmConnection connection, LlmEmbeddingRequest request) => Assert.NotEmpty(request.Inputs);
         public Task<LlmEmbeddingResult> EmbedAsync(LlmConnection connection, LlmEmbeddingRequest request,
             CancellationToken cancellationToken = default)
         { Calls++; throw new NotSupportedException(); }

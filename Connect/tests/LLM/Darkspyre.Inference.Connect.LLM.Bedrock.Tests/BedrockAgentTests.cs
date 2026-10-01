@@ -34,6 +34,29 @@ public sealed class BedrockAgentTests : IDisposable
     }
 
     [Fact]
+    public async Task ReferencedOpeningContextRefusesBeforeModelDiscovery()
+    {
+        var source = new ForbiddenSource();
+        await using var providers = new LlmProviderService(source, [_client]);
+        var agent = new ManagedBedrockAgentClient(_client, providers);
+        await Assert.ThrowsAsync<NotSupportedException>(() => agent.StartSessionAsync("selected", Connection(),
+            new() { ModelId = Model, Context = new() { SelectedResources = [new("workspace", "original")] } }));
+        await Assert.ThrowsAsync<NotSupportedException>(() => agent.StartSessionAsync("selected", Connection(),
+            new() { ModelId = Model, Context = new() { Entries = [new("entry", "turn", new("user", "inspect")
+                { Attachments = [new LlmFileReference(new("native"))] })] } }));
+        Assert.Equal(0, source.Reads);
+    }
+
+    private sealed class ForbiddenSource : ILlmConnectionSource
+    {
+        public int Reads { get; private set; }
+        public Task<LlmConnection?> GetConnectionAsync(string connectionId, CancellationToken cancellationToken = default)
+        { Reads++; throw new InvalidOperationException("Unexpected model discovery."); }
+        public Task SaveCredentialAsync(string connectionId, string credentialJson, string expectedVersion, CancellationToken cancellationToken = default)
+            => throw new InvalidOperationException("Unexpected credential persistence.");
+    }
+
+    [Fact]
     public void AReplyWithReportedUsageCarriesItsCountsAsContinuationState()
     {
         LlmChatResult result = Complete(Response(new TokenUsage { InputTokens = 1200, OutputTokens = 80, TotalTokens = 1280 }));

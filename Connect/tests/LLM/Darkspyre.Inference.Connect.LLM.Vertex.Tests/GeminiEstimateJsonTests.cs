@@ -15,7 +15,7 @@ namespace Darkspyre.Inference.Connect.LLM.Vertex.Tests;
 public sealed class GeminiEstimateJsonTests
 {
     private const string EmptyProjection = """
-        {"ModelId":"model","Instructions":null,"Messages":[],"Temperature":null,"MaxOutputTokens":null,"TopP":null,"TopK":null,"Seed":null,"PresencePenalty":null,"FrequencyPenalty":null,"StopSequences":[],"ReasoningLevel":null,"StructuredOutput":null,"Tools":[],"ToolChoice":null,"AllowParallelToolCalls":null,"ConversationKey":null,"PromptCache":null,"ProviderOptions":{},"UnboundContinuationState":0}
+        {"Resources":null,"ModelId":"model","Instructions":null,"Messages":[],"Temperature":null,"MaxOutputTokens":null,"TopP":null,"TopK":null,"Seed":null,"PresencePenalty":null,"FrequencyPenalty":null,"StopSequences":[],"ReasoningLevel":null,"StructuredOutput":null,"Tools":[],"ToolChoice":null,"AllowParallelToolCalls":null,"ConversationKey":null,"PromptCache":null,"ProviderOptions":{},"UnboundContinuationState":0}
         """;
 
     [Fact]
@@ -71,7 +71,7 @@ public sealed class GeminiEstimateJsonTests
                 ContinuationState = new()
                 { ImplementationId = "fixture", ModelId = request.ModelId, ScopeId = "scope", Payload = "opaque" }
             },
-            "attachment" => message with { Attachments = [new() { Kind = LlmBinaryKind.Image, FileName = "image.png", Data = new byte[] { 1 }, MediaType = "image/png" }] },
+            "attachment" => message with { Attachments = [new LlmAttachment { Kind = LlmBinaryKind.Image, FileName = "image.png", Data = new byte[] { 1 }, MediaType = "image/png" }] },
             "binary" => message with { ToolResults = [new("call", new() { Parts = [new LlmToolOutputBinary(LlmBinaryKind.Image, "image/png", new byte[] { 1 })] })] },
             _ => message with { ToolResults = [new("call", new() { Parts = [new LlmToolOutputResource("urn:fixture")] })] }
         };

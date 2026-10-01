@@ -9,7 +9,7 @@ internal sealed class UsageDeltas(bool enabled)
 
     public LlmUsageDeltaEvent? Next(LlmUsage? cumulative)
     {
-        if (!enabled || cumulative is null || cumulative == _previous)
+        if (!enabled || cumulative is null || Same(cumulative, _previous))
         {
             return null;
         }
@@ -17,4 +17,15 @@ internal sealed class UsageDeltas(bool enabled)
         _previous = cumulative;
         return new(cumulative);
     }
+
+    private static bool Same(LlmUsage current, LlmUsage? previous) => previous is not null
+        && current.InputTokens == previous.InputTokens && current.OutputTokens == previous.OutputTokens
+        && current.TotalTokens == previous.TotalTokens && current.CachedInputTokens == previous.CachedInputTokens
+        && current.CacheWriteInputTokens == previous.CacheWriteInputTokens
+        && current.ReasoningOutputTokens == previous.ReasoningOutputTokens
+        && current.ProviderReportedCostUsd == previous.ProviderReportedCostUsd
+        && current.HostedToolCallCount == previous.HostedToolCallCount && current.HostedSourcesUsed == previous.HostedSourcesUsed
+        && (current.HostedToolCalls is null ? previous.HostedToolCalls is null
+            : previous.HostedToolCalls is { } counts && current.HostedToolCalls.Count == counts.Count
+                && current.HostedToolCalls.All(pair => counts.TryGetValue(pair.Key, out int value) && pair.Value == value));
 }
