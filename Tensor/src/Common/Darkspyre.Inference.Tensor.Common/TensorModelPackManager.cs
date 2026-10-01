@@ -597,7 +597,9 @@ public sealed class TensorModelPackManager : ITensorModelPackManager, IDisposabl
         PersistedModelManifest manifest) =>
         string.Equals(manifest.ModelId, definition.Key.ModelId, StringComparison.Ordinal)
         && string.Equals(manifest.Revision, definition.Key.Revision, StringComparison.Ordinal)
+        && manifest.Artifacts is not null
         && manifest.Artifacts.Count == definition.Artifacts.Count
+        && manifest.Artifacts.All(static installed => installed is not null)
         && definition.Artifacts.All(artifact => manifest.Artifacts.Any(
             installed => string.Equals(installed.Role, artifact.Role, StringComparison.Ordinal)
                          && string.Equals(installed.RelativePath, artifact.RelativePath, StringComparison.Ordinal)
