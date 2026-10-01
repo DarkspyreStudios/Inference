@@ -357,6 +357,11 @@ to the private feed, verifies fresh downloads, and pushes the release source and
 
 ## License
 
+<!-- ownership-notice:start -->
 > **Proprietary software.** Copyright © 2026 Brandon Mathis. All rights reserved.
 > No permission is granted to use, copy, modify, or distribute this software
-> without prior written authorization. See [LICENSE.md](LICENSE.md).
+> without prior written authorization.
+> Any contribution, including code, reviews, patches, issues and designs, is
+> assigned to Brandon Mathis on submission. See [LICENSE.md](LICENSE.md) and
+> [CONTRIBUTING.md](CONTRIBUTING.md).
+<!-- ownership-notice:end -->
