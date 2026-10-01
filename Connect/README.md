@@ -112,6 +112,12 @@ field order, escaping, explicit null fields and final newline. Claude input keep
 attachments. Missing Antigravity tool parameters and failed managed-tool parameters remain empty JSON
 objects. These writers do not serialize library-owned anonymous types or change process/session lifetime.
 
+Native Claude agent initialization, controls, user turns and MCP envelopes use private DOM writers.
+Tool manifests retain ordered schemas and boolean `anthropic/alwaysLoad` metadata. MCP responses keep
+numeric and string request IDs distinct; input/tool parts retain their ordered media/resource fields,
+explicit nulls and omitted optional fields. The process wrapper owns the final newline. JSON writing
+does not change host-tool cancellation, response routing or session retirement.
+
 `LlmToolCapabilities.StrictInputSchema` reports Supported, Unsupported or Unknown. Unknown allows an
 explicit `Strict=true` request unchanged so the host can try it and handle the provider result.
 Known Unsupported rejects that request. Ordinary tools default to `Strict=false` independently.

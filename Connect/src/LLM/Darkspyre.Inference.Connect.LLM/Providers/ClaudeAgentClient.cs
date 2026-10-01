@@ -2,6 +2,7 @@ using System.Runtime.CompilerServices;
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.ExceptionServices;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Threading.Channels;
 using Darkspyre.Inference.Common.LLM;
 using Darkspyre.Inference.Connect.LLM.Internal;
@@ -527,23 +528,23 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
         {
             using LlmOperationLifetime.Lease operation = _lifetime.Enter(cancellationToken);
             cancellationToken = operation.Token;
-            var request = new Dictionary<string, object?>
+            var request = new JsonObject
             {
                 ["subtype"] = "initialize",
                 ["systemPrompt"] = string.IsNullOrWhiteSpace(instructions)
                     ? null
-                    : new[] { instructions },
+                    : new JsonArray(instructions),
                 ["systemPromptSnapshot"] = false
             };
             if (_tools.Count > 0)
             {
-                request["sdkMcpServers"] = new[] { McpServerName };
-                request["sdkMcpServerManifests"] = new Dictionary<string, object?>
+                request["sdkMcpServers"] = new JsonArray(McpServerName);
+                request["sdkMcpServerManifests"] = new JsonObject
                 {
-                    [McpServerName] = new
+                    [McpServerName] = new JsonObject
                     {
-                        initializeResult = McpInitializeResult("2025-06-18"),
-                        toolsListResult = McpToolsListResult(_tools)
+                        ["initializeResult"] = McpInitializeResult("2025-06-18"),
+                        ["toolsListResult"] = McpToolsListResult(_tools)
                     }
                 };
             }
@@ -592,17 +593,17 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
                     && !string.Equals(request.ModelId, _initialModelId, StringComparison.Ordinal))
                 {
                     await SendControlRequestAsync(
-                        new { subtype = "set_model", model = request.ModelId },
+                        new JsonObject { ["subtype"] = "set_model", ["model"] = request.ModelId },
                         cancellationToken);
                 }
                 if (request.ReasoningLevel is { } level)
                 {
                     LlmReasoningEffort.Validate(level, ClaudeCliLlmClient.ReasoningLevels);
                     await SendControlRequestAsync(
-                        new
+                        new JsonObject
                         {
-                            subtype = "apply_flag_settings",
-                            settings = new { effortLevel = LlmReasoningEffort.Word(level) }
+                            ["subtype"] = "apply_flag_settings",
+                            ["settings"] = new JsonObject { ["effortLevel"] = LlmReasoningEffort.Word(level) }
                         },
                         cancellationToken);
                 }
@@ -622,21 +623,21 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
                     _written.Add(turn);
                 }
                 await WriteJsonLineAsync(
-                    new
+                    new JsonObject
                     {
-                        type = "user",
-                        session_id = string.Empty,
-                        uuid = turnId,
-                        message = new
+                        ["type"] = "user",
+                        ["session_id"] = string.Empty,
+                        ["uuid"] = turnId,
+                        ["message"] = new JsonObject
                         {
-                            role = "user",
-                            content = opening is null
+                            ["role"] = "user",
+                            ["content"] = opening is null
                                 ? SerializeInput(request.Input, request.Attachments)
                                 : SerializeInput(
                                     [new LlmAgentTextContent(opening.Text), .. request.Input],
                                     [.. opening.Attachments, .. request.Attachments])
                         },
-                        parent_tool_use_id = (string?)null
+                        ["parent_tool_use_id"] = null
                     },
                     cancellationToken);
                 _opening = null;
@@ -696,7 +697,7 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             }
 
             await WriteControlRequestWithoutWaitingAsync(
-                new { subtype = "interrupt", cancel_queued = false },
+                new JsonObject { ["subtype"] = "interrupt", ["cancel_queued"] = false },
                 cancellationToken);
             cancellationToken.ThrowIfCancellationRequested();
         }
@@ -760,7 +761,7 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             }
             try
             {
-                await SendControlRequestAsync(new { subtype = "stop_task", task_id = resourceId }, cancellationToken);
+                await SendControlRequestAsync(new JsonObject { ["subtype"] = "stop_task", ["task_id"] = resourceId }, cancellationToken);
                 cancellationToken.ThrowIfCancellationRequested();
                 // The request is not the exit; the resource reports Stopped when the CLI confirms.
                 return LlmAgentResourceStopStatus.Requested;
@@ -814,7 +815,7 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
         }
 
         private async Task<JsonElement> SendControlRequestAsync(
-            object request,
+            JsonNode request,
             CancellationToken cancellationToken)
         {
             string requestId = Guid.NewGuid().ToString("N");
@@ -827,7 +828,7 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             try
             {
                 await WriteJsonLineAsync(
-                    new { type = "control_request", request_id = requestId, request },
+                    new JsonObject { ["type"] = "control_request", ["request_id"] = requestId, ["request"] = request },
                     cancellationToken);
                 return await waiter.Task.WaitAsync(cancellationToken);
             }
@@ -838,15 +839,15 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
         }
 
         private async Task WriteControlRequestWithoutWaitingAsync(
-            object request,
+            JsonNode request,
             CancellationToken cancellationToken)
         {
             await WriteJsonLineAsync(
-                new
+                new JsonObject
                 {
-                    type = "control_request",
-                    request_id = Guid.NewGuid().ToString("N"),
-                    request
+                    ["type"] = "control_request",
+                    ["request_id"] = Guid.NewGuid().ToString("N"),
+                    ["request"] = request
                 },
                 cancellationToken);
         }
@@ -899,14 +900,14 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
         private async Task WriteMcpResponseAsync(string requestId, JsonElement message, CancellationToken cancellationToken)
         {
             await WriteJsonLineAsync(
-                new
+                new JsonObject
                 {
-                    type = "control_response",
-                    response = new
+                    ["type"] = "control_response",
+                    ["response"] = new JsonObject
                     {
-                        subtype = "success",
-                        request_id = requestId,
-                        response = new { mcp_response = message }
+                        ["subtype"] = "success",
+                        ["request_id"] = requestId,
+                        ["response"] = new JsonObject { ["mcp_response"] = JsonNode.Parse(message.GetRawText()) }
                     }
                 },
                 cancellationToken);
@@ -933,12 +934,12 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
                             null);
                     }
                 case "notifications/initialized":
-                    return new McpResponse(McpResult(id, new { }), null);
+                    return new McpResponse(McpResult(id, new JsonObject()), null);
                 case "notifications/cancelled":
                     CancelToolCall(message);
-                    return new McpResponse(McpResult(id, new { }), null);
+                    return new McpResponse(McpResult(id, new JsonObject()), null);
                 case "ping":
-                    return new McpResponse(McpResult(id, new { }), null);
+                    return new McpResponse(McpResult(id, new JsonObject()), null);
                 case "tools/list":
                     return new McpResponse(McpResult(id, McpToolsListResult(_tools)), null);
                 default:
@@ -972,7 +973,7 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             JsonElement arguments = parameters.TryGetProperty("arguments", out JsonElement suppliedArguments)
                 && suppliedArguments.ValueKind == JsonValueKind.Object
                     ? suppliedArguments.Clone()
-                    : JsonSerializer.SerializeToElement(new { });
+                    : JsonElement.Parse("{}");
             PendingToolCall? pending = TakePendingToolCall(name, arguments);
             string callId = pending?.Id ?? ReadJsonRpcId(id) ?? controlRequestId;
             call = new LlmAgentToolCall(ThreadId, _activeTurnId ?? string.Empty, callId, McpServerName, name, arguments);
@@ -1018,10 +1019,10 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
                 catch (OperationCanceledException) when (running.Cancellation.IsCancellationRequested)
                 {
                     // The CLI cancelled the call, or the session ended. The call's control request is still answered.
-                    response = new McpResponse(McpResult(id, new
+                    response = new McpResponse(McpResult(id, new JsonObject
                     {
-                        content = new[] { new { type = "text", text = "The tool call was cancelled." } },
-                        isError = true
+                        ["content"] = new JsonArray(new JsonObject { ["type"] = "text", ["text"] = "The tool call was cancelled." }),
+                        ["isError"] = true
                     }), null);
                 }
                 operation.Token.ThrowIfCancellationRequested();
@@ -1088,10 +1089,10 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             return new McpResponse(
                 McpResult(
                     id,
-                    new
+                    new JsonObject
                     {
-                        content = SerializeToolResult(projected),
-                        isError = projected.IsError
+                        ["content"] = SerializeToolResult(projected),
+                        ["isError"] = projected.IsError
                     }),
                 toolEvent);
         }
@@ -1202,7 +1203,7 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
                 string callId = OptionalString(block, "id") ?? Guid.NewGuid().ToString("N");
                 JsonElement arguments = block.TryGetProperty("input", out JsonElement input)
                     ? input.Clone()
-                    : JsonSerializer.SerializeToElement(new { });
+                    : JsonElement.Parse("{}");
                 _pendingToolCalls.Add(new PendingToolCall(callId, name, arguments));
                 yield return new LlmAgentToolEvent(
                     ThreadId,
@@ -1284,22 +1285,22 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             CancellationToken cancellationToken)
         {
             await WriteJsonLineAsync(
-                new
+                new JsonObject
                 {
-                    type = "control_response",
-                    response = new
+                    ["type"] = "control_response",
+                    ["response"] = new JsonObject
                     {
-                        subtype = "error",
-                        request_id = requestId,
-                        error = "Unsupported control request."
+                        ["subtype"] = "error",
+                        ["request_id"] = requestId,
+                        ["error"] = "Unsupported control request."
                     }
                 },
                 cancellationToken);
         }
 
-        private async Task WriteJsonLineAsync(object value, CancellationToken cancellationToken)
+        private async Task WriteJsonLineAsync(JsonNode value, CancellationToken cancellationToken)
         {
-            string line = JsonSerializer.Serialize(value);
+            string line = value.ToJsonString();
             await _writeLock.WaitAsync(cancellationToken);
             try
             {
@@ -1440,7 +1441,7 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             }
             waiter.TrySetResult(response.TryGetProperty("response", out JsonElement payload)
                 ? payload.Clone()
-                : JsonSerializer.SerializeToElement(new { }));
+                : JsonElement.Parse("{}"));
         }
 
         private async Task StartHostTurnAsync(string? turnId)
@@ -1608,7 +1609,7 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             try
             {
                 await WriteControlRequestWithoutWaitingAsync(
-                    new { subtype = "interrupt", cancel_queued = false },
+                    new JsonObject { ["subtype"] = "interrupt", ["cancel_queued"] = false },
                     timeout.Token);
             }
             catch (Exception exception) when (exception is
@@ -1649,68 +1650,67 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             public Task Completion { get; set; } = Task.CompletedTask;
         }
 
-        private static IReadOnlyList<object> SerializeInput(
+        private static JsonArray SerializeInput(
             IReadOnlyList<LlmAgentContent> content,
-            IReadOnlyList<LlmAttachment> attachments) =>
+            IReadOnlyList<LlmAttachment> attachments) => new(
         [
             .. content.Select(item => item switch
             {
-                LlmAgentTextContent text => (object)new { type = "text", text = text.Text },
+                LlmAgentTextContent text => new JsonObject { ["type"] = "text", ["text"] = text.Text },
                 LlmAgentImageContent image => SerializeImageInput(image.ImageUrl),
                 _ => throw new ArgumentException(
                     $"Unsupported agent content type '{item.GetType().Name}'.",
                     nameof(content))
             }),
-            .. attachments.Select(attachment =>
-                (object)AnthropicAttachments.BuildContentBlock(attachment))
-        ];
+            .. attachments.Select(AnthropicAttachments.BuildContentBlock)
+        ]);
 
-        private static object SerializeImageInput(string imageUrl)
+        private static JsonObject SerializeImageInput(string imageUrl)
         {
             if (TryParseDataUrl(imageUrl, out string mediaType, out string data))
             {
-                return new
+                return new JsonObject
                 {
-                    type = "image",
-                    source = new { type = "base64", media_type = mediaType, data }
+                    ["type"] = "image",
+                    ["source"] = new JsonObject { ["type"] = "base64", ["media_type"] = mediaType, ["data"] = data }
                 };
             }
 
-            return new
+            return new JsonObject
             {
-                type = "image",
-                source = new { type = "url", url = imageUrl }
+                ["type"] = "image",
+                ["source"] = new JsonObject { ["type"] = "url", ["url"] = imageUrl }
             };
         }
 
-        private static IReadOnlyList<object> SerializeToolResult(ProjectedToolOutput projected) =>
+        private static JsonArray SerializeToolResult(ProjectedToolOutput projected) => new(
         [
             .. projected.Parts.Select(part => part switch
             {
-                SentText text => (object)new { type = "text", text = text.Text },
-                SentImage image => new Dictionary<string, object?>
+                SentText text => new JsonObject { ["type"] = "text", ["text"] = text.Text },
+                SentImage image => new JsonObject
                 {
                     ["type"] = "image",
                     ["mimeType"] = image.MediaType,
                     ["data"] = Convert.ToBase64String(image.Data.Span)
                 },
-                SentResourceLink { MediaType: null } link => new Dictionary<string, object?>
+                SentResourceLink { MediaType: null } link => new JsonObject
                 {
                     ["type"] = "resource_link",
                     ["uri"] = link.Uri,
                     ["name"] = link.Name ?? link.Uri
                 },
-                SentResourceLink link => new Dictionary<string, object?>
+                SentResourceLink link => new JsonObject
                 {
                     ["type"] = "resource_link",
                     ["uri"] = link.Uri,
                     ["name"] = link.Name ?? link.Uri,
                     ["mimeType"] = link.MediaType
                 },
-                SentEmbeddedText embedded => new Dictionary<string, object?>
+                SentEmbeddedText embedded => new JsonObject
                 {
                     ["type"] = "resource",
-                    ["resource"] = new Dictionary<string, object?>
+                    ["resource"] = new JsonObject
                     {
                         ["uri"] = embedded.Uri,
                         ["mimeType"] = embedded.MediaType ?? "text/plain",
@@ -1719,7 +1719,7 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
                 },
                 _ => throw new InvalidOperationException("The Claude MCP route does not carry this part natively.")
             })
-        ];
+        ]);
 
         private static bool TryParseDataUrl(
             string value,
@@ -1750,41 +1750,45 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             return mediaType.Length > 0 && data.Length > 0;
         }
 
-        private static object McpInitializeResult(string protocolVersion) => new
+        private static JsonObject McpInitializeResult(string protocolVersion) => new()
         {
-            protocolVersion,
-            capabilities = new { tools = new { listChanged = false } },
-            serverInfo = new
+            ["protocolVersion"] = protocolVersion,
+            ["capabilities"] = new JsonObject { ["tools"] = new JsonObject { ["listChanged"] = false } },
+            ["serverInfo"] = new JsonObject
             {
-                name = McpServerName,
-                version = typeof(ClaudeAgentClient).Assembly.GetName().Version?.ToString() ?? "0.0.0"
+                ["name"] = McpServerName,
+                ["version"] = typeof(ClaudeAgentClient).Assembly.GetName().Version?.ToString() ?? "0.0.0"
             }
         };
 
-        private static object McpToolsListResult(IReadOnlyList<LlmAgentToolDefinition> tools) => new
+        private static JsonObject McpToolsListResult(IReadOnlyList<LlmAgentToolDefinition> tools) => new()
         {
-            tools = tools.Select(tool => new Dictionary<string, object?>
+            ["tools"] = new JsonArray([.. tools.Select(tool => new JsonObject
             {
                 ["name"] = tool.Name,
                 ["description"] = tool.Description ?? string.Empty,
-                ["inputSchema"] = tool.InputSchema,
-                ["_meta"] = new Dictionary<string, object?>
+                ["inputSchema"] = JsonNode.Parse(tool.InputSchema.GetRawText()),
+                ["_meta"] = new JsonObject
                 {
                     ["anthropic/alwaysLoad"] = !tool.DeferLoading
                 }
-            }).ToArray()
+            })])
         };
 
-        private static JsonElement McpResult(JsonElement id, object result) =>
-            JsonSerializer.SerializeToElement(new { jsonrpc = "2.0", id, result });
+        private static JsonElement McpResult(JsonElement id, JsonNode result) => JsonElement.Parse(new JsonObject
+        {
+            ["jsonrpc"] = "2.0",
+            ["id"] = JsonNode.Parse(id.GetRawText()),
+            ["result"] = result
+        }.ToJsonString());
 
         private static JsonElement McpError(JsonElement id, int code, string message) =>
-            JsonSerializer.SerializeToElement(new
+            JsonElement.Parse(new JsonObject
             {
-                jsonrpc = "2.0",
-                id,
-                error = new { code, message }
-            });
+                ["jsonrpc"] = "2.0",
+                ["id"] = JsonNode.Parse(id.GetRawText()),
+                ["error"] = new JsonObject { ["code"] = code, ["message"] = message }
+            }.ToJsonString());
 
         private static string NormalizeToolName(string name)
         {
