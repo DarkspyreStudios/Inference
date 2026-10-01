@@ -52,6 +52,10 @@ public static class InferenceJson
     public static JsonTypeInfo<ImageGenerationRequest> ImageRequest => InferenceJsonContext.Default.ImageGenerationRequest;
     public static JsonTypeInfo<ImageGenerationResult> ImageResult => InferenceJsonContext.Default.ImageGenerationResult;
     public static JsonTypeInfo<ImageGenerationProgress> ImageProgress => InferenceJsonContext.Default.ImageGenerationProgress;
+    public static JsonTypeInfo<ImageSize> ImageSize => InferenceJsonContext.Default.ImageSize;
+    public static JsonTypeInfo<ImageCapabilities> ImageCapabilities => InferenceJsonContext.Default.ImageCapabilities;
+    public static JsonTypeInfo<GeneratedImage> GeneratedImage => InferenceJsonContext.Default.GeneratedImage;
+    public static JsonTypeInfo<ImageGenerationStage> ImageGenerationStage => InferenceJsonContext.Default.ImageGenerationStage;
     public static JsonTypeInfo<SetupStatus> SetupStatus => InferenceJsonContext.Default.SetupStatus;
     public static JsonTypeInfo<SetupValidation> SetupValidation => InferenceJsonContext.Default.SetupValidation;
     public static JsonTypeInfo<SetupConfigurationIdentity> SetupIdentity => InferenceJsonContext.Default.SetupConfigurationIdentity;
@@ -114,6 +118,10 @@ public static class InferenceJson
 [JsonSerializable(typeof(ImageGenerationRequest))]
 [JsonSerializable(typeof(ImageGenerationResult))]
 [JsonSerializable(typeof(ImageGenerationProgress))]
+[JsonSerializable(typeof(ImageSize))]
+[JsonSerializable(typeof(ImageCapabilities))]
+[JsonSerializable(typeof(GeneratedImage))]
+[JsonSerializable(typeof(ImageGenerationStage))]
 [JsonSerializable(typeof(SetupStatus))]
 [JsonSerializable(typeof(SetupValidation))]
 [JsonSerializable(typeof(SetupConfigurationIdentity))]

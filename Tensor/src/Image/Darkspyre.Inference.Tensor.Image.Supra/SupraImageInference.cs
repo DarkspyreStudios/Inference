@@ -59,7 +59,7 @@ public sealed class SupraImageInference : ITensorImageInference
         await ValidateModelIdAsync(modelId, cancellationToken).ConfigureAwait(false);
         return new ImageCapabilities
         {
-            SupportedSizes = [(SupraDiT.ImageSize, SupraDiT.ImageSize)],
+            SupportedSizes = [new(SupraDiT.ImageSize, SupraDiT.ImageSize)],
             SupportsNegativePrompt = false,
             SupportsSeed = true,
             SupportsSteps = true,
@@ -334,6 +334,11 @@ public sealed class SupraImageInference : ITensorImageInference
 
     private static void ValidateRequest(ImageGenerationRequest request)
     {
+        ArgumentNullException.ThrowIfNull(request.References);
+        if (request.References.Count > 0)
+            throw new InferenceException(InferenceFailureCode.UnsupportedFeature,
+                "Supra2-IMG does not support image references.");
+
         if (string.IsNullOrWhiteSpace(request.Prompt))
         {
             throw new InferenceException(InferenceFailureCode.InvalidRequest, "An image prompt is required.");

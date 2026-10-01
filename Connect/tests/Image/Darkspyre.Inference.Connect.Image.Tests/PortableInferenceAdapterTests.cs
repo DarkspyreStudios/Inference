@@ -5,6 +5,23 @@ namespace Darkspyre.Inference.Connect.Image.Tests;
 public sealed class PortableInferenceAdapterTests
 {
     [Fact]
+    public async Task UnsupportedReferencesRefuseBeforeTransportEntry()
+    {
+        var transport = new RecordingTransport();
+        var inference = new ImageProviderService([transport]).Bind(
+            new() { Transport = ImageTransport.ComfyUi, Endpoint = "http://provider.test" },
+            new() { Id = "workflow", Label = "Workflow", Transport = ImageTransport.ComfyUi });
+        var error = await Assert.ThrowsAsync<Darkspyre.Inference.Common.InferenceException>(() => inference.GenerateAsync(new()
+        {
+            ModelId = "workflow",
+            Prompt = "draw",
+            References = [new Darkspyre.Inference.Common.Media.ResourceMediaSource(new("workspace", "unread"))]
+        }));
+        Assert.Equal(Darkspyre.Inference.Common.InferenceFailureCode.UnsupportedFeature, error.Code);
+        Assert.Null(transport.Prepared);
+    }
+
+    [Fact]
     public async Task BoundInferenceMapsTypedRequestResultAndProvenance()
     {
         var transport = new RecordingTransport();

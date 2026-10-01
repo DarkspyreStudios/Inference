@@ -29,7 +29,7 @@ internal sealed class ConnectImageInference(
 
         return Task.FromResult(new CommonImage.ImageCapabilities
         {
-            SupportedSizes = [(workflow.DefaultWidth, workflow.DefaultHeight)],
+            SupportedSizes = [new(workflow.DefaultWidth, workflow.DefaultHeight)],
             SupportsNegativePrompt = true,
             SupportsSeed = true,
             MaximumImageCount = 1
@@ -42,6 +42,10 @@ internal sealed class ConnectImageInference(
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(request.References);
+        if (request.References.Count > 0)
+            throw new Common.InferenceException(Common.InferenceFailureCode.UnsupportedFeature,
+                "The portable image reference path is not yet wired into this adapter.");
         if (!string.Equals(request.ModelId, workflow.Id, StringComparison.Ordinal))
         {
             throw new Common.InferenceException(
