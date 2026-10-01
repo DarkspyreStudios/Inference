@@ -1279,7 +1279,8 @@ Unknown statuses and incomplete reasons map to `Unknown`. Context exhaustion ret
 reflections, and malformed JSON does not retain a parser exception containing provider text.
 
 The internal `XaiResponsesLlmClient` sends OAuth-only streaming or genuine non-streaming requests
-to the typed region's fixed endpoint. It sends the typed service tier and records the recognized applied
+to the typed region's fixed endpoint. It rejects mixed static secret headers before dispatch and retains
+ordinary nonsecret additional headers. It sends the typed service tier and records the recognized applied
 tier in diagnostics. Typed protocol controls cannot be injected through raw provider options, even when
 the typed property is absent. Client functions are limited to 350; `web_search` is a reserved hosted name.
 The client joins the generic and language listings, offers only listed language models, and reads the
