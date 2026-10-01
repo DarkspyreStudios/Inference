@@ -1137,6 +1137,15 @@ including tool continuations and accounting projections. A hint does not promise
 savings or a billed cache resource. Reported cache reads and writes remain in `CachedInputTokens`
 and `CacheWriteInputTokens`.
 
+Bedrock Claude translates the hint into Converse cache points. A prefix point follows the system
+blocks, or the tool definitions when no system blocks exist. `Conversation` also appends a point to
+the last message. Both response modes share these points. `Default` uses five minutes; `Extended`
+uses one hour except Claude 3.7 Sonnet and Claude 3.5 Sonnet, which fall back to five minutes. Points
+do not alter retained signed reasoning or fabricate cache usage.
+
+Gemini API and Vertex Gemini declare automatic caching without hint acceptance. Hints leave their
+generation and count-token wire requests unchanged. They do not create or select `cachedContents`.
+
 ## Provider setup and editing
 
 `LlmProviderCatalog.SetupDefinitions` describes providers without resolving connections or

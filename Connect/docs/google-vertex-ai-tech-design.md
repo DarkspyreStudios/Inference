@@ -353,6 +353,10 @@ and capture-format revision may be required. The user subsequently authorized th
 
 ## 7. Other contract deltas
 
+Vertex Gemini reports `PromptCache.Automatic = true` and `AcceptsHints = false`. It ignores the
+advisory request hint in generation and exact token counting. A hint does not select an explicit
+`cachedContents` resource or guarantee cache-read usage.
+
 **C2 — Tool controls:** add a shared `LlmToolCapabilities` descriptor to Common and Connect model
 capabilities. Members: supported `ChoiceModes`, `StrictInputSchema`,
 `SupportsParallelCalls`, `SupportsParallelCallControl`, and `SupportsArgumentStreaming`.
