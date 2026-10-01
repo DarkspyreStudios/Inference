@@ -40,11 +40,19 @@ public sealed class SttProviderService
         IInferenceResourceAccess? resources = null) => new(this, target, xaiBindings, resources);
     internal static void ValidateBinding(SttConnection connection, XaiFamilyBinding? xai)
     {
+        ValidateConnection(connection);
         if (connection.Xai is null || xai is null || connection.Xai != xai.Selection
             || connection.Authorization is not null && !ReferenceEquals(connection.Authorization, xai.Authorization))
             throw new ArgumentException("The hosted-STT connection requires its matching borrowed xAI binding.");
         if (connection.AdditionalHeaders.ContainsKey("Authorization") || connection.AdditionalHeaders.ContainsKey("api-key"))
             throw new ArgumentException("Static authentication headers cannot override the borrowed xAI authorization.");
+    }
+    internal static void ValidateConnection(SttConnection connection)
+    {
+        if (!connection.Endpoint.IsAbsoluteUri || connection.RequestTimeout <= TimeSpan.Zero
+            || !Enum.GetValues<XaiRegion>().Any(region => string.Equals(connection.Endpoint.AbsoluteUri.TrimEnd('/'),
+                new XaiConnectionOptions { Region = region }.GetEndpoint(), StringComparison.Ordinal)))
+            throw new ArgumentException("Use the fixed xAI regional API endpoint and a positive request timeout.");
     }
 }
 

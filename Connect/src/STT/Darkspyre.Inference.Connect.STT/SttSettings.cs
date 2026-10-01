@@ -27,7 +27,7 @@ public sealed class SttSettings : InferenceSettings<SttSetupChanges>
         if ((identity.Intent == SetupChangeIntent.Edit) != (existing is not null)
             || existing is not null && existing.Connection.Transport != transport)
             throw new ArgumentException("An edit requires the matching saved hosted-STT configuration.", nameof(existing));
-        _draft = existing ?? new(new() { Transport = transport, Endpoint = new("https://api.x.ai") });
+        _draft = existing ?? new(new() { Transport = transport, Endpoint = new(new XaiConnectionOptions().GetEndpoint()) });
         foreach ((string name, string value) in _draft.Connection.AdditionalHeaders) _headers.Add(new(name, value));
         _draft = _draft with { Connection = _draft.Connection with { AdditionalHeaders = new Dictionary<string, string>() } };
         _baseline = _draft;
@@ -38,8 +38,12 @@ public sealed class SttSettings : InferenceSettings<SttSetupChanges>
     }
     internal long Generation => _generation;
     internal SttSetupConfiguration Draft => _draft;
-    internal SttConnection Connection() => _draft.Connection with { Endpoint = _endpoint!, RequestTimeout = TimeSpan.FromTicks(_timeout ?? 0),
-        AdditionalHeaders = _headers.Where(header => header.Value is not null).ToDictionary(header => header.Name, header => header.Value!, StringComparer.OrdinalIgnoreCase) };
+    internal SttConnection Connection() => _draft.Connection with
+    {
+        Endpoint = _endpoint!,
+        RequestTimeout = TimeSpan.FromTicks(_timeout ?? 0),
+        AdditionalHeaders = _headers.Where(header => header.Value is not null).ToDictionary(header => header.Name, header => header.Value!, StringComparer.OrdinalIgnoreCase)
+    };
     protected override void OnDraftEdited() { _generation++; base.OnDraftEdited(); }
 
     protected override IReadOnlyList<SetupStep> CreateSteps() =>
@@ -47,7 +51,7 @@ public sealed class SttSettings : InferenceSettings<SttSetupChanges>
         new("connection", "Hosted transcription", "The selected runtime supplies credentials. Edits do not contact the provider.",
         [new("connection", "Connection",
         [
-            new SetupUriField(new("endpoint", "Endpoint") { IsRequired = true }, _endpoint, new("https://api.x.ai"), value => Edit(() => _endpoint = value)),
+            new SetupUriField(new("endpoint", "Endpoint") { IsRequired = true }, _endpoint, new(new XaiConnectionOptions().GetEndpoint()), value => Edit(() => _endpoint = value)),
             new SetupIntegerField(new("timeout", "HTTP timeout (ticks)") { IsRequired = true }, _timeout, TimeSpan.FromMinutes(5).Ticks, value => Edit(() => _timeout = value), 1),
             new SetupTextField(new("xai-connection", "xAI connection ID") { IsRequired = true }, _draft.Connection.Xai?.ConnectionId ?? "", "", value => Edit(() => _draft = _draft with { Connection = _draft.Connection with { Xai = value.Length == 0 ? null : new(value) } })),
             Headers()
@@ -139,8 +143,13 @@ public sealed class SttSettings : InferenceSettings<SttSetupChanges>
     protected override SetupValidation ValidateDraft()
     {
         var issues = new List<SetupIssue>();
-        if (_endpoint is null || !_endpoint.IsAbsoluteUri || _endpoint.Scheme != Uri.UriSchemeHttps || _endpoint.UserInfo.Length != 0 || _endpoint.Query.Length != 0 || _endpoint.Fragment.Length != 0 || _timeout is null or <= 0)
-            issues.Add(new("connection-invalid", "Use an absolute HTTPS endpoint and positive request timeout.", StepId: "connection"));
+        if (_endpoint is null || _timeout is null or <= 0)
+            issues.Add(new("connection-invalid", "Use the fixed xAI endpoint and positive request timeout.", StepId: "connection"));
+        else
+        {
+            try { SttProviderService.ValidateConnection(Connection()); }
+            catch (ArgumentException) { issues.Add(new("connection-invalid", "Use the fixed xAI regional API endpoint.", "endpoint")); }
+        }
         if (string.IsNullOrWhiteSpace(_draft.Connection.Xai?.ConnectionId)) issues.Add(new("binding-required", "Select the xAI connection.", "xai-connection"));
         if (_headers.Any(header => string.IsNullOrWhiteSpace(header.Name)) || _headers.Select(header => header.Name).Distinct(StringComparer.OrdinalIgnoreCase).Count() != _headers.Count)
             issues.Add(new("headers-invalid", "Header names must be nonempty and distinct.", "headers"));
@@ -164,8 +173,11 @@ public sealed class SttSettings : InferenceSettings<SttSetupChanges>
             if (header.Value is not null && (renamed || header.Edit.Kind == SetupSecretEditKind.Replace)) set[header.Name] = header.Value;
         }
         remove.ExceptWith(set.Keys);
-        return new(Identity, _draft with { Connection = Connection() with { AdditionalHeaders = new Dictionary<string, string>() },
-            StreamLimits = _events is null ? null : new((int)_events.Value, _payload!.Value, _message!.Value) }, new(set, remove.ToArray()));
+        return new(Identity, _draft with
+        {
+            Connection = Connection() with { AdditionalHeaders = new Dictionary<string, string>() },
+            StreamLimits = _events is null ? null : new((int)_events.Value, _payload!.Value, _message!.Value)
+        }, new(set, remove.ToArray()));
     }
     private sealed class Header(string name, string? original)
     {
@@ -197,13 +209,15 @@ public sealed class SttSettingsManager : InferenceSettingsManager<SttSettings, S
         IProgress<SetupProgress>? progress = null, CancellationToken cancellationToken = default)
     {
         using LlmOperationLifetime.Lease lease = _lifetime.Enter(cancellationToken);
-        return await base.RunAsync(settings, actionId, progress, lease.Token).ConfigureAwait(false);
+        SetupActionResult result = await base.RunAsync(settings, actionId, progress, lease.Token).ConfigureAwait(false);
+        return IsStopping(lease.Token) ? new(SetupActionState.Cancelled) : result;
     }
     public override async Task<SetupChoicePage> QueryChoicesAsync(InferenceSettings settings, string fieldId,
         SetupChoiceQuery query, CancellationToken cancellationToken = default)
     {
         using LlmOperationLifetime.Lease lease = _lifetime.Enter(cancellationToken);
-        return await base.QueryChoicesAsync(settings, fieldId, query, lease.Token).ConfigureAwait(false);
+        SetupChoicePage result = await base.QueryChoicesAsync(settings, fieldId, query, lease.Token).ConfigureAwait(false);
+        return IsStopping(lease.Token) ? new([], State: SetupChoiceState.Cancelled) : result;
     }
     public override async Task<SetupCommitResult> SaveAsync(InferenceSettings settings, CancellationToken cancellationToken = default)
     {
@@ -233,6 +247,12 @@ public sealed class SttSettingsManager : InferenceSettingsManager<SttSettings, S
         token.ThrowIfCancellationRequested();
         try { _lifetime.ThrowIfStopping(); }
         catch (ObjectDisposedException error) { throw new OperationCanceledException("The hosted-STT settings owner is retiring.", error, token); }
+    }
+    private bool IsStopping(CancellationToken token)
+    {
+        if (token.IsCancellationRequested) return true;
+        try { _lifetime.ThrowIfStopping(); return false; }
+        catch (ObjectDisposedException) { return true; }
     }
     public void Dispose() => RetireAsync().GetAwaiter().GetResult();
     public ValueTask DisposeAsync() => new(RetireAsync());

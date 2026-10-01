@@ -15,9 +15,11 @@ namespace Darkspyre.Inference.Connect.STT.Tests;
 
 public sealed class SttBindingTests
 {
-    private static SttConnection Connection => new() { Transport = SttTransport.XaiStt, Endpoint = new("https://api.x.ai"), Xai = new("selected") };
+    private static SttConnection Connection => new() { Transport = SttTransport.XaiStt, Endpoint = new("https://api.x.ai/v1"), Xai = new("selected") };
     private static readonly SetupConfigurationIdentity Create = new(SetupChangeIntent.Create, "stt", null);
-    private const string ConnectionJson = "{\"Transport\":0,\"Endpoint\":\"https://api.x.ai\",\"RequestTimeout\":\"00:05:00\",\"Xai\":{\"ConnectionId\":\"selected\"},\"Authorization\":null,\"AdditionalHeaders\":{\"X-Test\":\"sensitive\"}}";
+    private static readonly string[] FlagChoices = ["", "True", "False"];
+    private static readonly string[] TermChoices = ["Omitted", "List"];
+    private const string ConnectionJson = "{\"Transport\":0,\"Endpoint\":\"https://api.x.ai/v1\",\"RequestTimeout\":\"00:05:00\",\"Xai\":{\"ConnectionId\":\"selected\"},\"Authorization\":null,\"AdditionalHeaders\":{\"X-Test\":\"sensitive\"}}";
     public static TheoryData<string, string> Shapes => new()
     {
         { "SttTransport", "0" }, { "SttConnection", ConnectionJson },
@@ -86,11 +88,15 @@ public sealed class SttBindingTests
         var provider = new ControlledProvider(); var service = new SttProviderService([provider]);
         using var access = new LlmConnectionAccess(new UntouchableSource(), []); var binding = new XaiFamilyBinding(new("selected"), access);
         var resources = new UntouchableResources();
-        ISpeechTranscriptionClient client = service.Bind(Connection, binding, resources);
-        Assert.Same(provider, client); Assert.Same(binding, provider.Binding); Assert.Same(resources, provider.Resources); Assert.Same(Connection.Xai!.GetType(), provider.Connection!.Xai!.GetType());
+        SttConnection connection = Connection;
+        ISpeechTranscriptionClient client = service.Bind(connection, binding, resources);
+        Assert.Same(provider, client); Assert.Same(binding, provider.Binding); Assert.Same(resources, provider.Resources); Assert.Same(connection, provider.Connection);
         Assert.Throws<ArgumentException>(() => service.Bind(Connection, new(new("other"), access), resources));
         Assert.Throws<ArgumentException>(() => service.Bind(Connection with { Authorization = new UntouchableAuthorization() }, binding, resources));
         Assert.Throws<ArgumentException>(() => service.Bind(Connection with { AdditionalHeaders = new Dictionary<string, string> { ["aUtHoRiZaTiOn"] = "secret" } }, binding, resources));
+        Assert.Throws<ArgumentException>(() => service.Bind(Connection with { Endpoint = new("https://outside.invalid/v1") }, binding, resources));
+        Assert.Throws<ArgumentException>(() => service.Bind(Connection with { Endpoint = new("https://api.x.ai/v1?token=secret") }, binding, resources));
+        Assert.Throws<ArgumentException>(() => service.Bind(Connection with { RequestTimeout = TimeSpan.Zero }, binding, resources));
         Assert.Equal(1, provider.Binds);
         Assert.Throws<ArgumentException>(() => new SttProviderService([provider, provider]));
     }
@@ -159,6 +165,9 @@ public sealed class SttBindingTests
             SttSettings settings = await manager.OpenAsync(SttTransport.XaiStt, new(SetupChangeIntent.Edit, "stt", "version"), Populated());
             pending = manager.RunAsync(settings, "check"); await provider.Entered.Task;
             retirement = manager.DisposeAsync().AsTask(); Assert.False(retirement.IsCompleted);
+            InferenceSettingsManager<SttSettings, SttSetupChanges> baseManager = manager;
+            await Assert.ThrowsAsync<ObjectDisposedException>(() => baseManager.QueryChoicesAsync(settings, "raw-format", new()));
+            await Assert.ThrowsAsync<ObjectDisposedException>(() => baseManager.RunAsync(settings, "missing"));
             provider.Release.TrySetResult(); Assert.Equal(SetupActionState.Cancelled, (await pending).State); await retirement;
             Assert.Null(settings.Status.Ready.Value); Assert.False(provider.Disposed); Assert.False(resources.Disposed); Assert.False(target.Disposed);
             await Assert.ThrowsAsync<ObjectDisposedException>(() => manager.OpenAsync(SttTransport.XaiStt, Create));
@@ -233,6 +242,42 @@ public sealed class SttBindingTests
         }
         finally { provider.Release.TrySetResult(); if (pending is not null) await pending; }
     }
+
+    [Fact]
+    public async Task LocalChoiceQueriesDoNotAcquireCredentialsOrLoseOmittedValues()
+    {
+        using var access = new LlmConnectionAccess(new UntouchableSource(), []); var binding = new XaiFamilyBinding(new("selected"), access); int factories = 0;
+        await using SttSettingsManager manager = new SttProviderService([new ControlledProvider()]).CreateSettingsManager(new Target(), _ => { factories++; return binding; });
+        SttSettings settings = await manager.OpenAsync(SttTransport.XaiStt, new(SetupChangeIntent.Edit, "stt", "version"), Populated());
+        Assert.Equal(5, (await manager.QueryChoicesAsync(settings, "raw-format", new())).Choices.Count);
+        Assert.Equal(FlagChoices, (await manager.QueryChoicesAsync(settings, "interim-results", new())).Choices.Select(choice => choice.Value));
+        Assert.Equal(TermChoices, (await manager.QueryChoicesAsync(settings, "key-terms-mode", new())).Choices.Select(choice => choice.Value));
+        Assert.Equal(0, factories);
+    }
+
+    [Fact]
+    public async Task ExplicitHeaderMutationPreservesUnnamedHeaders()
+    {
+        var target = new Target(); await using SttSettingsManager manager = new SttProviderService([new ControlledProvider()]).CreateSettingsManager(target);
+        SttSettings settings = await manager.OpenAsync(SttTransport.XaiStt, new(SetupChangeIntent.Edit, "stt", "version"), Populated() with
+        { Connection = Connection with { AdditionalHeaders = new Dictionary<string, string> { ["X-One"] = "one", ["X-Two"] = "two" } } });
+        SetupRepeatableGroupField headers = Edit<SetupRepeatableGroupField>(settings, "headers");
+        SetupFieldRow one = headers.Rows.Single(row => ((SetupTextField)row.Fields[0]).Value == "X-One");
+        ((SetupSecretField)one.Fields[1]).SetValue(SetupSecretEdit.Replace("replacement"));
+        Assert.Equal(SetupCommitState.Committed, (await manager.SaveAsync(settings)).State);
+        Assert.Single(target.Changes!.Headers.Set); Assert.Equal("replacement", target.Changes.Headers.Set["X-One"]); Assert.Empty(target.Changes.Headers.Remove);
+    }
+    [Fact]
+    public async Task CollaboratorDisposalFailureIsNotTranslatedIntoOwnerRetirement()
+    {
+        var provider = new ControlledProvider { CapabilityFailure = new ObjectDisposedException("borrowed-provider") };
+        using var access = new LlmConnectionAccess(new UntouchableSource(), []); var binding = new XaiFamilyBinding(new("selected"), access);
+        await using SttSettingsManager manager = new SttProviderService([provider]).CreateSettingsManager(new Target(), _ => binding);
+        SttSettings settings = await manager.OpenAsync(SttTransport.XaiStt, new(SetupChangeIntent.Edit, "stt", "version"), Populated());
+        Assert.Equal(SetupActionState.Failed, (await manager.RunAsync(settings, "check")).State);
+        Assert.Equal(5, (await manager.QueryChoicesAsync(settings, "raw-format", new())).Choices.Count);
+        Assert.Null(settings.Status.Ready.Value);
+    }
     [Theory, MemberData(nameof(Shapes))]
     public void ActualForeignPublicMetadataAndCallerRetire(string name, string json)
     {
@@ -271,7 +316,8 @@ public sealed class SttBindingTests
     private static SttSetupConfiguration Populated() => new(Connection with { AdditionalHeaders = new Dictionary<string, string> { ["X-Original"] = "secret" } })
     {
         Transcription = new("manual", "en", SpeechAudioEncoding.Pcm16LittleEndian, 0, false, true, 2, ["one", "one"], false, 0, false),
-        Streaming = new("manual-stream", "en", SpeechAudioEncoding.Opus, 0, false, true, 2, [], false, 0, false, false, TimeSpan.Zero, 0, TimeSpan.Zero), StreamLimits = new(2, 3, 4)
+        Streaming = new("manual-stream", "en", SpeechAudioEncoding.Opus, 0, false, true, 2, [], false, 0, false, false, TimeSpan.Zero, 0, TimeSpan.Zero),
+        StreamLimits = new(2, 3, 4)
     };
     private static JsonTypeInfo Metadata(Type owner, string name) => (JsonTypeInfo)owner.GetProperty(name)!.GetValue(null)!;
     private static object RoundTrip(string json, JsonTypeInfo metadata)
@@ -304,8 +350,10 @@ public sealed class SttBindingTests
     }
     private sealed class Target : ISetupCommitTarget<SttSetupChanges>, IDisposable
     {
-        public SttSetupChanges? Changes { get; private set; } public bool Disposed { get; private set; }
-        public bool Hold { get; init; } public SetupCommitState Outcome { get; init; } = SetupCommitState.Committed;
+        public SttSetupChanges? Changes { get; private set; }
+        public bool Disposed { get; private set; }
+        public bool Hold { get; init; }
+        public SetupCommitState Outcome { get; init; } = SetupCommitState.Committed;
         public TaskCompletionSource Entered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously); public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public async Task<SetupCommitResult> CommitAsync(SttSetupChanges changes, CancellationToken cancellationToken = default) { Changes = changes; Entered.TrySetResult(); if (Hold) await Release.Task; return new(Outcome, "next"); }
         public void Dispose() => Disposed = true;
@@ -314,12 +362,17 @@ public sealed class SttBindingTests
     {
         public SttTransport Transport => SttTransport.XaiStt;
         public InferenceSetupDefinition SetupDefinition => new(new("controlled", "Controlled", InferenceImplementationKind.Connect, InferenceTask.SpeechTranscription), "Controlled provider");
-        public SttConnection? Connection { get; private set; } public XaiFamilyBinding? Binding { get; private set; } public IInferenceResourceAccess? Resources { get; private set; }
-        public int Binds { get; private set; } public bool Hold { get; init; } public bool Disposed { get; private set; }
+        public SttConnection? Connection { get; private set; }
+        public XaiFamilyBinding? Binding { get; private set; }
+        public IInferenceResourceAccess? Resources { get; private set; }
+        public int Binds { get; private set; }
+        public bool Hold { get; init; }
+        public bool Disposed { get; private set; }
         public CancellationToken LastToken { get; private set; }
+        public Exception? CapabilityFailure { get; init; }
         public TaskCompletionSource Entered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously); public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public ISpeechTranscriptionClient Bind(SttConnection connection, XaiFamilyBinding? xai = null, IInferenceResourceAccess? resources = null) { Connection = connection; Binding = xai; Resources = resources; Binds++; return this; }
-        public async Task<SpeechTranscriptionCapabilities> GetCapabilitiesAsync(string? modelId = null, CancellationToken cancellationToken = default) { LastToken = cancellationToken; Entered.TrySetResult(); if (Hold) await Release.Task; return new() { Transcription = new() { Available = true } }; }
+        public async Task<SpeechTranscriptionCapabilities> GetCapabilitiesAsync(string? modelId = null, CancellationToken cancellationToken = default) { LastToken = cancellationToken; Entered.TrySetResult(); if (Hold) await Release.Task; if (CapabilityFailure is not null) throw CapabilityFailure; return new() { Transcription = new() { Available = true } }; }
         public Task<SpeechTranscriptionResult> TranscribeAsync(SpeechTranscriptionInput input, SpeechTranscriptionOptions options, CancellationToken cancellationToken = default) => throw new InvalidOperationException();
         public Task<ISpeechTranscriptionSession> OpenStreamAsync(SpeechStreamOptions options, InferenceStreamLimits limits, CancellationToken cancellationToken = default) => throw new InvalidOperationException();
         public IAsyncEnumerable<SpeechTranscriptEvent> TranscribeStreamAsync(IAsyncEnumerable<ReadOnlyMemory<byte>> audio, SpeechStreamOptions options, InferenceStreamLimits limits, CancellationToken cancellationToken = default) => throw new InvalidOperationException();

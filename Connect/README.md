@@ -12,9 +12,11 @@ The connection carries a durable `XaiConnectionSelection`, optional borrowed aut
 case-insensitive protected headers. `Bind(connection, xai, resources)` passes the matching borrowed
 `XaiFamilyBinding` and caller workspace access to the selected adapter. These collaborators remain
 caller-owned. A session owns its streaming transport; Common clients gain no additional disposal API.
-The adapter acquires one validated snapshot for each operation and validates known incompatibilities
-before credential refresh or source effects. The five-minute request timeout is a library default,
-not a provider limit.
+Adapter operations require one validated snapshot and known-incompatibility validation before
+credential refresh or source effects. Binding validates the existing fixed xAI regional API bases,
+positive timeout and matching selection without acquisition. Static authentication headers cannot
+override the borrowed authorization. The five-minute request timeout is a library default, not a
+provider limit.
 
 `ConnectSttJson` exports exact connection/transport/setup data getters with a complete generated graph.
 Live authorization, family bindings, factories, services and sessions refuse nonnull portable JSON.
@@ -22,7 +24,9 @@ Diagnostics hide connection and header values. Setup preserves all nullable tran
 defaults and explicit stream budgets; omitted limits remain omitted. Commands still require explicit
 valid budgets before opening a stream. Field edits are effect-free. Only registered adapters supply
 capability checks. The disposable settings manager fences and drains admitted operations and saves,
-then releases borrowed targets/factories/access without disposing them.
+then releases borrowed targets/factories/access without disposing them. Its own synchronous retirement
+fence returns structured cancellation for admitted checks/queries even before linked cancellation
+propagates. Admitted saves preserve the host's actual committed or uncertain outcome.
 
 > **Proprietary software.** Copyright © 2026 Brandon Mathis. All rights reserved.
 > No permission is granted to use, copy, modify, or distribute this software
