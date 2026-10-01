@@ -135,12 +135,17 @@ public sealed class PackageVerificationTests
     [Theory]
     [InlineData("<DownloadFile SourceUrl='https://example.invalid/cli' DestinationFile='cli' />")]
     [InlineData("<downloadfile SourceUrl='https://example.invalid/cli' DestinationFile='cli' />")]
+    [InlineData("<Target Name='Run'><exec Command='npx @github/copilot' /></Target>")]
+    [InlineData("<Target Name='Run'><Exec command='npx @github/copilot' /></Target>")]
+    [InlineData("<ItemGroup><packagedownload Include='@anthropic-ai/claude-code' /></ItemGroup>")]
     [InlineData("<Target Name='InstallClaudeCli'><Message Text='acquire' /></Target>")]
     [InlineData("<Target Name='AcquireCodex' />")]
     [InlineData("<Target Name='DownloadCopilot' />")]
     [InlineData("<Target Name='BootstrapAntigravity' />")]
     [InlineData("<ItemGroup><PackageDownload Include='@anthropic-ai/claude-code' /></ItemGroup>")]
     [InlineData("<ItemGroup><PackageReference Include='@openai/codex' /></ItemGroup>")]
+    [InlineData("<ItemGroup><PackageDownload Include='@github/copilot' /></ItemGroup>")]
+    [InlineData("<ItemGroup><PackageDownload Include='antigravity' /></ItemGroup>")]
     [InlineData("<Import Project='https://example.invalid/acquire.targets' />")]
     [InlineData("<PropertyGroup><Acquire>npm install @github/copilot</Acquire></PropertyGroup><Target Name='Run'><Exec Command='$(Acquire)' /></Target>")]
     [InlineData("<UsingTask TaskName='Acquire' TaskFactory='RoslynCodeTaskFactory'><Task><Code>Invoke-WebRequest https://example.invalid/cli</Code></Task></UsingTask>")]
@@ -170,6 +175,7 @@ public sealed class PackageVerificationTests
             <Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
               <Import Project="../build/managed.targets" />
               <PropertyGroup><Output>$(MSBuildThisFileDirectory)assets</Output></PropertyGroup>
+              <ItemGroup><PackageReference Include="GitHub.Copilot.SDK" Version="1.0.0" /></ItemGroup>
               <ItemGroup><None Include="$(Output)/fixture.txt" CopyToOutputDirectory="PreserveNewest" /></ItemGroup>
               <Target Name="CopyAssets"><Copy SourceFiles="@(None)" DestinationFolder="$(OutDir)" /><Message Text="CLI is configured externally" /></Target>
             </Project>
@@ -232,6 +238,8 @@ public sealed class PackageVerificationTests
     [InlineData("mismatched-supplier")]
     [InlineData("child-metadata")]
     [InlineData("executable")]
+    [InlineData("computed-id")]
+    [InlineData("wildcard-id")]
     public void UnsupportedCentralInputsFailClosed(string failure)
     {
         XDocument document = PolicyDocument();
@@ -246,6 +254,8 @@ public sealed class PackageVerificationTests
         if (failure == "mismatched-supplier") item.SetAttributeValue("Version", "9.2.0");
         if (failure == "child-metadata") item.Add(new XElement("Version", "9.2.0"));
         if (failure == "executable") document.Root!.Add(new XElement("Target", new XAttribute("Name", "ChangeVersions")));
+        if (failure == "computed-id") item.Parent!.Add(new XElement("PackageVersion", new XAttribute("Include", "$(SupplierPackage)"), new XAttribute("Version", "9.2.0")));
+        if (failure == "wildcard-id") item.Parent!.Add(new XElement("PackageVersion", new XAttribute("Include", "Darkspyre.TensorSharp.*"), new XAttribute("Version", "9.2.0")));
         Assert.Throws<InvalidDataException>(() => DependencyPolicy.Read(document));
     }
 

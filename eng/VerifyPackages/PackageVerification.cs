@@ -44,7 +44,8 @@ internal sealed class DependencyPolicy
         {
             string? id = (string?)item.Attribute("Include");
             string? value = (string?)item.Attribute("Version");
-            PackageVerification.Require(!string.IsNullOrWhiteSpace(id) && !item.HasElements
+            PackageVerification.Require(!string.IsNullOrWhiteSpace(id)
+                && id.All(character => char.IsAsciiLetterOrDigit(character) || character is '.' or '-' or '_') && !item.HasElements
                 && item.Attribute("Update") is null && item.Attribute("Remove") is null
                 && !item.AncestorsAndSelf().Any(element => element.Attribute("Condition") is not null)
                 && value is not null && NuGetVersion.TryParse(value, out _),
@@ -124,6 +125,10 @@ internal static class PackageVerification
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
     private static readonly Regex CliName = new(@"claude|codex|copilot|antigravity", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
     private static readonly Regex AcquisitionName = new(@"install|acquire|download|bootstrap", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+    private static readonly HashSet<string> CliAcquisitionPackages = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "@anthropic-ai/claude-code", "@openai/codex", "@github/copilot", "antigravity"
+    };
 
     internal static void Verify(ZipArchive archive, string id, string version, string? sourceCommit, DependencyPolicy policy)
     {
@@ -186,20 +191,27 @@ internal static class PackageVerification
         Require(document.Root?.Name.LocalName == "Project", $"{path}: expected MSBuild Project XML");
         foreach (XElement element in document.Descendants())
         {
-            string name = element.Name.LocalName;
-            string? targetName = (string?)element.Attribute("Name");
-            Require(!name.Equals("DownloadFile", StringComparison.OrdinalIgnoreCase), $"{path}: build-time artifact acquisition is not allowed");
-            Require(name != "Target" || targetName is null || !CliName.IsMatch(targetName) || !AcquisitionName.IsMatch(targetName),
+            string name = element.Name.LocalName.ToUpperInvariant();
+            string? targetName = BuildAttribute(element, "Name");
+            Require(name != "DOWNLOADFILE", $"{path}: build-time artifact acquisition is not allowed");
+            Require(name != "TARGET" || targetName is null || !CliName.IsMatch(targetName) || !AcquisitionName.IsMatch(targetName),
                 $"{path}: CLI acquisition target is not allowed");
-            Require(name is not ("PackageDownload" or "PackageReference") || !CliName.IsMatch((string?)element.Attribute("Include") ?? string.Empty),
+            Require(name is not ("PACKAGEDOWNLOAD" or "PACKAGEREFERENCE") || !CliAcquisitionPackages.Contains(BuildAttribute(element, "Include") ?? string.Empty),
                 $"{path}: CLI acquisition package item is not allowed");
-            if (name == "Import" && Uri.TryCreate((string?)element.Attribute("Project"), UriKind.Absolute, out Uri? import))
+            if (name == "IMPORT" && Uri.TryCreate(BuildAttribute(element, "Project"), UriKind.Absolute, out Uri? import))
                 Require(import.Scheme is not ("http" or "https"), $"{path}: remote build import is not allowed");
-            if (name == "Exec")
-                Require(!AcquisitionCommand.IsMatch((string?)element.Attribute("Command") ?? string.Empty), $"{path}: acquisition command is not allowed");
-            if (name == "Code" || element.Parent?.Name.LocalName == "PropertyGroup")
+            if (name == "EXEC")
+                Require(!AcquisitionCommand.IsMatch(BuildAttribute(element, "Command") ?? string.Empty), $"{path}: acquisition command is not allowed");
+            if (name == "CODE" || element.Parent?.Name.LocalName.Equals("PropertyGroup", StringComparison.OrdinalIgnoreCase) == true)
                 Require(!AcquisitionCommand.IsMatch(element.Value), $"{path}: indirect acquisition command is not allowed");
         }
+    }
+
+    private static string? BuildAttribute(XElement element, string name)
+    {
+        XAttribute[] attributes = element.Attributes().Where(attribute => attribute.Name.LocalName.Equals(name, StringComparison.OrdinalIgnoreCase)).ToArray();
+        Require(attributes.Length <= 1, $"Ambiguous MSBuild attribute: {name}.");
+        return attributes.SingleOrDefault()?.Value;
     }
 
     internal static void Require(bool condition, string message)
