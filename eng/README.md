@@ -85,3 +85,34 @@ The published `11.5.2-rc.1` Tensor archive (and earlier affected archives) conta
 shader and intentionally fails the strengthened checks. Corrected releases must leave the shader
 owned by the Whisper runtime dependency; do not overwrite old versions. Fresh local/feed consumer
 checks verify this boundary on each deployment after the corrected archive is available.
+
+## Runtime dependency inventory
+
+`VerifyRuntimeInventory` reads the restored Tensor `project.assets.json`, checks each installed
+package manifest's identity/version and hashes the actual native/GPU asset files. It records exact
+package versions, restore dependency edges, managed assembly paths, declared RIDs, asset sizes and
+SHA-256 values. Whisper's build-target assets remain visible even though they do not use NuGet
+`runtimeTargets`. The report covers all restored native assets and checks primary vendor-library
+presence for `osx-arm64`, `linux-x64`, `linux-arm64`, `win-x64` and `win-arm64`.
+
+```bash
+dotnet run --project eng/VerifyRuntimeInventory -- \
+  Tensor/src/Darkspyre.Inference.Tensor/obj/project.assets.json \
+  tmp/tensor-runtime-inventory.json "$(git rev-parse HEAD)"
+dotnet test eng/VerifyRuntimeInventory.Tests -- \
+  xUnit.ParallelizeTestCollections=false xUnit.MaxParallelThreads=1
+```
+
+The report has schema version 1. Windows DLL architecture comes from the actual PE header, not the
+directory name. Other binary architectures remain `NotInspected` in this tool. `AssetsPresent`
+records package-file presence, not initialization, dynamic dependency closure, accelerator support
+or engine execution. Every execution qualification remains `NotRun`. The command never loads
+native libraries, acquires a CLI or builds/publishes a package. Missing declared files and conflicting
+installed manifests fail verification. Missing RID payloads and header/RID mismatches remain explicit
+report entries rather than disappearing from the inventory.
+
+`--require-managed-ggml` rejects restored GGML native payloads after writing the inventory. This
+gate distinguishes Tensor's managed-only dependency requirement from standalone consumer native
+selection. The current TensorSharp `2.8.6.7` graph contains GGML native payloads and fails that gate.
+Its Windows ARM64 GGML payload and OpenCV runtime are absent. The current OpenCV Windows x64
+runtime also includes an x86 `opencv_videoio_ffmpeg.dll`; the inventory reports the mismatch.
