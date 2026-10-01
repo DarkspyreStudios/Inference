@@ -76,8 +76,10 @@ public sealed class TensorPackJsonRetirementTests
         string firstHash = Convert.ToHexStringLower(SHA256.HashData(first)), secondHash = Convert.ToHexStringLower(SHA256.HashData(second));
         var definition = new TensorModelPackDefinition
         {
-            Key = new("fixture-model", "r1"), Capability = TensorCapability.Llm,
-            RuntimeArchitecture = "fixture", License = "test",
+            Key = new("fixture-model", "r1"),
+            Capability = TensorCapability.Llm,
+            RuntimeArchitecture = "fixture",
+            License = "test",
             SupportedBackends = new HashSet<TensorBackendKind> { TensorBackendKind.Cpu },
             Artifacts =
             [
@@ -142,7 +144,10 @@ public sealed class TensorPackJsonRetirementTests
             new("fixture", null, null), "test", false, false, []);
         var artifact = new TensorModelArtifactDefinition
         {
-            Role = "model", RelativePath = "model.bin", Length = 1, Sha256 = new('A', 64),
+            Role = "model",
+            RelativePath = "model.bin",
+            Length = 1,
+            Sha256 = new('A', 64),
             Sources = [new("https://example.test/z"), new("https://example.test/a")],
             Provenance = new(new("https://example.test/"), "owner/model", "rev", "model.bin", "test")
         };

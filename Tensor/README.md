@@ -280,8 +280,9 @@ assembly into a collectible context and verify collection after each owned famil
 Controlled caller tests also run canonical fingerprinting and the real pack manager in a foreign
 generation. Tiny local fixtures exercise installation, asynchronous manifest writes and reads,
 verification, artifact lease release, removal and disposal. Exact manifest bytes retain artifact
-order and hashes. Malformed JSON, null manifests and mismatched identities report Invalid; unknown
-manifest properties remain ignored. The settled caller graph retires after owned metadata and
+order and hashes. Malformed JSON, null manifests, missing/null artifact collections, null artifact
+entries and mismatched identities report Invalid; unknown manifest properties remain ignored.
+The settled caller graph retires after owned metadata and
 operation locals are released. These tests execute no native runtime and download no models.
 
 `ITensorBackendProbe.CheckAsync` takes a `TensorBackendProbeRequest`. The request carries an operation
