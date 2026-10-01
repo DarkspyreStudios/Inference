@@ -128,6 +128,8 @@ internal sealed class SelfHostLlmClient(ILlmSelfHost host) : ILlmClient, ILlmCon
         ReasoningLevel = request.ReasoningLevel,
         StructuredOutput = request.StructuredOutput,
         Tools = request.Tools,
+        HostedTools = request.HostedTools,
+        MaxHostedTurns = request.MaxHostedTurns,
         ToolChoice = request.ToolChoice,
         AllowParallelToolCalls = request.AllowParallelToolCalls,
         UnboundContinuationState = request.UnboundContinuationState,
@@ -147,6 +149,7 @@ internal sealed class SelfHostLlmClient(ILlmSelfHost host) : ILlmClient, ILlmCon
         ContinuationState = result.ContinuationState,
         OmittedContinuationStateCount = result.OmittedContinuationStateCount,
         ToolCalls = result.ToolCalls,
+        Citations = result.Citations,
         StructuredOutput = result.StructuredOutput,
         // An in-process call has no HTTP exchange; 200 records that it completed.
         Diagnostics = new(200, null, null)
@@ -173,6 +176,7 @@ internal sealed class SelfHostLlmClient(ILlmSelfHost host) : ILlmClient, ILlmCon
         MaxStopSequences = capabilities.MaxStopSequences,
         SupportsToolUse = capabilities.SupportsToolUse,
         Tools = capabilities.Tools,
+        HostedTools = capabilities.HostedTools,
         ToolHistory = LlmToolHistory.Structured,
         SupportsAgentSessions = true,
         SupportsAgentToolUse = capabilities.SupportsToolUse,

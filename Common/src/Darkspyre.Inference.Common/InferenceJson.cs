@@ -32,6 +32,28 @@ public static class InferenceJson
     public static JsonTypeInfo<LlmUsageDeltaEvent> UsageDelta => InferenceJsonContext.Default.LlmUsageDeltaEvent;
     public static JsonTypeInfo<LlmUsage> LlmUsage => InferenceJsonContext.Default.LlmUsage;
     public static JsonTypeInfo<LlmHostedToolKind> LlmHostedToolKind => InferenceJsonContext.Default.LlmHostedToolKind;
+    public static JsonTypeInfo<LlmHostedToolPhase> LlmHostedToolPhase => InferenceJsonContext.Default.LlmHostedToolPhase;
+    public static JsonTypeInfo<LlmImageGenerationAction> LlmImageGenerationAction => InferenceJsonContext.Default.LlmImageGenerationAction;
+    public static JsonTypeInfo<LlmHostedTool> LlmHostedTool => InferenceJsonContext.Default.LlmHostedTool;
+    public static JsonTypeInfo<LlmWebSearchTool> LlmWebSearchTool => InferenceJsonContext.Default.LlmWebSearchTool;
+    public static JsonTypeInfo<LlmCodeExecutionTool> LlmCodeExecutionTool => InferenceJsonContext.Default.LlmCodeExecutionTool;
+    public static JsonTypeInfo<LlmImageGenerationTool> LlmImageGenerationTool => InferenceJsonContext.Default.LlmImageGenerationTool;
+    public static JsonTypeInfo<LlmDocumentSearchTool> LlmDocumentSearchTool => InferenceJsonContext.Default.LlmDocumentSearchTool;
+    public static JsonTypeInfo<LlmRemoteMcpTool> LlmRemoteMcpTool => InferenceJsonContext.Default.LlmRemoteMcpTool;
+    public static JsonTypeInfo<LlmHostedToolOutput> LlmHostedToolOutput => InferenceJsonContext.Default.LlmHostedToolOutput;
+    public static JsonTypeInfo<LlmHostedSearchSource> LlmHostedSearchSource => InferenceJsonContext.Default.LlmHostedSearchSource;
+    public static JsonTypeInfo<LlmHostedSearchOutput> LlmHostedSearchOutput => InferenceJsonContext.Default.LlmHostedSearchOutput;
+    public static JsonTypeInfo<LlmHostedCodeOutput> LlmHostedCodeOutput => InferenceJsonContext.Default.LlmHostedCodeOutput;
+    public static JsonTypeInfo<LlmHostedDocumentMatch> LlmHostedDocumentMatch => InferenceJsonContext.Default.LlmHostedDocumentMatch;
+    public static JsonTypeInfo<LlmHostedDocumentSearchOutput> LlmHostedDocumentSearchOutput => InferenceJsonContext.Default.LlmHostedDocumentSearchOutput;
+    public static JsonTypeInfo<LlmHostedMcpOutput> LlmHostedMcpOutput => InferenceJsonContext.Default.LlmHostedMcpOutput;
+    public static JsonTypeInfo<LlmHostedImageOutput> LlmHostedImageOutput => InferenceJsonContext.Default.LlmHostedImageOutput;
+    public static JsonTypeInfo<LlmHostedToolCall> LlmHostedToolCall => InferenceJsonContext.Default.LlmHostedToolCall;
+    public static JsonTypeInfo<LlmHostedToolCallStartedEvent> LlmHostedToolCallStartedEvent => InferenceJsonContext.Default.LlmHostedToolCallStartedEvent;
+    public static JsonTypeInfo<LlmHostedToolCallProgressEvent> LlmHostedToolCallProgressEvent => InferenceJsonContext.Default.LlmHostedToolCallProgressEvent;
+    public static JsonTypeInfo<LlmHostedToolCallCompletedEvent> LlmHostedToolCallCompletedEvent => InferenceJsonContext.Default.LlmHostedToolCallCompletedEvent;
+    public static JsonTypeInfo<LlmCitation> LlmCitation => InferenceJsonContext.Default.LlmCitation;
+    public static JsonTypeInfo<LlmCitationEvent> LlmCitationEvent => InferenceJsonContext.Default.LlmCitationEvent;
     public static JsonTypeInfo<LlmCompletionEvent> Completion => InferenceJsonContext.Default.LlmCompletionEvent;
     public static JsonTypeInfo<DecisionQuestion> DecisionQuestion => InferenceJsonContext.Default.DecisionQuestion;
     public static JsonTypeInfo<DecisionAnswer> DecisionAnswer => InferenceJsonContext.Default.DecisionAnswer;
@@ -63,7 +85,7 @@ public static class InferenceJson
 }
 
 [JsonSourceGenerationOptions(GenerationMode = JsonSourceGenerationMode.Metadata,
-    Converters = [typeof(ResourceAccessJsonConverter), typeof(ResourceReadHandleJsonConverter), typeof(ResourceWriteHandleJsonConverter)])]
+    Converters = [typeof(ResourceAccessJsonConverter), typeof(ResourceReadHandleJsonConverter), typeof(ResourceWriteHandleJsonConverter), typeof(ProviderAuthorizationJsonConverter)])]
 [JsonSerializable(typeof(InferenceProvenance))]
 [JsonSerializable(typeof(LlmInferenceRequest))]
 [JsonSerializable(typeof(LlmInferenceResult))]
@@ -85,6 +107,28 @@ public static class InferenceJson
 [JsonSerializable(typeof(LlmUsageDeltaEvent))]
 [JsonSerializable(typeof(LlmUsage))]
 [JsonSerializable(typeof(LlmHostedToolKind))]
+[JsonSerializable(typeof(LlmHostedToolPhase))]
+[JsonSerializable(typeof(LlmImageGenerationAction))]
+[JsonSerializable(typeof(LlmHostedTool))]
+[JsonSerializable(typeof(LlmWebSearchTool))]
+[JsonSerializable(typeof(LlmCodeExecutionTool))]
+[JsonSerializable(typeof(LlmImageGenerationTool))]
+[JsonSerializable(typeof(LlmDocumentSearchTool))]
+[JsonSerializable(typeof(LlmRemoteMcpTool))]
+[JsonSerializable(typeof(LlmHostedToolOutput))]
+[JsonSerializable(typeof(LlmHostedSearchSource))]
+[JsonSerializable(typeof(LlmHostedSearchOutput))]
+[JsonSerializable(typeof(LlmHostedCodeOutput))]
+[JsonSerializable(typeof(LlmHostedDocumentMatch))]
+[JsonSerializable(typeof(LlmHostedDocumentSearchOutput))]
+[JsonSerializable(typeof(LlmHostedMcpOutput))]
+[JsonSerializable(typeof(LlmHostedImageOutput))]
+[JsonSerializable(typeof(LlmHostedToolCall))]
+[JsonSerializable(typeof(LlmHostedToolCallStartedEvent))]
+[JsonSerializable(typeof(LlmHostedToolCallProgressEvent))]
+[JsonSerializable(typeof(LlmHostedToolCallCompletedEvent))]
+[JsonSerializable(typeof(LlmCitation))]
+[JsonSerializable(typeof(LlmCitationEvent))]
 [JsonSerializable(typeof(LlmCompletionEvent))]
 [JsonSerializable(typeof(DecisionQuestion))]
 [JsonSerializable(typeof(DecisionAnswer))]

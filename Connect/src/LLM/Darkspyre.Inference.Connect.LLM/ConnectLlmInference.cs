@@ -105,6 +105,7 @@ internal sealed class ConnectLlmInference(
         ContinuationState = result.ContinuationState,
         OmittedContinuationStateCount = result.OmittedContinuationStateCount,
         ToolCalls = result.ToolCalls,
+        Citations = result.Citations,
         StructuredOutput = result.StructuredOutput,
         Provenance = new Common.InferenceProvenance
         {
@@ -137,6 +138,8 @@ internal sealed class ConnectLlmInference(
         ReasoningLevel = request.ReasoningLevel,
         StructuredOutput = request.StructuredOutput,
         Tools = request.Tools,
+        HostedTools = request.HostedTools,
+        MaxHostedTurns = request.MaxHostedTurns,
         ToolChoice = request.ToolChoice,
         AllowParallelToolCalls = request.AllowParallelToolCalls,
         UnboundContinuationState = request.UnboundContinuationState,
@@ -165,6 +168,7 @@ internal sealed class ConnectLlmInference(
         MaxStopSequences = capabilities.MaxStopSequences,
         SupportsToolUse = capabilities.SupportsToolUse,
         Tools = capabilities.Tools,
+        HostedTools = capabilities.HostedTools,
         SupportsPromptImages = capabilities.SupportsPromptImages,
         SupportsPromptDocuments = capabilities.SupportsPromptDocuments
     };

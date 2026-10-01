@@ -74,6 +74,8 @@ public sealed record LlmProviderCapabilities
 
     public LlmToolCapabilities Tools { get; init; } = new();
 
+    public IReadOnlySet<LlmHostedToolKind> HostedTools { get; init => field = value.ToFrozenSet(); } = FrozenSet<LlmHostedToolKind>.Empty;
+
     /// <summary>How tool calls and results already in the history reach the provider.</summary>
     public LlmToolHistory ToolHistory { get; init; }
 
