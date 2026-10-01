@@ -593,6 +593,10 @@ public sealed class QwenLlmInference : ITensorLlmInference
 
     private static void ValidateRequest(LlmInferenceRequest request)
     {
+        if (request.HostedTools is null || request.HostedTools.Count > 0 || request.MaxHostedTurns is not null)
+        {
+            throw new InferenceException(InferenceFailureCode.UnsupportedFeature, "Qwen does not implement hosted tools or hosted turn limits.");
+        }
         if (request.Messages.Count == 0 && string.IsNullOrWhiteSpace(request.Instructions))
         {
             throw new InferenceException(InferenceFailureCode.InvalidRequest, "At least one instruction or message is required.");

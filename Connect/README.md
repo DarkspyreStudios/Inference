@@ -83,6 +83,26 @@ reported by `OmittedContinuationStateCount`; default handling rejects unbound st
 
 ### JSON metadata
 
+`ConnectLlmJson.PortableRequest` closes the Common request graph with the fixed `XaiXSearchTool`
+variant, also supported by `ChatRequest` metadata. It adds no arbitrary CLR subtype registry and
+does not change Common's metadata. Owned options compose Common's exact runtime-resource and
+authorization refusal converters; live authorization cannot be serialized or reconstructed as
+data, and serialization never invokes its callback. The separate credential codec keeps its
+existing Web names and null omission.
+
+Hosted request tools and turn limits are unavailable on the built-in adapters. Direct and facade
+generation, counting and estimation reject them before provider authentication, discovery, CLI
+startup or model materialization. Native start/resume also rejects these unmapped options. Existing
+Anthropic server-tool configuration is separate and does not advertise the new hosted API.
+Managed sessions snapshot hosted data, borrow authorization and preserve actual streamed hosted
+and citation observations under the invocation RequestId; they never route hosted observations to
+the host function handler. Terminal chat/portable results preserve ordered citation lists.
+Managed disposal shares its completion across callers, drains the producer even after cancellation
+callback failure, then releases borrowed hosted authorization without disposing it. Cleanup failures
+remain visible to every disposer. These controlled contracts do not qualify provider wire mappings
+or native execution. Terminal-only citations have no managed-agent projection; streamed citation
+observations are not deduplicated against terminal copies.
+
 `ConnectLlmJson` exposes owned source-generated metadata for closed LLM connections, saved setup
 configuration, chat messages/requests/results and captured agent context. Pass the matching typed
 metadata to `JsonSerializer`. Credential `Serialize`/`Parse`, context-entry equivalence and continuation

@@ -1,4 +1,6 @@
 using System.Reflection;
+using System.Runtime.CompilerServices;
+using System.Runtime.Loader;
 using System.Text.Json;
 using System.Text.Json.Serialization.Metadata;
 using Darkspyre.Inference.Common.LLM;
@@ -55,5 +57,38 @@ public sealed class HostedMetadataTests
         Assert.NotNull(typeof(LlmInferenceRequest).GetProperty("MaxHostedTurns"));
         Assert.NotNull(typeof(LlmCapabilities).GetProperty("HostedTools"));
         Assert.NotNull(typeof(LlmInferenceResult).GetProperty("Citations"));
+    }
+
+    [Theory]
+    [MemberData(nameof(Roots))]
+    public void ActualForeignCommonMetadataExecutesAndRetires(string name, string json)
+    {
+        WeakReference generation = ExerciseGeneration(name, json);
+        for (int attempt = 0; generation.IsAlive && attempt < 20; attempt++)
+        { GC.Collect(); GC.WaitForPendingFinalizers(); GC.Collect(); Thread.Sleep(10); }
+        Assert.False(generation.IsAlive);
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static WeakReference ExerciseGeneration(string name, string json)
+    {
+        var generation = new AssemblyLoadContext("hosted-common", isCollectible: true);
+        var weak = new WeakReference(generation);
+        try
+        {
+            var common = generation.LoadFromAssemblyPath(typeof(InferenceJson).Assembly.Location);
+            Assert.Equal(typeof(InferenceJson).Assembly.ManifestModule.ModuleVersionId, common.ManifestModule.ModuleVersionId);
+            Assert.Same(generation, AssemblyLoadContext.GetLoadContext(common));
+            var metadata = (JsonTypeInfo)common.GetType(typeof(InferenceJson).FullName!)!.GetProperty(name)!.GetValue(null)!;
+            Assert.Same(common, metadata.Type.Assembly);
+            Assert.Same(common, metadata.Options.TypeInfoResolver!.GetType().Assembly);
+            object value = JsonSerializer.Deserialize(json, metadata)!;
+            using JsonDocument actual = JsonDocument.Parse(JsonSerializer.Serialize(value, metadata));
+            using JsonDocument expected = JsonDocument.Parse(json);
+            Assert.True(JsonElement.DeepEquals(expected.RootElement, actual.RootElement));
+            Assert.NotNull(JsonSerializer.Deserialize(actual.RootElement.GetRawText(), metadata));
+        }
+        finally { generation.Unload(); }
+        return weak;
     }
 }

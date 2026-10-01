@@ -10,6 +10,7 @@ internal sealed class ManagedAppleAgentClient(AppleFoundationModelsClient client
         LlmAgentSessionOptions options, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(options);
+        HostedTools.Validate(options.HostedTools, options.MaxHostedTurns, client.GetCapabilities(connection, options.ModelId).HostedTools);
         AppleProtocol.Ready(await client.ProbeAsync(connection, cancellationToken).ConfigureAwait(false));
         var models = await providers.ListModelsAsync(connectionId, cancellationToken).ConfigureAwait(false);
         var capabilities = client.GetCapabilities(connection, options.ModelId);

@@ -561,6 +561,7 @@ internal sealed class AntigravityCliLlmClient(IAntigravityCliRunner runner)
         LlmChatRequest request,
         LlmProviderCapabilities capabilities)
     {
+        HostedTools.Validate(request, capabilities);
         if (string.IsNullOrWhiteSpace(request.ModelId))
         {
             throw new ArgumentException("A model id is required.", nameof(request));

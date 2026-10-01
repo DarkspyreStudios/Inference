@@ -9,6 +9,25 @@ public sealed class QwenLlmInferenceTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
+    public async Task HostedRequestsRefuseBeforeModelOrRuntimeMaterialization(bool limitOnly)
+    {
+        await using var inference = new QwenLlmInference(new MissingPackManager());
+        var request = new LlmInferenceRequest
+        {
+            ModelId = TensorLlmModels.Qwen3FourBillionQ4Km.Key.ModelId,
+            Messages = [new LlmMessage("user", "hello")],
+            HostedTools = limitOnly ? [] : [new LlmCodeExecutionTool()],
+            MaxHostedTurns = limitOnly ? 1 : null
+        };
+        var failure = await Assert.ThrowsAsync<InferenceException>(async () =>
+        { await foreach (var unused in inference.StreamAsync(request)) { } });
+        Assert.Equal(InferenceFailureCode.UnsupportedFeature, failure.Code);
+        Assert.Empty((await inference.GetCapabilitiesAsync(request.ModelId)).HostedTools);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
     public async Task ValidRequestNeverLoadsAHiddenModel(bool cacheHint)
     {
         await using var inference = new QwenLlmInference(new MissingPackManager());

@@ -53,6 +53,7 @@ internal static class NativeAgentContract
     /// <summary>The validated start settings of a runtime that declares <paramref name="agent"/>.</summary>
     public static LlmAgentNativeRuntimeOptions ValidateStart(LlmAgentSessionOptions options, LlmAgentCapabilities agent)
     {
+        HostedTools.Validate(options.HostedTools, options.MaxHostedTurns, agent.HostedTools);
         // A supplied context becomes opening context; see AgentOpeningContext.
         if (options.ThreadId is not null || options.SessionId is not null || options.ExecutionOptions is not null)
         {
@@ -74,6 +75,7 @@ internal static class NativeAgentContract
     /// </summary>
     public static LlmAgentNativeRuntimeOptions ResumeRuntime(LlmAgentResumeOptions options, LlmAgentCapabilities agent)
     {
+        HostedTools.Validate(options.HostedTools, options.MaxHostedTurns, agent.HostedTools);
         LlmAgentNativeRuntimeOptions runtime = options.Runtime ?? new()
         {
             WorkingDirectory = Environment.CurrentDirectory,

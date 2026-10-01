@@ -12,6 +12,7 @@ internal sealed class ManagedSelfHostAgentClient(SelfHostLlmClient client, LlmPr
         string connectionId, LlmConnection connection, LlmAgentSessionOptions options, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(options);
+        HostedTools.Validate(options.HostedTools, options.MaxHostedTurns, client.GetCapabilities(connection, options.ModelId).HostedTools);
         // Listing first surfaces an engine that is not loaded as ModelUnavailable before any turn.
         var models = await providers.ListModelsAsync(connectionId, cancellationToken);
         var capabilities = client.GetCapabilities(connection, options.ModelId);

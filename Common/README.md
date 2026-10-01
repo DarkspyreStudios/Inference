@@ -47,6 +47,17 @@ and owned JSON import. `InferenceJson.LlmUsage` and `InferenceJson.LlmHostedTool
 typed metadata, also composed into existing result and usage-event graphs. These facts do not enable
 provider features or infer totals from partial observations.
 
+Hosted tools use a closed `type` union, separate from caller-executed functions. Requests carry
+ordered `HostedTools` and optional positive `MaxHostedTurns`; capability sets are frozen and empty
+by default. Hosted calls retain actual status, optional input/output and ordered source/log/error
+facts. Citation offsets are nullable UTF-16 positions in emitted text, with an exclusive end.
+Unknown positions and optional output remain absent, not inferred. Concrete hosted/citation events
+have exact-name `InferenceJson` getters; their event base has no discriminator. Live remote-MCP
+authorization is borrowed and refuses non-null owned JSON read/write without invoking its callback.
+Null authorization roundtrips; explicitly serialized header data remains secret data, while
+remote-MCP diagnostics are redacted. Common's union rejects caller-defined variants; Connect owns
+the fixed xAI search extension and its extension-aware portable metadata.
+
 ## Session and workspace resources
 
 `Darkspyre.Inference.Common.Resources` defines immutable content references, observed descriptors,

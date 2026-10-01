@@ -57,8 +57,11 @@ internal sealed class SelfHostLlmClient(ILlmSelfHost host) : ILlmClient, ILlmCon
         ArgumentNullException.ThrowIfNull(connection);
         ArgumentNullException.ThrowIfNull(request);
         ValidateOptions(connection, request);
+        HostedTools.Validate(request, GetCapabilities(connection, request.ModelId));
         CommonLlm.ILlmInference engine = await host.GetInferenceAsync(connection.Endpoint, cancellationToken).ConfigureAwait(false);
-        LlmClientBase.ValidateSampling(request, ToConnect(await engine.GetCapabilitiesAsync(request.ModelId, cancellationToken).ConfigureAwait(false)));
+        var capabilities = ToConnect(await engine.GetCapabilitiesAsync(request.ModelId, cancellationToken).ConfigureAwait(false));
+        LlmClientBase.ValidateSampling(request, capabilities);
+        HostedTools.Validate(request, capabilities);
         await foreach (CommonLlm.LlmStreamEvent item in engine.StreamAsync(ToCommon(request), cancellationToken).ConfigureAwait(false))
         {
             // Common's events pass through; only the completion carries Connect's result.
@@ -72,6 +75,7 @@ internal sealed class SelfHostLlmClient(ILlmSelfHost host) : ILlmClient, ILlmCon
         ArgumentNullException.ThrowIfNull(connection);
         ArgumentNullException.ThrowIfNull(request);
         ValidateOptions(connection, request);
+        HostedTools.Validate(request, GetCapabilities(connection, request.ModelId));
         LlmClientBase.ValidateSampling(request, GetCapabilities(connection, request.ModelId));
         var text = new StringBuilder(request.Instructions);
         foreach (LlmChatMessage message in request.Messages)

@@ -13,7 +13,7 @@ public sealed class HostedManagedLifetimeTests
         var session = new ManagedAgentSession(new() { Transport = LlmTransport.OpenAiResponses, Endpoint = "https://example.test", Version = "v" },
             new() { ModelId = "model" }, [], harness, harness.Stream, _ => new()
             { SupportsAgentSessions = true, Agent = ManagedAgentPolicy.Capabilities });
-        Task turn = Read(session.RunTurnAsync(new() { Input = [new LlmAgentTextContent("hello")] }));
+        Task<IReadOnlyList<LlmAgentEvent>> turn = Read(session.RunTurnAsync(new() { Input = [new LlmAgentTextContent("hello")] }));
         Task? first = null;
         Task? second = null;
         try
@@ -27,8 +27,8 @@ public sealed class HostedManagedLifetimeTests
             harness.Release.TrySetResult();
             var failure = await Assert.ThrowsAsync<AggregateException>(() => first);
             Assert.Same(failure, await Assert.ThrowsAsync<AggregateException>(() => second));
-            Assert.Same(harness.Failure, Assert.Single(failure.InnerExceptions));
-            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => turn);
+            Assert.Same(harness.Failure, Assert.Single(failure.Flatten().InnerExceptions));
+            Assert.Equal(LlmAgentCompletionReason.Interruption, Assert.Single((await turn).OfType<LlmAgentTurnCompletedEvent>()).Reason);
             Assert.Same(failure, await Assert.ThrowsAsync<AggregateException>(() => session.DisposeAsync().AsTask()));
         }
         finally
@@ -41,8 +41,12 @@ public sealed class HostedManagedLifetimeTests
         }
     }
 
-    private static async Task Read(IAsyncEnumerable<LlmAgentEvent> stream)
-    { await foreach (var unused in stream) { } }
+    private static async Task<IReadOnlyList<LlmAgentEvent>> Read(IAsyncEnumerable<LlmAgentEvent> stream)
+    {
+        List<LlmAgentEvent> events = [];
+        await foreach (var item in stream) { events.Add(item); }
+        return events;
+    }
 
     private static async Task Drain(Task task)
     {
