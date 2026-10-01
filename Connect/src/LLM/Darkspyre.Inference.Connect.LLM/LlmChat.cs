@@ -85,7 +85,11 @@ public sealed record LlmChatRequest
 public sealed record LlmProviderDiagnostics(
     int HttpStatusCode,
     string? RequestId,
-    string? RawFinalResponseJson);
+    string? RawFinalResponseJson)
+{
+    /// <summary>The applied service tier when the provider reports one.</summary>
+    public string? ServiceTier { get; init; }
+}
 
 public sealed record LlmChatResult
 {

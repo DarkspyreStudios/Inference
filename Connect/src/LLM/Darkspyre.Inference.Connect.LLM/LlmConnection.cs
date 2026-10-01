@@ -41,6 +41,8 @@ public sealed record LlmConnection
     /// <summary>Chat Completions protocol choices; null selects endpoint-aware defaults.</summary>
     public LlmChatCompletionsConfiguration? ChatCompletions { get; init; }
 
+    public XaiConnectionOptions? Xai { get; init; }
+
     /// <summary>Non-standard headers such as OpenRouter attribution headers.</summary>
     public IReadOnlyDictionary<string, string> AdditionalHeaders { get; init; } =
         new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);

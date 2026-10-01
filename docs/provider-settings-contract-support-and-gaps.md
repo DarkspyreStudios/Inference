@@ -202,6 +202,20 @@ currently supplies only ID, display name, help text, required and secret flags.
 capability and inference operations. `ILlmConnectionSource` is the existing host-owned credential
 seam: credential replacement compares an opaque version atomically and must not upsert. Keep it;
 the gaps below are not a request to move the application's database or vault into Connect.
+`LlmConnectionAccess` owns runtime OAuth refresh for chat and embeddings. Its connection-bound
+`LlmConnectionAuthorization` supplies Common's neutral authorization header without exposing storage.
+
+The xAI connection contract supplies `XaiResponses`, typed region/tier options, fixed endpoints,
+and OAuth-only draft setup and sign-in routing. The internal authenticator implements the device
+protocol, refresh and `/v1/me`; the HTTP classifier does not yet recognize subscription-specific
+403 responses. `AddLlmConnect` does not register a Grok provider or authenticator.
+The shared Responses pipeline handles terminal-authoritative output and function completion,
+account-bound opaque replay, context-exhaustion results and encrypted-context diagnostic redaction.
+The internal `XaiResponsesLlmClient` supplies OAuth-only chat requests with typed endpoint/tier checks,
+catalog-driven profiles and numeric schema preflight. Cross-family catalog ownership, multi-agent
+setup controls and the complete provider schema subset remain unwired or incomplete.
+[Connect's setup contract](../Connect/README.md#provider-setup-and-editing) describes this unregistered
+boundary; it is not an additional completed or live-qualified provider in the table below.
 
 | Provider | Current definition/behavior | Needed in the configuration contract |
 |---|---|---|

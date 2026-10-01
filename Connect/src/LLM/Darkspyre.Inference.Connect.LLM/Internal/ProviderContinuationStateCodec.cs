@@ -6,7 +6,7 @@ using System.Text.Json.Nodes;
 
 namespace Darkspyre.Inference.Connect.LLM.Internal;
 
-/// <summary>Versioned, account-bound output only. Never stores an unfiltered provider response.</summary>
+/// <summary>Versioned, account-bound output only. Never stores the provider's response envelope.</summary>
 internal static class ProviderContinuationStateCodec
 {
     internal static string ImplementationId(LlmTransport transport) => $"darkspyre.connect.llm.{transport}";
@@ -30,7 +30,7 @@ internal static class ProviderContinuationStateCodec
     /// </summary>
     public static bool Retains(LlmTransport transport) =>
         transport is LlmTransport.OpenAiResponses or LlmTransport.OpenAiCodex or LlmTransport.AzureOpenAiResponses or LlmTransport.AnthropicMessages
-            or LlmTransport.AwsBedrockConverse;
+            or LlmTransport.AwsBedrockConverse or LlmTransport.XaiResponses;
 
     private const string NoOutput = "[]";
 
@@ -185,6 +185,30 @@ internal static class ProviderContinuationStateCodec
             if (node is not JsonObject item || item["type"]?.GetValue<string>() is not { } type)
             {
                 throw new ArgumentException("Response state contains an invalid output item.");
+            }
+
+            if (transport == LlmTransport.XaiResponses)
+            {
+                if (type is not ("message" or "reasoning" or "function_call" or "web_search_call"
+                    or "x_search_call" or "code_interpreter_call" or "code_execution_call" or "file_search_call"
+                    or "mcp_call" or "image_generation_call" or "view_image_call" or "view_x_video_call"))
+                {
+                    throw new NotSupportedException("The adapter cannot retain this assistant output type.");
+                }
+                if (type == "message" && item["role"]?.GetValue<string>() != "assistant")
+                {
+                    throw new ArgumentException("Response state cannot contain non-assistant messages.");
+                }
+                if (type == "message" && (item["content"] is not JsonArray content
+                    || content.Any(part => part is not JsonObject)))
+                {
+                    throw new ArgumentException("Response state content must contain ordered assistant blocks.");
+                }
+                ValidateItem(item, transport, type);
+                // xAI requires verbatim ordered output, including encrypted server-tool metadata.
+                // The cloned payload is opaque context. The library never executes or logs its fields.
+                projected.Add(item.DeepClone());
+                continue;
             }
 
             string[] fields = (transport, type) switch
