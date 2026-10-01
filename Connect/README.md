@@ -1511,6 +1511,16 @@ ChatGPT sign-in, or a saved credential that the edit keeps. Model
 discovery uses the direct authenticated catalog. A model whose catalog entry lists
 `supported_reasoning_levels` offers exactly those levels; other models offer `Minimal` to `ExtraHigh`.
 
+The adapter targets Codex CLI `0.159.3`, independently of the Inference package version.
+Its `User-Agent`, `version` header and catalog `client_version` use that same version for discovery,
+generation and account usage. Additional `version` and `User-Agent` headers are reserved on this
+transport; other custom headers retain their existing policy. The reviewed upstream baseline is
+[`rust-v0.159.3`](https://github.com/openai/codex/releases/tag/rust-v0.159.3), source commit
+`01fc69f4026735edfdf6789820549727a4867b11`. Catalog limits use `context_window`, falling back to
+`max_context_window` only when the former is absent or null. Positive reported limits are physical
+context limits, not an invented usable-context or compaction budget. Unknown limits remain null.
+Matching the version does not establish full CLI tooling or endpoint parity.
+
 Chat and managed agents share SSE request mapping, attachments, tool definitions, reasoning level,
 JSON Schema, and ordered opaque response-state replay. Requests use `store: false`; the library
 does not retrieve server history or send `previous_response_id`. `ConversationKey` provides cache
