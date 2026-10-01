@@ -79,7 +79,31 @@ printed temporary path for inspection. They test orchestration, not native runti
 The separate package-asset checks evaluate real Tensor pack inputs and synthetic copy-path fixtures.
 They verify that Whisper's shader remains a copy-to-output asset but is excluded from Tensor's own
 archive inputs. Duplicate None/None and None/Content destinations fail; unique paths and noncopied
-files pass. The archive verifier also rejects `.metal` shader sources alongside native binaries.
+files pass. The archive verifier also rejects versioned ELF libraries, `.metal` shader sources,
+compiled shaders and GPU code alongside native binaries.
+
+`VerifyPackages` reads expected dependency versions from `Directory.Packages.props` in its own
+source context, found from the verifier assembly's directory. It rejects missing, duplicate,
+conditional, imported or computed central version inputs. MSBuild element and attribute names use
+ordinal case-insensitive comparisons. Differently cased duplicate attributes are ambiguous and
+rejected. NuGet's version parser validates Tensor's
+required dependency declarations against these inputs. TensorSharp declarations use one synchronized
+version. ONNX, both Whisper packages and NAudio remain required. Whisper runtime includes all build
+assets. A matching minimum declaration is not an exact restore pin: restored versions are checked
+separately by the inventory's managed-GGML gate. Exact Common declarations remain mandatory.
+
+Every archive rejects GGML native package dependencies even without embedded native files. Packaged
+MSBuild XML rejects known CLI acquisition targets/items, download tasks, remote HTTP imports, and
+acquisition commands in execution/inline-task/property inputs. These checks preserve local managed
+imports, static-asset manifests and normal copy targets. They are a known acquisition-pattern gate,
+not a sandbox for arbitrary MSBuild code. The fixture tests use in-memory ZIP streams; they do not
+create NuGet archives, restore supplier fixtures or execute native libraries. The UI fixture also
+evaluates current SDK static-asset pack inputs and inspects generated XML without executing Pack.
+
+```bash
+dotnet test eng/VerifyPackages.Tests -- \
+  xUnit.ParallelizeTestCollections=false xUnit.MaxParallelThreads=1
+```
 
 The published `11.5.2-rc.1` Tensor archive (and earlier affected archives) contains the duplicate
 shader and intentionally fails the strengthened checks. Corrected releases must leave the shader
@@ -111,8 +135,16 @@ native libraries, acquires a CLI or builds/publishes a package. Missing declared
 installed manifests fail verification. Missing RID payloads and header/RID mismatches remain explicit
 report entries rather than disappearing from the inventory.
 
-`--require-managed-ggml` rejects restored GGML native payloads after writing the inventory. This
-gate distinguishes Tensor's managed-only dependency requirement from standalone consumer native
-selection. The current TensorSharp `2.8.6.7` graph contains GGML native payloads and fails that gate.
+Optional GGML developer-package files under `ggml/<variant>/` are inventoried alongside baseline
+`runtimes/<rid>/native/` files. Their RID comes from the matching native package identity, not a guess
+from the filename. Unbound GGML variant files remain visible with an unknown RID. License files are
+not native payloads. Five-RID fixture coverage records file hashes and Windows PE facts without
+executing those files; every runtime qualification remains `NotRun`.
+
+`--require-managed-ggml` rejects GGML native package identities even without payloads, legacy GGML
+native payloads, missing required managed dependencies and restored versions that differ from the
+central policy. It writes the inventory before reporting a closure failure. This gate distinguishes
+Tensor's managed-only dependency requirement from standalone consumer native selection. The current
+TensorSharp `2.8.6.7` graph contains GGML native payloads and fails that gate.
 Its Windows ARM64 GGML payload and OpenCV runtime are absent. The current OpenCV Windows x64
 runtime also includes an x86 `opencv_videoio_ffmpeg.dll`; the inventory reports the mismatch.

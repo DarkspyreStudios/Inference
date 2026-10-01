@@ -47,6 +47,95 @@ public sealed class RuntimeInventoryTests
         Assert.False(inventory.HasTransitiveGgmlNatives);
     }
 
+    [Theory]
+    [InlineData("Darkspyre.TensorSharp.Backends.GGML.Native.linux-arm64")]
+    [InlineData("Darkspyre.TensorSharp.Backends.GGML.Native.linux-arm64.cuda13")]
+    public void NativePackageIdentityRejectsManagedClosureWithoutPayload(string id)
+    {
+        RuntimeInventory inventory = RuntimeInventory.Read(Fixture(id, "1.0.0", []), Commit);
+        Assert.Empty(inventory.NativeAssets);
+        Assert.True(inventory.HasTransitiveGgmlNatives);
+        Assert.Equal("NotRun", inventory.RuntimeQualification);
+    }
+
+    [Fact]
+    public void OptionalVariantDirectoryBindsItsPackageRidAndHashesActualFiles()
+    {
+        const string id = "Darkspyre.TensorSharp.Backends.GGML.Native.linux-arm64.cuda13";
+        RuntimeInventory inventory = RuntimeInventory.Read(Fixture(id, "1.0.0",
+            ["ggml/cuda13/libGgmlOps.so", "ggml/cuda13/libcudart.so.13"]), Commit);
+        Assert.Equal(2, inventory.NativeAssets.Count);
+        Assert.All(inventory.NativeAssets, asset =>
+        {
+            Assert.Equal("linux-arm64", asset.Rid);
+            Assert.Equal("NativeLibrary", asset.Kind);
+            Assert.Equal(Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes("fixture bytes"))), asset.Sha256);
+            Assert.Equal("NotRun", asset.RuntimeQualification);
+        });
+        Assert.True(inventory.HasTransitiveGgmlNatives);
+        Assert.Equal("AssetsPresent", inventory.Coverage.Single(item => item.Family == "Ggml" && item.Rid == "linux-arm64").State);
+        Assert.Equal(25, inventory.Coverage.Count);
+        Assert.All(inventory.Coverage, coverage => Assert.Equal("NotRun", coverage.RuntimeQualification));
+    }
+
+    [Theory]
+    [InlineData("osx-arm64", "libGgmlOps.dylib")]
+    [InlineData("linux-x64", "libGgmlOps.so")]
+    [InlineData("linux-arm64", "libGgmlOps.so")]
+    [InlineData("win-x64", "GgmlOps.dll")]
+    [InlineData("win-arm64", "GgmlOps.dll")]
+    public void BaselineInventoryCoversEveryRequiredRidWithoutExecution(string rid, string library)
+    {
+        string assets = Fixture(DependencyPolicy.NativeGgml + "." + rid, "1.0.0", ["runtimes/" + rid + "/native/" + library]);
+        RuntimeInventory inventory = RuntimeInventory.Read(assets, Commit);
+        RuntimeAsset asset = Assert.Single(inventory.NativeAssets);
+        Assert.Equal(rid, asset.Rid);
+        Assert.Equal("NativeLibrary", asset.Kind);
+        Assert.True(inventory.HasTransitiveGgmlNatives);
+        Assert.Equal(RuntimeInventory.SupportedRids, inventory.RequiredRids);
+        Assert.All(inventory.Coverage, coverage => Assert.Equal("NotRun", coverage.RuntimeQualification));
+        Assert.Equal("NotRun", asset.RuntimeQualification);
+        RuntimeCoverage coverage = inventory.Coverage.Single(item => item.Family == "Ggml" && item.Rid == rid);
+        Assert.StartsWith("AssetsPresent", coverage.State, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("linux-x64", "vulkan", "libGgmlOps.so")]
+    [InlineData("linux-x64", "cuda13", "libGgmlOps.so")]
+    [InlineData("linux-arm64", "vulkan", "libGgmlOps.so")]
+    [InlineData("linux-arm64", "cuda13", "libGgmlOps.so")]
+    [InlineData("win-x64", "vulkan", "GgmlOps.dll")]
+    [InlineData("win-x64", "cuda13", "GgmlOps.dll")]
+    [InlineData("win-arm64", "vulkan", "GgmlOps.dll")]
+    public void OptionalInventoryUsesTheDeclaredPackageRidAndVariant(string rid, string variant, string library)
+    {
+        const string version = "1.0.0";
+        string id = DependencyPolicy.NativeGgml + "." + rid + "." + variant;
+        RuntimeInventory inventory = RuntimeInventory.Read(Fixture(id, version,
+            ["ggml/" + variant + "/" + library, "ggml/" + variant + "/kernels.ptx", "ggml/" + variant + "/licenses/ggml-LICENSE.txt"]), Commit);
+        Assert.Equal(2, inventory.NativeAssets.Count);
+        Assert.All(inventory.NativeAssets, asset =>
+        {
+            Assert.Equal(id, asset.PackageId);
+            Assert.Equal(version, asset.Version);
+            Assert.Equal(rid, asset.Rid);
+            Assert.Equal("NotRun", asset.RuntimeQualification);
+        });
+        Assert.Contains(inventory.NativeAssets, asset => asset.Kind == "GpuCode");
+        Assert.True(inventory.HasTransitiveGgmlNatives);
+        Assert.All(inventory.Coverage, coverage => Assert.Equal("NotRun", coverage.RuntimeQualification));
+    }
+
+    [Fact]
+    public void ManagedPackageCannotInventAnOptionalVariantRid()
+    {
+        RuntimeInventory inventory = RuntimeInventory.Read(Fixture(DependencyPolicy.Ggml, "1.0.0", ["ggml/cuda13/libGgmlOps.so"]), Commit);
+        RuntimeAsset asset = Assert.Single(inventory.NativeAssets);
+        Assert.Null(asset.Rid);
+        Assert.Equal("NativeLibrary", asset.Kind);
+        Assert.True(inventory.HasTransitiveGgmlNatives);
+    }
+
     [Fact]
     public void AnyCpuNativeAssetIsNotClassifiedAsManagedOnly()
     {
@@ -111,13 +200,20 @@ public sealed class RuntimeInventoryTests
         string packageDirectory = Path.Combine(cache, package);
         Directory.CreateDirectory(packageDirectory);
         const string manifest = "fixture.nuspec";
-        File.WriteAllText(Path.Combine(packageDirectory, manifest), $"<package><metadata><id>{id}</id><version>{manifestVersion ?? version}</version></metadata></package>");
+        new System.Xml.Linq.XDocument(new System.Xml.Linq.XElement("package", new System.Xml.Linq.XElement("metadata",
+            new System.Xml.Linq.XElement("id", id), new System.Xml.Linq.XElement("version", manifestVersion ?? version))))
+            .Save(Path.Combine(packageDirectory, manifest));
         if (createPayload)
             foreach (string file in files)
             {
                 string path = Path.Combine(packageDirectory, file);
                 Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-                File.WriteAllText(path, "fixture bytes");
+                if (file.Contains("win-", StringComparison.Ordinal) || id.Contains("win-", StringComparison.Ordinal))
+                {
+                    if (file.EndsWith(".dll", StringComparison.OrdinalIgnoreCase)) File.Copy(typeof(RuntimeInventory).Assembly.Location, path);
+                    else File.WriteAllText(path, "fixture bytes");
+                }
+                else File.WriteAllText(path, "fixture bytes");
             }
         var fileArray = new JsonArray(files.Select(file => JsonValue.Create(file)).ToArray());
         fileArray.Add(manifest);

@@ -14,8 +14,17 @@ foreach (RuntimeCoverage coverage in inventory.Coverage.Where(item => item.State
 {
     Console.WriteLine($"{coverage.Family} {coverage.Rid}: {coverage.State}. {coverage.Detail}");
 }
-if (args.Length == 4 && inventory.HasTransitiveGgmlNatives)
+if (args.Length == 4)
 {
-    Console.Error.WriteLine("The Tensor restore graph still contains GGML native payloads. Managed-only closure is not satisfied.");
-    Environment.ExitCode = 1;
+    try
+    {
+        DependencyPolicy.ReadSourcePolicy().ValidateRestored(inventory.Packages.Select(package => (package.Id, package.Version)));
+        PackageVerification.Require(!inventory.HasTransitiveGgmlNatives,
+            "The Tensor restore graph still contains GGML native payloads. Managed-only closure is not satisfied.");
+    }
+    catch (InvalidDataException exception)
+    {
+        Console.Error.WriteLine(exception.Message);
+        Environment.ExitCode = 1;
+    }
 }

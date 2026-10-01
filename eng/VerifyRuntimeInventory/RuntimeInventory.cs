@@ -57,7 +57,7 @@ internal sealed record RuntimeInventory(
             }
             foreach (string file in files)
             {
-                (string? rid, string? kind) = Classify(file);
+                (string? rid, string? kind) = Classify(id, file);
                 if (kind is null) continue;
                 string fullPath = Resolve(directory, file);
                 using FileStream asset = File.OpenRead(fullPath);
@@ -73,7 +73,8 @@ internal sealed record RuntimeInventory(
                 nuspec, managed.ToArray(), dependencies.ToArray()));
         }
         RuntimeCoverage[] coverage = BuildCoverage(native);
-        bool ggmlNatives = native.Any(asset => IsGgml(asset.PackageId) && asset.Kind == "NativeLibrary");
+        bool ggmlNatives = packages.Any(package => DependencyPolicy.IsNativeGgml(package.Id))
+            || native.Any(asset => IsGgml(asset.PackageId) && asset.Kind == "NativeLibrary");
         return new(1, sourceCommit, assetsHash, SupportedRids, packages, native, coverage, ggmlNatives, "NotRun");
     }
 
@@ -105,15 +106,23 @@ internal sealed record RuntimeInventory(
         }
     }
 
-    private static bool IsGgml(string id) => id.StartsWith("Darkspyre.TensorSharp.Backends.GGML", StringComparison.Ordinal);
+    private static bool IsGgml(string id) => id.Equals(DependencyPolicy.Ggml, StringComparison.OrdinalIgnoreCase)
+        || id.StartsWith(DependencyPolicy.Ggml + ".", StringComparison.OrdinalIgnoreCase);
 
-    private static (string? Rid, string? Kind) Classify(string path)
+    private static (string? Rid, string? Kind) Classify(string packageId, string path)
     {
         string[] parts = path.Split('/');
         if (parts.Length >= 4 && parts[0] == "runtimes" && parts[2] == "native")
             return (parts[1], IsLibrary(path) ? "NativeLibrary" : "NativeAuxiliary");
         if (parts.Length >= 3 && parts[0] == "build" && IsLibrary(path))
             return (parts[1] switch { "macos-arm64" => "osx-arm64", "macos-x64" => "osx-x64", _ => parts[1] }, "NativeLibrary");
+        if (IsGgml(packageId) && parts.Length >= 3 && parts[0] == "ggml" && !parts.Skip(2).Contains("licenses", StringComparer.Ordinal))
+        {
+            string? rid = SupportedRids.FirstOrDefault(candidate => packageId.Equals(
+                DependencyPolicy.NativeGgml + "." + candidate + "." + parts[1], StringComparison.OrdinalIgnoreCase));
+            return (rid, IsLibrary(path) ? "NativeLibrary" : path.EndsWith(".ptx", StringComparison.OrdinalIgnoreCase)
+                || path.EndsWith(".cubin", StringComparison.OrdinalIgnoreCase) ? "GpuCode" : "NativeAuxiliary");
+        }
         if (path.EndsWith(".metal", StringComparison.OrdinalIgnoreCase) || path.EndsWith(".metallib", StringComparison.OrdinalIgnoreCase)) return ("osx-arm64", "GpuCode");
         if (path.EndsWith(".ptx", StringComparison.OrdinalIgnoreCase)) return (null, "GpuCode");
         return (null, null);
