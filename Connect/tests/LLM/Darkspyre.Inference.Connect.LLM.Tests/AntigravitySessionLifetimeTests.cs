@@ -1,4 +1,5 @@
 using System.Threading.Channels;
+using System.Reflection;
 using Darkspyre.Inference.Common.LLM;
 using Darkspyre.Inference.Connect.LLM.Providers;
 
@@ -127,11 +128,109 @@ public sealed class AntigravitySessionLifetimeTests
         Assert.Equal(1, factory.Processes[0].Disposals);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task RetirementFencesRemainingMappedEventsAndLateUsage(bool ignoreReadCancellation)
+    {
+        var factory = new Factory { IgnoreReadCancellation = ignoreReadCancellation };
+        ILlmAgentSession session = await OpenAsync(factory);
+        await using IAsyncEnumerator<LlmAgentEvent> turn = session.RunTurnAsync(Request()).GetAsyncEnumerator();
+        Assert.True(await turn.MoveNextAsync());
+        Process process = factory.Processes[0];
+        process.Emit("{\"event\":\"step_update\",\"step_update\":{\"step_index\":0,\"state\":\"DONE\",\"step_type\":\"user_input\"}}");
+        process.Emit("{\"event\":\"step_update\",\"step_update\":{\"step_index\":1,\"state\":\"ACTIVE\",\"step_type\":\"agent_response\",\"text_delta\":\"late text\"}}");
+        while (await turn.MoveNextAsync().AsTask().WaitAsync(Bound) && turn.Current is not LlmAgentActivityEvent) { }
+        Task retirement = session.DisposeAsync().AsTask();
+        process.Emit("{\"event\":\"step_update\",\"step_update\":{\"step_index\":1,\"state\":\"DONE\",\"step_type\":\"agent_response\",\"usage\":{\"input_tokens\":9,\"output_tokens\":2,\"total_tokens\":11}}}");
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => turn.MoveNextAsync().AsTask());
+        await turn.DisposeAsync();
+        await retirement.WaitAsync(Bound);
+        var accounted = (System.Collections.IEnumerable)typeof(AntigravityAgentSession)
+            .GetField("_accountedSteps", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(session)!;
+        Assert.Equal((1, 0), Assert.Single(accounted.Cast<object>()));
+        Assert.Equal(Conversation, session.ThreadId);
+    }
+
+    [Fact]
+    public async Task RetirementDuringReopenHandshakeDoesNotPublishOrSendATurn()
+    {
+        var factory = new Factory { HoldReopenHandshake = true };
+        ILlmAgentSession session = await OpenAsync(factory);
+        await using IAsyncEnumerator<LlmAgentEvent> turn = session.RunTurnAsync(Request() with { ReasoningLevel = LlmReasoningLevel.High }).GetAsyncEnumerator();
+        Task<bool> reopening = turn.MoveNextAsync().AsTask();
+        await factory.Reopened.Task.WaitAsync(Bound);
+        Task retirement = session.DisposeAsync().AsTask();
+        factory.Processes[1].Emit(Init);
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => reopening.WaitAsync(Bound));
+        await turn.DisposeAsync();
+        await retirement.WaitAsync(Bound);
+        Assert.Equal(2, factory.Processes.Count);
+        Assert.All(factory.Processes, process => { Assert.Equal(1, process.Disposals); Assert.Empty(process.Writes); });
+        Assert.Equal(Conversation, session.ThreadId);
+    }
+
+    [Fact]
+    public async Task ReopenCleanupFailurePreventsReplacementAndRemainsVisibleToDisposal()
+    {
+        var failure = new CliProcessTerminationException(4242);
+        var factory = new Factory { KillFailure = failure };
+        ILlmAgentSession session = await OpenAsync(factory);
+        await using IAsyncEnumerator<LlmAgentEvent> turn = session.RunTurnAsync(Request() with { ReasoningLevel = LlmReasoningLevel.High }).GetAsyncEnumerator();
+        Assert.Same(failure, await Record.ExceptionAsync(() => turn.MoveNextAsync().AsTask()));
+        Assert.Single(factory.Processes);
+        Task retirement = session.DisposeAsync().AsTask();
+        Assert.Same(failure, await Record.ExceptionAsync(() => retirement.WaitAsync(Bound)));
+        Assert.Same(retirement, session.DisposeAsync().AsTask());
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CancelledTurnPreservesEveryFailedCleanupStage(bool readerFailure)
+    {
+        var kill = new CliProcessTerminationException(4242);
+        var second = new IOException("controlled cleanup failure");
+        var factory = new Factory { KillFailure = kill, DisposeFailure = readerFailure ? null : second, ReadFailureOnClose = readerFailure ? second : null };
+        ILlmAgentSession session = await OpenAsync(factory);
+        using var cancellation = new CancellationTokenSource();
+        await using IAsyncEnumerator<LlmAgentEvent> turn = session.RunTurnAsync(Request(), cancellation.Token).GetAsyncEnumerator();
+        Assert.True(await turn.MoveNextAsync());
+        cancellation.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => turn.MoveNextAsync().AsTask());
+        Task retirement = session.DisposeAsync().AsTask();
+        AggregateException failure = await Assert.ThrowsAsync<AggregateException>(() => retirement.WaitAsync(Bound));
+        Assert.Collection(failure.InnerExceptions, error => Assert.Same(kill, error), error => Assert.Same(second, error));
+        Assert.Same(failure, await Record.ExceptionAsync(() => session.DisposeAsync().AsTask()));
+        Assert.Equal(1, factory.Processes[0].Disposals);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task FailedOpeningPreservesItsOriginalFailureAndCleanupFailure(bool cancelled)
+    {
+        var cleanup = new IOException("controlled cleanup failure");
+        var factory = new Factory { InvalidHandshake = !cancelled, HoldInitialHandshake = cancelled, DisposeFailure = cleanup };
+        using var cancellation = new CancellationTokenSource();
+        Task<ILlmAgentSession> opening = OpenAsync(factory, cancellation.Token);
+        if (cancelled)
+        {
+            await factory.Started.Task.WaitAsync(Bound);
+            cancellation.Cancel();
+        }
+        AggregateException failure = await Assert.ThrowsAsync<AggregateException>(() => opening.WaitAsync(Bound));
+        Assert.Collection(failure.InnerExceptions,
+            error => { if (cancelled) Assert.IsAssignableFrom<OperationCanceledException>(error); else Assert.IsType<LlmProviderException>(error); },
+            error => Assert.Same(cleanup, error));
+        Assert.Equal(1, factory.Processes[0].Disposals);
+    }
+
     private static LlmAgentTurnRequest Request() => new() { Input = [new LlmAgentTextContent("hello")] };
 
-    private static Task<ILlmAgentSession> OpenAsync(Factory factory) => AntigravityAgentSession.OpenAsync(factory,
+    private static Task<ILlmAgentSession> OpenAsync(Factory factory, CancellationToken cancellationToken = default) => AntigravityAgentSession.OpenAsync(factory,
         "agy", Environment.CurrentDirectory, new("gemini-pro", null, null), null,
-        new() { Version = "1", Transport = LlmTransport.GoogleAntigravityCli, Endpoint = "agy" }, CancellationToken.None);
+        new() { Version = "1", Transport = LlmTransport.GoogleAntigravityCli, Endpoint = "agy" }, cancellationToken);
 
     private static async Task ReadAsync(IAsyncEnumerable<LlmAgentEvent> events)
     {
@@ -143,14 +242,25 @@ public sealed class AntigravitySessionLifetimeTests
         internal bool HoldWrite { get; init; }
         internal bool IgnoreWriteCancellation { get; init; }
         internal bool HoldExit { get; init; }
+        internal bool HoldReopenHandshake { get; init; }
+        internal bool InvalidHandshake { get; init; }
+        internal bool HoldInitialHandshake { get; init; }
+        internal bool IgnoreReadCancellation { get; init; }
         internal Exception? KillFailure { get; init; }
+        internal Exception? DisposeFailure { get; init; }
+        internal Exception? ReadFailureOnClose { get; init; }
+        internal TaskCompletionSource Reopened { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        internal TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         internal List<Process> Processes { get; } = [];
 
         public IAntigravityCliSessionProcess Start(string executable, IReadOnlyList<string> arguments, string workingDirectory)
         {
             var process = new Process(this);
             Processes.Add(process);
-            process.Emit(Init);
+            if ((Processes.Count == 1 && !HoldInitialHandshake) || (Processes.Count > 1 && !HoldReopenHandshake))
+                process.Emit(InvalidHandshake ? "{\"event\":\"result\",\"result\":{\"status\":\"SUCCESS\"}}" : Init);
+            Started.TrySetResult();
+            if (Processes.Count == 2) Reopened.TrySetResult();
             return process;
         }
     }
@@ -183,8 +293,12 @@ public sealed class AntigravitySessionLifetimeTests
 
         public async ValueTask<string?> ReadLineAsync(CancellationToken cancellationToken = default)
         {
-            try { return await _output.Reader.ReadAsync(cancellationToken); }
-            catch (ChannelClosedException) { return null; }
+            try { return await _output.Reader.ReadAsync(factory.IgnoreReadCancellation ? CancellationToken.None : cancellationToken); }
+            catch (ChannelClosedException)
+            {
+                if (factory.ReadFailureOnClose is { } failure) throw failure;
+                return null;
+            }
         }
 
         public async Task<(int ExitCode, string StandardError)> WaitForExitAsync(CancellationToken cancellationToken = default)
@@ -206,7 +320,7 @@ public sealed class AntigravitySessionLifetimeTests
         {
             Disposals++;
             CloseInput();
-            return ValueTask.CompletedTask;
+            return factory.DisposeFailure is { } failure ? ValueTask.FromException(failure) : ValueTask.CompletedTask;
         }
     }
 }

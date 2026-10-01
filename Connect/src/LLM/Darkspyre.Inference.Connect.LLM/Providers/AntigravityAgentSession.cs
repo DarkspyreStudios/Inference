@@ -1,4 +1,6 @@
 using System.Runtime.CompilerServices;
+using System.Runtime.ExceptionServices;
+using System.Diagnostics.CodeAnalysis;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Channels;
@@ -35,6 +37,7 @@ internal sealed class AntigravityAgentSession : ILlmAgentSession
     private readonly NoAgentResources _resources = new(LlmAgentResourceStopStatus.Unknown);
     private readonly LlmOperationLifetime _retirement = new();
     private readonly Lock _sync = new();
+    private readonly List<Exception> _cleanupFailures = [];
 
     private IAntigravityCliSessionProcess? _process;
     private Channel<ProcessLine> _lines = Channel.CreateUnbounded<ProcessLine>();
@@ -80,6 +83,7 @@ internal sealed class AntigravityAgentSession : ILlmAgentSession
     public string SessionId => ThreadId;
 
     /// <summary>Starts a process, waits for its handshake and returns the session under its real conversation ID.</summary>
+    [SuppressMessage("Design", "CA1031", Justification = "Failed opening preserves both the original failure and a genuine retirement failure.")]
     public static async Task<ILlmAgentSession> OpenAsync(
         IAntigravityCliSessionProcessFactory factory,
         string executable,
@@ -93,18 +97,21 @@ internal sealed class AntigravityAgentSession : ILlmAgentSession
         var session = new AntigravityAgentSession(factory, executable, workingDirectory, launch, connection);
         try
         {
-            await session.StartProcessAsync(launch, conversationId, cancellationToken).ConfigureAwait(false);
+            using LlmOperationLifetime.Lease operation = session._retirement.Enter(cancellationToken);
+            await session.StartProcessAsync(launch, conversationId, operation.Token).ConfigureAwait(false);
             return session;
         }
-        catch
+        catch (Exception original)
         {
-            await session.DisposeAsync().ConfigureAwait(false);
+            try { await session.DisposeAsync().ConfigureAwait(false); }
+            catch (Exception cleanup) { throw new AggregateException(original, cleanup); }
             throw;
         }
     }
 
     public Task<LlmAgentCapabilities> GetCapabilitiesAsync(CancellationToken cancellationToken = default)
     {
+        using LlmOperationLifetime.Lease operation = _retirement.Enter(cancellationToken);
         cancellationToken.ThrowIfCancellationRequested();
         ThrowIfDisposed();
         return Task.FromResult(NativeAgentContract.Antigravity);
@@ -114,6 +121,7 @@ internal sealed class AntigravityAgentSession : ILlmAgentSession
         LlmAgentContext proposedContext,
         CancellationToken cancellationToken = default)
     {
+        using LlmOperationLifetime.Lease operation = _retirement.Enter(cancellationToken);
         ThrowIfDisposed();
         cancellationToken.ThrowIfCancellationRequested();
         ArgumentNullException.ThrowIfNull(proposedContext);
@@ -126,29 +134,44 @@ internal sealed class AntigravityAgentSession : ILlmAgentSession
 
     public Task<LlmAgentContextStatus> GetContextStatusAsync(
         LlmAgentTurnRequest? prospectiveTurn = null,
-        CancellationToken cancellationToken = default) =>
-        throw NativeAgentContract.UnsupportedContext(cancellationToken);
+        CancellationToken cancellationToken = default)
+    {
+        using LlmOperationLifetime.Lease operation = _retirement.Enter(cancellationToken);
+        throw NativeAgentContract.UnsupportedContext(operation.Token);
+    }
 
     public Task<LlmAgentContext> CaptureContextAsync(
         LlmAgentContextCaptureOptions? options = null,
-        CancellationToken cancellationToken = default) =>
-        throw NativeAgentContract.UnsupportedContext(cancellationToken);
+        CancellationToken cancellationToken = default)
+    {
+        using LlmOperationLifetime.Lease operation = _retirement.Enter(cancellationToken);
+        throw NativeAgentContract.UnsupportedContext(operation.Token);
+    }
 
     public Task ReplaceContextAsync(
         LlmAgentContext context,
         long expectedRevision,
-        CancellationToken cancellationToken = default) =>
-        throw NativeAgentContract.UnsupportedContext(cancellationToken);
+        CancellationToken cancellationToken = default)
+    {
+        using LlmOperationLifetime.Lease operation = _retirement.Enter(cancellationToken);
+        throw NativeAgentContract.UnsupportedContext(operation.Token);
+    }
 
-    public IAsyncEnumerable<LlmAgentEvent> ContinueTurnAsync(
+    public async IAsyncEnumerable<LlmAgentEvent> ContinueTurnAsync(
         LlmAgentTurnContinuation continuation,
-        CancellationToken cancellationToken = default) =>
-        NativeAgentContract.UnsupportedContinuation(cancellationToken);
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        using LlmOperationLifetime.Lease operation = _retirement.Enter(cancellationToken);
+        await Task.FromException(NativeAgentContract.UnsupportedContext(operation.Token)).ConfigureAwait(false);
+        yield break;
+    }
 
     public async IAsyncEnumerable<LlmAgentEvent> RunTurnAsync(
         LlmAgentTurnRequest request,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
+        using LlmOperationLifetime.Lease operation = _retirement.Enter(cancellationToken);
+        cancellationToken = operation.Token;
         ArgumentNullException.ThrowIfNull(request);
         (AntigravityLaunch launch, string prompt, JsonElement? schema) = Admit(request);
         bool usageDeltas = AntigravityCliLlmClient.ResolveCapabilities(_connection, launch.ModelId).SupportsUsageDeltas;
@@ -181,15 +204,25 @@ internal sealed class AntigravityAgentSession : ILlmAgentSession
             var turn = new TurnMapper(this, turnId, schema, request.OutputSchema, usageDeltas);
             lock (_sync)
             {
+                cancellationToken.ThrowIfCancellationRequested();
+                ThrowIfUnavailable();
                 _expectingOutput = true;
             }
             yield return new LlmAgentTurnStartedEvent(ThreadId, turnId);
+            cancellationToken.ThrowIfCancellationRequested();
 
             string? writeFailure = await WritePromptAsync(prompt, cancellationToken).ConfigureAwait(false);
+            cancellationToken.ThrowIfCancellationRequested();
             if (writeFailure is not null)
             {
-                FaultAndIdle(writeFailure);
+                lock (_sync)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    ThrowIfUnavailable();
+                    FaultAndIdle(writeFailure);
+                }
                 settled = true;
+                cancellationToken.ThrowIfCancellationRequested();
                 yield return new LlmAgentTurnCompletedEvent(ThreadId, turnId, LlmAgentCompletionReason.ProviderFailure, writeFailure);
                 yield break;
             }
@@ -210,14 +243,25 @@ internal sealed class AntigravityAgentSession : ILlmAgentSession
                     }
                 }
 
-                foreach (LlmAgentEvent agentEvent in turn.Map(line))
+                IReadOnlyList<LlmAgentEvent> mapped;
+                lock (_sync)
                 {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    ThrowIfUnavailable();
+                    mapped = turn.Map(line);
+                }
+                foreach (LlmAgentEvent agentEvent in mapped)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
                     yield return agentEvent;
+                    cancellationToken.ThrowIfCancellationRequested();
                 }
             }
 
             lock (_sync)
             {
+                cancellationToken.ThrowIfCancellationRequested();
+                ThrowIfUnavailable();
                 _expectingOutput = false;
                 if (turn.FaultReason is { } reason)
                 {
@@ -246,12 +290,14 @@ internal sealed class AntigravityAgentSession : ILlmAgentSession
         IReadOnlyList<LlmAgentContent> input,
         CancellationToken cancellationToken = default)
     {
+        using LlmOperationLifetime.Lease operation = _retirement.Enter(cancellationToken);
         ThrowIfDisposed();
         throw new NotSupportedException("Antigravity CLI does not support steering an active turn.");
     }
 
     public Task InterruptAsync(string turnId, CancellationToken cancellationToken = default)
     {
+        using LlmOperationLifetime.Lease operation = _retirement.Enter(cancellationToken);
         ThrowIfDisposed();
         throw new NotSupportedException(
             "Antigravity CLI has no in-process interrupt. Cancel RunTurnAsync; it closes the local session.");
@@ -260,6 +306,7 @@ internal sealed class AntigravityAgentSession : ILlmAgentSession
     public async IAsyncEnumerable<LlmAgentEvent> ObserveAsync(
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
+        using LlmOperationLifetime.Lease operation = _retirement.Enter(cancellationToken);
         ThrowIfDisposed();
         await foreach (LlmAgentEvent item in _resources.ObserveAsync(cancellationToken).ConfigureAwait(false))
         {
@@ -269,6 +316,7 @@ internal sealed class AntigravityAgentSession : ILlmAgentSession
 
     public Task<IReadOnlyList<LlmAgentResource>> GetResourcesAsync(CancellationToken cancellationToken = default)
     {
+        using LlmOperationLifetime.Lease operation = _retirement.Enter(cancellationToken);
         ThrowIfDisposed();
         throw new NotSupportedException(
             "Antigravity CLI does not report its background work; ResourceObservation is Unsupported.");
@@ -279,6 +327,7 @@ internal sealed class AntigravityAgentSession : ILlmAgentSession
         string? cursor,
         CancellationToken cancellationToken = default)
     {
+        using LlmOperationLifetime.Lease operation = _retirement.Enter(cancellationToken);
         ThrowIfDisposed();
         ArgumentException.ThrowIfNullOrWhiteSpace(resourceId);
         cancellationToken.ThrowIfCancellationRequested();
@@ -287,6 +336,7 @@ internal sealed class AntigravityAgentSession : ILlmAgentSession
 
     public Task<LlmAgentResourceStopStatus> StopResourceAsync(string resourceId, CancellationToken cancellationToken = default)
     {
+        using LlmOperationLifetime.Lease operation = _retirement.Enter(cancellationToken);
         ThrowIfDisposed();
         ArgumentException.ThrowIfNullOrWhiteSpace(resourceId);
         throw new NotSupportedException(
@@ -299,14 +349,15 @@ internal sealed class AntigravityAgentSession : ILlmAgentSession
         {
             _state = SessionState.Disposed;
             _expectingOutput = false;
+            _resources.Dispose();
+            return new(_retirement.RetireAsync(RetireSessionAsync));
         }
-        return new(_retirement.RetireAsync(RetireSessionAsync));
     }
 
     private async Task RetireSessionAsync()
     {
-        try { await CloseProcessAsync(graceful: true, propagateTerminationFailure: true).ConfigureAwait(false); }
-        finally { _resources.Dispose(); }
+        await CloseProcessAsync(graceful: true).ConfigureAwait(false);
+        ThrowCleanupFailures();
     }
 
     private (AntigravityLaunch Launch, string Prompt, JsonElement? Schema) Admit(LlmAgentTurnRequest request)
@@ -355,6 +406,7 @@ internal sealed class AntigravityAgentSession : ILlmAgentSession
 
     private async Task StartProcessAsync(AntigravityLaunch launch, string? conversationId, CancellationToken cancellationToken)
     {
+        using LlmOperationLifetime.Lease readerOwner = _retirement.Enter(CancellationToken.None);
         cancellationToken.ThrowIfCancellationRequested();
         var arguments = new List<string>
         {
@@ -385,9 +437,23 @@ internal sealed class AntigravityAgentSession : ILlmAgentSession
         }
 
         IAntigravityCliSessionProcess process;
+        var lines = Channel.CreateUnbounded<ProcessLine>(new UnboundedChannelOptions { SingleReader = true, SingleWriter = true });
+        int generation;
         try
         {
-            process = _factory.Start(_executable, arguments, _workingDirectory);
+            lock (_sync)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                ThrowIfUnavailable();
+                process = _factory.Start(_executable, arguments, _workingDirectory);
+                _process = process;
+                _lines = lines;
+                generation = ++_generation;
+                _accountedSteps.Clear();
+                _expectingOutput = true;
+                CancellationToken readerToken = readerOwner.Token;
+                _reader = Task.Run(() => ReadAsync(process, lines.Writer, generation, readerToken), CancellationToken.None);
+            }
         }
         catch (AntigravityCliUnavailableException exception)
         {
@@ -397,18 +463,6 @@ internal sealed class AntigravityAgentSession : ILlmAgentSession
                 providerCode: "antigravity_cli_not_found",
                 innerException: exception);
         }
-
-        var lines = Channel.CreateUnbounded<ProcessLine>(new UnboundedChannelOptions { SingleReader = true, SingleWriter = true });
-        int generation;
-        lock (_sync)
-        {
-            _process = process;
-            _lines = lines;
-            generation = ++_generation;
-            _accountedSteps.Clear();
-            _expectingOutput = true;
-        }
-        _reader = Task.Run(() => ReadAsync(process, lines.Writer, generation), CancellationToken.None);
 
         using var handshake = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         handshake.CancelAfter(HandshakeTimeout);
@@ -425,6 +479,7 @@ internal sealed class AntigravityAgentSession : ILlmAgentSession
         {
             first = ProcessLine.End;
         }
+        cancellationToken.ThrowIfCancellationRequested();
 
         if (first.Event is not AntigravityInit init)
         {
@@ -439,6 +494,8 @@ internal sealed class AntigravityAgentSession : ILlmAgentSession
 
         lock (_sync)
         {
+            cancellationToken.ThrowIfCancellationRequested();
+            ThrowIfUnavailable();
             _expectingOutput = false;
             _threadId = init.ConversationId;
             _launch = launch;
@@ -466,6 +523,7 @@ internal sealed class AntigravityAgentSession : ILlmAgentSession
             try
             {
                 await process.WaitForExitAsync(exit.Token).ConfigureAwait(false);
+                cancellationToken.ThrowIfCancellationRequested();
             }
             catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
             {
@@ -473,6 +531,8 @@ internal sealed class AntigravityAgentSession : ILlmAgentSession
             }
         }
         await CloseProcessAsync(graceful: false).ConfigureAwait(false);
+        ThrowCleanupFailures();
+        cancellationToken.ThrowIfCancellationRequested();
         string conversationId = ThreadId;
         await StartProcessAsync(launch, conversationId, cancellationToken).ConfigureAwait(false);
     }
@@ -484,6 +544,7 @@ internal sealed class AntigravityAgentSession : ILlmAgentSession
         try
         {
             await process.WriteAsync(line, cancellationToken).ConfigureAwait(false);
+            cancellationToken.ThrowIfCancellationRequested();
             return null;
         }
         catch (IOException)
@@ -492,12 +553,13 @@ internal sealed class AntigravityAgentSession : ILlmAgentSession
         }
     }
 
-    private async Task ReadAsync(IAntigravityCliSessionProcess process, ChannelWriter<ProcessLine> writer, int generation)
+    private async Task ReadAsync(IAntigravityCliSessionProcess process, ChannelWriter<ProcessLine> writer, int generation, CancellationToken cancellationToken)
     {
         try
         {
-            while (await process.ReadLineAsync().ConfigureAwait(false) is { } line)
+            while (await process.ReadLineAsync(cancellationToken).ConfigureAwait(false) is { } line)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 if (string.IsNullOrWhiteSpace(line))
                 {
                     continue;
@@ -509,7 +571,7 @@ internal sealed class AntigravityAgentSession : ILlmAgentSession
                 }
                 catch (LlmProviderException exception)
                 {
-                    writer.TryWrite(new ProcessLine(generation, null, exception));
+                    Publish(new ProcessLine(generation, null, exception));
                     return;
                 }
                 if (parsed is AntigravityUnrecognizedEvent)
@@ -518,22 +580,37 @@ internal sealed class AntigravityAgentSession : ILlmAgentSession
                 }
                 lock (_sync)
                 {
+                    if (_state == SessionState.Disposed || generation != _generation) return;
                     if (!_expectingOutput && generation == _generation && _state is SessionState.Idle or SessionState.Running)
                     {
                         FaultLocked("The Antigravity CLI produced output while no turn was active.");
                     }
+                    writer.TryWrite(new ProcessLine(generation, parsed, null));
                 }
-                writer.TryWrite(new ProcessLine(generation, parsed, null));
             }
-            writer.TryWrite(ProcessLine.End with { Generation = generation });
+            Publish(ProcessLine.End with { Generation = generation });
         }
         catch (Exception exception) when (exception is IOException or InvalidOperationException or ObjectDisposedException or OperationCanceledException)
         {
-            writer.TryWrite(new ProcessLine(generation, null, exception));
+            lock (_sync)
+            {
+                if (exception is not OperationCanceledException && _process is null && generation == _generation)
+                    RecordCleanupFailure(exception);
+            }
+            Publish(new ProcessLine(generation, null, exception));
         }
         finally
         {
             writer.TryComplete();
+        }
+
+        void Publish(ProcessLine line)
+        {
+            lock (_sync)
+            {
+                if (!cancellationToken.IsCancellationRequested && _state != SessionState.Disposed && generation == _generation)
+                    writer.TryWrite(line);
+            }
         }
     }
 
@@ -556,56 +633,52 @@ internal sealed class AntigravityAgentSession : ILlmAgentSession
         }
     }
 
-    private async Task CloseProcessAsync(bool graceful, bool propagateTerminationFailure = false)
+    [SuppressMessage("Design", "CA1031", Justification = "Every cleanup stage runs and its failure is preserved for all retirement callers.")]
+    private async Task CloseProcessAsync(bool graceful)
     {
         IAntigravityCliSessionProcess? process;
         string? schemaDirectory;
+        Task reader;
         lock (_sync)
         {
             process = _process;
             _process = null;
+            reader = _reader;
+            _reader = Task.CompletedTask;
             schemaDirectory = _schemaDirectory;
             _schemaDirectory = null;
         }
-        try
+        if (process is not null)
         {
-            if (process is not null)
+            if (!graceful)
             {
-                try
-                {
-                    if (!graceful)
-                    {
-                        await process.KillAsync().ConfigureAwait(false);
-                    }
-                }
-                catch (CliProcessTerminationException exception) when (!propagateTerminationFailure)
-                {
-                    FaultForTermination(exception);
-                }
-                finally
-                {
-                    try
-                    {
-                        await process.DisposeAsync().ConfigureAwait(false);
-                    }
-                    catch (CliProcessTerminationException exception) when (!propagateTerminationFailure)
-                    {
-                        FaultForTermination(exception);
-                    }
-                    finally
-                    {
-                        await _reader.ConfigureAwait(false);
-                    }
-                }
+                try { await process.KillAsync().ConfigureAwait(false); }
+                catch (Exception error) { RecordCleanupFailure(error); }
             }
+            try { await process.DisposeAsync().ConfigureAwait(false); }
+            catch (Exception error) { RecordCleanupFailure(error); }
+            try { await reader.ConfigureAwait(false); }
+            catch (Exception error) { RecordCleanupFailure(error); }
         }
-        finally
+        if (schemaDirectory is not null)
         {
-            if (schemaDirectory is not null)
-            {
-                CliInfrastructure.DeleteWorkingDirectory(schemaDirectory);
-            }
+            try { CliInfrastructure.DeleteWorkingDirectory(schemaDirectory); }
+            catch (Exception error) { RecordCleanupFailure(error); }
         }
+    }
+
+    private void RecordCleanupFailure(Exception error)
+    {
+        lock (_sync) { _cleanupFailures.Add(error); }
+        if (error is CliProcessTerminationException termination) FaultForTermination(termination);
+    }
+
+    private void ThrowCleanupFailures()
+    {
+        Exception[] failures;
+        lock (_sync) { failures = [.. _cleanupFailures]; }
+        if (failures.Length == 1) ExceptionDispatchInfo.Capture(failures[0]).Throw();
+        if (failures.Length > 1) throw new AggregateException(failures);
     }
 
     /// <summary>
