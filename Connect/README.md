@@ -83,6 +83,11 @@ scope hashing use owned metadata. Credentials retain their camel-case Web format
 captured context retains its property names, format 2 checks, Common tool-output discriminators and
 binary/null-versus-empty representations. Resolved internal services are never serialized.
 
+Gemini API and Vertex local text estimates serialize requests with `ConnectLlmJson.ChatRequest`.
+The projection retains default property names/order, numeric enums, explicit nulls and escaping.
+Opaque continuation state and media still produce unknown local occupancy; this metadata does not
+turn a local estimate into a provider count or admission check.
+
 Contexts and scope helpers remain internal. The package installs no reflection fallback for these
 families. Runtime settings, one-way secret edits, executable handlers and undiscriminated agent/event
 bases are not persisted snapshots. Provider CLI/HTTP protocol writers remain separate owners;

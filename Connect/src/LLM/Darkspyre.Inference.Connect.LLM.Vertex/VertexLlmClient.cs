@@ -207,7 +207,7 @@ internal sealed class VertexLlmClient(HttpClient http, IVertexAuthentication aut
         ValidateVertexRequest(connection, request, profile, capabilities);
         if (request.Messages.Any(message => message.ContinuationState is not null || message.Attachments.Count != 0
             || message.ToolResults.Any(result => result.Output.Parts.Any(part => part is not LlmToolOutputText)))) { return null; }
-        string projection = JsonSerializer.Serialize(request);
+        string projection = JsonSerializer.Serialize(request, ConnectLlmJson.ChatRequest);
         return new(LocalTokenCount.Count(projection));
     }
 
