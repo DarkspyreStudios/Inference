@@ -464,7 +464,7 @@ public sealed class AntigravityAgentClientTests : IDisposable
     {
         var factory = new Factory { KillFailure = new CliProcessTerminationException(4242) };
         factory.Turns.Enqueue(_ => [Step(0, "DONE", "user_input"), Step(1, "ACTIVE", "agent_response", "partial")]);
-        await using ILlmAgentSession session = await Client(factory).StartSessionAsync("c", Connection(), Options());
+        ILlmAgentSession session = await Client(factory).StartSessionAsync("c", Connection(), Options());
         using var cancellation = new CancellationTokenSource();
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
@@ -482,6 +482,10 @@ public sealed class AntigravityAgentClientTests : IDisposable
         InvalidOperationException fault = await Assert.ThrowsAsync<InvalidOperationException>(() =>
             Read(session.RunTurnAsync(Turn("again"))));
         Assert.Contains("4242", fault.Message, StringComparison.Ordinal);
+        Task retirement = session.DisposeAsync().AsTask();
+        Assert.Same(factory.KillFailure, await Record.ExceptionAsync(() => retirement));
+        Assert.Same(retirement, session.DisposeAsync().AsTask());
+        Assert.Same(factory.KillFailure, await Record.ExceptionAsync(() => session.DisposeAsync().AsTask()));
     }
 
     [Fact]

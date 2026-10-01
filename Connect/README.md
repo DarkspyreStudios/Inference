@@ -1869,6 +1869,12 @@ per open session, with an open standard input and one output reader.
 - Cancelling or abandoning a turn kills the owned process and faults the session object. Output that
   arrives while no turn is running also faults it. Resume opens a fresh session. Connect does not stop
   work AGY may keep running on its side.
+- Disposal closes observation immediately, cancels admitted turns and reopens, and waits for their
+  writes and iterators to stop using the session before releasing the process. A paused iterator must
+  advance or be disposed before retirement completes. Late output cannot publish events or update
+  usage. All disposal callers share one completion and its cleanup failure. Cancelled turns retain
+  cancellation; a failed local termination also faults the session with its PID and remains visible
+  to disposal. Failed opening preserves both the opening and cleanup errors when both occur.
 - `SupportsAgentToolUse` is false, `ToolExecutionOwnership` is Provider, `ResourceObservation` is
   Unsupported and resource operations throw. Interrupt, steering, fork and context capture, status,
   replacement and compaction handoff are unsupported.
