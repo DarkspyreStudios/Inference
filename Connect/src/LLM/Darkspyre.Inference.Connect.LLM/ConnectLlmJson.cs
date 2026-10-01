@@ -21,6 +21,8 @@ public static class ConnectLlmJson
         { TypeInfoResolver = ConnectLlmJsonContext.Default };
         foreach (Type type in new[] { typeof(IInferenceResourceAccess), typeof(IInferenceResourceReadHandle), typeof(IInferenceResourceWriteHandle) })
             options.Converters.Add(InferenceJson.InferenceResourceReference.Options.Converters.Single(converter => converter.CanConvert(type)));
+        options.Converters.Add(new DocumentRankingMetricJsonConverter());
+        options.Converters.Add(new DocumentRagPipelineJsonConverter());
         options.MakeReadOnly();
         return options;
     }
@@ -37,6 +39,23 @@ public static class ConnectLlmJson
     public static JsonTypeInfo<LlmEmbeddingRequest> LlmEmbeddingRequest => Metadata<LlmEmbeddingRequest>();
     public static JsonTypeInfo<LlmEmbeddingResult> LlmEmbeddingResult => Metadata<LlmEmbeddingResult>();
     public static JsonTypeInfo<LlmEmbeddingUsage> LlmEmbeddingUsage => Metadata<LlmEmbeddingUsage>();
+    public static JsonTypeInfo<DocumentGroupAggregate> DocumentGroupAggregate => Metadata<DocumentGroupAggregate>();
+    public static JsonTypeInfo<DocumentMinK> DocumentMinK => Metadata<DocumentMinK>();
+    public static JsonTypeInfo<DocumentMaxK> DocumentMaxK => Metadata<DocumentMaxK>();
+    public static JsonTypeInfo<DocumentSearchGroupBy> DocumentSearchGroupBy => Metadata<DocumentSearchGroupBy>();
+    public static JsonTypeInfo<DocumentHybridReranker> DocumentHybridReranker => Metadata<DocumentHybridReranker>();
+    public static JsonTypeInfo<DocumentRerankerModel> DocumentRerankerModel => Metadata<DocumentRerankerModel>();
+    public static JsonTypeInfo<DocumentRrfReranker> DocumentRrfReranker => Metadata<DocumentRrfReranker>();
+    public static JsonTypeInfo<DocumentRetrievalMode> DocumentRetrievalMode => Metadata<DocumentRetrievalMode>();
+    public static JsonTypeInfo<DocumentHybridRetrieval> DocumentHybridRetrieval => Metadata<DocumentHybridRetrieval>();
+    public static JsonTypeInfo<DocumentSemanticRetrieval> DocumentSemanticRetrieval => Metadata<DocumentSemanticRetrieval>();
+    public static JsonTypeInfo<DocumentKeywordRetrieval> DocumentKeywordRetrieval => Metadata<DocumentKeywordRetrieval>();
+    public static JsonTypeInfo<XaiDocumentRankingMetric> XaiDocumentRankingMetric => Metadata<XaiDocumentRankingMetric>();
+    public static JsonTypeInfo<XaiDocumentRagPipeline> XaiDocumentRagPipeline => Metadata<XaiDocumentRagPipeline>();
+    public static JsonTypeInfo<XaiDocumentSearchOptions> XaiDocumentSearchOptions => Metadata<XaiDocumentSearchOptions>();
+    public static JsonTypeInfo<DocumentSearchRequest> DocumentSearchRequest => Metadata<DocumentSearchRequest>();
+    public static JsonTypeInfo<DocumentSearchMatch> DocumentSearchMatch => Metadata<DocumentSearchMatch>();
+    public static JsonTypeInfo<DocumentSearchResult> DocumentSearchResult => Metadata<DocumentSearchResult>();
     public static JsonTypeInfo<LlmAgentContext> AgentContext => Metadata<LlmAgentContext>();
     public static JsonTypeInfo<LlmAgentContextEntry> AgentContextEntry => Metadata<LlmAgentContextEntry>();
     public static JsonTypeInfo<LlmAgentContextStatus> AgentContextStatus => Metadata<LlmAgentContextStatus>();
@@ -55,6 +74,23 @@ public static class ConnectLlmJson
 [JsonSerializable(typeof(LlmEmbeddingRequest))]
 [JsonSerializable(typeof(LlmEmbeddingResult))]
 [JsonSerializable(typeof(LlmEmbeddingUsage))]
+[JsonSerializable(typeof(DocumentGroupAggregate))]
+[JsonSerializable(typeof(DocumentMinK))]
+[JsonSerializable(typeof(DocumentMaxK))]
+[JsonSerializable(typeof(DocumentSearchGroupBy))]
+[JsonSerializable(typeof(DocumentHybridReranker))]
+[JsonSerializable(typeof(DocumentRerankerModel))]
+[JsonSerializable(typeof(DocumentRrfReranker))]
+[JsonSerializable(typeof(DocumentRetrievalMode))]
+[JsonSerializable(typeof(DocumentHybridRetrieval))]
+[JsonSerializable(typeof(DocumentSemanticRetrieval))]
+[JsonSerializable(typeof(DocumentKeywordRetrieval))]
+[JsonSerializable(typeof(XaiDocumentRankingMetric))]
+[JsonSerializable(typeof(XaiDocumentRagPipeline))]
+[JsonSerializable(typeof(XaiDocumentSearchOptions))]
+[JsonSerializable(typeof(DocumentSearchRequest))]
+[JsonSerializable(typeof(DocumentSearchMatch))]
+[JsonSerializable(typeof(DocumentSearchResult))]
 [JsonSerializable(typeof(LlmAgentContext))]
 [JsonSerializable(typeof(AgentContextFormat3))]
 [JsonSerializable(typeof(LegacyAgentContext))]
