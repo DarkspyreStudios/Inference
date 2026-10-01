@@ -71,9 +71,14 @@ public sealed class GeminiWireParityTests
         Assert.EndsWith(operation, Assert.Single(geminiHandler.Uris).AbsolutePath, StringComparison.Ordinal);
         JsonNode fromVertex = JsonNode.Parse(Assert.Single(vertexHandler.Bodies))!;
         JsonNode fromGemini = JsonNode.Parse(Assert.Single(geminiHandler.Bodies))!;
+        JsonNode vertexFormat = fromVertex["generationConfig"]!["responseFormat"]![0]!.DeepClone();
+        JsonNode geminiFormat = fromGemini["generationConfig"]!["responseFormat"]!.DeepClone();
+        Assert.True(JsonNode.DeepEquals(vertexFormat, geminiFormat));
+        fromVertex["generationConfig"]!.AsObject().Remove("responseFormat");
+        fromGemini["generationConfig"]!.AsObject().Remove("responseFormat");
         Assert.True(JsonNode.DeepEquals(fromVertex, fromGemini));
         Assert.Equal("MEDIUM", (string?)fromGemini["generationConfig"]?["thinkingConfig"]?["thinkingLevel"]);
-        Assert.NotNull(fromGemini["generationConfig"]?["responseJsonSchema"]);
+        Assert.Equal("APPLICATION_JSON", (string?)geminiFormat["text"]?["mimeType"]);
         Assert.Equal(.8, (double?)fromGemini["generationConfig"]?["topP"]);
         Assert.Equal(19, (int?)fromGemini["generationConfig"]?["topK"]);
         Assert.Equal(3, (int?)fromGemini["generationConfig"]?["seed"]);

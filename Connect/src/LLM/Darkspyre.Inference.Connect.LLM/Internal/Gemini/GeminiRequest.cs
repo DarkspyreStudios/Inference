@@ -132,9 +132,15 @@ internal static class GeminiRequest
         }
         if (request.StructuredOutput is { } schema && enforcement == LlmStructuredOutputEnforcement.ProviderJsonSchema)
         {
-            generation["responseMimeType"] = "application/json";
-            generation["responseJsonSchema"] = JsonNode.Parse(schema.Schema.GetRawText());
+            var format = new JsonObject
+            {
+                ["text"] = new JsonObject { ["mimeType"] = "APPLICATION_JSON", ["schema"] = JsonNode.Parse(schema.Schema.GetRawText()) }
+            };
+            generation["responseFormat"] = connection.Transport == LlmTransport.GoogleVertexAi ? new JsonArray(format) : format;
         }
+        if (connection.ProviderOptions.ContainsKey(AnthropicTools.OptionName) || request.ProviderOptions.ContainsKey(AnthropicTools.OptionName))
+        { throw new NotSupportedException("Gemini does not accept Anthropic tool configuration."); }
+        RequestJson.ApplyProviderOptions(generation, connection, request);
         var payload = new JsonObject { ["contents"] = contents, ["generationConfig"] = generation };
         if (system.Count > 0) { payload["systemInstruction"] = new JsonObject { ["parts"] = system }; }
         if (request.Tools.Count > 0)

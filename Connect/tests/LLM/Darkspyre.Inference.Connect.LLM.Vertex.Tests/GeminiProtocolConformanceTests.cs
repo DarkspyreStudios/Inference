@@ -16,6 +16,111 @@ public sealed class GeminiProtocolConformanceTests
     private static readonly byte[] Pdf = Encoding.UTF8.GetBytes("%PDF-fixture");
 
     [Theory]
+    [InlineData("{\"$defs\":{\"s\":{\"type\":\"string\"}},\"$ref\":\"#/$defs/s\"}")]
+    [InlineData("{\"type\":[\"string\",\"null\"]}")]
+    [InlineData("{\"prefixItems\":[{\"type\":\"string\"}]}")]
+    [InlineData("{\"oneOf\":[{\"type\":\"string\"},{\"type\":\"number\"}]}")]
+    [InlineData("{\"$id\":\"urn:test\",\"$anchor\":\"name\",\"type\":\"string\"}")]
+    public void ApiKeywordsDoNotWidenTheVertexDialect(string schema)
+    {
+        var request = new LlmStructuredOutputRequest { Name = "test", Schema = JsonElement.Parse(schema) };
+        Assert.Equal(LlmStructuredOutputEnforcement.ProviderJsonSchema, GeminiSchemas.Enforcement(request, "Gemini", GeminiSchemaDialect.GeminiApi));
+        Assert.Throws<NotSupportedException>(() => GeminiSchemas.Enforcement(request, "Vertex", GeminiSchemaDialect.Vertex));
+        Assert.Equal(LlmStructuredOutputEnforcement.LocalValidationOnly,
+            GeminiSchemas.Enforcement(request with { Fallback = LlmStructuredOutputFallback.LocalValidation }, "Vertex", GeminiSchemaDialect.Vertex));
+    }
+
+    [Theory]
+    [InlineData("{\"$ref\":\"#/s\",\"description\":\"ignored\"}")]
+    [InlineData("{\"$ref\":\"https://example.com/schema\"}")]
+    [InlineData("{\"$defs\":[]}")]
+    [InlineData("{\"prefixItems\":[{\"pattern\":\"^x\"}]}")]
+    [InlineData("{\"type\":[\"string\",1]}")]
+    [InlineData("{\"$anchor\":2}")]
+    [InlineData("{\"enum\":[true]}")]
+    public void UnsupportedApiSchemaRequiresExplicitLocalValidation(string schema)
+    {
+        var request = new LlmStructuredOutputRequest { Name = "test", Schema = JsonElement.Parse(schema) };
+        Assert.Throws<NotSupportedException>(() => GeminiSchemas.Enforcement(request, "Gemini", GeminiSchemaDialect.GeminiApi));
+        Assert.Equal(LlmStructuredOutputEnforcement.LocalValidationOnly,
+            GeminiSchemas.Enforcement(request with { Fallback = LlmStructuredOutputFallback.LocalValidation }, "Gemini", GeminiSchemaDialect.GeminiApi));
+    }
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public async Task OptionsStayInGenerationConfigAndRequestOverridesConnection(bool vertex, bool stream)
+    {
+        using var handler = new Handler(Reply, stream);
+        using var http = new HttpClient(handler);
+        LlmConnection connection = Connection(vertex, stream) with
+        {
+            ProviderOptions = new Dictionary<string, JsonElement>
+            { ["mediaResolution"] = JsonElement.Parse("\"MEDIA_RESOLUTION_LOW\""), ["presencePenalty"] = JsonElement.Parse("0.25") }
+        };
+        await Drain(Client(http, vertex).StreamAsync(connection, new()
+        {
+            ModelId = vertex ? "google/" + Model : Model,
+            ProviderOptions = new Dictionary<string, JsonElement> { ["mediaResolution"] = JsonElement.Parse("\"MEDIA_RESOLUTION_HIGH\"") }
+        }));
+        JsonNode body = JsonNode.Parse(handler.Bodies[0])!;
+        Assert.Null(body["mediaResolution"]);
+        Assert.Equal("MEDIA_RESOLUTION_HIGH", (string?)body["generationConfig"]!["mediaResolution"]);
+        Assert.Equal(.25, (double?)body["generationConfig"]!["presencePenalty"]);
+        Assert.Equal("MEDIA_RESOLUTION_LOW", connection.ProviderOptions["mediaResolution"].GetString());
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task OptionsCannotReplaceTypedGenerationFields(bool vertex)
+    {
+        using var handler = new Handler(Reply, true);
+        using var http = new HttpClient(handler);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => Drain(Client(http, vertex).StreamAsync(Connection(vertex, true), new()
+        {
+            ModelId = vertex ? "google/" + Model : Model,
+            Temperature = .5,
+            ProviderOptions = new Dictionary<string, JsonElement> { ["temperature"] = JsonElement.Parse("1.0") }
+        })));
+        Assert.Empty(handler.Bodies);
+    }
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public async Task NativeSchemaIsUnchangedInResponseFormatAndCountRequest(bool vertex, bool stream)
+    {
+        const string schema = """{"type":"object","properties":{"ok":{"type":"boolean"}},"required":["ok"],"additionalProperties":false}""";
+        var request = new LlmChatRequest
+        {
+            ModelId = vertex ? "google/" + Model : Model,
+            StructuredOutput = new() { Name = "result", Schema = JsonElement.Parse(schema) },
+            ProviderOptions = new Dictionary<string, JsonElement> { ["responseLogprobs"] = JsonElement.Parse("true") }
+        };
+        using var handler = new Handler(Reply, stream);
+        using var http = new HttpClient(handler);
+        await Drain(Client(http, vertex).StreamAsync(Connection(vertex, stream), request));
+        JsonNode generation = JsonNode.Parse(handler.Bodies[0])!["generationConfig"]!;
+        JsonNode format = vertex ? generation["responseFormat"]![0]! : generation["responseFormat"]!;
+        Assert.Equal("APPLICATION_JSON", (string?)format["text"]!["mimeType"]);
+        Assert.True(JsonNode.DeepEquals(JsonNode.Parse(schema), format["text"]!["schema"]));
+        Assert.Null(generation["responseJsonSchema"]);
+        Assert.Null(generation["responseMimeType"]);
+        using var countHandler = new Handler("{\"totalTokens\":17}", false);
+        using var countHttp = new HttpClient(countHandler);
+        var counter = (ILlmProviderTokenCounter)Client(countHttp, vertex);
+        Assert.Equal(17, (await counter.CountInputTokensAsync(Connection(vertex, stream), request)).InputTokens);
+        JsonNode count = JsonNode.Parse(countHandler.Bodies[0])!;
+        if (!vertex) { count = count["generateContentRequest"]!; }
+        Assert.True(JsonNode.DeepEquals(generation, count["generationConfig"]));
+    }
+
+    [Theory]
     [InlineData(false, false)]
     [InlineData(false, true)]
     [InlineData(true, false)]

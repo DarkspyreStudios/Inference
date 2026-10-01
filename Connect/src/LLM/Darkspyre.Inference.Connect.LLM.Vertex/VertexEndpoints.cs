@@ -15,8 +15,7 @@ internal static partial class VertexEndpoints
         {
             throw new ArgumentException("Vertex requires a project, location and supported authentication mode.");
         }
-        if (connection.Endpoint.TrimEnd('/') != BaseEndpoint || connection.AdditionalHeaders.Count != 0
-            || connection.ProviderOptions.Keys.Any(name => name != AnthropicTools.OptionName))
+        if (connection.Endpoint.TrimEnd('/') != BaseEndpoint || connection.AdditionalHeaders.Count != 0)
         {
             throw new NotSupportedException("Vertex owns endpoint routing, headers and request fields.");
         }

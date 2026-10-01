@@ -56,7 +56,9 @@ profiles and limits. Live cloud qualification remains; the shared contract requi
 The Gemini API (Google AI Studio) adapter is registered by `AddLlmConnect` under the provider id
 `gemini-api` and transport `GoogleGeminiApi`. It needs only an API key, sent in the `x-goog-api-key`
 header, and a fixed endpoint. It shares the Gemini request, stream, schema and continuation code with the
-Vertex Gemini route, so both send the same generateContent body. See the
+Vertex Gemini route. Both routes use native `responseFormat` with their documented object/array
+shapes; Vertex retains its narrower schema keyword allowlist. Provider options go into
+`generationConfig` and cannot replace fields written by the canonical builder. See the
 [Gemini API design](docs/gemini-api-tech-design.md) for model discovery, capabilities and limits. Live
 qualification remains.
 

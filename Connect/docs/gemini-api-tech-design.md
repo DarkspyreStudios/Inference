@@ -34,14 +34,15 @@ route both use:
 - `GeminiCapabilities` declares the capabilities the protocol implements and the inline attachment
   rules.
 
-The same portable request produces an identical body on both routes (`GeminiWireParityTests`).
+Both routes share the portable request body except their native `responseFormat` shapes.
+Gemini API uses an object; Vertex uses a single-item array (`GeminiWireParityTests`).
 
 ## Authentication and setup
 
 The key is stored in `LlmCredential.ApiKey` by the host's protected credential store. It travels only in
 the `x-goog-api-key` header. It never appears in a URL, a request body, an exception or a diagnostic.
 `LlmSettings` draws the existing API-key secret field and no endpoint field. A connection rejects an
-edited endpoint, additional headers, provider options, a Vertex configuration and any credential other
+edited endpoint, additional headers, a Vertex configuration and any credential other
 than an API key.
 
 The connection test lists models with the key. Success proves Google accepts the key. It does not
@@ -104,12 +105,23 @@ These fail before dispatch:
 
 - `Strict=true` tools;
 - `AllowParallelToolCalls`;
-- provider options;
 - temperature outside 0 to 2;
 - attachments other than PNG, JPEG or WebP images up to 7 MiB, PDFs up to 50 MiB and plain text up to
   7 MiB;
 - an output schema with a keyword outside the allowlist, unless the request sets the local validation
   fallback.
+
+Connection and request `ProviderOptions` map into `generationConfig`, not the top-level request.
+Request options override connection options. An option cannot replace a standard field that the
+builder writes. The adapter rejects Anthropic's declared tool configuration on either scope.
+Native output schemas use `responseFormat.text` with `mimeType = APPLICATION_JSON` and the original
+schema. The adapter does not send deprecated `responseJsonSchema` or `responseMimeType` fields.
+
+Gemini API accepts `$id`, `$anchor`, internal `$ref`, `$defs`, `prefixItems`, `oneOf` and string-array
+types alongside the shared keyword set. A `$ref` schema permits only `$`-prefixed siblings.
+Definitions and composition children use the same recursive keyword validation. The adapter does
+not rewrite schemas or expand references. Vertex retains its narrower keyword set; unsupported
+keywords on either route require explicit local validation.
 
 ## Stream mapping, usage and errors
 

@@ -209,7 +209,8 @@ internal sealed class VertexLlmClient(HttpClient http, IVertexAuthentication aut
 
     private static void ValidateVertexRequest(LlmConnection connection, LlmChatRequest request, VertexModelProfile profile, LlmProviderCapabilities capabilities)
     {
-        if (connection.ProviderOptions.Keys.Concat(request.ProviderOptions.Keys).Any(name => !profile.IsClaude || name != AnthropicTools.OptionName))
+        if (profile.IsClaude && connection.ProviderOptions.Keys.Concat(request.ProviderOptions.Keys).Any(name => name != AnthropicTools.OptionName)
+            || !profile.IsClaude && (connection.ProviderOptions.ContainsKey(AnthropicTools.OptionName) || request.ProviderOptions.ContainsKey(AnthropicTools.OptionName)))
         { throw new NotSupportedException("Vertex accepts only declared request controls."); }
         if (profile.IsClaude)
         {

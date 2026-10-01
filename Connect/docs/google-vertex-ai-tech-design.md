@@ -268,6 +268,14 @@ Malformed, unexpected and excessive tool-call finish reasons yield Failed with p
 no completed calls and no continuation. Missing thought signatures remain protocol errors.
 Image safety and prompt blocks yield Refused. Unknown finish reasons stay Unknown.
 
+Gemini connection and request provider options go into `generationConfig`. Request options override
+connection options. Options cannot replace standard fields written by the canonical builder.
+Anthropic tool configuration is rejected on Gemini. Vertex Gemini retains its existing output-schema
+keyword allowlist. Unsupported constraints require explicit local validation without schema rewriting.
+Native structured output uses a single-item `generationConfig.responseFormat` array containing
+`text: { mimeType: "APPLICATION_JSON", schema: ... }`. Gemini API uses the corresponding object.
+Neither route writes the deprecated response schema or MIME fields. Counting uses this same builder.
+
 ## 6. Required continuation contract change
 
 Before DSA-61, `LlmChatMessage`/`LlmChatResult` carried the Connect-only `LlmProviderResponseState`; Common's `LlmMessage`
