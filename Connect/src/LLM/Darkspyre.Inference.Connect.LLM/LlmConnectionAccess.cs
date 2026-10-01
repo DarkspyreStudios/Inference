@@ -5,7 +5,8 @@ namespace Darkspyre.Inference.Connect.LLM;
 /// <summary>Owns current credential acquisition and version-conditional refresh for a connection source.</summary>
 public sealed class LlmConnectionAccess : IDisposable, IAsyncDisposable
 {
-    private readonly ILlmConnectionSource _connections;
+    private ILlmConnectionSource? _connections;
+    private ILlmConnectionSource Connections => _connections ?? throw new ObjectDisposedException(nameof(LlmConnectionAccess));
     private readonly Dictionary<LlmTransport, ILlmAuthenticator> _authenticators;
     private readonly HashSet<LlmTransport> _ignoresStoredCredential;
     private readonly LlmOperationLifetime _lifetime = new();
@@ -24,7 +25,7 @@ public sealed class LlmConnectionAccess : IDisposable, IAsyncDisposable
     public async Task<LlmConnection> AcquireAsync(string connectionId, CancellationToken cancellationToken = default)
     {
         using LlmOperationLifetime.Lease operation = _lifetime.Enter(cancellationToken);
-        LlmConnection connection = await LlmConnectionResolver.ResolveAsync(_connections, connectionId, operation.Token);
+        LlmConnection connection = await LlmConnectionResolver.ResolveAsync(Connections, connectionId, operation.Token);
         ThrowIfAcquisitionCanceled(operation.Token);
         connection = await RefreshCoreAsync(connectionId, connection, operation.Token);
         ThrowIfAcquisitionCanceled(operation.Token);
@@ -54,7 +55,7 @@ public sealed class LlmConnectionAccess : IDisposable, IAsyncDisposable
         if (fresh == credential) return connection;
         string json = fresh.Serialize();
         ThrowIfAcquisitionCanceled(cancellationToken);
-        await _connections.SaveCredentialAsync(connectionId, json, connection.Version, cancellationToken);
+        await Connections.SaveCredentialAsync(connectionId, json, connection.Version, cancellationToken);
         ThrowIfAcquisitionCanceled(cancellationToken);
         return connection with { Credential = json };
     }
@@ -73,6 +74,7 @@ public sealed class LlmConnectionAccess : IDisposable, IAsyncDisposable
     /// <summary>Fences acquisition, cancels and drains resolution/refresh/save. Dependencies remain borrowed.</summary>
     public ValueTask DisposeAsync() => new(_lifetime.RetireAsync(() =>
     {
+        _connections = null;
         _authenticators.Clear();
         _ignoresStoredCredential.Clear();
         return Task.CompletedTask;

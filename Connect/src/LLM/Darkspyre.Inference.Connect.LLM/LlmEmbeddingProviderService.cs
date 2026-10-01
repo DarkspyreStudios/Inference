@@ -5,9 +5,11 @@ namespace Darkspyre.Inference.Connect.LLM;
 /// <summary>Routes embeddings through the one explicitly configured provider connection.</summary>
 public sealed class LlmEmbeddingProviderService : IDisposable, IAsyncDisposable
 {
-    private readonly ILlmConnectionSource _connections;
+    private ILlmConnectionSource? _connections;
+    private ILlmConnectionSource Connections => _connections ?? throw new ObjectDisposedException(nameof(LlmEmbeddingProviderService));
     private readonly List<ILlmEmbeddingClient> _clients;
-    private readonly LlmConnectionAccess _connectionAccess;
+    private LlmConnectionAccess? _connectionAccess;
+    private LlmConnectionAccess ConnectionAccess => _connectionAccess ?? throw new ObjectDisposedException(nameof(LlmEmbeddingProviderService));
     private readonly bool _ownsConnectionAccess;
     private readonly LlmOperationLifetime _lifetime = new();
     private readonly Lock _disposeGate = new();
@@ -42,14 +44,14 @@ public sealed class LlmEmbeddingProviderService : IDisposable, IAsyncDisposable
         }
 
         LlmConnection connection = await LlmConnectionResolver.ResolveAsync(
-            _connections,
+            Connections,
             connectionId,
             cancellationToken);
         cancellationToken.ThrowIfCancellationRequested();
         ILlmEmbeddingClient client = _clients.SingleOrDefault(value => value.Supports(connection.Transport))
             ?? throw new NotSupportedException(
                 $"The configured {connection.Transport} provider does not support embeddings in this client.");
-        connection = await _connectionAccess.RefreshAsync(connectionId, connection, cancellationToken);
+        connection = await ConnectionAccess.RefreshAsync(connectionId, connection, cancellationToken);
         cancellationToken.ThrowIfCancellationRequested();
         LlmEmbeddingResult result = await client.EmbedAsync(connection, request, cancellationToken);
         cancellationToken.ThrowIfCancellationRequested();
@@ -65,9 +67,14 @@ public sealed class LlmEmbeddingProviderService : IDisposable, IAsyncDisposable
     private async Task RetireAsync()
     {
         Task operations = _lifetime.RetireAsync();
-        Task credentials = _ownsConnectionAccess ? _connectionAccess.DisposeAsync().AsTask() : Task.CompletedTask;
+        Task credentials = _ownsConnectionAccess ? ConnectionAccess.DisposeAsync().AsTask() : Task.CompletedTask;
         try { await Task.WhenAll(operations, credentials).ConfigureAwait(false); }
-        finally { _clients.Clear(); }
+        finally
+        {
+            _clients.Clear();
+            _connections = null;
+            _connectionAccess = null;
+        }
     }
 
     /// <summary>Synchronously retires the facade. Use asynchronous disposal while provider work is active.</summary>

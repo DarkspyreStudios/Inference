@@ -390,7 +390,7 @@ same connection source and remains borrowed. Retiring a facade cancels its crede
 without retiring a shared owner.
 
 Access retirement fences acquisition, cancels and drains resolution, refresh and saving, and clears
-borrowed authenticator references without disposing the authenticator or source. Late refreshes are
+borrowed source and authenticator references without disposing those collaborators. Late refreshes are
 not saved; late save results do not return credentials. Cancellation during a save can race a source
 commit, so retirement waits for that save and does not undo or retry it. The source remains responsible
 for atomic version checks and rejecting writes to changed or deleted connections.
@@ -424,6 +424,19 @@ reloads. Chat and native-agent facades in that provider share the observation st
 retirement fences new calls, cancels active calls and waits for them to leave. It retires a privately
 created cache and credential-access owner, but not injected shared owners. Clients, authenticators
 and the connection source remain borrowed and are not disposed by the facade.
+
+Credential access and the chat, embedding and agent facades release their borrowed source references
+after admitted work drains. Chat and embedding facades also release credential-access references;
+chat releases setup environments and adapter collections. Cleanup failures do not skip this release.
+Concurrent disposal callers share the same completion and retained failure. Chat disposal preserves
+failures from its operation, credential and privately owned catalog retirement. Synchronous settings
+manager creation and Claude login participate in admission and drain. An admitted synchronous login
+keeps its existing result or exception; disposal waits for that call to leave.
+
+A disposed default-context facade or authorization object can remain retained without keeping a
+separately collectible source or adapter generation alive through those released references.
+Retained caller metadata, live settings objects and genuine foreign exception objects remain separate
+roots. This does not establish retirement of an active provider, native runtime or whole SDK graph.
 
 Cache retirement clears kept models, cancels provider listings through an owner token, and waits
 for every listing, including entries replaced by an edit or refresh. A cancelled caller only stops

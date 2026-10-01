@@ -6,7 +6,8 @@ namespace Darkspyre.Inference.Connect.LLM;
 /// <summary>Resolves configured connections for session-oriented agent transports.</summary>
 public sealed class LlmAgentProviderService : IDisposable, IAsyncDisposable
 {
-    private readonly ILlmConnectionSource _connections;
+    private ILlmConnectionSource? _connections;
+    private ILlmConnectionSource Connections => _connections ?? throw new ObjectDisposedException(nameof(LlmAgentProviderService));
     private readonly Dictionary<LlmTransport, ILlmAgentClient> _clients;
     private readonly LlmAccountUsageObservations _observations;
     private readonly bool _ownsObservations;
@@ -51,7 +52,7 @@ public sealed class LlmAgentProviderService : IDisposable, IAsyncDisposable
         cancellationToken = operation.Token;
         LlmAccountUsageObservations.Reservation reservation = _observations.Reserve(connectionId);
         LlmConnection connection = await LlmConnectionResolver.ResolveAsync(
-            _connections,
+            Connections,
             connectionId,
             cancellationToken);
         connection = connection with { AccountUsageObservationBinding = reservation.Bind(connection) };
@@ -74,7 +75,7 @@ public sealed class LlmAgentProviderService : IDisposable, IAsyncDisposable
         cancellationToken = operation.Token;
         LlmAccountUsageObservations.Reservation reservation = _observations.Reserve(connectionId);
         LlmConnection connection = await LlmConnectionResolver.ResolveAsync(
-            _connections,
+            Connections,
             connectionId,
             cancellationToken);
         connection = connection with { AccountUsageObservationBinding = reservation.Bind(connection) };
@@ -99,7 +100,7 @@ public sealed class LlmAgentProviderService : IDisposable, IAsyncDisposable
         cancellationToken = operation.Token;
         LlmAccountUsageObservations.Reservation reservation = _observations.Reserve(connectionId);
         LlmConnection connection = await LlmConnectionResolver.ResolveAsync(
-            _connections,
+            Connections,
             connectionId,
             cancellationToken);
         connection = connection with { AccountUsageObservationBinding = reservation.Bind(connection) };
@@ -172,6 +173,7 @@ public sealed class LlmAgentProviderService : IDisposable, IAsyncDisposable
             {
                 lock (_gate) { _sessions.Clear(); }
                 _clients.Clear();
+                _connections = null;
                 if (_ownsObservations) { _observations.Dispose(); }
             }
             completion.TrySetResult();

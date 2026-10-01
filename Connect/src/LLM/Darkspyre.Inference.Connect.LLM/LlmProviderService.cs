@@ -10,16 +10,18 @@ namespace Darkspyre.Inference.Connect.LLM;
 /// </summary>
 public sealed class LlmProviderService : ILlmTextTokenizer, IDisposable, IAsyncDisposable
 {
-    private readonly ILlmConnectionSource _connections;
+    private ILlmConnectionSource? _connections;
+    private ILlmConnectionSource Connections => _connections ?? throw new ObjectDisposedException(nameof(LlmProviderService));
     private readonly Dictionary<LlmTransport, ILlmClient> _clients;
     private readonly Dictionary<LlmTransport, ILlmAccountUsageClient> _accountUsageClients;
     private readonly Dictionary<LlmTransport, ILlmAuthenticator> _authenticators;
-    private readonly IReadOnlyDictionary<LlmTransport, ILlmSetupEnvironment> _setupEnvironments;
+    private readonly Dictionary<LlmTransport, ILlmSetupEnvironment> _setupEnvironments;
     private readonly LlmModelListCache _modelLists;
     private readonly bool _ownsModelLists;
     private readonly LlmAccountUsageObservations _observations;
     private readonly bool _ownsObservations;
-    private readonly LlmConnectionAccess _connectionAccess;
+    private LlmConnectionAccess? _connectionAccess;
+    private LlmConnectionAccess ConnectionAccess => _connectionAccess ?? throw new ObjectDisposedException(nameof(LlmProviderService));
     private readonly bool _ownsConnectionAccess;
     private readonly LlmOperationLifetime _lifetime = new();
     private readonly Lock _disposeGate = new();
@@ -108,7 +110,7 @@ public sealed class LlmProviderService : ILlmTextTokenizer, IDisposable, IAsyncD
     /// <summary>Creates the settings manager that opens, acts on and saves LLM settings through <paramref name="target"/>.</summary>
     public LlmSettingsManager CreateSettingsManager(Common.Setup.ISetupCommitTarget<LlmSetupChanges> target)
     {
-        _lifetime.ThrowIfStopping();
+        using var operation = _lifetime.Enter(CancellationToken.None);
         return new(_clients, _authenticators.Values, _setupEnvironments, target);
     }
 
@@ -132,7 +134,7 @@ public sealed class LlmProviderService : ILlmTextTokenizer, IDisposable, IAsyncD
     {
         using var operation = _lifetime.Enter(cancellationToken);
         cancellationToken = operation.Token;
-        LlmConnection? connection = await _connections.GetConnectionAsync(connectionId, cancellationToken);
+        LlmConnection? connection = await Connections.GetConnectionAsync(connectionId, cancellationToken);
         LlmCredential? credential = LlmCredential.Parse(connection?.Credential);
         if (connection?.Transport == LlmTransport.XaiResponses
             && (string.IsNullOrWhiteSpace(credential?.OAuth?.AccessToken)
@@ -173,7 +175,7 @@ public sealed class LlmProviderService : ILlmTextTokenizer, IDisposable, IAsyncD
             cancellationToken);
         if (connection.Transport == LlmTransport.XaiResponses)
             throw new NotSupportedException("Grok requires OAuth sign-in; an API key is not supported.");
-        await _connections.SaveCredentialAsync(
+        await Connections.SaveCredentialAsync(
             connectionId,
             new LlmCredential { ApiKey = apiKey }.Serialize(),
             connection.Version,
@@ -203,7 +205,7 @@ public sealed class LlmProviderService : ILlmTextTokenizer, IDisposable, IAsyncD
             deviceAuthId,
             userCode,
             cancellationToken);
-        await _connections.SaveCredentialAsync(
+        await Connections.SaveCredentialAsync(
             connectionId,
             credential.Serialize(),
             connection.Version,
@@ -258,7 +260,7 @@ public sealed class LlmProviderService : ILlmTextTokenizer, IDisposable, IAsyncD
             throw new ArgumentException("A Claude redirect URI is required.", nameof(redirectUri));
         }
 
-        cancellationToken.ThrowIfCancellationRequested();
+        using var operation = _lifetime.Enter(cancellationToken);
         return Task.FromResult(ClaudeLogin().Start(redirectUri));
     }
 
@@ -305,7 +307,7 @@ public sealed class LlmProviderService : ILlmTextTokenizer, IDisposable, IAsyncD
             code,
             state,
             cancellationToken);
-        await _connections.SaveCredentialAsync(
+        await Connections.SaveCredentialAsync(
             connectionId,
             credential.Serialize(),
             connection.Version,
@@ -325,7 +327,7 @@ public sealed class LlmProviderService : ILlmTextTokenizer, IDisposable, IAsyncD
             connectionId,
             expectedVersion,
             cancellationToken);
-        await _connections.SaveCredentialAsync(
+        await Connections.SaveCredentialAsync(
             connectionId,
             new LlmCredential { Aws = aws }.Serialize(),
             connection.Version,
@@ -346,7 +348,7 @@ public sealed class LlmProviderService : ILlmTextTokenizer, IDisposable, IAsyncD
         cancellationToken = operation.Token;
         ArgumentNullException.ThrowIfNull(prompt);
         LlmConnection connection = await LlmConnectionResolver.ResolveAsync(
-            _connections,
+            Connections,
             connectionId,
             cancellationToken);
         switch (connection.Transport)
@@ -355,7 +357,7 @@ public sealed class LlmProviderService : ILlmTextTokenizer, IDisposable, IAsyncD
                 LlmDeviceCode code = await CodexLogin().StartAsync(cancellationToken);
                 await prompt.ShowDeviceCodeAsync(code, cancellationToken);
                 LlmCredential codexCredential = await PollCodexAsync(code, cancellationToken);
-                await _connections.SaveCredentialAsync(
+                await Connections.SaveCredentialAsync(
                     connectionId,
                     codexCredential.Serialize(),
                     connection.Version,
@@ -414,7 +416,7 @@ public sealed class LlmProviderService : ILlmTextTokenizer, IDisposable, IAsyncD
         cancellationToken = operation.Token;
         LlmAccountUsageObservations.Reservation observationReservation = _observations.Reserve(connectionId);
         LlmConnection connection = await LlmConnectionResolver.ResolveAsync(
-            _connections,
+            Connections,
             connectionId,
             cancellationToken);
         ThrowIfOperationCanceled(cancellationToken);
@@ -424,7 +426,7 @@ public sealed class LlmProviderService : ILlmTextTokenizer, IDisposable, IAsyncD
         if (client is not IStreamingCredentialRefreshPolicy refreshPolicy
             || refreshPolicy.RequiresFreshOAuthCredentialForStreaming(connection))
         {
-            connection = await _connectionAccess.RefreshAsync(
+            connection = await ConnectionAccess.RefreshAsync(
                 connectionId,
                 connection,
                 cancellationToken);
@@ -440,7 +442,7 @@ public sealed class LlmProviderService : ILlmTextTokenizer, IDisposable, IAsyncD
             LlmConnection? persisted = null;
             try
             {
-                persisted = await _connections.GetConnectionAsync(connectionId, cancellationToken);
+                persisted = await Connections.GetConnectionAsync(connectionId, cancellationToken);
             }
             catch (Exception error) when (error is not OperationCanceledException)
             {
@@ -497,12 +499,12 @@ public sealed class LlmProviderService : ILlmTextTokenizer, IDisposable, IAsyncD
         ArgumentException.ThrowIfNullOrWhiteSpace(connectionId);
         ArgumentException.ThrowIfNullOrWhiteSpace(modelId);
         ArgumentNullException.ThrowIfNull(text);
-        LlmConnection connection = await LlmConnectionResolver.ResolveAsync(_connections, connectionId, cancellationToken);
+        LlmConnection connection = await LlmConnectionResolver.ResolveAsync(Connections, connectionId, cancellationToken);
         ThrowIfOperationCanceled(cancellationToken);
         ILlmClient client = ClientFor(connection.Transport);
         if (client is not ILlmTextTokenizerClient tokenizer)
             throw new NotSupportedException("This route does not implement plain-text tokenization.");
-        connection = await _connectionAccess.RefreshAsync(connectionId, connection, cancellationToken);
+        connection = await ConnectionAccess.RefreshAsync(connectionId, connection, cancellationToken);
         ThrowIfOperationCanceled(cancellationToken);
         LlmTokenization result;
         try { result = await tokenizer.TokenizeAsync(connection, modelId, text, cancellationToken).ConfigureAwait(false); }
@@ -526,13 +528,13 @@ public sealed class LlmProviderService : ILlmTextTokenizer, IDisposable, IAsyncD
         cancellationToken = operation.Token;
         ArgumentNullException.ThrowIfNull(request);
         ArgumentException.ThrowIfNullOrWhiteSpace(request.ModelId);
-        LlmConnection connection = await LlmConnectionResolver.ResolveAsync(_connections, connectionId, cancellationToken);
+        LlmConnection connection = await LlmConnectionResolver.ResolveAsync(Connections, connectionId, cancellationToken);
         ThrowIfOperationCanceled(cancellationToken);
         RequestJson.ValidateSamplingOptions(connection, request);
         ILlmClient client = ClientFor(connection.Transport);
         if (client is not ILlmProviderTokenCounter counter)
             throw new NotSupportedException("This route does not implement provider input-token counting.");
-        connection = await _connectionAccess.RefreshAsync(connectionId, connection, cancellationToken);
+        connection = await ConnectionAccess.RefreshAsync(connectionId, connection, cancellationToken);
         if (client is ILlmConnectionPreparation preparation)
             connection = await preparation.PrepareAsync(connection, cancellationToken).ConfigureAwait(false);
         (request, int omitted) = ContinuationStateProjection.Project(request, connection);
@@ -563,7 +565,7 @@ public sealed class LlmProviderService : ILlmTextTokenizer, IDisposable, IAsyncD
         if (request.MaxOutputTokens is <= 0) { throw new ArgumentOutOfRangeException(nameof(request)); }
         policy ??= new();
         ManagedAgentPolicy.Validate(new() { ContextPolicy = policy }, null);
-        var connection = await LlmConnectionResolver.ResolveAsync(_connections, connectionId, cancellationToken);
+        var connection = await LlmConnectionResolver.ResolveAsync(Connections, connectionId, cancellationToken);
         ThrowIfOperationCanceled(cancellationToken);
         RequestJson.ValidateSamplingOptions(connection, request);
         var client = ClientFor(connection.Transport);
@@ -714,7 +716,7 @@ public sealed class LlmProviderService : ILlmTextTokenizer, IDisposable, IAsyncD
     {
         using var operation = _lifetime.Enter(cancellationToken);
         LlmAccountUsageObservations.Reservation reservation = _observations.Reserve(connectionId);
-        LlmConnection connection = await LlmConnectionResolver.ResolveAsync(_connections, connectionId, operation.Token);
+        LlmConnection connection = await LlmConnectionResolver.ResolveAsync(Connections, connectionId, operation.Token);
         operation.Token.ThrowIfCancellationRequested();
         return reservation.Get(connection);
     }
@@ -726,7 +728,7 @@ public sealed class LlmProviderService : ILlmTextTokenizer, IDisposable, IAsyncD
         using var operation = _lifetime.Enter(cancellationToken);
         cancellationToken = operation.Token;
         LlmConnection connection = await LlmConnectionResolver.ResolveAsync(
-            _connections,
+            Connections,
             connectionId,
             cancellationToken);
         ILlmClient client = ClientFor(connection.Transport);
@@ -741,7 +743,7 @@ public sealed class LlmProviderService : ILlmTextTokenizer, IDisposable, IAsyncD
 
         if (connection.Transport == LlmTransport.OpenAiCodex)
         {
-            connection = await _connectionAccess.RefreshAsync(connectionId, connection, cancellationToken);
+            connection = await ConnectionAccess.RefreshAsync(connectionId, connection, cancellationToken);
         }
         return await usageClient.GetAccountUsageAsync(connection, cancellationToken);
     }
@@ -778,7 +780,7 @@ public sealed class LlmProviderService : ILlmTextTokenizer, IDisposable, IAsyncD
         {
             throw new ArgumentOutOfRangeException(nameof(lane));
         }
-        LlmConnection connection = await LlmConnectionResolver.ResolveAsync(_connections, connectionId, cancellationToken);
+        LlmConnection connection = await LlmConnectionResolver.ResolveAsync(Connections, connectionId, cancellationToken);
         ILlmClient client = ClientFor(connection.Transport);
         connection = await AttachCatalogAsync(connectionId, connection, client, cancellationToken);
         LlmProviderCapabilities route = client.GetCapabilities(connection);
@@ -836,11 +838,11 @@ public sealed class LlmProviderService : ILlmTextTokenizer, IDisposable, IAsyncD
         CancellationToken cancellationToken)
     {
         LlmConnection connection = await LlmConnectionResolver.ResolveAsync(
-            _connections,
+            Connections,
             connectionId,
             cancellationToken);
         _ = ClientFor(connection.Transport);
-        return await _connectionAccess.RefreshAsync(connectionId, connection, cancellationToken);
+        return await ConnectionAccess.RefreshAsync(connectionId, connection, cancellationToken);
     }
 
     private async Task<LlmConnection> RequireExpectedVersionAsync(
@@ -854,7 +856,7 @@ public sealed class LlmProviderService : ILlmTextTokenizer, IDisposable, IAsyncD
         }
 
         LlmConnection connection = await LlmConnectionResolver.ResolveAsync(
-            _connections,
+            Connections,
             connectionId,
             cancellationToken);
         return string.Equals(connection.Version, expectedVersion, StringComparison.Ordinal)
@@ -924,7 +926,7 @@ public sealed class LlmProviderService : ILlmTextTokenizer, IDisposable, IAsyncD
             throw new InvalidOperationException("Grok sign-in did not return an OAuth credential.");
         string serialized = credential.Serialize();
         ThrowIfOperationCanceled(token);
-        await _connections.SaveCredentialAsync(connectionId, serialized, version, token).ConfigureAwait(false);
+        await Connections.SaveCredentialAsync(connectionId, serialized, version, token).ConfigureAwait(false);
         ThrowIfOperationCanceled(token);
     }
 
@@ -981,17 +983,23 @@ public sealed class LlmProviderService : ILlmTextTokenizer, IDisposable, IAsyncD
     private async Task RetireAsync()
     {
         Task operations = _lifetime.RetireAsync();
-        Task credentials = _ownsConnectionAccess ? _connectionAccess.DisposeAsync().AsTask() : Task.CompletedTask;
-        try
+        Task credentials = _ownsConnectionAccess ? ConnectionAccess.DisposeAsync().AsTask() : Task.CompletedTask;
+        Task catalogs = _ownsModelLists ? _modelLists.DisposeAsync().AsTask() : Task.CompletedTask;
+        Task retirement = Task.WhenAll(operations, credentials, catalogs);
+        try { await retirement.ConfigureAwait(false); }
+        catch
         {
-            if (_ownsModelLists) await _modelLists.DisposeAsync().ConfigureAwait(false);
+            if (retirement.Exception is { InnerExceptions.Count: > 1 } failures) throw failures;
+            throw;
         }
         finally
         {
-            await Task.WhenAll(operations, credentials).ConfigureAwait(false);
             _clients.Clear();
             _authenticators.Clear();
             _accountUsageClients.Clear();
+            _setupEnvironments.Clear();
+            _connections = null;
+            _connectionAccess = null;
             if (_ownsObservations) { _observations.Dispose(); }
         }
     }

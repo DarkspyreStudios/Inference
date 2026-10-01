@@ -11,6 +11,51 @@ public sealed class RetainedCollaboratorTests
     private static readonly TimeSpan Bound = TimeSpan.FromSeconds(5);
 
     [Fact]
+    public async Task ChatRetirementDrainsBothOwnersAndPreservesOperationAndPrivateCatalogFailures()
+    {
+        var state = new ResolutionState(true) { Block = false };
+        var source = new ForeignCollaborator(state.ResolveAsync, state.Record);
+        var client = new FailingCatalogClient();
+        var service = new LlmProviderService(source, [client]);
+        Task listing = service.ListModelsAsync("connection");
+        Task? resolution = null;
+        Task? retirement = null;
+        try
+        {
+            await client.Entered.Task.WaitAsync(Bound);
+            state.Block = true;
+            resolution = service.GetObservedAccountUsageAsync("connection");
+            await state.Entered.Task.WaitAsync(Bound);
+            retirement = service.DisposeAsync().AsTask();
+            await state.Canceled.Task.WaitAsync(Bound);
+            await client.Canceled.Task.WaitAsync(Bound);
+            Assert.False(retirement.IsCompleted);
+            state.Release.TrySetResult();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => resolution.WaitAsync(Bound));
+            Assert.False(retirement.IsCompleted);
+            client.Release.TrySetResult();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => listing.WaitAsync(Bound));
+            AggregateException failure = await Assert.ThrowsAsync<AggregateException>(() => retirement.WaitAsync(Bound));
+            Assert.Contains(state.Failure, failure.Flatten().InnerExceptions);
+            Assert.Contains(client.Failure, failure.Flatten().InnerExceptions);
+            Assert.Same(failure, await Assert.ThrowsAsync<AggregateException>(() => service.DisposeAsync().AsTask()));
+            Assert.False(client.Disposed);
+            Assert.DoesNotContain("dispose", state.Executed);
+        }
+        finally
+        {
+            state.Release.TrySetResult();
+            client.Release.TrySetResult();
+            try { await DrainExpectedFailureAsync(listing); }
+            finally
+            {
+                try { if (resolution is not null) await DrainExpectedFailureAsync(resolution); }
+                finally { await DrainExpectedFailureAsync(retirement ?? service.DisposeAsync().AsTask()); }
+            }
+        }
+    }
+
+    [Fact]
     public async Task RetirementDrainsAnAdmittedSynchronousClaudeLoginWithoutDisposingTheAuthenticator()
     {
         using var auth = new BlockingLogin();
@@ -36,8 +81,8 @@ public sealed class RetainedCollaboratorTests
         finally
         {
             auth.Release.Set();
-            await login.WaitAsync(Bound);
-            await (retirement ?? service.DisposeAsync().AsTask()).WaitAsync(Bound);
+            try { await login.WaitAsync(Bound); }
+            finally { await (retirement ?? service.DisposeAsync().AsTask()).WaitAsync(Bound); }
         }
     }
 
@@ -59,7 +104,7 @@ public sealed class RetainedCollaboratorTests
         RetirementEvidence evidence = ExerciseGeneration(lane, failCleanup);
         try
         {
-            for (int attempt = 0; evidence.Generation.IsAlive && attempt < 30; attempt++)
+            for (int attempt = 0; (evidence.Generation.IsAlive || evidence.BorrowedAccess?.IsAlive == true) && attempt < 30; attempt++)
             {
                 GC.Collect();
                 GC.WaitForPendingFinalizers();
@@ -68,6 +113,8 @@ public sealed class RetainedCollaboratorTests
             }
             Assert.False(evidence.Generation.IsAlive,
                 $"The retired default-context {lane} still roots its separately collectible collaborator.");
+            if (evidence.BorrowedAccess is not null)
+                Assert.False(evidence.BorrowedAccess.IsAlive, "The retired facade still retains its borrowed access owner.");
         }
         finally { GC.KeepAlive(evidence.RetainedOwners); }
     }
@@ -79,12 +126,13 @@ public sealed class RetainedCollaboratorTests
         var weak = new WeakReference(generation);
         try
         {
-            return new(weak, ExerciseCallerAsync(generation, lane, failCleanup).GetAwaiter().GetResult());
+            CallerEvidence caller = ExerciseCallerAsync(generation, lane, failCleanup).GetAwaiter().GetResult();
+            return new(weak, caller.RetainedOwners, caller.BorrowedAccess);
         }
         finally { generation.Unload(); }
     }
 
-    private static async Task<object[]> ExerciseCallerAsync(AssemblyLoadContext generation, string lane, bool failCleanup)
+    private static async Task<CallerEvidence> ExerciseCallerAsync(AssemblyLoadContext generation, string lane, bool failCleanup)
     {
         var state = new ResolutionState(failCleanup);
         Assembly fixture = generation.LoadFromAssemblyPath(typeof(RetainedCollaboratorTests).Assembly.Location);
@@ -186,14 +234,30 @@ public sealed class RetainedCollaboratorTests
             }
             Assert.DoesNotContain("dispose", state.Executed);
             Assert.Same(AssemblyLoadContext.Default, AssemblyLoadContext.GetLoadContext(owner.GetType().Assembly));
-            return [owner, .. borrowedAccess is null ? [] : new object[] { borrowedAccess },
-                .. authorization is null ? [] : new object[] { authorization }];
+            return borrowedAccess is null
+                ? new([owner, .. authorization is null ? [] : new object[] { authorization }], null)
+                : new([owner], new WeakReference(borrowedAccess));
         }
         finally
         {
             state.Release.TrySetResult();
-            if (retirement is not null) _ = retirement.Exception;
+            try { await DrainExpectedFailureAsync(request); }
+            finally
+            {
+                try { await DrainExpectedFailureAsync(retirement ?? owner.DisposeAsync().AsTask()); }
+                finally
+                {
+                    if (borrowedAccess is not null) await borrowedAccess.DisposeAsync().AsTask().WaitAsync(Bound);
+                }
+            }
         }
+    }
+
+    private static async Task DrainExpectedFailureAsync(Task operation)
+    {
+        try { await operation.WaitAsync(Bound); }
+        catch (OperationCanceledException) { }
+        catch (AggregateException) { }
     }
 
     private static async Task AssertRetiredAsync(IAsyncDisposable owner, object? authorization)
@@ -216,7 +280,35 @@ public sealed class RetainedCollaboratorTests
         }
     }
 
-    private sealed record RetirementEvidence(WeakReference Generation, object[] RetainedOwners);
+    private sealed record RetirementEvidence(WeakReference Generation, object[] RetainedOwners, WeakReference? BorrowedAccess);
+    private sealed record CallerEvidence(object[] RetainedOwners, WeakReference? BorrowedAccess);
+
+    private sealed class FailingCatalogClient : ILlmClient, IDisposable
+    {
+        internal TaskCompletionSource Entered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        internal TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        internal TaskCompletionSource Canceled { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        internal InvalidOperationException Failure { get; } = new("Controlled default-context catalog cleanup failure.");
+        internal bool Disposed { get; private set; }
+        public LlmTransport Transport => LlmTransport.OpenAiCompatibleChat;
+        public LlmProviderDefinition ProviderDefinition => Providers.ProviderDefinitions.OpenAiCompatible;
+        public LlmProviderCapabilities GetCapabilities(LlmConnection connection, string? modelId = null) => new() { SupportsModelListing = true };
+        public IAsyncEnumerable<LlmStreamEvent> StreamAsync(LlmConnection connection, LlmChatRequest request,
+            CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public async Task<IReadOnlyList<LlmModel>> ListModelsAsync(LlmConnection connection,
+            CancellationToken cancellationToken = default)
+        {
+            using CancellationTokenRegistration registration = cancellationToken.Register(() =>
+            {
+                Canceled.TrySetResult();
+                throw Failure;
+            });
+            Entered.TrySetResult();
+            await Release.Task;
+            return [];
+        }
+        public void Dispose() => Disposed = true;
+    }
 
     private sealed class BlockingLogin : IClaudePkceLogin, IDisposable
     {
@@ -257,7 +349,9 @@ public sealed class RetainedCollaboratorTests
         internal int Reads { get; private set; }
         internal LlmConnection Connection { get; } = new()
         {
-            Version = "v1", Transport = LlmTransport.OpenAiCompatibleChat, Endpoint = "https://provider.invalid/v1",
+            Version = "v1",
+            Transport = LlmTransport.OpenAiCompatibleChat,
+            Endpoint = "https://provider.invalid/v1",
             Credential = new LlmCredential { OAuth = new() { AccessToken = "controlled-token" } }.Serialize()
         };
         internal void Record(string method) => Executed.Add(method);
