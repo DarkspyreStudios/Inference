@@ -129,6 +129,53 @@ public sealed class VideoOperationTests
     }
 
     [Theory]
+    [InlineData("async")]
+    [InlineData("array")]
+    [InlineData("span")]
+    public async Task SynchronousOwnerFenceRejectsReadBeforeDelayedLinkedCancellation(string mode)
+    {
+        var source = new Source(); await using var access = new LlmConnectionAccess(source, []);
+        using var caller = new CancellationTokenSource(); using var unblock = new ManualResetEventSlim();
+        var callbackEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var stream = new HeldStream(); var transport = new FixtureTransport { Download = stream, ReleaseGet = new() };
+        IVideoInference facade = new VideoProviderService([transport]).Bind(Connection, new(new("connection"), access));
+        Task<VideoJobSnapshot> anchor = facade.GetAsync(new("job", Scope));
+        await transport.Entered.Task.WaitAsync(Bound);
+        CancellationToken stop = transport.LastGetToken;
+        Stream owned = await facade.DownloadAsync(Output, caller.Token);
+        Task<int> pending = mode switch
+        {
+            "array" => Task.Run(() => owned.Read(new byte[1], 0, 1)),
+            "span" => Task.Run(() => owned.Read(new byte[1].AsSpan())),
+            _ => owned.ReadAsync(new byte[1]).AsTask()
+        };
+        await stream.Entered.Task.WaitAsync(Bound);
+        CancellationTokenRegistration blocker = stop.Register(() =>
+        {
+            callbackEntered.TrySetResult();
+            if (!unblock.Wait(Bound)) throw new TimeoutException("The controlled cancellation callback was not released.");
+        });
+        Task? retirement = null;
+        try
+        {
+            retirement = ((IAsyncDisposable)facade).DisposeAsync().AsTask();
+            await callbackEntered.Task.WaitAsync(Bound);
+            Assert.True(stop.IsCancellationRequested); Assert.False(stream.LastReadToken.IsCancellationRequested);
+            stream.Release.TrySetResult();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => pending.WaitAsync(Bound));
+            Assert.False(retirement.IsCompleted);
+        }
+        finally
+        {
+            unblock.Set(); stream.Release.TrySetResult(); transport.ReleaseGet.TrySetResult();
+            retirement ??= ((IAsyncDisposable)facade).DisposeAsync().AsTask();
+            try { await Task.WhenAll(Record.ExceptionAsync(() => anchor), Record.ExceptionAsync(() => pending)); }
+            finally { try { await retirement.WaitAsync(Bound); await owned.DisposeAsync(); } finally { blocker.Dispose(); } }
+        }
+        Assert.Equal(1, stream.Disposes);
+    }
+
+    [Theory]
     [InlineData(false)]
     [InlineData(true)]
     public async Task MaterializationStreamsActualBytesAndPreservesCommitAndCleanupFacts(bool failCleanup)
@@ -199,6 +246,29 @@ public sealed class VideoOperationTests
         Assert.Equal(InferenceResourceCommitOutcome.Committed, error.Failure.SelectionOutcome);
         Assert.Equal(1, error.Failure.SelectionVersion!.Revision); Assert.Equal(3, error.Failure.BytesTransferred);
         await retirement.WaitAsync(Bound); Assert.Equal(1, resources.Writer.Disposes); Assert.Equal(0, resources.Disposes);
+    }
+
+    [Fact]
+    public async Task RetirementDuringSuccessfulCleanupPreservesCommittedResourceFacts()
+    {
+        var source = new Source(); await using var access = new LlmConnectionAccess(source, []);
+        var resources = new Resources { ReleaseCleanup = new() };
+        IVideoInference facade = new VideoProviderService([new FixtureTransport()]).Bind(Connection, new(new("connection"), access), resources);
+        Task<InferenceResourceDescriptor> pending = facade.MaterializeAsync(Output);
+        await resources.Writer!.CleanupEntered.Task.WaitAsync(Bound);
+        Task retirement = ((IAsyncDisposable)facade).DisposeAsync().AsTask();
+        try
+        {
+            Assert.False(retirement.IsCompleted); resources.ReleaseCleanup.TrySetResult();
+            InferenceResourceOperationCanceledException error = await Assert.ThrowsAsync<InferenceResourceOperationCanceledException>(() => pending.WaitAsync(Bound));
+            Assert.Equal(resources.Writer.Reference, error.Failure.Reference);
+            Assert.Equal(InferenceResourceCommitOutcome.Committed, error.Failure.CommitOutcome);
+            Assert.Equal(InferenceResourceCommitOutcome.Committed, error.Failure.SelectionOutcome);
+            Assert.Equal(new InferenceResourceSelectionVersion("w", "s", 1), error.Failure.SelectionVersion);
+            Assert.Equal(3, error.Failure.BytesTransferred); Assert.Equal(1, resources.Writer.Commits);
+        }
+        finally { resources.ReleaseCleanup.TrySetResult(); try { await Record.ExceptionAsync(() => pending); } finally { await retirement.WaitAsync(Bound); } }
+        Assert.Equal(1, resources.Writer.Disposes); Assert.Equal(0, resources.Disposes);
     }
 
     [Fact]
@@ -296,6 +366,7 @@ public sealed class VideoOperationTests
         internal TaskCompletionSource? ReleaseGet { get; init; }
         internal TaskCompletionSource Entered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         internal Stream? Download { get; init; }
+        internal CancellationToken LastGetToken { get; private set; }
         public Task<VideoCapabilities> GetCapabilitiesAsync(VideoConnection connection, string? modelId = null, XaiFamilyBinding? xai = null, CancellationToken cancellationToken = default) => Task.FromResult(new VideoCapabilities());
         public Task<VideoJob> SubmitAsync(VideoConnection connection, VideoRequest request, XaiFamilyBinding? xai = null, IInferenceResourceAccess? resources = null, CancellationToken cancellationToken = default)
         {
@@ -316,7 +387,7 @@ public sealed class VideoOperationTests
             ReceiptBinding = xai;
             if (job.Scope != Scope) throw new ArgumentException("The controlled receipt authority is not proven.");
             await xai!.AcquireAsync(cancellationToken);
-            Gets++; Entered.TrySetResult(); if (ReleaseGet is not null) await ReleaseGet.Task.ConfigureAwait(false); return new(job, VideoJobState.Completed, Output: Output);
+            Gets++; LastGetToken = cancellationToken; Entered.TrySetResult(); if (ReleaseGet is not null) await ReleaseGet.Task.ConfigureAwait(false); return new(job, VideoJobState.Completed, Output: Output);
         }
         public async Task<Stream> DownloadAsync(VideoConnection connection, VideoOutput output, XaiFamilyBinding? xai = null, CancellationToken cancellationToken = default)
         {
@@ -338,8 +409,11 @@ public sealed class VideoOperationTests
         internal TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         internal TaskCompletionSource Closed { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         internal int Disposes { get; private set; }
+        internal CancellationToken LastReadToken { get; private set; }
         public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
-        { Entered.TrySetResult(); await Release.Task.ConfigureAwait(false); return 0; }
+        { LastReadToken = cancellationToken; Entered.TrySetResult(); await Release.Task.ConfigureAwait(false); return 0; }
+        public override int Read(byte[] buffer, int offset, int count) { Entered.TrySetResult(); Release.Task.GetAwaiter().GetResult(); return 0; }
+        public override int Read(Span<byte> buffer) { Entered.TrySetResult(); Release.Task.GetAwaiter().GetResult(); return 0; }
         protected override void Dispose(bool disposing) { if (disposing) { Disposes++; Closed.TrySetResult(); } base.Dispose(disposing); }
     }
     private sealed class PartialStream() : MemoryStream([1, 2, 3], false)
@@ -368,10 +442,11 @@ public sealed class VideoOperationTests
         internal bool FailCleanup { get; init; }
         internal bool FailCommit { get; init; }
         internal TaskCompletionSource? ReleaseCommit { get; init; }
+        internal TaskCompletionSource? ReleaseCleanup { get; init; }
         internal Writer? Writer { get; private set; }
         internal int Disposes { get; private set; }
         public Task<IInferenceResourceWriteHandle> OpenWriteAsync(InferenceResourceCreate resource, CancellationToken cancellationToken = default)
-        { Writer = new(resource, FailCleanup, FailCommit, ReleaseCommit); return Task.FromResult<IInferenceResourceWriteHandle>(Writer); }
+        { Writer = new(resource, FailCleanup, FailCommit, ReleaseCommit, ReleaseCleanup); return Task.FromResult<IInferenceResourceWriteHandle>(Writer); }
         public Task<InferenceResourceDescriptor?> GetAsync(InferenceResourceReference reference, CancellationToken cancellationToken = default) => throw new InvalidOperationException();
         public Task<IInferenceResourceReadHandle> OpenReadAsync(InferenceResourceReference reference, CancellationToken cancellationToken = default) => throw new InvalidOperationException();
         public Task<InferenceResourceSelection> GetSelectionAsync(CancellationToken cancellationToken = default) => throw new InvalidOperationException();
@@ -379,7 +454,7 @@ public sealed class VideoOperationTests
         public Task<InferenceResourceSelection> ReplaceSelectionAsync(IReadOnlyList<InferenceResourceReference> references, long expectedRevision, CancellationToken cancellationToken = default) => throw new InvalidOperationException();
         public void Dispose() => Disposes++;
     }
-    internal sealed class Writer(InferenceResourceCreate metadata, bool failCleanup, bool failCommit, TaskCompletionSource? release) : IInferenceResourceWriteHandle
+    internal sealed class Writer(InferenceResourceCreate metadata, bool failCleanup, bool failCommit, TaskCompletionSource? release, TaskCompletionSource? releaseCleanup) : IInferenceResourceWriteHandle
     {
         public InferenceResourceReference Reference { get; } = new("w", "actual-written");
         internal MemoryStream Data { get; } = new();
@@ -389,6 +464,7 @@ public sealed class VideoOperationTests
         internal int Commits { get; private set; }
         internal int Disposes { get; private set; }
         internal TaskCompletionSource Entered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        internal TaskCompletionSource CleanupEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public async Task<InferenceResourceCommitResult> CommitAsync(long bytesWritten, InferenceResourceCommitOptions? options = null, CancellationToken cancellationToken = default)
         {
             Commits++; Written = bytesWritten; SelectForSession = options?.SelectForSession == true;
@@ -397,7 +473,7 @@ public sealed class VideoOperationTests
             if (failCommit) throw new IOException("controlled unknown commit");
             return new(new(Reference, metadata.SessionId, metadata.FileName, metadata.ContentType, bytesWritten), new("w", "s", 1, [Reference]));
         }
-        public ValueTask DisposeAsync() { Disposes++; Data.Dispose(); return failCleanup ? ValueTask.FromException(new InvalidOperationException("controlled cleanup")) : ValueTask.CompletedTask; }
+        public async ValueTask DisposeAsync() { Disposes++; CleanupEntered.TrySetResult(); if (releaseCleanup is not null) await releaseCleanup.Task.ConfigureAwait(false); Data.Dispose(); if (failCleanup) throw new InvalidOperationException("controlled cleanup"); }
     }
     private sealed record UnknownOptions : VideoProviderOptions;
     private sealed class UncallableAuthenticator : ILlmAuthenticator
