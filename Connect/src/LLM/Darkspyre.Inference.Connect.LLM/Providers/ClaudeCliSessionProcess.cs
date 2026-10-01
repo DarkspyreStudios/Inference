@@ -40,27 +40,20 @@ internal sealed class ClaudeCliSessionProcessFactory : IClaudeCliSessionProcessF
 
 internal sealed class ClaudeCliSessionProcess : IClaudeCliSessionProcess
 {
-    private readonly Process _process;
-    private readonly Task<string> _standardError;
-    private readonly SemaphoreSlim _writeLock = new(1, 1);
-    private bool _disposed;
+    private readonly CliSessionProcess _process;
 
     public ClaudeCliSessionProcess(Process process)
     {
-        _process = process;
-        _standardError = process.StandardError.ReadToEndAsync();
+        _process = new(process, "Claude CLI", 16 * 1024 * 1024, truncateError: false);
     }
 
     public async ValueTask WriteLineAsync(
         string line,
         CancellationToken cancellationToken = default)
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
-        await _writeLock.WaitAsync(cancellationToken);
         try
         {
-            await _process.StandardInput.WriteLineAsync(line.AsMemory(), cancellationToken);
-            await _process.StandardInput.FlushAsync(cancellationToken);
+            await _process.WriteAsync(line, newline: true, cancellationToken).ConfigureAwait(false);
         }
         catch (IOException exception)
         {
@@ -68,73 +61,16 @@ internal sealed class ClaudeCliSessionProcess : IClaudeCliSessionProcess
                 "The Claude CLI closed its input stream while the agent session was active.",
                 exception);
         }
-        finally
-        {
-            _writeLock.Release();
-        }
     }
 
-    public async ValueTask<string?> ReadLineAsync(CancellationToken cancellationToken = default)
-    {
-        ObjectDisposedException.ThrowIf(_disposed, this);
-        string? line = await _process.StandardOutput.ReadLineAsync(cancellationToken);
-        if (line is not null)
-        {
-            ClaudeCliProcessRunner.EnsureCaptureLimit(
-                line.Length,
-                nameof(_process.StandardOutput));
-        }
-
-        return line;
-    }
+    public ValueTask<string?> ReadLineAsync(CancellationToken cancellationToken = default) => _process.ReadLineAsync(cancellationToken);
 
     public async Task<ClaudeCliProcessResult> WaitForExitAsync(
         CancellationToken cancellationToken = default)
     {
-        await _process.WaitForExitAsync(cancellationToken);
-        string error = await _standardError.WaitAsync(cancellationToken);
-        ClaudeCliProcessRunner.EnsureCaptureLimit(error.Length, nameof(_process.StandardError));
-        return new ClaudeCliProcessResult(_process.ExitCode, string.Empty, error);
+        (int exitCode, string error) = await _process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
+        return new ClaudeCliProcessResult(exitCode, string.Empty, error);
     }
 
-    public async ValueTask DisposeAsync()
-    {
-        if (_disposed)
-        {
-            return;
-        }
-
-        _disposed = true;
-        try
-        {
-            _process.StandardInput.Close();
-            if (!_process.HasExited)
-            {
-                using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
-                try
-                {
-                    await _process.WaitForExitAsync(timeout.Token);
-                }
-                catch (OperationCanceledException)
-                {
-                    await CliProcessTermination.KillAsync(_process);
-                }
-            }
-
-            try
-            {
-                // A descendant that left the process group can hold the pipe open after the kill.
-                await _standardError.WaitAsync(CliProcessTermination.ExitBound);
-            }
-            catch (TimeoutException)
-            {
-                // Disposal only releases resources. Disposing the process closes the pipe.
-            }
-        }
-        finally
-        {
-            _writeLock.Dispose();
-            _process.Dispose();
-        }
-    }
+    public ValueTask DisposeAsync() => _process.DisposeAsync();
 }

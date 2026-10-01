@@ -583,6 +583,28 @@ blocked stdin write and early disposal of its output stream both terminate the o
 Its stderr reader enforces a 16 MiB character limit while reading. A stderr read failure interrupts
 blocked stdin/stdout operations. Retirement cancels and observes that reader with a 5-second bound.
 
+Claude and Antigravity native session processes share one pipe-operation owner. Retirement fences new
+reads, writes and exit waits, cancels active and queued operations, and waits for them to leave before
+disposing the process. Concurrent disposal calls await the same completion, including its failure.
+Caller cancellation affects only that operation. Each write flushes before completing. Closing stdin
+discards buffered input from an abandoned write; it does not flush that input during retirement.
+Antigravity rejects closing stdin while another write is active.
+
+Native Claude stderr capture rejects input above 16 MiB characters during reading. Native Antigravity
+keeps the first 64 KiB characters and drains the remaining stderr without retaining it. A capture
+failure interrupts pending pipe operations. Both wrappers reject stdout lines above 16 MiB characters
+after the line is read; this check does not bound a partially received line's allocation.
+
+Native-session disposal allows up to 2 seconds for graceful exit after closing stdin, then signals an
+owned process that remains alive. The process exit and stderr EOF share a subsequent 5-second bound.
+Cleanup cancels and observes the stderr reader with a separate 5-second bound. An exit wait or
+disposal that cannot drain stderr fails with `IOException`; a capture-limit failure remains visible
+as `InvalidOperationException`. A parent that already exited is not signalled through its former group
+ID. Descendants holding its stderr pipe open therefore produce a drain failure, not successful
+retirement. Antigravity drains its session reader even when process disposal fails.
+Antigravity session disposal also shares one retirement completion across callers. It reports
+termination and pipe-drain failures to those callers and closes its observation feed even on failure.
+
 Claude and Antigravity share one launcher for chat and native sessions. Their default commands are
 `claude` and `agy`. On Windows the launcher searches absolute PATH directories in order for `.exe`,
 `.com`, `.cmd` and `.bat` entries. An explicit executable path keeps its configured target.

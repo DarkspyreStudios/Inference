@@ -33,6 +33,7 @@ internal sealed class AntigravityAgentSession : ILlmAgentSession
     private readonly LlmConnection _connection;
     private readonly HashSet<(int Generation, int Index)> _accountedSteps = [];
     private readonly NoAgentResources _resources = new(LlmAgentResourceStopStatus.Unknown);
+    private readonly LlmOperationLifetime _retirement = new();
     private readonly Lock _sync = new();
 
     private IAntigravityCliSessionProcess? _process;
@@ -292,19 +293,20 @@ internal sealed class AntigravityAgentSession : ILlmAgentSession
             "Antigravity CLI does not report its background work; ResourceObservation is Unsupported.");
     }
 
-    public async ValueTask DisposeAsync()
+    public ValueTask DisposeAsync()
     {
         lock (_sync)
         {
-            if (_state == SessionState.Disposed)
-            {
-                return;
-            }
             _state = SessionState.Disposed;
             _expectingOutput = false;
         }
-        await CloseProcessAsync(graceful: true).ConfigureAwait(false);
-        _resources.Dispose();
+        return new(_retirement.RetireAsync(RetireSessionAsync));
+    }
+
+    private async Task RetireSessionAsync()
+    {
+        try { await CloseProcessAsync(graceful: true, propagateTerminationFailure: true).ConfigureAwait(false); }
+        finally { _resources.Dispose(); }
     }
 
     private (AntigravityLaunch Launch, string Prompt, JsonElement? Schema) Admit(LlmAgentTurnRequest request)
@@ -529,7 +531,7 @@ internal sealed class AntigravityAgentSession : ILlmAgentSession
             }
             writer.TryWrite(ProcessLine.End with { Generation = generation });
         }
-        catch (Exception exception) when (exception is IOException or InvalidOperationException or ObjectDisposedException)
+        catch (Exception exception) when (exception is IOException or InvalidOperationException or ObjectDisposedException or OperationCanceledException)
         {
             writer.TryWrite(new ProcessLine(generation, null, exception));
         }
@@ -558,7 +560,7 @@ internal sealed class AntigravityAgentSession : ILlmAgentSession
         }
     }
 
-    private async Task CloseProcessAsync(bool graceful)
+    private async Task CloseProcessAsync(bool graceful, bool propagateTerminationFailure = false)
     {
         IAntigravityCliSessionProcess? process;
         string? schemaDirectory;
@@ -569,32 +571,44 @@ internal sealed class AntigravityAgentSession : ILlmAgentSession
             schemaDirectory = _schemaDirectory;
             _schemaDirectory = null;
         }
-        if (process is not null)
+        try
         {
-            try
+            if (process is not null)
             {
-                if (!graceful)
+                try
                 {
-                    await process.KillAsync().ConfigureAwait(false);
+                    if (!graceful)
+                    {
+                        await process.KillAsync().ConfigureAwait(false);
+                    }
+                }
+                catch (CliProcessTerminationException exception) when (!propagateTerminationFailure)
+                {
+                    FaultForTermination(exception);
+                }
+                finally
+                {
+                    try
+                    {
+                        await process.DisposeAsync().ConfigureAwait(false);
+                    }
+                    catch (CliProcessTerminationException exception) when (!propagateTerminationFailure)
+                    {
+                        FaultForTermination(exception);
+                    }
+                    finally
+                    {
+                        await _reader.ConfigureAwait(false);
+                    }
                 }
             }
-            catch (CliProcessTerminationException exception)
-            {
-                FaultForTermination(exception);
-            }
-            try
-            {
-                await process.DisposeAsync().ConfigureAwait(false);
-            }
-            catch (CliProcessTerminationException exception)
-            {
-                FaultForTermination(exception);
-            }
-            await _reader.ConfigureAwait(false);
         }
-        if (schemaDirectory is not null)
+        finally
         {
-            CliInfrastructure.DeleteWorkingDirectory(schemaDirectory);
+            if (schemaDirectory is not null)
+            {
+                CliInfrastructure.DeleteWorkingDirectory(schemaDirectory);
+            }
         }
     }
 

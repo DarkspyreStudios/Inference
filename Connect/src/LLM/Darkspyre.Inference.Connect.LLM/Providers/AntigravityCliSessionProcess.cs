@@ -1,6 +1,5 @@
 using System.ComponentModel;
 using System.Diagnostics;
-using System.Text;
 
 namespace Darkspyre.Inference.Connect.LLM.Providers;
 
@@ -65,148 +64,29 @@ internal sealed class AntigravityCliSessionProcessFactory : IAntigravityCliSessi
 internal sealed class AntigravityCliSessionProcess : IAntigravityCliSessionProcess
 {
     /// <summary>The longest standard output line accepted.</summary>
-    internal const int MaximumLineCharacters = 16 * 1024 * 1024;
+    internal const int MaximumLineCharacters = CliSessionProcess.MaximumLineCharacters;
 
     /// <summary>Standard error beyond this many characters is discarded.</summary>
     private const int MaximumStandardErrorCharacters = 64 * 1024;
 
-    private static readonly TimeSpan GracefulExit = TimeSpan.FromSeconds(2);
-
-    private readonly Process _process;
-    private readonly Lock _standardErrorLock = new();
-    private readonly StringBuilder _standardErrorText = new();
-    private readonly Task _standardError;
-    private readonly SemaphoreSlim _writeLock = new(1, 1);
-    private int _disposed;
+    private readonly CliSessionProcess _process;
 
     public AntigravityCliSessionProcess(Process process)
     {
-        _process = process;
-        _standardError = ReadBoundedAsync(process.StandardError);
+        _process = new(process, "Antigravity CLI", MaximumStandardErrorCharacters, truncateError: true);
     }
 
-    public async ValueTask WriteAsync(string text, CancellationToken cancellationToken = default)
-    {
-        ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
-        await _writeLock.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try
-        {
-            await _process.StandardInput.WriteAsync(text.AsMemory(), cancellationToken).ConfigureAwait(false);
-            await _process.StandardInput.FlushAsync(cancellationToken).ConfigureAwait(false);
-        }
-        finally
-        {
-            _writeLock.Release();
-        }
-    }
+    public ValueTask WriteAsync(string text, CancellationToken cancellationToken = default) => _process.WriteAsync(text, newline: false, cancellationToken);
 
-    public void CloseInput()
-    {
-        try
-        {
-            _process.StandardInput.Close();
-        }
-        catch (IOException)
-        {
-            // The child process has already closed its end of the input pipe.
-        }
-        catch (InvalidOperationException)
-        {
-            // The process has already exited and disposed the redirected stream.
-        }
-    }
+    public void CloseInput() => _process.CloseInput();
 
-    public async ValueTask<string?> ReadLineAsync(CancellationToken cancellationToken = default)
-    {
-        ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
-        string? line = await _process.StandardOutput.ReadLineAsync(cancellationToken).ConfigureAwait(false);
-        if (line is { Length: > MaximumLineCharacters })
-        {
-            throw new InvalidOperationException(
-                $"Antigravity CLI output exceeded the {MaximumLineCharacters}-character line limit.");
-        }
-        return line;
-    }
+    public ValueTask<string?> ReadLineAsync(CancellationToken cancellationToken = default) => _process.ReadLineAsync(cancellationToken);
 
-    public async Task<(int ExitCode, string StandardError)> WaitForExitAsync(CancellationToken cancellationToken = default)
-    {
-        await _process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
-        try
-        {
-            // A descendant that left the process group can hold the pipe open after the process exits.
-            await _standardError.WaitAsync(CliProcessTermination.ExitBound, cancellationToken).ConfigureAwait(false);
-        }
-        catch (TimeoutException)
-        {
-            // The text captured so far is returned.
-        }
-        return (_process.ExitCode, CapturedStandardError());
-    }
+    public Task<(int ExitCode, string StandardError)> WaitForExitAsync(CancellationToken cancellationToken = default) => _process.WaitForExitAsync(cancellationToken);
 
-    public Task KillAsync() => CliProcessTermination.KillAsync(_process);
+    public Task KillAsync() => _process.KillAsync();
 
-    public async ValueTask DisposeAsync()
-    {
-        if (Interlocked.Exchange(ref _disposed, 1) != 0)
-        {
-            return;
-        }
-
-        try
-        {
-            CloseInput();
-            if (!_process.HasExited)
-            {
-                using var timeout = new CancellationTokenSource(GracefulExit);
-                try
-                {
-                    await _process.WaitForExitAsync(timeout.Token).ConfigureAwait(false);
-                }
-                catch (OperationCanceledException)
-                {
-                    await CliProcessTermination.KillAsync(_process).ConfigureAwait(false);
-                }
-            }
-            try
-            {
-                await _standardError.WaitAsync(CliProcessTermination.ExitBound).ConfigureAwait(false);
-            }
-            catch (TimeoutException)
-            {
-                // Disposal only releases resources. Disposing the process closes the pipe.
-            }
-        }
-        finally
-        {
-            _writeLock.Dispose();
-            _process.Dispose();
-        }
-    }
-
-    private async Task ReadBoundedAsync(StreamReader reader)
-    {
-        char[] buffer = new char[4096];
-        int read;
-        while ((read = await reader.ReadAsync(buffer).ConfigureAwait(false)) > 0)
-        {
-            lock (_standardErrorLock)
-            {
-                int room = MaximumStandardErrorCharacters - _standardErrorText.Length;
-                if (room > 0)
-                {
-                    _standardErrorText.Append(buffer, 0, Math.Min(room, read));
-                }
-            }
-        }
-    }
-
-    private string CapturedStandardError()
-    {
-        lock (_standardErrorLock)
-        {
-            return _standardErrorText.ToString();
-        }
-    }
+    public ValueTask DisposeAsync() => _process.DisposeAsync();
 }
 
 internal sealed class AntigravityCliUnavailableException(string executable, Exception innerException)

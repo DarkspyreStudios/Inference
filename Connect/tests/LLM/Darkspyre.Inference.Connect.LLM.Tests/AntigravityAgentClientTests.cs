@@ -534,6 +534,45 @@ public sealed class AntigravityAgentClientTests : IDisposable
         await Assert.ThrowsAsync<ObjectDisposedException>(() => session.GetCapabilitiesAsync());
     }
 
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(2)]
+    public async Task DisposalCallersSharePendingRetirementAndItsFailure(int failureKind)
+    {
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        Exception? failure = failureKind switch
+        {
+            1 => new CliProcessTerminationException(4242),
+            2 => new CliProcessDrainException(4242),
+            _ => null
+        };
+        var factory = new Factory { DisposalRelease = release.Task, DisposalFailure = failure };
+        ILlmAgentSession session = await Client(factory).StartSessionAsync("c", Connection(), Options());
+        await using IAsyncEnumerator<LlmAgentEvent> events = session.ObserveAsync().GetAsyncEnumerator();
+        Task<bool> observation = events.MoveNextAsync().AsTask();
+        Assert.False(observation.IsCompleted);
+        try
+        {
+            Task retirement = session.DisposeAsync().AsTask();
+            Assert.False(retirement.IsCompleted);
+            Assert.Same(retirement, session.DisposeAsync().AsTask());
+            await Assert.ThrowsAsync<ObjectDisposedException>(() => session.GetCapabilitiesAsync());
+
+            release.TrySetResult();
+
+            if (failure is null) await retirement.WaitAsync(CliProcessTerminationTests.TestBound);
+            else Assert.Same(failure, await Record.ExceptionAsync(() => retirement.WaitAsync(CliProcessTerminationTests.TestBound)));
+            Assert.False(await observation.WaitAsync(CliProcessTerminationTests.TestBound));
+            Assert.Same(retirement, session.DisposeAsync().AsTask());
+        }
+        finally
+        {
+            release.TrySetResult();
+            _ = await Record.ExceptionAsync(() => session.DisposeAsync().AsTask());
+        }
+    }
+
     private static AntigravityAgentClient Client(Factory factory) => new(factory);
 
     private LlmAgentSessionOptions Options() => new()
@@ -657,6 +696,10 @@ public sealed class AntigravityAgentClientTests : IDisposable
         /// <summary>When set, killing a process fails with this exception after the process ends its output.</summary>
         public Exception? KillFailure { get; init; }
 
+        public Task? DisposalRelease { get; init; }
+
+        public Exception? DisposalFailure { get; init; }
+
         public IAntigravityCliSessionProcess Start(string executable, IReadOnlyList<string> arguments, string workingDirectory)
         {
             var process = new FakeProcess(this, Processes.Count + 1, [.. arguments], workingDirectory);
@@ -769,11 +812,12 @@ public sealed class AntigravityAgentClientTests : IDisposable
             return factory.KillFailure is { } failure ? Task.FromException(failure) : Task.CompletedTask;
         }
 
-        public ValueTask DisposeAsync()
+        public async ValueTask DisposeAsync()
         {
             Disposed = true;
             CloseInput();
-            return ValueTask.CompletedTask;
+            if (factory.DisposalRelease is { } release) await release;
+            if (factory.DisposalFailure is { } failure) throw failure;
         }
     }
 }
