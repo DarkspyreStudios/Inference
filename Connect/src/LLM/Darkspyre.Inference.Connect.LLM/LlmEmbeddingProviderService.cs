@@ -68,7 +68,13 @@ public sealed class LlmEmbeddingProviderService : IDisposable, IAsyncDisposable
     {
         Task operations = _lifetime.RetireAsync();
         Task credentials = _ownsConnectionAccess ? ConnectionAccess.DisposeAsync().AsTask() : Task.CompletedTask;
-        try { await Task.WhenAll(operations, credentials).ConfigureAwait(false); }
+        Task retirement = Task.WhenAll(operations, credentials);
+        try { await retirement.ConfigureAwait(false); }
+        catch
+        {
+            if (retirement.Exception is { InnerExceptions.Count: > 1 } failures) throw failures;
+            throw;
+        }
         finally
         {
             _clients.Clear();

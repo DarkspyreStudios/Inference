@@ -429,7 +429,11 @@ Credential access and the chat, embedding and agent facades release their borrow
 after admitted work drains. Chat and embedding facades also release credential-access references;
 chat releases setup environments and adapter collections. Cleanup failures do not skip this release.
 Concurrent disposal callers share the same completion and retained failure. Chat disposal preserves
-failures from its operation, credential and privately owned catalog retirement. Synchronous settings
+failures from its operation, credential and privately owned catalog retirement. Embedding disposal
+preserves operation and owned credential-retirement failures. Agent disposal preserves opening and
+every owned session-retirement failure. Each waits for all owned cleanup before reporting failure.
+A single original error remains unchanged; multiple errors are retained in an `AggregateException`.
+Repeated disposal returns the same cached failure instance. Synchronous settings
 manager creation and Claude login participate in admission and drain. An admitted synchronous login
 keeps its existing result or exception; disposal waits for that call to leave.
 

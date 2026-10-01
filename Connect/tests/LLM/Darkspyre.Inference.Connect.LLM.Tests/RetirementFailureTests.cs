@@ -67,10 +67,11 @@ public sealed class RetirementFailureTests
         }
         finally
         {
+            retirement ??= facade.DisposeAsync().AsTask();
             auth.ReleaseOuterCancellation.Set();
             auth.ReleaseRefresh.TrySetResult();
             try { await DrainAsync(request); }
-            finally { await DrainAsync(retirement ?? facade.DisposeAsync().AsTask()); }
+            finally { await DrainAsync(retirement); }
         }
     }
 
@@ -86,12 +87,15 @@ public sealed class RetirementFailureTests
         using var source = new AgentSource();
         using var client = new AgentClient(sessionFailures);
         var facade = new LlmAgentProviderService(source, [client]);
-        ILlmAgentSession first = await facade.StartSessionAsync("first", new() { ModelId = "model" });
-        ILlmAgentSession second = await facade.StartSessionAsync("second", new() { ModelId = "model" });
-        Task? late = opening ? facade.StartSessionAsync("opening", new() { ModelId = "model" }) : null;
+        ILlmAgentSession? first = null;
+        ILlmAgentSession? second = null;
+        Task? late = null;
         Task? retirement = null;
         try
         {
+            first = await facade.StartSessionAsync("first", new() { ModelId = "model" });
+            second = await facade.StartSessionAsync("second", new() { ModelId = "model" });
+            late = opening ? facade.StartSessionAsync("opening", new() { ModelId = "model" }) : null;
             if (opening) await source.Entered.Task.WaitAsync(Bound);
             retirement = facade.DisposeAsync().AsTask();
             foreach (FailingSession session in client.Sessions) await session.Entered.Task.WaitAsync(Bound);
@@ -131,16 +135,17 @@ public sealed class RetirementFailureTests
         }
         finally
         {
+            retirement ??= facade.DisposeAsync().AsTask();
             source.Release.TrySetResult();
             foreach (FailingSession session in client.Sessions) session.Release.TrySetResult();
             try { if (late is not null) await DrainAsync(late); }
             finally
             {
-                try { await DrainAsync(retirement ?? facade.DisposeAsync().AsTask()); }
+                try { await DrainAsync(retirement); }
                 finally
                 {
-                    try { await DrainAsync(first.DisposeAsync().AsTask()); }
-                    finally { await DrainAsync(second.DisposeAsync().AsTask()); }
+                    try { if (first is not null) await DrainAsync(first.DisposeAsync().AsTask()); }
+                    finally { if (second is not null) await DrainAsync(second.DisposeAsync().AsTask()); }
                 }
             }
         }
@@ -197,12 +202,15 @@ public sealed class RetirementFailureTests
             });
             return Task.FromResult<LlmConnection?>(new()
             {
-                Version = "v1", Transport = LlmTransport.OpenAiCompatibleChat, Endpoint = "https://provider.invalid",
+                Version = "v1",
+                Transport = LlmTransport.OpenAiCompatibleChat,
+                Endpoint = "https://provider.invalid",
                 Credential = new LlmCredential { OAuth = new() { AccessToken = "controlled-token", ExpiresAtUnixSeconds = 0 } }.Serialize()
             });
         }
         public Task SaveCredentialAsync(string connectionId, string credentialJson, string expectedVersion,
-            CancellationToken cancellationToken = default) { Saves++; throw new NotSupportedException(); }
+            CancellationToken cancellationToken = default)
+        { Saves++; throw new NotSupportedException(); }
         public void Dispose() { Disposed = true; _cancellation.Dispose(); }
     }
 
@@ -254,7 +262,8 @@ public sealed class RetirementFailureTests
         internal bool Disposed { get; private set; }
         public bool Supports(LlmTransport transport) => transport == LlmTransport.OpenAiCompatibleChat;
         public Task<LlmEmbeddingResult> EmbedAsync(LlmConnection connection, LlmEmbeddingRequest request,
-            CancellationToken cancellationToken = default) { Calls++; throw new NotSupportedException(); }
+            CancellationToken cancellationToken = default)
+        { Calls++; throw new NotSupportedException(); }
         public void Dispose() => Disposed = true;
     }
 

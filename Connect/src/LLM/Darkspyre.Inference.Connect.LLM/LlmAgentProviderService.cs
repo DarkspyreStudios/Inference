@@ -168,7 +168,13 @@ public sealed class LlmAgentProviderService : IDisposable, IAsyncDisposable
         {
             Task openings = _lifetime.RetireAsync();
             Task retiredSessions = Task.WhenAll(sessions.Select(session => session.DisposeAsync().AsTask()));
-            try { await Task.WhenAll(openings, retiredSessions).ConfigureAwait(false); }
+            Task retirement = Task.WhenAll(openings, retiredSessions);
+            try { await retirement.ConfigureAwait(false); }
+            catch
+            {
+                if (retirement.Exception is { InnerExceptions.Count: > 1 } failures) throw failures;
+                throw;
+            }
             finally
             {
                 lock (_gate) { _sessions.Clear(); }
