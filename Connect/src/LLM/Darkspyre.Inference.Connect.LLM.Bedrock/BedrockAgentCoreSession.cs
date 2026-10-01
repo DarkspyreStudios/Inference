@@ -144,11 +144,15 @@ internal sealed class BedrockAgentCoreSession : ILlmAgentSession
                 ? request.Input
                 : [new LlmAgentTextContent(opening.Text), .. request.Input]);
             string modelId = request.ModelId ?? _initialModelId;
-            bool reasoningText = BedrockAgentCoreLlmClient.ResolveCapabilities(_connection, modelId).SupportsReasoningText;
+            LlmProviderCapabilities capabilities = BedrockAgentCoreLlmClient.ResolveCapabilities(_connection, modelId);
+            bool reasoningText = capabilities.SupportsReasoningText;
+            var usage = new BedrockHarnessUsage(capabilities.SupportsUsageDeltas);
 
             for (int round = 0; round < MaximumInlineToolRounds; round++)
             {
                 token.ThrowIfCancellationRequested();
+                usage.BeginRound();
+                string requestId = $"usage-{turnId}-{round}";
                 InvokeHarnessRequest invokeRequest = BuildRequest(messages, modelId);
                 var text = new StringBuilder();
                 var pendingTools = new Dictionary<int, PendingToolUse>();
@@ -208,10 +212,17 @@ internal sealed class BedrockAgentCoreSession : ILlmAgentSession
                         case HarnessMessageStopEvent stopped:
                             stopReason = stopped.StopReason?.Value;
                             break;
+                        case HarnessMetadataEvent metadata:
+                            if (usage.Observe(metadata))
+                                yield return new LlmAgentUsageEvent(ThreadId, turnId, requestId, usage.Current, usage.RunningTotals);
+                            break;
                     }
                     token.ThrowIfCancellationRequested();
                 }
 
+                token.ThrowIfCancellationRequested();
+                LlmUsage? totals = usage.Settle();
+                yield return new LlmAgentUsageEvent(ThreadId, turnId, requestId, usage.Current, totals);
                 token.ThrowIfCancellationRequested();
                 if (text.Length > 0)
                 {

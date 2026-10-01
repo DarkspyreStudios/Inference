@@ -22,6 +22,7 @@ internal sealed class BedrockAgentCoreLlmClient(IBedrockAgentCoreInvoker invoker
         SupportsStreaming = true,
         SupportsReasoningText = true,
         SupportsStreamingUsage = true,
+        SupportsUsageDeltas = true,
         SupportsModelListing = false,
         SupportsJsonSchema = false,
         SupportsJsonObject = false,
@@ -82,7 +83,7 @@ internal sealed class BedrockAgentCoreLlmClient(IBedrockAgentCoreInvoker invoker
         LlmAwsCredentials aws = RequireAws(connection);
         InvokeHarnessRequest invokeRequest = BuildChatRequest(connection, request);
         var text = new StringBuilder();
-        LlmUsage? usage = null;
+        var usage = new BedrockHarnessUsage(capabilities.SupportsUsageDeltas);
         string? stopReason = null;
 
         await foreach (IEventStreamEvent streamEvent in invoker.InvokeAsync(
@@ -90,6 +91,7 @@ internal sealed class BedrockAgentCoreLlmClient(IBedrockAgentCoreInvoker invoker
                            invokeRequest,
                            cancellationToken))
         {
+            cancellationToken.ThrowIfCancellationRequested();
             switch (streamEvent)
             {
                 case HarnessContentBlockDeltaEvent { Delta.Text: { Length: > 0 } delta }:
@@ -108,15 +110,15 @@ internal sealed class BedrockAgentCoreLlmClient(IBedrockAgentCoreInvoker invoker
                 case HarnessMessageStopEvent stopped:
                     stopReason = stopped.StopReason?.Value;
                     break;
-                case HarnessMetadataEvent { Usage: not null } metadata:
-                    usage = new LlmUsage(
-                        metadata.Usage.InputTokens,
-                        metadata.Usage.OutputTokens,
-                        metadata.Usage.TotalTokens);
+                case HarnessMetadataEvent metadata:
+                    usage.Observe(metadata);
+                    if (usage.Delta is { } observation) yield return observation;
                     break;
             }
+            cancellationToken.ThrowIfCancellationRequested();
         }
 
+        cancellationToken.ThrowIfCancellationRequested();
         if (stopReason is null)
         {
             throw new InvalidOperationException(
@@ -151,7 +153,7 @@ internal sealed class BedrockAgentCoreLlmClient(IBedrockAgentCoreInvoker invoker
                     : LlmCompletionStatus.Completed,
             FinishReason = MapFinishReason(stopReason),
             IncompleteReason = incomplete ? stopReason : null,
-            Usage = usage,
+            Usage = usage.Settle(),
             StructuredOutput = validation,
             Diagnostics = new LlmProviderDiagnostics(200, null, null)
         });

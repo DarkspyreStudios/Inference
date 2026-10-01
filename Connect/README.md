@@ -1580,6 +1580,17 @@ must resume or be disposed before retirement completes; it cannot resume host or
 retirement starts. Late provider and tool results are not delivered. The injected invoker remains
 borrowed. Local retirement does not claim a remote Harness interrupt or shutdown.
 
+AgentCore chat and native sessions replace usage observations within each actual Harness invocation.
+Chat emits changed known counts before its completion; its final usage can be null. Its running event
+cannot represent wholly unavailable usage. A later known observation after unavailable metadata is
+emitted again. Native observations share one request ID per invocation and can report unknown usage.
+Each native invocation emits authoritative settled usage even when interim observations are disabled.
+Turn totals sum distinct completed invocations, including host-tool follow-ups, without adding repeated
+metadata. Absent and overflowing counts remain unknown. Input, output and total counts retain the
+provider values independently. Reasoning counts are unavailable. Cache-read/write normalization is
+unqualified, so the normalized cache subsets remain unavailable; no cache counts are added to input
+or total usage. Usage observations do not establish billing or remote-session cumulative totals.
+
 Host tools become AgentCore inline functions. When the Harness stops with `tool_use`, Darkspyre.Inference.Connect.LLM
 captures the streamed arguments, invokes `LlmAgentToolHandler`, and performs the required follow-up
 with both the assistant `toolUse` and user `toolResult` messages on the same runtime session. Tool
