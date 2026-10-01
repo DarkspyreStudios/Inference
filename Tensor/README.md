@@ -294,8 +294,18 @@ presence and successful initialization are separate observations. `ActualBackend
 successfully initialized runtime, not a suggested selection. Prerequisite checks leave actual
 backend, initialization and loaded-candidate identity unknown. Diagnostics preserve candidate
 order and report phase, safe code/message and possible surviving native state. The settings manager
-rejects a result for another operation, implementation or requested backend. Restart-required and
+rejects a result for another operation, implementation, requested backend or target RID. RID matching
+is exact and ordinal. Each settings draft reserves its own backend checks. Only the latest check
+can publish evidence, and every accepted draft edit invalidates outstanding checks, including an
+edit back to the original value. A superseded valid result returns `Unavailable` without replacing
+current evidence. Cancellation and source errors retain the manager's existing result semantics;
+they do not allow an older check to publish. Separate drafts do not fence each other. Restart-required and
 unsupported results are not retryable. No observation guarantees future model allocation.
+
+The controlled collectible settings test loads the real registry, Qwen provider, Tensor settings
+and Common identities in one foreign generation. It settles injected checks and a settings save,
+round-trips saved changes through owned metadata, then releases the graph and verifies collection.
+This test does not initialize a native runtime or qualify an active model/session generation.
 
 Qwen and Supra now load the definition selected by `LoadAsync(key)`, rather than requiring the
 built-in key. Register complete, immutable definitions in the same manager used by the engine.

@@ -36,6 +36,9 @@ public sealed class TensorSettings : InferenceSettings<TensorSetupChanges>
     private TensorModelKey? _model;
     private TensorBackendKind _backend;
     private TensorModelObservation? _instanceObservation;
+    private readonly object _backendCheckGate = new();
+    private long _backendCheckRevision;
+    private TensorBackendAvailability? _backendAvailability;
 
     internal TensorSettings(InferenceSetupDefinition definition, SetupConfigurationIdentity identity,
         IReadOnlyList<TensorModelPackDefinition> models, TensorSetupConfiguration? existing, bool hasBackendProbe,
@@ -71,7 +74,30 @@ public sealed class TensorSettings : InferenceSettings<TensorSetupChanges>
     internal TensorBackendKind Backend => _backend;
     internal string Repository => _repository;
     internal string SourceRevision => _sourceRevision;
-    internal TensorBackendAvailability? BackendAvailability { get; set; }
+    internal TensorBackendAvailability? BackendAvailability
+    {
+        get { lock (_backendCheckGate) { return _backendAvailability; } }
+    }
+
+    internal (long Revision, TensorBackendProbeRequest Request) ReserveBackendCheck()
+    {
+        lock (_backendCheckGate)
+        {
+            return (++_backendCheckRevision, new(Guid.NewGuid(), Definition.Implementation.Id,
+                _backend, RuntimeInformation.RuntimeIdentifier));
+        }
+    }
+
+    internal bool PublishBackendCheck(long revision, TensorBackendAvailability observation, CancellationToken token)
+    {
+        lock (_backendCheckGate)
+        {
+            token.ThrowIfCancellationRequested();
+            if (revision != _backendCheckRevision) return false;
+            _backendAvailability = observation;
+            return true;
+        }
+    }
     internal TensorModelPackDefinition? Resolved { get; private set; }
     internal TensorModelEvaluation? Evaluation { get; private set; }
 
@@ -122,7 +148,7 @@ public sealed class TensorSettings : InferenceSettings<TensorSetupChanges>
                     pathSelection: _locationKind == "folder" ? SetupPathSelectionKind.Folder : SetupPathSelectionKind.File),
                 new SetupUriField(new("source-url", "Artifact URL") { IsVisible = _locationKind == "url",
                     HelpText = "Required for Inspect and Import. Use a durable HTTPS URL. The host supplies credentials separately." }, _sourceUrl, null,
-                    value => Edit(() => { _sourceUrl = value; ClearResolution(); })),
+                    value => EditDraft(() => { _sourceUrl = value; ClearResolution(); })),
                 new SetupTextField(new("folder-primary", "Primary artifact filename") { IsVisible = _locationKind == "folder",
                     HelpText = "Optional when exactly one model matches this family's format; required for ambiguous folders or split GGUF." },
                     _variant, string.Empty, value => EditSource("variant", value)),
@@ -133,7 +159,7 @@ public sealed class TensorSettings : InferenceSettings<TensorSetupChanges>
                     HelpText = "Optional before Import. Import computes a content hash but does not authenticate its publisher." },
                     _sha256, string.Empty, value => EditSource("source-sha256", value)),
                 new SetupIntegerField(new("source-length", "Expected primary length (bytes)") { IsVisible = _locationKind != "repository" },
-                    _length, null, value => Edit(() => { _length = value; ClearResolution(); }), minimum: 0)
+                    _length, null, value => EditDraft(() => { _length = value; ClearResolution(); }), minimum: 0)
             ]));
             if (_requirements.Count > 1)
                 sections.Add(new("companions", "Required companions", _requirements.Skip(1).Select(requirement => (SetupField)
@@ -168,12 +194,12 @@ public sealed class TensorSettings : InferenceSettings<TensorSetupChanges>
                         [new SetupTextField(new("companion-" + item.Key, "Shard path or URL"), item.Value, string.Empty,
                             value => EditSource("companion-" + item.Key, value), pathSelection: SetupPathSelectionKind.File)])).ToArray(),
                     () => _companions.Keys.Count(key => key.StartsWith(prefix, StringComparison.Ordinal)) >= 255
-                        ? new(SetupEditState.Invalid, [new("artifact-limit", "At most 255 additional shards can be selected.")]) : Edit(() =>
+                        ? new(SetupEditState.Invalid, [new("artifact-limit", "At most 255 additional shards can be selected.")]) : EditDraft(() =>
                     {
                         int index = Enumerable.Range(2, 255).First(index => !_companions.ContainsKey(prefix + index));
                         _companions.Add(prefix + index, string.Empty); ClearResolution();
                     }),
-                    id => Edit(() => { if (id.StartsWith(prefix, StringComparison.Ordinal)) _companions.Remove(id); ClearResolution(); }))
+                    id => EditDraft(() => { if (id.StartsWith(prefix, StringComparison.Ordinal)) _companions.Remove(id); ClearResolution(); }))
                 ]));
         }
         return [new("model", "Model and backend", "Select a supported pack. Browsing and saving never install or load weights.", sections)];
@@ -201,7 +227,7 @@ public sealed class TensorSettings : InferenceSettings<TensorSetupChanges>
             || field == "local-path" && value.Length != 0 && !Path.IsPathFullyQualified(value)
             || field.StartsWith("companion-", StringComparison.Ordinal) && value.Length != 0 && ParseLocation(value) is null)
         { return new(SetupEditState.Invalid, [new("source-selection", "Enter a valid location or integrity value.", field)]); }
-        return Edit(() =>
+        return EditDraft(() =>
         {
             switch (field)
             {
@@ -245,7 +271,7 @@ public sealed class TensorSettings : InferenceSettings<TensorSetupChanges>
     {
         TensorModelPackDefinition? selected = Choices().FirstOrDefault(model => model.Key.ToString() == value);
         return selected is null ? new(SetupEditState.Invalid, [new("model-unsupported", "Select a supported pack.", "model")])
-            : Edit(() =>
+            : EditDraft(() =>
             {
                 _model = selected.Key;
                 if (selected.Key != Resolved?.Key)
@@ -255,7 +281,7 @@ public sealed class TensorSettings : InferenceSettings<TensorSetupChanges>
 
     private SetupEditResult SelectBackend(string value) =>
         Enum.TryParse(value, out TensorBackendKind backend) && Backends().Contains(backend)
-            ? Edit(() => { _backend = backend; if (HasLocation) { ClearResolution(); } })
+            ? EditDraft(() => { _backend = backend; if (HasLocation) { ClearResolution(); } })
             : new(SetupEditState.Invalid, [new("backend-unsupported", "Select a supported backend.", "backend")]);
 
     private IEnumerable<TensorBackendKind> Backends() => new[] { TensorBackendKind.Auto }.Concat(
@@ -312,10 +338,19 @@ public sealed class TensorSettings : InferenceSettings<TensorSetupChanges>
     }, _backend, string.IsNullOrWhiteSpace(_license) ? null : _license, _length, _sha256.Length == 0 ? null : _sha256,
         _companions.Where(item => item.Value.Length != 0).Select(item => new TensorArtifactLocation(item.Key, ParseLocation(item.Value)!)).ToArray());
 
+    private SetupEditResult EditDraft(Action change)
+    {
+        lock (_backendCheckGate) { return Edit(change); }
+    }
+
     protected override void OnDraftEdited()
     {
         base.OnDraftEdited();
-        BackendAvailability = null;
+        lock (_backendCheckGate)
+        {
+            ++_backendCheckRevision;
+            _backendAvailability = null;
+        }
         Status = Status with { Installed = SetupObservation.Unknown, Verified = SetupObservation.Unknown, Loaded = SetupObservation.Unknown, Ready = SetupObservation.Unknown };
         // Loaded and Ready follow the last engine observation against the new selection.
         if (_instanceObservation is not null) { InstanceObservation = _instanceObservation; }
@@ -502,14 +537,14 @@ public sealed class TensorSettingsManager : InferenceSettingsManager<TensorSetti
 
     private async Task<SetupActionResult> CheckBackendAsync(TensorSettings settings, CancellationToken token)
     {
-        var request = new TensorBackendProbeRequest(Guid.NewGuid(), _definition.Implementation.Id,
-            settings.Backend, RuntimeInformation.RuntimeIdentifier);
+        (long revision, TensorBackendProbeRequest request) = settings.ReserveBackendCheck();
         TensorBackendAvailability observation = await _backendProbe!.CheckAsync(request, token).ConfigureAwait(false);
         token.ThrowIfCancellationRequested();
         if (observation.OperationId != request.OperationId || observation.ImplementationId != request.ImplementationId
-            || observation.RequestedBackend != request.RequestedBackend)
+            || observation.RequestedBackend != request.RequestedBackend
+            || !string.Equals(observation.TargetRid, request.TargetRid, StringComparison.Ordinal))
             return new(SetupActionState.Failed, [new("backend-probe-mismatch", "The probe returned an observation for another request.", "backend")]);
-        settings.BackendAvailability = observation;
+        if (!settings.PublishBackendCheck(revision, observation, token)) return new(SetupActionState.Unavailable);
         return observation.IsAvailable ? SetupActionResult.Completed : new(SetupActionState.Failed,
             [new(observation.State switch
             {

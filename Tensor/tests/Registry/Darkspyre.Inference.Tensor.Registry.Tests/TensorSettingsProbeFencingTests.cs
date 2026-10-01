@@ -1,5 +1,10 @@
+using System.Reflection;
+using System.Runtime.CompilerServices;
+using System.Runtime.Loader;
+using System.Text.Json;
 using Darkspyre.Inference.Common.Setup;
 using Darkspyre.Inference.Tensor.Common;
+using Darkspyre.Inference.Tensor.LLM.Qwen;
 
 namespace Darkspyre.Inference.Tensor.Registry.Tests;
 
@@ -87,6 +92,51 @@ public sealed class TensorSettingsProbeFencingTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
+    public async Task LatestCancellationOrFailurePreservesEstablishedEvidence(bool cancel)
+    {
+        var fixture = new Fixture();
+        TensorSettings settings = await fixture.OpenAsync();
+        Task<SetupActionResult> initial = fixture.Manager.RunAsync(settings, "backend-check");
+        fixture.Probe.Complete(0, true, "established evidence");
+        Assert.Equal(SetupActionState.Completed, (await initial).State);
+        Task<SetupActionResult> older = fixture.Manager.RunAsync(settings, "backend-check");
+        using var cancellation = new CancellationTokenSource();
+        Task<SetupActionResult> latest = fixture.Manager.RunAsync(settings, "backend-check", cancellationToken: cancellation.Token);
+        if (cancel)
+        {
+            cancellation.Cancel();
+            fixture.Probe.Complete(2, true, "cancelled evidence");
+            Assert.Equal(SetupActionState.Cancelled, (await latest).State);
+        }
+        else
+        {
+            fixture.Probe.Fail(2);
+            AssertSafeFailure(await latest);
+        }
+        fixture.Probe.Complete(1, false, "older evidence");
+        Assert.Equal(SetupActionState.Unavailable, (await older).State);
+        Assert.Equal("established evidence", Observation(settings));
+        fixture.AssertNoEffects();
+    }
+
+    [Fact]
+    public async Task RejectedEditDoesNotInvalidateAnOutstandingCheck()
+    {
+        var fixture = new Fixture();
+        TensorSettings settings = await fixture.OpenAsync();
+        Task<SetupActionResult> pending = fixture.Manager.RunAsync(settings, "backend-check");
+        SetupChoiceField field = settings.Steps.SelectMany(step => step.Sections).SelectMany(section => section.Fields)
+            .OfType<SetupChoiceField>().Single(field => field.Description.Id == "backend");
+        Assert.Equal(SetupEditState.Invalid, field.SetValue(TensorBackendKind.Cuda.ToString()).State);
+        fixture.Probe.Complete(0, true, "valid evidence");
+        Assert.Equal(SetupActionState.Completed, (await pending).State);
+        Assert.Equal("valid evidence", Observation(settings));
+        fixture.AssertNoEffects();
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
     public async Task SourceFailureKeepsSafeExistingResultAndNewerEvidence(bool latestFails)
     {
         var fixture = new Fixture();
@@ -127,6 +177,82 @@ public sealed class TensorSettingsProbeFencingTests
         Assert.False(result.IsRetryable);
         Assert.Contains("Unknown", Observation(settings), StringComparison.Ordinal);
         fixture.AssertNoEffects();
+    }
+
+    [Fact]
+    public void ActualForeignRegistrySettingsProbeSaveAndMetadataGraphRetires()
+    {
+        WeakReference weak = ExerciseForeignGeneration();
+        for (int attempt = 0; weak.IsAlive && attempt < 20; ++attempt)
+        {
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+            GC.Collect();
+            Thread.Sleep(10);
+        }
+        Assert.False(weak.IsAlive, "The settled foreign registry/provider/settings/owned metadata graph remains rooted.");
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static WeakReference ExerciseForeignGeneration()
+    {
+        string path = typeof(TensorSettingsProbeFencingTests).Assembly.Location;
+        var generation = new SettingsGeneration(Path.GetDirectoryName(path)!);
+        var weak = new WeakReference(generation);
+        try
+        {
+            Assembly fixture = generation.LoadFromAssemblyPath(path);
+            Type caller = fixture.GetType(typeof(TensorSettingsProbeFencingTests).FullName!, throwOnError: true)!;
+            caller.GetMethod(nameof(RunForeignSettingsPath), BindingFlags.Static | BindingFlags.NonPublic)!.Invoke(null, null);
+            Assert.Equal(0, generation.NativeRequests);
+        }
+        finally { generation.Unload(); }
+        return weak;
+    }
+
+    private static void RunForeignSettingsPath()
+    {
+        AssemblyLoadContext generation = AssemblyLoadContext.GetLoadContext(typeof(TensorSettingsProbeFencingTests).Assembly)!;
+        Assert.True(generation.IsCollectible);
+        Assert.NotSame(AssemblyLoadContext.Default, generation);
+        var registry = new TensorEngineRegistry([new QwenEngineProvider()]);
+        Assert.True(registry.TryGetProvider("darkspyre.tensor.qwen", out ITensorEngineProvider? provider));
+        var probe = new ControlledProbe();
+        var packs = new RecordingPacks();
+        var target = new RecordingTarget();
+        TensorModelPackDefinition pack = TensorLlmModels.Qwen3FourBillionQ4Km;
+        TensorSettingsManager manager = provider.CreateSettingsManager(target, packs, [pack], backendProbe: probe);
+        TensorSettings settings = manager.OpenAsync(new(SetupChangeIntent.Create, "foreign-entry", null)).GetAwaiter().GetResult();
+        foreach (Assembly owned in new[] { registry.GetType().Assembly, provider.GetType().Assembly, manager.GetType().Assembly,
+            settings.GetType().Assembly, settings.Identity.GetType().Assembly, packs.GetType().Assembly,
+            TensorJson.SetupChanges.Type.Assembly, TensorJson.SetupChanges.Options.TypeInfoResolver!.GetType().Assembly })
+            Assert.Same(generation, AssemblyLoadContext.GetLoadContext(owned));
+
+        Assert.Empty(packs.Calls);
+        Task<SetupActionResult> oldCheck = manager.RunAsync(settings, "backend-check");
+        Task<SetupActionResult> latestCheck = manager.RunAsync(settings, "backend-check");
+        probe.Complete(1, true, "foreign latest evidence");
+        Assert.Equal(SetupActionState.Completed, latestCheck.GetAwaiter().GetResult().State);
+        probe.Complete(0, false, "foreign stale evidence");
+        Assert.Equal(SetupActionState.Unavailable, oldCheck.GetAwaiter().GetResult().State);
+        Assert.Equal("foreign latest evidence", Observation(settings));
+
+        SetupChoiceField model = settings.Steps.SelectMany(step => step.Sections).SelectMany(section => section.Fields)
+            .OfType<SetupChoiceField>().Single(field => field.Description.Id == "model");
+        Assert.Equal(SetupEditState.Applied, model.SetValue(pack.Key.ToString()).State);
+        Assert.Contains("Unknown", Observation(settings), StringComparison.Ordinal);
+        SelectBackend(settings, TensorBackendKind.Cpu);
+        Assert.Equal(SetupCommitState.Committed, manager.SaveAsync(settings).GetAwaiter().GetResult().State);
+        TensorSetupChanges changes = target.Changes!;
+        Assert.Same(generation, AssemblyLoadContext.GetLoadContext(changes.Identity.GetType().Assembly));
+        string json = JsonSerializer.Serialize(changes, TensorJson.SetupChanges);
+        TensorSetupChanges restored = JsonSerializer.Deserialize(json, TensorJson.SetupChanges)!;
+        Assert.Equal(json, JsonSerializer.Serialize(restored, TensorJson.SetupChanges));
+        Assert.Equal("foreign-entry", restored.Identity.Id);
+        Assert.Equal(pack.Key, restored.Configuration.Model);
+        Assert.Equal(TensorBackendKind.Cpu, restored.Configuration.Backend);
+        Assert.Same(generation, AssemblyLoadContext.GetLoadContext(restored.Identity.GetType().Assembly));
+        Assert.Empty(packs.Calls);
     }
 
     private static void AssertSafeFailure(SetupActionResult result)
@@ -176,11 +302,29 @@ public sealed class TensorSettingsProbeFencingTests
         public void Complete(int index, bool available, string reason, string? rid = null)
         {
             var call = _calls[index];
-            call.Completion.SetResult(TensorBackendAvailability.Observe(new(call.Request.OperationId, call.Request.ImplementationId,
-                call.Request.RequestedBackend, rid ?? call.Request.TargetRid),
-                available ? TensorBackendAvailabilityState.Available : TensorBackendAvailabilityState.Unavailable, reason));
+            call.Completion.SetResult(new(call.Request.OperationId, call.Request.ImplementationId, call.Request.RequestedBackend,
+                available ? TensorBackendAvailabilityState.Available : TensorBackendAvailabilityState.Unavailable,
+                reason, DateTimeOffset.UnixEpoch, rid ?? call.Request.TargetRid));
         }
 
         public void Fail(int index) => _calls[index].Completion.SetException(new IOException("secret endpoint"));
+    }
+
+    private sealed class SettingsGeneration(string directory) : AssemblyLoadContext(isCollectible: true)
+    {
+        public int NativeRequests { get; private set; }
+
+        protected override Assembly? Load(AssemblyName assemblyName)
+        {
+            if (assemblyName.Name?.StartsWith("Darkspyre.Inference.", StringComparison.Ordinal) != true) return null;
+            string path = Path.Combine(directory, assemblyName.Name + ".dll");
+            return File.Exists(path) ? LoadFromAssemblyPath(path) : null;
+        }
+
+        protected override nint LoadUnmanagedDll(string unmanagedDllName)
+        {
+            ++NativeRequests;
+            throw new DllNotFoundException("This controlled settings generation cannot execute native libraries.");
+        }
     }
 }
