@@ -1022,6 +1022,37 @@ remain separate; ComfyUI does not advertise a built-in workflow catalog.
 The shared [`XaiFamilyBinding` contract](docs/media-bindings.md) uses explicit selection and the
 existing credential-access owner. It does not register or qualify an xAI Image transport.
 
+## Video contracts
+
+`Darkspyre.Inference.Connect.Video` supplies `VideoConnection`, `IVideoTransport`,
+`VideoProviderService.Bind(connection, xai, resources)` and the five-operation Common
+`IVideoInference` facade. Capability lookup, submit, one-poll lookup and owned download
+remain explicit calls. Materialization streams actual downloaded bytes into the borrowed
+caller resource store and atomically commits content with session selection. It retains
+actual nullable MIME, duration and expiry instead of inferring them from request policy.
+Returned download streams hold their operation lease until closure. Facade disposal closes
+owned downloads, fences new operations and drains admitted work before detaching borrowed
+transports, bindings and resource access. Callers can dispose the bound facade through
+`IDisposable` or `IAsyncDisposable`.
+
+`XaiVideoOptions` is the fixed Video-owned subtype for Files-owned storage controls, signed
+upload destinations and explicit user data. Common metadata refuses these provider options;
+`ConnectVideoJson` owns their complete generation/edit/extension and scoped receipt graph.
+Serialized job/output scope is data, not proof of authority. Each implemented transport owns
+receipt validation and download-origin authorization before effects. Lookup and download receive
+the same borrowed binding for adapter-owned validation before acquisition or refresh.
+Materialization performs one download, not a second credential acquisition. Extension requests
+refuse an explicit `User` instead of dropping it. New settings carry an explicit xAI connection selection;
+rendering, opening and saving do not acquire credentials. Only the explicit capability action
+uses the supplied borrowed binding factory. Header changes use the typed protected commit target.
+The existing LLM header parser rejects reserved or malformed explicit and acquired-snapshot
+headers before credential refresh. The bound facade copies source bytes at operation admission;
+the shared `BinaryMediaSource` data constructor still borrows its input.
+
+`AddVideoConnect` registers the family service only. No xAI Video transport is registered, so
+binding or opening settings for that unimplemented transport fails as unsupported. The data and
+SDK contracts do not establish provider availability, wire compatibility or download-origin safety.
+
 ## Host-executed tools
 
 For complete, compile-checked implementations for every supported provider, including connection
