@@ -1572,6 +1572,14 @@ runtime session ID, and `ResumeSessionAsync` continues an existing ID. AgentCore
 portable fork, steer, remote interrupt, compaction, or non-persistent session operations, so those
 methods fail explicitly. Canceling `RunTurnAsync` cancels the local streaming request.
 
+Direct AgentCore session disposal fences new operational calls and cancels its active SDK request
+and host tool callback. Concurrent disposal callers share the same retirement result and failures.
+Retirement closes the observation feed and waits for active operations before releasing the turn gate.
+An ignoring SDK reader or callback keeps retirement pending until it returns. A paused turn iterator
+must resume or be disposed before retirement completes; it cannot resume host or SDK effects after
+retirement starts. Late provider and tool results are not delivered. The injected invoker remains
+borrowed. Local retirement does not claim a remote Harness interrupt or shutdown.
+
 Host tools become AgentCore inline functions. When the Harness stops with `tool_use`, Darkspyre.Inference.Connect.LLM
 captures the streamed arguments, invokes `LlmAgentToolHandler`, and performs the required follow-up
 with both the assistant `toolUse` and user `toolResult` messages on the same runtime session. Tool
