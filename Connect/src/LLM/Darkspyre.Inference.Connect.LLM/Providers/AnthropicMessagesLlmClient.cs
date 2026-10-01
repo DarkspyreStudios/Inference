@@ -159,6 +159,7 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
             httpRequest,
             HttpCompletionOption.ResponseHeadersRead,
             cancellationToken);
+        if (ObserveAccountUsage(response) is { } observed) { yield return new AccountUsageObservedEvent(observed); }
         await ProviderHttp.ThrowIfUnsuccessfulAsync(
             response,
             Transport,
@@ -370,6 +371,9 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
             lastEvent ?? string.Empty,
             credential);
     }
+
+    protected virtual LlmAccountUsageSnapshot? ObserveAccountUsage(HttpResponseMessage response) =>
+        AnthropicRateLimitHeaders.Parse(response.Headers, DateTimeOffset.UtcNow);
 
     /// <summary>Maps a response that arrived as one Message object.</summary>
     private List<LlmStreamEvent> ReadCompleteResponse(

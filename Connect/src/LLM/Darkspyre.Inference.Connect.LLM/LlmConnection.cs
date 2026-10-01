@@ -11,6 +11,7 @@ public sealed record LlmConnection
     // Resolved by the selected adapter for one operation. Never serialized or supplied by a host.
     internal Internal.ILlmContinuationCodec? ContinuationCodec { get; init; }
     internal string? ResolvedContinuationScope { get; init; }
+    internal LlmAccountUsageObservations.Binding? AccountUsageObservationBinding { get; init; }
 
     // The connection's model list from LlmModelListCache, published by the service for one operation.
     // Never serialized or supplied by a host.

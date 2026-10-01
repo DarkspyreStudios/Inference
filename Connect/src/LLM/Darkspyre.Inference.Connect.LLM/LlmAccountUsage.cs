@@ -8,9 +8,22 @@ public enum LlmQuotaState
     Exhausted
 }
 
+/// <summary>Evidence attached to one passively observed account measurement.</summary>
+public sealed record LlmAccountUsageObservation
+{
+    public required DateTimeOffset ObservedAt { get; init; }
+    public required string Source { get; init; }
+    public DateTimeOffset? ExpiresAt { get; init; }
+    public decimal? RawUtilization { get; init; }
+    public string? UtilizationUnit { get; init; }
+    public string? RawReset { get; init; }
+    public string? ResetUnit { get; init; }
+}
+
 /// <summary>A rolling, calendar, model, or provider-defined quota window.</summary>
 public sealed record LlmQuotaWindow
 {
+    public LlmAccountUsageObservation? Observation { get; init; }
     /// <summary>Stable identifier within this provider's account-usage result.</summary>
     public required string Id { get; init; }
 
@@ -47,6 +60,7 @@ public sealed record LlmQuotaWindow
 /// <summary>A provider credit balance associated with an authenticated account.</summary>
 public sealed record LlmCreditBalance
 {
+    public LlmAccountUsageObservation? Observation { get; init; }
     public required string Id { get; init; }
 
     public string? DisplayName { get; init; }
@@ -57,7 +71,8 @@ public sealed record LlmCreditBalance
 
     public bool? HasCredits { get; init; }
 
-    public bool IsUnlimited { get; init; }
+    /// <summary>Null when the provider does not report whether the balance is unlimited.</summary>
+    public bool? IsUnlimited { get; init; }
 
     public DateTimeOffset? ExpiresAt { get; init; }
 

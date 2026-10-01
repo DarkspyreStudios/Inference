@@ -382,6 +382,10 @@ read the same list, and a failed listing is not kept. Common's `ILlmInference` c
 `ListModelsAsync` may answer from a kept list, and `RefreshModelsAsync` lists again. A service built by
 hand without the shared cache keeps its own.
 
+`AddLlmConnect` also registers one disposable `LlmAccountUsageObservations` for its owning service
+provider. That provider owns one dependency generation, not an application-global store shared across
+reloads. Chat and native-agent facades in that provider share the observation store.
+
 `LlmProviderService` and `LlmModelListCache` implement `IDisposable` and `IAsyncDisposable`. Facade
 retirement fences new calls, cancels active calls and waits for them to leave. It retires a privately
 created cache, but not an injected shared cache. Clients, authenticators and the connection source
@@ -1231,7 +1235,41 @@ The snapshot separates proportional or absolute quota windows, credit balances, 
 metrics. Reset times are UTC `DateTimeOffset` values; `IsApproximate` identifies estimates. A CLI may
 also supply a sanitized `Summary` for display only—hosts must not parse that text as a stable contract.
 Credentials, account email, and raw protocol responses are never included. Codex, Claude subscription,
-and Antigravity expose this capability; Anthropic API-key connections and other transports do not.
+Antigravity and compatible connections whose endpoint host is exactly `openrouter.ai` expose queried
+usage. OpenRouter reads the authenticated key's `/key` report, not the management-only account balance.
+Other compatible endpoints reject account-usage overrides that claim this operation. A missing
+`IsUnlimited` value is null, distinct from an explicit false.
+
+`GetObservedAccountUsageAsync(connectionId)` reads passive provider evidence without a provider call.
+It returns null until that connection identity reports a quota. OpenAI Responses and compatible Chat
+Completions read rate-limit headers, Anthropic Messages reads its rate-limit headers, Codex reads quota
+headers, and both Claude CLI lanes record `rate_limit_event`. HTTP observations precede status handling,
+including failed responses, and cover streaming and complete response paths. Vertex Claude does not
+inherit Anthropic account observations. These measurements are separate from generation-token usage
+and are not public stream events.
+
+The store merges each reported bucket by its own observation time. Each observed quota or credit
+retains `Observation.ObservedAt` and `Source`; reset and expiry stay unknown unless reported. Raw Claude
+utilization uses a fraction and its reset uses Unix seconds. Codex raw utilization uses percent.
+Anthropic token remaining counts are approximate. Codex observed IDs match queried meter/window IDs.
+Connection version, provider or account-scope replacement clears prior observations and fences late
+results from the old binding. A generation-owned reservation is taken before each chat, polling or
+native-session host resolution: an older asynchronous completion cannot replace a newer identity,
+while late resolutions of the same identity retain valid in-flight bindings. Host versions remain
+opaque; the store does not compare their numeric or lexical order. After an OAuth credential save,
+chat confirms the persisted provider/account scope and exact refreshed credential before attaching
+response evidence to its persisted version. Concurrent replacement or deletion drops that response's
+observation without changing generation behavior or clearing a newer bucket. A failed confirmation
+read also drops evidence; cancellation still stops the operation. Confirmation and polling
+participate in facade cancellation and retirement. The store does not invent fresh balances when a
+reset passes.
+
+Standalone composition passes the same `LlmAccountUsageObservations` to the `LlmProviderService` and
+`LlmAgentProviderService` constructors. Their injected store remains borrowed; its generation owner
+disposes it after the facades retire. A facade without an injected store owns a private store and
+disposes it on retirement; that store is not shared with a separately constructed native-agent facade.
+Store disposal clears measurements and ignores later emissions. `ConnectLlmJson.AccountUsageSnapshot`
+supplies generation-local JSON metadata for the closed result and nullable provenance graph.
 
 ## Direct ChatGPT subscription transport and managed agents
 
@@ -1441,6 +1479,10 @@ Tool calls return only with `RequiresAction`. The stop reasons `max_tokens` and
 `model_context_window_exceeded` report `Incomplete`, `content_filtered` and `guardrail_intervened` report
 `Refused`, and `malformed_model_output` and `malformed_tool_use` report `Failed` with no tool calls and no
 continuation state. An unknown or missing stop reason reports `Unknown`.
+
+A `tool_use` reply with null, scalar or array tool input throws `LlmProviderException` in both
+Converse modes. Non-streaming mapping rejects it before publishing response events. Empty object
+input remains valid, and provider-reported malformed stop reasons keep their `Failed` result.
 
 Converse model listing returns the region's inference profiles and its foundation models. It omits a
 foundation model whose only inference type is `PROVISIONED`, such as `amazon.nova-lite-v1:0:300k`.

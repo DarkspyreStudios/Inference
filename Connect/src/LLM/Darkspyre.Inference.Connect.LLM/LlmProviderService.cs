@@ -17,6 +17,8 @@ public sealed class LlmProviderService : IDisposable, IAsyncDisposable
     private readonly IReadOnlyDictionary<LlmTransport, ILlmSetupEnvironment> _setupEnvironments;
     private readonly LlmModelListCache _modelLists;
     private readonly bool _ownsModelLists;
+    private readonly LlmAccountUsageObservations _observations;
+    private readonly bool _ownsObservations;
     private readonly LlmOperationLifetime _lifetime = new();
     private readonly Lock _disposeGate = new();
     private Task? _disposal;
@@ -33,7 +35,8 @@ public sealed class LlmProviderService : IDisposable, IAsyncDisposable
         IEnumerable<ILlmClient> clients,
         IEnumerable<ILlmAuthenticator> authenticators,
         IEnumerable<ILlmSetupEnvironment>? setupEnvironments = null,
-        LlmModelListCache? modelLists = null)
+        LlmModelListCache? modelLists = null,
+        LlmAccountUsageObservations? observations = null)
     {
         ArgumentNullException.ThrowIfNull(connections);
         ArgumentNullException.ThrowIfNull(clients);
@@ -42,6 +45,8 @@ public sealed class LlmProviderService : IDisposable, IAsyncDisposable
         // A service built without the application's shared cache keeps its own lists.
         _modelLists = modelLists ?? new LlmModelListCache();
         _ownsModelLists = modelLists is null;
+        _observations = observations ?? new();
+        _ownsObservations = observations is null;
         ILlmClient[] clientArray = [.. clients];
         IGrouping<LlmTransport, ILlmClient>? duplicate = clientArray
             .GroupBy(client => client.Transport)
@@ -345,11 +350,13 @@ public sealed class LlmProviderService : IDisposable, IAsyncDisposable
     {
         using var operation = _lifetime.Enter(cancellationToken);
         cancellationToken = operation.Token;
+        LlmAccountUsageObservations.Reservation observationReservation = _observations.Reserve(connectionId);
         LlmConnection connection = await LlmConnectionResolver.ResolveAsync(
             _connections,
             connectionId,
             cancellationToken);
         ILlmClient client = ClientFor(connection.Transport);
+        string? resolvedCredential = connection.Credential;
         if (client is not IStreamingCredentialRefreshPolicy refreshPolicy
             || refreshPolicy.RequiresFreshOAuthCredentialForStreaming(connection))
         {
@@ -357,6 +364,30 @@ public sealed class LlmProviderService : IDisposable, IAsyncDisposable
                 connectionId,
                 connection,
                 cancellationToken);
+        }
+        LlmAccountUsageObservations.Binding? observationBinding;
+        if (connection.Credential == resolvedCredential)
+        {
+            observationBinding = observationReservation.Bind(connection);
+        }
+        else
+        {
+            observationReservation = _observations.Reserve(connectionId);
+            LlmConnection? persisted = null;
+            try
+            {
+                persisted = await _connections.GetConnectionAsync(connectionId, cancellationToken);
+            }
+            catch (Exception error) when (error is not OperationCanceledException)
+            {
+                // Failed observation confirmation drops evidence, not an otherwise valid generation.
+                cancellationToken.ThrowIfCancellationRequested();
+            }
+            cancellationToken.ThrowIfCancellationRequested();
+            observationBinding = persisted is not null && !string.IsNullOrWhiteSpace(persisted.Version)
+                && persisted.Transport == connection.Transport && persisted.Credential == connection.Credential
+                && ProviderContinuationStateCodec.Scope(persisted) == ProviderContinuationStateCodec.Scope(connection)
+                ? observationReservation.Bind(persisted) : null;
         }
         if (client is ILlmConnectionPreparation preparation)
         {
@@ -381,6 +412,8 @@ public sealed class LlmProviderService : IDisposable, IAsyncDisposable
                            request,
                            cancellationToken))
         {
+            if (streamEvent is AccountUsageObservedEvent observed)
+            { observationBinding?.Record(observed.Snapshot); continue; }
             yield return streamEvent is LlmChatCompletionEvent completion
                 ? new LlmChatCompletionEvent(SanitizeDiagnostics(completion.Result, connection) with
                 {
@@ -578,6 +611,17 @@ public sealed class LlmProviderService : IDisposable, IAsyncDisposable
         }
         return await _modelLists.RefreshAsync(connectionId, connection.Version + connection.ResolvedContinuationScope,
             token => client.ListModelsAsync(connection, token), cancellationToken);
+    }
+
+    /// <summary>Reads passive quota evidence without a provider call, or null when none is observed for this identity.</summary>
+    public async Task<LlmAccountUsageSnapshot?> GetObservedAccountUsageAsync(
+        string connectionId, CancellationToken cancellationToken = default)
+    {
+        using var operation = _lifetime.Enter(cancellationToken);
+        LlmAccountUsageObservations.Reservation reservation = _observations.Reserve(connectionId);
+        LlmConnection connection = await LlmConnectionResolver.ResolveAsync(_connections, connectionId, operation.Token);
+        operation.Token.ThrowIfCancellationRequested();
+        return reservation.Get(connection);
     }
 
     public async Task<LlmAccountUsageSnapshot> GetAccountUsageAsync(
@@ -833,6 +877,7 @@ public sealed class LlmProviderService : IDisposable, IAsyncDisposable
             _clients.Clear();
             _authenticators.Clear();
             _accountUsageClients.Clear();
+            if (_ownsObservations) { _observations.Dispose(); }
         }
     }
 
