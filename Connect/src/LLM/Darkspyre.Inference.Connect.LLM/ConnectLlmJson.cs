@@ -16,6 +16,9 @@ public static class ConnectLlmJson
     public static JsonTypeInfo<LlmChatMessage> ChatMessage => ConnectLlmJsonContext.Default.LlmChatMessage;
     public static JsonTypeInfo<LlmTokenization> Tokenization => ConnectLlmJsonContext.Default.LlmTokenization;
     public static JsonTypeInfo<LlmToken> Token => ConnectLlmJsonContext.Default.LlmToken;
+    public static JsonTypeInfo<LlmEmbeddingRequest> LlmEmbeddingRequest => ConnectLlmJsonContext.Default.LlmEmbeddingRequest;
+    public static JsonTypeInfo<LlmEmbeddingResult> LlmEmbeddingResult => ConnectLlmJsonContext.Default.LlmEmbeddingResult;
+    public static JsonTypeInfo<LlmEmbeddingUsage> LlmEmbeddingUsage => ConnectLlmJsonContext.Default.LlmEmbeddingUsage;
     public static JsonTypeInfo<LlmAgentContext> AgentContext => ConnectLlmJsonContext.Default.LlmAgentContext;
     public static JsonTypeInfo<LlmAgentContextEntry> AgentContextEntry => ConnectLlmJsonContext.Default.LlmAgentContextEntry;
     public static JsonTypeInfo<LlmAgentContextStatus> AgentContextStatus => ConnectLlmJsonContext.Default.LlmAgentContextStatus;
@@ -30,6 +33,9 @@ public static class ConnectLlmJson
 [JsonSerializable(typeof(LlmChatMessage))]
 [JsonSerializable(typeof(LlmTokenization))]
 [JsonSerializable(typeof(LlmToken))]
+[JsonSerializable(typeof(LlmEmbeddingRequest))]
+[JsonSerializable(typeof(LlmEmbeddingResult))]
+[JsonSerializable(typeof(LlmEmbeddingUsage))]
 [JsonSerializable(typeof(LlmAgentContext))]
 [JsonSerializable(typeof(LlmAgentContextEntry))]
 [JsonSerializable(typeof(LlmAgentContextStatus))]

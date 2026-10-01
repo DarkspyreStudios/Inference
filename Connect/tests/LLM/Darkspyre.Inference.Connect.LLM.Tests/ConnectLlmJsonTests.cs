@@ -271,6 +271,9 @@ public sealed class ConnectLlmJsonTests
         { "ChatRequest", "{\"ModelId\":\"model\",\"PromptCache\":{\"Scope\":0,\"Retention\":1},\"Messages\":[" + MessageJson + "]}" },
         { "ChatResult", "{\"Text\":\"text\",\"Status\":0,\"ContinuationState\":" + StateJson + ",\"Diagnostics\":{\"HttpStatusCode\":200}}" },
         { "ChatMessage", MessageJson },
+        { "LlmEmbeddingRequest", "{\"ModelId\":\"unknown-model\",\"Inputs\":[\"first\",\"second\"],\"Dimensions\":2,\"ProviderOptions\":{\"custom\":{\"nested\":true}}}" },
+        { "LlmEmbeddingResult", "{\"Vectors\":[[0,1],[2,3]],\"Usage\":{\"InputTokens\":0,\"TotalTokens\":null},\"Diagnostics\":{\"HttpStatusCode\":200}}" },
+        { "LlmEmbeddingUsage", "{\"InputTokens\":null,\"TotalTokens\":0}" },
         { "AgentContext", "{\"FormatVersion\":2,\"Entries\":[" + EntryJson + "]}" },
         { "AgentContextEntry", EntryJson },
         { "AgentContextStatus", "{\"ModelId\":\"model\",\"ContextRevision\":1,\"Source\":0}" },
@@ -302,8 +305,12 @@ public sealed class ConnectLlmJsonTests
         {
             Assembly connect = generation.LoadFromAssemblyPath(path);
             Assembly common = generation.LoadFromAssemblyPath(typeof(InferenceJson).Assembly.Location);
+            Assert.Equal(typeof(ConnectLlmJson).Assembly.ManifestModule.ModuleVersionId, connect.ManifestModule.ModuleVersionId);
+            Assert.Equal(typeof(InferenceJson).Assembly.ManifestModule.ModuleVersionId, common.ManifestModule.ModuleVersionId);
+            Assert.Same(generation, AssemblyLoadContext.GetLoadContext(connect));
             Assert.Same(generation, AssemblyLoadContext.GetLoadContext(common));
             Type owner = connect.GetType("Darkspyre.Inference.Connect.LLM.ConnectLlmJson", throwOnError: true)!;
+            if (family.StartsWith("LlmEmbedding", StringComparison.Ordinal)) Assert.NotNull(owner.GetProperty(family));
             JsonTypeInfo metadata;
             if (owner.GetProperty(family) is { } exported) metadata = (JsonTypeInfo)exported.GetValue(null)!;
             else

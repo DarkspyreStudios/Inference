@@ -37,7 +37,7 @@ public sealed class LlmEmbeddingProviderService : IDisposable, IAsyncDisposable
     {
         using LlmOperationLifetime.Lease operation = _lifetime.Enter(cancellationToken);
         cancellationToken = operation.Token;
-        ArgumentNullException.ThrowIfNull(request);
+        request = EmbeddingRequestData.Snapshot(request);
         if (request.Inputs.Count == 0 || request.Inputs.Any(string.IsNullOrWhiteSpace))
         {
             throw new ArgumentException("At least one non-empty embedding input is required.", nameof(request));
@@ -47,15 +47,29 @@ public sealed class LlmEmbeddingProviderService : IDisposable, IAsyncDisposable
             Connections,
             connectionId,
             cancellationToken);
-        cancellationToken.ThrowIfCancellationRequested();
+        ThrowIfRequestCanceled(cancellationToken);
+        connection = EmbeddingRequestData.Snapshot(connection);
         ILlmEmbeddingClient client = _clients.SingleOrDefault(value => value.Supports(connection.Transport))
             ?? throw new NotSupportedException(
                 $"The configured {connection.Transport} provider does not support embeddings in this client.");
+        client.ValidateRequest(connection, request);
+        ThrowIfRequestCanceled(cancellationToken);
         connection = await ConnectionAccess.RefreshAsync(connectionId, connection, cancellationToken);
-        cancellationToken.ThrowIfCancellationRequested();
+        ThrowIfRequestCanceled(cancellationToken);
         LlmEmbeddingResult result = await client.EmbedAsync(connection, request, cancellationToken);
-        cancellationToken.ThrowIfCancellationRequested();
+        ThrowIfRequestCanceled(cancellationToken);
         return result;
+    }
+
+    private void ThrowIfRequestCanceled(CancellationToken token)
+    {
+        token.ThrowIfCancellationRequested();
+        // Linked cancellation callbacks can lag behind the synchronous admission fence.
+        try { _lifetime.ThrowIfStopping(); }
+        catch (ObjectDisposedException error)
+        {
+            throw new OperationCanceledException("Embedding request was canceled by retirement.", error, token);
+        }
     }
 
     /// <summary>Fences new requests, cancels and awaits active embedding work. Supplied dependencies remain borrowed.</summary>

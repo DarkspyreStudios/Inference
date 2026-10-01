@@ -8,6 +8,9 @@ public sealed record LlmEmbeddingRequest
 
     public required IReadOnlyList<string> Inputs { get; init; }
 
+    /// <summary>Requested vector size; null preserves the model default.</summary>
+    public int? Dimensions { get; init; }
+
     public IReadOnlyDictionary<string, JsonElement> ProviderOptions { get; init; } =
         new Dictionary<string, JsonElement>(StringComparer.Ordinal);
 }

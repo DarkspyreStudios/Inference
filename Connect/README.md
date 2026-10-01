@@ -462,11 +462,22 @@ containers does not transfer that responsibility to a scoped facade.
 
 `LlmEmbeddingProviderService` implements `IDisposable` and `IAsyncDisposable`. Its registration owner
 retires the facade. Embeddings refresh OAuth through the same access implementation as chat before
-dispatch; unsupported embedding routes fail before refresh. Retirement fences new requests, cancels
+dispatch. Every `ILlmEmbeddingClient` supplies an effect-free `ValidateRequest`; the facade calls it
+before refresh, and the direct adapter validates before HTTP. `LlmEmbeddingRequest.Dimensions` is
+nullable and positive when supplied. Raw `dimensions`, `model` and `input` are reserved in both
+connection and request options. Unknown model-specific limits remain provider decisions. Requests
+snapshot inputs and JSON options before asynchronous work; connections snapshot embedding options
+and headers before refresh. OpenAI-compatible responses require one unique in-range index per input,
+finite nonempty vectors and the requested dimensions. The three embedding data types expose owned
+metadata through their exact type-name getters on `ConnectLlmJson`.
+
+Retirement fences new requests, cancels
 connection lookup and provider calls, and awaits all active requests before releasing its adapter references. Supplied adapters and the
 connection source remain borrowed and are not disposed by the facade. Caller cancellation affects
 only that request. A provider that ignores cancellation keeps retirement pending; its late result
 is rejected. Use asynchronous scope disposal while embedding requests are active.
+Post-await boundaries check the synchronous retirement fence even when a cancellation callback
+delays propagation to a request's linked token.
 
 ### Agent-session lifetime
 

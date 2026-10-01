@@ -583,6 +583,7 @@ public sealed class ConnectionAccessTests
         internal LlmConnection? LastConnection { get; private set; }
         internal bool Disposed { get; private set; }
         public bool Supports(LlmTransport transport) => transport == LlmTransport.OpenAiCodex;
+        public void ValidateRequest(LlmConnection connection, LlmEmbeddingRequest request) => Assert.NotEmpty(request.Inputs);
         public Task<LlmEmbeddingResult> EmbedAsync(LlmConnection connection, LlmEmbeddingRequest request, CancellationToken cancellationToken = default)
         { LastConnection = connection; return Task.FromResult(new LlmEmbeddingResult { Vectors = [new float[] { 1 }], Diagnostics = new(200, null, null) }); }
         public void Dispose() => Disposed = true;
