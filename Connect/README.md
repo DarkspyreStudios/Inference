@@ -1093,6 +1093,29 @@ image/document content blocks for prompt attachments. Direct Codex sends prompt 
 tool-output binaries inline through Responses, with no CLI staging directory. The caller supplies kind,
 filename, and bytes; adapters own MIME detection, encoding, and wire representation.
 
+### Files and skills contracts
+
+`ILlmFileClient`, `IXaiFilePublicUrlClient` and `IXaiSkillClient` declare explicit native resource
+operations. Their metadata, options, pages, deletion results, transfer receipts and capability data
+have exact type-name getters on `ConnectLlmJson`. These are inert SDK contracts; the provider facade
+does not implement or register these interfaces. All new capability flags default to false.
+
+Files pages preserve their returned token and an explicit `IsKnownLastPage` fact. Skills pages
+preserve their distinct first/last-ID and `HasMore` observations. Required response values do not
+become zero or false when absent. File bytes may be zero; missing MIME and expiry observations stay
+null. Public URLs retain their actual strings in data serialization but are absent from diagnostics.
+Files and Skills list limits are 1 through 100, matching the
+[published parameter schemas](https://docs.x.ai/openapi.json). Optional file/URL lifetimes retain
+whole seconds between one hour and thirty days; absent values remain absent.
+
+Skill uploads carry explicitly supplied borrowed streams and ordered directory entries. They do
+not enumerate paths, inspect archives, read streams or attach a skill to generation. Their runtime
+inputs and service interfaces have no public data-metadata getters; the owned serialization
+options reject non-null values without inspecting collaborators. Diagnostic strings omit paths,
+stream details and resource payloads. Operation-time path/duplicate/page consistency checks,
+transfer ownership, facade routing, native scope and provider qualification are not implemented
+by these declarations.
+
 ### Explicit cache contracts
 
 `ILlmContextCacheClient` declares explicit create, get, one-page list, expiry update and delete
