@@ -240,6 +240,16 @@ public sealed class PackageVerificationTests
     [InlineData("executable")]
     [InlineData("computed-id")]
     [InlineData("wildcard-id")]
+    [InlineData("lower-import")]
+    [InlineData("lower-choose")]
+    [InlineData("lower-target")]
+    [InlineData("lower-usingtask")]
+    [InlineData("lower-condition")]
+    [InlineData("lower-group-condition")]
+    [InlineData("lower-update")]
+    [InlineData("lower-remove")]
+    [InlineData("ambiguous-include")]
+    [InlineData("ambiguous-version")]
     public void UnsupportedCentralInputsFailClosed(string failure)
     {
         XDocument document = PolicyDocument();
@@ -256,7 +266,30 @@ public sealed class PackageVerificationTests
         if (failure == "executable") document.Root!.Add(new XElement("Target", new XAttribute("Name", "ChangeVersions")));
         if (failure == "computed-id") item.Parent!.Add(new XElement("PackageVersion", new XAttribute("Include", "$(SupplierPackage)"), new XAttribute("Version", "9.2.0")));
         if (failure == "wildcard-id") item.Parent!.Add(new XElement("PackageVersion", new XAttribute("Include", "Darkspyre.TensorSharp.*"), new XAttribute("Version", "9.2.0")));
+        if (failure.StartsWith("lower-", StringComparison.Ordinal))
+        {
+            if (failure == "lower-condition") item.SetAttributeValue("condition", "'$(Configuration)' == 'Debug'");
+            else if (failure == "lower-group-condition") item.Parent!.SetAttributeValue("condition", "'$(Configuration)' == 'Debug'");
+            else if (failure == "lower-update") item.SetAttributeValue("update", "Darkspyre.TensorSharp.Chat");
+            else if (failure == "lower-remove") item.SetAttributeValue("remove", "Darkspyre.TensorSharp.Chat");
+            else document.Root!.Add(new XElement(failure["lower-".Length..]));
+        }
+        if (failure == "ambiguous-include") item.SetAttributeValue("include", "Other.Package");
+        if (failure == "ambiguous-version") item.SetAttributeValue("version", "9.2.0");
         Assert.Throws<InvalidDataException>(() => DependencyPolicy.Read(document));
+    }
+
+    [Fact]
+    public void LiteralCentralPolicyUsesMsBuildNameAndAttributeCasing()
+    {
+        XDocument document = PolicyDocument();
+        foreach (XElement element in document.Descendants())
+        {
+            element.Name = element.Name.LocalName.ToLowerInvariant();
+            element.ReplaceAttributes(element.Attributes().Select(attribute =>
+                new XAttribute(attribute.Name.LocalName.ToLowerInvariant(), attribute.Value)).ToArray());
+        }
+        Assert.NotNull(DependencyPolicy.Read(document));
     }
 
     [Fact]
