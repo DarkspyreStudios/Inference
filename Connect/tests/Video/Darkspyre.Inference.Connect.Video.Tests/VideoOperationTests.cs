@@ -163,6 +163,8 @@ public sealed class VideoOperationTests
             Assert.True(stop.IsCancellationRequested); Assert.False(stream.LastReadToken.IsCancellationRequested);
             stream.Release.TrySetResult();
             await Assert.ThrowsAnyAsync<OperationCanceledException>(() => pending.WaitAsync(Bound));
+            Assert.ThrowsAny<OperationCanceledException>(() => owned.Read(new byte[1], 0, 1));
+            Assert.Equal(1, stream.Reads);
             Assert.False(retirement.IsCompleted);
         }
         finally
@@ -409,11 +411,12 @@ public sealed class VideoOperationTests
         internal TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         internal TaskCompletionSource Closed { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         internal int Disposes { get; private set; }
+        internal int Reads { get; private set; }
         internal CancellationToken LastReadToken { get; private set; }
         public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
-        { LastReadToken = cancellationToken; Entered.TrySetResult(); await Release.Task.ConfigureAwait(false); return 0; }
-        public override int Read(byte[] buffer, int offset, int count) { Entered.TrySetResult(); Release.Task.GetAwaiter().GetResult(); return 0; }
-        public override int Read(Span<byte> buffer) { Entered.TrySetResult(); Release.Task.GetAwaiter().GetResult(); return 0; }
+        { Reads++; LastReadToken = cancellationToken; Entered.TrySetResult(); await Release.Task.ConfigureAwait(false); return 0; }
+        public override int Read(byte[] buffer, int offset, int count) { Reads++; Entered.TrySetResult(); Release.Task.GetAwaiter().GetResult(); return 0; }
+        public override int Read(Span<byte> buffer) { Reads++; Entered.TrySetResult(); Release.Task.GetAwaiter().GetResult(); return 0; }
         protected override void Dispose(bool disposing) { if (disposing) { Disposes++; Closed.TrySetResult(); } base.Dispose(disposing); }
     }
     private sealed class PartialStream() : MemoryStream([1, 2, 3], false)

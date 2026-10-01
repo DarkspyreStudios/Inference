@@ -67,7 +67,7 @@ internal sealed class ConnectVideoInference : IVideoInference, IDisposable, IAsy
             (VideoConnection connection, XaiFamilyBinding binding) = ReceiptBinding();
             stream = await _transport!.DownloadAsync(connection, output, binding, lease.Token).ConfigureAwait(false) ?? throw ProtocolFailure();
             Fence(lease.Token);
-            var owned = new VideoDownloadStream(stream, lease);
+            var owned = new VideoDownloadStream(stream, lease, _lifetime);
             stream = owned;
             owned.ObserveRetirement();
             Fence(lease.Token);
@@ -166,7 +166,12 @@ internal sealed class ConnectVideoInference : IVideoInference, IDisposable, IAsy
                 cleanups.Count == 1 ? cleanups[0] : new AggregateException(cleanups));
         }
         if (failure is not null) ExceptionDispatchInfo.Throw(failure);
-        Fence(lease.Token);
+        try { Fence(lease.Token); }
+        catch (OperationCanceledException error)
+        {
+            throw new InferenceResourceOperationCanceledException(new(phase, allocation, outcome, written)
+            { SelectionOutcome = selectionOutcome, SelectionVersion = selectionVersion }, lease.Token, error);
+        }
         return result!;
     }
 
@@ -277,37 +282,44 @@ internal sealed class VideoDownloadStream : Stream
     private readonly Lock _gate = new();
     private readonly LlmOperationLifetime _reads = new();
     private readonly LlmOperationLifetime.Lease _lease;
+    private readonly LlmOperationLifetime _owner;
     private Stream? _stream;
     private Task? _disposal;
     private CancellationTokenRegistration _registration;
 
-    internal VideoDownloadStream(Stream stream, LlmOperationLifetime.Lease lease)
+    internal VideoDownloadStream(Stream stream, LlmOperationLifetime.Lease lease, LlmOperationLifetime owner)
     {
-        _stream = stream; _lease = lease;
+        _stream = stream; _lease = lease; _owner = owner;
     }
     internal void ObserveRetirement() => _registration = _lease.Token.UnsafeRegister(static owner => ((VideoDownloadStream)owner!).Dispose(), this);
-    private Stream Inner { get { _lease.Token.ThrowIfCancellationRequested(); return _stream ?? throw new ObjectDisposedException(nameof(VideoDownloadStream)); } }
+    private Stream Inner { get { Fence(default); return _stream ?? throw new ObjectDisposedException(nameof(VideoDownloadStream)); } }
+    private void Fence(CancellationToken token)
+    {
+        token.ThrowIfCancellationRequested(); _lease.Token.ThrowIfCancellationRequested();
+        try { _owner.ThrowIfStopping(); _reads.ThrowIfStopping(); }
+        catch (ObjectDisposedException error) { throw new OperationCanceledException("The video download owner is retiring.", error, _lease.Token); }
+    }
     public override bool CanRead => _stream?.CanRead == true;
     public override bool CanSeek => _stream?.CanSeek == true;
     public override bool CanWrite => false;
-    public override long Length { get { using LlmOperationLifetime.Lease read = _reads.Enter(default); return Inner.Length; } }
+    public override long Length { get { using LlmOperationLifetime.Lease read = _reads.Enter(default); long result = Inner.Length; Fence(read.Token); return result; } }
     public override long Position
     {
-        get { using LlmOperationLifetime.Lease read = _reads.Enter(default); return Inner.Position; }
-        set { using LlmOperationLifetime.Lease read = _reads.Enter(default); Inner.Position = value; }
+        get { using LlmOperationLifetime.Lease read = _reads.Enter(default); long result = Inner.Position; Fence(read.Token); return result; }
+        set { using LlmOperationLifetime.Lease read = _reads.Enter(default); Inner.Position = value; Fence(read.Token); }
     }
     public override int Read(byte[] buffer, int offset, int count)
     {
         using LlmOperationLifetime.Lease read = _reads.Enter(default);
         int result = Inner.Read(buffer, offset, count);
-        read.Token.ThrowIfCancellationRequested(); _lease.Token.ThrowIfCancellationRequested();
+        Fence(read.Token);
         return result;
     }
     public override int Read(Span<byte> buffer)
     {
         using LlmOperationLifetime.Lease read = _reads.Enter(default);
         int result = Inner.Read(buffer);
-        read.Token.ThrowIfCancellationRequested(); _lease.Token.ThrowIfCancellationRequested();
+        Fence(read.Token);
         return result;
     }
     public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
@@ -315,7 +327,7 @@ internal sealed class VideoDownloadStream : Stream
         using LlmOperationLifetime.Lease read = _reads.Enter(cancellationToken);
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(_lease.Token, read.Token);
         int count = await Inner.ReadAsync(buffer, linked.Token).ConfigureAwait(false);
-        linked.Token.ThrowIfCancellationRequested();
+        Fence(linked.Token);
         return count;
     }
     public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
@@ -323,7 +335,9 @@ internal sealed class VideoDownloadStream : Stream
     public override long Seek(long offset, SeekOrigin origin)
     {
         using LlmOperationLifetime.Lease read = _reads.Enter(default);
-        return Inner.Seek(offset, origin);
+        long result = Inner.Seek(offset, origin);
+        Fence(read.Token);
+        return result;
     }
     public override void Flush() => throw new NotSupportedException();
     public override void SetLength(long value) => throw new NotSupportedException();
