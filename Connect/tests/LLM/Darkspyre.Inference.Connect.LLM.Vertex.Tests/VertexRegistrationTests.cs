@@ -20,7 +20,11 @@ public sealed class VertexRegistrationTests
         services.AddLlmConnectVertex();
         using var container = services.BuildServiceProvider();
         var clients = container.GetServices<ILlmClient>().ToArray();
-        Assert.Equal(Enum.GetValues<LlmTransport>().Order(), clients.Select(client => client.Transport).Order());
+        var expectedChat = new[] { LlmTransport.OpenAiResponses, LlmTransport.OpenAiCompatibleChat, LlmTransport.AnthropicMessages,
+            LlmTransport.OpenAiCodex, LlmTransport.AwsBedrockConverse, LlmTransport.GoogleAntigravityCli, LlmTransport.AnthropicClaudeCli,
+            LlmTransport.AwsBedrockAgentCore, LlmTransport.SelfHost, LlmTransport.AppleFoundationModels,
+            LlmTransport.GoogleVertexAi, LlmTransport.GoogleGeminiApi };
+        Assert.Equal(expectedChat.Order(), clients.Select(client => client.Transport).Order());
         var expectedAgents = new[] { LlmTransport.OpenAiCodex, LlmTransport.AwsBedrockConverse,
             LlmTransport.GoogleAntigravityCli, LlmTransport.AnthropicClaudeCli, LlmTransport.AwsBedrockAgentCore, LlmTransport.SelfHost,
             LlmTransport.AppleFoundationModels, LlmTransport.GoogleVertexAi, LlmTransport.GoogleGeminiApi };

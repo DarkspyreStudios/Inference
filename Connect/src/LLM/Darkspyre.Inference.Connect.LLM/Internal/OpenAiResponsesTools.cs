@@ -258,6 +258,7 @@ internal sealed class OpenAiToolCallStream
     private readonly Dictionary<int, LlmToolCall> _callsByIndex = [];
     private readonly HashSet<string> _started = new(StringComparer.Ordinal);
     private readonly HashSet<string> _completed = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _argumentsObserved = new(StringComparer.Ordinal);
 
     public IReadOnlyList<LlmStreamEvent> ObserveAdded(JsonElement root)
     {
@@ -287,6 +288,7 @@ internal sealed class OpenAiToolCallStream
             return [];
         }
 
+        _argumentsObserved.Add(call.Id);
         return [new LlmToolCallArgumentsDeltaEvent(call.Id, delta)];
     }
 
@@ -314,7 +316,8 @@ internal sealed class OpenAiToolCallStream
         return events;
     }
 
-    public IReadOnlyList<LlmStreamEvent> CompleteMissing(IReadOnlyList<LlmToolCall> calls)
+    public IReadOnlyList<LlmStreamEvent> CompleteMissing(IReadOnlyList<LlmToolCall> calls,
+        bool emitMissingArguments = false)
     {
         var events = new List<LlmStreamEvent>();
         for (int index = 0; index < calls.Count; index++)
@@ -323,11 +326,12 @@ internal sealed class OpenAiToolCallStream
             if (_started.Add(call.Id))
             {
                 events.Add(new LlmToolCallStartedEvent(call.Id, call.Name, index));
-                if (call.ArgumentsJson.Length > 0)
-                {
+                if (call.ArgumentsJson.Length > 0 && _argumentsObserved.Add(call.Id))
                     events.Add(new LlmToolCallArgumentsDeltaEvent(call.Id, call.ArgumentsJson));
-                }
             }
+
+            if (emitMissingArguments && call.ArgumentsJson.Length > 0 && _argumentsObserved.Add(call.Id))
+                events.Add(new LlmToolCallArgumentsDeltaEvent(call.Id, call.ArgumentsJson));
 
             if (_completed.Add(call.Id))
             {

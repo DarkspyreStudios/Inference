@@ -19,6 +19,7 @@ internal abstract class OAuthAuthenticatorBase(HttpClient http) : ILlmAuthentica
         LlmCredential credential,
         CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         if (credential.OAuth is null || !ShouldRefresh(credential.OAuth))
         {
             return credential;
@@ -32,10 +33,20 @@ internal abstract class OAuthAuthenticatorBase(HttpClient http) : ILlmAuthentica
 
         using HttpRequestMessage request = BuildRefreshRequest(credential.OAuth);
         using HttpResponseMessage response = await Http.SendAsync(request, cancellationToken);
-        await ThrowIfUnsuccessfulAsync(response, $"{Transport} token refresh", cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
+        await ValidateRefreshResponseAsync(response, credential, cancellationToken);
         using JsonDocument document = await ParseJsonAsync(response, cancellationToken);
-        return MapTokens(document.RootElement, credential.OAuth);
+        cancellationToken.ThrowIfCancellationRequested();
+        LlmCredential refreshed = MapTokens(document.RootElement, credential.OAuth);
+        cancellationToken.ThrowIfCancellationRequested();
+        return refreshed;
     }
+
+    protected virtual Task ValidateRefreshResponseAsync(
+        HttpResponseMessage response,
+        LlmCredential credential,
+        CancellationToken cancellationToken) =>
+        ThrowIfUnsuccessfulAsync(response, $"{Transport} token refresh", cancellationToken, credential);
 
     protected abstract HttpRequestMessage BuildRefreshRequest(LlmOAuthTokens tokens);
 
@@ -48,13 +59,21 @@ internal abstract class OAuthAuthenticatorBase(HttpClient http) : ILlmAuthentica
         CancellationToken cancellationToken)
     {
         await using Stream stream = await response.Content.ReadAsStreamAsync(cancellationToken);
-        return await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
+        try
+        {
+            return await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
+        }
+        catch (JsonException)
+        {
+            throw new InvalidOperationException("The authorization server returned invalid JSON.");
+        }
     }
 
     protected static async Task ThrowIfUnsuccessfulAsync(
         HttpResponseMessage response,
         string operation,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        LlmCredential? credential = null)
     {
         if (response.IsSuccessStatusCode)
         {
@@ -62,7 +81,7 @@ internal abstract class OAuthAuthenticatorBase(HttpClient http) : ILlmAuthentica
         }
 
         string body = await response.Content.ReadAsStringAsync(cancellationToken);
-        string safe = SecretRedactor.Sanitize(body, credential: null);
+        string safe = SecretRedactor.Sanitize(body, credential);
         throw new InvalidOperationException(
             $"{operation} failed ({(int)response.StatusCode}): {safe}");
     }

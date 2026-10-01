@@ -209,8 +209,9 @@ reference; its implementation owns cleanup. No distributed transaction is promis
 Creates require absence; edits require the same existing version. Neither silently upserts.
 
 LLM interactive setup uses a settings-local `ILlmConnectionSource`, so authentication completion updates
-the settings rather than saved credentials. Runtime refresh continues using the existing host
-`ILlmConnectionSource.SaveCredentialAsync` compare-and-replace seam unchanged. The final setup commit
+the settings rather than saved credentials. `LlmConnectionAccess` owns runtime refresh for chat and
+embeddings using the existing host `ILlmConnectionSource.SaveCredentialAsync` compare-and-replace seam
+unchanged. The final setup commit
 compares the original saved version, including credentials; a concurrent refresh can therefore cause
 a real conflict. Do not solve conflicts by overwriting newer credentials or replaying authorization.
 
@@ -258,6 +259,21 @@ services stay first-class and callable independently of a wizard.
 | Antigravity CLI | Executable, model | Verify installed/authenticated CLI; discover via current adapter; no token scraping |
 | Bedrock Converse | AWS profile and region choices, model | SDK-owned choices/checks in Bedrock assembly; standard credential chain remains owner |
 | AgentCore Harness | Profile, region, Harness ARN, optional model override | Validate ARN/region; default/manual override semantics; explicit session-based test |
+
+`XaiResponses` has an unregistered connection/setup contract tracked by DSA-127. Region and service-tier
+fields are bounded choices on `XaiConnectionOptions`. Setup derives the endpoint from the region
+and has no API-key field. A saved OAuth token or completed draft sign-in satisfies Save. Both setup
+continuation and facade interactive sign-in use the same expiry/interval/slow-down helper. The internal
+`XaiAuthenticator` implements the device grant, token refresh and one `/v1/me` check. The shared
+`XaiErrorClassifier` sanitizes errors; subscription-specific 403 matching remains unqualified and is
+not implemented. No xAI client or authenticator is registered by `AddLlmConnect`, so this contract
+does not add an enabled provider to the table above. The shared Responses pipeline retains ordered
+xAI output verbatim, binds replay to the account/endpoint/model, uses terminal output for function
+completion and maps context exhaustion to an incomplete result. Encrypted replay data remains opaque
+and is redacted from diagnostics. The internal `XaiResponsesLlmClient` sends OAuth-only Responses
+requests, applies model profiles and catalog modalities, and checks numeric schema guarantees.
+Its catalog reads the facade's published chat snapshot. Cross-family catalog ownership and multi-agent
+setup controls are not wired. The client remains unregistered and not live-qualified.
 
 ComfyUI setup edits endpoint, timeout, protected headers and workflow selection. An
 `IImageWorkflowChoiceSource` supplied by the host provides paged/searchable workflow identities and

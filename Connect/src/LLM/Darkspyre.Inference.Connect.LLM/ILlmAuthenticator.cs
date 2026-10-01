@@ -29,3 +29,14 @@ public interface IClaudePkceLogin : ILlmAuthenticator
         string state,
         CancellationToken cancellationToken = default);
 }
+
+/// <summary>Grok's RFC 8628 device grant. Completion performs one token poll.</summary>
+public interface IXaiDeviceLogin : ILlmAuthenticator
+{
+    Task<LlmDeviceCode> StartAsync(CancellationToken cancellationToken = default);
+
+    Task<LlmCredential> CompleteAsync(
+        string deviceAuthId,
+        string userCode,
+        CancellationToken cancellationToken = default);
+}

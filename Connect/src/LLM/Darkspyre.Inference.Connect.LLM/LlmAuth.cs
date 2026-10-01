@@ -4,7 +4,13 @@ public sealed record LlmDeviceCode(
     string VerificationUrl,
     string UserCode,
     string DeviceAuthId,
-    int IntervalSeconds);
+    int IntervalSeconds)
+{
+    /// <summary>The provider-reported expiry, or null when the provider supplies none.</summary>
+    public DateTimeOffset? ExpiresAt { get; init; }
+
+    public override string ToString() => "LlmDeviceCode { Redacted }";
+}
 
 public sealed record LlmAuthorizationSession
 {
@@ -70,4 +76,8 @@ public sealed record LlmRedirectResult(string Code, string State)
     }
 }
 
-public sealed class LlmAuthPendingException(string message) : Exception(message);
+public sealed class LlmAuthPendingException(string message) : Exception(message)
+{
+    /// <summary>The RFC 8628 slow_down response adds five seconds to subsequent polling intervals.</summary>
+    public bool SlowDown { get; init; }
+}

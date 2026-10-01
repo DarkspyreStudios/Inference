@@ -41,6 +41,13 @@ setup interactions are not transport contracts. `InferenceImplementationDescript
 value-tuple sizes in `ImageCapabilities` have no round-trip JSON representation in this metadata
 surface. Generated metadata does not change those contracts or establish native runtime retirement.
 
+## Provider authorization
+
+`IProviderAuthorization.GetAsync` acquires authorization for one operation. The returned
+`ProviderAuthorizationHeader` carries its scheme and secret value without exposing credential storage.
+Its diagnostic string redacts both fields. Header values are not log, diagnostic or persistent data.
+The authorization implementation owns credential acquisition; a consumer borrows it.
+
 ## Sampling controls
 
 `LlmInferenceRequest` carries nullable `TopP`, `TopK`, `Seed`, `PresencePenalty` and

@@ -370,6 +370,28 @@ var result = await provider.CompleteAsync(
     cancellationToken);
 ```
 
+### Credential access
+
+`LlmConnectionAccess.AcquireAsync` resolves a connection and refreshes its OAuth credential through
+the registered authenticator. A changed credential is saved through `SaveCredentialAsync` with the
+resolved expected version. A rejected save fails the operation without retry or fallback. Adapters
+that ignore stored credentials retain that policy. Non-OAuth credentials remain unchanged.
+
+`AddLlmConnect` registers one scoped access owner shared by chat and embeddings. A facade built by
+hand without an injected access owner creates and retires its own. An injected owner must use the
+same connection source and remains borrowed. Retiring a facade cancels its credential operations
+without retiring a shared owner.
+
+Access retirement fences acquisition, cancels and drains resolution, refresh and saving, and clears
+borrowed authenticator references without disposing the authenticator or source. Late refreshes are
+not saved; late save results do not return credentials. Cancellation during a save can race a source
+commit, so retirement waits for that save and does not undo or retry it. The source remains responsible
+for atomic version checks and rejecting writes to changed or deleted connections.
+
+`LlmConnectionAuthorization` binds a connection ID to a borrowed access owner. Its
+`IProviderAuthorization.GetAsync` returns the current OAuth Bearer token after acquisition. Missing
+OAuth fails; API keys are not substituted. The returned header's diagnostic text redacts its fields.
+
 ### Model lists
 
 OpenAI-style discovery preserves positive integer `context_length`, `top_provider.context_length`,
@@ -390,8 +412,8 @@ reloads. Chat and native-agent facades in that provider share the observation st
 
 `LlmProviderService` and `LlmModelListCache` implement `IDisposable` and `IAsyncDisposable`. Facade
 retirement fences new calls, cancels active calls and waits for them to leave. It retires a privately
-created cache, but not an injected shared cache. Clients, authenticators and the connection source
-remain borrowed and are not disposed by the facade.
+created cache and credential-access owner, but not injected shared owners. Clients, authenticators
+and the connection source remain borrowed and are not disposed by the facade.
 
 Cache retirement clears kept models, cancels provider listings through an owner token, and waits
 for every listing, including entries replaced by an edit or refresh. A cancelled caller only stops
@@ -412,8 +434,9 @@ containers does not transfer that responsibility to a scoped facade.
 ### Embedding lifetime
 
 `LlmEmbeddingProviderService` implements `IDisposable` and `IAsyncDisposable`. Its registration owner
-retires the facade. Retirement fences new requests, cancels connection lookup and provider calls,
-and awaits all active requests before releasing its adapter references. Supplied adapters and the
+retires the facade. Embeddings refresh OAuth through the same access implementation as chat before
+dispatch; unsupported embedding routes fail before refresh. Retirement fences new requests, cancels
+connection lookup and provider calls, and awaits all active requests before releasing its adapter references. Supplied adapters and the
 connection source remain borrowed and are not disposed by the facade. Caller cancellation affects
 only that request. A provider that ignores cancellation keeps retirement pending; its late result
 is rejected. Use asynchronous scope disposal while embedding requests are active.
@@ -1211,6 +1234,66 @@ choices and require retesting after edits. Provider options cannot replace a sta
 by the typed request. Conversation affinity is a hint, not an explicit billed cache resource.
 Existing provider JSON, headers and model-specific overrides are retained; the editor does not turn them into
 an arbitrary JSON settings payload.
+
+`XaiResponses` defines the Grok OAuth connection and settings contract. `LlmConnection.Xai` holds
+`XaiConnectionOptions`: `Global` selects `https://api.x.ai/v1`, and `UnitedStates` selects
+`https://us.api.x.ai/v1`. `GetEndpoint()` derives that fixed URL. Setup offers bounded region and
+`Default`/`Priority` service-tier choices, with no endpoint or API-key field. It retains unrelated
+headers, provider options and overrides. A kept OAuth access token or a completed draft sign-in
+satisfies Save; an API key or static secret header does not. Region edits replace the endpoint;
+tier edits require retesting but do not request reauthentication.
+
+`IXaiDeviceLogin` supplies the device grant to `StartXaiLoginAsync`, `CompleteXaiLoginAsync` and
+`SignInAsync`. Completion performs one token poll; interactive sign-in owns the polling loop.
+Setup continuation and interactive sign-in respect the device interval, provider-reported expiry,
+and the five-second increase on RFC 8628 `slow_down`. `LlmDeviceCode.ExpiresAt` is null for a provider
+that supplies no expiry. Device-code diagnostic text is redacted. Token saves use the captured
+connection version. Facade retirement cancels and drains sign-in and suppresses late results;
+it does not dispose the borrowed authenticator or undo a save already committed by the source.
+
+The internal `XaiAuthenticator` implements the [RFC 8628](https://www.rfc-editor.org/rfc/rfc8628)
+device grant against `auth.x.ai` with form-encoded requests and a public client. A successful token
+exchange calls `GET https://api.x.ai/v1/me` once and requires a non-blocked account. Credentials contain
+only OAuth tokens. Expiry comes from `expires_in` or the access-token JWT; account identity comes from
+`/v1/me`, and the optional ID-token email is display metadata, not a locally verified identity claim.
+The shared OAuth pipeline refreshes within 60 seconds of expiry. It preserves account metadata,
+accepts rotated tokens and saves through `LlmConnectionAccess`'s version-conditional source seam.
+
+`XaiErrorClassifier` supplies one sanitized HTTP failure policy. It maps 401 and the specified
+token-validation 403 message to `AuthenticationRequired`, and 402 or a blocked account to the named
+entitlement failure (`AccessDenied`). Unknown 403 responses remain provider errors. Subscription-specific
+403 matching is not implemented or live-qualified. Errors never trigger a retry or refresh.
+Named authentication and entitlement failures clear the setup device attempt without saving a credential.
+
+The shared Responses pipeline retains xAI output as an ordered deep clone, including hosted-tool
+items and encrypted metadata. Continuation is bound to the transport, endpoint, account and model;
+token rotation on the same account does not break that binding. The terminal output is authoritative,
+including an empty array. Function completions use terminal calls, and a call without streamed arguments
+still emits its arguments once. Known terminal statuses map to completion, action, refusal, failure or
+incomplete results. The [xAI response schema](https://docs.x.ai/developers/rest-api-reference/inference/responses)
+names `max_output_tokens`, `max_prompt_tokens` and `max_time_limit`; each maps to `Incomplete`.
+Unknown statuses and incomplete reasons map to `Unknown`. Context exhaustion returns
+`Incomplete` without retrying. Encrypted context stays opaque; diagnostics redact its named values and
+reflections, and malformed JSON does not retain a parser exception containing provider text.
+
+The internal `XaiResponsesLlmClient` sends OAuth-only streaming or genuine non-streaming requests
+to the typed region's fixed endpoint. It sends the typed service tier and records the recognized applied
+tier in diagnostics. Typed protocol controls cannot be injected through raw provider options, even when
+the typed property is absent. Client functions are limited to 350; `web_search` is a reserved hosted name.
+The client joins the generic and language listings, offers only listed language models, and reads the
+facade's published catalog. Catalog reasoning levels and image modalities override family fallbacks.
+Unknown manually entered models still permit a request without fabricated discovery evidence.
+Image prompts require catalog image support and cannot exceed 20 MiB. Temperature and top-p follow
+the model profile; top-k, seed, penalties and string stops are unsupported on this Responses route.
+The numeric schema preflight follows schema positions and local references, not literal data. Bounds
+above 2048 string characters, 256 array items or 64 properties require explicitly authorized local
+validation against the original schema. Strict tool schemas beyond those bounds fail without weakening.
+This numeric check does not implement the provider's complete regex and schema subset.
+
+`AddLlmConnect` does not register a Grok provider, authenticator or runtime client. This internal client
+is not an enabled or live-qualified provider. Cross-family catalog ownership and multi-agent setup
+controls are not wired; the multi-agent profile records agent counts separately from reasoning levels.
+The region and tier premiums follow [xAI pricing](https://docs.x.ai/developers/pricing).
 
 `ImageProviderService.SetupDefinitions` and `CreateSettingsManager` provide the same editing surface for
 ComfyUI. Supply `IImageWorkflowChoiceSource` for host-owned saved workflows and a typed

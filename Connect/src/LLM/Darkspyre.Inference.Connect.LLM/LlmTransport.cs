@@ -23,6 +23,9 @@ public enum LlmTransport
     /// <summary>The Gemini API (Google AI Studio) with an API key.</summary>
     GoogleGeminiApi = 12,
 
+    /// <summary>The xAI Responses API with a host-owned Grok OAuth credential.</summary>
+    XaiResponses = 13,
+
     /// <summary>Azure resource OpenAI Responses, with explicit deployment and authentication configuration.</summary>
     AzureOpenAiResponses = 14,
 

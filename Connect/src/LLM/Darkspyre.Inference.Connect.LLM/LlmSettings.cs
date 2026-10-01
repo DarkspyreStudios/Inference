@@ -1,6 +1,7 @@
 using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Common.LLM;
 using Darkspyre.Inference.Connect.LLM.Providers;
+using Darkspyre.Inference.Connect.LLM.Internal;
 using Darkspyre.Inference.Common.Setup;
 
 namespace Darkspyre.Inference.Connect.LLM;
@@ -60,16 +61,26 @@ public sealed class LlmSettings : InferenceSettings<LlmSetupChanges>
         _hasEnvironment = environment is not null;
         _validateEnvironment = environment is null ? null : environment.Validate;
         _original = existing;
-        LlmConnection opened = existing is null ? new() { Version = "0", Transport = transport, Endpoint = definition.DefaultEndpoint }
+        LlmConnection opened = existing is null ? new()
+        {
+            Version = "0",
+            Transport = transport,
+            Endpoint = definition.DefaultEndpoint,
+            Xai = transport == LlmTransport.XaiResponses ? new() : null
+        }
             : existing with
             {
                 AdditionalHeaders = new Dictionary<string, string>(existing.AdditionalHeaders, StringComparer.OrdinalIgnoreCase),
                 ProviderOptions = existing.ProviderOptions.ToDictionary(pair => pair.Key, pair => pair.Value.Clone(), StringComparer.Ordinal),
                 ModelCapabilityOverrides = new Dictionary<string, LlmCapabilityOverrides>(existing.ModelCapabilityOverrides, StringComparer.Ordinal)
             };
-        // Direct Codex has one official endpoint and no endpoint field. A saved former value, such as a
-        // CLI executable, differs from the baseline, so the next save replaces it.
+        // Fixed endpoints replace a former value on Save. xAI derives its endpoint from the typed region.
         _draft = UsesFixedEndpoint(transport) ? opened with { Endpoint = definition.DefaultEndpoint } : opened;
+        if (transport == LlmTransport.XaiResponses)
+        {
+            XaiConnectionOptions options = opened.Xai ?? new();
+            _draft = opened with { Xai = options, Endpoint = Enum.IsDefined(options.Region) ? options.GetEndpoint() : opened.Endpoint };
+        }
         _model = _originalModel = modelId ?? (UsesAzure ? existing?.Azure?.DeploymentId : null) ?? definition.DefaultModelId;
         if (UsesAzure && _draft.Azure is null) _draft = _draft with { Azure = new() { DeploymentId = _model } };
         _baseline = opened;
@@ -99,7 +110,10 @@ public sealed class LlmSettings : InferenceSettings<LlmSetupChanges>
     /// <summary>A CLI provider reported it is not authenticated; the settings show its prerequisite.</summary>
     internal bool CliPrerequisite { get; set; }
 
-    private static bool UsesFixedEndpoint(LlmTransport transport) => transport is LlmTransport.OpenAiCodex or LlmTransport.GoogleVertexAi or LlmTransport.GoogleGeminiApi;
+    private static bool UsesFixedEndpoint(LlmTransport transport) => transport is LlmTransport.OpenAiCodex or LlmTransport.GoogleVertexAi
+        or LlmTransport.GoogleGeminiApi or LlmTransport.XaiResponses;
+    private bool UsesXai => _draft.Transport == LlmTransport.XaiResponses;
+    private XaiConnectionOptions Xai => _draft.Xai ?? new();
     private bool UsesVertex => _draft.Transport == LlmTransport.GoogleVertexAi;
     private bool UsesAzure => _draft.Transport is LlmTransport.AzureOpenAiResponses or LlmTransport.AzureOpenAiChat;
     private LlmVertexConfiguration Vertex => _draft.Vertex ?? new();
@@ -109,15 +123,16 @@ public sealed class LlmSettings : InferenceSettings<LlmSetupChanges>
     private LlmCredential Credential => LlmCredential.Parse(_draft.Credential) ?? new();
 
     protected override bool IsDraftDirty =>
-        _draft.Endpoint != _baseline.Endpoint || _draft.Vertex != _baseline.Vertex || _draft.Azure != _baseline.Azure || _draft.ChatCompletions != _baseline.ChatCompletions || _model != _originalModel
+        _draft.Endpoint != _baseline.Endpoint || _draft.Vertex != _baseline.Vertex || _draft.Azure != _baseline.Azure || _draft.ChatCompletions != _baseline.ChatCompletions || _draft.Xai != _baseline.Xai || _model != _originalModel
             || (_draft.CapabilityOverrides ?? new()) != (_baseline.CapabilityOverrides ?? new()) || _callback.Length != 0
             || (UsesAws ? NormalizeAws(Credential.Aws) != NormalizeAws(LlmCredential.Parse(_baseline.Credential)?.Aws)
                 : _credentialChange != SetupSecretEditKind.Keep);
 
-    /// <summary>Direct Codex requires its ChatGPT sign-in, or a saved credential that is being kept.</summary>
-    protected override bool IsSignInSatisfied => _draft.Transport != LlmTransport.OpenAiCodex
-        || Status.Authenticated.Value == true
-        || _credentialChange == SetupSecretEditKind.Keep && !string.IsNullOrEmpty(LlmCredential.Parse(_original?.Credential)?.Serialize());
+    /// <summary>Subscription API connections require sign-in or a retained saved credential.</summary>
+    protected override bool IsSignInSatisfied => UsesXai
+        ? !string.IsNullOrWhiteSpace(Credential.OAuth?.AccessToken)
+        : _draft.Transport != LlmTransport.OpenAiCodex || Status.Authenticated.Value == true
+            || _credentialChange == SetupSecretEditKind.Keep && !string.IsNullOrEmpty(LlmCredential.Parse(_original?.Credential)?.Serialize());
 
     private static LlmAwsCredentials NormalizeAws(LlmAwsCredentials? value) => (value ?? new()) with
     { Profile = value?.Profile ?? string.Empty, Region = value?.Region ?? string.Empty };
@@ -170,6 +185,35 @@ public sealed class LlmSettings : InferenceSettings<LlmSetupChanges>
                     };
                     _draft = _draft with { Credential = (Credential with { ApiKey = key }).Serialize() };
                 })));
+        }
+        if (UsesXai)
+        {
+            fields.Add(new SetupChoiceField(new("xai-region", "API region")
+            {
+                IsRequired = true,
+                HelpText = "United States text token usage costs 1.1x the global rate."
+            }, Xai.Region.ToString(), XaiRegion.Global.ToString(), value =>
+            {
+                if (value is not (nameof(XaiRegion.Global) or nameof(XaiRegion.UnitedStates)))
+                    return new(SetupEditState.Invalid, [new("xai-region-invalid", "Select an xAI region.", "xai-region")]);
+                XaiRegion region = Enum.Parse<XaiRegion>(value);
+                return Edit(() =>
+                {
+                    XaiConnectionOptions options = Xai with { Region = region };
+                    _draft = _draft with { Xai = options, Endpoint = options.GetEndpoint() };
+                });
+            }, false));
+            fields.Add(new SetupChoiceField(new("xai-service-tier", "Service tier")
+            {
+                IsRequired = true,
+                HelpText = "Applied priority text token usage costs 2x the default rate."
+            }, Xai.ServiceTier.ToString(), XaiServiceTier.Default.ToString(), value =>
+            {
+                if (value is not (nameof(XaiServiceTier.Default) or nameof(XaiServiceTier.Priority)))
+                    return new(SetupEditState.Invalid, [new("xai-tier-invalid", "Select an xAI service tier.", "xai-service-tier")]);
+                XaiServiceTier tier = Enum.Parse<XaiServiceTier>(value);
+                return Edit(() => _draft = _draft with { Xai = Xai with { ServiceTier = tier } });
+            }, false));
         }
         if (UsesVertex)
         {
@@ -372,6 +416,10 @@ public sealed class LlmSettings : InferenceSettings<LlmSetupChanges>
     protected override SetupChoicePage? GetLocalChoices(string fieldId, SetupChoiceQuery query)
     {
         _ = CreateSteps(); // Registers the override field IDs for the current transport.
+        if (UsesXai && fieldId == "xai-region")
+            return Page(query, [new(XaiRegion.Global.ToString(), "Global"), new(XaiRegion.UnitedStates.ToString(), "United States", "1.1x global rate")]);
+        if (UsesXai && fieldId == "xai-service-tier")
+            return Page(query, [new(XaiServiceTier.Default.ToString(), "Default"), new(XaiServiceTier.Priority.ToString(), "Priority", "2x default rate")]);
         return fieldId == "google-authentication" && UsesVertex
             ? Page(query, [new(LlmGoogleAuthenticationMode.ApplicationDefault.ToString(), "Application default credentials"),
                 new(LlmGoogleAuthenticationMode.ServiceAccount.ToString(), "Service-account key"),
@@ -388,6 +436,11 @@ public sealed class LlmSettings : InferenceSettings<LlmSetupChanges>
         if (_draft.Transport == LlmTransport.OpenAiCodex)
         {
             actions.Add(new("authorize", "Sign in with ChatGPT", SetupActionPurpose.Authenticate,
+                SetupSideEffect.Network | SetupSideEffect.BrowserInteraction));
+        }
+        if (UsesXai)
+        {
+            actions.Add(new("authorize", "Sign in with Grok", SetupActionPurpose.Authenticate,
                 SetupSideEffect.Network | SetupSideEffect.BrowserInteraction));
         }
         if (_draft.Transport == LlmTransport.AnthropicClaudeCli)
@@ -435,7 +488,7 @@ public sealed class LlmSettings : InferenceSettings<LlmSetupChanges>
         }
         else if (DeviceCode is not null)
         {
-            Interaction = new SetupDeviceAuthorization(new(DeviceCode.VerificationUrl), DeviceCode.UserCode, null, ContinueAction, CancelAction);
+            Interaction = new SetupDeviceAuthorization(new(DeviceCode.VerificationUrl), DeviceCode.UserCode, DeviceCode.ExpiresAt, ContinueAction, CancelAction);
         }
         else if (BrowserAuthorization is not null)
         {
@@ -454,6 +507,12 @@ public sealed class LlmSettings : InferenceSettings<LlmSetupChanges>
     {
         ClearAuthorization();
         DeviceCode = code;
+        RefreshInteraction();
+    }
+
+    internal void UpdateDevicePolling(LlmAuthPendingException pending)
+    {
+        if (DeviceCode is { } code) DeviceCode = XaiDevicePolling.AfterPending(code, pending);
         RefreshInteraction();
     }
 
@@ -521,6 +580,13 @@ public sealed class LlmSettings : InferenceSettings<LlmSetupChanges>
         { issues.Add(new("key-required", "An API credential is required.", "api-key")); }
         if (UsesAzure && _draft.Azure?.DeploymentId != _model)
             issues.Add(new("azure-deployment-conflict", "The selected model must match the configured Azure deployment.", "model"));
+        if (UsesXai)
+        {
+            if (!Enum.IsDefined(Xai.Region)) issues.Add(new("xai-region-invalid", "Select an xAI region.", "xai-region"));
+            if (!Enum.IsDefined(Xai.ServiceTier)) issues.Add(new("xai-tier-invalid", "Select an xAI service tier.", "xai-service-tier"));
+            if (!string.IsNullOrEmpty(Credential.ApiKey) || Credential.SecretHeaders.Count != 0)
+                issues.Add(new("xai-oauth-required", "Grok requires OAuth sign-in; API keys and static secret headers are not supported."));
+        }
         if (UsesAws || UsesVertex || UsesAzure)
         {
             if (_validateEnvironment is null) { issues.Add(new("setup-environment-missing", "Register the provider's setup support.")); }
@@ -544,7 +610,7 @@ public sealed class LlmSettings : InferenceSettings<LlmSetupChanges>
         _credentialChange == SetupSecretEditKind.Keep ? SetupSecretEdit.Keep
             : _draft.Credential is null ? SetupSecretEdit.Clear : SetupSecretEdit.Replace(_draft.Credential),
         _original is not null && (_original.Endpoint != _draft.Endpoint || _original.Vertex != _draft.Vertex || _original.Azure != _draft.Azure),
-        _original is null || _original.Endpoint != _draft.Endpoint || _original.Vertex != _draft.Vertex || _original.Azure != _draft.Azure || _originalModel != _model
+        _original is null || _original.Endpoint != _draft.Endpoint || _original.Vertex != _draft.Vertex || _original.Azure != _draft.Azure || _original.Xai != _draft.Xai || _originalModel != _model
             || _original.ChatCompletions != _draft.ChatCompletions || _original.CapabilityOverrides != _draft.CapabilityOverrides || _credentialChange != SetupSecretEditKind.Keep);
 }
 
@@ -584,7 +650,8 @@ public sealed class LlmSettingsManager : InferenceSettingsManager<LlmSettings, L
         switch (action.Id)
         {
             case "authorize":
-                settings.BeginDeviceAuthorization(await service.StartCodexLoginAsync(cancellationToken).ConfigureAwait(false));
+                settings.BeginDeviceAuthorization(await (settings.Transport == LlmTransport.XaiResponses
+                    ? service.StartXaiLoginAsync(cancellationToken) : service.StartCodexLoginAsync(cancellationToken)).ConfigureAwait(false));
                 return new(SetupActionState.NeedsInteraction, Interaction: settings.Interaction);
             case "authorize-catalog":
                 settings.BeginBrowserAuthorization(await service.StartClaudeLoginAsync(cancellationToken).ConfigureAwait(false));
@@ -640,13 +707,38 @@ public sealed class LlmSettingsManager : InferenceSettingsManager<LlmSettings, L
         if (settings.DeviceCode is { } code)
         {
             progress?.Report(new("authorizing", "Waiting for device authorization."));
-            await Task.Delay(TimeSpan.FromSeconds(Math.Max(1, code.IntervalSeconds)), token).ConfigureAwait(false);
             try
             {
-                await service.CompleteCodexLoginAsync(settings.Identity.Id, code.DeviceAuthId, code.UserCode,
-                    LlmSettings.DraftVersion, token).ConfigureAwait(false);
+                if (settings.Transport == LlmTransport.XaiResponses)
+                {
+                    await XaiDevicePolling.WaitAsync(code, token).ConfigureAwait(false);
+                    await service.CompleteXaiLoginAsync(settings.Identity.Id, code.DeviceAuthId, code.UserCode,
+                        LlmSettings.DraftVersion, token).ConfigureAwait(false);
+                }
+                else
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(Math.Max(1, code.IntervalSeconds)), token).ConfigureAwait(false);
+                    await service.CompleteCodexLoginAsync(settings.Identity.Id, code.DeviceAuthId, code.UserCode,
+                        LlmSettings.DraftVersion, token).ConfigureAwait(false);
+                }
             }
-            catch (LlmAuthPendingException) { return new(SetupActionState.NeedsInteraction, Interaction: settings.Interaction); }
+            catch (LlmAuthPendingException pending)
+            {
+                if (settings.Transport == LlmTransport.XaiResponses) settings.UpdateDevicePolling(pending);
+                return new(SetupActionState.NeedsInteraction, Interaction: settings.Interaction);
+            }
+            catch (LlmProviderException error) when (settings.Transport == LlmTransport.XaiResponses
+                && error.ProviderCode is "expired_token" or "access_denied")
+            {
+                settings.ClearAuthorization();
+                throw;
+            }
+            catch (InferenceException error) when (settings.Transport == LlmTransport.XaiResponses
+                && error.Code is InferenceFailureCode.AuthenticationRequired or InferenceFailureCode.AccessDenied)
+            {
+                settings.ClearAuthorization();
+                throw;
+            }
         }
         else if (settings.BrowserAuthorization is { } authorization)
         {
@@ -656,7 +748,7 @@ public sealed class LlmSettingsManager : InferenceSettingsManager<LlmSettings, L
         else { return new(SetupActionState.Unavailable); }
         settings.ClearAuthorization();
         // Catalog OAuth does not establish CLI authentication.
-        if (settings.Transport == LlmTransport.OpenAiCodex)
+        if (settings.Transport is LlmTransport.OpenAiCodex or LlmTransport.XaiResponses)
         {
             settings.Status = settings.Status with { Authenticated = SetupObservation.Known(true) };
         }
