@@ -417,6 +417,8 @@ public sealed class LlmProviderService : ILlmTextTokenizer, IDisposable, IAsyncD
             _connections,
             connectionId,
             cancellationToken);
+        ThrowIfOperationCanceled(cancellationToken);
+        RequestJson.ValidateSamplingOptions(connection, request);
         ILlmClient client = ClientFor(connection.Transport);
         string? resolvedCredential = connection.Credential;
         if (client is not IStreamingCredentialRefreshPolicy refreshPolicy
@@ -525,6 +527,8 @@ public sealed class LlmProviderService : ILlmTextTokenizer, IDisposable, IAsyncD
         ArgumentNullException.ThrowIfNull(request);
         ArgumentException.ThrowIfNullOrWhiteSpace(request.ModelId);
         LlmConnection connection = await LlmConnectionResolver.ResolveAsync(_connections, connectionId, cancellationToken);
+        ThrowIfOperationCanceled(cancellationToken);
+        RequestJson.ValidateSamplingOptions(connection, request);
         ILlmClient client = ClientFor(connection.Transport);
         if (client is not ILlmProviderTokenCounter counter)
             throw new NotSupportedException("This route does not implement provider input-token counting.");
@@ -560,6 +564,8 @@ public sealed class LlmProviderService : ILlmTextTokenizer, IDisposable, IAsyncD
         policy ??= new();
         ManagedAgentPolicy.Validate(new() { ContextPolicy = policy }, null);
         var connection = await LlmConnectionResolver.ResolveAsync(_connections, connectionId, cancellationToken);
+        ThrowIfOperationCanceled(cancellationToken);
+        RequestJson.ValidateSamplingOptions(connection, request);
         var client = ClientFor(connection.Transport);
         // Measure what would be sent: the same projection as the request path.
         // Ambient-credential adapters cannot decide state binding without resolving identity.
