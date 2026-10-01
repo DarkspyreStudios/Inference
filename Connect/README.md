@@ -559,6 +559,15 @@ must allow direct calling. Deferred clients require a declared tool-search tool.
 not establish live tool provisioning or complete tool-specific compiler validation. See the
 [programmatic calling contract](https://platform.claude.com/docs/en/agents-and-tools/tool-use/programmatic-tool-calling).
 
+Programmatic client schemas reject proven local ordinary-`$ref` cycles before generation or provider
+counting; Vertex rejects these cycles before authentication. Direct-only recursive schemas remain
+unchanged, including in mixed requests. The guard indexes draft 2020-12 schema locations, local
+resource IDs and anchors without fetching references or evaluating instances. It handles JSON Pointer
+escaping and shared acyclic references. `default`, `const`, `enum`, `examples` and unknown annotations
+remain opaque data. Unresolved external references, unknown dialects and ambiguous identities remain
+provider validation. The guard never rewrites schemas or adds strict-schema restrictions. Dynamic
+`$dynamicRef` evaluation is outside this ordinary-`$ref` cycle check.
+
 The canonical Claude builder validates scoped, projected continuation before HTTP dispatch. Mixed
 turns with waiting native tools and programmatic turns require an immediate user message containing
 only results, exactly once for every waiting client call. Results can arrive in a different order.
