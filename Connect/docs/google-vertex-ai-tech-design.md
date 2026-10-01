@@ -353,6 +353,13 @@ and capture-format revision may be required. The user subsequently authorized th
 
 ## 7. Other contract deltas
 
+Vertex Claude accepts `PromptCache` with `Default` or `Extended` retention. The shared Anthropic
+builder marks the last nonempty system text, or the last tool when system text is absent. A
+`Conversation` hint also adds top-level `cache_control`. Default retention omits TTL; Extended uses
+one hour. Generation and exact token counting share the markers without editing retained assistant
+or signed blocks. A hint combined with raw `cache_control` fails before authentication or dispatch.
+The hint does not promise a cache hit or change normalized usage.
+
 Vertex Gemini reports `PromptCache.Automatic = true` and `AcceptsHints = false`. It ignores the
 advisory request hint in generation and exact token counting. A hint does not select an explicit
 `cachedContents` resource or guarantee cache-read usage.

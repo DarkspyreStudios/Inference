@@ -13,4 +13,12 @@ internal static class PromptCaching
         AcceptsHints = true,
         Retentions = new[] { LlmPromptCacheRetention.Default, LlmPromptCacheRetention.Extended }.ToFrozenSet()
     };
+
+    public static LlmPromptCacheCapabilities OpenAi { get; } = Claude with { Automatic = true };
+
+    internal static void RejectRawOption(LlmConnection connection, LlmChatRequest request, string name)
+    {
+        if (connection.ProviderOptions.Keys.Concat(request.ProviderOptions.Keys).Contains(name, StringComparer.Ordinal))
+            throw new InvalidOperationException($"Provider option '{name}' cannot replace a standard request field.");
+    }
 }

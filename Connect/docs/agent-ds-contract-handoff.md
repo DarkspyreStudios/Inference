@@ -321,6 +321,13 @@ Darkspyre.Inference.Connect.LLM will not read application paths to reconstruct m
 
 ## Context pressure and compaction
 
+`LlmChatRequest.PromptCache` and Common `LlmInferenceRequest.PromptCache` carry advisory prefix or
+conversation hints. Read each route's `PromptCache` capabilities for automatic caching, hint
+acceptance and retentions. Unsupported routes ignore hints. Managed agent requests automatically
+include Conversation with Default retention. SelfHost forwards the hint and the engine's cache
+declaration. Cache reads remain part of occupied input; a hint does not reduce occupancy or prove
+savings. Raw provider cache options conflict with handled typed hints.
+
 `LlmAgentContextStatus` exposes `ModelId`, `ContextRevision`, `MaxContextTokens`, `UsedContextTokens`,
 `ReservedOutputTokens`, `AvailableInputTokens`, nullable `NeedsCompaction`, and
 `Source` (`Unknown`, `Estimated`, `Mixed`). All token values are nullable `long`.

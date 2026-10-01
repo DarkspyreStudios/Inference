@@ -440,6 +440,13 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
         {
             payload["prompt_cache_key"] = request.ConversationKey;
         }
+        if (Transport == LlmTransport.OpenAiResponses && request.PromptCache is { } hint
+            && OpenAiModelProfiles.Get(request.ModelId).SupportsPromptCacheOptions)
+        {
+            PromptCaching.RejectRawOption(connection, request, "prompt_cache_options");
+            if (hint.Retention == LlmPromptCacheRetention.Extended)
+                payload["prompt_cache_options"] = new JsonObject { ["ttl"] = "30m" };
+        }
         return payload;
     }
 

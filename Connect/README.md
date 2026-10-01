@@ -1141,6 +1141,13 @@ including tool continuations and accounting projections. A hint does not promise
 savings or a billed cache resource. Reported cache reads and writes remain in `CachedInputTokens`
 and `CacheWriteInputTokens`.
 
+Anthropic Messages and Vertex Claude accept both retentions. `Prefix` marks the last nonempty
+system text block, or the last tool when no such system block exists. `Conversation` adds a
+top-level automatic marker. `Default` omits the TTL; `Extended` uses one hour. Generation and exact
+token counting share these markers. Retained assistant, signed reasoning and opaque blocks stay
+unchanged. A hint combined with raw `cache_control` provider options fails before dispatch, including
+`Prefix` requests. Requests without hints keep their existing raw-option policy.
+
 Bedrock Claude translates the hint into Converse cache points. A prefix point follows the system
 blocks, or the tool definitions when no system blocks exist. `Conversation` also appends a point to
 the last message. Both response modes share these points. `Default` uses five minutes; `Extended`
@@ -1149,6 +1156,13 @@ do not alter retained signed reasoning or fabricate cache usage.
 
 Gemini API and Vertex Gemini declare automatic caching without hint acceptance. Hints leave their
 generation and count-token wire requests unchanged. They do not create or select `cachedContents`.
+
+OpenAI Responses declares automatic caching. The verified GPT-5.6, GPT-6.1-Sol, GPT-6-Astra and
+GPT-6-Luna profile families accept hints. `Extended` sends `prompt_cache_options.ttl = "30m"`;
+`Default` and the scope add no fields. `ConversationKey` keeps its existing cache-affinity mapping.
+A handled hint conflicts with raw `prompt_cache_options`, including `Default`. Other model profiles
+ignore hints. Codex and Claude CLI declare automatic-only caching and leave their request projection
+unchanged by hints. No mapping prewarms a cache or creates, renews or deletes a billed resource.
 
 ## Provider setup and editing
 

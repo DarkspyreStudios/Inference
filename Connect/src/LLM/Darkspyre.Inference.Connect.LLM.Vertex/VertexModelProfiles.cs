@@ -33,6 +33,7 @@ internal static class VertexModelProfiles
             SupportsReasoningText = true,
             SupportsStreamingUsage = true,
             SupportsUsageDeltas = true,
+            PromptCache = PromptCaching.Claude,
             SupportsModelListing = true,
             OutputLimitEnforcement = LlmOutputLimitEnforcement.ProviderEnforced,
             SupportsJsonSchema = profile.SupportsStructuredOutputs == true,
