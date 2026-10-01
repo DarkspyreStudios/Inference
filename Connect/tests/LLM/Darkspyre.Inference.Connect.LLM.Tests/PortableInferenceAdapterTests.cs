@@ -26,6 +26,7 @@ public sealed class PortableInferenceAdapterTests
         var client = new RecordingClient();
         var service = new LlmProviderService(new ConnectionSource(), [client]);
         CommonLlm.ILlmInference inference = service.Bind("primary");
+        var hint = new LlmPromptCacheHint { Scope = LlmPromptCacheScope.Prefix, Retention = LlmPromptCacheRetention.Extended };
 
         CommonLlm.LlmInferenceResult result = await CommonLlm.LlmInferenceExtensions.CompleteAsync(
             inference,
@@ -40,7 +41,8 @@ public sealed class PortableInferenceAdapterTests
                 Seed = 3,
                 PresencePenalty = .2,
                 FrequencyPenalty = -.3,
-                StopSequences = ["stop"]
+                StopSequences = ["stop"],
+                PromptCache = hint
             });
 
         Assert.Equal("Hello back", result.Text);
@@ -56,6 +58,7 @@ public sealed class PortableInferenceAdapterTests
         Assert.Equal(.2, client.Request.PresencePenalty);
         Assert.Equal(-.3, client.Request.FrequencyPenalty);
         Assert.Equal(["stop"], client.Request.StopSequences);
+        Assert.Same(hint, client.Request.PromptCache);
         var capabilities = await inference.GetCapabilitiesAsync("model-a");
         Assert.True(capabilities.SupportsTopP);
         Assert.True(capabilities.SupportsTopK);
@@ -63,6 +66,8 @@ public sealed class PortableInferenceAdapterTests
         Assert.True(capabilities.SupportsPresencePenalty);
         Assert.True(capabilities.SupportsFrequencyPenalty);
         Assert.Equal(16, capabilities.MaxStopSequences);
+        Assert.True(capabilities.PromptCache.AcceptsHints);
+        Assert.Contains(LlmPromptCacheRetention.Extended, capabilities.PromptCache.Retentions);
     }
 
     [Fact]
@@ -190,6 +195,7 @@ public sealed class PortableInferenceAdapterTests
                 SupportsSeed = true,
                 SupportsPresencePenalty = true,
                 SupportsFrequencyPenalty = true,
+                PromptCache = new() { AcceptsHints = true, Retentions = new HashSet<LlmPromptCacheRetention> { LlmPromptCacheRetention.Default, LlmPromptCacheRetention.Extended } },
                 MaxStopSequences = 16
             };
 

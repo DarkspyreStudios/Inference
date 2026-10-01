@@ -1120,6 +1120,23 @@ Interactive completion methods accept the connection version captured before aut
 The `SignInAsync` convenience method captures that version internally. In both cases, the final save is
 still conditional, so a connection change during the external authentication round trip is rejected.
 
+## Prompt caching
+
+`LlmChatRequest.PromptCache` and Common `LlmInferenceRequest.PromptCache` carry the same advisory
+`LlmPromptCacheHint`. `Prefix` asks to cache tools and instructions. `Conversation` also includes
+the conversation prefix through its last message. `Default` selects the provider's standard retention;
+`Extended` asks for its longer retention, which can increase cache-write charges.
+
+`LlmProviderCapabilities.PromptCache` and Common `LlmCapabilities.PromptCache` declare automatic
+caching, hint acceptance and supported retentions. Capability overrides do not replace this declaration.
+Unsupported routes ignore the hint. Unsupported retention falls back to `Default`. SelfHost preserves
+the loaded engine's declaration and forwards the hint without turning it into a required control.
+
+Managed agent requests automatically include a `Conversation` hint with `Default` retention,
+including tool continuations and accounting projections. A hint does not promise a cache hit, token
+savings or a billed cache resource. Reported cache reads and writes remain in `CachedInputTokens`
+and `CacheWriteInputTokens`.
+
 ## Provider setup and editing
 
 `LlmProviderCatalog.SetupDefinitions` describes providers without resolving connections or

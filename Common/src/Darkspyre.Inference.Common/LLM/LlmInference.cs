@@ -55,6 +55,8 @@ public sealed record LlmCapabilities
 
     public bool SupportsJsonObject { get; init; }
 
+    public LlmPromptCacheCapabilities PromptCache { get; init; } = new();
+
     /// <summary>The reasoning levels the model accepts. Empty when the model accepts no reasoning control.</summary>
     public IReadOnlySet<LlmReasoningLevel> ReasoningLevels { get; init; } = FrozenSet<LlmReasoningLevel>.Empty;
 

@@ -22,9 +22,24 @@ public sealed class SelfHostTests
         SupportsSeed = true,
         SupportsPresencePenalty = true,
         SupportsFrequencyPenalty = true,
+        PromptCache = new() { Automatic = true, AcceptsHints = true, Retentions = new HashSet<LlmPromptCacheRetention> { LlmPromptCacheRetention.Default, LlmPromptCacheRetention.Extended } },
         MaxStopSequences = 16,
         ReasoningLevels = new HashSet<LlmReasoningLevel> { LlmReasoningLevel.None, LlmReasoningLevel.High }
     };
+
+    [Fact]
+    public async Task CacheHintsRemainAdvisoryWhenTheEngineAcceptsNone()
+    {
+        var engine = new Engine { Capabilities = new() { SupportsStreaming = true } };
+        engine.Script.Enqueue([Completion("done")]);
+        using ServiceProvider services = Services(engine);
+        var llms = services.GetRequiredService<LlmProviderService>();
+        var hint = new LlmPromptCacheHint { Retention = LlmPromptCacheRetention.Extended };
+        var result = await llms.CompleteAsync("connection", new() { ModelId = "qwen", PromptCache = hint });
+        Assert.Equal("done", result.Text);
+        Assert.Same(hint, Assert.Single(engine.Requests).PromptCache);
+        Assert.False((await llms.GetModelCapabilitiesAsync("connection", "qwen")).PromptCache.AcceptsHints);
+    }
 
     [Fact]
     public async Task UnsupportedEngineSamplingFailsBeforeItsStreamStarts()
@@ -101,7 +116,8 @@ public sealed class SelfHostTests
             Seed = 3,
             PresencePenalty = .2,
             FrequencyPenalty = -.3,
-            StopSequences = ["stop"]
+            StopSequences = ["stop"],
+            PromptCache = new() { Scope = LlmPromptCacheScope.Prefix, Retention = LlmPromptCacheRetention.Extended }
         })) { events.Add(item); }
 
         LlmInferenceRequest sent = Assert.Single(engine.Requests);
@@ -115,6 +131,8 @@ public sealed class SelfHostTests
         Assert.Equal(.2, sent.PresencePenalty);
         Assert.Equal(-.3, sent.FrequencyPenalty);
         Assert.Equal(["stop"], sent.StopSequences);
+        Assert.Equal(LlmPromptCacheScope.Prefix, sent.PromptCache!.Scope);
+        Assert.Equal(LlmPromptCacheRetention.Extended, sent.PromptCache.Retention);
         Assert.IsType<LlmReasoningDeltaEvent>(events[0]);
         Assert.Equal("hello", Assert.IsType<LlmChatCompletionEvent>(events[^1]).Result.Text);
     }
@@ -137,6 +155,9 @@ public sealed class SelfHostTests
         Assert.True(capabilities.SupportsPresencePenalty);
         Assert.True(capabilities.SupportsFrequencyPenalty);
         Assert.Equal(16, capabilities.MaxStopSequences);
+        Assert.Same(EngineCapabilities.PromptCache, capabilities.PromptCache);
+        Assert.Same(EngineCapabilities.PromptCache, (await llms.Bind("connection").GetCapabilitiesAsync("qwen")).PromptCache);
+        Assert.Same(EngineCapabilities.PromptCache, model.Capabilities!.PromptCache);
         Assert.True((await llms.Bind("connection").GetCapabilitiesAsync("qwen")).SupportsReasoningText);
         Assert.True(capabilities.SupportsAgentToolUse);
         Assert.Contains(LlmReasoningLevel.High, capabilities.ReasoningLevels);

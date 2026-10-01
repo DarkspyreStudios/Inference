@@ -69,6 +69,8 @@ public sealed record LlmChatRequest
     /// </summary>
     public string? ConversationKey { get; init; }
 
+    public LlmPromptCacheHint? PromptCache { get; init; }
+
     /// <summary>Per-operation provider JSON properties; standard request fields cannot be replaced.</summary>
     public IReadOnlyDictionary<string, JsonElement> ProviderOptions { get; init; } =
         new Dictionary<string, JsonElement>(StringComparer.Ordinal);
