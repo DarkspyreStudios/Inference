@@ -10,6 +10,13 @@ namespace Darkspyre.Inference.Connect.LLM;
 /// <summary>Connect-owned metadata for closed connection, request and captured-context contracts.</summary>
 public static class ConnectLlmJson
 {
+    public static JsonTypeInfo<LlmContextCacheCreate> LlmContextCacheCreate => Metadata<LlmContextCacheCreate>();
+    public static JsonTypeInfo<LlmContextCacheCreateCorrelation> LlmContextCacheCreateCorrelation => Metadata<LlmContextCacheCreateCorrelation>();
+    public static JsonTypeInfo<LlmContextCache> LlmContextCache => Metadata<LlmContextCache>();
+    public static JsonTypeInfo<LlmContextCacheUsage> LlmContextCacheUsage => Metadata<LlmContextCacheUsage>();
+    public static JsonTypeInfo<LlmContextCacheList> LlmContextCacheList => Metadata<LlmContextCacheList>();
+    public static JsonTypeInfo<LlmContextCachePage> LlmContextCachePage => Metadata<LlmContextCachePage>();
+    public static JsonTypeInfo<LlmContextCacheDeleteResult> LlmContextCacheDeleteResult => Metadata<LlmContextCacheDeleteResult>();
     public static JsonTypeInfo<LlmAgentClientToolDefinition> LlmAgentClientToolDefinition => Metadata<LlmAgentClientToolDefinition>();
     public static JsonTypeInfo<LlmAgentToolDefinition> LlmAgentToolDefinition => Metadata<LlmAgentToolDefinition>();
     public static JsonTypeInfo<LlmAgentShellTool> LlmAgentShellTool => Metadata<LlmAgentShellTool>();
@@ -67,6 +74,13 @@ public static class ConnectLlmJson
 [JsonSourceGenerationOptions(GenerationMode = JsonSourceGenerationMode.Metadata,
     Converters = [typeof(LlmAgentContextJsonConverter)])]
 [JsonSerializable(typeof(LlmConnection))]
+[JsonSerializable(typeof(LlmContextCacheCreate))]
+[JsonSerializable(typeof(LlmContextCacheCreateCorrelation))]
+[JsonSerializable(typeof(LlmContextCache))]
+[JsonSerializable(typeof(LlmContextCacheUsage))]
+[JsonSerializable(typeof(LlmContextCacheList))]
+[JsonSerializable(typeof(LlmContextCachePage))]
+[JsonSerializable(typeof(LlmContextCacheDeleteResult))]
 [JsonSerializable(typeof(LlmAgentClientToolDefinition))]
 [JsonSerializable(typeof(LlmAgentToolDefinition))]
 [JsonSerializable(typeof(LlmAgentShellTool))]
