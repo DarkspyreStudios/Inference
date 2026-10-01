@@ -41,6 +41,49 @@ setup interactions are not transport contracts. `InferenceImplementationDescript
 value-tuple sizes in `ImageCapabilities` have no round-trip JSON representation in this metadata
 surface. Generated metadata does not change those contracts or establish native runtime retirement.
 
+## Session and workspace resources
+
+`Darkspyre.Inference.Common.Resources` defines immutable content references, observed descriptors,
+ordered selection snapshots and primitive operation-failure facts. A reference identifies workspace
+content but grants no access. A selection version belongs to one logical workspace/session, not a
+provider thread. Selection snapshots copy their ordered unique membership; empty means no selected
+resources. Nullable byte counts distinguish unknown from zero. Constructors reject missing IDs,
+negative counts and malformed selection membership; access implementations also validate inputs,
+authorization and current scope at each operation boundary.
+Positional-record `with` assignments can bypass scalar constructor checks, including changing a
+selection's scope without changing its copied membership. Data objects are not authorization or
+intrinsic-validity proofs: operation boundaries must revalidate every caller-supplied value, including
+`with` copies. Owned JSON import checks constructor inputs and required facts; serialization alone
+does not validate authorization or the current store version.
+
+`IInferenceResourceAccess` is borrowed caller-owned authority. Its single-result methods return
+`Task<T>`. Opened read/write handles are operation-owned `IAsyncDisposable` values and own their
+streams. Dispose the handle, not its stream separately. The caller implements storage, retention and
+authorization; this package supplies no store or provider materialization.
+
+`SelectAsync` atomically appends authorized committed references. `ReplaceSelectionAsync` is an
+explicit revision-checked replacement; removing membership does not delete content. A write handle's
+single commit publishes complete immutable content. With `SelectForSession = true`, content and
+additive selection must publish atomically in the same caller store transaction; separate commit then
+select is not equivalent. Null/default options do not select content. These are implementation
+obligations of the caller-owned authority, not an implementation supplied by Common.
+
+Cancellation or a lost acknowledgment does not prove rollback. Primitive content and selection
+outcomes preserve unknown effects independently. Reconcile the known reference and current selection
+after the attempt is terminal, without automatic retry or inferred historical outcomes. Runtime
+operation exceptions preserve the original inner exception; cancellation remains an
+`OperationCanceledException`. Exceptions, authority and handles are not portable data.
+
+`InferenceJson` exports typed metadata named after each resource data contract, including the scoped
+selection version, commit result and failure facts. Required scope, revision and membership fields
+cannot disappear into defaults during JSON import. Its metadata options also contain fixed internal
+refusal converters for the three resource interfaces: null is allowed, but non-null values refuse
+before any collaborator callback. A closed caller-owned JSON context can compose those exact
+converters from `InferenceJson.InferenceResourceReference.Options.Converters` by the known interface
+type's `CanConvert` match before construction. This is not a global serializer policy or support for
+arbitrary caller CLR graphs. Resource references are not yet part of LLM attachments or requests;
+these standalone contracts do not establish automatic provider switching.
+
 ## Provider authorization
 
 `IProviderAuthorization.GetAsync` acquires authorization for one operation. The returned
