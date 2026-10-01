@@ -671,6 +671,29 @@ public sealed class ClaudeCliLlmClientTests
         await CliProcessTerminationTests.AssertGoneAsync(processId);
     });
 
+    [UnixFact]
+    public Task UnterminatedStdoutOverflowIsRejectedAndRetiresTheChatProcess() => CliProcessTerminationTests.Bounded(async () =>
+    {
+        var invocation = new ClaudeCliInvocation(
+            "/bin/sh",
+            ["-c", "echo $$; head -c 16777217 /dev/zero | tr '\\000' x; exec sleep 300"],
+            StandardInput: null, Path.GetTempPath());
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        int processId = 0;
+
+        InvalidOperationException failure = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+        {
+            await foreach (ClaudeCliProcessEvent processEvent in new ClaudeCliProcessRunner().StreamAsync(invocation, cancellation.Token))
+                processId = CliProcessTerminationTests.ParseProcessId(Assert.IsType<ClaudeCliOutputLine>(processEvent).Line);
+        });
+
+        Assert.Contains("StandardOutput", failure.Message, StringComparison.Ordinal);
+        Assert.Contains("safety limit", failure.Message, StringComparison.Ordinal);
+        Assert.False(cancellation.IsCancellationRequested);
+        Assert.True(processId > 0);
+        await CliProcessTerminationTests.AssertGoneAsync(processId);
+    });
+
     [Fact]
     public async Task RejectsMinimalReasoningWithoutStartingTheCli()
     {

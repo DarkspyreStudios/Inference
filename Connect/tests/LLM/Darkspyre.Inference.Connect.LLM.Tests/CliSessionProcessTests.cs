@@ -123,6 +123,24 @@ public sealed class CliSessionProcessTests
         await CliProcessTerminationTests.AssertGoneAsync(fixture.ProcessId);
     });
 
+    [UnixTheory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public Task UnterminatedStdoutOverflowIsRejectedBeforeCallerTimeout(bool claude) => Bounded(async () =>
+    {
+        await using var fixture = new SessionFixture(claude,
+            "head -c 16777217 /dev/zero | tr '\\000' x; exec sleep 300");
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+
+        InvalidOperationException failure = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => fixture.ReadAsync(cancellation.Token));
+
+        Assert.Contains("line limit", failure.Message, StringComparison.Ordinal);
+        Assert.False(cancellation.IsCancellationRequested);
+        await fixture.RetireAsync();
+        await CliProcessTerminationTests.AssertGoneAsync(fixture.ProcessId);
+    });
+
     [UnixFact]
     public Task ClaudeStderrOverflowInterruptsAnAlreadyBlockedWrite() => Bounded(async () =>
     {
