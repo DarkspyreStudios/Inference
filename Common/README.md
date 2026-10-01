@@ -41,6 +41,12 @@ setup interactions are not transport contracts. `InferenceImplementationDescript
 value-tuple sizes in `ImageCapabilities` have no round-trip JSON representation in this metadata
 surface. Generated metadata does not change those contracts or establish native runtime retirement.
 
+`LlmUsage` preserves provider-reported decimal USD costs and independent hosted-tool/source counts.
+Its named hosted counts snapshot their input; negative hosted counts become unknown at assignment
+and owned JSON import. `InferenceJson.LlmUsage` and `InferenceJson.LlmHostedToolKind` expose the exact
+typed metadata, also composed into existing result and usage-event graphs. These facts do not enable
+provider features or infer totals from partial observations.
+
 ## Session and workspace resources
 
 `Darkspyre.Inference.Common.Resources` defines immutable content references, observed descriptors,

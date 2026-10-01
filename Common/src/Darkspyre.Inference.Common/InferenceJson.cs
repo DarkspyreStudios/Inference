@@ -30,6 +30,8 @@ public static class InferenceJson
     public static JsonTypeInfo<LlmToolCallArgumentsDeltaEvent> ToolCallArgumentsDelta => InferenceJsonContext.Default.LlmToolCallArgumentsDeltaEvent;
     public static JsonTypeInfo<LlmToolCallCompletedEvent> ToolCallCompleted => InferenceJsonContext.Default.LlmToolCallCompletedEvent;
     public static JsonTypeInfo<LlmUsageDeltaEvent> UsageDelta => InferenceJsonContext.Default.LlmUsageDeltaEvent;
+    public static JsonTypeInfo<LlmUsage> LlmUsage => InferenceJsonContext.Default.LlmUsage;
+    public static JsonTypeInfo<LlmHostedToolKind> LlmHostedToolKind => InferenceJsonContext.Default.LlmHostedToolKind;
     public static JsonTypeInfo<LlmCompletionEvent> Completion => InferenceJsonContext.Default.LlmCompletionEvent;
     public static JsonTypeInfo<DecisionQuestion> DecisionQuestion => InferenceJsonContext.Default.DecisionQuestion;
     public static JsonTypeInfo<DecisionAnswer> DecisionAnswer => InferenceJsonContext.Default.DecisionAnswer;
@@ -81,6 +83,8 @@ public static class InferenceJson
 [JsonSerializable(typeof(LlmToolCallArgumentsDeltaEvent))]
 [JsonSerializable(typeof(LlmToolCallCompletedEvent))]
 [JsonSerializable(typeof(LlmUsageDeltaEvent))]
+[JsonSerializable(typeof(LlmUsage))]
+[JsonSerializable(typeof(LlmHostedToolKind))]
 [JsonSerializable(typeof(LlmCompletionEvent))]
 [JsonSerializable(typeof(DecisionQuestion))]
 [JsonSerializable(typeof(DecisionAnswer))]

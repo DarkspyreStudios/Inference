@@ -15,6 +15,31 @@ public sealed class InferenceJsonTests
     private const string ProvenanceJson = "{\"ImplementationId\":\"fixture\",\"ModelId\":\"model\"}";
     private const string ResultJson = "{\"Text\":\"done\",\"Status\":0,\"Provenance\":" + ProvenanceJson + "}";
     private const string ContinuationJson = "{\"FormatVersion\":2,\"ImplementationId\":\"fixture\",\"ModelId\":\"model\",\"ScopeId\":\"scope\",\"Payload\":\"opaque\"}";
+    private const string HostedUsageJson = "{\"InputTokens\":null,\"OutputTokens\":0,\"TotalTokens\":null,\"ProviderReportedCostUsd\":0.0000000001,\"HostedToolCalls\":{\"WebSearch\":2},\"HostedToolCallCount\":5,\"HostedSourcesUsed\":0}";
+    private static readonly string[] HostedToolNames = ["WebSearch", "SocialSearch", "CodeExecution", "ImageGeneration", "DocumentSearch", "RemoteMcp", "ImageUnderstanding", "VideoUnderstanding"];
+
+    [Fact]
+    public void HostedUsageRootsPreserveExactIdentitiesAndUnknownCounts()
+    {
+        Assert.Equal(HostedToolNames, Enum.GetNames<LlmHostedToolKind>());
+        Assert.Equal(Enumerable.Range(0, 8), Enum.GetValues<LlmHostedToolKind>().Select(value => (int)value));
+        foreach (LlmHostedToolKind kind in Enum.GetValues<LlmHostedToolKind>())
+            Assert.Equal(kind, JsonSerializer.Deserialize(JsonSerializer.Serialize(kind, InferenceJson.LlmHostedToolKind), InferenceJson.LlmHostedToolKind));
+
+        var usage = JsonSerializer.Deserialize(HostedUsageJson, InferenceJson.LlmUsage)!;
+        Assert.Equal(0.0000000001m, usage.ProviderReportedCostUsd);
+        Assert.Equal(5, usage.HostedToolCallCount);
+        Assert.Equal(0, usage.HostedSourcesUsed);
+        Assert.Equal(2, usage.HostedToolCalls![LlmHostedToolKind.WebSearch]);
+        var invalid = JsonSerializer.Deserialize("{\"HostedToolCalls\":{\"WebSearch\":-1,\"RemoteMcp\":0},\"HostedToolCallCount\":-1,\"HostedSourcesUsed\":-1}", InferenceJson.LlmUsage)!;
+        Assert.Null(invalid.HostedToolCallCount);
+        Assert.Null(invalid.HostedSourcesUsed);
+        Assert.Equal(new KeyValuePair<LlmHostedToolKind, int>(LlmHostedToolKind.RemoteMcp, 0), Assert.Single(invalid.HostedToolCalls!));
+        var copy = usage with { HostedToolCallCount = -1, HostedSourcesUsed = -1 };
+        Assert.Null(copy.HostedToolCallCount);
+        Assert.Null(copy.HostedSourcesUsed);
+        Assert.Null(JsonSerializer.Deserialize("{}", InferenceJson.LlmUsage)!.HostedToolCalls);
+    }
 
     [Fact]
     public void LlmRequestPreservesSchemaSamplingContinuationAndTypedToolOutput()
@@ -159,6 +184,8 @@ public sealed class InferenceJsonTests
 
     public static TheoryData<string, string> CollectibleFamilies => new()
     {
+        { "LlmUsage", HostedUsageJson },
+        { "LlmHostedToolKind", "7" },
         { "Provenance", ProvenanceJson },
         { "LlmRequest", "{\"ModelId\":\"model\",\"Messages\":[{\"Role\":\"assistant\",\"Content\":\"text\",\"ContinuationState\":" + ContinuationJson + "}]}" },
         { "LlmRequest", "{\"ModelId\":\"model\",\"PromptCache\":{\"Scope\":0,\"Retention\":1}}" },
@@ -180,6 +207,7 @@ public sealed class InferenceJsonTests
         { "ToolCallArgumentsDelta", "{\"ToolCallId\":\"call\",\"Delta\":\"{}\"}" },
         { "ToolCallCompleted", "{\"ToolCall\":{\"Id\":\"call\",\"Name\":\"tool\",\"ArgumentsJson\":\"{}\"}}" },
         { "UsageDelta", "{\"Cumulative\":{\"InputTokens\":1,\"OutputTokens\":2,\"TotalTokens\":3}}" },
+        { "UsageDelta", "{\"Cumulative\":{\"InputTokens\":null,\"OutputTokens\":0,\"TotalTokens\":null,\"ProviderReportedCostUsd\":0.0000000001,\"HostedToolCalls\":{\"WebSearch\":0},\"HostedToolCallCount\":5,\"HostedSourcesUsed\":0}}" },
         { "Completion", "{\"Result\":" + ResultJson + "}" },
         { "DecisionQuestion", "{\"type\":\"choice\",\"Id\":\"question\",\"Instructions\":\"text\",\"Choices\":[{\"Id\":\"yes\"}]}" },
         { "DecisionAnswer", "{\"type\":\"boolean\",\"QuestionId\":\"question\",\"Confidence\":0.8,\"Value\":true,\"TrueProbability\":0.8}" },
@@ -223,6 +251,8 @@ public sealed class InferenceJsonTests
         try
         {
             Assembly assembly = generation.LoadFromAssemblyPath(typeof(InferenceJson).Assembly.Location);
+            Assert.NotSame(typeof(InferenceJson).Assembly, assembly);
+            Assert.Equal(typeof(InferenceJson).Assembly.ManifestModule.ModuleVersionId, assembly.ManifestModule.ModuleVersionId);
             Type owner = assembly.GetType("Darkspyre.Inference.Common.InferenceJson", throwOnError: true)!;
             var metadata = (JsonTypeInfo)owner.GetProperty(family)!.GetValue(null)!;
             Assert.Same(generation, AssemblyLoadContext.GetLoadContext(metadata.Type.Assembly));
@@ -230,6 +260,20 @@ public sealed class InferenceJsonTests
             object value = JsonSerializer.Deserialize(json, metadata)!;
             string written = JsonSerializer.Serialize(value, metadata);
             Assert.NotNull(JsonSerializer.Deserialize(written, metadata));
+            if (json.Contains("\"ProviderReportedCostUsd\"", StringComparison.Ordinal))
+            {
+                object usage = family == "LlmUsage" ? value : value.GetType().GetProperty("Cumulative")!.GetValue(value)!;
+                Assert.Same(assembly, usage.GetType().Assembly);
+                var map = (System.Collections.IEnumerable)usage.GetType().GetProperty("HostedToolCalls")!.GetValue(usage)!;
+                object entry = Assert.Single(map.Cast<object>());
+                Assert.Same(assembly, entry.GetType().GetProperty("Key")!.GetValue(entry)!.GetType().Assembly);
+                using JsonDocument expected = JsonDocument.Parse(json);
+                using JsonDocument actual = JsonDocument.Parse(written);
+                JsonElement expectedUsage = family == "LlmUsage" ? expected.RootElement : expected.RootElement.GetProperty("Cumulative");
+                JsonElement actualUsage = family == "LlmUsage" ? actual.RootElement : actual.RootElement.GetProperty("Cumulative");
+                foreach (string name in new[] { "ProviderReportedCostUsd", "HostedToolCalls", "HostedToolCallCount", "HostedSourcesUsed" })
+                    Assert.True(JsonElement.DeepEquals(expectedUsage.GetProperty(name), actualUsage.GetProperty(name)), name);
+            }
             if (json.Contains("\"PromptCache\"", StringComparison.Ordinal))
             {
                 object cache = value.GetType().GetProperty("PromptCache")!.GetValue(value)!;

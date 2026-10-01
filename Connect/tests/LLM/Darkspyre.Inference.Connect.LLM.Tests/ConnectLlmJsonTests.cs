@@ -274,6 +274,7 @@ public sealed class ConnectLlmJsonTests
         { "LlmEmbeddingRequest", "{\"ModelId\":\"unknown-model\",\"Inputs\":[\"first\",\"second\"],\"Dimensions\":2,\"ProviderOptions\":{\"custom\":{\"nested\":true}}}" },
         { "LlmEmbeddingResult", "{\"Vectors\":[[0,1],[2,3]],\"Usage\":{\"InputTokens\":0,\"TotalTokens\":null},\"Diagnostics\":{\"HttpStatusCode\":200}}" },
         { "LlmEmbeddingUsage", "{\"InputTokens\":null,\"TotalTokens\":0}" },
+        { "ChatResult", "{\"Text\":\"done\",\"Status\":0,\"Usage\":{\"InputTokens\":0,\"OutputTokens\":null,\"TotalTokens\":null,\"ProviderReportedCostUsd\":0.0000000001,\"HostedToolCalls\":{\"WebSearch\":2},\"HostedToolCallCount\":5,\"HostedSourcesUsed\":0},\"Diagnostics\":{\"HttpStatusCode\":200}}" },
         { "AgentContext", "{\"FormatVersion\":2,\"Entries\":[" + EntryJson + "]}" },
         { "AgentContextEntry", EntryJson },
         { "AgentContextStatus", "{\"ModelId\":\"model\",\"ContextRevision\":1,\"Source\":0}" },
@@ -324,6 +325,18 @@ public sealed class ConnectLlmJsonTests
             object value = JsonSerializer.Deserialize(json, metadata)!;
             string written = JsonSerializer.Serialize(value, metadata);
             Assert.NotNull(JsonSerializer.Deserialize(written, metadata));
+            if (json.Contains("\"ProviderReportedCostUsd\"", StringComparison.Ordinal))
+            {
+                object usage = value.GetType().GetProperty("Usage")!.GetValue(value)!;
+                Assert.Same(common, usage.GetType().Assembly);
+                var map = (System.Collections.IEnumerable)usage.GetType().GetProperty("HostedToolCalls")!.GetValue(usage)!;
+                object entry = Assert.Single(map.Cast<object>());
+                Assert.Same(common, entry.GetType().GetProperty("Key")!.GetValue(entry)!.GetType().Assembly);
+                using JsonDocument expected = JsonDocument.Parse(json);
+                using JsonDocument actual = JsonDocument.Parse(written);
+                foreach (string name in new[] { "ProviderReportedCostUsd", "HostedToolCalls", "HostedToolCallCount", "HostedSourcesUsed" })
+                    Assert.True(JsonElement.DeepEquals(expected.RootElement.GetProperty("Usage").GetProperty(name), actual.RootElement.GetProperty("Usage").GetProperty(name)), name);
+            }
             if (json.Contains("\"PromptCache\"", StringComparison.Ordinal))
             {
                 object hint = value.GetType().GetProperty("PromptCache")!.GetValue(value)!;

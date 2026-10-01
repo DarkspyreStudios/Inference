@@ -188,6 +188,8 @@ public sealed record LlmInferenceRequest
 
 public sealed record LlmUsage(int? InputTokens, int? OutputTokens, int? TotalTokens)
 {
+    private readonly IReadOnlyDictionary<LlmHostedToolKind, int>? _hostedToolCalls;
+
     /// <summary>Subset of input tokens served from cache; null means not reported.</summary>
     public int? CachedInputTokens { get; init; }
 
@@ -196,6 +198,22 @@ public sealed record LlmUsage(int? InputTokens, int? OutputTokens, int? TotalTok
 
     /// <summary>Subset of output tokens used for reasoning; null means not reported.</summary>
     public int? ReasoningOutputTokens { get; init; }
+
+    /// <summary>Actual provider-reported USD cost; null means not reported, never a local estimate.</summary>
+    public decimal? ProviderReportedCostUsd { get; init; }
+
+    /// <summary>Reported counts by hosted category. Missing keys are unknown; an empty map reports no named counts.</summary>
+    public IReadOnlyDictionary<LlmHostedToolKind, int>? HostedToolCalls
+    {
+        get => _hostedToolCalls;
+        init => _hostedToolCalls = value?.Where(pair => pair.Value >= 0).ToFrozenDictionary();
+    }
+
+    /// <summary>Actual total hosted-tool calls, independent of a possibly partial named-count map. Negative observations remain unknown.</summary>
+    public int? HostedToolCallCount { get; init => field = value is >= 0 ? value : null; }
+
+    /// <summary>Actual sources used, independent of hosted-tool call counts. Negative observations remain unknown.</summary>
+    public int? HostedSourcesUsed { get; init => field = value is >= 0 ? value : null; }
 }
 
 public enum LlmCompletionStatus

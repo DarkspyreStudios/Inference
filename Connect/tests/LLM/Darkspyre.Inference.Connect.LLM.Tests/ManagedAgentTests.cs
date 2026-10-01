@@ -189,6 +189,72 @@ public sealed class ManagedAgentTests
         Assert.NotEqual(usage[0].RequestId, usage[3].RequestId);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task HostedCostAndCountsReplaceInterimUsageAndRespectUnknownFinal(bool unknownFinal)
+    {
+        static LlmUsage Usage(int value) => new(1, 2, 3)
+        {
+            ProviderReportedCostUsd = value,
+            HostedToolCallCount = value * 2,
+            HostedSourcesUsed = 0,
+            HostedToolCalls = new Dictionary<LlmHostedToolKind, int> { [LlmHostedToolKind.WebSearch] = value }
+        };
+        var harness = new Harness();
+        harness.UsageObservations.Enqueue([Usage(1), Usage(2)]);
+        harness.UsageObservations.Enqueue([Usage(1), Usage(2)]);
+        harness.Results.Enqueue(new()
+        {
+            Diagnostics = new(200, null, null),
+            Text = "",
+            Status = LlmCompletionStatus.RequiresAction,
+            ToolCalls = [new("a", "echo", "{}")],
+            Usage = Usage(3)
+        });
+        harness.Results.Enqueue(new()
+        { Diagnostics = new(200, null, null), Text = "done", Status = LlmCompletionStatus.Completed, Usage = unknownFinal ? null : Usage(5) });
+        await using var session = harness.Create(ToolsOptions(_ => LlmToolOutput.FromText("ok")));
+        LlmAgentUsageEvent[] observations = [.. (await Read(session.RunTurnAsync(Turn("hello")))).OfType<LlmAgentUsageEvent>()];
+        Assert.Equal(new decimal?[] { 1, 2, 3, 4, 5, unknownFinal ? null : 8 }, observations.Select(item => item.RunTotals?.ProviderReportedCostUsd));
+        Assert.Equal(new int?[] { 2, 4, 6, 8, 10, unknownFinal ? null : 16 }, observations.Select(item => item.RunTotals?.HostedToolCallCount));
+        Assert.Equal(new int?[] { 1, 2, 3, 4, 5, unknownFinal ? null : 8 }, observations.Select(item => item.RunTotals?.HostedToolCalls?[LlmHostedToolKind.WebSearch]));
+        Assert.All(observations.Take(5), item => Assert.Equal(0, item.RunTotals?.HostedSourcesUsed));
+        Assert.Equal(2, observations.Select(item => item.RequestId).Distinct().Count());
+        if (unknownFinal) Assert.Null(observations[^1].RunTotals);
+    }
+
+    [Fact]
+    public async Task NegativeHostedCountsAreUnknownInInterimAndFinalRequestFacts()
+    {
+        var invalid = new LlmUsage(1, 2, 3)
+        {
+            ProviderReportedCostUsd = -0.25m,
+            HostedToolCallCount = -1,
+            HostedSourcesUsed = -1,
+            HostedToolCalls = new Dictionary<LlmHostedToolKind, int>
+            { [LlmHostedToolKind.WebSearch] = -1, [LlmHostedToolKind.RemoteMcp] = 0 }
+        };
+        var harness = new Harness();
+        harness.UsageObservations.Enqueue([invalid]);
+        harness.Results.Enqueue(new()
+        { Diagnostics = new(200, null, null), Text = "done", Status = LlmCompletionStatus.Completed, Usage = invalid });
+        await using var session = harness.Create(Options());
+        LlmAgentUsageEvent[] observations = [.. (await Read(session.RunTurnAsync(Turn("hello")))).OfType<LlmAgentUsageEvent>()];
+        Assert.Equal(2, observations.Length);
+        foreach (LlmAgentUsageEvent observation in observations)
+        {
+            foreach (LlmUsage usage in new[] { observation.Usage!, observation.RunTotals! })
+            {
+                Assert.Null(usage.HostedToolCallCount);
+                Assert.Null(usage.HostedSourcesUsed);
+                Assert.Equal(new KeyValuePair<LlmHostedToolKind, int>(LlmHostedToolKind.RemoteMcp, 0), Assert.Single(usage.HostedToolCalls!));
+                Assert.Equal(-0.25m, usage.ProviderReportedCostUsd);
+                Assert.Equal(3, usage.TotalTokens);
+            }
+        }
+    }
+
     [Fact]
     public async Task HostToolsAreSentNonStrictUnlessTheHostRequestsStrictness()
     {

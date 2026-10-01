@@ -657,6 +657,14 @@ for a caller-directed later turn. They do not automatically retry or execute ser
 running `LlmUsageDeltaEvent` observations and is mirrored on Common's capabilities. Each observation
 replaces the previous value for the entire call. Null counts remain unknown. Duplicate observations
 are suppressed. Only completion usage is authoritative, including when it corrects an earlier value.
+`LlmUsage` also carries nullable `ProviderReportedCostUsd`, `HostedToolCallCount`, `HostedSourcesUsed`
+and a frozen `HostedToolCalls` map keyed by `LlmHostedToolKind`. These are independent provider facts;
+no local price calculation or named-count sum invents an unreported total. Distinct completed calls
+sum a field only when every contributor reports it without overflow. Named counts use the intersection
+of reported valid keys; null maps remain unknown and empty maps report no named detail. Assignment and
+owned JSON import normalize negative hosted counts to unknown, retaining explicit zero. Interim usage
+replaces the current request's observation. These shared fields do not enable a hosted-tool capability
+or claim a provider mapping that has not been implemented.
 Anthropic and Vertex Claude report observations from `message_start` and `message_delta`. Gemini
 and Vertex Gemini report normalized `usageMetadata`, including reasoning output tokens.
 Claude CLI chat and native sessions share a ledger keyed by API message ID. It sums distinct calls
