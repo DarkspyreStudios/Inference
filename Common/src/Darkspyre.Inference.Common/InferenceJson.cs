@@ -13,6 +13,7 @@ namespace Darkspyre.Inference.Common;
 /// <summary>Common-owned metadata for closed data contracts. No reflection fallback is installed.</summary>
 public static class InferenceJson
 {
+    public static JsonTypeInfo<InferenceStreamLimits> InferenceStreamLimits => Metadata<InferenceStreamLimits>();
     public static JsonTypeInfo<LlmExplicitCacheReference> LlmExplicitCacheReference => Metadata<LlmExplicitCacheReference>();
     public static JsonTypeInfo<LlmClientToolDefinition> LlmClientToolDefinition => Metadata<LlmClientToolDefinition>();
     public static JsonTypeInfo<LlmShellSkill> LlmShellSkill => Metadata<LlmShellSkill>();
@@ -142,6 +143,7 @@ public static class InferenceJson
 [JsonSourceGenerationOptions(GenerationMode = JsonSourceGenerationMode.Metadata,
     Converters = [typeof(ResourceAccessJsonConverter), typeof(ResourceReadHandleJsonConverter), typeof(ResourceWriteHandleJsonConverter), typeof(ProviderAuthorizationJsonConverter), typeof(HostedToolPhaseJsonConverter), typeof(ImageGenerationActionJsonConverter)])]
 [JsonSerializable(typeof(InferenceProvenance))]
+[JsonSerializable(typeof(InferenceStreamLimits))]
 [JsonSerializable(typeof(InferenceMediaSourceKind))]
 [JsonSerializable(typeof(InferenceMediaSource))]
 [JsonSerializable(typeof(BinaryMediaSource))]
