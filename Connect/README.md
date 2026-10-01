@@ -1189,6 +1189,8 @@ Auth interactions, dynamic choices, validation and explicit model tests use one 
 OpenAI-compatible remains an advanced provider with explicit manual-model support and typed
 default/enabled/disabled capability overrides. Disabling the `Streaming` override selects the endpoint's
 non-streaming request, as [Streaming, reasoning text and usage](#streaming-reasoning-text-and-usage) describes.
+The Chat Completions and Responses adapters each share one protocol implementation. Adapter hooks
+select request routing, headers and model-specific sampling validation without replacing the wire model.
 Prompt-image overrides send `image_url` data-URL parts. Prompt-document overrides send PDFs as
 `file` parts and valid UTF-8 `text/*` documents as text parts. Other document formats fail before
 dispatch. Tool results remain text-only; prompt overrides do not enable binary tool results.
