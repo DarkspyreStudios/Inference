@@ -10,6 +10,27 @@ providers. The package contains semantic request, response, capability, progress
 failure types. It does not select an implementation or provide automatic fallback between local and
 external inference. The current synchronized package family targets .NET 11.
 
+## Hosted speech transcription
+
+`Darkspyre.Inference.Common.STT` contains hosted transcription data and client/session interfaces.
+Binary, URL and workspace-resource inputs form one closed union. Options preserve explicit false,
+nullable observations, raw signed numeric values, channel facts and ordered key terms. Sample rates
+use hertz. Timing fields use `TimeSpan`; absent duration, confidence, language and word/channel lists
+remain null. Empty lists and actual zero values remain distinct from absence.
+
+Binary data and collections are copied on construction and `with` updates. Owned `InferenceJson`
+getters cover the input union, options, word/channel/result data, concrete events and capabilities.
+Unknown input variants and undefined encodings refuse. Required factual properties cannot disappear
+through JSON defaults. Runtime clients and sessions refuse nonnull owned JSON serialization before
+callbacks or diagnostics run. There is no exported event-base JSON discriminator format.
+
+`ISpeechTranscriptionSession` exposes ordered audio, finalization and completion commands plus an
+event stream. Commands complete after send, not after a terminal event. The convenience stream
+contract owns one ephemeral session and its input enumerator with explicit `InferenceStreamLimits`.
+The contracts contain no hosted adapter, transport registration or runtime implementation.
+Capabilities default to unavailable, empty supported sets and unknown nullable lists. These hosted
+contracts do not replace Tensor's model-instance speech-transcription lifecycle or task identity.
+
 Applications choose an implementation explicitly and work with typed contracts:
 
 ```csharp

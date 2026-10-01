@@ -7,6 +7,7 @@ using Darkspyre.Inference.Common.LLM;
 using Darkspyre.Inference.Common.Media;
 using Darkspyre.Inference.Common.Resources;
 using Darkspyre.Inference.Common.Setup;
+using Darkspyre.Inference.Common.STT;
 using Darkspyre.Inference.Common.Video;
 
 namespace Darkspyre.Inference.Common;
@@ -14,6 +15,22 @@ namespace Darkspyre.Inference.Common;
 /// <summary>Common-owned metadata for closed data contracts. No reflection fallback is installed.</summary>
 public static class InferenceJson
 {
+    public static JsonTypeInfo<SpeechAudioEncoding> SpeechAudioEncoding => Metadata<SpeechAudioEncoding>();
+    public static JsonTypeInfo<SpeechTranscriptionInput> SpeechTranscriptionInput => Metadata<SpeechTranscriptionInput>();
+    public static JsonTypeInfo<BinarySpeechInput> BinarySpeechInput => Metadata<BinarySpeechInput>();
+    public static JsonTypeInfo<UrlSpeechInput> UrlSpeechInput => Metadata<UrlSpeechInput>();
+    public static JsonTypeInfo<ResourceSpeechInput> ResourceSpeechInput => Metadata<ResourceSpeechInput>();
+    public static JsonTypeInfo<SpeechTranscriptionOptions> SpeechTranscriptionOptions => Metadata<SpeechTranscriptionOptions>();
+    public static JsonTypeInfo<SpeechStreamOptions> SpeechStreamOptions => Metadata<SpeechStreamOptions>();
+    public static JsonTypeInfo<SpeechWord> SpeechWord => Metadata<SpeechWord>();
+    public static JsonTypeInfo<SpeechChannelTranscript> SpeechChannelTranscript => Metadata<SpeechChannelTranscript>();
+    public static JsonTypeInfo<SpeechTranscriptionResult> SpeechTranscriptionResult => Metadata<SpeechTranscriptionResult>();
+    public static JsonTypeInfo<SpeechTranscriptCreatedEvent> SpeechTranscriptCreatedEvent => Metadata<SpeechTranscriptCreatedEvent>();
+    public static JsonTypeInfo<SpeechTranscriptPartialEvent> SpeechTranscriptPartialEvent => Metadata<SpeechTranscriptPartialEvent>();
+    public static JsonTypeInfo<SpeechTranscriptDoneEvent> SpeechTranscriptDoneEvent => Metadata<SpeechTranscriptDoneEvent>();
+    public static JsonTypeInfo<SpeechTranscriptErrorEvent> SpeechTranscriptErrorEvent => Metadata<SpeechTranscriptErrorEvent>();
+    public static JsonTypeInfo<SpeechTranscriptionCapabilities> SpeechTranscriptionCapabilities => Metadata<SpeechTranscriptionCapabilities>();
+    public static JsonTypeInfo<SpeechTranscriptionModeCapabilities> SpeechTranscriptionModeCapabilities => Metadata<SpeechTranscriptionModeCapabilities>();
     public static JsonTypeInfo<VideoProviderOptions> VideoProviderOptions => Metadata<VideoProviderOptions>();
     public static JsonTypeInfo<VideoRequest> VideoRequest => Metadata<VideoRequest>();
     public static JsonTypeInfo<VideoGenerationRequest> VideoGenerationRequest => Metadata<VideoGenerationRequest>();
@@ -56,6 +73,9 @@ public static class InferenceJson
         options.Converters.Add(new VideoOperationJsonConverter());
         options.Converters.Add(new VideoProviderOptionsJsonConverter());
         options.Converters.Add(new VideoInferenceJsonConverter());
+        options.Converters.Add(new SpeechAudioEncodingJsonConverter());
+        options.Converters.Add(new SpeechTranscriptionClientJsonConverter());
+        options.Converters.Add(new SpeechTranscriptionSessionJsonConverter());
         options.MakeReadOnly();
         return options;
     }
@@ -66,8 +86,10 @@ public static class InferenceJson
 
         public JsonTypeInfo? GetTypeInfo(Type type, JsonSerializerOptions options)
         {
+            if (type == typeof(ISpeechTranscriptionClient)) return JsonMetadataServices.CreateValueInfo<ISpeechTranscriptionClient>(options, new SpeechTranscriptionClientJsonConverter());
+            if (type == typeof(ISpeechTranscriptionSession)) return JsonMetadataServices.CreateValueInfo<ISpeechTranscriptionSession>(options, new SpeechTranscriptionSessionJsonConverter());
             var metadata = ((IJsonTypeInfoResolver)InferenceJsonContext.Default).GetTypeInfo(type, options);
-            if ((type == typeof(LlmHostedImageOutput) || type == typeof(BinaryMediaSource)) && metadata is not null)
+            if ((type == typeof(LlmHostedImageOutput) || type == typeof(BinaryMediaSource) || type == typeof(BinarySpeechInput)) && metadata is not null)
                 metadata.Properties.Single(property => property.Name == "Data").CustomConverter = imageData;
             return metadata;
         }
@@ -163,6 +185,22 @@ public static class InferenceJson
 [JsonSourceGenerationOptions(GenerationMode = JsonSourceGenerationMode.Metadata,
     Converters = [typeof(ResourceAccessJsonConverter), typeof(ResourceReadHandleJsonConverter), typeof(ResourceWriteHandleJsonConverter), typeof(ProviderAuthorizationJsonConverter), typeof(HostedToolPhaseJsonConverter), typeof(ImageGenerationActionJsonConverter)])]
 [JsonSerializable(typeof(InferenceProvenance))]
+[JsonSerializable(typeof(SpeechAudioEncoding))]
+[JsonSerializable(typeof(SpeechTranscriptionInput))]
+[JsonSerializable(typeof(BinarySpeechInput))]
+[JsonSerializable(typeof(UrlSpeechInput))]
+[JsonSerializable(typeof(ResourceSpeechInput))]
+[JsonSerializable(typeof(SpeechTranscriptionOptions))]
+[JsonSerializable(typeof(SpeechStreamOptions))]
+[JsonSerializable(typeof(SpeechWord))]
+[JsonSerializable(typeof(SpeechChannelTranscript))]
+[JsonSerializable(typeof(SpeechTranscriptionResult))]
+[JsonSerializable(typeof(SpeechTranscriptCreatedEvent))]
+[JsonSerializable(typeof(SpeechTranscriptPartialEvent))]
+[JsonSerializable(typeof(SpeechTranscriptDoneEvent))]
+[JsonSerializable(typeof(SpeechTranscriptErrorEvent))]
+[JsonSerializable(typeof(SpeechTranscriptionCapabilities))]
+[JsonSerializable(typeof(SpeechTranscriptionModeCapabilities))]
 [JsonSerializable(typeof(VideoProviderOptions))]
 [JsonSerializable(typeof(VideoRequest))]
 [JsonSerializable(typeof(VideoGenerationRequest))]
