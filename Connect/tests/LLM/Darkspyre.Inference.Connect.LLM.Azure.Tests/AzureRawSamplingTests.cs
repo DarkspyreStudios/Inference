@@ -33,9 +33,14 @@ public sealed class AzureRawSamplingTests
             Credential = "",
             CapabilityOverrides = new()
             {
-                SupportsStreaming = operation == 0, SupportsTemperature = false, SupportsTopP = false,
-                SupportsTopK = false, SupportsSeed = false, SupportsPresencePenalty = false,
-                SupportsFrequencyPenalty = false, MaxStopSequences = 0
+                SupportsStreaming = operation == 0,
+                SupportsTemperature = false,
+                SupportsTopP = false,
+                SupportsTopK = false,
+                SupportsSeed = false,
+                SupportsPresencePenalty = false,
+                SupportsFrequencyPenalty = false,
+                MaxStopSequences = 0
             }
         };
         var request = AzureProtocolTests.Request with

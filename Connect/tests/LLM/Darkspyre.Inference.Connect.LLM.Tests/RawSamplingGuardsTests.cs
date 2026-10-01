@@ -37,9 +37,14 @@ public sealed class RawSamplingGuardsTests
             ProviderOptions = connectionScope ? options : new Dictionary<string, JsonElement>(),
             CapabilityOverrides = new()
             {
-                SupportsStreaming = operation == 0, SupportsTemperature = false, SupportsTopP = false,
-                SupportsTopK = false, SupportsSeed = false, SupportsPresencePenalty = false,
-                SupportsFrequencyPenalty = false, MaxStopSequences = 0
+                SupportsStreaming = operation == 0,
+                SupportsTemperature = false,
+                SupportsTopP = false,
+                SupportsTopK = false,
+                SupportsSeed = false,
+                SupportsPresencePenalty = false,
+                SupportsFrequencyPenalty = false,
+                MaxStopSequences = 0
             }
         };
         LlmChatRequest request = Request(route) with
@@ -154,8 +159,11 @@ public sealed class RawSamplingGuardsTests
         Version = "1",
         Transport = route switch
         {
-            "responses" => LlmTransport.OpenAiResponses, "compatible" => LlmTransport.OpenAiCompatibleChat,
-            "anthropic" => LlmTransport.AnthropicMessages, "gemini" => LlmTransport.GoogleGeminiApi, _ => LlmTransport.XaiResponses
+            "responses" => LlmTransport.OpenAiResponses,
+            "compatible" => LlmTransport.OpenAiCompatibleChat,
+            "anthropic" => LlmTransport.AnthropicMessages,
+            "gemini" => LlmTransport.GoogleGeminiApi,
+            _ => LlmTransport.XaiResponses
         },
         Endpoint = route switch { "gemini" => GeminiApiLlmClient.DefaultEndpoint, "xai" => new XaiConnectionOptions().GetEndpoint(), _ => "https://provider.invalid/v1" },
         Credential = route == "xai" ? new LlmCredential { OAuth = new() { AccessToken = "fixture-token" } }.Serialize()
@@ -164,8 +172,11 @@ public sealed class RawSamplingGuardsTests
     };
     internal static ILlmClient Client(HttpClient http, string route) => route switch
     {
-        "responses" => new OpenAiResponsesLlmClient(http), "compatible" => new OpenAiCompatibleChatLlmClient(http),
-        "anthropic" => new AnthropicMessagesLlmClient(http), "gemini" => new GeminiApiLlmClient(http), _ => new XaiResponsesLlmClient(http)
+        "responses" => new OpenAiResponsesLlmClient(http),
+        "compatible" => new OpenAiCompatibleChatLlmClient(http),
+        "anthropic" => new AnthropicMessagesLlmClient(http),
+        "gemini" => new GeminiApiLlmClient(http),
+        _ => new XaiResponsesLlmClient(http)
     };
     private static async Task Invoke(ILlmClient client, LlmConnection connection, LlmChatRequest request, int operation)
     {

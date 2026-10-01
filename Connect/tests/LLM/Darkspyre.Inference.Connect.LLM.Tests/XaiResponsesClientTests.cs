@@ -153,8 +153,16 @@ public sealed class XaiResponsesClientTests
         using var http = new HttpClient(handler);
         var client = new XaiResponsesLlmClient(http);
         var options = new Dictionary<string, JsonElement> { [field] = Json("true") };
-        await Assert.ThrowsAsync<ArgumentException>(() => Read(client.StreamAsync(Connection(), Request() with { ProviderOptions = options })));
-        await Assert.ThrowsAsync<ArgumentException>(() => Read(client.StreamAsync(Connection() with { ProviderOptions = options }, Request())));
+        if (field == "temperature")
+        {
+            await Assert.ThrowsAsync<InvalidOperationException>(() => Read(client.StreamAsync(Connection(), Request() with { ProviderOptions = options })));
+            await Assert.ThrowsAsync<InvalidOperationException>(() => Read(client.StreamAsync(Connection() with { ProviderOptions = options }, Request())));
+        }
+        else
+        {
+            await Assert.ThrowsAsync<ArgumentException>(() => Read(client.StreamAsync(Connection(), Request() with { ProviderOptions = options })));
+            await Assert.ThrowsAsync<ArgumentException>(() => Read(client.StreamAsync(Connection() with { ProviderOptions = options }, Request())));
+        }
         Assert.Equal(0, handler.Calls);
     }
 

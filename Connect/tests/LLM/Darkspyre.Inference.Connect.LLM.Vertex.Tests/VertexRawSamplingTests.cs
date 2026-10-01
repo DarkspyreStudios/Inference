@@ -38,9 +38,14 @@ public sealed class VertexRawSamplingTests
             ProviderOptions = connectionScope ? options : new Dictionary<string, JsonElement>(),
             CapabilityOverrides = new()
             {
-                SupportsStreaming = operation == 0, SupportsTemperature = false, SupportsTopP = false,
-                SupportsTopK = false, SupportsSeed = false, SupportsPresencePenalty = false,
-                SupportsFrequencyPenalty = false, MaxStopSequences = 0
+                SupportsStreaming = operation == 0,
+                SupportsTemperature = false,
+                SupportsTopP = false,
+                SupportsTopK = false,
+                SupportsSeed = false,
+                SupportsPresencePenalty = false,
+                SupportsFrequencyPenalty = false,
+                MaxStopSequences = 0
             }
         };
         var request = Request(claude) with
@@ -93,14 +98,17 @@ public sealed class VertexRawSamplingTests
     { [field] = JsonElement.Parse(Value(field)) };
     private static LlmConnection Connection(bool streaming) => new()
     {
-        Version = "1", Transport = LlmTransport.GoogleVertexAi, Endpoint = "https://aiplatform.googleapis.com",
+        Version = "1",
+        Transport = LlmTransport.GoogleVertexAi,
+        Endpoint = "https://aiplatform.googleapis.com",
         Vertex = new() { ProjectId = "test-project", Location = "global" },
         CapabilityOverrides = new() { SupportsStreaming = streaming }
     };
     private static LlmChatRequest Request(bool claude) => new()
     {
         ModelId = claude ? "anthropic/claude-sonnet-4-6" : "google/gemini-2.5-flash",
-        ReasoningLevel = claude ? LlmReasoningLevel.None : null, Messages = [new("user", "hello")]
+        ReasoningLevel = claude ? LlmReasoningLevel.None : null,
+        Messages = [new("user", "hello")]
     };
     private static async Task Invoke(VertexLlmClient client, LlmConnection connection, LlmChatRequest request, int operation)
     {

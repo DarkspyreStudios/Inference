@@ -90,6 +90,59 @@ public sealed class RawSamplingFacadeTests
         }
         public void Dispose() => Disposed = true;
     }
+
+    [Theory]
+    [InlineData(0, false)]
+    [InlineData(2, false)]
+    [InlineData(3, false)]
+    [InlineData(0, true)]
+    [InlineData(2, true)]
+    [InlineData(3, true)]
+    public async Task LateResolutionPreservesCallerAndOwnerCancellation(int operation, bool dispose)
+    {
+        using var handler = new RawSamplingGuardsTests.Handler("gemini");
+        using var http = new HttpClient(handler);
+        var source = new DelayedSource();
+        var authenticator = new Authenticator(LlmTransport.GoogleGeminiApi);
+        var service = new LlmProviderService(source, [RawSamplingGuardsTests.Client(http, "gemini")], [authenticator]);
+        using var cancellation = new CancellationTokenSource();
+        var request = RawSamplingGuardsTests.Request("gemini") with
+        { ProviderOptions = new Dictionary<string, JsonElement> { ["temperature"] = JsonElement.Parse("0.5") } };
+        Task run = RunAsync();
+        await source.Entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        Task? retirement = null;
+        if (dispose)
+        {
+            retirement = service.DisposeAsync().AsTask();
+            Assert.False(retirement.IsCompleted);
+        }
+        else cancellation.Cancel();
+        source.Returned.SetResult(RawSamplingGuardsTests.Connection("gemini", true));
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => run);
+        if (retirement is not null) await retirement;
+        else await service.DisposeAsync();
+        Assert.Equal(0, authenticator.Calls);
+        Assert.Equal(0, handler.Calls);
+        Assert.False(authenticator.Disposed);
+
+        async Task RunAsync()
+        {
+            if (operation == 2) await service.CountInputTokensAsync("connection", request, cancellation.Token);
+            else if (operation == 3) await service.MeasureRequestAsync("connection", request, cancellationToken: cancellation.Token);
+            else await foreach (LlmStreamEvent unused in service.StreamAsync("connection", request, cancellation.Token)) { }
+        }
+    }
+
+    private sealed class DelayedSource : ILlmConnectionSource
+    {
+        internal TaskCompletionSource Entered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        internal TaskCompletionSource<LlmConnection?> Returned { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public Task<LlmConnection?> GetConnectionAsync(string connectionId, CancellationToken cancellationToken = default)
+        { Entered.SetResult(); return Returned.Task; }
+        public Task SaveCredentialAsync(string connectionId, string credentialJson, string expectedVersion, CancellationToken cancellationToken = default)
+            => throw new InvalidOperationException("Late resolution cannot save credentials.");
+    }
+
     private sealed class Authenticator(LlmTransport transport) : ILlmAuthenticator, IDisposable
     {
         public LlmTransport Transport => transport;

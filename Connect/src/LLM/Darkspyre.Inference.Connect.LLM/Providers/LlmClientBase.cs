@@ -115,6 +115,7 @@ internal abstract class LlmClientBase(HttpClient http) : ILlmClient
         IReadOnlySet<string>? nativeToolNames = null)
     {
         EnsureTransport(connection);
+        RequestJson.ValidateSamplingOptions(connection, request);
         if (string.IsNullOrWhiteSpace(request.ModelId))
         {
             throw new ArgumentException("A model id is required.", nameof(request));
