@@ -125,6 +125,7 @@ public static class ConnectLlmJson
     public static JsonTypeInfo<LlmAgentHostedToolCallCompletedEvent> LlmAgentHostedToolCallCompletedEvent => Metadata<LlmAgentHostedToolCallCompletedEvent>();
     public static JsonTypeInfo<LlmAgentCitationEvent> LlmAgentCitationEvent => Metadata<LlmAgentCitationEvent>();
     public static JsonTypeInfo<LlmAgentCompactedEvent> LlmAgentCompactedEvent => Metadata<LlmAgentCompactedEvent>();
+    public static JsonTypeInfo<LlmAgentResourceSelectionChangedEvent> LlmAgentResourceSelectionChangedEvent => Metadata<LlmAgentResourceSelectionChangedEvent>();
     public static JsonTypeInfo<LlmCredential> Credential => LlmCredentialJsonContext.Default.LlmCredential;
     public static JsonTypeInfo<LlmAccountUsageSnapshot> AccountUsageSnapshot => Metadata<LlmAccountUsageSnapshot>();
     public static JsonTypeInfo<LlmConnection> Connection => Metadata<LlmConnection>();
@@ -219,6 +220,7 @@ public static class ConnectLlmJson
 [JsonSerializable(typeof(LlmAgentHostedToolCallCompletedEvent))]
 [JsonSerializable(typeof(LlmAgentCitationEvent))]
 [JsonSerializable(typeof(LlmAgentCompactedEvent))]
+[JsonSerializable(typeof(LlmAgentResourceSelectionChangedEvent))]
 [JsonSerializable(typeof(LlmChatResult))]
 [JsonSerializable(typeof(LlmChatMessage))]
 [JsonSerializable(typeof(LlmTokenization))]

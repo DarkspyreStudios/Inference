@@ -325,7 +325,7 @@ public sealed class SelfHostTests
         await using ILlmAgentSession session = await agents.StartSessionAsync("connection", new LlmAgentSessionOptions
         {
             ModelId = "qwen",
-            Tools = [new() { Name = "get_time", InputSchema = JsonSerializer.SerializeToElement(new { type = "object" }) }],
+            Tools = [new LlmAgentToolDefinition() { Name = "get_time", InputSchema = JsonSerializer.SerializeToElement(new { type = "object" }) }],
             ToolHandler = (tool, _) => { ran.Add(tool.Name); return Task.FromResult(LlmToolOutput.FromText("12:00")); }
         });
         var text = new List<string>();

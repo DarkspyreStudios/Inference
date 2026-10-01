@@ -15,7 +15,7 @@ namespace Darkspyre.Inference.Connect.LLM.Vertex.Tests;
 public sealed class GeminiEstimateJsonTests
 {
     private const string EmptyProjection = """
-        {"Resources":null,"ModelId":"model","Instructions":null,"Messages":[],"Temperature":null,"MaxOutputTokens":null,"TopP":null,"TopK":null,"Seed":null,"PresencePenalty":null,"FrequencyPenalty":null,"StopSequences":[],"ReasoningLevel":null,"StructuredOutput":null,"Tools":[],"ToolChoice":null,"AllowParallelToolCalls":null,"ConversationKey":null,"PromptCache":null,"ProviderOptions":{},"UnboundContinuationState":0}
+        {"Resources":null,"ModelId":"model","Instructions":null,"Messages":[],"Temperature":null,"MaxOutputTokens":null,"TopP":null,"TopK":null,"Seed":null,"PresencePenalty":null,"FrequencyPenalty":null,"StopSequences":[],"ReasoningLevel":null,"StructuredOutput":null,"Tools":[],"HostedTools":[],"MaxHostedTurns":null,"ToolChoice":null,"AllowParallelToolCalls":null,"ConversationKey":null,"PromptCache":null,"ProviderOptions":{},"UnboundContinuationState":0}
         """;
 
     [Fact]
@@ -72,8 +72,8 @@ public sealed class GeminiEstimateJsonTests
                 { ImplementationId = "fixture", ModelId = request.ModelId, ScopeId = "scope", Payload = "opaque" }
             },
             "attachment" => message with { Attachments = [new LlmAttachment { Kind = LlmBinaryKind.Image, FileName = "image.png", Data = new byte[] { 1 }, MediaType = "image/png" }] },
-            "binary" => message with { ToolResults = [new("call", new() { Parts = [new LlmToolOutputBinary(LlmBinaryKind.Image, "image/png", new byte[] { 1 })] })] },
-            _ => message with { ToolResults = [new("call", new() { Parts = [new LlmToolOutputResource("urn:fixture")] })] }
+            "binary" => message with { ToolResults = [new LlmToolResult("call", new() { Parts = [new LlmToolOutputBinary(LlmBinaryKind.Image, "image/png", new byte[] { 1 })] })] },
+            _ => message with { ToolResults = [new LlmToolResult("call", new() { Parts = [new LlmToolOutputResource("urn:fixture")] })] }
         };
         using var http = new HttpClient(new NoHttp());
         using var authentication = new VertexAuthentication();
@@ -125,7 +125,7 @@ public sealed class GeminiEstimateJsonTests
         Instructions = null,
         Messages = [new("user", "\"\\\n<&>\u00e9"), new("tool", "")
         {
-            ToolResults = tools ? [new("call", new()
+            ToolResults = tools ? [new LlmToolResult("call", new()
             {
                 Parts = [new LlmToolOutputText("result<&>")],
                 StructuredContent = JsonElement.Parse("{\"raw\":\"<&>\",\"zero\":0}")
@@ -136,7 +136,7 @@ public sealed class GeminiEstimateJsonTests
         ReasoningLevel = LlmReasoningLevel.Medium,
         ConversationKey = string.Empty,
         PromptCache = new() { Scope = LlmPromptCacheScope.Prefix, Retention = LlmPromptCacheRetention.Extended },
-        Tools = tools ? [new() { Name = "lookup", Description = null, InputSchema = JsonElement.Parse("{\"type\":\"object\"}") }] : [],
+        Tools = tools ? [new LlmToolDefinition() { Name = "lookup", Description = null, InputSchema = JsonElement.Parse("{\"type\":\"object\"}") }] : [],
         ToolChoice = tools ? new() { Mode = LlmToolChoiceMode.Auto } : null,
         ProviderOptions = new Dictionary<string, JsonElement> { ["opaque"] = JsonElement.Parse("{\"b\":false,\"a\":null}") }
     };

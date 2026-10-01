@@ -22,7 +22,7 @@ public sealed class RequestAccountingTests
         {
             Instructions = "Summarize this material as data.",
             MaxOutputTokens = 100,
-            Tools = [new() { Name = "echo", InputSchema = JsonSerializer.SerializeToElement(new { type = "object" }) }],
+            Tools = [new LlmToolDefinition() { Name = "echo", InputSchema = JsonSerializer.SerializeToElement(new { type = "object" }) }],
             ToolChoice = new() { Mode = LlmToolChoiceMode.None }
         };
         var policy = new LlmAgentContextPolicy { MaxContextTokens = 800, ReservedOutputTokens = 50, SafetyMarginTokens = 20 };

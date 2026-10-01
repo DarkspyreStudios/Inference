@@ -415,7 +415,7 @@ public sealed class LlmProviderService : ILlmTextTokenizer, IDisposable, IAsyncD
         using var operation = _lifetime.Enter(cancellationToken);
         cancellationToken = operation.Token;
         ArgumentNullException.ThrowIfNull(request);
-        request = request with { HostedTools = HostedTools.Snapshot(request.HostedTools) };
+        request = ClientTools.Snapshot(request with { HostedTools = HostedTools.Snapshot(request.HostedTools) });
         LlmAccountUsageObservations.Reservation observationReservation = _observations.Reserve(connectionId);
         LlmConnection connection = await LlmConnectionResolver.ResolveAsync(
             Connections,
@@ -427,6 +427,7 @@ public sealed class LlmProviderService : ILlmTextTokenizer, IDisposable, IAsyncD
         string? resolvedCredential = connection.Credential;
         LlmAttachments.ValidateReferences(request, () => client.GetCapabilities(connection, request.ModelId).SupportsFileReferences);
         HostedTools.Validate(request, client.GetCapabilities(connection, request.ModelId));
+        ClientTools.Validate(request, client.GetCapabilities(connection, request.ModelId).SupportsShellTools);
         if (client is not IStreamingCredentialRefreshPolicy refreshPolicy
             || refreshPolicy.RequiresFreshOAuthCredentialForStreaming(connection))
         {
@@ -532,7 +533,7 @@ public sealed class LlmProviderService : ILlmTextTokenizer, IDisposable, IAsyncD
         cancellationToken = operation.Token;
         ArgumentNullException.ThrowIfNull(request);
         ArgumentException.ThrowIfNullOrWhiteSpace(request.ModelId);
-        request = request with { HostedTools = HostedTools.Snapshot(request.HostedTools) };
+        request = ClientTools.Snapshot(request with { HostedTools = HostedTools.Snapshot(request.HostedTools) });
         LlmConnection connection = await LlmConnectionResolver.ResolveAsync(Connections, connectionId, cancellationToken);
         ThrowIfOperationCanceled(cancellationToken);
         RequestJson.ValidateSamplingOptions(connection, request);
@@ -541,6 +542,7 @@ public sealed class LlmProviderService : ILlmTextTokenizer, IDisposable, IAsyncD
             throw new NotSupportedException("This route does not implement provider input-token counting.");
         LlmAttachments.ValidateReferences(request, () => client.GetCapabilities(connection, request.ModelId).SupportsFileReferences);
         HostedTools.Validate(request, client.GetCapabilities(connection, request.ModelId));
+        ClientTools.Validate(request, client.GetCapabilities(connection, request.ModelId).SupportsShellTools);
         connection = await ConnectionAccess.RefreshAsync(connectionId, connection, cancellationToken);
         if (client is ILlmConnectionPreparation preparation)
             connection = await preparation.PrepareAsync(connection, cancellationToken).ConfigureAwait(false);
@@ -572,7 +574,7 @@ public sealed class LlmProviderService : ILlmTextTokenizer, IDisposable, IAsyncD
         if (request.MaxOutputTokens is <= 0) { throw new ArgumentOutOfRangeException(nameof(request)); }
         policy ??= new();
         ManagedAgentPolicy.Validate(new() { ContextPolicy = policy }, null);
-        request = request with { HostedTools = HostedTools.Snapshot(request.HostedTools) };
+        request = ClientTools.Snapshot(request with { HostedTools = HostedTools.Snapshot(request.HostedTools) });
         var connection = await LlmConnectionResolver.ResolveAsync(Connections, connectionId, cancellationToken);
         ThrowIfOperationCanceled(cancellationToken);
         RequestJson.ValidateSamplingOptions(connection, request);
@@ -580,6 +582,7 @@ public sealed class LlmProviderService : ILlmTextTokenizer, IDisposable, IAsyncD
         // Measure what would be sent: the same projection as the request path.
         LlmAttachments.ValidateReferences(request, () => client.GetCapabilities(connection, request.ModelId).SupportsFileReferences);
         HostedTools.Validate(request, client.GetCapabilities(connection, request.ModelId));
+        ClientTools.Validate(request, client.GetCapabilities(connection, request.ModelId).SupportsShellTools);
         // Ambient-credential adapters cannot decide state binding without resolving identity.
         // Their nonmutating estimator reports unknown for opaque state instead of dropping it.
         if (client is not ILlmConnectionPreparation)

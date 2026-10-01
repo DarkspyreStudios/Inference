@@ -496,7 +496,7 @@ internal abstract class ChatCompletionsLlmClientBase(HttpClient http) : LlmClien
                 : (JsonObject)ProviderContinuationStateCodec.DecodeMessage(message, connection, request.ModelId)[0]!;
             if (message.ToolResults.Count > 0)
             {
-                foreach (LlmToolResult result in message.ToolResults)
+                foreach (LlmToolResult result in ClientTools.Functions(message.ToolResults))
                 {
                     messages.Add(new JsonObject
                     {
@@ -525,7 +525,7 @@ internal abstract class ChatCompletionsLlmClientBase(HttpClient http) : LlmClien
             if (message.ToolCalls.Count > 0)
             {
                 var mappedCalls = new JsonArray();
-                foreach (LlmToolCall call in message.ToolCalls)
+                foreach (LlmToolCall call in ClientTools.Functions(message.ToolCalls))
                 {
                     mappedCalls.Add(new JsonObject
                     {
@@ -596,7 +596,7 @@ internal abstract class ChatCompletionsLlmClientBase(HttpClient http) : LlmClien
         if (request.Tools.Count > 0)
         {
             var tools = new JsonArray();
-            foreach (LlmToolDefinition tool in request.Tools)
+            foreach (LlmToolDefinition tool in ClientTools.Functions(request.Tools))
             {
                 var function = new JsonObject
                 {

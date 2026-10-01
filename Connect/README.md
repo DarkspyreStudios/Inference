@@ -1085,8 +1085,10 @@ without normalization or filesystem access. File URLs and relative paths are not
 
 Factories and caller services remain borrowed. A returned terminal handle is owned by its session;
 Kill preserves readability, while DisposeAsync must kill/drain and invalidate that handle. These
-interfaces contain no filesystem, process or shell implementation. Current Start/Resume options do
-not yet accept the composition, and no runtime advertises these services.
+interfaces contain no filesystem, process or shell implementation. Start/Resume borrow the typed
+composition and reject unsupported supplied services before runtime work. Built-in adapters do not
+advertise caller-service or shell mappings. Managed sessions release their borrowed handler/service
+references only after admitted work drains; they do not dispose them.
 
 `ConnectLlmJson` exports the callback data through exact type-name getters and closed fixed unions.
 Runtime services have no public metadata getters. Their internal owned codecs refuse all non-null
@@ -1097,9 +1099,18 @@ freezes caller-selected policy roots and does not grant filesystem or resource a
 `LlmAgentClientToolDefinition` is a closed function/shell data union. The existing
 `LlmAgentToolDefinition` retains its schema, strictness, deferred-loading and sequential-execution
 fields. `LlmAgentShellTool` wraps the Common shell definition. `ConnectLlmJson` exports these three
-types with exact type-name getters and fixed `function`/`shell` discriminators. Current Start/Resume
-tool collections remain function-only. These declarations do not enable shell execution or change
-provider capabilities.
+types with exact type-name getters and fixed `function`/`shell` discriminators. Start/Resume definitions
+and Common/Connect request, history and terminal collections preserve one ordered function/shell
+union. Unsupported shell definitions/history refuse before refresh, catalog, provider counting or
+native entry. Facades freeze the new tool graphs before their first awaited resolution. Shell results
+match actual preceding calls; output limits remain on that call, not duplicated on the result.
+
+`LlmAgentEvent.TurnId` is nullable for actual session-only observations. Concrete turn-scoped events
+retain guarded non-null IDs, including construction and base-typed `with` assignments. Resource and
+resource-output observations carry null, not an empty synthetic turn. The owned
+`LlmAgentResourceSelectionChangedEvent` metadata preserves an observed revision and nullable actual
+turn; its declaration does not implement selected-resource membership or hint publication.
+Common shell-call observations and typed history remain distinct from function-shaped agent events.
 
 A tool result carries one `LlmToolOutput`: ordered parts, optional structured JSON, and an error flag.
 A chat request sends it as `new LlmToolResult(call.Id, output)`, and an agent `ToolHandler` returns it.

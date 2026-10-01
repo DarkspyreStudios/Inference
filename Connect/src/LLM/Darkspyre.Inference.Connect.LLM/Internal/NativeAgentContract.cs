@@ -54,6 +54,7 @@ internal static class NativeAgentContract
     public static LlmAgentNativeRuntimeOptions ValidateStart(LlmAgentSessionOptions options, LlmAgentCapabilities agent)
     {
         HostedTools.Validate(options.HostedTools, options.MaxHostedTurns, agent.HostedTools);
+        ClientTools.ValidateCallerServices(options.CallerServices, agent);
         // A supplied context becomes opening context; see AgentOpeningContext.
         if (options.ThreadId is not null || options.SessionId is not null || options.ExecutionOptions is not null)
         {
@@ -76,6 +77,8 @@ internal static class NativeAgentContract
     public static LlmAgentNativeRuntimeOptions ResumeRuntime(LlmAgentResumeOptions options, LlmAgentCapabilities agent)
     {
         HostedTools.Validate(options.HostedTools, options.MaxHostedTurns, agent.HostedTools);
+        ClientTools.ValidateCallerServices(options.CallerServices, agent);
+        ValidateTools(options.Tools);
         LlmAgentNativeRuntimeOptions runtime = options.Runtime ?? new()
         {
             WorkingDirectory = Environment.CurrentDirectory,
@@ -117,7 +120,7 @@ internal static class NativeAgentContract
         LlmAgentCapabilities agent,
         bool supportsAgentToolUse,
         string? modelId,
-        IReadOnlyList<LlmAgentToolDefinition> tools,
+        IReadOnlyList<LlmAgentClientToolDefinition> tools,
         LlmAgentToolHandler? toolHandler)
     {
         var implemented = new LlmProviderCapabilities
@@ -138,10 +141,10 @@ internal static class NativeAgentContract
         }
     }
 
-    public static void ValidateTools(IReadOnlyList<LlmAgentToolDefinition> tools)
+    public static void ValidateTools(IReadOnlyList<LlmAgentClientToolDefinition> tools)
     {
         ArgumentNullException.ThrowIfNull(tools);
-        if (tools.Any(tool => tool.RequiresSequentialExecution))
+        if (ClientTools.Functions(tools).Any(tool => tool.RequiresSequentialExecution))
         {
             throw new NotSupportedException("This native runtime does not implement managed tool scheduling.");
         }

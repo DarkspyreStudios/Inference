@@ -26,7 +26,7 @@ public sealed class GeminiWireParityTests
             Messages = [new("system", "Extra rule."), new("user", "Run pwd")],
             Tools =
             [
-                new()
+                new LlmToolDefinition()
                 {
                     Name = "run",
                     Description = "Run a command",

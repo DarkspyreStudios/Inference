@@ -775,7 +775,7 @@ public sealed class ClaudeCliLlmClientTests
         {
             ModelId = "claude-test",
             Messages = ToolHistory(),
-            Tools = [new() { Name = "lookup", InputSchema = JsonSerializer.SerializeToElement(new { type = "object" }) }]
+            Tools = [new LlmToolDefinition() { Name = "lookup", InputSchema = JsonSerializer.SerializeToElement(new { type = "object" }) }]
         })));
         Assert.Empty(runner.Invocations);
     }

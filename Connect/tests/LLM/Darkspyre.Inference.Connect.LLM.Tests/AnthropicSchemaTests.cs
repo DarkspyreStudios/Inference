@@ -164,7 +164,7 @@ public sealed class AnthropicSchemaTests
         var request = new LlmChatRequest
         {
             ModelId = Model,
-            Tools = [new()
+            Tools = [new LlmToolDefinition()
         { Name = "run", Strict = true, InputSchema = JsonElement.Parse(ClosedSchema) }]
         };
         LlmConnection unsupported = Connection(false) with
@@ -263,9 +263,9 @@ public sealed class AnthropicSchemaTests
         var request = Request(output.GetRawText()) with
         {
             Tools = [
-            new() { Name = "first", Strict = true, InputSchema = first },
-            new() { Name = "second", Strict = true, InputSchema = second },
-            new() { Name = "ordinary", InputSchema = ComplexitySchema(25, 17) }]
+            new LlmToolDefinition() { Name = "first", Strict = true, InputSchema = first },
+            new LlmToolDefinition() { Name = "second", Strict = true, InputSchema = second },
+            new LlmToolDefinition() { Name = "ordinary", InputSchema = ComplexitySchema(25, 17) }]
         };
         string original = JsonSerializer.Serialize(request);
         using var handler = new Handler(streaming, "{}");
@@ -285,7 +285,7 @@ public sealed class AnthropicSchemaTests
             Assert.True(JsonNode.DeepEquals(JsonNode.Parse(output.GetRawText()), native["output_config"]!["format"]!["schema"]));
             Assert.Equal(true, (bool?)native["tools"]![0]!["strict"]);
             Assert.Null(native["tools"]![2]!["strict"]);
-            Assert.True(JsonNode.DeepEquals(JsonNode.Parse(request.Tools[2].InputSchema.GetRawText()), native["tools"]![2]!["input_schema"]));
+            Assert.True(JsonNode.DeepEquals(JsonNode.Parse(Assert.IsType<LlmToolDefinition>(request.Tools[2]).InputSchema.GetRawText()), native["tools"]![2]!["input_schema"]));
         }
         Assert.Equal(original, JsonSerializer.Serialize(request));
     }
@@ -298,7 +298,7 @@ public sealed class AnthropicSchemaTests
         JsonElement tools = ComplexitySchema(optional ? 24 : 0, optional ? 0 : 16);
         JsonElement output = ComplexitySchema(optional ? 1 : 0, optional ? 0 : 1);
         var request = Request(output.GetRawText(), LlmStructuredOutputFallback.LocalValidation) with
-        { Tools = [new() { Name = "strict_run", Strict = true, InputSchema = tools }] };
+        { Tools = [new LlmToolDefinition() { Name = "strict_run", Strict = true, InputSchema = tools }] };
         string original = JsonSerializer.Serialize(request);
         string validText = optional ? "{}" : "{\"union_0\":null}";
         using var handler = new Handler(false, validText);
@@ -322,8 +322,8 @@ public sealed class AnthropicSchemaTests
         var request = Request(ClosedSchema, LlmStructuredOutputFallback.LocalValidation) with
         {
             Tools = [
-            new() { Name = "first", Strict = true, InputSchema = schema },
-            new() { Name = "second", Strict = true, InputSchema = schema }]
+            new LlmToolDefinition() { Name = "first", Strict = true, InputSchema = schema },
+            new LlmToolDefinition() { Name = "second", Strict = true, InputSchema = schema }]
         };
         string original = JsonSerializer.Serialize(request);
         using var handler = new Handler(false, "{}");

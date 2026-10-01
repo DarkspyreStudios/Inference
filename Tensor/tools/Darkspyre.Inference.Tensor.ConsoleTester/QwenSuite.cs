@@ -61,7 +61,8 @@ internal sealed class QwenSuite(ILlmInference engine, string modelId)
         LlmInferenceResult? first = await StreamAsync("tools: call", request, cancellationToken);
         if (!Check(first is { ToolCalls.Count: > 0 }, "the model made no tool call")) { return false; }
 
-        LlmToolCall call = first!.ToolCalls[0];
+        if (first!.ToolCalls[0] is not LlmToolCall call)
+            throw new InvalidOperationException("Qwen returned a non-function tool call.");
         string now = DateTime.Now.ToString("F", CultureInfo.InvariantCulture);
         Console.WriteLine($"  -> ran {call.Name}({call.ArgumentsJson}) = {now}");
         LlmInferenceRequest followUp = request with
@@ -70,7 +71,7 @@ internal sealed class QwenSuite(ILlmInference engine, string modelId)
             [
                 .. request.Messages,
                 new("assistant", first.Text) { ToolCalls = first.ToolCalls },
-                new("user", string.Empty) { ToolResults = [new(call.Id, LlmToolOutput.FromText(now))] }
+                new("user", string.Empty) { ToolResults = [new LlmToolResult(call.Id, LlmToolOutput.FromText(now))] }
             ]
         };
         LlmInferenceResult? answer = await StreamAsync("tools: answer", followUp, cancellationToken);

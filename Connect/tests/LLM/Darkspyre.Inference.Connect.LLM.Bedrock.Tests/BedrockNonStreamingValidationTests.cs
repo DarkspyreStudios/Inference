@@ -63,7 +63,7 @@ public sealed class BedrockNonStreamingValidationTests
         LlmChatResult result = Assert.IsType<LlmChatCompletionEvent>(events[^1]).Result;
         Assert.Single(events.OfType<LlmChatCompletionEvent>());
         Assert.Equal(LlmCompletionStatus.RequiresAction, result.Status);
-        LlmToolCall call = Assert.Single(result.ToolCalls);
+        LlmToolCall call = Assert.IsType<LlmToolCall>(Assert.Single(result.ToolCalls));
         Assert.Equal("call-1", call.Id);
         Assert.Equal("lookup", call.Name);
         Assert.Equal(kind == "object" ? "{\"path\":\"a.txt\"}" : "{}", call.ArgumentsJson);

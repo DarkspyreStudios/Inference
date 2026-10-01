@@ -58,18 +58,22 @@ public sealed class GeminiProtocolConformanceTests
         LlmConnection connection = Connection(vertex, stream) with
         {
             ProviderOptions = new Dictionary<string, JsonElement>
-            { ["mediaResolution"] = JsonElement.Parse("\"MEDIA_RESOLUTION_LOW\""), ["presencePenalty"] = JsonElement.Parse("0.25") }
+            { ["mediaResolution"] = JsonElement.Parse("\"MEDIA_RESOLUTION_LOW\"") }
         };
-        await Drain(Client(http, vertex).StreamAsync(connection, new()
+        var request = new LlmChatRequest
         {
             ModelId = vertex ? "google/" + Model : Model,
+            PresencePenalty = .25,
             ProviderOptions = new Dictionary<string, JsonElement> { ["mediaResolution"] = JsonElement.Parse("\"MEDIA_RESOLUTION_HIGH\"") }
-        }));
+        };
+        await Drain(Client(http, vertex).StreamAsync(connection, request));
         JsonNode body = JsonNode.Parse(handler.Bodies[0])!;
         Assert.Null(body["mediaResolution"]);
+        Assert.Null(body["presencePenalty"]);
         Assert.Equal("MEDIA_RESOLUTION_HIGH", (string?)body["generationConfig"]!["mediaResolution"]);
         Assert.Equal(.25, (double?)body["generationConfig"]!["presencePenalty"]);
         Assert.Equal("MEDIA_RESOLUTION_LOW", connection.ProviderOptions["mediaResolution"].GetString());
+        Assert.Equal(.25, request.PresencePenalty);
     }
 
     [Theory]
@@ -161,13 +165,13 @@ public sealed class GeminiProtocolConformanceTests
             UnboundContinuationState = LlmUnboundContinuationState.Omit,
             Messages =
             [
-                new("assistant", "") { ToolCalls = [new("first", "lookup", "{}"), new("second", "lookup", "{}")] },
+                new("assistant", "") { ToolCalls = [new LlmToolCall("first", "lookup", "{}"), new LlmToolCall("second", "lookup", "{}")] },
                 new("tool", "")
                 {
                     ToolResults =
                     [
-                        new("second", LlmToolOutput.FromText("second")),
-                        new("first", new()
+                        new LlmToolResult("second", LlmToolOutput.FromText("second")),
+                        new LlmToolResult("first", new()
                         {
                             IsError = true,
                             Parts = [new LlmToolOutputText("media"),
@@ -211,8 +215,8 @@ public sealed class GeminiProtocolConformanceTests
         await Assert.ThrowsAsync<ArgumentException>(() => Drain(Client(http, vertex).StreamAsync(Connection(vertex, true), new()
         {
             ModelId = vertex ? "google/" + Model : Model,
-            Messages = [new("assistant", "") { ToolCalls = [new("call", "run", "{}")] },
-                new("tool", "") { ToolResults = [new("call", LlmToolOutput.FromText("ok"))] }]
+            Messages = [new("assistant", "") { ToolCalls = [new LlmToolCall("call", "run", "{}")] },
+                new("tool", "") { ToolResults = [new LlmToolResult("call", LlmToolOutput.FromText("ok"))] }]
         })));
         Assert.Empty(handler.Bodies);
     }
@@ -227,8 +231,8 @@ public sealed class GeminiProtocolConformanceTests
         {
             ModelId = "gemini-2.5-flash",
             UnboundContinuationState = LlmUnboundContinuationState.Omit,
-            Messages = [new("assistant", "") { ToolCalls = [new("call", "run", "{}")] },
-                new("tool", "") { ToolResults = [new("call", new() { Parts = [new LlmToolOutputBinary(LlmBinaryKind.Image, "image/png", Image)] })] }]
+            Messages = [new("assistant", "") { ToolCalls = [new LlmToolCall("call", "run", "{}")] },
+                new("tool", "") { ToolResults = [new LlmToolResult("call", new() { Parts = [new LlmToolOutputBinary(LlmBinaryKind.Image, "image/png", Image)] })] }]
         }));
         Assert.DoesNotContain("thoughtSignature", handler.Bodies[0], StringComparison.Ordinal);
         Assert.DoesNotContain("inlineData", handler.Bodies[0], StringComparison.Ordinal);

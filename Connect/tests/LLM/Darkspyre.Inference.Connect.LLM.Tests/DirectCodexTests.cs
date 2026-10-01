@@ -119,7 +119,7 @@ public sealed class DirectCodexTests
         {
             Messages = [new("user", "first"),
             new("assistant", result.Text) { ToolCalls = result.ToolCalls, ContinuationState = result.ContinuationState },
-            new("user", "") { ToolResults = [new("call", LlmToolOutput.FromText("answer"))] }]
+            new("user", "") { ToolResults = [new LlmToolResult("call", LlmToolOutput.FromText("answer"))] }]
         });
         using var replay = JsonDocument.Parse(handler.Body!);
         var input = replay.RootElement.GetProperty("input");
@@ -170,8 +170,8 @@ public sealed class DirectCodexTests
         await Complete(client, Connection(), Request() with
         {
             Messages = [new("user", "see") { Attachments = [image, document] },
-            new("assistant", "") { ToolCalls = [new("call", "echo", "{}")] },
-            new("user", "") { ToolResults = [new("call", output)] }]
+            new("assistant", "") { ToolCalls = [new LlmToolCall("call", "echo", "{}")] },
+            new("user", "") { ToolResults = [new LlmToolResult("call", output)] }]
         });
         using var sent = JsonDocument.Parse(handler.Body!);
         JsonElement items = sent.RootElement.GetProperty("input")[2].GetProperty("output");
@@ -322,7 +322,7 @@ public sealed class DirectCodexTests
         var options = new LlmAgentSessionOptions
         {
             ModelId = "model",
-            Tools = [new() { Name = "echo", InputSchema = JsonSerializer.SerializeToElement(new
+            Tools = [new LlmAgentToolDefinition() { Name = "echo", InputSchema = JsonSerializer.SerializeToElement(new
             { type = "object", properties = new { }, additionalProperties = false }) }],
             ToolHandler = (_, _) =>
         {
@@ -368,7 +368,7 @@ public sealed class DirectCodexTests
         {
             Messages = [new("user", "first"),
                 new("assistant", first.Text) { ToolCalls = first.ToolCalls, ContinuationState = first.ContinuationState },
-                new("user", "") { ToolResults = [new("call", LlmToolOutput.FromText("answer"))] }]
+                new("user", "") { ToolResults = [new LlmToolResult("call", LlmToolOutput.FromText("answer"))] }]
         };
 
         ContextEstimate estimate = client.EstimateInputTokens(Connection(), followup)!.Value;
@@ -388,7 +388,7 @@ public sealed class DirectCodexTests
         Assert.Null(client.EstimateInputTokens(Connection(), followup with
         {
             Messages = [.. followup.Messages, new("assistant", "") { ToolCalls = first.ToolCalls, ContinuationState = unreported },
-                new("user", "") { ToolResults = [new("call", LlmToolOutput.FromText("again"))] }]
+                new("user", "") { ToolResults = [new LlmToolResult("call", LlmToolOutput.FromText("again"))] }]
         }));
     }
 
@@ -477,7 +477,7 @@ public sealed class DirectCodexTests
             UnboundContinuationState = LlmUnboundContinuationState.Omit,
             Messages = [new("user", "first"),
                 new("assistant", first.Text) { ToolCalls = first.ToolCalls, ContinuationState = first.ContinuationState },
-                new("user", "") { ToolResults = [new("call", LlmToolOutput.FromText("answer"))] }]
+                new("user", "") { ToolResults = [new LlmToolResult("call", LlmToolOutput.FromText("answer"))] }]
         };
         return (handler, providers, followup);
     }

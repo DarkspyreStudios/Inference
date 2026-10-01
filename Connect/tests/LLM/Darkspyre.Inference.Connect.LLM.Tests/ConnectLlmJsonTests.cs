@@ -29,7 +29,7 @@ public sealed class ConnectLlmJsonTests
     private const string XaiUnitedStatesPriorityJson = "{\"Region\":1,\"ServiceTier\":1}";
     private const string XaiFutureModesJson = "{\"Region\":999,\"ServiceTier\":999}";
     private const string StateJson = "{\"FormatVersion\":2,\"ImplementationId\":\"fixture\",\"ModelId\":\"model\",\"ScopeId\":\"scope\",\"Payload\":\"opaque\"}";
-    private const string MessageJson = "{\"Role\":\"user\",\"Content\":\"text\",\"Attachments\":[{\"type\":\"binary\",\"Kind\":0,\"FileName\":\"image.png\",\"Data\":\"AQID\"}],\"ToolResults\":[{\"ToolCallId\":\"call\",\"Output\":{\"Parts\":[{\"type\":\"text\",\"Text\":\"text\"},{\"type\":\"binary\",\"Kind\":2,\"MediaType\":\"audio/wav\",\"Data\":\"BA==\"},{\"type\":\"resource\",\"Uri\":\"urn:test\",\"Data\":\"\"}]}}]}";
+    private const string MessageJson = "{\"Role\":\"user\",\"Content\":\"text\",\"Attachments\":[{\"type\":\"binary\",\"Kind\":0,\"FileName\":\"image.png\",\"Data\":\"AQID\"}],\"ToolResults\":[{\"type\":\"function\",\"ToolCallId\":\"call\",\"Output\":{\"Parts\":[{\"type\":\"text\",\"Text\":\"text\"},{\"type\":\"binary\",\"Kind\":2,\"MediaType\":\"audio/wav\",\"Data\":\"BA==\"},{\"type\":\"resource\",\"Uri\":\"urn:test\",\"Data\":\"\"}]}}]}";
     private const string EntryJson = "{\"Id\":\"entry\",\"TurnId\":\"turn\",\"Message\":" + MessageJson + "}";
 
     [Fact]
@@ -101,25 +101,25 @@ public sealed class ConnectLlmJsonTests
     {
         var entry = new LlmAgentContextEntry("entry", "turn", new("user", "text")
         {
-            ToolResults = [new("call", new()
+            ToolResults = [new LlmToolResult("call", new()
             {
                 StructuredContent = JsonElement.Parse("{\"a\":1,\"b\":true}"),
                 Parts = [new LlmToolOutputText("text"), new LlmToolOutputBinary(LlmBinaryKind.Audio, "audio/wav", new byte[] { 1 })]
             })]
         });
-        LlmToolOutput output = entry.Message.ToolResults[0].Output;
+        LlmToolOutput output = Assert.IsType<LlmToolResult>(entry.Message.ToolResults[0]).Output;
         Assert.True(ManagedAgentContext.Equivalent(entry, entry with
         {
-            Message = entry.Message with { ToolResults = [new("call", output with { StructuredContent = JsonElement.Parse("{\"b\":true,\"a\":1}") })] }
+            Message = entry.Message with { ToolResults = [new LlmToolResult("call", output with { StructuredContent = JsonElement.Parse("{\"b\":true,\"a\":1}") })] }
         }));
         Assert.False(ManagedAgentContext.Equivalent(entry, entry with { Id = "another" }));
         Assert.False(ManagedAgentContext.Equivalent(entry, entry with
         {
-            Message = entry.Message with { ToolResults = [new("call", output with { Parts = output.Parts.Reverse().ToArray() })] }
+            Message = entry.Message with { ToolResults = [new LlmToolResult("call", output with { Parts = output.Parts.Reverse().ToArray() })] }
         }));
         Assert.False(ManagedAgentContext.Equivalent(entry, entry with
         {
-            Message = entry.Message with { ToolResults = [new("call", output with { Parts = [new LlmToolOutputText("text"), new LlmToolOutputBinary(LlmBinaryKind.Audio, "audio/wav", new byte[] { 2 })] })] }
+            Message = entry.Message with { ToolResults = [new LlmToolResult("call", output with { Parts = [new LlmToolOutputText("text"), new LlmToolOutputBinary(LlmBinaryKind.Audio, "audio/wav", new byte[] { 2 })] })] }
         }));
     }
 
@@ -128,9 +128,9 @@ public sealed class ConnectLlmJsonTests
     {
         LlmChatMessage message = JsonSerializer.Deserialize(MessageJson, ConnectLlmJson.ChatMessage)!;
         Assert.Equal(new byte[] { 1, 2, 3 }, Assert.IsType<LlmAttachment>(message.Attachments[0]).Data.ToArray());
-        Assert.IsType<LlmToolOutputText>(message.ToolResults[0].Output.Parts[0]);
-        Assert.Equal(new byte[] { 4 }, Assert.IsType<LlmToolOutputBinary>(message.ToolResults[0].Output.Parts[1]).Data.ToArray());
-        Assert.True(Assert.IsType<LlmToolOutputResource>(message.ToolResults[0].Output.Parts[2]).Data.HasValue);
+        Assert.IsType<LlmToolOutputText>(Assert.IsType<LlmToolResult>(message.ToolResults[0]).Output.Parts[0]);
+        Assert.Equal(new byte[] { 4 }, Assert.IsType<LlmToolOutputBinary>(Assert.IsType<LlmToolResult>(message.ToolResults[0]).Output.Parts[1]).Data.ToArray());
+        Assert.True(Assert.IsType<LlmToolOutputResource>(Assert.IsType<LlmToolResult>(message.ToolResults[0]).Output.Parts[2]).Data.HasValue);
         string written = JsonSerializer.Serialize(message, ConnectLlmJson.ChatMessage);
         Assert.Contains("\"type\":\"binary\"", written);
         Assert.Contains("\"Data\":\"AQID\"", written);
@@ -271,12 +271,17 @@ public sealed class ConnectLlmJsonTests
         { "ChatRequest", "{\"ModelId\":\"model\",\"PromptCache\":{\"Scope\":0,\"Retention\":1},\"Messages\":[" + MessageJson + "]}" },
         { "ChatResult", "{\"Text\":\"text\",\"Status\":0,\"ContinuationState\":" + StateJson + ",\"Diagnostics\":{\"HttpStatusCode\":200}}" },
         { "ChatMessage", MessageJson },
+        { "ChatRequest", """{"ModelId":"model","Tools":[{"type":"function","Name":"lookup","InputSchema":{}},{"type":"shell","Skills":[]}],"Messages":[{"Role":"assistant","Content":"","ToolCalls":[{"type":"function","Id":"fn","Name":"lookup","ArgumentsJson":"{}"},{"type":"shell","Id":"sh","Commands":["echo actual"],"TimeoutMs":0,"MaxOutputLength":0}]},{"Role":"user","Content":"","ToolResults":[{"type":"shell","ToolCallId":"sh","Output":[{"Stdout":"","Stderr":null,"Outcome":{"type":"exit","ExitCode":0}}]},{"type":"function","ToolCallId":"fn","Output":{"Parts":[]}}]}]}""" },
+        { "ChatResult", """{"Text":"","Status":2,"Diagnostics":{"HttpStatusCode":200},"ToolCalls":[{"type":"shell","Id":"sh","Commands":["echo actual"],"TimeoutMs":null,"MaxOutputLength":0},{"type":"function","Id":"fn","Name":"lookup","ArgumentsJson":"{}"}]}""" },
+        { "LlmAgentResourceSelectionChangedEvent", """{"ThreadId":"actual-thread","TurnId":null,"ResourceSelectionRevision":0}""" },
+        { "LlmAgentResourceSelectionChangedEvent", """{"ThreadId":"actual-thread","TurnId":"actual-turn","ResourceSelectionRevision":5}""" },
         { "LlmEmbeddingRequest", "{\"ModelId\":\"unknown-model\",\"Inputs\":[\"first\",\"second\"],\"Dimensions\":2,\"ProviderOptions\":{\"custom\":{\"nested\":true}}}" },
         { "LlmEmbeddingResult", "{\"Vectors\":[[0,1],[2,3]],\"Usage\":{\"InputTokens\":0,\"TotalTokens\":null},\"Diagnostics\":{\"HttpStatusCode\":200}}" },
         { "LlmEmbeddingUsage", "{\"InputTokens\":null,\"TotalTokens\":0}" },
         { "ChatResult", "{\"Text\":\"done\",\"Status\":0,\"Usage\":{\"InputTokens\":0,\"OutputTokens\":null,\"TotalTokens\":null,\"ProviderReportedCostUsd\":0.0000000001,\"HostedToolCalls\":{\"WebSearch\":2},\"HostedToolCallCount\":5,\"HostedSourcesUsed\":0},\"Diagnostics\":{\"HttpStatusCode\":200}}" },
         { "AgentContext", "{\"FormatVersion\":3,\"SelectedResources\":[],\"Entries\":[{\"Id\":\"entry\",\"TurnId\":\"turn\",\"Message\":{\"Role\":\"user\",\"Content\":\"text\",\"Attachments\":[{\"type\":\"binary\",\"Kind\":0,\"FileName\":\"image.png\",\"Data\":\"AQID\"}]}}]}" },
         { "AgentContextEntry", EntryJson },
+        { "AgentContext", """{"FormatVersion":3,"SelectedResources":[],"Entries":[{"Id":"user","TurnId":"turn","Message":{"Role":"user","Content":"go"}},{"Id":"calls","TurnId":"turn","Message":{"Role":"assistant","Content":"","ToolCalls":[{"type":"function","Id":"fn","Name":"lookup","ArgumentsJson":"{}"},{"type":"shell","Id":"sh","Commands":["echo actual"],"TimeoutMs":0,"MaxOutputLength":0}]}},{"Id":"results","TurnId":"turn","Message":{"Role":"user","Content":"","ToolResults":[{"type":"shell","ToolCallId":"sh","Output":[{"Stdout":"","Stderr":null,"Outcome":{"type":"exit","ExitCode":0}}]},{"type":"function","ToolCallId":"fn","Output":{"Parts":[]}}]}}]}""" },
         { "AgentContextStatus", "{\"ModelId\":\"model\",\"ContextRevision\":1,\"Source\":0}" },
         { "ConnectContinuationScopeIdentity", "{\"Transport\":0,\"Endpoint\":\"https://provider.invalid\",\"ApiKey\":null,\"OAuthIdentity\":null,\"Headers\":[],\"SecretHeaders\":null}" }
     };

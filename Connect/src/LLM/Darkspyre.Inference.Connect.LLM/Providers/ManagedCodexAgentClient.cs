@@ -15,10 +15,11 @@ internal sealed class ManagedCodexAgentClient(OpenAiCodexLlmClient client, LlmPr
         cancellationToken.ThrowIfCancellationRequested();
         if (options.Context is not null) { ManagedAgentContext.ValidateRuntimeResources(options.Context); }
         HostedTools.Validate(options.HostedTools, options.MaxHostedTurns, client.GetCapabilities(connection, options.ModelId).HostedTools);
+        ClientTools.ValidateManagedOpening(options, client.GetCapabilities(connection, options.ModelId));
         // The capability checks below and the session's per-model lookups read the Codex model catalog.
         connection = await providers.AttachCatalogAsync(connectionId, connection, client, cancellationToken);
         var capabilities = client.GetCapabilities(connection, options.ModelId);
-        if (!capabilities.SupportsAgentSessions || (options.Tools.Count > 0 && !capabilities.SupportsAgentToolUse))
+        if (!capabilities.SupportsAgentSessions || (options.Tools.Any(tool => tool is LlmAgentToolDefinition) && !capabilities.SupportsAgentToolUse))
         {
             throw new NotSupportedException("The selected model/connection disables the requested agent operation.");
         }

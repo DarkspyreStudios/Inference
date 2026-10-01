@@ -826,7 +826,7 @@ public sealed class LlmTransportTests
         LlmChatResult result = Assert.Single(events.OfType<LlmChatCompletionEvent>()).Result;
         Assert.Equal(LlmCompletionStatus.Incomplete, result.Status);
         Assert.Null(result.Refusal);
-        Assert.Equal("lookup", Assert.Single(result.ToolCalls).Name);
+        Assert.Equal("lookup", Assert.IsType<LlmToolCall>(Assert.Single(result.ToolCalls)).Name);
         Assert.Equal(new LlmUsage(5, 7, 12), result.Usage);
 
         var refusalHandler = new RecordingHttpMessageHandler(_ => JsonResponse("""

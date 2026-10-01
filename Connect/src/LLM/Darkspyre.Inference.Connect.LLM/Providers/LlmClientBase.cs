@@ -117,6 +117,7 @@ internal abstract class LlmClientBase(HttpClient http) : ILlmClient
         EnsureTransport(connection);
         RequestJson.ValidateSamplingOptions(connection, request);
         HostedTools.Validate(request, capabilities);
+        ClientTools.Validate(request, capabilities.SupportsShellTools);
         if (string.IsNullOrWhiteSpace(request.ModelId))
         {
             throw new ArgumentException("A model id is required.", nameof(request));
@@ -223,9 +224,9 @@ internal abstract class LlmClientBase(HttpClient http) : ILlmClient
         IReadOnlySet<string>? nativeToolNames = null)
     {
         bool hasToolHistory = request.Messages.Any(message =>
-            message.ToolCalls.Count > 0 || message.ToolResults.Count > 0);
+            message.ToolCalls.Any(call => call is LlmToolCall) || message.ToolResults.Any(result => result is LlmToolResult));
         // A text transcript carries tool history without asking the provider to run host tools.
-        bool requestsToolUse = request.Tools.Count > 0
+        bool requestsToolUse = request.Tools.Any(tool => tool is LlmToolDefinition)
             || request.ToolChoice is not null
             || request.AllowParallelToolCalls is not null
             || (hasToolHistory && capabilities.ToolHistory == LlmToolHistory.Structured);
@@ -238,13 +239,15 @@ internal abstract class LlmClientBase(HttpClient http) : ILlmClient
         if (!Enum.IsDefined(capabilities.Tools.StrictInputSchema))
         { throw new ArgumentException("Invalid strict tool-schema capability.", nameof(capabilities)); }
         // Unknown deliberately permits an attempt. Never turn a host opt-in into a non-strict request.
-        if (request.Tools.Any(tool => tool.Strict)
+        if (request.Tools.Any(tool => tool is LlmToolDefinition { Strict: true })
             && capabilities.Tools.StrictInputSchema == LlmStrictInputSchemaSupport.Unsupported)
         { throw new NotSupportedException("The selected route cannot enforce strict tool input schemas."); }
 
         var toolNames = new HashSet<string>(StringComparer.Ordinal);
-        foreach (LlmToolDefinition tool in request.Tools)
+        foreach (LlmClientToolDefinition definition in request.Tools)
         {
+            if (definition is LlmShellTool) continue;
+            if (definition is not LlmToolDefinition tool) throw new NotSupportedException("Unknown client tool definition.");
             if (string.IsNullOrWhiteSpace(tool.Name)
                 || tool.InputSchema.ValueKind != JsonValueKind.Object)
             {
@@ -293,8 +296,10 @@ internal abstract class LlmClientBase(HttpClient http) : ILlmClient
                     nameof(request));
             }
 
-            foreach (LlmToolCall call in message.ToolCalls)
+            foreach (LlmClientToolCall observed in message.ToolCalls)
             {
+                if (observed is LlmShellCall) continue;
+                if (observed is not LlmToolCall call) throw new NotSupportedException("Unknown client tool call.");
                 if (string.IsNullOrWhiteSpace(call.Id) || string.IsNullOrWhiteSpace(call.Name))
                 {
                     throw new ArgumentException(
@@ -321,8 +326,10 @@ internal abstract class LlmClientBase(HttpClient http) : ILlmClient
                 }
             }
 
-            foreach (LlmToolResult result in message.ToolResults)
+            foreach (LlmClientToolResult observed in message.ToolResults)
             {
+                if (observed is LlmShellCallResult) continue;
+                if (observed is not LlmToolResult result) throw new NotSupportedException("Unknown client tool result.");
                 // Content a route cannot carry is omitted by projection, not rejected here.
                 if (string.IsNullOrWhiteSpace(result.ToolCallId) || result.Output is null)
                 {

@@ -63,13 +63,13 @@ public sealed class XaiResponsesReplayTests
         var message = new LlmChatMessage("assistant", "answer")
         {
             ContinuationState = state,
-            ToolCalls = [new("call-id", "lookup", "{\"key\":\"value\"}")]
+            ToolCalls = [new LlmToolCall("call-id", "lookup", "{\"key\":\"value\"}")]
         };
         Assert.True(JsonNode.DeepEquals(output, ProviderContinuationStateCodec.DecodeMessage(message, connection, "grok-4.7")));
         Assert.Throws<ArgumentException>(() => ProviderContinuationStateCodec.DecodeMessage(message with { Content = "changed" }, connection, "grok-4.7"));
         Assert.Throws<ArgumentException>(() => ProviderContinuationStateCodec.DecodeMessage(message with { ToolCalls = [] }, connection, "grok-4.7"));
         Assert.Throws<ArgumentException>(() => ProviderContinuationStateCodec.DecodeMessage(message with
-        { ToolCalls = [new("call-id", "changed", "{}")] }, connection, "grok-4.7"));
+        { ToolCalls = [new LlmToolCall("call-id", "changed", "{}")] }, connection, "grok-4.7"));
     }
 
     [Theory]
@@ -180,7 +180,7 @@ public sealed class XaiResponsesReplayTests
         await Read(client.StreamAsync(connection, Request() with
         {
             Messages = [new("user", "first"), new("assistant", "") { ContinuationState = result.ContinuationState, ToolCalls = result.ToolCalls },
-                new("user", "") { ToolResults = [new("call-id", LlmToolOutput.FromText("tool result"))] }]
+                new("user", "") { ToolResults = [new LlmToolResult("call-id", LlmToolOutput.FromText("tool result"))] }]
         }));
         using var sent = JsonDocument.Parse(handler.Body!);
         JsonElement input = sent.RootElement.GetProperty("input");

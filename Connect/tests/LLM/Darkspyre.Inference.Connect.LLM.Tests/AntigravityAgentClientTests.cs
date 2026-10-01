@@ -48,7 +48,7 @@ public sealed class AntigravityAgentClientTests : IDisposable
         LlmAgentSessionOptions options = Options();
         options = field switch
         {
-            1 => options with { Tools = [new() { Name = "echo", InputSchema = JsonSerializer.SerializeToElement(new { type = "object" }) }] },
+            1 => options with { Tools = [new LlmAgentToolDefinition() { Name = "echo", InputSchema = JsonSerializer.SerializeToElement(new { type = "object" }) }] },
             2 => options with { ToolHandler = (_, _) => Task.FromResult(new LlmToolOutput()) },
             3 => options with { Instructions = "Be terse." },
             4 => options with { Context = new LlmAgentContext() },

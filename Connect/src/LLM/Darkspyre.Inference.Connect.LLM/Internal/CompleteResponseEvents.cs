@@ -34,7 +34,13 @@ internal static class CompleteResponseEvents
 
         for (int index = 0; index < result.ToolCalls.Count; index++)
         {
-            LlmToolCall call = result.ToolCalls[index];
+            if (result.ToolCalls[index] is LlmShellCall shell)
+            {
+                yield return new LlmShellCallEvent((LlmShellCall)ClientTools.Snapshot(shell));
+                continue;
+            }
+            LlmToolCall call = result.ToolCalls[index] as LlmToolCall
+                ?? throw new NotSupportedException("Unknown client tool call.");
             yield return new LlmToolCallStartedEvent(call.Id, call.Name, index);
             if (call.ArgumentsJson.Length > 0)
             {

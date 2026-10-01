@@ -206,7 +206,7 @@ internal sealed class VertexLlmClient(HttpClient http, IVertexAuthentication aut
         ValidateRequest(connection, request, capabilities, profile.IsClaude ? AnthropicTools.Resolve(connection, request).NativeNames : null);
         ValidateVertexRequest(connection, request, profile, capabilities);
         if (request.Messages.Any(message => message.ContinuationState is not null || message.Attachments.Count != 0
-            || message.ToolResults.Any(result => result.Output.Parts.Any(part => part is not LlmToolOutputText)))) { return null; }
+            || ClientTools.Functions(message.ToolResults).Any(result => result.Output.Parts.Any(part => part is not LlmToolOutputText)))) { return null; }
         string projection = JsonSerializer.Serialize(request, ConnectLlmJson.ChatRequest);
         return new(LocalTokenCount.Count(projection));
     }
@@ -246,7 +246,7 @@ internal sealed class VertexLlmClient(HttpClient http, IVertexAuthentication aut
         if (request.MaxOutputTokens > profile.OutputTokens || request.Temperature is < 0 or > 2
             || profile.IsClaude && request.Temperature > 1)
         { throw new ArgumentException("The output limit or temperature exceeds the selected model's range."); }
-        if (request.Tools.Any(tool => tool.Strict) && capabilities.Tools.StrictInputSchema == LlmStrictInputSchemaSupport.Unsupported)
+        if (request.Tools.Any(tool => tool is LlmToolDefinition { Strict: true }) && capabilities.Tools.StrictInputSchema == LlmStrictInputSchemaSupport.Unsupported)
         { throw new NotSupportedException("This model does not offer strict tool-schema enforcement. Ordinary non-strict tools are supported."); }
         if (request.AllowParallelToolCalls is not null && !capabilities.Tools.SupportsParallelCallControl)
         { throw new NotSupportedException("This route cannot enforce parallel tool-call control."); }

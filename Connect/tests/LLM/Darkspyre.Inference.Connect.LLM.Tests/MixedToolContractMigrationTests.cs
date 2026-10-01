@@ -1,4 +1,5 @@
 using Darkspyre.Inference.Common.LLM;
+using Darkspyre.Inference.Connect.LLM.Internal;
 
 namespace Darkspyre.Inference.Connect.LLM.Tests;
 
@@ -32,5 +33,31 @@ public sealed class MixedToolContractMigrationTests
         Assert.NotNull(property);
         Assert.Equal(typeof(bool), property.PropertyType);
         Assert.Equal(false, property.GetValue(Activator.CreateInstance(owner)));
+    }
+
+    [Fact]
+    public void ShellHistoryLedgerRetainsCallOwnedLimitsAndOrderedActualOutputs()
+    {
+        var call = new LlmShellCall("shell", ["first", "second"], 0, 0);
+        var result = new LlmShellCallResult(call.Id,
+            [new(null, "observed error", new LlmShellExitedOutcome(7)), new("", null, new LlmShellTimedOutOutcome())]);
+        var request = new LlmChatRequest
+        {
+            ModelId = "model",
+            Messages = [new("assistant", "") { ToolCalls = [call] }, new("user", "") { ToolResults = [result] }]
+        };
+        ClientTools.Validate(request, supportsShellTools: true);
+        Assert.Equal(0, call.MaxOutputLength); Assert.Equal(0, call.TimeoutMs);
+        Assert.Null(result.Output[0].Stdout); Assert.Equal("observed error", result.Output[0].Stderr);
+        Assert.Equal(7, Assert.IsType<LlmShellExitedOutcome>(result.Output[0].Outcome).ExitCode);
+        Assert.IsType<LlmShellTimedOutOutcome>(result.Output[1].Outcome);
+        Assert.Null(typeof(LlmShellCallResult).GetProperty("MaxOutputLength"));
+        Assert.Throws<NotSupportedException>(() => ClientTools.Validate(request, supportsShellTools: false));
+        Assert.Throws<ArgumentException>(() => ClientTools.Validate(request with
+        { Messages = [request.Messages[0], new("user", "") { ToolResults = [new LlmToolResult(call.Id, new())] }] }, true));
+        Assert.Throws<ArgumentException>(() => ClientTools.Validate(request with
+        { Messages = [request.Messages[0], new("user", "") { ToolResults = [result, result] }] }, true));
+        Assert.Throws<ArgumentException>(() => ClientTools.Validate(request with
+        { Messages = [new("user", "") { ToolResults = [result] }] }, true));
     }
 }

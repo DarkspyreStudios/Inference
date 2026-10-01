@@ -74,7 +74,7 @@ public sealed class AppleLiveTests(ITestOutputHelper output)
         {
             ModelId = "apple-system-default",
             Instructions = "Use lookup to retrieve requested readings. After a lookup result is present, report it without looking it up again.",
-            Tools = [new() { Name = tool.Name, Description = tool.Description, InputSchema = tool.InputSchema }],
+            Tools = [new LlmAgentToolDefinition() { Name = tool.Name, Description = tool.Description, InputSchema = tool.InputSchema }],
             ToolHandler = (_, _) => { Interlocked.Increment(ref executed); return Task.FromResult(LlmToolOutput.FromText("Synthetic reading: seven")); }
         });
         var events = await AppleFoundationModelsTests.Read(session.RunTurnAsync(new() { Input = [new LlmAgentTextContent("Look up key sample and report its reading.")] }));

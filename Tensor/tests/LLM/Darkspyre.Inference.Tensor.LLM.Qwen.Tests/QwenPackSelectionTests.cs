@@ -131,7 +131,7 @@ public sealed class QwenPackSelectionTests : IDisposable
         [
             new("user", "inspect") { Attachments = [new LlmFileReference(new("native"))] },
             new("user", "inspect") { Attachments = [new LlmResourceAttachment(new("workspace", "original"))] },
-            new("user", "inspect") { ToolResults = [new("call", new() { Parts = [new LlmToolOutputSessionResource(new("workspace", "generated"))] })] }
+            new("user", "inspect") { ToolResults = [new LlmToolResult("call", new() { Parts = [new LlmToolOutputSessionResource(new("workspace", "generated"))] })] }
         ];
         foreach (var message in messages)
         {
@@ -139,6 +139,33 @@ public sealed class QwenPackSelectionTests : IDisposable
                 Request("host/references") with { Messages = [message] }));
             Assert.Equal(InferenceFailureCode.UnsupportedFeature, error.Code);
         }
+        Assert.Empty(runtime.Keys);
+        Assert.Null(runtime.LastSampling);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(2)]
+    public async Task ShellDefinitionsAndHistoryRefuseBeforeModelOrNativeRuntimeEntry(int variant)
+    {
+        using var http = new HttpClient(new Handler());
+        using var packs = Manager(http, Pack("host/shell"));
+        var runtime = new Runtime();
+        await using var engine = new QwenLlmInference(packs, runtime, TensorBackendKind.Cpu);
+        LlmShellCall call = new("actual-shell", ["printf observed"], 0, 0);
+        LlmInferenceRequest request = variant switch
+        {
+            0 => Request("host/shell") with { Tools = [new LlmShellTool([])] },
+            1 => Request("host/shell") with { Messages = [new("assistant", "") { ToolCalls = [call] }] },
+            _ => Request("host/shell") with
+            {
+                Messages = [new("assistant", "") { ToolCalls = [call] }, new("user", "")
+                { ToolResults = [new LlmShellCallResult(call.Id, [new("", null, new LlmShellExitedOutcome(0))])] }]
+            }
+        };
+        InferenceException error = await Assert.ThrowsAsync<InferenceException>(() => Collect(engine, request));
+        Assert.Equal(InferenceFailureCode.UnsupportedFeature, error.Code);
         Assert.Empty(runtime.Keys);
         Assert.Null(runtime.LastSampling);
     }
@@ -304,7 +331,7 @@ public sealed class QwenPackSelectionTests : IDisposable
                 [
                     new("user", "Read a.txt"),
                     new("assistant", "") { ToolCalls = [call] },
-                    new("user", "") { ToolResults = [new(call.Id, LlmToolOutput.FromText("contents"))] }
+                    new("user", "") { ToolResults = [new LlmToolResult(call.Id, LlmToolOutput.FromText("contents"))] }
                 ]
             });
             ChatMessage assistant = runtime.LastMessages.Single(message => message.Role == "assistant");

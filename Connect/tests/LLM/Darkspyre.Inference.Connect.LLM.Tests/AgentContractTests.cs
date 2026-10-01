@@ -50,7 +50,7 @@ public sealed class AgentContractTests
         Assert.Equal(context.Entries.Select(entry => entry.Id), copy.Entries.Select(entry => entry.Id));
         Assert.Equal(State(), copy.Entries[1].Message.ContinuationState);
         Assert.Equal("hello"u8.ToArray(), Assert.IsType<LlmAttachment>(copy.Entries[0].Message.Attachments[0]).Data.ToArray());
-        LlmToolOutput output = copy.Entries[2].Message.ToolResults[0].Output;
+        LlmToolOutput output = Assert.IsType<LlmToolResult>(copy.Entries[2].Message.ToolResults[0]).Output;
         Assert.Equal("done", Assert.IsType<LlmToolOutputText>(output.Parts[0]).Text);
         var binary = Assert.IsType<LlmToolOutputBinary>(output.Parts[1]);
         Assert.Equal((LlmBinaryKind.Document, "text/plain", "hello.txt"), (binary.Kind, binary.MediaType, binary.FileName));
@@ -193,7 +193,7 @@ public sealed class AgentContractTests
         var state = ProviderContinuationStateCodec.EncodeCounts(bedrock, "model", 1200, 80);
         Assert.Equal((1200L, 80L), (state.InputTokens, state.OutputTokens));
         Assert.Empty(ProviderContinuationStateCodec.Decode(state, bedrock with { Version = "v2" }, "model"));
-        var message = new LlmChatMessage("assistant", "done") { ContinuationState = state, ToolCalls = [new("call-1", "tool", "{}")] };
+        var message = new LlmChatMessage("assistant", "done") { ContinuationState = state, ToolCalls = [new LlmToolCall("call-1", "tool", "{}")] };
         Assert.Empty(ProviderContinuationStateCodec.DecodeMessage(message, bedrock, "model"));
         Assert.Throws<ArgumentException>(() => ProviderContinuationStateCodec.Decode(state, bedrock, "another-model"));
         Assert.Throws<ArgumentException>(() => ProviderContinuationStateCodec.Decode(state, bedrock with { Endpoint = "aws://other" }, "model"));
@@ -288,15 +288,15 @@ public sealed class AgentContractTests
             ContinuationState = ProviderContinuationStateCodec.Encode(Connection(), "model", output)
         };
         Assert.Throws<ArgumentException>(() => ProviderContinuationStateCodec.DecodeMessage(message, Connection(), "model"));
-        message = message with { ToolCalls = [new("call-1", "read", "{}")] };
+        message = message with { ToolCalls = [new LlmToolCall("call-1", "read", "{}")] };
         Assert.Single(ProviderContinuationStateCodec.DecodeMessage(message, Connection(), "model"));
         Assert.Throws<ArgumentException>(() => ProviderContinuationStateCodec.DecodeMessage(message with
         {
-            ToolCalls = [new("call-1", "delete", "{}")]
+            ToolCalls = [new LlmToolCall("call-1", "delete", "{}")]
         }, Connection(), "model"));
         Assert.Throws<ArgumentException>(() => ProviderContinuationStateCodec.DecodeMessage(message with
         {
-            ToolCalls = [new("call-1", "read", "{\"changed\":true}")]
+            ToolCalls = [new LlmToolCall("call-1", "read", "{\"changed\":true}")]
         }, Connection(), "model"));
     }
 

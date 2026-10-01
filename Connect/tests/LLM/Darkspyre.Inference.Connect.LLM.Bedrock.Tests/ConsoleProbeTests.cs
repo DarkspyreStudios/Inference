@@ -148,7 +148,7 @@ public sealed class ConsoleProbeTests
                 return Events([new LlmCompletionEvent(Result() with
                 {
                     Status = LlmCompletionStatus.RequiresAction,
-                    ToolCalls = [new("one", "lookup", """{"key":"sample"}"""), new("two", "lookup", """{"key":"sample"}""")]
+                    ToolCalls = [new LlmToolCall("one", "lookup", """{"key":"sample"}"""), new LlmToolCall("two", "lookup", """{"key":"sample"}""")]
                 })], token);
             Assert.Equal(LlmToolChoiceMode.None, request.ToolChoice?.Mode);
             Assert.Equal(["two", "one"], request.Messages[^1].ToolResults.Select(result => result.ToolCallId));
@@ -176,7 +176,7 @@ public sealed class ConsoleProbeTests
             return Events([new LlmCompletionEvent(Result() with
             {
                 Status = LlmCompletionStatus.RequiresAction,
-                ToolCalls = [new("same", "lookup", """{"key":"sample"}"""), new("same", "lookup", """{"key":"sample"}""")]
+                ToolCalls = [new LlmToolCall("same", "lookup", """{"key":"sample"}"""), new LlmToolCall("same", "lookup", """{"key":"sample"}""")]
             })], token);
         });
         await Assert.ThrowsAsync<ProbeFailure>(() => Probe(inference).Cases.Single(test => test.Name == "tools").Run(CancellationToken.None));

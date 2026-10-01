@@ -18,6 +18,8 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
     private readonly Func<string, LlmProviderCapabilities> _capabilities;
     private readonly Func<LlmChatRequest, CancellationToken, IAsyncEnumerable<LlmStreamEvent>> _stream;
     private readonly Dictionary<string, LlmAgentToolDefinition> _tools;
+    private LlmAgentToolHandler? _toolHandler;
+    private LlmAgentCallerServices? _callerServices;
     private IReadOnlyList<LlmHostedTool> _hostedTools;
     private Task? _retirement;
     private LlmAgentContext _context;
@@ -51,23 +53,33 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
         _stream = stream;
         _capabilities = capabilities;
         HostedTools.Validate(options.HostedTools, options.MaxHostedTurns, capabilities(options.ModelId).HostedTools);
+        ClientTools.ValidateManagedOpening(options, capabilities(options.ModelId));
         _hostedTools = HostedTools.Snapshot(options.HostedTools);
         ManagedAgentPolicy.Validate(_execution, Model(options.ModelId));
-        if (options.Tools.Any(tool => tool.DeferLoading))
+        if (options.Tools.Any(tool => tool is LlmAgentToolDefinition { DeferLoading: true }))
         {
             throw new NotSupportedException("Managed agents do not implement deferred tool loading.");
         }
-        if (options.Tools.Count > 0 && options.ToolHandler is null)
+        if (options.Tools.Any(tool => tool is LlmAgentToolDefinition) && options.ToolHandler is null)
         {
             throw new ArgumentException("Managed tools require a host tool handler.");
         }
+        _toolHandler = options.ToolHandler;
+        _callerServices = options.CallerServices;
         _options = options with
         {
-            Tools = Array.AsReadOnly(options.Tools.Select(tool => tool with { InputSchema = tool.InputSchema.Clone() }).ToArray()),
+            Tools = Array.AsReadOnly(options.Tools.Select(tool => tool switch
+            {
+                LlmAgentToolDefinition function => (LlmAgentClientToolDefinition)(function with { InputSchema = function.InputSchema.Clone() }),
+                LlmAgentShellTool shell => shell with { Tool = shell.Tool with { Skills = shell.Tool.Skills } },
+                _ => throw new NotSupportedException("Unknown agent tool definition.")
+            }).ToArray()),
+            ToolHandler = null,
+            CallerServices = null,
             HostedTools = [],
             Context = null
         };
-        _tools = _options.Tools.ToDictionary(tool => tool.Name, StringComparer.Ordinal);
+        _tools = _options.Tools.OfType<LlmAgentToolDefinition>().ToDictionary(tool => tool.Name, StringComparer.Ordinal);
         (_context, _startOmittedContinuationStates) = ManagedAgentContext.Import(
             options.Context ?? new(), connection, options.ModelId, options.UnboundContinuationState);
         ThreadId = options.ThreadId ?? Guid.NewGuid().ToString();
@@ -268,8 +280,13 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
             if (!_segmentActive) { _run = null; run.Dispose(); return; }
             cancellation = run.Cancellation.CancelAsync();
         }
-        await cancellation;
-        await producer.WaitAsync(cancellationToken);
+        Task interruption = Task.WhenAll(cancellation, producer.WaitAsync(cancellationToken));
+        try { await interruption.ConfigureAwait(false); }
+        catch
+        {
+            if (interruption.Exception is { InnerExceptions.Count: > 1 } failures) throw failures;
+            throw;
+        }
     }
 
     public async IAsyncEnumerable<LlmAgentEvent> ObserveAsync(
@@ -336,6 +353,8 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
             lock (_sync)
             {
                 _hostedTools = [];
+                _toolHandler = null;
+                _callerServices = null;
                 _run = null;
                 if (!_segmentActive) { run?.Dispose(); }
             }
@@ -365,10 +384,20 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
             await foreach (var item in segment.Reader.ReadAllAsync(cancellationToken)) { yield return item; }
             drained = true;
         }
+        finally { await DrainSegmentAsync(run, segment, drained).ConfigureAwait(false); }
+    }
+
+    private async Task DrainSegmentAsync(LiveRun run, Segment segment, bool drained)
+    {
+        Task retirement = Task.WhenAll(segment.Cancellation.CancelAsync(), segment.Producer);
+        try { await retirement.ConfigureAwait(false); }
+        catch
+        {
+            if (retirement.Exception is { InnerExceptions.Count: > 1 } failures) throw failures;
+            throw;
+        }
         finally
         {
-            await segment.Cancellation.CancelAsync();
-            await segment.Producer;
             lock (_sync)
             {
                 _segmentActive = false;
@@ -556,9 +585,10 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
         return assistant;
     }
 
-    private async Task ExecuteToolsAsync(LiveRun run, IReadOnlyList<LlmToolCall> calls, string assistantId,
+    private async Task ExecuteToolsAsync(LiveRun run, IReadOnlyList<LlmClientToolCall> returnedCalls, string assistantId,
         ChannelWriter<LlmAgentEvent> writer, CancellationToken token)
     {
+        IReadOnlyList<LlmToolCall> calls = ClientTools.Functions(returnedCalls);
         bool parallel = _execution.ToolExecutionMode == LlmAgentToolExecutionMode.Parallel
             && !calls.Any(call => _tools.TryGetValue(call.Name, out var tool) && tool.RequiresSequentialExecution);
         using var concurrency = new SemaphoreSlim(parallel ? _execution.MaxConcurrentTools : 1);
@@ -593,7 +623,7 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
                     arguments.RootElement.Clone(), null, "started"), token);
                 token.ThrowIfCancellationRequested();
                 started = true;
-                var output = await _options.ToolHandler!(new(ThreadId, run.Id, call.Id, null, call.Name,
+                var output = await _toolHandler!(new(ThreadId, run.Id, call.Id, null, call.Name,
                     arguments.RootElement.Clone()), token);
                 // The output is kept whole; the route's projection decides what reaches the model when it is sent.
                 var mapped = new LlmToolResult(call.Id, ManagedAgentContext.CopyOutput(output));
@@ -669,12 +699,17 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
         PromptCache = new LlmPromptCacheHint { Scope = LlmPromptCacheScope.Conversation },
         ReasoningLevel = turn.ReasoningLevel,
         StructuredOutput = turn.OutputSchema is { } schema ? new() { Name = "agent_output", Schema = schema } : null,
-        Tools = _options.Tools.Select(tool => new LlmToolDefinition
+        Tools = _options.Tools.Select(tool => tool switch
         {
-            Name = tool.Name,
-            Description = tool.Description,
-            InputSchema = tool.InputSchema,
-            Strict = tool.Strict
+            LlmAgentToolDefinition function => (LlmClientToolDefinition)new LlmToolDefinition
+            {
+                Name = function.Name,
+                Description = function.Description,
+                InputSchema = function.InputSchema,
+                Strict = function.Strict
+            },
+            LlmAgentShellTool shell => shell.Tool,
+            _ => throw new NotSupportedException("Unknown agent tool definition.")
         }).ToArray(),
         HostedTools = _hostedTools,
         MaxHostedTurns = _options.MaxHostedTurns
@@ -702,6 +737,7 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
         LlmAttachments.Validate(turn.Attachments, true, true, nameof(turn));
         var capabilities = _capabilities(turn.ModelId ?? _options.ModelId);
         HostedTools.Validate(_hostedTools, _options.MaxHostedTurns, capabilities.HostedTools);
+        ClientTools.ValidateManagedOpening(_options with { ToolHandler = _toolHandler, CallerServices = _callerServices }, capabilities);
         if (!capabilities.SupportsAgentSessions || (_tools.Count > 0 && !capabilities.SupportsAgentToolUse)
             || (turn.Instructions is not null && !capabilities.SupportsAgentTurnInstructions))
         {
@@ -722,7 +758,7 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
         get
         {
             var capabilities = _capabilities(_run?.Turn.ModelId ?? _options.ModelId);
-            return capabilities.Agent with { HostedTools = capabilities.HostedTools };
+            return ClientTools.ManagedCapabilities(capabilities) with { HostedTools = capabilities.HostedTools };
         }
     }
     private static void RequireCapability(bool supported)
@@ -766,8 +802,9 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
     {
         if (_context.Revision != revision) { throw new InvalidOperationException("The context revision is stale."); }
     }
-    private void ValidateCalls(IReadOnlyList<LlmToolCall> calls)
+    private void ValidateCalls(IReadOnlyList<LlmClientToolCall> returnedCalls)
     {
+        IReadOnlyList<LlmToolCall> calls = ClientTools.Functions(returnedCalls);
         var ids = _context.Entries.SelectMany(entry => entry.Message.ToolCalls)
             .Select(call => call.Id).ToHashSet(StringComparer.Ordinal);
         foreach (var call in calls)

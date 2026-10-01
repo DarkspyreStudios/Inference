@@ -15,10 +15,11 @@ internal sealed class ManagedSelfHostAgentClient(SelfHostLlmClient client, LlmPr
         cancellationToken.ThrowIfCancellationRequested();
         if (options.Context is not null) { ManagedAgentContext.ValidateRuntimeResources(options.Context); }
         HostedTools.Validate(options.HostedTools, options.MaxHostedTurns, client.GetCapabilities(connection, options.ModelId).HostedTools);
+        ClientTools.ValidateManagedOpening(options, client.GetCapabilities(connection, options.ModelId));
         // Listing first surfaces an engine that is not loaded as ModelUnavailable before any turn.
         var models = await providers.ListModelsAsync(connectionId, cancellationToken);
         var capabilities = client.GetCapabilities(connection, options.ModelId);
-        if (!capabilities.SupportsAgentSessions || (options.Tools.Count > 0 && !capabilities.SupportsAgentToolUse))
+        if (!capabilities.SupportsAgentSessions || (options.Tools.Any(tool => tool is LlmAgentToolDefinition) && !capabilities.SupportsAgentToolUse))
         {
             throw new NotSupportedException("The selected engine or model disables the requested agent operation.");
         }

@@ -73,6 +73,7 @@ internal sealed class BedrockAgentCoreLlmClient(IBedrockAgentCoreInvoker invoker
         ArgumentNullException.ThrowIfNull(request);
         LlmProviderCapabilities capabilities = GetCapabilities(connection, request.ModelId);
         HostedTools.Validate(request, capabilities);
+        ClientTools.Validate(request, capabilities.SupportsShellTools);
         ValidateChatRequest(request, capabilities);
         if (request.Messages.Any(message => message.ContinuationState is not null))
         {
@@ -185,7 +186,7 @@ internal sealed class BedrockAgentCoreLlmClient(IBedrockAgentCoreInvoker invoker
         ValidateSessionOptions(
             options.ModelId,
             runtime.WorkingDirectory,
-            options.Tools,
+            ClientTools.Functions(options.Tools),
             options.ToolHandler,
             runtime.Ephemeral,
             policy.Sandbox,
@@ -199,7 +200,7 @@ internal sealed class BedrockAgentCoreLlmClient(IBedrockAgentCoreInvoker invoker
             options.ModelId,
             connection,
             options.Instructions,
-            options.Tools,
+            ClientTools.Functions(options.Tools),
             policy.Sandbox,
             policy.ApprovalPolicy,
             options.ToolHandler,
@@ -227,7 +228,7 @@ internal sealed class BedrockAgentCoreLlmClient(IBedrockAgentCoreInvoker invoker
         ValidateSessionOptions(
             modelId,
             runtime.WorkingDirectory,
-            options.Tools,
+            ClientTools.Functions(options.Tools),
             options.ToolHandler,
             runtime.Ephemeral,
             policy.Sandbox,
@@ -240,7 +241,7 @@ internal sealed class BedrockAgentCoreLlmClient(IBedrockAgentCoreInvoker invoker
             modelId,
             connection,
             options.Instructions,
-            options.Tools,
+            ClientTools.Functions(options.Tools),
             policy.Sandbox,
             policy.ApprovalPolicy,
             options.ToolHandler,

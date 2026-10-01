@@ -39,8 +39,8 @@ nullable raw 32-bit output length, optional stdout/stderr and explicit exit/time
 Lists copy their inputs at construction and `with` assignment. Skills contain caller paths;
 constructing or serializing them does not read files or execute commands.
 
-The existing request, message and result collections still accept only function records.
-The standalone shell metadata is an inert contract foundation, not an execution capability.
+Request definitions, message calls/results and terminal calls use one ordered function/shell union.
+`SupportsShellTools` defaults false. A union declaration grants no execution capability.
 `InferenceJson` exposes every fixed shell record and each mixed union with its exact type-name
 getter. Union discriminators are `function` and `shell`; outcomes use `exit` and `timeout`.
 

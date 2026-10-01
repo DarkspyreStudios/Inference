@@ -33,7 +33,7 @@ internal static class SelfHostSuite
         await using ILlmAgentSession session = await agents.StartSessionAsync(EngineId, new LlmAgentSessionOptions
         {
             ModelId = modelId,
-            Tools = [new() { Name = "get_time", Description = "Returns the current local date and time.",
+            Tools = [new LlmAgentToolDefinition() { Name = "get_time", Description = "Returns the current local date and time.",
                 InputSchema = JsonSerializer.SerializeToElement(new { type = "object", properties = new { }, additionalProperties = false }) }],
             ToolHandler = (call, _) =>
             {
