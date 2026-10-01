@@ -1103,9 +1103,23 @@ Unknown statuses and incomplete reasons map to `Unknown`. Context exhaustion ret
 `Incomplete` without retrying. Encrypted context stays opaque; diagnostics redact its named values and
 reflections, and malformed JSON does not retain a parser exception containing provider text.
 
-`AddLlmConnect` does not register a Grok provider, authenticator or runtime client. The protocol
-implementation, shared response handling and setup contracts are not a concrete, enabled or
-live-qualified chat adapter.
+The internal `XaiResponsesLlmClient` sends OAuth-only streaming or genuine non-streaming requests
+to the typed region's fixed endpoint. It sends the typed service tier and records the recognized applied
+tier in diagnostics. Typed protocol controls cannot be injected through raw provider options, even when
+the typed property is absent. Client functions are limited to 350; `web_search` is a reserved hosted name.
+The client joins the generic and language listings, offers only listed language models, and reads the
+facade's published catalog. Catalog reasoning levels and image modalities override family fallbacks.
+Unknown manually entered models still permit a request without fabricated discovery evidence.
+Image prompts require catalog image support and cannot exceed 20 MiB. Temperature and top-p follow
+the model profile; top-k, seed, penalties and string stops are unsupported on this Responses route.
+The numeric schema preflight follows schema positions and local references, not literal data. Bounds
+above 2048 string characters, 256 array items or 64 properties require explicitly authorized local
+validation against the original schema. Strict tool schemas beyond those bounds fail without weakening.
+This numeric check does not implement the provider's complete regex and schema subset.
+
+`AddLlmConnect` does not register a Grok provider, authenticator or runtime client. This internal client
+is not an enabled or live-qualified provider. Cross-family catalog ownership and multi-agent setup
+controls are not wired; the multi-agent profile records agent counts separately from reasoning levels.
 The region and tier premiums follow [xAI pricing](https://docs.x.ai/developers/pricing).
 
 `ImageProviderService.SetupDefinitions` and `CreateSettingsManager` provide the same editing surface for

@@ -270,7 +270,10 @@ not implemented. No xAI client or authenticator is registered by `AddLlmConnect`
 does not add an enabled provider to the table above. The shared Responses pipeline retains ordered
 xAI output verbatim, binds replay to the account/endpoint/model, uses terminal output for function
 completion and maps context exhaustion to an incomplete result. Encrypted replay data remains opaque
-and is redacted from diagnostics. This shared handling is not a concrete xAI chat adapter.
+and is redacted from diagnostics. The internal `XaiResponsesLlmClient` sends OAuth-only Responses
+requests, applies model profiles and catalog modalities, and checks numeric schema guarantees.
+Its catalog reads the facade's published chat snapshot. Cross-family catalog ownership and multi-agent
+setup controls are not wired. The client remains unregistered and not live-qualified.
 
 ComfyUI setup edits endpoint, timeout, protected headers and workflow selection. An
 `IImageWorkflowChoiceSource` supplied by the host provides paged/searchable workflow identities and

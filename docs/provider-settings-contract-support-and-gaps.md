@@ -211,7 +211,9 @@ protocol, refresh and `/v1/me`; the HTTP classifier does not yet recognize subsc
 403 responses. `AddLlmConnect` does not register a Grok provider or authenticator.
 The shared Responses pipeline handles terminal-authoritative output and function completion,
 account-bound opaque replay, context-exhaustion results and encrypted-context diagnostic redaction.
-There is no concrete xAI chat adapter.
+The internal `XaiResponsesLlmClient` supplies OAuth-only chat requests with typed endpoint/tier checks,
+catalog-driven profiles and numeric schema preflight. Cross-family catalog ownership, multi-agent
+setup controls and the complete provider schema subset remain unwired or incomplete.
 [Connect's setup contract](../Connect/README.md#provider-setup-and-editing) describes this unregistered
 boundary; it is not an additional completed or live-qualified provider in the table below.
 

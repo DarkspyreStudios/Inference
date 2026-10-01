@@ -17,8 +17,7 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
         LlmProviderCapabilities capabilities = GetCapabilities(connection, request.ModelId);
         ValidateRequest(connection, request, capabilities);
         ValidateSampling(request);
-        var enforcement = request.StructuredOutput is null ? (LlmStructuredOutputEnforcement?)null
-            : StructuredOutput.ResolveEnforcement(request.StructuredOutput, capabilities);
+        var enforcement = ResolveStructuredOutputEnforcement(connection, request, capabilities);
         JsonObject payload = BuildPayload(connection, request, enforcement, capabilities.SupportsStreaming);
         RequestJson.ApplyProviderOptions(payload, connection, request);
 
@@ -72,9 +71,7 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
         LlmProviderCapabilities capabilities = GetCapabilities(connection, request.ModelId);
         ValidateRequest(connection, request, capabilities);
         ValidateSampling(request);
-        LlmStructuredOutputEnforcement? enforcement = request.StructuredOutput is null
-            ? null
-            : StructuredOutput.ResolveEnforcement(request.StructuredOutput, capabilities);
+        LlmStructuredOutputEnforcement? enforcement = ResolveStructuredOutputEnforcement(connection, request, capabilities);
 
         JsonObject payload = BuildPayload(connection, request, enforcement, capabilities.SupportsStreaming);
         RequestJson.ApplyProviderOptions(payload, connection, request);
@@ -455,6 +452,10 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
         return payload;
     }
 
+    protected virtual LlmStructuredOutputEnforcement? ResolveStructuredOutputEnforcement(
+        LlmConnection connection, LlmChatRequest request, LlmProviderCapabilities capabilities) =>
+        request.StructuredOutput is { } output ? StructuredOutput.ResolveEnforcement(output, capabilities) : null;
+
     /// <summary>Only a verified API-key profile requests a default summary; fallback effort levels are not evidence.</summary>
     protected virtual bool ReasonsByDefault(LlmConnection connection, string modelId) =>
         OpenAiModelProfiles.Get(modelId) is { Verified: true, IsReasoning: true };
@@ -638,6 +639,11 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
                 (int)response.StatusCode,
                 ProviderHttp.ReadRequestId(response),
                 SecretRedactor.Sanitize(rawEvent, credential))
+            {
+                ServiceTier = connection.Transport == LlmTransport.XaiResponses
+                    && LlmJson.GetString(responseRoot, "service_tier") is "default" or "priority" or "fast"
+                    ? LlmJson.GetString(responseRoot, "service_tier") : null
+            }
         };
     }
 
