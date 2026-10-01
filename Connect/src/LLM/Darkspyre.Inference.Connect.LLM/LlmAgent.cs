@@ -21,7 +21,7 @@ public enum LlmAgentApprovalPolicy
 }
 
 /// <summary>A host-implemented dynamic tool exposed to an agent session.</summary>
-public sealed record LlmAgentToolDefinition
+public sealed record LlmAgentToolDefinition : LlmAgentClientToolDefinition
 {
     public required string Name { get; init; }
 

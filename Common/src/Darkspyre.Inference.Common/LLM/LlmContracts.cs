@@ -33,7 +33,7 @@ public sealed record LlmAttachment : LlmMessageAttachment
     public required ReadOnlyMemory<byte> Data { get; init; }
 }
 
-public sealed record LlmToolDefinition
+public sealed record LlmToolDefinition : LlmClientToolDefinition
 {
     public required string Name { get; init; }
 
@@ -64,10 +64,10 @@ public sealed record LlmToolChoice
     public string? Name { get; init; }
 }
 
-public sealed record LlmToolCall(string Id, string Name, string ArgumentsJson);
+public sealed record LlmToolCall(string Id, string Name, string ArgumentsJson) : LlmClientToolCall(Id);
 
 /// <summary>The output of a tool invocation executed by the host application.</summary>
-public sealed record LlmToolResult(string ToolCallId, LlmToolOutput Output);
+public sealed record LlmToolResult(string ToolCallId, LlmToolOutput Output) : LlmClientToolResult(ToolCallId);
 
 public enum LlmStructuredOutputFallback
 {

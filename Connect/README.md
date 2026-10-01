@@ -1031,6 +1031,13 @@ filename, and bytes; adapters own MIME detection, encoding, and wire representat
 
 ### Tool output
 
+`LlmAgentClientToolDefinition` is a closed function/shell data union. The existing
+`LlmAgentToolDefinition` retains its schema, strictness, deferred-loading and sequential-execution
+fields. `LlmAgentShellTool` wraps the Common shell definition. `ConnectLlmJson` exports these three
+types with exact type-name getters and fixed `function`/`shell` discriminators. Current Start/Resume
+tool collections remain function-only. These declarations do not enable shell execution or change
+provider capabilities.
+
 A tool result carries one `LlmToolOutput`: ordered parts, optional structured JSON, and an error flag.
 A chat request sends it as `new LlmToolResult(call.Id, output)`, and an agent `ToolHandler` returns it.
 
