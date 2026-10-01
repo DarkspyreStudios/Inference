@@ -148,13 +148,12 @@ public sealed class SttSettings : InferenceSettings<SttSetupChanges>
         else
         {
             try { SttProviderService.ValidateConnection(Connection()); }
-            catch (ArgumentException) { issues.Add(new("connection-invalid", "Use the fixed xAI regional API endpoint.", "endpoint")); }
+            catch (Exception error) when (error is ArgumentException or InvalidOperationException)
+            { issues.Add(new("connection-invalid", "Check the fixed xAI endpoint and permitted header names and values.", StepId: "connection")); }
         }
         if (string.IsNullOrWhiteSpace(_draft.Connection.Xai?.ConnectionId)) issues.Add(new("binding-required", "Select the xAI connection.", "xai-connection"));
         if (_headers.Any(header => string.IsNullOrWhiteSpace(header.Name)) || _headers.Select(header => header.Name).Distinct(StringComparer.OrdinalIgnoreCase).Count() != _headers.Count)
             issues.Add(new("headers-invalid", "Header names must be nonempty and distinct.", "headers"));
-        if (_headers.Any(header => header.Name.Equals("Authorization", StringComparison.OrdinalIgnoreCase) || header.Name.Equals("api-key", StringComparison.OrdinalIgnoreCase)))
-            issues.Add(new("headers-authentication", "Static headers cannot replace the selected xAI authorization.", "headers"));
         if ((_events is not null || _payload is not null || _message is not null) && (_events is null or <= 0 or > int.MaxValue || _payload is null or <= 0 || _message is null or <= 0))
             issues.Add(new("limits-invalid", "Supply all three positive stream budgets, or leave them all omitted.", StepId: "streaming"));
         return new(issues.AsReadOnly());
@@ -175,7 +174,7 @@ public sealed class SttSettings : InferenceSettings<SttSetupChanges>
         remove.ExceptWith(set.Keys);
         return new(Identity, _draft with
         {
-            Connection = Connection() with { AdditionalHeaders = new Dictionary<string, string>() },
+            Connection = Connection() with { Authorization = null, AdditionalHeaders = new Dictionary<string, string>() },
             StreamLimits = _events is null ? null : new((int)_events.Value, _payload!.Value, _message!.Value)
         }, new(set, remove.ToArray()));
     }

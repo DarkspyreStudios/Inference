@@ -4,6 +4,7 @@ using Darkspyre.Inference.Common.Resources;
 using Darkspyre.Inference.Common.Setup;
 using Darkspyre.Inference.Common.STT;
 using Darkspyre.Inference.Connect.LLM;
+using Darkspyre.Inference.Connect.LLM.Internal;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Darkspyre.Inference.Connect.STT;
@@ -44,8 +45,6 @@ public sealed class SttProviderService
         if (connection.Xai is null || xai is null || connection.Xai != xai.Selection
             || connection.Authorization is not null && !ReferenceEquals(connection.Authorization, xai.Authorization))
             throw new ArgumentException("The hosted-STT connection requires its matching borrowed xAI binding.");
-        if (connection.AdditionalHeaders.ContainsKey("Authorization") || connection.AdditionalHeaders.ContainsKey("api-key"))
-            throw new ArgumentException("Static authentication headers cannot override the borrowed xAI authorization.");
     }
     internal static void ValidateConnection(SttConnection connection)
     {
@@ -53,6 +52,9 @@ public sealed class SttProviderService
             || !Enum.GetValues<XaiRegion>().Any(region => string.Equals(connection.Endpoint.AbsoluteUri.TrimEnd('/'),
                 new XaiConnectionOptions { Region = region }.GetEndpoint(), StringComparison.Ordinal)))
             throw new ArgumentException("Use the fixed xAI regional API endpoint and a positive request timeout.");
+        if (connection.AdditionalHeaders.ContainsKey("api-key"))
+            throw new ArgumentException("Static authentication headers cannot override the borrowed xAI authorization.");
+        ProviderHttp.ValidateAdditionalHeaders(connection.AdditionalHeaders);
     }
 }
 

@@ -14,9 +14,10 @@ case-insensitive protected headers. `Bind(connection, xai, resources)` passes th
 caller-owned. A session owns its streaming transport; Common clients gain no additional disposal API.
 Adapter operations require one validated snapshot and known-incompatibility validation before
 credential refresh or source effects. Binding validates the existing fixed xAI regional API bases,
-positive timeout and matching selection without acquisition. Static authentication headers cannot
-override the borrowed authorization. The five-minute request timeout is a library default, not a
-provider limit.
+positive timeout and matching selection without acquisition. Direct binding and setup use the shared
+header validator before provider or binding-factory callbacks. Reserved, malformed and newline-bearing
+headers refuse; static authentication headers cannot override the borrowed authorization. The
+five-minute request timeout is a library default, not a provider limit.
 
 `ConnectSttJson` exports exact connection/transport/setup data getters with a complete generated graph.
 Live authorization, family bindings, factories, services and sessions refuse nonnull portable JSON.
@@ -27,6 +28,8 @@ capability checks. The disposable settings manager fences and drains admitted op
 then releases borrowed targets/factories/access without disposing them. Its own synchronous retirement
 fence returns structured cancellation for admitted checks/queries even before linked cancellation
 propagates. Admitted saves preserve the host's actual committed or uncertain outcome.
+Checks retain matching borrowed authorization. Portable setup changes omit that runtime authority;
+the selected connection ID remains data, and only explicit named header edits reach the commit target.
 
 > **Proprietary software.** Copyright © 2026 Brandon Mathis. All rights reserved.
 > No permission is granted to use, copy, modify, or distribute this software

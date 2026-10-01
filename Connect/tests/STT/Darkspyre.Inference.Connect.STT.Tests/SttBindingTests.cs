@@ -93,7 +93,7 @@ public sealed class SttBindingTests
         Assert.Same(provider, client); Assert.Same(binding, provider.Binding); Assert.Same(resources, provider.Resources); Assert.Same(connection, provider.Connection);
         Assert.Throws<ArgumentException>(() => service.Bind(Connection, new(new("other"), access), resources));
         Assert.Throws<ArgumentException>(() => service.Bind(Connection with { Authorization = new UntouchableAuthorization() }, binding, resources));
-        Assert.Throws<ArgumentException>(() => service.Bind(Connection with { AdditionalHeaders = new Dictionary<string, string> { ["aUtHoRiZaTiOn"] = "secret" } }, binding, resources));
+        Assert.Throws<InvalidOperationException>(() => service.Bind(Connection with { AdditionalHeaders = new Dictionary<string, string> { ["aUtHoRiZaTiOn"] = "secret" } }, binding, resources));
         Assert.Throws<ArgumentException>(() => service.Bind(Connection with { Endpoint = new("https://outside.invalid/v1") }, binding, resources));
         Assert.Throws<ArgumentException>(() => service.Bind(Connection with { Endpoint = new("https://api.x.ai/v1?token=secret") }, binding, resources));
         Assert.Throws<ArgumentException>(() => service.Bind(Connection with { RequestTimeout = TimeSpan.Zero }, binding, resources));
@@ -353,6 +353,9 @@ public sealed class SttBindingTests
             Assert.Same(loaded[typeof(SttBindingTests).Assembly.GetName().Name!], entry.Module.Assembly); Assert.Equal(0, entry.Invoke(null, null));
             MethodInfo callerEntry = entry.DeclaringType!.GetMethod(nameof(ExerciseDelayedRetirementAsync))!;
             Assert.Same(entry.Module.Assembly, callerEntry.Module.Assembly); ((Task)callerEntry.Invoke(null, null)!).GetAwaiter().GetResult();
+            MethodInfo saveEntry = entry.DeclaringType.GetMethod(nameof(BorrowedAuthorityWorksForCheckButNeverEntersPortableChanges))!;
+            Assert.Same(entry.Module.Assembly, saveEntry.Module.Assembly);
+            ((Task)saveEntry.Invoke(Activator.CreateInstance(entry.DeclaringType), null)!).GetAwaiter().GetResult();
             Type auth = loaded[typeof(InferenceJson).Assembly.GetName().Name!].GetType(typeof(IProviderAuthorization).FullName!, true)!;
             Assert.Same(loaded[typeof(InferenceJson).Assembly.GetName().Name!], metadata.Options.GetConverter(auth).GetType().Assembly);
         }
