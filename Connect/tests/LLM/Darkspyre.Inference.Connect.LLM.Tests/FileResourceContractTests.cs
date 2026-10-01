@@ -16,6 +16,14 @@ public sealed class FileResourceContractTests
 
     public static TheoryData<string, string> Shapes => new()
     {
+        { "XaiStoragePublicUrlRequest", "{\"type\":\"flag\",\"Enabled\":false}" },
+        { "XaiStoragePublicUrlRequest", "{\"type\":\"configuration\",\"Options\":{\"ExpiresAfter\":\"01:00:00\"}}" },
+        { "XaiStoragePublicUrlFlag", "{\"Enabled\":true}" },
+        { "XaiStoragePublicUrlConfiguration", "{\"Options\":{\"ExpiresAfter\":null}}" },
+        { "XaiFileStorageOptions", "{\"FileName\":\"exact/path.mp4\",\"ExpiresAfter\":null,\"PublicUrl\":null}" },
+        { "XaiFileStorageOptions", "{\"FileName\":\"clip.mp4\",\"ExpiresAfter\":\"00:00:01\",\"PublicUrl\":{\"type\":\"flag\",\"Enabled\":false}}" },
+        { "XaiFileStorageOptions", "{\"FileName\":\"clip.mp4\",\"ExpiresAfter\":\"30.00:00:00\",\"PublicUrl\":{\"type\":\"flag\",\"Enabled\":true}}" },
+        { "XaiFileStorageOptions", "{\"FileName\":\"clip.mp4\",\"ExpiresAfter\":\"02:00:00\",\"PublicUrl\":{\"type\":\"configuration\",\"Options\":{\"ExpiresAfter\":\"01:00:00\"}}}" },
         { "LlmFileOrder", "1" }, { "LlmFileSort", "2" }, { "LlmFileContentFormat", "1" },
         { "LlmProviderFile", FileJson },
         { "LlmProviderFile", "{\"Id\":\"native-id\",\"FileName\":\"created.json\",\"Bytes\":23,\"CreatedAt\":\"1970-01-01T00:00:00+00:00\",\"Resource\":{\"WorkspaceId\":\"workspace\",\"Id\":\"logical-id\"}}" },
@@ -41,6 +49,9 @@ public sealed class FileResourceContractTests
 
     public static TheoryData<string, string, string> RequiredFacts => new()
     {
+        { "XaiStoragePublicUrlFlag", "{\"Enabled\":false}", "Enabled" },
+        { "XaiStoragePublicUrlConfiguration", "{\"Options\":{}}", "Options" },
+        { "XaiFileStorageOptions", "{\"FileName\":\"clip.mp4\"}", "FileName" },
         { "LlmProviderFile", FileJson, "Id,FileName,Bytes,CreatedAt" },
         { "LlmFilePage", "{\"Items\":[],\"IsKnownLastPage\":false}", "Items,IsKnownLastPage" },
         { "LlmFileDeletion", "{\"Id\":\"f\",\"Deleted\":false}", "Id,Deleted" },
@@ -97,6 +108,23 @@ public sealed class FileResourceContractTests
         Assert.Equal(TimeSpan.FromDays(30), new LlmFileUploadOptions(TimeSpan.FromDays(30)).ExpiresAfter);
         Assert.Throws<ArgumentOutOfRangeException>(() => new ResourceDownloadReceipt(-1, null, null));
         Assert.Throws<ArgumentOutOfRangeException>(() => new ResourceDownloadReceipt(0, null, null) with { DeclaredContentLength = -1 });
+    }
+
+    [Fact]
+    public void StorageAndPublicUrlExpiryRemainDistinctAndPublicationIsExplicit()
+    {
+        var storage = new XaiFileStorageOptions("secret/path.mp4");
+        Assert.Null(storage.ExpiresAfter); Assert.Null(storage.PublicUrl);
+        foreach (TimeSpan exact in new[] { TimeSpan.FromSeconds(-1), TimeSpan.Zero, TimeSpan.FromSeconds(1), TimeSpan.FromDays(30) })
+            Assert.Equal(exact, (storage with { ExpiresAfter = exact }).ExpiresAfter);
+        Assert.Throws<ArgumentOutOfRangeException>(() => storage with { ExpiresAfter = TimeSpan.FromDays(30) + TimeSpan.FromSeconds(1) });
+        Assert.Throws<ArgumentOutOfRangeException>(() => new XaiFileStorageOptions("clip.mp4", TimeSpan.FromTicks(1)));
+        Assert.Throws<ArgumentOutOfRangeException>(() => new XaiPublicUrlOptions(TimeSpan.FromSeconds(1)));
+        Assert.Throws<ArgumentNullException>(() => storage with { FileName = null! });
+        Assert.Throws<ArgumentNullException>(() => new XaiStoragePublicUrlConfiguration(new()) with { Options = null! });
+        Assert.Equal("XaiFileStorageOptions { <options> }", storage.ToString());
+        Assert.Throws<JsonException>(() => JsonSerializer.Deserialize("{\"type\":\"other\"}", ConnectLlmJson.XaiStoragePublicUrlRequest));
+        Assert.Throws<JsonException>(() => JsonSerializer.Deserialize("{\"type\":\"flag\",\"Enabled\":false,\"Options\":{}}", ConnectLlmJson.XaiStoragePublicUrlRequest));
     }
 
     [Fact]
@@ -174,6 +202,13 @@ public sealed class FileResourceContractTests
             Assert.Same(loaded[0], metadata.Type.Assembly);
             object result = RoundTrip(json, metadata);
             Assert.Same(loaded[0], result.GetType().Assembly);
+            object? publication = result.GetType().GetProperty("PublicUrl")?.GetValue(result);
+            if (publication is not null && publication is not string)
+            {
+                Assert.Same(loaded[0], publication.GetType().Assembly);
+                object? options = publication.GetType().GetProperty("Options")?.GetValue(publication);
+                if (options is not null) Assert.Same(loaded[0], options.GetType().Assembly);
+            }
             if (name == nameof(LlmProviderFile) && result.GetType().GetProperty("Resource")!.GetValue(result) is { } resource)
             {
                 Assert.Same(loaded[1], resource.GetType().Assembly);
