@@ -16,6 +16,9 @@ public sealed class TensorPackJsonRetirementTests
     [InlineData("null")]
     [InlineData("mismatch")]
     [InlineData("unknown")]
+    [InlineData("missing-artifacts")]
+    [InlineData("null-artifacts")]
+    [InlineData("null-artifact")]
     public void ActualForeignPackManifestAndFingerprintCallersRetire(string manifestCase)
     {
         string directory = Path.Combine(Path.GetTempPath(), "tensor-pack-json-" + Guid.NewGuid().ToString("N"));
@@ -106,6 +109,9 @@ public sealed class TensorPackJsonRetirementTests
         JsonObject changed = JsonNode.Parse(expected)!.AsObject();
         if (manifestCase == "mismatch") changed["Revision"] = "another-revision";
         if (manifestCase == "unknown") changed["future"] = new JsonObject { ["empty"] = new JsonArray(), ["missing"] = null };
+        if (manifestCase == "missing-artifacts") changed.Remove("Artifacts");
+        if (manifestCase == "null-artifacts") changed["Artifacts"] = null;
+        if (manifestCase == "null-artifact") changed["Artifacts"]!.AsArray()[0] = null;
         string replacement = manifestCase switch { "malformed" => "{", "null" => "null", _ => changed.ToJsonString() };
         await File.WriteAllTextAsync(manifestPath, replacement);
         TensorModelPackStatus observed = await manager.GetStatusAsync(definition.Key);
