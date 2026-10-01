@@ -58,6 +58,24 @@ public sealed class CodexVersionParityTests
         Assert.Equal(1, handler.Calls);
     }
 
+    [Fact]
+    public async Task FacadeFirstListingAndExplicitRefreshFetchActualSelectedVersionCatalogs()
+    {
+        using var handler = new Handler(versionSensitiveCatalog: true);
+        using var http = new HttpClient(handler);
+        var client = new OpenAiCodexLlmClient(http);
+        await using var service = new LlmProviderService(new Source(DirectCodexTests.Connection()), [client]);
+
+        Assert.Equal("release-selected-model", Assert.Single(await service.ListModelsAsync("configured")).Id);
+        handler.Catalog = "{\"models\":[{\"slug\":\"next-reported-model\"}]}";
+        Assert.Equal("release-selected-model", Assert.Single(await service.ListModelsAsync("configured")).Id);
+        Assert.Equal(1, handler.Calls);
+        Assert.Equal("next-reported-model", Assert.Single(await service.RefreshModelsAsync("configured")).Id);
+        Assert.Equal(2, handler.Calls);
+        Assert.Equal(TargetVersion, Assert.Single(handler.Headers["version"]));
+        Assert.Equal("?client_version=" + TargetVersion, handler.Uri?.Query);
+    }
+
     [Theory]
     [InlineData("version", "catalog")]
     [InlineData("VeRsIoN", "generation")]
@@ -126,6 +144,7 @@ public sealed class CodexVersionParityTests
     private sealed class Handler(bool versionSensitiveCatalog = false, string? catalog = null) : HttpMessageHandler
     {
         public int Calls { get; private set; }
+        public string? Catalog { get; set; } = catalog;
         public Uri? Uri { get; private set; }
         public Dictionary<string, string[]> Headers { get; private set; } = new(StringComparer.OrdinalIgnoreCase);
 
@@ -138,7 +157,7 @@ public sealed class CodexVersionParityTests
                 StringComparer.OrdinalIgnoreCase);
             bool isCatalog = Uri!.AbsolutePath.EndsWith("/models", StringComparison.Ordinal);
             string body = isCatalog
-                ? catalog ?? (versionSensitiveCatalog && Uri.Query != "?client_version=" + TargetVersion
+                ? Catalog ?? (versionSensitiveCatalog && Uri.Query != "?client_version=" + TargetVersion
                     ? "{\"models\":[{\"slug\":\"old-version-model\"}]}"
                     : "{\"models\":[{\"slug\":\"release-selected-model\",\"context_window\":123456}]}")
                 : request.Method == HttpMethod.Post ? Completion : "{}";
@@ -148,5 +167,14 @@ public sealed class CodexVersionParityTests
                     request.Method == HttpMethod.Post ? "text/event-stream" : "application/json")
             });
         }
+    }
+
+    private sealed class Source(LlmConnection connection) : ILlmConnectionSource
+    {
+        public Task<LlmConnection?> GetConnectionAsync(string connectionId, CancellationToken cancellationToken = default) =>
+            Task.FromResult<LlmConnection?>(connection);
+
+        public Task SaveCredentialAsync(string connectionId, string credentialJson, string expectedVersion,
+            CancellationToken cancellationToken = default) => throw new InvalidOperationException("No refresh is required.");
     }
 }
