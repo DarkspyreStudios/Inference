@@ -10,6 +10,10 @@ namespace Darkspyre.Inference.Connect.LLM.Vertex.Tests;
 
 public sealed class VertexProtocolTests
 {
+    [Fact]
+    public void VertexRejectsForeignChatConfiguration() =>
+        Assert.Throws<NotSupportedException>(() => VertexEndpoints.Validate(Connection with { ChatCompletions = new() }));
+
     private const string Gemini = "google/gemini-3-flash-preview";
     private const string Claude = "anthropic/claude-sonnet-4-6";
     private static LlmConnection Connection => new()

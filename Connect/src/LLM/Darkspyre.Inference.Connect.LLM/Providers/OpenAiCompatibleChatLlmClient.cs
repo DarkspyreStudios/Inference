@@ -28,6 +28,9 @@ internal sealed class OpenAiCompatibleChatLlmClient(HttpClient http) : LlmClient
         SupportsModelListing = true,
         SupportsJsonSchema = false,
         SupportsJsonObject = false,
+        SupportsPromptImages = false,
+        SupportsPromptDocuments = false,
+        RichContentSupported = RichContentRoutes.TextOnly,
         SupportsTemperature = true,
         SupportsTopP = true,
         SupportsSeed = true,
@@ -47,12 +50,12 @@ internal sealed class OpenAiCompatibleChatLlmClient(HttpClient http) : LlmClient
 
     public override LlmProviderCapabilities GetCapabilities(
         LlmConnection connection,
-        string? modelId = null) => base.GetCapabilities(connection, modelId) with
-        {
-            SupportsPromptImages = false,
-            SupportsPromptDocuments = false,
-            RichContentSupported = RichContentRoutes.TextOnly
-        };
+        string? modelId = null)
+    {
+        if (connection.ChatCompletions?.OutputLimitField is { } field && !Enum.IsDefined(field))
+            throw new ArgumentOutOfRangeException(nameof(connection), "The Chat Completions output-limit field is invalid.");
+        return base.GetCapabilities(connection, modelId);
+    }
 
     public Task<LlmConnection> PrepareAsync(LlmConnection connection, CancellationToken cancellationToken)
     {
@@ -207,32 +210,43 @@ internal sealed class OpenAiCompatibleChatLlmClient(HttpClient http) : LlmClient
                             toolCalls.Add(index, builder);
                         }
 
-                        builder.Id ??= LlmJson.GetString(toolCallDelta, "id");
+                        if (LlmJson.GetString(toolCallDelta, "id") is { Length: > 0 } incomingId)
+                        {
+                            if (!builder.SyntheticId && builder.Id is { } previous && previous != incomingId)
+                                throw ProtocolException("OpenAI-compatible chat changed a tool-call id mid-stream.", response, data, credential);
+                            if (!builder.SyntheticId) builder.Id = incomingId;
+                        }
                         string argumentsDelta = string.Empty;
                         if (LlmJson.GetObject(toolCallDelta, "function") is { } function)
                         {
-                            builder.Name ??= LlmJson.GetString(function, "name");
+                            if (LlmJson.GetString(function, "name") is { Length: > 0 } incomingName)
+                                builder.Name ??= incomingName;
                             argumentsDelta = LlmJson.GetString(function, "arguments")
                                 ?? string.Empty;
                         }
 
-                        if (!builder.Started
-                            && builder.Id is { } callId
-                            && builder.Name is { } name)
+                        if (!builder.Started && builder.Name is { } name)
                         {
+                            builder.EnsureId();
                             builder.Started = true;
-                            yield return new LlmToolCallStartedEvent(callId, name, index);
+                            yield return new LlmToolCallStartedEvent(builder.Id!, name, index);
+                            if (builder.Pending.Length > 0)
+                            {
+                                yield return new LlmToolCallArgumentsDeltaEvent(builder.Id!, builder.Pending.ToString());
+                                builder.Pending.Clear();
+                            }
                         }
 
                         if (argumentsDelta.Length > 0)
                         {
                             builder.Arguments.Append(argumentsDelta);
-                            if (builder.Id is { } argumentCallId)
+                            if (builder.Started)
                             {
                                 yield return new LlmToolCallArgumentsDeltaEvent(
-                                    argumentCallId,
+                                    builder.Id!,
                                     argumentsDelta);
                             }
+                            else builder.Pending.Append(argumentsDelta);
                         }
                     }
                 }
@@ -479,7 +493,8 @@ internal sealed class OpenAiCompatibleChatLlmClient(HttpClient http) : LlmClient
             var mappedMessage = new JsonObject
             {
                 ["role"] = message.Role,
-                ["content"] = message.Content.Length == 0 && message.ToolCalls.Count > 0
+                ["content"] = message.Attachments.Count > 0 ? BuildContentParts(message)
+                    : message.Content.Length == 0 && message.ToolCalls.Count > 0
                     ? null
                     : message.Content
             };
@@ -545,7 +560,9 @@ internal sealed class OpenAiCompatibleChatLlmClient(HttpClient http) : LlmClient
 
         if (request.MaxOutputTokens is int maxOutputTokens)
         {
-            payload["max_tokens"] = maxOutputTokens;
+            LlmChatCompletionsOutputLimitField field = connection.ChatCompletions?.OutputLimitField
+                ?? (IsOpenAiEndpoint(connection) ? LlmChatCompletionsOutputLimitField.MaxCompletionTokens : LlmChatCompletionsOutputLimitField.MaxTokens);
+            payload[field == LlmChatCompletionsOutputLimitField.MaxCompletionTokens ? "max_completion_tokens" : "max_tokens"] = maxOutputTokens;
         }
 
         if (request.ReasoningLevel is { } level)
@@ -625,8 +642,41 @@ internal sealed class OpenAiCompatibleChatLlmClient(HttpClient http) : LlmClient
             }
         }
 
+        if (request.ConversationKey is { Length: > 0 } key
+            && (connection.ChatCompletions?.UsePromptCacheKey ?? IsOpenAiEndpoint(connection)))
+            payload["prompt_cache_key"] = key;
+
         RequestJson.ApplyProviderOptions(payload, connection, request);
         return payload;
+    }
+
+    private static bool IsOpenAiEndpoint(LlmConnection connection) =>
+        Uri.TryCreate(connection.Endpoint, UriKind.Absolute, out Uri? endpoint)
+        && endpoint.Host.Equals("api.openai.com", StringComparison.OrdinalIgnoreCase);
+
+    private static JsonArray BuildContentParts(LlmChatMessage message)
+    {
+        var parts = new JsonArray();
+        if (message.Content.Length > 0) parts.Add(new JsonObject { ["type"] = "text", ["text"] = message.Content });
+        foreach (LlmAttachment attachment in message.Attachments)
+        {
+            parts.Add(attachment.Kind switch
+            {
+                LlmBinaryKind.Image => new JsonObject
+                { ["type"] = "image_url", ["image_url"] = new JsonObject { ["url"] = LlmAttachments.ToDataUrl(attachment) } },
+                LlmBinaryKind.Document when LlmAttachments.ResolveMediaType(attachment) == "application/pdf" => new JsonObject
+                {
+                    ["type"] = "file",
+                    ["file"] = new JsonObject
+                    { ["filename"] = attachment.FileName, ["file_data"] = LlmAttachments.ToDataUrl(attachment) }
+                },
+                LlmBinaryKind.Document when LlmAttachments.ResolveMediaType(attachment).StartsWith("text/", StringComparison.Ordinal) =>
+                    new JsonObject { ["type"] = "text", ["text"] = LlmAttachments.ReadText(attachment) },
+                LlmBinaryKind.Document => throw new NotSupportedException("OpenAI-compatible chat carries PDF and UTF-8 text documents only."),
+                _ => throw new ArgumentOutOfRangeException(nameof(message))
+            });
+        }
+        return parts;
     }
 
     private static JsonObject BuildJsonSchema(LlmStructuredOutputRequest structured)
@@ -683,22 +733,34 @@ internal sealed class OpenAiCompatibleChatLlmClient(HttpClient http) : LlmClient
     {
         public string? Id { get; set; }
 
+        public bool SyntheticId { get; private set; }
+
         public string? Name { get; set; }
 
         public StringBuilder Arguments { get; } = new();
 
+        public StringBuilder Pending { get; } = new();
+
         public bool Started { get; set; }
+
+        public void EnsureId()
+        {
+            if (!string.IsNullOrWhiteSpace(Id)) return;
+            Id = "call_" + Guid.NewGuid().ToString("N");
+            SyntheticId = true;
+        }
 
         public LlmToolCall Build()
         {
-            if (string.IsNullOrWhiteSpace(Id) || string.IsNullOrWhiteSpace(Name))
+            if (string.IsNullOrWhiteSpace(Name))
             {
                 throw new InvalidOperationException(
                     "The provider returned an incomplete tool-call stream.");
             }
 
+            EnsureId();
             return new LlmToolCall(
-                Id,
+                Id!,
                 Name,
                 Arguments.Length == 0 ? "{}" : Arguments.ToString());
         }

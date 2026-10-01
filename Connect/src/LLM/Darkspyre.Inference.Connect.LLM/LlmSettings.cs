@@ -107,7 +107,7 @@ public sealed class LlmSettings : InferenceSettings<LlmSetupChanges>
     private LlmCredential Credential => LlmCredential.Parse(_draft.Credential) ?? new();
 
     protected override bool IsDraftDirty =>
-        _draft.Endpoint != _baseline.Endpoint || _draft.Vertex != _baseline.Vertex || _model != _originalModel
+        _draft.Endpoint != _baseline.Endpoint || _draft.Vertex != _baseline.Vertex || _draft.ChatCompletions != _baseline.ChatCompletions || _model != _originalModel
             || (_draft.CapabilityOverrides ?? new()) != (_baseline.CapabilityOverrides ?? new()) || _callback.Length != 0
             || (UsesAws ? NormalizeAws(Credential.Aws) != NormalizeAws(LlmCredential.Parse(_baseline.Credential)?.Aws)
                 : _credentialChange != SetupSecretEditKind.Keep);
@@ -253,6 +253,33 @@ public sealed class LlmSettings : InferenceSettings<LlmSetupChanges>
         }
         return new("capabilities", "Endpoint capability overrides",
         [
+            new SetupChoiceField(new("output-limit-field", "Output-limit field")
+                { HelpText = "Default uses max_completion_tokens on api.openai.com and max_tokens elsewhere." },
+                _draft.ChatCompletions?.OutputLimitField switch
+                {
+                    LlmChatCompletionsOutputLimitField.MaxTokens => "max_tokens",
+                    LlmChatCompletionsOutputLimitField.MaxCompletionTokens => "max_completion_tokens",
+                    _ => "default"
+                }, "default", selection =>
+                {
+                    if (selection is not ("default" or "max_tokens" or "max_completion_tokens"))
+                        return new(SetupEditState.Invalid, [new("output-limit-invalid", "Select default, max_tokens or max_completion_tokens.", "output-limit-field")]);
+                    return Edit(() => SetChatCompletions((_draft.ChatCompletions ?? new()) with
+                    {
+                        OutputLimitField = selection == "default" ? null : selection == "max_tokens"
+                            ? LlmChatCompletionsOutputLimitField.MaxTokens : LlmChatCompletionsOutputLimitField.MaxCompletionTokens
+                    }));
+                }, false),
+            new SetupChoiceField(new("prompt-cache-key", "Conversation cache key")
+                { HelpText = "Default sends the conversation key only to api.openai.com. Enable only when the endpoint supports prompt_cache_key." },
+                _draft.ChatCompletions?.UsePromptCacheKey is { } cacheKey ? cacheKey ? "enabled" : "disabled" : "default",
+                "default", selection =>
+                {
+                    if (selection is not ("default" or "enabled" or "disabled"))
+                        return new(SetupEditState.Invalid, [new("cache-key-invalid", "Select default, enabled or disabled.", "prompt-cache-key")]);
+                    return Edit(() => SetChatCompletions((_draft.ChatCompletions ?? new()) with
+                    { UsePromptCacheKey = selection == "default" ? null : selection == "enabled" }));
+                }, false),
             Override("streaming", "Streaming", current.SupportsStreaming, (value, selection) => value with { SupportsStreaming = selection },
                 "Disabled sends the endpoint's non-streaming request. The reply arrives in one piece when generation ends."),
             Override("streaming-usage", "Streaming usage", current.SupportsStreamingUsage, (value, selection) => value with { SupportsStreamingUsage = selection }),
@@ -308,12 +335,18 @@ public sealed class LlmSettings : InferenceSettings<LlmSetupChanges>
         _credentialChange = SetupSecretEditKind.Replace;
     }
 
+    private void SetChatCompletions(LlmChatCompletionsConfiguration configuration) =>
+        _draft = _draft with { ChatCompletions = configuration.OutputLimitField is null && configuration.UsePromptCacheKey is null ? null : configuration };
+
     protected override SetupChoicePage? GetLocalChoices(string fieldId, SetupChoiceQuery query)
     {
         _ = CreateSteps(); // Registers the override field IDs for the current transport.
         return fieldId == "google-authentication" && UsesVertex
             ? Page(query, [new(LlmGoogleAuthenticationMode.ApplicationDefault.ToString(), "Application default credentials"),
                 new(LlmGoogleAuthenticationMode.ServiceAccount.ToString(), "Service-account key")])
+            : fieldId == "output-limit-field" && _draft.Transport == LlmTransport.OpenAiCompatibleChat
+                ? Page(query, [new("default", "Default"), new("max_tokens", "max_tokens"), new("max_completion_tokens", "max_completion_tokens")])
+            : fieldId == "prompt-cache-key" && _draft.Transport == LlmTransport.OpenAiCompatibleChat ? Page(query, OverrideChoices)
             : _overrideFields.Contains(fieldId) ? Page(query, OverrideChoices) : null;
     }
 
@@ -478,7 +511,7 @@ public sealed class LlmSettings : InferenceSettings<LlmSetupChanges>
             : _draft.Credential is null ? SetupSecretEdit.Clear : SetupSecretEdit.Replace(_draft.Credential),
         _original is not null && (_original.Endpoint != _draft.Endpoint || _original.Vertex != _draft.Vertex),
         _original is null || _original.Endpoint != _draft.Endpoint || _original.Vertex != _draft.Vertex || _originalModel != _model
-            || _original.CapabilityOverrides != _draft.CapabilityOverrides || _credentialChange != SetupSecretEditKind.Keep);
+            || _original.ChatCompletions != _draft.ChatCompletions || _original.CapabilityOverrides != _draft.CapabilityOverrides || _credentialChange != SetupSecretEditKind.Keep);
 }
 
 /// <summary>
