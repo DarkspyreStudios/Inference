@@ -88,6 +88,16 @@ public sealed class VideoContractTests
     }
 
     [Fact]
+    public void NestedBinaryMediaRejectsNullBytesButPreservesActualEmptyBytes()
+    {
+        Assert.Throws<JsonException>(() => JsonSerializer.Deserialize(
+            "{\"ModelId\":\"m\",\"FirstFrame\":{\"type\":\"binary\",\"Data\":null}}", InferenceJson.VideoGenerationRequest));
+        var request = JsonSerializer.Deserialize(
+            "{\"ModelId\":\"m\",\"FirstFrame\":{\"type\":\"binary\",\"Data\":\"\"}}", InferenceJson.VideoGenerationRequest)!;
+        Assert.True(Assert.IsType<BinaryMediaSource>(request.FirstFrame).Data.IsEmpty);
+    }
+
+    [Fact]
     public void CollectionsAndOpaqueStateAreSnapshotsWithoutInventedObservations()
     {
         var source = new ResourceMediaSource(new("workspace", "original"));
