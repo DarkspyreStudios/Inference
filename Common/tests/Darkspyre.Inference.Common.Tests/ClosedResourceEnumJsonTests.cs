@@ -4,6 +4,7 @@ using System.Runtime.CompilerServices;
 using System.Runtime.Loader;
 using System.Text.Json;
 using System.Text.Json.Serialization.Metadata;
+using Darkspyre.Inference.Common.Image;
 using Darkspyre.Inference.Common.Media;
 using Darkspyre.Inference.Common.Resources;
 
@@ -54,6 +55,15 @@ public sealed class ClosedResourceEnumJsonTests
     }
 
     [Fact]
+    public void NestedCapabilityReadRefusesUndefined() => Assert.Throws<JsonException>(() =>
+        JsonSerializer.Deserialize("{\"SupportedSizes\":[],\"SupportedReferenceKinds\":[99]}", InferenceJson.ImageCapabilities));
+
+    [Fact]
+    public void NestedCapabilityWriteRefusesUndefined() => Assert.Throws<JsonException>(() =>
+        JsonSerializer.Serialize(new ImageCapabilities { SupportedSizes = [], SupportedReferenceKinds = new HashSet<InferenceMediaSourceKind> { (InferenceMediaSourceKind)99 } },
+            InferenceJson.ImageCapabilities));
+
+    [Fact]
     public void DefinedNumericValuesAndObservedUnknownOrZeroRemainExact()
     {
         foreach (string name in new[] { "InferenceMediaSourceKind", "InferenceResourceOperationPhase", "InferenceResourceCommitOutcome" })
@@ -85,8 +95,9 @@ public sealed class ClosedResourceEnumJsonTests
         }
         foreach (string property in new[] { "Phase", "CommitOutcome", "SelectionOutcome" }) test.NestedFailureReadRefusesUndefined(property);
         foreach (int field in new[] { 0, 1, 2 }) test.NestedFailureWriteRefusesUndefined(field);
+        test.NestedCapabilityReadRefusesUndefined(); test.NestedCapabilityWriteRefusesUndefined();
         test.DefinedNumericValuesAndObservedUnknownOrZeroRemainExact();
-        return 31;
+        return 33;
     }
 
     [Fact]
@@ -123,7 +134,7 @@ public sealed class ClosedResourceEnumJsonTests
                 Assert.Same(generation, AssemblyLoadContext.GetLoadContext(converter.GetType().Assembly));
                 roots.Add(new(metadata)); roots.Add(new(metadata.Type)); roots.Add(new(converter)); roots.Add(new(metadata.Options.TypeInfoResolver!));
             }
-            Assert.Equal(31, proof.Invoke(null, null));
+            Assert.Equal(33, proof.Invoke(null, null));
         }
         finally { generation.Unload(); }
         return roots.ToArray();

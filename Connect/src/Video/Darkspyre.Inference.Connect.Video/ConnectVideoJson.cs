@@ -41,7 +41,8 @@ public static class ConnectVideoJson
     {
         var options = new JsonSerializerOptions(ConnectVideoJsonContext.Default.Options) { TypeInfoResolver = new VideoResolver() };
         foreach (Type type in new[] { typeof(IProviderAuthorization), typeof(IInferenceResourceAccess), typeof(IInferenceResourceReadHandle), typeof(IInferenceResourceWriteHandle),
-            typeof(IVideoInference), typeof(VideoJobState), typeof(VideoOperation) })
+            typeof(IVideoInference), typeof(VideoJobState), typeof(VideoOperation), typeof(InferenceMediaSourceKind),
+            typeof(InferenceResourceOperationPhase), typeof(InferenceResourceCommitOutcome) })
             options.Converters.Add(InferenceJson.VideoRequest.Options.Converters.Single(converter => converter.CanConvert(type)));
         options.MakeReadOnly();
         return options;
