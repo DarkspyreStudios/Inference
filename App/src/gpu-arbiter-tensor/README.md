@@ -110,9 +110,10 @@ with the deployment driver; installing the newest toolkit alone does not establi
 The app continues to consume the package; it does not rewrite PTX or copy engine source.
 
 The [RTX 3090 Ti Qwen comparison](../../../docs/design/gpu-box-qwen-benchmark.md)
-uses a local rebuilt CUDA dependency in an isolated test application. Its three-run
-median is 4.19 tokens/sec for direct CUDA versus 41.10 for llama.cpp. That evidence
-does not change the published dependency pin or qualify the separate `GgmlCuda` backend.
+uses local rebuilt dependencies in isolated test applications. Its three-run medians
+are 28.77 tokens/sec for `GgmlCuda`, 4.19 for direct CUDA and 41.10 for llama.cpp.
+The GGML CUDA rerun uses the separately built CUDA 12 `GgmlOps.dll` bridge.
+These measurements do not change the published dependency pin or deployed application.
 
 `GgmlCuda` is a distinct backend. Its CUDA bridge is not included in the published TensorSharp
 2.8.6.7 package. Provision that bridge through the TensorSharp native build documented in

@@ -2,8 +2,10 @@
 
 The 2026-10-02 comparison runs both engines on Windows `gpu-box`, using the
 RTX 3090 Ti (24 GB, compute capability 8.6) and NVIDIA driver 595.97.
-llama.cpp is 9.82 times faster than TensorSharp's measured direct `Cuda` path.
-This result does not qualify TensorSharp's separate `GgmlCuda` backend.
+TensorSharp's `GgmlCuda` rerun measures 28.77 tokens/sec, 6.87 times its direct
+`Cuda` result. The saved llama.cpp result is 41.10 tokens/sec. `GgmlCuda` has
+29.98 percent lower throughput than that llama.cpp baseline. The rerun changes
+the Tensor backend and native bridge; it does not rerun llama.cpp.
 
 ## Matched input and measurement
 
@@ -36,6 +38,7 @@ reasoning-token usage fields are null. Those null fields are not measured zeroes
 | --- | ---: | ---: | ---: | ---: |
 | llama.cpp b11238, CUDA | 41.10 | 41.09–41.11 | 0.259 sec | 6.462 sec |
 | Tensor arbiter, TensorSharp direct CUDA | 4.19 | 4.18–4.19 | 6.672 sec | 67.719 sec |
+| Tensor arbiter, TensorSharp GGML CUDA | 28.77 | 28.75–33.69 | 0.900 sec | 9.724 sec |
 
 The temporary llama server uses one sequence slot, all GPU layers and flash attention.
 Its observed VRAM use is 19,763 MiB. It listens on loopback 8083; the normal llama
@@ -55,6 +58,39 @@ has no unavailable-PTX, CUDA-error or slow CPU-fallback warning.
 Tensor reports that direct CUDA has no fused whole-model prefill or decode graph
 and uses per-operation loops. That diagnostic identifies a difference in execution
 paths; this benchmark does not isolate each source of the speed difference.
+
+## GGML CUDA rerun
+
+The Tensor arbiter uses the same existing managed assemblies and model pack.
+Its isolated configuration selects `GgmlCuda`. The bridge is the Release
+`GgmlOps.dll` built from TensorSharp source
+`c7fd85b5609a92c7c56dbce116914fc97d757fa3` and unchanged upstream GGML source
+`456172ec733a135778adcd32d00e576a58232e45`, using CUDA 12.8 and MSVC 14.44 for
+`sm_86`. Its SHA-256 is
+`7b4d982af1f0d8b01d98230461acdfc3a549b7736721870e94d0c8864ecbb058`.
+This is the same GGML backend family as the Mac's `GgmlMetal` comparison.
+
+The rerun keeps the 16,384-token context, default FP16 KV, temperature zero,
+disabled reasoning, separate 32-token array-definition warm-up and 256-token
+hash-table requests. It uses the same OpenAI SSE timing calculation and Mac
+client through SSH forwarding. Each measured request reports 36 prompt tokens,
+256 completion tokens and the length finish reason. No reasoning text appears.
+Cached/reasoning usage fields remain null. Each request uses a new ChatSession.
+
+The three decode measurements are 33.69, 28.75 and 28.77 tokens/sec. The spread
+is reported without discarding a run. The console confirms `Backend: GgmlCuda`,
+21,496 MB of device-resident quantized weights across 449 tensors and the 16k
+context limit. It contains no CUDA error or fallback diagnostic. Loading and
+warm-up are excluded from timings. The native bridge's separate compatibility
+smoke verifies native CUDA backend identity, GPU operations, attention and
+16-token Qwen generation before this benchmark.
+
+The original llama arbiter reloads its original 98,304-token context, Q8 KV and
+two-sequence preset after the rerun. The copied Tensor server stops and its app
+folder is removed. The SSH tunnel closes. No production application or preset
+files change. Raw measurements, output, DLL hashes, configuration, console and
+restoration evidence remain in this worktree's ignored `tmp/ggml-cuda-benchmark/`
+and on GPU box under `G:\AI\benchmarks\qwen-ggml-cuda-20261002`.
 
 ## Direct CUDA execution verification
 
