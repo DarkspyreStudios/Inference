@@ -217,6 +217,165 @@ public sealed class QwenPackSelectionTests : IDisposable
     }
 
     [Theory]
+    [InlineData(TensorBackendKind.Cpu)]
+    [InlineData(TensorBackendKind.GgmlCpu)]
+    public async Task FailedLoadCleanupRetainsItsPackAndRefusesReplacementUntilReleaseSucceeds(TensorBackendKind backend)
+    {
+        TensorModelPackDefinition first = Pack("host/held-failure"), second = Pack("host/replacement");
+        using var http = new HttpClient(new Handler());
+        using var packs = Manager(http, first, second);
+        await packs.InstallAsync(first.Key);
+        await packs.InstallAsync(second.Key);
+        var original = new InvalidDataException("controlled load failure");
+        var cleanup = new InvalidOperationException("controlled unload failure");
+        bool failCleanup = true;
+        var runtime = new Runtime
+        {
+            OnLoad = () => throw original,
+            OnUnload = () => { if (failCleanup) throw cleanup; }
+        };
+        QwenRuntimeOwner owner = QwenRuntimeOwnerTests.CreateControlledCpuOwner(out var supplier);
+        var engine = new QwenLlmInference(packs, runtime, backend, runtimeOwner: owner);
+        try
+        {
+            AggregateException error = await Assert.ThrowsAsync<AggregateException>(() => engine.LoadAndWaitAsync(first.Key));
+            Assert.Same(original, error.InnerExceptions[0]);
+            Assert.Same(cleanup, error.InnerExceptions[1]);
+            await Assert.ThrowsAsync<InferenceException>(() => engine.LoadAndWaitAsync(second.Key));
+            Assert.Equal(new[] { first.Key }, runtime.Keys);
+            await Assert.ThrowsAsync<TensorModelPackException>(() => packs.RemoveAsync(first.Key));
+            Assert.Equal(0, supplier.ModelReleases);
+            if (backend == TensorBackendKind.GgmlCpu)
+                Assert.Equal(1, (await owner.ShutdownAsync()).OutstandingLeases);
+
+            failCleanup = false;
+            await engine.UnloadAndWaitAsync();
+            await packs.RemoveAsync(first.Key);
+            await packs.RemoveAsync(second.Key);
+            Assert.Null(runtime.ContextLength);
+            Assert.Equal(backend == TensorBackendKind.GgmlCpu ? 1 : 0, supplier.ModelReleases);
+        }
+        finally
+        {
+            failCleanup = false;
+            await engine.DisposeAsync();
+            await owner.DisposeAsync();
+        }
+    }
+
+    [Theory]
+    [InlineData(TensorBackendKind.Cpu, false)]
+    [InlineData(TensorBackendKind.Cpu, true)]
+    [InlineData(TensorBackendKind.GgmlCpu, false)]
+    [InlineData(TensorBackendKind.GgmlCpu, true)]
+    public async Task FailedStopAndRepeatedDisposalExposeFailureUntilExplicitReleaseOnlyRetry(
+        TensorBackendKind backend, bool cleanupAvailableBeforeDisposal)
+    {
+        TensorModelPackDefinition pack = Pack("host/failed-stop");
+        using var http = new HttpClient(new Handler());
+        using var packs = Manager(http, pack);
+        await packs.InstallAsync(pack.Key);
+        var cleanup = new InvalidOperationException("controlled retirement failure");
+        bool failCleanup = true;
+        var runtime = new Runtime { OnUnload = () => { if (failCleanup) throw cleanup; } };
+        QwenRuntimeOwner owner = QwenRuntimeOwnerTests.CreateControlledCpuOwner(out var supplier);
+        var engine = new QwenLlmInference(packs, runtime, backend, runtimeOwner: owner);
+        Task? disposal = null;
+        try
+        {
+            await engine.LoadAndWaitAsync(pack.Key);
+            Assert.Same(cleanup, await Assert.ThrowsAsync<InvalidOperationException>(() => engine.StopAndWaitAsync()));
+            int failedAttempts = runtime.UnloadAttempts;
+            if (cleanupAvailableBeforeDisposal) failCleanup = false;
+            disposal = engine.DisposeAsync().AsTask();
+            Assert.Same(cleanup, await Assert.ThrowsAsync<InvalidOperationException>(() => disposal));
+            Assert.Equal(failedAttempts, runtime.UnloadAttempts);
+            Assert.Same(disposal, engine.DisposeAsync().AsTask());
+            await Assert.ThrowsAsync<TensorModelPackException>(() => packs.RemoveAsync(pack.Key));
+            Assert.Equal(0, runtime.Disposals);
+            Assert.Equal(0, supplier.ModelReleases);
+            if (backend == TensorBackendKind.GgmlCpu)
+                Assert.Equal(1, (await owner.ShutdownAsync()).OutstandingLeases);
+            await Assert.ThrowsAsync<ObjectDisposedException>(() => engine.LoadAsync(pack.Key));
+
+            failCleanup = false;
+            await engine.StopAndWaitAsync();
+            await packs.RemoveAsync(pack.Key);
+            Assert.Equal(1, runtime.Disposals);
+            Assert.Equal(backend == TensorBackendKind.GgmlCpu ? 1 : 0, supplier.ModelReleases);
+            Assert.Equal(TensorEngineState.Stopped, (await engine.GetObservationAsync()).State);
+            Assert.Same(disposal, engine.DisposeAsync().AsTask());
+        }
+        finally
+        {
+            failCleanup = false;
+            if ((await engine.GetObservationAsync()).State != TensorEngineState.Stopped)
+                await engine.StopAndWaitAsync();
+            if (disposal is not null) { try { await disposal; } catch (InvalidOperationException) { } }
+            else { try { await engine.DisposeAsync(); } catch (InvalidOperationException) { } }
+            await owner.DisposeAsync();
+        }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task RacingStopAndDisposalShareOneActualCleanupAttempt(bool failFirst)
+    {
+        TensorModelPackDefinition pack = Pack("host/racing-stop");
+        using var http = new HttpClient(new Handler());
+        using var packs = Manager(http, pack);
+        await packs.InstallAsync(pack.Key);
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var cleanup = new InvalidOperationException("controlled held cleanup failure");
+        int unloads = 0;
+        var runtime = new Runtime
+        {
+            OnUnload = () =>
+            {
+                if (Interlocked.Increment(ref unloads) != 1) return;
+                entered.TrySetResult();
+                release.Task.GetAwaiter().GetResult();
+                if (failFirst) throw cleanup;
+            }
+        };
+        var engine = new QwenLlmInference(packs, runtime, TensorBackendKind.Cpu);
+        Task? disposal = null;
+        try
+        {
+            await engine.LoadAndWaitAsync(pack.Key);
+            await engine.StopAsync();
+            await entered.Task;
+            await engine.StopAsync();
+            disposal = engine.DisposeAsync().AsTask();
+            Assert.Same(disposal, engine.DisposeAsync().AsTask());
+            Assert.False(disposal.IsCompleted);
+            Assert.Equal(1, Volatile.Read(ref unloads));
+            await Assert.ThrowsAsync<ObjectDisposedException>(() => engine.LoadAsync(pack.Key));
+            release.TrySetResult();
+            if (failFirst)
+            {
+                Assert.Same(cleanup, await Assert.ThrowsAsync<InvalidOperationException>(() => disposal));
+                Assert.Equal(0, runtime.Disposals);
+                await Assert.ThrowsAsync<TensorModelPackException>(() => packs.RemoveAsync(pack.Key));
+                await engine.StopAndWaitAsync();
+            }
+            else await disposal;
+            Assert.Equal(1, runtime.Disposals);
+            await packs.RemoveAsync(pack.Key);
+        }
+        finally
+        {
+            disposal ??= engine.DisposeAsync().AsTask();
+            release.TrySetResult();
+            try { await disposal; } catch (InvalidOperationException) { }
+            if ((await engine.GetObservationAsync()).State != TensorEngineState.Stopped)
+                await engine.StopAndWaitAsync();
+        }
+    }
+
+    [Theory]
     [InlineData(false)]
     [InlineData(true)]
     public async Task StreamingLeaseProtectsNativeLifetimeDuringUnload(bool urgent)
@@ -420,6 +579,9 @@ public sealed class QwenPackSelectionTests : IDisposable
         public int? PromptEstimate { get; init; }
         public int? EstimatePromptTokens(List<ChatMessage> messages, List<ToolFunction>? tools, bool enableThinking) => PromptEstimate;
         public Action? OnLoad { get; init; }
+        public Action? OnUnload { get; init; }
+        public int Disposals { get; private set; }
+        public int UnloadAttempts { get; private set; }
         public int? ContextLength { get; private set; }
         public string? LoadedBackend { get; private set; }
         public CancellationToken LastStreamToken { get; private set; }
@@ -430,7 +592,7 @@ public sealed class QwenPackSelectionTests : IDisposable
             OnLoad?.Invoke();
             return Task.CompletedTask;
         }
-        public void Unload() { ContextLength = null; LoadedBackend = null; }
+        public void Unload() { UnloadAttempts++; OnUnload?.Invoke(); ContextLength = null; LoadedBackend = null; }
         public void ApplyGrammar(SamplingConfig sampling, StructuredOutputFormat format, bool enableThinking) => throw new NotSupportedException();
         public async IAsyncEnumerable<ChatStreamUpdate> StreamAsync(ChatSession session, List<ChatMessage> messages, int maxTokens,
             SamplingConfig sampling, List<ToolFunction>? tools, bool enableThinking, [EnumeratorCancellation] CancellationToken cancellationToken)
@@ -449,7 +611,7 @@ public sealed class QwenPackSelectionTests : IDisposable
             cancellationToken.ThrowIfCancellationRequested();
             yield return new("", true, 1, 1, 0, 0, 0, 0, "stop");
         }
-        public void Dispose() => Unload();
+        public void Dispose() { Unload(); Disposals++; }
     }
     private sealed class Target : ISetupCommitTarget<TensorSetupChanges>
     {
