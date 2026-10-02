@@ -1500,6 +1500,17 @@ Files and Skills list limits are 1 through 100, matching the
 [published parameter schemas](https://docs.x.ai/openapi.json). Optional file/URL lifetimes retain
 whole seconds between one hour and thirty days; absent values remain absent.
 
+The private xAI Files adapter uses one HTTP exchange path for upload, list, metadata, download,
+delete and public-URL operations. It attempts owned response and request cleanup independently.
+An actual disposal refusal uses the typed Cleanup phase and retains the refused message through
+the operation error and the adapter's retirement result. Original operation failures remain first;
+response and request cleanup failures follow in that order. Retirement drains admitted operations,
+detaches borrowed HTTP and reports the same cleanup failures without retrying disposal. Upload
+content detaches its borrowed source and fence after the operation settles, including when a
+refused request retains its multipart content. Caller streams are not closed, rewound or flushed.
+Partial destination bytes and remote mutations are not rolled back by cleanup. This private
+implementation does not enable the public provider route or establish live OAuth qualification.
+
 `XaiFileStorageOptions` is separate provider-storage data. It preserves a required filename,
 optional whole-second expiry capped at thirty days, and explicit public-URL intent. It does not
 apply the standalone upload's one-hour minimum to storage. The closed public-URL union uses

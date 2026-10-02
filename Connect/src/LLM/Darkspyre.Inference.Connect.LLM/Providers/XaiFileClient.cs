@@ -12,6 +12,7 @@ namespace Darkspyre.Inference.Connect.LLM.Providers;
 internal sealed class XaiFileClient(HttpClient http) : IDisposable, IAsyncDisposable
 {
     private readonly LlmOperationLifetime _lifetime = new();
+    private readonly List<Exception> _cleanupFailures = [];
     private HttpClient? _http = http;
 
     internal async Task<LlmProviderFile> UploadAsync(LlmConnection connection, Stream source, string fileName,
@@ -26,14 +27,20 @@ internal sealed class XaiFileClient(HttpClient http) : IDisposable, IAsyncDispos
         Check(fence, cancellationToken);
         using var consumption = SdkHttpConsumption.Enter(_http!, cancellationToken);
         cancellationToken = consumption.Token;
-        LlmProviderFile result = await ExchangeAsync(connection, HttpMethod.Post, "files", request =>
+        UploadContent? upload = null;
+        try
         {
-            var multipart = new MultipartFormDataContent();
-            request.Content = multipart;
-            if (expiry is { } seconds) multipart.Add(new StringContent(seconds.ToString(CultureInfo.InvariantCulture)), "expires_after");
-            multipart.Add(new UploadContent(source, () => Check(fence, cancellationToken), cancellationToken), "file", fileName);
-        }, response => ReadAsync(connection, response, ReadFile, fence, cancellationToken), fence, cancellationToken).ConfigureAwait(false);
-        return consumption.Publish(result);
+            LlmProviderFile result = await ExchangeAsync(connection, HttpMethod.Post, "files", request =>
+            {
+                var multipart = new MultipartFormDataContent();
+                request.Content = multipart;
+                if (expiry is { } seconds) multipart.Add(new StringContent(seconds.ToString(CultureInfo.InvariantCulture)), "expires_after");
+                upload = new UploadContent(source, () => Check(fence, cancellationToken), cancellationToken);
+                multipart.Add(upload, "file", fileName);
+            }, response => ReadAsync(connection, response, ReadFile, fence, cancellationToken), fence, cancellationToken).ConfigureAwait(false);
+            return consumption.Publish(result);
+        }
+        finally { upload?.DetachBorrowed(); }
     }
 
     internal Task<LlmFilePage> ListAsync(LlmConnection connection, LlmFileListRequest request,
@@ -127,7 +134,8 @@ internal sealed class XaiFileClient(HttpClient http) : IDisposable, IAsyncDispos
         var failures = new List<Exception>();
         try
         {
-            request = Request(connection, method, path);
+            request = new HttpRequestMessage(method, ProviderHttp.BuildUri(connection, path));
+            XaiRequestHeaders.Apply(request, connection, false);
             configure(request);
             Check(fence, token);
             response = await _http!.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token).ConfigureAwait(false);
@@ -139,9 +147,9 @@ internal sealed class XaiFileClient(HttpClient http) : IDisposable, IAsyncDispos
         finally
         {
             try { response?.Dispose(); }
-            catch (Exception cleanup) { failures.Add(cleanup); }
+            catch (Exception cleanup) { failures.Add(RecordCleanup(cleanup, response!)); }
             try { request?.Dispose(); }
-            catch (Exception cleanup) { failures.Add(cleanup); }
+            catch (Exception cleanup) { failures.Add(RecordCleanup(cleanup, request!)); }
         }
         if (failures.Count == 1) ExceptionDispatchInfo.Throw(failures[0]);
         if (failures.Count > 1) throw new AggregateException("Grok Files operation and cleanup failed.", failures);
@@ -175,13 +183,6 @@ internal sealed class XaiFileClient(HttpClient http) : IDisposable, IAsyncDispos
         catch (ObjectDisposedException error) { throw new OperationCanceledException("Files operation retired.", error, token); }
         fence();
         token.ThrowIfCancellationRequested();
-    }
-
-    private static HttpRequestMessage Request(LlmConnection connection, HttpMethod method, string path)
-    {
-        var request = new HttpRequestMessage(method, ProviderHttp.BuildUri(connection, path));
-        try { XaiRequestHeaders.Apply(request, connection, false); return request; }
-        catch { request.Dispose(); throw; }
     }
 
     private static LlmProviderException Invalid() => new("Grok Files returned invalid protocol data.", LlmTransport.XaiResponses);
@@ -254,12 +255,27 @@ internal sealed class XaiFileClient(HttpClient http) : IDisposable, IAsyncDispos
         }
         protected override void Dispose(bool disposing)
         {
-            if (disposing) { _source = null; _fence = null; }
+            if (disposing) DetachBorrowed();
             base.Dispose(disposing);
         }
+
+        internal void DetachBorrowed() { _source = null; _fence = null; }
     }
 
     public void Dispose() => _lifetime.RetireAsync(ReleaseAsync).GetAwaiter().GetResult();
     public ValueTask DisposeAsync() => new(_lifetime.RetireAsync(ReleaseAsync));
-    private Task ReleaseAsync() { _http = null; return Task.CompletedTask; }
+    private Exception RecordCleanup(Exception cause, object refusedOwner)
+    {
+        Exception failure = LlmResourcePreparation.AsCleanupFailure(cause, refusedOwner: refusedOwner);
+        lock (_cleanupFailures) { _cleanupFailures.Add(failure); }
+        return failure;
+    }
+
+    private Task ReleaseAsync()
+    {
+        _http = null;
+        if (_cleanupFailures.Count == 1) return Task.FromException(_cleanupFailures[0]);
+        if (_cleanupFailures.Count > 1) return Task.FromException(new AggregateException("Grok Files cleanup failed.", _cleanupFailures));
+        return Task.CompletedTask;
+    }
 }
