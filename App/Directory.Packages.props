@@ -1,6 +1,8 @@
 <Project>
   <PropertyGroup><ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally></PropertyGroup>
   <ItemGroup>
+    <PackageVersion Include="Darkspyre.TensorSharp.Backends.Cuda" Version="2.8.6.7" />
+    <PackageVersion Include="NAudio.Core" Version="2.2.1" />
     <PackageVersion Include="Darkspyre.Inference.Common" Version="11.14.0-rc.1" />
     <PackageVersion Include="Darkspyre.Inference.Tensor" Version="11.14.0-rc.1" />
     <PackageVersion Include="Yarp.ReverseProxy" Version="2.3.0" />

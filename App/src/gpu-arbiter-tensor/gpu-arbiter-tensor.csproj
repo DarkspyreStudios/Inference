@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <PropertyGroup>
+    <TargetFramework>net11.0</TargetFramework>
+    <AssemblyName>gpu-arbiter-tensor</AssemblyName>
+    <RuntimeIdentifiers>win-x64;osx-arm64</RuntimeIdentifiers>
+  </PropertyGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="GpuArbiter.Tensor.Tests" />
+    <ProjectReference Include="../GpuArbiter.Core/GpuArbiter.Core.csproj" />
+    <PackageReference Include="Darkspyre.Inference.Common" />
+    <PackageReference Include="Darkspyre.Inference.Tensor" />
+    <PackageReference Include="Yarp.ReverseProxy" />
+    <PackageReference Include="NAudio.Core" />
+    <PackageReference Include="Darkspyre.TensorSharp.Backends.Cuda" GeneratePathProperty="true" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" />
+  </ItemGroup>
+  <!-- The CUDA package owns these PTX assets but declares no output-copy target. -->
+  <ItemGroup>
+    <Content Include="$(PkgDarkspyre_TensorSharp_Backends_Cuda)/content/native/ptx/*.ptx"
+             Link="cuda_kernels/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

@@ -1,5 +1,9 @@
 # GPU arbiter
 
+The sibling [gpu-arbiter-tensor](src/gpu-arbiter-tensor/README.md) hosts the published Tensor
+engines with OpenAI JSON/SSE adapters. Both applications use `GpuArbiter.Core`. Only one
+application can own GPU admission on a machine at a time.
+
 The GPU arbiter shares one Windows x64 NVIDIA GPU between llama.cpp and a user-launched
 ComfyUI instance. The llama.cpp app targets .NET 10. The App solution uses the installed .NET 11 SDK.
 `GpuArbiter.Core` owns the shared GPU admission, Comfy handoff, VRAM probe and operational logging. Its solution, version and dependencies live in
@@ -64,7 +68,7 @@ Deployment on a different GPU requires measurement.
 `ReleasedMaxUsedMiB` is 2,482 MiB: the measured 1,458 MiB idle usage after ComfyUI frees
 its cached Chroma model, plus 1,024 MiB. Other hosts require their own idle measurement.
 
-Run from `App/` so `global.json` selects the .NET 10 SDK:
+Run from `App/` so `global.json` selects the .NET 11 SDK:
 
 ```bash
 dotnet restore GpuArbiter.slnx

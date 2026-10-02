@@ -2,7 +2,7 @@
 
 ## Functional scope
 
-The Windows GPU arbiter hosts the engines in `Darkspyre.Inference.Tensor` in process.
+The sibling `App/src/gpu-arbiter-tensor` application hosts the engines in `Darkspyre.Inference.Tensor` in process.
 The host exposes the OpenAI operations that the public Tensor and Common interfaces can express.
 It retains GPU observation, explicit model load and unload, queued admission, streaming wait
 notifications, and the ComfyUI proxy and GPU handoffs.
@@ -56,8 +56,11 @@ One host coordinator owns admission, waiters, resident-model selection, request 
 handoffs. Tensor's execution coordinator continues to serialize execution inside an engine; it
 does not become a second owner of host admission or Comfy state.
 
-Replace the llama-router lifecycle seam with a model-host seam implemented over
-`ITensorModelInstance`. Remove llama-server supervision and HTTP forwarding from this version.
+`GpuArbiter.Core` owns the shared coordinator, Comfy proxy gate, VRAM probe and logging.
+The existing llama.cpp app implements `IModelHost` over its router. The sibling Tensor app
+implements that seam over `ITensorModelInstance`. It hosts no llama-server supervisor or
+inference HTTP forwarder. Only one app can own the GPU at a time. Different listening ports
+permit isolated startup checks; they do not coordinate two arbiters.
 The host starts engine instances through `StartAsync`. It subscribes before initiating a lifecycle
 operation and waits for the target `EngineStatusChanged` state, or `Failed`, with cancellation and
 the configured timeout. Acceptance of `LoadAsync` or `UnloadAsync` is not completion.
@@ -119,7 +122,7 @@ only identifiers, lifecycle transitions, timings and failures without protected 
 - Verify image and PCM transcription adapters with controlled outputs and malformed-input cases.
 - Restore, build with zero warnings, run focused App tests, verify formatting and audit dependencies.
 - Prepare a Windows publish artifact and run a side-by-side live Qwen smoke test on an unused port.
-- Deploy the replacement service only after explicit deployment approval.
+- Install or deploy the sibling service only after explicit deployment approval.
 
 ## References
 
