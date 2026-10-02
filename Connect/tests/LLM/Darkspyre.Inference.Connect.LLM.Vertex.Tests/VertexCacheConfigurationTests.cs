@@ -123,8 +123,13 @@ public sealed class VertexCacheConfigurationTests
         finally { context.Unload(); }
     }
 
-    private static LlmConnection Connection(LlmVertexCacheStaging staging) => new() { Transport = LlmTransport.GoogleVertexAi,
-        Version = "1", Endpoint = "https://aiplatform.googleapis.com", Vertex = new() { ProjectId = "project-id", Location = "global", CacheStaging = staging } };
+    private static LlmConnection Connection(LlmVertexCacheStaging staging) => new()
+    {
+        Transport = LlmTransport.GoogleVertexAi,
+        Version = "1",
+        Endpoint = "https://aiplatform.googleapis.com",
+        Vertex = new() { ProjectId = "project-id", Location = "global", CacheStaging = staging }
+    };
     private sealed class Environment : ILlmSetupEnvironment
     {
         public LlmTransport Transport => LlmTransport.GoogleVertexAi;

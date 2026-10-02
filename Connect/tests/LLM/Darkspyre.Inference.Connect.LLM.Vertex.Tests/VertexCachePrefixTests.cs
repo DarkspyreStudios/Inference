@@ -20,8 +20,11 @@ public sealed class VertexCachePrefixTests
         var auth = new Authentication();
         await using var facade = new LlmProviderService(new Source(Connection()), [new VertexLlmClient(http, auth)]);
         var caches = await facade.BindContextCacheAsync("connection");
-        _ = await caches.CreateAsync(Request() with { Messages = [new("user", "prefix")
-        { Attachments = [new LlmAttachment { Kind = LlmBinaryKind.Image, FileName = "image.png", MediaType = "image/png", Data = new byte[bytes] }] }] });
+        _ = await caches.CreateAsync(Request() with
+        {
+            Messages = [new("user", "prefix")
+        { Attachments = [new LlmAttachment { Kind = LlmBinaryKind.Image, FileName = "image.png", MediaType = "image/png", Data = new byte[bytes] }] }]
+        });
         using JsonDocument body = JsonDocument.Parse(handler.CacheBody!);
         Assert.Equal(bytes, body.RootElement.GetProperty("contents")[0].GetProperty("parts")[1].GetProperty("inlineData").GetProperty("data").GetBytesFromBase64().Length);
         Assert.Single(handler.Paths); Assert.Equal(1, auth.Calls);
@@ -91,8 +94,11 @@ public sealed class VertexCachePrefixTests
         var caches = await facade.BindContextCacheAsync("connection");
         LlmAttachment Image(string mime, string text) => new()
         { Kind = LlmBinaryKind.Image, FileName = "image", MediaType = mime, Data = System.Text.Encoding.UTF8.GetBytes(text) };
-        _ = await caches.CreateAsync(Request() with { Messages = [new("user", "prefix")
-        { Attachments = [Image("image/png", "abc"), Image("image/png", "abc"), Image("image/jpeg", "abc"), Image("image/png", "xyz")] }] });
+        _ = await caches.CreateAsync(Request() with
+        {
+            Messages = [new("user", "prefix")
+        { Attachments = [Image("image/png", "abc"), Image("image/png", "abc"), Image("image/jpeg", "abc"), Image("image/png", "xyz")] }]
+        });
         Assert.Equal(4, handler.Paths.Count);
         Assert.Equal(2, handler.UploadBodies.Count(bytes => bytes.AsSpan().SequenceEqual("abc"u8)));
         Assert.Equal(1, handler.UploadBodies.Count(bytes => bytes.AsSpan().SequenceEqual("xyz"u8)));
@@ -159,8 +165,12 @@ public sealed class VertexCachePrefixTests
         using var handler = new Handler(); using var http = new HttpClient(handler);
         await using var facade = new LlmProviderService(new Source(Connection(true)), [new VertexLlmClient(http, new Authentication())]);
         var caches = await facade.BindContextCacheAsync("connection");
-        _ = await caches.CreateAsync(Request() with { Resources = resources, Messages = [new("user", "prefix")
-        { Attachments = [new LlmResourceAttachment(resources.Reference), new LlmAttachment { Kind = LlmBinaryKind.Image, FileName = "image.gif", MediaType = "image/gif", Data = "raw"u8.ToArray() }] }] });
+        _ = await caches.CreateAsync(Request() with
+        {
+            Resources = resources,
+            Messages = [new("user", "prefix")
+        { Attachments = [new LlmResourceAttachment(resources.Reference), new LlmAttachment { Kind = LlmBinaryKind.Image, FileName = "image.gif", MediaType = "image/gif", Data = "raw"u8.ToArray() }] }]
+        });
         Assert.Null(handler.Lengths[0]); Assert.True(handler.Chunked[0]); Assert.Equal(3, handler.Lengths[1]);
         Assert.Equal(3, handler.Paths.Count); Assert.Equal(1, resources.Closed);
         using JsonDocument body = JsonDocument.Parse(handler.CacheBody!);
@@ -176,8 +186,12 @@ public sealed class VertexCachePrefixTests
         var connection = Connection(true) with { Vertex = Connection(true).Vertex! with { CacheStaging = new("cache-bucket", prefix) } };
         await using var facade = new LlmProviderService(new Source(connection), [new VertexLlmClient(http, new Authentication())]);
         var caches = await facade.BindContextCacheAsync("connection");
-        _ = await caches.CreateAsync(Request() with { Resources = resources, Messages = [new("user", "prefix")
-        { Attachments = [new LlmResourceAttachment(resources.Reference)] }] });
+        _ = await caches.CreateAsync(Request() with
+        {
+            Resources = resources,
+            Messages = [new("user", "prefix")
+        { Attachments = [new LlmResourceAttachment(resources.Reference)] }]
+        });
         Assert.StartsWith(prefix, handler.UploadName!, StringComparison.Ordinal);
         Assert.Contains("%252F", handler.Paths[0], StringComparison.Ordinal);
         using JsonDocument body = JsonDocument.Parse(handler.CacheBody!);
@@ -194,8 +208,12 @@ public sealed class VertexCachePrefixTests
         using var handler = new Handler(); using var http = new HttpClient(handler);
         await using var facade = new LlmProviderService(new Source(Connection()), [new VertexLlmClient(http, new Authentication())]);
         var caches = await facade.BindContextCacheAsync("connection");
-        var request = Request() with { Resources = resources, Messages = [new("user", "prefix")
-        { Attachments = [new LlmResourceAttachment(resources.Reference)] }] };
+        var request = Request() with
+        {
+            Resources = resources,
+            Messages = [new("user", "prefix")
+        { Attachments = [new LlmResourceAttachment(resources.Reference)] }]
+        };
         if (observedMime is null) { await Assert.ThrowsAsync<InferenceResourceOperationException>(() => caches.CreateAsync(request)); Assert.Empty(handler.Paths); }
         else { _ = await caches.CreateAsync(request); Assert.Single(handler.Paths); }
         Assert.Equal(1, resources.Opened); Assert.Equal(1, resources.Closed);
@@ -250,8 +268,12 @@ public sealed class VertexCachePrefixTests
         try
         {
             var caches = await facade.BindContextCacheAsync("connection");
-            create = caches.CreateAsync(Request() with { Resources = resources, Messages = [new("user", "prefix")
-            { Attachments = [new LlmResourceAttachment(resources.Reference)] }] });
+            create = caches.CreateAsync(Request() with
+            {
+                Resources = resources,
+                Messages = [new("user", "prefix")
+            { Attachments = [new LlmResourceAttachment(resources.Reference)] }]
+            });
             await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
             retirement = facade.DisposeAsync().AsTask();
             if (ignoresCancellation) { Assert.False(retirement.IsCompleted); Assert.False(create.IsCompleted); }
@@ -285,11 +307,26 @@ public sealed class VertexCachePrefixTests
         }
     }
 
-    private static LlmContextCacheCreate Request() => new() { ModelId = Model, Correlation = new("operation", "display"),
-        TimeToLive = TimeSpan.FromHours(1), Messages = [new("user", "prefix")] };
-    private static LlmConnection Connection(bool staging = false) => new() { Transport = LlmTransport.GoogleVertexAi,
-        Version = "1", Endpoint = "https://aiplatform.googleapis.com", Vertex = new() { ProjectId = "project-id", Location = "global",
-            CacheStaging = staging ? new("cache-bucket", "prefix/") : null }, CapabilityOverrides = new() { SupportsModelListing = false } };
+    private static LlmContextCacheCreate Request() => new()
+    {
+        ModelId = Model,
+        Correlation = new("operation", "display"),
+        TimeToLive = TimeSpan.FromHours(1),
+        Messages = [new("user", "prefix")]
+    };
+    private static LlmConnection Connection(bool staging = false) => new()
+    {
+        Transport = LlmTransport.GoogleVertexAi,
+        Version = "1",
+        Endpoint = "https://aiplatform.googleapis.com",
+        Vertex = new()
+        {
+            ProjectId = "project-id",
+            Location = "global",
+            CacheStaging = staging ? new("cache-bucket", "prefix/") : null
+        },
+        CapabilityOverrides = new() { SupportsModelListing = false }
+    };
     private sealed class Source(LlmConnection connection) : ILlmConnectionSource
     {
         public Task<LlmConnection?> GetConnectionAsync(string connectionId, CancellationToken cancellationToken = default) => Task.FromResult<LlmConnection?>(connection);
@@ -323,8 +360,14 @@ public sealed class VertexCachePrefixTests
                 UploadBodies.Add(UploadBytes);
                 string name = Uri.UnescapeDataString(request.RequestUri.Query.Split('&').Single(part => part.StartsWith("name=", StringComparison.Ordinal))[5..]);
                 UploadName = name;
-                var facts = new Dictionary<string, string> { ["bucket"] = "cache-bucket", ["name"] = name,
-                    ["generation"] = "42", ["size"] = UploadBytes.Length.ToString(CultureInfo.InvariantCulture), ["contentType"] = request.Content.Headers.ContentType!.MediaType! };
+                var facts = new Dictionary<string, string>
+                {
+                    ["bucket"] = "cache-bucket",
+                    ["name"] = name,
+                    ["generation"] = "42",
+                    ["size"] = UploadBytes.Length.ToString(CultureInfo.InvariantCulture),
+                    ["contentType"] = request.Content.Headers.ContentType!.MediaType!
+                };
                 if (BadField is { } field) facts[field == "mime" ? "contentType" : field] = "private-secret";
                 return new(HttpStatusCode.OK) { Content = new StringContent(JsonSerializer.Serialize(facts)) };
             }

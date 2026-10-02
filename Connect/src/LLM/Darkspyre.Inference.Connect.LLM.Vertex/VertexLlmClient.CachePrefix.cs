@@ -24,8 +24,12 @@ internal sealed partial class VertexLlmClient
         var chat = CacheChat(request);
         LlmResourcePreparation.ValidateArguments(chat);
         var capabilities = GetCapabilities(connection, request.ModelId);
-        var binary = chat with { Resources = null, Messages = chat.Messages.Select(message => message with
-            { Attachments = message.Attachments.Where(attachment => attachment is not LlmResourceAttachment).ToArray() }).ToArray() };
+        var binary = chat with
+        {
+            Resources = null,
+            Messages = chat.Messages.Select(message => message with
+            { Attachments = message.Attachments.Where(attachment => attachment is not LlmResourceAttachment).ToArray() }).ToArray()
+        };
         ValidateRequest(connection, binary, capabilities);
         if (!capabilities.RichContentSupported.Equals(RichContentRoutes.GeminiFunctionResponse)
             && chat.Messages.SelectMany(message => message.ToolResults).OfType<LlmToolResult>()
@@ -48,8 +52,14 @@ internal sealed partial class VertexLlmClient
     }
 
     private static LlmChatRequest CacheChat(LlmContextCacheCreate request) => new()
-    { ModelId = request.ModelId, Instructions = request.Instructions, Messages = request.Messages,
-        Tools = request.Tools, ToolChoice = request.ToolChoice, Resources = request.Resources };
+    {
+        ModelId = request.ModelId,
+        Instructions = request.Instructions,
+        Messages = request.Messages,
+        Tools = request.Tools,
+        ToolChoice = request.ToolChoice,
+        Resources = request.Resources
+    };
 
     private static (string? Mime, ReadOnlyMemory<byte> Data) Media(SentToolPart part) => part switch
     {
@@ -225,12 +235,15 @@ internal sealed partial class VertexLlmClient
                         return prepared.Mime.StartsWith("image/", StringComparison.Ordinal)
                             ? new SentImage(prepared.Mime, prepared.Data, null) : new SentFile(prepared.Mime, prepared.Data, "resource.pdf");
                     });
-                return projected with { Parts = projected.Parts.Select(part =>
+                return projected with
+                {
+                    Parts = projected.Parts.Select(part =>
                 {
                     var raw = Media(part);
                     return raw.Mime is { } mime && media.TryGetValue((mime, raw.Data), out PreparedMedia? prepared)
                         && prepared.File is { } file ? new SentNativeFile(file.Uri) : part;
-                }).ToArray() };
+                }).ToArray()
+                };
             }
             JsonObject Attachment(LlmMessageAttachment attachment)
             {

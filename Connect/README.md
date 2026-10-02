@@ -1600,7 +1600,10 @@ from dispatched cache-create uncertainty. Unknown-length upload acceptance, nati
 interpretation, external object retention and actual model entitlement are not established by local
 validation or controlled transport fixtures.
 
-If owned response or read-handle cleanup refuses, the same facade retains the actual refused
+Upload requests own their content and receive one cleanup attempt after response cleanup. Media
+content detaches its borrowed source and fence after admitted upload work drains, including when an
+outer request-content wrapper refuses cleanup. The source stream remains borrowed.
+If owned request, response or read-handle cleanup refuses, the same facade retains the actual refused
 owner through a safe cleanup carrier. Retirement drains admitted operations, attempts independent
 owned cleanup and reports its cached cleanup failure to every disposal caller; it does not retry
 the refused release. Ordinary provider/transport/receipt failures do not fault retirement, and

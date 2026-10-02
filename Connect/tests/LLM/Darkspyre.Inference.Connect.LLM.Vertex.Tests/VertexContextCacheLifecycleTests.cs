@@ -57,8 +57,13 @@ public sealed class VertexContextCacheLifecycleTests
         await using var facade = new LlmProviderService(new Source(Connection()), [new VertexLlmClient(http, auth)]);
         ILlmContextCacheClient caches = await facade.BindContextCacheAsync("connection");
         LlmContextCache created = await caches.CreateAsync(new()
-        { ModelId = Model, Messages = [new("user", "prefix")], Instructions = "instruction",
-            Correlation = new("operation", "reconcile"), TimeToLive = TimeSpan.FromHours(1) });
+        {
+            ModelId = Model,
+            Messages = [new("user", "prefix")],
+            Instructions = "instruction",
+            Correlation = new("operation", "reconcile"),
+            TimeToLive = TimeSpan.FromHours(1)
+        });
         Assert.Equal(1, auth.Calls);
         using (JsonDocument body = JsonDocument.Parse(handler.Bodies[0]!))
         {
@@ -188,7 +193,9 @@ public sealed class VertexContextCacheLifecycleTests
 
     private static LlmConnection Connection() => new()
     {
-        Transport = LlmTransport.GoogleVertexAi, Version = "1", Endpoint = "https://aiplatform.googleapis.com",
+        Transport = LlmTransport.GoogleVertexAi,
+        Version = "1",
+        Endpoint = "https://aiplatform.googleapis.com",
         Vertex = new() { ProjectId = "project-id", Location = "global" },
         CapabilityOverrides = new() { SupportsModelListing = false, SupportsStreaming = false }
     };

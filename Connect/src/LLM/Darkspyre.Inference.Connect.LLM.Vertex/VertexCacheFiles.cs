@@ -41,7 +41,8 @@ internal static class VertexCacheFiles
         var content = new GoogleCacheMediaContent(source, mimeType, length, MaximumObjectBytes, fence);
         var request = new HttpRequestMessage(HttpMethod.Post,
             "https://storage.googleapis.com/upload/storage/v1/b/" + Uri.EscapeDataString(staging.Bucket)
-            + "/o?uploadType=media&name=" + Uri.EscapeDataString(name) + "&ifGenerationMatch=0") { Content = content };
+            + "/o?uploadType=media&name=" + Uri.EscapeDataString(name) + "&ifGenerationMatch=0")
+        { Content = content };
         if (length is null) request.Headers.TransferEncodingChunked = true;
         HttpResponseMessage? response = null;
         HttpStatusCode? status = null; string? requestId = null; TimeSpan? retry = null;

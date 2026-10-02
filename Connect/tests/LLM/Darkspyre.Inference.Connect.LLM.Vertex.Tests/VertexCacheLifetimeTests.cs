@@ -36,8 +36,14 @@ public sealed class VertexCacheLifetimeTests
             {
                 switch (method)
                 {
-                    case "create": _ = await caches.CreateAsync(new() { ModelId = Model, Correlation = new("operation", "display"),
-                        TimeToLive = TimeSpan.FromHours(1), Messages = [new("user", "prefix")] }); break;
+                    case "create":
+                        _ = await caches.CreateAsync(new()
+                        {
+                            ModelId = Model,
+                            Correlation = new("operation", "display"),
+                            TimeToLive = TimeSpan.FromHours(1),
+                            Messages = [new("user", "prefix")]
+                        }); break;
                     case "get": _ = await caches.GetAsync(reference); break;
                     case "list": _ = await caches.ListAsync(new(10)); break;
                     case "update": _ = await caches.UpdateExpiryAsync(reference, DateTimeOffset.UtcNow.AddHours(1)); break;
@@ -282,8 +288,14 @@ public sealed class VertexCacheLifetimeTests
     {
         public LlmTransport Transport => LlmTransport.GoogleVertexAi;
         public LlmProviderDefinition ProviderDefinition { get; } = new()
-        { Id = "neutral", DisplayName = "Neutral", Description = "Controlled interface caller", Transport = LlmTransport.GoogleVertexAi,
-            DefaultEndpoint = "https://aiplatform.googleapis.com", SetupSteps = Array.AsReadOnly<Common.Setup.SetupStep>([]) };
+        {
+            Id = "neutral",
+            DisplayName = "Neutral",
+            Description = "Controlled interface caller",
+            Transport = LlmTransport.GoogleVertexAi,
+            DefaultEndpoint = "https://aiplatform.googleapis.com",
+            SetupSteps = Array.AsReadOnly<Common.Setup.SetupStep>([])
+        };
         public LlmProviderCapabilities GetCapabilities(LlmConnection connection, string? modelId = null) => throw new NotSupportedException();
         public IAsyncEnumerable<LlmStreamEvent> StreamAsync(LlmConnection connection, LlmChatRequest request, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<IReadOnlyList<LlmModel>> ListModelsAsync(LlmConnection connection, CancellationToken cancellationToken = default) => throw new NotSupportedException();
@@ -369,9 +381,13 @@ public sealed class VertexCacheLifetimeTests
             var facade = new LlmProviderService(source, [new VertexLlmClient(http, auth)]);
             var caches = facade.BindContextCacheAsync("connection").GetAwaiter().GetResult();
             Exception operation = Assert.Throws<InferenceResourceOperationException>(() => caches.CreateAsync(new()
-            { ModelId = Model, Correlation = new("operation", "display"), TimeToLive = TimeSpan.FromHours(1),
+            {
+                ModelId = Model,
+                Correlation = new("operation", "display"),
+                TimeToLive = TimeSpan.FromHours(1),
                 Messages = [new("user", "prefix") { Attachments = [new LlmAttachment { Kind = LlmBinaryKind.Image,
-                    MediaType = "image/png", FileName = "image.png", Data = "abc"u8.ToArray() }] }] }).GetAwaiter().GetResult());
+                    MediaType = "image/png", FileName = "image.png", Data = "abc"u8.ToArray() }] }]
+            }).GetAwaiter().GetResult());
             Exception cleanup = FindCleanup(operation);
             Assert.Same(cleanup, Assert.Throws<InferenceResourceOperationException>(() => facade.Dispose()));
             Assert.Same(cleanup, Assert.Throws<InferenceResourceOperationException>(() => facade.Dispose()));
@@ -401,9 +417,18 @@ public sealed class VertexCacheLifetimeTests
             Request = request; byte[] bytes = await request.Content!.ReadAsByteArrayAsync(token);
             string name = Uri.UnescapeDataString(request.RequestUri.Query.Split('&').Single(part => part.StartsWith("name=", StringComparison.Ordinal))[5..]);
             request.Content = Wrap!(request.Content);
-            return new(HttpStatusCode.OK) { Content = new StringContent(System.Text.Json.JsonSerializer.Serialize(
-                new Dictionary<string, string> { ["bucket"] = "cache-bucket", ["name"] = name, ["generation"] = "42",
-                    ["size"] = bytes.Length.ToString(System.Globalization.CultureInfo.InvariantCulture), ["contentType"] = "image/png" })) };
+            return new(HttpStatusCode.OK)
+            {
+                Content = new StringContent(System.Text.Json.JsonSerializer.Serialize(
+                new Dictionary<string, string>
+                {
+                    ["bucket"] = "cache-bucket",
+                    ["name"] = name,
+                    ["generation"] = "42",
+                    ["size"] = bytes.Length.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    ["contentType"] = "image/png"
+                }))
+            };
         }
     }
     private sealed class RefusingRequestContent(HttpContent original) : HttpContent
@@ -430,8 +455,13 @@ public sealed class VertexCacheLifetimeTests
         internal bool Staging { get; init; }
         public int DisposeCalls { get; private set; }
         public Task<LlmConnection?> GetConnectionAsync(string connectionId, CancellationToken cancellationToken = default) => Task.FromResult<LlmConnection?>(new()
-        { Transport = LlmTransport.GoogleVertexAi, Version = "1", Endpoint = "https://aiplatform.googleapis.com",
-            Vertex = new() { ProjectId = "project-id", Location = "global", CacheStaging = Staging ? new("cache-bucket", "prefix/") : null }, CapabilityOverrides = new() { SupportsModelListing = false } });
+        {
+            Transport = LlmTransport.GoogleVertexAi,
+            Version = "1",
+            Endpoint = "https://aiplatform.googleapis.com",
+            Vertex = new() { ProjectId = "project-id", Location = "global", CacheStaging = Staging ? new("cache-bucket", "prefix/") : null },
+            CapabilityOverrides = new() { SupportsModelListing = false }
+        });
         public Task SaveCredentialAsync(string connectionId, string credentialJson, string expectedVersion, CancellationToken cancellationToken = default) => throw new InvalidOperationException();
         public void Dispose() => DisposeCalls++;
     }

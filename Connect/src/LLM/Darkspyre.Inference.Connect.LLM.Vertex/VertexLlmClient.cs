@@ -27,8 +27,11 @@ internal sealed partial class VertexLlmClient(HttpClient http, IVertexAuthentica
         if (express && modelId is not null && VertexModelProfiles.Get(modelId).IsClaude)
             throw new NotSupportedException("Vertex express mode serves Gemini models only.");
         if (express) capabilities = capabilities with { SupportsModelListing = false };
-        capabilities = capabilities with { SupportsExplicitCache = !express && connection.CacheBindings is not null
-            && (modelId is null || !VertexModelProfiles.Get(modelId).IsClaude) };
+        capabilities = capabilities with
+        {
+            SupportsExplicitCache = !express && connection.CacheBindings is not null
+            && (modelId is null || !VertexModelProfiles.Get(modelId).IsClaude)
+        };
         LlmProviderCapabilities implemented = capabilities;
         capabilities = LlmCapabilityOverrideLookup.Apply(capabilities, connection, modelId);
         if (capabilities.SupportsJsonObject || capabilities.SupportsAccountUsage

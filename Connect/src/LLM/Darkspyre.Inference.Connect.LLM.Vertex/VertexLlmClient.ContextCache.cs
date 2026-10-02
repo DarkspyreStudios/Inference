@@ -57,8 +57,12 @@ internal sealed partial class VertexLlmClient
         token.ThrowIfCancellationRequested(); fence(token); ValidateCacheConnection(connection);
         VertexAccess access = await authentication.ResolveAsync(connection, token).ConfigureAwait(false);
         token.ThrowIfCancellationRequested(); fence(token);
-        return new CacheOperation(this, connection with { CacheCredentialEvidence = access.Scope,
-            ContinuationCodec = new VertexContinuationCodec(), ResolvedContinuationScope = access.Scope }, access);
+        return new CacheOperation(this, connection with
+        {
+            CacheCredentialEvidence = access.Scope,
+            ContinuationCodec = new VertexContinuationCodec(),
+            ResolvedContinuationScope = access.Scope
+        }, access);
     }
 
     private Task<VertexAccess> ResolveAccessAsync(LlmConnection connection, CancellationToken token) =>

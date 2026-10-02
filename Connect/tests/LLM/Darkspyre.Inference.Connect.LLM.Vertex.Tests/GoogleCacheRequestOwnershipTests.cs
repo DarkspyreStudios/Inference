@@ -79,8 +79,13 @@ public sealed class GoogleCacheRequestOwnershipTests
             _ = await VertexCacheFiles.UploadAsync(http, new("controlled", "source"), new("cache-bucket", "prefix/"),
                 "text/plain", 3, new("workspace", "resource"), source, static _ => { }, CancellationToken.None);
         else
-            _ = await GeminiCacheFiles.UploadAsync(http, new() { Version = "v1", Endpoint = GeminiApiLlmClient.DefaultEndpoint, Transport = LlmTransport.GoogleGeminiApi,
-                Credential = new LlmCredential { ApiKey = "controlled" }.Serialize() },
+            _ = await GeminiCacheFiles.UploadAsync(http, new()
+            {
+                Version = "v1",
+                Endpoint = GeminiApiLlmClient.DefaultEndpoint,
+                Transport = LlmTransport.GoogleGeminiApi,
+                Credential = new LlmCredential { ApiKey = "controlled" }.Serialize()
+            },
                 new(new("workspace", "resource"), "session", "source.txt", "text/plain", 3), source,
                 static _ => { }, CancellationToken.None);
     }
