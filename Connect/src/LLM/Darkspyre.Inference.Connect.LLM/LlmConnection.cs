@@ -38,6 +38,13 @@ public sealed record LlmConnection
 
     public LlmAzureConfiguration? Azure { get; init; }
 
+    public LlmAcpConfiguration? Acp { get; init; }
+
+    public LlmCopilotConfiguration? Copilot { get; init; }
+
+    /// <summary>Transient explicit launch values; non-null values cannot be serialized as configuration.</summary>
+    public LlmAgentRuntimeLaunchInputs? RuntimeLaunchInputs { get; init; }
+
     /// <summary>Chat Completions protocol choices; null selects endpoint-aware defaults.</summary>
     public LlmChatCompletionsConfiguration? ChatCompletions { get; init; }
 
