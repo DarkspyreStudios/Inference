@@ -549,7 +549,7 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
         }
     }
 
-    private static LlmChatResult BuildResultCore(
+    private LlmChatResult BuildResultCore(
         JsonElement eventRoot,
         HttpResponseMessage response,
         string rawEvent,
@@ -692,7 +692,7 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
         return (text.ToString(), refusal.ToString());
     }
 
-    private static LlmUsage? ReadUsage(JsonElement root)
+    protected virtual LlmUsage? ReadUsage(JsonElement root)
     {
         if (LlmJson.GetObject(root, "usage") is not { } usage)
         {

@@ -1855,6 +1855,17 @@ This numeric check does not implement the provider's complete regex and schema s
 The client does not interpret unqualified xAI headers as OpenAI account-usage evidence. Its usage
 header names and units require separate provider qualification; no quota snapshot is fabricated.
 
+The terminal Responses `usage` maps [reported integer cost ticks](https://docs.x.ai/developers/cost-tracking)
+exactly to decimal USD at 10^-10 USD per tick. `num_server_side_tools_used` and `num_sources_used`
+remain independent total-call and source observations. The documented
+[`server_side_tool_usage_details`](https://docs.x.ai/developers/tools/x-search#usage-counts) maps
+web, X, code-interpreter, MCP and image-generation call counts to the corresponding hosted categories.
+Missing, malformed, negative or unrepresentable observations remain unknown; explicit zero and empty
+detail remain observed. The client does not sum named detail into a total or count fetched X items as
+calls or sources. It leaves the separate `file_search_calls`/`document_search_calls` pairing unknown
+because their neutral aggregation is unqualified. Other Responses providers do not acquire these xAI
+metrics. Terminal usage remains authoritative; no interim usage producer or capability is added.
+
 `LlmChatRequest.ProviderControls`, its Common request projection and `LlmAgentTurnRequest`
 carry `XaiMultiAgentControls`. An absent control inherits `XaiConnectionOptions.MultiAgent`;
 a present control with `AgentCount = null` suppresses the saved count and leaves the provider
