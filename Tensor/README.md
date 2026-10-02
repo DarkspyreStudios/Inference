@@ -327,6 +327,14 @@ lazy Qwen owner factory. A factory-created owner is container-owned; an explicit
 instance remains borrowed. Model instances release their own leases and never shut down the shared
 runtime. Stop/dispose instances before terminal runtime shutdown.
 
+The Qwen runtime-owner source requires the TensorSharp 2.8.6.8 managed loader APIs. Its managed
+verification uses an ignored, test-only project-reference overlay over genuine supplier source;
+the shipping 2.8.6.7 package references are unchanged and do not supply those APIs. That verification
+is not a successful shipping-package restore/build or native-backend qualification. The actual
+private-generation test composes Qwen with the genuine Chat/Models/GGML/Core/Runtime assemblies,
+checks an explicit empty plan, and retires owned metadata and zero-handle runtime state. It does
+not initialize a backend, resolve a catalog or load a model.
+
 Null candidates resolve the supplier's finite deployed package catalog once at the first admitted
 GGML check/load. Empty candidates admit nothing and never resolve or load ambient libraries. Auto
 considers compatible concrete backend groups in priority order. It stops fallback after any possibly
