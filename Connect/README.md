@@ -1011,8 +1011,15 @@ non-Windows run reports them as skipped; it does not qualify Windows invocation.
 ## Document search contracts
 
 `IDocumentSearchClient.SearchAsync` declares a connection-selected search over existing provider
-collections. Connect supplies the data contract and owned `ConnectLlmJson` metadata; it does not
-register a document-search implementation or advertise provider availability.
+collections. `LlmProviderService` implements that exact operation. `AddLlmConnect` resolves the
+interface to the same scoped facade. Search remains unavailable before connection resolution,
+credential refresh or provider calls. The existing facade admission preserves caller cancellation
+and refuses calls after retirement. Supplied sources and authenticators remain borrowed.
+
+Connect supplies the data contract and owned `ConnectLlmJson` metadata; it does not register a
+document-search adapter or advertise provider availability. Owned options reject non-null live
+`IDocumentSearchClient` values on read and write, including nested consumer-generated metadata;
+explicit null remains null. No runtime client is exported as portable data.
 
 `DocumentSearchRequest` carries ordered collection IDs, an opaque filter, optional grouping and a
 closed hybrid/semantic/keyword retrieval selection. Grouping supports `DocumentMinK` and

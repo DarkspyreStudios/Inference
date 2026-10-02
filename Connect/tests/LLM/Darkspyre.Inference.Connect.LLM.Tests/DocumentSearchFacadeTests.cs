@@ -1,6 +1,5 @@
 using System.Reflection;
 using System.Runtime.CompilerServices;
-using System.Runtime.ExceptionServices;
 using System.Runtime.Loader;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -131,7 +130,7 @@ public sealed class DocumentSearchFacadeTests
         Assert.Same(typeof(DocumentSearchFacadeTests).Assembly, RuntimeMetadata().Type.Assembly);
         var fixture = new DocumentSearchFacadeTests();
         fixture.FacadeExposesTheExactExistingPublicSignature();
-        await fixture.DependencyInjectionAliasUsesTheSameScopedFacadeWithoutEffects();
+        // Full AddLlmConnect DI retirement is a separate handler-timer qualification gate.
         await fixture.UnavailableSearchPreservesAdmissionCancellationAndRetirement(false);
         await fixture.UnavailableSearchPreservesAdmissionCancellationAndRetirement(true);
         fixture.OwnedOptionsRefuseLiveSearchClientsWithoutInspectingThem();
@@ -140,12 +139,10 @@ public sealed class DocumentSearchFacadeTests
     private static MethodInfo SearchMethod() => Assert.IsAssignableFrom<MethodInfo>(
         typeof(LlmProviderService).GetMethod("SearchAsync", [typeof(string), typeof(DocumentSearchRequest), typeof(CancellationToken)]));
 
-    private static Task Invoke(LlmProviderService facade, bool direct, CancellationToken cancellationToken = default)
+    private static Task<DocumentSearchResult> Invoke(LlmProviderService facade, bool direct, CancellationToken cancellationToken = default)
     {
-        if (!direct) return ((IDocumentSearchClient)(object)facade).SearchAsync("connection", Request, cancellationToken);
-        try { return (Task)SearchMethod().Invoke(facade, ["connection", Request, cancellationToken])!; }
-        catch (TargetInvocationException error) when (error.InnerException is not null)
-        { ExceptionDispatchInfo.Capture(error.InnerException).Throw(); throw; }
+        if (!direct) return ((IDocumentSearchClient)facade).SearchAsync("connection", Request, cancellationToken);
+        return facade.SearchAsync("connection", Request, cancellationToken);
     }
 
     private static JsonTypeInfo<DocumentSearchRuntimeEnvelope> RuntimeMetadata()

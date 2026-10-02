@@ -97,6 +97,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<ILlmFileClient>(provider => provider.GetRequiredService<LlmProviderService>());
         services.AddScoped<IXaiFilePublicUrlClient>(provider => provider.GetRequiredService<LlmProviderService>());
         services.AddScoped<IXaiSkillClient>(provider => provider.GetRequiredService<LlmProviderService>());
+        services.AddScoped<IDocumentSearchClient>(provider => provider.GetRequiredService<LlmProviderService>());
         services.AddScoped<LlmAgentProviderService>();
         services.AddScoped<LlmEmbeddingProviderService>();
         return services;
