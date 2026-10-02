@@ -16,7 +16,8 @@ using Darkspyre.Inference.Tensor.STT.Whisper;
 using Darkspyre.Inference.UI.Settings;
 using Microsoft.Extensions.DependencyInjection;
 
-if (args.Length != 2) { throw new ArgumentException("Usage: VerifyConsumer <family-version> <source-commit>"); }
+if (args.Length is not (2 or 3) || args.Length == 3 && args[2] is not ("absent" or "cpu" or "metal" or "auto"))
+{ throw new ArgumentException("Usage: VerifyConsumer <family-version> <source-commit> [absent|cpu|metal|auto]"); }
 string expected = args[0] + "+" + args[1];
 Type[] surfaces = [typeof(IInferenceSettingsManager), typeof(SetupChoiceCapabilities), typeof(LlmProviderService),
     typeof(ImageProviderService), typeof(TtsProviderService), typeof(AudioProviderService), typeof(SttProviderService),
@@ -40,3 +41,4 @@ await using ServiceProvider services = new ServiceCollection().AddTensorEngines(
 if (services.GetRequiredService<TensorEngineRegistry>().Definitions.Count != 4) { throw new InvalidOperationException("Tensor engine registrations missing."); }
 Console.WriteLine("Four-package consumer loaded the release contracts, four Tensor engines and twelve Whisper variants.");
 Console.WriteLine("Whisper native runtime: " + Whisper.net.WhisperFactory.GetRuntimeInfo());
+if (args.Length == 3) { await GgmlRuntimeVerification.RunAsync(args[2]); }

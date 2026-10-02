@@ -10,6 +10,8 @@
     <PackageReference Include="Darkspyre.Inference.Connect" Version="[$(Version)]" />
     <PackageReference Include="Darkspyre.Inference.Tensor" Version="[$(Version)]" />
     <PackageReference Include="Darkspyre.Inference.UI.Settings" Version="[$(Version)]" />
+    <PackageReference Include="Darkspyre.TensorSharp.Backends.GGML.Native.osx-arm64"
+                      Version="[$(VerifyGgmlNativeVersion)]" Condition="'$(VerifyGgmlNativeVersion)' != ''" />
   </ItemGroup>
   <Import Project="VerifyOutputPaths.targets" />
 </Project>

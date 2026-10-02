@@ -31,6 +31,15 @@ Credentials are process-scoped and are never written into NuGet.Config or Git. T
 fixed to `https://nuget.pkg.github.com/DarkspyreStudios/index.json`, not nuget.org. Native runtime
 requirements for the existing consumer smoke test still apply to the deployment machine.
 
+`VerifyConsumer` accepts an optional third argument, `absent`, to verify that GGML package discovery
+and a Qwen runtime check refuse missing native assets without native initialization. On macOS ARM64,
+an explicit `-p:VerifyGgmlNativeVersion=<supplier-version>` during restore and build adds the separate
+`Darkspyre.TensorSharp.Backends.GGML.Native.osx-arm64` package. The third argument `cpu`, `metal`, or
+`auto` then verifies its catalog/file identity, actual Qwen backend initialization and terminal shutdown.
+Each mode runs in a separate process. These checks load no model weights and do not qualify inference.
+The default two-argument consumer still restores exactly the four Inference package references without
+a GGML native package. A native check uses the supplier version required by the selected Tensor package.
+
 ## Release sequence
 
 1. Check tooling, checkout, credentials, remote and all four target package versions.
