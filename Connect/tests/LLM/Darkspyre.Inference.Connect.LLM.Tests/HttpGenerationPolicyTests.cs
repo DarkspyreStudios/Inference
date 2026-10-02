@@ -120,6 +120,67 @@ public sealed class HttpGenerationPolicyTests
     }
 
     [Fact]
+    public async Task ExpiryDuringHeldInitializationCannotRetireReservedClientEntry()
+    {
+        var services = new ServiceCollection();
+        services.AddLlmConnect();
+        var handler = new CountingHandler();
+        services.AddHttpClient(Pipeline).ConfigurePrimaryHttpMessageHandler(() => handler);
+        bool reserved = false;
+        services.Configure<HttpClientFactoryOptions>(Pipeline, options => options.HttpMessageHandlerBuilderActions.Add(builder =>
+        {
+            SdkHttpGenerationPool pool = builder.Services.GetRequiredService<SdkHttpGenerationPool>();
+            var entries = (HashSet<SdkHttpPipelineEntry>)typeof(SdkHttpGenerationPool).GetField("_entries", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.GetValue(pool)!;
+            SdkHttpPipelineEntry entry = Assert.Single(entries);
+            pool.Expire(entry);
+            reserved = entry.Holders == 1 && entry.Cleanup is null;
+        }));
+        await using ServiceProvider root = services.BuildServiceProvider();
+        using HttpClient client = root.GetRequiredService<SdkHttpGenerationPool>().CreateClient(Pipeline);
+        Assert.True(reserved, "Expiry observes the admitted client reservation before initialization can yield.");
+        using HttpResponseMessage response = await client.GetAsync("https://controlled.invalid/", HttpCompletionOption.ResponseHeadersRead);
+        Assert.Equal(1, handler.Sends);
+    }
+
+    [Fact]
+    public async Task FailedBuilderDoesNotPoisonNameAndPartialChainDisposesOnlyRoots()
+    {
+        var services = new ServiceCollection(); services.AddLlmConnect();
+        var primary = new CountingHandler(); var outer = new CountingDelegatingHandler { InnerHandler = primary };
+        int attempts = 0;
+        services.Configure<HttpClientFactoryOptions>(Pipeline, options => options.HttpMessageHandlerBuilderActions.Add(builder =>
+        {
+            if (++attempts == 1) { builder.PrimaryHandler = primary; builder.AdditionalHandlers.Add(outer); builder.AdditionalHandlers.Add(outer); }
+            else builder.PrimaryHandler = new CountingHandler();
+        }));
+        await using ServiceProvider root = services.BuildServiceProvider();
+        SdkHttpGenerationPool pool = root.GetRequiredService<SdkHttpGenerationPool>();
+        Assert.Throws<InvalidOperationException>(() => pool.CreateClient(Pipeline));
+        Assert.Equal(1, outer.Disposals); Assert.Equal(1, primary.Disposals);
+        using HttpClient client = pool.CreateClient(Pipeline);
+        using HttpResponseMessage response = await client.GetAsync("https://controlled.invalid/", HttpCompletionOption.ResponseHeadersRead);
+        Assert.Equal(2, attempts);
+    }
+
+    [Fact]
+    public async Task FailedInitializationAllowsNextClientToRetrySameName()
+    {
+        var services = new ServiceCollection(); services.AddLlmConnect();
+        int attempts = 0;
+        services.AddHttpClient(Pipeline).ConfigurePrimaryHttpMessageHandler(() =>
+        {
+            if (++attempts == 1) throw new InvalidOperationException("controlled construction failure");
+            return new CountingHandler();
+        });
+        await using ServiceProvider root = services.BuildServiceProvider();
+        SdkHttpGenerationPool pool = root.GetRequiredService<SdkHttpGenerationPool>();
+        Assert.Throws<InvalidOperationException>(() => pool.CreateClient(Pipeline));
+        using HttpClient client = pool.CreateClient(Pipeline);
+        using HttpResponseMessage response = await client.GetAsync("https://controlled.invalid/", HttpCompletionOption.ResponseHeadersRead);
+        Assert.Equal(2, attempts);
+    }
+
+    [Fact]
     public void ConfigurationRejectsUnknownNamesModesAndConflictingSelectionAndFreezesCallbacks()
     {
         var services = new ServiceCollection();
@@ -184,5 +245,18 @@ public sealed class HttpGenerationPolicyTests
         public int Disposals { get; private set; }
         public HttpClient CreateClient(string name) { Names.Add(name); return new(); }
         public void Dispose() => Disposals++;
+    }
+    private sealed class CountingHandler : HttpMessageHandler
+    {
+        public int Sends { get; private set; }
+        public int Disposals { get; private set; }
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        { ObjectDisposedException.ThrowIf(Disposals != 0, this); Sends++; return Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK)); }
+        protected override void Dispose(bool disposing) { if (disposing) Disposals++; base.Dispose(disposing); }
+    }
+    private sealed class CountingDelegatingHandler : DelegatingHandler
+    {
+        public int Disposals { get; private set; }
+        protected override void Dispose(bool disposing) { if (disposing) Disposals++; base.Dispose(disposing); }
     }
 }
