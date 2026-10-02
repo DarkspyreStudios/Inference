@@ -362,7 +362,8 @@ remain supported. Runtime authority, resource access, binding factories and sett
 non-null serialization through the owned codec without invoking callbacks.
 
 TTS settings managers fence new admissions synchronously, drain admitted actions and conditional
-commits, then release borrowed collaborators without disposing them. Late check/test/query results
+commits, then release borrowed collaborators without disposing them. Opening settings checks the
+owner fence after reading the borrowed setup definition. Late check/test/query results
 cannot verify an edited or retiring draft. Portable changes omit runtime authorization and retain
 protected-header patches separately. Typed xAI setup controls preserve explicit false, zero and
 empty values; these declarations do not register an xAI provider or activate capabilities.

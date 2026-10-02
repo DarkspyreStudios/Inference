@@ -314,7 +314,9 @@ public sealed class TtsSettingsManager : InferenceSettingsManager<TtsSettings, T
     {
         using LlmOperationLifetime.Lease lease = _lifetime.Enter(cancellationToken);
         ITtsProvider provider = _service!.Provider(transport);
-        var settings = new TtsSettings(provider.SetupDefinition, provider.Transport, identity, existing);
+        InferenceSetupDefinition definition = provider.SetupDefinition;
+        Fence(lease.Token);
+        var settings = new TtsSettings(definition, transport, identity, existing);
         Fence(lease.Token);
         return Task.FromResult(settings);
     }
