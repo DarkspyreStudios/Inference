@@ -1,5 +1,6 @@
 using System.Net;
 using System.Text;
+using System.Text.Json;
 using System.Text.Json.Nodes;
 using Darkspyre.Inference.Common.LLM;
 using Darkspyre.Inference.Connect.LLM.Vertex;
@@ -8,6 +9,67 @@ namespace Darkspyre.Inference.Connect.LLM.Vertex.Tests;
 
 public sealed class VertexAttachmentAdmissionTests
 {
+    [Theory]
+    [InlineData("stream")]
+    [InlineData("complete")]
+    [InlineData("count")]
+    public async Task DirectRequestFreezesStopsOptionsAndSchemaBeforeAuthentication(string operation)
+    {
+        var authentication = new Authentication();
+        using var handler = new Handler(operation);
+        using var http = new HttpClient(handler);
+        var client = new VertexLlmClient(http, authentication);
+        using var document = JsonDocument.Parse("{\"schema\":{\"type\":\"object\"},\"extension\":{\"marker\":\"original\"}}");
+        List<string> stops = ["first", "second"];
+        Dictionary<string, JsonElement> options = new(StringComparer.Ordinal)
+        { ["extension"] = document.RootElement.GetProperty("extension") };
+        var request = new LlmChatRequest
+        {
+            ModelId = "google/gemini-3-flash-preview",
+            Messages = [new("user", "hello")],
+            StopSequences = stops,
+            ProviderOptions = options,
+            StructuredOutput = new() { Name = "actual", Schema = document.RootElement.GetProperty("schema") }
+        };
+        var connection = new LlmConnection
+        {
+            Transport = LlmTransport.GoogleVertexAi,
+            Version = "1",
+            Endpoint = "https://aiplatform.googleapis.com",
+            Vertex = new() { ProjectId = "test-project", Location = "global" },
+            CapabilityOverrides = new() { SupportsStreaming = operation != "complete" }
+        };
+        Task run = ExecuteAsync();
+        try
+        {
+            await authentication.Entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            stops.Reverse(); stops.Add("late");
+            options["extension"] = JsonSerializer.SerializeToElement("changed");
+            options["late"] = JsonSerializer.SerializeToElement(true);
+            document.Dispose();
+            authentication.Release.TrySetResult();
+            await run.WaitAsync(TimeSpan.FromSeconds(5));
+            JsonNode generation = JsonNode.Parse(Assert.Single(handler.Bodies))!["generationConfig"]!;
+            Assert.Collection(generation["stopSequences"]!.AsArray(),
+                value => Assert.Equal("first", (string?)value), value => Assert.Equal("second", (string?)value));
+            Assert.Equal("original", (string?)generation["extension"]!["marker"]);
+            Assert.Null(generation["late"]);
+            Assert.Equal("object", (string?)generation["responseFormat"]![0]!["text"]!["schema"]!["type"]);
+        }
+        finally
+        {
+            authentication.Release.TrySetResult();
+            try { await run.WaitAsync(TimeSpan.FromSeconds(5)); }
+            catch (Exception) when (run.IsCompleted) { }
+        }
+
+        async Task ExecuteAsync()
+        {
+            if (operation == "count") await client.CountInputTokensAsync(connection, request);
+            else await foreach (var unused in client.StreamAsync(connection, request)) { }
+        }
+    }
+
     [Theory]
     [InlineData("stream")]
     [InlineData("complete")]

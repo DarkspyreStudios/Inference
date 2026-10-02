@@ -1,5 +1,6 @@
 using System.Collections.Frozen;
 using System.Collections.ObjectModel;
+using System.Text.Json;
 using Darkspyre.Inference.Common.LLM;
 
 namespace Darkspyre.Inference.Connect.LLM.Internal;
@@ -82,6 +83,10 @@ internal static class ClientTools
 
     internal static LlmChatRequest Snapshot(LlmChatRequest request) => request with
     {
+        StopSequences = Array.AsReadOnly(request.StopSequences.ToArray()),
+        ProviderOptions = new ReadOnlyDictionary<string, JsonElement>(request.ProviderOptions.ToDictionary(
+            option => option.Key, option => option.Value.Clone(), StringComparer.Ordinal)),
+        StructuredOutput = request.StructuredOutput is { } output ? output with { Schema = output.Schema.Clone() } : null,
         Tools = Array.AsReadOnly(request.Tools.Select(tool => tool switch
         {
             LlmToolDefinition function => (LlmClientToolDefinition)(function with { InputSchema = function.InputSchema.Clone() }),

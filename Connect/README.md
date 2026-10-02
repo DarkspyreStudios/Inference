@@ -220,6 +220,8 @@ Native Claude turns snapshot input lists and attachments before control acknowle
 managed turns use the same copier before their asynchronous work.
 Caller mutation after admission cannot change the attachment graph used by the request builder.
 Runtime resource authority stays borrowed; snapshotting does not fetch or materialize references.
+The same admitted request freezes string stops, provider-option JSON and structured-output schemas
+before connection resolution; disposing the caller's JSON document does not invalidate that snapshot.
 
 Gemini API and Vertex local text estimates serialize requests with `ConnectLlmJson.ChatRequest`.
 The projection retains default property names/order, numeric enums, explicit nulls and escaping.
