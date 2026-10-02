@@ -113,6 +113,71 @@ public sealed class PocketResourceLifetimeTests
         Assert.All(roots, root => Assert.False(root.IsAlive)); GC.KeepAlive(client);
     }
 
+    [Fact]
+    public async Task RetirementAfterCommitPreservesActualDurableEffectsWithoutReceiptPublication()
+    {
+        var access = new VoiceResourceFixture();
+        using var http = new HttpClient(new Handler((_, _) => Task.FromResult(Wave())));
+        ITtsClient client = new PocketTtsHttpProvider(http).Bind(Connection, resources: access);
+        Task? retirement = null;
+        access.AfterCommit = () => retirement = client.DisposeAsync().AsTask();
+        var failure = await Assert.ThrowsAsync<InferenceResourceOperationCanceledException>(() => client.SpeakAsync(new() { Text = "actual" }));
+        Assert.Equal(InferenceResourceCommitOutcome.Committed, failure.Failure.CommitOutcome);
+        Assert.Equal(InferenceResourceCommitOutcome.Committed, failure.Failure.SelectionOutcome);
+        Assert.Equal(1, failure.Failure.SelectionVersion!.Revision);
+        Assert.Equal(Audio, access.Committed); Assert.Equal(1, access.HandleDisposals);
+        await retirement!.WaitAsync(Bound); await client.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task IgnoringResourceWriteDrainsBeforeRetirementAndNeverCommitsLateBytes()
+    {
+        var access = new VoiceResourceFixture { HoldWrite = true };
+        using var http = new HttpClient(new Handler((_, _) => Task.FromResult(Wave())));
+        ITtsClient client = new PocketTtsHttpProvider(http).Bind(Connection, resources: access);
+        Task<TtsResult>? pending = null; Task? retirement = null;
+        try
+        {
+            pending = client.SpeakAsync(new() { Text = "held" }); await access.WriteEntered.Task.WaitAsync(Bound);
+            retirement = client.DisposeAsync().AsTask(); Assert.False(retirement.IsCompleted);
+            access.WriteRelease.TrySetResult();
+            var failure = await Assert.ThrowsAsync<InferenceResourceOperationCanceledException>(() => pending);
+            Assert.Equal(InferenceResourceOperationPhase.Write, failure.Failure.Phase);
+            Assert.Equal(Audio.Length, failure.Failure.BytesTransferred);
+            Assert.Equal(InferenceResourceCommitOutcome.NotAttempted, failure.Failure.CommitOutcome);
+            await retirement.WaitAsync(Bound); Assert.Equal(0, access.CommitCalls); Assert.Equal(1, access.HandleDisposals);
+        }
+        finally
+        {
+            retirement ??= client.DisposeAsync().AsTask(); access.WriteRelease.TrySetResult();
+            try { if (pending is not null) await Observe(pending); } finally { await Observe(retirement); }
+        }
+    }
+
+    [Fact]
+    public void FailedConcreteHandleIsRootedOnlyByActualRetainedClientFailure()
+    {
+        WeakReference[] roots = ExerciseFailedOwner();
+        for (int index = 0; roots.Any(root => root.IsAlive) && index < 30; index++)
+        { GC.Collect(); GC.WaitForPendingFinalizers(); GC.Collect(); Thread.Sleep(10); }
+        Assert.All(roots, root => Assert.False(root.IsAlive));
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static WeakReference[] ExerciseFailedOwner()
+    {
+        var access = new VoiceResourceFixture { CleanupFailure = new InvalidOperationException("refused handle") };
+        using var http = new HttpClient(new Handler((_, _) => Task.FromResult(Wave())));
+        ITtsClient client = new PocketTtsHttpProvider(http).Bind(Connection, resources: access);
+        Exception? failure = Record.Exception(() => client.SpeakAsync(new() { Text = "actual" }).GetAwaiter().GetResult());
+        Assert.NotNull(failure); Assert.Same(failure, Record.Exception(client.Dispose));
+        WeakReference[] roots = [new(access.LastHandle!), new(access.LastWriter!)];
+        access = null!;
+        GC.Collect(); GC.WaitForPendingFinalizers(); GC.Collect();
+        Assert.All(roots, root => Assert.True(root.IsAlive));
+        GC.KeepAlive(failure); GC.KeepAlive(client); return roots;
+    }
+
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static (ITtsClient, WeakReference[]) ExerciseForeign()
     {
@@ -160,17 +225,30 @@ public sealed class VoiceResourceFixture : IInferenceResourceAccess, IDisposable
     public int HandleDisposals { get; private set; }
     public int BorrowedDisposals { get; private set; }
     public MemoryStream? LastWriter { get; private set; }
+    public object? LastHandle { get; private set; }
+    public Action? AfterCommit { get; set; }
+    public bool HoldWrite { get; init; }
+    public TaskCompletionSource WriteEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    public TaskCompletionSource WriteRelease { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
     public Exception? CommitFailure { get; init; }
     public Exception? CleanupFailure { get; init; }
     public Task<InferenceResourceSelection> GetSelectionAsync(CancellationToken cancellationToken = default)
     { Record(nameof(GetSelectionAsync)); return Task.FromResult(new InferenceResourceSelection(WorkspaceId, SessionId, Selected ? 1 : 0, Selected ? [new(WorkspaceId, "audio")] : [])); }
     public Task<IInferenceResourceWriteHandle> OpenWriteAsync(InferenceResourceCreate resource, CancellationToken cancellationToken = default)
-    { Record(nameof(OpenWriteAsync)); LastWriter = new(); return Task.FromResult<IInferenceResourceWriteHandle>(new Writer(this, resource)); }
+    { Record(nameof(OpenWriteAsync)); LastWriter = new StagingStream(this); var writer = new Writer(this, resource); LastHandle = writer; return Task.FromResult<IInferenceResourceWriteHandle>(writer); }
     public Task<InferenceResourceDescriptor?> GetAsync(InferenceResourceReference reference, CancellationToken cancellationToken = default) => throw new NotSupportedException();
     public Task<IInferenceResourceReadHandle> OpenReadAsync(InferenceResourceReference reference, CancellationToken cancellationToken = default) => throw new NotSupportedException();
     public Task<InferenceResourceSelection> SelectAsync(IReadOnlyList<InferenceResourceReference> references, CancellationToken cancellationToken = default) => throw new InvalidOperationException("Commit must select atomically.");
     public Task<InferenceResourceSelection> ReplaceSelectionAsync(IReadOnlyList<InferenceResourceReference> references, long expectedRevision, CancellationToken cancellationToken = default) => throw new NotSupportedException();
     public void Dispose() { BorrowedDisposals++; Record(nameof(Dispose)); }
+    private sealed class StagingStream(VoiceResourceFixture owner) : MemoryStream
+    {
+        public override async ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            owner.WriteEntered.TrySetResult(); if (owner.HoldWrite) await owner.WriteRelease.Task;
+            await base.WriteAsync(buffer, CancellationToken.None);
+        }
+    }
     private sealed class Writer(VoiceResourceFixture owner, InferenceResourceCreate create) : IInferenceResourceWriteHandle
     {
         public InferenceResourceReference Reference { get; } = new(owner.WorkspaceId, "audio");
@@ -181,7 +259,8 @@ public sealed class VoiceResourceFixture : IInferenceResourceAccess, IDisposable
             if (owner.CommitFailure is not null) throw owner.CommitFailure;
             if (options?.SelectForSession != true || bytesWritten != owner.LastWriter!.Length) throw new InvalidOperationException();
             owner.Committed = owner.LastWriter!.ToArray(); owner.Selected = true;
-            return new(new(Reference, create.SessionId, create.FileName, create.ContentType, bytesWritten), await owner.GetSelectionAsync(cancellationToken));
+            var receipt = new InferenceResourceCommitResult(new(Reference, create.SessionId, create.FileName, create.ContentType, bytesWritten), await owner.GetSelectionAsync(cancellationToken));
+            owner.AfterCommit?.Invoke(); return receipt;
         }
         public ValueTask DisposeAsync()
         {

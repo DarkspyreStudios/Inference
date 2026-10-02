@@ -53,7 +53,7 @@ public sealed class TtsContractTests
     public async Task PocketRejectsEveryExplicitNewControlBeforeHttp(string control)
     {
         using var handler = new NoHttp(); using var http = new HttpClient(handler);
-        ITtsClient client = new PocketTtsHttpProvider(http).Bind(new() { Endpoint = new("https://example.invalid") });
+        using ITtsClient client = new PocketTtsHttpProvider(http).Bind(new() { Endpoint = new("https://example.invalid") });
         TtsRequest request = control switch
         {
             "Language" => new() { Text = "text", Language = "en" },

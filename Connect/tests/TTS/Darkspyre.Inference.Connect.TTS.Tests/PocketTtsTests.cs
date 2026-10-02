@@ -28,8 +28,8 @@ public sealed class PocketTtsTests
             return Wave();
         });
         using var http = new HttpClient(handler);
-        await new PocketTtsHttpProvider(http).Bind(Connection() with { PocketTts = new() { Protocol = PocketTtsProtocol.BridgeJson } })
-            .SpeakAsync(new() { Text = "<&>", VoiceId = voice, Speed = speed });
+        await using ITtsClient client = new PocketTtsHttpProvider(http).Bind(Connection() with { PocketTts = new() { Protocol = PocketTtsProtocol.BridgeJson } });
+        await client.SpeakAsync(new() { Text = "<&>", VoiceId = voice, Speed = speed });
     }
 
     [Fact]
@@ -41,7 +41,8 @@ public sealed class PocketTtsTests
                 System.Text.Encoding.UTF8, "application/json")
         }));
         using var http = new HttpClient(handler);
-        TtsVoice voice = Assert.Single(await new PocketTtsHttpProvider(http).Bind(Connection()).ListVoicesAsync());
+        await using ITtsClient client = new PocketTtsHttpProvider(http).Bind(Connection());
+        TtsVoice voice = Assert.Single(await client.ListVoicesAsync());
         Assert.Equal("voice-id", voice.Id);
         Assert.Equal("A voice", voice.DisplayName);
         Assert.Null(voice.Description);
@@ -110,6 +111,7 @@ public sealed class PocketTtsTests
                 object provenance = result.GetType().GetProperty("Provenance")!.GetValue(result)!;
                 Assert.Same(generation, AssemblyLoadContext.GetLoadContext(provenance.GetType().Assembly));
                 Assert.Equal(2, handler.Calls);
+                ((IAsyncDisposable)client).DisposeAsync().AsTask().GetAwaiter().GetResult();
             }
         }
         finally { generation.Unload(); }
@@ -135,7 +137,8 @@ public sealed class PocketTtsTests
             return Task.FromResult(Json(new { voiceOptions = new[] { new { id = "voice-id", name = "A voice", category = "Built-in" } } }));
         });
         using var http = new HttpClient(handler);
-        TtsVoice voice = Assert.Single(await new PocketTtsHttpProvider(http).Bind(Connection()).ListVoicesAsync());
+        await using ITtsClient client = new PocketTtsHttpProvider(http).Bind(Connection());
+        TtsVoice voice = Assert.Single(await client.ListVoicesAsync());
         Assert.Equal("voice-id", voice.Id);
         Assert.Equal("A voice", voice.DisplayName);
         Assert.Equal("Built-in", voice.Description);
@@ -148,7 +151,7 @@ public sealed class PocketTtsTests
         using var handler = new Handler((request, _) => Task.FromResult(request.RequestUri!.AbsolutePath.EndsWith("/voices", StringComparison.Ordinal)
             ? Json(new { voices = Array.Empty<string>() }) : Json(new { voices = ServerVoices })));
         using var http = new HttpClient(handler);
-        ITtsClient client = new PocketTtsHttpProvider(http).Bind(Connection());
+        await using ITtsClient client = new PocketTtsHttpProvider(http).Bind(Connection());
         Assert.Equal("server-voice", Assert.Single(await client.ListVoicesAsync()).Id);
         Assert.Equal(2, handler.Calls);
     }
@@ -169,7 +172,7 @@ public sealed class PocketTtsTests
             return Wave();
         });
         using var http = new HttpClient(handler);
-        ITtsClient client = new PocketTtsHttpProvider(http).Bind(Connection());
+        await using ITtsClient client = new PocketTtsHttpProvider(http).Bind(Connection());
         Assert.False((await client.GetCapabilitiesAsync()).SupportsSpeed);
         TtsResult result = await client.SpeakAsync(new() { Text = "test speech", VoiceId = "voice", Speed = 1 });
         Assert.Equal("audio/wav", result.ContentType);
@@ -194,7 +197,7 @@ public sealed class PocketTtsTests
             return Wave();
         });
         using var http = new HttpClient(handler);
-        ITtsClient client = new PocketTtsHttpProvider(http).Bind(Connection() with { PocketTts = new() { Protocol = PocketTtsProtocol.BridgeJson } });
+        await using ITtsClient client = new PocketTtsHttpProvider(http).Bind(Connection() with { PocketTts = new() { Protocol = PocketTtsProtocol.BridgeJson } });
         Assert.True((await client.GetCapabilitiesAsync()).SupportsSpeed);
         await client.SpeakAsync(new() { Text = "test speech", VoiceId = "voice", Speed = 1.25 });
     }
@@ -208,7 +211,8 @@ public sealed class PocketTtsTests
     {
         using var handler = new Handler((_, _) => Task.FromResult(new HttpResponseMessage((HttpStatusCode)status) { Content = new StringContent("private response") }));
         using var http = new HttpClient(handler);
-        InferenceException error = await Assert.ThrowsAsync<InferenceException>(() => new PocketTtsHttpProvider(http).Bind(Connection()).ListVoicesAsync());
+        await using ITtsClient client = new PocketTtsHttpProvider(http).Bind(Connection());
+        InferenceException error = await Assert.ThrowsAsync<InferenceException>(() => client.ListVoicesAsync());
         Assert.Equal(code, error.Code);
         Assert.DoesNotContain("private response", error.ToString(), StringComparison.Ordinal);
         Assert.Equal(1, handler.Calls);
@@ -221,7 +225,8 @@ public sealed class PocketTtsTests
     {
         using var handler = new Handler((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(data) }));
         using var http = new HttpClient(handler);
-        InferenceException error = await Assert.ThrowsAsync<InferenceException>(() => new PocketTtsHttpProvider(http).Bind(Connection()).SpeakAsync(new() { Text = "test" }));
+        await using ITtsClient client = new PocketTtsHttpProvider(http).Bind(Connection());
+        InferenceException error = await Assert.ThrowsAsync<InferenceException>(() => client.SpeakAsync(new() { Text = "test" }));
         Assert.Equal(InferenceFailureCode.ProtocolFailure, error.Code);
     }
 
@@ -231,11 +236,12 @@ public sealed class PocketTtsTests
         using var cancellation = new CancellationTokenSource();
         using var handler = new Handler((_, token) => { cancellation.Cancel(); token.ThrowIfCancellationRequested(); return Task.FromResult(Wave()); });
         using var http = new HttpClient(handler);
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => new PocketTtsHttpProvider(http).Bind(Connection())
-            .SpeakAsync(new() { Text = "test" }, cancellation.Token));
+        await using ITtsClient client = new PocketTtsHttpProvider(http).Bind(Connection());
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => client.SpeakAsync(new() { Text = "test" }, cancellation.Token));
         using var timeoutHandler = new Handler((_, _) => throw new TaskCanceledException());
         using var timeoutHttp = new HttpClient(timeoutHandler);
-        InferenceException error = await Assert.ThrowsAsync<InferenceException>(() => new PocketTtsHttpProvider(timeoutHttp).Bind(Connection()).SpeakAsync(new() { Text = "test" }));
+        await using ITtsClient timeoutClient = new PocketTtsHttpProvider(timeoutHttp).Bind(Connection());
+        InferenceException error = await Assert.ThrowsAsync<InferenceException>(() => timeoutClient.SpeakAsync(new() { Text = "test" }));
         Assert.Equal(InferenceFailureCode.TimedOut, error.Code);
         Assert.Equal(1, timeoutHandler.Calls);
     }

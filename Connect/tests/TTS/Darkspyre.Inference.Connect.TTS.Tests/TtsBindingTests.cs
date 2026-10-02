@@ -18,6 +18,53 @@ public sealed class TtsBindingTests
     private static TtsSetupConfiguration Configuration => new(Connection) { Language = "en", Format = TtsAudioFormat.Mp3 };
     private static SetupConfigurationIdentity Identity => new(SetupChangeIntent.Edit, "tts", "version");
 
+    [Fact]
+    public async Task OrdinaryTemporaryClientFailureDoesNotPoisonRetirement()
+    {
+        var fixture = new TtsBorrowedFixture { ClientOperationFailure = new InvalidOperationException("ordinary action") };
+        using var access = new LlmConnectionAccess(new UntouchableSource(), []);
+        await using var facade = new TtsProviderService([fixture]);
+        var manager = facade.CreateSettingsManager(fixture, _ => new(new("selected"), access));
+        try
+        {
+            var settings = await manager.OpenAsync(TtsTransport.XaiTts, Identity, Configuration);
+            Assert.Equal(SetupActionState.Failed, (await manager.RunAsync(settings, "test")).State);
+            await manager.DisposeAsync(); Assert.Equal(1, fixture.ClientDisposals); Assert.Equal(0, fixture.DisposeCalls);
+        }
+        finally { await manager.DisposeAsync(); }
+    }
+
+    [Fact]
+    public async Task ConcurrentTemporaryCleanupFailuresAllSurviveSharedRetirement()
+    {
+        Exception first = new InvalidOperationException("first cleanup"), second = new InvalidOperationException("second cleanup");
+        var failures = new System.Collections.Concurrent.ConcurrentQueue<Exception>([first, second]);
+        var both = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously); int entered = 0;
+        var fixture = new TtsBorrowedFixture { HoldOperation = true, ClientCleanup = () => failures.TryDequeue(out var failure) ? failure : null };
+        fixture.OnOperation = _ => { if (Interlocked.Increment(ref entered) == 2) both.TrySetResult(); };
+        using var access = new LlmConnectionAccess(new UntouchableSource(), []);
+        await using var facade = new TtsProviderService([fixture]);
+        var manager = facade.CreateSettingsManager(fixture, _ => new(new("selected"), access));
+        Task<SetupActionResult>? action = null; Task<SetupChoicePage>? query = null; Task? retirement = null;
+        try
+        {
+            var settings = await manager.OpenAsync(TtsTransport.XaiTts, Identity, Configuration);
+            action = manager.RunAsync(settings, "test"); query = manager.QueryChoicesAsync(settings, "voice", new());
+            await both.Task.WaitAsync(Bound); retirement = manager.DisposeAsync().AsTask(); Assert.False(retirement.IsCompleted);
+            fixture.Release.TrySetResult(); await Task.WhenAll(action, query).WaitAsync(Bound);
+            var failure = Assert.IsType<AggregateException>(await Record.ExceptionAsync(() => retirement.WaitAsync(Bound)));
+            Assert.Contains(first, failure.Flatten().InnerExceptions); Assert.Contains(second, failure.Flatten().InnerExceptions);
+            Assert.Same(failure, await Record.ExceptionAsync(() => manager.DisposeAsync().AsTask()));
+            Assert.Equal(2, fixture.ClientDisposals); Assert.Equal(0, fixture.DisposeCalls);
+        }
+        finally
+        {
+            retirement ??= manager.DisposeAsync().AsTask(); fixture.Release.TrySetResult();
+            try { await Task.WhenAll(new Task?[] { action, query }.OfType<Task>()).WaitAsync(Bound); }
+            finally { _ = await Record.ExceptionAsync(() => retirement.WaitAsync(Bound)); }
+        }
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -77,7 +124,7 @@ public sealed class TtsBindingTests
         TtsConnection connection = Connection with { Headers = headers, Authorization = binding.Authorization };
         headers["X-Test"] = "changed";
         var service = new TtsProviderService([fixture]);
-        ITtsClient client = service.Bind(connection, binding, fixture);
+        using ITtsClient client = service.Bind(connection, binding, fixture);
         Assert.Same(fixture.LastClient, client);
         Assert.Same(connection, fixture.Connection); Assert.Same(binding, fixture.Binding); Assert.Same(fixture, fixture.Resources);
         Assert.Equal("actual", fixture.Connection!.Headers["x-test"]); Assert.Equal(0, source.Calls);
@@ -318,13 +365,13 @@ public sealed class TtsBindingTests
     [Fact]
     public void RetiredDefaultManagerReleasesActualForeignBorrowedCollaborators()
     {
-        (TtsSettingsManager retained, WeakReference generation) = RetireForeignBorrowers();
-        for (int attempt = 0; generation.IsAlive && attempt < 20; attempt++) { GC.Collect(); GC.WaitForPendingFinalizers(); GC.Collect(); Thread.Sleep(10); }
-        Assert.False(generation.IsAlive); GC.KeepAlive(retained);
+        (TtsSettingsManager retained, WeakReference[] roots) = RetireForeignBorrowers();
+        for (int attempt = 0; roots.Any(root => root.IsAlive) && attempt < 30; attempt++) { GC.Collect(); GC.WaitForPendingFinalizers(); GC.Collect(); Thread.Sleep(10); }
+        Assert.All(roots, root => Assert.False(root.IsAlive)); GC.KeepAlive(retained);
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private static (TtsSettingsManager, WeakReference) RetireForeignBorrowers()
+    private static (TtsSettingsManager, WeakReference[]) RetireForeignBorrowers()
     {
         var generation = new FixtureGeneration(); var weak = new WeakReference(generation);
         Assembly assembly = generation.LoadFromAssemblyPath(typeof(TtsBindingTests).Assembly.Location);
@@ -339,7 +386,11 @@ public sealed class TtsBindingTests
         Assert.Equal(SetupActionState.Completed, manager.RunAsync(settings, "check").GetAwaiter().GetResult().State);
         Assert.Equal(SetupCommitState.Committed, manager.SaveAsync(settings).GetAwaiter().GetResult().State);
         manager.Dispose(); Assert.Equal(0, (int)type.GetProperty(nameof(TtsBorrowedFixture.DisposeCalls))!.GetValue(foreign)!);
-        generation.Unload(); return (manager, weak);
+        Assert.Equal(1, (int)type.GetProperty(nameof(TtsBorrowedFixture.ClientDisposals))!.GetValue(foreign)!);
+        Assert.Equal(1, (int)type.GetProperty(nameof(TtsBorrowedFixture.FactoryCalls))!.GetValue(foreign)!);
+        Assert.Equal(1, (int)type.GetProperty(nameof(TtsBorrowedFixture.Commits))!.GetValue(foreign)!);
+        WeakReference[] roots = [weak, new(assembly), new(type), new(foreign), new(factory), new(factory.Method)];
+        generation.Unload(); return (manager, roots);
     }
 
     private static T Field<T>(TtsSettings settings, string id) where T : SetupField => (T)settings.Steps.SelectMany(step => step.Sections).SelectMany(section => section.Fields).Single(field => field.Description.Id == id);
@@ -377,8 +428,10 @@ public sealed class TtsBorrowedFixture : ITtsProvider, ITtsClient, ISetupCommitT
     public TtsRequest? Request { get; private set; }
     public ITtsClient? LastClient { get; private set; }
     public Action? OnBind { get; set; }
-    public int ClientDisposals { get; private set; }
+    private int _clientDisposals;
+    public int ClientDisposals => Volatile.Read(ref _clientDisposals);
     public Exception? ClientCleanupFailure { get; init; }
+    public Func<Exception?>? ClientCleanup { get; init; }
     public Exception? ClientOperationFailure { get; init; }
     public TtsSetupChanges? Changes { get; private set; }
     public int Binds { get; private set; }
@@ -409,8 +462,8 @@ public sealed class TtsBorrowedFixture : ITtsProvider, ITtsClient, ISetupCommitT
         public void Dispose() => DisposeAsync().AsTask().GetAwaiter().GetResult();
         public ValueTask DisposeAsync()
         {
-            owner.ClientDisposals++;
-            return owner.ClientCleanupFailure is { } error ? ValueTask.FromException(error) : ValueTask.CompletedTask;
+            Interlocked.Increment(ref owner._clientDisposals);
+            return (owner.ClientCleanup?.Invoke() ?? owner.ClientCleanupFailure) is { } error ? ValueTask.FromException(error) : ValueTask.CompletedTask;
         }
     }
     public string WorkspaceId => "workspace";

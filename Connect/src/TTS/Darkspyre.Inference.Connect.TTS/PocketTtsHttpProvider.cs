@@ -174,15 +174,17 @@ public sealed class PocketTtsHttpProvider(HttpClient httpClient) : ITtsProvider
         private async Task<T> SendAsync<T>(HttpMethod method, string path, HttpContent? body,
             Func<HttpResponseMessage, CancellationToken, Task<T>> read, CancellationToken cancellationToken)
         {
-            Fence(cancellationToken);
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            timeout.CancelAfter(_connection!.RequestTimeout);
-            var request = new HttpRequestMessage(method, new Uri(new Uri(_connection.Endpoint.AbsoluteUri.TrimEnd('/') + "/"), path.TrimStart('/'))) { Content = body };
+            var request = new HttpRequestMessage { Content = body };
             HttpResponseMessage? response = null;
             Exception? failure = null;
             T result = default!;
             try
             {
+                Fence(cancellationToken);
+                timeout.CancelAfter(_connection!.RequestTimeout);
+                request.Method = method;
+                request.RequestUri = new Uri(new Uri(_connection.Endpoint.AbsoluteUri.TrimEnd('/') + "/"), path.TrimStart('/'));
                 foreach ((string name, string value) in _connection.Headers)
                 { if (!request.Headers.TryAddWithoutValidation(name, value)) { throw Invalid("A configured header cannot be used on this request."); } }
                 response = await _provider!.SendAsync(request, timeout.Token).ConfigureAwait(false);
@@ -207,8 +209,18 @@ public sealed class PocketTtsHttpProvider(HttpClient httpClient) : ITtsProvider
             catch (Exception error) { failure = error; }
             var failures = new List<Exception>();
             if (failure is not null) failures.Add(failure);
-            try { response?.Dispose(); } catch (Exception error) { failures.Add(error); }
-            try { request.Dispose(); } catch (Exception error) { failures.Add(error); }
+            try { response?.Dispose(); }
+            catch (Exception error)
+            {
+                Exception cleanup = LlmResourcePreparation.AsCleanupFailure(error, refusedOwner: response);
+                failures.Add(cleanup); RecordCleanup(cleanup);
+            }
+            try { request.Dispose(); }
+            catch (Exception error)
+            {
+                Exception cleanup = LlmResourcePreparation.AsCleanupFailure(error, refusedOwner: request);
+                failures.Add(cleanup); RecordCleanup(cleanup);
+            }
             if (failures.Count == 1) ExceptionDispatchInfo.Capture(failures[0]).Throw();
             if (failures.Count > 1) throw new AggregateException(failures);
             Fence(cancellationToken);

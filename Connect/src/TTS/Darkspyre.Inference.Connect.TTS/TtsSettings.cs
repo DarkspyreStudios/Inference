@@ -304,6 +304,7 @@ public sealed class TtsSettingsManager : InferenceSettingsManager<TtsSettings, T
     private TtsProviderService? _service;
     private Func<XaiConnectionSelection, XaiFamilyBinding>? _xaiBindings;
     private IInferenceResourceAccess? _resources;
+    private readonly List<(Exception Failure, ITtsClient Owner)> _cleanupFailures = [];
 
     internal TtsSettingsManager(TtsProviderService service, ISetupCommitTarget<TtsSetupChanges> target,
         Func<XaiConnectionSelection, XaiFamilyBinding>? xaiBindings, IInferenceResourceAccess? resources)
@@ -404,7 +405,11 @@ public sealed class TtsSettingsManager : InferenceSettingsManager<TtsSettings, T
         if (client is not null)
         {
             try { await client.DisposeAsync().ConfigureAwait(false); }
-            catch (Exception cleanup) { failure = failure is null ? cleanup : new AggregateException(failure, cleanup); }
+            catch (Exception cleanup)
+            {
+                failure = failure is null ? cleanup : new AggregateException(failure, cleanup);
+                lock (_cleanupFailures) _cleanupFailures.Add((failure, client));
+            }
         }
         if (failure is not null) ExceptionDispatchInfo.Capture(failure).Throw();
         return result;
@@ -427,7 +432,12 @@ public sealed class TtsSettingsManager : InferenceSettingsManager<TtsSettings, T
         catch (Exception original)
         {
             try { await result.DisposeAsync().ConfigureAwait(false); }
-            catch (Exception cleanup) { throw new AggregateException(original, cleanup); }
+            catch (Exception cleanup)
+            {
+                var failure = new AggregateException(original, cleanup);
+                lock (_cleanupFailures) _cleanupFailures.Add((failure, result));
+                throw failure;
+            }
             ExceptionDispatchInfo.Capture(original).Throw();
             throw;
         }
@@ -446,5 +456,11 @@ public sealed class TtsSettingsManager : InferenceSettingsManager<TtsSettings, T
     }
     public void Dispose() => Retire().GetAwaiter().GetResult();
     public ValueTask DisposeAsync() => new(Retire());
-    private Task Retire() => _lifetime.RetireAsync(() => { _service = null; _xaiBindings = null; _resources = null; DetachCommitTarget(); return Task.CompletedTask; });
+    private Task Retire() => _lifetime.RetireAsync(() =>
+    {
+        _service = null; _xaiBindings = null; _resources = null; DetachCommitTarget();
+        if (_cleanupFailures.Count == 1) return Task.FromException(_cleanupFailures[0].Failure);
+        if (_cleanupFailures.Count > 1) return Task.FromException(new AggregateException(_cleanupFailures.Select(item => item.Failure)));
+        return Task.CompletedTask;
+    });
 }

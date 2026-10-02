@@ -434,7 +434,7 @@ offers `Minimal` to `ExtraHigh` and accepts temperature at any level.
 `services.AddTtsConnect()`, then bind a host-supplied `TtsConnection` with `TtsProviderService`:
 
 ```csharp
-ITtsClient speech = ttsProviders.Bind(new TtsConnection
+await using ITtsClient speech = ttsProviders.Bind(new TtsConnection
 {
     Endpoint = new Uri("http://127.0.0.1:8020"),
     PocketTts = new PocketTtsEndpointOptions { Protocol = PocketTtsProtocol.Multipart }
@@ -505,6 +505,13 @@ bytes and session membership atomically before returning `TtsResult.Resource`. I
 invent a filename. Null resources preserve standalone bytes. The caller owns the access and
 returned clients; facade retirement does not retire handed-off clients. Settings retire their
 temporary clients and do not bind resources for readiness checks or sample clips.
+Pocket exchanges own request bodies before the first send fence and clean response and request
+owners once. Refused cleanup retains the actual unsafe owner and reaches the client's cached
+retirement failure. Independent operation and cleanup errors remain ordered and intact.
+TTS and hosted-STT settings retire every temporary client, including a binding rejected by a
+late owner fence. They preserve genuine cleanup failures across repeated disposal after draining
+work and dropping borrowed collaborators. Ordinary action failures do not poison retirement.
+Retained cleanup failures can retain the refused client's own collaborator and metadata graph.
 
 `ITtsStreamingClient` and `ITtsStreamingSession` declare reusable disposable streaming and one
 ephemeral iterator wrapper. Opens and wrappers require explicit positive `InferenceStreamLimits`

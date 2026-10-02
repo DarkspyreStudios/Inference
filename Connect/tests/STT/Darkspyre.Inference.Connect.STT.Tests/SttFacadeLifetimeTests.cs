@@ -46,7 +46,12 @@ public sealed class SttFacadeLifetimeTests
             Assert.Throws<ObjectDisposedException>(() => facade.CreateSettingsManager(new Target()));
             release.Set();
             if (fails) Assert.Same(failure, await Record.ExceptionAsync(() => request.WaitAsync(Deadline)));
-            else if (bind) Assert.Same(provider.LastClient, await request.WaitAsync(Deadline));
+            else if (bind)
+            {
+                object result = await request.WaitAsync(Deadline);
+                Assert.Same(provider.LastClient, result);
+                await Assert.IsAssignableFrom<ISpeechTranscriptionClient>(result).DisposeAsync();
+            }
             else Assert.Single(Assert.IsAssignableFrom<IReadOnlyList<InferenceSetupDefinition>>(await request.WaitAsync(Deadline)));
             await retirement.WaitAsync(Deadline);
             Assert.Same(retirement, Retire(facade));
@@ -77,7 +82,7 @@ public sealed class SttFacadeLifetimeTests
             await manager.DisposeAsync(); Assert.Equal(0, target.DisposeCalls);
             provider.Dispose(); Assert.Equal(1, provider.DisposeCalls);
         }
-        finally { await manager.DisposeAsync(); await Cleanup(facade); }
+        finally { try { await client.DisposeAsync(); } finally { await manager.DisposeAsync(); await Cleanup(facade); } }
     }
 
     [Theory]
