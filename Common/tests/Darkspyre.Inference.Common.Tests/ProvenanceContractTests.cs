@@ -4,6 +4,7 @@ using System.Runtime.Loader;
 using System.Text.Json;
 using System.Text.Json.Serialization.Metadata;
 using Darkspyre.Inference.Common.LLM;
+using Darkspyre.Inference.Common.STT;
 
 namespace Darkspyre.Inference.Common.Tests;
 
@@ -33,10 +34,13 @@ public sealed class ProvenanceContractTests
         {
             Text = "actual",
             Status = LlmCompletionStatus.Completed,
-            Provenance = new() { ImplementationId = "actual-speech", ModelId = model! }
+            Provenance = new() { ImplementationId = "actual-speech", ModelId = model }
         };
         LlmInferenceResult restored = JsonSerializer.Deserialize(JsonSerializer.Serialize(result, InferenceJson.LlmResult), InferenceJson.LlmResult)!;
         Assert.Equal(model, restored.Provenance.ModelId);
+        var speech = new SpeechTranscriptionResult("actual", result.Provenance);
+        var restoredSpeech = JsonSerializer.Deserialize(JsonSerializer.Serialize(speech, InferenceJson.SpeechTranscriptionResult), InferenceJson.SpeechTranscriptionResult)!;
+        Assert.Equal(model, restoredSpeech.Provenance.ModelId);
     }
 
     [Fact]

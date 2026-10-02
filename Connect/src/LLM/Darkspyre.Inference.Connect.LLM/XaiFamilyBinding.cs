@@ -10,14 +10,18 @@ public sealed record XaiConnectionSelection([property: JsonRequired] string Conn
 public sealed class XaiFamilyBinding
 {
     private readonly LlmConnectionAccess _access;
+    private readonly LlmProviderService? _service;
     private readonly LlmConnection? _snapshot;
 
-    public XaiFamilyBinding(XaiConnectionSelection selection, LlmConnectionAccess access)
+    public XaiFamilyBinding(XaiConnectionSelection selection, LlmConnectionAccess access,
+        LlmProviderService? service = null)
     {
         ArgumentNullException.ThrowIfNull(selection);
         ArgumentException.ThrowIfNullOrWhiteSpace(selection.ConnectionId);
         Selection = selection;
         _access = access ?? throw new ArgumentNullException(nameof(access));
+        service?.ValidateXaiAccess(access);
+        _service = service;
         Authorization = new BindingAuthorization(this);
     }
 
@@ -25,12 +29,35 @@ public sealed class XaiFamilyBinding
     {
         Selection = source.Selection;
         _access = source._access;
+        _service = source._service;
         _snapshot = snapshot;
         Authorization = new BindingAuthorization(this);
     }
 
     public XaiConnectionSelection Selection { get; }
     public IProviderAuthorization Authorization { get; }
+
+    internal bool HasCatalogService => _service?.SupportsXaiSnapshot is true;
+
+    internal void RequireCatalogService()
+    {
+        if (!HasCatalogService)
+            throw new NotSupportedException("Cross-family catalog operations require the selected LLM facade.");
+    }
+
+    internal Task<T> RunCatalogAsync<T>(LlmConnection snapshot, Action fence,
+        Func<HttpClient, LlmConnection, Action, CancellationToken, Task<T>> operation, CancellationToken token)
+    {
+        RequireCatalogService();
+        return _service!.RunXaiSnapshotAsync(snapshot, fence, operation, token);
+    }
+
+    internal Task<T> RunFilesAsync<T>(LlmConnection snapshot, Action fence,
+        Func<Providers.XaiFileClient, LlmConnection, Action, CancellationToken, Task<T>> operation, CancellationToken token)
+    {
+        RequireCatalogService();
+        return _service!.RunXaiFilesSnapshotAsync(snapshot, fence, operation, token);
+    }
 
     public Task<LlmConnection> AcquireAsync(CancellationToken cancellationToken = default)
         => AcquireAsync(null, cancellationToken);

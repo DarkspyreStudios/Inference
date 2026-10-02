@@ -10,6 +10,10 @@ providers. The package contains semantic request, response, capability, progress
 failure types. It does not select an implementation or provide automatic fallback between local and
 external inference. The current synchronized package family targets .NET 11.
 
+`InferenceProvenance.ModelId` remains a required JSON member but may be null when a provider
+does not report model identity. Null is unknown, not a requested/default model or an inferred
+identity. Observed model strings remain unchanged; omitted members still refuse owned import.
+
 ## Hosted speech transcription
 
 `Darkspyre.Inference.Common.STT` contains hosted transcription data and client/session interfaces.

@@ -70,7 +70,7 @@ public sealed record InferenceProvenance
 {
     public required string ImplementationId { get; init; }
 
-    public required string ModelId { get; init; }
+    public required string? ModelId { get; init; }
 
     public string? ModelRevision { get; init; }
 
