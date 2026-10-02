@@ -4,6 +4,73 @@ namespace Darkspyre.Inference.Connect.LLM.Tests;
 
 public sealed class XaiSignInTests
 {
+    public static TheoryData<string> InvalidOAuthResults => new()
+    {
+        "api-key", "secret-header", "aws", "google", "azure-secret", "azure-certificate",
+        "empty-token", "whitespace-token", "newline-token", "nul-token"
+    };
+
+    [Theory]
+    [MemberData(nameof(InvalidOAuthResults))]
+    public async Task StatusRejectsIncompatibleOrMalformedOAuthWithoutEffects(string kind)
+    {
+        var source = new Source();
+        source.Connection = source.Connection! with { Credential = InvalidOAuth(kind).Serialize() };
+        var auth = new Authenticator();
+        await using var service = new LlmProviderService(source, [], [auth]);
+        Assert.False(await service.IsAuthenticatedAsync("id"));
+        Assert.Equal(0, auth.Starts);
+        Assert.Equal(0, auth.Polls);
+        Assert.Equal(0, source.Saves);
+    }
+
+    [Theory]
+    [MemberData(nameof(InvalidOAuthResults))]
+    public async Task OnePollRejectsIncompatibleOrMalformedOAuthBeforeSave(string kind) =>
+        await RefuseInvalidLoginResultAsync(kind, interactive: false);
+
+    [Theory]
+    [MemberData(nameof(InvalidOAuthResults))]
+    public async Task InteractiveLoginRejectsIncompatibleOrMalformedOAuthBeforeSave(string kind) =>
+        await RefuseInvalidLoginResultAsync(kind, interactive: true);
+
+    private static async Task RefuseInvalidLoginResultAsync(string kind, bool interactive)
+    {
+        var source = new Source();
+        var auth = new Authenticator { Credential = InvalidOAuth(kind) };
+        await using var service = new LlmProviderService(source, [], [auth]);
+        InvalidOperationException error = await Assert.ThrowsAsync<InvalidOperationException>(() => interactive
+            ? service.SignInAsync("id", new Prompt(_ => { }))
+            : CompleteAsync(service, auth.Code));
+        Assert.Equal("Grok sign-in did not return an OAuth credential.", error.Message);
+        Assert.DoesNotContain("original-token", error.ToString());
+        Assert.DoesNotContain("other-secret", error.ToString());
+        Assert.Equal(interactive ? 1 : 0, auth.Starts);
+        Assert.Equal(1, auth.Polls);
+        Assert.Equal(0, source.Saves);
+        Assert.Null(source.Saved);
+        Assert.Equal("version", source.Connection!.Version);
+    }
+
+    private static LlmCredential InvalidOAuth(string kind)
+    {
+        var credential = new LlmCredential { OAuth = new() { AccessToken = "original-token" } };
+        return kind switch
+        {
+            "api-key" => credential with { ApiKey = "other-secret" },
+            "secret-header" => credential with { SecretHeaders = new Dictionary<string, string> { ["X-Key"] = "other-secret" } },
+            "aws" => credential with { Aws = new() { SecretAccessKey = "other-secret" } },
+            "google" => credential with { Google = new() { ServiceAccountJson = "other-secret" } },
+            "azure-secret" => credential with { Azure = new LlmAzureSecret.ClientSecret("other-secret") },
+            "azure-certificate" => credential with { Azure = new LlmAzureSecret.CertificatePkcs12("other-secret", "other-secret") },
+            "empty-token" => credential with { OAuth = new() { AccessToken = "" } },
+            "whitespace-token" => credential with { OAuth = new() { AccessToken = "bad token" } },
+            "newline-token" => credential with { OAuth = new() { AccessToken = "token\r\nnew" } },
+            "nul-token" => credential with { OAuth = new() { AccessToken = "token\0new" } },
+            _ => throw new ArgumentOutOfRangeException(nameof(kind))
+        };
+    }
+
     [Fact]
     public async Task OnePollSavesTheCapturedVersionAndOnlyAnOAuthCredential()
     {
