@@ -65,8 +65,7 @@ public sealed class XaiFamilyBinding
             throw new ArgumentException("A cross-family xAI binding requires the xAI transport.");
         if (!string.Equals(connection.Endpoint.TrimEnd('/'), (connection.Xai ?? new()).GetEndpoint(), StringComparison.Ordinal))
             throw new ArgumentException("The xAI endpoint must match the selected typed region.");
-        if (string.IsNullOrWhiteSpace(LlmCredential.Parse(connection.Credential)?.OAuth?.AccessToken))
-            throw new InferenceException(InferenceFailureCode.AuthenticationRequired, "The xAI binding requires OAuth sign-in.");
+        _ = Internal.XaiAuthorization.Require(connection);
     }
 
     private sealed class BindingAuthorization(XaiFamilyBinding owner) : IProviderAuthorization

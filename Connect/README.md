@@ -1159,6 +1159,8 @@ remain separate; ComfyUI does not advertise a built-in workflow catalog.
 
 The shared [`XaiFamilyBinding` contract](docs/media-bindings.md) uses explicit selection and the
 existing credential-access owner. It does not register or qualify an xAI Image transport.
+Family acquisition rejects incompatible credentials before refresh and incompatible refresh results
+before credential save; the Responses client uses the same OAuth-only authorization validator before HTTP.
 
 ## Video contracts
 

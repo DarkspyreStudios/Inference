@@ -263,14 +263,7 @@ internal sealed class XaiResponsesLlmClient(HttpClient http) : ResponsesLlmClien
     private static AuthenticationHeaderValue Authorization(LlmConnection connection)
     {
         ValidateEndpoint(connection);
-        LlmCredential? credential = LlmCredential.Parse(connection.Credential);
-        if (credential is null || !string.IsNullOrWhiteSpace(credential.ApiKey) || credential.Aws is not null || credential.Google is not null
-            || credential.SecretHeaders.Count != 0
-            || credential.OAuth?.AccessToken is not { Length: > 0 } token || token.Any(char.IsWhiteSpace)
-            || !AuthenticationHeaderValue.TryParse("Bearer " + token, out AuthenticationHeaderValue? authorization)
-            || authorization.Scheme != "Bearer" || authorization.Parameter != token)
-            throw new InferenceException(InferenceFailureCode.AuthenticationRequired, "Grok requires a valid OAuth credential.");
-        return authorization;
+        return XaiAuthorization.Require(connection);
     }
 
     private static void ValidateEndpoint(LlmConnection connection)
