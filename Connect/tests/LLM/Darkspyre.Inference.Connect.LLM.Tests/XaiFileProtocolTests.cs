@@ -311,6 +311,63 @@ public sealed class XaiFileProtocolTests
         Assert.Equal(0, destination.Flushes);
     }
 
+    [Theory]
+    [InlineData("CreatePublicUrlAsync", "relative/path")]
+    [InlineData("CreatePublicUrlAsync", "")]
+    [InlineData("CreatePublicUrlAsync", "https://files.invalid/a\nb")]
+    [InlineData("GetAsync", "relative/path")]
+    [InlineData("GetAsync", "")]
+    [InlineData("GetAsync", "https://files.invalid/a\rb")]
+    [InlineData("RevokePublicUrlAsync", "relative/path")]
+    [InlineData("RevokePublicUrlAsync", "")]
+    [InlineData("RevokePublicUrlAsync", "https://files.invalid/a\tb")]
+    public async Task InvalidObservedPublicUrlRefusesWithoutPublishingCapability(string method, string url)
+    {
+        string encoded = JsonSerializer.Serialize(url);
+        string body = method switch
+        {
+            "CreatePublicUrlAsync" => "{\"public_url\":" + encoded + "}",
+            "GetAsync" => File[..^1] + ",\"public_url\":" + encoded + "}",
+            "RevokePublicUrlAsync" => "{\"id\":\"file-a\",\"revoked\":true,\"public_url\":" + encoded + "}",
+            _ => throw new InvalidOperationException()
+        };
+        using var http = new HttpClient(new Handler(_ => Task.FromResult(Response(body))));
+        await using var adapter = Create(http);
+        LlmProviderException failure = await Assert.ThrowsAsync<LlmProviderException>(async () =>
+        {
+            if (method == "CreatePublicUrlAsync") await Invoke<XaiPublicUrl>(adapter, method, Connection(), "file-a", null, (Action)(() => { }), CancellationToken.None);
+            else if (method == "GetAsync") await Invoke<LlmProviderFile>(adapter, method, Connection(), "file-a", (Action)(() => { }), CancellationToken.None);
+            else await Invoke<XaiPublicUrlRevocation>(adapter, method, Connection(), "file-a", (Action)(() => { }), CancellationToken.None);
+        });
+        Assert.Equal("Grok Files returned invalid protocol data.", failure.Message);
+        Assert.Null(failure.InnerException);
+    }
+
+    [Theory]
+    [InlineData("urn:opaque-provider-capability")]
+    [InlineData("https://files.invalid/a%2Fb?token=Sensitive%2BValue&x=1")]
+    public async Task ObservedAbsoluteUriKeepsExactStringWithoutExtraSchemePolicy(string url)
+    {
+        using var http = new HttpClient(new Handler(_ => Task.FromResult(Response("{\"public_url\":" + JsonSerializer.Serialize(url) + "}"))));
+        await using var adapter = Create(http);
+        XaiPublicUrl result = await Invoke<XaiPublicUrl>(adapter, "CreatePublicUrlAsync", Connection(), "file-a", null, (Action)(() => { }), CancellationToken.None);
+        Assert.Equal(url, result.PublicUrl);
+    }
+
+    [Theory]
+    [InlineData(3599)]
+    [InlineData(2592001)]
+    [InlineData(3600.5)]
+    public async Task PublicUrlPublishedExpiryBoundsRefuseBeforeDispatch(double seconds)
+    {
+        int calls = 0;
+        using var http = new HttpClient(new Handler(_ => { calls++; return Task.FromResult(Response("{}")); }));
+        await using var adapter = Create(http);
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => Invoke<XaiPublicUrl>(adapter, "CreatePublicUrlAsync", Connection(), "file-a",
+            new XaiPublicUrlOptions(TimeSpan.FromSeconds(seconds)), (Action)(() => { }), CancellationToken.None));
+        Assert.Equal(0, calls);
+    }
+
     private static IAsyncDisposable Create(HttpClient http)
     {
         Type type = typeof(XaiResponsesLlmClient).Assembly.GetType("Darkspyre.Inference.Connect.LLM.Providers.XaiFileClient", throwOnError: true)!;
