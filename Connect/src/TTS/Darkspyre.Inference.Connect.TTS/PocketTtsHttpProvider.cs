@@ -6,6 +6,8 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Common.Setup;
+using Darkspyre.Inference.Common.Resources;
+using Darkspyre.Inference.Connect.LLM;
 
 namespace Darkspyre.Inference.Connect.TTS;
 
@@ -20,9 +22,12 @@ public sealed class PocketTtsHttpProvider(HttpClient httpClient) : ITtsProvider
         new("darkspyre.connect.pockettts", "PocketTTS HTTP", InferenceImplementationKind.Connect, InferenceTask.SpeechSynthesis),
         "Synthesize speech through an externally managed PocketTTS endpoint.");
 
-    public ITtsClient Bind(TtsConnection connection)
+    public ITtsClient Bind(TtsConnection connection, XaiFamilyBinding? xai = null,
+        IInferenceResourceAccess? resources = null)
     {
         ArgumentNullException.ThrowIfNull(connection);
+        if (xai is not null || connection.Xai is not null || connection.Authorization is not null)
+            throw new InferenceException(InferenceFailureCode.UnsupportedFeature, "PocketTTS does not implement borrowed provider authorization or xAI binding.");
         ValidateConnection(connection);
         return new Client(this, connection with { Headers = new Dictionary<string, string>(connection.Headers, StringComparer.OrdinalIgnoreCase) });
     }

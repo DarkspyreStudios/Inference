@@ -24,6 +24,7 @@
   <ItemGroup>
     <InternalsVisibleTo Include="Darkspyre.Inference.Connect.Image" />
     <InternalsVisibleTo Include="Darkspyre.Inference.Connect.Video" />
+    <InternalsVisibleTo Include="Darkspyre.Inference.Connect.TTS" />
   </ItemGroup>
 
 </Project>

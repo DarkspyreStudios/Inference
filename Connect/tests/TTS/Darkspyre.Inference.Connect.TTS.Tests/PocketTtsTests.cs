@@ -99,7 +99,7 @@ public sealed class PocketTtsTests
                 object options = connectionType.GetProperty("PocketTts")!.GetValue(connection)!;
                 PropertyInfo protocol = options.GetType().GetProperty("Protocol")!;
                 protocol.SetValue(options, Enum.Parse(protocol.PropertyType, "BridgeJson"));
-                object client = providerType.GetMethod("Bind")!.Invoke(provider, [connection])!;
+                object client = providerType.GetMethod("Bind")!.Invoke(provider, [connection, null, null])!;
                 ((Task)client.GetType().GetMethod("ListVoicesAsync")!.Invoke(client, [CancellationToken.None])!).GetAwaiter().GetResult();
                 Type requestType = tts.GetType(typeof(TtsRequest).FullName!, throwOnError: true)!;
                 object request = Activator.CreateInstance(requestType)!;
