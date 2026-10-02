@@ -11,7 +11,11 @@ internal sealed class SdkHttpGenerationPool : IHttpClientFactory, IDisposable, I
     private readonly LlmOperationLifetime _lifetime = new();
     private readonly Dictionary<string, SdkHttpPipelineEntry> _active = new(StringComparer.Ordinal);
     private readonly HashSet<SdkHttpPipelineEntry> _entries = [];
-    private readonly HashSet<SdkHttpClientLease> _clients = [];
+    private readonly HashSet<SdkHttpClientRegistration> _clients = [];
+    private readonly List<(ITimer Timer, Task Cleanup)> _cleanupTimers = [];
+    private ITimer? _cleanupTimer;
+    private bool _releaseStarted;
+    private static readonly TimeSpan CleanupInterval = TimeSpan.FromSeconds(10);
     private IServiceProvider? _services;
     private IOptionsMonitor<HttpClientFactoryOptions>? _options;
     private IHttpMessageHandlerBuilderFilter[]? _filters;
@@ -51,8 +55,10 @@ internal sealed class SdkHttpGenerationPool : IHttpClientFactory, IDisposable, I
         try
         {
             _ = entry.Initialization!.Value;
-            client = new(this, entry);
-            lock (_gate) _clients.Add(client);
+            var registration = new SdkHttpClientRegistration(entry);
+            client = new(this, registration);
+            registration.Client = new(client);
+            lock (_gate) _clients.Add(registration);
             foreach (Action<HttpClient> action in _options!.Get(name).HttpClientActions) action(client);
             Fence(operation.Token);
             entry.StartTimer(_clock!);
@@ -132,11 +138,13 @@ internal sealed class SdkHttpGenerationPool : IHttpClientFactory, IDisposable, I
         lock (_gate) { entry.Holders--; StartUnusedRetirement(entry); }
         operation.Dispose();
     }
-    internal void ReleaseClient(SdkHttpClientLease client, SdkHttpPipelineEntry entry, Exception? failure)
+    internal void ReleaseClient(SdkHttpClientLease client, SdkHttpClientRegistration registration, Exception? failure)
     {
         lock (_gate)
         {
-            _clients.Remove(client); entry.Holders--;
+            if (!_clients.Remove(registration)) return;
+            SdkHttpPipelineEntry entry = registration.Entry;
+            entry.Holders--;
             if (failure is not null) entry.Failures.Add((client, failure));
             StartUnusedRetirement(entry);
         }
@@ -144,28 +152,82 @@ internal sealed class SdkHttpGenerationPool : IHttpClientFactory, IDisposable, I
     internal void RecordFailure(SdkHttpPipelineEntry entry, object resource, Exception failure)
     { lock (_gate) entry.Failures.Add((resource, failure)); }
     internal void Expire(SdkHttpPipelineEntry entry)
-    { lock (_gate) { entry.Expired = true; StartUnusedRetirement(entry); } }
-    private static void StartUnusedRetirement(SdkHttpPipelineEntry entry)
+    { lock (_gate) { entry.Expired = true; ReconcileClients(); StartUnusedRetirement(entry); UpdateCleanupTimer(); } }
+    private void ReconcileClients()
     {
-        if (entry.Expired && entry.Holders == 0) entry.Cleanup ??= Task.Run(entry.CleanupAsync);
+        foreach (SdkHttpClientRegistration registration in _clients.ToArray())
+        {
+            if (registration.Client!.TryGetTarget(out _)) continue;
+            _clients.Remove(registration);
+            registration.Entry.Holders--;
+            StartUnusedRetirement(registration.Entry);
+        }
+    }
+    private void StartUnusedRetirement(SdkHttpPipelineEntry entry)
+    {
+        if (entry.Expired && entry.Holders == 0) entry.Cleanup ??= Task.Run(() => CleanupEntryAsync(entry));
+    }
+    private async Task CleanupEntryAsync(SdkHttpPipelineEntry entry)
+    {
+        try { await entry.CleanupAsync().ConfigureAwait(false); }
+        finally
+        {
+            lock (_gate)
+            {
+                if (entry.Released)
+                {
+                    _entries.Remove(entry);
+                    foreach (string name in _active.Where(pair => ReferenceEquals(pair.Value, entry)).Select(pair => pair.Key).ToArray()) _active.Remove(name);
+                }
+                UpdateCleanupTimer();
+            }
+        }
+    }
+    private void UpdateCleanupTimer()
+    {
+        bool pending = !_releaseStarted && _entries.Any(entry => entry.Expired && entry.Cleanup?.IsCompleted != true);
+        if (pending && _cleanupTimer is null)
+            _cleanupTimer = _clock!.CreateTimer(_ => SweepClients(), null, CleanupInterval, CleanupInterval);
+        else if (!pending && _cleanupTimer is { } timer)
+        {
+            _cleanupTimer = null;
+            _cleanupTimers.Add((timer, Task.Run(async () => await timer.DisposeAsync().ConfigureAwait(false))));
+        }
+        _cleanupTimers.RemoveAll(item => item.Cleanup.IsCompletedSuccessfully);
+    }
+    private void SweepClients()
+    {
+        LlmOperationLifetime.Lease operation;
+        try { operation = _lifetime.Enter(default); }
+        catch (ObjectDisposedException) { return; }
+        using (operation)
+            lock (_gate) { ReconcileClients(); UpdateCleanupTimer(); }
     }
 
     private async Task ReleaseAsync()
     {
         SdkHttpClientLease[] clients; SdkHttpPipelineEntry[] entries;
-        lock (_gate) { clients = _clients.ToArray(); entries = _entries.ToArray(); _active.Clear(); }
+        Task[] timers;
+        lock (_gate)
+        {
+            _releaseStarted = true; UpdateCleanupTimer(); ReconcileClients();
+            clients = _clients.Select(registration => registration.Client!.TryGetTarget(out SdkHttpClientLease? client) ? client : null).OfType<SdkHttpClientLease>().ToArray();
+            entries = _entries.ToArray(); timers = _cleanupTimers.Select(item => item.Cleanup).ToArray(); _active.Clear();
+        }
         var errors = new List<Exception>();
+        foreach (Task timer in timers)
+            try { await timer.ConfigureAwait(false); } catch (Exception error) { errors.Add(error); }
         foreach (SdkHttpClientLease client in clients)
             try { client.Dispose(); } catch (Exception) { /* The client records its exact failure on its owned entry. */ }
         foreach (SdkHttpPipelineEntry entry in entries)
         {
-            Task cleanup; lock (_gate) cleanup = entry.Cleanup ??= Task.Run(entry.CleanupAsync);
+            Task cleanup; lock (_gate) cleanup = entry.Cleanup ??= Task.Run(() => CleanupEntryAsync(entry));
             try { await cleanup.ConfigureAwait(false); }
             catch (Exception error) { errors.Add(error); }
         }
         lock (_gate)
         {
-            _clients.Clear(); _entries.RemoveWhere(entry => entry.Released);
+            _clients.Clear(); _cleanupTimers.RemoveAll(item => item.Cleanup.IsCompletedSuccessfully); _entries.RemoveWhere(entry => entry.Released);
             _services = null; _options = null; _filters = null; _clock = null;
             _configuration!.Detach(); _configuration = null;
         }
@@ -229,8 +291,14 @@ internal sealed class SdkHttpPipelineEntry(SdkHttpGenerationPool owner)
     }
 }
 
-internal sealed class SdkHttpClientLease(SdkHttpGenerationPool owner, SdkHttpPipelineEntry entry)
-    : HttpClient(new SdkHttpSendHandler(owner, entry), disposeHandler: true)
+internal sealed class SdkHttpClientRegistration(SdkHttpPipelineEntry entry)
+{
+    internal SdkHttpPipelineEntry Entry { get; } = entry;
+    internal WeakReference<SdkHttpClientLease>? Client { get; set; }
+}
+
+internal sealed class SdkHttpClientLease(SdkHttpGenerationPool owner, SdkHttpClientRegistration registration)
+    : HttpClient(new SdkHttpSendHandler(owner, registration.Entry), disposeHandler: true)
 {
     private int _disposed;
     protected override void Dispose(bool disposing)
@@ -239,7 +307,7 @@ internal sealed class SdkHttpClientLease(SdkHttpGenerationPool owner, SdkHttpPip
         Exception? failure = null;
         try { base.Dispose(true); }
         catch (Exception error) { failure = error; throw; }
-        finally { owner.ReleaseClient(this, entry, failure); }
+        finally { owner.ReleaseClient(this, registration, failure); }
     }
 }
 

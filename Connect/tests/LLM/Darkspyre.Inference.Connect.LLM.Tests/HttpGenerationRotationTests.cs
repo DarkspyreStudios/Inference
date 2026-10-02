@@ -57,6 +57,47 @@ public sealed class HttpGenerationRotationTests
         Assert.NotEmpty(facade.SupportedProviders); Assert.Equal(2, factory.Calls);
         return [new(facade), .. factory.Clients];
     }
+    [Fact]
+    public async Task DroppedWrapperCleanupFailureRemainsOwnedAndAllRootDisposersReceiveOriginalFailure()
+    {
+        var clock = new Clock(); var failure = new InvalidOperationException("controlled expired cleanup"); var handler = new Handler(failure);
+        var services = new ServiceCollection(); services.AddSingleton<TimeProvider>(clock); services.AddLlmConnect();
+        services.AddHttpClient(Pipeline).SetHandlerLifetime(TimeSpan.FromSeconds(2)).ConfigurePrimaryHttpMessageHandler(() => handler);
+        ServiceProvider root = services.BuildServiceProvider(); SdkHttpGenerationPool pool = root.GetRequiredService<SdkHttpGenerationPool>();
+        try
+        {
+            WeakReference wrapper = DropWrapper(pool); Collect([wrapper]); Assert.False(wrapper.IsAlive);
+            clock.Advance(TimeSpan.FromSeconds(2)); clock.Advance(TimeSpan.FromSeconds(10));
+            await handler.Disposed.Task.WaitAsync(Bound);
+            Task first = pool.DisposeAsync().AsTask(); Task second = pool.DisposeAsync().AsTask(); Assert.Same(first, second);
+            Assert.Same(failure, await Assert.ThrowsAsync<InvalidOperationException>(() => first.WaitAsync(Bound)));
+            Assert.Same(failure, await Assert.ThrowsAsync<InvalidOperationException>(() => second.WaitAsync(Bound)));
+            Assert.Equal(1, handler.Disposals);
+        }
+        finally { try { await root.DisposeAsync(); } catch (InvalidOperationException error) when (ReferenceEquals(error, failure)) { } }
+    }
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static WeakReference DropWrapper(SdkHttpGenerationPool pool) => new(pool.CreateClient(Pipeline));
+    [Fact]
+    public async Task RootStopsAndDrainsInFlightCleanupTimerBeforeClosingLiveClientsAndHandler()
+    {
+        var clock = new Clock(); var handler = new Handler(); var services = new ServiceCollection();
+        services.AddSingleton<TimeProvider>(clock); services.AddLlmConnect();
+        services.AddHttpClient(Pipeline).SetHandlerLifetime(TimeSpan.FromSeconds(2)).ConfigurePrimaryHttpMessageHandler(() => handler);
+        await using ServiceProvider root = services.BuildServiceProvider(); SdkHttpGenerationPool pool = root.GetRequiredService<SdkHttpGenerationPool>();
+        using HttpClient client = pool.CreateClient(Pipeline); clock.Advance(TimeSpan.FromSeconds(2));
+        Timer sweep = Assert.Single(clock.Timers, timer => timer.Period == TimeSpan.FromSeconds(10));
+        Task callback = sweep.StartPausedCallbackAsync(); await sweep.CallbackEntered.Task.WaitAsync(Bound);
+        Task retirement = pool.DisposeAsync().AsTask();
+        try
+        {
+            await sweep.DisposalEntered.Task.WaitAsync(Bound);
+            Assert.False(retirement.IsCompleted); Assert.Equal(0, handler.Disposals);
+            Assert.Throws<ObjectDisposedException>(() => pool.CreateClient(Pipeline));
+        }
+        finally { sweep.ReleaseCallback.TrySetResult(); await callback.WaitAsync(Bound); await retirement.WaitAsync(Bound); }
+        Assert.Equal(1, handler.Disposals); Assert.Equal(1, sweep.Disposals);
+    }
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static async Task<(HttpResponseMessage Response, WeakReference Wrapper)> DropWrapperAfterHeadersAsync(SdkHttpGenerationPool pool)
     {
@@ -82,13 +123,13 @@ public sealed class HttpGenerationRotationTests
         public Task SaveCredentialAsync(string connectionId, string credentialJson, string expectedVersion, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public void Dispose() => Disposals++;
     }
-    private sealed class Handler : HttpMessageHandler
+    private sealed class Handler(Exception? failure = null) : HttpMessageHandler
     {
         public int Disposals { get; private set; }
         public TaskCompletionSource Disposed { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
             Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK) { Content = new StringContent("actual") });
-        protected override void Dispose(bool disposing) { if (disposing) { Disposals++; Disposed.TrySetResult(); } base.Dispose(disposing); }
+        protected override void Dispose(bool disposing) { if (disposing) { Disposals++; Disposed.TrySetResult(); if (failure is not null) throw failure; } base.Dispose(disposing); }
     }
     private sealed class Clock : TimeProvider
     {
@@ -104,6 +145,12 @@ public sealed class HttpGenerationRotationTests
     }
     private sealed class Timer(TimerCallback callback, object? state, TimeSpan due, TimeSpan interval, TimeSpan period) : ITimer
     {
+        public TaskCompletionSource CallbackEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource ReleaseCallback { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource DisposalEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private Task? _callback;
+        public Task StartPausedCallbackAsync() => _callback = RunPausedCallbackAsync();
+        private async Task RunPausedCallbackAsync() { CallbackEntered.TrySetResult(); await ReleaseCallback.Task; callback(state); }
         private TimeSpan _due = due;
         public TimeSpan Interval => interval;
         public TimeSpan Period => period;
@@ -116,6 +163,6 @@ public sealed class HttpGenerationRotationTests
         }
         public bool Change(TimeSpan dueTime, TimeSpan nextPeriod) => throw new NotSupportedException();
         public void Dispose() { Disposals++; Disposed.TrySetResult(); }
-        public ValueTask DisposeAsync() { Dispose(); return ValueTask.CompletedTask; }
+        public async ValueTask DisposeAsync() { DisposalEntered.TrySetResult(); if (_callback is not null) await _callback; Dispose(); }
     }
 }

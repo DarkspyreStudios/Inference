@@ -18,6 +18,12 @@ Logger factories run after the named handler-builder actions in the actual handl
 default logging, header redaction and meter filters remain active. HTTP configuration objects refuse
 nonnull JSON serialization and contain no transferable credential authority.
 
+Handler expiry stops new assignment to the old chain. Live issued clients and response/body leases
+keep it alive; weak client registrations do not retain dropped typed consumers. A generation-owned
+10-second cleanup timer reconciles collected wrappers while expired entries remain pending. Root
+retirement stops and drains that timer, closes live wrappers and awaits owned chain cleanup. Cleanup
+failures remain owned and are returned to all repeated disposers; borrowed host resources are untouched.
+
 ## Batch and deferred contracts
 
 `Darkspyre.Inference.Connect.Resources` declares `ILlmBatchClient` for explicit-connection batch

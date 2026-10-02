@@ -282,7 +282,7 @@ public sealed class HttpGenerationLifetimeTests
     {
         public List<ControlledTimer> Timers { get; } = [];
         public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
-        { Assert.Equal(Timeout.InfiniteTimeSpan, period); var timer = new ControlledTimer(callback, state); Timers.Add(timer); return timer; }
+        { Assert.True(period == Timeout.InfiniteTimeSpan || period == TimeSpan.FromSeconds(10)); var timer = new ControlledTimer(callback, state); Timers.Add(timer); return timer; }
         public void Fire() { foreach (ControlledTimer timer in Timers.ToArray()) timer.Fire(); }
     }
     private sealed class ControlledTimer(TimerCallback callback, object? state) : ITimer
