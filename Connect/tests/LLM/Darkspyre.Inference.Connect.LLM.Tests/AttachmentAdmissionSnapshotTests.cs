@@ -5,6 +5,7 @@ using System.Text.Json;
 using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Common.LLM;
 using Darkspyre.Inference.Common.Media;
+using Darkspyre.Inference.Common.Resources;
 using Darkspyre.Inference.Connect.LLM.Internal;
 using Darkspyre.Inference.Connect.LLM.Providers;
 
@@ -12,6 +13,32 @@ namespace Darkspyre.Inference.Connect.LLM.Tests;
 
 public sealed class AttachmentAdmissionSnapshotTests
 {
+    [Fact]
+    public void SnapshotPreservesBorrowedResourceAuthorityWithoutCallbacks()
+    {
+        var resources = new ForbiddenResources();
+        LlmChatRequest snapshot = ClientTools.Snapshot(new LlmChatRequest { ModelId = "model", Resources = resources });
+        Assert.Same(resources, snapshot.Resources);
+        Assert.Equal(0, resources.Touched);
+        Assert.False(resources.Disposed);
+    }
+
+    [Fact]
+    public void ProviderOptionSnapshotPreservesOrderJsonKindsAndReadOnlyOwnership()
+    {
+        using var document = JsonDocument.Parse("{\"first\":null,\"second\":false,\"third\":1}");
+        Dictionary<string, JsonElement> options = document.RootElement.EnumerateObject()
+            .ToDictionary(property => property.Name, property => property.Value, StringComparer.Ordinal);
+        LlmChatRequest snapshot = ClientTools.Snapshot(new LlmChatRequest { ModelId = "model", ProviderOptions = options });
+        options.Clear(); document.Dispose();
+        Assert.Collection(snapshot.ProviderOptions,
+            option => { Assert.Equal("first", option.Key); Assert.Equal(JsonValueKind.Null, option.Value.ValueKind); },
+            option => { Assert.Equal("second", option.Key); Assert.Equal(JsonValueKind.False, option.Value.ValueKind); },
+            option => { Assert.Equal("third", option.Key); Assert.Equal("1", option.Value.GetRawText()); });
+        Assert.Throws<NotSupportedException>(() => ((IDictionary<string, JsonElement>)snapshot.ProviderOptions)
+            .Add("late", JsonSerializer.SerializeToElement(true)));
+    }
+
     [Fact]
     public void ForeignOwnedSnapshotCallerAndMetadataRetireAfterTheOperation()
     {
@@ -40,9 +67,14 @@ public sealed class AttachmentAdmissionSnapshotTests
             }
             Type type = fixture.GetType(typeof(AttachmentAdmissionSnapshotTests).FullName!, true)!;
             object caller = Activator.CreateInstance(type)!;
+            type.GetMethod(nameof(SnapshotPreservesBorrowedResourceAuthorityWithoutCallbacks))!.Invoke(caller, null);
+            type.GetMethod(nameof(ProviderOptionSnapshotPreservesOrderJsonKindsAndReadOnlyOwnership))!.Invoke(caller, null);
             type.GetMethod(nameof(SnapshotPreservesTheWholeAttachmentUnionWithoutEffects))!.Invoke(caller, null);
             ((Task)type.GetMethod(nameof(FacadeFreezesAttachmentOrderBytesAndOmissionsAtAdmission))!
                 .Invoke(caller, [0, 0])!).GetAwaiter().GetResult();
+            for (int field = 0; field < 3; field++)
+                ((Task)type.GetMethod(nameof(FacadeFreezesStopsProviderOptionsAndSchemaBeforeResolution))!
+                    .Invoke(caller, [field, 0])!).GetAwaiter().GetResult();
         }
         finally { generation.Unload(); }
         return weak.ToArray();
@@ -249,6 +281,28 @@ public sealed class AttachmentAdmissionSnapshotTests
             Entered.TrySetResult();
             await Release.Task.WaitAsync(token);
         }
+    }
+
+    private sealed class ForbiddenResources : IInferenceResourceAccess, IDisposable
+    {
+        internal int Touched { get; private set; }
+        internal bool Disposed { get; private set; }
+        public string WorkspaceId => Forbidden<string>();
+        public string SessionId => Forbidden<string>();
+        public Task<InferenceResourceDescriptor?> GetAsync(InferenceResourceReference reference, CancellationToken cancellationToken = default)
+            => Forbidden<Task<InferenceResourceDescriptor?>>();
+        public Task<IInferenceResourceReadHandle> OpenReadAsync(InferenceResourceReference reference, CancellationToken cancellationToken = default)
+            => Forbidden<Task<IInferenceResourceReadHandle>>();
+        public Task<IInferenceResourceWriteHandle> OpenWriteAsync(InferenceResourceCreate resource, CancellationToken cancellationToken = default)
+            => Forbidden<Task<IInferenceResourceWriteHandle>>();
+        public Task<InferenceResourceSelection> GetSelectionAsync(CancellationToken cancellationToken = default)
+            => Forbidden<Task<InferenceResourceSelection>>();
+        public Task<InferenceResourceSelection> SelectAsync(IReadOnlyList<InferenceResourceReference> references, CancellationToken cancellationToken = default)
+            => Forbidden<Task<InferenceResourceSelection>>();
+        public Task<InferenceResourceSelection> ReplaceSelectionAsync(IReadOnlyList<InferenceResourceReference> references, long expectedRevision, CancellationToken cancellationToken = default)
+            => Forbidden<Task<InferenceResourceSelection>>();
+        public void Dispose() => Disposed = true;
+        private T Forbidden<T>() { Touched++; throw new InvalidOperationException("Unexpected resource callback."); }
     }
 
     private sealed class Source(Gate gate) : ILlmConnectionSource, IDisposable
