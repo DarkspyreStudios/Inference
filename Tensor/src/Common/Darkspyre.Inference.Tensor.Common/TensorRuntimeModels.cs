@@ -111,14 +111,12 @@ public sealed record TensorRuntimeBackendIdentity(TensorBackendKind Backend, Ten
         = TensorRuntimeValidation.Text(NativeSourceCommit, nameof(NativeSourceCommit));
 }
 
-[JsonConverter(typeof(TensorRuntimeStateJsonConverter))]
 public enum TensorRuntimeState
 {
     Uninitialized = 0, Initializing = 1, Ready = 2, Unavailable = 3,
     RequiresProcessRestart = 4, Stopping = 5, Stopped = 6
 }
 
-[JsonConverter(typeof(TensorRuntimeShutdownStateJsonConverter))]
 public enum TensorRuntimeShutdownState
 {
     Completed = 0, AlreadyStopped = 1, Busy = 2,
