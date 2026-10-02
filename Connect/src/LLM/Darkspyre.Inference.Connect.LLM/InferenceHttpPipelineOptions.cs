@@ -10,7 +10,7 @@ namespace Darkspyre.Inference.Connect.LLM;
 public enum InferenceHttpCreationMode { SdkGenerationOwned = 0, BorrowHostFactory = 1 }
 
 /// <summary>Configures one SDK DI generation. This runtime configuration is not portable data.</summary>
-[JsonConverter(typeof(InferenceHttpRuntimeJsonConverter<InferenceHttpPipelineOptions>))]
+[JsonConverter(typeof(InferenceHttpConfigurationJsonConverterFactory))]
 public sealed class InferenceHttpPipelineOptions
 {
     private readonly List<(string Name, InferenceHttpLoggingBuilder Builder)> _logging = [];
@@ -36,7 +36,7 @@ public sealed class InferenceHttpPipelineOptions
 }
 
 /// <summary>Registers ordered logging through public factory policy and explicit SDK logger adapters.</summary>
-[JsonConverter(typeof(InferenceHttpRuntimeJsonConverter<InferenceHttpLoggingBuilder>))]
+[JsonConverter(typeof(InferenceHttpConfigurationJsonConverterFactory))]
 public sealed class InferenceHttpLoggingBuilder
 {
     private readonly List<Action<IHttpClientBuilder, SdkHttpConfiguration>> _actions = [];
@@ -78,14 +78,28 @@ public sealed class InferenceHttpLoggingBuilder
     public override string ToString() => nameof(InferenceHttpLoggingBuilder);
 }
 
-internal sealed class InferenceHttpRuntimeJsonConverter<T> : JsonConverter<T> where T : class
+/// <summary>Refuses transfer of the two HTTP runtime configuration types while preserving null values.</summary>
+public sealed class InferenceHttpConfigurationJsonConverterFactory : JsonConverterFactory
 {
-    public override bool HandleNull => true;
-    public override T? Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options) =>
-        reader.TokenType == JsonTokenType.Null ? null : throw new NotSupportedException("HTTP runtime configuration is not portable data.");
-    public override void Write(Utf8JsonWriter writer, T value, JsonSerializerOptions options)
+    public override bool CanConvert(Type typeToConvert) =>
+        typeToConvert == typeof(InferenceHttpPipelineOptions) || typeToConvert == typeof(InferenceHttpLoggingBuilder);
+
+    public override JsonConverter CreateConverter(Type typeToConvert, JsonSerializerOptions options)
     {
-        if (value is null) writer.WriteNullValue();
-        else throw new NotSupportedException("HTTP runtime configuration is not portable data.");
+        if (typeToConvert == typeof(InferenceHttpPipelineOptions)) return new RuntimeRefusalConverter<InferenceHttpPipelineOptions>();
+        if (typeToConvert == typeof(InferenceHttpLoggingBuilder)) return new RuntimeRefusalConverter<InferenceHttpLoggingBuilder>();
+        throw new NotSupportedException("Only the two HTTP runtime configuration types use this converter factory.");
+    }
+
+    private sealed class RuntimeRefusalConverter<T> : JsonConverter<T> where T : class
+    {
+        public override bool HandleNull => true;
+        public override T? Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options) =>
+            reader.TokenType == JsonTokenType.Null ? null : throw new NotSupportedException("HTTP runtime configuration is not portable data.");
+        public override void Write(Utf8JsonWriter writer, T value, JsonSerializerOptions options)
+        {
+            if (value is null) writer.WriteNullValue();
+            else throw new NotSupportedException("HTTP runtime configuration is not portable data.");
+        }
     }
 }

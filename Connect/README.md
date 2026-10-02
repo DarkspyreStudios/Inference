@@ -17,6 +17,8 @@ Custom logger registrations in owned mode use `ConfigureLogging(name, logging =>
 Logger factories run after the named handler-builder actions in the actual handler scope. Public
 default logging, header redaction and meter filters remain active. HTTP configuration objects refuse
 nonnull JSON serialization and contain no transferable credential authority.
+Their attributes name one public closed converter factory for the two configuration types, so
+nonfriend generated contexts preserve the same nonnull refusal and null handling.
 
 Handler expiry stops new assignment to the old chain. Live issued clients and response/body leases
 keep it alive; weak client registrations do not retain dropped typed consumers. A generation-owned
