@@ -507,7 +507,7 @@ public sealed class QwenLlmInference : ITensorLlmInference
             {
                 // Qwen owns the terminal admission fence; the existing lifecycle queues release-only retries.
                 return _lifetime.AcceptAsync(TensorEngineState.Stopping, current.Model, current.Backend,
-                    token => StopCoreAsync(token, completion), cancellationToken, teardown: true);
+                    token => StopCoreAsync(completion, token), cancellationToken, teardown: true);
             }
             catch (Exception error)
             {
@@ -517,7 +517,7 @@ public sealed class QwenLlmInference : ITensorLlmInference
         }
     }
 
-    private async Task<TensorEngineStatus> StopCoreAsync(CancellationToken token, TaskCompletionSource completion)
+    private async Task<TensorEngineStatus> StopCoreAsync(TaskCompletionSource completion, CancellationToken token)
     {
         try
         {

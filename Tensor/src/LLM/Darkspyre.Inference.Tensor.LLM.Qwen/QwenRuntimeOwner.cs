@@ -153,7 +153,7 @@ public sealed class QwenRuntimeOwner : ITensorRuntimeOwner
 
     internal IDisposable EnterExecution() => Enter();
 
-    private IDisposable Enter()
+    private OperationLease Enter()
     {
         lock (_gate)
         {
@@ -318,11 +318,11 @@ public sealed class QwenRuntimeOwner : ITensorRuntimeOwner
             presence.ToArray(), diagnostics.ToArray());
     }
 
-    private GgmlNativeCandidate ToSupplier(TensorRuntimeCandidate candidate) => new(
+    private static GgmlNativeCandidate ToSupplier(TensorRuntimeCandidate candidate) => new(
         Path.GetDirectoryName(candidate.Identity.AbsoluteBridgePath) ?? string.Empty, candidate.Identity.Build.Version,
         candidate.Identity.TargetRid, candidate.Identity.Variant, ToSupplier(candidate.Backend),
         candidate.Files.Select(file => new GgmlNativeFile(file.RelativePath, file.Size, file.Sha256)).ToArray())
-        { NativeAbi = candidate.Identity.Build.NativeAbi };
+    { NativeAbi = candidate.Identity.Build.NativeAbi };
 
     private static TensorRuntimeCandidate? Match(List<(TensorRuntimeCandidate Original, GgmlNativeCandidate Native)> candidates,
         GgmlNativeCandidate native) => candidates.FirstOrDefault(candidate => candidate.Native.Directory == native.Directory
@@ -336,14 +336,18 @@ public sealed class QwenRuntimeOwner : ITensorRuntimeOwner
 
     internal static GgmlBackendType ToSupplier(TensorBackendKind backend) => backend switch
     {
-        TensorBackendKind.GgmlCpu => GgmlBackendType.Cpu, TensorBackendKind.GgmlMetal => GgmlBackendType.Metal,
-        TensorBackendKind.GgmlCuda => GgmlBackendType.Cuda, TensorBackendKind.GgmlVulkan => GgmlBackendType.Vulkan,
+        TensorBackendKind.GgmlCpu => GgmlBackendType.Cpu,
+        TensorBackendKind.GgmlMetal => GgmlBackendType.Metal,
+        TensorBackendKind.GgmlCuda => GgmlBackendType.Cuda,
+        TensorBackendKind.GgmlVulkan => GgmlBackendType.Vulkan,
         _ => throw new ArgumentOutOfRangeException(nameof(backend))
     };
     private static TensorBackendKind FromSupplier(GgmlBackendType backend) => backend switch
     {
-        GgmlBackendType.Cpu => TensorBackendKind.GgmlCpu, GgmlBackendType.Metal => TensorBackendKind.GgmlMetal,
-        GgmlBackendType.Cuda => TensorBackendKind.GgmlCuda, GgmlBackendType.Vulkan => TensorBackendKind.GgmlVulkan,
+        GgmlBackendType.Cpu => TensorBackendKind.GgmlCpu,
+        GgmlBackendType.Metal => TensorBackendKind.GgmlMetal,
+        GgmlBackendType.Cuda => TensorBackendKind.GgmlCuda,
+        GgmlBackendType.Vulkan => TensorBackendKind.GgmlVulkan,
         _ => throw new ArgumentOutOfRangeException(nameof(backend))
     };
 

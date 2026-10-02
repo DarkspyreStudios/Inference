@@ -6,6 +6,7 @@ namespace Darkspyre.Inference.Tensor.LLM.Qwen.Tests;
 
 public sealed class QwenRuntimeOwnerTests
 {
+    private static readonly string[] RefusedCandidateCodes = ["candidate-entry-invalid", "native-refused"];
     private static TensorSharpBuildIdentity Build => new("2.8.6.8", new('a', 64), new('b', 40));
     private const string Rid = "linux-x64";
     private static TensorRuntimeCandidate Candidate(string id, TensorBackendKind backend) => new(
@@ -152,7 +153,7 @@ public sealed class QwenRuntimeOwnerTests
             TensorBackendAvailability result = await owner.CheckAsync(Request());
             Assert.Equal(TensorBackendAvailabilityState.Unavailable, result.State);
             Assert.All(result.CandidatePresence, candidate => Assert.Null(candidate.IsInstalled));
-            Assert.Equal(new[] { "candidate-entry-invalid", "native-refused" }, result.CandidateDiagnostics.Select(item => item.Code));
+            Assert.Equal(RefusedCandidateCodes, result.CandidateDiagnostics.Select(item => item.Code));
             Assert.DoesNotContain("private-error", string.Join(" ", result.CandidateDiagnostics.Select(item => item.Message)), StringComparison.Ordinal);
             Assert.Empty(supplier.Configured);
             Assert.Equal(0, supplier.Initializations);
@@ -350,7 +351,8 @@ public sealed class QwenRuntimeOwnerTests
     private static GgmlNativeCandidate Native(TensorRuntimeCandidate candidate) => new(
         Path.GetDirectoryName(candidate.Identity.AbsoluteBridgePath)!, candidate.Identity.Build.Version, candidate.Identity.TargetRid,
         candidate.Identity.Variant, QwenRuntimeOwner.ToSupplier(candidate.Backend),
-        candidate.Files.Select(file => new GgmlNativeFile(file.RelativePath, file.Size, file.Sha256)).ToArray()) { NativeAbi = Build.NativeAbi };
+        candidate.Files.Select(file => new GgmlNativeFile(file.RelativePath, file.Size, file.Sha256)).ToArray())
+    { NativeAbi = Build.NativeAbi };
 
     internal sealed class Supplier : IQwenGgmlRuntime
     {
