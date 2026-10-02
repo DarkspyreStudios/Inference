@@ -28,6 +28,9 @@ public static class ConnectTtsJson
     public static JsonTypeInfo<TtsAudioChunk> TtsAudioChunk => Metadata<TtsAudioChunk>();
     public static JsonTypeInfo<TtsUtteranceCompleted> TtsUtteranceCompleted => Metadata<TtsUtteranceCompleted>();
     public static JsonTypeInfo<TtsStreamError> TtsStreamError => Metadata<TtsStreamError>();
+    public static JsonTypeInfo<TtsStreamEvent> TtsStreamEvent => Metadata<TtsStreamEvent>();
+    public static JsonTypeInfo<TtsReplacementsUpdated> TtsReplacementsUpdated => Metadata<TtsReplacementsUpdated>();
+    public static JsonTypeInfo<TtsUtteranceCleared> TtsUtteranceCleared => Metadata<TtsUtteranceCleared>();
 
     private static readonly JsonSerializerOptions OwnedOptions = CreateOptions();
     private static JsonTypeInfo<T> Metadata<T>() => OwnedOptions.GetTypeInfo<T>();
@@ -74,6 +77,8 @@ public static class ConnectTtsJson
             if (type == typeof(TtsSettings)) return RuntimeValue<TtsSettings>(options);
             if (type == typeof(TtsSettingsManager)) return RuntimeValue<TtsSettingsManager>(options);
             JsonTypeInfo? metadata = ((IJsonTypeInfoResolver)ConnectTtsJsonContext.Default).GetTypeInfo(type, options);
+            if (type == typeof(TtsSetupConfiguration) && metadata is not null)
+                metadata.UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow;
             if ((type == typeof(TtsResult) || type == typeof(TtsAudioChunk)) && metadata is not null)
                 metadata.Properties.Single(property => property.Name == "Audio").CustomConverter = audio;
             return metadata;
@@ -129,4 +134,7 @@ internal sealed class TtsRuntimeJsonConverter<T> : JsonConverter<T> where T : cl
 [JsonSerializable(typeof(TtsAudioChunk))]
 [JsonSerializable(typeof(TtsUtteranceCompleted))]
 [JsonSerializable(typeof(TtsStreamError))]
+[JsonSerializable(typeof(TtsStreamEvent))]
+[JsonSerializable(typeof(TtsReplacementsUpdated))]
+[JsonSerializable(typeof(TtsUtteranceCleared))]
 internal sealed partial class ConnectTtsJsonContext : JsonSerializerContext;

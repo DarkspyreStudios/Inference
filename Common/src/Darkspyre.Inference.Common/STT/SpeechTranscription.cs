@@ -172,7 +172,7 @@ public interface ISpeechTranscriptionSession : IAsyncDisposable
 }
 
 /// <summary>Hosted transcription operations, separate from Tensor's model-instance STT lifecycle.</summary>
-public interface ISpeechTranscriptionClient
+public interface ISpeechTranscriptionClient : IDisposable, IAsyncDisposable
 {
     Task<SpeechTranscriptionCapabilities> GetCapabilitiesAsync(string? modelId = null,
         CancellationToken cancellationToken = default);

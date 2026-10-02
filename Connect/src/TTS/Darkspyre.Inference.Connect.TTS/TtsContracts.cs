@@ -28,6 +28,7 @@ public sealed record TtsConnection
     public IReadOnlyDictionary<string, string> Headers { get; init => field = TtsData.Copy(TtsData.Required(value), StringComparer.OrdinalIgnoreCase)!; } = TtsData.Copy(new Dictionary<string, string>(), StringComparer.OrdinalIgnoreCase)!;
     public PocketTtsEndpointOptions PocketTts { get; init => field = TtsData.Required(value); } = new();
     public XaiConnectionSelection? Xai { get; init; }
+    public XaiTtsOptions? XaiDefaults { get; init; }
     public IProviderAuthorization? Authorization { get; init; }
     public override string ToString() => "TtsConnection { <data> }";
 }
@@ -63,6 +64,8 @@ public sealed record TtsCapabilities(bool SupportsVoiceListing, bool SupportsSpe
     public bool SupportsTimestamps { get; init; }
     public bool SupportsStreaming { get; init; }
     public bool SupportsRepeatedUtterances { get; init; }
+    public bool SupportsReplacementUpdates { get; init; }
+    public bool SupportsUtteranceClearing { get; init; }
     public bool SupportsTextNormalization { get; init; }
     public bool SupportsTextReplacement { get; init; }
     public bool SupportsOptimizeStreamingLatency { get; init; }
@@ -77,10 +80,11 @@ public sealed record TtsResult(string ContentType, ReadOnlyMemory<byte> Audio, I
     [JsonRequired] public InferenceProvenance Provenance { get; init => field = TtsData.Required(value); } = TtsData.Required(Provenance);
     public TimeSpan? Duration { get; init; }
     public IReadOnlyList<TtsTimestamp>? Timestamps { get; init => field = value is null ? null : TtsData.Copy(value); }
+    public InferenceResourceDescriptor? Resource { get; init; }
     public override string ToString() => "TtsResult { <data> }";
 }
 
-public interface ITtsClient
+public interface ITtsClient : IDisposable, IAsyncDisposable
 {
     InferenceImplementationDescriptor Descriptor { get; }
     Task<TtsCapabilities> GetCapabilitiesAsync(CancellationToken cancellationToken = default);

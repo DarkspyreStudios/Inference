@@ -1,8 +1,18 @@
 using System.Text.Json.Serialization;
 using Darkspyre.Inference.Common.LLM;
 using Darkspyre.Inference.Common.Media;
+using Darkspyre.Inference.Common.Resources;
 
 namespace Darkspyre.Inference.Common.Realtime;
+
+public sealed record RealtimeAudioArtifact(RealtimeEventIdentity Identity,
+    InferenceResourceDescriptor Resource, RealtimeAudioConfig? Audio = null)
+{
+    [JsonRequired] public RealtimeEventIdentity Identity { get; init => field = RealtimeData.Required(value); } = RealtimeData.Required(Identity);
+    [JsonRequired] public InferenceResourceDescriptor Resource { get; init => field = RealtimeData.Required(value); } = RealtimeData.Required(Resource);
+    public InferenceResourceSelectionVersion? SelectionVersion { get; init; }
+    public override string ToString() => "RealtimeAudioArtifact { <data> }";
+}
 
 public sealed record RealtimeEventIdentity(string? EventId = null, string? ResponseId = null,
     string? ItemId = null, int? OutputIndex = null, int? ContentIndex = null)
@@ -98,11 +108,15 @@ public sealed record RealtimeResponseEvent(RealtimeEventIdentity Identity, strin
 {
     [JsonRequired] public string Stage { get; init => field = RealtimeData.Required(value); } = RealtimeData.Required(Stage);
     public IReadOnlyDictionary<string, string>? Metadata { get; init => field = RealtimeData.Map(value); } = RealtimeData.Map(Metadata);
+    public IReadOnlyList<RealtimeAudioArtifact>? AudioArtifacts { get; init => field = value is null ? null : RealtimeData.Copy(value); }
+    public string? ProviderStatus { get; init; }
     public override string ToString() => "RealtimeResponseEvent { <event> }";
 }
 public sealed record RealtimeErrorEvent(RealtimeEventIdentity Identity, InferenceResourceFailure Error,
     string? Parameter = null, string? RelatedClientEventId = null) : RealtimeEvent(Identity)
 {
     [JsonRequired] public InferenceResourceFailure Error { get; init => field = RealtimeData.Required(value); } = RealtimeData.Required(Error);
+    public IReadOnlyList<RealtimeAudioArtifact>? AudioArtifacts { get; init => field = value is null ? null : RealtimeData.Copy(value); }
+    public string? ProviderStatus { get; init; }
     public override string ToString() => "RealtimeErrorEvent { <event> }";
 }

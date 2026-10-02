@@ -24,7 +24,7 @@ public sealed class TtsContractTests
         { "TtsVoice", "{\"Id\":\"voice\",\"DisplayName\":\"name\",\"Locale\":null}" },
         { "TtsCapabilities", "{\"SupportsVoiceListing\":false,\"SupportsSpeed\":false,\"Formats\":[0,1],\"SampleRates\":null,\"BitRates\":[]}" },
         { "TtsResult", "{\"ContentType\":\"audio/wav\",\"Audio\":\"AQI=\",\"Provenance\":" + Provenance + ",\"Duration\":null,\"Timestamps\":[{\"Text\":\" a \",\"Start\":\"00:00:01\",\"End\":\"00:00:02\"}]}" },
-        { "TtsSetupConfiguration", "{\"Connection\":{\"Endpoint\":\"https://example.invalid/\"},\"Language\":\"en\",\"SampleRate\":24000,\"BitRate\":128000,\"IncludeTimestamps\":false,\"Xai\":{\"Replace\":{}}}" },
+        { "TtsSetupConfiguration", "{\"Connection\":{\"Endpoint\":\"https://example.invalid/\",\"XaiDefaults\":{\"Replace\":{}}},\"Language\":\"en\",\"SampleRate\":24000,\"BitRate\":128000,\"IncludeTimestamps\":false}" },
         { "TtsSetupHeaderChanges", "{\"Set\":{},\"Remove\":[]}" },
         { "TtsSetupChanges", "{\"Identity\":{\"Id\":\"id\",\"Intent\":0},\"Configuration\":{\"Connection\":{\"Endpoint\":\"https://example.invalid/\"}},\"Headers\":{\"Set\":{},\"Remove\":[]}}" },
         { "TtsTimestamp", "{\"Text\":\" \\u00e9 \",\"Start\":\"00:00:00\",\"End\":\"00:00:00\"}" },
@@ -32,7 +32,10 @@ public sealed class TtsContractTests
         { "TtsStreamOptions", "{\"VoiceId\":null,\"Format\":3,\"Xai\":{\"Replace\":null}}" },
         { "TtsAudioChunk", "{\"Audio\":\"\",\"ContentType\":null,\"Duration\":null,\"Timestamps\":[]}" },
         { "TtsUtteranceCompleted", "{\"ProviderTraceId\":null}" },
-        { "TtsStreamError", "{\"Error\":{\"Code\":6,\"Message\":\"sanitized\",\"ProviderCode\":null}}" }
+        { "TtsStreamError", "{\"Error\":{\"Code\":6,\"Message\":\"sanitized\",\"ProviderCode\":null}}" },
+        { "TtsStreamEvent", "{\"type\":\"utterance-completed\",\"ProviderTraceId\":\"actual\",\"Resource\":{\"Reference\":{\"WorkspaceId\":\"w\",\"Id\":\"a\"},\"SessionId\":\"s\",\"FileName\":null,\"ContentType\":\"audio/wav\",\"Bytes\":0}}" },
+        { "TtsReplacementsUpdated", "{\"Replace\":{\"literal\":\"actual\"}}" },
+        { "TtsUtteranceCleared", "{}" }
     };
 
     [Theory, MemberData(nameof(Shapes))]
@@ -50,7 +53,7 @@ public sealed class TtsContractTests
     public async Task PocketRejectsEveryExplicitNewControlBeforeHttp(string control)
     {
         using var handler = new NoHttp(); using var http = new HttpClient(handler);
-        ITtsClient client = new PocketTtsHttpProvider(http).Bind(new() { Endpoint = new("https://example.invalid") });
+        using ITtsClient client = new PocketTtsHttpProvider(http).Bind(new() { Endpoint = new("https://example.invalid") });
         TtsRequest request = control switch
         {
             "Language" => new() { Text = "text", Language = "en" },
@@ -151,7 +154,7 @@ public sealed class TtsContractTests
     {
         Assert.Equal(0, ExerciseRuntimeRefusal());
         Assert.Null(typeof(ConnectTtsJson).GetProperty(nameof(ITtsStreamingSession)));
-        Assert.Null(typeof(ConnectTtsJson).GetProperty(nameof(TtsStreamEvent)));
+        Assert.NotNull(typeof(ConnectTtsJson).GetProperty(nameof(TtsStreamEvent)));
     }
 
     public static int ExerciseRuntimeRefusal()
@@ -175,8 +178,8 @@ public sealed class TtsContractTests
         var service = new TtsProviderService([new PocketTtsHttpProvider(http)]);
         var target = new Target();
         TtsSettingsManager manager = service.CreateSettingsManager(target);
-        var configuration = new TtsSetupConfiguration(new() { Endpoint = new("https://example.invalid") })
-        { Language = "en", SampleRate = 24000, BitRate = 128000, IncludeTimestamps = false, Xai = new(TextNormalization: false) };
+        var configuration = new TtsSetupConfiguration(new() { Endpoint = new("https://example.invalid"), XaiDefaults = new(TextNormalization: false) })
+        { Language = "en", SampleRate = 24000, BitRate = 128000, IncludeTimestamps = false };
         TtsSettings settings = await manager.OpenAsync(TtsTransport.PocketTtsHttp, new(SetupChangeIntent.Edit, "id", "v1"), configuration);
         Assert.False(settings.Validate().IsValid);
         Assert.False(Assert.Single(settings.Actions, action => action.Id == "test").IsEnabled);
@@ -188,7 +191,7 @@ public sealed class TtsContractTests
         var restored = JsonSerializer.Deserialize(json, ConnectTtsJson.TtsSetupConfiguration)!;
         Assert.Equal("en", restored.Language); Assert.Equal(24000, restored.SampleRate);
         Assert.Equal(128000, restored.BitRate); Assert.False(restored.IncludeTimestamps);
-        Assert.False(restored.Xai!.TextNormalization);
+        Assert.False(restored.Connection.XaiDefaults!.TextNormalization);
         Assert.False(settings.HasUnsavedChanges);
     }
 
@@ -305,6 +308,9 @@ public sealed class TtsContractTests
 
     private sealed class UntouchableRuntime : ITtsClient, ITtsProvider, ITtsStreamingClient, ITtsStreamingSession
     {
+        public void Dispose() => throw Touched();
+        public Task UpdateReplacementsAsync(IReadOnlyDictionary<string, string> replacements, CancellationToken cancellationToken = default) => throw Touched();
+        public Task ClearUtteranceAsync(CancellationToken cancellationToken = default) => throw Touched();
         public int Effects { get; private set; }
         private InvalidOperationException Touched() { Effects++; return new("A runtime collaborator was inspected."); }
         public override string ToString() => throw Touched();
@@ -318,7 +324,7 @@ public sealed class TtsContractTests
         public Task<IReadOnlyList<TtsVoice>> ListVoicesAsync(CancellationToken cancellationToken = default) => throw Touched();
         public Task<TtsResult> SpeakAsync(TtsRequest request, CancellationToken cancellationToken = default) => throw Touched();
         public Task<ITtsStreamingSession> OpenStreamAsync(TtsStreamOptions options, InferenceStreamLimits limits, CancellationToken cancellationToken = default) => throw Touched();
-        public IAsyncEnumerable<TtsAudioChunk> SpeakStreamAsync(IAsyncEnumerable<string> text, TtsStreamOptions options, InferenceStreamLimits limits, CancellationToken cancellationToken = default) => throw Touched();
+        public IAsyncEnumerable<TtsStreamEvent> SpeakStreamAsync(IAsyncEnumerable<string> text, TtsStreamOptions options, InferenceStreamLimits limits, CancellationToken cancellationToken = default) => throw Touched();
         public Task AppendTextAsync(string text, CancellationToken cancellationToken = default) => throw Touched();
         public Task CompleteUtteranceAsync(CancellationToken cancellationToken = default) => throw Touched();
         public ValueTask DisposeAsync() => throw Touched();

@@ -46,7 +46,12 @@ public sealed class SttFacadeLifetimeTests
             Assert.Throws<ObjectDisposedException>(() => facade.CreateSettingsManager(new Target()));
             release.Set();
             if (fails) Assert.Same(failure, await Record.ExceptionAsync(() => request.WaitAsync(Deadline)));
-            else if (bind) Assert.Same(provider, await request.WaitAsync(Deadline));
+            else if (bind)
+            {
+                object result = await request.WaitAsync(Deadline);
+                Assert.Same(provider.LastClient, result);
+                await Assert.IsAssignableFrom<ISpeechTranscriptionClient>(result).DisposeAsync();
+            }
             else Assert.Single(Assert.IsAssignableFrom<IReadOnlyList<InferenceSetupDefinition>>(await request.WaitAsync(Deadline)));
             await retirement.WaitAsync(Deadline);
             Assert.Same(retirement, Retire(facade));
@@ -72,12 +77,12 @@ public sealed class SttFacadeLifetimeTests
         try
         {
             Assert.IsAssignableFrom<IDisposable>(facade).Dispose(); await Retire(facade);
-            Assert.Same(provider, client); Assert.Equal(0, provider.DisposeCalls); Assert.Equal(0, target.DisposeCalls);
+            Assert.Same(provider.LastClient, client); Assert.Equal(0, provider.DisposeCalls); Assert.Equal(0, target.DisposeCalls);
             Assert.False((await client.GetCapabilitiesAsync()).Transcription.Available);
             await manager.DisposeAsync(); Assert.Equal(0, target.DisposeCalls);
             provider.Dispose(); Assert.Equal(1, provider.DisposeCalls);
         }
-        finally { await manager.DisposeAsync(); await Cleanup(facade); }
+        finally { try { await client.DisposeAsync(); } finally { await manager.DisposeAsync(); await Cleanup(facade); } }
     }
 
     [Theory]
@@ -137,7 +142,11 @@ public sealed class SttFacadeLifetimeTests
             await entered.Task.WaitAsync(Deadline); retirement = Cleanup(facade);
             release.Set();
             if (fails) Assert.Same(failure, await Record.ExceptionAsync(() => request.WaitAsync(Deadline)));
-            else await request.WaitAsync(Deadline);
+            else
+            {
+                object result = await request.WaitAsync(Deadline);
+                if (bind) await Assert.IsAssignableFrom<ISpeechTranscriptionClient>(result).DisposeAsync();
+            }
             await retirement.WaitAsync(Deadline);
             Assert.Contains(executed, item => item.Method == (bind ? "Bind" : "SetupDefinition"));
             Assert.DoesNotContain(executed, item => item.Method == "Dispose");
@@ -171,9 +180,10 @@ public sealed class SttFacadeLifetimeTests
     }
 }
 
-public sealed class ForeignSttProvider(Action? definition, Action? bind, Action<string, Guid> executed) : ISttProvider, ISpeechTranscriptionClient, IDisposable
+public sealed class ForeignSttProvider(Action? definition, Action? bind, Action<string, Guid> executed) : ISttProvider, IDisposable
 {
     public int DisposeCalls { get; private set; }
+    public ISpeechTranscriptionClient? LastClient { get; private set; }
     private void Record(string method) => executed(method, typeof(ForeignSttProvider).Assembly.ManifestModule.ModuleVersionId);
     public SttTransport Transport { get { Record("Transport"); return SttTransport.XaiStt; } }
     public InferenceSetupDefinition SetupDefinition
@@ -181,10 +191,15 @@ public sealed class ForeignSttProvider(Action? definition, Action? bind, Action<
         get { Record("SetupDefinition"); definition?.Invoke(); return new(new("controlled", "Controlled", InferenceImplementationKind.Connect, InferenceTask.SpeechTranscription), "Controlled provider"); }
     }
     public ISpeechTranscriptionClient Bind(SttConnection connection, XaiFamilyBinding? xai = null, IInferenceResourceAccess? resources = null)
-    { Record("Bind"); bind?.Invoke(); return this; }
-    public Task<SpeechTranscriptionCapabilities> GetCapabilitiesAsync(string? modelId = null, CancellationToken cancellationToken = default) => Task.FromResult(new SpeechTranscriptionCapabilities());
-    public Task<SpeechTranscriptionResult> TranscribeAsync(SpeechTranscriptionInput input, SpeechTranscriptionOptions options, CancellationToken cancellationToken = default) => throw new NotSupportedException();
-    public Task<ISpeechTranscriptionSession> OpenStreamAsync(SpeechStreamOptions options, InferenceStreamLimits limits, CancellationToken cancellationToken = default) => throw new NotSupportedException();
-    public IAsyncEnumerable<SpeechTranscriptEvent> TranscribeStreamAsync(IAsyncEnumerable<ReadOnlyMemory<byte>> audio, SpeechStreamOptions options, InferenceStreamLimits limits, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+    { Record("Bind"); bind?.Invoke(); return LastClient = new Client(); }
     public void Dispose() { DisposeCalls++; Record("Dispose"); }
+    private sealed class Client : ISpeechTranscriptionClient
+    {
+        public Task<SpeechTranscriptionCapabilities> GetCapabilitiesAsync(string? modelId = null, CancellationToken cancellationToken = default) => Task.FromResult(new SpeechTranscriptionCapabilities());
+        public Task<SpeechTranscriptionResult> TranscribeAsync(SpeechTranscriptionInput input, SpeechTranscriptionOptions options, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<ISpeechTranscriptionSession> OpenStreamAsync(SpeechStreamOptions options, InferenceStreamLimits limits, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public IAsyncEnumerable<SpeechTranscriptEvent> TranscribeStreamAsync(IAsyncEnumerable<ReadOnlyMemory<byte>> audio, SpeechStreamOptions options, InferenceStreamLimits limits, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public void Dispose() { }
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
 }

@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Runtime.ExceptionServices;
 using System.Text.Json.Serialization;
 using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Common.Setup;
@@ -16,7 +17,6 @@ public sealed record TtsSetupConfiguration(TtsConnection Connection, string? Voi
     public int? SampleRate { get; init; }
     public int? BitRate { get; init; }
     public bool? IncludeTimestamps { get; init; }
-    public XaiTtsOptions? Xai { get; init; }
     internal TtsRequest Request(string text) => new()
     {
         Text = text,
@@ -27,7 +27,7 @@ public sealed record TtsSetupConfiguration(TtsConnection Connection, string? Voi
         SampleRate = SampleRate,
         BitRate = BitRate,
         IncludeTimestamps = IncludeTimestamps,
-        Xai = Xai
+        Xai = TtsData.EffectiveOptions(Connection.XaiDefaults, null)
     };
     public override string ToString() => "TtsSetupConfiguration { <data> }";
 }
@@ -148,10 +148,10 @@ public sealed class TtsSettings : InferenceSettings<TtsSetupChanges>
             Number("sample-rate", "Sample rate (Hz)", _draft.SampleRate, value => _draft = _draft with { SampleRate = value }),
             Number("bit-rate", "Bit rate", _draft.BitRate, value => _draft = _draft with { BitRate = value }),
             Flag("timestamps", "Timestamps", _draft.IncludeTimestamps, value => _draft = _draft with { IncludeTimestamps = value }),
-            Number("latency", "Streaming latency", _draft.Xai?.OptimizeStreamingLatency,
-                value => _draft = _draft with { Xai = (_draft.Xai ?? new()) with { OptimizeStreamingLatency = value } }),
-            Flag("normalization", "Text normalization", _draft.Xai?.TextNormalization,
-                value => _draft = _draft with { Xai = (_draft.Xai ?? new()) with { TextNormalization = value } }),
+            Number("latency", "Streaming latency", _draft.Connection.XaiDefaults?.OptimizeStreamingLatency,
+                value => SetXai((_draft.Connection.XaiDefaults ?? new()) with { OptimizeStreamingLatency = value })),
+            Flag("normalization", "Text normalization", _draft.Connection.XaiDefaults?.TextNormalization,
+                value => SetXai((_draft.Connection.XaiDefaults ?? new()) with { TextNormalization = value })),
             ReplacementMode(), Replacements()
         ])])
     ];
@@ -162,16 +162,17 @@ public sealed class TtsSettings : InferenceSettings<TtsSetupChanges>
     private SetupChoiceField Flag(string id, string label, bool? value, Action<bool?> set) => new(new(id, label), value?.ToString() ?? string.Empty, string.Empty, replacement =>
         replacement.Length == 0 ? Edit(() => set(null)) : bool.TryParse(replacement, out bool flag) ? Edit(() => set(flag))
             : new(SetupEditState.Invalid, [new("flag-invalid", "Select true, false or omitted.", id)]), false);
-    private SetupChoiceField ReplacementMode() => new(new("replace-mode", "Text replacement"), _draft.Xai?.Replace is null ? "Omitted" : "Map", "Omitted", value => value switch
+    private void SetXai(XaiTtsOptions options) => _draft = _draft with { Connection = _draft.Connection with { XaiDefaults = options } };
+    private SetupChoiceField ReplacementMode() => new(new("replace-mode", "Text replacement"), _draft.Connection.XaiDefaults?.Replace is null ? "Omitted" : "Map", "Omitted", value => value switch
     {
-        "Omitted" => Edit(() => _draft = _draft with { Xai = (_draft.Xai ?? new()) with { Replace = null } }),
-        "Map" => Edit(() => _draft = _draft with { Xai = (_draft.Xai ?? new()) with { Replace = _draft.Xai?.Replace ?? new Dictionary<string, string>() } }),
+        "Omitted" => Edit(() => SetXai((_draft.Connection.XaiDefaults ?? new()) with { Replace = null })),
+        "Map" => Edit(() => SetXai((_draft.Connection.XaiDefaults ?? new()) with { Replace = _draft.Connection.XaiDefaults?.Replace ?? new Dictionary<string, string>() })),
         _ => new(SetupEditState.Invalid, [new("replace-mode-invalid", "Select omitted or map.", "replace-mode")])
     }, false);
     private SetupRepeatableGroupField Replacements()
     {
-        Dictionary<string, string> Copy() => new(_draft.Xai?.Replace ?? new Dictionary<string, string>(), StringComparer.Ordinal);
-        void Set(Dictionary<string, string> map) => _draft = _draft with { Xai = (_draft.Xai ?? new()) with { Replace = map } };
+        Dictionary<string, string> Copy() => new(_draft.Connection.XaiDefaults?.Replace ?? new Dictionary<string, string>(), StringComparer.Ordinal);
+        void Set(Dictionary<string, string> map) => SetXai((_draft.Connection.XaiDefaults ?? new()) with { Replace = map });
         SetupFieldRow Row(KeyValuePair<string, string> pair)
         {
             string key = pair.Key;
@@ -256,7 +257,7 @@ public sealed class TtsSettings : InferenceSettings<TtsSetupChanges>
         { issues.Add(new("speed-invalid", "Use a positive speed supported by the selected protocol.", "speed")); }
         if (!Enum.IsDefined(_draft.Format) || Transport == TtsTransport.PocketTtsHttp && _draft.Format != TtsAudioFormat.Wav) { issues.Add(new("format-unsupported", "Select a supported audio format.", "format")); }
         if (Transport == TtsTransport.PocketTtsHttp && (_draft.Language is not null || _draft.SampleRate is not null || _draft.BitRate is not null
-            || _draft.IncludeTimestamps is not null || _draft.Xai is not null))
+            || _draft.IncludeTimestamps is not null || _draft.Connection.XaiDefaults is not null))
         { issues.Add(new("controls-unsupported", "PocketTTS does not implement these explicit speech controls.", StepId: "speech")); }
         if (Transport == TtsTransport.XaiTts && string.IsNullOrWhiteSpace(_draft.Language))
             issues.Add(new("language-required", "Supply the speech language.", "language"));
@@ -267,7 +268,7 @@ public sealed class TtsSettings : InferenceSettings<TtsSetupChanges>
         || (_draft.VoiceId ?? string.Empty) != (_baseline.VoiceId ?? string.Empty)
         || _draft.Speed != _baseline.Speed || _draft.Format != _baseline.Format || _endpoint != _baseline.Connection.Endpoint
         || _draft.Language != _baseline.Language || _draft.SampleRate != _baseline.SampleRate
-        || _draft.BitRate != _baseline.BitRate || _draft.IncludeTimestamps != _baseline.IncludeTimestamps || _draft.Xai != _baseline.Xai
+        || _draft.BitRate != _baseline.BitRate || _draft.IncludeTimestamps != _baseline.IncludeTimestamps
         || _timeout != (long)_baseline.Connection.RequestTimeout.TotalSeconds || _removed.Count != 0
         || _headers.Any(header => header.OriginalName.Length == 0 || header.Name != header.OriginalName
             || header.Edit.Kind != SetupSecretEditKind.Keep);
@@ -303,6 +304,7 @@ public sealed class TtsSettingsManager : InferenceSettingsManager<TtsSettings, T
     private TtsProviderService? _service;
     private Func<XaiConnectionSelection, XaiFamilyBinding>? _xaiBindings;
     private IInferenceResourceAccess? _resources;
+    private readonly List<(Exception Failure, ITtsClient Owner)> _cleanupFailures = [];
 
     internal TtsSettingsManager(TtsProviderService service, ISetupCommitTarget<TtsSetupChanges> target,
         Func<XaiConnectionSelection, XaiFamilyBinding>? xaiBindings, IInferenceResourceAccess? resources)
@@ -349,29 +351,31 @@ public sealed class TtsSettingsManager : InferenceSettingsManager<TtsSettings, T
         TtsSetupConfiguration draft = settings.Draft;
         if (action.Id == "test" && settings.Transport == TtsTransport.PocketTtsHttp)
             PocketTtsHttpProvider.ValidateRequest(connection, draft.Request("This is a speech test."));
-        ITtsClient? client = Bind(connection, cancellationToken);
-        if (client is null) return new(SetupActionState.Unavailable);
-        if (settings.Generation != generation) return new(SetupActionState.Cancelled);
-        switch (action.Id)
+        return await UseClientAsync<SetupActionResult>(connection, async client =>
         {
-            case "check":
-                settings.Status = settings.Status with { Verified = SetupObservation.Unknown };
-                await client.ListVoicesAsync(cancellationToken).ConfigureAwait(false);
-                Fence(cancellationToken);
-                if (settings.Generation != generation) return new(SetupActionState.Cancelled);
-                settings.Status = settings.Status with { Verified = SetupObservation.Known(true) };
-                return SetupActionResult.Completed;
-            case "test":
-                settings.Status = settings.Status with { Ready = SetupObservation.Unknown };
-                await client.SpeakAsync(draft.Request("This is a speech test."),
-                    cancellationToken).ConfigureAwait(false);
-                Fence(cancellationToken);
-                if (settings.Generation != generation) return new(SetupActionState.Cancelled);
-                settings.Status = settings.Status with { Ready = SetupObservation.Known(true), Verified = SetupObservation.Known(true) };
-                return SetupActionResult.Completed;
-            default:
-                return new(SetupActionState.Unavailable);
-        }
+            if (client is null) return new(SetupActionState.Unavailable);
+            if (settings.Generation != generation) return new(SetupActionState.Cancelled);
+            switch (action.Id)
+            {
+                case "check":
+                    settings.Status = settings.Status with { Verified = SetupObservation.Unknown };
+                    await client.ListVoicesAsync(cancellationToken).ConfigureAwait(false);
+                    Fence(cancellationToken);
+                    if (settings.Generation != generation) return new(SetupActionState.Cancelled);
+                    settings.Status = settings.Status with { Verified = SetupObservation.Known(true) };
+                    return SetupActionResult.Completed;
+                case "test":
+                    settings.Status = settings.Status with { Ready = SetupObservation.Unknown };
+                    await client.SpeakAsync(draft.Request("This is a speech test."),
+                        cancellationToken).ConfigureAwait(false);
+                    Fence(cancellationToken);
+                    if (settings.Generation != generation) return new(SetupActionState.Cancelled);
+                    settings.Status = settings.Status with { Ready = SetupObservation.Known(true), Verified = SetupObservation.Known(true) };
+                    return SetupActionResult.Completed;
+                default:
+                    return new(SetupActionState.Unavailable);
+            }
+        }, cancellationToken).ConfigureAwait(false);
     }
 
     protected override async Task<SetupChoicePage> QueryProviderChoicesAsync(TtsSettings settings, string fieldId,
@@ -380,16 +384,38 @@ public sealed class TtsSettingsManager : InferenceSettingsManager<TtsSettings, T
         if (fieldId != "voice") { return new([], State: SetupChoiceState.Unavailable); }
         long generation = settings.Generation;
         TtsConnection connection = settings.Connection();
-        ITtsClient? client = Bind(connection, cancellationToken);
-        if (client is null) return new([], State: SetupChoiceState.Unavailable);
-        if (settings.Generation != generation) return new([], State: SetupChoiceState.Cancelled);
-        IReadOnlyList<TtsVoice> voices = await client.ListVoicesAsync(cancellationToken).ConfigureAwait(false);
-        Fence(cancellationToken);
-        if (settings.Generation != generation) return new([], State: SetupChoiceState.Cancelled);
-        return InferenceSettings.Page(query, voices.Select(voice => new SetupChoice(voice.Id, voice.DisplayName, voice.Description)));
+        return await UseClientAsync<SetupChoicePage>(connection, async client =>
+        {
+            if (client is null) return new([], State: SetupChoiceState.Unavailable);
+            if (settings.Generation != generation) return new([], State: SetupChoiceState.Cancelled);
+            IReadOnlyList<TtsVoice> voices = await client.ListVoicesAsync(cancellationToken).ConfigureAwait(false);
+            Fence(cancellationToken);
+            if (settings.Generation != generation) return new([], State: SetupChoiceState.Cancelled);
+            return InferenceSettings.Page(query, voices.Select(voice => new SetupChoice(voice.Id, voice.DisplayName, voice.Description)));
+        }, cancellationToken).ConfigureAwait(false);
     }
 
-    private ITtsClient? Bind(TtsConnection connection, CancellationToken token)
+    private async Task<T> UseClientAsync<T>(TtsConnection connection, Func<ITtsClient?, Task<T>> action, CancellationToken token)
+    {
+        ITtsClient? client = await BindAsync(connection, token).ConfigureAwait(false);
+        Exception? failure = null;
+        T result = default!;
+        try { result = await action(client).ConfigureAwait(false); }
+        catch (Exception original) { failure = original; }
+        if (client is not null)
+        {
+            try { await client.DisposeAsync().ConfigureAwait(false); }
+            catch (Exception cleanup)
+            {
+                failure = failure is null ? cleanup : new AggregateException(failure, cleanup);
+                lock (_cleanupFailures) _cleanupFailures.Add((failure, client));
+            }
+        }
+        if (failure is not null) ExceptionDispatchInfo.Capture(failure).Throw();
+        return result;
+    }
+
+    private async Task<ITtsClient?> BindAsync(TtsConnection connection, CancellationToken token)
     {
         TtsProviderService.ValidateConnection(connection);
         Fence(token);
@@ -400,9 +426,21 @@ public sealed class TtsSettingsManager : InferenceSettingsManager<TtsSettings, T
             binding = _xaiBindings(connection.Xai);
             Fence(token);
         }
-        ITtsClient result = _service!.Bind(connection, binding, _resources);
-        Fence(token);
-        return result;
+        // Readiness checks and sample clips do not select persistent session artifacts.
+        ITtsClient result = _service!.Bind(connection, binding);
+        try { Fence(token); return result; }
+        catch (Exception original)
+        {
+            try { await result.DisposeAsync().ConfigureAwait(false); }
+            catch (Exception cleanup)
+            {
+                var failure = new AggregateException(original, cleanup);
+                lock (_cleanupFailures) _cleanupFailures.Add((failure, result));
+                throw failure;
+            }
+            ExceptionDispatchInfo.Capture(original).Throw();
+            throw;
+        }
     }
     private void Fence(CancellationToken token)
     {
@@ -418,5 +456,11 @@ public sealed class TtsSettingsManager : InferenceSettingsManager<TtsSettings, T
     }
     public void Dispose() => Retire().GetAwaiter().GetResult();
     public ValueTask DisposeAsync() => new(Retire());
-    private Task Retire() => _lifetime.RetireAsync(() => { _service = null; _xaiBindings = null; _resources = null; DetachCommitTarget(); return Task.CompletedTask; });
+    private Task Retire() => _lifetime.RetireAsync(() =>
+    {
+        _service = null; _xaiBindings = null; _resources = null; DetachCommitTarget();
+        if (_cleanupFailures.Count == 1) return Task.FromException(_cleanupFailures[0].Failure);
+        if (_cleanupFailures.Count > 1) return Task.FromException(new AggregateException(_cleanupFailures.Select(item => item.Failure)));
+        return Task.CompletedTask;
+    });
 }

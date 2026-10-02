@@ -195,6 +195,7 @@ public sealed class SttSettingsManager : InferenceSettingsManager<SttSettings, S
     private SttProviderService? _service;
     private Func<XaiConnectionSelection, XaiFamilyBinding>? _xaiBindings;
     private IInferenceResourceAccess? _resources;
+    private readonly List<(Exception Failure, ISpeechTranscriptionClient Owner)> _cleanupFailures = [];
     internal SttSettingsManager(SttProviderService service, ISetupCommitTarget<SttSetupChanges> target,
         Func<XaiConnectionSelection, XaiFamilyBinding>? xaiBindings, IInferenceResourceAccess? resources) : base(target)
     { _service = service; _xaiBindings = xaiBindings; _resources = resources; }
@@ -235,11 +236,28 @@ public sealed class SttSettingsManager : InferenceSettingsManager<SttSettings, S
         Fence(cancellationToken);
         if (settings.Generation != generation) return new(SetupActionState.Cancelled);
         ISpeechTranscriptionClient client = _service!.Bind(connection, binding, _resources);
-        SpeechTranscriptionCapabilities capabilities = await client.GetCapabilitiesAsync(settings.Draft.Transcription.ModelId, cancellationToken).ConfigureAwait(false);
-        Fence(cancellationToken);
-        if (settings.Generation != generation) return new(SetupActionState.Cancelled);
-        settings.Status = settings.Status with { Verified = SetupObservation.Known(capabilities.Transcription.Available), Ready = SetupObservation.Known(capabilities.Transcription.Available) };
-        return SetupActionResult.Completed;
+        Exception? failure = null;
+        SetupActionResult result = new(SetupActionState.Cancelled);
+        try
+        {
+            Fence(cancellationToken);
+            SpeechTranscriptionCapabilities capabilities = await client.GetCapabilitiesAsync(settings.Draft.Transcription.ModelId, cancellationToken).ConfigureAwait(false);
+            Fence(cancellationToken);
+            if (settings.Generation == generation)
+            {
+                settings.Status = settings.Status with { Verified = SetupObservation.Known(capabilities.Transcription.Available), Ready = SetupObservation.Known(capabilities.Transcription.Available) };
+                result = SetupActionResult.Completed;
+            }
+        }
+        catch (Exception original) { failure = original; }
+        try { await client.DisposeAsync().ConfigureAwait(false); }
+        catch (Exception cleanup)
+        {
+            failure = failure is null ? cleanup : new AggregateException(failure, cleanup);
+            lock (_cleanupFailures) _cleanupFailures.Add((failure, client));
+        }
+        if (failure is not null) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(failure).Throw();
+        return result;
     }
     private void Fence(CancellationToken token)
     {
@@ -255,5 +273,11 @@ public sealed class SttSettingsManager : InferenceSettingsManager<SttSettings, S
     }
     public void Dispose() => RetireAsync().GetAwaiter().GetResult();
     public ValueTask DisposeAsync() => new(RetireAsync());
-    private Task RetireAsync() => _lifetime.RetireAsync(() => { _service = null; _xaiBindings = null; _resources = null; DetachCommitTarget(); return Task.CompletedTask; });
+    private Task RetireAsync() => _lifetime.RetireAsync(() =>
+    {
+        _service = null; _xaiBindings = null; _resources = null; DetachCommitTarget();
+        if (_cleanupFailures.Count == 1) return Task.FromException(_cleanupFailures[0].Failure);
+        if (_cleanupFailures.Count > 1) return Task.FromException(new AggregateException(_cleanupFailures.Select(item => item.Failure)));
+        return Task.CompletedTask;
+    });
 }

@@ -19,6 +19,80 @@ public sealed class SttBindingTests
     private static readonly SetupConfigurationIdentity Create = new(SetupChangeIntent.Create, "stt", null);
     private static readonly string[] FlagChoices = ["", "True", "False"];
     private static readonly string[] TermChoices = ["Omitted", "List"];
+
+    [Fact]
+    public async Task ConcurrentTemporaryClientCleanupFailuresDrainAndShareTheFullOutcome()
+    {
+        Exception first = new InvalidOperationException("first cleanup"), second = new InvalidOperationException("second cleanup");
+        var failures = new System.Collections.Concurrent.ConcurrentQueue<Exception>([first, second]); int entered = 0;
+        var both = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var provider = new ControlledProvider { Hold = true, Cleanup = () => failures.TryDequeue(out var failure) ? failure : null };
+        provider.OnCapability = () => { if (Interlocked.Increment(ref entered) == 2) both.TrySetResult(); };
+        using var access = new LlmConnectionAccess(new UntouchableSource(), []);
+        await using var facade = new SttProviderService([provider]);
+        var manager = facade.CreateSettingsManager(new Target(), _ => new(new("selected"), access));
+        Task<SetupActionResult>? one = null, two = null; Task? retirement = null;
+        try
+        {
+            var settings = await manager.OpenAsync(SttTransport.XaiStt, new(SetupChangeIntent.Edit, "stt", "version"), Populated());
+            one = manager.RunAsync(settings, "check"); two = manager.RunAsync(settings, "check");
+            await both.Task.WaitAsync(TimeSpan.FromSeconds(5)); retirement = manager.DisposeAsync().AsTask(); Assert.False(retirement.IsCompleted);
+            provider.Release.TrySetResult(); await Task.WhenAll(one, two).WaitAsync(TimeSpan.FromSeconds(5));
+            var failure = Assert.IsType<AggregateException>(await Record.ExceptionAsync(() => retirement.WaitAsync(TimeSpan.FromSeconds(5))));
+            Assert.Contains(first, failure.Flatten().InnerExceptions); Assert.Contains(second, failure.Flatten().InnerExceptions);
+            Assert.Same(failure, await Record.ExceptionAsync(() => manager.DisposeAsync().AsTask()));
+            Assert.Equal(2, provider.ClientDisposals); Assert.False(provider.Disposed);
+        }
+        finally
+        {
+            retirement ??= manager.DisposeAsync().AsTask(); provider.Release.TrySetResult();
+            try { await Task.WhenAll(new Task?[] { one, two }.OfType<Task>()).WaitAsync(TimeSpan.FromSeconds(5)); }
+            finally { _ = await Record.ExceptionAsync(() => retirement.WaitAsync(TimeSpan.FromSeconds(5))); }
+        }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task TemporaryCleanupFailureSurvivesStructuredActionAndSharedRetirement(bool operationFails)
+    {
+        var original = new InvalidOperationException("ordinary capability failure"); var cleanup = new InvalidOperationException("client cleanup failure");
+        var provider = new ControlledProvider { CapabilityFailure = operationFails ? original : null, CleanupFailure = cleanup };
+        using var access = new LlmConnectionAccess(new UntouchableSource(), []);
+        await using var facade = new SttProviderService([provider]);
+        var manager = facade.CreateSettingsManager(new Target(), _ => new(new("selected"), access));
+        try
+        {
+            var settings = await manager.OpenAsync(SttTransport.XaiStt, new(SetupChangeIntent.Edit, "stt", "version"), Populated());
+            Assert.Equal(SetupActionState.Failed, (await manager.RunAsync(settings, "check")).State);
+            Exception? failure = await Record.ExceptionAsync(() => manager.DisposeAsync().AsTask()); Assert.NotNull(failure);
+            if (operationFails)
+            { var aggregate = Assert.IsType<AggregateException>(failure); Assert.Same(original, aggregate.InnerExceptions[0]); Assert.Same(cleanup, aggregate.InnerExceptions[1]); }
+            else Assert.Same(cleanup, failure);
+            Assert.Same(failure, await Record.ExceptionAsync(() => manager.DisposeAsync().AsTask()));
+            Assert.Equal(1, provider.ClientDisposals); Assert.False(provider.Disposed);
+        }
+        finally { _ = await Record.ExceptionAsync(() => manager.DisposeAsync().AsTask()); }
+    }
+
+    [Fact]
+    public async Task LateBindDisposesUnhandedClientAndPreservesOriginalAndCleanup()
+    {
+        var cleanup = new InvalidOperationException("client cleanup failure"); var provider = new ControlledProvider { CleanupFailure = cleanup };
+        using var access = new LlmConnectionAccess(new UntouchableSource(), []);
+        await using var facade = new SttProviderService([provider]);
+        var manager = facade.CreateSettingsManager(new Target(), _ => new(new("selected"), access)); Task? retirement = null;
+        try
+        {
+            var settings = await manager.OpenAsync(SttTransport.XaiStt, new(SetupChangeIntent.Edit, "stt", "version"), Populated());
+            provider.OnBind = () => retirement = manager.DisposeAsync().AsTask();
+            Assert.Equal(SetupActionState.Cancelled, (await manager.RunAsync(settings, "check")).State);
+            var failure = Assert.IsType<AggregateException>(await Record.ExceptionAsync(() => retirement!));
+            Assert.IsAssignableFrom<OperationCanceledException>(failure.InnerExceptions[0]); Assert.Same(cleanup, failure.InnerExceptions[1]);
+            Assert.Equal(1, provider.ClientDisposals); Assert.False(provider.Disposed);
+        }
+        finally { _ = await Record.ExceptionAsync(() => manager.DisposeAsync().AsTask()); }
+    }
     private const string ConnectionJson = "{\"Transport\":0,\"Endpoint\":\"https://api.x.ai/v1\",\"RequestTimeout\":\"00:05:00\",\"Xai\":{\"ConnectionId\":\"selected\"},\"Authorization\":null,\"AdditionalHeaders\":{\"X-Test\":\"sensitive\"}}";
     public static TheoryData<string, string> Shapes => new()
     {
@@ -89,8 +163,8 @@ public sealed class SttBindingTests
         using var access = new LlmConnectionAccess(new UntouchableSource(), []); var binding = new XaiFamilyBinding(new("selected"), access);
         var resources = new UntouchableResources();
         SttConnection connection = Connection;
-        ISpeechTranscriptionClient client = service.Bind(connection, binding, resources);
-        Assert.Same(provider, client); Assert.Same(binding, provider.Binding); Assert.Same(resources, provider.Resources); Assert.Same(connection, provider.Connection);
+        using ISpeechTranscriptionClient client = service.Bind(connection, binding, resources);
+        Assert.Same(provider.LastClient, client); Assert.Same(binding, provider.Binding); Assert.Same(resources, provider.Resources); Assert.Same(connection, provider.Connection);
         Assert.Throws<ArgumentException>(() => service.Bind(Connection, new(new("other"), access), resources));
         Assert.Throws<ArgumentException>(() => service.Bind(Connection with { Authorization = new UntouchableAuthorization() }, binding, resources));
         Assert.Throws<InvalidOperationException>(() => service.Bind(Connection with { AdditionalHeaders = new Dictionary<string, string> { ["aUtHoRiZaTiOn"] = "secret" } }, binding, resources));
@@ -416,17 +490,34 @@ public sealed class SttBindingTests
         public XaiFamilyBinding? Binding { get; private set; }
         public IInferenceResourceAccess? Resources { get; private set; }
         public int Binds { get; private set; }
+        public ISpeechTranscriptionClient? LastClient { get; private set; }
         public bool Hold { get; init; }
         public bool Disposed { get; private set; }
         public CancellationToken LastToken { get; private set; }
         public Exception? CapabilityFailure { get; init; }
+        public Exception? CleanupFailure { get; init; }
+        public Func<Exception?>? Cleanup { get; init; }
+        public Action? OnCapability { get; set; }
+        private int _clientDisposals;
+        public int ClientDisposals => Volatile.Read(ref _clientDisposals);
+        public Action? OnBind { get; set; }
         public TaskCompletionSource Entered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously); public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        public ISpeechTranscriptionClient Bind(SttConnection connection, XaiFamilyBinding? xai = null, IInferenceResourceAccess? resources = null) { Connection = connection; Binding = xai; Resources = resources; Binds++; return this; }
-        public async Task<SpeechTranscriptionCapabilities> GetCapabilitiesAsync(string? modelId = null, CancellationToken cancellationToken = default) { LastToken = cancellationToken; Entered.TrySetResult(); if (Hold) await Release.Task; if (CapabilityFailure is not null) throw CapabilityFailure; return new() { Transcription = new() { Available = true } }; }
+        public ISpeechTranscriptionClient Bind(SttConnection connection, XaiFamilyBinding? xai = null, IInferenceResourceAccess? resources = null) { Connection = connection; Binding = xai; Resources = resources; Binds++; LastClient = new BoundClient(this); OnBind?.Invoke(); return LastClient; }
+        public async Task<SpeechTranscriptionCapabilities> GetCapabilitiesAsync(string? modelId = null, CancellationToken cancellationToken = default) { LastToken = cancellationToken; OnCapability?.Invoke(); Entered.TrySetResult(); if (Hold) await Release.Task; if (CapabilityFailure is not null) throw CapabilityFailure; return new() { Transcription = new() { Available = true } }; }
         public Task<SpeechTranscriptionResult> TranscribeAsync(SpeechTranscriptionInput input, SpeechTranscriptionOptions options, CancellationToken cancellationToken = default) => throw new InvalidOperationException();
         public Task<ISpeechTranscriptionSession> OpenStreamAsync(SpeechStreamOptions options, InferenceStreamLimits limits, CancellationToken cancellationToken = default) => throw new InvalidOperationException();
         public IAsyncEnumerable<SpeechTranscriptEvent> TranscribeStreamAsync(IAsyncEnumerable<ReadOnlyMemory<byte>> audio, SpeechStreamOptions options, InferenceStreamLimits limits, CancellationToken cancellationToken = default) => throw new InvalidOperationException();
         public void Dispose() => Disposed = true;
+        public ValueTask DisposeAsync() { Dispose(); return ValueTask.CompletedTask; }
+        private sealed class BoundClient(ControlledProvider owner) : ISpeechTranscriptionClient
+        {
+            public Task<SpeechTranscriptionCapabilities> GetCapabilitiesAsync(string? modelId = null, CancellationToken cancellationToken = default) => owner.GetCapabilitiesAsync(modelId, cancellationToken);
+            public Task<SpeechTranscriptionResult> TranscribeAsync(SpeechTranscriptionInput input, SpeechTranscriptionOptions options, CancellationToken cancellationToken = default) => owner.TranscribeAsync(input, options, cancellationToken);
+            public Task<ISpeechTranscriptionSession> OpenStreamAsync(SpeechStreamOptions options, InferenceStreamLimits limits, CancellationToken cancellationToken = default) => owner.OpenStreamAsync(options, limits, cancellationToken);
+            public IAsyncEnumerable<SpeechTranscriptEvent> TranscribeStreamAsync(IAsyncEnumerable<ReadOnlyMemory<byte>> audio, SpeechStreamOptions options, InferenceStreamLimits limits, CancellationToken cancellationToken = default) => owner.TranscribeStreamAsync(audio, options, limits, cancellationToken);
+            public void Dispose() => DisposeAsync().AsTask().GetAwaiter().GetResult();
+            public ValueTask DisposeAsync() { Interlocked.Increment(ref owner._clientDisposals); return (owner.Cleanup?.Invoke() ?? owner.CleanupFailure) is { } failure ? ValueTask.FromException(failure) : ValueTask.CompletedTask; }
+        }
     }
     private sealed class UntouchableResources : IInferenceResourceAccess, IDisposable
     {
