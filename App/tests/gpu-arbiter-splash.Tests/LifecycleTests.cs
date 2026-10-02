@@ -11,7 +11,7 @@ public sealed class LifecycleTests
         await using var rig = new ApiRig();
         rig.Options.ModelLoadTimeoutSeconds = 1;
         rig.Control.Observation = rig.Control.Observation with { Ready = false };
-        await Assert.ThrowsAsync<GpuException>(() => rig.Models.LoadAsync("qwen3.8-27b-splash", CancellationToken.None));
+        await Assert.ThrowsAsync<GpuException>(() => rig.Models.LoadAsync("incoai/Qwen3.8-27B-Splash", CancellationToken.None));
         Assert.True(rig.Models.GroupsReleased);
         Assert.True((await rig.Models.ModelsAsync(CancellationToken.None))[0].Failed);
     }
@@ -20,9 +20,9 @@ public sealed class LifecycleTests
     public async Task IntendedUnloadKeepsControllerAvailableAndAllowsReload()
     {
         await using var rig = new ApiRig(); await rig.StartAsync();
-        using (var first = await rig.Coordinator.AcquireAsync(GpuTarget.Llm("qwen3.8-27b-splash"), CancellationToken.None)) { }
-        await rig.Coordinator.UnloadAsync("qwen3.8-27b-splash", CancellationToken.None);
-        using var second = await rig.Coordinator.AcquireAsync(GpuTarget.Llm("qwen3.8-27b-splash"), CancellationToken.None);
+        using (var first = await rig.Coordinator.AcquireAsync(GpuTarget.Llm("incoai/Qwen3.8-27B-Splash"), CancellationToken.None)) { }
+        await rig.Coordinator.UnloadAsync("incoai/Qwen3.8-27B-Splash", CancellationToken.None);
+        using var second = await rig.Coordinator.AcquireAsync(GpuTarget.Llm("incoai/Qwen3.8-27B-Splash"), CancellationToken.None);
         Assert.Equal(2, rig.Processes.Started.Count);
         Assert.False(second.HostStopped.IsCancellationRequested);
     }
@@ -31,11 +31,11 @@ public sealed class LifecycleTests
     public async Task CrashCancelsLeasesCleansChildrenAndAllowsSubsequentLoad()
     {
         await using var rig = new ApiRig(); await rig.StartAsync();
-        using var first = await rig.Coordinator.AcquireAsync(GpuTarget.Llm("qwen3.8-27b-splash"), CancellationToken.None);
+        using var first = await rig.Coordinator.AcquireAsync(GpuTarget.Llm("incoai/Qwen3.8-27B-Splash"), CancellationToken.None);
         rig.Processes.Started[0].Crash();
         await ApiRig.WaitFor(() => first.HostStopped.IsCancellationRequested);
         await ApiRig.WaitFor(() => !rig.Processes.Started[0].GroupAlive);
-        using var second = await rig.Coordinator.AcquireAsync(GpuTarget.Llm("qwen3.8-27b-splash"), CancellationToken.None);
+        using var second = await rig.Coordinator.AcquireAsync(GpuTarget.Llm("incoai/Qwen3.8-27B-Splash"), CancellationToken.None);
         Assert.Equal(2, rig.Processes.Started.Count);
         Assert.False(second.HostStopped.IsCancellationRequested);
     }
@@ -46,7 +46,7 @@ public sealed class LifecycleTests
         await using var rig = new ApiRig();
         rig.Control.Observation = rig.Control.Observation with { ServerPid = 999 };
         using var cancellation = new CancellationTokenSource();
-        var load = rig.Models.LoadAsync("qwen3.8-27b-splash", cancellation.Token);
+        var load = rig.Models.LoadAsync("incoai/Qwen3.8-27B-Splash", cancellation.Token);
         await ApiRig.WaitFor(() => rig.Control.Reads > 0);
         Assert.False(load.IsCompleted);
         cancellation.Cancel();
@@ -60,8 +60,8 @@ public sealed class LifecycleTests
     {
         await using var rig = new ApiRig();
         var process = new FakeProcess { SurviveStop = true }; rig.Processes.Next = process;
-        await rig.Models.LoadAsync("qwen3.8-27b-splash", CancellationToken.None);
-        await Assert.ThrowsAsync<GpuException>(() => rig.Models.UnloadAsync("qwen3.8-27b-splash", CancellationToken.None));
+        await rig.Models.LoadAsync("incoai/Qwen3.8-27B-Splash", CancellationToken.None);
+        await Assert.ThrowsAsync<GpuException>(() => rig.Models.UnloadAsync("incoai/Qwen3.8-27B-Splash", CancellationToken.None));
         Assert.False(rig.Models.GroupsReleased);
         Assert.Equal("unloading", (await rig.Models.ModelsAsync(CancellationToken.None))[0].Status);
         process.SurviveStop = false;
@@ -71,7 +71,7 @@ public sealed class LifecycleTests
     public async Task ShutdownConfirmsAllOwnedGroupsExit()
     {
         await using var rig = new ApiRig();
-        await rig.Models.LoadAsync("qwen3.8-27b-splash", CancellationToken.None);
+        await rig.Models.LoadAsync("incoai/Qwen3.8-27B-Splash", CancellationToken.None);
         await rig.Models.StopAsync(CancellationToken.None);
         Assert.True(rig.Models.GroupsReleased);
         Assert.False(rig.Processes.Started[0].GroupAlive);

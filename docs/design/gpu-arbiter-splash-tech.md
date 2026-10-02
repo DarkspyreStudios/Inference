@@ -24,6 +24,8 @@ Only one arbiter may run against the same GPU and ComfyUI instance.
 
 Configuration names absolute paths to the packaged Python executable, server entry point, and native Splash binary.
 It includes a catalog of public model IDs and installed pack directories.
+Public model IDs use the native required `owner/repo` form.
+The initial ID is `incoai/Qwen3.8-27B-Splash`.
 Each pack supplies `target`, `draft`, `tokenizer`, and its original manifest.
 Startup validates executable paths, catalog uniqueness, manifest format, and required artifacts.
 Listing models reads that catalog without starting Splash.

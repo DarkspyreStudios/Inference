@@ -40,13 +40,22 @@ public sealed class SplashOptions : CoordinatorOptions
         foreach (var model in Models)
         {
             if (string.IsNullOrWhiteSpace(model.Id) || model.Id.Length > 256 || model.Id.Any(char.IsControl) ||
-                !aliases.Add(model.Id) || !Path.IsPathFullyQualified(model.Pack) || model.Pack.Any(char.IsControl))
+                !aliases.Add(model.Id) || !ValidModelId(model.Id) || !Path.IsPathFullyQualified(model.Pack) || model.Pack.Any(char.IsControl))
                 throw new InvalidOperationException("Invalid Splash model ID or installed pack path.");
             if (checkAssets) ValidatePack(model.Pack);
         }
         if (checkAssets)
             foreach (var path in new[] { Python, Server, Binary })
                 if (!File.Exists(path)) throw new InvalidOperationException($"Installed Splash runtime file is missing: {path}");
+    }
+
+    private static bool ValidModelId(string id)
+    {
+        var parts = id.Split('/');
+        return parts.Length == 2 && parts.All(part => part.Length is >= 1 and <= 96 &&
+            char.IsAsciiLetterOrDigit(part[0]) && char.IsAsciiLetterOrDigit(part[^1]) &&
+            !part.Contains("..", StringComparison.Ordinal) && !part.Contains("--", StringComparison.Ordinal) &&
+            part.All(c => char.IsAsciiLetterOrDigit(c) || c is '.' or '_' or '-'));
     }
 
     private static bool Positive(double value) => double.IsFinite(value) && value > 0;
@@ -81,6 +90,6 @@ public sealed class SplashOptions : CoordinatorOptions
 
 public sealed class SplashModelOptions
 {
-    public string Id { get; set; } = "qwen3.8-27b-splash";
+    public string Id { get; set; } = "incoai/Qwen3.8-27B-Splash";
     public string Pack { get; set; } = "/Volumes/Data/Models/Qwen3.8-27B-Splash";
 }

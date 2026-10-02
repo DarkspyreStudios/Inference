@@ -4,7 +4,7 @@ This C# application runs the installed Splash engine on Apple Silicon macOS.
 It shares the App coordinator and ComfyUI controls with the llama.cpp and Tensor arbiters.
 Only one arbiter may own admission on this machine at a time.
 
-The default model ID is `qwen3.8-27b-splash`.
+The default model ID is `incoai/Qwen3.8-27B-Splash`.
 Its installed pack is `/Volumes/Data/Models/Qwen3.8-27B-Splash`.
 The runtime paths select the installed Homebrew Splash 1.1.0 package.
 The host never downloads weights and does not modify the installed runtime.
@@ -31,9 +31,9 @@ curl http://127.0.0.1:8084/v1/models
 curl http://127.0.0.1:8084/gpu
 curl http://127.0.0.1:8084/v1/chat/completions \
   -H 'Content-Type: application/json' \
-  -d '{"model":"qwen3.8-27b-splash","messages":[{"role":"user","content":"Reply only with OK."}],"max_tokens":16,"temperature":0}'
+  -d '{"model":"incoai/Qwen3.8-27B-Splash","messages":[{"role":"user","content":"Reply only with OK."}],"max_tokens":16,"temperature":0}'
 curl http://127.0.0.1:8084/models/unload \
-  -H 'Content-Type: application/json' -d '{"model":"qwen3.8-27b-splash"}'
+  -H 'Content-Type: application/json' -d '{"model":"incoai/Qwen3.8-27B-Splash"}'
 ```
 
 `appsettings.json` contains paths, ports, model catalog, and limits.

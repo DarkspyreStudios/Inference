@@ -67,7 +67,7 @@ internal sealed class FakeComfy : IComfyClient
 
 internal sealed class ApiRig : IHttpClientFactory, IAsyncDisposable
 {
-    public SplashOptions Options { get; } = new() { Models = [new(), new() { Id = "other" }], CleanupTimeoutSeconds = 0.2 };
+    public SplashOptions Options { get; } = new() { Models = [new(), new() { Id = "local/other" }], CleanupTimeoutSeconds = 0.2 };
     public FakeProcesses Processes { get; } = new();
     public FakeControl Control { get; } = new();
     public FakeComfy Comfy { get; } = new();
