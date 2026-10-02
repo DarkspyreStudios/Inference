@@ -92,12 +92,12 @@ internal sealed class XaiFileClient(HttpClient http) : IDisposable, IAsyncDispos
         var body = new JsonObject();
         if (Expiry(options?.ExpiresAfter) is { } seconds) body["expires_after"] = seconds;
         return JsonAsync(connection, HttpMethod.Post, Path(fileId) + "/public-url", body.ToJsonString(),
-            root => new XaiPublicUrl(Text(root, "public_url"), OptionalDate(root, "expires_at")), fence, cancellationToken);
+            root => new XaiPublicUrl(PublicUrl(Text(root, "public_url"))!, OptionalDate(root, "expires_at")), fence, cancellationToken);
     }
 
     internal Task<XaiPublicUrlRevocation> RevokePublicUrlAsync(LlmConnection connection, string fileId, Action fence, CancellationToken cancellationToken) =>
         JsonAsync(connection, HttpMethod.Post, Path(fileId) + "/public-url/revoke", null,
-            root => new XaiPublicUrlRevocation(Identity(Text(root, "id")), Boolean(root, "revoked"), OptionalString(root, "public_url")), fence, cancellationToken);
+            root => new XaiPublicUrlRevocation(Identity(Text(root, "id")), Boolean(root, "revoked"), PublicUrl(OptionalString(root, "public_url"))), fence, cancellationToken);
 
     internal async Task<ResourceDownloadReceipt> DownloadAsync(LlmConnection connection, string fileId, Stream destination,
         LlmFileDownloadOptions? options, Action fence, CancellationToken cancellationToken)
@@ -229,6 +229,11 @@ internal sealed class XaiFileClient(HttpClient http) : IDisposable, IAsyncDispos
         ? value.ValueKind == JsonValueKind.String ? value.GetString() : throw Invalid() : null;
     private static DateTimeOffset? OptionalDate(JsonElement root, string name) => Optional(root, name) is { } value
         ? DateTimeOffset.FromUnixTimeSeconds(Integer(value)) : null;
+    private static string? PublicUrl(string? value)
+    {
+        if (value is not null && (value.Any(char.IsControl) || !Uri.TryCreate(value, UriKind.Absolute, out _))) throw Invalid();
+        return value;
+    }
     private static LlmProviderFile ReadFile(JsonElement root)
     {
         if (Text(root, "object") != "file") throw Invalid();
@@ -236,7 +241,7 @@ internal sealed class XaiFileClient(HttpClient http) : IDisposable, IAsyncDispos
         if (bytes < 0) throw Invalid();
         return new(Identity(Text(root, "id")), Text(root, "filename"), bytes,
             DateTimeOffset.FromUnixTimeSeconds(Integer(Required(root, "created_at"))), OptionalDate(root, "expires_at"))
-        { PublicUrl = OptionalString(root, "public_url"), PublicUrlExpiresAt = OptionalDate(root, "public_url_expires_at") };
+        { PublicUrl = PublicUrl(OptionalString(root, "public_url")), PublicUrlExpiresAt = OptionalDate(root, "public_url_expires_at") };
     }
 
     private static async Task<long> TransferAsync(Stream source, Stream destination, Action fence, CancellationToken token)

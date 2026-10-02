@@ -733,11 +733,25 @@ connection source or credential owner. Skills methods use the `IXaiSkillClient` 
 distinguish skill IDs and results from file IDs and results.
 
 `LlmProviderCapabilities.Files` and `.Skills` report separate resource-operation facts. Every
-current adapter leaves those facts false. No Files or Skills adapter implements these operations;
+current registered adapter leaves those facts false. No Files or Skills route is selected by the facade;
 the facade rejects them before resolving connections, refreshing credentials or inspecting caller
 streams. Caller cancellation and retired-facade admission retain the existing lifetime behavior.
 Upload and download streams remain borrowed, including on rejection and facade disposal. These
 resource interfaces do not enable native-file prompt references or skill generation attachment.
+
+The private xAI Files transport implements upload, bounded one-page listing, metadata retrieval,
+raw download, deletion and explicit public-URL creation/revocation against an admitted connection
+snapshot. It shares the chat adapter's OAuth-only regional header policy. Upload sources and
+download destinations remain borrowed; transfers do not seek, flush or close them. Download receipts
+follow complete copy and owned response cleanup. Premature EOF against an observed HTTP content length
+is a failure; text extraction is not compared with original file metadata size. Partial failures can
+leave written destination bytes. Observed public URLs must parse as absolute URIs without literal
+controls. Their accepted strings remain unchanged; the transport does not fetch them or impose an
+undocumented scheme/host policy.
+The transport fences each awaited boundary and drains entered work before dropping its borrowed HTTP
+client. Its protocol errors retain actual status and authentication/entitlement classification, but
+exclude provider response bodies and capability URLs from diagnostics. No facade route, provider
+capability or logical Session/Workspace materialization is activated by this private implementation.
 
 ### Embedding lifetime
 
@@ -1398,8 +1412,8 @@ filename, and bytes; adapters own MIME detection, encoding, and wire representat
 
 `ILlmFileClient`, `IXaiFilePublicUrlClient` and `IXaiSkillClient` declare explicit native resource
 operations. Their metadata, options, pages, deletion results, transfer receipts and capability data
-have exact type-name getters on `ConnectLlmJson`. These are inert SDK contracts; the provider facade
-does not implement or register these interfaces. All new capability flags default to false.
+have exact type-name getters on `ConnectLlmJson`. The provider facade implements these interfaces,
+but its resource routes remain unavailable. All new capability flags default to false.
 
 Files pages preserve their returned token and an explicit `IsKnownLastPage` fact. Skills pages
 preserve their distinct first/last-ID and `HasMore` observations. Required response values do not
