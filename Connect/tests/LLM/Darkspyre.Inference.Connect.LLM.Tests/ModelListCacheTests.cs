@@ -41,6 +41,30 @@ public sealed class ModelListCacheTests
         Assert.Equal(3, client.Calls);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task PreparedVersionAndScopeTuplesDoNotAliasAfterListingOrRefresh(bool refresh)
+    {
+        var source = new Source("1");
+        var client = new ListingClient(["model-a"]) { Scope = "23" };
+        await using var service = Service(source, client);
+        IReadOnlyList<LlmModel> first = refresh
+            ? await service.RefreshModelsAsync("connection")
+            : await service.ListModelsAsync("connection");
+
+        source.Version = "12";
+        client.Scope = "3";
+        client.Models = ["model-b"];
+        IReadOnlyList<LlmModel> current = await service.ListModelsAsync("connection");
+
+        Assert.Equal("model-b", Assert.Single(current).Id);
+        Assert.NotSame(first, current);
+        Assert.Equal(2, client.Calls);
+        Assert.Same(current, await service.ListModelsAsync("connection"));
+        Assert.Equal(2, client.Calls);
+    }
+
     [Fact]
     public async Task ConcurrentListingsShareOneRequestAndOneCallersCancellationStopsNoOther()
     {
@@ -136,11 +160,16 @@ public sealed class ModelListCacheTests
     }
 
     /// <summary>Counts listings; a gate holds them open and a failure count fails the first ones.</summary>
-    private sealed class ListingClient(IReadOnlyList<string> models) : ILlmClient, ILlmContextEstimator
+    private sealed class ListingClient(IReadOnlyList<string> models) : ILlmClient, ILlmContextEstimator, ILlmConnectionPreparation
     {
         private int _calls;
 
         public IReadOnlyList<string> Models { get; set; } = models;
+
+        public string? Scope { get; set; }
+
+        public Task<LlmConnection> PrepareAsync(LlmConnection connection, CancellationToken cancellationToken) =>
+            Task.FromResult(connection with { ResolvedContinuationScope = Scope });
 
         public TaskCompletionSource? Gate { get; init; }
 
