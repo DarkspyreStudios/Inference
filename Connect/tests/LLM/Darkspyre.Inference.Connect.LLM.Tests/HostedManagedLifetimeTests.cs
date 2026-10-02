@@ -7,6 +7,75 @@ namespace Darkspyre.Inference.Connect.LLM.Tests;
 public sealed class HostedManagedLifetimeTests
 {
     [Fact]
+    public async Task InterruptCancellationFailureStillDrainsIgnoringProducer()
+    {
+        var harness = new Harness();
+        var session = new ManagedAgentSession(new() { Transport = LlmTransport.OpenAiResponses, Endpoint = "https://example.test", Version = "v" },
+            new() { ModelId = "model" }, [], harness, harness.Stream, _ => new()
+            { SupportsAgentSessions = true, Agent = ManagedAgentPolicy.Capabilities });
+        var started = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        Task<IReadOnlyList<LlmAgentEvent>> turn = ReadStarted(session.RunTurnAsync(new() { Input = [new LlmAgentTextContent("hello")] }), started);
+        Task? interruption = null;
+        Task? retirement = null;
+        try
+        {
+            string turnId = await started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            await harness.Entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            interruption = session.InterruptAsync(turnId);
+            await harness.Canceled.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            await Assert.ThrowsAsync<TimeoutException>(() => interruption.WaitAsync(TimeSpan.FromMilliseconds(200)));
+            harness.Release.TrySetResult();
+            var failure = await Assert.ThrowsAsync<AggregateException>(() => interruption);
+            Assert.Same(harness.Failure, Assert.Single(failure.Flatten().InnerExceptions));
+            Assert.Equal(LlmAgentCompletionReason.Interruption, Assert.Single((await turn).OfType<LlmAgentTurnCompletedEvent>()).Reason);
+            await session.DisposeAsync();
+        }
+        finally
+        {
+            retirement ??= session.DisposeAsync().AsTask();
+            harness.Release.TrySetResult();
+            if (interruption is not null) await Drain(interruption);
+            await Drain(turn);
+            await Drain(retirement);
+        }
+    }
+
+    [Fact]
+    public async Task AbandonedIteratorCancellationFailureStillDrainsIgnoringProducer()
+    {
+        var harness = new Harness();
+        var session = new ManagedAgentSession(new() { Transport = LlmTransport.OpenAiResponses, Endpoint = "https://example.test", Version = "v" },
+            new() { ModelId = "model" }, [], harness, harness.Stream, _ => new()
+            { SupportsAgentSessions = true, Agent = ManagedAgentPolicy.Capabilities });
+        IAsyncEnumerator<LlmAgentEvent> iterator = session.RunTurnAsync(new() { Input = [new LlmAgentTextContent("hello")] }).GetAsyncEnumerator();
+        Task? abandoned = null;
+        Task? retirement = null;
+        try
+        {
+            Assert.True(await iterator.MoveNextAsync());
+            await harness.Entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            abandoned = iterator.DisposeAsync().AsTask();
+            await harness.Canceled.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.False(abandoned.IsCompleted);
+            retirement = session.DisposeAsync().AsTask();
+            Assert.False(retirement.IsCompleted);
+            harness.Release.TrySetResult();
+            var failure = await Assert.ThrowsAsync<AggregateException>(() => abandoned);
+            Assert.Same(harness.Failure, Assert.Single(failure.Flatten().InnerExceptions));
+            await retirement;
+            await session.DisposeAsync();
+        }
+        finally
+        {
+            retirement ??= session.DisposeAsync().AsTask();
+            harness.Release.TrySetResult();
+            abandoned ??= iterator.DisposeAsync().AsTask();
+            await Drain(abandoned);
+            await Drain(retirement);
+        }
+    }
+
+    [Fact]
     public async Task CancellationFailureStillDrainsProducerAndAllDisposersShareFailure()
     {
         var harness = new Harness();
@@ -45,6 +114,18 @@ public sealed class HostedManagedLifetimeTests
     {
         List<LlmAgentEvent> events = [];
         await foreach (var item in stream) { events.Add(item); }
+        return events;
+    }
+
+    private static async Task<IReadOnlyList<LlmAgentEvent>> ReadStarted(IAsyncEnumerable<LlmAgentEvent> stream,
+        TaskCompletionSource<string> started)
+    {
+        List<LlmAgentEvent> events = [];
+        await foreach (var item in stream)
+        {
+            if (item is LlmAgentTurnStartedEvent turn) started.TrySetResult(turn.TurnId);
+            events.Add(item);
+        }
         return events;
     }
 

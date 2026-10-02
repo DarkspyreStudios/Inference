@@ -137,7 +137,7 @@ internal static class ProviderContinuationStateCodec
         {
             JsonObject call = calls[index];
             bool anthropic = call["type"]?.GetValue<string>() == "tool_use";
-            var visible = message.ToolCalls[index];
+            var visible = ClientTools.Functions(message.ToolCalls)[index];
             try
             {
                 if (call[anthropic ? "id" : "call_id"]?.GetValue<string>() != visible.Id

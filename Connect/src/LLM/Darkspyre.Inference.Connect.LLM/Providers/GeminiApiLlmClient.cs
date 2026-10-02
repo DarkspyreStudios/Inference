@@ -174,7 +174,8 @@ internal sealed partial class GeminiApiLlmClient(HttpClient http)
     {
         ValidateRequest(connection, request, GetCapabilities(connection, request.ModelId));
         if (request.Messages.Any(message => message.ContinuationState is not null || message.Attachments.Count != 0
-            || message.ToolResults.Any(result => result.Output.Parts.Any(part => part is not LlmToolOutputText)))) { return null; }
+            || message.ToolResults.Any(result => result is not LlmToolResult function
+                || function.Output.Parts.Any(part => part is not LlmToolOutputText)))) { return null; }
         return new(LocalTokenCount.Count(JsonSerializer.Serialize(request, ConnectLlmJson.ChatRequest)));
     }
 
@@ -255,7 +256,7 @@ internal sealed partial class GeminiApiLlmClient(HttpClient http)
         if (request.ProviderOptions.ContainsKey(AnthropicTools.OptionName))
         { throw new NotSupportedException("Gemini does not accept Anthropic tool configuration."); }
         if (request.Temperature is < 0 or > 2) { throw new ArgumentException("The temperature exceeds the Gemini range of 0 to 2."); }
-        if (request.Tools.Any(tool => tool.Strict) && capabilities.Tools.StrictInputSchema == LlmStrictInputSchemaSupport.Unsupported)
+        if (ClientTools.Functions(request.Tools).Any(tool => tool.Strict) && capabilities.Tools.StrictInputSchema == LlmStrictInputSchemaSupport.Unsupported)
         { throw new NotSupportedException("This model does not offer strict tool-schema enforcement. Ordinary non-strict tools are supported."); }
         if (request.AllowParallelToolCalls is not null && !capabilities.Tools.SupportsParallelCallControl)
         { throw new NotSupportedException("This route cannot enforce parallel tool-call control."); }

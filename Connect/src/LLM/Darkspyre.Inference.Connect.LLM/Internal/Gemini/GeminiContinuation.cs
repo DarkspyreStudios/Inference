@@ -47,7 +47,7 @@ internal static class GeminiContinuation
         for (int index = 0; index < calls.Length; index++)
         {
             var call = calls[index]["functionCall"]!;
-            var expected = message.ToolCalls[index];
+            var expected = ClientTools.Functions(message.ToolCalls)[index];
             if ((string?)calls[index]["connectCallId"] != expected.Id || (string?)call["name"] != expected.Name
                 || !JsonNode.DeepEquals(call["args"], JsonNode.Parse(expected.ArgumentsJson))) { throw new ArgumentException("Continuation content does not match its visible message."); }
         }

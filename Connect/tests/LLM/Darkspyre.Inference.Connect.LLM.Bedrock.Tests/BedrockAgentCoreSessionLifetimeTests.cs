@@ -402,7 +402,7 @@ public sealed class BedrockAgentCoreSessionLifetimeTests
         {
             ModelId = "default",
             Runtime = new() { WorkingDirectory = Environment.CurrentDirectory, Policy = new LlmAgentHostRuntimePolicy { Sandbox = LlmAgentSandboxMode.ReadOnly, ApprovalPolicy = LlmAgentApprovalPolicy.Never } },
-            Tools = tool is null ? [] : [new() { Name = "lookup", Description = "Controlled lookup", InputSchema = JsonElement.Parse("{\"type\":\"object\"}") }],
+            Tools = tool is null ? [] : [new LlmAgentToolDefinition() { Name = "lookup", Description = "Controlled lookup", InputSchema = JsonElement.Parse("{\"type\":\"object\"}") }],
             ToolHandler = tool
         });
 

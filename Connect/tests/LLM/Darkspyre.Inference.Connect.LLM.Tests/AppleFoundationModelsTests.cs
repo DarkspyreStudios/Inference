@@ -205,8 +205,8 @@ public sealed class AppleFoundationModelsTests
             ModelId = Request.ModelId,
             ToolChoice = new() { Mode = LlmToolChoiceMode.None },
             Tools = [Tool],
-            Messages = [new("user", ""), new("assistant", "looking") { ToolCalls = [new("a", "lookup", "{}"), new("b", "lookup", "{}")] },
-                new("user", "continue") { ToolResults = [new("b", LlmToolOutput.FromText("second", isError: true)), new("a", LlmToolOutput.FromText("first"))] }]
+            Messages = [new("user", ""), new("assistant", "looking") { ToolCalls = [new LlmToolCall("a", "lookup", "{}"), new LlmToolCall("b", "lookup", "{}")] },
+                new("user", "continue") { ToolResults = [new LlmToolResult("b", LlmToolOutput.FromText("second", isError: true)), new LlmToolResult("a", LlmToolOutput.FromText("first"))] }]
         });
         Assert.Equal("probe", runner.Requests[0].Command);
         var request = Assert.Single(runner.Requests, command => command.Command == "generate").Request!;
@@ -248,7 +248,7 @@ public sealed class AppleFoundationModelsTests
         await using var session = await new ManagedAppleAgentClient(client, service).StartSessionAsync("apple", Connection, new()
         {
             ModelId = Request.ModelId,
-            Tools = [new() { Name = Tool.Name, Description = Tool.Description, InputSchema = Tool.InputSchema }],
+            Tools = [new LlmAgentToolDefinition() { Name = Tool.Name, Description = Tool.Description, InputSchema = Tool.InputSchema }],
             ToolHandler = (call, _) => { executed.Add(call.CallId); return Task.FromResult(LlmToolOutput.FromText(call.CallId, isError: call.CallId == "b")); }
         });
         var events = await Read(session.RunTurnAsync(new() { Input = [new LlmAgentTextContent("lookup")] }));
@@ -277,14 +277,14 @@ public sealed class AppleFoundationModelsTests
         await using var session = await new ManagedAppleAgentClient(client, service).StartSessionAsync("apple", Connection, new()
         {
             ModelId = Request.ModelId,
-            Tools = [new() { Name = Tool.Name, Description = Tool.Description, InputSchema = Tool.InputSchema }],
+            Tools = [new LlmAgentToolDefinition() { Name = Tool.Name, Description = Tool.Description, InputSchema = Tool.InputSchema }],
             ToolHandler = (_, _) => { executed++; return Task.FromResult(LlmToolOutput.FromText("result")); }
         });
         var events = await Read(session.RunTurnAsync(new() { Input = [new LlmAgentTextContent("lookup")] }));
         Assert.Equal(LlmAgentCompletionReason.ProviderFailure, Assert.Single(events.OfType<LlmAgentTurnCompletedEvent>()).Reason);
         Assert.Equal(1, executed);
         Assert.Equal(2, step);
-        Assert.Equal("result", (await session.CaptureContextAsync()).Entries[^1].Message.ToolResults[0].Output.Parts.OfType<LlmToolOutputText>().Single().Text);
+        Assert.Equal("result", Assert.IsType<LlmToolResult>((await session.CaptureContextAsync()).Entries[^1].Message.ToolResults[0]).Output.Parts.OfType<LlmToolOutputText>().Single().Text);
     }
 
     [Theory]
@@ -319,8 +319,8 @@ public sealed class AppleFoundationModelsTests
         var runner = new Runner(_ => []);
         using var http = new HttpClient();
         var client = new AppleFoundationModelsClient(http, runner);
-        Assert.Throws<ArgumentException>(() => client.EstimateInputTokens(Connection, Request with { Messages = [new("assistant", "") { ToolCalls = [new("a", "lookup", "{}")] }] }));
-        Assert.Throws<ArgumentException>(() => client.EstimateInputTokens(Connection, Request with { Messages = [new("user", "") { ToolResults = [new("missing", LlmToolOutput.FromText("x"))] }] }));
+        Assert.Throws<ArgumentException>(() => client.EstimateInputTokens(Connection, Request with { Messages = [new("assistant", "") { ToolCalls = [new LlmToolCall("a", "lookup", "{}")] }] }));
+        Assert.Throws<ArgumentException>(() => client.EstimateInputTokens(Connection, Request with { Messages = [new("user", "") { ToolResults = [new LlmToolResult("missing", LlmToolOutput.FromText("x"))] }] }));
         Assert.Throws<NotSupportedException>(() => client.EstimateInputTokens(Connection, Request with { Messages = [new("system", "instructions")] }));
         Assert.Throws<NotSupportedException>(() => client.EstimateInputTokens(Connection, Request with { Tools = [Tool], ToolChoice = new() { Mode = LlmToolChoiceMode.Required } }));
         Assert.Throws<NotSupportedException>(() => client.EstimateInputTokens(Connection, Request with { Tools = [Tool], ToolChoice = new() { Mode = LlmToolChoiceMode.Specific, Name = "lookup" } }));

@@ -35,7 +35,7 @@ internal sealed record AgentOpeningContext(string Text, IReadOnlyList<LlmAttachm
         TranscriptText.Append(text, context.Entries.Select(entry => entry.Message));
         // History images and documents travel as first-turn attachments; tool-output audio, other binaries and
         // resource byte bodies have no attachment form and count as not carried.
-        LlmToolOutputPart[] toolBytes = [.. context.Entries.SelectMany(entry => entry.Message.ToolResults)
+        LlmToolOutputPart[] toolBytes = [.. context.Entries.SelectMany(entry => ClientTools.Functions(entry.Message.ToolResults))
             .SelectMany(result => result.Output.Parts)
             .Where(part => part is LlmToolOutputBinary or LlmToolOutputResource { Data: not null })];
         LlmAttachment[] attachments = [.. context.Entries.SelectMany(entry => entry.Message.Attachments).Select(LlmAttachments.RequireBinary),

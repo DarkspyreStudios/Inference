@@ -115,7 +115,7 @@ public sealed class ClaudeAgentJsonTests
             ModelId = "initial",
             Instructions = tools ? "<&>\u00e9" : " ",
             Runtime = new() { WorkingDirectory = Environment.CurrentDirectory },
-            Tools = tools ? [new() { Name = "echo", InputSchema = JsonElement.Parse("{}"), DeferLoading = true }] : [],
+            Tools = tools ? [new LlmAgentToolDefinition() { Name = "echo", InputSchema = JsonElement.Parse("{}"), DeferLoading = true }] : [],
             ToolHandler = tools ? (_, _) => Task.FromResult(new LlmToolOutput
             {
                 Parts = [new LlmToolOutputText("<&>"), new LlmToolOutputResource("urn:notes") { Text = "notes" }],

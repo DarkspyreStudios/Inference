@@ -222,7 +222,7 @@ public sealed class BedrockAgentCoreUsageTests
     {
         ModelId = "default",
         Runtime = new() { WorkingDirectory = Environment.CurrentDirectory, Policy = new LlmAgentHostRuntimePolicy() },
-        Tools = tools ? [new() { Name = "lookup", Description = "Controlled lookup", InputSchema = JsonElement.Parse("{}") }] : [],
+        Tools = tools ? [new LlmAgentToolDefinition() { Name = "lookup", Description = "Controlled lookup", InputSchema = JsonElement.Parse("{}") }] : [],
         ToolHandler = tools ? (_, _) => Task.FromResult(LlmToolOutput.FromText("result")) : null
     };
     private static async Task<T[]> ReadAsync<T>(IAsyncEnumerable<T> stream)

@@ -37,8 +37,8 @@ public sealed class AnthropicToolContinuationTests
         return new()
         {
             ModelId = Model,
-            Tools = [new() { Name = "run", InputSchema = JsonElement.Parse("""{"type":"object"}""") },
-                new() { Name = "direct", InputSchema = JsonElement.Parse("""{"type":"object"}""") }],
+            Tools = [new LlmToolDefinition() { Name = "run", InputSchema = JsonElement.Parse("""{"type":"object"}""") },
+                new LlmToolDefinition() { Name = "direct", InputSchema = JsonElement.Parse("""{"type":"object"}""") }],
             ProviderOptions = new Dictionary<string, JsonElement> { [AnthropicTools.OptionName] = JsonElement.Parse(Native) },
             Messages = [new("user", "start"), new("assistant", "") { ContinuationState = state, ToolCalls = calls },
                 new("tool", "") { ToolResults = [Result("client_2"), Result("client_1")] }]
@@ -104,7 +104,7 @@ public sealed class AnthropicToolContinuationTests
         if (variant == "partial") request = request with
         { ProviderOptions = new Dictionary<string, JsonElement> { [AnthropicTools.OptionName] = JsonElement.Parse(Native) } };
         if (variant == "client-spoof") request = request with
-        { Tools = [new() { Name = "web_search", InputSchema = JsonElement.Parse("{}") }, new() { Name = "code_execution", InputSchema = JsonElement.Parse("{}") }] };
+        { Tools = [new LlmToolDefinition() { Name = "web_search", InputSchema = JsonElement.Parse("{}") }, new LlmToolDefinition() { Name = "code_execution", InputSchema = JsonElement.Parse("{}") }] };
         if (variant == "clear")
         {
             connection = connection with { ProviderOptions = PauseRequest(connection).ProviderOptions };
@@ -226,8 +226,8 @@ public sealed class AnthropicToolContinuationTests
         var options = new JsonObject { ["server_tools"] = new JsonArray(new JsonObject { ["type"] = type, ["name"] = name }) };
         var request = PauseRequest(connection, content) with
         {
-            Tools = [new() { Name = "bash_code_execution", InputSchema = JsonElement.Parse("{}") },
-                     new() { Name = "text_editor_code_execution", InputSchema = JsonElement.Parse("{}") }],
+            Tools = [new LlmToolDefinition() { Name = "bash_code_execution", InputSchema = JsonElement.Parse("{}") },
+                     new LlmToolDefinition() { Name = "text_editor_code_execution", InputSchema = JsonElement.Parse("{}") }],
             ProviderOptions = new Dictionary<string, JsonElement> { [AnthropicTools.OptionName] = JsonElement.Parse(options.ToJsonString()) }
         };
         await Assert.ThrowsAsync<ArgumentException>(() => Complete(new AnthropicMessagesLlmClient(http), connection, request));
@@ -266,7 +266,7 @@ public sealed class AnthropicToolContinuationTests
             request = request with
             {
                 Messages = [request.Messages[0], request.Messages[1], request.Messages[2] with
-            { ToolResults = [Result("client_2"), new("client_1", new() { Parts = [new LlmToolOutputText("first"), new LlmToolOutputText("second")] })] }]
+            { ToolResults = [Result("client_2"), new LlmToolResult("client_1", new() { Parts = [new LlmToolOutputText("first"), new LlmToolOutputText("second")] })] }]
             };
         await Complete(new AnthropicMessagesLlmClient(http), connection, request);
         JsonNode payload = JsonNode.Parse(Assert.Single(handler.Bodies))!;
@@ -323,7 +323,7 @@ public sealed class AnthropicToolContinuationTests
             case "document-result":
                 reply = reply with
                 {
-                    ToolResults = [Result("client_2"), new("client_1", new()
+                    ToolResults = [Result("client_2"), new LlmToolResult("client_1", new()
                 { Parts = [new LlmToolOutputBinary(variant == "image-result" ? LlmBinaryKind.Image : LlmBinaryKind.Document,
                     variant == "image-result" ? "image/png" : "application/pdf", new byte[] { 1 })] })]
                 };
@@ -344,7 +344,7 @@ public sealed class AnthropicToolContinuationTests
             case "no-native": request = request with { ProviderOptions = new Dictionary<string, JsonElement>() }; break;
             case "client-native-spoof":
                 request = request with
-                { ProviderOptions = new Dictionary<string, JsonElement>(), Tools = [.. request.Tools, new() { Name = "code_execution", InputSchema = JsonElement.Parse("""{"type":"object"}""") }] }; break;
+                { ProviderOptions = new Dictionary<string, JsonElement>(), Tools = [.. request.Tools, new LlmToolDefinition() { Name = "code_execution", InputSchema = JsonElement.Parse("""{"type":"object"}""") }] }; break;
             case "old-native-version":
                 request = request with
                 {
@@ -457,7 +457,7 @@ public sealed class AnthropicToolContinuationTests
         request = request with
         {
             Messages = [request.Messages[0], request.Messages[1], request.Messages[2] with
-        { Content = valid ? "" : "extra", ToolResults = [Result("client_2"), new("client_1", new()
+        { Content = valid ? "" : "extra", ToolResults = [Result("client_2"), new LlmToolResult("client_1", new()
         { Parts = [new LlmToolOutputBinary(LlmBinaryKind.Image, "image/png", new byte[] { 1 })] })] }]
         };
         if (valid)

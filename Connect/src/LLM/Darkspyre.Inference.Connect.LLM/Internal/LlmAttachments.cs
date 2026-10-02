@@ -35,7 +35,8 @@ internal static class LlmAttachments
                 }
                 _ = RequireBinary(attachment);
             }
-            if (message.ToolResults.Any(result => result.Output.Parts.Any(part => part is LlmToolOutputSessionResource)))
+            if (message.ToolResults.Any(result => result is LlmToolResult function
+                && function.Output.Parts.Any(part => part is LlmToolOutputSessionResource)))
                 throw new NotSupportedException("This route cannot materialize workspace tool content.");
         }
     }

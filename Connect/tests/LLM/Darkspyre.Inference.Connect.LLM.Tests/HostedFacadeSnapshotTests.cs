@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using System.Text.Json;
 using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Common.LLM;
 using Darkspyre.Inference.Connect.LLM.Internal;
@@ -65,6 +66,58 @@ public sealed class HostedFacadeSnapshotTests
         }
     }
 
+    [Theory, MemberData(nameof(Cases))]
+    public async Task AdmissionFreezesMixedToolGraphBeforeResolutionRefreshAndCatalog(int boundary, int operation)
+    {
+        var gate = new Gate(boundary);
+        var source = new Source(gate);
+        var client = new Client(gate);
+        var authenticator = new Authenticator(gate);
+        using JsonDocument schema = JsonDocument.Parse("{\"original\":true}");
+        List<LlmClientToolDefinition> definitions = [new LlmToolDefinition { Name = "fn", InputSchema = schema.RootElement }, new LlmShellTool([])];
+        var shell = new LlmShellCall("shell", ["original-command"], 0, 0);
+        List<LlmClientToolCall> calls = [new LlmToolCall("fn-call", "fn", "{}"), shell];
+        List<LlmToolOutputPart> parts = [new LlmToolOutputText("original-result")];
+        List<LlmClientToolResult> results = [new LlmToolResult("fn-call", new() { Parts = parts }),
+            new LlmShellCallResult(shell.Id, [new("original-shell", null, new LlmShellExitedOutcome(0))])];
+        List<LlmChatMessage> messages = [new("assistant", "") { ToolCalls = calls }, new("user", "") { ToolResults = results }];
+        var request = new LlmChatRequest { ModelId = "model", Tools = definitions, Messages = messages };
+        var service = new LlmProviderService(source, [client], [authenticator]);
+        Task run = ExecuteAsync();
+        try
+        {
+            await gate.Entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            definitions.Clear(); calls.Clear(); results.Clear(); messages.Clear();
+            parts[0] = new LlmToolOutputText("late-result"); schema.Dispose();
+            gate.Release.TrySetResult();
+            await run.WaitAsync(TimeSpan.FromSeconds(5));
+            LlmChatRequest sent = Assert.IsType<LlmChatRequest>(client.Sent);
+            Assert.Equal(2, sent.Tools.Count); Assert.IsType<LlmShellTool>(sent.Tools[1]);
+            Assert.True(Assert.IsType<LlmToolDefinition>(sent.Tools[0]).InputSchema.GetProperty("original").GetBoolean());
+            Assert.Equal(2, sent.Messages.Count); Assert.Equal(2, sent.Messages[0].ToolCalls.Count);
+            Assert.Equal("original-command", Assert.Single(Assert.IsType<LlmShellCall>(sent.Messages[0].ToolCalls[1]).Commands));
+            Assert.Equal("original-result", Assert.IsType<LlmToolOutputText>(Assert.Single(Assert.IsType<LlmToolResult>(sent.Messages[1].ToolResults[0]).Output.Parts)).Text);
+            Assert.Equal("original-shell", Assert.Single(Assert.IsType<LlmShellCallResult>(sent.Messages[1].ToolResults[1]).Output).Stdout);
+        }
+        finally
+        {
+            Task retirement = service.DisposeAsync().AsTask();
+            gate.Release.TrySetResult();
+            try { await run.WaitAsync(TimeSpan.FromSeconds(5)); }
+            catch (OperationCanceledException) { }
+            finally { await retirement.WaitAsync(TimeSpan.FromSeconds(5)); }
+        }
+        Assert.False(source.Disposed); Assert.False(authenticator.Disposed);
+
+        async Task ExecuteAsync()
+        {
+            if (operation == 1) await service.CompleteAsync("connection", request);
+            else if (operation == 2) await service.CountInputTokensAsync("connection", request);
+            else if (operation == 3) await service.MeasureRequestAsync("connection", request);
+            else await foreach (var unused in service.StreamAsync("connection", request)) { }
+        }
+    }
+
     private sealed class Gate(int boundary)
     {
         internal TaskCompletionSource Entered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -119,7 +172,7 @@ public sealed class HostedFacadeSnapshotTests
         };
         internal LlmChatRequest? Sent { get; private set; }
         public LlmProviderCapabilities GetCapabilities(LlmConnection connection, string? modelId = null) => new()
-        { SupportsStreaming = true, SupportsModelListing = true, HostedTools = new HashSet<LlmHostedToolKind> { LlmHostedToolKind.RemoteMcp, LlmHostedToolKind.CodeExecution } };
+        { SupportsStreaming = true, SupportsModelListing = true, SupportsShellTools = true, HostedTools = new HashSet<LlmHostedToolKind> { LlmHostedToolKind.RemoteMcp, LlmHostedToolKind.CodeExecution } };
         public async IAsyncEnumerable<LlmStreamEvent> StreamAsync(LlmConnection connection, LlmChatRequest request,
             [EnumeratorCancellation] CancellationToken cancellationToken = default)
         {

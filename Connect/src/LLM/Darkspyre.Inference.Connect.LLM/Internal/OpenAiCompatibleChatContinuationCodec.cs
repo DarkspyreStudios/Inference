@@ -43,7 +43,7 @@ internal sealed class OpenAiCompatibleChatContinuationCodec : ILlmContinuationCo
             for (int index = 0; index < calls.Count; index++)
             {
                 var call = (JsonObject)calls[index]!;
-                var expected = message.ToolCalls[index];
+                var expected = ClientTools.Functions(message.ToolCalls)[index];
                 if ((string?)call["id"] != expected.Id || (string?)call["name"] != expected.Name
                     || !JsonNode.DeepEquals(JsonNode.Parse((string)call["arguments"]!), JsonNode.Parse(expected.ArgumentsJson)))
                 { throw Invalid(); }

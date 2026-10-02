@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using Darkspyre.Inference.Common.LLM;
+using System.Diagnostics.CodeAnalysis;
 using Darkspyre.Inference.Common.Resources;
 
 namespace Darkspyre.Inference.Connect.LLM;
@@ -171,7 +172,11 @@ public enum LlmAgentCompactionReason
 public sealed record LlmAgentContextStatusEvent(
     string ThreadId,
     string TurnId,
-    LlmAgentContextStatus Status) : LlmAgentEvent(ThreadId, TurnId);
+    LlmAgentContextStatus Status) : LlmAgentEvent(ThreadId, HostedEventFacts.Identity(TurnId))
+{
+    [AllowNull]
+    public override string TurnId { get => base.TurnId!; init => base.TurnId = HostedEventFacts.Identity(value); }
+}
 
 /// <summary>Ends this enumeration, not the run. All issued tools have settled before this event.</summary>
 public sealed record LlmAgentCompactionRequiredEvent(
@@ -181,12 +186,20 @@ public sealed record LlmAgentCompactionRequiredEvent(
     LlmAgentContextStatus Status,
     LlmAgentCompactionReason Reason,
     bool CanCompactHistory,
-    IReadOnlyList<string> ProtectedEntryIds) : LlmAgentEvent(ThreadId, TurnId);
+    IReadOnlyList<string> ProtectedEntryIds) : LlmAgentEvent(ThreadId, HostedEventFacts.Identity(TurnId))
+{
+    [AllowNull]
+    public override string TurnId { get => base.TurnId!; init => base.TurnId = HostedEventFacts.Identity(value); }
+}
 
 public sealed record LlmAgentTurnContinuedEvent(
     string ThreadId,
     string TurnId,
-    string PauseId) : LlmAgentEvent(ThreadId, TurnId);
+    string PauseId) : LlmAgentEvent(ThreadId, HostedEventFacts.Identity(TurnId))
+{
+    [AllowNull]
+    public override string TurnId { get => base.TurnId!; init => base.TurnId = HostedEventFacts.Identity(value); }
+}
 
 /// <summary>
 /// Usage for one model step and this logical run, including earlier continued segments. Repeated observations for
@@ -197,7 +210,11 @@ public sealed record LlmAgentUsageEvent(
     string TurnId,
     string RequestId,
     LlmUsage? Usage,
-    LlmUsage? RunTotals) : LlmAgentEvent(ThreadId, TurnId);
+    LlmUsage? RunTotals) : LlmAgentEvent(ThreadId, HostedEventFacts.Identity(TurnId))
+{
+    [AllowNull]
+    public override string TurnId { get => base.TurnId!; init => base.TurnId = HostedEventFacts.Identity(value); }
+}
 
 public enum LlmAgentCompletionReason
 {

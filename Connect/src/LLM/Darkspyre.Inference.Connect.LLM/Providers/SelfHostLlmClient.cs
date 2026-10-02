@@ -58,10 +58,12 @@ internal sealed class SelfHostLlmClient(ILlmSelfHost host) : ILlmClient, ILlmCon
         ArgumentNullException.ThrowIfNull(request);
         ValidateOptions(connection, request);
         HostedTools.Validate(request, GetCapabilities(connection, request.ModelId));
+        ClientTools.Validate(request, GetCapabilities(connection, request.ModelId).SupportsShellTools);
         CommonLlm.ILlmInference engine = await host.GetInferenceAsync(connection.Endpoint, cancellationToken).ConfigureAwait(false);
         var capabilities = ToConnect(await engine.GetCapabilitiesAsync(request.ModelId, cancellationToken).ConfigureAwait(false));
         LlmClientBase.ValidateSampling(request, capabilities);
         HostedTools.Validate(request, capabilities);
+        ClientTools.Validate(request, capabilities.SupportsShellTools);
         await foreach (CommonLlm.LlmStreamEvent item in engine.StreamAsync(ToCommon(request), cancellationToken).ConfigureAwait(false))
         {
             // Common's events pass through; only the completion carries Connect's result.
@@ -76,18 +78,19 @@ internal sealed class SelfHostLlmClient(ILlmSelfHost host) : ILlmClient, ILlmCon
         ArgumentNullException.ThrowIfNull(request);
         ValidateOptions(connection, request);
         HostedTools.Validate(request, GetCapabilities(connection, request.ModelId));
+        ClientTools.Validate(request, GetCapabilities(connection, request.ModelId).SupportsShellTools);
         LlmClientBase.ValidateSampling(request, GetCapabilities(connection, request.ModelId));
         var text = new StringBuilder(request.Instructions);
         foreach (LlmChatMessage message in request.Messages)
         {
             text.Append('\n').Append(message.Content);
-            foreach (CommonLlm.LlmToolCall call in message.ToolCalls) { text.Append('\n').Append(call.Name).Append(call.ArgumentsJson); }
-            foreach (CommonLlm.LlmToolResult result in message.ToolResults)
+            foreach (CommonLlm.LlmToolCall call in ClientTools.Functions(message.ToolCalls)) { text.Append('\n').Append(call.Name).Append(call.ArgumentsJson); }
+            foreach (CommonLlm.LlmToolResult result in ClientTools.Functions(message.ToolResults))
             {
                 foreach (CommonLlm.LlmToolOutputText part in result.Output.Parts.OfType<CommonLlm.LlmToolOutputText>()) { text.Append('\n').Append(part.Text); }
             }
         }
-        foreach (CommonLlm.LlmToolDefinition tool in request.Tools)
+        foreach (CommonLlm.LlmToolDefinition tool in ClientTools.Functions(request.Tools))
         {
             text.Append('\n').Append(tool.Name).Append(tool.Description).Append(tool.InputSchema.GetRawText());
         }
@@ -104,7 +107,8 @@ internal sealed class SelfHostLlmClient(ILlmSelfHost host) : ILlmClient, ILlmCon
         if (request?.Resources is not null)
         { return ("self-host-resource-authority", "SelfHost does not materialize caller-owned resources."); }
         if (request?.Messages.Any(message => message.Attachments.Any(attachment => attachment is not CommonLlm.LlmAttachment)
-            || message.ToolResults.Any(result => result.Output.Parts.Any(part => part is CommonLlm.LlmToolOutputSessionResource))) is true)
+            || message.ToolResults.Any(result => result is CommonLlm.LlmToolResult function
+                && function.Output.Parts.Any(part => part is CommonLlm.LlmToolOutputSessionResource))) is true)
         { return ("self-host-resource-references", "SelfHost does not materialize referenced prompt or tool content."); }
         if (connection.ProviderOptions.Count > 0 || request?.ProviderOptions.Count > 0)
         { return ("self-host-provider-options", "A SelfHost engine accepts no provider request options. Remove ProviderOptions from the connection and request."); }
@@ -185,6 +189,7 @@ internal sealed class SelfHostLlmClient(ILlmSelfHost host) : ILlmClient, ILlmCon
         SupportsFrequencyPenalty = capabilities.SupportsFrequencyPenalty,
         MaxStopSequences = capabilities.MaxStopSequences,
         SupportsToolUse = capabilities.SupportsToolUse,
+        SupportsShellTools = capabilities.SupportsShellTools,
         Tools = capabilities.Tools,
         HostedTools = capabilities.HostedTools,
         ToolHistory = LlmToolHistory.Structured,

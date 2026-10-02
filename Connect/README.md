@@ -1,5 +1,28 @@
 # Darkspyre.Inference.Connect
 
+## Batch and deferred contracts
+
+`Darkspyre.Inference.Connect.Resources` declares `ILlmBatchClient` for explicit-connection batch
+creation, incremental requests, one-page queries/results, cancellation, JSONL creation and deferred
+submission/retrieval. Its closed operation union carries actual chat, image/workflow and video
+requests. Results retain caller `CustomId` correlation, native video snapshots and committed caller
+resource descriptors. Counts and timestamps remain nullable observations; absent counts are not zero.
+Media materialization budgets are explicit positive caller policy, not provider defaults. Page limits
+retain the caller's raw nullable integer; these data declarations impose no provider paging bounds.
+
+`ConnectResourcesJson` exports 25 exact data-type getters with one generated closed Common/LLM/Image/
+Video graph. Pages copy their ordered lists, including assignments through `with`. Nested existing
+request/result objects retain their own contracts; constructing a batch wrapper does not admit a
+provider operation or resolve content. The codec preserves fixed xAI hosted-tool and video-option
+variants and mixed function/shell tool graphs. It composes the existing LLM-owned caller-service refusal
+policy and refuses nonnull resource access, handles, authorization and batch clients without calling
+them. Diagnostic strings hide resource, prompt and native receipt data.
+
+This assembly contains declarations and codecs only. It registers no batch/deferred adapter, makes
+no OAuth or endpoint-availability claim, and supplies no `LlmResourceProviderService` implementation.
+Caller workspace storage remains caller-owned. Constructing or serializing a receipt performs no
+upload, polling, materialization, cache creation or tool execution.
+
 ## Hosted STT bindings
 
 `Darkspyre.Inference.Connect.STT` binds a host-selected `SttConnection` to the Common hosted
@@ -573,6 +596,34 @@ Use asynchronous disposal while provider work is active. Consume or dispose acti
 enumerators so their owned operations can leave. Disposal does not report completion while an
 operation remains active. A registration owner disposes its shared cache; sharing a cache across
 containers does not transfer that responsibility to a scoped facade.
+
+### Explicit cache binding
+
+`LlmProviderService.BindContextCacheAsync(connectionId, ct)` is the asynchronous entry point for
+`ILlmContextCacheClient`. It resolves one versioned connection, snapshots its data and validates that
+the selected transport is registered. Binding does not refresh credentials, prepare a provider,
+discover models or create a cache. No current adapter implements explicit cache operations, so a
+valid binding attempt reports `NotSupportedException` instead of returning a usable client.
+
+The facade's admission and retirement cover the source read. Cancellation waits for a source that
+ignores its token to return, then rejects its late result. Facade retirement also drains that read
+before releasing borrowed collaborators. This endpoint does not enable explicit cache generation
+selection, paid cache creation or provider-specific cache scope validation.
+
+### Files and Skills facade
+
+`LlmProviderService` exposes `ILlmFileClient`, `IXaiFilePublicUrlClient` and
+`IXaiSkillClient`. `AddLlmConnect` registers those interfaces as aliases of the same scoped facade.
+The facade owns their admission and retirement; resolving an interface does not create another
+connection source or credential owner. Skills methods use the `IXaiSkillClient` interface to
+distinguish skill IDs and results from file IDs and results.
+
+`LlmProviderCapabilities.Files` and `.Skills` report separate resource-operation facts. Every
+current adapter leaves those facts false. No Files or Skills adapter implements these operations;
+the facade rejects them before resolving connections, refreshing credentials or inspecting caller
+streams. Caller cancellation and retired-facade admission retain the existing lifetime behavior.
+Upload and download streams remain borrowed, including on rejection and facade disposal. These
+resource interfaces do not enable native-file prompt references or skill generation attachment.
 
 ### Embedding lifetime
 
@@ -1254,12 +1305,49 @@ implement dispatch tracking, automatic retries, reconciliation or paid cache cre
 
 ### Tool output
 
+`LlmAgentCallerServices` groups borrowed permission, text-file, terminal-factory, shell-executor
+and resource-access interfaces. The typed callback DTOs preserve actual session/turn scope,
+informational content/diffs/locations, raw JSON, ordered permission choices and artifact descriptors.
+New DTOs copy lists, binary data and JSON values on constructor/init/with assignment. Diagnostic
+strings omit callback contents, paths and environment values. File read StartLine is one-based;
+MaxLines=0 remains zero. Terminal OutputByteLimit preserves nullable/zero/64-bit values.
+Absolute POSIX, Windows drive-rooted and server/share UNC path text survives across decoding hosts
+without normalization or filesystem access. File URLs and relative paths are not operational paths.
+
+Factories and caller services remain borrowed. A returned terminal handle is owned by its session;
+Kill preserves readability, while DisposeAsync must kill/drain and invalidate that handle. These
+interfaces contain no filesystem, process or shell implementation. Start/Resume borrow the typed
+composition and reject unsupported supplied services before runtime work. Built-in adapters do not
+advertise caller-service or shell mappings. Managed sessions release their borrowed handler/service
+references only after admitted work drains; they do not dispose them.
+The current managed lane remains function-only even when a caller-owned SelfHost engine truthfully
+advertises portable shell support. That portable fact does not enable a managed shell executor or
+caller-service mapping; supplied managed shell definitions/services refuse before engine resolution.
+
+`ConnectLlmJson` exports the callback data through exact type-name getters and closed fixed unions.
+Runtime services have no public metadata getters. Their internal owned codecs refuse all non-null
+read/write without invoking callbacks or diagnostic methods. Start/Resume are not data-codec roots.
+Callback RuntimePolicy uses fixed `host-controlled` and `provider-configured` variants. Scope data
+freezes caller-selected policy roots and does not grant filesystem or resource access.
+
 `LlmAgentClientToolDefinition` is a closed function/shell data union. The existing
 `LlmAgentToolDefinition` retains its schema, strictness, deferred-loading and sequential-execution
 fields. `LlmAgentShellTool` wraps the Common shell definition. `ConnectLlmJson` exports these three
-types with exact type-name getters and fixed `function`/`shell` discriminators. Current Start/Resume
-tool collections remain function-only. These declarations do not enable shell execution or change
-provider capabilities.
+types with exact type-name getters and fixed `function`/`shell` discriminators. Start/Resume definitions
+and Common/Connect request, history and terminal collections preserve one ordered function/shell
+union. Unsupported shell definitions/history refuse before refresh, catalog, provider counting or
+native entry. Facades freeze the new tool graphs before their first awaited resolution. Agent
+Start/Resume/Fork freezes definitions before connection resolution. Managed openers freeze definitions
+and supplied context before preparation or catalog awaits. Schemas and context bytes are copied;
+handlers and caller services stay borrowed. Shell results
+match actual preceding calls; output limits remain on that call, not duplicated on the result.
+
+`LlmAgentEvent.TurnId` is nullable for actual session-only observations. Concrete turn-scoped events
+retain guarded non-null IDs, including construction and base-typed `with` assignments. Resource and
+resource-output observations carry null, not an empty synthetic turn. The owned
+`LlmAgentResourceSelectionChangedEvent` metadata preserves an observed revision and nullable actual
+turn; its declaration does not implement selected-resource membership or hint publication.
+Common shell-call observations and typed history remain distinct from function-shaped agent events.
 
 A tool result carries one `LlmToolOutput`: ordered parts, optional structured JSON, and an error flag.
 A chat request sends it as `new LlmToolResult(call.Id, output)`, and an agent `ToolHandler` returns it.

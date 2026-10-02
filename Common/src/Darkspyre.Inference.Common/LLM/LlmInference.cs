@@ -80,6 +80,9 @@ public sealed record LlmCapabilities
 
     public bool SupportsToolUse { get; init; }
 
+    /// <summary>The route implements shell definitions, calls and typed results.</summary>
+    public bool SupportsShellTools { get; init; }
+
     public LlmToolCapabilities Tools { get; init; } = new();
 
     public IReadOnlySet<LlmHostedToolKind> HostedTools { get; init => field = value.ToFrozenSet(); } = FrozenSet<LlmHostedToolKind>.Empty;

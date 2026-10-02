@@ -38,13 +38,13 @@ public sealed class AttachmentJsonTests
             Messages = [new("user", "inspect")
             {
                 Attachments = [new LlmFileReference(new("native")), new LlmResourceAttachment(new("workspace", "original"))],
-                ToolResults = [new("call", new() { Parts = [new LlmToolOutputSessionResource(new("workspace", "generated"))] })]
+                ToolResults = [new LlmToolResult("call", new() { Parts = [new LlmToolOutputSessionResource(new("workspace", "generated"))] })]
             }]
         };
         string json = JsonSerializer.Serialize(request, InferenceJson.LlmRequest);
         var copy = JsonSerializer.Deserialize(json, InferenceJson.LlmRequest)!;
         Assert.Equal(request.Messages[0].Attachments, copy.Messages[0].Attachments);
-        Assert.Equal(request.Messages[0].ToolResults[0].Output.Parts, copy.Messages[0].ToolResults[0].Output.Parts);
+        Assert.Equal(Assert.IsType<LlmToolResult>(request.Messages[0].ToolResults[0]).Output.Parts, Assert.IsType<LlmToolResult>(copy.Messages[0].ToolResults[0]).Output.Parts);
         Assert.Contains("\"type\":\"workspace-resource\"", json, StringComparison.Ordinal);
         Assert.DoesNotContain("\"Data\"", json, StringComparison.Ordinal);
         Assert.Null(copy.Resources);

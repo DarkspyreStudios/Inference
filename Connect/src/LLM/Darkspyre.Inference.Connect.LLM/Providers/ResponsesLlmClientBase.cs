@@ -60,7 +60,8 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
 
     /// <summary>Content the local tokenizer cannot count: bytes, and encrypted reasoning.</summary>
     private static bool Uncountable(LlmChatMessage message) => message.Attachments.Count > 0
-        || message.ToolResults.Any(result => result.Output.Parts.Any(part => part is LlmToolOutputBinary or LlmToolOutputResource { Data: not null }))
+        || message.ToolResults.Any(result => result is LlmToolResult function
+            && function.Output.Parts.Any(part => part is LlmToolOutputBinary or LlmToolOutputResource { Data: not null }))
         || message.ContinuationState?.Payload.Contains("encrypted_content", StringComparison.Ordinal) == true;
 
     public override async IAsyncEnumerable<LlmStreamEvent> StreamAsync(
@@ -238,7 +239,7 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
                                 credential,
                                 connection,
                                 request.ModelId);
-                            foreach (LlmStreamEvent toolEvent in toolCallStream.CompleteMissing(result.ToolCalls,
+                            foreach (LlmStreamEvent toolEvent in toolCallStream.CompleteMissing(ClientTools.Functions(result.ToolCalls),
                                          emitMissingArguments: Transport == LlmTransport.XaiResponses))
                             {
                                 yield return toolEvent;
@@ -433,7 +434,7 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
         payload["include"] = new JsonArray("reasoning.encrypted_content");
         if (request.Tools.Count > 0)
         {
-            payload["tools"] = OpenAiResponsesTools.BuildTools(request.Tools);
+            payload["tools"] = OpenAiResponsesTools.BuildTools(ClientTools.Functions(request.Tools));
         }
 
         if (request.ToolChoice is { } toolChoice)

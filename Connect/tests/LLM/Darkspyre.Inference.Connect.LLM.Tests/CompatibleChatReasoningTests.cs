@@ -144,10 +144,10 @@ public sealed class CompatibleChatReasoningTests
         var events = await Read(client.StreamAsync(Connection(), Request()));
         var result = Assert.IsType<LlmChatCompletionEvent>(events[^1]).Result;
         var retained = new LlmChatMessage("assistant", result.Text)
-        { ContinuationState = result.ContinuationState, ToolCalls = [new("call-1", "echo", "{ \"y\": 2, \"x\": 1 }")] };
+        { ContinuationState = result.ContinuationState, ToolCalls = [new LlmToolCall("call-1", "echo", "{ \"y\": 2, \"x\": 1 }")] };
         await Read(client.StreamAsync(Connection(), Request() with { Messages = [retained] }));
         await Assert.ThrowsAsync<ArgumentException>(() => Read(client.StreamAsync(Connection(), Request() with
-        { Messages = [retained with { ToolCalls = [new("call-1", "echo", "{\"x\":2,\"y\":2}")] }] })));
+        { Messages = [retained with { ToolCalls = [new LlmToolCall("call-1", "echo", "{\"x\":2,\"y\":2}")] }] })));
         Assert.Equal(2, handler.Bodies.Count);
     }
 
@@ -197,7 +197,7 @@ public sealed class CompatibleChatReasoningTests
             case "endpoint": connection = connection with { Endpoint = "https://other.test/v1" }; break;
             case "credential": connection = connection with { Credential = new LlmCredential { ApiKey = "other-key" }.Serialize() }; break;
             case "text": request = request with { Messages = [message with { Content = "tampered" }] }; break;
-            case "call": request = request with { Messages = [message with { ToolCalls = [new("invented", "echo", "{}")] }] }; break;
+            case "call": request = request with { Messages = [message with { ToolCalls = [new LlmToolCall("invented", "echo", "{}")] }] }; break;
             case "field":
                 JsonArray payload = JsonNode.Parse(message.ContinuationState!.Payload)!.AsArray();
                 payload[0]!["unknown"] = "secret";
@@ -230,7 +230,7 @@ public sealed class CompatibleChatReasoningTests
     private static LlmConnection Connection() => new()
     { Version = "1", Transport = LlmTransport.OpenAiCompatibleChat, Endpoint = "https://provider.test/v1", Credential = new LlmCredential { ApiKey = "fixture" }.Serialize() };
     private static LlmChatRequest Request() => new()
-    { ModelId = "model", Messages = [new("user", "hi")], Tools = [new() { Name = "echo", InputSchema = JsonSerializer.SerializeToElement(new { type = "object" }) }] };
+    { ModelId = "model", Messages = [new("user", "hi")], Tools = [new LlmToolDefinition() { Name = "echo", InputSchema = JsonSerializer.SerializeToElement(new { type = "object" }) }] };
     private static string Reply(string message, bool streaming, string finish = "stop") => streaming
         ? $"data: {{\"choices\":[{{\"delta\":{message},\"finish_reason\":\"{finish}\"}}]}}\n\ndata: [DONE]\n\n"
         : $"{{\"choices\":[{{\"message\":{message},\"finish_reason\":\"{finish}\"}}]}}";
