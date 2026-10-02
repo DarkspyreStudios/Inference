@@ -30,6 +30,7 @@ internal sealed class ManagedVertexAgentClient(VertexLlmClient client, LlmProvid
         ArgumentNullException.ThrowIfNull(options);
         cancellationToken.ThrowIfCancellationRequested();
         options = ClientTools.Snapshot(options);
+        ProviderControlPolicy.Validate(connection, new() { ModelId = options.ModelId });
         if (options.Context is not null) { ManagedAgentContext.ValidateRuntimeResources(options.Context); }
         HostedTools.Validate(options.HostedTools, options.MaxHostedTurns, client.GetCapabilities(connection, options.ModelId).HostedTools);
         ClientTools.ValidateManagedOpening(options, client.GetCapabilities(connection, options.ModelId));

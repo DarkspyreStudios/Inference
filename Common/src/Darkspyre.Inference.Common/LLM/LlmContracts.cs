@@ -198,6 +198,9 @@ public sealed record LlmInferenceRequest
 
     /// <summary>An explicitly selected native cache. It is separate from advisory prompt-cache hints.</summary>
     public LlmExplicitCacheReference? ExplicitCache { get; init; }
+
+    /// <summary>Typed provider controls. Null leaves the selected connection default in place.</summary>
+    public LlmProviderControls? ProviderControls { get; init; }
 }
 
 public sealed record LlmUsage(int? InputTokens, int? OutputTokens, int? TotalTokens)

@@ -104,6 +104,8 @@ internal sealed class SelfHostLlmClient(ILlmSelfHost host) : ILlmClient, ILlmCon
 
     internal static (string Code, string Message)? UnsupportedOptions(LlmConnection connection, LlmChatRequest? request = null)
     {
+        if ((request?.ProviderControls ?? connection.Xai?.MultiAgent) is not null)
+        { return ("self-host-provider-controls", "SelfHost does not forward connector-owned provider controls."); }
         if (request?.ExplicitCache is not null)
         { return ("self-host-explicit-cache", "SelfHost does not forward native provider cache receipts."); }
         if (request?.Resources is not null)
@@ -151,6 +153,7 @@ internal sealed class SelfHostLlmClient(ILlmSelfHost host) : ILlmClient, ILlmCon
         ConversationKey = request.ConversationKey,
         PromptCache = request.PromptCache,
         ExplicitCache = request.ExplicitCache,
+        ProviderControls = request.ProviderControls,
         Resources = request.Resources
     };
 

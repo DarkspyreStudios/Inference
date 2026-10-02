@@ -123,6 +123,7 @@ internal static class NativeAgentContract
         IReadOnlyList<LlmAgentClientToolDefinition> tools,
         LlmAgentToolHandler? toolHandler)
     {
+        ProviderControlPolicy.Validate(connection, new() { ModelId = modelId ?? string.Empty });
         var implemented = new LlmProviderCapabilities
         {
             SupportsAgentSessions = true,
@@ -152,6 +153,8 @@ internal static class NativeAgentContract
 
     public static void ValidateTurn(LlmAgentTurnRequest request)
     {
+        if (request.ProviderControls is not null)
+            throw new NotSupportedException("This native runtime does not implement supplied provider controls.");
         if (request.Instructions is not null)
         {
             throw new NotSupportedException(

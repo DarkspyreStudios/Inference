@@ -395,6 +395,8 @@ Qwen reports no automatic prompt caching, cache-hint acceptance or supported cac
 Qwen reports `SupportsExplicitCache=false` and rejects a supplied `ExplicitCache` selection
 before model materialization or native entry. Provider-native cache receipts do not transfer
 to the local engine.
+Qwen rejects non-null `ProviderControls` before model materialization or native entry; it does not
+interpret another implementation's provider-specific controls.
 Qwen supports top-p, top-k, seed, presence and frequency penalties, and up to 16 non-empty stop
 strings. The Common request maps directly to TensorSharp's `SamplingConfig`, including requests
 without a structured-output grammar. Top-p, top-k and seed require a positive temperature; null

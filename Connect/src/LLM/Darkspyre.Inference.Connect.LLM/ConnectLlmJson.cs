@@ -11,6 +11,7 @@ namespace Darkspyre.Inference.Connect.LLM;
 /// <summary>Connect-owned metadata for closed connection, request and captured-context contracts.</summary>
 public static class ConnectLlmJson
 {
+    public static JsonTypeInfo<XaiMultiAgentControls> XaiMultiAgentControls => Metadata<XaiMultiAgentControls>();
     public static JsonTypeInfo<LlmAgentCapabilities> LlmAgentCapabilities => Metadata<LlmAgentCapabilities>();
     public static JsonTypeInfo<LlmAzureConfiguration> LlmAzureConfiguration => Metadata<LlmAzureConfiguration>();
     public static JsonTypeInfo<LlmAzureApiMode> LlmAzureApiMode => Metadata<LlmAzureApiMode>();
@@ -172,6 +173,13 @@ public static class ConnectLlmJson
             if (LlmAgentCallerJson.RuntimeMetadata(type, options) is { } runtime) return runtime;
             if (LlmRuntimeAuthenticationJson.RuntimeMetadata(type, options) is { } authentication) return authentication;
             var metadata = ((IJsonTypeInfoResolver)ConnectLlmJsonContext.Default).GetTypeInfo(type, options);
+            if (type == typeof(LlmProviderControls) && metadata is not null)
+                metadata.PolymorphismOptions = new JsonPolymorphismOptions
+                {
+                    TypeDiscriminatorPropertyName = "type",
+                    UnknownDerivedTypeHandling = JsonUnknownDerivedTypeHandling.FailSerialization,
+                    DerivedTypes = { new JsonDerivedType(typeof(XaiMultiAgentControls), "xai-multi-agent") }
+                };
             if (type == typeof(LlmAgentRuntimePolicy) && metadata is not null)
                 metadata.PolymorphismOptions = new JsonPolymorphismOptions
                 {
@@ -300,6 +308,8 @@ public static class ConnectLlmJson
 [JsonSerializable(typeof(LlmAgentStagedStateSnapshot))]
 [JsonSerializable(typeof(LlmAgentStagedStateCommitResult))]
 [JsonSerializable(typeof(LlmConnection))]
+[JsonSerializable(typeof(XaiMultiAgentControls))]
+[JsonSerializable(typeof(LlmAgentTurnRequest))]
 [JsonSerializable(typeof(XaiStoragePublicUrlRequest))]
 [JsonSerializable(typeof(XaiStoragePublicUrlFlag))]
 [JsonSerializable(typeof(XaiStoragePublicUrlConfiguration))]

@@ -216,6 +216,9 @@ public sealed record LlmAgentResumeOptions
 
 public sealed record LlmAgentTurnRequest
 {
+    /// <summary>Typed provider controls frozen for this run, including its tool and compaction continuations.</summary>
+    public LlmProviderControls? ProviderControls { get; init; }
+
     /// <summary>
     /// Null uses session base instructions; empty clears them for this run; nonempty replaces them.
     /// Applies through tool iterations and compaction continuations, never to subsequent runs.
