@@ -116,6 +116,32 @@ public sealed class AzureSettingsTests
         Assert.Equal(0, handler.Calls);
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task EntraDraftDoesNotOfferApiKeyOrAcquireOrSaveUnimplementedAuthentication(bool responses)
+    {
+        using var handler = new AzureProtocolTests.Handler(responses, false);
+        using var http = new HttpClient(handler);
+        var client = AzureProtocolTests.Client(http, responses);
+        await using var provider = new LlmProviderService(new Source(), [client], [], [new AzureSetupEnvironment(client.Transport)]);
+        var target = new Target();
+        var manager = provider.CreateSettingsManager(target);
+        LlmConnection connection = AzureProtocolTests.Connection(responses, false);
+        var entra = new LlmAzureEntraConfiguration(LlmAzureCloud.Public, LlmAzureTokenAudience.Foundry,
+            new LlmAzureIdentitySelection.ServicePrincipalSecret("tenant", "client"));
+        var credential = new LlmCredential { Azure = new LlmAzureSecret.ClientSecret("protected-secret") };
+        LlmSettings settings = await manager.OpenAsync(client.Transport, new(SetupChangeIntent.Edit, "id", "v1"),
+            connection with { Azure = connection.Azure! with { AuthenticationMode = LlmAzureAuthenticationMode.Entra, Entra = entra },
+                Credential = credential.Serialize() });
+        Assert.DoesNotContain(Fields(settings), field => field.Description.Id == "api-key");
+        Assert.False(settings.Validate().IsValid);
+        Assert.NotEqual(SetupCommitState.Committed, (await manager.SaveAsync(settings)).State);
+        Assert.Equal(0, target.Calls);
+        Assert.Equal(0, handler.Calls);
+        Assert.Equal(SetupObservation.Unknown, settings.Status.Authenticated);
+    }
+
     private static SetupField Field(LlmSettings settings, string id) => Assert.Single(Fields(settings), field => field.Description.Id == id);
     private static IEnumerable<SetupField> Fields(LlmSettings settings) => settings.Steps.SelectMany(step => step.Sections).SelectMany(section => section.Fields);
     private sealed class Target : ISetupCommitTarget<LlmSetupChanges>
