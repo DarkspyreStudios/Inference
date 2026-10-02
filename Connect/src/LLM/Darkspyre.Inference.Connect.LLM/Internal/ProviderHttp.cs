@@ -13,6 +13,14 @@ internal static class ProviderHttp
 
     private static readonly string[] ReservedHeaders = ["Authorization", "Accept", "Content-Type", "Host"];
 
+    internal static void ValidateAdditionalHeaders(IReadOnlyDictionary<string, string> headers)
+    {
+        ArgumentNullException.ThrowIfNull(headers);
+        using var request = new HttpRequestMessage();
+        foreach ((string name, string value) in headers)
+            AddCustomHeader(request, name, value, "additional");
+    }
+
     public static void ApplyHeaders(
         HttpRequestMessage request,
         LlmConnection connection,
