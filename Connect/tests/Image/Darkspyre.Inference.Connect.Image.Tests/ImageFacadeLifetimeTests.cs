@@ -16,6 +16,49 @@ public sealed class ImageFacadeLifetimeTests
     private static Task Retire(ImageProviderService facade) => Assert.IsAssignableFrom<IAsyncDisposable>(facade).DisposeAsync().AsTask();
     private static Task Cleanup(ImageProviderService facade) => (object)facade is IAsyncDisposable owner ? owner.DisposeAsync().AsTask() : Task.CompletedTask;
 
+    [Fact]
+    public async Task LiveListingPreservesExactProviderResultAndBorrowing()
+    {
+        IReadOnlyList<ImageWorkflow> expected = [ForeignImageFacadeTransport.Workflow];
+        var transport = new ForeignImageFacadeTransport(_ => Task.FromResult(expected), (_, _) => { });
+        var facade = new ImageProviderService([transport]);
+        try
+        {
+            Assert.Same(expected, await facade.GetWorkflowsAsync(Connection));
+            Assert.Same(transport, facade.GetRequiredTransport(ImageTransport.ComfyUi));
+            Assert.Single(facade.SetupDefinitions); Assert.Single(facade.AvailableTransports);
+            await Retire(facade); Assert.Equal(0, transport.DisposeCalls);
+        }
+        finally { await Cleanup(facade); }
+    }
+
+    [Fact]
+    public async Task CooperativeListingObservesOwnerCancellationAndRetirementDrainsIt()
+    {
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var canceled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var transport = new ForeignImageFacadeTransport(async token =>
+        {
+            using CancellationTokenRegistration registration = token.Register(() => canceled.TrySetResult());
+            entered.TrySetResult(); await canceled.Task; await release.Task; token.ThrowIfCancellationRequested(); return [];
+        }, (_, _) => { });
+        var facade = new ImageProviderService([transport]); Task<IReadOnlyList<ImageWorkflow>>? request = null; Task? retirement = null;
+        try
+        {
+            request = facade.GetWorkflowsAsync(Connection); await entered.Task.WaitAsync(Deadline);
+            retirement = Retire(facade); await canceled.Task.WaitAsync(Deadline); Assert.False(retirement.IsCompleted);
+            release.TrySetResult(); await Assert.ThrowsAnyAsync<OperationCanceledException>(() => request.WaitAsync(Deadline));
+            await retirement.WaitAsync(Deadline); Assert.Equal(0, transport.DisposeCalls);
+        }
+        finally
+        {
+            retirement ??= Cleanup(facade); canceled.TrySetResult(); release.TrySetResult();
+            try { if (request is not null) await Record.ExceptionAsync(() => request.WaitAsync(Deadline)); }
+            finally { await Record.ExceptionAsync(() => retirement.WaitAsync(Deadline)); }
+        }
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -144,12 +187,21 @@ public sealed class ImageFacadeLifetimeTests
             Assert.IsAssignableFrom<IDisposable>(facade).Dispose(); await Retire(facade);
             await inference.GetCapabilitiesAsync(); Assert.Equal(0, transport.DisposeCalls); Assert.Equal(0, target.DisposeCalls);
             await manager.DisposeAsync(); Assert.Equal(0, target.DisposeCalls);
+            await Assert.IsAssignableFrom<IAsyncDisposable>(inference).DisposeAsync(); Assert.Equal(0, transport.DisposeCalls);
         }
         finally
         {
             Task retirement = Cleanup(facade); release.TrySetResult();
             try { if (request is not null) await Record.ExceptionAsync(() => request.WaitAsync(Deadline)); }
-            finally { try { await manager.DisposeAsync(); } finally { await Record.ExceptionAsync(() => retirement.WaitAsync(Deadline)); } }
+            finally
+            {
+                try { await manager.DisposeAsync(); }
+                finally
+                {
+                    try { await Assert.IsAssignableFrom<IAsyncDisposable>(inference).DisposeAsync(); }
+                    finally { await Record.ExceptionAsync(() => retirement.WaitAsync(Deadline)); }
+                }
+            }
         }
     }
 
