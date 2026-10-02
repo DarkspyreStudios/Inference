@@ -115,6 +115,45 @@ public sealed class XaiTtsStreamingTests
         }
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task LateUnhandedSocketCleanupIsOnceAndRefusalIsRetained(bool fails)
+    {
+        using var access = new LlmConnectionAccess(new XaiTtsTests.Source(), []);
+        using var http = new HttpClient(new XaiTtsTests.Handler(_ => throw new InvalidOperationException()));
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var cleanup = new InvalidOperationException("actual unhanded socket refusal");
+        var socket = new Socket { CleanupFailure = fails ? cleanup : null };
+        ITtsClient client = Provider(http, async (_, _, _) => { entered.TrySetResult(); await release.Task; return socket; }).Bind(XaiTtsTests.Connection, new(new("selected"), access));
+        Task<ITtsStreamingSession> opening = Assert.IsAssignableFrom<ITtsStreamingClient>(client).OpenStreamAsync(new(Language: "en"), Limits);
+        Task? retirement = null;
+        try
+        {
+            await entered.Task.WaitAsync(Timeout); retirement = client.DisposeAsync().AsTask();
+            Assert.False(retirement.IsCompleted); release.TrySetResult();
+            Exception? error = await Record.ExceptionAsync(() => opening);
+            if (fails)
+            {
+                var aggregate = Assert.IsType<AggregateException>(error);
+                Assert.IsAssignableFrom<OperationCanceledException>(aggregate.InnerExceptions[0]);
+                var refused = Assert.IsType<Darkspyre.Inference.Common.Resources.InferenceResourceOperationException>(aggregate.InnerExceptions[1]);
+                Assert.Same(cleanup, refused.InnerException);
+                Assert.Same(refused, await Record.ExceptionAsync(() => retirement));
+                Assert.Same(refused, await Record.ExceptionAsync(() => client.DisposeAsync().AsTask()));
+            }
+            else { Assert.IsAssignableFrom<OperationCanceledException>(error); await retirement.WaitAsync(Timeout); }
+            Assert.Equal(1, socket.Disposals);
+        }
+        finally
+        {
+            retirement ??= client.DisposeAsync().AsTask(); release.TrySetResult();
+            try { _ = await Record.ExceptionAsync(() => opening.WaitAsync(Timeout)); }
+            finally { _ = await Record.ExceptionAsync(() => retirement.WaitAsync(Timeout)); }
+        }
+    }
+
     [Fact]
     public async Task PausedEventsDoNotBlockRetirementAndSecondReaderRefuses()
     {
