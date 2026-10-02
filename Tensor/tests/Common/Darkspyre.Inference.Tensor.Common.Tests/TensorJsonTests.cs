@@ -193,6 +193,16 @@ public sealed class TensorJsonTests
             Assert.Same(tensor, metadata.Options.TypeInfoResolver.GetType().Assembly);
             object value = JsonSerializer.Deserialize(json, metadata)!;
             string written = JsonSerializer.Serialize(value, metadata);
+            if (family is "TensorRuntimeState" or "TensorRuntimeShutdownState")
+            {
+                foreach (int undefined in new[] { -1, 999, int.MinValue, int.MaxValue })
+                {
+                    Assert.Throws<JsonException>(() => JsonSerializer.Deserialize(
+                        undefined.ToString(CultureInfo.InvariantCulture), metadata));
+                    Assert.Throws<JsonException>(() => JsonSerializer.Serialize(
+                        Enum.ToObject(metadata.Type, undefined), metadata));
+                }
+            }
             if (family.StartsWith("TensorRuntime", StringComparison.Ordinal))
             {
                 Assert.Equal(json, written);

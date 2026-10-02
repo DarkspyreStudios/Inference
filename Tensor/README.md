@@ -331,6 +331,8 @@ copies. Validated init accessors reject invalid copies and snapshot nested build
 Owned JSON requires every mandatory runtime fact, including zero sizes, observation timestamps,
 shutdown counts/state/flags and an explicitly nullable actual candidate ID. Missing facts refuse;
 they do not become zero, false, Completed or a default timestamp. Plan candidates remain optional.
+The two runtime-state enums retain their numeric wire values. Their owned JSON readers and writers
+reject undefined values, strings, nulls and numbers outside the Int32 range.
 
 `TensorRuntimeShutdownResult` snapshots its ordered safe diagnostics and carries the actual
 observation time, operation ID, outstanding owner leases and possible surviving native state.
