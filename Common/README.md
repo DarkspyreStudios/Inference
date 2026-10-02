@@ -190,6 +190,9 @@ operation exceptions preserve the original inner exception; cancellation remains
 unchanged. It reports actual owned-handle disposal refusal, retaining the original cleanup error and
 already observed reference without invoking handle metadata during cleanup. Healthy operation
 cancellation does not itself report a cleanup failure.
+An internal Connect-only retention slot keeps actual refused cleanup owners reachable through the
+runtime failure until its references are released. It is not a portable field, global quarantine or
+automatic retry, and does not retain healthy borrowed authority merely to keep an operation alive.
 
 `InferenceJson` exports typed metadata named after each resource data contract, including the scoped
 selection version, commit result and failure facts. Required scope, revision and membership fields

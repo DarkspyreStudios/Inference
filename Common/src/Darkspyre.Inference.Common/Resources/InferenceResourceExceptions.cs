@@ -3,6 +3,7 @@ namespace Darkspyre.Inference.Common.Resources;
 /// <summary>A runtime operation failure with separately portable primitive effect facts.</summary>
 public sealed class InferenceResourceOperationException : Exception
 {
+    private object? _cleanupOwner;
     public InferenceResourceOperationException(InferenceFailureCode code, string message,
         InferenceResourceOperationFailure failure, Exception? innerException = null)
         : base(message, innerException)
@@ -14,11 +15,26 @@ public sealed class InferenceResourceOperationException : Exception
 
     public InferenceFailureCode Code { get; }
     public InferenceResourceOperationFailure Failure { get; }
+
+    internal void RetainCleanupOwner(object owner)
+    {
+        ArgumentNullException.ThrowIfNull(owner);
+        if (Failure.Phase != InferenceResourceOperationPhase.Cleanup)
+            throw new InvalidOperationException("Only an actual cleanup failure can retain its refused owner.");
+        while (true)
+        {
+            object? previous = Volatile.Read(ref _cleanupOwner);
+            if (ReferenceEquals(previous, owner)) return;
+            object retained = previous is null ? owner : (previous, owner);
+            if (ReferenceEquals(Interlocked.CompareExchange(ref _cleanupOwner, retained, previous), previous)) return;
+        }
+    }
 }
 
 /// <summary>Cancellation retains the actual token and known/unknown effect facts.</summary>
 public sealed class InferenceResourceOperationCanceledException : OperationCanceledException
 {
+    private object? _cleanupOwner;
     public InferenceResourceOperationCanceledException(InferenceResourceOperationFailure failure,
         CancellationToken cancellationToken, Exception? innerException = null)
         : base("The resource operation was canceled.", innerException, cancellationToken)
@@ -28,6 +44,20 @@ public sealed class InferenceResourceOperationCanceledException : OperationCance
     }
 
     public InferenceResourceOperationFailure Failure { get; }
+
+    internal void RetainCleanupOwner(object owner)
+    {
+        ArgumentNullException.ThrowIfNull(owner);
+        if (Failure.Phase != InferenceResourceOperationPhase.Cleanup)
+            throw new InvalidOperationException("Only an actual cleanup failure can retain its refused owner.");
+        while (true)
+        {
+            object? previous = Volatile.Read(ref _cleanupOwner);
+            if (ReferenceEquals(previous, owner)) return;
+            object retained = previous is null ? owner : (previous, owner);
+            if (ReferenceEquals(Interlocked.CompareExchange(ref _cleanupOwner, retained, previous), previous)) return;
+        }
+    }
 }
 
 /// <summary>A refused replacement. No selection mutation occurs on this conflict.</summary>

@@ -138,11 +138,11 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
         {
             var cleanup = new List<Exception>();
             try { if (iterator is not null) await iterator.DisposeAsync().ConfigureAwait(false); }
-            catch (Exception error) { cleanup.Add(resources is null ? error : LlmResourcePreparation.AsCleanupFailure(error)); }
+            catch (Exception error) { cleanup.Add(resources is null ? error : LlmResourcePreparation.AsCleanupFailure(error, refusedOwner: iterator)); }
             try { if (resources is not null) await resources.DisposeAsync().ConfigureAwait(false); }
             catch (Exception error) { cleanup.Add(LlmResourcePreparation.AsResourceFailure(error, cancellationToken)); }
             try { if (ownedFiles is not null) await ownedFiles.DisposeAsync().ConfigureAwait(false); }
-            catch (Exception error) { cleanup.Add(resourceAdmitted ? LlmResourcePreparation.AsCleanupFailure(error) : error); }
+            catch (Exception error) { cleanup.Add(resourceAdmitted ? LlmResourcePreparation.AsCleanupFailure(error, refusedOwner: ownedFiles) : error); }
             if (cleanup.Count > 0)
             {
                 if (failure is not null) cleanup.Insert(0, failure);
@@ -204,15 +204,22 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
         finally
         {
             var cleanup = new List<Exception>();
-            void Record(Exception error) => cleanup.Add(resourceAdmitted ? LlmResourcePreparation.AsCleanupFailure(error) : error);
+            void Record(Exception error, object? refusedOwner = null) => cleanup.Add(resourceAdmitted
+                ? LlmResourcePreparation.AsCleanupFailure(error, refusedOwner: refusedOwner) : error);
+            bool bodyRefused = false;
             try { if (body is not null) await body.DisposeAsync().ConfigureAwait(false); }
-            catch (Exception error) { Record(error); }
-            try { if (stream is not null) await stream.DisposeAsync().ConfigureAwait(false); }
-            catch (Exception error) { Record(error); }
-            try { response?.Dispose(); }
-            catch (Exception error) { Record(error); }
+            catch (Exception error) { bodyRefused = true; Record(error, (body, stream, response)); }
+            bool streamRefused = false;
+            try { if (!bodyRefused && stream is not null) await stream.DisposeAsync().ConfigureAwait(false); }
+            catch (Exception error) { streamRefused = true; Record(error, (stream, response)); }
+            // Response content owns the same stream; a refused release cannot be retried through its owner.
+            if (!bodyRefused && !streamRefused)
+            {
+                try { response?.Dispose(); }
+                catch (Exception error) { Record(error, response); }
+            }
             try { httpRequest?.Dispose(); }
-            catch (Exception error) { Record(error); }
+            catch (Exception error) { Record(error, httpRequest); }
             if (cleanup.Count > 0)
             {
                 if (failure is not null) cleanup.Insert(0, failure);

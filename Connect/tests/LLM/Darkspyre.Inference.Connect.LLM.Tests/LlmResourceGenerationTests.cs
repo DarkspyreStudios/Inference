@@ -12,16 +12,18 @@ namespace Darkspyre.Inference.Connect.LLM.Tests;
 
 public sealed class LlmResourceGenerationTests
 {
-    [Fact]
-    public async Task RetainedDefaultSessionReleasesSeparatelyCollectibleBorrowedResourceAccess()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task RetainedDefaultSessionReleasesSeparatelyCollectibleBorrowedResourceAccess(bool cleanupFailure)
     {
-        (ManagedAgentSession retained, WeakReference[] roots) = await ExerciseBorrowedAsync();
+        (ManagedAgentSession retained, WeakReference[] roots) = await ExerciseBorrowedAsync(cleanupFailure);
         Collect(roots);
         GC.KeepAlive(retained);
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private static async Task<(ManagedAgentSession, WeakReference[])> ExerciseBorrowedAsync()
+    private static async Task<(ManagedAgentSession, WeakReference[])> ExerciseBorrowedAsync(bool cleanupFailure)
     {
         var generation = new Generation();
         var roots = new List<WeakReference> { new(generation) };
@@ -38,18 +40,29 @@ public sealed class LlmResourceGenerationTests
             InferenceResourceReference reference = await (Task<InferenceResourceReference>)register.Invoke(access, ["source.txt", "text/plain", "foreign source"])!;
             Assert.Equal("resource-1", reference.Id);
             using var destination = new LlmResourceMaterializationTests.ResourceDestination();
+            if (cleanupFailure) destination.ResponseCleanupFailure = new InvalidOperationException("default-owned response cleanup refusal");
             using var http = new HttpClient(destination);
             var client = new XaiResponsesLlmClient(http);
             var session = await ManagedAgentSession.CreateAsync(LlmResourceMaterializationTests.Connection(),
                 new() { ModelId = "grok-4", CallerServices = new() { Resources = access } }, [], client,
                 (request, token) => client.StreamAsync(LlmResourceMaterializationTests.Connection(), request, token),
                 model => ManagedResourceMaterializationTests.ManagedCapabilities(client, model));
-            await ManagedResourceMaterializationTests.Read(session.RunTurnAsync(new() { Input = [new LlmAgentTextContent("inspect")] }));
-            LlmAgentContext captured = await session.CaptureContextAsync();
-            Assert.Equal(new[] { reference }, captured.SelectedResources);
+            if (cleanupFailure)
+            {
+                var failure = await Assert.ThrowsAsync<InferenceResourceOperationException>(() => ManagedResourceMaterializationTests.Read(
+                    session.RunTurnAsync(new() { Input = [new LlmAgentTextContent("inspect")] })));
+                Assert.Same(destination.ResponseCleanupFailure, failure.InnerException);
+                Assert.Same(failure, await Assert.ThrowsAsync<InferenceResourceOperationException>(() => session.DisposeAsync().AsTask()));
+            }
+            else
+            {
+                await ManagedResourceMaterializationTests.Read(session.RunTurnAsync(new() { Input = [new LlmAgentTextContent("inspect")] }));
+                LlmAgentContext captured = await session.CaptureContextAsync();
+                Assert.Equal(new[] { reference }, captured.SelectedResources);
+                await session.DisposeAsync();
+            }
             Assert.Single(destination.Uploads);
             Assert.Equal("foreign source", System.Text.Encoding.UTF8.GetString(destination.Uploads[0].Bytes));
-            await session.DisposeAsync();
             Assert.Equal(0, type.GetProperty("DisposeCalls", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(access));
             Assert.Equal(1, type.GetProperty("OpenedReads", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(access));
             Assert.Equal(1, type.GetProperty("DisposedReads", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(access));

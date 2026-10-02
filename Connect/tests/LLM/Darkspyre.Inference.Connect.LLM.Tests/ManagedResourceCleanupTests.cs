@@ -1,3 +1,4 @@
+using Darkspyre.Inference.Common.LLM;
 using Darkspyre.Inference.Common.Resources;
 using Darkspyre.Inference.Connect.LLM.Internal;
 using Darkspyre.Inference.Connect.LLM.Providers;
@@ -6,6 +7,37 @@ namespace Darkspyre.Inference.Connect.LLM.Tests;
 
 public sealed class ManagedResourceCleanupTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task HealthyStreamingOwnersReleaseOnEndAndAbandonment(bool abandon)
+    {
+        var resources = new ControlledSessionResources();
+        await resources.RegisterAsync("source.txt", "text/plain", "source");
+        using var destination = new LlmResourceMaterializationTests.ResourceDestination();
+        using var stream = new HealthyBodyStream();
+        using var handler = new StreamingDestination(destination, stream);
+        using var http = new HttpClient(handler);
+        var connection = LlmResourceMaterializationTests.Connection() with { CapabilityOverrides = new() { SupportsStreaming = true } };
+        var client = new XaiResponsesLlmClient(http);
+        await using (var reader = client.StreamAsync(connection, LlmResourceMaterializationTests.Request(resources)).GetAsyncEnumerator())
+        {
+            Assert.True(await reader.MoveNextAsync());
+            Assert.IsType<LlmTextDeltaEvent>(reader.Current);
+            if (!abandon)
+            {
+                Assert.True(await reader.MoveNextAsync());
+                Assert.IsType<LlmChatCompletionEvent>(reader.Current);
+                Assert.False(await reader.MoveNextAsync());
+            }
+        }
+        Assert.Equal(1, stream.AsyncCleanupAttempts);
+        Assert.Equal(1, handler.ResponseCleanupAttempts);
+        Assert.Equal(1, handler.RequestCleanupAttempts);
+        Assert.Equal(1, resources.DisposedReads);
+        Assert.Equal(0, resources.DisposeCalls);
+    }
+
     [Fact]
     public void CachedCleanupFailureRetainsTheActualRefusedStreamAndResponseOnlyUntilReleased()
     {
@@ -94,6 +126,8 @@ public sealed class ManagedResourceCleanupTests
             Assert.Same(failure, await Assert.ThrowsAsync<InferenceResourceOperationCanceledException>(() => retirement));
             Assert.Equal(1, stream.AsyncCleanupAttempts);
             Assert.Equal(0, stream.SyncCleanupAttempts);
+            Assert.Equal(0, handler.ResponseCleanupAttempts);
+            Assert.Equal(1, handler.RequestCleanupAttempts);
             Assert.Equal(1, resources.DisposedReads);
         }
         finally { retirement ??= session.DisposeAsync().AsTask(); await Drain(retirement); }
@@ -271,13 +305,32 @@ public sealed class ManagedResourceCleanupTests
     {
         private readonly HttpMessageInvoker _destination = new(destination, disposeHandler: false);
         internal WeakReference? Response { get; private set; }
+        internal int ResponseCleanupAttempts { get; private set; }
+        internal int RequestCleanupAttempts { get; private set; }
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken token)
         {
             HttpResponseMessage response = await _destination.SendAsync(request, token);
             if (request.RequestUri!.AbsolutePath.EndsWith("/responses", StringComparison.Ordinal))
-            { response.Content.Dispose(); response.Content = new StreamContent(body); Response = new(response); }
+            {
+                response.Content.Dispose();
+                response.Content = new ResponseStreamContent(body, () => ResponseCleanupAttempts++);
+                request.Content!.Dispose();
+                request.Content = new RequestContent(() => RequestCleanupAttempts++);
+                Response = new(response);
+            }
             return response;
         }
         protected override void Dispose(bool disposing) { if (disposing) _destination.Dispose(); base.Dispose(disposing); }
     }
+    private sealed class HealthyBodyStream() : MemoryStream(System.Text.Encoding.UTF8.GetBytes(
+        "data: {\"type\":\"response.output_text.delta\",\"delta\":\"done\"}\n\n" +
+        "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"response-one\",\"status\":\"completed\",\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"done\"}]}]}}\n\n"))
+    {
+        internal int AsyncCleanupAttempts { get; private set; }
+        public override ValueTask DisposeAsync() { AsyncCleanupAttempts++; return base.DisposeAsync(); }
+    }
+    private sealed class ResponseStreamContent(Stream stream, Action cleanup) : StreamContent(stream)
+    { protected override void Dispose(bool disposing) { if (disposing) cleanup(); base.Dispose(disposing); } }
+    private sealed class RequestContent(Action cleanup) : StringContent(string.Empty)
+    { protected override void Dispose(bool disposing) { if (disposing) cleanup(); base.Dispose(disposing); } }
 }

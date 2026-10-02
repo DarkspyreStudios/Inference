@@ -108,15 +108,37 @@ internal sealed class LlmResourcePreparation : IAsyncDisposable
         _ => false
     };
 
-    internal static Exception AsCleanupFailure(Exception cleanup, InferenceResourceReference? reference = null)
+    internal static Exception AsCleanupFailure(Exception cleanup, InferenceResourceReference? reference = null, object? refusedOwner = null)
     {
-        if (IsCleanupFailure(cleanup)) return cleanup;
+        if (IsCleanupFailure(cleanup))
+        {
+            if (refusedOwner is not null) RetainCleanupOwner(cleanup, refusedOwner);
+            return cleanup;
+        }
         var facts = new InferenceResourceOperationFailure(InferenceResourceOperationPhase.Cleanup, reference,
             InferenceResourceCommitOutcome.NotAttempted);
-        return cleanup is OperationCanceledException canceled
+        Exception failure = cleanup is OperationCanceledException canceled
             ? new InferenceResourceOperationCanceledException(facts, canceled.CancellationToken, cleanup)
             : new InferenceResourceOperationException(InferenceFailureCode.ExecutionFailed,
                 "The owned resource could not be released.", facts, cleanup);
+        if (refusedOwner is not null) RetainCleanupOwner(failure, refusedOwner);
+        return failure;
+    }
+
+    private static void RetainCleanupOwner(Exception failure, object owner)
+    {
+        switch (failure)
+        {
+            case InferenceResourceOperationException resource when resource.Failure.Phase == InferenceResourceOperationPhase.Cleanup:
+                resource.RetainCleanupOwner(owner);
+                break;
+            case InferenceResourceOperationCanceledException resource when resource.Failure.Phase == InferenceResourceOperationPhase.Cleanup:
+                resource.RetainCleanupOwner(owner);
+                break;
+            case AggregateException aggregate:
+                RetainCleanupOwner(aggregate.InnerExceptions.First(IsCleanupFailure), owner);
+                break;
+        }
     }
 
     internal static Exception AsResourceFailure(Exception error, CancellationToken token)
@@ -295,7 +317,7 @@ internal sealed class LlmResourcePreparation : IAsyncDisposable
             catch (Exception cleanup)
             {
                 failedHandles.Add(owned);
-                failures.Add(AsCleanupFailure(cleanup, owned.Reference));
+                failures.Add(AsCleanupFailure(cleanup, owned.Reference, owned.Handle));
             }
         }
         _handles.Clear();

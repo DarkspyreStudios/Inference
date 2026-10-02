@@ -567,6 +567,11 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
                 {
                     await foreach (var item in StreamModelAsync(run, request, token))
                     {
+                        if (request.Resources is not null)
+                        {
+                            try { FenceResourceCallback(token); }
+                            catch (Exception error) { ExceptionDispatchInfo.Capture(LlmResourcePreparation.AsResourceFailure(error, token)).Throw(); throw; }
+                        }
                         if (result is not null) { throw new InvalidOperationException("Model emitted an event after completion."); }
                         switch (item)
                         {
@@ -614,6 +619,11 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
                 {
                     await PauseAsync(run, status with { NeedsCompaction = true }, LlmAgentCompactionReason.ProviderOverflow, writer, token);
                     return;
+                }
+                if (request.Resources is not null)
+                {
+                    try { FenceResourceCallback(token); }
+                    catch (Exception error) { ExceptionDispatchInfo.Capture(LlmResourcePreparation.AsResourceFailure(error, token)).Throw(); throw; }
                 }
                 if (result is null) { throw new InvalidOperationException("Model stream ended without completion."); }
                 run.Iterations++;

@@ -791,7 +791,11 @@ Typed resource cancellation reaches a live reader even when session retirement c
 Healthy cleanup leaves session disposal successful. Actual owned handle or HTTP cleanup refusal uses
 `InferenceResourceOperationPhase.Cleanup` and remains the same cached reader/disposer failure;
 independent operation and cleanup causes remain visible. Borrowed authority detaches after callback
-drain, while refused owned resources and their actual failures are retained. This controlled managed
+drain, while refused owned resources remain reachable through the actual retained cleanup failure.
+SSE parsing borrows its caller-owned stream. A refused async body-stream release skips dependent
+response/content cleanup rather than retrying that same stream synchronously; the failed stream and
+dependent response stay with the cleanup error until that error's references are released. This is
+not process-exit quarantine. This controlled managed
 xAI composition does not activate a public Grok agent opener or qualify other destinations.
 
 ### Embedding lifetime
