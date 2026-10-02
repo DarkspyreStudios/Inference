@@ -192,7 +192,9 @@ public sealed class VertexCachedCountPreflightTests
 
     private static LlmConnection Connection(bool refreshable = true) => new()
     {
-        Transport = LlmTransport.GoogleVertexAi, Version = "1", Endpoint = "https://aiplatform.googleapis.com",
+        Transport = LlmTransport.GoogleVertexAi,
+        Version = "1",
+        Endpoint = "https://aiplatform.googleapis.com",
         Vertex = new() { ProjectId = "project", Location = "global" },
         Credential = refreshable ? new LlmCredential { OAuth = new() { AccessToken = "controlled-old" } }.Serialize() : null
     };
@@ -200,8 +202,12 @@ public sealed class VertexCachedCountPreflightTests
     private static LlmChatRequest Request(bool claude, bool cache)
     {
         string model = claude ? "anthropic/claude-sonnet-4-6" : "google/gemini-2.5-flash";
-        return new() { ModelId = model, Messages = [new("user", "suffix")],
-            ExplicitCache = cache ? new("cachedContents/test", model, "scope") : null };
+        return new()
+        {
+            ModelId = model,
+            Messages = [new("user", "suffix")],
+            ExplicitCache = cache ? new("cachedContents/test", model, "scope") : null
+        };
     }
 
     private sealed class Authentication : IVertexAuthentication
@@ -266,8 +272,13 @@ public sealed class VertexCachedCountPreflightTests
             [EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested(); Generations++; LastRequest = request; await Task.CompletedTask;
-            yield return new LlmChatCompletionEvent(new() { Text = "done", Status = LlmCompletionStatus.Completed,
-                Usage = new(7, 2, 9) { CachedInputTokens = 5 }, Diagnostics = new(200, null, null) });
+            yield return new LlmChatCompletionEvent(new()
+            {
+                Text = "done",
+                Status = LlmCompletionStatus.Completed,
+                Usage = new(7, 2, 9) { CachedInputTokens = 5 },
+                Diagnostics = new(200, null, null)
+            });
         }
     }
 

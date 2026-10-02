@@ -634,6 +634,7 @@ public sealed class LlmProviderService : ILlmTextTokenizer, ILlmFileClient, IXai
         ThrowIfOperationCanceled(cancellationToken);
         RequestJson.ValidateSamplingOptions(connection, request);
         request = ProviderControlPolicy.Resolve(connection, request);
+        ExplicitCaches.ValidateProviderTokenCount(connection, request);
         ILlmClient client = ClientFor(connection.Transport);
         if (client is not ILlmProviderTokenCounter counter)
             throw new NotSupportedException("This route does not implement provider input-token counting.");

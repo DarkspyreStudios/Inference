@@ -719,6 +719,11 @@ ignores its token to return, then rejects its late result. Facade retirement als
 before releasing borrowed collaborators. This endpoint does not enable explicit cache generation
 selection, paid cache creation or provider-specific cache scope validation.
 
+Exact provider-token counting rejects explicitly cached Vertex requests before credential refresh,
+authentication, connection preparation, model discovery or HTTP dispatch. This restriction is
+independent of generation-cache capability. Uncached counting and local estimated accounting
+retain their existing behavior.
+
 ### Files and Skills facade
 
 `LlmProviderService` exposes `ILlmFileClient`, `IXaiFilePublicUrlClient` and
