@@ -9,6 +9,7 @@ public sealed class XaiFamilyCompositionTests
     {
         ConstructorInfo constructor = Constructor();
         Assert.True(constructor.GetParameters()[2].IsOptional);
+        Assert.Equal("providerService", constructor.GetParameters()[2].Name);
         Assert.Null(constructor.GetParameters()[2].DefaultValue);
         var source = new Source();
         using var access = new LlmConnectionAccess(source, []);
