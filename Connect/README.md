@@ -1755,6 +1755,9 @@ connection version. Facade retirement cancels and drains sign-in and suppresses 
 it does not dispose the borrowed authenticator or undo a save already committed by the source.
 Entered Grok sign-in operations check the synchronous owner fence after awaited work and before
 saving. Retirement rejects late results even while linked cancellation callbacks are pending.
+Grok authentication status and sign-in saves use the shared OAuth-only credential validator.
+Status returns false for incompatible credentials or malformed bearer tokens; sign-in refuses them
+before saving. Both paths retain their rejection of a nonempty API-key field, including whitespace.
 
 The internal `XaiAuthenticator` implements the [RFC 8628](https://www.rfc-editor.org/rfc/rfc8628)
 device grant against `auth.x.ai` with form-encoded requests and a public client. A successful token

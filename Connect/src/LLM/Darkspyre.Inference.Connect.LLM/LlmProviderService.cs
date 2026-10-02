@@ -223,8 +223,7 @@ public sealed class LlmProviderService : ILlmTextTokenizer, ILlmFileClient, IXai
         if (connection is not null) RuntimeInputAdmission.Validate(connection);
         LlmCredential? credential = LlmCredential.Parse(connection?.Credential);
         if (connection?.Transport == LlmTransport.XaiResponses
-            && (string.IsNullOrWhiteSpace(credential?.OAuth?.AccessToken)
-                || !string.IsNullOrEmpty(credential.ApiKey) || credential.SecretHeaders.Count != 0))
+            && (!string.IsNullOrEmpty(credential?.ApiKey) || !XaiAuthorization.IsValid(credential)))
             return false;
         if (connection is not null
             && _clients.TryGetValue(connection.Transport, out ILlmClient? client)
@@ -1043,8 +1042,7 @@ public sealed class LlmProviderService : ILlmTextTokenizer, ILlmFileClient, IXai
     {
         ThrowIfOperationCanceled(token);
         RuntimeInputAdmission.ValidateCredential(LlmTransport.XaiResponses, credential);
-        if (string.IsNullOrWhiteSpace(credential.OAuth?.AccessToken)
-            || !string.IsNullOrEmpty(credential.ApiKey) || credential.SecretHeaders.Count != 0)
+        if (!string.IsNullOrEmpty(credential.ApiKey) || !XaiAuthorization.IsValid(credential))
             throw new InvalidOperationException("Grok sign-in did not return an OAuth credential.");
         string serialized = credential.Serialize();
         ThrowIfOperationCanceled(token);
