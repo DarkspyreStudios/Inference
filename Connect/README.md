@@ -213,6 +213,14 @@ Current built-in routes reject unimplemented references and authority before ref
 provider, process or model execution. `SupportsFileReferences` defaults to false; capability overrides
 cannot enable a missing native-file route.
 
+Chat admission copies each ordered attachment list, binary payload and omission list before
+connection resolution, refresh or catalog work. Direct Vertex, Bedrock Converse and SelfHost
+requests use the same snapshot before authentication, model resolution or engine acquisition.
+Native Claude turns snapshot input lists and attachments before control acknowledgments and turn-start events;
+managed turns use the same copier before their asynchronous work.
+Caller mutation after admission cannot change the attachment graph used by the request builder.
+Runtime resource authority stays borrowed; snapshotting does not fetch or materialize references.
+
 Gemini API and Vertex local text estimates serialize requests with `ConnectLlmJson.ChatRequest`.
 The projection retains default property names/order, numeric enums, explicit nulls and escaping.
 Opaque continuation state and media still produce unknown local occupancy; this metadata does not

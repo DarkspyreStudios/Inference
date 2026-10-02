@@ -128,6 +128,7 @@ internal sealed class BedrockLlmClient(
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         LlmProviderCapabilities capabilities = ValidateRequest(connection, request);
+        request = ClientTools.Snapshot(request);
         LlmStructuredOutputEnforcement? enforcement = request.StructuredOutput is null
             ? null
             : StructuredOutput.ResolveEnforcement(request.StructuredOutput, capabilities);
