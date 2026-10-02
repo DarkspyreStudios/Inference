@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <AssemblyName>Darkspyre.Inference.Connect.Resources</AssemblyName>
+    <Description>Typed cross-family batch, deferred and materialized resource contracts.</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../../../Common/src/Darkspyre.Inference.Common/Darkspyre.Inference.Common.csproj" />
+    <ProjectReference Include="../../LLM/Darkspyre.Inference.Connect.LLM/Darkspyre.Inference.Connect.LLM.csproj" />
+    <ProjectReference Include="../../Image/Darkspyre.Inference.Connect.Image/Darkspyre.Inference.Connect.Image.csproj" />
+    <ProjectReference Include="../../Video/Darkspyre.Inference.Connect.Video/Darkspyre.Inference.Connect.Video.csproj" />
+  </ItemGroup>
+</Project>
