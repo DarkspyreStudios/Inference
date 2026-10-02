@@ -37,46 +37,61 @@ public sealed partial class LlmProviderService
     private void CheckContextCache(GeminiCacheBindings.Admission admission, CancellationToken token)
     { ThrowIfOperationCanceled(token); _cacheBindings.Check(admission); }
 
+    private async Task<T> CaptureCacheCleanupAsync<T>(Func<Task<T>> action)
+    {
+        try { return await action().ConfigureAwait(false); }
+        catch (Exception error) { _cacheBindings.RecordCleanupFailure(error); throw; }
+    }
+
     private async Task<LlmContextCache> CreateContextCacheAsync(string connectionId, LlmContextCacheCreate request, CancellationToken token)
     {
         using var operation = _lifetime.Enter(token); token = operation.Token;
-        request = GoogleCacheData.Snapshot(request, DateTimeOffset.UtcNow);
-        var selected = await ResolveContextCacheAsync(connectionId, token).ConfigureAwait(false);
-        LlmContextCache receipt = await selected.Client.CreateCacheAsync(selected.Connection, request, selected.Admission.Scope,
-            current => CheckContextCache(selected.Admission, current), token).ConfigureAwait(false);
-        try
+        return await CaptureCacheCleanupAsync(async () =>
         {
-            CheckContextCache(selected.Admission, token);
-            _ = _cacheBindings.Admit(selected.Admission, receipt);
-            return receipt;
-        }
-        catch (OperationCanceledException error)
-        { throw new LlmContextCacheCreateCancelledException(request.Correlation, token, error, observedReceipt: receipt); }
-        catch (InvalidOperationException error)
-        { throw new LlmContextCacheCreateUncertainException(request.Correlation, error, observedReceipt: receipt); }
+            request = GoogleCacheData.Snapshot(request, DateTimeOffset.UtcNow);
+            var selected = await ResolveContextCacheAsync(connectionId, token).ConfigureAwait(false);
+            LlmContextCache receipt = await selected.Client.CreateCacheAsync(selected.Connection, request, selected.Admission.Scope,
+                current => CheckContextCache(selected.Admission, current), token).ConfigureAwait(false);
+            try
+            {
+                CheckContextCache(selected.Admission, token);
+                _ = _cacheBindings.Admit(selected.Admission, receipt);
+                return receipt;
+            }
+            catch (OperationCanceledException error)
+            { throw new LlmContextCacheCreateCancelledException(request.Correlation, token, error, observedReceipt: receipt); }
+            catch (InvalidOperationException error)
+            { throw new LlmContextCacheCreateUncertainException(request.Correlation, error, observedReceipt: receipt); }
+        }).ConfigureAwait(false);
     }
 
     private async Task<LlmContextCache> GetContextCacheAsync(string connectionId, LlmExplicitCacheReference reference, CancellationToken token)
     {
         using var operation = _lifetime.Enter(token); token = operation.Token;
-        ValidateCacheReference(reference);
-        var selected = await ResolveContextCacheAsync(connectionId, token).ConfigureAwait(false);
-        LlmContextCache receipt = await selected.Client.GetCacheAsync(selected.Connection, reference, selected.Admission.Scope,
-            current => CheckContextCache(selected.Admission, current), token).ConfigureAwait(false);
-        CheckContextCache(selected.Admission, token);
-        _ = _cacheBindings.Admit(selected.Admission, receipt);
-        return receipt;
+        return await CaptureCacheCleanupAsync(async () =>
+        {
+            ValidateCacheReference(reference);
+            var selected = await ResolveContextCacheAsync(connectionId, token).ConfigureAwait(false);
+            LlmContextCache receipt = await selected.Client.GetCacheAsync(selected.Connection, reference, selected.Admission.Scope,
+                current => CheckContextCache(selected.Admission, current), token).ConfigureAwait(false);
+            CheckContextCache(selected.Admission, token);
+            _ = _cacheBindings.Admit(selected.Admission, receipt);
+            return receipt;
+        }).ConfigureAwait(false);
     }
 
     private async Task<LlmContextCachePage> ListContextCachesAsync(string connectionId, LlmContextCacheList request, CancellationToken token)
     {
         using var operation = _lifetime.Enter(token); token = operation.Token;
-        GoogleCacheData.ValidatePage(request);
-        var selected = await ResolveContextCacheAsync(connectionId, token).ConfigureAwait(false);
-        LlmContextCachePage page = await selected.Client.ListCachesAsync(selected.Connection, request, selected.Admission.Scope,
-            current => CheckContextCache(selected.Admission, current), token).ConfigureAwait(false);
-        CheckContextCache(selected.Admission, token);
-        return page;
+        return await CaptureCacheCleanupAsync(async () =>
+        {
+            GoogleCacheData.ValidatePage(request);
+            var selected = await ResolveContextCacheAsync(connectionId, token).ConfigureAwait(false);
+            LlmContextCachePage page = await selected.Client.ListCachesAsync(selected.Connection, request, selected.Admission.Scope,
+                current => CheckContextCache(selected.Admission, current), token).ConfigureAwait(false);
+            CheckContextCache(selected.Admission, token);
+            return page;
+        }).ConfigureAwait(false);
     }
 
     private async Task<GeminiCacheBindings.Admission> RequireContextCacheAsync(string connectionId, LlmConnection connection,
@@ -88,8 +103,8 @@ public sealed partial class LlmProviderService
         GeminiCacheBindings.Observation known = _cacheBindings.RequireKnown(admission, reference, allowDeleted);
         if (known.Epoch != admission.Epoch)
         {
-            LlmContextCache checkedReceipt = await client.GetCacheAsync(connection, reference, admission.Scope,
-                current => CheckContextCache(admission, current), token).ConfigureAwait(false);
+            LlmContextCache checkedReceipt = await CaptureCacheCleanupAsync(() => client.GetCacheAsync(connection, reference, admission.Scope,
+                current => CheckContextCache(admission, current), token)).ConfigureAwait(false);
             CheckContextCache(admission, token);
             admission = _cacheBindings.Admit(admission, checkedReceipt);
         }
@@ -102,63 +117,69 @@ public sealed partial class LlmProviderService
         DateTimeOffset expiry, CancellationToken token)
     {
         using var operation = _lifetime.Enter(token); token = operation.Token;
-        ValidateCacheReference(reference);
-        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(expiry, DateTimeOffset.UtcNow);
-        var selected = await ResolveContextCacheAsync(connectionId, token).ConfigureAwait(false);
-        var admission = await RequireContextCacheAsync(connectionId, selected.Connection, selected.Client, reference, selected.Admission.Sequence, false, token).ConfigureAwait(false);
-        LlmContextCache? observed = null;
-        try
+        return await CaptureCacheCleanupAsync(async () =>
         {
-            LlmContextCache receipt = await selected.Client.UpdateCacheExpiryAsync(selected.Connection, admission.Reference!, expiry, admission.Scope,
-                current => CheckContextCache(admission, current), token).ConfigureAwait(false);
-            observed = receipt;
-            CheckContextCache(admission, token);
-            admission = _cacheBindings.ChangedResource(admission, deleted: false, uncertain: true);
-            _ = _cacheBindings.Admit(admission, receipt, afterMutation: true);
-            return receipt;
-        }
-        catch (Exception error) when (error is LlmContextCacheMutationCancelledException or LlmContextCacheMutationUncertainException)
-        { _ = _cacheBindings.ChangedResource(admission, deleted: false, uncertain: true); throw; }
-        catch (Exception error) when (observed is not null)
-        {
-            _ = _cacheBindings.ChangedResource(admission, deleted: false, uncertain: true);
-            if (error is OperationCanceledException)
-                throw new LlmContextCacheMutationCancelledException(LlmContextCacheMutation.UpdateExpiry, admission.Reference!, token,
+            ValidateCacheReference(reference);
+            ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(expiry, DateTimeOffset.UtcNow);
+            var selected = await ResolveContextCacheAsync(connectionId, token).ConfigureAwait(false);
+            var admission = await RequireContextCacheAsync(connectionId, selected.Connection, selected.Client, reference, selected.Admission.Sequence, false, token).ConfigureAwait(false);
+            LlmContextCache? observed = null;
+            try
+            {
+                LlmContextCache receipt = await selected.Client.UpdateCacheExpiryAsync(selected.Connection, admission.Reference!, expiry, admission.Scope,
+                    current => CheckContextCache(admission, current), token).ConfigureAwait(false);
+                observed = receipt;
+                CheckContextCache(admission, token);
+                admission = _cacheBindings.ChangedResource(admission, deleted: false, uncertain: true);
+                _ = _cacheBindings.Admit(admission, receipt, afterMutation: true);
+                return receipt;
+            }
+            catch (Exception error) when (error is LlmContextCacheMutationCancelledException or LlmContextCacheMutationUncertainException)
+            { _ = _cacheBindings.ChangedResource(admission, deleted: false, uncertain: true); throw; }
+            catch (Exception error) when (observed is not null)
+            {
+                _ = _cacheBindings.ChangedResource(admission, deleted: false, uncertain: true);
+                if (error is OperationCanceledException)
+                    throw new LlmContextCacheMutationCancelledException(LlmContextCacheMutation.UpdateExpiry, admission.Reference!, token,
+                        error, observedUpdate: observed);
+                throw new LlmContextCacheMutationUncertainException(LlmContextCacheMutation.UpdateExpiry, admission.Reference!,
                     error, observedUpdate: observed);
-            throw new LlmContextCacheMutationUncertainException(LlmContextCacheMutation.UpdateExpiry, admission.Reference!,
-                error, observedUpdate: observed);
-        }
+            }
+        }).ConfigureAwait(false);
     }
 
     private async Task<LlmContextCacheDeleteResult> DeleteContextCacheAsync(string connectionId,
         LlmExplicitCacheReference reference, CancellationToken token)
     {
         using var operation = _lifetime.Enter(token); token = operation.Token;
-        ValidateCacheReference(reference);
-        var selected = await ResolveContextCacheAsync(connectionId, token).ConfigureAwait(false);
-        var admission = await RequireContextCacheAsync(connectionId, selected.Connection, selected.Client, reference, selected.Admission.Sequence, true, token).ConfigureAwait(false);
-        LlmContextCacheDeleteResult? observed = null;
-        try
+        return await CaptureCacheCleanupAsync(async () =>
         {
-            LlmContextCacheDeleteResult receipt = await selected.Client.DeleteCacheAsync(selected.Connection, admission.Reference!,
-                candidate => { CheckContextCache(admission, token); return candidate == admission.Reference; },
-                current => CheckContextCache(admission, current), token).ConfigureAwait(false);
-            observed = receipt;
-            CheckContextCache(admission, token);
-            _ = _cacheBindings.ChangedResource(admission, deleted: true, uncertain: false);
-            return receipt;
-        }
-        catch (Exception error) when (error is LlmContextCacheMutationCancelledException or LlmContextCacheMutationUncertainException)
-        { _ = _cacheBindings.ChangedResource(admission, deleted: false, uncertain: true); throw; }
-        catch (Exception error) when (observed is not null)
-        {
-            _ = _cacheBindings.ChangedResource(admission, deleted: false, uncertain: true);
-            if (error is OperationCanceledException)
-                throw new LlmContextCacheMutationCancelledException(LlmContextCacheMutation.Delete, admission.Reference!, token,
+            ValidateCacheReference(reference);
+            var selected = await ResolveContextCacheAsync(connectionId, token).ConfigureAwait(false);
+            var admission = await RequireContextCacheAsync(connectionId, selected.Connection, selected.Client, reference, selected.Admission.Sequence, true, token).ConfigureAwait(false);
+            LlmContextCacheDeleteResult? observed = null;
+            try
+            {
+                LlmContextCacheDeleteResult receipt = await selected.Client.DeleteCacheAsync(selected.Connection, admission.Reference!,
+                    candidate => { CheckContextCache(admission, token); return candidate == admission.Reference; },
+                    current => CheckContextCache(admission, current), token).ConfigureAwait(false);
+                observed = receipt;
+                CheckContextCache(admission, token);
+                _ = _cacheBindings.ChangedResource(admission, deleted: true, uncertain: false);
+                return receipt;
+            }
+            catch (Exception error) when (error is LlmContextCacheMutationCancelledException or LlmContextCacheMutationUncertainException)
+            { _ = _cacheBindings.ChangedResource(admission, deleted: false, uncertain: true); throw; }
+            catch (Exception error) when (observed is not null)
+            {
+                _ = _cacheBindings.ChangedResource(admission, deleted: false, uncertain: true);
+                if (error is OperationCanceledException)
+                    throw new LlmContextCacheMutationCancelledException(LlmContextCacheMutation.Delete, admission.Reference!, token,
+                        error, observedDelete: observed);
+                throw new LlmContextCacheMutationUncertainException(LlmContextCacheMutation.Delete, admission.Reference!,
                     error, observedDelete: observed);
-            throw new LlmContextCacheMutationUncertainException(LlmContextCacheMutation.Delete, admission.Reference!,
-                error, observedDelete: observed);
-        }
+            }
+        }).ConfigureAwait(false);
     }
 
     private static void ValidateCacheReference(LlmExplicitCacheReference reference)

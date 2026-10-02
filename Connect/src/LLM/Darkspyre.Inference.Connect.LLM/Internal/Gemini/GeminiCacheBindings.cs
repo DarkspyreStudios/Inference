@@ -10,6 +10,40 @@ internal sealed class GeminiCacheBindings
     private readonly Dictionary<string, Binding> _bindings = new(StringComparer.Ordinal);
     private long _sequence;
     private bool _stopped;
+    private readonly List<Exception> _cleanupFailures = [];
+
+    internal void RecordCleanupFailure(Exception error)
+    {
+        var pending = new Stack<Exception>();
+        var visited = new HashSet<Exception>(ReferenceEqualityComparer.Instance);
+        pending.Push(error);
+        lock (_gate)
+        {
+            while (pending.TryPop(out Exception? current))
+            {
+                if (!visited.Add(current)) continue;
+                if (current is Common.Resources.InferenceResourceOperationException resource
+                    && resource.Failure.Phase == Common.Resources.InferenceResourceOperationPhase.Cleanup
+                    || current is Common.Resources.InferenceResourceOperationCanceledException canceled
+                    && canceled.Failure.Phase == Common.Resources.InferenceResourceOperationPhase.Cleanup)
+                {
+                    if (!_cleanupFailures.Any(existing => ReferenceEquals(existing, current))) _cleanupFailures.Add(current);
+                }
+                if (current is AggregateException aggregate)
+                    for (int index = aggregate.InnerExceptions.Count - 1; index >= 0; index--) pending.Push(aggregate.InnerExceptions[index]);
+                else if (current.InnerException is { } inner) pending.Push(inner);
+            }
+        }
+    }
+
+    internal Task ReleaseAsync()
+    {
+        Exception[] failures;
+        lock (_gate) failures = _cleanupFailures.ToArray();
+        if (failures.Length == 1) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(failures[0]).Throw();
+        if (failures.Length > 1) throw new AggregateException(failures);
+        return Task.CompletedTask;
+    }
 
     internal long BeginOperation() => Interlocked.Increment(ref _sequence);
 

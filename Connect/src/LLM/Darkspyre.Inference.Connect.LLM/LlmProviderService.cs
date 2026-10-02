@@ -1209,7 +1209,19 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, ILlmFileClie
     {
         Task operations = _lifetime.RetireAsync(async () =>
         {
-            if (_xaiFiles is { } files) await files.DisposeAsync().ConfigureAwait(false);
+            Task files;
+            try { files = _xaiFiles is { } client ? client.DisposeAsync().AsTask() : Task.CompletedTask; }
+            catch (Exception error) { files = Task.FromException(error); }
+            Task caches;
+            try { caches = _cacheBindings.ReleaseAsync(); }
+            catch (Exception error) { caches = Task.FromException(error); }
+            Task cleanup = Task.WhenAll(files, caches);
+            try { await cleanup.ConfigureAwait(false); }
+            catch
+            {
+                if (cleanup.Exception is { InnerExceptions.Count: > 1 } failures) throw failures;
+                throw;
+            }
         });
         Task credentials = _ownsConnectionAccess ? ConnectionAccess.DisposeAsync().AsTask() : Task.CompletedTask;
         Task catalogs = _ownsModelLists ? _modelLists.DisposeAsync().AsTask() : Task.CompletedTask;

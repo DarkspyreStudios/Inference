@@ -1527,6 +1527,12 @@ access, source content and HTTP are borrowed. Derived staging copies follow Goog
 expiry without implicit deletion, reupload or retry. Unknown-length multipart acceptance, staging
 expiry versus cache lifetime and real model entitlement remain provider qualification gates.
 
+If owned response or read-handle cleanup refuses, the same facade retains the actual refused
+owner through a safe cleanup carrier. Retirement drains admitted operations, attempts independent
+owned cleanup and reports its cached cleanup failure to every disposal caller; it does not retry
+the refused release. Ordinary provider/transport/receipt failures do not fault retirement, and
+healthy borrowed references detach even when a distinct owned resource cannot be released.
+
 Receipts require observed expiry and preserve unknown usage/timestamps as null. List page size is
 explicit and positive; a short page with a continuation token remains nonterminal. Collection
 properties copy their lists, without claiming an admitted operation's deep prefix snapshot.

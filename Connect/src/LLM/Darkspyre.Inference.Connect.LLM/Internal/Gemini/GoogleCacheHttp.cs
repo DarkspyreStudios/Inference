@@ -118,7 +118,8 @@ internal static class GoogleCacheHttp
             try { response.Dispose(); }
             catch (Exception error)
             {
-                Exception cleanup = SafeMutationFailure(error, "Google cache mutation response cleanup failed.");
+                Exception cleanup = LlmResourcePreparation.AsCleanupFailure(
+                    SafeMutationFailure(error, "Google cache mutation response cleanup failed."), refusedOwner: response);
                 failure = failure is null ? cleanup : new AggregateException(failure, cleanup);
                 canceled |= error is OperationCanceledException;
             }
@@ -207,7 +208,8 @@ internal static class GoogleCacheHttp
             try { response.Dispose(); }
             catch (Exception error)
             {
-                Exception cleanup = SafeReadFailure(error, "Google cache read response cleanup failed.");
+                Exception cleanup = LlmResourcePreparation.AsCleanupFailure(
+                    SafeReadFailure(error, "Google cache read response cleanup failed."), refusedOwner: response);
                 failure = failure is null ? cleanup : new AggregateException(failure, cleanup);
                 canceled |= error is OperationCanceledException;
             }
@@ -292,8 +294,9 @@ internal static class GoogleCacheHttp
             try { response.Dispose(); }
             catch (Exception error)
             {
-                Exception cleanup = SafeFailure(error, "Google cache create response cleanup failed.",
-                    transport, status, requestId, retryAfter, cancellationToken);
+                Exception cleanup = LlmResourcePreparation.AsCleanupFailure(
+                    SafeFailure(error, "Google cache create response cleanup failed.",
+                        transport, status, requestId, retryAfter, cancellationToken), refusedOwner: response);
                 failure = failure is null ? cleanup : new AggregateException(failure, cleanup);
                 canceled |= error is OperationCanceledException;
             }

@@ -6,6 +6,7 @@ using System.Text;
 using System.Text.Json;
 using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Common.LLM;
+using Darkspyre.Inference.Common.Resources;
 using Darkspyre.Inference.Connect.LLM.Internal;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -38,13 +39,16 @@ public sealed class GoogleCacheReadHttpTests
         });
         using var http = new HttpClient(handler);
         using var request = Request();
-        var error = await Assert.ThrowsAsync<LlmProviderException>(() => Read(list, http, request,
-            _ => { if (boundary == "parse") throw original; }, _ => { }, CancellationToken.None));
+        Exception failure = (await Record.ExceptionAsync(() => Read(list, http, request,
+            _ => { if (boundary == "parse") throw original; }, _ => { }, CancellationToken.None)))!;
+        LlmProviderException error = boundary == "cleanup"
+            ? Assert.IsType<LlmProviderException>(Assert.IsType<InferenceResourceOperationException>(failure).InnerException)
+            : Assert.IsType<LlmProviderException>(failure);
         Assert.NotSame(original, error);
         Assert.Null(error.InnerException);
         Assert.Null(error.ProviderCode);
         Assert.Null(error.SanitizedResponseBody);
-        Assert.DoesNotContain(Secret, error.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain(Secret, failure.ToString(), StringComparison.Ordinal);
         Assert.Equal(1, sends);
         Assert.Equal(boundary == "transport" ? 0 : 1, content.Disposals);
         Assert.Equal(0, handler.Disposals);
@@ -194,8 +198,11 @@ public sealed class GoogleCacheReadHttpTests
         var error = await Assert.ThrowsAsync<AggregateException>(() => Read(list, http, request, _ => { }, _ => { }, CancellationToken.None));
         Assert.Equal(2, error.InnerExceptions.Count);
         Assert.Contains("resource facts", error.InnerExceptions[0].Message, StringComparison.Ordinal);
-        Assert.Contains("cleanup", error.InnerExceptions[1].Message, StringComparison.Ordinal);
-        Assert.All(error.InnerExceptions, item => Assert.Null(item.InnerException));
+        var cleanup = Assert.IsType<InferenceResourceOperationException>(error.InnerExceptions[1]);
+        Assert.Equal(InferenceResourceOperationPhase.Cleanup, cleanup.Failure.Phase);
+        Assert.Contains("cleanup", Assert.IsType<LlmProviderException>(cleanup.InnerException).Message, StringComparison.Ordinal);
+        Assert.Null(error.InnerExceptions[0].InnerException);
+        Assert.Null(cleanup.InnerException!.InnerException);
         Assert.DoesNotContain(Secret, error.ToString(), StringComparison.Ordinal);
         Assert.Equal(1, content.Disposals);
     }
@@ -212,7 +219,9 @@ public sealed class GoogleCacheReadHttpTests
         var error = await Assert.ThrowsAnyAsync<OperationCanceledException>(() => Read(list, http, request, _ => { }, _ => { }, CancellationToken.None));
         var aggregate = Assert.IsType<AggregateException>(error.InnerException);
         Assert.IsType<OperationCanceledException>(aggregate.InnerExceptions[0]);
-        Assert.IsType<LlmProviderException>(aggregate.InnerExceptions[1]);
+        var cleanup = Assert.IsType<InferenceResourceOperationException>(aggregate.InnerExceptions[1]);
+        Assert.Equal(InferenceResourceOperationPhase.Cleanup, cleanup.Failure.Phase);
+        Assert.IsType<LlmProviderException>(cleanup.InnerException);
         Assert.DoesNotContain(Secret, error.ToString(), StringComparison.Ordinal);
         Assert.IsNotType<LlmContextCacheCreateCancelledException>(error);
     }

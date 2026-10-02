@@ -235,20 +235,25 @@ public sealed class GeminiCacheLifecycleTests
         var named = await resources.RegisterAsync("source.txt", "text/plain", "actual named bytes");
         var original = new InvalidOperationException("Controlled handle cleanup refusal."); resources.ReadCleanupFailure = original;
         using var handler = new Handler(); using var http = new HttpClient(handler);
-        await using var facade = new LlmProviderService(new Source(), [new GeminiApiLlmClient(http)]);
-        var cache = await facade.BindContextCacheAsync("selected");
-        var failure = await Assert.ThrowsAsync<InferenceResourceOperationException>(() => cache.CreateAsync(new()
+        var facade = new LlmProviderService(new Source(), [new GeminiApiLlmClient(http)]);
+        try
         {
-            ModelId = Model,
-            Correlation = new("operation", "display"),
-            TimeToLive = TimeSpan.FromMinutes(1),
-            Resources = resources,
-            Messages = [new("user", "prefix") { Attachments = [new LlmResourceAttachment(named)] }]
-        }));
-        Assert.Equal(InferenceResourceOperationPhase.Cleanup, failure.Failure.Phase);
-        Assert.Equal(named, failure.Failure.Reference); Assert.Same(original, failure.InnerException);
-        Assert.Equal(1, resources.ReadCleanupAttempts); Assert.Equal(0, resources.DisposedReads); Assert.Equal(0, resources.DisposeCalls);
-        Assert.DoesNotContain(handler.Requests, request => request.Path == "/v1beta/cachedContents");
+            var cache = await facade.BindContextCacheAsync("selected");
+            var failure = await Assert.ThrowsAsync<InferenceResourceOperationException>(() => cache.CreateAsync(new()
+            {
+                ModelId = Model,
+                Correlation = new("operation", "display"),
+                TimeToLive = TimeSpan.FromMinutes(1),
+                Resources = resources,
+                Messages = [new("user", "prefix") { Attachments = [new LlmResourceAttachment(named)] }]
+            }));
+            Assert.Equal(InferenceResourceOperationPhase.Cleanup, failure.Failure.Phase);
+            Assert.Equal(named, failure.Failure.Reference); Assert.Same(original, failure.InnerException);
+            Assert.Equal(1, resources.ReadCleanupAttempts); Assert.Equal(0, resources.DisposedReads); Assert.Equal(0, resources.DisposeCalls);
+            Assert.DoesNotContain(handler.Requests, request => request.Path == "/v1beta/cachedContents");
+            Assert.Same(failure, await Assert.ThrowsAsync<InferenceResourceOperationException>(() => facade.DisposeAsync().AsTask()));
+        }
+        finally { try { await facade.DisposeAsync(); } catch (InferenceResourceOperationException) { } }
     }
 
     [Fact]
