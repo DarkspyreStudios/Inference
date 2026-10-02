@@ -6,6 +6,7 @@ using System.Text;
 using System.Text.Json;
 using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Common.LLM;
+using Darkspyre.Inference.Common.Resources;
 using Darkspyre.Inference.Connect.LLM.Internal;
 
 namespace Darkspyre.Inference.Connect.LLM.Tests;
@@ -181,7 +182,9 @@ public sealed class GoogleCacheHttpTests
         var aggregate = Assert.IsType<AggregateException>(error.InnerException);
         Assert.Equal(2, aggregate.InnerExceptions.Count);
         Assert.Contains("receipt", aggregate.InnerExceptions[0].Message, StringComparison.Ordinal);
-        Assert.Contains("cleanup", aggregate.InnerExceptions[1].Message, StringComparison.Ordinal);
+        var cleanup = Assert.IsType<InferenceResourceOperationException>(aggregate.InnerExceptions[1]);
+        Assert.Equal(InferenceResourceOperationPhase.Cleanup, cleanup.Failure.Phase);
+        Assert.Contains("cleanup", Assert.IsType<LlmProviderException>(cleanup.InnerException).Message, StringComparison.Ordinal);
         Assert.Equal(1, sends);
         Assert.Equal(1, content.Disposals);
         Assert.DoesNotContain(Secret, error.ToString(), StringComparison.Ordinal);

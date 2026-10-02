@@ -78,12 +78,14 @@ public sealed class ExplicitCacheContractTests
         var authenticator = new Authenticator(connection.Transport);
         await using var facade = new LlmProviderService(source, [RawSamplingGuardsTests.Client(http, route)], [authenticator]);
         var request = Select(RawSamplingGuardsTests.Request(route));
-        await Assert.ThrowsAsync<NotSupportedException>(async () =>
+        async Task RunFacade()
         {
             if (operation == 2) await facade.CountInputTokensAsync("connection", request);
             else if (operation == 3) await facade.MeasureRequestAsync("connection", request);
             else await foreach (var unused in facade.StreamAsync("connection", request)) { }
-        });
+        }
+        if (route == "gemini") await Assert.ThrowsAsync<ArgumentException>(RunFacade);
+        else await Assert.ThrowsAsync<NotSupportedException>(RunFacade);
         Assert.Equal(1, source.Reads); Assert.Equal(0, source.Saves);
         Assert.Equal(0, authenticator.Calls); Assert.Equal(0, handler.Calls);
         Assert.Equal(connection.Credential, source.Connection.Credential);

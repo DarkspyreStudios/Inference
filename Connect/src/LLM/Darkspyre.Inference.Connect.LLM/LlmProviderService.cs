@@ -1,6 +1,7 @@
 using System.Runtime.CompilerServices;
 using Darkspyre.Inference.Common.LLM;
 using Darkspyre.Inference.Connect.LLM.Internal;
+using Darkspyre.Inference.Connect.LLM.Providers;
 
 namespace Darkspyre.Inference.Connect.LLM;
 
@@ -8,7 +9,7 @@ namespace Darkspyre.Inference.Connect.LLM;
 /// Resolves one configured connection and dispatches to exactly one matching transport. It never
 /// retries against, or falls back to, another provider.
 /// </summary>
-public sealed class LlmProviderService : ILlmTextTokenizer, ILlmFileClient, IXaiFilePublicUrlClient,
+public sealed partial class LlmProviderService : ILlmTextTokenizer, ILlmFileClient, IXaiFilePublicUrlClient,
     IXaiSkillClient, IDocumentSearchClient, IDisposable, IAsyncDisposable
 {
     private ILlmConnectionSource? _connections;
@@ -28,6 +29,7 @@ public sealed class LlmProviderService : ILlmTextTokenizer, ILlmFileClient, IXai
     private readonly Lock _disposeGate = new();
     private Task? _disposal;
     private Providers.XaiFileClient? _xaiFiles;
+    private readonly GeminiCacheBindings _cacheBindings = new();
 
     public LlmProviderService(
         ILlmConnectionSource connections,
@@ -157,9 +159,12 @@ public sealed class LlmProviderService : ILlmTextTokenizer, ILlmFileClient, IXai
             .ConfigureAwait(false);
         ThrowIfOperationCanceled(operation.Token);
         connection = EmbeddingRequestData.Snapshot(connection);
-        _ = ClientFor(connection.Transport);
+        ILlmClient client = ClientFor(connection.Transport);
         ThrowIfOperationCanceled(operation.Token);
-        throw new NotSupportedException("No explicit context cache adapter is implemented.");
+        if (client is not Providers.GeminiApiLlmClient) throw new NotSupportedException("No explicit context cache adapter is implemented.");
+        Providers.GeminiApiLlmClient.Validate(connection);
+        _ = Providers.GeminiApiLlmClient.Key(connection);
+        return new BoundContextCache(this, connectionId);
     }
 
     /// <summary>Uploads borrowed source bytes through the selected implemented native file route.</summary>
@@ -552,6 +557,7 @@ public sealed class LlmProviderService : ILlmTextTokenizer, ILlmFileClient, IXai
         ArgumentNullException.ThrowIfNull(request);
         request = ClientTools.Snapshot(request with { HostedTools = HostedTools.Snapshot(request.HostedTools) });
         LlmAccountUsageObservations.Reservation observationReservation = _observations.Reserve(connectionId);
+        long cacheSequence = _cacheBindings.BeginOperation();
         LlmConnection connection = await ResolveConnectionAsync(
             connectionId,
             cancellationToken);
@@ -560,6 +566,8 @@ public sealed class LlmProviderService : ILlmTextTokenizer, ILlmFileClient, IXai
         request = ProviderControlPolicy.Resolve(connection, request);
         ILlmClient client = ClientFor(connection.Transport);
         string? resolvedCredential = connection.Credential;
+        connection = WithContextCache(EmbeddingRequestData.Snapshot(connection), client);
+        if (client is GeminiApiLlmClient) GeminiApiLlmClient.ValidateCachedSuffix(request);
         if (request.ExplicitCache is not null)
             ExplicitCaches.Validate(request, client.GetCapabilities(connection, request.ModelId).SupportsExplicitCache);
         LlmAttachments.ValidateReferences(request, () => client.GetCapabilities(connection, request.ModelId).SupportsFileReferences,
@@ -569,6 +577,7 @@ public sealed class LlmProviderService : ILlmTextTokenizer, ILlmFileClient, IXai
         if (client is Providers.XaiResponsesLlmClient resourceDestination)
             resourceDestination.PreflightResourceRequest(connection, request);
         ThrowIfOperationCanceled(cancellationToken);
+        (connection, request) = await AdmitContextCacheAsync(connectionId, connection, client, request, cacheSequence, cancellationToken).ConfigureAwait(false);
         if (client is not IStreamingCredentialRefreshPolicy refreshPolicy
             || refreshPolicy.RequiresFreshOAuthCredentialForStreaming(connection))
         {
@@ -625,6 +634,8 @@ public sealed class LlmProviderService : ILlmTextTokenizer, ILlmFileClient, IXai
             : client.StreamAsync(connection, request, cancellationToken);
         await foreach (LlmStreamEvent streamEvent in stream)
         {
+            ThrowIfOperationCanceled(cancellationToken);
+            connection.CacheAdmission?.Check(connection, request.ExplicitCache);
             if (streamEvent is AccountUsageObservedEvent observed)
             { observationBinding?.Record(observed.Snapshot); continue; }
             yield return streamEvent is LlmChatCompletionEvent completion
@@ -634,7 +645,8 @@ public sealed class LlmProviderService : ILlmTextTokenizer, ILlmFileClient, IXai
                 })
                 : streamEvent;
         }
-        cancellationToken.ThrowIfCancellationRequested();
+        ThrowIfOperationCanceled(cancellationToken);
+        connection.CacheAdmission?.Check(connection, request.ExplicitCache);
     }
 
     /// <summary>Tokenizes only the supplied plain text. No request projection, catalog, usage or estimate is substituted.</summary>
@@ -676,6 +688,7 @@ public sealed class LlmProviderService : ILlmTextTokenizer, ILlmFileClient, IXai
         ArgumentNullException.ThrowIfNull(request);
         ArgumentException.ThrowIfNullOrWhiteSpace(request.ModelId);
         request = ClientTools.Snapshot(request with { HostedTools = HostedTools.Snapshot(request.HostedTools) });
+        long cacheSequence = _cacheBindings.BeginOperation();
         LlmConnection connection = await ResolveConnectionAsync(connectionId, cancellationToken);
         ThrowIfOperationCanceled(cancellationToken);
         RequestJson.ValidateSamplingOptions(connection, request);
@@ -684,11 +697,14 @@ public sealed class LlmProviderService : ILlmTextTokenizer, ILlmFileClient, IXai
         ILlmClient client = ClientFor(connection.Transport);
         if (client is not ILlmProviderTokenCounter counter)
             throw new NotSupportedException("This route does not implement provider input-token counting.");
+        connection = WithContextCache(EmbeddingRequestData.Snapshot(connection), client);
+        if (client is GeminiApiLlmClient) GeminiApiLlmClient.ValidateCachedSuffix(request);
         if (request.ExplicitCache is not null)
             ExplicitCaches.Validate(request, client.GetCapabilities(connection, request.ModelId).SupportsExplicitCache);
         LlmAttachments.ValidateReferences(request, () => client.GetCapabilities(connection, request.ModelId).SupportsFileReferences);
         HostedTools.Validate(request, client.GetCapabilities(connection, request.ModelId));
         ClientTools.Validate(request, client.GetCapabilities(connection, request.ModelId).SupportsShellTools);
+        (connection, request) = await AdmitContextCacheAsync(connectionId, connection, client, request, cacheSequence, cancellationToken).ConfigureAwait(false);
         connection = await RefreshConnectionAsync(connectionId, connection, client, cancellationToken);
         if (client is ILlmConnectionPreparation preparation)
             connection = await preparation.PrepareAsync(connection, cancellationToken).ConfigureAwait(false);
@@ -698,7 +714,8 @@ public sealed class LlmProviderService : ILlmTextTokenizer, ILlmFileClient, IXai
         try { result = await counter.CountInputTokensAsync(connection, request, cancellationToken).ConfigureAwait(false); }
         catch (Exception) when (cancellationToken.IsCancellationRequested)
         { throw new OperationCanceledException(cancellationToken); }
-        cancellationToken.ThrowIfCancellationRequested();
+        ThrowIfOperationCanceled(cancellationToken);
+        connection.CacheAdmission?.Check(connection, request.ExplicitCache);
         return result with { OmittedContinuationStateCount = checked(omitted + result.OmittedContinuationStateCount) };
     }
 
@@ -721,11 +738,14 @@ public sealed class LlmProviderService : ILlmTextTokenizer, ILlmFileClient, IXai
         policy ??= new();
         ManagedAgentPolicy.Validate(new() { ContextPolicy = policy }, null);
         request = ClientTools.Snapshot(request with { HostedTools = HostedTools.Snapshot(request.HostedTools) });
+        long cacheSequence = _cacheBindings.BeginOperation();
         var connection = await ResolveConnectionAsync(connectionId, cancellationToken);
         ThrowIfOperationCanceled(cancellationToken);
         RequestJson.ValidateSamplingOptions(connection, request);
         request = ProviderControlPolicy.Resolve(connection, request);
         var client = ClientFor(connection.Transport);
+        connection = WithContextCache(connection, client);
+        ValidateCacheEstimate(connectionId, connection, client, request, cacheSequence);
         // Measure what would be sent: the same projection as the request path.
         if (request.ExplicitCache is not null)
             ExplicitCaches.Validate(request, client.GetCapabilities(connection, request.ModelId).SupportsExplicitCache);
@@ -918,6 +938,7 @@ public sealed class LlmProviderService : ILlmTextTokenizer, ILlmFileClient, IXai
         LlmConnection connection = await ResolveFreshConnectionAsync(connectionId, cancellationToken);
         ILlmClient client = ClientFor(connection.Transport);
         connection = await AttachCatalogAsync(connectionId, connection, client, cancellationToken);
+        connection = WithContextCache(connection, client);
         LlmProviderCapabilities capabilities = FileCapabilities(client, client.GetCapabilities(connection));
         ThrowIfOperationCanceled(cancellationToken);
         return capabilities;
@@ -963,6 +984,7 @@ public sealed class LlmProviderService : ILlmTextTokenizer, ILlmFileClient, IXai
         LlmConnection connection = await ResolveFreshConnectionAsync(connectionId, cancellationToken);
         ILlmClient client = ClientFor(connection.Transport);
         connection = await AttachCatalogAsync(connectionId, connection, client, cancellationToken);
+        connection = WithContextCache(connection, client);
         LlmProviderCapabilities capabilities = FileCapabilities(client, client.GetCapabilities(connection, modelId));
         ThrowIfOperationCanceled(cancellationToken);
         return capabilities;
@@ -1187,7 +1209,19 @@ public sealed class LlmProviderService : ILlmTextTokenizer, ILlmFileClient, IXai
     {
         Task operations = _lifetime.RetireAsync(async () =>
         {
-            if (_xaiFiles is { } files) await files.DisposeAsync().ConfigureAwait(false);
+            Task files;
+            try { files = _xaiFiles is { } client ? client.DisposeAsync().AsTask() : Task.CompletedTask; }
+            catch (Exception error) { files = Task.FromException(error); }
+            Task caches;
+            try { caches = _cacheBindings.ReleaseAsync(); }
+            catch (Exception error) { caches = Task.FromException(error); }
+            Task cleanup = Task.WhenAll(files, caches);
+            try { await cleanup.ConfigureAwait(false); }
+            catch
+            {
+                if (cleanup.Exception is { InnerExceptions.Count: > 1 } failures) throw failures;
+                throw;
+            }
         });
         Task credentials = _ownsConnectionAccess ? ConnectionAccess.DisposeAsync().AsTask() : Task.CompletedTask;
         Task catalogs = _ownsModelLists ? _modelLists.DisposeAsync().AsTask() : Task.CompletedTask;
@@ -1200,6 +1234,7 @@ public sealed class LlmProviderService : ILlmTextTokenizer, ILlmFileClient, IXai
         }
         finally
         {
+            _cacheBindings.Clear();
             _clients.Clear();
             _authenticators.Clear();
             _accountUsageClients.Clear();

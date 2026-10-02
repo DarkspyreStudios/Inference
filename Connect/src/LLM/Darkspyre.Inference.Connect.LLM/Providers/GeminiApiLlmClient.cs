@@ -37,11 +37,13 @@ internal sealed partial class GeminiApiLlmClient(HttpClient http)
         bool supportsTopK = modelId is not null && ILlmCatalogCapabilities.EntryFor(connection, modelId) is { ValueKind: JsonValueKind.Object } entry
             && entry.TryGetProperty("topK", out JsonElement topK) && topK.ValueKind == JsonValueKind.Number
             && topK.TryGetInt32(out int defaultTopK) && defaultTopK > 0;
-        LlmProviderCapabilities implemented = GeminiCapabilities.Create(profile, supportsTopK);
+        LlmProviderCapabilities implemented = GeminiCapabilities.Create(profile, supportsTopK) with
+        { SupportsExplicitCache = connection.CacheBindings is not null };
         LlmProviderCapabilities capabilities = implemented;
         if (modelId is not null && !IsReviewed(modelId)) { capabilities = capabilities with { SupportsJsonSchema = false }; }
         capabilities = LlmCapabilityOverrideLookup.Apply(capabilities, connection, modelId);
         if (capabilities.SupportsJsonObject || capabilities.SupportsAccountUsage
+            || capabilities.SupportsExplicitCache && !implemented.SupportsExplicitCache
             || capabilities.SupportsTemperature && !implemented.SupportsTemperature
             || capabilities.SupportsTopP && !implemented.SupportsTopP
             || capabilities.SupportsTopK && !implemented.SupportsTopK
@@ -69,6 +71,13 @@ internal sealed partial class GeminiApiLlmClient(HttpClient http)
         LlmProviderCapabilities capabilities = GetCapabilities(connection, request.ModelId);
         ValidateRequest(connection, request, capabilities);
         ValidateGeminiRequest(request, capabilities);
+        ValidateCachedSuffix(request);
+        if (request.ExplicitCache is { } cache)
+        {
+            if (connection.CacheAdmission is not { } admission || admission.Owner != connection.CacheBindings)
+                throw new ArgumentException("The selected cache requires admission through its binding owner.", nameof(request));
+            admission.Check(connection, cache);
+        }
         string scope = KeyScope(connection);
         if (connection.ResolvedContinuationScope is { } pinned && pinned != scope)
         { throw new InvalidOperationException("The Gemini API key changed before dispatch."); }
@@ -97,6 +106,7 @@ internal sealed partial class GeminiApiLlmClient(HttpClient http)
             result = await ProviderTokenCounting.SendAsync(Http, message, Transport, request.ModelId, false,
                 cancellationToken).ConfigureAwait(false);
         }
+        built.Connection.CacheAdmission?.Check(built.Connection, built.Request.ExplicitCache);
         return consumption.Publish(result with { OmittedContinuationStateCount = built.Omitted });
     }
 
@@ -130,6 +140,7 @@ internal sealed partial class GeminiApiLlmClient(HttpClient http)
                 throw new LlmProviderException("Gemini API generation failed. Check the model, request configuration and key.", Transport);
             }
             if (!moved) { yield break; }
+            connection.CacheAdmission?.Check(connection, request.ExplicitCache);
             yield return consumption.Publish<LlmStreamEvent>(iterator.Current is LlmChatCompletionEvent completion
                 ? new LlmChatCompletionEvent(completion.Result with
                 {
@@ -179,6 +190,8 @@ internal sealed partial class GeminiApiLlmClient(HttpClient http)
     public ContextEstimate? EstimateInputTokens(LlmConnection connection, LlmChatRequest request)
     {
         ValidateRequest(connection, request, GetCapabilities(connection, request.ModelId));
+        ValidateCachedSuffix(request);
+        if (request.ExplicitCache is not null) { return null; }
         if (request.Messages.Any(message => message.ContinuationState is not null || message.Attachments.Count != 0
             || message.ToolResults.Any(result => result is not LlmToolResult function
                 || function.Output.Parts.Any(part => part is not LlmToolOutputText)))) { return null; }

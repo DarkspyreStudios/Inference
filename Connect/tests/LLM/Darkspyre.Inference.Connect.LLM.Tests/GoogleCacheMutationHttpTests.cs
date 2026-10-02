@@ -6,6 +6,7 @@ using System.Text;
 using System.Text.Json;
 using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Common.LLM;
+using Darkspyre.Inference.Common.Resources;
 using Darkspyre.Inference.Connect.LLM.Internal;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -150,7 +151,13 @@ public sealed class GoogleCacheMutationHttpTests
         using var request = Request(update);
         var error = await Assert.ThrowsAsync<LlmContextCacheMutationUncertainException>(() => Mutate(update, http, request,
             root => boundary == "parse" ? throw malicious : Parse(root), _ => boundary == "authorize" ? throw malicious : true, _ => { }));
-        Assert.IsType<LlmProviderException>(error.InnerException);
+        if (boundary == "cleanup")
+        {
+            var cleanup = Assert.IsType<InferenceResourceOperationException>(error.InnerException);
+            Assert.Equal(InferenceResourceOperationPhase.Cleanup, cleanup.Failure.Phase);
+            Assert.IsType<LlmProviderException>(cleanup.InnerException);
+        }
+        else Assert.IsType<LlmProviderException>(error.InnerException);
         Assert.DoesNotContain(Secret, error.ToString());
         Assert.Equal(boundary == "send" ? 0 : 1, content.Disposals);
         Assert.Equal(1, handler.Calls); Assert.Equal(0, handler.Disposals);
@@ -182,7 +189,9 @@ public sealed class GoogleCacheMutationHttpTests
                 _ => throw operationFailure, _ => throw operationFailure, _ => { }, caller.Token));
         var failures = Assert.IsType<AggregateException>(error.InnerException);
         Assert.Equal(2, failures.InnerExceptions.Count);
-        Assert.Contains("response cleanup failed", failures.InnerExceptions[1].Message, StringComparison.Ordinal);
+        var cleanup = Assert.IsType<InferenceResourceOperationException>(failures.InnerExceptions[1]);
+        Assert.Equal(InferenceResourceOperationPhase.Cleanup, cleanup.Failure.Phase);
+        Assert.Contains("response cleanup failed", Assert.IsType<LlmProviderException>(cleanup.InnerException).Message, StringComparison.Ordinal);
         Assert.DoesNotContain(Secret, error.ToString());
         Assert.Equal(1, content.Disposals); Assert.Equal(1, handler.Calls);
         if (cancellation) Assert.Equal(caller.Token, Assert.IsType<LlmContextCacheMutationCancelledException>(error).CancellationToken);

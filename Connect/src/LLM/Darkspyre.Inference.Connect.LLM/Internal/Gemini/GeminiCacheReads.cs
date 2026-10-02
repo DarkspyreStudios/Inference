@@ -49,7 +49,7 @@ internal static class GeminiCacheReads
         return GeminiApiLlmClient.Key(connection);
     }
 
-    private static HttpRequestMessage Request(string suffix, string key)
+    internal static HttpRequestMessage Request(string suffix, string key)
     {
         var request = new HttpRequestMessage(HttpMethod.Get,
             GeminiApiLlmClient.DefaultEndpoint + "/v1beta/cachedContents" + suffix);
@@ -62,7 +62,7 @@ internal static class GeminiCacheReads
         return request;
     }
 
-    private static LlmContextCache ParseReceipt(JsonElement root, string scopeId, string? expectedName, string? expectedModel) =>
+    internal static LlmContextCache ParseReceipt(JsonElement root, string scopeId, string? expectedName, string? expectedModel) =>
         GoogleCacheData.Receipt(root, scopeId, name =>
         {
             _ = ResourceId(name);
@@ -76,7 +76,7 @@ internal static class GeminiCacheReads
             return model;
         }, vertex: false);
 
-    private static string ResourceId(string name)
+    internal static string ResourceId(string name)
     {
         ArgumentNullException.ThrowIfNull(name);
         const string prefix = "cachedContents/";

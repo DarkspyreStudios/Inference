@@ -1510,15 +1510,49 @@ by these declarations.
 `ILlmContextCacheClient` declares explicit create, get, one-page list, expiry update and delete
 operations. Its request, correlation, receipt, usage, page and delete-result records have exact
 type-name getters on `ConnectLlmJson`. `BindContextCacheAsync` validates a selected connection
-without effects and refuses because no provider cache implementation is registered.
+without remote effects and binds the implemented Gemini API route; other routes remain unavailable.
 `LlmChatRequest.ExplicitCache` and Common's request carry the same data-only selection.
 `SupportsExplicitCache` defaults to false on both capability shapes; overrides cannot enable it.
-Every built-in route refuses a supplied selection before credential refresh, catalog discovery,
-counting, remote requests or engine/process entry. Registered implementations own their declared
+The Gemini facade advertises its owner-admitted selection path; a raw direct adapter without this
+internal admission remains unavailable. Other built-in routes refuse a supplied selection before
+credential refresh, catalog discovery, counting, remote requests or engine/process entry. Registered implementations own their declared
 capability and selection validation. Vertex exact cached counting refuses independently of
 generation support. SelfHost does not forward native provider cache receipts. Portable projection
-preserves the selection; advisory `PromptCache` remains separate. These contracts do not create,
-renew, transfer or fall back from a paid cache.
+preserves the selection; advisory `PromptCache` remains separate. No operation creates, renews,
+transfers or falls back from a paid cache implicitly.
+
+Each Gemini cache operation resolves one selected connection snapshot. The same facade retains
+only derived provider-validated receipt facts, swept at observed expiry and cleared at retirement;
+it retains neither prefixes nor complete listings. Scope IDs are data, not account authority.
+Matching owned record/JSON copies can reuse that receipt evidence. Unknown or new-owner imports
+require explicit `Get`; observed credential/configuration replacement revalidates a known receipt
+through the current fixed-route `Get` before use. Credential equality is only change detection,
+never a claim of rotation-stable principal identity. List does not authorize generation.
+
+Generation and exact Gemini counting use the same canonical cached-content suffix body. Cached
+suffixes cannot replace system instructions, tools or tool configuration. Advisory occupancy is
+unknown rather than a suffix-only total, and it never performs cache revalidation. Actual usage
+remains the provider's observation. Create, expiry-only update and delete are explicit operations;
+dispatched acknowledgement failures preserve mutation uncertainty without retry. A same-owner
+successful-delete tombstone permits repeat deletion only under unchanged configuration, and
+`AlreadyAbsent` requires an actual authorized 404. Expired selections and fixed-route not-found
+reads use distinct typed unavailable reasons; authentication failures do not imply absence.
+
+Cache creation materializes only explicitly named logical prefix resources, not the session's
+selected chat resources or the workspace catalog. The shared scope/descriptor/read-handle owner
+validates immutable metadata and counts streamed bytes. Google Files staging uses a fixed-origin
+multipart route, validates returned native identity/MIME/observed size, and observes PROCESSING via
+fixed-route readiness reads under the same connection until ACTIVE. FAILED or contradictory facts
+refuse; cancellation drains admitted work. Opened handles and responses are owned; workspace
+access, source content and HTTP are borrowed. Derived staging copies follow Google's documented
+expiry without implicit deletion, reupload or retry. Unknown-length multipart acceptance, staging
+expiry versus cache lifetime and real model entitlement remain provider qualification gates.
+
+If owned response or read-handle cleanup refuses, the same facade retains the actual refused
+owner through a safe cleanup carrier. Retirement drains admitted operations, attempts independent
+owned cleanup and reports its cached cleanup failure to every disposal caller; it does not retry
+the refused release. Ordinary provider/transport/receipt failures do not fault retirement, and
+healthy borrowed references detach even when a distinct owned resource cannot be released.
 
 Receipts require observed expiry and preserve unknown usage/timestamps as null. List page size is
 explicit and positive; a short page with a continuation token remains nonterminal. Collection
@@ -1535,7 +1569,8 @@ helpers do not establish native resource/principal authority or enable cache dis
 
 The shared Gemini request codec can construct immutable cache-prefix contents, system instructions,
 function declarations and tool configuration without generation-only settings; this internal
-preparation does not enable explicit-cache binding or provider CRUD.
+preparation shares the canonical contents/tool owner used by the Gemini lifecycle; it does not
+independently authorize a native receipt or prefix resource.
 
 The private Google cache create send boundary borrows an already-authorized request and client.
 It disposes the response, checks the existing caller and HTTP-generation fences, and never retries.
@@ -1559,7 +1594,7 @@ connection. It reuses the Gemini API endpoint and API-key rules, validates nativ
 model IDs, and replaces imported receipt scope data with the caller-supplied scope after an exact
 GET identity check. LIST preserves actual page order and continuation tokens. Requests are owned;
 HTTP and owner fences are borrowed. The adapter issues no scope authority, retains no cache catalog
-and does not enable public binding, generation selection or cache creation.
+and does not independently enable public binding, generation selection or cache creation.
 
 The private Google cache mutation boundary borrows already-authorized PATCH or DELETE requests and
 the existing caller and SDK-generation owners. It validates update receipt identity and observed

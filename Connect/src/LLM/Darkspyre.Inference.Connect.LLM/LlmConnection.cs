@@ -12,6 +12,8 @@ public sealed record LlmConnection
     internal Internal.ILlmContinuationCodec? ContinuationCodec { get; init; }
     internal string? ResolvedContinuationScope { get; init; }
     internal LlmAccountUsageObservations.Binding? AccountUsageObservationBinding { get; init; }
+    internal Internal.GeminiCacheBindings? CacheBindings { get; init; }
+    internal Internal.GeminiCacheBindings.Admission? CacheAdmission { get; init; }
 
     // The connection's model list from LlmModelListCache, published by the service for one operation.
     // Never serialized or supplied by a host.
