@@ -37,7 +37,8 @@ internal static class GeminiCacheFiles
         if (descriptor.FileName is { Length: > 0 } name) metadata["displayName"] = name;
         using var body = new MultipartContent("related");
         body.Add(JsonContent.Create(new JsonObject { ["file"] = metadata }));
-        body.Add(new MediaContent(source, descriptor.ContentType!, descriptor.Bytes, fence));
+        body.Add(new GoogleCacheMediaContent(source, descriptor.ContentType!, descriptor.Bytes,
+            descriptor.ContentType == "application/pdf" ? 50L * 1024 * 1024 : MaximumBytes, fence));
         using var request = new HttpRequestMessage(HttpMethod.Post,
             GeminiApiLlmClient.DefaultEndpoint + "/upload/v1beta/files?uploadType=multipart")
         { Content = body };
@@ -128,36 +129,4 @@ internal static class GeminiCacheFiles
         return new(name, uri, mime, state, observedBytes);
     }
 
-    private sealed class MediaContent : HttpContent
-    {
-        private readonly Stream _source;
-        private readonly long? _length;
-        private readonly long _maximum;
-        private readonly Action<CancellationToken> _fence;
-        internal MediaContent(Stream source, string mime, long? length, Action<CancellationToken> fence)
-        {
-            _source = source; _length = length; _maximum = mime == "application/pdf" ? 50L * 1024 * 1024 : MaximumBytes;
-            _fence = fence; Headers.ContentType = MediaTypeHeaderValue.Parse(mime);
-        }
-
-        protected override bool TryComputeLength(out long computed) { computed = _length ?? 0; return _length is not null; }
-        protected override Task SerializeToStreamAsync(Stream destination, TransportContext? context) => WriteAsync(destination, CancellationToken.None);
-        protected override Task SerializeToStreamAsync(Stream destination, TransportContext? context, CancellationToken token) => WriteAsync(destination, token);
-        private async Task WriteAsync(Stream destination, CancellationToken token)
-        {
-            byte[] buffer = new byte[32 * 1024];
-            long sent = 0;
-            while (true)
-            {
-                token.ThrowIfCancellationRequested(); _fence(token);
-                int read = await _source.ReadAsync(buffer, token).ConfigureAwait(false);
-                token.ThrowIfCancellationRequested(); _fence(token);
-                if (read == 0) break;
-                sent = checked(sent + read);
-                if (sent > _maximum || _length is { } expected && sent > expected) throw new InvalidOperationException("The staged content exceeds its permitted byte count.");
-                await destination.WriteAsync(buffer.AsMemory(0, read), token).ConfigureAwait(false);
-            }
-            if (_length is { } actual && sent != actual) throw new InvalidOperationException("The staged content does not match its observed byte count.");
-        }
-    }
 }

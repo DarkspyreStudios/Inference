@@ -161,9 +161,8 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, ILlmFileClie
         connection = EmbeddingRequestData.Snapshot(connection);
         ILlmClient client = ClientFor(connection.Transport);
         ThrowIfOperationCanceled(operation.Token);
-        if (client is not Providers.GeminiApiLlmClient) throw new NotSupportedException("No explicit context cache adapter is implemented.");
-        Providers.GeminiApiLlmClient.Validate(connection);
-        _ = Providers.GeminiApiLlmClient.Key(connection);
+        if (client is not ILlmContextCacheAdapter cache) throw new NotSupportedException("No explicit context cache adapter is implemented.");
+        cache.ValidateCacheConnection(connection);
         return new BoundContextCache(this, connectionId);
     }
 

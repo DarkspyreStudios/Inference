@@ -12,6 +12,37 @@ namespace Darkspyre.Inference.Connect.LLM.Providers;
 
 internal sealed partial class GeminiApiLlmClient
 {
+    void ILlmContextCacheAdapter.ValidateCacheConnection(LlmConnection connection) { Validate(connection); _ = Key(connection); }
+    void ILlmContextCacheAdapter.ValidateCacheReference(LlmConnection connection, LlmExplicitCacheReference reference)
+    { ArgumentNullException.ThrowIfNull(reference); _ = GeminiCacheReads.ResourceId(reference.ResourceName); _ = ParseModel(reference.ModelId); }
+    void ILlmContextCacheAdapter.ValidateCachedSuffix(LlmChatRequest request) => ValidateCachedSuffix(request);
+    void ILlmContextCacheAdapter.ValidateCacheCreate(LlmConnection connection, LlmContextCacheCreate request)
+    { Validate(connection); _ = ParseModel(request.ModelId); LlmResourcePreparation.ValidateArguments(new()
+        { ModelId = request.ModelId, Messages = request.Messages, Tools = request.Tools, Resources = request.Resources }); }
+    Task<ILlmContextCacheOperation> ILlmContextCacheAdapter.PrepareCacheOperationAsync(LlmConnection connection,
+        Action<CancellationToken> fence, CancellationToken token)
+    {
+        token.ThrowIfCancellationRequested(); fence(token); Validate(connection); _ = Key(connection);
+        return Task.FromResult<ILlmContextCacheOperation>(new CacheOperation(this, connection));
+    }
+
+    private sealed class CacheOperation(GeminiApiLlmClient owner, LlmConnection connection) : ILlmContextCacheOperation
+    {
+        public LlmConnection Connection { get; } = connection;
+        public Task<LlmContextCache> CreateAsync(LlmContextCacheCreate request, GeminiCacheBindings.Admission admission,
+            Action<CancellationToken> fence, CancellationToken token) => owner.CreateCacheAsync(Connection, request, admission.Scope, fence, token);
+        public Task<LlmContextCache> GetAsync(LlmExplicitCacheReference reference, GeminiCacheBindings.Admission admission,
+            Action<CancellationToken> fence, CancellationToken token) => owner.GetCacheAsync(Connection, reference, admission.Scope, fence, token);
+        public Task<LlmContextCachePage> ListAsync(LlmContextCacheList request, GeminiCacheBindings.Admission admission,
+            Action<CancellationToken> fence, CancellationToken token) => owner.ListCachesAsync(Connection, request, admission.Scope, fence, token);
+        public Task<LlmContextCache> UpdateExpiryAsync(LlmExplicitCacheReference reference, DateTimeOffset expiry,
+            GeminiCacheBindings.Admission admission, Action<CancellationToken> fence, CancellationToken token) =>
+            owner.UpdateCacheExpiryAsync(Connection, reference, expiry, admission.Scope, fence, token);
+        public Task<LlmContextCacheDeleteResult> DeleteAsync(LlmExplicitCacheReference reference,
+            Func<LlmExplicitCacheReference, bool> authorizeAlreadyAbsent, GeminiCacheBindings.Admission admission,
+            Action<CancellationToken> fence, CancellationToken token) => owner.DeleteCacheAsync(Connection, reference, authorizeAlreadyAbsent, fence, token);
+    }
+
     internal Task<LlmContextCache> GetCacheAsync(LlmConnection connection, LlmExplicitCacheReference reference,
         string scope, Action<CancellationToken> fence, CancellationToken token) =>
         GetCacheCoreAsync(connection, reference, scope, fence, token);

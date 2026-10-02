@@ -89,7 +89,7 @@ public sealed class LlmMetadataInventoryTests
             ["CertificatePkcs12"] = ConnectLlm + "LlmAzureSecret+CertificatePkcs12"
         };
         Add(expected, ConnectLlm,
-            "XaiMultiAgentControls", "XaiXSearchTool", "LlmAgentCapabilities",
+            "XaiMultiAgentControls", "XaiXSearchTool", "LlmAgentCapabilities", "LlmVertexCacheStaging",
             "LlmAzureConfiguration", "LlmAzureApiMode", "LlmAzureAuthenticationMode",
             "LlmAzureCloud", "LlmAzureTokenAudience", "LlmAzureEntraConfiguration",
             "LlmAzureIdentitySelection", "LlmAzureManagedIdentityId", "LlmAzureSecret",
