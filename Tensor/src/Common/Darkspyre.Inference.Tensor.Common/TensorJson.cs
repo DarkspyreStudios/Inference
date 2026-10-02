@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
 
@@ -6,21 +7,34 @@ namespace Darkspyre.Inference.Tensor.Common;
 /// <summary>Assembly-owned metadata for Tensor settings, model manifests and runtime observations.</summary>
 public static class TensorJson
 {
-    public static JsonTypeInfo<TensorSetupConfiguration> SetupConfiguration => TensorJsonContext.Default.TensorSetupConfiguration;
-    public static JsonTypeInfo<TensorSetupChanges> SetupChanges => TensorJsonContext.Default.TensorSetupChanges;
-    public static JsonTypeInfo<TensorModelPackDefinition> ModelPack => TensorJsonContext.Default.TensorModelPackDefinition;
-    public static JsonTypeInfo<TensorModelPackStatus> PackStatus => TensorJsonContext.Default.TensorModelPackStatus;
-    public static JsonTypeInfo<TensorModelObservation> ModelObservation => TensorJsonContext.Default.TensorModelObservation;
-    public static JsonTypeInfo<TensorBackendProbeRequest> BackendProbeRequest => TensorJsonContext.Default.TensorBackendProbeRequest;
-    public static JsonTypeInfo<TensorBackendAvailability> BackendAvailability => TensorJsonContext.Default.TensorBackendAvailability;
-    public static JsonTypeInfo<TensorRuntimeNativeFile> TensorRuntimeNativeFile => TensorJsonContext.Default.TensorRuntimeNativeFile;
-    public static JsonTypeInfo<TensorRuntimeCandidate> TensorRuntimeCandidate => TensorJsonContext.Default.TensorRuntimeCandidate;
-    public static JsonTypeInfo<TensorRuntimePlan> TensorRuntimePlan => TensorJsonContext.Default.TensorRuntimePlan;
-    public static JsonTypeInfo<TensorRuntimeBackendIdentity> TensorRuntimeBackendIdentity => TensorJsonContext.Default.TensorRuntimeBackendIdentity;
-    public static JsonTypeInfo<TensorRuntimeState> TensorRuntimeState => TensorJsonContext.Default.TensorRuntimeState;
-    public static JsonTypeInfo<TensorRuntimeShutdownState> TensorRuntimeShutdownState => TensorJsonContext.Default.TensorRuntimeShutdownState;
-    public static JsonTypeInfo<TensorRuntimeDiagnostic> TensorRuntimeDiagnostic => TensorJsonContext.Default.TensorRuntimeDiagnostic;
-    public static JsonTypeInfo<TensorRuntimeShutdownResult> TensorRuntimeShutdownResult => TensorJsonContext.Default.TensorRuntimeShutdownResult;
+    private static readonly JsonSerializerOptions Options = CreateOptions();
+
+    public static JsonTypeInfo<TensorSetupConfiguration> SetupConfiguration => Metadata<TensorSetupConfiguration>();
+    public static JsonTypeInfo<TensorSetupChanges> SetupChanges => Metadata<TensorSetupChanges>();
+    public static JsonTypeInfo<TensorModelPackDefinition> ModelPack => Metadata<TensorModelPackDefinition>();
+    public static JsonTypeInfo<TensorModelPackStatus> PackStatus => Metadata<TensorModelPackStatus>();
+    public static JsonTypeInfo<TensorModelObservation> ModelObservation => Metadata<TensorModelObservation>();
+    public static JsonTypeInfo<TensorBackendProbeRequest> BackendProbeRequest => Metadata<TensorBackendProbeRequest>();
+    public static JsonTypeInfo<TensorBackendAvailability> BackendAvailability => Metadata<TensorBackendAvailability>();
+    public static JsonTypeInfo<TensorRuntimeNativeFile> TensorRuntimeNativeFile => Metadata<TensorRuntimeNativeFile>();
+    public static JsonTypeInfo<TensorRuntimeCandidate> TensorRuntimeCandidate => Metadata<TensorRuntimeCandidate>();
+    public static JsonTypeInfo<TensorRuntimePlan> TensorRuntimePlan => Metadata<TensorRuntimePlan>();
+    public static JsonTypeInfo<TensorRuntimeBackendIdentity> TensorRuntimeBackendIdentity => Metadata<TensorRuntimeBackendIdentity>();
+    public static JsonTypeInfo<TensorRuntimeState> TensorRuntimeState => Metadata<TensorRuntimeState>();
+    public static JsonTypeInfo<TensorRuntimeShutdownState> TensorRuntimeShutdownState => Metadata<TensorRuntimeShutdownState>();
+    public static JsonTypeInfo<TensorRuntimeDiagnostic> TensorRuntimeDiagnostic => Metadata<TensorRuntimeDiagnostic>();
+    public static JsonTypeInfo<TensorRuntimeShutdownResult> TensorRuntimeShutdownResult => Metadata<TensorRuntimeShutdownResult>();
+
+    private static JsonTypeInfo<T> Metadata<T>() => Options.GetTypeInfo<T>();
+
+    private static JsonSerializerOptions CreateOptions()
+    {
+        var options = new JsonSerializerOptions(TensorJsonContext.Default.Options);
+        options.Converters.Add(new TensorRuntimeStateJsonConverter());
+        options.Converters.Add(new TensorRuntimeShutdownStateJsonConverter());
+        options.MakeReadOnly();
+        return options;
+    }
 }
 
 [JsonSourceGenerationOptions(GenerationMode = JsonSourceGenerationMode.Metadata)]

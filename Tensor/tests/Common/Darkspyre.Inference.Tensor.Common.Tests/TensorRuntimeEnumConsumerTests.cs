@@ -42,6 +42,16 @@ public sealed class TensorRuntimeEnumConsumerTests
         Assert.Throws<JsonException>(() => JsonSerializer.Deserialize(json, context.TensorEnumConsumerObservation));
     }
 
+    [Theory]
+    [InlineData((TensorRuntimeState)999, TensorRuntimeShutdownState.Busy)]
+    [InlineData(TensorRuntimeState.Ready, (TensorRuntimeShutdownState)999)]
+    public void ConsumerOwnedGraphRejectsUndefinedWrites(TensorRuntimeState state, TensorRuntimeShutdownState shutdown)
+    {
+        TensorEnumConsumerContext context = CreateContext();
+        Assert.Throws<JsonException>(() => JsonSerializer.Serialize(new(state, shutdown, TensorBackendKind.Cpu),
+            context.TensorEnumConsumerObservation));
+    }
+
     [Fact]
     public void ActualForeignConsumerAndTensorMetadataCollectAfterCodecExecution()
     {
