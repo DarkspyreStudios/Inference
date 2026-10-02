@@ -18,6 +18,7 @@ public static class ConnectImageJson
     private static JsonSerializerOptions CreateOptions()
     {
         var options = new JsonSerializerOptions(ConnectImageJsonContext.Default.Options) { TypeInfoResolver = new ImageTypeInfoResolver() };
+        options.Converters.Add(new ImageWorkflowOriginJsonConverter());
         foreach (Type type in new[] { typeof(IProviderAuthorization), typeof(IInferenceResourceAccess), typeof(IInferenceResourceReadHandle), typeof(IInferenceResourceWriteHandle),
             typeof(InferenceResourceOperationPhase), typeof(InferenceResourceCommitOutcome) })
             options.Converters.Add(InferenceJson.InferenceResourceReference.Options.Converters.Single(converter => converter.CanConvert(type)));
@@ -86,6 +87,28 @@ public static class ConnectImageJson
 [JsonSerializable(typeof(ImageTransportProgress))]
 [JsonSerializable(typeof(ImageProviderHealth))]
 internal sealed partial class ConnectImageJsonContext : JsonSerializerContext;
+
+internal sealed class ImageWorkflowOriginJsonConverter : JsonConverter<ImageWorkflowOrigin>
+{
+    public override ImageWorkflowOrigin Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+    {
+        if (reader.TokenType != JsonTokenType.Number || !reader.TryGetInt32(out int value))
+            throw new JsonException("Image workflow origin must be a defined integer.");
+        return value switch
+        {
+            (int)ImageWorkflowOrigin.Host => ImageWorkflowOrigin.Host,
+            (int)ImageWorkflowOrigin.BuiltIn => ImageWorkflowOrigin.BuiltIn,
+            _ => throw new JsonException("The Image workflow origin is undefined.")
+        };
+    }
+
+    public override void Write(Utf8JsonWriter writer, ImageWorkflowOrigin value, JsonSerializerOptions options)
+    {
+        if (value is not (ImageWorkflowOrigin.Host or ImageWorkflowOrigin.BuiltIn))
+            throw new JsonException("The Image workflow origin is undefined.");
+        writer.WriteNumberValue((int)value);
+    }
+}
 
 internal abstract class ImageRuntimeJsonConverter<T> : JsonConverter<T> where T : class
 {
