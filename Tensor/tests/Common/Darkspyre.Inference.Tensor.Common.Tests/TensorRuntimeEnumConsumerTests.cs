@@ -66,13 +66,17 @@ public sealed class TensorRuntimeEnumConsumerTests
             Assert.Same(generation, AssemblyLoadContext.GetLoadContext(consumer));
             Assert.Equal(typeof(TensorRuntimeEnumConsumerTests).Assembly.ManifestModule.ModuleVersionId, consumer.ManifestModule.ModuleVersionId);
             consumer.GetType(typeof(TensorRuntimeEnumConsumerTests).FullName!, true)!
-                .GetMethod(nameof(ExecuteForeign), BindingFlags.Public | BindingFlags.Static)!.Invoke(null, null);
+                .GetMethod(nameof(ExecuteForeign), BindingFlags.NonPublic | BindingFlags.Static)!.Invoke(null, null);
+            Assembly tensor = generation.Assemblies.Single(assembly => assembly.GetName().Name == typeof(TensorJson).Assembly.GetName().Name);
+            Assert.NotSame(typeof(TensorJson).Assembly, tensor);
+            Assert.Same(generation, AssemblyLoadContext.GetLoadContext(tensor));
+            Assert.Equal(typeof(TensorJson).Assembly.ManifestModule.ModuleVersionId, tensor.ManifestModule.ModuleVersionId);
             return new(generation);
         }
         finally { generation.Unload(); }
     }
 
-    public static void ExecuteForeign()
+    private static void ExecuteForeign()
     {
         AssemblyLoadContext generation = AssemblyLoadContext.GetLoadContext(typeof(TensorRuntimeEnumConsumerTests).Assembly)!;
         Assert.True(generation.IsCollectible);
