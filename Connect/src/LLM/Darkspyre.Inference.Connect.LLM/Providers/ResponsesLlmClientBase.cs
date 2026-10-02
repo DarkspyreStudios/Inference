@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using System.Runtime.ExceptionServices;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -64,18 +65,86 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
             && function.Output.Parts.Any(part => part is LlmToolOutputBinary or LlmToolOutputResource { Data: not null }))
         || message.ContinuationState?.Payload.Contains("encrypted_content", StringComparison.Ordinal) == true;
 
-    public override async IAsyncEnumerable<LlmStreamEvent> StreamAsync(
+    public override IAsyncEnumerable<LlmStreamEvent> StreamAsync(LlmConnection connection, LlmChatRequest request,
+        CancellationToken cancellationToken = default) => StreamCoreAsync(connection, request, null, null, cancellationToken);
+
+    internal IAsyncEnumerable<LlmStreamEvent> StreamWithResourcesAsync(LlmConnection connection, LlmChatRequest request,
+        XaiFileClient files, Action outerFence, CancellationToken token) => StreamCoreAsync(connection, request, files, outerFence, token);
+
+    private async IAsyncEnumerable<LlmStreamEvent> StreamCoreAsync(
         LlmConnection connection,
         LlmChatRequest request,
+        XaiFileClient? suppliedFiles,
+        Action? outerFence,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
+        using var consumption = SdkHttpConsumption.Enter(Http, cancellationToken);
+        cancellationToken = consumption.Token;
+        void Fence() { cancellationToken.ThrowIfCancellationRequested(); consumption.Fence(); outerFence?.Invoke(); cancellationToken.ThrowIfCancellationRequested(); }
+        Fence();
+        request = ClientTools.Snapshot(request);
         LlmProviderCapabilities capabilities = GetCapabilities(connection, request.ModelId);
         ValidateRequest(connection, request, capabilities);
         ValidateModelSampling(connection, request);
         LlmStructuredOutputEnforcement? enforcement = ResolveStructuredOutputEnforcement(connection, request, capabilities);
 
-        JsonObject payload = BuildPayload(connection, request, enforcement, capabilities.SupportsStreaming);
-        RequestJson.ApplyProviderOptions(payload, connection, request);
+        XaiFileClient? ownedFiles = null;
+        LlmResourcePreparation? resources = null;
+        IAsyncEnumerator<LlmStreamEvent>? iterator = null;
+        Exception? failure = null;
+        LlmChatCompletionEvent? terminal = null;
+        try
+        {
+            try
+            {
+                if (request.Resources is not null)
+                {
+                    if (this is not XaiResponsesLlmClient xai) throw new NotSupportedException("This route does not materialize resources.");
+                    XaiFileClient files = suppliedFiles ?? (ownedFiles = xai.CreateFileClient());
+                    resources = await LlmResourcePreparation.PrepareAsync(connection, request, files, Fence, cancellationToken).ConfigureAwait(false);
+                    Fence();
+                    request = resources.Request;
+                }
+                JsonObject payload = BuildPayload(connection, request, enforcement, capabilities.SupportsStreaming, resources);
+                RequestJson.ApplyProviderOptions(payload, connection, request);
+                iterator = StreamResponseAsync(connection, request, payload, capabilities, enforcement, consumption, cancellationToken)
+                    .GetAsyncEnumerator(cancellationToken);
+            }
+            catch (Exception error) { failure = error; throw; }
+            while (true)
+            {
+                bool moved;
+                try { moved = await iterator.MoveNextAsync().ConfigureAwait(false); Fence(); }
+                catch (Exception error) { failure = error; throw; }
+                if (!moved) break;
+                if (resources is not null && iterator.Current is LlmChatCompletionEvent completion) terminal = completion;
+                else yield return iterator.Current;
+            }
+        }
+        finally
+        {
+            var cleanup = new List<Exception>();
+            try { if (iterator is not null) await iterator.DisposeAsync().ConfigureAwait(false); }
+            catch (Exception error) { cleanup.Add(error); }
+            try { if (resources is not null) await resources.DisposeAsync().ConfigureAwait(false); }
+            catch (Exception error) { cleanup.Add(error); }
+            try { if (ownedFiles is not null) await ownedFiles.DisposeAsync().ConfigureAwait(false); }
+            catch (Exception error) { cleanup.Add(error); }
+            if (cleanup.Count > 0)
+            {
+                if (failure is not null) cleanup.Insert(0, failure);
+                if (cleanup.Count == 1) ExceptionDispatchInfo.Capture(cleanup[0]).Throw();
+                ExceptionDispatchInfo.Capture(new AggregateException(cleanup)).Throw();
+            }
+        }
+        Fence();
+        if (terminal is not null) yield return terminal;
+    }
+
+    private async IAsyncEnumerable<LlmStreamEvent> StreamResponseAsync(LlmConnection connection, LlmChatRequest request,
+        JsonObject payload, LlmProviderCapabilities capabilities, LlmStructuredOutputEnforcement? enforcement,
+        SdkHttpConsumption.Operation consumption, [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
         using var httpRequest = new HttpRequestMessage(
             HttpMethod.Post,
             BuildRequestUri(connection, request))
@@ -85,7 +154,6 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
         ApplyRequestHeaders(httpRequest, connection, request);
 
         LlmCredential? credential = LlmCredential.Parse(connection.Credential);
-        using var consumption = SdkHttpConsumption.Enter(Http, cancellationToken); cancellationToken = consumption.Token;
         using HttpResponseMessage response = await Http.SendAsync(
             httpRequest,
             HttpCompletionOption.ResponseHeadersRead,
@@ -387,13 +455,14 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
         LlmConnection connection,
         LlmChatRequest request,
         LlmStructuredOutputEnforcement? enforcement,
-        bool stream)
+        bool stream,
+        LlmResourcePreparation? resources = null)
     {
         JsonArray input = OpenAiResponsesTools.BuildInput(
             request,
             connection,
             OpenAiResponsesTools.BuildMessage,
-            output => ProjectToolOutput(connection, request.ModelId, output));
+            output => ProjectToolOutput(connection, request.ModelId, output, resources is null ? null : resources.Project));
 
         var payload = new JsonObject
         {

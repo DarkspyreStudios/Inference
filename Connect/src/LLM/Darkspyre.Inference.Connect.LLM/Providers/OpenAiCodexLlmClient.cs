@@ -111,7 +111,8 @@ internal sealed class OpenAiCodexLlmClient(HttpClient http)
     }
 
     protected override JsonObject BuildPayload(
-        LlmConnection connection, LlmChatRequest request, LlmStructuredOutputEnforcement? enforcement, bool stream)
+        LlmConnection connection, LlmChatRequest request, LlmStructuredOutputEnforcement? enforcement, bool stream,
+        LlmResourcePreparation? resources = null)
     {
         if (request.MaxOutputTokens is not null)
         {
@@ -134,7 +135,7 @@ internal sealed class OpenAiCodexLlmClient(HttpClient http)
         {
             Messages = [.. request.Messages.Where(message => message.Role is not ("system" or "developer"))]
         };
-        JsonObject payload = base.BuildPayload(connection, projected, enforcement, stream);
+        JsonObject payload = base.BuildPayload(connection, projected, enforcement, stream, resources);
         payload["instructions"] = string.Join("\n\n", instructions);
         return payload;
     }

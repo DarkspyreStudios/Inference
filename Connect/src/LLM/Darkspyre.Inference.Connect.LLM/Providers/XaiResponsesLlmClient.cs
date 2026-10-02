@@ -29,6 +29,7 @@ internal sealed class XaiResponsesLlmClient(HttpClient http) : ResponsesLlmClien
     public override LlmProviderDefinition ProviderDefinition => ProviderDefinitions.GrokSubscription;
     protected override bool OffersNonStreamingRequests => true;
     protected override bool OffersUsageDeltas => false;
+    protected override bool SupportsResourcePreparation => true;
 
     // xAI quota names and units require its own qualified evidence; OpenAI provenance is not interchangeable.
     protected override LlmAccountUsageSnapshot? ObserveAccountUsage(HttpResponseMessage response) => null;
@@ -114,6 +115,7 @@ internal sealed class XaiResponsesLlmClient(HttpClient http) : ResponsesLlmClien
             SupportsArgumentStreaming = true
         },
         SupportsPromptDocuments = true,
+        SupportsFileReferences = true,
         Files = new() { Upload = true, List = true, Get = true, Download = true, Delete = true, TextDownload = true, PublicUrls = true },
         RichContentSupported = RichContentRoutes.Responses
     };
@@ -149,10 +151,18 @@ internal sealed class XaiResponsesLlmClient(HttpClient http) : ResponsesLlmClien
         };
     }
 
-    protected override JsonObject BuildPayload(LlmConnection connection, LlmChatRequest request,
-        LlmStructuredOutputEnforcement? enforcement, bool stream)
+    internal void PreflightResourceRequest(LlmConnection connection, LlmChatRequest request)
+    {
+        LlmProviderCapabilities capabilities = GetCapabilities(connection, request.ModelId);
+        ValidateRequest(connection, request, capabilities);
+        ValidateModelSampling(connection, request);
+        _ = ResolveStructuredOutputEnforcement(connection, request, capabilities);
+    }
+
+    protected override void ValidateAdditionalRequest(LlmConnection connection, LlmChatRequest request)
     {
         request = ProviderControlPolicy.Resolve(connection, request);
+        LlmResourcePreparation.ValidateArguments(request);
         _ = XaiRequestHeaders.Require(connection);
         if (connection.ProviderOptions.Keys.Concat(request.ProviderOptions.Keys).Any(ReservedOptions.Contains))
             throw new ArgumentException("Grok protocol controls use typed request and connection properties, not provider options.", nameof(request));
@@ -162,7 +172,11 @@ internal sealed class XaiResponsesLlmClient(HttpClient http) : ResponsesLlmClien
             throw new NotSupportedException("Grok accepts at most 350 client tools.");
         if (ClientTools.Functions(request.Tools).Any(tool => tool.Name == "web_search"))
             throw new ArgumentException("A Grok client function cannot be named web_search.", nameof(request));
-        foreach (LlmAttachment attachment in request.Messages.SelectMany(message => message.Attachments).Select(LlmAttachments.RequireBinary))
+        foreach (LlmFileReference file in request.Messages.SelectMany(message => message.Attachments).OfType<LlmFileReference>())
+            _ = XaiFileRequestData.Identity(file.File.FileId);
+        if (request.Resources is not null && !GetCapabilities(connection, request.ModelId).SupportsPromptDocuments)
+            throw new NotSupportedException("This resource destination requires document input support.");
+        foreach (LlmAttachment attachment in request.Messages.SelectMany(message => message.Attachments).OfType<LlmAttachment>())
             if (attachment.Kind == LlmBinaryKind.Image && attachment.Data.Length > MaxImageBytes)
                 throw new ArgumentException("Grok input images must not exceed 20 MiB.", nameof(request));
         if (GetCapabilities(connection, request.ModelId).RichContentSupported.Images == LlmRichContentCarriage.Native)
@@ -174,12 +188,18 @@ internal sealed class XaiResponsesLlmClient(HttpClient http) : ResponsesLlmClien
         foreach (LlmToolDefinition tool in ClientTools.Functions(request.Tools).Where(tool => tool.Strict))
             if (!XaiSchemaLimits.Fits(tool.InputSchema))
                 throw new NotSupportedException("A strict Grok tool schema exceeds the published numeric guarantees. The schema is not weakened or sent as non-strict.");
+    }
+
+    protected override JsonObject BuildPayload(LlmConnection connection, LlmChatRequest request,
+        LlmStructuredOutputEnforcement? enforcement, bool stream, LlmResourcePreparation? resources = null)
+    {
+        request = ProviderControlPolicy.Resolve(connection, request);
 
         XaiModelProfile profile = XaiModelProfiles.Get(connection, request.ModelId);
         if (request.ReasoningLevel is null && profile.DefaultReasoningLevel is { } defaultLevel
             && GetCapabilities(connection, request.ModelId).ReasoningLevels.Contains(defaultLevel))
             request = request with { ReasoningLevel = defaultLevel };
-        JsonObject payload = base.BuildPayload(connection, request, enforcement, stream);
+        JsonObject payload = base.BuildPayload(connection, request, enforcement, stream, resources);
         if (request.ProviderControls is XaiMultiAgentControls { AgentCount: { } count })
             payload["reasoning"] = new JsonObject
             {

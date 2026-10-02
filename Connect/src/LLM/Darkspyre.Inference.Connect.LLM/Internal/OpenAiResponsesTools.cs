@@ -84,9 +84,11 @@ internal static class OpenAiResponsesTools
             });
         }
 
-        foreach (LlmAttachment attachment in message.Attachments.Select(LlmAttachments.RequireBinary))
+        foreach (LlmMessageAttachment attachment in message.Attachments)
         {
-            content.Add(BuildAttachment(attachment));
+            content.Add(attachment is LlmFileReference file
+                ? new JsonObject { ["type"] = "input_file", ["file_id"] = file.File.FileId }
+                : BuildAttachment(LlmAttachments.RequireBinary(attachment)));
         }
 
         return new JsonObject
@@ -125,6 +127,7 @@ internal static class OpenAiResponsesTools
                     ["filename"] = file.FileName,
                     ["file_data"] = DataUrl(file.MediaType, file.Data)
                 },
+                SentNativeFile file => new JsonObject { ["type"] = "input_file", ["file_id"] = file.FileId },
                 _ => throw new InvalidOperationException("Responses tool output does not carry this part natively.")
             });
         }

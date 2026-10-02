@@ -121,7 +121,7 @@ internal sealed class LlmResourcePreparation : IAsyncDisposable
             operation.Request = request with
             {
                 Resources = null,
-                Messages = request.Messages.Select(message => message with
+                Messages = request.Messages.Select(message => message.ContinuationState is not null ? message : message with
                 {
                     Attachments = message.Attachments.Select(attachment => attachment is LlmResourceAttachment logical
                         ? (LlmMessageAttachment)new LlmFileReference(new ProviderFileReference(operation._files[logical.Resource].Id))
@@ -137,7 +137,7 @@ internal sealed class LlmResourcePreparation : IAsyncDisposable
                 InferenceResourceCommitOutcome.NotAttempted, reading?.BytesRead);
             Exception error = original is OperationCanceledException
                 ? new InferenceResourceOperationCanceledException(facts, token, original)
-                : new InferenceResourceOperationException(InferenceFailureCode.ProviderFailure,
+                : new InferenceResourceOperationException(InferenceFailureCode.ExecutionFailed,
                     "The resource could not be supplied to the selected destination.", facts, original);
             try { await operation.DisposeAsync().ConfigureAwait(false); }
             catch (Exception cleanup) { throw new AggregateException(error, cleanup); }

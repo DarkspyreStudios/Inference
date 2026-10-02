@@ -170,9 +170,14 @@ internal abstract class LlmClientBase(HttpClient http) : ILlmClient
                 nameof(request));
         }
 
-        ValidatePromptAttachments(request, capabilities);
+        ValidatePromptAttachments(request, capabilities, SupportsResourcePreparation);
         ValidateToolUse(request, capabilities, nativeToolNames);
+        ValidateAdditionalRequest(connection, request);
     }
+
+    protected virtual bool SupportsResourcePreparation => false;
+
+    protected virtual void ValidateAdditionalRequest(LlmConnection connection, LlmChatRequest request) { }
 
     internal static void ValidateSampling(LlmChatRequest request, LlmProviderCapabilities capabilities)
     {
@@ -206,9 +211,10 @@ internal abstract class LlmClientBase(HttpClient http) : ILlmClient
 
     internal static void ValidatePromptAttachments(
         LlmChatRequest request,
-        LlmProviderCapabilities capabilities)
+        LlmProviderCapabilities capabilities,
+        bool supportsResources = false)
     {
-        LlmAttachments.ValidateReferences(request);
+        LlmAttachments.ValidateReferences(request, () => capabilities.SupportsFileReferences, supportsResources);
         foreach (LlmChatMessage message in request.Messages)
         {
             if (message.Attachments.Count > 0
@@ -223,7 +229,8 @@ internal abstract class LlmClientBase(HttpClient http) : ILlmClient
                 message.Attachments,
                 capabilities.SupportsPromptImages,
                 capabilities.SupportsPromptDocuments,
-                nameof(request));
+                nameof(request),
+                capabilities.SupportsFileReferences || supportsResources);
         }
     }
 
@@ -353,11 +360,13 @@ internal abstract class LlmClientBase(HttpClient http) : ILlmClient
     /// <summary>
     /// Projects a tool output with the connection's support as the route and the model's support as the target.
     /// </summary>
-    internal ProjectedToolOutput ProjectToolOutput(LlmConnection connection, string modelId, LlmToolOutput output) =>
+    internal ProjectedToolOutput ProjectToolOutput(LlmConnection connection, string modelId, LlmToolOutput output,
+        Func<Common.Resources.InferenceResourceReference, SentToolPart>? resource = null) =>
         ToolOutputProjector.Project(
             output,
             GetCapabilities(connection).RichContentSupported,
-            GetCapabilities(connection, modelId).RichContentSupported);
+            GetCapabilities(connection, modelId).RichContentSupported,
+            resource);
 
     protected LlmProviderException ProtocolException(
         string message,

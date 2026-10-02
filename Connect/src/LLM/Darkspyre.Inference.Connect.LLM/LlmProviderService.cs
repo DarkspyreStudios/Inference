@@ -562,9 +562,13 @@ public sealed class LlmProviderService : ILlmTextTokenizer, ILlmFileClient, IXai
         string? resolvedCredential = connection.Credential;
         if (request.ExplicitCache is not null)
             ExplicitCaches.Validate(request, client.GetCapabilities(connection, request.ModelId).SupportsExplicitCache);
-        LlmAttachments.ValidateReferences(request, () => client.GetCapabilities(connection, request.ModelId).SupportsFileReferences);
+        LlmAttachments.ValidateReferences(request, () => client.GetCapabilities(connection, request.ModelId).SupportsFileReferences,
+            client is Providers.XaiResponsesLlmClient);
         HostedTools.Validate(request, client.GetCapabilities(connection, request.ModelId));
         ClientTools.Validate(request, client.GetCapabilities(connection, request.ModelId).SupportsShellTools);
+        if (client is Providers.XaiResponsesLlmClient resourceDestination)
+            resourceDestination.PreflightResourceRequest(connection, request);
+        ThrowIfOperationCanceled(cancellationToken);
         if (client is not IStreamingCredentialRefreshPolicy refreshPolicy
             || refreshPolicy.RequiresFreshOAuthCredentialForStreaming(connection))
         {
@@ -616,10 +620,10 @@ public sealed class LlmProviderService : ILlmTextTokenizer, ILlmFileClient, IXai
         }
         (request, int omitted) = ContinuationStateProjection.Project(request, connection);
         connection = await AttachCatalogAsync(connectionId, connection, client, cancellationToken);
-        await foreach (LlmStreamEvent streamEvent in client.StreamAsync(
-                           connection,
-                           request,
-                           cancellationToken))
+        IAsyncEnumerable<LlmStreamEvent> stream = client is Providers.XaiResponsesLlmClient xai
+            ? xai.StreamWithResourcesAsync(connection, request, _xaiFiles!, () => ThrowIfOperationCanceled(cancellationToken), cancellationToken)
+            : client.StreamAsync(connection, request, cancellationToken);
+        await foreach (LlmStreamEvent streamEvent in stream)
         {
             if (streamEvent is AccountUsageObservedEvent observed)
             { observationBinding?.Record(observed.Snapshot); continue; }

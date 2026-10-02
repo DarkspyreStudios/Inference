@@ -16,10 +16,10 @@ internal static class LlmAttachments
     private static readonly byte[] OleSignature = [0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1];
 
     /// <summary>Refuses unimplemented reference routes before authentication, catalog or provider effects.</summary>
-    public static void ValidateReferences(LlmChatRequest request, Func<bool>? supportsFileReferences = null)
+    public static void ValidateReferences(LlmChatRequest request, Func<bool>? supportsFileReferences = null, bool supportsResources = false)
     {
         ArgumentNullException.ThrowIfNull(request);
-        if (request.Resources is not null)
+        if (request.Resources is not null && !supportsResources)
             throw new NotSupportedException("This route does not materialize caller-owned resources.");
         bool? acceptsFiles = null;
         foreach (var message in request.Messages)
@@ -27,6 +27,11 @@ internal static class LlmAttachments
             foreach (var attachment in message.Attachments)
             {
                 if (attachment is LlmAttachment) { continue; }
+                if (attachment is LlmResourceAttachment resource && supportsResources)
+                {
+                    _ = CopyResource(resource.Resource);
+                    continue;
+                }
                 if (attachment is LlmFileReference { File: { } file }
                     && (acceptsFiles ??= supportsFileReferences?.Invoke() ?? false))
                 {
@@ -36,7 +41,7 @@ internal static class LlmAttachments
                 _ = RequireBinary(attachment);
             }
             if (message.ToolResults.Any(result => result is LlmToolResult function
-                && function.Output.Parts.Any(part => part is LlmToolOutputSessionResource)))
+                && function.Output.Parts.Any(part => part is LlmToolOutputSessionResource)) && !supportsResources)
                 throw new NotSupportedException("This route cannot materialize workspace tool content.");
         }
     }
@@ -45,7 +50,8 @@ internal static class LlmAttachments
         IReadOnlyList<LlmMessageAttachment> attachments,
         bool supportsImages,
         bool supportsDocuments,
-        string parameterName)
+        string parameterName,
+        bool supportsReferences = false)
     {
         ArgumentNullException.ThrowIfNull(attachments, parameterName);
         foreach (LlmMessageAttachment value in attachments)
@@ -55,6 +61,12 @@ internal static class LlmAttachments
                 throw new ArgumentException("Attachments cannot contain null entries.", parameterName);
             }
 
+            if (supportsReferences && value is LlmFileReference or LlmResourceAttachment)
+            {
+                if (!supportsDocuments) throw new NotSupportedException("The selected connection does not support document references.");
+                _ = Copy(value);
+                continue;
+            }
             LlmAttachment attachment = RequireBinary(value);
 
             if (attachment.Kind is not (LlmBinaryKind.Image or LlmBinaryKind.Document))
