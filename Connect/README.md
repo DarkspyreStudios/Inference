@@ -18,8 +18,16 @@ variants and mixed function/shell tool graphs. It composes the existing LLM-owne
 policy and refuses nonnull resource access, handles, authorization and batch clients without calling
 them. Diagnostic strings hide resource, prompt and native receipt data.
 
-This assembly contains declarations and codecs only. It registers no batch/deferred adapter, makes
-no OAuth or endpoint-availability claim, and supplies no `LlmResourceProviderService` implementation.
+`LlmResourceProviderService(connectionAccess)` borrows an existing `LlmConnectionAccess`.
+`AddLlmResources()` registers one scoped concrete facade and its same-instance `ILlmBatchClient`
+alias. The caller registers connection access separately; this extension creates no connection source,
+HTTP factory or provider adapter. All ten operations explicitly refuse as unavailable before connection
+resolution, credential refresh, resource callbacks, upload or deferred-result consumption. Disposal
+fences entry, shares retirement completion and releases the borrowed access reference without disposing
+it. Caller cancellation retains the existing facade entry precedence. The owned codec refuses both
+nonnull concrete and interface facade values; null runtime values remain portable.
+
+This assembly registers no batch/deferred adapter and makes no OAuth or endpoint-availability claim.
 Caller workspace storage remains caller-owned. Constructing or serializing a receipt performs no
 upload, polling, materialization, cache creation or tool execution.
 

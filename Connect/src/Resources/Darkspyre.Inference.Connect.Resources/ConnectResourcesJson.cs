@@ -91,7 +91,7 @@ public static class ConnectResourcesJson
 }
 
 [JsonSourceGenerationOptions(GenerationMode = JsonSourceGenerationMode.Metadata,
-    Converters = [typeof(BatchClientJsonConverter)])]
+    Converters = [typeof(BatchClientJsonConverter), typeof(ResourceProviderJsonConverter)])]
 [JsonSerializable(typeof(LlmResourcePageRequest))]
 [JsonSerializable(typeof(LlmBatchCounts))]
 [JsonSerializable(typeof(LlmBatch))]
@@ -135,5 +135,17 @@ internal sealed class BatchClientJsonConverter : JsonConverter<ILlmBatchClient>
     {
         if (value is null) writer.WriteNullValue();
         else throw new NotSupportedException("Live batch clients are not portable data.");
+    }
+}
+
+internal sealed class ResourceProviderJsonConverter : JsonConverter<LlmResourceProviderService>
+{
+    public override bool HandleNull => true;
+    public override LlmResourceProviderService? Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+        => reader.TokenType == JsonTokenType.Null ? null : throw new NotSupportedException("Live resource facades are not portable data.");
+    public override void Write(Utf8JsonWriter writer, LlmResourceProviderService value, JsonSerializerOptions options)
+    {
+        if (value is null) writer.WriteNullValue();
+        else throw new NotSupportedException("Live resource facades are not portable data.");
     }
 }
