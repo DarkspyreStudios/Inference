@@ -67,6 +67,21 @@ public sealed class LlmConnectionAccess : IDisposable, IAsyncDisposable
         return connection;
     }
 
+    internal async Task<LlmConnection> RefreshAsync(string connectionId, LlmConnection connection,
+        Action<LlmConnection> validate, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(validate);
+        using LlmOperationLifetime.Lease operation = _lifetime.Enter(cancellationToken);
+        ThrowIfAcquisitionCanceled(operation.Token);
+        RuntimeInputAdmission.Validate(connection);
+        connection = EmbeddingRequestData.Snapshot(connection);
+        validate(connection);
+        ThrowIfAcquisitionCanceled(operation.Token);
+        connection = await RefreshCoreAsync(connectionId, connection, validate, operation.Token);
+        ThrowIfAcquisitionCanceled(operation.Token);
+        return connection;
+    }
+
     private async Task<LlmConnection> RefreshCoreAsync(string connectionId, LlmConnection connection,
         Action<LlmConnection>? validate, CancellationToken cancellationToken)
     {

@@ -82,6 +82,51 @@ public sealed class XaiFacadeAdmissionTests
     }
 
     [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task UnchangedRefreshKeepsBothSelectedPolicyValidations(bool authenticator)
+    {
+        var source = new Source(OAuth());
+        var auth = new Authenticator { Unchanged = true };
+        var client = new PolicyClient();
+        await using var service = new LlmProviderService(source, [client], authenticator ? [auth] : []);
+        await service.ListModelsAsync("connection");
+        Assert.Equal(2, client.Validations);
+        Assert.Equal(authenticator ? 1 : 0, auth.Calls);
+        Assert.Equal(0, source.Writes);
+        Assert.Equal(1, client.CatalogCalls);
+    }
+
+    [Fact]
+    public async Task SelectedRefreshSnapshotsHeadersBeforeIgnoringAuthenticatorAwait()
+    {
+        var headers = new Dictionary<string, string> { ["X-Entered"] = "original" };
+        var source = new Source(OAuth()) { Headers = headers };
+        var auth = new Authenticator { Hold = true };
+        using var handler = new Handler();
+        using var http = new HttpClient(handler);
+        await using var service = new LlmProviderService(source, [new XaiResponsesLlmClient(http)], [auth]);
+        Task? operation = null;
+        try
+        {
+            operation = service.ListModelsAsync("connection");
+            await auth.Entered.Task.WaitAsync(Bound);
+            headers["X-Entered"] = "mutated";
+            auth.Release.TrySetResult();
+            await operation.WaitAsync(Bound);
+            Assert.Equal("original", handler.EnteredHeader);
+            Assert.Equal("v1", source.ExpectedVersion);
+        }
+        finally
+        {
+            Task stopping = service.DisposeAsync().AsTask();
+            auth.Release.TrySetResult();
+            if (operation is not null) await Record.ExceptionAsync(() => operation.WaitAsync(Bound));
+            await stopping.WaitAsync(Bound);
+        }
+    }
+
+    [Theory]
     [InlineData("measure")]
     [InlineData("projection")]
     public async Task CatalogPolicyRunsOutsideFallbackBeforeCatalogCallback(string route)
@@ -94,6 +139,18 @@ public sealed class XaiFacadeAdmissionTests
         Assert.Equal(1, client.Validations);
         Assert.Equal(0, source.Writes);
         Refusal(error, "azure");
+    }
+
+    [Fact]
+    public async Task CatalogFallbackDoesNotSwallowSelectedPolicyFailure()
+    {
+        var source = new Source(OAuth());
+        var failure = new LlmProviderException("Controlled selected-policy refusal.", LlmTransport.XaiResponses);
+        var client = new PolicyClient { ValidationFailure = failure };
+        await using var service = new LlmProviderService(source, [client]);
+        Exception? error = await Record.ExceptionAsync(() => Invoke(service, "projection"));
+        Assert.Equal(0, client.CatalogCalls);
+        Assert.Same(failure, error);
     }
 
     [Fact]
@@ -164,6 +221,60 @@ public sealed class XaiFacadeAdmissionTests
     }
 
     [Theory]
+    [InlineData("valid")]
+    [InlineData("azure")]
+    [InlineData("copilot")]
+    public async Task BorrowedAccessSeesFacadeFenceBeforeDelayedLinkedCancellation(string freshKind)
+    {
+        var source = new Source(OAuth());
+        var auth = new Authenticator
+        {
+            Hold = true,
+            Result = freshKind == "valid" ? new() { OAuth = new() { AccessToken = "fresh-token" } } : Invalid(freshKind)
+        };
+        using var handler = new Handler();
+        using var http = new HttpClient(handler);
+        await using var access = new LlmConnectionAccess(source, [auth]);
+        await using var service = new LlmProviderService(source, [new XaiResponsesLlmClient(http)], [auth], connectionAccess: access);
+        using var caller = new CancellationTokenSource();
+        var callbackEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var callbackRelease = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        Task? request = null;
+        Task? stopping = null;
+        CancellationTokenRegistration registration = default;
+        try
+        {
+            await service.GetObservedAccountUsageAsync("connection");
+            CancellationToken stop = source.LastToken;
+            request = service.ListModelsAsync("connection", caller.Token);
+            await auth.Entered.Task.WaitAsync(Bound);
+            registration = stop.Register(() =>
+            {
+                callbackEntered.TrySetResult();
+                callbackRelease.Task.GetAwaiter().GetResult();
+            });
+            stopping = service.DisposeAsync().AsTask();
+            await callbackEntered.Task.WaitAsync(Bound);
+            Assert.True(stop.IsCancellationRequested);
+            Assert.False(auth.Token.IsCancellationRequested);
+            auth.Release.TrySetResult();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => request.WaitAsync(Bound));
+            Assert.Equal(0, source.Writes);
+            Assert.Equal(0, handler.Calls);
+        }
+        finally
+        {
+            Task disposal = service.DisposeAsync().AsTask();
+            callbackRelease.TrySetResult();
+            auth.Release.TrySetResult();
+            if (request is not null) await Record.ExceptionAsync(() => request.WaitAsync(Bound));
+            if (stopping is not null) await Record.ExceptionAsync(() => stopping.WaitAsync(Bound));
+            await disposal.WaitAsync(Bound);
+            registration.Dispose();
+        }
+    }
+
+    [Theory]
     [InlineData(false)]
     [InlineData(true)]
     public async Task ReentrantSelectedPolicyFencesBeforeRefreshAndCatalog(bool catalog)
@@ -179,6 +290,32 @@ public sealed class XaiFacadeAdmissionTests
         Assert.Equal(0, source.Writes);
         Assert.Equal(0, client.CatalogCalls);
         Assert.IsAssignableFrom<OperationCanceledException>(error);
+        if (stopping is not null) await stopping.WaitAsync(Bound);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task FinalSelectedPolicyCancellationFencesSaveWithBorrowedAccess(bool retire)
+    {
+        var source = new Source(OAuth());
+        var auth = new Authenticator();
+        var client = new PolicyClient();
+        await using var access = new LlmConnectionAccess(source, [auth]);
+        await using var service = new LlmProviderService(source, [client], [auth], connectionAccess: access);
+        using var caller = new CancellationTokenSource();
+        Task? stopping = null;
+        client.AfterValidation = () =>
+        {
+            if (client.Validations != 2) return;
+            if (retire) stopping = service.DisposeAsync().AsTask();
+            else caller.Cancel();
+        };
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => service.ListModelsAsync("connection", caller.Token));
+        Assert.Equal(2, client.Validations);
+        Assert.Equal(1, auth.Calls);
+        Assert.Equal(0, source.Writes);
+        Assert.Equal(0, client.CatalogCalls);
         if (stopping is not null) await stopping.WaitAsync(Bound);
     }
 
@@ -212,14 +349,15 @@ public sealed class XaiFacadeAdmissionTests
             Assert.Equal(typeof(XaiFacadeAdmissionTests).Assembly.ManifestModule.ModuleVersionId, assembly.ManifestModule.ModuleVersionId);
             var client = (ILlmClient)Activator.CreateInstance(assembly.GetType(typeof(PolicyClient).FullName!, true)!)!;
             Assert.IsAssignableFrom<ILlmCredentialAdmissionPolicy>(client);
-            var source = new Source(OAuth());
-            var access = new LlmConnectionAccess(source, []);
-            var service = new LlmProviderService(source, [client], [], connectionAccess: access);
+            var source = (ILlmConnectionSource)client;
+            var access = new LlmConnectionAccess(source, [(ILlmAuthenticator)client]);
+            var service = new LlmProviderService(source, [client], [(ILlmAuthenticator)client], connectionAccess: access);
             service.GetCapabilitiesAsync("connection").GetAwaiter().GetResult();
             service.Dispose();
             // The access remains caller-owned and usable until its own explicit retirement.
             Assert.Equal("v1", access.AcquireAsync("connection").GetAwaiter().GetResult().Version);
             access.Dispose();
+            Assert.Equal(0, (int)client.GetType().GetProperty(nameof(PolicyClient.Disposals))!.GetValue(client)!);
             return (new(generation), new(client), new object[] { service, access });
         }
         finally { generation.Unload(); }
@@ -264,12 +402,14 @@ public sealed class XaiFacadeAdmissionTests
     private sealed class Source(LlmCredential? credential) : ILlmConnectionSource
     {
         public string Endpoint { get; init; } = "https://api.x.ai/v1";
-        public LlmConnection Connection => new() { Transport = LlmTransport.XaiResponses, Endpoint = Endpoint, Version = "v1", Credential = credential?.Serialize() };
+        public IReadOnlyDictionary<string, string> Headers { get; init; } = new Dictionary<string, string>();
+        public LlmConnection Connection => new() { Transport = LlmTransport.XaiResponses, Endpoint = Endpoint, Version = "v1", Credential = credential?.Serialize(), AdditionalHeaders = Headers };
         public int Reads { get; private set; }
         public int Writes { get; private set; }
         public string? ExpectedVersion { get; private set; }
+        public CancellationToken LastToken { get; private set; }
         public Task<LlmConnection?> GetConnectionAsync(string connectionId, CancellationToken cancellationToken = default)
-        { Reads++; return Task.FromResult<LlmConnection?>(Connection); }
+        { Reads++; LastToken = cancellationToken; return Task.FromResult<LlmConnection?>(Connection); }
         public Task SaveCredentialAsync(string connectionId, string credentialJson, string expectedVersion, CancellationToken cancellationToken = default)
         { Writes++; ExpectedVersion = expectedVersion; return Task.CompletedTask; }
     }
@@ -281,20 +421,23 @@ public sealed class XaiFacadeAdmissionTests
         public bool Unchanged { get; init; }
         public bool Hold { get; init; }
         public int Calls { get; private set; }
+        public CancellationToken Token { get; private set; }
         public TaskCompletionSource Entered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public async Task<LlmCredential> EnsureFreshAsync(LlmCredential credential, CancellationToken cancellationToken = default)
-        { Calls++; Entered.TrySetResult(); if (Hold) await Release.Task; return Unchanged ? credential : Result; }
+        { Calls++; Token = cancellationToken; Entered.TrySetResult(); if (Hold) await Release.Task; return Unchanged ? credential : Result; }
     }
 
     private sealed class Handler : HttpMessageHandler
     {
         public int Calls { get; private set; }
         public string? Bearer { get; private set; }
+        public string? EnteredHeader { get; private set; }
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             Calls++;
             Bearer = request.Headers.Authorization?.Parameter;
+            if (request.Headers.TryGetValues("X-Entered", out IEnumerable<string>? values)) EnteredHeader = values.Single();
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
             { Content = new StringContent("{\"data\":[],\"models\":[]}", Encoding.UTF8, "application/json") });
         }
@@ -305,18 +448,26 @@ public sealed class XaiFacadeAdmissionTests
         protected override Assembly? Load(AssemblyName name) => Default.Assemblies.FirstOrDefault(a => AssemblyName.ReferenceMatchesDefinition(name, a.GetName()));
     }
 
-    public sealed class PolicyClient : ILlmClient, ILlmCatalogCapabilities, ILlmCredentialAdmissionPolicy
+    public sealed class PolicyClient : ILlmClient, ILlmCatalogCapabilities, ILlmCredentialAdmissionPolicy,
+        ILlmConnectionSource, ILlmAuthenticator, IDisposable
     {
         public LlmTransport Transport => LlmTransport.XaiResponses;
         public LlmProviderDefinition ProviderDefinition => ProviderDefinitions.GrokSubscription;
         public int CatalogCalls { get; private set; }
         public int Validations { get; private set; }
         public Action? AfterValidation { get; set; }
+        public int Disposals { get; private set; }
+        public Exception? ValidationFailure { get; init; }
         public void ValidateCredential(LlmConnection connection)
-        { Validations++; _ = XaiAuthorization.Require(connection); AfterValidation?.Invoke(); }
+        { Validations++; if (ValidationFailure is not null) throw ValidationFailure; _ = XaiAuthorization.Require(connection); AfterValidation?.Invoke(); }
         public LlmProviderCapabilities GetCapabilities(LlmConnection connection, string? modelId = null) => new();
         public IAsyncEnumerable<LlmStreamEvent> StreamAsync(LlmConnection connection, LlmChatRequest request, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<IReadOnlyList<LlmModel>> ListModelsAsync(LlmConnection connection, CancellationToken cancellationToken = default)
         { CatalogCalls++; return Task.FromResult<IReadOnlyList<LlmModel>>([]); }
+        public Task<LlmConnection?> GetConnectionAsync(string connectionId, CancellationToken cancellationToken = default) =>
+            Task.FromResult<LlmConnection?>(new() { Transport = Transport, Endpoint = "https://api.x.ai/v1", Version = "v1", Credential = OAuth().Serialize() });
+        public Task<LlmCredential> EnsureFreshAsync(LlmCredential credential, CancellationToken cancellationToken = default) => Task.FromResult(credential);
+        public Task SaveCredentialAsync(string connectionId, string credentialJson, string expectedVersion, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public void Dispose() => Disposals++;
     }
 }

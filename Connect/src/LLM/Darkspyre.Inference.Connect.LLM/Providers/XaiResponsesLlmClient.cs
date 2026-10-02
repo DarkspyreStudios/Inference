@@ -10,8 +10,11 @@ using Darkspyre.Inference.Connect.LLM.Internal;
 namespace Darkspyre.Inference.Connect.LLM.Providers;
 
 /// <summary>OAuth-only Grok Responses adapter. The facade owns its published chat catalog.</summary>
-internal sealed class XaiResponsesLlmClient(HttpClient http) : ResponsesLlmClientBase(http), ILlmCatalogCapabilities, ILlmTextTokenizerClient
+internal sealed class XaiResponsesLlmClient(HttpClient http) : ResponsesLlmClientBase(http), ILlmCatalogCapabilities,
+    ILlmTextTokenizerClient, ILlmCredentialAdmissionPolicy
 {
+    void ILlmCredentialAdmissionPolicy.ValidateCredential(LlmConnection connection) => _ = Authorization(connection);
+
     private const int MaxImageBytes = 20 * 1024 * 1024;
     private static readonly FrozenSet<string> ReservedOptions = new[]
     {
