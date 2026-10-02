@@ -129,6 +129,20 @@ public sealed class LlmProviderService : ILlmTextTokenizer, ILlmFileClient, IXai
         return new ConnectLlmInference(this, connectionId);
     }
 
+    /// <summary>Validates an explicit connection without refreshing credentials or invoking a provider.</summary>
+    public async Task<ILlmContextCacheClient> BindContextCacheAsync(
+        string connectionId, CancellationToken cancellationToken = default)
+    {
+        using var operation = _lifetime.Enter(cancellationToken);
+        LlmConnection connection = await LlmConnectionResolver.ResolveAsync(Connections, connectionId, operation.Token)
+            .ConfigureAwait(false);
+        ThrowIfOperationCanceled(operation.Token);
+        connection = EmbeddingRequestData.Snapshot(connection);
+        _ = ClientFor(connection.Transport);
+        ThrowIfOperationCanceled(operation.Token);
+        throw new NotSupportedException("No explicit context cache adapter is implemented.");
+    }
+
     /// <summary>Native file operations remain unavailable until a resource adapter implements this route.</summary>
     public Task<LlmProviderFile> UploadAsync(string connectionId, Stream source, string fileName,
         LlmFileUploadOptions? options = null, CancellationToken cancellationToken = default) =>

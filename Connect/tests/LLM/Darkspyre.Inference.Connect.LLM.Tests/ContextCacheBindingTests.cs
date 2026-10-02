@@ -13,7 +13,9 @@ public sealed class ContextCacheBindingTests
     private static readonly TimeSpan Bound = TimeSpan.FromSeconds(5);
     private static readonly LlmConnection Connection = new()
     {
-        Version = "version", Transport = LlmTransport.OpenAiResponses, Endpoint = "https://example.invalid/v1",
+        Version = "version",
+        Transport = LlmTransport.OpenAiResponses,
+        Endpoint = "https://example.invalid/v1",
         Credential = new LlmCredential { OAuth = new() { AccessToken = "private", RefreshToken = "private", ExpiresAtUnixSeconds = 0 } }.Serialize()
     };
 
@@ -38,7 +40,11 @@ public sealed class ContextCacheBindingTests
     }
 
     [Theory]
-    [InlineData("blank")] [InlineData("missing")] [InlineData("version")] [InlineData("transport")] [InlineData("failure")]
+    [InlineData("blank")]
+    [InlineData("missing")]
+    [InlineData("version")]
+    [InlineData("transport")]
+    [InlineData("failure")]
     public async Task ExistingResolutionAndRegistrationFailuresRemainAuthoritative(string scenario)
     {
         using var source = new Source(scenario == "missing" ? null : scenario == "version" ? Connection with { Version = "" } : Connection);
@@ -84,7 +90,8 @@ public sealed class ContextCacheBindingTests
     }
 
     [Theory]
-    [InlineData(false)] [InlineData(true)]
+    [InlineData(false)]
+    [InlineData(true)]
     public async Task CancelledBindingDrainsIgnoringResolutionAndRejectsLateResult(bool retireOwner)
     {
         using var source = new Source(Connection) { Hold = true };

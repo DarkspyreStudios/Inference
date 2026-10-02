@@ -532,6 +532,19 @@ enumerators so their owned operations can leave. Disposal does not report comple
 operation remains active. A registration owner disposes its shared cache; sharing a cache across
 containers does not transfer that responsibility to a scoped facade.
 
+### Explicit cache binding
+
+`LlmProviderService.BindContextCacheAsync(connectionId, ct)` is the asynchronous entry point for
+`ILlmContextCacheClient`. It resolves one versioned connection, snapshots its data and validates that
+the selected transport is registered. Binding does not refresh credentials, prepare a provider,
+discover models or create a cache. No current adapter implements explicit cache operations, so a
+valid binding attempt reports `NotSupportedException` instead of returning a usable client.
+
+The facade's admission and retirement cover the source read. Cancellation waits for a source that
+ignores its token to return, then rejects its late result. Facade retirement also drains that read
+before releasing borrowed collaborators. This endpoint does not enable explicit cache generation
+selection, paid cache creation or provider-specific cache scope validation.
+
 ### Files and Skills facade
 
 `LlmProviderService` exposes `ILlmFileClient`, `IXaiFilePublicUrlClient` and
