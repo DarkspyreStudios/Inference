@@ -7,20 +7,29 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace Darkspyre.Inference.Connect.TTS;
 
-public sealed class TtsProviderService
+public sealed class TtsProviderService : IDisposable, IAsyncDisposable
 {
-    private readonly IReadOnlyDictionary<TtsTransport, ITtsProvider> _providers;
+    private readonly LlmOperationLifetime _lifetime = new();
+    private IReadOnlyDictionary<TtsTransport, ITtsProvider>? _providers;
     public TtsProviderService(IEnumerable<ITtsProvider> providers)
     {
         ArgumentNullException.ThrowIfNull(providers);
         _providers = providers.ToDictionary(provider => provider.Transport);
     }
-    public IReadOnlyList<InferenceSetupDefinition> SetupDefinitions => _providers.Values.Select(provider => provider.SetupDefinition).ToArray();
+    public IReadOnlyList<InferenceSetupDefinition> SetupDefinitions
+    {
+        get
+        {
+            using LlmOperationLifetime.Lease operation = _lifetime.Enter(default);
+            return _providers!.Values.Select(provider => provider.SetupDefinition).ToArray();
+        }
+    }
     public ITtsClient Bind(TtsConnection connection, XaiFamilyBinding? xai = null,
         IInferenceResourceAccess? resources = null)
     {
+        using LlmOperationLifetime.Lease operation = _lifetime.Enter(default);
         ArgumentNullException.ThrowIfNull(connection);
-        ITtsProvider provider = RequiredProvider(_providers, connection.Transport);
+        ITtsProvider provider = RequiredProvider(_providers!, connection.Transport);
         ValidateBinding(connection, xai);
         return provider.Bind(connection, xai, resources);
     }
@@ -33,9 +42,27 @@ public sealed class TtsProviderService
     /// <summary>Creates the settings manager that opens, acts on and saves TTS settings through <paramref name="target"/>.</summary>
     public TtsSettingsManager CreateSettingsManager(ISetupCommitTarget<TtsSetupChanges> target,
         Func<XaiConnectionSelection, XaiFamilyBinding>? xaiBindings = null,
-        IInferenceResourceAccess? resources = null) => new(this, target, xaiBindings, resources);
+        IInferenceResourceAccess? resources = null)
+    {
+        using LlmOperationLifetime.Lease operation = _lifetime.Enter(default);
+        return new(this, target, xaiBindings, resources);
+    }
 
-    internal ITtsProvider Provider(TtsTransport transport) => RequiredProvider(_providers, transport);
+    internal ITtsProvider Provider(TtsTransport transport)
+    {
+        using LlmOperationLifetime.Lease operation = _lifetime.Enter(default);
+        return RequiredProvider(_providers!, transport);
+    }
+
+    public void Dispose() => RetireAsync().GetAwaiter().GetResult();
+
+    public ValueTask DisposeAsync() => new(RetireAsync());
+
+    private Task RetireAsync() => _lifetime.RetireAsync(() =>
+    {
+        _providers = null;
+        return Task.CompletedTask;
+    });
 
     internal static void ValidateBinding(TtsConnection connection, XaiFamilyBinding? xai)
     {
