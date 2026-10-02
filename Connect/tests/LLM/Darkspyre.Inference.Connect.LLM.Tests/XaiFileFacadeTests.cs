@@ -156,13 +156,15 @@ public sealed class XaiFileFacadeTests
     [InlineData("source")]
     [InlineData("refresh")]
     [InlineData("http")]
+    [InlineData("save")]
     public async Task RetirementDrainsIgnoringCallbackAndNeverPublishesLateFile(string boundary)
     {
         var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var source = new Source
         {
-            Read = boundary == "source" ? async _ => { entered.SetResult(); await release.Task; return Connection(); } : null
+            Read = boundary == "source" ? async _ => { entered.SetResult(); await release.Task; return Connection(); } : null,
+            Save = boundary == "save" ? async () => { entered.SetResult(); await release.Task; } : null
         };
         var auth = new Authenticator
         {
@@ -233,6 +235,35 @@ public sealed class XaiFileFacadeTests
     }
 
     [Fact]
+    public async Task FacadeRetirementDrainsActualIgnoringBorrowedDownloadWriteWithoutPublishingReceipt()
+    {
+        using var destination = new GatedDestination();
+        using var http = new HttpClient(new Handler(_ => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+        { Content = new ByteArrayContent(Encoding.UTF8.GetBytes("abc")) })));
+        var service = new LlmProviderService(new Source(), [new XaiResponsesLlmClient(http)]);
+        Task<ResourceDownloadReceipt> download = service.DownloadAsync("selected", "file-a", destination);
+        Task? retirement = null;
+        try
+        {
+            await destination.Entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            retirement = service.DisposeAsync().AsTask();
+            Assert.False(retirement.IsCompleted);
+            destination.Release.SetResult();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => download);
+            await retirement.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.Equal("abc", Encoding.UTF8.GetString(destination.ToArray()));
+            Assert.Equal(0, destination.Disposals);
+        }
+        finally
+        {
+            retirement ??= service.DisposeAsync().AsTask();
+            destination.Release.TrySetResult();
+            try { await download.WaitAsync(TimeSpan.FromSeconds(5)); } catch (OperationCanceledException) { }
+            await retirement.WaitAsync(TimeSpan.FromSeconds(5));
+        }
+    }
+
+    [Fact]
     public async Task CancellationCallbackFaultDoesNotReleaseBorrowedGraphBeforeSourceDrain()
     {
         var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -286,6 +317,7 @@ public sealed class XaiFileFacadeTests
     private sealed class Source : ILlmConnectionSource
     {
         public Func<CancellationToken, Task<LlmConnection?>>? Read { get; init; }
+        public Func<Task>? Save { get; init; }
         public LlmConnection Connection { get; init; } = XaiFileFacadeTests.Connection();
         public int Reads { get; private set; }
         public int Writes { get; private set; }
@@ -293,7 +325,7 @@ public sealed class XaiFileFacadeTests
         public Task<LlmConnection?> GetConnectionAsync(string connectionId, CancellationToken cancellationToken = default)
         { Reads++; return Read?.Invoke(cancellationToken) ?? Task.FromResult<LlmConnection?>(Connection); }
         public Task SaveCredentialAsync(string connectionId, string credentialJson, string expectedVersion, CancellationToken cancellationToken = default)
-        { Writes++; ExpectedVersion = expectedVersion; return Task.CompletedTask; }
+        { Writes++; ExpectedVersion = expectedVersion; return Save?.Invoke() ?? Task.CompletedTask; }
     }
 
     private sealed class Authenticator : ILlmAuthenticator
@@ -314,6 +346,20 @@ public sealed class XaiFileFacadeTests
     {
         public override bool CanRead => capability();
         public override bool CanWrite => capability();
+    }
+
+    private sealed class GatedDestination : MemoryStream
+    {
+        public TaskCompletionSource Entered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public int Disposals { get; private set; }
+        public override async ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            Entered.TrySetResult();
+            await Release.Task;
+            Write(buffer.Span);
+        }
+        protected override void Dispose(bool disposing) { if (disposing) Disposals++; base.Dispose(disposing); }
     }
 
     private sealed class CustomClient(XaiResponsesLlmClient metadata) : ILlmClient

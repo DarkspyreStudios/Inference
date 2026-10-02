@@ -4,6 +4,7 @@ using System.Runtime.CompilerServices;
 using System.Runtime.Loader;
 using System.Text.Json;
 using Darkspyre.Inference.Common;
+using Darkspyre.Inference.Common.Resources;
 using Darkspyre.Inference.Connect.LLM.Providers;
 
 namespace Darkspyre.Inference.Connect.LLM.Tests;
@@ -54,9 +55,14 @@ public sealed class XaiFileFacadeGenerationTests
         finally { await service.DisposeAsync(); }
         var metadata = ConnectLlmJson.LlmProviderFile;
         Assert.Same(typeof(LlmProviderService).Assembly, metadata.Type.Assembly);
+        var commonMetadata = InferenceJson.InferenceResourceReference;
+        Assert.Same(typeof(InferenceJson).Assembly, commonMetadata.Type.Assembly);
+        string resourceWire = JsonSerializer.Serialize(new InferenceResourceReference("fixture-workspace", "fixture-resource"), commonMetadata);
+        result = result with { Resource = JsonSerializer.Deserialize(resourceWire, commonMetadata)! };
         string wire = JsonSerializer.Serialize(result, metadata);
         result = JsonSerializer.Deserialize(wire, metadata)!;
-        return [JsonSerializer.Serialize(result, metadata), new WeakReference(service), new WeakReference(metadata), new WeakReference(metadata.Options.TypeInfoResolver!)];
+        return [JsonSerializer.Serialize(result, metadata), new WeakReference(service), new WeakReference(metadata), new WeakReference(metadata.Options.TypeInfoResolver!),
+            new WeakReference(commonMetadata), new WeakReference(commonMetadata.Options.TypeInfoResolver!)];
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
