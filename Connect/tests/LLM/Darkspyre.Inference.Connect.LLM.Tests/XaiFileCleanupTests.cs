@@ -1,4 +1,5 @@
 using System.Net;
+using Darkspyre.Inference.Common.Resources;
 using Darkspyre.Inference.Connect.LLM.Providers;
 
 namespace Darkspyre.Inference.Connect.LLM.Tests;
@@ -23,7 +24,7 @@ public sealed class XaiFileCleanupTests
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = content });
         });
         using var http = new HttpClient(handler);
-        await using var adapter = new XaiFileClient(http);
+        var adapter = new XaiFileClient(http);
         using var stream = new BorrowedStream();
 
         AggregateException failure = await Assert.ThrowsAsync<AggregateException>(() => Invoke(adapter, route, stream, () =>
@@ -31,7 +32,8 @@ public sealed class XaiFileCleanupTests
             if (returned) throw primary;
         }));
 
-        Assert.Collection(failure.InnerExceptions, error => Assert.Same(primary, error), error => Assert.Same(cleanup, error));
+        Assert.Collection(failure.InnerExceptions, error => Assert.Same(primary, error), error => AssertCleanup(cleanup, error));
+        await AssertRetirement(adapter, failure.InnerExceptions[1]);
         Assert.Equal(1, content.Disposals);
         Assert.Equal(0, stream.Disposals);
         Assert.Equal(0, handler.Disposals);
@@ -47,10 +49,12 @@ public sealed class XaiFileCleanupTests
         var content = new Content(route == 2 ? "abc" : FileJson, cleanup);
         using var http = new HttpClient(new Handler((_, _) => Task.FromResult(
             new HttpResponseMessage(HttpStatusCode.OK) { Content = content })));
-        await using var adapter = new XaiFileClient(http);
+        var adapter = new XaiFileClient(http);
         using var stream = new BorrowedStream();
 
-        Assert.Same(cleanup, await Assert.ThrowsAsync<IOException>(() => Invoke(adapter, route, stream, () => { })));
+        Exception failure = await Assert.ThrowsAsync<InferenceResourceOperationException>(() => Invoke(adapter, route, stream, () => { }));
+        AssertCleanup(cleanup, failure);
+        await AssertRetirement(adapter, failure);
         Assert.Equal(1, content.Disposals);
         Assert.Equal(0, stream.Disposals);
     }
@@ -99,7 +103,7 @@ public sealed class XaiFileCleanupTests
             returned = true;
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = responseContent });
         }));
-        await using var adapter = new XaiFileClient(http);
+        var adapter = new XaiFileClient(http);
         using var stream = new BorrowedStream();
 
         AggregateException failure = await Assert.ThrowsAsync<AggregateException>(() => Invoke(adapter, route, stream, () =>
@@ -107,7 +111,10 @@ public sealed class XaiFileCleanupTests
             if (returned) throw primary;
         }));
         Assert.Collection(failure.Flatten().InnerExceptions,
-            error => Assert.Same(primary, error), error => Assert.Same(responseCleanup, error), error => Assert.Same(requestCleanup, error));
+            error => Assert.Same(primary, error), error => AssertCleanup(responseCleanup, error), error => AssertCleanup(requestCleanup, error));
+        AggregateException retirement = await Assert.ThrowsAsync<AggregateException>(() => adapter.DisposeAsync().AsTask());
+        Assert.Collection(retirement.InnerExceptions,
+            error => Assert.Same(failure.InnerExceptions[1], error), error => Assert.Same(failure.InnerExceptions[2], error));
         Assert.Equal(1, responseContent.Disposals);
         Assert.Equal(1, requestContent.Disposals);
         Assert.Equal(0, stream.Disposals);
@@ -122,12 +129,13 @@ public sealed class XaiFileCleanupTests
         var content = new Content("{", cleanup);
         using var http = new HttpClient(new Handler((_, _) => Task.FromResult(
             new HttpResponseMessage(HttpStatusCode.OK) { Content = content })));
-        await using var adapter = new XaiFileClient(http);
+        var adapter = new XaiFileClient(http);
         using var stream = new BorrowedStream();
 
         AggregateException failure = await Assert.ThrowsAsync<AggregateException>(() => Invoke(adapter, route, stream, () => { }));
         Assert.Collection(failure.InnerExceptions,
-            error => Assert.IsType<LlmProviderException>(error), error => Assert.Same(cleanup, error));
+            error => Assert.IsType<LlmProviderException>(error), error => AssertCleanup(cleanup, error));
+        await AssertRetirement(adapter, failure.InnerExceptions[1]);
         Assert.Equal(1, content.Disposals);
         Assert.Equal(0, stream.Disposals);
     }
@@ -140,15 +148,25 @@ public sealed class XaiFileCleanupTests
         var content = new Content("abc", cleanup);
         using var http = new HttpClient(new Handler((_, _) => Task.FromResult(
             new HttpResponseMessage(HttpStatusCode.OK) { Content = content })));
-        await using var adapter = new XaiFileClient(http);
+        var adapter = new XaiFileClient(http);
         using var stream = new FailingDestination(primary);
 
         AggregateException failure = await Assert.ThrowsAsync<AggregateException>(() => Invoke(adapter, 2, stream, () => { }));
-        Assert.Collection(failure.InnerExceptions, error => Assert.Same(primary, error), error => Assert.Same(cleanup, error));
+        Assert.Collection(failure.InnerExceptions, error => Assert.Same(primary, error), error => AssertCleanup(cleanup, error));
+        await AssertRetirement(adapter, failure.InnerExceptions[1]);
         Assert.Equal("abc"u8.ToArray(), stream.ToArray());
         Assert.Equal(1, content.Disposals);
         Assert.Equal(0, stream.Disposals);
     }
+
+    private static void AssertCleanup(Exception cause, Exception failure)
+    {
+        Assert.Same(cause, failure.InnerException);
+        Assert.Equal(InferenceResourceOperationPhase.Cleanup, Assert.IsType<InferenceResourceOperationException>(failure).Failure.Phase);
+    }
+
+    private static async Task AssertRetirement(XaiFileClient adapter, Exception failure) =>
+        Assert.Same(failure, await Assert.ThrowsAsync<InferenceResourceOperationException>(() => adapter.DisposeAsync().AsTask()));
 
     private static Task Invoke(XaiFileClient adapter, int route, Stream stream, Action fence) => route switch
     {
