@@ -50,6 +50,7 @@ public sealed class ResourcesJsonTests
         { "LlmBatchChatOperation", "{\"Request\":{\"ModelId\":\"m\",\"Tools\":[{\"type\":\"function\",\"Name\":\"function\",\"InputSchema\":{\"type\":\"object\"}},{\"type\":\"shell\",\"Skills\":[{\"Name\":\"skill\",\"Description\":\"actual\",\"Path\":\"/skills/actual\"}]}],\"Messages\":[{\"Role\":\"assistant\",\"Content\":\"\",\"ToolCalls\":[{\"type\":\"function\",\"Id\":\"f\",\"Name\":\"function\",\"ArgumentsJson\":\"{}\"},{\"type\":\"shell\",\"Id\":\"sh\",\"Commands\":[\"first\",\"second\"],\"TimeoutMs\":-9223372036854775808,\"MaxOutputLength\":2147483647}]},{\"Role\":\"tool\",\"Content\":\"\",\"ToolResults\":[{\"type\":\"function\",\"ToolCallId\":\"f\",\"Output\":{\"Parts\":[{\"type\":\"text\",\"Text\":\"actual\"}]}},{\"type\":\"shell\",\"ToolCallId\":\"sh\",\"Output\":[{\"Stdout\":\"raw\",\"Stderr\":null,\"Outcome\":{\"type\":\"exit\",\"ExitCode\":-2147483648}},{\"Stdout\":null,\"Stderr\":\"error\",\"Outcome\":{\"type\":\"timeout\"}},{\"Stdout\":\"\",\"Stderr\":\"\",\"Outcome\":{\"type\":\"exit\",\"ExitCode\":0}}]}]}]}}" },
         { "LlmBatchImageOperation", "{\"Request\":" + ImageRequest + ",\"Workflow\":" + Workflow + "}" },
         { "LlmBatchVideoGenerationOperation", "{\"Request\":" + VideoGeneration + "}" },
+        { "LlmBatchVideoGenerationOperation", "{\"Request\":{\"ModelId\":\"video-model\",\"Prompt\":\"actual\",\"Duration\":\"00:00:08\",\"AspectRatio\":\"16:9\",\"ResolutionHeight\":720,\"FirstFrame\":{\"type\":\"binary\",\"ContentType\":\"image/png\",\"Data\":\"AQI=\"},\"LastFrame\":{\"type\":\"url\",\"Url\":\"https://example.invalid/last\"},\"Keyframes\":[{\"Image\":{\"type\":\"resource\",\"Resource\":{\"WorkspaceId\":\"w\",\"Id\":\"r\"}},\"Timestamp\":\"00:00:00\"}],\"ReferenceImages\":[{\"type\":\"file\",\"File\":{\"FileId\":\"native\"}}],\"ReferenceAudio\":[{\"type\":\"voice\",\"VoiceId\":\"preset\"},{\"type\":\"audio\",\"Source\":{\"type\":\"binary\",\"ContentType\":\"audio/wav\",\"Data\":\"AwQ=\"}}],\"GenerateAudio\":false,\"ProviderOptions\":{\"type\":\"xai-video\",\"Storage\":{\"FileName\":\"output\",\"ExpiresAfter\":\"00:00:00\",\"PublicUrl\":{\"type\":\"configuration\",\"Options\":{\"ExpiresAfter\":\"01:00:00\"}}},\"Output\":{\"UploadUrl\":\"https://example.invalid/upload?signature=secret\"},\"User\":\"opaque\"}}}" },
         { "LlmBatchVideoEditOperation", "{\"Request\":" + VideoEdit + "}" },
         { "LlmBatchVideoExtensionOperation", "{\"Request\":" + VideoExtension + "}" },
         { "LlmBatchRequest", "{\"CustomId\":\"second\",\"Operation\":{\"type\":\"chat\",\"Request\":" + ChatRequest + "}}" },
@@ -96,9 +97,11 @@ public sealed class ResourcesJsonTests
         { "LlmBatch", "{\"Id\":\"b\",\"Name\":null,\"Scope\":" + Scope + ",\"Counts\":{}}" },
         { "LlmBatch", "{\"Id\":\"b\",\"Name\":\"n\",\"Scope\":{\"Owner\":null,\"Identity\":\"i\"},\"Counts\":{}}" },
         { "LlmBatchCounts", "{\"Requests\":-1}" }, { "LlmBatchCounts", "{\"Requests\":9223372036854775808}" },
-        { "LlmResourcePageRequest", "{\"Limit\":0}" },
         { "LlmBatchOperation", "{\"type\":\"unknown\",\"Request\":" + ChatRequest + "}" },
         { "LlmBatchChatOperation", "{}" }, { "LlmBatchChatOperation", "{\"Request\":null}" },
+        { "LlmBatchChatOperation", "{\"Request\":{\"ModelId\":\"m\",\"Tools\":[{\"type\":\"unknown\"}]}}" },
+        { "LlmBatchChatOperation", "{\"Request\":{\"ModelId\":\"m\",\"Messages\":[{\"Role\":\"assistant\",\"Content\":\"\",\"ToolCalls\":[{\"type\":\"shell\",\"Id\":\"sh\"}]}]}}" },
+        { "LlmBatchChatOperation", "{\"Request\":{\"ModelId\":\"m\",\"Messages\":[{\"Role\":\"tool\",\"Content\":\"\",\"ToolResults\":[{\"type\":\"shell\",\"ToolCallId\":\"sh\",\"Output\":[{\"Outcome\":{\"type\":\"unknown\"}}]}]}]}}" },
         { "LlmBatchImageOperation", "{\"Request\":" + ImageRequest + "}" },
         { "LlmBatchVideoGenerationOperation", "{}" }, { "LlmBatchVideoEditOperation", "{\"Request\":null}" },
         { "LlmBatchVideoExtensionOperation", "{}" },
@@ -157,9 +160,27 @@ public sealed class ResourcesJsonTests
     internal static void ExerciseCallerAuthorityRefusal()
     {
         JsonTypeInfo<ResourcesRuntimeEnvelope> metadata = RuntimeMetadata();
+        var caller = new CallerAuthority();
         Assert.Throws<NotSupportedException>(() => JsonSerializer.Serialize(new ResourcesRuntimeEnvelope { CallerServices = new() }, metadata));
-        Assert.Throws<NotSupportedException>(() => JsonSerializer.Deserialize("{\"CallerServices\":{}}", metadata));
-        Assert.NotNull(JsonSerializer.Deserialize("{\"CallerServices\":null}", metadata));
+        var services = new LlmAgentCallerServices
+        {
+            Permissions = caller,
+            TextFileReader = caller,
+            TextFileWriter = caller,
+            Terminals = caller,
+            ShellExecutor = caller
+        };
+        Assert.Throws<NotSupportedException>(() => JsonSerializer.Serialize(new ResourcesRuntimeEnvelope { CallerServices = services }, metadata));
+        Assert.Throws<NotSupportedException>(() => JsonSerializer.Serialize(new ResourcesRuntimeEnvelope { Permissions = caller }, metadata));
+        Assert.Throws<NotSupportedException>(() => JsonSerializer.Serialize(new ResourcesRuntimeEnvelope { TextFileReader = caller }, metadata));
+        Assert.Throws<NotSupportedException>(() => JsonSerializer.Serialize(new ResourcesRuntimeEnvelope { TextFileWriter = caller }, metadata));
+        Assert.Throws<NotSupportedException>(() => JsonSerializer.Serialize(new ResourcesRuntimeEnvelope { Terminals = caller }, metadata));
+        Assert.Throws<NotSupportedException>(() => JsonSerializer.Serialize(new ResourcesRuntimeEnvelope { Terminal = caller }, metadata));
+        Assert.Throws<NotSupportedException>(() => JsonSerializer.Serialize(new ResourcesRuntimeEnvelope { ShellExecutor = caller }, metadata));
+        foreach (string field in new[] { "CallerServices", "Permissions", "TextFileReader", "TextFileWriter", "Terminals", "Terminal", "ShellExecutor" })
+            Assert.Throws<NotSupportedException>(() => JsonSerializer.Deserialize("{\"" + field + "\":{}}", metadata));
+        Assert.NotNull(JsonSerializer.Deserialize("{\"CallerServices\":null,\"Permissions\":null,\"TextFileReader\":null,\"TextFileWriter\":null,\"Terminals\":null,\"Terminal\":null,\"ShellExecutor\":null}", metadata));
+        Assert.Equal(0, caller.Calls);
     }
 
     [Fact]
@@ -255,6 +276,14 @@ public sealed class ResourcesJsonTests
             Assert.Same(loaded[4], metadata.Options.Converters.Single(converter => converter.CanConvert(clientType)).GetType().Assembly);
             Type fixture = loaded[5].GetType(typeof(ResourcesJsonTests).FullName!, true)!;
             fixture.GetMethod(nameof(ExerciseRuntimeRefusal), BindingFlags.Static | BindingFlags.NonPublic)!.Invoke(null, null);
+            fixture.GetMethod(nameof(ExerciseCallerAuthorityRefusal), BindingFlags.Static | BindingFlags.NonPublic)!.Invoke(null, null);
+            foreach (Type type in new[] { typeof(LlmAgentCallerServices), typeof(ILlmAgentPermissionSelector),
+                typeof(ILlmAgentTextFileReader), typeof(ILlmAgentTextFileWriter), typeof(ILlmAgentTerminalFactory),
+                typeof(ILlmAgentTerminal), typeof(ILlmAgentShellExecutor) })
+            {
+                Type foreign = loaded[1].GetType(type.FullName!, true)!;
+                Assert.Same(loaded[1], metadata.Options.Converters.Single(converter => converter.CanConvert(foreign)).GetType().Assembly);
+            }
             var runtime = (JsonTypeInfo)fixture.GetMethod(nameof(RuntimeMetadata))!.Invoke(null, null)!;
             Assert.Same(loaded[5], runtime.Type.Assembly);
             foreach ((Type type, Type owner, string property) in new[]
@@ -381,6 +410,22 @@ public sealed class ResourcesJsonTests
         public Task<LlmBatch> CreateFromRequestsAsync(string connectionId, string name, IReadOnlyList<LlmBatchRequest> requests, IInferenceResourceAccess? resources = null, CancellationToken cancellationToken = default) => throw Effect();
         public override string ToString() => throw Effect();
     }
+    private sealed class CallerAuthority : ILlmAgentPermissionSelector, ILlmAgentTextFileReader, ILlmAgentTextFileWriter,
+        ILlmAgentTerminalFactory, ILlmAgentTerminal, ILlmAgentShellExecutor
+    {
+        public int Calls { get; private set; }
+        private InvalidOperationException Effect() { Calls++; return new InvalidOperationException(); }
+        public Task<LlmAgentPermissionResult> RequestAsync(LlmAgentPermissionRequest request, CancellationToken cancellationToken = default) => throw Effect();
+        public Task<string> ReadAsync(LlmAgentTextFileReadRequest request, CancellationToken cancellationToken = default) => throw Effect();
+        public Task<LlmAgentTextFileWriteResult> WriteAsync(LlmAgentTextFileWriteRequest request, CancellationToken cancellationToken = default) => throw Effect();
+        public Task<ILlmAgentTerminal> CreateAsync(LlmAgentTerminalCreateRequest request, CancellationToken cancellationToken = default) => throw Effect();
+        public Task<LlmAgentTerminalOutput> GetOutputAsync(CancellationToken cancellationToken = default) => throw Effect();
+        public Task<LlmAgentTerminalExit> WaitForExitAsync(CancellationToken cancellationToken = default) => throw Effect();
+        public Task KillAsync(CancellationToken cancellationToken = default) => throw Effect();
+        public Task<LlmShellCallResult> ExecuteAsync(LlmAgentShellRequest request, CancellationToken cancellationToken = default) => throw Effect();
+        public ValueTask DisposeAsync() => throw Effect();
+        public override string ToString() => throw Effect();
+    }
 }
 
 public sealed record ResourcesRuntimeEnvelope
@@ -391,6 +436,12 @@ public sealed record ResourcesRuntimeEnvelope
     public IProviderAuthorization? Authorization { get; init; }
     public ILlmBatchClient? Client { get; init; }
     public LlmAgentCallerServices? CallerServices { get; init; }
+    public ILlmAgentPermissionSelector? Permissions { get; init; }
+    public ILlmAgentTextFileReader? TextFileReader { get; init; }
+    public ILlmAgentTextFileWriter? TextFileWriter { get; init; }
+    public ILlmAgentTerminalFactory? Terminals { get; init; }
+    public ILlmAgentTerminal? Terminal { get; init; }
+    public ILlmAgentShellExecutor? ShellExecutor { get; init; }
 }
 [JsonSourceGenerationOptions(GenerationMode = JsonSourceGenerationMode.Metadata)]
 [JsonSerializable(typeof(ResourcesRuntimeEnvelope))]

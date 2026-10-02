@@ -12,7 +12,6 @@ namespace Darkspyre.Inference.Connect.Resources;
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
 public sealed record LlmResourcePageRequest(int? Limit = null, string? PaginationToken = null)
 {
-    public int? Limit { get; init => field = BatchData.Positive(value); } = BatchData.Positive(Limit);
     public override string ToString() => "LlmResourcePageRequest { <data> }";
 }
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
@@ -249,11 +248,6 @@ internal static class BatchData
     internal static long? Nonnegative(long? value)
     {
         if (value is < 0) throw new ArgumentOutOfRangeException(nameof(value));
-        return value;
-    }
-    internal static int? Positive(int? value)
-    {
-        if (value is <= 0) throw new ArgumentOutOfRangeException(nameof(value));
         return value;
     }
     internal static long Positive(long value) { ArgumentOutOfRangeException.ThrowIfNegativeOrZero(value); return value; }

@@ -50,6 +50,10 @@ public static class ConnectResourcesJson
             typeof(IInferenceResourceReadHandle), typeof(IInferenceResourceWriteHandle),
             typeof(LlmHostedToolPhase), typeof(LlmImageGenerationAction), typeof(VideoJobState), typeof(VideoOperation) })
             options.Converters.Add(InferenceJson.VideoRequest.Options.Converters.Single(converter => converter.CanConvert(type)));
+        foreach (Type type in new[] { typeof(LlmAgentCallerServices), typeof(ILlmAgentPermissionSelector),
+            typeof(ILlmAgentTextFileReader), typeof(ILlmAgentTextFileWriter), typeof(ILlmAgentTerminalFactory),
+            typeof(ILlmAgentTerminal), typeof(ILlmAgentShellExecutor) })
+            options.Converters.Add(ConnectLlmJson.ChatRequest.Options.GetConverter(type));
         options.MakeReadOnly();
         return options;
     }

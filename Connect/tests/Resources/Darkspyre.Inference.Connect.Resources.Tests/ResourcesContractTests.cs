@@ -90,4 +90,18 @@ public sealed class ResourcesContractTests
         Assert.Null(new LlmResourcePageRequest().PaginationToken);
         Assert.Null(new LlmDeferredCompletion("r", new("endpoint", "account")).ExpiresAt);
     }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData(0)]
+    [InlineData(-1)]
+    [InlineData(int.MinValue)]
+    [InlineData(int.MaxValue)]
+    public void PageLimitPreservesRawCallerValueWithoutInventedProviderBounds(int? limit)
+    {
+        var page = new LlmResourcePageRequest(limit, "opaque");
+        var restored = JsonSerializer.Deserialize(JsonSerializer.Serialize(page, ConnectResourcesJson.LlmResourcePageRequest), ConnectResourcesJson.LlmResourcePageRequest)!;
+        Assert.Equal(limit, restored.Limit); Assert.Equal("opaque", restored.PaginationToken);
+        Assert.Equal(limit, (page with { Limit = limit }).Limit);
+    }
 }
