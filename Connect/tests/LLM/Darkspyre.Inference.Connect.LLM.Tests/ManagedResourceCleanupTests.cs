@@ -112,19 +112,39 @@ public sealed class ManagedResourceCleanupTests
             (request, token) => client.StreamAsync(LlmResourceMaterializationTests.Connection(), request, token),
             model => ManagedResourceMaterializationTests.ManagedCapabilities(client, model));
         Task? retirement = null;
-        resources.BeforeReadCleanup = () => retirement = session.DisposeAsync().AsTask();
+        var callbackEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseCallback = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        CancellationToken actualReadToken = default;
+        CancellationTokenRegistration registration = default;
+        resources.BeforeRead = token => { actualReadToken = token; return Task.CompletedTask; };
+        resources.BeforeReadCleanup = () =>
+        {
+            object run = typeof(ManagedAgentSession).GetField("_run", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.GetValue(session)!;
+            var owner = (CancellationTokenSource)run.GetType().GetProperty("Cancellation")!.GetValue(run)!;
+            registration = owner.Token.Register(() => { callbackEntered.TrySetResult(); releaseCallback.Task.GetAwaiter().GetResult(); });
+            retirement = session.DisposeAsync().AsTask();
+            callbackEntered.Task.WaitAsync(TimeSpan.FromSeconds(5)).GetAwaiter().GetResult();
+            Assert.False(actualReadToken.IsCancellationRequested);
+        };
         try
         {
             var failure = await Assert.ThrowsAsync<InferenceResourceOperationCanceledException>(() => ManagedResourceMaterializationTests.Read(
                 session.RunTurnAsync(new() { Input = [new LlmAgentTextContent("inspect")] })));
             Assert.Equal(InferenceResourceOperationPhase.Materialize, failure.Failure.Phase);
             Assert.NotNull(retirement);
+            releaseCallback.TrySetResult();
             await retirement;
             Assert.Equal(1, resources.DisposedReads);
             Assert.Equal(1, destination.ResponseCleanupAttempts);
             Assert.Single(destination.Uploads);
         }
-        finally { retirement ??= session.DisposeAsync().AsTask(); await Drain(retirement); }
+        finally
+        {
+            retirement ??= session.DisposeAsync().AsTask();
+            releaseCallback.TrySetResult();
+            await Drain(retirement);
+            registration.Dispose();
+        }
     }
 
     [Theory]
