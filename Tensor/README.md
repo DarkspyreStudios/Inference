@@ -250,9 +250,10 @@ host-owned. `OpenAsync` reads its state through `GetObservationAsync`. The manag
 Without an instance, Loaded/Ready remain unknown. A backend name is a supported selection, not proof
 that the backend is available. The explicit **Check backend prerequisites** action records available,
 unavailable or unknown runtime/device prerequisites without installing or loading a model. Qwen uses
-the loader's same Auto policy (GGML Metal on macOS, GGML CUDA elsewhere); Supra Auto can fall back
-to managed CPU. Laya Auto selects Core ML on macOS and CPU elsewhere. No check starts a backend: GGML
-checks `GgmlBasicOps.CanInitializeBackend`, MLX checks that its native library is present, direct
+the shared runtime owner's Auto policy: Metal then GGML CPU on macOS; CUDA, Vulkan, then GGML CPU
+on supported non-macOS targets, excluding CUDA on Windows ARM64. Supra Auto can fall back
+to managed CPU. Laya Auto selects Core ML on macOS and CPU elsewhere. Qwen's GGML check resolves
+the bound candidate plan and initializes its one backend; it never loads model weights. MLX checks that its native library is present, direct
 CUDA checks its device/driver, and Core ML checks that ONNX Runtime offers its Core ML execution
 provider. Every check runs on a background thread. These observations do not guarantee memory allocation or successful model
 loading. Edits clear the observation, and opening or browsing settings never runs a probe.
@@ -316,9 +317,54 @@ This test does not initialize a native runtime or qualify an active model/sessio
 
 `ITensorRuntimeOwner` declares generation runtime control alongside `ITensorBackendProbe`. It exposes
 the immutable `TensorRuntimePlan`, the runtime state, the nullable actual backend identity and a
-structured shutdown observation. Tensor.Common supplies these contracts, not a Qwen runtime owner
-implementation or a composed execution path. Constructing or serializing a plan never resolves a
+structured shutdown observation. `QwenRuntimeOwner.GetOrCreate(plan)` binds one assembly-generation
+owner. Equal plans join it; conflicting plans refuse, including after terminal shutdown. Qwen engines,
+model resolvers and settings borrow that same owner. Constructing or serializing a plan never resolves a
 package catalog, inspects files, initializes a backend or establishes availability.
+
+`AddTensorEngines(services, ggmlRuntimePlan)` carries the optional immutable logical plan into its
+lazy Qwen owner factory. A factory-created owner is container-owned; an explicitly registered owner
+instance remains borrowed. Model instances release their own leases and never shut down the shared
+runtime. Stop/dispose instances before terminal runtime shutdown.
+
+The Qwen runtime-owner source requires the TensorSharp 2.8.6.8 managed loader APIs. Its managed
+verification uses an ignored, test-only project-reference overlay over genuine supplier source;
+the shipping 2.8.6.7 package references are unchanged and do not supply those APIs. That verification
+is not a successful shipping-package restore/build or native-backend qualification. The actual
+private-generation test composes Qwen with the genuine Chat/Models/GGML/Core/Runtime assemblies,
+checks an explicit empty plan, and retires owned metadata and zero-handle runtime state. It does
+not initialize a backend, resolve a catalog or load a model.
+
+Null candidates resolve the supplier's finite deployed package catalog once at the first admitted
+GGML check/load. Empty candidates admit nothing and never resolve or load ambient libraries. Auto
+considers compatible concrete backend groups in priority order. It stops fallback after any possibly
+retained native state. Actual backend, variant, build, ABI and native source commit come from successful
+supplier initialization, not the requested backend or current managed source checkout.
+
+Initialization, queued model loading, resident models and execution retain owner leases until their
+actual work/cleanup settles. Ordinary shutdown with active leases reports Busy without teardown.
+Disposal synchronously fences new work and reports Busy/failure visibly. Existing instances retain
+release-only cleanup access; explicit terminal shutdown can finish after they drain. Concurrent
+shutdown/disposal calls share cleanup and failure. A cancelled shutdown wait does not cancel cleanup
+or reopen admission. Supplier refusals without structured safe-Busy proof report FailedRequiresProcessExit;
+no diagnostic text is parsed to invent counts or recoverability.
+An initialized supplier that remains Ready after its guard refuses teardown reports Busy with zero
+owner leases and possible external native resources. Its control is retained for explicit retry after
+those resources drain; the admission fence stays closed. Unknown or poisoned refusals remain terminal.
+
+If acquisition cancellation is followed by model-lease cleanup failure, the runtime owner retains
+that exact cleanup handle and both failures remain visible. It does not count failed cleanup as
+release or invoke native shutdown over it. Explicit shutdown may retry only that held release;
+failure reports FailedRequiresProcessExit with the outstanding ownership, while successful release
+permits guarded terminal shutdown. Drained terminal owners drop supplier/catalog task references
+without disposing borrowed collaborators.
+
+A failed model load/unload that cannot complete cleanup keeps its pack/runtime ownership. New loading
+or execution refuses until release-only cleanup succeeds, rather than replacing those held leases.
+Qwen stops new operational admissions synchronously and shares the pending cleanup attempt. Stop still
+returns admission and publishes Stopped/Failed through the existing lifecycle; a completed failed Stop
+can be explicitly retried for release only. Dispose waits for actual cleanup and preserves its shared
+failure for repeated callers, even if a later explicit Stop successfully releases the resources.
 
 Plans deep-snapshot ordered GGML candidates and their file declarations. Each candidate has a
 distinct ID, exact build/RID and concrete GGML backend. Null candidates retain the standard-package
