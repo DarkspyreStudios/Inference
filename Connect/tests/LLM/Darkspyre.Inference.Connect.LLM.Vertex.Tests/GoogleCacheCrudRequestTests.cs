@@ -15,7 +15,7 @@ public sealed class GoogleCacheCrudRequestTests
 {
     private static readonly bool[] BooleanValues = [false, true];
     private static readonly string[] MethodNames = ["create", "get", "list", "update", "delete"];
-    private static readonly string[] Phases = ["parameter", "fence", "consumption"];
+    private static readonly string[] Phases = ["parameter", "fence", "consumption", "cancellation"];
     public static TheoryData<bool, string, bool> Methods
     {
         get
@@ -96,6 +96,9 @@ public sealed class GoogleCacheCrudRequestTests
     [MemberData(nameof(AdmissionFailures))]
     public async Task PredispatchFailuresCleanTheActualRequestWithoutMutationUncertainty(string method, string phase)
     {
+        using var cancellation = new CancellationTokenSource();
+        if (phase == "cancellation") cancellation.Cancel();
+        CancellationToken token = cancellation.Token;
         using var handler = new Handler(false); using var borrowed = new HttpClient(handler);
         var services = new ServiceCollection(); services.AddLlmConnect();
         services.AddHttpClient("GeminiApiLlmClient").ConfigurePrimaryHttpMessageHandler(() => new Handler(false));
@@ -111,16 +114,37 @@ public sealed class GoogleCacheCrudRequestTests
         HttpClient http = phase == "consumption" ? retired : borrowed;
         Exception error = await Assert.ThrowsAnyAsync<Exception>(() => method switch
         {
-            "create" => GoogleCacheHttp.CreateAsync(http, request, LlmTransport.GoogleGeminiApi, phase == "parameter" ? null! : new("operation", "display"), parse, fence, default),
-            "get" => GoogleCacheHttp.GetAsync(http, request, LlmTransport.GoogleGeminiApi, phase == "parameter" ? null! : parse, fence, default),
-            "list" => GoogleCacheHttp.ListAsync(http, request, LlmTransport.GoogleGeminiApi, phase == "parameter" ? null! : _ => new([], null), fence, default),
-            "update" => GoogleCacheHttp.UpdateExpiryAsync(http, request, LlmTransport.GoogleGeminiApi, reference, phase == "parameter" ? null! : parse, fence, default),
-            _ => GoogleCacheHttp.DeleteAsync(http, request, LlmTransport.GoogleGeminiApi, reference, phase == "parameter" ? null! : _ => true, fence, default)
+            "create" => GoogleCacheHttp.CreateAsync(http, request, LlmTransport.GoogleGeminiApi, phase == "parameter" ? null! : new("operation", "display"), parse, fence, token),
+            "get" => GoogleCacheHttp.GetAsync(http, request, LlmTransport.GoogleGeminiApi, phase == "parameter" ? null! : parse, fence, token),
+            "list" => GoogleCacheHttp.ListAsync(http, request, LlmTransport.GoogleGeminiApi, phase == "parameter" ? null! : _ => new([], null), fence, token),
+            "update" => GoogleCacheHttp.UpdateExpiryAsync(http, request, LlmTransport.GoogleGeminiApi, reference, phase == "parameter" ? null! : parse, fence, token),
+            _ => GoogleCacheHttp.DeleteAsync(http, request, LlmTransport.GoogleGeminiApi, reference, phase == "parameter" ? null! : _ => true, fence, token)
         });
         Assert.Equal(1, content.Calls); Assert.Equal(0, handler.Sends); Assert.Single(Errors(error), IsCleanup);
         Assert.DoesNotContain(Errors(error), value => value is LlmContextCacheCreateUncertainException or LlmContextCacheMutationUncertainException);
         if (phase == "fence") Assert.Contains(Errors(error), value => ReferenceEquals(primary, value));
+        if (phase == "cancellation") Assert.Equal(token, Assert.Single(Errors(error).OfType<OperationCanceledException>()).CancellationToken);
         Assert.DoesNotContain("private-crud-secret", error.ToString(), StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task AuthorizedNotFoundDeleteKeepsActualAcknowledgementWhenRequestCleanupRefuses(bool vertex)
+    {
+        using var handler = new Handler(vertex); using var http = new HttpClient(handler);
+        var facade = new LlmProviderService(new Source(vertex), [vertex ? new VertexLlmClient(http, new Authentication()) : new GeminiApiLlmClient(http)]);
+        try
+        {
+            var caches = await facade.BindContextCacheAsync("connection");
+            var reference = (await caches.GetAsync(new(Name(vertex), Model(vertex), "import"))).Reference;
+            Assert.False((await caches.DeleteAsync(reference)).AlreadyAbsent);
+            handler.Status = HttpStatusCode.NotFound; handler.RefuseRequest = true;
+            var error = await Assert.ThrowsAsync<LlmContextCacheMutationUncertainException>(() => caches.DeleteAsync(reference));
+            Assert.True(error.ObservedDelete!.AlreadyAbsent); Assert.Single(Errors(error), IsCleanup);
+            Assert.Equal(1, handler.RequestContent!.Calls); Assert.Equal(3, handler.Sends);
+        }
+        finally { try { await facade.DisposeAsync(); } catch (Exception error) when (Errors(error).Any(IsCleanup)) { } }
     }
 
     [Fact]
@@ -187,11 +211,14 @@ public sealed class GoogleCacheCrudRequestTests
     {
         internal int Disposals { get; private set; }
         public Task<LlmConnection?> GetConnectionAsync(string connectionId, CancellationToken cancellationToken = default) => Task.FromResult<LlmConnection?>(new()
-        { Version = "1", Transport = vertex ? LlmTransport.GoogleVertexAi : LlmTransport.GoogleGeminiApi,
+        {
+            Version = "1",
+            Transport = vertex ? LlmTransport.GoogleVertexAi : LlmTransport.GoogleGeminiApi,
             Endpoint = vertex ? "https://aiplatform.googleapis.com" : GeminiApiLlmClient.DefaultEndpoint,
             Credential = vertex ? null : new LlmCredential { ApiKey = "controlled" }.Serialize(),
             Vertex = vertex ? new() { ProjectId = "project-id", Location = "global" } : null,
-            CapabilityOverrides = new() { SupportsModelListing = false } });
+            CapabilityOverrides = new() { SupportsModelListing = false }
+        });
         public Task SaveCredentialAsync(string connectionId, string credentialJson, string expectedVersion, CancellationToken cancellationToken = default) => throw new InvalidOperationException();
         public void Dispose() => Disposals++;
     }
