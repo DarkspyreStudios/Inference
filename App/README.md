@@ -1,7 +1,8 @@
 # GPU arbiter
 
 The sibling [gpu-arbiter-tensor](src/gpu-arbiter-tensor/README.md) hosts the published Tensor
-engines with OpenAI JSON/SSE adapters. Both applications use `GpuArbiter.Core`. Only one
+engines with OpenAI JSON/SSE adapters. The [gpu-arbiter-splash](src/gpu-arbiter-splash/README.md) sibling wraps the installed Splash runtime
+on Apple Silicon macOS. All three applications use `GpuArbiter.Core`. Only one
 application can own GPU admission on a machine at a time.
 
 The GPU arbiter shares one Windows x64 NVIDIA GPU between llama.cpp and a user-launched

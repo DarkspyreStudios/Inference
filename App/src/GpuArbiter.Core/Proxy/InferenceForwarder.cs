@@ -10,6 +10,8 @@ public sealed class InferenceForwarder(IHttpClientFactory clients)
 {
     private static readonly HashSet<string> HopHeaders = new(StringComparer.OrdinalIgnoreCase)
     { "Connection", "Keep-Alive", "Proxy-Authenticate", "Proxy-Authorization", "TE", "Trailer", "Transfer-Encoding", "Upgrade", "Host" };
+    private static readonly HashSet<string> PrivateHeaders = new(StringComparer.OrdinalIgnoreCase)
+    { "Accept", "Content-Type", "User-Agent", "OpenAI-Beta", "anthropic-version", "anthropic-beta" };
 
     public async Task ForwardAsync(HttpContext context, string upstream, byte[]? body, CancellationToken token,
         string backend, WireProtocol protocol = WireProtocol.OpenAi, bool stripCredentials = false)
@@ -21,9 +23,7 @@ public sealed class InferenceForwarder(IHttpClientFactory clients)
         foreach (var header in context.Request.Headers)
         {
             if (HopHeaders.Contains(header.Key) || connectionHeaders.Contains(header.Key, StringComparer.OrdinalIgnoreCase) ||
-                (stripCredentials && (header.Key.Equals("Authorization", StringComparison.OrdinalIgnoreCase) ||
-                header.Key.Equals("Cookie", StringComparison.OrdinalIgnoreCase) || header.Key.Contains("key", StringComparison.OrdinalIgnoreCase) ||
-                header.Key.Contains("token", StringComparison.OrdinalIgnoreCase) || header.Key.Contains("secret", StringComparison.OrdinalIgnoreCase)))) continue;
+                (stripCredentials && !PrivateHeaders.Contains(header.Key))) continue;
             if (!request.Headers.TryAddWithoutValidation(header.Key, header.Value.ToArray()) && request.Content is not null)
                 request.Content.Headers.TryAddWithoutValidation(header.Key, header.Value.ToArray());
         }

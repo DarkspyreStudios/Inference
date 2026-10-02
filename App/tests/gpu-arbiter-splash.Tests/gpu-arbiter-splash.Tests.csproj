@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><IsTestProject>true</IsTestProject><AssemblyName>GpuArbiter.Splash.Tests</AssemblyName></PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../src/gpu-arbiter-splash/gpu-arbiter-splash.csproj" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="Microsoft.AspNetCore.TestHost" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio" PrivateAssets="all" />
+  </ItemGroup>
+</Project>

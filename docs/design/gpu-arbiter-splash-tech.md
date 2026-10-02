@@ -106,8 +106,8 @@ Permission errors or a surviving group fail the release operation and block the 
 Shutdown rejects admission, cancels active transport, stops the group, and awaits cleanup.
 Process termination remains necessary even when native status is unreachable.
 
-Operational child output passes through a narrow classifier that retains lifecycle facts only.
-Arbitrary stdout/stderr lines and exception strings are not copied into logs.
+Child stdout and stderr are drained without retention.
+The host records lifecycle facts directly; arbitrary child lines and exception strings are not copied into logs.
 The host logs configured IDs, owned PIDs, transitions, durations, and exit codes.
 
 ## HTTP forwarding
@@ -159,7 +159,7 @@ It forwards only execution modes accepted by the installed runtime.
 
 Queued streaming calls receive SSE comments after two seconds.
 Failures before headers start use the applicable OpenAI or Anthropic error envelope and HTTP status.
-Failures after SSE starts use a protocol-appropriate error event; SystemOne follows its native stream framing.
+Failures after SSE starts use a protocol-appropriate error event; SystemOne and other non-streaming routes reject `stream: true`.
 Non-streaming calls receive no response bytes before admission.
 
 ## Disconnects and native completion
@@ -203,15 +203,15 @@ A failed `/free` on a reachable service blocks Splash acquisition.
 
 ## Verification and task checklist
 
-- [ ] Convert the release seam and configuration in Core, llama, Tensor, and affected tests; preserve Windows thresholds and fairness.
-- [ ] Extract shared forwarding and SSE wait mechanics; verify existing llama transport behavior with focused tests.
-- [ ] Implement configuration, installed catalog, Mac process containment, and Splash model lifecycle with controlled process/HTTP doubles.
-- [ ] Implement Splash routing, resident-response leases, errors, and native completion confirmation.
-- [ ] Wire the Comfy proxy and publish truthful Mac GPU observations.
-- [ ] Verify load failure cleanup, intended unload versus crash, timeout escalation, surviving native descendants, and recovery without request replay.
-- [ ] Verify opaque tool/image/structured-output payload forwarding, streaming, stored responses, unsupported routes, waiter cancellation, and unload barriers.
-- [ ] Restore and build App with zero warnings; run focused affected tests in runs under one minute; verify format and audit dependencies.
-- [ ] Run a foreground live Mac smoke: list without loading, short chat, streaming, Responses create/read/delete, unload/reload, and verify no owned child survives shutdown.
+- [x] Convert the release seam and configuration in Core, llama, Tensor, and affected tests; preserve Windows thresholds and fairness.
+- [x] Extract shared forwarding and SSE wait mechanics; verify existing llama transport behavior with focused tests.
+- [x] Implement configuration, installed catalog, Mac process containment, and Splash model lifecycle with controlled process/HTTP doubles.
+- [x] Implement Splash routing, resident-response leases, errors, and native completion confirmation.
+- [x] Wire the Comfy proxy and publish truthful Mac GPU observations.
+- [x] Verify load failure cleanup, intended unload versus crash, timeout escalation, surviving native descendants, and recovery without request replay.
+- [x] Verify opaque tool/image/structured-output payload forwarding, streaming, stored responses, unsupported routes, waiter cancellation, and unload barriers.
+- [x] Restore and build App with zero warnings; run focused affected tests in runs under one minute; verify format and audit dependencies.
+- [x] Run a foreground live Mac smoke: list without loading, short chat, streaming, Responses create/read/delete, unload/reload, and verify no owned child survives shutdown.
 - [ ] Exercise Comfy handoffs live if a Mac Comfy instance is available; otherwise record that live check as unavailable and retain controlled coverage.
 - [ ] Compare the existing short prompt through the wrapper with the prior Splash profile, recording load and inference separately; verify no significant transport regression.
 - [ ] Update canonical App ownership and application README documents; commit and push the coherent units.
@@ -225,3 +225,11 @@ The route and lifecycle contract is based on the installed Splash 1.1.0 `install
 The schema-5 status fields are verified in the saved Mac benchmark status observations.
 The prior benchmark records live in the Tensor arbiter worktree's ignored `tmp/mac-three-engines` directory.
 The shared admission contract is documented in `App/README.md` and `docs/design/gpu-arbiter-tensor-tech.md`.
+
+## Implementation verification
+
+The App solution builds in Release with zero warnings.
+The 28 Splash adapter tests pass, including real Mac process-group termination without model weights.
+The 21 coordinator/llama tests and 23 Tensor adapter tests pass after the shared release and forwarding extraction.
+The seven llama HTTP proxy tests also pass after the private-header forwarding policy change.
+The dependency audit reports no vulnerable packages in the App solution.

@@ -1,4 +1,4 @@
 <Solution>
-  <Folder Name="/src/"><Project Path="src/gpu-arbiter-tensor/gpu-arbiter-tensor.csproj" /><Project Path="src/GpuArbiter.Core/GpuArbiter.Core.csproj" /><Project Path="src/GpuArbiter/GpuArbiter.csproj" /></Folder>
-  <Folder Name="/tests/"><Project Path="tests/gpu-arbiter-tensor.Tests/gpu-arbiter-tensor.Tests.csproj" /><Project Path="tests/GpuArbiter.Tests/GpuArbiter.Tests.csproj" /></Folder>
+  <Folder Name="/src/"><Project Path="src/gpu-arbiter-splash/gpu-arbiter-splash.csproj" /><Project Path="src/gpu-arbiter-tensor/gpu-arbiter-tensor.csproj" /><Project Path="src/GpuArbiter.Core/GpuArbiter.Core.csproj" /><Project Path="src/GpuArbiter/GpuArbiter.csproj" /></Folder>
+  <Folder Name="/tests/"><Project Path="tests/gpu-arbiter-splash.Tests/gpu-arbiter-splash.Tests.csproj" /><Project Path="tests/gpu-arbiter-tensor.Tests/gpu-arbiter-tensor.Tests.csproj" /><Project Path="tests/GpuArbiter.Tests/GpuArbiter.Tests.csproj" /></Folder>
 </Solution>

@@ -13,7 +13,7 @@ configuration, package versions, documentation, tests, examples, and tools.
 justify placeholder projects or packages.
 
 `App/` owns the standalone GPU arbiter solution and its independent version, dependency pins,
-build configuration and Windows x64 deployment. It does not participate in the four-package
+build configuration, Windows x64 deployment, and Mac Splash application. It does not participate in the four-package
 Inference release. Its local MSBuild files isolate it from the package-family defaults.
 
 ## Capability layout

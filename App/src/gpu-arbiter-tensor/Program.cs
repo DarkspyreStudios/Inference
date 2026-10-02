@@ -77,11 +77,19 @@ app.Run(async context =>
         }
         if (HttpMethods.IsGet(context.Request.Method))
         {
-            object WireModel(HostedModel model) => new { id = model.Alias, @object = "model", created = 0, owned_by = model.Instance switch
-            { Darkspyre.Inference.Tensor.LLM.ITensorLlmInference llm => llm.Descriptor.Id,
-                Darkspyre.Inference.Tensor.Image.ITensorImageInference image => image.Descriptor.Id,
-                Darkspyre.Inference.Tensor.STT.ITensorSpeechToTextInference speech => speech.Descriptor.Id,
-                _ => "darkspyre.tensor" } };
+            object WireModel(HostedModel model) => new
+            {
+                id = model.Alias,
+                @object = "model",
+                created = 0,
+                owned_by = model.Instance switch
+                {
+                    Darkspyre.Inference.Tensor.LLM.ITensorLlmInference llm => llm.Descriptor.Id,
+                    Darkspyre.Inference.Tensor.Image.ITensorImageInference image => image.Descriptor.Id,
+                    Darkspyre.Inference.Tensor.STT.ITensorSpeechToTextInference speech => speech.Descriptor.Id,
+                    _ => "darkspyre.tensor"
+                }
+            };
             if (context.Request.Path == "/gpu") await context.Response.WriteAsJsonAsync(await coordinator.SnapshotAsync(context.RequestAborted), context.RequestAborted);
             else if (context.Request.Path == "/v1/models") await context.Response.WriteAsJsonAsync(new { @object = "list", data = models.Models.Select(WireModel) }, context.RequestAborted);
             else if (context.Request.Path.Value?.StartsWith("/v1/models/", StringComparison.Ordinal) == true)

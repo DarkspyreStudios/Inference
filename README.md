@@ -14,9 +14,10 @@ persistence, user consent, and shutdown.
 Current release: **11.14.0-rc.1**, targeting **.NET 11**, distributed through the private
 [DarkspyreStudios GitHub Packages feed](https://github.com/orgs/DarkspyreStudios/packages).
 
-The repository also hosts the [GPU arbiter](App/README.md), an independent .NET 10 Windows
-x64 application under `App/` that shares a GPU between llama.cpp and ComfyUI. It owns its
-solution, version and deployment outside the four-package release.
+The repository also hosts the [GPU arbiter applications](App/README.md) under `App/`.
+The Windows hosts wrap llama.cpp and Tensor engines. The Apple Silicon Mac host wraps Splash.
+They share GPU admission and ComfyUI controls and own their solution, version and deployment
+outside the four-package release.
 
 ## Goals
 

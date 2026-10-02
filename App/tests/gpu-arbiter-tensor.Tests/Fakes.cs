@@ -22,8 +22,12 @@ internal sealed class FakeEngine : ITensorLlmInference, ITensorImageInference, I
     public InferenceImplementationDescriptor Descriptor { get; } = new("fake", "Fake", InferenceImplementationKind.Tensor, InferenceTask.TextGeneration);
     public LlmCapabilities Capabilities { get; set; } = new()
     {
-        SupportsStreaming = true, SupportsTemperature = true, SupportsJsonObject = true, SupportsJsonSchema = true,
-        SupportsToolUse = true, OutputLimitEnforcement = LlmOutputLimitEnforcement.EngineEnforced,
+        SupportsStreaming = true,
+        SupportsTemperature = true,
+        SupportsJsonObject = true,
+        SupportsJsonSchema = true,
+        SupportsToolUse = true,
+        OutputLimitEnforcement = LlmOutputLimitEnforcement.EngineEnforced,
         ReasoningLevels = new HashSet<LlmReasoningLevel> { LlmReasoningLevel.None, LlmReasoningLevel.High },
         Tools = new() { StrictInputSchema = LlmStrictInputSchemaSupport.Unsupported }
     };
@@ -56,7 +60,8 @@ internal sealed class FakeEngine : ITensorLlmInference, ITensorImageInference, I
             else { yield return new LlmTextDeltaEvent("Hello"); yield return new LlmTextDeltaEvent(" world"); }
             yield return new LlmCompletionEvent(new()
             {
-                Text = EmitTools ? "" : "Hello world", Status = EmitTools ? LlmCompletionStatus.RequiresAction : LlmCompletionStatus.Completed,
+                Text = EmitTools ? "" : "Hello world",
+                Status = EmitTools ? LlmCompletionStatus.RequiresAction : LlmCompletionStatus.Completed,
                 ToolCalls = EmitTools ? [new("call-1", "lookup", "{\"id\":1}")] : [],
                 Usage = NoUsage ? null : new(10, 2, 12) { CachedInputTokens = 3 },
                 Provenance = new() { ImplementationId = "fake", ModelId = "actual-model" }
