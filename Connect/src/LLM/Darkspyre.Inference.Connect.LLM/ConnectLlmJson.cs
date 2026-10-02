@@ -90,6 +90,8 @@ public static class ConnectLlmJson
     public static JsonTypeInfo<LlmContextCacheList> LlmContextCacheList => Metadata<LlmContextCacheList>();
     public static JsonTypeInfo<LlmContextCachePage> LlmContextCachePage => Metadata<LlmContextCachePage>();
     public static JsonTypeInfo<LlmContextCacheDeleteResult> LlmContextCacheDeleteResult => Metadata<LlmContextCacheDeleteResult>();
+    public static JsonTypeInfo<LlmContextCacheUnavailableReason> LlmContextCacheUnavailableReason => Metadata<LlmContextCacheUnavailableReason>();
+    public static JsonTypeInfo<LlmContextCacheMutation> LlmContextCacheMutation => Metadata<LlmContextCacheMutation>();
     public static JsonTypeInfo<LlmAgentShellRequest> LlmAgentShellRequest => Metadata<LlmAgentShellRequest>();
     public static JsonTypeInfo<LlmAgentCallerServiceKind> LlmAgentCallerServiceKind => Metadata<LlmAgentCallerServiceKind>();
     public static JsonTypeInfo<LlmAgentPermissionChoiceKind> LlmAgentPermissionChoiceKind => Metadata<LlmAgentPermissionChoiceKind>();
@@ -146,6 +148,8 @@ public static class ConnectLlmJson
         options.Converters.Add(new CallerEnumConverter<LlmAgentCallerServiceKind>());
         options.Converters.Add(new CallerEnumConverter<LlmAgentPermissionChoiceKind>());
         options.Converters.Add(new CallerEnumConverter<LlmAgentRuntimePolicyKind>());
+        options.Converters.Add(new CallerEnumConverter<LlmContextCacheUnavailableReason>());
+        options.Converters.Add(new CallerEnumConverter<LlmContextCacheMutation>());
         options.Converters.Add(new CallerEnumConverter<LlmAzureApiMode>());
         options.Converters.Add(new CallerEnumConverter<LlmAzureAuthenticationMode>());
         options.Converters.Add(new CallerEnumConverter<LlmAzureCloud>());
@@ -342,6 +346,8 @@ public static class ConnectLlmJson
 [JsonSerializable(typeof(LlmContextCacheList))]
 [JsonSerializable(typeof(LlmContextCachePage))]
 [JsonSerializable(typeof(LlmContextCacheDeleteResult))]
+[JsonSerializable(typeof(LlmContextCacheUnavailableReason))]
+[JsonSerializable(typeof(LlmContextCacheMutation))]
 [JsonSerializable(typeof(LlmAgentShellRequest))]
 [JsonSerializable(typeof(LlmAgentCallerServiceKind))]
 [JsonSerializable(typeof(LlmAgentPermissionChoiceKind))]

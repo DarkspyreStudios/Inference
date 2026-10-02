@@ -1529,10 +1529,38 @@ Read failures retain safe status and request identifiers as ordinary provider or
 with both safe operation and cleanup facts when they fail together. They do not imply a mutation,
 publish late receipts or establish resource/account authority.
 
+The private Google cache mutation boundary borrows already-authorized PATCH or DELETE requests and
+the existing caller and SDK-generation owners. It validates update receipt identity and observed
+expiry before publication. Delete success acknowledges `AlreadyAbsent=false`; only HTTP 404 can
+invoke the borrowed effect-free absence-authorization callback, fenced before and after invocation.
+That callback supplies already-established binding evidence. A false result remains an uncertain
+failed acknowledgement, not absence. Rejections and deletion acknowledgements do not read response
+bodies. Failures after invoking send use the typed update/delete uncertainty errors, preserving safe
+operation and response-cleanup facts and optional validated late evidence without retrying or
+publishing success. Cancellation retains actual observed response status, request ID and retry delay
+as safe evidence within one cancellation failure, not an extra failure or successful acknowledgement.
+These internal exchanges do not authorize routes, issue receipt scopes or
+enable public cache operations.
+
 `LlmContextCacheCreateCancelledException` and `LlmContextCacheCreateUncertainException` retain
 correlation, the actual request ID and an optional observed receipt without declaring success or
 rollback. They are runtime exceptions, not portable metadata roots. Their presence does not
 implement dispatch tracking, automatic retries, reconciliation or paid cache creation.
+
+`LlmContextCacheUnavailableException` distinguishes a selected route's observed missing cache from
+elapsed selected or observed expiry. Missing permits an absent HTTP status or HTTP 404, never a
+contradictory authentication or transport status. Expiry does not establish deletion or account entitlement.
+`LlmContextCacheMutationUncertainException` and `LlmContextCacheMutationCancelledException` identify
+an expiry update or deletion that may have committed. They retain the selected reference, actual
+request ID and optional matching late update or deletion evidence without declaring success or
+authorizing another mutation. Update evidence preserves the same resource, model and scope while
+allowing changed expiry; a supplied reference expiry must match that receipt's observed expiry.
+Cancellation retains its token. The existing create errors remain
+distinct. These runtime exceptions have fixed diagnostics and retain already-safe inner failures;
+the adapter boundary must sanitize untrusted failures before construction. They are not portable
+metadata roots. `LlmContextCacheUnavailableReason` and `LlmContextCacheMutation` have closed,
+numeric owned metadata. Constructor validation does not prove provider authority. These
+contracts do not implement update/delete dispatch or make a cache provider available.
 
 ### Tool output
 
