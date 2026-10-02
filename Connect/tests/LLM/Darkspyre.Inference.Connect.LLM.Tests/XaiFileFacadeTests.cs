@@ -12,6 +12,27 @@ public sealed class XaiFileFacadeTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
+    public async Task CapabilitiesGetterCannotPublishAfterStartingFacadeRetirement(bool model)
+    {
+        using var http = new HttpClient(new Handler(_ => throw new InvalidOperationException("Unexpected HTTP.")));
+        LlmProviderService? service = null;
+        Task? retirement = null;
+        var custom = new CustomClient(new XaiResponsesLlmClient(http))
+        { OnCapabilities = () => retirement = service!.DisposeAsync().AsTask() };
+        service = new LlmProviderService(new Source(), [custom]);
+        try
+        {
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => model
+                ? service.GetModelCapabilitiesAsync("selected", "grok-4")
+                : service.GetCapabilitiesAsync("selected"));
+            await retirement!.WaitAsync(TimeSpan.FromSeconds(5));
+        }
+        finally { await service.DisposeAsync(); }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
     public async Task FacadeCapabilitiesDoNotClaimAnUnimplementedCustomFilesRoute(bool model)
     {
         var source = new Source();
@@ -364,9 +385,11 @@ public sealed class XaiFileFacadeTests
 
     private sealed class CustomClient(XaiResponsesLlmClient metadata) : ILlmClient
     {
+        public Action? OnCapabilities { get; init; }
         public LlmTransport Transport => LlmTransport.XaiResponses;
         public LlmProviderDefinition ProviderDefinition => metadata.ProviderDefinition;
-        public LlmProviderCapabilities GetCapabilities(LlmConnection connection, string? modelId = null) => metadata.GetCapabilities(connection, modelId);
+        public LlmProviderCapabilities GetCapabilities(LlmConnection connection, string? modelId = null)
+        { OnCapabilities?.Invoke(); return metadata.GetCapabilities(connection, modelId); }
         public IAsyncEnumerable<LlmStreamEvent> StreamAsync(LlmConnection connection, LlmChatRequest request, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<IReadOnlyList<LlmModel>> ListModelsAsync(LlmConnection connection, CancellationToken cancellationToken = default) => throw new InvalidOperationException("Unexpected catalog.");
     }
