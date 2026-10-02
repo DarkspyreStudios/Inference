@@ -93,8 +93,10 @@ public sealed class XaiTtsTests
         await using ITtsClient client = Provider(http).Bind(Connection, new(new("selected"), access));
         var request = control switch
         {
-            "language" => Request with { Language = null }, "speed" => Request with { Speed = double.NaN },
-            "format" => Request with { Format = (TtsAudioFormat)99 }, "rate" => Request with { SampleRate = 0 },
+            "language" => Request with { Language = null },
+            "speed" => Request with { Speed = double.NaN },
+            "format" => Request with { Format = (TtsAudioFormat)99 },
+            "rate" => Request with { SampleRate = 0 },
             _ => Request with { Format = TtsAudioFormat.Pcm, BitRate = 128000 }
         };
         Assert.NotNull(await Record.ExceptionAsync(() => client.SpeakAsync(request))); Assert.Equal(0, source.Calls); Assert.Equal(0, handler.Calls);

@@ -37,7 +37,7 @@ internal sealed class XaiTtsSession : ITtsStreamingSession
     }
     internal static async Task<XaiTtsSession> OpenAsync(Func<Uri, HttpRequestMessage, CancellationToken, Task<WebSocket>> connect,
         LlmConnection snapshot, TtsConnection connection, TtsStreamOptions options, InferenceStreamLimits limits,
-        IInferenceResourceAccess? resources, Action openingFence, CancellationToken token)
+        IInferenceResourceAccess? resources, Action openingFence, Action<Exception> recordOpeningCleanup, CancellationToken token)
     {
         if (limits.MaximumBufferedEvents <= 0 || limits.MaximumBufferedPayloadBytes <= 0 || limits.MaximumMessageBytes <= 0) throw XaiTtsProtocol.Invalid();
         openingFence();
@@ -59,7 +59,12 @@ internal sealed class XaiTtsSession : ITtsStreamingSession
         catch (Exception original)
         {
             try { if (session is not null) await session.DisposeAsync().ConfigureAwait(false); else socket?.Dispose(); }
-            catch (Exception cleanup) { throw new AggregateException(original, cleanup); }
+            catch (Exception error)
+            {
+                Exception cleanup = LlmResourcePreparation.AsCleanupFailure(error, refusedOwner: (object?)session ?? socket);
+                recordOpeningCleanup(cleanup);
+                throw new AggregateException(original, cleanup);
+            }
             throw;
         }
     }

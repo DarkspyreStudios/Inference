@@ -159,9 +159,19 @@ public sealed class XaiTtsProvider : ITtsProvider
             var admitted = XaiTtsProtocol.Snapshot(_connection!, options);
             using var consumption = SdkHttpConsumption.Enter(_provider!._http, lease.Token);
             LlmConnection snapshot = await AcquireAsync(consumption.Token).ConfigureAwait(false);
-            var session = await XaiTtsSession.OpenAsync(_provider!._connect, snapshot, _connection!, admitted, limits, _resources, () => { Fence(consumption.Token); consumption.Fence(); }, consumption.Token).ConfigureAwait(false);
+            var session = await XaiTtsSession.OpenAsync(_provider!._connect, snapshot, _connection!, admitted, limits, _resources, () => { Fence(consumption.Token); consumption.Fence(); }, RecordCleanup, consumption.Token).ConfigureAwait(false);
             try { Fence(consumption.Token); return consumption.Publish<ITtsStreamingSession>(session); }
-            catch (Exception original) { try { await session.DisposeAsync().ConfigureAwait(false); } catch (Exception cleanup) { throw new AggregateException(original, cleanup); } throw; }
+            catch (Exception original)
+            {
+                try { await session.DisposeAsync().ConfigureAwait(false); }
+                catch (Exception error)
+                {
+                    Exception cleanup = LlmResourcePreparation.AsCleanupFailure(error, refusedOwner: session);
+                    RecordCleanup(cleanup);
+                    throw new AggregateException(original, cleanup);
+                }
+                throw;
+            }
         }
         public async IAsyncEnumerable<TtsStreamEvent> SpeakStreamAsync(IAsyncEnumerable<string> text, TtsStreamOptions options, InferenceStreamLimits limits,
             [EnumeratorCancellation] CancellationToken cancellationToken = default)

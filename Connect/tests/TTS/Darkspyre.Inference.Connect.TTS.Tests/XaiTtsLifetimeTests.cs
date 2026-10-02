@@ -58,9 +58,11 @@ public sealed class XaiTtsLifetimeTests
         {
             retirement ??= retireFacade ? facade.DisposeAsync().AsTask() : client.DisposeAsync().AsTask();
             release.TrySetResult();
-            try { await Observe(request); } finally
+            try { await Observe(request); }
+            finally
             {
-                try { await Observe(retirement); } finally
+                try { await Observe(retirement); }
+                finally
                 {
                     try { await Observe(client.DisposeAsync().AsTask()); } finally { await Observe(facade.DisposeAsync().AsTask()); }
                 }
