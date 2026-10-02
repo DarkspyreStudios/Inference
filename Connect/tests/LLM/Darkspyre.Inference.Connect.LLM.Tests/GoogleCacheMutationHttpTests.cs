@@ -1,16 +1,20 @@
 using System.Net;
 using System.Reflection;
-using System.Runtime.ExceptionServices;
+using System.Runtime.CompilerServices;
+using System.Runtime.Loader;
 using System.Text;
 using System.Text.Json;
+using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Common.LLM;
 using Darkspyre.Inference.Connect.LLM.Internal;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Darkspyre.Inference.Connect.LLM.Tests;
 
 public sealed class GoogleCacheMutationHttpTests
 {
     private const string ReceiptBody = "{\"name\":\"cachedContents/id\",\"model\":\"models/m\",\"expireTime\":\"2030-01-01T00:00:00Z\"}";
+    private const string Secret = "untrusted-token-private-cache-prefix";
     private static LlmExplicitCacheReference Reference() => new("cachedContents/id", "m", "scope", DateTimeOffset.UnixEpoch);
     private static LlmContextCache Parse(JsonElement root) => GoogleCacheData.Receipt(root, "scope", name => Assert.Equal("cachedContents/id", name), model => { Assert.Equal("models/m", model); return "m"; }, false);
 
@@ -88,22 +92,184 @@ public sealed class GoogleCacheMutationHttpTests
         Assert.Equal(0, handler.Calls);
     }
 
+    [Theory]
+    [InlineData(false, HttpStatusCode.BadRequest)]
+    [InlineData(false, HttpStatusCode.Unauthorized)]
+    [InlineData(false, HttpStatusCode.Forbidden)]
+    [InlineData(false, HttpStatusCode.NotFound)]
+    [InlineData(false, HttpStatusCode.TooManyRequests)]
+    [InlineData(false, HttpStatusCode.InternalServerError)]
+    [InlineData(true, HttpStatusCode.BadRequest)]
+    [InlineData(true, HttpStatusCode.Unauthorized)]
+    [InlineData(true, HttpStatusCode.Forbidden)]
+    [InlineData(true, HttpStatusCode.NotFound)]
+    [InlineData(true, HttpStatusCode.TooManyRequests)]
+    [InlineData(true, HttpStatusCode.InternalServerError)]
+    public async Task NonSuccessIsUncertainWithoutRetryOrBodyRead(bool update, HttpStatusCode status)
+    {
+        var content = new TrackedContent(Secret, forbidRead: true);
+        using var handler = new Handler((_, _) =>
+        {
+            var response = new HttpResponseMessage(status) { Content = content };
+            response.Headers.TryAddWithoutValidation("x-request-id", "actual-request");
+            response.Headers.RetryAfter = new(TimeSpan.FromSeconds(2));
+            return Task.FromResult(response);
+        });
+        using var http = new HttpClient(handler);
+        using var request = Request(update);
+        int authorizations = 0;
+        var error = await Assert.ThrowsAsync<LlmContextCacheMutationUncertainException>(() => Mutate(update, http, request, Parse,
+            _ => { authorizations++; return false; }, _ => { }));
+        Assert.Equal(update ? LlmContextCacheMutation.UpdateExpiry : LlmContextCacheMutation.Delete, error.Operation);
+        Assert.Null(error.ObservedDelete); Assert.Null(error.ObservedUpdate);
+        var provider = Assert.IsType<LlmProviderException>(error.InnerException);
+        Assert.Equal(status, provider.StatusCode); Assert.Equal("actual-request", error.RequestId);
+        Assert.Equal(TimeSpan.FromSeconds(2), provider.RetryAfter);
+        Assert.Equal(!update && status == HttpStatusCode.NotFound ? 1 : 0, authorizations);
+        Assert.Equal(0, content.Reads); Assert.Equal(1, content.Disposals); Assert.Equal(1, handler.Calls);
+        Assert.DoesNotContain(Secret, error.ToString());
+    }
+
+    [Theory]
+    [InlineData(true, "send")]
+    [InlineData(false, "send")]
+    [InlineData(true, "read")]
+    [InlineData(true, "parse")]
+    [InlineData(false, "authorize")]
+    [InlineData(true, "cleanup")]
+    [InlineData(false, "cleanup")]
+    public async Task UntrustedFailureGraphsAreSanitized(bool update, string boundary)
+    {
+        Exception malicious = new LlmProviderException(Secret, LlmTransport.GoogleGeminiApi,
+            innerException: new InvalidOperationException(Secret));
+        var content = new TrackedContent(ReceiptBody, cleanup: boundary == "cleanup" ? () => throw malicious : null,
+            beforeRead: boundary == "read" ? () => throw malicious : null);
+        using var handler = new Handler((_, _) => boundary == "send" ? throw malicious
+            : Task.FromResult(new HttpResponseMessage(boundary == "authorize" ? HttpStatusCode.NotFound : HttpStatusCode.OK) { Content = content }));
+        using var http = new HttpClient(handler);
+        using var request = Request(update);
+        var error = await Assert.ThrowsAsync<LlmContextCacheMutationUncertainException>(() => Mutate(update, http, request,
+            root => boundary == "parse" ? throw malicious : Parse(root), _ => boundary == "authorize" ? throw malicious : true, _ => { }));
+        Assert.IsType<LlmProviderException>(error.InnerException);
+        Assert.DoesNotContain(Secret, error.ToString());
+        Assert.Equal(boundary == "send" ? 0 : 1, content.Disposals);
+        Assert.Equal(1, handler.Calls); Assert.Equal(0, handler.Disposals);
+        if (boundary == "cleanup")
+        {
+            if (update) Assert.NotNull(error.ObservedUpdate);
+            else Assert.False(error.ObservedDelete!.AlreadyAbsent);
+        }
+    }
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public async Task IndependentOperationAndCleanupFailuresRemainSafeFacts(bool update, bool cancellation)
+    {
+        var safeToken = new CancellationTokenSource();
+        using var caller = safeToken;
+        Exception operationFailure = cancellation ? new OperationCanceledException(Secret, caller.Token) : new InvalidOperationException(Secret);
+        var content = new TrackedContent(ReceiptBody, cleanup: () => throw new InvalidOperationException(Secret));
+        using var handler = new Handler((_, _) => Task.FromResult(new HttpResponseMessage(update ? HttpStatusCode.OK : HttpStatusCode.NotFound) { Content = content }));
+        using var http = new HttpClient(handler);
+        using var request = Request(update);
+        Exception error = cancellation
+            ? await Assert.ThrowsAsync<LlmContextCacheMutationCancelledException>(() => Mutate(update, http, request,
+                _ => throw operationFailure, _ => throw operationFailure, _ => { }, caller.Token))
+            : await Assert.ThrowsAsync<LlmContextCacheMutationUncertainException>(() => Mutate(update, http, request,
+                _ => throw operationFailure, _ => throw operationFailure, _ => { }, caller.Token));
+        var failures = Assert.IsType<AggregateException>(error.InnerException);
+        Assert.Equal(2, failures.InnerExceptions.Count);
+        Assert.Contains("response cleanup failed", failures.InnerExceptions[1].Message, StringComparison.Ordinal);
+        Assert.DoesNotContain(Secret, error.ToString());
+        Assert.Equal(1, content.Disposals); Assert.Equal(1, handler.Calls);
+        if (cancellation) Assert.Equal(caller.Token, Assert.IsType<LlmContextCacheMutationCancelledException>(error).CancellationToken);
+    }
+
+    [Theory]
+    [InlineData("resource")]
+    [InlineData("model")]
+    [InlineData("scope")]
+    [InlineData("expiry")]
+    [InlineData("null")]
+    public async Task InvalidPositiveUpdateCallbackOutputCannotPublishOrBecomeEvidence(string mismatch)
+    {
+        var content = new TrackedContent(ReceiptBody);
+        using var handler = new Handler((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = content }));
+        using var http = new HttpClient(handler);
+        using var request = Request(true);
+        var error = await Assert.ThrowsAsync<LlmContextCacheMutationUncertainException>(() => Update(http, request, Reference(), root =>
+        {
+            var receipt = Parse(root);
+            return mismatch switch
+            {
+                "resource" => receipt with { Reference = receipt.Reference with { ResourceName = Secret } },
+                "model" => receipt with { Reference = receipt.Reference with { ModelId = Secret } },
+                "scope" => receipt with { Reference = receipt.Reference with { ScopeId = Secret } },
+                "expiry" => receipt with { Reference = receipt.Reference with { ExpiresAt = DateTimeOffset.UnixEpoch } },
+                _ => null!
+            };
+        }, _ => { }));
+        Assert.Null(error.ObservedUpdate); Assert.Null(error.ObservedDelete);
+        Assert.DoesNotContain(Secret, error.ToString()); Assert.Equal(1, content.Disposals);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CancellationAndOwnerFenceBeforeDispatchAreOrdinary(bool update)
+    {
+        using var handler = new Handler((_, _) => throw new InvalidOperationException("Must not send."));
+        using var http = new HttpClient(handler);
+        using var request = Request(update);
+        using var cancellation = new CancellationTokenSource(); cancellation.Cancel();
+        var error = await Assert.ThrowsAnyAsync<OperationCanceledException>(() => Mutate(update, http, request, Parse, _ => true, _ => { }, cancellation.Token));
+        Assert.IsNotType<LlmContextCacheMutationCancelledException>(error);
+        int fences = 0;
+        var original = new OperationCanceledException("Owner fence stopped admission.");
+        error = await Assert.ThrowsAnyAsync<OperationCanceledException>(() => Mutate(update, http, request, Parse, _ => true,
+            _ => { if (++fences == 2) throw original; }));
+        Assert.Same(original, error); Assert.Equal(0, handler.Calls);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CallbackRetirementAndCleanupRetirementRefuseLateSuccess(bool update)
+    {
+        bool retiring = false;
+        var content = new TrackedContent(ReceiptBody, cleanup: !update ? () => retiring = true : null);
+        using var handler = new Handler((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = content }));
+        using var http = new HttpClient(handler);
+        using var request = Request(update);
+        var error = await Assert.ThrowsAsync<LlmContextCacheMutationCancelledException>(() => Mutate(update, http, request,
+            root => { var receipt = Parse(root); retiring = true; return receipt; }, _ => true,
+            token => { if (retiring) throw new OperationCanceledException("Owner retired.", token); }));
+        if (update) Assert.NotNull(error.ObservedUpdate);
+        else Assert.False(error.ObservedDelete!.AlreadyAbsent);
+        Assert.Equal(1, content.Disposals); Assert.Equal(1, handler.Calls);
+    }
+
     private static Task<LlmContextCache> Update(HttpClient http, HttpRequestMessage request, LlmExplicitCacheReference reference,
         Func<JsonElement, LlmContextCache> parse, Action<CancellationToken> fence, CancellationToken token = default) =>
-        Invoke<LlmContextCache>("UpdateExpiryAsync", [http, request, LlmTransport.GoogleGeminiApi, reference, parse, fence, token]);
+        GoogleCacheHttp.UpdateExpiryAsync(http, request, LlmTransport.GoogleGeminiApi, reference, parse, fence, token);
 
     private static Task<LlmContextCacheDeleteResult> Delete(HttpClient http, HttpRequestMessage request, LlmExplicitCacheReference reference,
         Func<LlmExplicitCacheReference, bool> authorize, Action<CancellationToken> fence, CancellationToken token = default) =>
-        Invoke<LlmContextCacheDeleteResult>("DeleteAsync", [http, request, LlmTransport.GoogleGeminiApi, reference, authorize, fence, token]);
+        GoogleCacheHttp.DeleteAsync(http, request, LlmTransport.GoogleGeminiApi, reference, authorize, fence, token);
 
-    private static Task<T> Invoke<T>(string name, object?[] arguments)
+    private static async Task<object> Mutate(bool update, HttpClient http, HttpRequestMessage request,
+        Func<JsonElement, LlmContextCache> parse, Func<LlmExplicitCacheReference, bool> authorize,
+        Action<CancellationToken> fence, CancellationToken token = default)
     {
-        MethodInfo? method = typeof(GoogleCacheHttp).GetMethod(name, BindingFlags.NonPublic | BindingFlags.Static);
-        Assert.NotNull(method);
-        try { return (Task<T>)method.Invoke(null, arguments)!; }
-        catch (TargetInvocationException error) when (error.InnerException is not null)
-        { ExceptionDispatchInfo.Capture(error.InnerException).Throw(); throw; }
+        if (update) return await Update(http, request, Reference(), parse, fence, token);
+        return await Delete(http, request, Reference(), authorize, fence, token);
     }
+
+    private static HttpRequestMessage Request(bool update) => new(update ? HttpMethod.Patch : HttpMethod.Delete,
+        "https://generativelanguage.googleapis.com/v1beta/cachedContents/id");
 
     private sealed class Handler(Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> send) : HttpMessageHandler
     {
@@ -114,17 +280,20 @@ public sealed class GoogleCacheMutationHttpTests
         protected override void Dispose(bool disposing) { if (disposing) Disposals++; base.Dispose(disposing); }
     }
 
-    private sealed class TrackedContent(string body, bool forbidRead = false) : HttpContent
+    private sealed class TrackedContent(string body, bool forbidRead = false, Action? cleanup = null, Action? beforeRead = null,
+        TaskCompletionSource? entered = null, TaskCompletionSource? release = null) : HttpContent
     {
         internal int Reads { get; private set; }
         internal int Disposals { get; private set; }
-        protected override Task SerializeToStreamAsync(Stream stream, TransportContext? context)
+        protected override async Task SerializeToStreamAsync(Stream stream, TransportContext? context)
         {
             Reads++;
             if (forbidRead) throw new InvalidOperationException("Response body must not be read.");
-            return stream.WriteAsync(Encoding.UTF8.GetBytes(body)).AsTask();
+            beforeRead?.Invoke();
+            if (entered is not null) { entered.TrySetResult(); await release!.Task; }
+            await stream.WriteAsync(Encoding.UTF8.GetBytes(body));
         }
         protected override bool TryComputeLength(out long length) { length = 0; return false; }
-        protected override void Dispose(bool disposing) { if (disposing) Disposals++; base.Dispose(disposing); }
+        protected override void Dispose(bool disposing) { if (disposing) { Disposals++; cleanup?.Invoke(); } base.Dispose(disposing); }
     }
 }

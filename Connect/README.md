@@ -1506,6 +1506,17 @@ Read failures retain safe status and request identifiers as ordinary provider or
 with both safe operation and cleanup facts when they fail together. They do not imply a mutation,
 publish late receipts or establish resource/account authority.
 
+The private Google cache mutation boundary borrows already-authorized PATCH or DELETE requests and
+the existing caller and SDK-generation owners. It validates update receipt identity and observed
+expiry before publication. Delete success acknowledges `AlreadyAbsent=false`; only HTTP 404 can
+invoke the borrowed effect-free absence-authorization callback, fenced before and after invocation.
+That callback supplies already-established binding evidence. A false result remains an uncertain
+failed acknowledgement, not absence. Rejections and deletion acknowledgements do not read response
+bodies. Failures after invoking send use the typed update/delete uncertainty errors, preserving safe
+operation and response-cleanup facts and optional validated late evidence without retrying or
+publishing success. These internal exchanges do not authorize routes, issue receipt scopes or
+enable public cache operations.
+
 `LlmContextCacheCreateCancelledException` and `LlmContextCacheCreateUncertainException` retain
 correlation, the actual request ID and an optional observed receipt without declaring success or
 rollback. They are runtime exceptions, not portable metadata roots. Their presence does not
