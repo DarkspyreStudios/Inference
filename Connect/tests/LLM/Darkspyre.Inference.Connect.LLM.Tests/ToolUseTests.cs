@@ -136,7 +136,7 @@ public sealed class ToolUseTests
         LlmChatResult firstResult = Assert.Single(firstStream.OfType<LlmChatCompletionEvent>()).Result;
         Assert.Equal(LlmCompletionStatus.RequiresAction, firstResult.Status);
         Assert.Equal("tool_calls", firstResult.FinishReason);
-        LlmToolCall call = Assert.Single(firstResult.ToolCalls);
+        LlmToolCall call = Assert.IsType<LlmToolCall>(Assert.Single(firstResult.ToolCalls));
         Assert.NotNull(firstResult.ContinuationState);
 
         using (JsonDocument sent = JsonDocument.Parse(handler.Bodies[0]))

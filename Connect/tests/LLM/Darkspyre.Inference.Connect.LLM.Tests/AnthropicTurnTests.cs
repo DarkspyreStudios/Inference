@@ -187,7 +187,7 @@ public sealed class AnthropicTurnTests
         var replay = request with
         {
             Messages = [request.Messages[0], new("assistant", result.Text) { ToolCalls = result.ToolCalls, ContinuationState = result.ContinuationState },
-                new("tool", "") { ToolResults = [new("client_1", new() { Parts = [new LlmToolOutputText("client result")] })] }]
+                new("tool", "") { ToolResults = [new LlmToolResult("client_1", new() { Parts = [new LlmToolOutputText("client result")] })] }]
         };
         await Read(client.StreamAsync(connection, replay));
         JsonNode payload = JsonNode.Parse(handler.Bodies[1])!;

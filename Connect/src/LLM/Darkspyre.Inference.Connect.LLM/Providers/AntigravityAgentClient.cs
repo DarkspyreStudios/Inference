@@ -71,7 +71,7 @@ internal sealed class AntigravityAgentClient(IAntigravityCliSessionProcessFactor
 
     private static void ValidateHostInputs(
         string? instructions,
-        IReadOnlyList<LlmAgentToolDefinition> tools,
+        IReadOnlyList<LlmAgentClientToolDefinition> tools,
         LlmAgentToolHandler? toolHandler)
     {
         ArgumentNullException.ThrowIfNull(tools);

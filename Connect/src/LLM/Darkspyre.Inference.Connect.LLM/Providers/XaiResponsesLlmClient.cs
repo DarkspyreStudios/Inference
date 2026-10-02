@@ -92,18 +92,18 @@ internal sealed class XaiResponsesLlmClient(HttpClient http) : ResponsesLlmClien
             throw new ArgumentOutOfRangeException(nameof(request), "Grok temperature must be in [0, 2].");
         if (request.Tools.Count > 350)
             throw new NotSupportedException("Grok accepts at most 350 client tools.");
-        if (request.Tools.Any(tool => tool.Name == "web_search"))
+        if (ClientTools.Functions(request.Tools).Any(tool => tool.Name == "web_search"))
             throw new ArgumentException("A Grok client function cannot be named web_search.", nameof(request));
         foreach (LlmAttachment attachment in request.Messages.SelectMany(message => message.Attachments).Select(LlmAttachments.RequireBinary))
             if (attachment.Kind == LlmBinaryKind.Image && attachment.Data.Length > MaxImageBytes)
                 throw new ArgumentException("Grok input images must not exceed 20 MiB.", nameof(request));
         if (GetCapabilities(connection, request.ModelId).RichContentSupported.Images == LlmRichContentCarriage.Native)
-            foreach (LlmToolOutputPart part in request.Messages.SelectMany(message => message.ToolResults)
+            foreach (LlmToolOutputPart part in request.Messages.SelectMany(message => ClientTools.Functions(message.ToolResults))
                 .SelectMany(result => result.Output.Parts))
                 if (part is LlmToolOutputBinary { Kind: LlmBinaryKind.Image } binary && binary.Data.Length > MaxImageBytes
                     || part is LlmToolOutputResource { BodyKind: LlmBinaryKind.Image, Data: { } data } && data.Length > MaxImageBytes)
                     throw new ArgumentException("Grok tool input images must not exceed 20 MiB.", nameof(request));
-        foreach (LlmToolDefinition tool in request.Tools.Where(tool => tool.Strict))
+        foreach (LlmToolDefinition tool in ClientTools.Functions(request.Tools).Where(tool => tool.Strict))
             if (!XaiSchemaLimits.Fits(tool.InputSchema))
                 throw new NotSupportedException("A strict Grok tool schema exceeds the published numeric guarantees. The schema is not weakened or sent as non-strict.");
 

@@ -21,12 +21,12 @@ public sealed class AzureToolTests
         LlmConnection connection = AzureProtocolTests.Connection(responses, streaming);
         LlmChatRequest request = AzureProtocolTests.Request with
         {
-            Tools = [new() { Name = "lookup", InputSchema = JsonSerializer.SerializeToElement(new { type = "object" }) }]
+            Tools = [new LlmToolDefinition() { Name = "lookup", InputSchema = JsonSerializer.SerializeToElement(new { type = "object" }) }]
         };
         var events = new List<LlmStreamEvent>();
         await foreach (LlmStreamEvent item in client.StreamAsync(connection, request)) events.Add(item);
         LlmChatResult first = Assert.Single(events.OfType<LlmChatCompletionEvent>()).Result;
-        LlmToolCall call = Assert.Single(first.ToolCalls);
+        LlmToolCall call = Assert.IsType<LlmToolCall>(Assert.Single(first.ToolCalls));
         Assert.Equal("call_1", call.Id);
         Assert.Equal("lookup", call.Name);
         Assert.Equal("{\"city\":\"Lyon\"}", call.ArgumentsJson);
@@ -43,7 +43,7 @@ public sealed class AzureToolTests
         LlmChatRequest next = request with
         {
             Messages = [new("user", "question"), new("assistant", first.Text) { ToolCalls = first.ToolCalls, ContinuationState = first.ContinuationState },
-                new("user", "") { ToolResults = [new(call.Id, LlmToolOutput.FromText("sunny"))] }]
+                new("user", "") { ToolResults = [new LlmToolResult(call.Id, LlmToolOutput.FromText("sunny"))] }]
         };
         await AzureProtocolTests.Complete(client, connection, next);
         string replay = handler.Body!.ToJsonString();

@@ -444,7 +444,7 @@ internal sealed class BedrockLlmClient(
 
     /// <summary>Content the local tokenizer cannot count: attachments and binary tool output.</summary>
     private static bool Uncountable(LlmChatMessage message) => message.Attachments.Count > 0
-        || message.ToolResults.Any(result => result.Output.Parts.Any(part => part is not LlmToolOutputText));
+        || ClientTools.Functions(message.ToolResults).Any(result => result.Output.Parts.Any(part => part is not LlmToolOutputText));
 
     /// <summary>The textual projection a Converse request carries, for local token counting.</summary>
     private static string Projection(LlmChatRequest request, IEnumerable<LlmChatMessage> messages, bool framing)
@@ -455,16 +455,16 @@ internal sealed class BedrockLlmClient(
             {
                 ["role"] = message.Role,
                 ["content"] = message.Content,
-                ["tool_calls"] = new System.Text.Json.Nodes.JsonArray([.. message.ToolCalls.Select(call =>
+                ["tool_calls"] = new System.Text.Json.Nodes.JsonArray([.. ClientTools.Functions(message.ToolCalls).Select(call =>
                     (System.Text.Json.Nodes.JsonNode)new System.Text.Json.Nodes.JsonObject { ["name"] = call.Name, ["input"] = call.ArgumentsJson })]),
-                ["tool_results"] = new System.Text.Json.Nodes.JsonArray([.. message.ToolResults.SelectMany(result => result.Output.Parts)
+                ["tool_results"] = new System.Text.Json.Nodes.JsonArray([.. ClientTools.Functions(message.ToolResults).SelectMany(result => result.Output.Parts)
                     .OfType<LlmToolOutputText>().Select(part => (System.Text.Json.Nodes.JsonNode)part.Text)])
             })])
         };
         if (framing)
         {
             projection["system"] = request.Instructions;
-            projection["tools"] = new System.Text.Json.Nodes.JsonArray([.. request.Tools.Select(tool =>
+            projection["tools"] = new System.Text.Json.Nodes.JsonArray([.. ClientTools.Functions(request.Tools).Select(tool =>
                 (System.Text.Json.Nodes.JsonNode)new System.Text.Json.Nodes.JsonObject
                 {
                     ["name"] = tool.Name,
@@ -530,7 +530,7 @@ internal sealed class BedrockLlmClient(
             else
             {
                 var content = new List<ContentBlock>();
-                foreach (LlmToolResult toolResult in message.ToolResults)
+                foreach (LlmToolResult toolResult in ClientTools.Functions(message.ToolResults))
                 {
                     content.Add(new ContentBlock
                     {
@@ -558,7 +558,7 @@ internal sealed class BedrockLlmClient(
                     content.Add(BuildPromptAttachment(attachment));
                 }
 
-                foreach (LlmToolCall call in message.ToolCalls)
+                foreach (LlmToolCall call in ClientTools.Functions(message.ToolCalls))
                 {
                     content.Add(new ContentBlock
                     {
@@ -645,7 +645,7 @@ internal sealed class BedrockLlmClient(
         {
             var toolConfiguration = new ToolConfiguration
             {
-                Tools = request.Tools.Select(definition => new Tool
+                Tools = ClientTools.Functions(request.Tools).Select(definition => new Tool
                 {
                     ToolSpec = new ToolSpecification
                     {

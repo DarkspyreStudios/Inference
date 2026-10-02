@@ -296,7 +296,7 @@ public sealed class XaiResponsesClientTests
     {
         using var handler = new Handler(_ => Response());
         using var http = new HttpClient(handler);
-        var request = Request() with { Tools = [new() { Name = "web_search", InputSchema = Json("{}") }] };
+        var request = Request() with { Tools = [new LlmToolDefinition() { Name = "web_search", InputSchema = Json("{}") }] };
         await Assert.ThrowsAsync<ArgumentException>(() => Read(new XaiResponsesLlmClient(http).StreamAsync(Connection(), request)));
         Assert.Equal(0, handler.Calls);
     }
@@ -367,7 +367,7 @@ public sealed class XaiResponsesClientTests
         var request = Request() with
         {
             StructuredOutput = new() { Name = "output", Schema = schema },
-            Tools = [new() { Name = "lookup", Strict = true, InputSchema = schema }],
+            Tools = [new LlmToolDefinition() { Name = "lookup", Strict = true, InputSchema = schema }],
             ToolChoice = new() { Mode = LlmToolChoiceMode.Specific, Name = "lookup" },
             AllowParallelToolCalls = false
         };
@@ -386,7 +386,7 @@ public sealed class XaiResponsesClientTests
     {
         using var handler = new Handler(_ => Response());
         using var http = new HttpClient(handler);
-        var request = Request() with { Tools = [new() { Name = "lookup", Strict = true, InputSchema = Json("{\"type\":\"object\",\"maxProperties\":65}") }] };
+        var request = Request() with { Tools = [new LlmToolDefinition() { Name = "lookup", Strict = true, InputSchema = Json("{\"type\":\"object\",\"maxProperties\":65}") }] };
         await Assert.ThrowsAsync<NotSupportedException>(() => Read(new XaiResponsesLlmClient(http).StreamAsync(Connection(), request)));
         Assert.Equal(0, handler.Calls);
     }
@@ -509,7 +509,7 @@ public sealed class XaiResponsesClientTests
         var bytes = new byte[20 * 1024 * 1024 + 1];
         LlmToolOutputPart part = resource ? new LlmToolOutputResource("https://resource.test/image.png") { MediaType = "image/png", Data = bytes }
             : new LlmToolOutputBinary(LlmBinaryKind.Image, "image/png", bytes);
-        var request = Request() with { Messages = [new("tool", "") { ToolResults = [new("call", new() { Parts = [part] })] }] };
+        var request = Request() with { Messages = [new("tool", "") { ToolResults = [new LlmToolResult("call", new() { Parts = [part] })] }] };
         await Assert.ThrowsAsync<ArgumentException>(() => Read(new XaiResponsesLlmClient(http).StreamAsync(WithImageCatalog(true), request)));
         Assert.Equal(0, handler.Calls);
     }

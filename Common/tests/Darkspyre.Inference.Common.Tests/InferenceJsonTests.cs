@@ -57,13 +57,13 @@ public sealed class InferenceJsonTests
             ReasoningLevel = LlmReasoningLevel.High,
             PromptCache = new() { Scope = LlmPromptCacheScope.Prefix, Retention = LlmPromptCacheRetention.Extended },
             StructuredOutput = new() { Name = "answer", Schema = Json("{\"type\":\"object\"}") },
-            Tools = [new() { Name = "tool", InputSchema = Json("{\"type\":\"object\"}"), Strict = true }],
+            Tools = [new LlmToolDefinition() { Name = "tool", InputSchema = Json("{\"type\":\"object\"}"), Strict = true }],
             Messages = [new("assistant", "text")
             {
                 ContinuationState = JsonSerializer.Deserialize(ContinuationJson, InferenceJson.ContinuationState),
                 Attachments = [new LlmAttachment { Kind = LlmBinaryKind.Image, FileName = "image.png", Data = new byte[] { 1, 2, 3 } }],
-                ToolCalls = [new("call", "tool", "{}")],
-                ToolResults = [new("call", new()
+                ToolCalls = [new LlmToolCall("call", "tool", "{}")],
+                ToolResults = [new LlmToolResult("call", new()
                 {
                     Parts = [new LlmToolOutputText("text"), new LlmToolOutputBinary(LlmBinaryKind.Audio, "audio/wav", new byte[] { 4 }),
                         new LlmToolOutputResource("urn:test") { Text = "resource", Data = ReadOnlyMemory<byte>.Empty }],
@@ -79,9 +79,9 @@ public sealed class InferenceJsonTests
         Assert.Equal(original.PromptCache, restored.PromptCache);
         Assert.Equal("opaque", restored.Messages[0].ContinuationState!.Payload);
         Assert.Equal(new byte[] { 1, 2, 3 }, Assert.IsType<LlmAttachment>(restored.Messages[0].Attachments[0]).Data.ToArray());
-        Assert.True(restored.Tools[0].Strict);
-        Assert.Equal(original.Tools[0].InputSchema.GetRawText(), restored.Tools[0].InputSchema.GetRawText());
-        LlmToolOutput output = restored.Messages[0].ToolResults[0].Output;
+        Assert.True(Assert.IsType<LlmToolDefinition>(restored.Tools[0]).Strict);
+        Assert.Equal(Assert.IsType<LlmToolDefinition>(original.Tools[0]).InputSchema.GetRawText(), Assert.IsType<LlmToolDefinition>(restored.Tools[0]).InputSchema.GetRawText());
+        LlmToolOutput output = Assert.IsType<LlmToolResult>(restored.Messages[0].ToolResults[0]).Output;
         Assert.IsType<LlmToolOutputText>(output.Parts[0]);
         Assert.IsType<LlmToolOutputBinary>(output.Parts[1]);
         Assert.True(Assert.IsType<LlmToolOutputResource>(output.Parts[2]).Data.HasValue);
@@ -190,6 +190,8 @@ public sealed class InferenceJsonTests
         { "LlmRequest", "{\"ModelId\":\"model\",\"Messages\":[{\"Role\":\"assistant\",\"Content\":\"text\",\"ContinuationState\":" + ContinuationJson + "}]}" },
         { "LlmRequest", "{\"ModelId\":\"model\",\"PromptCache\":{\"Scope\":0,\"Retention\":1}}" },
         { "LlmResult", ResultJson },
+        { "LlmRequest", """{"ModelId":"model","Tools":[{"type":"function","Name":"lookup","InputSchema":{}},{"type":"shell","Skills":[]}],"Messages":[{"Role":"assistant","Content":"","ToolCalls":[{"type":"function","Id":"fn","Name":"lookup","ArgumentsJson":"{}"},{"type":"shell","Id":"sh","Commands":["echo actual"],"TimeoutMs":0,"MaxOutputLength":0}]},{"Role":"user","Content":"","ToolResults":[{"type":"shell","ToolCallId":"sh","Output":[{"Stdout":"","Stderr":null,"Outcome":{"type":"exit","ExitCode":0}}]},{"type":"function","ToolCallId":"fn","Output":{"Parts":[]}}]}]}""" },
+        { "LlmResult", """{"Text":"","Status":2,"Provenance":{"ImplementationId":"fixture","ModelId":"model"},"ToolCalls":[{"type":"shell","Id":"sh","Commands":["echo actual"],"TimeoutMs":null,"MaxOutputLength":0},{"type":"function","Id":"fn","Name":"lookup","ArgumentsJson":"{}"}]}""" },
         { "LlmMessage", "{\"Role\":\"user\",\"Content\":\"text\"}" },
         { "ContinuationState", ContinuationJson },
         { "LlmCapabilities", "{\"ReasoningLevels\":[0,4],\"Tools\":{\"ChoiceModes\":[0,2]}}" },

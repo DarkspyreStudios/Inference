@@ -11,12 +11,14 @@ internal sealed class ManagedAppleAgentClient(AppleFoundationModelsClient client
     {
         ArgumentNullException.ThrowIfNull(options);
         cancellationToken.ThrowIfCancellationRequested();
+        options = ClientTools.Snapshot(options);
         if (options.Context is not null) { ManagedAgentContext.ValidateRuntimeResources(options.Context); }
         HostedTools.Validate(options.HostedTools, options.MaxHostedTurns, client.GetCapabilities(connection, options.ModelId).HostedTools);
+        ClientTools.ValidateManagedOpening(options, client.GetCapabilities(connection, options.ModelId));
         AppleProtocol.Ready(await client.ProbeAsync(connection, cancellationToken).ConfigureAwait(false));
         var models = await providers.ListModelsAsync(connectionId, cancellationToken).ConfigureAwait(false);
         var capabilities = client.GetCapabilities(connection, options.ModelId);
-        if (!capabilities.SupportsAgentSessions || (options.Tools.Count > 0 && !capabilities.SupportsAgentToolUse))
+        if (!capabilities.SupportsAgentSessions || (options.Tools.Any(tool => tool is LlmAgentToolDefinition) && !capabilities.SupportsAgentToolUse))
             throw new NotSupportedException("The Apple connection disables this agent operation.");
         string scope = ProviderContinuationStateCodec.Scope(connection);
         return new ManagedAgentSession(connection, options, models, client,

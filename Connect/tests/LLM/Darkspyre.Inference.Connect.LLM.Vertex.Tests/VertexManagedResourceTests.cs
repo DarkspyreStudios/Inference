@@ -28,10 +28,10 @@ public sealed class VertexManagedResourceTests
             {
                 Entries =
                 [
-                    new("call", "turn", new("assistant", "") { ToolCalls = [new("actual", "create", "{}")] }),
+                    new("call", "turn", new("assistant", "") { ToolCalls = [new LlmToolCall("actual", "create", "{}")] }),
                     new("result", "turn", new("user", "")
                     {
-                        ToolResults = [new("actual", new()
+                        ToolResults = [new LlmToolResult("actual", new()
                         { Parts = [new LlmToolOutputSessionResource(new("workspace", "generated"))] })]
                     })
                 ]

@@ -1,5 +1,7 @@
 using System.Runtime.CompilerServices;
+using System.Diagnostics.CodeAnalysis;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Darkspyre.Inference.Common.LLM;
 
 namespace Darkspyre.Inference.Connect.LLM;
@@ -162,7 +164,11 @@ public sealed record LlmAgentSessionOptions
 
     public string? Instructions { get; init; }
 
-    public IReadOnlyList<LlmAgentToolDefinition> Tools { get; init; } = [];
+    public IReadOnlyList<LlmAgentClientToolDefinition> Tools { get; init; } = [];
+
+    /// <summary>Borrowed runtime services. The session releases references after admitted work drains.</summary>
+    [JsonIgnore]
+    public LlmAgentCallerServices? CallerServices { get; init; }
 
     public IReadOnlyList<LlmHostedTool> HostedTools { get; init; } = [];
 
@@ -192,7 +198,11 @@ public sealed record LlmAgentResumeOptions
     /// Host tools to expose after resuming. Providers that persist tool definitions may reuse the
     /// stored definitions when this collection is empty.
     /// </summary>
-    public IReadOnlyList<LlmAgentToolDefinition> Tools { get; init; } = [];
+    public IReadOnlyList<LlmAgentClientToolDefinition> Tools { get; init; } = [];
+
+    /// <summary>Borrowed runtime services. The session releases references after admitted work drains.</summary>
+    [JsonIgnore]
+    public LlmAgentCallerServices? CallerServices { get; init; }
 
     public IReadOnlyList<LlmHostedTool> HostedTools { get; init; } = [];
 
@@ -235,17 +245,29 @@ public enum LlmAgentTurnStatus
     Unknown
 }
 
-public abstract record LlmAgentEvent(string ThreadId, string TurnId);
+public abstract record LlmAgentEvent(string ThreadId, string? TurnId)
+{
+    public virtual string ThreadId { get; init; } = ThreadId;
+    public virtual string? TurnId { get; init; } = TurnId;
+}
 
 public sealed record LlmAgentTurnStartedEvent(string ThreadId, string TurnId)
-    : LlmAgentEvent(ThreadId, TurnId);
+    : LlmAgentEvent(ThreadId, HostedEventFacts.Identity(TurnId))
+{
+    [AllowNull]
+    public override string TurnId { get => base.TurnId!; init => base.TurnId = HostedEventFacts.Identity(value); }
+}
 
 public sealed record LlmAgentTextDeltaEvent(
     string ThreadId,
     string TurnId,
     string ItemId,
     string Delta)
-    : LlmAgentEvent(ThreadId, TurnId);
+    : LlmAgentEvent(ThreadId, HostedEventFacts.Identity(TurnId))
+{
+    [AllowNull]
+    public override string TurnId { get => base.TurnId!; init => base.TurnId = HostedEventFacts.Identity(value); }
+}
 
 /// <summary>Replaces the previous partial structured object for this item.</summary>
 public sealed record LlmAgentStructuredOutputSnapshotEvent(
@@ -253,7 +275,11 @@ public sealed record LlmAgentStructuredOutputSnapshotEvent(
     string TurnId,
     string ItemId,
     JsonElement Content)
-    : LlmAgentEvent(ThreadId, TurnId);
+    : LlmAgentEvent(ThreadId, HostedEventFacts.Identity(TurnId))
+{
+    [AllowNull]
+    public override string TurnId { get => base.TurnId!; init => base.TurnId = HostedEventFacts.Identity(value); }
+}
 
 public sealed record LlmAgentReasoningDeltaEvent(
     string ThreadId,
@@ -261,14 +287,22 @@ public sealed record LlmAgentReasoningDeltaEvent(
     string ItemId,
     string Delta,
     bool IsSummary)
-    : LlmAgentEvent(ThreadId, TurnId);
+    : LlmAgentEvent(ThreadId, HostedEventFacts.Identity(TurnId))
+{
+    [AllowNull]
+    public override string TurnId { get => base.TurnId!; init => base.TurnId = HostedEventFacts.Identity(value); }
+}
 
 public sealed record LlmAgentMessageCompletedEvent(
     string ThreadId,
     string TurnId,
     string ItemId,
     string Text)
-    : LlmAgentEvent(ThreadId, TurnId);
+    : LlmAgentEvent(ThreadId, HostedEventFacts.Identity(TurnId))
+{
+    [AllowNull]
+    public override string TurnId { get => base.TurnId!; init => base.TurnId = HostedEventFacts.Identity(value); }
+}
 
 /// <summary>
 /// A tool call observed during a turn. <see cref="Output"/> is the result the runtime reported for it, or
@@ -285,7 +319,11 @@ public sealed record LlmAgentToolEvent(
     bool? Success,
     string Status,
     LlmToolOutput? Output = null)
-    : LlmAgentEvent(ThreadId, TurnId);
+    : LlmAgentEvent(ThreadId, HostedEventFacts.Identity(TurnId))
+{
+    [AllowNull]
+    public override string TurnId { get => base.TurnId!; init => base.TurnId = HostedEventFacts.Identity(value); }
+}
 
 /// <summary>Adapter-owned progress text. It is not assistant transcript content.</summary>
 public sealed record LlmAgentActivityEvent(
@@ -293,21 +331,32 @@ public sealed record LlmAgentActivityEvent(
     string TurnId,
     string ItemId,
     string Activity)
-    : LlmAgentEvent(ThreadId, TurnId);
+    : LlmAgentEvent(ThreadId, HostedEventFacts.Identity(TurnId))
+{
+    [AllowNull]
+    public override string TurnId { get => base.TurnId!; init => base.TurnId = HostedEventFacts.Identity(value); }
+}
 
 public sealed record LlmAgentWarningEvent(
     string ThreadId,
     string TurnId,
     string Message)
-    : LlmAgentEvent(ThreadId, TurnId);
+    : LlmAgentEvent(ThreadId, HostedEventFacts.Identity(TurnId))
+{
+    [AllowNull]
+    public override string TurnId { get => base.TurnId!; init => base.TurnId = HostedEventFacts.Identity(value); }
+}
 
 public sealed record LlmAgentTurnCompletedEvent(
     string ThreadId,
     string TurnId,
     LlmAgentCompletionReason Reason,
     string? Error)
-    : LlmAgentEvent(ThreadId, TurnId)
+    : LlmAgentEvent(ThreadId, HostedEventFacts.Identity(TurnId))
 {
+    [AllowNull]
+    public override string TurnId { get => base.TurnId!; init => base.TurnId = HostedEventFacts.Identity(value); }
+
     /// <summary>
     /// Derived from <see cref="Reason"/>: <c>Completed</c> for a completed turn, <c>Interrupted</c> for an
     /// interruption, <c>Unknown</c> for unreported termination, and <c>Failed</c> for every other reason.

@@ -78,8 +78,9 @@ internal sealed class AppleProbe(ILlmInference inference,
         Require(calls.ToolCalls.Count == 2, $"expected two tool calls, got {calls.ToolCalls.Count}");
         Require(calls.ToolCalls.Select(call => call.Id).Distinct(StringComparer.Ordinal).Count() == 2,
             "identical-argument calls did not retain distinct IDs");
-        foreach (var call in calls.ToolCalls)
+        foreach (LlmClientToolCall item in calls.ToolCalls)
         {
+            if (item is not LlmToolCall call) throw new InvalidOperationException("Expected a function tool call.");
             using var arguments = JsonDocument.Parse(call.ArgumentsJson);
             Require(call.Name == Tool.Name && arguments.RootElement.GetProperty("key").GetString() == "sample",
                 "model did not select the requested tool and identical arguments");
@@ -106,7 +107,7 @@ internal sealed class AppleProbe(ILlmInference inference,
             ModelId = model,
             Instructions = "Use lookup to retrieve the requested reading. Once its result is present, report it without looking it up again.",
             ExecutionOptions = new() { MaxModelIterations = 4 },
-            Tools = [new() { Name = Tool.Name, Description = Tool.Description, InputSchema = Schema }],
+            Tools = [new LlmAgentToolDefinition() { Name = Tool.Name, Description = Tool.Description, InputSchema = Schema }],
             ToolHandler = (call, cancellation) =>
             {
                 cancellation.ThrowIfCancellationRequested();

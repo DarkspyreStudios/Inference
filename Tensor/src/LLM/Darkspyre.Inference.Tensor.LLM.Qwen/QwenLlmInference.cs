@@ -517,7 +517,7 @@ public sealed class QwenLlmInference : ITensorLlmInference
                 {
                     Role = message.Role,
                     Content = message.Content,
-                    ToolCalls = message.ToolCalls.Count == 0 ? null : message.ToolCalls.Select((call, index) => new ToolCall
+                    ToolCalls = message.ToolCalls.Count == 0 ? null : message.ToolCalls.Cast<LlmToolCall>().Select((call, index) => new ToolCall
                     {
                         Id = call.Id,
                         Name = call.Name,
@@ -528,7 +528,7 @@ public sealed class QwenLlmInference : ITensorLlmInference
             }
 
             // The chat template renders each tool result as its own tool-role message.
-            messages.AddRange(message.ToolResults.Select(static result => new ChatMessage
+            messages.AddRange(message.ToolResults.Cast<LlmToolResult>().Select(static result => new ChatMessage
             {
                 Role = "tool",
                 ToolCallId = result.ToolCallId,
@@ -550,7 +550,7 @@ public sealed class QwenLlmInference : ITensorLlmInference
         return output.IsError ? "Error: " + text : text;
     }
 
-    private static List<ToolFunction>? BuildTools(IReadOnlyList<LlmToolDefinition> tools)
+    private static List<ToolFunction>? BuildTools(IReadOnlyList<LlmClientToolDefinition> tools)
     {
         if (tools.Count == 0)
         {
@@ -558,7 +558,7 @@ public sealed class QwenLlmInference : ITensorLlmInference
         }
 
         // TensorSharp builds its tool functions from the same JSON-schema shape an OpenAI client sends.
-        string json = QwenJson.WriteTools(tools);
+        string json = QwenJson.WriteTools(tools.Cast<LlmToolDefinition>().ToArray());
         return ToolFunction.ParseList(json);
     }
 
@@ -593,6 +593,12 @@ public sealed class QwenLlmInference : ITensorLlmInference
 
     private static void ValidateRequest(LlmInferenceRequest request)
     {
+        if (request.Tools.Any(tool => tool is not LlmToolDefinition)
+            || request.Messages.Any(message => message.ToolCalls.Any(call => call is not LlmToolCall)
+                || message.ToolResults.Any(result => result is not LlmToolResult)))
+        {
+            throw new InferenceException(InferenceFailureCode.UnsupportedFeature, "Qwen implements function tools only.");
+        }
         if (request.HostedTools is null || request.HostedTools.Count > 0 || request.MaxHostedTurns is not null)
         {
             throw new InferenceException(InferenceFailureCode.UnsupportedFeature, "Qwen does not implement hosted tools or hosted turn limits.");
@@ -635,7 +641,7 @@ public sealed class QwenLlmInference : ITensorLlmInference
             throw new InferenceException(InferenceFailureCode.UnsupportedFeature, "Qwen accepts at most 16 stop sequences.");
         }
 
-        if (request.Tools.Any(tool => tool.Strict))
+        if (request.Tools.Any(tool => tool is LlmToolDefinition { Strict: true }))
         { throw new InferenceException(InferenceFailureCode.UnsupportedFeature, "Qwen cannot enforce strict tool argument schemas."); }
 
         // The chat template has no control for a forced or serial tool choice.
@@ -645,7 +651,8 @@ public sealed class QwenLlmInference : ITensorLlmInference
         }
 
         if (request.Messages.Any(static message => message.Attachments.Count > 0
-            || message.ToolResults.Any(static result => result.Output.Parts.Any(static part => part is LlmToolOutputSessionResource))))
+            || message.ToolResults.Any(static result => result is LlmToolResult function
+                && function.Output.Parts.Any(static part => part is LlmToolOutputSessionResource))))
         {
             throw new InferenceException(InferenceFailureCode.UnsupportedFeature, "Qwen accepts text messages only.");
         }

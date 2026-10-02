@@ -29,7 +29,7 @@ public sealed class VertexTokenCountingTests
             Instructions = "Count this instruction too.",
             MaxOutputTokens = 100,
             Messages = [new("user", "Return JSON")],
-            Tools = [new() { Name = "run", InputSchema = JsonElement.Parse(Schema) }],
+            Tools = [new LlmToolDefinition() { Name = "run", InputSchema = JsonElement.Parse(Schema) }],
             ToolChoice = new() { Mode = LlmToolChoiceMode.Auto },
             StructuredOutput = new() { Name = "result", Schema = JsonElement.Parse(Schema) },
             ReasoningLevel = LlmReasoningLevel.Low

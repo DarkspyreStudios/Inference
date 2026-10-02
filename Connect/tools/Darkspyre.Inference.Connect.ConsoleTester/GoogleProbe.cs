@@ -49,7 +49,7 @@ internal sealed class GoogleProbe(ILlmInference inference, LlmAgentProviderServi
     {
         var request = Request("Call lookup with key sample to retrieve the reading. Do not invent it.") with
         {
-            Tools = [new() { Name = "lookup", InputSchema = Schema }],
+            Tools = [new LlmToolDefinition() { Name = "lookup", InputSchema = Schema }],
             ToolChoice = new() { Mode = LlmToolChoiceMode.Required }
         };
         var calls = await inference.CompleteAsync(request, token);

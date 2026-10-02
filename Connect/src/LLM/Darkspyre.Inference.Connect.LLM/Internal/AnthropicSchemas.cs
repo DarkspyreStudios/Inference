@@ -33,10 +33,10 @@ internal static class AnthropicSchemas
 
     private static SchemaCost StrictToolCost(LlmChatRequest request)
     {
-        if (request.Tools.Count(tool => tool.Strict) > 20)
+        if (ClientTools.Functions(request.Tools).Count(tool => tool.Strict) > 20)
         { throw new NotSupportedException("Claude accepts at most 20 strict tools in one request."); }
         SchemaCost total = default;
-        foreach (LlmToolDefinition tool in request.Tools.Where(tool => tool.Strict))
+        foreach (LlmToolDefinition tool in ClientTools.Functions(request.Tools).Where(tool => tool.Strict))
         {
             if (!Analyze(tool.InputSchema, out SchemaCost cost))
             { throw new NotSupportedException("A strict tool schema contains constraints outside Claude's native subset. The tool schema is not weakened or sent as non-strict."); }

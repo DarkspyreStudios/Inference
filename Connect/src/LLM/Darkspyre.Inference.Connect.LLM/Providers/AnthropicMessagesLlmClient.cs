@@ -699,7 +699,7 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
             else if (message.Role is "user" or "assistant" || message.ToolResults.Count > 0)
             {
                 var content = new JsonArray();
-                foreach (LlmToolResult result in message.ToolResults)
+                foreach (LlmToolResult result in ClientTools.Functions(message.ToolResults))
                 {
                     ProjectedToolOutput projected = projectToolOutput(result.Output);
                     content.Add(new JsonObject
@@ -716,7 +716,7 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
                     content.Add(new JsonObject { ["type"] = "text", ["text"] = message.Content });
                 }
 
-        foreach (LlmAttachment attachment in message.Attachments.Select(LlmAttachments.RequireBinary))
+                foreach (LlmAttachment attachment in message.Attachments.Select(LlmAttachments.RequireBinary))
                 {
                     content.Add(attachment.Kind switch
                     {
@@ -726,7 +726,7 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
                     });
                 }
 
-                foreach (LlmToolCall call in message.ToolCalls)
+                foreach (LlmToolCall call in ClientTools.Functions(message.ToolCalls))
                 {
                     content.Add(new JsonObject
                     {
@@ -808,7 +808,7 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
         if (request.TopK is { } topK) { payload["top_k"] = topK; }
         if (request.StopSequences.Count > 0) { payload["stop_sequences"] = JsonSerializer.SerializeToNode(request.StopSequences); }
 
-        JsonArray tools = AnthropicTools.Resolve(connection, request).Build(request.Tools);
+        JsonArray tools = AnthropicTools.Resolve(connection, request).Build(ClientTools.Functions(request.Tools));
         if (tools.Count > 0) payload["tools"] = tools;
 
         if (tools.Count > 0

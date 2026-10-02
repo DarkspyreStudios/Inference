@@ -43,7 +43,7 @@ public sealed class ContextCodecTests
         Assert.Equal(new LlmToolCall("actual-call", "create", "{\"a\":1}"), Assert.Single(context.Entries[1].Message.ToolCalls));
         Assert.Equal("opaque unchanged", context.Entries[1].Message.ContinuationState!.Payload);
         Assert.Equal("scope", context.Entries[1].Message.ContinuationState!.ScopeId);
-        LlmToolResult result = Assert.Single(context.Entries[2].Message.ToolResults);
+        LlmToolResult result = Assert.IsType<LlmToolResult>(Assert.Single(context.Entries[2].Message.ToolResults));
         Assert.Equal("actual-call", result.ToolCallId);
         Assert.True(result.Output.IsError);
         Assert.True(result.Output.StructuredContent!.Value.GetProperty("actual").GetBoolean());
@@ -226,10 +226,10 @@ public sealed class ContextCodecTests
                         new LlmFileReference(new ProviderFileReference("native-id"))
                     ]
                 }),
-                new("call", "turn", new("assistant", "") { ToolCalls = [new("actual", "create", "{}")] }),
+                new("call", "turn", new("assistant", "") { ToolCalls = [new LlmToolCall("actual", "create", "{}")] }),
                 new("result", "turn", new("user", "")
                 {
-                    ToolResults = [new("actual", new() { Parts = [new LlmToolOutputSessionResource(reference)] })]
+                    ToolResults = [new LlmToolResult("actual", new() { Parts = [new LlmToolOutputSessionResource(reference)] })]
                 })
             ]
         };
@@ -242,7 +242,7 @@ public sealed class ContextCodecTests
         Assert.Equal(new byte[] { 7, 8 }, Assert.IsType<LlmAttachment>(attachments[1]).Data.ToArray());
         Assert.Equal(reference, Assert.IsType<LlmResourceAttachment>(attachments[2]).Resource);
         Assert.Equal("native-id", Assert.IsType<LlmFileReference>(attachments[3]).File.FileId);
-        Assert.Equal(reference, Assert.IsType<LlmToolOutputSessionResource>(Assert.Single(restored.Entries[2].Message.ToolResults[0].Output.Parts)).Resource);
+        Assert.Equal(reference, Assert.IsType<LlmToolOutputSessionResource>(Assert.Single(Assert.IsType<LlmToolResult>(restored.Entries[2].Message.ToolResults[0]).Output.Parts)).Resource);
         LlmAgentContext excluded = ManagedAgentContext.Copy(restored, false);
         LlmAgentContext byteExcluded = JsonSerializer.Deserialize(JsonSerializer.Serialize(excluded, ConnectLlmJson.AgentContext), ConnectLlmJson.AgentContext)!;
         Assert.Equal(reference, Assert.Single(byteExcluded.SelectedResources));
@@ -250,7 +250,7 @@ public sealed class ContextCodecTests
         Assert.Equal(new LlmOmittedAttachment(LlmBinaryKind.Document, "original.txt", 1),
             Assert.Single(byteExcluded.Entries[0].Message.OmittedAttachments));
         Assert.Equal(reference, Assert.IsType<LlmResourceAttachment>(byteExcluded.Entries[0].Message.Attachments[1]).Resource);
-        Assert.Equal(reference, Assert.IsType<LlmToolOutputSessionResource>(Assert.Single(byteExcluded.Entries[2].Message.ToolResults[0].Output.Parts)).Resource);
+        Assert.Equal(reference, Assert.IsType<LlmToolOutputSessionResource>(Assert.Single(Assert.IsType<LlmToolResult>(byteExcluded.Entries[2].Message.ToolResults[0]).Output.Parts)).Resource);
     }
 
     [Theory]

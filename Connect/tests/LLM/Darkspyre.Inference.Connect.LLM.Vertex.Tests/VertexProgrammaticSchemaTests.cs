@@ -41,7 +41,7 @@ public sealed class VertexProgrammaticSchemaTests
         using var http = new HttpClient(handler);
         var authentication = new Authentication();
         var client = new VertexLlmClient(http, authentication);
-        var request = Request(Acyclic) with { Tools = [Request(Acyclic).Tools[0], Request(Recursive).Tools[0] with { Name = "direct" }] };
+        var request = Request(Acyclic) with { Tools = [Request(Acyclic).Tools[0], Assert.IsType<LlmToolDefinition>(Request(Recursive).Tools[0]) with { Name = "direct" }] };
         var connection = Connection(operation == 0);
         await Invoke(client, connection, request with { ProviderOptions = new Dictionary<string, JsonElement>() }, operation);
         await Invoke(client, connection, request, operation);
@@ -50,8 +50,8 @@ public sealed class VertexProgrammaticSchemaTests
         var programmatic = JsonElement.Parse(handler.Bodies[1]).GetProperty("tools");
         for (int index = 0; index < 2; index++)
             Assert.Equal(baseline[index].GetProperty("input_schema").GetRawText(), programmatic[index].GetProperty("input_schema").GetRawText());
-        Assert.Equal(Acyclic, request.Tools[0].InputSchema.GetRawText());
-        Assert.Equal(Recursive, request.Tools[1].InputSchema.GetRawText());
+        Assert.Equal(Acyclic, Assert.IsType<LlmToolDefinition>(request.Tools[0]).InputSchema.GetRawText());
+        Assert.Equal(Recursive, Assert.IsType<LlmToolDefinition>(request.Tools[1]).InputSchema.GetRawText());
         Assert.Equal(Programmatic, request.ProviderOptions[AnthropicTools.OptionName].GetRawText());
     }
 
@@ -69,7 +69,7 @@ public sealed class VertexProgrammaticSchemaTests
         ModelId = "anthropic/claude-sonnet-4-6",
         ReasoningLevel = LlmReasoningLevel.None,
         Messages = [new("user", "hello")],
-        Tools = [new() { Name = "run", InputSchema = JsonElement.Parse(schema) }],
+        Tools = [new LlmToolDefinition() { Name = "run", InputSchema = JsonElement.Parse(schema) }],
         ProviderOptions = new Dictionary<string, JsonElement>
         { [AnthropicTools.OptionName] = JsonElement.Parse(Programmatic) }
     };

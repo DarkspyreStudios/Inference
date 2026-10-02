@@ -168,6 +168,7 @@ internal sealed class ConnectLlmInference(
         SupportsFrequencyPenalty = capabilities.SupportsFrequencyPenalty,
         MaxStopSequences = capabilities.MaxStopSequences,
         SupportsToolUse = capabilities.SupportsToolUse,
+        SupportsShellTools = capabilities.SupportsShellTools,
         Tools = capabilities.Tools,
         HostedTools = capabilities.HostedTools,
         SupportsPromptImages = capabilities.SupportsPromptImages,

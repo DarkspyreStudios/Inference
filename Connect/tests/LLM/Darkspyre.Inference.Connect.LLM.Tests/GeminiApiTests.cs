@@ -201,7 +201,7 @@ public sealed class GeminiApiTests
         {
             ModelId = Flash,
             Tools = [Tool],
-            Messages = [new("user", "Run pwd"), assistant, new("tool", "") { ToolResults = [new(first.ToolCalls[0].Id, LlmToolOutput.FromText("/tmp"))] }]
+            Messages = [new("user", "Run pwd"), assistant, new("tool", "") { ToolResults = [new LlmToolResult(first.ToolCalls[0].Id, LlmToolOutput.FromText("/tmp"))] }]
         });
         Assert.Equal("done", second.Text);
         JsonNode next = JsonNode.Parse(handler.Bodies[1])!;
