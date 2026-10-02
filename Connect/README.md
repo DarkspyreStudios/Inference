@@ -755,6 +755,13 @@ Response cleanup failures remain visible to the SDK owner. One disposal failure 
 another resource. Logging verification also fences and drains its lookups and clears its cache.
 Use asynchronous container disposal while work is active.
 
+SDK acquisition, awaited results, catalog follow-on calls, logging verification and each published
+Converse response event check the synchronous owner fence. Delayed linked-token propagation cannot admit
+a late successful result. Successful retirement detaches client-creation callbacks and disposed
+stream response references. The owner retains exact resources whose cleanup fails and the original
+errors; repeated disposal shares that failure and does not retry cleanup. A failed stream opening
+preserves both its original operation error and a response-cleanup error when both occur.
+
 Clients use a private default AWS credential resolver and SDK-client-local HTTP caches. Retiring
 the SDK owner disposes the resolver and the SDK pipelines' HTTP pools. Runtime and AgentCore HTTP
 clients have infinite generation timeouts; control-plane clients retain their SDK timeout.

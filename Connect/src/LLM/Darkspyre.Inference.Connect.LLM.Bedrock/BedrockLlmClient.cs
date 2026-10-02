@@ -152,6 +152,7 @@ internal sealed class BedrockLlmClient(
             control.ThrowIfCanceled();
             foreach (LlmStreamEvent item in MapResponse(connection, request, enforcement, response))
             {
+                control.ThrowIfCanceled();
                 yield return item;
             }
             yield break;
@@ -168,6 +169,7 @@ internal sealed class BedrockLlmClient(
             foreach (LlmStreamEvent item in accumulator.Observe(streamEvent))
             {
                 if (item is LlmReasoningDeltaEvent && !capabilities.SupportsReasoningText) { continue; }
+                control.ThrowIfCanceled();
                 yield return item;
             }
         }
@@ -175,6 +177,7 @@ internal sealed class BedrockLlmClient(
         // The completion follows the end of the stream, because the metadata event with usage follows message-stop.
         control.ThrowIfCanceled();
         BedrockReply reply = accumulator.Complete(stream.RequestId);
+        control.ThrowIfCanceled();
         yield return new LlmChatCompletionEvent(BuildResult(connection, request, enforcement, reply));
     }
 

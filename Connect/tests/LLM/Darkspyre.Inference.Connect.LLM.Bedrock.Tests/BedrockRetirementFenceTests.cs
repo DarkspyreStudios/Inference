@@ -60,8 +60,11 @@ public sealed partial class BedrockLifetimeTests
         {
             events = client.StreamAsync(new()
             {
-                Version = "v1", Transport = LlmTransport.AwsBedrockConverse, Endpoint = "aws://bedrock",
-                Credential = new LlmCredential { Aws = Aws }.Serialize(), CapabilityOverrides = new() { SupportsStreaming = false }
+                Version = "v1",
+                Transport = LlmTransport.AwsBedrockConverse,
+                Endpoint = "aws://bedrock",
+                Credential = new LlmCredential { Aws = Aws }.Serialize(),
+                CapabilityOverrides = new() { SupportsStreaming = false }
             }, new() { ModelId = "us.fixture-model", Messages = [new("user", "question")] }).GetAsyncEnumerator();
             Assert.True(await events.MoveNextAsync()); Assert.IsType<LlmTextDeltaEvent>(events.Current);
             retirement = factory.DisposeAsync().AsTask(); Assert.False(retirement.IsCompleted);
@@ -278,8 +281,10 @@ public sealed partial class BedrockLifetimeTests
         {
             listing = client.ListModelsAsync(new()
             {
-                Version = "v1", Transport = LlmTransport.AwsBedrockConverse,
-                Endpoint = "aws://bedrock", Credential = new LlmCredential { Aws = Aws }.Serialize()
+                Version = "v1",
+                Transport = LlmTransport.AwsBedrockConverse,
+                Endpoint = "aws://bedrock",
+                Credential = new LlmCredential { Aws = Aws }.Serialize()
             }, caller.Token);
             await control.Started.Task.WaitAsync(Bound);
             stop.Register(anchor.Token);
