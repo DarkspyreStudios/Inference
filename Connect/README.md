@@ -1221,6 +1221,9 @@ interfaces contain no filesystem, process or shell implementation. Start/Resume 
 composition and reject unsupported supplied services before runtime work. Built-in adapters do not
 advertise caller-service or shell mappings. Managed sessions release their borrowed handler/service
 references only after admitted work drains; they do not dispose them.
+The current managed lane remains function-only even when a caller-owned SelfHost engine truthfully
+advertises portable shell support. That portable fact does not enable a managed shell executor or
+caller-service mapping; supplied managed shell definitions/services refuse before engine resolution.
 
 `ConnectLlmJson` exports the callback data through exact type-name getters and closed fixed unions.
 Runtime services have no public metadata getters. Their internal owned codecs refuse all non-null

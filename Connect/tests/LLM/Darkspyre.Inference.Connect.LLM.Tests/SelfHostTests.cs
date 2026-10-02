@@ -183,7 +183,8 @@ public sealed class SelfHostTests
         {
             await using ILlmAgentSession session = await agents.StartSessionAsync("connection", new()
             {
-                ModelId = "qwen", Tools = [new LlmAgentShellTool(new([]))],
+                ModelId = "qwen",
+                Tools = [new LlmAgentShellTool(new([]))],
                 CallerServices = supplyExecutor ? new() { ShellExecutor = executor } : null
             });
         });

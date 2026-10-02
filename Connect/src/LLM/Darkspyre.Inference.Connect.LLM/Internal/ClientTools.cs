@@ -8,10 +8,8 @@ internal static class ClientTools
 {
     internal static LlmAgentCapabilities ManagedCapabilities(LlmProviderCapabilities capabilities) => capabilities.Agent with
     {
-        SupportsShellTools = capabilities.SupportsShellTools,
-        SupportedCallerServices = capabilities.SupportsShellTools
-            ? new[] { LlmAgentCallerServiceKind.ShellExecution }.ToFrozenSet()
-            : FrozenSet<LlmAgentCallerServiceKind>.Empty
+        SupportsShellTools = false,
+        SupportedCallerServices = FrozenSet<LlmAgentCallerServiceKind>.Empty
     };
 
     internal static void ValidateCallerServices(LlmAgentCallerServices? services, LlmAgentCapabilities capabilities)
@@ -29,10 +27,11 @@ internal static class ClientTools
 
     internal static void ValidateManagedOpening(LlmAgentSessionOptions options, LlmProviderCapabilities capabilities)
     {
-        ValidateCallerServices(options.CallerServices, ManagedCapabilities(capabilities));
+        LlmAgentCapabilities managed = ManagedCapabilities(capabilities);
+        ValidateCallerServices(options.CallerServices, managed);
         if (options.Tools.Any(tool => tool is LlmAgentShellTool))
         {
-            if (!capabilities.SupportsShellTools)
+            if (!managed.SupportsShellTools)
                 throw new NotSupportedException("This route does not implement shell tools.");
             if (options.CallerServices?.ShellExecutor is null)
                 throw new ArgumentException("Managed shell tools require a borrowed caller shell executor.");
