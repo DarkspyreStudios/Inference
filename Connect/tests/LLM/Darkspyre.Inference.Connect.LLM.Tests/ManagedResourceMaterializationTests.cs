@@ -8,6 +8,63 @@ namespace Darkspyre.Inference.Connect.LLM.Tests;
 
 public sealed class ManagedResourceMaterializationTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ToolResourceAuthorizationScopeOrRetirementFailureNeverFabricatesFunctionText(bool retire)
+    {
+        var resources = new ControlledSessionResources();
+        using var destination = new LlmResourceMaterializationTests.ResourceDestination();
+        destination.Responses.Enqueue("{\"id\":\"tool-response\",\"status\":\"completed\",\"output\":[{\"type\":\"function_call\",\"id\":\"fc-one\",\"call_id\":\"call-one\",\"name\":\"generate\",\"arguments\":\"{}\"}]}");
+        using var http = new HttpClient(destination);
+        var client = new XaiResponsesLlmClient(http);
+        ManagedAgentSession? session = null;
+        Task? retirement = null;
+        var events = new List<LlmAgentEvent>();
+        session = await ManagedAgentSession.CreateAsync(LlmResourceMaterializationTests.Connection(), new()
+        {
+            ModelId = "grok-4", CallerServices = new() { Resources = resources },
+            Tools = [new LlmAgentToolDefinition { Name = "generate", InputSchema = JsonElement.Parse("{\"type\":\"object\",\"properties\":{}}") }],
+            ToolHandler = async (_, _) =>
+            {
+                InferenceResourceReference generated = await resources.RegisterAsync("generated.json", "application/json", "{}");
+                if (retire) retirement = session!.DisposeAsync().AsTask();
+                else resources.CurrentSessionId = "replacement-session";
+                return new() { Parts = [new LlmToolOutputSessionResource(generated)] };
+            }
+        }, [], client, (request, token) => client.StreamAsync(LlmResourceMaterializationTests.Connection(), request, token),
+            model => ManagedCapabilities(client, model));
+        try
+        {
+            Exception failure = await Assert.ThrowsAnyAsync<Exception>(async () =>
+            { await foreach (var item in session.RunTurnAsync(new() { Input = [new LlmAgentTextContent("generate")] })) events.Add(item); });
+            Assert.True(LlmResourcePreparation.IsResourceFailure(failure));
+            Assert.DoesNotContain(events.OfType<LlmAgentToolEvent>(), item => item.Status is "completed" or "failed");
+            Assert.Empty(destination.Uploads);
+            Assert.Single(destination.Prompts);
+        }
+        finally { retirement ??= session.DisposeAsync().AsTask(); await Drain(retirement); }
+    }
+
+    [Fact]
+    public async Task RequestFailureAfterSuccessfulUploadNeverAutomaticallyUploadsOrSendsAgain()
+    {
+        var resources = new ControlledSessionResources();
+        await resources.RegisterAsync("source.txt", "text/plain", "source");
+        using var destination = new LlmResourceMaterializationTests.ResourceDestination();
+        destination.ResponseFailure = new HttpRequestException("controlled post-upload failure");
+        using var http = new HttpClient(destination);
+        var client = new XaiResponsesLlmClient(http);
+        await using var session = await ManagedAgentSession.CreateAsync(LlmResourceMaterializationTests.Connection(),
+            new() { ModelId = "grok-4", CallerServices = new() { Resources = resources } }, [], client,
+            (request, token) => client.StreamAsync(LlmResourceMaterializationTests.Connection(), request, token), model => ManagedCapabilities(client, model));
+        var failure = await Assert.ThrowsAsync<InferenceResourceOperationException>(() => Read(session.RunTurnAsync(new() { Input = [new LlmAgentTextContent("inspect")] })));
+        Assert.Same(destination.ResponseFailure, failure.InnerException);
+        Assert.Single(destination.Uploads);
+        Assert.Single(destination.Prompts);
+        Assert.Equal(1, resources.ReadCleanupAttempts);
+    }
+
     [Fact]
     public async Task RetiringDuringActualResourceReadPreservesTypedCancellationForLiveCallerReader()
     {

@@ -147,6 +147,10 @@ public sealed class LlmResourceMaterializationTests
     {
         internal List<(string Name, byte[] Bytes)> Uploads { get; } = [];
         internal Queue<string> Responses { get; } = new();
+        internal List<string> Prompts { get; } = [];
+        internal Exception? ResponseFailure { get; set; }
+        internal Exception? ResponseCleanupFailure { get; set; }
+        internal int ResponseCleanupAttempts { get; private set; }
         internal string? Prompt { get; private set; }
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken token)
         {
@@ -165,11 +169,18 @@ public sealed class LlmResourceMaterializationTests
             if (path.EndsWith("/responses", StringComparison.Ordinal))
             {
                 Prompt = await request.Content!.ReadAsStringAsync(token);
-                return Json(Responses.TryDequeue(out string? response) ? response : "{\"id\":\"response-one\",\"status\":\"completed\",\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"done\"}]}]}");
+                Prompts.Add(Prompt);
+                if (ResponseFailure is { } failure) throw failure;
+                string body = Responses.TryDequeue(out string? response) ? response : "{\"id\":\"response-one\",\"status\":\"completed\",\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"done\"}]}]}";
+                return new(HttpStatusCode.OK) { Content = new ResponseContent(body, () => { ResponseCleanupAttempts++; if (ResponseCleanupFailure is { } cleanup) throw cleanup; }) };
             }
             throw new InvalidOperationException("Unexpected endpoint: " + path);
         }
         private static HttpResponseMessage Json(string json) => new(HttpStatusCode.OK) { Content = new StringContent(json, Encoding.UTF8, "application/json") };
+        private sealed class ResponseContent(string body, Action cleanup) : StringContent(body, Encoding.UTF8, "application/json")
+        {
+            protected override void Dispose(bool disposing) { if (disposing) cleanup(); base.Dispose(disposing); }
+        }
     }
 }
 
@@ -181,7 +192,8 @@ internal sealed class ControlledSessionResources : IInferenceResourceAccess, IDi
     private long _revision;
     private int _next;
     public string WorkspaceId => "workspace";
-    public string SessionId => "logical-session";
+    public string SessionId => CurrentSessionId;
+    internal string CurrentSessionId { get; set; } = "logical-session";
     internal int SelectionReads { get; private set; }
     internal int OpenedReads { get; private set; }
     internal int DisposedReads { get; private set; }

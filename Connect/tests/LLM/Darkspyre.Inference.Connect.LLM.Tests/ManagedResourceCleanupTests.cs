@@ -6,6 +6,40 @@ namespace Darkspyre.Inference.Connect.LLM.Tests;
 
 public sealed class ManagedResourceCleanupTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ActualResponseCleanupRefusalIsAnOwnedResourceFailure(bool malformedBody)
+    {
+        var resources = new ControlledSessionResources();
+        await resources.RegisterAsync("source.txt", "text/plain", "source");
+        var cleanup = new InvalidOperationException("actual response disposal refused");
+        using var destination = new LlmResourceMaterializationTests.ResourceDestination { ResponseCleanupFailure = cleanup };
+        if (malformedBody) destination.Responses.Enqueue("not-json");
+        using var http = new HttpClient(destination);
+        var client = new XaiResponsesLlmClient(http);
+        var session = await ManagedAgentSession.CreateAsync(LlmResourceMaterializationTests.Connection(),
+            new() { ModelId = "grok-4", CallerServices = new() { Resources = resources } }, [], client,
+            (request, token) => client.StreamAsync(LlmResourceMaterializationTests.Connection(), request, token),
+            model => ManagedResourceMaterializationTests.ManagedCapabilities(client, model));
+        Task? retirement = null;
+        try
+        {
+            Exception readerError = await Assert.ThrowsAnyAsync<Exception>(() => ManagedResourceMaterializationTests.Read(
+                session.RunTurnAsync(new() { Input = [new LlmAgentTextContent("inspect")] })));
+            var carrier = Assert.Single(Leaves(readerError).OfType<InferenceResourceOperationException>(),
+                failure => failure.Failure.Phase == (InferenceResourceOperationPhase)9);
+            Assert.Same(cleanup, carrier.InnerException);
+            Assert.Null(carrier.Failure.Reference);
+            Assert.Equal(malformedBody ? 2 : 1, Leaves(readerError).Count());
+            retirement = session.DisposeAsync().AsTask();
+            Assert.Same(readerError, await Assert.ThrowsAnyAsync<Exception>(() => retirement));
+            Assert.Equal(1, destination.ResponseCleanupAttempts);
+            Assert.Equal(1, resources.DisposedReads);
+        }
+        finally { retirement ??= session.DisposeAsync().AsTask(); await Drain(retirement); }
+    }
+
     [Fact]
     public async Task ExplicitFaultCompletionKeepsCleanupCancellationInFaultAccounting()
     {
