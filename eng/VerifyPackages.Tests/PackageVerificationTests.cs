@@ -16,6 +16,7 @@ public sealed class PackageVerificationTests
     {
         ["Darkspyre.ML.Tokenizers"] = "2.0.0.1",
         ["Darkspyre.TensorSharp.Backends.Cuda"] = "9.1.0",
+        [DependencyPolicy.Ggml] = "9.1.0",
         ["Darkspyre.TensorSharp.Chat"] = "9.1.0",
         ["Darkspyre.TensorSharp.Models"] = "9.1.0",
         ["Darkspyre.TensorSharp.Runtime"] = "9.1.0",
@@ -94,6 +95,7 @@ public sealed class PackageVerificationTests
 
     [Theory]
     [InlineData("Darkspyre.TensorSharp.Backends.Cuda")]
+    [InlineData(DependencyPolicy.Ggml)]
     [InlineData("Darkspyre.TensorSharp.Chat")]
     [InlineData("Darkspyre.TensorSharp.Models")]
     [InlineData("Darkspyre.TensorSharp.Runtime")]
@@ -134,8 +136,7 @@ public sealed class PackageVerificationTests
             new XAttribute("id", id), new XAttribute("version", "9.1.0")))));
 
     [Fact]
-    public void OrdinaryManagedGgmlDependencyIsAllowed() => Verify(Tensor, manifest: metadata => Dependencies(metadata).Add(
-        new XElement("dependency", new XAttribute("id", DependencyPolicy.Ggml), new XAttribute("version", "9.1.0"))));
+    public void OrdinaryManagedGgmlDependencyIsAllowed() => Verify(Tensor);
 
     [Theory]
     [InlineData("None")]
@@ -338,7 +339,7 @@ public sealed class PackageVerificationTests
     public void ExactResolvedVersionsAreVerifiedSeparatelyFromMinimumDeclarations()
     {
         DependencyPolicy policy = DependencyPolicy.Read(PolicyDocument());
-        (string Id, string Version)[] packages = Versions.Select(pair => (pair.Key, pair.Value)).Append((DependencyPolicy.Ggml, "9.1.0")).ToArray();
+        (string Id, string Version)[] packages = Versions.Select(pair => (pair.Key, pair.Value)).ToArray();
         policy.ValidateRestored(packages);
         Assert.Throws<InvalidDataException>(() => policy.ValidateRestored(packages.Select(package =>
             package.Id == "Darkspyre.TensorSharp.Models" ? (package.Id, "9.2.0") : package)));
@@ -360,7 +361,7 @@ public sealed class PackageVerificationTests
     public void EveryRequiredRestoredDependencyMustBePresentAtItsExactVersion(string id)
     {
         DependencyPolicy policy = DependencyPolicy.Read(PolicyDocument());
-        (string Id, string Version)[] packages = Versions.Select(pair => (pair.Key, pair.Value)).Append((DependencyPolicy.Ggml, "9.1.0")).ToArray();
+        (string Id, string Version)[] packages = Versions.Select(pair => (pair.Key, pair.Value)).ToArray();
         Assert.Throws<InvalidDataException>(() => policy.ValidateRestored(packages.Where(package => package.Id != id)));
         Assert.Throws<InvalidDataException>(() => policy.ValidateRestored(packages.Select(package =>
             package.Id == id ? (package.Id, "99.0.0") : package)));
