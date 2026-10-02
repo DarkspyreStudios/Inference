@@ -176,10 +176,12 @@ public sealed class TtsBindingTests
         var fixture = new TtsBorrowedFixture();
         TtsSettingsManager manager = new TtsProviderService([fixture]).CreateSettingsManager(fixture);
         Task? retirement = null;
+        int readsAtFence = -1;
         try
         {
-            fixture.OnDefinition = () => { retirement = manager.DisposeAsync().AsTask(); Assert.False(retirement.IsCompleted); };
+            fixture.OnDefinition = () => { readsAtFence = fixture.TransportReads; retirement = manager.DisposeAsync().AsTask(); Assert.False(retirement.IsCompleted); };
             await Assert.ThrowsAsync<OperationCanceledException>(() => manager.OpenAsync(TtsTransport.XaiTts, Identity, Configuration));
+            Assert.Equal(readsAtFence, fixture.TransportReads);
         }
         finally { retirement ??= manager.DisposeAsync().AsTask(); await retirement.WaitAsync(Bound); }
         Assert.Equal(0, fixture.DisposeCalls);
@@ -311,7 +313,8 @@ public sealed class TtsBindingTests
 
 public sealed class TtsBorrowedFixture : ITtsProvider, ITtsClient, ISetupCommitTarget<TtsSetupChanges>, IInferenceResourceAccess, IDisposable
 {
-    public TtsTransport Transport => TtsTransport.XaiTts;
+    public int TransportReads { get; private set; }
+    public TtsTransport Transport { get { TransportReads++; return TtsTransport.XaiTts; } }
     private readonly InferenceSetupDefinition _definition = new(new("controlled-tts", "Controlled TTS", InferenceImplementationKind.Connect, InferenceTask.SpeechSynthesis), "Managed fixture.");
     public InferenceSetupDefinition SetupDefinition { get { OnDefinition?.Invoke(); return _definition; } }
     public Action? OnDefinition { get; set; }
