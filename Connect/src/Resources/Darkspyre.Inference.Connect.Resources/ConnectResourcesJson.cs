@@ -91,7 +91,7 @@ public static class ConnectResourcesJson
 }
 
 [JsonSourceGenerationOptions(GenerationMode = JsonSourceGenerationMode.Metadata,
-    Converters = [typeof(BatchClientJsonConverter), typeof(ResourceProviderJsonConverter)])]
+    Converters = [typeof(BatchClientJsonConverter<ILlmBatchClient>), typeof(BatchClientJsonConverter<LlmResourceProviderService>)])]
 [JsonSerializable(typeof(LlmResourcePageRequest))]
 [JsonSerializable(typeof(LlmBatchCounts))]
 [JsonSerializable(typeof(LlmBatch))]
@@ -126,26 +126,14 @@ public static class ConnectResourcesJson
 [JsonSerializable(typeof(XaiStoragePublicUrlConfiguration))]
 internal sealed partial class ConnectResourcesJsonContext : JsonSerializerContext;
 
-internal sealed class BatchClientJsonConverter : JsonConverter<ILlmBatchClient>
+internal sealed class BatchClientJsonConverter<T> : JsonConverter<T> where T : class
 {
     public override bool HandleNull => true;
-    public override ILlmBatchClient? Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+    public override T? Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
         => reader.TokenType == JsonTokenType.Null ? null : throw new NotSupportedException("Live batch clients are not portable data.");
-    public override void Write(Utf8JsonWriter writer, ILlmBatchClient value, JsonSerializerOptions options)
+    public override void Write(Utf8JsonWriter writer, T value, JsonSerializerOptions options)
     {
         if (value is null) writer.WriteNullValue();
         else throw new NotSupportedException("Live batch clients are not portable data.");
-    }
-}
-
-internal sealed class ResourceProviderJsonConverter : JsonConverter<LlmResourceProviderService>
-{
-    public override bool HandleNull => true;
-    public override LlmResourceProviderService? Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
-        => reader.TokenType == JsonTokenType.Null ? null : throw new NotSupportedException("Live resource facades are not portable data.");
-    public override void Write(Utf8JsonWriter writer, LlmResourceProviderService value, JsonSerializerOptions options)
-    {
-        if (value is null) writer.WriteNullValue();
-        else throw new NotSupportedException("Live resource facades are not portable data.");
     }
 }
