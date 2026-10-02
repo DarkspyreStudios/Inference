@@ -1878,6 +1878,14 @@ remain explicit operation arguments. `InferenceStreamLimits` contains three posi
 budgets with no implicit defaults. A returned `IRealtimeVoiceSession` owns its socket and tasks;
 the caller disposes it. The facade retires a session returned after cancellation before handoff.
 
+The facade implements `IDisposable` and `IAsyncDisposable`. Retirement fences new work, cancels
+entered provider callbacks and waits for admitted synchronous and asynchronous calls to finish.
+It detaches borrowed providers after drain, including when cancellation callbacks fail. Concurrent
+disposal callers observe the same completion and failure. Providers remain caller-owned. A late,
+unhanded session is disposed before its open operation exits; cancellation and cleanup failures are
+both preserved. A session already returned to its caller is not disposed by facade retirement.
+Retained foreign exceptions can still retain their own type and stack metadata.
+
 `RealtimeSessionConfig` retains the complete typed instructions, audio, tools, turn detection,
 transcription, speed and explicit scoped resumption settings. Tool schemas and hosted-tool data
 are snapshotted before provider entry. `XaiRealtimeOptions.Replace` distinguishes omitted and

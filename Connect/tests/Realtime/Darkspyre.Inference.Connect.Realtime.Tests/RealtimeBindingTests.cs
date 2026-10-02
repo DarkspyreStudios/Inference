@@ -250,7 +250,6 @@ public sealed class RealtimeBindingTests
     [Fact]
     public async Task SynchronousOwnerFenceWinsBeforeLinkedCancellationCallbacksFinish()
     {
-        CancellationToken stop = default;
         CancellationToken enteredToken = default;
         int calls = 0;
         var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -261,11 +260,14 @@ public sealed class RealtimeBindingTests
         {
             Capabilities = (connection, model, token) =>
             {
-                if (++calls == 1) { stop = token; return Task.FromResult(new RealtimeCapabilities()); }
+                if (++calls == 1) return Task.FromResult(new RealtimeCapabilities());
                 enteredToken = token; entered.SetResult(); return release.Task;
             }
         };
         var manager = new RealtimeProviderService([provider]).CreateSettingsManager(new ControlledCommitTarget());
+        // A completed provider operation's linked token no longer represents the manager owner.
+        object lifetime = typeof(RealtimeSettingsManager).GetField("_lifetime", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.GetValue(manager)!;
+        CancellationToken stop = ((CancellationTokenSource)lifetime.GetType().GetField("_stop", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.GetValue(lifetime)!).Token;
         Task? retirement = null;
         CancellationTokenRegistration callback = default;
         try

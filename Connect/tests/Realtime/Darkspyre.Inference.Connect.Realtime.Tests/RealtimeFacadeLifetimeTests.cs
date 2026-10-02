@@ -20,6 +20,46 @@ public sealed class RealtimeFacadeLifetimeTests
     private static Task Cleanup(RealtimeProviderService facade) => (object)facade is IAsyncDisposable owner ? owner.DisposeAsync().AsTask() : Task.CompletedTask;
 
     [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task SynchronousFacadeFenceWinsWhileLinkedCancellationIsDelayed(bool open)
+    {
+        var entered = Signal(); var release = Signal(); var callbackEntered = Signal();
+        using var callbackRelease = new ManualResetEventSlim();
+        CancellationToken enteredToken = default;
+        var session = new ControlledRealtimeSession();
+        async Task Wait(CancellationToken token) { enteredToken = token; entered.TrySetResult(); await release.Task.ConfigureAwait(false); }
+        var provider = new ControlledRealtimeProvider
+        {
+            Capabilities = async (_, _, token) => { await Wait(token).ConfigureAwait(false); return new(); },
+            Open = async (_, _, _, _, _, token) => { await Wait(token).ConfigureAwait(false); return session; }
+        };
+        var facade = new RealtimeProviderService([provider]);
+        using var caller = new CancellationTokenSource();
+        Task request = open ? facade.OpenSessionAsync(Connection, new(), Limits, cancellationToken: caller.Token)
+            : facade.GetCapabilitiesAsync(Connection, cancellationToken: caller.Token);
+        Task? retirement = null; CancellationTokenRegistration callback = default;
+        try
+        {
+            await entered.Task.WaitAsync(Deadline);
+            object lifetime = typeof(RealtimeProviderService).GetField("_lifetime", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(facade)!;
+            CancellationToken stop = ((CancellationTokenSource)lifetime.GetType().GetField("_stop", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(lifetime)!).Token;
+            callback = stop.Register(() => { callbackEntered.TrySetResult(); callbackRelease.Wait(); });
+            retirement = Retire(facade); await callbackEntered.Task.WaitAsync(Deadline);
+            Assert.False(enteredToken.IsCancellationRequested); release.TrySetResult();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => request.WaitAsync(Deadline));
+            Assert.Equal(open ? 1 : 0, session.DisposeCalls); Assert.False(retirement.IsCompleted);
+            callbackRelease.Set(); await retirement.WaitAsync(Deadline);
+        }
+        finally
+        {
+            retirement ??= Cleanup(facade); release.TrySetResult(); callbackRelease.Set(); callback.Dispose();
+            await Record.ExceptionAsync(() => request.WaitAsync(Deadline));
+            await Record.ExceptionAsync(() => retirement.WaitAsync(Deadline));
+        }
+    }
+
+    [Theory]
     [InlineData(false, false)]
     [InlineData(true, false)]
     [InlineData(false, true)]
@@ -64,6 +104,7 @@ public sealed class RealtimeFacadeLifetimeTests
             }
             else await retirement.WaitAsync(Deadline);
             Assert.Equal(open ? 1 : 0, session.DisposeCalls);
+            Assert.Null(typeof(RealtimeProviderService).GetField("_providers", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(facade));
         }
         finally
         {
@@ -108,11 +149,14 @@ public sealed class RealtimeFacadeLifetimeTests
             cleanupEntered.TrySetResult(); await cleanupRelease.Task.ConfigureAwait(false);
             if (cleanupFails) throw failure;
         });
-        var provider = new ControlledRealtimeProvider { Open = async (_, _, _, _, _, token) =>
+        var provider = new ControlledRealtimeProvider
+        {
+            Open = async (_, _, _, _, _, token) =>
         {
             using CancellationTokenRegistration registration = token.Register(() => canceled.TrySetResult());
             entered.TrySetResult(); await release.Task.ConfigureAwait(false); return session;
-        } };
+        }
+        };
         var facade = new RealtimeProviderService([provider]);
         Task<IRealtimeVoiceSession> opening = facade.OpenSessionAsync(Connection, new(), Limits);
         Task? retirement = null;
@@ -159,37 +203,49 @@ public sealed class RealtimeFacadeLifetimeTests
     }
 
     [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public void RetainedDefaultFacadeReleasesSeparatelyCollectibleBorrowedProvider(bool open)
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public void RetainedDefaultFacadeReleasesSeparatelyCollectibleBorrowedProvider(bool open, bool callbackFails)
     {
-        Evidence evidence = ExerciseGeneration(open);
+        Evidence evidence = ExerciseGeneration(open, callbackFails);
         try
         {
-            for (int attempt = 0; evidence.Generation.IsAlive && attempt < 30; attempt++)
+            for (int attempt = 0; (evidence.Generation.IsAlive || evidence.ForeignRoots.Any(root => root.IsAlive)) && attempt < 30; attempt++)
             {
                 GC.Collect(); GC.WaitForPendingFinalizers(); GC.Collect(); Thread.Sleep(10);
             }
             Assert.False(evidence.Generation.IsAlive, "The retained disposed facade roots its separately collectible borrowed provider.");
+            Assert.All(evidence.ForeignRoots, root => Assert.False(root.IsAlive, "A foreign assembly, provider type/instance or method root remains retained."));
         }
         finally { GC.KeepAlive(evidence.Facade); }
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private static Evidence ExerciseGeneration(bool open)
+    private static Evidence ExerciseGeneration(bool open, bool callbackFails)
     {
         var generation = new CollaboratorGeneration(); var weak = new WeakReference(generation);
-        try { return new(weak, ExerciseCallerAsync(generation, open).GetAwaiter().GetResult()); }
+        try
+        {
+            CallerEvidence caller = ExerciseCallerAsync(generation, open, callbackFails).GetAwaiter().GetResult();
+            return new(weak, caller.ForeignRoots, caller.Facade);
+        }
         finally { generation.Unload(); }
     }
 
-    private static async Task<RealtimeProviderService> ExerciseCallerAsync(AssemblyLoadContext generation, bool open)
+    private static async Task<CallerEvidence> ExerciseCallerAsync(AssemblyLoadContext generation, bool open, bool callbackFails)
     {
         var entered = Signal(); var release = Signal(); var canceled = Signal();
+        var failure = new InvalidOperationException("Default-context foreign-lane cancellation callback failure.");
         var executed = new List<(string Method, Guid Mvid)>();
         async Task Wait(CancellationToken token)
         {
-            using CancellationTokenRegistration registration = token.Register(() => canceled.TrySetResult());
+            using CancellationTokenRegistration registration = token.Register(() =>
+            {
+                canceled.TrySetResult();
+                if (callbackFails) throw failure;
+            });
             entered.TrySetResult(); await release.Task.ConfigureAwait(false);
         }
         var session = new ControlledRealtimeSession();
@@ -199,6 +255,8 @@ public sealed class RealtimeFacadeLifetimeTests
         Assert.Same(generation, AssemblyLoadContext.GetLoadContext(fixture));
         Assert.Equal(typeof(RealtimeFacadeLifetimeTests).Assembly.ManifestModule.ModuleVersionId, fixture.ManifestModule.ModuleVersionId);
         Type type = fixture.GetType(typeof(ForeignRealtimeProvider).FullName!, true)!;
+        MethodInfo method = type.GetMethod(open ? nameof(IRealtimeProvider.OpenSessionAsync) : nameof(IRealtimeProvider.GetCapabilitiesAsync))!;
+        Assert.Same(type, method.DeclaringType); Assert.Equal(fixture.ManifestModule.ModuleVersionId, method.Module.ModuleVersionId);
         Assert.Contains(typeof(IRealtimeProvider), type.GetInterfaces());
         Assert.Same(AssemblyLoadContext.Default, AssemblyLoadContext.GetLoadContext(typeof(IRealtimeProvider).Assembly));
         var provider = (IRealtimeProvider)Activator.CreateInstance(type, (Func<CancellationToken, Task<RealtimeCapabilities>>)Capabilities,
@@ -213,14 +271,20 @@ public sealed class RealtimeFacadeLifetimeTests
             await entered.Task.WaitAsync(Deadline); retirement = Retire(facade);
             await canceled.Task.WaitAsync(Deadline); Assert.False(retirement.IsCompleted);
             release.TrySetResult(); await Assert.ThrowsAnyAsync<OperationCanceledException>(() => request.WaitAsync(Deadline));
-            await retirement.WaitAsync(Deadline);
+            if (callbackFails)
+            {
+                Exception? error = await Record.ExceptionAsync(() => retirement.WaitAsync(Deadline));
+                Assert.Contains(failure, Assert.IsType<AggregateException>(error).Flatten().InnerExceptions);
+                Assert.Same(error, await Record.ExceptionAsync(() => Retire(facade).WaitAsync(Deadline)));
+            }
+            else await retirement.WaitAsync(Deadline);
             Assert.Contains(executed, entry => entry.Method == "Transport");
             Assert.Contains(executed, entry => entry.Method == "SetupDefinition");
             Assert.Contains(executed, entry => entry.Method == (open ? "OpenSessionAsync" : "GetCapabilitiesAsync"));
             Assert.DoesNotContain(executed, entry => entry.Method == "Dispose");
             Assert.All(executed, entry => Assert.Equal(fixture.ManifestModule.ModuleVersionId, entry.Mvid));
             Assert.Equal(open ? 1 : 0, session.DisposeCalls);
-            return facade;
+            return new([new(fixture), new(type), new(provider), new(method)], facade);
         }
         finally
         {
@@ -230,7 +294,8 @@ public sealed class RealtimeFacadeLifetimeTests
         }
     }
 
-    private sealed record Evidence(WeakReference Generation, RealtimeProviderService Facade);
+    private sealed record Evidence(WeakReference Generation, WeakReference[] ForeignRoots, RealtimeProviderService Facade);
+    private sealed record CallerEvidence(WeakReference[] ForeignRoots, RealtimeProviderService Facade);
     private sealed class CollaboratorGeneration() : AssemblyLoadContext(isCollectible: true)
     {
         protected override Assembly? Load(AssemblyName name) => Default.Assemblies.FirstOrDefault(assembly => AssemblyName.ReferenceMatchesDefinition(name, assembly.GetName()));
