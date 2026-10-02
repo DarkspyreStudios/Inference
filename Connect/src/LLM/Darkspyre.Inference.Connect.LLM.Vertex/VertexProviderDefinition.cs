@@ -12,7 +12,7 @@ internal static class VertexProviderDefinition
         Transport = LlmTransport.GoogleVertexAi,
         DefaultEndpoint = VertexEndpoints.BaseEndpoint,
         DisplayOrder = 55,
-        SetupSteps =
+        SetupSteps = Array.AsReadOnly<SetupStep>(
         [
             new SetupStep
             {
@@ -35,6 +35,6 @@ internal static class VertexProviderDefinition
                 CompletionRequirement = "A completed response verifies this model and connection.",
                 Troubleshooting = "Check model access, region eligibility, quotas and organization policies."
             }
-        ]
+        ])
     };
 }

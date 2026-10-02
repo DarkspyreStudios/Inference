@@ -33,24 +33,27 @@ internal static class GeminiCacheFiles
         Func<TimeSpan, CancellationToken, Task>? wait = null)
     {
         ValidateDescriptor(descriptor);
+        string key = GeminiApiLlmClient.Key(connection);
         var metadata = new JsonObject();
         if (descriptor.FileName is { Length: > 0 } name) metadata["displayName"] = name;
-        using var body = new MultipartContent("related");
+        var body = new MultipartContent("related");
         body.Add(JsonContent.Create(new JsonObject { ["file"] = metadata }));
-        body.Add(new MediaContent(source, descriptor.ContentType!, descriptor.Bytes, fence));
-        using var request = new HttpRequestMessage(HttpMethod.Post,
+        var media = new GoogleCacheMediaContent(source, descriptor.ContentType!, descriptor.Bytes,
+            descriptor.ContentType == "application/pdf" ? 50L * 1024 * 1024 : MaximumBytes, fence);
+        body.Add(media);
+        var request = new HttpRequestMessage(HttpMethod.Post,
             GeminiApiLlmClient.DefaultEndpoint + "/upload/v1beta/files?uploadType=multipart")
         { Content = body };
-        request.Headers.Add("x-goog-api-key", GeminiApiLlmClient.Key(connection));
-        File observed = await ExchangeAsync(http, request, descriptor, fence, true, token).ConfigureAwait(false);
+        File observed;
+        try { observed = await ExchangeAsync(http, request, key, descriptor, fence, true, token).ConfigureAwait(false); }
+        finally { media.DetachBorrowed(); }
         while (observed.State == "PROCESSING")
         {
             token.ThrowIfCancellationRequested(); fence(token);
             await (wait is null ? Task.Delay(TimeSpan.FromSeconds(5), token) : wait(TimeSpan.FromSeconds(5), token)).ConfigureAwait(false);
             token.ThrowIfCancellationRequested(); fence(token);
-            using var get = new HttpRequestMessage(HttpMethod.Get, observed.Uri);
-            get.Headers.Add("x-goog-api-key", GeminiApiLlmClient.Key(connection));
-            File ready = await ExchangeAsync(http, get, descriptor, fence, false, token).ConfigureAwait(false);
+            var get = new HttpRequestMessage(HttpMethod.Get, observed.Uri);
+            File ready = await ExchangeAsync(http, get, key, descriptor, fence, false, token).ConfigureAwait(false);
             if (ready.Name != observed.Name || ready.Uri != observed.Uri || ready.MimeType != observed.MimeType
                 || ready.Bytes is { } readyBytes && observed.Bytes is { } previousBytes && readyBytes != previousBytes)
                 throw new LlmProviderException("Google staging readiness returned contradictory file identity.", LlmTransport.GoogleGeminiApi);
@@ -60,12 +63,11 @@ internal static class GeminiCacheFiles
     }
 
     [SuppressMessage("Design", "CA1031", Justification = "Untrusted transport and response cleanup diagnostics are replaced by fixed safe facts.")]
-    private static async Task<File> ExchangeAsync(HttpClient http, HttpRequestMessage request,
+    private static async Task<File> ExchangeAsync(HttpClient http, HttpRequestMessage request, string key,
         InferenceResourceDescriptor descriptor, Action<CancellationToken> fence, bool envelope, CancellationToken token)
     {
-        using var consumption = SdkHttpConsumption.Enter(http, token); token = consumption.Token;
-        void Fence() { token.ThrowIfCancellationRequested(); fence(token); consumption.Fence(); }
-        Fence();
+        SdkHttpConsumption.Operation? consumption = null;
+        void Fence() { token.ThrowIfCancellationRequested(); fence(token); consumption?.Fence(); }
         HttpResponseMessage? response = null;
         File? result = null;
         Exception? failure = null;
@@ -73,6 +75,9 @@ internal static class GeminiCacheFiles
         string? requestId = null;
         try
         {
+            consumption = SdkHttpConsumption.Enter(http, token); token = consumption.Token;
+            request.Headers.Add("x-goog-api-key", key);
+            Fence();
             response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token).ConfigureAwait(false);
             status = response.StatusCode; requestId = ProviderHttp.ReadRequestId(response);
             Fence();
@@ -89,6 +94,7 @@ internal static class GeminiCacheFiles
             failure = error is OperationCanceledException ? new OperationCanceledException(token)
                 : new LlmProviderException("Google cache prefix file staging failed.", LlmTransport.GoogleGeminiApi, status, requestId: requestId);
         }
+        using var ownedConsumption = consumption;
         if (response is not null)
         {
             try { response.Dispose(); }
@@ -98,6 +104,13 @@ internal static class GeminiCacheFiles
                     new LlmProviderException("Google cache prefix file response cleanup failed.", LlmTransport.GoogleGeminiApi), descriptor.Reference, response);
                 failure = failure is null ? cleanup : new AggregateException(failure, cleanup);
             }
+        }
+        try { request.Dispose(); }
+        catch (Exception)
+        {
+            Exception cleanup = LlmResourcePreparation.AsCleanupFailure(
+                new LlmProviderException("Google cache prefix file request cleanup failed.", LlmTransport.GoogleGeminiApi), descriptor.Reference, request);
+            failure = failure is null ? cleanup : new AggregateException(failure, cleanup);
         }
         if (failure is not null) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(failure).Throw();
         Fence();
@@ -128,36 +141,4 @@ internal static class GeminiCacheFiles
         return new(name, uri, mime, state, observedBytes);
     }
 
-    private sealed class MediaContent : HttpContent
-    {
-        private readonly Stream _source;
-        private readonly long? _length;
-        private readonly long _maximum;
-        private readonly Action<CancellationToken> _fence;
-        internal MediaContent(Stream source, string mime, long? length, Action<CancellationToken> fence)
-        {
-            _source = source; _length = length; _maximum = mime == "application/pdf" ? 50L * 1024 * 1024 : MaximumBytes;
-            _fence = fence; Headers.ContentType = MediaTypeHeaderValue.Parse(mime);
-        }
-
-        protected override bool TryComputeLength(out long computed) { computed = _length ?? 0; return _length is not null; }
-        protected override Task SerializeToStreamAsync(Stream destination, TransportContext? context) => WriteAsync(destination, CancellationToken.None);
-        protected override Task SerializeToStreamAsync(Stream destination, TransportContext? context, CancellationToken token) => WriteAsync(destination, token);
-        private async Task WriteAsync(Stream destination, CancellationToken token)
-        {
-            byte[] buffer = new byte[32 * 1024];
-            long sent = 0;
-            while (true)
-            {
-                token.ThrowIfCancellationRequested(); _fence(token);
-                int read = await _source.ReadAsync(buffer, token).ConfigureAwait(false);
-                token.ThrowIfCancellationRequested(); _fence(token);
-                if (read == 0) break;
-                sent = checked(sent + read);
-                if (sent > _maximum || _length is { } expected && sent > expected) throw new InvalidOperationException("The staged content exceeds its permitted byte count.");
-                await destination.WriteAsync(buffer.AsMemory(0, read), token).ConfigureAwait(false);
-            }
-            if (_length is { } actual && sent != actual) throw new InvalidOperationException("The staged content does not match its observed byte count.");
-        }
-    }
 }

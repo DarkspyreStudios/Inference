@@ -15,7 +15,7 @@ namespace Darkspyre.Inference.Connect.LLM.Vertex.Tests;
 public sealed class GeminiEstimateJsonTests
 {
     private const string EmptyProjection = """
-        {"Resources":null,"ModelId":"model","Instructions":null,"Messages":[],"Temperature":null,"MaxOutputTokens":null,"TopP":null,"TopK":null,"Seed":null,"PresencePenalty":null,"FrequencyPenalty":null,"StopSequences":[],"ReasoningLevel":null,"StructuredOutput":null,"Tools":[],"HostedTools":[],"MaxHostedTurns":null,"ToolChoice":null,"AllowParallelToolCalls":null,"ConversationKey":null,"PromptCache":null,"ProviderOptions":{},"UnboundContinuationState":0}
+        {"Resources":null,"ModelId":"model","Instructions":null,"Messages":[],"Temperature":null,"MaxOutputTokens":null,"TopP":null,"TopK":null,"Seed":null,"PresencePenalty":null,"FrequencyPenalty":null,"StopSequences":[],"ReasoningLevel":null,"StructuredOutput":null,"Tools":[],"HostedTools":[],"MaxHostedTurns":null,"ToolChoice":null,"AllowParallelToolCalls":null,"ConversationKey":null,"PromptCache":null,"ExplicitCache":null,"ProviderControls":null,"ProviderOptions":{},"UnboundContinuationState":0}
         """;
 
     [Fact]

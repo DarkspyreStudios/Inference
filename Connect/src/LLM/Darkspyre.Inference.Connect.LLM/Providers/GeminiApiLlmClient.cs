@@ -10,7 +10,7 @@ namespace Darkspyre.Inference.Connect.LLM.Providers;
 
 /// <summary>The Gemini API (Google AI Studio) over generateContent, authenticated with an API key header.</summary>
 internal sealed partial class GeminiApiLlmClient(HttpClient http)
-    : LlmClientBase(http), ILlmConnectionPreparation, ILlmContextEstimator, ILlmCatalogCapabilities, ILlmProviderTokenCounter
+    : LlmClientBase(http), ILlmConnectionPreparation, ILlmContextEstimator, ILlmCatalogCapabilities, ILlmProviderTokenCounter, ILlmContextCacheAdapter
 {
     public const string DefaultEndpoint = "https://generativelanguage.googleapis.com";
     internal const string Owner = "darkspyre.connect.llm.gemini-api";

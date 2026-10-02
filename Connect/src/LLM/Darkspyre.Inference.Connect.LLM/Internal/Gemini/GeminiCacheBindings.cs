@@ -60,6 +60,7 @@ internal sealed class GeminiCacheBindings
                 binding.Connection = frozen;
                 binding.Epoch++;
                 binding.Scope = Guid.NewGuid().ToString("N");
+                binding.NativeProject = null;
             }
             binding.Sequence = Math.Max(sequence, binding.Sequence);
             foreach (LlmExplicitCacheReference expired in binding.Observed.Keys
@@ -78,6 +79,30 @@ internal sealed class GeminiCacheBindings
         }
     }
 
+    internal void ObserveNativeProject(Admission admission, string project)
+    {
+        lock (_gate)
+        {
+            Check(admission);
+            if (admission.Binding.NativeProject is { } previous && previous != project) throw Changed();
+            admission.Binding.NativeProject = project;
+        }
+    }
+
+    internal void ValidateEstimate(string connectionId, LlmConnection connection, LlmExplicitCacheReference reference, long sequence)
+    {
+        lock (_gate)
+        {
+            ObjectDisposedException.ThrowIf(_stopped, this);
+            if (!_bindings.TryGetValue(connectionId, out Binding? binding))
+                throw new ArgumentException("The selected cache requires explicit Get validation.", nameof(reference));
+            // Advisory measurement must not resolve credentials or invalidate admitted evidence.
+            var snapshot = connection with { CacheCredentialEvidence = binding.Connection.CacheCredentialEvidence };
+            if (!SameSelection(binding.Connection, snapshot)) return;
+            _ = RequireKnown(Capture(binding, snapshot, sequence), reference, false);
+        }
+    }
+
     internal Observation RequireKnown(Admission operation, LlmExplicitCacheReference reference, bool allowDeleted)
     {
         lock (_gate)
@@ -90,6 +115,20 @@ internal sealed class GeminiCacheBindings
             if (observed.Deleted && !allowDeleted || observed.Uncertain)
                 throw new ArgumentException("The selected cache requires explicit reconciliation.", nameof(reference));
             return observed;
+        }
+    }
+
+    // Recognizing a tuple precedes credential callbacks; final admission still validates the acquired snapshot.
+    internal void RequireObserved(string connectionId, LlmExplicitCacheReference reference, bool allowDeleted)
+    {
+        lock (_gate)
+        {
+            ObjectDisposedException.ThrowIf(_stopped, this);
+            if (reference.ExpiresAt is { } expiry && expiry <= DateTimeOffset.UtcNow)
+                throw new LlmContextCacheUnavailableException(LlmContextCacheUnavailableReason.Expired, reference);
+            if (!_bindings.TryGetValue(connectionId, out Binding? binding) || !binding.Observed.TryGetValue(reference, out Observation? known)
+                || known.Uncertain || known.Deleted && !allowDeleted)
+                throw new ArgumentException("The selected cache requires explicit Get validation.", nameof(reference));
         }
     }
 
@@ -148,6 +187,7 @@ internal sealed class GeminiCacheBindings
     private static bool SameSelection(LlmConnection left, LlmConnection right) =>
         left.Version == right.Version && left.Transport == right.Transport && left.Endpoint == right.Endpoint
         && left.Credential == right.Credential && left.Vertex == right.Vertex && left.ChatCompletions == right.ChatCompletions
+        && left.CacheCredentialEvidence == right.CacheCredentialEvidence
         && SameOverrides(left.CapabilityOverrides, right.CapabilityOverrides)
         && left.ModelCapabilityOverrides.Count == right.ModelCapabilityOverrides.Count
         && left.ModelCapabilityOverrides.All(pair => right.ModelCapabilityOverrides.TryGetValue(pair.Key, out var value) && SameOverrides(pair.Value, value))
@@ -172,6 +212,7 @@ internal sealed class GeminiCacheBindings
         internal long Sequence { get; set; }
         internal long Epoch { get; set; }
         internal string Scope { get; set; } = Guid.NewGuid().ToString("N");
+        internal string? NativeProject { get; set; }
         internal Dictionary<LlmExplicitCacheReference, Observation> Observed { get; } = [];
     }
 

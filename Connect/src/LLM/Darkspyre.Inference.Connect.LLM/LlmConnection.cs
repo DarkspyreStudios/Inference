@@ -14,6 +14,9 @@ public sealed record LlmConnection
     internal LlmAccountUsageObservations.Binding? AccountUsageObservationBinding { get; init; }
     internal Internal.GeminiCacheBindings? CacheBindings { get; init; }
     internal Internal.GeminiCacheBindings.Admission? CacheAdmission { get; init; }
+    internal Internal.ILlmContextCacheOperation? CacheOperation { get; init; }
+    // Equality evidence for this admitted credential source, never a stable principal identity.
+    internal string? CacheCredentialEvidence { get; init; }
 
     // The connection's model list from LlmModelListCache, published by the service for one operation.
     // Never serialized or supplied by a host.

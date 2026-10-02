@@ -11,6 +11,7 @@ namespace Darkspyre.Inference.Connect.LLM;
 /// <summary>Connect-owned metadata for closed connection, request and captured-context contracts.</summary>
 public static class ConnectLlmJson
 {
+    public static JsonTypeInfo<LlmVertexCacheStaging> LlmVertexCacheStaging => Metadata<LlmVertexCacheStaging>();
     public static JsonTypeInfo<XaiMultiAgentControls> XaiMultiAgentControls => Metadata<XaiMultiAgentControls>();
     public static JsonTypeInfo<LlmAgentCapabilities> LlmAgentCapabilities => Metadata<LlmAgentCapabilities>();
     public static JsonTypeInfo<LlmAzureConfiguration> LlmAzureConfiguration => Metadata<LlmAzureConfiguration>();
@@ -271,6 +272,7 @@ public static class ConnectLlmJson
         typeof(CallerAuthorityConverter<ILlmAgentRuntimeAuthentication>),
         typeof(CallerAuthorityConverter<LlmAgentRuntimeLoginTerminalRequest>),
         typeof(CallerAuthorityConverter<ILlmAuthPrompt>)])]
+[JsonSerializable(typeof(LlmVertexCacheStaging))]
 [JsonSerializable(typeof(LlmAzureConfiguration))]
 [JsonSerializable(typeof(LlmAzureApiMode))]
 [JsonSerializable(typeof(LlmAzureAuthenticationMode))]
