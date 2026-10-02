@@ -6,7 +6,7 @@ public sealed class XaiSignInTests
 {
     public static TheoryData<string> InvalidOAuthResults => new()
     {
-        "api-key", "secret-header", "aws", "google", "azure-secret", "azure-certificate",
+        "api-key", "blank-api-key", "secret-header", "aws", "google", "azure-secret", "azure-certificate",
         "empty-token", "whitespace-token", "newline-token", "nul-token"
     };
 
@@ -58,6 +58,7 @@ public sealed class XaiSignInTests
         return kind switch
         {
             "api-key" => credential with { ApiKey = "other-secret" },
+            "blank-api-key" => credential with { ApiKey = " " },
             "secret-header" => credential with { SecretHeaders = new Dictionary<string, string> { ["X-Key"] = "other-secret" } },
             "aws" => credential with { Aws = new() { SecretAccessKey = "other-secret" } },
             "google" => credential with { Google = new() { ServiceAccountJson = "other-secret" } },
