@@ -575,6 +575,9 @@ public sealed class LlmSettings : InferenceSettings<LlmSetupChanges>
     private SetupValidation ConnectionValidation()
     {
         var issues = new List<SetupIssue>();
+        try { RuntimeInputAdmission.Validate(_draft); }
+        catch (NotSupportedException error)
+        { return new([new("runtime-inputs-unsupported", error.Message)]); }
         if (UsesApple)
         {
             try { AppleFoundationModelsClient.ValidateConnection(_draft); }
@@ -699,6 +702,8 @@ public sealed class LlmSettingsManager : InferenceSettingsManager<LlmSettings, L
     protected override async Task<SetupActionResult> RunCoreAsync(LlmSettings settings, SetupActionDescriptor action,
         IProgress<SetupProgress>? progress, CancellationToken cancellationToken)
     {
+        Fence(cancellationToken);
+        RuntimeInputAdmission.Validate(settings.CurrentConnection());
         await using LlmProviderService service = Service(settings, cancellationToken);
         Fence(cancellationToken);
         switch (action.Id)
@@ -732,6 +737,7 @@ public sealed class LlmSettingsManager : InferenceSettingsManager<LlmSettings, L
         SetupChoiceQuery query, CancellationToken cancellationToken)
     {
         Fence(cancellationToken);
+        RuntimeInputAdmission.Validate(settings.CurrentConnection());
         ILlmSetupEnvironment? environment = _environments!.GetValueOrDefault(settings.Transport);
         switch (fieldId)
         {

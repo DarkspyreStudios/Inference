@@ -87,6 +87,8 @@ public sealed class LlmAgentProviderService : IDisposable, IAsyncDisposable
             cancellationToken);
         connection = connection with { AccountUsageObservationBinding = reservation.Bind(connection) };
         cancellationToken.ThrowIfCancellationRequested();
+        ThrowIfOpeningCanceled(cancellationToken);
+        RuntimeInputAdmission.Validate(connection);
         ILlmAgentSession session = await ClientFor(connection.Transport).StartSessionAsync(
             connectionId,
             connection,
@@ -111,6 +113,8 @@ public sealed class LlmAgentProviderService : IDisposable, IAsyncDisposable
             cancellationToken);
         connection = connection with { AccountUsageObservationBinding = reservation.Bind(connection) };
         cancellationToken.ThrowIfCancellationRequested();
+        ThrowIfOpeningCanceled(cancellationToken);
+        RuntimeInputAdmission.Validate(connection);
         ILlmAgentSession session = await ClientFor<ILlmAgentResumeClient>(connection.Transport, "resume").ResumeSessionAsync(
             connectionId,
             connection,
@@ -137,6 +141,8 @@ public sealed class LlmAgentProviderService : IDisposable, IAsyncDisposable
             cancellationToken);
         connection = connection with { AccountUsageObservationBinding = reservation.Bind(connection) };
         cancellationToken.ThrowIfCancellationRequested();
+        ThrowIfOpeningCanceled(cancellationToken);
+        RuntimeInputAdmission.Validate(connection);
         ILlmAgentSession session = await ClientFor<ILlmAgentForkClient>(connection.Transport, "fork").ForkSessionAsync(
             connectionId,
             connection,
@@ -145,6 +151,14 @@ public sealed class LlmAgentProviderService : IDisposable, IAsyncDisposable
             options,
             cancellationToken);
         return await OwnAsync(session, cancellationToken);
+    }
+
+    private void ThrowIfOpeningCanceled(CancellationToken token)
+    {
+        token.ThrowIfCancellationRequested();
+        try { _lifetime.ThrowIfStopping(); }
+        catch (ObjectDisposedException error)
+        { throw new OperationCanceledException("Agent opening was canceled by retirement.", error, token); }
     }
 
     private LlmOperationLifetime.Lease Enter(CancellationToken cancellationToken)

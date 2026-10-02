@@ -181,6 +181,7 @@ internal sealed partial class GeminiApiLlmClient(HttpClient http)
 
     internal static void Validate(LlmConnection connection)
     {
+        RuntimeInputAdmission.Validate(connection);
         if (connection.Transport != LlmTransport.GoogleGeminiApi) { throw new ArgumentException("Wrong Gemini API connection transport."); }
         if (connection.Endpoint.TrimEnd('/') != DefaultEndpoint || connection.AdditionalHeaders.Count != 0
             || connection.Vertex is not null || connection.ChatCompletions is not null)

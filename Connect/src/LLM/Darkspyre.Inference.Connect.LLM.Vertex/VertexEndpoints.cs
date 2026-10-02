@@ -9,6 +9,7 @@ internal static partial class VertexEndpoints
 
     public static void Validate(LlmConnection connection)
     {
+        RuntimeInputAdmission.Validate(connection);
         if (connection.Transport != LlmTransport.GoogleVertexAi || connection.Vertex is not { } config
             || !Enum.IsDefined(config.AuthenticationMode))
         {

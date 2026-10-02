@@ -48,6 +48,7 @@ public sealed class LlmEmbeddingProviderService : IDisposable, IAsyncDisposable
             connectionId,
             cancellationToken);
         ThrowIfRequestCanceled(cancellationToken);
+        RuntimeInputAdmission.Validate(connection);
         connection = EmbeddingRequestData.Snapshot(connection);
         ILlmEmbeddingClient client = _clients.SingleOrDefault(value => value.Supports(connection.Transport))
             ?? throw new NotSupportedException(
