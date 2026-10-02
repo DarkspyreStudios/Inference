@@ -1,5 +1,36 @@
 # Darkspyre.Inference.Connect
 
+## Hosted STT bindings
+
+`Darkspyre.Inference.Connect.STT` binds a host-selected `SttConnection` to the Common hosted
+`ISpeechTranscriptionClient`. `SttProviderService` resolves registered `ISttProvider` adapters.
+`AddSttConnect()` registers the facade only. It registers no xAI adapter, advertises no setup
+definitions without an adapter, and refuses an unregistered transport before credential or resource
+effects. Hosted STT does not replace Tensor's model-instance transcription API.
+
+The connection carries a durable `XaiConnectionSelection`, optional borrowed authorization and copied
+case-insensitive protected headers. `Bind(connection, xai, resources)` passes the matching borrowed
+`XaiFamilyBinding` and caller workspace access to the selected adapter. These collaborators remain
+caller-owned. A session owns its streaming transport; Common clients gain no additional disposal API.
+Adapter operations require one validated snapshot and known-incompatibility validation before
+credential refresh or source effects. Binding validates the existing fixed xAI regional API bases,
+positive timeout and matching selection without acquisition. Direct binding and setup use the shared
+header validator before provider or binding-factory callbacks. Reserved, malformed and newline-bearing
+headers refuse; static authentication headers cannot override the borrowed authorization. The
+five-minute request timeout is a library default, not a provider limit.
+
+`ConnectSttJson` exports exact connection/transport/setup data getters with a complete generated graph.
+Live authorization, family bindings, factories, services and sessions refuse nonnull portable JSON.
+Diagnostics hide connection and header values. Setup preserves all nullable transcription/streaming
+defaults and explicit stream budgets; omitted limits remain omitted. Commands still require explicit
+valid budgets before opening a stream. Field edits are effect-free. Only registered adapters supply
+capability checks. The disposable settings manager fences and drains admitted operations and saves,
+then releases borrowed targets/factories/access without disposing them. Its own synchronous retirement
+fence returns structured cancellation for admitted checks/queries even before linked cancellation
+propagates. Admitted saves preserve the host's actual committed or uncertain outcome.
+Checks retain matching borrowed authorization. Portable setup changes omit that runtime authority;
+the selected connection ID remains data, and only explicit named header edits reach the commit target.
+
 > **Proprietary software.** Copyright © 2026 Brandon Mathis. All rights reserved.
 > No permission is granted to use, copy, modify, or distribute this software
 > without prior written authorization. See [LICENSE.md](LICENSE.md).
@@ -993,6 +1024,40 @@ remain separate; ComfyUI does not advertise a built-in workflow catalog.
 
 The shared [`XaiFamilyBinding` contract](docs/media-bindings.md) uses explicit selection and the
 existing credential-access owner. It does not register or qualify an xAI Image transport.
+
+## Video contracts
+
+`Darkspyre.Inference.Connect.Video` supplies `VideoConnection`, `IVideoTransport`,
+`VideoProviderService.Bind(connection, xai, resources)` and the five-operation Common
+`IVideoInference` facade. Capability lookup, submit, one-poll lookup and owned download
+remain explicit calls. Materialization streams actual downloaded bytes into the borrowed
+caller resource store and atomically commits content with session selection. It retains
+actual nullable MIME, duration and expiry instead of inferring them from request policy.
+Returned download streams hold their operation lease until closure. Facade disposal closes
+owned downloads, fences new operations and drains admitted work before detaching borrowed
+transports, bindings and resource access. Callers can dispose the bound facade through
+`IDisposable` or `IAsyncDisposable`. Returned-stream operations check the synchronous owner
+fence before effects and before returning, even when linked cancellation propagation is delayed.
+Cancellation during successful materialization cleanup retains the observed committed reference,
+session-selection outcome and revision in `InferenceResourceOperationCanceledException`.
+
+`XaiVideoOptions` is the fixed Video-owned subtype for Files-owned storage controls, signed
+upload destinations and explicit user data. Common metadata refuses these provider options;
+`ConnectVideoJson` owns their complete generation/edit/extension and scoped receipt graph.
+Serialized job/output scope is data, not proof of authority. Each implemented transport owns
+receipt validation and download-origin authorization before effects. Lookup and download receive
+the same borrowed binding for adapter-owned validation before acquisition or refresh.
+Materialization performs one download, not a second credential acquisition. Extension requests
+refuse an explicit `User` instead of dropping it. New settings carry an explicit xAI connection selection;
+rendering, opening and saving do not acquire credentials. Only the explicit capability action
+uses the supplied borrowed binding factory. Header changes use the typed protected commit target.
+The existing LLM header parser rejects reserved or malformed explicit and acquired-snapshot
+headers before credential refresh. The bound facade copies source bytes at operation admission;
+the shared `BinaryMediaSource` data constructor still borrows its input.
+
+`AddVideoConnect` registers the family service only. No xAI Video transport is registered, so
+binding or opening settings for that unimplemented transport fails as unsupported. The data and
+SDK contracts do not establish provider availability, wire compatibility or download-origin safety.
 
 ## Host-executed tools
 
