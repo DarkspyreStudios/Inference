@@ -10,6 +10,36 @@ public sealed class HttpGenerationLifetimeTests
     private static readonly TimeSpan Bound = TimeSpan.FromSeconds(5);
 
     [Fact]
+    public async Task SynchronousOwnerFenceRejectsLateHeadersWhileLinkedCancellationIsStillBlocked()
+    {
+        var handler = new HeldHandler(); await using ServiceProvider root = CreateRoot(handler);
+        SdkHttpGenerationPool pool = root.GetRequiredService<SdkHttpGenerationPool>(); using HttpClient client = pool.CreateClient(Pipeline);
+        Task<HttpResponseMessage> sending = client.GetAsync("https://controlled.invalid/", HttpCompletionOption.ResponseHeadersRead);
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        Task? retirement = null;
+        CancellationTokenRegistration blocker = default;
+        try
+        {
+            await handler.Entered.Task.WaitAsync(Bound);
+            var lifetime = (LlmOperationLifetime)typeof(SdkHttpGenerationPool).GetField("_lifetime", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.GetValue(pool)!;
+            var stop = (CancellationTokenSource)typeof(LlmOperationLifetime).GetField("_stop", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.GetValue(lifetime)!;
+            blocker = stop.Token.Register(() => { entered.TrySetResult(); release.Task.GetAwaiter().GetResult(); });
+            retirement = pool.DisposeAsync().AsTask(); await entered.Task.WaitAsync(Bound);
+            Assert.False(handler.Token.IsCancellationRequested);
+            handler.Release.TrySetResult(); await Assert.ThrowsAnyAsync<OperationCanceledException>(() => sending);
+            Assert.Equal(1, handler.Content.Disposals); Assert.False(retirement.IsCompleted);
+            release.TrySetResult(); await retirement.WaitAsync(Bound);
+        }
+        finally
+        {
+            retirement ??= pool.DisposeAsync().AsTask(); handler.Release.TrySetResult(); release.TrySetResult();
+            await ObserveAsync(sending); await ObserveAsync(retirement);
+            blocker.Dispose();
+        }
+    }
+
+    [Fact]
     public async Task IgnoringSendDrainsAndLateResponseIsDisposedBeforeSharedRetirementCompletes()
     {
         var handler = new HeldHandler();
@@ -209,9 +239,11 @@ public sealed class HttpGenerationLifetimeTests
         public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public TaskCompletionSource CallbackEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public TrackedContent Content { get; } = new();
+        public CancellationToken Token { get; private set; }
         public int Disposals { get; private set; }
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
+            Token = cancellationToken;
             using CancellationTokenRegistration registration = cancellationToken.Register(() =>
             { CallbackEntered.TrySetResult(); if (callbackFailure is not null) throw callbackFailure; });
             Entered.TrySetResult(); await Release.Task; return new(HttpStatusCode.OK) { Content = Content };

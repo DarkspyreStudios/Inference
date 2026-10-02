@@ -25,10 +25,12 @@ public sealed class HttpGenerationCompositionTests
         Assert.NotNull(typeof(ServiceCollectionExtensions).GetMethod("ConfigureInferenceHttpPipelines", [typeof(IServiceCollection), typeof(Action<>).MakeGenericType(options)]));
     }
 
-    [Fact]
-    public void ActualDefaultAddLlmConnectRootRetiresWithoutFactoryTimerRoots()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ActualDefaultAddLlmConnectRootRetiresWithoutFactoryTimerRoots(bool families)
     {
-        WeakReference[] roots = ExerciseGeneration();
+        WeakReference[] roots = ExerciseGeneration(families);
         for (int attempt = 0; roots.Any(root => root.IsAlive) && attempt < 30; attempt++)
         {
             GC.Collect(); GC.WaitForPendingFinalizers(); GC.Collect(); Thread.Sleep(10);
@@ -37,7 +39,7 @@ public sealed class HttpGenerationCompositionTests
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private static WeakReference[] ExerciseGeneration()
+    private static WeakReference[] ExerciseGeneration(bool families)
     {
         var generation = new HttpGeneration();
         try
@@ -47,10 +49,22 @@ public sealed class HttpGenerationCompositionTests
             Assert.Same(generation, AssemblyLoadContext.GetLoadContext(core));
             Assert.Equal(typeof(LlmProviderService).Assembly.ManifestModule.ModuleVersionId, core.ManifestModule.ModuleVersionId);
             Type caller = fixture.GetType(typeof(ForeignCaller).FullName!, true)!;
-            MethodInfo method = caller.GetMethod(nameof(ForeignCaller.Run))!;
+            MethodInfo method = caller.GetMethod(families ? nameof(ForeignCaller.RunAllFamilies) : nameof(ForeignCaller.Run))!;
             var result = (string)method.Invoke(null, null)!;
             Assert.Contains("Messages", result, StringComparison.Ordinal);
-            return [new(generation), new(fixture), new(core), new(caller), new(method)];
+            var roots = new List<WeakReference> { new(generation), new(fixture), new(core), new(caller), new(method) };
+            if (families)
+            {
+                Assembly[] expected = [typeof(Azure.ServiceCollectionExtensions).Assembly, typeof(Vertex.ServiceCollectionExtensions).Assembly,
+                    typeof(TTS.TtsProviderService).Assembly, typeof(Audio.AudioProviderService).Assembly, typeof(Image.ImageProviderService).Assembly];
+                foreach (Assembly owner in expected)
+                {
+                    Assembly actual = Assert.Single(generation.Assemblies, assembly => assembly.GetName().Name == owner.GetName().Name);
+                    Assert.Equal(owner.ManifestModule.ModuleVersionId, actual.ManifestModule.ModuleVersionId);
+                    Assert.Same(generation, AssemblyLoadContext.GetLoadContext(actual)); roots.Add(new(actual));
+                }
+            }
+            return roots.ToArray();
         }
         finally { generation.Unload(); }
     }
@@ -74,10 +88,34 @@ public sealed class HttpGenerationCompositionTests
         public static string Run()
         {
             var services = new ServiceCollection(); services.AddSingleton<ILlmConnectionSource, EmptySource>(); services.AddLlmConnect();
+            return Resolve(services, false);
+        }
+        public static string RunAllFamilies()
+        {
+            var services = new ServiceCollection(); services.AddSingleton<ILlmConnectionSource, EmptySource>(); services.AddLlmConnect();
+            Azure.ServiceCollectionExtensions.AddLlmConnectAzure(services);
+            Vertex.ServiceCollectionExtensions.AddLlmConnectVertex(services);
+            TTS.ServiceCollectionExtensions.AddTtsConnect(services);
+            Audio.ServiceCollectionExtensions.AddAudioConnect(services);
+            Image.ServiceCollectionExtensions.AddImageConnect(services);
+            return Resolve(services, true);
+        }
+        private static string Resolve(ServiceCollection services, bool families)
+        {
             using ServiceProvider provider = services.BuildServiceProvider();
             using IServiceScope scope = provider.CreateScope();
             Assert.Same(scope.ServiceProvider.GetRequiredService<LlmProviderService>(), scope.ServiceProvider.GetRequiredService<ILlmFileClient>());
             Assert.Same(scope.ServiceProvider.GetRequiredService<LlmProviderService>(), scope.ServiceProvider.GetRequiredService<IDocumentSearchClient>());
+            if (families)
+            {
+                Assert.NotEmpty(scope.ServiceProvider.GetRequiredService<TTS.TtsProviderService>().SetupDefinitions);
+                Assert.NotEmpty(scope.ServiceProvider.GetRequiredService<Audio.AudioProviderService>().SetupDefinitions);
+                Assert.NotEmpty(scope.ServiceProvider.GetRequiredService<Image.ImageProviderService>().SetupDefinitions);
+            }
+            var configuration = new InferenceHttpPipelineOptions();
+            Assert.Throws<NotSupportedException>(() => JsonSerializer.Serialize(configuration, HttpConfigurationJsonContext.Default.InferenceHttpPipelineOptions));
+            Assert.Null(JsonSerializer.Deserialize("null", HttpConfigurationJsonContext.Default.InferenceHttpPipelineOptions));
+            Assert.Same(typeof(ForeignCaller).Assembly, HttpConfigurationJsonContext.Default.GetType().Assembly);
             return JsonSerializer.Serialize(new LlmChatRequest { ModelId = "manual", Messages = [new("user", "actual")] }, ConnectLlmJson.ChatRequest);
         }
     }

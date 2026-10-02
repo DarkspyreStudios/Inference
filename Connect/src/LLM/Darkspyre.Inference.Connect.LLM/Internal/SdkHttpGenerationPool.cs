@@ -9,7 +9,7 @@ internal sealed class SdkHttpGenerationPool : IHttpClientFactory, IDisposable, I
 {
     private readonly Lock _gate = new();
     private readonly LlmOperationLifetime _lifetime = new();
-    private readonly Dictionary<string, Lazy<SdkHttpPipelineEntry>> _active = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, SdkHttpPipelineEntry> _active = new(StringComparer.Ordinal);
     private readonly HashSet<SdkHttpPipelineEntry> _entries = [];
     private readonly HashSet<SdkHttpClientLease> _clients = [];
     private IServiceProvider? _services;
@@ -34,17 +34,25 @@ internal sealed class SdkHttpGenerationPool : IHttpClientFactory, IDisposable, I
         SdkHttpRegistration.ValidateName(name);
         using LlmOperationLifetime.Lease operation = _lifetime.Enter(default);
         if (_mode == InferenceHttpCreationMode.BorrowHostFactory) return _services!.GetRequiredService<IHttpClientFactory>().CreateClient(name);
-        Lazy<SdkHttpPipelineEntry> selected;
+        SdkHttpPipelineEntry entry;
         lock (_gate)
         {
-            if (!_active.TryGetValue(name, out selected!) || (selected.IsValueCreated && selected.Value.Expired))
-                _active[name] = selected = new(() => BuildEntry(name));
+            if (!_active.TryGetValue(name, out entry!) || entry.Expired)
+            {
+                entry = new(this);
+                SdkHttpPipelineEntry created = entry;
+                entry.Initialization = new(() => { BuildEntry(name, created); return true; });
+                _active[name] = entry;
+                _entries.Add(entry);
+            }
+            entry.Holders++;
         }
-        SdkHttpPipelineEntry entry = selected.Value;
-        var client = new SdkHttpClientLease(this, entry);
-        lock (_gate) { _clients.Add(client); entry.Holders++; }
+        SdkHttpClientLease? client = null;
         try
         {
+            _ = entry.Initialization!.Value;
+            client = new(this, entry);
+            lock (_gate) _clients.Add(client);
             foreach (Action<HttpClient> action in _options!.Get(name).HttpClientActions) action(client);
             Fence(operation.Token);
             entry.StartTimer(_clock!);
@@ -52,18 +60,27 @@ internal sealed class SdkHttpGenerationPool : IHttpClientFactory, IDisposable, I
         }
         catch (Exception original)
         {
+            if (client is null)
+            {
+                lock (_gate)
+                {
+                    if (_active.TryGetValue(name, out SdkHttpPipelineEntry? current) && ReferenceEquals(current, entry)) _active.Remove(name);
+                    entry.Expired = true; entry.Holders--; StartUnusedRetirement(entry);
+                }
+                throw;
+            }
             try { client.Dispose(); }
             catch (Exception cleanup) { throw new AggregateException(original, cleanup); }
             throw;
         }
     }
 
-    private SdkHttpPipelineEntry BuildEntry(string name)
+    private void BuildEntry(string name, SdkHttpPipelineEntry entry)
     {
         HttpClientFactoryOptions options = _options!.Get(name);
         IServiceScope? scope = options.SuppressHandlerScope ? null : _services!.CreateScope();
-        var entry = new SdkHttpPipelineEntry(this, scope, options.HandlerLifetime);
-        lock (_gate) _entries.Add(entry);
+        entry.Scope = scope;
+        entry.Lifetime = options.HandlerLifetime;
         var builder = new SdkHttpMessageHandlerBuilder(name, scope?.ServiceProvider ?? _services!, options.HandlerLifetime, _configuration!);
         try
         {
@@ -76,15 +93,16 @@ internal sealed class SdkHttpGenerationPool : IHttpClientFactory, IDisposable, I
             configure(builder);
             entry.Handler = builder.Build();
             entry.Invoker = new(entry.Handler, disposeHandler: false);
-            return entry;
         }
         catch (Exception original)
         {
             var errors = new List<Exception> { original };
-            foreach (DelegatingHandler handler in builder.AdditionalHandlers.Distinct())
+            var components = new HashSet<HttpMessageHandler>(builder.AdditionalHandlers);
+            if (builder.CreatedPrimary is { } primary) components.Add(primary);
+            var children = new HashSet<HttpMessageHandler>(components.OfType<DelegatingHandler>()
+                .Select(handler => handler.InnerHandler).OfType<HttpMessageHandler>());
+            foreach (HttpMessageHandler handler in components.Where(handler => !children.Contains(handler)))
                 try { handler.Dispose(); } catch (Exception cleanup) { errors.Add(cleanup); entry.Failures.Add((handler, cleanup)); }
-            if (builder.CreatedPrimary is { } primary)
-                try { primary.Dispose(); } catch (Exception cleanup) { errors.Add(cleanup); entry.Failures.Add((primary, cleanup)); }
             if (entry.Failures.Count == 0)
                 try { entry.DisposeScopeAsync().GetAwaiter().GetResult(); } catch (Exception cleanup) { errors.Add(cleanup); entry.Failures.Add((scope!, cleanup)); }
             ThrowFailures(errors); throw;
@@ -162,10 +180,13 @@ internal sealed class SdkHttpGenerationPool : IHttpClientFactory, IDisposable, I
     public ValueTask DisposeAsync() => new(_lifetime.RetireAsync(ReleaseAsync));
 }
 
-internal sealed class SdkHttpPipelineEntry(SdkHttpGenerationPool owner, IServiceScope? scope, TimeSpan lifetime)
+internal sealed class SdkHttpPipelineEntry(SdkHttpGenerationPool owner)
 {
     private readonly Lock _timerGate = new();
     private ITimer? _timer;
+    internal Lazy<bool>? Initialization { get; set; }
+    internal IServiceScope? Scope { get; set; }
+    internal TimeSpan Lifetime { get; set; }
     internal HttpMessageHandler? Handler { get; set; }
     internal HttpMessageInvoker? Invoker { get; set; }
     internal int Holders { get; set; }
@@ -177,15 +198,15 @@ internal sealed class SdkHttpPipelineEntry(SdkHttpGenerationPool owner, IService
     {
         lock (_timerGate)
         {
-            if (lifetime != Timeout.InfiniteTimeSpan && _timer is null)
-                _timer = clock.CreateTimer(_ => owner.Expire(this), null, lifetime, Timeout.InfiniteTimeSpan);
+            if (Lifetime != Timeout.InfiniteTimeSpan && _timer is null)
+                _timer = clock.CreateTimer(_ => owner.Expire(this), null, Lifetime, Timeout.InfiniteTimeSpan);
         }
     }
     internal async Task DisposeScopeAsync()
     {
-        if (scope is IAsyncDisposable asynchronous) await asynchronous.DisposeAsync().ConfigureAwait(false);
-        else scope?.Dispose();
-        scope = null;
+        if (Scope is IAsyncDisposable asynchronous) await asynchronous.DisposeAsync().ConfigureAwait(false);
+        else Scope?.Dispose();
+        Scope = null;
     }
     internal async Task CleanupAsync()
     {
@@ -203,6 +224,7 @@ internal sealed class SdkHttpPipelineEntry(SdkHttpGenerationPool owner, IService
                 catch (Exception error) { errors.Add(error); }
         }
         Released = errors.Count == 0;
+        Initialization = null;
         SdkHttpGenerationPool.ThrowFailures(errors);
     }
 }

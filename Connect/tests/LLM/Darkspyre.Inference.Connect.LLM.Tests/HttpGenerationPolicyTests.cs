@@ -1,5 +1,6 @@
 using System.Diagnostics.Metrics;
 using Darkspyre.Inference.Connect.LLM.Internal;
+using Darkspyre.Inference.Connect.LLM.Providers;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Http;
 using Microsoft.Extensions.Http.Logging;
@@ -9,6 +10,21 @@ namespace Darkspyre.Inference.Connect.LLM.Tests;
 public sealed class HttpGenerationPolicyTests
 {
     private const string Pipeline = "OpenAiResponsesLlmClient";
+
+    [Fact]
+    public async Task PreRegisteredTypedClientAndPublicTypedFactoryPolicyRemainAuthoritative()
+    {
+        using var borrowedHttp = new HttpClient(); var existing = new OpenAiResponsesLlmClient(borrowedHttp);
+        var services = new ServiceCollection(); services.AddSingleton(existing); services.AddLlmConnect();
+        await using ServiceProvider first = services.BuildServiceProvider();
+        Assert.Same(existing, first.GetRequiredService<OpenAiResponsesLlmClient>());
+        var typed = new ControlledTypedFactory(); services = new(); services.AddSingleton<ITypedHttpClientFactory<OpenAiResponsesLlmClient>>(typed); services.AddLlmConnect();
+        await using ServiceProvider second = services.BuildServiceProvider();
+        Assert.Same(typed, second.GetRequiredService<ITypedHttpClientFactory<OpenAiResponsesLlmClient>>());
+        _ = second.GetRequiredService<OpenAiResponsesLlmClient>();
+        Assert.Equal(1, typed.Calls); Assert.IsType<SdkHttpClientLease>(typed.Client);
+        await first.DisposeAsync(); Assert.Equal(TimeSpan.FromSeconds(100), borrowedHttp.Timeout);
+    }
 
     [Fact]
     public async Task AllSixteenRegistrationsPreserveDefaultsAndSelectedMeter()
@@ -258,5 +274,11 @@ public sealed class HttpGenerationPolicyTests
     {
         public int Disposals { get; private set; }
         protected override void Dispose(bool disposing) { if (disposing) Disposals++; base.Dispose(disposing); }
+    }
+    private sealed class ControlledTypedFactory : ITypedHttpClientFactory<OpenAiResponsesLlmClient>
+    {
+        public int Calls { get; private set; }
+        public HttpClient? Client { get; private set; }
+        public OpenAiResponsesLlmClient CreateClient(HttpClient httpClient) { Calls++; Client = httpClient; return new(httpClient); }
     }
 }

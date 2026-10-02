@@ -63,6 +63,11 @@ internal sealed class SdkHttpResponseLease : HttpContent
     internal void EndStreamCleanup()
     { lock (_gate) { _cleanup--; ReleaseIfComplete(); } }
     internal void Failed(object resource, Exception error) => _owner.RecordFailure(_entry, resource, error);
+    internal void StreamCleanupFailed(Stream stream, Exception error)
+    {
+        lock (_gate) { _disposing = true; _disposed = true; }
+        _owner.RecordFailure(_entry, (this, stream), error);
+    }
     protected override void Dispose(bool disposing)
     {
         if (!disposing) return;
@@ -138,9 +143,12 @@ internal sealed class SdkHttpBodyStream(SdkHttpResponseLease owner, Stream strea
         try
         {
             try { await stream.DisposeAsync().ConfigureAwait(false); }
-            catch (Exception error) { errors.Add(error); owner.Failed(stream, error); }
-            try { owner.Dispose(); }
-            catch (Exception error) { errors.Add(error); }
+            catch (Exception error) { errors.Add(error); owner.StreamCleanupFailed(stream, error); }
+            if (errors.Count == 0)
+            {
+                try { owner.Dispose(); }
+                catch (Exception error) { errors.Add(error); }
+            }
         }
         finally
         {
