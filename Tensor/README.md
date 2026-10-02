@@ -340,6 +340,9 @@ release-only cleanup access; explicit terminal shutdown can finish after they dr
 shutdown/disposal calls share cleanup and failure. A cancelled shutdown wait does not cancel cleanup
 or reopen admission. Supplier refusals without structured safe-Busy proof report FailedRequiresProcessExit;
 no diagnostic text is parsed to invent counts or recoverability.
+An initialized supplier that remains Ready after its guard refuses teardown reports Busy with zero
+owner leases and possible external native resources. Its control is retained for explicit retry after
+those resources drain; the admission fence stays closed. Unknown or poisoned refusals remain terminal.
 
 If acquisition cancellation is followed by model-lease cleanup failure, the runtime owner retains
 that exact cleanup handle and both failures remain visible. It does not count failed cleanup as
@@ -347,6 +350,13 @@ release or invoke native shutdown over it. Explicit shutdown may retry only that
 failure reports FailedRequiresProcessExit with the outstanding ownership, while successful release
 permits guarded terminal shutdown. Drained terminal owners drop supplier/catalog task references
 without disposing borrowed collaborators.
+
+A failed model load/unload that cannot complete cleanup keeps its pack/runtime ownership. New loading
+or execution refuses until release-only cleanup succeeds, rather than replacing those held leases.
+Qwen stops new operational admissions synchronously and shares the pending cleanup attempt. Stop still
+returns admission and publishes Stopped/Failed through the existing lifecycle; a completed failed Stop
+can be explicitly retried for release only. Dispose waits for actual cleanup and preserves its shared
+failure for repeated callers, even if a later explicit Stop successfully releases the resources.
 
 Plans deep-snapshot ordered GGML candidates and their file declarations. Each candidate has a
 distinct ID, exact build/RID and concrete GGML backend. Null candidates retain the standard-package

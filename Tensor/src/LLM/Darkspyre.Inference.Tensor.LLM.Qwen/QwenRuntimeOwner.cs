@@ -388,10 +388,25 @@ public sealed class QwenRuntimeOwner : ITensorRuntimeOwner
             }
         }
         bool released;
-        try { released = _supplier!.Shutdown().Released; }
+        bool safeBusy = false;
+        try
+        {
+            IQwenGgmlRuntime supplier = _supplier!;
+            bool readyBefore = _current is not null && supplier.State == GgmlRuntimeState.Ready;
+            released = supplier.Shutdown().Released;
+            // The real guard leaves Ready unchanged only when it refused teardown over live external resources.
+            safeBusy = !released && readyBefore && supplier.State == GgmlRuntimeState.Ready;
+        }
         catch (Exception error) when (error is not OutOfMemoryException) { released = false; }
         lock (_gate)
         {
+            if (safeBusy)
+            {
+                _state = TensorRuntimeState.Stopping;
+                _shutdown = null;
+                return new(TensorRuntimeShutdownState.Busy, Guid.NewGuid(), DateTimeOffset.UtcNow, 0, true,
+                    [new("native-resources-active", "The guarded supplier refused teardown while its external native resources remain active.")]);
+            }
             _state = released ? TensorRuntimeState.Stopped : TensorRuntimeState.RequiresProcessRestart;
             if (released) { _current = null; _nativeMayRemain = false; }
             // No admitted work remains. Drop drained supplier/catalog task roots, not borrowed dependencies.

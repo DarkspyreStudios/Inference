@@ -9,10 +9,16 @@ public sealed class QwenRuntimeOwnerTests
     private static TensorSharpBuildIdentity Build => new("2.8.6.8", new('a', 64), new('b', 40));
     private const string Rid = "linux-x64";
     private static TensorRuntimeCandidate Candidate(string id, TensorBackendKind backend) => new(
-        new(id, "/controlled/" + id + "/libGgmlOps.so", id, Build, Rid), backend,
+        new(id, Path.Combine(Path.GetTempPath(), "controlled-qwen", id, "libGgmlOps.so"), id, Build, Rid), backend,
         [new("libGgmlOps.so", 1, new('c', 64))]);
     private static TensorBackendProbeRequest Request(TensorBackendKind backend = TensorBackendKind.Auto) =>
         new(Guid.NewGuid(), QwenSetup.Definition.Implementation.Id, backend, Rid);
+
+    internal static QwenRuntimeOwner CreateControlledCpuOwner(out Supplier supplier)
+    {
+        supplier = new();
+        return new(new(Build, Rid, [Candidate("cpu", TensorBackendKind.GgmlCpu)]), supplier);
+    }
 
     [Fact]
     public void ConstructionMetadataAndPlanComparisonHaveNoSupplierEffects()
@@ -322,7 +328,7 @@ public sealed class QwenRuntimeOwnerTests
         candidate.Identity.Variant, QwenRuntimeOwner.ToSupplier(candidate.Backend),
         candidate.Files.Select(file => new GgmlNativeFile(file.RelativePath, file.Size, file.Sha256)).ToArray()) { NativeAbi = Build.NativeAbi };
 
-    private sealed class Supplier : IQwenGgmlRuntime
+    internal sealed class Supplier : IQwenGgmlRuntime
     {
         public TensorSharpBuildIdentity Build => QwenRuntimeOwnerTests.Build;
         public string Rid => QwenRuntimeOwnerTests.Rid;
