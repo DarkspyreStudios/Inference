@@ -10,6 +10,8 @@ namespace Darkspyre.Inference.Connect.LLM.Internal;
 /// <summary>Effect-free Google cache data conversion. Callers supply independently validated routing and scope.</summary>
 internal static partial class GoogleCacheData
 {
+    private const long MaximumDurationTicks = 315576000000L * TimeSpan.TicksPerSecond + TimeSpan.TicksPerSecond - 1;
+
     internal static LlmContextCacheCreate Snapshot(LlmContextCacheCreate request, DateTimeOffset now)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -17,8 +19,7 @@ internal static partial class GoogleCacheData
         ArgumentNullException.ThrowIfNull(request.Correlation);
         if ((request.TimeToLive is null) == (request.ExpiresAt is null))
             throw new ArgumentException("Cache creation requires exactly one explicit TTL or expiry.");
-        if (request.TimeToLive is { } ttl && ttl <= TimeSpan.Zero)
-            throw new ArgumentOutOfRangeException(nameof(request), "Cache TTL must be positive.");
+        if (request.TimeToLive is { } ttl) _ = Duration(ttl);
         if (request.ExpiresAt is { } expiry && expiry <= now)
             throw new ArgumentOutOfRangeException(nameof(request), "Cache expiry must be in the future.");
         if (request.DisplayName is { } display && display != request.Correlation.ReconciliationDisplayName)
@@ -45,6 +46,8 @@ internal static partial class GoogleCacheData
     internal static string Duration(TimeSpan value)
     {
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(value, TimeSpan.Zero);
+        // The protobuf Duration seconds/nanos representation, not a cache/model TTL policy.
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(value.Ticks, MaximumDurationTicks);
         return ((decimal)value.Ticks / TimeSpan.TicksPerSecond).ToString("0.#######", CultureInfo.InvariantCulture) + "s";
     }
 
