@@ -115,6 +115,7 @@ internal abstract class LlmClientBase(HttpClient http) : ILlmClient
         IReadOnlySet<string>? nativeToolNames = null)
     {
         EnsureTransport(connection);
+        ExplicitCaches.Validate(request, capabilities.SupportsExplicitCache);
         RequestJson.ValidateSamplingOptions(connection, request);
         HostedTools.Validate(request, capabilities);
         ClientTools.Validate(request, capabilities.SupportsShellTools);

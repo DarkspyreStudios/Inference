@@ -392,6 +392,9 @@ authority before model access or native execution. It does not materialize those
 Qwen reports `SupportsStreamingUsage = true` because streamed completions report final usage.
 Qwen reports no automatic prompt caching, cache-hint acceptance or supported cache retentions in
 `LlmCapabilities.PromptCache`. It ignores the advisory `LlmInferenceRequest.PromptCache` hint.
+Qwen reports `SupportsExplicitCache=false` and rejects a supplied `ExplicitCache` selection
+before model materialization or native entry. Provider-native cache receipts do not transfer
+to the local engine.
 Qwen supports top-p, top-k, seed, presence and frequency penalties, and up to 16 non-empty stop
 strings. The Common request maps directly to TensorSharp's `SamplingConfig`, including requests
 without a structured-output grammar. Top-p, top-k and seed require a positive temperature; null

@@ -593,6 +593,8 @@ public sealed class QwenLlmInference : ITensorLlmInference
 
     private static void ValidateRequest(LlmInferenceRequest request)
     {
+        if (request.ExplicitCache is not null)
+            throw new InferenceException(InferenceFailureCode.UnsupportedFeature, "Qwen does not implement native provider cache selection.");
         if (request.Tools.Any(tool => tool is not LlmToolDefinition)
             || request.Messages.Any(message => message.ToolCalls.Any(call => call is not LlmToolCall)
                 || message.ToolResults.Any(result => result is not LlmToolResult)))

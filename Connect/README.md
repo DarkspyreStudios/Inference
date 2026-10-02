@@ -1289,8 +1289,16 @@ by these declarations.
 
 `ILlmContextCacheClient` declares explicit create, get, one-page list, expiry update and delete
 operations. Its request, correlation, receipt, usage, page and delete-result records have exact
-type-name getters on `ConnectLlmJson`. These declarations are inert: no facade cache binding or
-provider cache implementation is registered. They do not enable cached generation.
+type-name getters on `ConnectLlmJson`. `BindContextCacheAsync` validates a selected connection
+without effects and refuses because no provider cache implementation is registered.
+`LlmChatRequest.ExplicitCache` and Common's request carry the same data-only selection.
+`SupportsExplicitCache` defaults to false on both capability shapes; overrides cannot enable it.
+Every built-in route refuses a supplied selection before credential refresh, catalog discovery,
+counting, remote requests or engine/process entry. Registered implementations own their declared
+capability and selection validation. Vertex exact cached counting refuses independently of
+generation support. SelfHost does not forward native provider cache receipts. Portable projection
+preserves the selection; advisory `PromptCache` remains separate. These contracts do not create,
+renew, transfer or fall back from a paid cache.
 
 Receipts require observed expiry and preserve unknown usage/timestamps as null. List page size is
 explicit and positive; a short page with a continuation token remains nonterminal. Collection

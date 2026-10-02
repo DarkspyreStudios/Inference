@@ -221,6 +221,7 @@ internal sealed class BedrockLlmClient(
 
         LlmProviderCapabilities capabilities = GetCapabilities(connection, request.ModelId);
         HostedTools.Validate(request, capabilities);
+        ExplicitCaches.Validate(request, capabilities.SupportsExplicitCache);
         if (request.Temperature is not null && !capabilities.SupportsTemperature)
         {
             throw new NotSupportedException("This Bedrock connection does not support temperature.");
