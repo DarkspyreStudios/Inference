@@ -20,7 +20,7 @@ if (args.Length != 2) { throw new ArgumentException("Usage: VerifyConsumer <fami
 string expected = args[0] + "+" + args[1];
 Type[] surfaces = [typeof(IInferenceSettingsManager), typeof(SetupChoiceCapabilities), typeof(LlmProviderService),
     typeof(ImageProviderService), typeof(TtsProviderService), typeof(AudioProviderService), typeof(SttProviderService),
-    typeof(VideoProviderService), typeof(RealtimeProviderService), typeof(ILlmBatchClient), typeof(ConnectResourcesJson), typeof(QwenSetup),
+    typeof(VideoProviderService), typeof(RealtimeProviderService), typeof(ILlmBatchClient), typeof(LlmResourceProviderService), typeof(ConnectResourcesJson), typeof(QwenSetup),
     typeof(SupraSetup), typeof(LayaSetup), typeof(WhisperSetup), typeof(TensorEngineRegistry), typeof(InferenceSettingsEditor),
     typeof(SetupEditorState), typeof(SetupNumberInput<long>), typeof(SetupNumberInput<decimal>)];
 foreach (Type type in surfaces)

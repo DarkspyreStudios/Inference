@@ -9,3 +9,4 @@ using System.Runtime.CompilerServices;
 [assembly: InternalsVisibleTo("Darkspyre.Inference.Connect.LLM.Vertex.Tests")]
 [assembly: InternalsVisibleTo("Darkspyre.Inference.Connect.LLM.Azure")]
 [assembly: InternalsVisibleTo("Darkspyre.Inference.Connect.LLM.Azure.Tests")]
+[assembly: InternalsVisibleTo("Darkspyre.Inference.Connect.Resources")]
