@@ -1,6 +1,6 @@
 # Darkspyre.Inference.Tensor
 
-Version **11.14.0-rc.1** adopts the shared typed reasoning-level contract; Qwen supports `None` and `High`.
+Source package version **11.15.0-rc.1** uses the shared typed reasoning-level contract; Qwen supports `None` and `High`.
 It includes Laya's CPU/GPU-only Core ML update and retains the ONNX and user-selected
 model-location/import contracts introduced in 11.4.0-rc.1.
 
@@ -266,7 +266,7 @@ the configuration and reconstruct registrations when composing the manager after
 does not perform that unload. Stop remains terminal, and an
 already-cancelled teardown action token reaches the engine as urgency rather than skipping cleanup.
 See the [shared editor example](../Common/examples/Darkspyre.Inference.Setup.Examples/README.md).
-These setup contracts are included in the synchronized 11.14.0-rc.1 package family, including
+These setup contracts use the synchronized source package version 11.15.0-rc.1, including
 provider-owned dirty state and explicit choice capabilities for the shared Settings editor.
 
 `TensorJson` exports assembly-owned `JsonTypeInfo<T>` for `SetupConfiguration`, `SetupChanges`,
@@ -721,7 +721,7 @@ the Audio / SpeechTranscription task without provider-name renderer branches.
 
 ## Package dependency boundary
 
-Tensor depends on **Darkspyre.Inference.Common [11.14.0-rc.1]** and the **Darkspyre.TensorSharp.*
+Tensor depends on **Darkspyre.Inference.Common [11.15.0-rc.1]** and the **Darkspyre.TensorSharp.*
 2.8.6.8** dependency closure through NuGet. None of their DLLs is embedded in Tensor. TensorSharp
 loads model files from paths and provides bounded metadata inspection through its GGUF,
 safetensors and restricted PyTorch readers. `Darkspyre.TensorSharp.Backends.GGML` is managed-only.
