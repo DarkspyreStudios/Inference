@@ -237,7 +237,7 @@ public static class InferenceJson
 }
 
 [JsonSourceGenerationOptions(GenerationMode = JsonSourceGenerationMode.Metadata,
-    Converters = [typeof(ResourceAccessJsonConverter), typeof(ResourceReadHandleJsonConverter), typeof(ResourceWriteHandleJsonConverter), typeof(ProviderAuthorizationJsonConverter), typeof(HostedToolPhaseJsonConverter), typeof(ImageGenerationActionJsonConverter)])]
+    Converters = [typeof(ResourceAccessJsonConverter), typeof(ResourceReadHandleJsonConverter), typeof(ResourceWriteHandleJsonConverter), typeof(ProviderAuthorizationJsonConverter), typeof(HostedToolKindJsonConverter), typeof(HostedToolPhaseJsonConverter), typeof(ImageGenerationActionJsonConverter)])]
 [JsonSerializable(typeof(InferenceProvenance))]
 [JsonSerializable(typeof(SpeechAudioEncoding))]
 [JsonSerializable(typeof(SpeechTranscriptionInput))]

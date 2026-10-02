@@ -19,6 +19,15 @@ public sealed class HostedKindJsonTests
         JsonSerializer.Serialize((LlmHostedToolKind)99, InferenceJson.LlmHostedToolKind));
 
     [Theory]
+    [InlineData("-1")]
+    [InlineData("8")]
+    [InlineData("99")]
+    [InlineData("2147483648")]
+    [InlineData("UnreportedKind")]
+    public void UndefinedOrMalformedDictionaryKeysRefuse(string key) => Assert.Throws<JsonException>(() =>
+        JsonSerializer.Deserialize("{\"InputTokens\":0,\"OutputTokens\":0,\"TotalTokens\":0,\"HostedToolCalls\":{\"" + key + "\":0}}", InferenceJson.LlmUsage));
+
+    [Theory]
     [InlineData(0)]
     [InlineData(1)]
     [InlineData(2)]
@@ -95,30 +104,33 @@ public sealed class HostedKindJsonTests
     {
         var tests = new HostedKindJsonTests();
         tests.UndefinedRootReadRefuses(); tests.UndefinedRootWriteRefuses();
+        foreach (string key in new[] { "-1", "8", "99", "2147483648", "UnreportedKind" }) tests.UndefinedOrMalformedDictionaryKeysRefuse(key);
         for (int graph = 0; graph < 3; graph++) { tests.UndefinedNestedReadRefuses(graph); tests.UndefinedNestedWriteRefuses(graph); }
         for (int number = 0; number < 8; number++) tests.DefinedValuesKeepNumericValuesAndNamedOrNumericKeys(number);
         Assert.Same(typeof(InferenceJson).Assembly, InferenceJson.LlmHostedToolKind.Converter.GetType().Assembly);
-        return 16;
+        return 21;
     }
 
     [Fact]
     public void ActualForeignOwnedPolicyExecutesAndRetires()
     {
-        WeakReference generation = ExerciseForeign();
-        for (int attempt = 0; generation.IsAlive && attempt < 20; attempt++)
+        WeakReference[] roots = ExerciseForeign();
+        for (int attempt = 0; roots.Any(root => root.IsAlive) && attempt < 20; attempt++)
         { GC.Collect(); GC.WaitForPendingFinalizers(); GC.Collect(); Thread.Sleep(10); }
-        Assert.False(generation.IsAlive);
+        foreach (WeakReference root in roots) Assert.False(root.IsAlive);
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private static WeakReference ExerciseForeign()
+    private static WeakReference[] ExerciseForeign()
     {
         var generation = new AssemblyLoadContext("hosted-kind-common", isCollectible: true);
-        var weak = new WeakReference(generation);
+        var roots = new List<WeakReference> { new(generation) };
         try
         {
             Assembly common = generation.LoadFromAssemblyPath(typeof(InferenceJson).Assembly.Location);
             Assembly fixture = generation.LoadFromAssemblyPath(typeof(HostedKindJsonTests).Assembly.Location);
+            roots.Add(new(common));
+            roots.Add(new(fixture));
             foreach ((Assembly local, Assembly actual) in new[] { (typeof(InferenceJson).Assembly, common), (typeof(HostedKindJsonTests).Assembly, fixture) })
             {
                 Assert.NotSame(local, actual);
@@ -127,9 +139,25 @@ public sealed class HostedKindJsonTests
             }
             MethodInfo proof = fixture.GetType(typeof(HostedKindJsonTests).FullName!, true)!.GetMethod(nameof(ExerciseClosedPolicy))!;
             Assert.Same(fixture, proof.DeclaringType!.Assembly);
-            Assert.Equal(16, proof.Invoke(null, null));
+            roots.Add(new(proof.DeclaringType));
+            Assembly owner = generation.Assemblies.Single(assembly => assembly.GetName().Name == typeof(InferenceJson).Assembly.GetName().Name);
+            Type facade = owner.GetType(typeof(InferenceJson).FullName!, true)!;
+            var metadata = (JsonTypeInfo)facade.GetProperty(nameof(InferenceJson.LlmHostedToolKind))!.GetValue(null)!;
+            Assert.Same(owner, metadata.Type.Assembly);
+            Assert.Same(generation, AssemblyLoadContext.GetLoadContext(metadata.Type.Assembly));
+            Assembly commonOwner = generation.Assemblies.Single(assembly => assembly.GetName().Name == typeof(InferenceJson).Assembly.GetName().Name);
+            Type kind = commonOwner.GetType(typeof(LlmHostedToolKind).FullName!, true)!;
+            var converter = metadata.Options.GetConverter(kind);
+            Assert.Same(commonOwner, converter.GetType().Assembly);
+            Assert.Same(generation, AssemblyLoadContext.GetLoadContext(converter.GetType().Assembly));
+            roots.Add(new(facade));
+            roots.Add(new(metadata));
+            roots.Add(new(metadata.Type));
+            roots.Add(new(metadata.Options.TypeInfoResolver!));
+            roots.Add(new(converter));
+            Assert.Equal(21, proof.Invoke(null, null));
         }
         finally { generation.Unload(); }
-        return weak;
+        return roots.ToArray();
     }
 }

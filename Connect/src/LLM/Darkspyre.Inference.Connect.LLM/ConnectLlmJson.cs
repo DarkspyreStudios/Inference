@@ -137,7 +137,7 @@ public static class ConnectLlmJson
     {
         // Retain generated converters and compose Common's exact live-authority refusal policy.
         var options = new JsonSerializerOptions(ConnectLlmJsonContext.Default.Options) { TypeInfoResolver = new HostedTypeInfoResolver() };
-        foreach (var type in new[] { typeof(IInferenceResourceAccess), typeof(IInferenceResourceReadHandle), typeof(IInferenceResourceWriteHandle), typeof(IProviderAuthorization), typeof(LlmHostedToolPhase), typeof(LlmImageGenerationAction) })
+        foreach (var type in new[] { typeof(IInferenceResourceAccess), typeof(IInferenceResourceReadHandle), typeof(IInferenceResourceWriteHandle), typeof(IProviderAuthorization), typeof(LlmHostedToolKind), typeof(LlmHostedToolPhase), typeof(LlmImageGenerationAction) })
         {
             options.Converters.Add(InferenceJson.InferenceResourceReference.Options.Converters.Single(converter => converter.CanConvert(type)));
         }

@@ -145,6 +145,9 @@ Null authorization roundtrips; explicitly serialized header data remains secret 
 remote-MCP diagnostics are redacted. Common's union rejects caller-defined variants; Connect owns
 the fixed xAI search extension and its extension-aware portable metadata.
 Owned hosted metadata rejects missing observation identities, kind/phase facts and image bytes.
+Hosted-tool kinds are closed on owned JSON read/write, including capability sets and usage dictionary
+keys. Defined values retain their numeric encoding and standard named/numeric dictionary-key reads;
+unknown kinds refuse without converting observed zero counts or absent facts into other values.
 Explicit null image bytes are not an observed empty image; explicit empty bytes remain valid.
 The new phase/action enum roots reject undefined values without changing other enum policies.
 Caller-generated closed envelopes can compose the owned resolver and its fixed converters; the

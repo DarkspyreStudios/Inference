@@ -2,6 +2,7 @@ using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Runtime.Loader;
 using System.Text.Json;
+using System.Text.Json.Serialization.Metadata;
 using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Common.LLM;
 using Darkspyre.Inference.Connect.Image;
@@ -22,7 +23,9 @@ public sealed class HostedKindJsonTests
 
     private static LlmBatchChatResult Result(LlmHostedToolKind kind) => new("actual", new()
     {
-        Text = "actual", Status = LlmCompletionStatus.Completed, Diagnostics = new(200, null, null),
+        Text = "actual",
+        Status = LlmCompletionStatus.Completed,
+        Diagnostics = new(200, null, null),
         Usage = new(0, 0, 0) { HostedToolCalls = new Dictionary<LlmHostedToolKind, int> { [kind] = 0 } }
     });
 
@@ -52,22 +55,23 @@ public sealed class HostedKindJsonTests
     [Fact]
     public void ActualForeignFamilyPolicyExecutesAndRetires()
     {
-        WeakReference generation = ExerciseForeign();
-        for (int attempt = 0; generation.IsAlive && attempt < 20; attempt++)
+        WeakReference[] roots = ExerciseForeign();
+        for (int attempt = 0; roots.Any(root => root.IsAlive) && attempt < 20; attempt++)
         { GC.Collect(); GC.WaitForPendingFinalizers(); GC.Collect(); Thread.Sleep(10); }
-        Assert.False(generation.IsAlive);
+        foreach (WeakReference root in roots) Assert.False(root.IsAlive);
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private static WeakReference ExerciseForeign()
+    private static WeakReference[] ExerciseForeign()
     {
         var generation = new AssemblyLoadContext("hosted-kind-resources", isCollectible: true);
-        var weak = new WeakReference(generation);
+        var roots = new List<WeakReference> { new(generation) };
         try
         {
             foreach (Assembly local in new[] { typeof(InferenceJson).Assembly, typeof(ConnectLlmJson).Assembly, typeof(ConnectImageJson).Assembly, typeof(ConnectVideoJson).Assembly, typeof(ConnectResourcesJson).Assembly, typeof(HostedKindJsonTests).Assembly })
             {
                 Assembly actual = generation.LoadFromAssemblyPath(local.Location);
+                roots.Add(new(actual));
                 Assert.NotSame(local, actual);
                 Assert.Equal(local.ManifestModule.ModuleVersionId, actual.ManifestModule.ModuleVersionId);
                 Assert.Same(generation, AssemblyLoadContext.GetLoadContext(actual));
@@ -75,9 +79,25 @@ public sealed class HostedKindJsonTests
             Assembly fixture = generation.Assemblies.Single(assembly => assembly.GetName().Name == typeof(HostedKindJsonTests).Assembly.GetName().Name);
             MethodInfo proof = fixture.GetType(typeof(HostedKindJsonTests).FullName!, true)!.GetMethod(nameof(ExerciseClosedPolicy))!;
             Assert.Same(fixture, proof.DeclaringType!.Assembly);
+            roots.Add(new(proof.DeclaringType));
+            Assembly owner = generation.Assemblies.Single(assembly => assembly.GetName().Name == typeof(ConnectResourcesJson).Assembly.GetName().Name);
+            Type facade = owner.GetType(typeof(ConnectResourcesJson).FullName!, true)!;
+            var metadata = (JsonTypeInfo)facade.GetProperty(nameof(ConnectResourcesJson.LlmBatchChatResult))!.GetValue(null)!;
+            Assert.Same(owner, metadata.Type.Assembly);
+            Assert.Same(generation, AssemblyLoadContext.GetLoadContext(metadata.Type.Assembly));
+            Assembly commonOwner = generation.Assemblies.Single(assembly => assembly.GetName().Name == typeof(InferenceJson).Assembly.GetName().Name);
+            Type kind = commonOwner.GetType(typeof(LlmHostedToolKind).FullName!, true)!;
+            var converter = metadata.Options.GetConverter(kind);
+            Assert.Same(commonOwner, converter.GetType().Assembly);
+            Assert.Same(generation, AssemblyLoadContext.GetLoadContext(converter.GetType().Assembly));
+            roots.Add(new(facade));
+            roots.Add(new(metadata));
+            roots.Add(new(metadata.Type));
+            roots.Add(new(metadata.Options.TypeInfoResolver!));
+            roots.Add(new(converter));
             Assert.Equal(3, proof.Invoke(null, null));
         }
         finally { generation.Unload(); }
-        return weak;
+        return roots.ToArray();
     }
 }
