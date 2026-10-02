@@ -1446,6 +1446,13 @@ properties copy their lists, without claiming an admitted operation's deep prefi
 Create's optional `Resources` is borrowed runtime authority: non-null serialization fails and
 diagnostics do not inspect it. The request does not validate a provider's lifetime or scope.
 
+The private Google cache data boundary freezes prefix lists, binary bytes and tool schemas, requires
+one positive TTL or future expiry, and preserves the exact reconciliation display name. It converts
+CLR ticks without floating-point rounding and refuses observed timestamps finer than representable
+CLR precision. Its receipt parser preserves independent unknown usage facts, validates required
+observed expiry and returns one ordered page with its actual continuation token. These effect-free
+helpers do not establish native resource/principal authority or enable cache dispatch.
+
 `LlmContextCacheCreateCancelledException` and `LlmContextCacheCreateUncertainException` retain
 correlation, the actual request ID and an optional observed receipt without declaring success or
 rollback. They are runtime exceptions, not portable metadata roots. Their presence does not
