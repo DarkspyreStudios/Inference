@@ -157,14 +157,23 @@ public sealed class PocketResourceLifetimeTests
     [Fact]
     public void FailedConcreteHandleIsRootedOnlyByActualRetainedClientFailure()
     {
-        WeakReference[] roots = ExerciseFailedOwner();
+        WeakReference[] roots = RetainThenReleaseFailedOwner();
         for (int index = 0; roots.Any(root => root.IsAlive) && index < 30; index++)
         { GC.Collect(); GC.WaitForPendingFinalizers(); GC.Collect(); Thread.Sleep(10); }
         Assert.All(roots, root => Assert.False(root.IsAlive));
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private static WeakReference[] ExerciseFailedOwner()
+    private static WeakReference[] RetainThenReleaseFailedOwner()
+    {
+        (ITtsClient client, Exception failure, WeakReference[] roots) = ExerciseFailedOwner();
+        GC.Collect(); GC.WaitForPendingFinalizers(); GC.Collect();
+        Assert.All(roots, root => Assert.True(root.IsAlive));
+        GC.KeepAlive(failure); GC.KeepAlive(client); return roots;
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static (ITtsClient, Exception, WeakReference[]) ExerciseFailedOwner()
     {
         var generation = new FixtureGeneration();
         Assembly assembly = generation.LoadFromAssemblyPath(typeof(VoiceResourceFixture).Assembly.Location);
@@ -183,9 +192,7 @@ public sealed class PocketResourceLifetimeTests
         WeakReference[] roots = [new(generation), new(assembly), new(type), new(access), new(handle), new(writer)];
         access = null!;
         generation.Unload();
-        GC.Collect(); GC.WaitForPendingFinalizers(); GC.Collect();
-        Assert.All(roots, root => Assert.True(root.IsAlive));
-        GC.KeepAlive(failure); GC.KeepAlive(client); return roots;
+        return (client, failure!, roots);
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]

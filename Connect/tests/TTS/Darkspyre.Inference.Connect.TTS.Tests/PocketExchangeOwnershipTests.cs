@@ -67,14 +67,22 @@ public sealed class PocketExchangeOwnershipTests
     [Fact]
     public void FailedResponseAndRequestRootsFollowActualCachedClientFailure()
     {
-        WeakReference[] roots = ExerciseFailedRoots();
+        WeakReference[] roots = RetainThenReleaseFailedRoots();
         for (int index = 0; roots.Any(root => root.IsAlive) && index < 30; index++)
         { GC.Collect(); GC.WaitForPendingFinalizers(); GC.Collect(); Thread.Sleep(10); }
         Assert.All(roots, root => Assert.False(root.IsAlive));
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private static WeakReference[] ExerciseFailedRoots()
+    private static WeakReference[] RetainThenReleaseFailedRoots()
+    {
+        (ITtsClient client, Exception failure, WeakReference[] roots) = ExerciseFailedRoots();
+        GC.Collect(); GC.WaitForPendingFinalizers(); GC.Collect(); Assert.All(roots, root => Assert.True(root.IsAlive));
+        GC.KeepAlive(client); GC.KeepAlive(failure); return roots;
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static (ITtsClient, Exception, WeakReference[]) ExerciseFailedRoots()
     {
         HttpRequestMessage? requestOwner = null; HttpResponseMessage? responseOwner = null;
         using var http = new HttpClient(new Handler(request =>
@@ -87,8 +95,7 @@ public sealed class PocketExchangeOwnershipTests
         Exception? failure = Record.Exception(() => client.SpeakAsync(new() { Text = "actual" }).GetAwaiter().GetResult());
         Assert.NotNull(failure); Assert.NotNull(Record.Exception(client.Dispose));
         WeakReference[] roots = [new(requestOwner!), new(responseOwner!)]; requestOwner = null; responseOwner = null;
-        GC.Collect(); GC.WaitForPendingFinalizers(); GC.Collect(); Assert.All(roots, root => Assert.True(root.IsAlive));
-        GC.KeepAlive(client); GC.KeepAlive(failure); return roots;
+        return (client, failure!, roots);
     }
 
     private sealed class Handler(Func<HttpRequestMessage, HttpResponseMessage> send) : HttpMessageHandler

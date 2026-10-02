@@ -134,7 +134,11 @@ public sealed class TtsFacadeLifetimeTests
             request = Task.Run<object>(() => bind ? facade.Bind(Connection, binding) : facade.SetupDefinitions);
             await entered.Task.WaitAsync(Deadline); retirement = Cleanup(facade); release.Set();
             if (fails) Assert.Same(failure, await Record.ExceptionAsync(() => request.WaitAsync(Deadline)));
-            else await request.WaitAsync(Deadline);
+            else
+            {
+                object result = await request.WaitAsync(Deadline);
+                if (bind) await Assert.IsAssignableFrom<ITtsClient>(result).DisposeAsync();
+            }
             await retirement.WaitAsync(Deadline);
             Assert.Contains(executed, item => item.Method == (bind ? "Bind" : "SetupDefinition"));
             Assert.DoesNotContain(executed, item => item.Method == "Dispose");
