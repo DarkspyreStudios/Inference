@@ -472,6 +472,13 @@ cannot verify an edited or retiring draft. Portable changes omit runtime authori
 protected-header patches separately. Typed xAI setup controls preserve explicit false, zero and
 empty values; these declarations do not register an xAI provider or activate capabilities.
 
+`TtsProviderService` supports synchronous and asynchronous disposal. Retirement fences new facade
+calls, drains admitted synchronous setup/binding callbacks, then releases borrowed provider references.
+It does not interrupt those callbacks or replace their original result or failure. Returned clients
+and settings managers keep independent caller ownership; facade disposal never disposes them or
+the borrowed providers. Concurrent disposal callers share the same completion. Use asynchronous
+disposal while another thread is inside a facade callback.
+
 ## TangoFlux audio
 
 `ConnectAudioJson` exports exact type-name metadata getters for the nine public Audio
@@ -1149,6 +1156,12 @@ releasing borrowed transports, workflow catalogs, binding factories, resource ac
 targets. Those collaborators are never disposed. Settings admission also applies through base and
 interface references. Draft edits invalidate pending health, choice and workflow results; an admitted
 conditional save still preserves the commit target's observed committed or uncertain result.
+`ImageProviderService` also supports synchronous and asynchronous disposal. Retirement cancels
+workflow listings, drains providers that ignore cancellation, and checks its own retirement fence
+before publishing a completed listing. Provider failures retain their original identity. Admitted
+synchronous facade calls keep their original outcomes; returned inference objects and settings
+managers keep independent caller ownership. Concurrent disposal callers share completion, including
+cancellation-callback failures. Disposal releases the borrowed transport map without disposing it.
 
 `ConnectImageJson` exports exact type-name metadata for the complete public Image data graph.
 Runtime authority, bindings, resource handles and binding factories refuse non-null serialization.
