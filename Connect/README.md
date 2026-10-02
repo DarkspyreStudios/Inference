@@ -1514,7 +1514,9 @@ That callback supplies already-established binding evidence. A false result rema
 failed acknowledgement, not absence. Rejections and deletion acknowledgements do not read response
 bodies. Failures after invoking send use the typed update/delete uncertainty errors, preserving safe
 operation and response-cleanup facts and optional validated late evidence without retrying or
-publishing success. These internal exchanges do not authorize routes, issue receipt scopes or
+publishing success. Cancellation retains actual observed response status, request ID and retry delay
+as safe evidence within one cancellation failure, not an extra failure or successful acknowledgement.
+These internal exchanges do not authorize routes, issue receipt scopes or
 enable public cache operations.
 
 `LlmContextCacheCreateCancelledException` and `LlmContextCacheCreateUncertainException` retain

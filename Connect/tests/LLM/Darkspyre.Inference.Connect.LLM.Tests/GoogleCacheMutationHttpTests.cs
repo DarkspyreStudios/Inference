@@ -401,7 +401,8 @@ public sealed class GoogleCacheMutationHttpTests
         var entered = Signal(); var release = Signal();
         var callbackEntered = Signal(); var callbackRelease = Signal();
         var content = new TrackedContent(ReceiptBody, cleanup: boundary == "cleanup"
-            ? () => { entered.TrySetResult(); release.Task.GetAwaiter().GetResult(); } : null,
+            ? () => { entered.TrySetResult(); release.Task.GetAwaiter().GetResult(); }
+        : null,
             entered: boundary == "read" ? entered : null, release: boundary == "read" ? release : null);
         using var handler = new Handler(async (_, _) =>
         {

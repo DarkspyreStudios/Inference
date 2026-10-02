@@ -139,8 +139,13 @@ internal static class GoogleCacheHttp
         }
         return observed!;
 
-        Exception SafeMutationFailure(Exception error, string safeCategory) => SafeFailure(error, safeCategory,
-            transport, status, requestId, retryAfter, cancellationToken, "Google cache mutation was interrupted.");
+        Exception SafeMutationFailure(Exception error, string safeCategory) =>
+            error is OperationCanceledException && status is not null
+                ? new OperationCanceledException("Google cache mutation was interrupted.",
+                    new LlmProviderException("Google cache mutation response observed before interruption.",
+                        transport, status, requestId: requestId, retryAfter: retryAfter), cancellationToken)
+                : SafeFailure(error, safeCategory, transport, status, requestId, retryAfter,
+                    cancellationToken, "Google cache mutation was interrupted.");
     }
 
     [SuppressMessage("Design", "CA1031", Justification = "The provider boundary sanitizes failures and attempts owned response cleanup for every failure.")]
