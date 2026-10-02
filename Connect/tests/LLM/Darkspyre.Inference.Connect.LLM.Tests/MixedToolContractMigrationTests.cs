@@ -35,6 +35,24 @@ public sealed class MixedToolContractMigrationTests
         Assert.Equal(false, property.GetValue(Activator.CreateInstance(owner)));
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ManagedLaneDoesNotInferCallerMappingsFromPortableOrAdvertisedAgentShellFacts(bool portableShell)
+    {
+        var advertised = ManagedAgentPolicy.Capabilities with
+        {
+            SupportsShellTools = true,
+            SupportedCallerServices = new HashSet<LlmAgentCallerServiceKind> { LlmAgentCallerServiceKind.ShellExecution, LlmAgentCallerServiceKind.Permission }
+        };
+        var portable = new LlmProviderCapabilities { SupportsShellTools = portableShell, Agent = advertised };
+        var managed = ClientTools.ManagedCapabilities(portable);
+        Assert.False(managed.SupportsShellTools); Assert.Empty(managed.SupportedCallerServices);
+        Assert.True(advertised.SupportsShellTools); Assert.Equal(2, advertised.SupportedCallerServices.Count);
+        Assert.Throws<NotSupportedException>(() => ClientTools.ValidateManagedOpening(new()
+        { ModelId = "model", Tools = [new LlmAgentShellTool(new([]))] }, portable));
+    }
+
     [Fact]
     public void ShellHistoryLedgerRetainsCallOwnedLimitsAndOrderedActualOutputs()
     {

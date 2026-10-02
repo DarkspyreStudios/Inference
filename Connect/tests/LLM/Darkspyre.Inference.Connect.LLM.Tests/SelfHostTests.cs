@@ -166,6 +166,47 @@ public sealed class SelfHostTests
         Assert.Equal(LlmAgentOwnership.Host, capabilities.Agent.ContextOwnership);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task PortableEngineShellSupportDoesNotEnableManagedShellOpening(bool supplyExecutor)
+    {
+        var engine = new Engine { Capabilities = EngineCapabilities with { SupportsShellTools = true } };
+        using ServiceProvider services = Services(engine);
+        var llms = services.GetRequiredService<LlmProviderService>();
+        var agents = services.GetRequiredService<LlmAgentProviderService>();
+        var host = (Host)services.GetRequiredService<ILlmSelfHost>();
+        Assert.True((await llms.Bind("connection").GetCapabilitiesAsync("qwen")).SupportsShellTools);
+        int resolutions = host.ResolutionCount;
+        var executor = new UntouchableShellExecutor();
+        await Assert.ThrowsAsync<NotSupportedException>(async () =>
+        {
+            await using ILlmAgentSession session = await agents.StartSessionAsync("connection", new()
+            {
+                ModelId = "qwen", Tools = [new LlmAgentShellTool(new([]))],
+                CallerServices = supplyExecutor ? new() { ShellExecutor = executor } : null
+            });
+        });
+        Assert.Equal(resolutions, host.ResolutionCount); Assert.Empty(engine.Requests); Assert.Equal(0, executor.Calls);
+    }
+
+    [Fact]
+    public async Task ManagedSessionStaysFunctionOnlyWhileDirectEngineShellCapabilityRemainsTruthful()
+    {
+        var engine = new Engine { Capabilities = EngineCapabilities with { SupportsShellTools = true } };
+        using ServiceProvider services = Services(engine);
+        var llms = services.GetRequiredService<LlmProviderService>();
+        await using ILlmAgentSession session = await services.GetRequiredService<LlmAgentProviderService>()
+            .StartSessionAsync("connection", new() { ModelId = "qwen" });
+        LlmAgentCapabilities managed = await session.GetCapabilitiesAsync();
+        Assert.False(managed.SupportsShellTools); Assert.Empty(managed.SupportedCallerServices);
+        Assert.True((await llms.GetModelCapabilitiesAsync("connection", "qwen")).SupportsShellTools);
+        engine.Script.Enqueue([Completion("direct-engine")]);
+        var result = await llms.CompleteAsync("connection", new() { ModelId = "qwen", Tools = [new LlmShellTool([])] });
+        Assert.Equal("direct-engine", result.Text);
+        Assert.IsType<LlmShellTool>(Assert.Single(Assert.Single(engine.Requests).Tools));
+    }
+
     [Fact]
     public async Task AnEngineThatIsNotLoadedIsModelUnavailable()
     {
@@ -401,6 +442,13 @@ public sealed class SelfHostTests
         }
         public LlmCapabilities? GetCapabilities(string engineId, string? modelId) =>
             loaded && engineId == "engine-1" ? engine.Capabilities : null;
+    }
+
+    private sealed class UntouchableShellExecutor : ILlmAgentShellExecutor
+    {
+        internal int Calls { get; private set; }
+        public Task<LlmShellCallResult> ExecuteAsync(LlmAgentShellRequest request, CancellationToken cancellationToken = default)
+        { Calls++; throw new InvalidOperationException("The function-only managed lane cannot execute shell calls."); }
     }
 
     private sealed class Engine : ILlmInference
