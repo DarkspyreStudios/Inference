@@ -63,12 +63,21 @@ public sealed class ImageOperationTests
                 if (outcome is "commit" or "commit-cleanup" or "selection")
                     Assert.Equal(InferenceResourceCommitOutcome.Unknown, operation.Failure.SelectionOutcome);
                 if (outcome == "commit-cleanup")
-                    Assert.Same(resources.CleanupFailure, Assert.IsType<AggregateException>(error).InnerExceptions[1]);
+                {
+                    var cleanup = Assert.IsType<InferenceResourceOperationException>(Assert.IsType<AggregateException>(error).InnerExceptions[1]);
+                    Assert.Equal(InferenceResourceOperationPhase.Cleanup, cleanup.Failure.Phase);
+                    Assert.Same(resources.CleanupFailure, cleanup.InnerException);
+                }
                 if (outcome != "selection") Assert.Same(resources.OperationFailure, operation.InnerException);
                 if (resources.Writers.Count > 0) Assert.Equal(1, resources.Writers[0].Disposals);
             }
         }
-        finally { await ((IAsyncDisposable)inference).DisposeAsync(); }
+        finally
+        {
+            if (outcome == "commit-cleanup")
+                _ = await Assert.ThrowsAsync<InferenceResourceOperationException>(() => ((IAsyncDisposable)inference).DisposeAsync().AsTask());
+            else await ((IAsyncDisposable)inference).DisposeAsync();
+        }
         Assert.Equal(0, resources.Disposals);
         Assert.Equal(0, transport.Disposals);
     }
@@ -144,9 +153,10 @@ public sealed class ImageOperationTests
             Assert.Equal(InferenceResourceCommitOutcome.Committed, failure.Failure.SelectionOutcome);
             Assert.Equal(new InferenceResourceSelectionVersion("workspace", "session", 1), failure.Failure.SelectionVersion);
             Assert.Equal(2, failure.Failure.BytesTransferred);
+            Assert.Equal(InferenceResourceOperationPhase.Cleanup, failure.Failure.Phase);
             Assert.Equal(1, resources.Writers[0].Disposals);
         }
-        finally { await ((IAsyncDisposable)inference).DisposeAsync(); }
+        finally { _ = await Assert.ThrowsAsync<InferenceResourceOperationException>(() => ((IAsyncDisposable)inference).DisposeAsync().AsTask()); }
     }
 
     [Fact]
@@ -193,8 +203,13 @@ public sealed class ImageOperationTests
         var binding = new XaiFamilyBinding(new("chosen"), access);
         var transport = new ImageTestTransport { Kind = ImageTransport.XaiImagine };
         IImageInference inference = new ImageProviderService([transport]).Bind(
-            new() { Transport = ImageTransport.XaiImagine, Endpoint = "https://api.x.ai/v1", Xai = binding.Selection,
-                AdditionalHeaders = new Dictionary<string, string> { ["X-Test"] = "initial" } },
+            new()
+            {
+                Transport = ImageTransport.XaiImagine,
+                Endpoint = "https://api.x.ai/v1",
+                Xai = binding.Selection,
+                AdditionalHeaders = new Dictionary<string, string> { ["X-Test"] = "initial" }
+            },
             Workflow() with { Transport = ImageTransport.XaiImagine }, binding, pollInterval: TimeSpan.Zero);
         try
         {
@@ -246,8 +261,17 @@ internal sealed class ImageTestTransport : IImageTransport, IDisposable
         await ObserveAsync(connection, xai);
         if (ChangedSource is not null) ChangedSource.Current = ChangedSource.Current with { Version = "v2", Endpoint = "https://us.api.x.ai/v1", Xai = new() { Region = XaiRegion.UnitedStates } };
         if (CallerHeaders is not null) CallerHeaders["X-Test"] = "changed";
-        return new() { SupportedSizes = [new(1024, 1024)], MaximumImageCount = 2, SupportsSeed = true, SupportsNegativePrompt = true,
-            SupportsSteps = true, SupportsGuidanceScale = true, MaximumReferences = 1, SupportedReferenceKinds = new[] { InferenceMediaSourceKind.Binary }.ToFrozenSet() };
+        return new()
+        {
+            SupportedSizes = [new(1024, 1024)],
+            MaximumImageCount = 2,
+            SupportsSeed = true,
+            SupportsNegativePrompt = true,
+            SupportsSteps = true,
+            SupportsGuidanceScale = true,
+            MaximumReferences = 1,
+            SupportedReferenceKinds = new[] { InferenceMediaSourceKind.Binary }.ToFrozenSet()
+        };
     }
     public PreparedImageTransportRequest Prepare(ImageTransportPreparationRequest request) { Prepared = request; return new("{}"); }
     public Task<ImageProviderHealth> TestAsync(ImageConnection connection, ImageWorkflow? workflow = null, XaiFamilyBinding? xai = null, CancellationToken cancellationToken = default) => throw new NotSupportedException();
@@ -283,8 +307,14 @@ internal sealed class ImageTestTransport : IImageTransport, IDisposable
 
 internal sealed class XaiSource : ILlmConnectionSource, IDisposable
 {
-    public LlmConnection Current { get; set; } = new() { Version = "v1", Transport = LlmTransport.XaiResponses, Endpoint = "https://api.x.ai/v1", Xai = new(),
-        Credential = new LlmCredential { OAuth = new() { AccessToken = "token", AccountId = "account" } }.Serialize() };
+    public LlmConnection Current { get; set; } = new()
+    {
+        Version = "v1",
+        Transport = LlmTransport.XaiResponses,
+        Endpoint = "https://api.x.ai/v1",
+        Xai = new(),
+        Credential = new LlmCredential { OAuth = new() { AccessToken = "token", AccountId = "account" } }.Serialize()
+    };
     public int Reads { get; private set; }
     public int Saves { get; private set; }
     public int Disposals { get; private set; }

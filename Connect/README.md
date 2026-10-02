@@ -1278,6 +1278,12 @@ session before ComfyUI uploads the authorized logical resource. Resource reads a
 the endpoint/header snapshot admitted before the first callback. Generated outputs are likewise
 committed and selected before the composite publishes completion. Typed failures preserve known
 content/selection outcomes; a dispatched commit with no matching response remains unknown.
+Resource callbacks retain the admitted workspace and session scope. Returned content and selection
+receipts must match the actual artifact. Successful owned-handle cleanup is followed by a final
+scope and retirement fence before publication. Refused cleanup uses the typed Cleanup phase and
+retains the actual unsafe handle. Independent operation and cleanup errors remain ordered. Bound
+inference retirement reports the same retained cleanup failure to repeated disposal callers,
+including reader refusals before job submission. Healthy borrowed collaborators detach after drain.
 
 Image facades and settings managers fence new calls on disposal and drain admitted operations before
 releasing borrowed transports, workflow catalogs, binding factories, resource access and commit
