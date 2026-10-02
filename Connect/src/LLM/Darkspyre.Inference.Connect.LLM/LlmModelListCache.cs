@@ -1,3 +1,4 @@
+using System.Collections.Frozen;
 using System.Diagnostics.CodeAnalysis;
 using Darkspyre.Inference.Connect.LLM.Internal;
 
@@ -22,6 +23,7 @@ public sealed class LlmModelListCache : IDisposable, IAsyncDisposable
         Task<IReadOnlyList<LlmModel>> listing;
         lock (_gate)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             ObjectDisposedException.ThrowIf(_disposed, this);
             if (!_entries.TryGetValue(connectionId, out Entry? entry) || entry.Version != version
                 || entry.Listing.IsFaulted || entry.Listing.IsCanceled)
@@ -39,6 +41,7 @@ public sealed class LlmModelListCache : IDisposable, IAsyncDisposable
         Task<IReadOnlyList<LlmModel>> listing;
         lock (_gate)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             ObjectDisposedException.ThrowIf(_disposed, this);
             listing = Start(connectionId, version, list).Listing;
         }
@@ -52,12 +55,14 @@ public sealed class LlmModelListCache : IDisposable, IAsyncDisposable
         var completion = new TaskCompletionSource<IReadOnlyList<LlmModel>>(TaskCreationOptions.RunContinuationsAsynchronously);
         var entry = new Entry(version, completion.Task);
         _entries[connectionId] = entry;
-        _ = Task.Run(() => CompleteListingAsync(completion, operation, list), CancellationToken.None);
+        _ = Task.Run(() => CompleteListingAsync(connectionId, entry, completion, operation, list), CancellationToken.None);
         return entry;
     }
 
     [SuppressMessage("Design", "CA1031", Justification = "The shared listing preserves provider failures for its waiters and observes abandoned faults.")]
     private async Task CompleteListingAsync(
+        string connectionId,
+        Entry entry,
         TaskCompletionSource<IReadOnlyList<LlmModel>> completion,
         LlmOperationLifetime.Lease operation,
         Func<CancellationToken, Task<IReadOnlyList<LlmModel>>> list)
@@ -69,9 +74,21 @@ public sealed class LlmModelListCache : IDisposable, IAsyncDisposable
                 operation.Token.ThrowIfCancellationRequested();
                 IReadOnlyList<LlmModel> models = await list(operation.Token).ConfigureAwait(false);
                 operation.Token.ThrowIfCancellationRequested();
+                models = Array.AsReadOnly(models.Select(model => model with
+                {
+                    CatalogEntry = model.CatalogEntry?.Clone(),
+                    Capabilities = model.Capabilities is not { } capabilities ? null : capabilities with
+                    {
+                        ReasoningLevels = capabilities.ReasoningLevels.ToFrozenSet(),
+                        PromptCache = capabilities.PromptCache with { Retentions = capabilities.PromptCache.Retentions.ToFrozenSet() },
+                        Tools = capabilities.Tools with { ChoiceModes = capabilities.Tools.ChoiceModes.ToFrozenSet() },
+                        Agent = capabilities.Agent with { SupportedRuntimePolicies = capabilities.Agent.SupportedRuntimePolicies.ToFrozenSet() }
+                    }
+                }).ToArray());
                 lock (_gate)
                 {
-                    if (_disposed) completion.TrySetCanceled(operation.Token);
+                    if (_disposed || !_entries.TryGetValue(connectionId, out Entry? current) || !ReferenceEquals(current, entry))
+                        completion.TrySetCanceled(operation.Token);
                     else completion.TrySetResult(models);
                 }
             }
