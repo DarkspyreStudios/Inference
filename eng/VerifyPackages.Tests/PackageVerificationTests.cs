@@ -60,6 +60,18 @@ public sealed class PackageVerificationTests
     }
 
     [Theory]
+    [InlineData("dll")]
+    [InlineData("xml")]
+    public void CrossFamilyResourcesOutputsBelongToTheConnectBoundary(string extension)
+    {
+        const string connect = "Darkspyre.Inference.Connect";
+        const string resources = "Darkspyre.Inference.Connect.Resources";
+        Assert.Contains(resources, PackageVerification.Owned[connect]);
+        Assert.Throws<InvalidDataException>(() => Verify(connect,
+            files => files.Remove("lib/net11.0/" + resources + "." + extension)));
+    }
+
+    [Theory]
     [InlineData("native/libforeign.so")]
     [InlineData("native/libforeign.so.1")]
     [InlineData("native/libforeign.SO.1.2")]
