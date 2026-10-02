@@ -242,6 +242,7 @@ public sealed class HttpGenerationLifetimeTests
     {
         public int AsyncDisposals { get; private set; }
         public int SyncDisposals { get; private set; }
+        [System.Diagnostics.CodeAnalysis.SuppressMessage("Usage", "CA2215", Justification = "This controlled fixture refuses actual cleanup and detects a forbidden dependent synchronous retry.")]
         public override ValueTask DisposeAsync() { AsyncDisposals++; return ValueTask.FromException(failure); }
         protected override void Dispose(bool disposing) { if (disposing) SyncDisposals++; base.Dispose(disposing); }
     }
