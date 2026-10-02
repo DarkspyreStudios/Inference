@@ -8,11 +8,13 @@
 
   <ItemGroup>
     <PackageReference Include="Darkspyre.TensorSharp.Backends.Cuda" GeneratePathProperty="true" />
+    <PackageReference Include="Darkspyre.TensorSharp.Backends.GGML" />
     <PackageReference Include="Darkspyre.TensorSharp.Chat" />
   </ItemGroup>
 
   <ItemGroup>
     <InternalsVisibleTo Include="Darkspyre.Inference.Tensor.LLM.Qwen.Tests" />
+    <InternalsVisibleTo Include="Darkspyre.Inference.Tensor.Registry" />
     <ProjectReference Include="..\Darkspyre.Inference.Tensor.LLM\Darkspyre.Inference.Tensor.LLM.csproj" />
   </ItemGroup>
 

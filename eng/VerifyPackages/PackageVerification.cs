@@ -14,7 +14,7 @@ internal sealed class DependencyPolicy
     internal const string NativeGgml = Ggml + ".Native";
     internal static readonly string[] TensorDependencies =
     [
-        "Darkspyre.ML.Tokenizers", "Darkspyre.TensorSharp.Backends.Cuda", "Darkspyre.TensorSharp.Chat",
+        "Darkspyre.ML.Tokenizers", "Darkspyre.TensorSharp.Backends.Cuda", Ggml, "Darkspyre.TensorSharp.Chat",
         "Darkspyre.TensorSharp.Models", "Darkspyre.TensorSharp.Runtime", "Microsoft.ML.OnnxRuntime",
         "Whisper.net", "Whisper.net.Runtime", "NAudio.Core"
     ];
@@ -85,7 +85,7 @@ internal sealed class DependencyPolicy
         (string Id, string Version)[] restored = packages.ToArray();
         PackageVerification.Require(!restored.Any(package => IsNativeGgml(package.Id)),
             "The restore graph contains a GGML native package, even if it has no native payload.");
-        foreach (string id in TensorDependencies.Append(Ggml))
+        foreach (string id in TensorDependencies)
             PackageVerification.Require(restored.Any(package => package.Id.Equals(id, StringComparison.OrdinalIgnoreCase)),
                 $"The restore graph is missing {id}.");
         foreach ((string id, string version) in restored)

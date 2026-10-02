@@ -8,7 +8,9 @@ namespace Darkspyre.Inference.Tensor.LLM.Qwen;
 /// <summary>Resolves complete Qwen 3 and Qwen 3.5 family GGUF packs through bounded metadata inspection, never weight loading.</summary>
 public sealed partial class QwenModelResolver : TensorModelResolver
 {
-    public QwenModelResolver(ITensorModelSource? source = null, ITensorArtifactReader? reader = null) : base(source, reader) { }
+    private readonly QwenRuntimeOwner _runtimeOwner;
+    public QwenModelResolver(ITensorModelSource? source = null, ITensorArtifactReader? reader = null,
+        QwenRuntimeOwner? runtimeOwner = null) : base(source, reader) => _runtimeOwner = runtimeOwner ?? QwenRuntimeOwner.GetOrCreate();
     public override IReadOnlyList<TensorArtifactRequirement> Requirements => [new("model", "*.gguf")];
     public override string? AdditionalArtifactRolePrefix => "model-shard-";
     protected override string CompanionPath(string role, string path, string primary) =>
@@ -24,8 +26,8 @@ public sealed partial class QwenModelResolver : TensorModelResolver
         var evidence = new List<TensorCompatibilityEvidence>();
         TensorModelResolution Failure(TensorCompatibilityState state, string code, string message, TensorSourceState sourceState = TensorSourceState.Available) =>
             new(new(state, [new(code, message)], evidence.ToArray(), sourceState));
-        TensorBackendKind actual = QwenLlmInference.ResolveBackend(backend);
-        if (!TensorLlmModels.Qwen3FourBillionQ4Km.SupportedBackends.Contains(actual))
+        IReadOnlyList<TensorBackendKind> compatible = QwenRuntimeOwner.CompatibleBackends(backend, _runtimeOwner.Plan.TargetRid);
+        if (!compatible.Any(TensorLlmModels.Qwen3FourBillionQ4Km.SupportedBackends.Contains))
         { return Failure(TensorCompatibilityState.Unsupported, "backend-unsupported", "This Qwen adapter does not support the selected backend."); }
         TensorSourceArtifact[] matches = candidate.Artifacts.Where(artifact => artifact.Path == candidate.Selection.Variant).ToArray();
         if (matches.Length != 1) { return Failure(TensorCompatibilityState.Unverified, "variant-missing", "The selected artifact is missing or ambiguous in the candidate."); }
@@ -56,7 +58,7 @@ public sealed partial class QwenModelResolver : TensorModelResolver
             string architecture = QwenModelCompatibility.ArchitectureOf(headers[0].Header.Values);
             evidence.Add(new(artifacts[0].Path, "qwen-schema", $"Complete {architecture} tensor, tokenizer, chat-template, dimension, quantization and shard schema accepted by the loading policy."));
             evidence.Add(new(artifacts[0].Path, "context-length", Convert.ToString(headers[0].Header.Values[$"{architecture}.context_length"], CultureInfo.InvariantCulture)!));
-            evidence.Add(new(artifacts[0].Path, "backend", $"{actual} is supported. Device availability and model allocation are separate checks."));
+            evidence.Add(new(artifacts[0].Path, "backend", $"{backend} has a compatible declared backend. Device availability and model allocation are separate checks."));
             return new(new(TensorCompatibilityState.Supported, [], evidence.ToArray()), definition);
         }
         catch (TensorSourceException exception)

@@ -23,6 +23,7 @@
   <ItemGroup>
     <PackageReference Include="Darkspyre.ML.Tokenizers" />
     <PackageReference Include="Darkspyre.TensorSharp.Backends.Cuda" />
+    <PackageReference Include="Darkspyre.TensorSharp.Backends.GGML" />
     <PackageReference Include="Darkspyre.TensorSharp.Chat" />
     <PackageReference Include="Darkspyre.TensorSharp.Models" />
     <PackageReference Include="Darkspyre.TensorSharp.Runtime" />

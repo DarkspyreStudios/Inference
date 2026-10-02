@@ -55,8 +55,17 @@ public sealed class QwenBackendProbeTests
     [Fact]
     public void ProbeAndLoaderShareAutomaticBackendPolicy()
     {
-        Assert.Equal(OperatingSystem.IsMacOS() ? TensorBackendKind.GgmlMetal : TensorBackendKind.GgmlCuda,
-            QwenLlmInference.ResolveBackend(TensorBackendKind.Auto));
-        Assert.Equal(TensorBackendKind.Cpu, QwenLlmInference.ResolveBackend(TensorBackendKind.Cpu));
+        string rid = System.Runtime.InteropServices.RuntimeInformation.RuntimeIdentifier;
+        TensorBackendKind[] expected = rid switch
+        {
+            "osx-arm64" => [TensorBackendKind.GgmlMetal, TensorBackendKind.GgmlCpu],
+            "win-arm64" => [TensorBackendKind.GgmlVulkan, TensorBackendKind.GgmlCpu],
+            "linux-x64" or "linux-arm64" or "win-x64" => [TensorBackendKind.GgmlCuda, TensorBackendKind.GgmlVulkan, TensorBackendKind.GgmlCpu],
+            _ => []
+        };
+        Assert.Equal(expected,
+            QwenRuntimeOwner.CompatibleBackends(TensorBackendKind.Auto, System.Runtime.InteropServices.RuntimeInformation.RuntimeIdentifier));
+        Assert.Equal(new[] { TensorBackendKind.Cpu },
+            QwenRuntimeOwner.CompatibleBackends(TensorBackendKind.Cpu, System.Runtime.InteropServices.RuntimeInformation.RuntimeIdentifier));
     }
 }

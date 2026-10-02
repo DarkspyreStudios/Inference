@@ -250,9 +250,10 @@ host-owned. `OpenAsync` reads its state through `GetObservationAsync`. The manag
 Without an instance, Loaded/Ready remain unknown. A backend name is a supported selection, not proof
 that the backend is available. The explicit **Check backend prerequisites** action records available,
 unavailable or unknown runtime/device prerequisites without installing or loading a model. Qwen uses
-the loader's same Auto policy (GGML Metal on macOS, GGML CUDA elsewhere); Supra Auto can fall back
-to managed CPU. Laya Auto selects Core ML on macOS and CPU elsewhere. No check starts a backend: GGML
-checks `GgmlBasicOps.CanInitializeBackend`, MLX checks that its native library is present, direct
+the shared runtime owner's Auto policy: Metal then GGML CPU on macOS; CUDA, Vulkan, then GGML CPU
+on supported non-macOS targets, excluding CUDA on Windows ARM64. Supra Auto can fall back
+to managed CPU. Laya Auto selects Core ML on macOS and CPU elsewhere. Qwen's GGML check resolves
+the bound candidate plan and initializes its one backend; it never loads model weights. MLX checks that its native library is present, direct
 CUDA checks its device/driver, and Core ML checks that ONNX Runtime offers its Core ML execution
 provider. Every check runs on a background thread. These observations do not guarantee memory allocation or successful model
 loading. Edits clear the observation, and opening or browsing settings never runs a probe.
@@ -316,9 +317,54 @@ This test does not initialize a native runtime or qualify an active model/sessio
 
 `ITensorRuntimeOwner` declares generation runtime control alongside `ITensorBackendProbe`. It exposes
 the immutable `TensorRuntimePlan`, the runtime state, the nullable actual backend identity and a
-structured shutdown observation. Tensor.Common supplies these contracts, not a Qwen runtime owner
-implementation or a composed execution path. Constructing or serializing a plan never resolves a
+structured shutdown observation. `QwenRuntimeOwner.GetOrCreate(plan)` binds one assembly-generation
+owner. Equal plans join it; conflicting plans refuse, including after terminal shutdown. Qwen engines,
+model resolvers and settings borrow that same owner. Constructing or serializing a plan never resolves a
 package catalog, inspects files, initializes a backend or establishes availability.
+
+`AddTensorEngines(services, ggmlRuntimePlan)` carries the optional immutable logical plan into its
+lazy Qwen owner factory. A factory-created owner is container-owned; an explicitly registered owner
+instance remains borrowed. Model instances release their own leases and never shut down the shared
+runtime. Stop/dispose instances before terminal runtime shutdown.
+Dispose a service provider that resolves these registrations asynchronously with `await using` or
+`DisposeAsync`. Its factory-created Qwen runtime owner has an asynchronous terminal lifetime.
+
+Qwen consumes the TensorSharp 2.8.6.8 managed loader APIs through ordinary PackageReferences.
+GGML is a direct Qwen and Tensor package dependency. Source restore and compilation do not substitute
+supplier project references. The actual private-generation test composes Qwen with the package's
+Chat/Models/GGML/Core/Runtime assemblies, checks an explicit empty plan, and retires owned metadata
+and zero-handle runtime state. It does not initialize a backend, resolve a catalog or load a model.
+
+Null candidates resolve the supplier's finite deployed package catalog once at the first admitted
+GGML check/load. Empty candidates admit nothing and never resolve or load ambient libraries. Auto
+considers compatible concrete backend groups in priority order. It stops fallback after any possibly
+retained native state. Actual backend, variant, build, ABI and native source commit come from successful
+supplier initialization, not the requested backend or current managed source checkout.
+
+Initialization, queued model loading, resident models and execution retain owner leases until their
+actual work/cleanup settles. Ordinary shutdown with active leases reports Busy without teardown.
+Disposal synchronously fences new work and reports Busy/failure visibly. Existing instances retain
+release-only cleanup access; explicit terminal shutdown can finish after they drain. Concurrent
+shutdown/disposal calls share cleanup and failure. A cancelled shutdown wait does not cancel cleanup
+or reopen admission. Supplier refusals without structured safe-Busy proof report FailedRequiresProcessExit;
+no diagnostic text is parsed to invent counts or recoverability.
+An initialized supplier that remains Ready after its guard refuses teardown reports Busy with zero
+owner leases and possible external native resources. Its control is retained for explicit retry after
+those resources drain; the admission fence stays closed. Unknown or poisoned refusals remain terminal.
+
+If acquisition cancellation is followed by model-lease cleanup failure, the runtime owner retains
+that exact cleanup handle and both failures remain visible. It does not count failed cleanup as
+release or invoke native shutdown over it. Explicit shutdown may retry only that held release;
+failure reports FailedRequiresProcessExit with the outstanding ownership, while successful release
+permits guarded terminal shutdown. Drained terminal owners drop supplier/catalog task references
+without disposing borrowed collaborators.
+
+A failed model load/unload that cannot complete cleanup keeps its pack/runtime ownership. New loading
+or execution refuses until release-only cleanup succeeds, rather than replacing those held leases.
+Qwen stops new operational admissions synchronously and shares the pending cleanup attempt. Stop still
+returns admission and publishes Stopped/Failed through the existing lifecycle; a completed failed Stop
+can be explicitly retried for release only. Dispose waits for actual cleanup and preserves its shared
+failure for repeated callers, even if a later explicit Stop successfully releases the resources.
 
 Plans deep-snapshot ordered GGML candidates and their file declarations. Each candidate has a
 distinct ID, exact build/RID and concrete GGML backend. Null candidates retain the standard-package
@@ -676,15 +722,17 @@ the Audio / SpeechTranscription task without provider-name renderer branches.
 ## Package dependency boundary
 
 Tensor depends on **Darkspyre.Inference.Common [11.14.0-rc.1]** and the **Darkspyre.TensorSharp.*
-2.8.6.7** dependency closure through NuGet. None of their DLLs is embedded in Tensor. TensorSharp
-2.8.6.7 loads model files from paths and provides bounded metadata inspection through its GGUF,
-safetensors and restricted PyTorch readers. `Darkspyre.TensorSharp.Backends.GGML` ships prebuilt GGML
-native bridges at `runtimes/<rid>/native/`: CPU and Metal for osx-arm64, and CPU for linux-x64,
-linux-arm64 and win-x64. Qwen and Supra therefore load on those backends without a native build. The
-Linux bridges need glibc 2.39 or later. CUDA, Vulkan and win-arm64 build the bridge from a
-TensorSharp checkout with its `TensorSharp.GGML.Native/build-*` script.
+2.8.6.8** dependency closure through NuGet. None of their DLLs is embedded in Tensor. TensorSharp
+loads model files from paths and provides bounded metadata inspection through its GGUF,
+safetensors and restricted PyTorch readers. `Darkspyre.TensorSharp.Backends.GGML` is managed-only.
+Its restore graph does not select a GGML native package. Consumers supply compatible native
+packages or an explicit runtime candidate plan before an admitted backend check or model load.
+An empty candidate plan never falls through to ambient probing. Package presence does not establish
+backend availability or successful model allocation.
 
-Use the root `NuGet.Config` and process-scoped private-feed credentials for normal restores.
+Use the root `NuGet.Config` and process-scoped private-feed credentials for normal restores when the
+required package version is available on the feed. A local archive source for verification is an
+explicit separate restore configuration, not a permanent shipping-source redirect.
 Darkspyre dependencies come from the private feed; Microsoft.ML.OnnxRuntime, Whisper.net, its
 runtime and NAudio.Core come from public NuGet. Their own packages own their assemblies/native runtime assets. Tensor contains
 only its capability, engine and registry assemblies and their XML documentation, README and license.
@@ -695,3 +743,7 @@ device availability. Explicit backend observations retain the documented availab
 host native-runtime provisioning and full-weight/device validation are not inferred from package
 installation. Whisper's advertised CPU runtime and ONNX Runtime's native library, including its
 Core ML execution provider, are supplied by their public package dependencies.
+The CUDA dependency retains its committed PTX payload; disabling native builds does not remove that
+payload. Tensor's archive boundary excludes those foreign shader files. The strict
+`VerifyRuntimeInventory --require-managed-ggml` gate checks actual restored GGML package identities
+and payloads while retaining the separate Whisper, ONNX, image-runtime and GPU asset inventory.

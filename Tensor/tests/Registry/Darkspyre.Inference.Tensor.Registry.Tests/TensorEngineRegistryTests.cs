@@ -43,7 +43,7 @@ public sealed class TensorEngineRegistryTests
     {
         var services = new ServiceCollection();
         services.AddTensorEngines().AddTensorEngines();
-        Assert.Equal(5, services.Count);
+        Assert.Equal(6, services.Count);
         Assert.Equal(4, services.BuildServiceProvider().GetRequiredService<TensorEngineRegistry>().Definitions.Count);
     }
 
