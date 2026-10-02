@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Runtime.Loader;
@@ -64,6 +65,63 @@ public sealed class TensorJsonTests
         Assert.Equal((TensorBackendKind)999, configuration.Backend);
         Assert.Equal(ConfigurationJson.Replace("\"Backend\":6", "\"Backend\":999", StringComparison.Ordinal),
             JsonSerializer.Serialize(configuration, TensorJson.SetupConfiguration));
+    }
+
+    public static TheoryData<bool, int> UndefinedRuntimeStates => new()
+    {
+        { false, -1 }, { false, 7 }, { false, 999 }, { false, int.MinValue }, { false, int.MaxValue },
+        { true, -1 }, { true, 4 }, { true, 999 }, { true, int.MinValue }, { true, int.MaxValue }
+    };
+
+    [Theory]
+    [MemberData(nameof(UndefinedRuntimeStates))]
+    public void RuntimeStateGettersRefuseUndefinedReads(bool shutdown, int value)
+    {
+        string json = value.ToString(CultureInfo.InvariantCulture);
+        if (shutdown)
+            Assert.Throws<JsonException>(() => JsonSerializer.Deserialize(json, TensorJson.TensorRuntimeShutdownState));
+        else
+            Assert.Throws<JsonException>(() => JsonSerializer.Deserialize(json, TensorJson.TensorRuntimeState));
+    }
+
+    [Theory]
+    [MemberData(nameof(UndefinedRuntimeStates))]
+    public void RuntimeStateGettersRefuseUndefinedWrites(bool shutdown, int value)
+    {
+        if (shutdown)
+            Assert.Throws<JsonException>(() => JsonSerializer.Serialize((TensorRuntimeShutdownState)value, TensorJson.TensorRuntimeShutdownState));
+        else
+            Assert.Throws<JsonException>(() => JsonSerializer.Serialize((TensorRuntimeState)value, TensorJson.TensorRuntimeState));
+    }
+
+    [Fact]
+    public void EveryDefinedRuntimeStateKeepsItsNumericWireValue()
+    {
+        foreach (TensorRuntimeState value in Enum.GetValues<TensorRuntimeState>())
+        {
+            string json = ((int)value).ToString(CultureInfo.InvariantCulture);
+            Assert.Equal(json, JsonSerializer.Serialize(value, TensorJson.TensorRuntimeState));
+            Assert.Equal(value, JsonSerializer.Deserialize(json, TensorJson.TensorRuntimeState));
+        }
+        foreach (TensorRuntimeShutdownState value in Enum.GetValues<TensorRuntimeShutdownState>())
+        {
+            string json = ((int)value).ToString(CultureInfo.InvariantCulture);
+            Assert.Equal(json, JsonSerializer.Serialize(value, TensorJson.TensorRuntimeShutdownState));
+            Assert.Equal(value, JsonSerializer.Deserialize(json, TensorJson.TensorRuntimeShutdownState));
+        }
+    }
+
+    [Theory]
+    [InlineData("\"Ready\"")]
+    [InlineData("null")]
+    [InlineData("1.5")]
+    [InlineData("{}")]
+    [InlineData("[]")]
+    [InlineData("2147483648")]
+    public void RuntimeStateGettersRequireInt32NumericData(string json)
+    {
+        Assert.Throws<JsonException>(() => JsonSerializer.Deserialize(json, TensorJson.TensorRuntimeState));
+        Assert.Throws<JsonException>(() => JsonSerializer.Deserialize(json, TensorJson.TensorRuntimeShutdownState));
     }
 
     public static TheoryData<string, string> CollectibleFamilies => new()
