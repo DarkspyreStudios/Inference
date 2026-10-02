@@ -112,6 +112,69 @@ public sealed class AttachmentAdmissionSnapshotTests
     private static async Task ReadAsync(IAsyncEnumerable<LlmStreamEvent> events)
     { await foreach (var unused in events) { } }
 
+    public static IEnumerable<object[]> ControlCases()
+    {
+        for (int field = 0; field < 3; field++)
+            for (int operation = 0; operation < 4; operation++) yield return [field, operation];
+    }
+
+    [Theory, MemberData(nameof(ControlCases))]
+    public async Task FacadeFreezesStopsProviderOptionsAndSchemaBeforeResolution(int field, int operation)
+    {
+        var gate = new Gate(0);
+        var source = new Source(gate);
+        var client = new Client(gate);
+        using var document = JsonDocument.Parse("{\"type\":\"object\"}");
+        List<string> stops = ["first", "second"];
+        Dictionary<string, JsonElement> options = new(StringComparer.Ordinal)
+        { ["extension"] = document.RootElement };
+        var request = new LlmChatRequest
+        {
+            ModelId = "model",
+            Messages = [new("user", "hello")],
+            StopSequences = field == 0 ? stops : [],
+            ProviderOptions = field == 1 ? options : new Dictionary<string, JsonElement>(),
+            StructuredOutput = field == 2 ? new() { Name = "actual", Schema = document.RootElement } : null
+        };
+        var facade = new LlmProviderService(source, [client]);
+        Task run = ExecuteAsync();
+        try
+        {
+            await gate.Entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            if (field == 0) { stops.Reverse(); stops.Add("late"); }
+            if (field == 1)
+            {
+                options["extension"] = JsonSerializer.SerializeToElement("changed");
+                options["late"] = JsonSerializer.SerializeToElement(true);
+            }
+            document.Dispose();
+            gate.Release.TrySetResult();
+            await run.WaitAsync(TimeSpan.FromSeconds(5));
+            LlmChatRequest sent = Assert.IsType<LlmChatRequest>(client.Sent);
+            if (field == 0) Assert.Collection(sent.StopSequences,
+                stop => Assert.Equal("first", stop), stop => Assert.Equal("second", stop));
+            if (field == 1) Assert.Equal("{\"type\":\"object\"}", Assert.Single(sent.ProviderOptions).Value.GetRawText());
+            if (field == 2) Assert.Equal("{\"type\":\"object\"}", Assert.IsType<LlmStructuredOutputRequest>(sent.StructuredOutput).Schema.GetRawText());
+        }
+        finally
+        {
+            Task retirement = facade.DisposeAsync().AsTask();
+            gate.Release.TrySetResult();
+            try { await run.WaitAsync(TimeSpan.FromSeconds(5)); }
+            catch (Exception) when (run.IsCompleted) { }
+            finally { await retirement.WaitAsync(TimeSpan.FromSeconds(5)); }
+        }
+        Assert.False(source.Disposed);
+
+        async Task ExecuteAsync()
+        {
+            if (operation == 1) await facade.CompleteAsync("connection", request);
+            else if (operation == 2) await facade.CountInputTokensAsync("connection", request);
+            else if (operation == 3) await facade.MeasureRequestAsync("connection", request);
+            else await foreach (var unused in facade.StreamAsync("connection", request)) { }
+        }
+    }
+
     public static IEnumerable<object[]> Cases()
     {
         for (int boundary = 0; boundary < 3; boundary++)
