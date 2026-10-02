@@ -1477,6 +1477,10 @@ finer than representable CLR precision. Its receipt parser preserves independent
 observed expiry and returns one ordered page with its actual continuation token. These effect-free
 helpers do not establish native resource/principal authority or enable cache dispatch.
 
+The shared Gemini request codec can construct immutable cache-prefix contents, system instructions,
+function declarations and tool configuration without generation-only settings; this internal
+preparation does not enable explicit-cache binding or provider CRUD.
+
 The private Google cache create send boundary borrows an already-authorized request and client.
 It disposes the response, checks the existing caller and HTTP-generation fences, and never retries.
 Cancellation before send remains ordinary cancellation. Failed acknowledgement after invoking send,
