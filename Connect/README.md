@@ -1,5 +1,26 @@
 # Darkspyre.Inference.Connect
 
+## Batch and deferred contracts
+
+`Darkspyre.Inference.Connect.Resources` declares `ILlmBatchClient` for explicit-connection batch
+creation, incremental requests, one-page queries/results, cancellation, JSONL creation and deferred
+submission/retrieval. Its closed operation union carries actual chat, image/workflow and video
+requests. Results retain caller `CustomId` correlation, native video snapshots and committed caller
+resource descriptors. Counts and timestamps remain nullable observations; absent counts are not zero.
+Media materialization budgets are explicit positive caller policy, not provider defaults.
+
+`ConnectResourcesJson` exports 25 exact data-type getters with one generated closed Common/LLM/Image/
+Video graph. Pages copy their ordered lists, including assignments through `with`. Nested existing
+request/result objects retain their own contracts; constructing a batch wrapper does not admit a
+provider operation or resolve content. The codec preserves fixed xAI hosted-tool and video-option
+variants and refuses nonnull resource access, handles, authorization and batch clients without calling
+them. Diagnostic strings hide resource, prompt and native receipt data.
+
+This assembly contains declarations and codecs only. It registers no batch/deferred adapter, makes
+no OAuth or endpoint-availability claim, and supplies no `LlmResourceProviderService` implementation.
+Caller workspace storage remains caller-owned. Constructing or serializing a receipt performs no
+upload, polling, materialization, cache creation or tool execution.
+
 ## Hosted STT bindings
 
 `Darkspyre.Inference.Connect.STT` binds a host-selected `SttConnection` to the Common hosted

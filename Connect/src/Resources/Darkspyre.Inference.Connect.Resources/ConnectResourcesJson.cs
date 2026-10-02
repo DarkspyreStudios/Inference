@@ -60,7 +60,7 @@ public static class ConnectResourcesJson
         {
             JsonTypeInfo? metadata = ((IJsonTypeInfoResolver)ConnectResourcesJsonContext.Default).GetTypeInfo(type, options);
             if (type == typeof(LlmHostedTool) && metadata?.PolymorphismOptions is { } hosted)
-                hosted.DerivedTypes.Add(new JsonDerivedType(typeof(XaiXSearchTool), "x-search"));
+                hosted.DerivedTypes.Add(new JsonDerivedType(typeof(XaiXSearchTool), "xai-x-search"));
             if (type == typeof(VideoProviderOptions) && metadata is not null)
                 metadata.PolymorphismOptions = new()
                 {
@@ -79,7 +79,8 @@ public static class ConnectResourcesJson
     }
 }
 
-[JsonSourceGenerationOptions(GenerationMode = JsonSourceGenerationMode.Metadata)]
+[JsonSourceGenerationOptions(GenerationMode = JsonSourceGenerationMode.Metadata,
+    Converters = [typeof(BatchClientJsonConverter)])]
 [JsonSerializable(typeof(LlmResourcePageRequest))]
 [JsonSerializable(typeof(LlmBatchCounts))]
 [JsonSerializable(typeof(LlmBatch))]
@@ -112,3 +113,15 @@ public static class ConnectResourcesJson
 [JsonSerializable(typeof(XaiStoragePublicUrlFlag))]
 [JsonSerializable(typeof(XaiStoragePublicUrlConfiguration))]
 internal sealed partial class ConnectResourcesJsonContext : JsonSerializerContext;
+
+internal sealed class BatchClientJsonConverter : JsonConverter<ILlmBatchClient>
+{
+    public override bool HandleNull => true;
+    public override ILlmBatchClient? Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+        => reader.TokenType == JsonTokenType.Null ? null : throw new NotSupportedException("Live batch clients are not portable data.");
+    public override void Write(Utf8JsonWriter writer, ILlmBatchClient value, JsonSerializerOptions options)
+    {
+        if (value is null) writer.WriteNullValue();
+        else throw new NotSupportedException("Live batch clients are not portable data.");
+    }
+}
