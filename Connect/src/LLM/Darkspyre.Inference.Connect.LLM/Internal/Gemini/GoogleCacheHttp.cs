@@ -7,6 +7,39 @@ namespace Darkspyre.Inference.Connect.LLM.Internal;
 /// <summary>Sends an already-authorized create request. Routing and receipt authority remain the caller's responsibility.</summary>
 internal static class GoogleCacheHttp
 {
+    internal static Task<LlmContextCache> GetAsync(HttpClient http, HttpRequestMessage request,
+        LlmTransport transport, Func<JsonElement, LlmContextCache> parseReceipt,
+        Action<CancellationToken> ownerFence, CancellationToken cancellationToken) =>
+        ReadAsync(http, request, transport, parseReceipt, ownerFence, cancellationToken);
+
+    internal static Task<LlmContextCachePage> ListAsync(HttpClient http, HttpRequestMessage request,
+        LlmTransport transport, Func<JsonElement, LlmContextCachePage> parsePage,
+        Action<CancellationToken> ownerFence, CancellationToken cancellationToken) =>
+        ReadAsync(http, request, transport, parsePage, ownerFence, cancellationToken);
+
+    private static async Task<T> ReadAsync<T>(HttpClient http, HttpRequestMessage request,
+        LlmTransport transport, Func<JsonElement, T> parse, Action<CancellationToken> ownerFence,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(http);
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(parse);
+        ArgumentNullException.ThrowIfNull(ownerFence);
+        if (request.Method != HttpMethod.Get) throw new ArgumentException("Cache reads require a GET request.", nameof(request));
+        using var consumption = SdkHttpConsumption.Enter(http, cancellationToken);
+        cancellationToken = consumption.Token;
+        cancellationToken.ThrowIfCancellationRequested();
+        ownerFence(cancellationToken);
+        consumption.Fence();
+        using var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
+        if (!response.IsSuccessStatusCode)
+            throw new LlmProviderException("Google rejected cache reading.", transport, response.StatusCode,
+                requestId: ProviderHttp.ReadRequestId(response), retryAfter: response.Headers.RetryAfter?.Delta);
+        string body = await SdkHttpConsumption.ReadAsStringAsync(response.Content, cancellationToken).ConfigureAwait(false);
+        using var document = JsonDocument.Parse(body);
+        return parse(document.RootElement);
+    }
+
     [SuppressMessage("Design", "CA1031", Justification = "The provider boundary reports uncertain mutation and attempts owned response cleanup for every failure.")]
     internal static async Task<LlmContextCache> CreateAsync(HttpClient http, HttpRequestMessage request,
         LlmTransport transport, LlmContextCacheCreateCorrelation correlation,
