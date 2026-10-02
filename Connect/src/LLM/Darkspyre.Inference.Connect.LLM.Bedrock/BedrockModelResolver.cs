@@ -6,12 +6,12 @@ namespace Darkspyre.Inference.Connect.LLM.Bedrock;
 internal sealed class BedrockModelResolver
 {
     public static async Task<string> ResolveAsync(
-        AmazonBedrockClient control,
+        BedrockClientFactory.Lease<AmazonBedrockClient> control,
         string region,
         string requestedModelId,
         CancellationToken cancellationToken)
     {
-        cancellationToken.ThrowIfCancellationRequested();
+        control.ThrowIfCanceled();
         if (LooksLikeInferenceProfile(requestedModelId))
         {
             return requestedModelId;
@@ -19,10 +19,10 @@ internal sealed class BedrockModelResolver
 
         try
         {
-            GetFoundationModelResponse details = await control.GetFoundationModelAsync(
+            GetFoundationModelResponse details = await control.Client.GetFoundationModelAsync(
                 new GetFoundationModelRequest { ModelIdentifier = requestedModelId },
                 cancellationToken);
-            cancellationToken.ThrowIfCancellationRequested();
+            control.ThrowIfCanceled();
             var types = details.ModelDetails?.InferenceTypesSupported ?? [];
             bool supportsOnDemand = types.Any(type => string.Equals(
                 type,
@@ -46,17 +46,17 @@ internal sealed class BedrockModelResolver
         }
         catch (AmazonBedrockException)
         {
-            cancellationToken.ThrowIfCancellationRequested();
+            control.ThrowIfCanceled();
             return requestedModelId;
         }
     }
 
     public static async Task<IReadOnlyList<LlmModel>> ListAsync(
-        AmazonBedrockClient control,
+        BedrockClientFactory.Lease<AmazonBedrockClient> control,
         string region,
         CancellationToken cancellationToken)
     {
-        cancellationToken.ThrowIfCancellationRequested();
+        control.ThrowIfCanceled();
         var byId = new Dictionary<string, LlmModel>(StringComparer.Ordinal);
         foreach (InferenceProfileSummary profile in await ListInferenceProfilesAsync(
                      control,
@@ -75,11 +75,11 @@ internal sealed class BedrockModelResolver
 
         try
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            ListFoundationModelsResponse models = await control.ListFoundationModelsAsync(
+            control.ThrowIfCanceled();
+            ListFoundationModelsResponse models = await control.Client.ListFoundationModelsAsync(
                 new ListFoundationModelsRequest(),
                 cancellationToken);
-            cancellationToken.ThrowIfCancellationRequested();
+            control.ThrowIfCanceled();
             foreach (FoundationModelSummary model in models.ModelSummaries ?? [])
             {
                 if (!string.IsNullOrEmpty(model.ModelId) && !IsProvisionedOnly(model.InferenceTypesSupported))
@@ -92,7 +92,7 @@ internal sealed class BedrockModelResolver
         }
         catch (AmazonBedrockException)
         {
-            cancellationToken.ThrowIfCancellationRequested();
+            control.ThrowIfCanceled();
             // Inference profiles alone remain useful when foundation-model listing is denied.
         }
 
@@ -100,7 +100,7 @@ internal sealed class BedrockModelResolver
     }
 
     private static async Task<string?> FindProfileForModelAsync(
-        AmazonBedrockClient control,
+        BedrockClientFactory.Lease<AmazonBedrockClient> control,
         string region,
         string requestedModelId,
         CancellationToken cancellationToken)
@@ -136,21 +136,21 @@ internal sealed class BedrockModelResolver
     }
 
     private static async Task<List<InferenceProfileSummary>> ListInferenceProfilesAsync(
-        AmazonBedrockClient control,
+        BedrockClientFactory.Lease<AmazonBedrockClient> control,
         CancellationToken cancellationToken)
     {
         try
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            ListInferenceProfilesResponse response = await control.ListInferenceProfilesAsync(
+            control.ThrowIfCanceled();
+            ListInferenceProfilesResponse response = await control.Client.ListInferenceProfilesAsync(
                 new ListInferenceProfilesRequest(),
                 cancellationToken);
-            cancellationToken.ThrowIfCancellationRequested();
+            control.ThrowIfCanceled();
             return response.InferenceProfileSummaries ?? [];
         }
         catch (AmazonBedrockException)
         {
-            cancellationToken.ThrowIfCancellationRequested();
+            control.ThrowIfCanceled();
             return [];
         }
     }

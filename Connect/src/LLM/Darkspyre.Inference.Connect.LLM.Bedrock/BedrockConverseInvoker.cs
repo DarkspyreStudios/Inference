@@ -36,8 +36,9 @@ internal sealed class BedrockConverseInvoker(BedrockClientFactory factory) : IBe
         CancellationToken cancellationToken)
     {
         using BedrockClientFactory.Lease<AmazonBedrockRuntimeClient> lease = factory.Runtime(aws, cancellationToken);
+        lease.ThrowIfCanceled();
         ConverseResponse response = await lease.Client.ConverseAsync(request, lease.Token);
-        lease.Token.ThrowIfCancellationRequested();
+        lease.ThrowIfCanceled();
         return response;
     }
 
@@ -51,18 +52,27 @@ internal sealed class BedrockConverseInvoker(BedrockClientFactory factory) : IBe
         bool transferred = false;
         try
         {
+            lease.ThrowIfCanceled();
             response = await lease.Client.ConverseStreamAsync(request, lease.Token);
-            lease.Token.ThrowIfCancellationRequested();
+            lease.ThrowIfCanceled();
             var stream = new EventStream(response, lease);
             transferred = true;
             return stream;
+        }
+        catch (Exception operationFailure)
+        {
+            try { if (response is not null) lease.DisposeResponse(response); }
+            catch (Exception cleanup)
+            {
+                throw new AggregateException("Bedrock stream opening and response cleanup failed.", operationFailure, cleanup);
+            }
+            throw;
         }
         finally
         {
             if (!transferred)
             {
-                try { if (response is not null) lease.DisposeResponse(response); }
-                finally { lease.Dispose(); }
+                lease.Dispose();
             }
         }
     }
@@ -80,20 +90,24 @@ internal sealed class BedrockConverseInvoker(BedrockClientFactory factory) : IBe
         BedrockClientFactory.Lease<AmazonBedrockRuntimeClient> lease) : IBedrockEventStream
     {
         private readonly LlmOperationLifetime _readers = new();
-        public string? RequestId => response.ResponseMetadata?.RequestId;
+        private ConverseStreamResponse? _response = response;
+        private BedrockClientFactory.Lease<AmazonBedrockRuntimeClient>? _lease = lease;
+        public string? RequestId { get; } = response.ResponseMetadata?.RequestId;
 
         public async IAsyncEnumerable<IEventStreamEvent> ReadAsync(
             [EnumeratorCancellation] CancellationToken cancellationToken)
         {
             using LlmOperationLifetime.Lease reader = _readers.Enter(cancellationToken);
-            using var linked = CancellationTokenSource.CreateLinkedTokenSource(reader.Token, lease.Token);
+            using var linked = CancellationTokenSource.CreateLinkedTokenSource(reader.Token, _lease!.Token);
             cancellationToken = linked.Token;
+            ThrowIfReadCanceled(cancellationToken);
             // C# forbids yield inside try/catch, so each MoveNextAsync is guarded on its own.
-            IAsyncEnumerator<IEventStreamEvent> events = response.Stream.GetAsyncEnumerator(cancellationToken);
+            IAsyncEnumerator<IEventStreamEvent> events = _response!.Stream.GetAsyncEnumerator(cancellationToken);
             await using (events)
             {
                 while (true)
                 {
+                    ThrowIfReadCanceled(cancellationToken);
                     bool moved;
                     try
                     {
@@ -106,11 +120,11 @@ internal sealed class BedrockConverseInvoker(BedrockClientFactory factory) : IBe
 
                     if (!moved)
                     {
-                        cancellationToken.ThrowIfCancellationRequested();
+                        ThrowIfReadCanceled(cancellationToken);
                         yield break;
                     }
 
-                    cancellationToken.ThrowIfCancellationRequested();
+                    ThrowIfReadCanceled(cancellationToken);
                     yield return events.Current;
                 }
             }
@@ -118,10 +132,20 @@ internal sealed class BedrockConverseInvoker(BedrockClientFactory factory) : IBe
 
         public ValueTask DisposeAsync() => new(_readers.RetireAsync(ReleaseAsync));
 
+        private void ThrowIfReadCanceled(CancellationToken token)
+        {
+            token.ThrowIfCancellationRequested();
+            _lease!.ThrowIfCanceled();
+            try { _readers.ThrowIfStopping(); }
+            catch (ObjectDisposedException) { throw new OperationCanceledException("Bedrock stream ownership is retiring.", token); }
+        }
+
         private Task ReleaseAsync()
         {
-            try { lease.DisposeResponse(response); }
-            finally { lease.Dispose(); }
+            try { _lease!.DisposeResponse(_response!); }
+            finally { _lease!.Dispose(); }
+            _response = null;
+            _lease = null;
             return Task.CompletedTask;
         }
     }
