@@ -107,6 +107,59 @@ public sealed class VertexContextCacheLifecycleTests
         Assert.Equal(0, auth.Calls); Assert.Empty(handler.Paths);
     }
 
+    [Theory]
+    [InlineData("projects/123456/locations/us-central1/cachedContents/cache-1", "project-id")]
+    [InlineData(Name, "654321")]
+    [InlineData("https://aiplatform.googleapis.com/" + Name, "project-id")]
+    public async Task KnownRouteContradictionsRefuseBeforeAuthentication(string name, string project)
+    {
+        using var handler = new Handler(); using var http = new HttpClient(handler);
+        var auth = new Authentication();
+        await using var facade = new LlmProviderService(new Source(Connection() with { Vertex = new() { ProjectId = project, Location = "global" } }), [new VertexLlmClient(http, auth)]);
+        var caches = await facade.BindContextCacheAsync("connection");
+        await Assert.ThrowsAsync<ArgumentException>(() => caches.GetAsync(new(name, Model, "imported")));
+        Assert.Equal(0, auth.Calls); Assert.Empty(handler.Paths);
+    }
+
+    [Theory]
+    [InlineData("instructions")]
+    [InlineData("system")]
+    [InlineData("tools")]
+    [InlineData("choice")]
+    public async Task CachedSuffixConflictsRefuseBeforeAuthenticationOrGet(string conflict)
+    {
+        using var handler = new Handler(); using var http = new HttpClient(handler);
+        var auth = new Authentication();
+        await using var facade = new LlmProviderService(new Source(Connection()), [new VertexLlmClient(http, auth)]);
+        var caches = await facade.BindContextCacheAsync("connection");
+        var observed = await caches.GetAsync(new(Name, Model, "imported"));
+        var request = new LlmChatRequest { ModelId = Model, ExplicitCache = observed.Reference, Messages = [new("user", "suffix")] };
+        request = conflict switch
+        {
+            "instructions" => request with { Instructions = "conflict" },
+            "system" => request with { Messages = [new("system", "conflict"), new("user", "suffix")] },
+            "tools" => request with { Tools = [new LlmToolDefinition { Name = "tool", InputSchema = JsonElement.Parse("{\"type\":\"object\"}") }] },
+            _ => request with { ToolChoice = new() { Mode = LlmToolChoiceMode.None } }
+        };
+        await Assert.ThrowsAsync<ArgumentException>(() => facade.CompleteAsync("connection", request));
+        Assert.Equal(1, auth.Calls); Assert.Single(handler.Paths);
+    }
+
+    [Fact]
+    public async Task ChangedAuthenticationEvidenceRevalidatesKnownReceiptWithoutMakingHashAuthority()
+    {
+        using var handler = new Handler(); using var http = new HttpClient(handler);
+        var auth = new Authentication();
+        await using var facade = new LlmProviderService(new Source(Connection()), [new VertexLlmClient(http, auth)]);
+        var caches = await facade.BindContextCacheAsync("connection");
+        var observed = await caches.GetAsync(new(Name, Model, "imported"));
+        auth.Scope = "replacement";
+        _ = await facade.CompleteAsync("connection", new() { ModelId = Model, ExplicitCache = observed.Reference, Messages = [new("user", "suffix")] });
+        Assert.Equal(2, auth.Calls); Assert.Equal(3, handler.Paths.Count);
+        Assert.EndsWith("/cachedContents/cache-1", handler.Paths[1], StringComparison.Ordinal);
+        Assert.EndsWith(":generateContent", handler.Paths[2], StringComparison.Ordinal);
+    }
+
     private static LlmConnection Connection() => new()
     {
         Transport = LlmTransport.GoogleVertexAi, Version = "1", Endpoint = "https://aiplatform.googleapis.com",
@@ -123,8 +176,9 @@ public sealed class VertexContextCacheLifecycleTests
     private sealed class Authentication : IVertexAuthentication
     {
         internal int Calls { get; private set; }
+        internal string Scope { get; set; } = "controlled-source";
         public Task<VertexAccess> ResolveAsync(LlmConnection connection, CancellationToken cancellationToken)
-        { Calls++; return Task.FromResult(new VertexAccess("controlled", "controlled-source")); }
+        { Calls++; return Task.FromResult(new VertexAccess("controlled", Scope)); }
     }
 
     private sealed class Handler(bool list = false, string nativeModel = "models/gemini-2.5-flash") : HttpMessageHandler
