@@ -7,9 +7,29 @@ namespace Darkspyre.Inference.Connect.LLM.Internal;
 internal static class GeminiRequest
 {
     internal const string DummyThoughtSignature = "skip_thought_signature_validator";
-    public static JsonObject Build(LlmConnection connection, LlmChatRequest request,
-        LlmStructuredOutputEnforcement? enforcement, Func<LlmToolOutput, ProjectedToolOutput> project,
-        GeminiModelProfile reasoning, bool reasoningText, bool streamArguments = false)
+
+    /// <summary>Converts an admitted frozen cache prefix through the generation codec, without issuing resource scope.</summary>
+    internal static JsonObject BuildCachePrefix(LlmConnection connection, LlmContextCacheCreate request,
+        Func<LlmToolOutput, ProjectedToolOutput> project, GeminiModelProfile reasoning)
+    {
+        var prefix = new LlmChatRequest
+        {
+            ModelId = request.ModelId,
+            Instructions = request.Instructions,
+            Messages = request.Messages,
+            Tools = request.Tools,
+            ToolChoice = request.ToolChoice,
+            Resources = request.Resources
+        };
+        (JsonArray contents, JsonArray system) = BuildContents(connection, prefix, project, reasoning);
+        ValidateToolOptions(connection, prefix);
+        var payload = new JsonObject { ["contents"] = contents };
+        AppendPrefixConfiguration(payload, system, prefix, reasoning, streamArguments: false);
+        return payload;
+    }
+
+    private static (JsonArray Contents, JsonArray System) BuildContents(LlmConnection connection,
+        LlmChatRequest request, Func<LlmToolOutput, ProjectedToolOutput> project, GeminiModelProfile reasoning)
     {
         var contents = new JsonArray();
         var calls = new Dictionary<string, (string Name, string? WireId)>(StringComparer.Ordinal);
@@ -117,6 +137,20 @@ internal static class GeminiRequest
             }
         }
         if (pending.Count != 0) { throw new ArgumentException("Every Gemini tool call requires a result before continuing generation."); }
+        return (contents, system);
+
+        void AddCall(string id, string name, string? wireId)
+        {
+            if (!calls.TryAdd(id, (name, wireId))) { throw new ArgumentException("Duplicate Gemini tool-call identity."); }
+            pending.Add(id);
+        }
+    }
+
+    public static JsonObject Build(LlmConnection connection, LlmChatRequest request,
+        LlmStructuredOutputEnforcement? enforcement, Func<LlmToolOutput, ProjectedToolOutput> project,
+        GeminiModelProfile reasoning, bool reasoningText, bool streamArguments = false)
+    {
+        (JsonArray contents, JsonArray system) = BuildContents(connection, request, project, reasoning);
         var generation = new JsonObject { ["candidateCount"] = 1 };
         if (request.MaxOutputTokens is int maximum) { generation["maxOutputTokens"] = maximum; }
         if (request.Temperature is double temperature) { generation["temperature"] = temperature; }
@@ -138,10 +172,22 @@ internal static class GeminiRequest
             };
             generation["responseFormat"] = connection.Transport == LlmTransport.GoogleVertexAi ? new JsonArray(format) : format;
         }
-        if (connection.ProviderOptions.ContainsKey(AnthropicTools.OptionName) || request.ProviderOptions.ContainsKey(AnthropicTools.OptionName))
-        { throw new NotSupportedException("Gemini does not accept Anthropic tool configuration."); }
+        ValidateToolOptions(connection, request);
         RequestJson.ApplyProviderOptions(generation, connection, request);
         var payload = new JsonObject { ["contents"] = contents, ["generationConfig"] = generation };
+        AppendPrefixConfiguration(payload, system, request, reasoning, streamArguments);
+        return payload;
+    }
+
+    private static void ValidateToolOptions(LlmConnection connection, LlmChatRequest request)
+    {
+        if (connection.ProviderOptions.ContainsKey(AnthropicTools.OptionName) || request.ProviderOptions.ContainsKey(AnthropicTools.OptionName))
+        { throw new NotSupportedException("Gemini does not accept Anthropic tool configuration."); }
+    }
+
+    private static void AppendPrefixConfiguration(JsonObject payload, JsonArray system, LlmChatRequest request,
+        GeminiModelProfile reasoning, bool streamArguments)
+    {
         if (system.Count > 0) { payload["systemInstruction"] = new JsonObject { ["parts"] = system }; }
         if (request.Tools.Count > 0)
         {
@@ -174,13 +220,6 @@ internal static class GeminiRequest
         {
             payload["toolConfig"] ??= new JsonObject { ["functionCallingConfig"] = new JsonObject() };
             payload["toolConfig"]!["functionCallingConfig"]!["streamFunctionCallArguments"] = true;
-        }
-        return payload;
-
-        void AddCall(string id, string name, string? wireId)
-        {
-            if (!calls.TryAdd(id, (name, wireId))) { throw new ArgumentException("Duplicate Gemini tool-call identity."); }
-            pending.Add(id);
         }
     }
 
