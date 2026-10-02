@@ -216,7 +216,7 @@ cannot enable a missing native-file route.
 Chat admission copies each ordered attachment list, binary payload and omission list before
 connection resolution, refresh or catalog work. Direct Vertex, Bedrock Converse and SelfHost
 requests use the same snapshot before authentication, model resolution or engine acquisition.
-Native Claude turns snapshot attachments before control acknowledgments and turn-start events;
+Native Claude turns snapshot input lists and attachments before control acknowledgments and turn-start events;
 managed turns use the same copier before their asynchronous work.
 Caller mutation after admission cannot change the attachment graph used by the request builder.
 Runtime resource authority stays borrowed; snapshotting does not fetch or materialize references.

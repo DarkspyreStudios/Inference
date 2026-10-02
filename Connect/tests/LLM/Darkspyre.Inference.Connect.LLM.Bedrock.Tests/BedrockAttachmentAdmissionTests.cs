@@ -28,17 +28,30 @@ public sealed class BedrockAttachmentAdmissionTests
         byte[] bytes = "original"u8.ToArray();
         List<LlmMessageAttachment> attachments = [new LlmAttachment { Kind = LlmBinaryKind.Document,
             FileName = "original.txt", MediaType = "text/plain", Data = bytes }];
-        var connection = new LlmConnection { Version = "1", Transport = LlmTransport.AwsBedrockConverse,
-            Endpoint = "https://bedrock.invalid", Credential = new LlmCredential { Aws = new()
-            { Region = "us-east-1", AccessKeyId = "controlled", SecretAccessKey = "controlled" } }.Serialize(),
-            CapabilityOverrides = new() { SupportsStreaming = streaming } };
+        var connection = new LlmConnection
+        {
+            Version = "1",
+            Transport = LlmTransport.AwsBedrockConverse,
+            Endpoint = "https://bedrock.invalid",
+            Credential = new LlmCredential
+            {
+                Aws = new()
+                { Region = "us-east-1", AccessKeyId = "controlled", SecretAccessKey = "controlled" }
+            }.Serialize(),
+            CapabilityOverrides = new() { SupportsStreaming = streaming }
+        };
         Task run = ReadAsync();
         try
         {
             await control.Entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
             bytes[0] = (byte)'X';
-            attachments.Add(new LlmAttachment { Kind = LlmBinaryKind.Document, FileName = "late.txt",
-                MediaType = "text/plain", Data = "late"u8.ToArray() });
+            attachments.Add(new LlmAttachment
+            {
+                Kind = LlmBinaryKind.Document,
+                FileName = "late.txt",
+                MediaType = "text/plain",
+                Data = "late"u8.ToArray()
+            });
             control.Release.TrySetResult();
             await run.WaitAsync(TimeSpan.FromSeconds(5));
             IReadOnlyList<ContentBlock> content = streaming ? Assert.Single(invoker.StreamRequests).Messages[0].Content
@@ -56,8 +69,11 @@ public sealed class BedrockAttachmentAdmissionTests
 
         async Task ReadAsync()
         {
-            await foreach (var unused in client.StreamAsync(connection, new() { ModelId = "us.anthropic.claude-sonnet-4-6",
-                Messages = [new("user", "hello") { Attachments = attachments }] })) { }
+            await foreach (var unused in client.StreamAsync(connection, new()
+            {
+                ModelId = "us.anthropic.claude-sonnet-4-6",
+                Messages = [new("user", "hello") { Attachments = attachments }]
+            })) { }
         }
     }
 

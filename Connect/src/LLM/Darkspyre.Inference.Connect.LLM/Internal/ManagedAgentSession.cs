@@ -753,7 +753,6 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
         {
             ModelId = turn.ModelId ?? _options.ModelId,
             ProviderControls = effective.ProviderControls,
-            Input = Array.AsReadOnly(turn.Input.ToArray()),
             OutputSchema = turn.OutputSchema?.Clone()
         };
     }

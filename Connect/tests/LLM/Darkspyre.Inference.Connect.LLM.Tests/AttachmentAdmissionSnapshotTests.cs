@@ -69,6 +69,13 @@ public sealed class AttachmentAdmissionSnapshotTests
         LlmChatRequest read = JsonSerializer.Deserialize(written, ConnectLlmJson.ChatRequest)!;
         Assert.Equal(written, JsonSerializer.Serialize(read, ConnectLlmJson.ChatRequest));
         Assert.Same(typeof(ConnectLlmJson).Assembly, ConnectLlmJson.ChatRequest.Type.Assembly);
+        foreach (LlmMessageAttachment attachment in message.Attachments)
+        {
+            string json = JsonSerializer.Serialize(attachment, InferenceJson.LlmMessageAttachment);
+            LlmMessageAttachment parsed = JsonSerializer.Deserialize(json, InferenceJson.LlmMessageAttachment)!;
+            Assert.Equal(json, JsonSerializer.Serialize(parsed, InferenceJson.LlmMessageAttachment));
+        }
+        Assert.Same(typeof(InferenceJson).Assembly, InferenceJson.LlmMessageAttachment.Type.Assembly);
         Assert.Throws<NotSupportedException>(() => LlmAttachments.ValidateReferences(copy));
     }
 
@@ -124,8 +131,12 @@ public sealed class AttachmentAdmissionSnapshotTests
         { Kind = LlmBinaryKind.Document, FileName = "original.txt", MediaType = "text/plain", Data = bytes },
             new LlmFileReference(new ProviderFileReference("native-original"))];
         List<LlmOmittedAttachment> omissions = [new(LlmBinaryKind.Document, "omitted.txt", 2)];
-        var request = new LlmChatRequest { ModelId = "model", Messages = [new("user", "original")
-        { Attachments = attachments, OmittedAttachments = omissions }] };
+        var request = new LlmChatRequest
+        {
+            ModelId = "model",
+            Messages = [new("user", "original")
+        { Attachments = attachments, OmittedAttachments = omissions }]
+        };
         var facade = new LlmProviderService(source, [client], [authenticator]);
         Task run = ExecuteAsync();
         try
@@ -183,8 +194,13 @@ public sealed class AttachmentAdmissionSnapshotTests
         public async Task<LlmConnection?> GetConnectionAsync(string connectionId, CancellationToken cancellationToken = default)
         {
             await gate.WaitAsync(0, cancellationToken);
-            return new() { Transport = LlmTransport.OpenAiResponses, Version = "1", Endpoint = "https://example.test",
-                Credential = new LlmCredential { OAuth = new() { AccessToken = "controlled" } }.Serialize() };
+            return new()
+            {
+                Transport = LlmTransport.OpenAiResponses,
+                Version = "1",
+                Endpoint = "https://example.test",
+                Credential = new LlmCredential { OAuth = new() { AccessToken = "controlled" } }.Serialize()
+            };
         }
         public Task SaveCredentialAsync(string connectionId, string credentialJson, string expectedVersion, CancellationToken cancellationToken = default)
             => throw new InvalidOperationException("The unchanged credential cannot be persisted.");
@@ -204,8 +220,14 @@ public sealed class AttachmentAdmissionSnapshotTests
     {
         public LlmTransport Transport => LlmTransport.OpenAiResponses;
         public LlmProviderDefinition ProviderDefinition => new()
-        { Id = "controlled", DisplayName = "Controlled", Description = "Controlled", Transport = Transport,
-            DefaultEndpoint = "https://example.test", SetupSteps = [] };
+        {
+            Id = "controlled",
+            DisplayName = "Controlled",
+            Description = "Controlled",
+            Transport = Transport,
+            DefaultEndpoint = "https://example.test",
+            SetupSteps = []
+        };
         internal LlmChatRequest? Sent { get; private set; }
         public LlmProviderCapabilities GetCapabilities(LlmConnection connection, string? modelId = null) => new()
         { SupportsStreaming = true, SupportsModelListing = true, SupportsFileReferences = true };
@@ -245,8 +267,12 @@ public sealed class AttachmentAdmissionSnapshotTests
             [EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
             Sent = request; await Task.Yield(); cancellationToken.ThrowIfCancellationRequested();
-            yield return new LlmCompletionEvent(new() { Text = "actual", Status = LlmCompletionStatus.Completed,
-                Provenance = new() { ImplementationId = "controlled", ModelId = "model" } });
+            yield return new LlmCompletionEvent(new()
+            {
+                Text = "actual",
+                Status = LlmCompletionStatus.Completed,
+                Provenance = new() { ImplementationId = "controlled", ModelId = "model" }
+            });
         }
         private async Task WaitAsync(CancellationToken token)
         { Entered.TrySetResult(); await Release.Task.WaitAsync(token); }

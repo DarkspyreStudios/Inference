@@ -68,6 +68,7 @@ internal static class ClientTools
 
     internal static LlmAgentTurnRequest Snapshot(LlmAgentTurnRequest request) => request with
     {
+        Input = Array.AsReadOnly(request.Input.ToArray()),
         Attachments = Array.AsReadOnly(request.Attachments.Select(LlmAttachments.Copy).ToArray())
     };
 

@@ -21,18 +21,31 @@ public sealed class VertexAttachmentAdmissionTests
         byte[] bytes = Encoding.UTF8.GetBytes("original");
         List<LlmMessageAttachment> attachments = [new LlmAttachment
         { Kind = LlmBinaryKind.Document, FileName = "original.txt", MediaType = "text/plain", Data = bytes }];
-        var request = new LlmChatRequest { ModelId = "google/gemini-3-flash-preview",
-            Messages = [new("user", "hello") { Attachments = attachments }] };
-        var connection = new LlmConnection { Transport = LlmTransport.GoogleVertexAi, Version = "1",
-            Endpoint = "https://aiplatform.googleapis.com", Vertex = new() { ProjectId = "test-project", Location = "global" },
-            CapabilityOverrides = new() { SupportsStreaming = operation != "complete" } };
+        var request = new LlmChatRequest
+        {
+            ModelId = "google/gemini-3-flash-preview",
+            Messages = [new("user", "hello") { Attachments = attachments }]
+        };
+        var connection = new LlmConnection
+        {
+            Transport = LlmTransport.GoogleVertexAi,
+            Version = "1",
+            Endpoint = "https://aiplatform.googleapis.com",
+            Vertex = new() { ProjectId = "test-project", Location = "global" },
+            CapabilityOverrides = new() { SupportsStreaming = operation != "complete" }
+        };
         Task run = ExecuteAsync();
         try
         {
             await authentication.Entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
             bytes[0] = (byte)'X';
-            attachments.Add(new LlmAttachment { Kind = LlmBinaryKind.Document, FileName = "late.txt",
-                MediaType = "text/plain", Data = Encoding.UTF8.GetBytes("late") });
+            attachments.Add(new LlmAttachment
+            {
+                Kind = LlmBinaryKind.Document,
+                FileName = "late.txt",
+                MediaType = "text/plain",
+                Data = Encoding.UTF8.GetBytes("late")
+            });
             authentication.Release.TrySetResult();
             await run.WaitAsync(TimeSpan.FromSeconds(5));
             JsonNode payload = JsonNode.Parse(Assert.Single(handler.Bodies))!;
@@ -72,8 +85,11 @@ public sealed class VertexAttachmentAdmissionTests
             Bodies.Add(await request.Content!.ReadAsStringAsync(cancellationToken));
             const string reply = "{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"actual\"}]},\"finishReason\":\"STOP\"}]}";
             string body = operation == "count" ? "{\"totalTokens\":12}" : operation == "stream" ? $"data: {reply}\n\n" : reply;
-            return new(HttpStatusCode.OK) { Content = new StringContent(body, Encoding.UTF8,
-                operation == "stream" ? "text/event-stream" : "application/json") };
+            return new(HttpStatusCode.OK)
+            {
+                Content = new StringContent(body, Encoding.UTF8,
+                operation == "stream" ? "text/event-stream" : "application/json")
+            };
         }
     }
 }
