@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace Darkspyre.Inference.Connect.Image;
 
@@ -49,4 +50,4 @@ public sealed record ImageReference
 
 public enum ImageWorkflowOrigin { Host = 0, BuiltIn = 1 }
 
-public sealed record ImageWorkflowSelection(ImageWorkflowOrigin Origin, string Id);
+public sealed record ImageWorkflowSelection([property: JsonRequired] ImageWorkflowOrigin Origin, string Id);
