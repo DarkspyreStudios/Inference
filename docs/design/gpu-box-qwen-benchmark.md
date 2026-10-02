@@ -56,6 +56,39 @@ Tensor reports that direct CUDA has no fused whole-model prefill or decode graph
 and uses per-operation loops. That diagnostic identifies a difference in execution
 paths; this benchmark does not isolate each source of the speed difference.
 
+## Direct CUDA execution verification
+
+A separate 16-token generation uses the same prompt, model and default FP16
+cache. SHA-256 checks confirm that Core, Chat, Models and Runtime assemblies
+match the measured arbiter. Both PTX module hashes match the benchmark build.
+The diagnostic CUDA DLL adds counters after successful `cuLaunchKernel` calls.
+Its source is TensorSharp branch `codex-qwen-cuda-proof`, code commit
+`047764a4`. The validation host uses the arbiter's bundled runtime.
+
+The request reports 36 prompt tokens and 16 generated tokens. Its generation
+phase records 3,509 successful kernel launch calls and zero counted CPU fallback
+operations. The console contains no CUDA error or fallback warning. The calls
+include 256 Q4_K projection calls, 49 Q6_K projection calls, 401 RMSNorm calls,
+32 FP16 decode attention calls and 96 packed GatedDeltaNet calls.
+
+The counts include CUDA graph capture calls and exclude subsequent graph
+replays. They do not count every device execution. CPU fallback counters cover
+`CudaCpuFallback.Invoke` operations, not all possible managed model paths or
+CPU tokenization and sampling. The counters and generated output directly
+confirm GPU model computation. This instrumented short run does not replace
+the throughput measurements above.
+
+The untouched `G:\AI\gpu-arbiter-tensor\smoke` folder still contains older PTX
+modules. An isolated probe using those modules reports CUDA error 218 and CPU
+fallbacks. Both the measured benchmark and the successful verification use the
+rebuilt compatible modules. The benchmark result therefore applies to the
+isolated updated application, not the untouched installed Tensor application.
+
+Verification JSON, assembly/PTX hashes, console output and restoration evidence
+remain in the TensorSharp proof worktree's ignored `tmp/qwen-cuda-proof/` and on
+GPU box under `G:\AI\benchmarks\qwen-cuda-proof-20261002`. The copied probe
+application is removed. The original llama arbiter holds Qwen and is idle.
+
 ## Restoration and evidence
 
 After measurement, Tensor unload completes in 4.02 seconds. The original llama
