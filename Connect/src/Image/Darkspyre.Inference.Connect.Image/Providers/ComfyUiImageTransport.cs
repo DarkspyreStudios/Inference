@@ -418,37 +418,51 @@ internal sealed class ComfyUiImageTransport(
             Exception? failure = null;
             InferenceResourceOperationPhase phase = InferenceResourceOperationPhase.OpenRead;
             long? bytesTransferred = null;
+            string? workspaceId = null;
+            string? sessionId = null;
             try
             {
+                workspaceId = resources.WorkspaceId;
+                cancellationToken.ThrowIfCancellationRequested(); consumption.Fence();
+                sessionId = resources.SessionId;
+                CheckReadScope();
+                if (resource.Resource.WorkspaceId != workspaceId) throw InvalidReadScope();
                 reader = await resources!.OpenReadAsync(resource.Resource, cancellationToken).ConfigureAwait(false);
-                cancellationToken.ThrowIfCancellationRequested();
-                consumption.Fence();
-                if (reader.Resource.Reference != resource.Resource)
+                CheckReadScope();
+                if (reader is null) throw InvalidReadScope();
+                InferenceResourceDescriptor descriptor = reader.Resource;
+                CheckReadScope();
+                if (descriptor is null || descriptor.Reference != resource.Resource
+                    || descriptor.SessionId is { } producerSession && producerSession != sessionId
+                    || descriptor.Bytes is < 0)
                     throw new InferenceException(InferenceFailureCode.ProtocolFailure, "Resource access returned a different content identity.");
+                Stream sourceContent = reader.Content;
+                CheckReadScope();
+                if (sourceContent is null || !sourceContent.CanRead) throw InvalidReadScope();
+                CheckReadScope();
                 using var content = new MemoryStream();
                 phase = InferenceResourceOperationPhase.Read;
-                try { await reader.Content.CopyToAsync(content, cancellationToken).ConfigureAwait(false); }
-                catch (Exception error) when (error is not OutOfMemoryException) { bytesTransferred = content.Length; throw; }
+                try { await sourceContent.CopyToAsync(content, cancellationToken).ConfigureAwait(false); }
+                catch (Exception) { bytesTransferred = content.Length; throw; }
                 bytesTransferred = content.Length;
-                cancellationToken.ThrowIfCancellationRequested();
-                consumption.Fence();
+                CheckReadScope();
+                if (descriptor.Bytes is { } expectedBytes && expectedBytes != content.Length) throw InvalidReadScope();
                 content.Position = 0;
                 phase = InferenceResourceOperationPhase.Materialize;
                 bytesTransferred = null;
                 ImagePreparedReference receipt = await UploadAdmittedAsync(connection, new ImageReference
-                { Id = Guid.NewGuid(), FileName = reader.Resource.FileName, ContentType = reader.Resource.ContentType },
+                { Id = Guid.NewGuid(), FileName = descriptor.FileName, ContentType = descriptor.ContentType },
                     content, scope, cancellationToken).ConfigureAwait(false);
-                cancellationToken.ThrowIfCancellationRequested();
-                consumption.Fence();
+                CheckReadScope();
                 result = receipt with { Resource = resource.Resource };
             }
-            catch (Exception error) when (error is not OutOfMemoryException)
+            catch (Exception error)
             {
                 var facts = new InferenceResourceOperationFailure(phase, resource.Resource, InferenceResourceCommitOutcome.NotAttempted, bytesTransferred);
                 failure = error switch
                 {
                     InferenceResourceOperationException or InferenceResourceOperationCanceledException => error,
-                    OperationCanceledException => new InferenceResourceOperationCanceledException(facts, cancellationToken, error),
+                    OperationCanceledException canceled => new InferenceResourceOperationCanceledException(facts, canceled.CancellationToken, error),
                     _ => new InferenceResourceOperationException(error is InferenceException provider ? provider.Code : InferenceFailureCode.ExecutionFailed,
                         "The image reference resource operation failed.", facts, error)
                 };
@@ -456,15 +470,40 @@ internal sealed class ComfyUiImageTransport(
             if (reader is not null)
             {
                 try { await reader.DisposeAsync().ConfigureAwait(false); }
-                catch (Exception cleanup) when (cleanup is not OutOfMemoryException)
+                catch (Exception cleanup)
                 {
-                    if (failure is not null) throw new AggregateException(failure, cleanup);
-                    throw new InferenceResourceOperationException(InferenceFailureCode.ExecutionFailed, "The image reference resource cleanup failed.",
-                        new(phase, resource.Resource, InferenceResourceCommitOutcome.NotAttempted, bytesTransferred), cleanup);
+                    var facts = new InferenceResourceOperationFailure(InferenceResourceOperationPhase.Cleanup, resource.Resource,
+                        InferenceResourceCommitOutcome.NotAttempted, bytesTransferred);
+                    Exception refused = LlmResourcePreparation.AsCleanupFailure(LlmResourcePreparation.IsCleanupFailure(cleanup) ? cleanup
+                        : new InferenceResourceOperationException(InferenceFailureCode.ExecutionFailed, "The image reference resource cleanup failed.", facts, cleanup),
+                        resource.Resource, reader);
+                    if (failure is not null) throw new AggregateException(failure, refused);
+                    throw refused;
                 }
             }
             if (failure is not null) ExceptionDispatchInfo.Throw(failure);
+            try { CheckReadScope(); }
+            catch (Exception error)
+            {
+                var facts = new InferenceResourceOperationFailure(phase, resource.Resource, InferenceResourceCommitOutcome.NotAttempted, bytesTransferred);
+                throw error is OperationCanceledException canceled ? new InferenceResourceOperationCanceledException(facts, canceled.CancellationToken, error)
+                    : new InferenceResourceOperationException(error is InferenceException provider ? provider.Code : InferenceFailureCode.ExecutionFailed,
+                        "The image reference scope changed before publication.", facts, error);
+            }
             return consumption.Publish<ImagePreparedReference>(result!);
+
+            void CheckReadScope()
+            {
+                cancellationToken.ThrowIfCancellationRequested(); consumption.Fence();
+                if (string.IsNullOrEmpty(workspaceId) || string.IsNullOrEmpty(sessionId)) throw InvalidReadScope();
+                string currentWorkspace = resources.WorkspaceId;
+                cancellationToken.ThrowIfCancellationRequested(); consumption.Fence();
+                if (currentWorkspace != workspaceId) throw InvalidReadScope();
+                string currentSession = resources.SessionId;
+                cancellationToken.ThrowIfCancellationRequested(); consumption.Fence();
+                if (currentSession != sessionId) throw InvalidReadScope();
+            }
+            static InferenceException InvalidReadScope() => new(InferenceFailureCode.ProtocolFailure, "The image reference scope or content does not match the admitted resource.");
         }
         throw new InferenceException(InferenceFailureCode.UnsupportedFeature, "ComfyUI accepts binary or logical resource reference images only.");
     }

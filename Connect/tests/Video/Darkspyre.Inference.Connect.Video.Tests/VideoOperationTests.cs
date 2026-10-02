@@ -207,7 +207,13 @@ public sealed class VideoOperationTests
         Assert.Equal([1, 2, 3], resources.Writer!.Data.ToArray()); Assert.Equal(3, resources.Writer.Written);
         Assert.True(resources.Writer.SelectForSession); Assert.Equal(1, resources.Writer.Commits); Assert.Equal(1, resources.Writer.Disposes);
         Assert.Equal(1, transport.StreamDisposals); Assert.Equal(1, source.Reads); Assert.Equal(0, resources.Disposes);
-        await ((IAsyncDisposable)facade).DisposeAsync(); Assert.Equal(0, resources.Disposes);
+        if (failCleanup)
+        {
+            var cleanup = await Assert.ThrowsAsync<InferenceResourceOperationException>(() => ((IAsyncDisposable)facade).DisposeAsync().AsTask());
+            Assert.Equal(InferenceResourceOperationPhase.Cleanup, cleanup.Failure.Phase);
+        }
+        else await ((IAsyncDisposable)facade).DisposeAsync();
+        Assert.Equal(0, resources.Disposes);
     }
 
     [Fact]
@@ -222,8 +228,10 @@ public sealed class VideoOperationTests
         Assert.Equal(InferenceResourceOperationPhase.Read, original.Failure.Phase);
         Assert.Equal(3, original.Failure.BytesTransferred); Assert.Equal(InferenceResourceCommitOutcome.NotAttempted, original.Failure.CommitOutcome);
         Assert.IsType<IOException>(original.InnerException); Assert.Equal(2, error.InnerExceptions.Count);
+        var cleanup = Assert.IsType<InferenceResourceOperationException>(error.InnerExceptions[1]);
+        Assert.Equal(InferenceResourceOperationPhase.Cleanup, cleanup.Failure.Phase);
         Assert.Equal(0, resources.Writer!.Commits); Assert.Equal(1, resources.Writer.Disposes);
-        await ((IAsyncDisposable)facade).DisposeAsync();
+        Assert.Same(cleanup, await Record.ExceptionAsync(() => ((IAsyncDisposable)facade).DisposeAsync().AsTask()));
     }
 
     [Fact]
