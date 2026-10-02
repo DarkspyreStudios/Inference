@@ -16,6 +16,8 @@ The four-package family is distributed through the private
 [DarkspyreStudios GitHub Packages feed](https://github.com/orgs/DarkspyreStudios/packages).
 The restore source is `https://nuget.pkg.github.com/DarkspyreStudios/index.json`.
 Unimplemented provider capabilities remain unavailable; publishing their contracts does not enable them.
+GGML engine activation additionally requires a compatible per-RID native package; those native
+packages are not on the private feed yet. The managed TensorSharp GGML wrapper is not a native driver.
 
 ## Goals
 

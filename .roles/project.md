@@ -40,6 +40,9 @@ reports no vulnerabilities. Its strict managed-GGML inventory records seventy-se
 eighty-five native/GPU assets; it does not qualify cross-RID execution. Whisper runtime information
 is available without loading model weights. Unimplemented provider capabilities remain unavailable.
 GPU drivers remain separate existing artifacts, not rebuilt payloads in this release.
+GGML engine activation also requires a compatible per-RID native package and its bound catalog.
+`Darkspyre.TensorSharp.Backends.GGML.Native.*` packages are not on the private feed yet.
+The managed GGML package alone does not satisfy that runtime prerequisite.
 
 ## Package families
 
