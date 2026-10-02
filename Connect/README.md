@@ -757,8 +757,10 @@ leave written destination bytes. Observed public URLs must parse as absolute URI
 controls. Their accepted strings remain unchanged; the transport does not fetch them or impose an
 undocumented scheme/host policy.
 The transport fences each awaited boundary and drains entered work before dropping its borrowed HTTP
-client. Its protocol errors retain actual status and authentication/entitlement classification, but
-exclude provider response bodies and capability URLs from diagnostics. No facade route, provider
+client. Owned response and request cleanup each runs once. Independent operation and cleanup failures
+remain visible together; a lone failure retains its original identity. Publication follows cleanup
+and the final owner fence. Its protocol errors retain actual status and authentication/entitlement
+classification, but exclude provider response bodies and capability URLs from diagnostics. No facade route, provider
 capability or logical Session/Workspace materialization is activated by this private implementation.
 
 ### Embedding lifetime
