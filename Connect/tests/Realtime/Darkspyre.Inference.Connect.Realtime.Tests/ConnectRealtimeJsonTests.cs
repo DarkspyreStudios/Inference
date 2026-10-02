@@ -170,6 +170,26 @@ public sealed class ConnectRealtimeJsonTests
 
     [Fact] public void LiveRuntimeAuthorityRefusesWithoutEffects() => RuntimeRefusalProof();
 
+    [Theory]
+    [InlineData("Authorization")]
+    [InlineData("Provider")]
+    [InlineData("Service")]
+    [InlineData("Settings")]
+    [InlineData("Manager")]
+    [InlineData("Session")]
+    [InlineData("Binding")]
+    [InlineData("Resources")]
+    [InlineData("Read")]
+    [InlineData("Write")]
+    public void RuntimeNullRoundTripsWithoutAPortableRoot(string property)
+    {
+        Type type = typeof(RealtimeRuntimeEnvelope).GetProperty(property)!.PropertyType;
+        JsonSerializerOptions options = ConnectRealtimeJson.RealtimeSessionConfig.Options;
+        Assert.Equal("null", JsonSerializer.Serialize((object?)null, type, options));
+        Assert.Null(JsonSerializer.Deserialize("null", type, options));
+        Assert.Throws<NotSupportedException>(() => JsonSerializer.Deserialize("{}", type, options));
+    }
+
     public static JsonTypeInfo<RealtimeRuntimeEnvelope> RuntimeMetadata()
     {
         var options = new JsonSerializerOptions(ConnectRealtimeJson.RealtimeSessionConfig.Options) { TypeInfoResolver = RealtimeConsumerJsonContext.Default };

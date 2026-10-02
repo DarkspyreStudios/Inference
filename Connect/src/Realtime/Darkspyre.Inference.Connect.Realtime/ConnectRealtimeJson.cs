@@ -67,7 +67,7 @@ public static class ConnectRealtimeJson
             typeof(IInferenceResourceWriteHandle), typeof(LlmHostedToolPhase), typeof(LlmImageGenerationAction), typeof(RealtimeAudioEncoding),
             typeof(RealtimeAudioTransport), typeof(RealtimeModality), typeof(RealtimeMessageRole), typeof(IRealtimeVoiceSession) })
             options.Converters.Add(InferenceJson.RealtimeSessionConfig.Options.Converters.Single(converter => converter.CanConvert(type)));
-        options.Converters.Add(ConnectLlmJson.Connection.Options.GetConverter(typeof(XaiFamilyBinding)));
+        options.Converters.Add(ConnectLlmJson.Connection.Options.Converters.Single(converter => converter.CanConvert(typeof(XaiFamilyBinding))));
         options.Converters.Add(new RealtimeTransportJsonConverter());
         options.Converters.Add(new RealtimeRuntimeJsonConverter<IRealtimeProvider>());
         options.Converters.Add(new RealtimeRuntimeJsonConverter<RealtimeProviderService>());
@@ -81,6 +81,11 @@ public static class ConnectRealtimeJson
     {
         public JsonTypeInfo? GetTypeInfo(Type type, JsonSerializerOptions options)
         {
+            if (type == typeof(XaiFamilyBinding)) return RuntimeValue<XaiFamilyBinding>(options);
+            if (type == typeof(IRealtimeVoiceSession)) return RuntimeValue<IRealtimeVoiceSession>(options);
+            if (type == typeof(IInferenceResourceAccess)) return RuntimeValue<IInferenceResourceAccess>(options);
+            if (type == typeof(IInferenceResourceReadHandle)) return RuntimeValue<IInferenceResourceReadHandle>(options);
+            if (type == typeof(IInferenceResourceWriteHandle)) return RuntimeValue<IInferenceResourceWriteHandle>(options);
             if (type == typeof(IRealtimeProvider)) return JsonMetadataServices.CreateValueInfo<IRealtimeProvider>(options, new RealtimeRuntimeJsonConverter<IRealtimeProvider>());
             if (type == typeof(RealtimeProviderService)) return JsonMetadataServices.CreateValueInfo<RealtimeProviderService>(options, new RealtimeRuntimeJsonConverter<RealtimeProviderService>());
             if (type == typeof(RealtimeSettings)) return JsonMetadataServices.CreateValueInfo<RealtimeSettings>(options, new RealtimeRuntimeJsonConverter<RealtimeSettings>());
@@ -116,6 +121,9 @@ public static class ConnectRealtimeJson
                     InferenceJson.RealtimeAudioContent.Properties.Single(property => property.Name == "Audio").CustomConverter;
             return metadata;
         }
+
+        private static JsonTypeInfo<T> RuntimeValue<T>(JsonSerializerOptions options) where T : class =>
+            JsonMetadataServices.CreateValueInfo<T>(options, (JsonConverter<T>)options.Converters.Single(converter => converter.CanConvert(typeof(T))));
     }
 }
 
@@ -192,4 +200,3 @@ internal sealed class RealtimeRuntimeJsonConverter<T> : JsonConverter<T> where T
         else throw new NotSupportedException("Live realtime collaborators are not portable data.");
     }
 }
-

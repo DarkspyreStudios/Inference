@@ -25,13 +25,15 @@ public sealed class RealtimeProviderService
         return _providers.TryGetValue(transport, out IRealtimeProvider? provider) ? provider
             : throw new InferenceException(InferenceFailureCode.UnsupportedFeature, "The selected realtime transport is not registered.");
     }
-    public Task<RealtimeCapabilities> GetCapabilitiesAsync(RealtimeConnection connection, string? modelId = null,
+    public async Task<RealtimeCapabilities> GetCapabilitiesAsync(RealtimeConnection connection, string? modelId = null,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(connection); cancellationToken.ThrowIfCancellationRequested();
-        return GetRequiredProvider(connection.Transport).GetCapabilitiesAsync(connection, modelId, cancellationToken);
+        RealtimeCapabilities? capabilities = await GetRequiredProvider(connection.Transport).GetCapabilitiesAsync(connection, modelId, cancellationToken).ConfigureAwait(false);
+        cancellationToken.ThrowIfCancellationRequested();
+        return capabilities ?? throw new InferenceException(InferenceFailureCode.ProtocolFailure, "The realtime provider returned no capability facts.");
     }
-    public Task<IRealtimeVoiceSession> OpenSessionAsync(RealtimeConnection connection, RealtimeSessionConfig config,
+    public async Task<IRealtimeVoiceSession> OpenSessionAsync(RealtimeConnection connection, RealtimeSessionConfig config,
         InferenceStreamLimits limits, XaiFamilyBinding? xai = null, IInferenceResourceAccess? resources = null,
         CancellationToken cancellationToken = default)
     {
@@ -39,7 +41,20 @@ public sealed class RealtimeProviderService
         cancellationToken.ThrowIfCancellationRequested();
         IRealtimeProvider provider = GetRequiredProvider(connection.Transport);
         RealtimeSessionConfig snapshot = RealtimeRequestData.Snapshot(config);
-        return provider.OpenSessionAsync(connection, snapshot, limits, xai, resources, cancellationToken);
+        IRealtimeVoiceSession? session = await provider.OpenSessionAsync(connection, snapshot, limits, xai, resources, cancellationToken).ConfigureAwait(false);
+        if (session is null)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            throw new InferenceException(InferenceFailureCode.ProtocolFailure, "The realtime provider returned no session.");
+        }
+        if (cancellationToken.IsCancellationRequested)
+        {
+            var cancellation = new OperationCanceledException(cancellationToken);
+            try { await session.DisposeAsync().ConfigureAwait(false); }
+            catch (Exception cleanup) { throw new AggregateException(cancellation, cleanup); }
+            throw cancellation;
+        }
+        return session;
     }
     public RealtimeSettingsManager CreateSettingsManager(ISetupCommitTarget<RealtimeSetupChanges> target) => new(this, target);
 }

@@ -54,8 +54,17 @@ public sealed class RealtimeBindingTests
         var facade = new RealtimeProviderService([provider]);
         Task<IRealtimeVoiceSession> open = facade.OpenSessionAsync(Connection, new()
         { Tools = [new LlmToolDefinition { Name = "tool", InputSchema = schema.RootElement }], HostedTools = [new XaiXSearchTool { AllowedHandles = handles }] }, suppliedLimits);
-        await entered.Task.WaitAsync(Deadline); schema.Dispose(); handles.Clear(); release.SetResult();
-        Assert.Same(session, await open.WaitAsync(Deadline)); Assert.Equal(0, session.DisposeCalls);
+        try
+        {
+            await entered.Task.WaitAsync(Deadline); schema.Dispose(); handles.Clear(); release.SetResult();
+            Assert.Same(session, await open.WaitAsync(Deadline)); Assert.Equal(0, session.DisposeCalls);
+        }
+        finally
+        {
+            release.TrySetResult();
+            await Record.ExceptionAsync(() => open.WaitAsync(Deadline));
+            await session.DisposeAsync();
+        }
     }
 
     [Fact]
@@ -67,12 +76,17 @@ public sealed class RealtimeBindingTests
         var provider = new ControlledRealtimeProvider { Capabilities = (connection, model, token) => { entered.SetResult(); return release.Task; } };
         var facade = new RealtimeProviderService([provider]);
         Task<RealtimeCapabilities> lookup = facade.GetCapabilitiesAsync(Connection, "manual", cancellation.Token);
-        await entered.Task.WaitAsync(Deadline); await cancellation.CancelAsync(); release.SetResult(new());
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => lookup.WaitAsync(Deadline));
+        try
+        {
+            await entered.Task.WaitAsync(Deadline); await cancellation.CancelAsync(); release.SetResult(new());
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => lookup.WaitAsync(Deadline));
+        }
+        finally { release.TrySetResult(new()); await Record.ExceptionAsync(() => lookup.WaitAsync(Deadline)); }
     }
 
     [Theory]
-    [InlineData(false)] [InlineData(true)]
+    [InlineData(false)]
+    [InlineData(true)]
     public async Task LateCancelledOpenRetiresUnhandedSessionAndPreservesCleanupFailure(bool cleanupFails)
     {
         using var cancellation = new CancellationTokenSource();
@@ -82,16 +96,20 @@ public sealed class RealtimeBindingTests
         var session = new ControlledRealtimeSession { CleanupError = cleanupFails ? cleanup : null };
         var provider = new ControlledRealtimeProvider { Open = (connection, config, limits, xai, resources, token) => { entered.SetResult(); return release.Task; } };
         Task<IRealtimeVoiceSession> open = new RealtimeProviderService([provider]).OpenSessionAsync(Connection, new(), Limits, cancellationToken: cancellation.Token);
-        await entered.Task.WaitAsync(Deadline); await cancellation.CancelAsync(); release.SetResult(session);
-        Exception? error = await Record.ExceptionAsync(() => open.WaitAsync(Deadline));
-        if (cleanupFails)
+        try
         {
-            var aggregate = Assert.IsType<AggregateException>(error);
-            Assert.Contains(aggregate.InnerExceptions, item => item is OperationCanceledException);
-            Assert.Contains(cleanup, aggregate.InnerExceptions);
+            await entered.Task.WaitAsync(Deadline); await cancellation.CancelAsync(); release.SetResult(session);
+            Exception? error = await Record.ExceptionAsync(() => open.WaitAsync(Deadline));
+            if (cleanupFails)
+            {
+                var aggregate = Assert.IsType<AggregateException>(error);
+                Assert.Contains(aggregate.InnerExceptions, item => item is OperationCanceledException);
+                Assert.Contains(cleanup, aggregate.InnerExceptions);
+            }
+            else Assert.IsAssignableFrom<OperationCanceledException>(error);
+            Assert.Equal(1, session.DisposeCalls);
         }
-        else Assert.IsAssignableFrom<OperationCanceledException>(error);
-        Assert.Equal(1, session.DisposeCalls);
+        finally { await cancellation.CancelAsync(); release.TrySetResult(session); await Record.ExceptionAsync(() => open.WaitAsync(Deadline)); }
     }
 
     [Fact]
@@ -103,11 +121,20 @@ public sealed class RealtimeBindingTests
         using var schema = JsonDocument.Parse("{\"type\":\"object\"}");
         var config = new RealtimeSessionConfig
         {
-            ModelId = "manual", Voice = "actual", Instructions = "", ReasoningEffort = LlmReasoningLevel.Low,
-            Tools = [new LlmToolDefinition { Name = "tool", InputSchema = schema.RootElement }], HostedTools = [new XaiXSearchTool()],
-            TurnDetection = new RealtimeManualTurnDetection(), InputAudio = new(RealtimeAudioEncoding.Opus, Transport: RealtimeAudioTransport.Binary),
-            OutputAudio = new(RealtimeAudioEncoding.Mulaw), TranscriptionLanguage = "en", TranscriptionKeyTerms = ["actual"],
-            OutputSpeed = 1.25, Resumption = new(false), ProviderOptions = new XaiRealtimeOptions(new Dictionary<string, string> { ["spoken"] = "replacement" })
+            ModelId = "manual",
+            Voice = "actual",
+            Instructions = "",
+            ReasoningEffort = LlmReasoningLevel.Low,
+            Tools = [new LlmToolDefinition { Name = "tool", InputSchema = schema.RootElement }],
+            HostedTools = [new XaiXSearchTool()],
+            TurnDetection = new RealtimeManualTurnDetection(),
+            InputAudio = new(RealtimeAudioEncoding.Opus, Transport: RealtimeAudioTransport.Binary),
+            OutputAudio = new(RealtimeAudioEncoding.Mulaw),
+            TranscriptionLanguage = "en",
+            TranscriptionKeyTerms = ["actual"],
+            OutputSpeed = 1.25,
+            Resumption = new(false),
+            ProviderOptions = new XaiRealtimeOptions(new Dictionary<string, string> { ["spoken"] = "replacement" })
         };
         var existing = new RealtimeSetupConfiguration(Connection, config, Limits);
         schema.Dispose();
@@ -143,7 +170,9 @@ public sealed class RealtimeBindingTests
     }
 
     [Theory]
-    [InlineData(0)] [InlineData(1)] [InlineData(2)]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(2)]
     public async Task BufferingBudgetsAreExplicitCompleteAndPositive(int changed)
     {
         await using RealtimeSettingsManager manager = new RealtimeProviderService([new ControlledRealtimeProvider()]).CreateSettingsManager(new ControlledCommitTarget());
@@ -178,8 +207,12 @@ public sealed class RealtimeBindingTests
         await using RealtimeSettingsManager manager = new RealtimeProviderService([provider]).CreateSettingsManager(new ControlledCommitTarget());
         RealtimeSettings settings = await manager.OpenAsync(RealtimeTransport.XaiRealtime, new(SetupChangeIntent.Edit, "entry", "v"), new(Connection, new() { ModelId = "original" }));
         Task<SetupActionResult> run = manager.RunAsync(settings, "capabilities");
-        await entered.Task.WaitAsync(Deadline); Assert.IsType<SetupTextField>(Field(settings, "model")).SetValue("new"); release.SetResult(new());
-        Assert.Equal(SetupActionState.Cancelled, (await run.WaitAsync(Deadline)).State); Assert.Null(settings.Status.Ready.Value);
+        try
+        {
+            await entered.Task.WaitAsync(Deadline); Assert.IsType<SetupTextField>(Field(settings, "model")).SetValue("new"); release.SetResult(new());
+            Assert.Equal(SetupActionState.Cancelled, (await run.WaitAsync(Deadline)).State); Assert.Null(settings.Status.Ready.Value);
+        }
+        finally { release.TrySetResult(new()); await run.WaitAsync(Deadline); }
     }
 
     [Fact]
@@ -193,19 +226,73 @@ public sealed class RealtimeBindingTests
         var manager = new RealtimeProviderService([provider]).CreateSettingsManager(target);
         RealtimeSettings settings = await manager.OpenAsync(RealtimeTransport.XaiRealtime, new(SetupChangeIntent.Edit, "entry", "v"), new(Connection, new()));
         IInferenceSettingsManager caller = manager;
-        Task<SetupActionResult> run = caller.RunAsync(settings, "capabilities"); await entered.Task.WaitAsync(Deadline);
-        Task retirement = manager.DisposeAsync().AsTask(); Task second = manager.DisposeAsync().AsTask();
-        Assert.False(retirement.IsCompleted);
-        await Assert.ThrowsAsync<ObjectDisposedException>(() => caller.SaveAsync(settings));
-        await Assert.ThrowsAsync<ObjectDisposedException>(() => caller.QueryChoicesAsync(settings, "model", new()));
-        release.SetResult(new()); Assert.Equal(SetupActionState.Cancelled, (await run.WaitAsync(Deadline)).State);
-        await Task.WhenAll(retirement, second).WaitAsync(Deadline);
-        Assert.Equal(0, target.Calls); Assert.Equal(1, provider.Calls);
-        Assert.Null(typeof(RealtimeSettingsManager).BaseType!.GetField("_target", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.GetValue(manager));
+        Task<SetupActionResult>? run = null;
+        try
+        {
+            run = caller.RunAsync(settings, "capabilities"); await entered.Task.WaitAsync(Deadline);
+            Task retirement = manager.DisposeAsync().AsTask(); Task second = manager.DisposeAsync().AsTask();
+            Assert.False(retirement.IsCompleted);
+            await Assert.ThrowsAsync<ObjectDisposedException>(() => caller.SaveAsync(settings));
+            await Assert.ThrowsAsync<ObjectDisposedException>(() => caller.QueryChoicesAsync(settings, "model", new()));
+            release.SetResult(new()); Assert.Equal(SetupActionState.Cancelled, (await run.WaitAsync(Deadline)).State);
+            await Task.WhenAll(retirement, second).WaitAsync(Deadline);
+            Assert.Equal(0, target.Calls); Assert.Equal(1, provider.Calls);
+            Assert.Null(typeof(RealtimeSettingsManager).BaseType!.GetField("_target", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.GetValue(manager));
+        }
+        finally
+        {
+            Task retirement = manager.DisposeAsync().AsTask(); release.TrySetResult(new());
+            if (run is not null) await run.WaitAsync(Deadline);
+            await retirement.WaitAsync(Deadline);
+        }
+    }
+
+    [Fact]
+    public async Task SynchronousOwnerFenceWinsBeforeLinkedCancellationCallbacksFinish()
+    {
+        CancellationToken stop = default;
+        CancellationToken enteredToken = default;
+        int calls = 0;
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource<RealtimeCapabilities>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var callbackEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var callbackRelease = new ManualResetEventSlim();
+        var provider = new ControlledRealtimeProvider
+        {
+            Capabilities = (connection, model, token) =>
+            {
+                if (++calls == 1) { stop = token; return Task.FromResult(new RealtimeCapabilities()); }
+                enteredToken = token; entered.SetResult(); return release.Task;
+            }
+        };
+        var manager = new RealtimeProviderService([provider]).CreateSettingsManager(new ControlledCommitTarget());
+        Task? retirement = null;
+        CancellationTokenRegistration callback = default;
+        try
+        {
+            RealtimeSettings settings = await manager.OpenAsync(RealtimeTransport.XaiRealtime, new(SetupChangeIntent.Edit, "entry", "v"), new(Connection, new()));
+            Assert.Equal(SetupActionState.Completed, (await manager.RunAsync(settings, "capabilities")).State);
+            using var callerCancellation = new CancellationTokenSource();
+            Task<SetupActionResult> pending = manager.RunAsync(settings, "capabilities", cancellationToken: callerCancellation.Token);
+            await entered.Task.WaitAsync(Deadline);
+            callback = stop.Register(() => { callbackEntered.SetResult(); callbackRelease.Wait(); });
+            retirement = manager.DisposeAsync().AsTask(); await callbackEntered.Task.WaitAsync(Deadline);
+            Assert.False(enteredToken.IsCancellationRequested); release.SetResult(new());
+            Assert.Equal(SetupActionState.Cancelled, (await pending.WaitAsync(Deadline)).State);
+            Assert.Null(settings.Status.Ready.Value);
+        }
+        finally
+        {
+            release.TrySetResult(new()); callbackRelease.Set();
+            callback.Dispose();
+            if (retirement is not null) await retirement.WaitAsync(Deadline);
+            await manager.DisposeAsync();
+        }
     }
 
     [Theory]
-    [InlineData(SetupCommitState.Committed)] [InlineData(SetupCommitState.Uncertain)]
+    [InlineData(SetupCommitState.Committed)]
+    [InlineData(SetupCommitState.Uncertain)]
     public async Task RetirementPreservesActualAdmittedCommitOutcome(SetupCommitState outcome)
     {
         var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -214,22 +301,83 @@ public sealed class RealtimeBindingTests
         var manager = new RealtimeProviderService([new ControlledRealtimeProvider()]).CreateSettingsManager(target);
         RealtimeSettings settings = await manager.OpenAsync(RealtimeTransport.XaiRealtime, new(SetupChangeIntent.Edit, "entry", "v"), new(Connection, new()));
         InferenceSettingsManager<RealtimeSettings, RealtimeSetupChanges> caller = manager;
-        Task<SetupCommitResult> save = caller.SaveAsync(settings); await entered.Task.WaitAsync(Deadline);
-        Task retirement = manager.DisposeAsync().AsTask(); Assert.False(retirement.IsCompleted);
-        release.SetResult(new(outcome, "observed"));
-        Assert.Equal(outcome, (await save.WaitAsync(Deadline)).State); await retirement.WaitAsync(Deadline);
-        Assert.True(settings.IsSaved); Assert.Equal(outcome == SetupCommitState.Uncertain, settings.SaveOutcomeUncertain); Assert.Equal(1, target.Calls);
+        Task<SetupCommitResult>? save = null;
+        try
+        {
+            save = caller.SaveAsync(settings); await entered.Task.WaitAsync(Deadline);
+            Task retirement = manager.DisposeAsync().AsTask(); Assert.False(retirement.IsCompleted);
+            release.SetResult(new(outcome, "observed"));
+            Assert.Equal(outcome, (await save.WaitAsync(Deadline)).State); await retirement.WaitAsync(Deadline);
+            Assert.True(settings.IsSaved); Assert.Equal(outcome == SetupCommitState.Uncertain, settings.SaveOutcomeUncertain); Assert.Equal(1, target.Calls);
+        }
+        finally
+        {
+            Task retirement = manager.DisposeAsync().AsTask(); release.TrySetResult(new(outcome, "observed"));
+            if (save is not null) await save.WaitAsync(Deadline);
+            await retirement.WaitAsync(Deadline);
+        }
     }
 
     private static SetupField Field(RealtimeSettings settings, string id) => settings.Steps.SelectMany(step => step.Sections)
         .SelectMany(section => section.Fields).Single(field => field.Description.Id == id);
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public async Task NullProviderResultsAreProtocolFailureUnlessCallerCancelled(bool open, bool cancel)
+    {
+        using var cancellation = new CancellationTokenSource();
+        var provider = new ControlledRealtimeProvider
+        {
+            Capabilities = (connection, model, token) => { if (cancel) cancellation.Cancel(); return Task.FromResult<RealtimeCapabilities>(null!); },
+            Open = (connection, config, limits, xai, resources, token) => { if (cancel) cancellation.Cancel(); return Task.FromResult<IRealtimeVoiceSession>(null!); }
+        };
+        var facade = new RealtimeProviderService([provider]);
+        Exception? error = await Record.ExceptionAsync(async () =>
+        {
+            if (open) await facade.OpenSessionAsync(Connection, new(), Limits, cancellationToken: cancellation.Token);
+            else await facade.GetCapabilitiesAsync(Connection, cancellationToken: cancellation.Token);
+        });
+        if (cancel) Assert.IsAssignableFrom<OperationCanceledException>(error);
+        else Assert.Equal(InferenceFailureCode.ProtocolFailure, Assert.IsType<InferenceException>(error).Code);
+    }
+
+    [Fact]
+    public async Task SettingsOpenRefusesLateBorrowedDefinitionAfterRetirement()
+    {
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var release = new ManualResetEventSlim();
+        var provider = new ControlledRealtimeProvider { ReadDefinition = () => { entered.SetResult(); release.Wait(); } };
+        var manager = new RealtimeProviderService([provider]).CreateSettingsManager(new ControlledCommitTarget());
+        Task<RealtimeSettings>? opening = null;
+        Task? retirement = null;
+        try
+        {
+            opening = Task.Run(() => manager.OpenAsync(RealtimeTransport.XaiRealtime, Identity));
+            await entered.Task.WaitAsync(Deadline);
+            retirement = manager.DisposeAsync().AsTask(); Assert.False(retirement.IsCompleted);
+            release.Set();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => opening.WaitAsync(Deadline));
+        }
+        finally
+        {
+            release.Set();
+            if (opening is not null) await Record.ExceptionAsync(() => opening.WaitAsync(Deadline));
+            if (retirement is not null) await retirement.WaitAsync(Deadline);
+            await manager.DisposeAsync();
+        }
+    }
 }
 
 internal sealed class ControlledRealtimeProvider : IRealtimeProvider
 {
     public RealtimeTransport Transport => RealtimeTransport.XaiRealtime;
-    public InferenceSetupDefinition SetupDefinition { get; } = new(new("controlled-realtime", "Controlled", InferenceImplementationKind.Connect,
+    private readonly InferenceSetupDefinition _definition = new(new("controlled-realtime", "Controlled", InferenceImplementationKind.Connect,
         [InferenceTask.RealtimeVoice]), "Controlled test boundary");
+    internal Action? ReadDefinition { get; init; }
+    public InferenceSetupDefinition SetupDefinition { get { ReadDefinition?.Invoke(); return _definition; } }
     internal int Calls { get; private set; }
     internal int OpenCalls { get; private set; }
     internal Func<RealtimeConnection, string?, CancellationToken, Task<RealtimeCapabilities>>? Capabilities { get; init; }

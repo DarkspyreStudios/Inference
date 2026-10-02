@@ -12,14 +12,16 @@ public sealed record RealtimeSetupConfiguration(RealtimeConnection Connection,
     RealtimeSessionConfig Session, InferenceStreamLimits? StreamLimits = null)
 {
     [JsonRequired] public RealtimeConnection Connection { get; init => field = RealtimeData.Required(value); } = RealtimeData.Required(Connection);
-    [JsonRequired] public RealtimeSessionConfig Session { get; init => field = RealtimeRequestData.Snapshot(RealtimeData.Required(value)); }
+    [JsonRequired]
+    public RealtimeSessionConfig Session { get; init => field = RealtimeRequestData.Snapshot(RealtimeData.Required(value)); }
         = RealtimeRequestData.Snapshot(RealtimeData.Required(Session));
     public override string ToString() => "RealtimeSetupConfiguration { <configuration> }";
 }
 
 public sealed record RealtimeSetupHeaderChanges(IReadOnlyDictionary<string, string> Set, IReadOnlyList<string> Remove)
 {
-    [JsonRequired] public IReadOnlyDictionary<string, string> Set { get; init => field = RealtimeData.Map(value, StringComparer.OrdinalIgnoreCase); }
+    [JsonRequired]
+    public IReadOnlyDictionary<string, string> Set { get; init => field = RealtimeData.Map(value, StringComparer.OrdinalIgnoreCase); }
         = RealtimeData.Map(Set, StringComparer.OrdinalIgnoreCase);
     [JsonRequired] public IReadOnlyList<string> Remove { get; init => field = RealtimeData.List(value); } = RealtimeData.List(Remove);
     public override string ToString() => "RealtimeSetupHeaderChanges { <changes> }";
@@ -127,7 +129,7 @@ public sealed class RealtimeSettings : InferenceSettings<RealtimeSetupChanges>
 
     private bool ConnectionValid() => _endpoint is { IsAbsoluteUri: true, Scheme: "wss" }
         && string.IsNullOrEmpty(_endpoint.UserInfo) && string.IsNullOrEmpty(_endpoint.Query) && string.IsNullOrEmpty(_endpoint.Fragment)
-        && _timeout is > 0 && _timeout <= long.MaxValue / (decimal)TimeSpan.TicksPerSecond
+        && _timeout >= 1m / TimeSpan.TicksPerSecond && _timeout <= long.MaxValue / (decimal)TimeSpan.TicksPerSecond
         && !string.IsNullOrWhiteSpace(_draft.Connection.Xai?.ConnectionId)
         && _headers.All(header => !string.IsNullOrWhiteSpace(header.Name))
         && _headers.Select(header => header.Name).Distinct(StringComparer.OrdinalIgnoreCase).Count() == _headers.Count;
@@ -192,7 +194,11 @@ public sealed class RealtimeSettingsManager : InferenceSettingsManager<RealtimeS
         RealtimeSetupConfiguration? existing = null, CancellationToken cancellationToken = default)
     {
         using LlmOperationLifetime.Lease lease = _lifetime.Enter(cancellationToken);
-        return Task.FromResult(new RealtimeSettings(_service!.GetRequiredProvider(transport).SetupDefinition, transport, identity, existing));
+        InferenceSetupDefinition definition = _service!.GetRequiredProvider(transport).SetupDefinition;
+        Fence(lease.Token);
+        var settings = new RealtimeSettings(definition, transport, identity, existing);
+        Fence(lease.Token);
+        return Task.FromResult(settings);
     }
 
     public override async Task<SetupActionResult> RunAsync(InferenceSettings settings, string actionId,
