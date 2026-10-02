@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Net;
 using System.Net.Http.Json;
+using Darkspyre.Inference.Connect.LLM.Internal;
 using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Common.Setup;
 
@@ -74,6 +75,7 @@ public sealed class TangoFluxHttpProvider(HttpClient httpClient) : IAudioProvide
             ArgumentNullException.ThrowIfNull(request);
             cancellationToken.ThrowIfCancellationRequested();
             ValidateRequest(request);
+            using var consumption = provider.Enter(cancellationToken); cancellationToken = consumption.Token;
             long started = Stopwatch.GetTimestamp();
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             timeout.CancelAfter(connection.RequestTimeout);
@@ -100,15 +102,15 @@ public sealed class TangoFluxHttpProvider(HttpClient httpClient) : IAudioProvide
                 }
                 if (response.Content.Headers.ContentType?.MediaType is { } contentType
                     && !contentType.Equals("audio/wav", StringComparison.OrdinalIgnoreCase)) { throw Protocol(); }
-                byte[] bytes = await response.Content.ReadAsByteArrayAsync(timeout.Token).ConfigureAwait(false);
+                byte[] bytes = await SdkHttpConsumption.ReadAsByteArrayAsync(response.Content, timeout.Token).ConfigureAwait(false);
                 ValidateWave(bytes);
-                return new("audio/wav", bytes, null, new()
+                return consumption.Publish(new AudioGenerationResult("audio/wav", bytes, null, new()
                 {
                     ImplementationId = Descriptor.Id,
                     ModelId = "tangoflux",
                     Runtime = "HTTP",
                     Elapsed = Stopwatch.GetElapsedTime(started)
-                });
+                }));
             }
             catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
             { throw new InferenceException(InferenceFailureCode.TimedOut, "TangoFlux request timed out; it was not retried."); }
@@ -119,6 +121,7 @@ public sealed class TangoFluxHttpProvider(HttpClient httpClient) : IAudioProvide
 
     private Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken token) =>
         httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token);
+    private SdkHttpConsumption.Operation Enter(CancellationToken token) => SdkHttpConsumption.Enter(httpClient, token);
 
     // Protocol framing validation only, not an audio decoder or duration estimator.
     private static void ValidateWave(ReadOnlySpan<byte> bytes)

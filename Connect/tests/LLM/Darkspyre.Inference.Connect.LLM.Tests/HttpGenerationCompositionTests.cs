@@ -2,6 +2,7 @@ using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Runtime.Loader;
 using System.Text.Json;
+using Darkspyre.Inference.Connect.LLM.Internal;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Darkspyre.Inference.Connect.LLM.Tests;
@@ -53,6 +54,9 @@ public sealed class HttpGenerationCompositionTests
             var result = (string)method.Invoke(null, null)!;
             Assert.Contains("Messages", result, StringComparison.Ordinal);
             var roots = new List<WeakReference> { new(generation), new(fixture), new(core), new(caller), new(method) };
+            Type helper = core.GetType(typeof(SdkHttpConsumption).FullName!, true)!;
+            Assert.Equal(core.ManifestModule.ModuleVersionId, helper.Module.ModuleVersionId);
+            roots.Add(new(helper)); roots.Add(new(helper.GetMethod("ReadAsStringAsync", BindingFlags.Static | BindingFlags.NonPublic)!));
             if (families)
             {
                 Assembly[] expected = [typeof(Azure.ServiceCollectionExtensions).Assembly, typeof(Vertex.ServiceCollectionExtensions).Assembly,
@@ -102,6 +106,7 @@ public sealed class HttpGenerationCompositionTests
         }
         private static string Resolve(ServiceCollection services, bool families)
         {
+            services.AddHttpClient("OpenAiResponsesLlmClient").ConfigurePrimaryHttpMessageHandler(() => new ControlledHandler());
             using ServiceProvider provider = services.BuildServiceProvider();
             using IServiceScope scope = provider.CreateScope();
             Assert.Same(scope.ServiceProvider.GetRequiredService<LlmProviderService>(), scope.ServiceProvider.GetRequiredService<ILlmFileClient>());
@@ -116,8 +121,20 @@ public sealed class HttpGenerationCompositionTests
             Assert.Throws<NotSupportedException>(() => JsonSerializer.Serialize(configuration, HttpConfigurationJsonContext.Default.InferenceHttpPipelineOptions));
             Assert.Null(JsonSerializer.Deserialize("null", HttpConfigurationJsonContext.Default.InferenceHttpPipelineOptions));
             Assert.Same(typeof(ForeignCaller).Assembly, HttpConfigurationJsonContext.Default.GetType().Assembly);
+            using HttpClient client = provider.GetRequiredService<SdkHttpGenerationPool>().CreateClient("OpenAiResponsesLlmClient");
+            using var consumption = SdkHttpConsumption.Enter(client, default);
+            using HttpResponseMessage response = client.GetAsync("https://controlled.invalid/").GetAwaiter().GetResult();
+            Assert.Equal("actual buffered body", SdkHttpConsumption.ReadAsStringAsync(response.Content, consumption.Token).GetAwaiter().GetResult());
+            using Stream stream = SdkHttpConsumption.ReadAsStreamAsync(response.Content, consumption.Token).GetAwaiter().GetResult();
+            Assert.Equal((byte)'a', stream.ReadByte()); consumption.Fence();
             return JsonSerializer.Serialize(new LlmChatRequest { ModelId = "manual", Messages = [new("user", "actual")] }, ConnectLlmJson.ChatRequest);
         }
+    }
+
+    private sealed class ControlledHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
+            Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK) { Content = new StringContent("actual buffered body") });
     }
 
     private sealed class EmptySource : ILlmConnectionSource

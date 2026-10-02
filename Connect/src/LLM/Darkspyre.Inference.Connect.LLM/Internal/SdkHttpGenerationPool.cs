@@ -121,6 +121,8 @@ internal sealed class SdkHttpGenerationPool : IHttpClientFactory, IDisposable, I
         lock (_gate) entry.Holders++;
         return operation;
     }
+    internal LlmOperationLifetime.Lease? EnterConsumption(CancellationToken token) =>
+        _mode == InferenceHttpCreationMode.SdkGenerationOwned ? _lifetime.Enter(token) : null;
     internal LlmOperationLifetime.Lease EnterBody(SdkHttpPipelineEntry entry, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -300,6 +302,7 @@ internal sealed class SdkHttpClientRegistration(SdkHttpPipelineEntry entry)
 internal sealed class SdkHttpClientLease(SdkHttpGenerationPool owner, SdkHttpClientRegistration registration)
     : HttpClient(new SdkHttpSendHandler(owner, registration.Entry), disposeHandler: true)
 {
+    internal SdkHttpGenerationPool GenerationOwner => owner;
     private int _disposed;
     protected override void Dispose(bool disposing)
     {

@@ -78,7 +78,7 @@ internal static class ProviderHttp
             return;
         }
 
-        string body = await response.Content.ReadAsStringAsync(cancellationToken);
+        string body = await SdkHttpConsumption.ReadAsStringAsync(response.Content, cancellationToken);
         string sanitized = SecretRedactor.Sanitize(body, credential);
         (string? code, string? providerMessage) = ReadProviderError(sanitized);
         string requestId = ReadRequestId(response) ?? "unknown";

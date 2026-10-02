@@ -30,10 +30,10 @@ public sealed class HttpContentBoundaryTests
             {
                 switch (consumption)
                 {
-                    case "string": _ = await response.Content.ReadAsStringAsync(); break;
-                    case "bytes": _ = await response.Content.ReadAsByteArrayAsync(); break;
-                    case "copy": using (var destination = new MemoryStream()) await response.Content.CopyToAsync(destination); break;
-                    case "stream": await using (Stream stream = await response.Content.ReadAsStreamAsync()) { _ = await stream.ReadAsync(new byte[1]); } break;
+                    case "string": _ = await SdkHttpConsumption.ReadAsStringAsync(response.Content); break;
+                    case "bytes": _ = await SdkHttpConsumption.ReadAsByteArrayAsync(response.Content); break;
+                    case "copy": using (var destination = new MemoryStream()) await SdkHttpConsumption.CopyToAsync(response.Content, destination); break;
+                    case "stream": await using (Stream stream = await SdkHttpConsumption.ReadAsStreamAsync(response.Content)) { _ = await stream.ReadAsync(new byte[1]); } break;
                     default: throw new InvalidOperationException();
                 }
             });

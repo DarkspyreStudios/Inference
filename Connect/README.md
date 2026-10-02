@@ -24,6 +24,18 @@ keep it alive; weak client registrations do not retain dropped typed consumers. 
 retirement stops and drains that timer, closes live wrappers and awaits owned chain cleanup. Cleanup
 failures remain owned and are returned to all repeated disposers; borrowed host resources are untouched.
 
+All SDK-owned response consumption and result/event publication use one internal helper. It fences
+cached strings/bytes/copies and buffered streams as well as unbuffered reads, without changing HTTP
+completion options or body values. Raw arbitrary caller use of .NET `HttpContent` is not transparently
+intercepted: its nonvirtual cached APIs can bypass content overrides. Direct supplied clients and
+`BorrowHostFactory` keep ordinary body and ownership semantics.
+
+Comfy's in-transport reference materialization stays admitted through resource commit and cleanup.
+Returned Image inference has a separate caller-owned lifetime across download, resource commit and
+publication. Pool retirement alone does not drain that inference after copied download bytes return;
+whole-generation retirement must also retire the returned inference owner. Committed and uncertain
+resource facts remain actual observations, not rollback claims.
+
 ## Batch and deferred contracts
 
 `Darkspyre.Inference.Connect.Resources` declares `ILlmBatchClient` for explicit-connection batch

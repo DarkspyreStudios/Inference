@@ -155,11 +155,12 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
         JsonObject payload = BuildPayload(connection, request, output => ProjectToolOutput(connection, request.ModelId, output), stream);
         using HttpRequestMessage httpRequest = CreateHttpRequest(connection, request, payload, stream);
 
+        using var consumption = SdkHttpConsumption.Enter(Http, cancellationToken); cancellationToken = consumption.Token;
         using HttpResponseMessage response = await Http.SendAsync(
             httpRequest,
             HttpCompletionOption.ResponseHeadersRead,
             cancellationToken);
-        if (ObserveAccountUsage(response) is { } observed) { yield return new AccountUsageObservedEvent(observed); }
+        if (ObserveAccountUsage(response) is { } observed) { yield return consumption.Publish<LlmStreamEvent>(new AccountUsageObservedEvent(observed)); }
         await ProviderHttp.ThrowIfUnsuccessfulAsync(
             response,
             Transport,
@@ -169,17 +170,17 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
 
         if (!stream)
         {
-            string body = await response.Content.ReadAsStringAsync(cancellationToken);
+            string body = await SdkHttpConsumption.ReadAsStringAsync(response.Content, cancellationToken);
             foreach (LlmStreamEvent completeEvent in ReadCompleteResponse(
                          body, response, connection, request, enforcement, credential, capabilities.SupportsReasoningText))
             {
-                yield return completeEvent;
+                yield return consumption.Publish<LlmStreamEvent>(completeEvent);
             }
 
             yield break;
         }
 
-        await using Stream events = await response.Content.ReadAsStreamAsync(cancellationToken);
+        await using Stream events = await SdkHttpConsumption.ReadAsStreamAsync(response.Content, cancellationToken);
         var text = new StringBuilder();
         int? inputTokens = null;
         int? cachedTokens = null;
@@ -230,7 +231,7 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
 
                         if (usageDeltas.Next(AnthropicUsage.Create(inputTokens, outputTokens, cachedTokens, cacheWriteTokens)) is { } initialUsage)
                         {
-                            yield return initialUsage;
+                            yield return consumption.Publish<LlmStreamEvent>(initialUsage);
                         }
 
                         break;
@@ -243,14 +244,14 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
                             if (value.Length > 0)
                             {
                                 text.Append(value);
-                                yield return new LlmTextDeltaEvent(value);
+                                yield return consumption.Publish<LlmStreamEvent>(new LlmTextDeltaEvent(value));
                             }
                         }
                         else if (LlmJson.GetObject(root, "delta") is { } thinkingDelta
                             && LlmJson.GetString(thinkingDelta, "type") == "thinking_delta"
                             && LlmJson.GetString(thinkingDelta, "thinking") is { Length: > 0 } thinking)
                         {
-                            if (capabilities.SupportsReasoningText) { yield return new LlmReasoningDeltaEvent(thinking, true); }
+                            if (capabilities.SupportsReasoningText) { yield return consumption.Publish<LlmStreamEvent>(new LlmReasoningDeltaEvent(thinking, true)); }
                         }
                         else if (LlmJson.GetObject(root, "delta") is { } toolDelta
                             && LlmJson.GetString(toolDelta, "type") == "input_json_delta")
@@ -263,7 +264,7 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
                                 && toolCalls.TryGetValue(index.Value, out AnthropicToolCallBuilder? builder))
                             {
                                 builder.Arguments.Append(partialJson);
-                                yield return new LlmToolCallArgumentsDeltaEvent(builder.Id, partialJson);
+                                yield return consumption.Publish<LlmStreamEvent>(new LlmToolCallArgumentsDeltaEvent(builder.Id, partialJson));
                             }
                         }
 
@@ -275,7 +276,7 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
                             && LlmJson.GetString(initialBlock, "text") is { Length: > 0 } initialText)
                         {
                             text.Append(initialText);
-                            yield return new LlmTextDeltaEvent(initialText);
+                            yield return consumption.Publish<LlmStreamEvent>(new LlmTextDeltaEvent(initialText));
                         }
                         if (LlmJson.GetObject(root, "content_block") is { } contentBlock
                             && LlmJson.GetString(contentBlock, "type") == "tool_use"
@@ -292,7 +293,7 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
                             }
 
                             toolCalls[toolIndex] = builder;
-                            yield return new LlmToolCallStartedEvent(toolId, toolName, toolIndex);
+                            yield return consumption.Publish<LlmStreamEvent>(new LlmToolCallStartedEvent(toolId, toolName, toolIndex));
                         }
 
                         break;
@@ -303,7 +304,7 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
                             && !completedBuilder.Completed)
                         {
                             completedBuilder.Completed = true;
-                            yield return new LlmToolCallCompletedEvent(completedBuilder.Build());
+                            yield return consumption.Publish<LlmStreamEvent>(new LlmToolCallCompletedEvent(completedBuilder.Build()));
                         }
 
                         break;
@@ -322,12 +323,12 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
                         cacheWriteTokens = ReadToken(root, "usage", "cache_creation_input_tokens") ?? cacheWriteTokens;
                         if (usageDeltas.Next(AnthropicUsage.Create(inputTokens, outputTokens, cachedTokens, cacheWriteTokens)) is { } runningUsage)
                         {
-                            yield return runningUsage;
+                            yield return consumption.Publish<LlmStreamEvent>(runningUsage);
                         }
                         if (string.Equals(stopReason, "refusal", StringComparison.Ordinal)
                             && refusalExplanation is { Length: > 0 } declined)
                         {
-                            yield return new LlmRefusalDeltaEvent(declined);
+                            yield return consumption.Publish<LlmStreamEvent>(new LlmRefusalDeltaEvent(declined));
                         }
 
                         break;
@@ -341,10 +342,10 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
                         foreach (AnthropicToolCallBuilder builder in toolCalls.Values.Where(value => !value.Completed))
                         {
                             builder.Completed = true;
-                            yield return new LlmToolCallCompletedEvent(builder.Build());
+                            yield return consumption.Publish<LlmStreamEvent>(new LlmToolCallCompletedEvent(builder.Build()));
                         }
 
-                        yield return new LlmChatCompletionEvent(BuildResult(
+                        yield return consumption.Publish<LlmStreamEvent>(new LlmChatCompletionEvent(BuildResult(
                             connection,
                             request,
                             enforcement,
@@ -359,7 +360,7 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
                             containerId,
                             response,
                             lastEvent,
-                            credential));
+                            credential)));
                         yield break;
                 }
             }
@@ -573,6 +574,7 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
     {
         _ = GetCapabilities(connection);
         LlmCredential? credential = LlmCredential.Parse(connection.Credential);
+        using var consumption = SdkHttpConsumption.Enter(Http, cancellationToken); cancellationToken = consumption.Token;
         var models = new List<LlmModel>();
         string? afterId = null;
 
@@ -591,7 +593,7 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
                 credential,
                 "Anthropic model discovery",
                 cancellationToken);
-            string body = await response.Content.ReadAsStringAsync(cancellationToken);
+            string body = await SdkHttpConsumption.ReadAsStringAsync(response.Content, cancellationToken);
             JsonDocument document;
             try
             {
@@ -646,7 +648,7 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
             }
         }
 
-        return [.. models.OrderBy(model => model.DisplayName, StringComparer.OrdinalIgnoreCase)];
+        return consumption.Publish<IReadOnlyList<LlmModel>>([.. models.OrderBy(model => model.DisplayName, StringComparer.OrdinalIgnoreCase)]);
     }
 
     protected virtual HttpRequestMessage CreateHttpRequest(LlmConnection connection, LlmChatRequest request, JsonObject payload, bool stream)

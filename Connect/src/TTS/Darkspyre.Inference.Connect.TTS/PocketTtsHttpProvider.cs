@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Net;
 using System.Net.Http.Json;
+using Darkspyre.Inference.Connect.LLM.Internal;
 using System.Text.Json;
 using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Common.Setup;
@@ -85,15 +86,16 @@ public sealed class PocketTtsHttpProvider(HttpClient httpClient) : ITtsProvider
 
         public async Task<IReadOnlyList<TtsVoice>> ListVoicesAsync(CancellationToken cancellationToken = default)
         {
+            using var consumption = provider.Enter(cancellationToken); cancellationToken = consumption.Token;
             IReadOnlyList<TtsVoice> voices = await ListAsync(connection.PocketTts.VoicesPath, cancellationToken).ConfigureAwait(false);
             if (voices.Count == 0) { voices = await ListAsync(connection.PocketTts.HealthPath, cancellationToken).ConfigureAwait(false); }
-            return voices.Count > 0 ? voices : throw Protocol();
+            return consumption.Publish(voices.Count > 0 ? voices : throw Protocol());
         }
 
         private Task<IReadOnlyList<TtsVoice>> ListAsync(string path, CancellationToken cancellationToken) =>
             SendAsync(HttpMethod.Get, path, null, async (response, token) =>
             {
-                PocketTtsVoiceList? list = await response.Content.ReadFromJsonAsync(PocketTtsJsonContext.Default.PocketTtsVoiceList, token).ConfigureAwait(false);
+                PocketTtsVoiceList? list = await SdkHttpConsumption.ReadFromJsonAsync(response.Content, PocketTtsJsonContext.Default.PocketTtsVoiceList, token).ConfigureAwait(false);
                 IEnumerable<TtsVoice> voices = list?.VoiceOptions is { Count: > 0 }
                     ? list.VoiceOptions.Where(option => option is not null).Select(option =>
                         new TtsVoice(option.Id ?? option.Name ?? string.Empty, option.Name ?? option.Id ?? string.Empty, Description: option.Category))
@@ -105,6 +107,7 @@ public sealed class PocketTtsHttpProvider(HttpClient httpClient) : ITtsProvider
         public async Task<TtsResult> SpeakAsync(TtsRequest request, CancellationToken cancellationToken = default)
         {
             ValidateRequest(connection, request);
+            using var consumption = provider.Enter(cancellationToken); cancellationToken = consumption.Token;
             long started = Stopwatch.GetTimestamp();
             using HttpContent body = CreateContent(request);
             byte[] audio = await SendAsync(HttpMethod.Post, connection.PocketTts.SpeakPath, body, async (response, token) =>
@@ -112,17 +115,17 @@ public sealed class PocketTtsHttpProvider(HttpClient httpClient) : ITtsProvider
                 if (response.Content.Headers.ContentType?.MediaType is { } contentType
                     && !contentType.Equals("audio/wav", StringComparison.OrdinalIgnoreCase)
                     && !contentType.Equals("audio/x-wav", StringComparison.OrdinalIgnoreCase)) { throw Protocol(); }
-                byte[] bytes = await response.Content.ReadAsByteArrayAsync(token).ConfigureAwait(false);
+                byte[] bytes = await SdkHttpConsumption.ReadAsByteArrayAsync(response.Content, token).ConfigureAwait(false);
                 ValidateWave(bytes);
                 return bytes;
             }, cancellationToken).ConfigureAwait(false);
-            return new("audio/wav", audio, new()
+            return consumption.Publish(new TtsResult("audio/wav", audio, new()
             {
                 ImplementationId = Descriptor.Id,
                 ModelId = "pockettts",
                 Runtime = "HTTP",
                 Elapsed = Stopwatch.GetElapsedTime(started)
-            });
+            }));
         }
 
         private HttpContent CreateContent(TtsRequest request)
@@ -174,6 +177,7 @@ public sealed class PocketTtsHttpProvider(HttpClient httpClient) : ITtsProvider
 
     private Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken token) =>
         httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token);
+    private SdkHttpConsumption.Operation Enter(CancellationToken token) => SdkHttpConsumption.Enter(httpClient, token);
 
     private static void ValidateWave(ReadOnlySpan<byte> bytes)
     {

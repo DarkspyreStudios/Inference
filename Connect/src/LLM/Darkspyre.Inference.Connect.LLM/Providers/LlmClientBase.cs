@@ -44,6 +44,7 @@ internal abstract class LlmClientBase(HttpClient http) : ILlmClient
         using var request = new HttpRequestMessage(HttpMethod.Get, ProviderHttp.BuildUri(connection, "models"));
         ProviderHttp.ApplyHeaders(request, connection);
 
+        using var consumption = SdkHttpConsumption.Enter(Http, cancellationToken); cancellationToken = consumption.Token;
         using HttpResponseMessage response = await Http.SendAsync(request, cancellationToken);
         await ProviderHttp.ThrowIfUnsuccessfulAsync(
             response,
@@ -52,7 +53,7 @@ internal abstract class LlmClientBase(HttpClient http) : ILlmClient
             "Model discovery",
             cancellationToken);
 
-        string body = await response.Content.ReadAsStringAsync(cancellationToken);
+        string body = await SdkHttpConsumption.ReadAsStringAsync(response.Content, cancellationToken);
         try
         {
             using JsonDocument document = JsonDocument.Parse(body);
@@ -67,7 +68,7 @@ internal abstract class LlmClientBase(HttpClient http) : ILlmClient
 
             if (models.ValueKind != JsonValueKind.Array)
             {
-                return [];
+                return consumption.Publish<IReadOnlyList<LlmModel>>([]);
             }
 
             var results = new List<LlmModel>();
@@ -91,7 +92,7 @@ internal abstract class LlmClientBase(HttpClient http) : ILlmClient
                 });
             }
 
-            return [.. results.OrderBy(model => model.DisplayName, StringComparer.OrdinalIgnoreCase)];
+            return consumption.Publish<IReadOnlyList<LlmModel>>([.. results.OrderBy(model => model.DisplayName, StringComparer.OrdinalIgnoreCase)]);
         }
         catch (JsonException exception)
         {

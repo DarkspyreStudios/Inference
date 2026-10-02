@@ -82,6 +82,7 @@ internal sealed class VertexLlmClient(HttpClient http, IVertexAuthentication aut
         if (request.ExplicitCache is not null)
             throw new NotSupportedException("Vertex does not implement exact counting for an explicitly cached request.");
         if (VertexModelProfiles.Get(request.ModelId).IsClaude) AnthropicMessagesLlmClient.ValidateTokenCountOptions(connection, request);
+        using var consumption = SdkHttpConsumption.Enter(Http, cancellationToken); cancellationToken = consumption.Token;
         var built = await PrepareRequestAsync(connection, request, cancellationToken).ConfigureAwait(false);
         LlmProviderInputTokenCount result;
         if (built.Profile.IsClaude)
@@ -97,12 +98,13 @@ internal sealed class VertexLlmClient(HttpClient http, IVertexAuthentication aut
             built.Access.Authorize(message);
             result = await ProviderTokenCounting.SendAsync(Http, message, Transport, request.ModelId, false, cancellationToken).ConfigureAwait(false);
         }
-        return result with { OmittedContinuationStateCount = checked(result.OmittedContinuationStateCount + built.Omitted) };
+        return consumption.Publish(result with { OmittedContinuationStateCount = checked(result.OmittedContinuationStateCount + built.Omitted) });
     }
 
     public override async IAsyncEnumerable<LlmStreamEvent> StreamAsync(LlmConnection connection, LlmChatRequest request,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
+        using var consumption = SdkHttpConsumption.Enter(Http, cancellationToken); cancellationToken = consumption.Token;
         var (profile, capabilities, access, prepared, projected, enforcement, omitted) =
             await PrepareRequestAsync(connection, request, cancellationToken).ConfigureAwait(false);
         connection = prepared;
@@ -128,12 +130,12 @@ internal sealed class VertexLlmClient(HttpClient http, IVertexAuthentication aut
                     Transport, error is LlmProviderException provider ? provider.StatusCode : null);
             }
             if (!moved) { yield break; }
-            yield return iterator.Current is LlmChatCompletionEvent completion
+            yield return consumption.Publish<LlmStreamEvent>(iterator.Current is LlmChatCompletionEvent completion
                 ? new LlmChatCompletionEvent(completion.Result with
                 {
                     OmittedContinuationStateCount = checked(completion.Result.OmittedContinuationStateCount + omitted),
                     Diagnostics = completion.Result.Diagnostics with { RawFinalResponseJson = null }
-                }) : iterator.Current;
+                }) : iterator.Current);
         }
     }
 
@@ -142,6 +144,7 @@ internal sealed class VertexLlmClient(HttpClient http, IVertexAuthentication aut
         cancellationToken.ThrowIfCancellationRequested();
         VertexEndpoints.Validate(connection);
         if (connection.Vertex!.AuthenticationMode == LlmGoogleAuthenticationMode.ApiKey) return [];
+        using var consumption = SdkHttpConsumption.Enter(Http, cancellationToken); cancellationToken = consumption.Token;
         VertexAccess access = await authentication.ResolveAsync(connection, cancellationToken).ConfigureAwait(false);
         if (connection.ResolvedContinuationScope is { } pinned && pinned != access.Scope)
         { throw new InvalidOperationException("The Google credential identity changed before model discovery."); }
@@ -161,7 +164,7 @@ internal sealed class VertexLlmClient(HttpClient http, IVertexAuthentication aut
                 CheckStatus(response);
                 try
                 {
-                    using JsonDocument document = JsonDocument.Parse(await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false));
+                    using JsonDocument document = JsonDocument.Parse(await SdkHttpConsumption.ReadAsStringAsync(response.Content, cancellationToken).ConfigureAwait(false));
                     JsonElement root = document.RootElement;
                     if (root.TryGetProperty("publisherModels", out var models))
                     {
@@ -200,7 +203,7 @@ internal sealed class VertexLlmClient(HttpClient http, IVertexAuthentication aut
                     : $"Publisher catalog entry ({safeStage}); invocation access has not been tested."
             });
         }
-        return result;
+        return consumption.Publish<IReadOnlyList<LlmModel>>(result);
     }
 
     public string? EstimateDiagnostic => "Local text estimate; opaque reasoning and media occupancy are unknown. This is not a provider admission check.";

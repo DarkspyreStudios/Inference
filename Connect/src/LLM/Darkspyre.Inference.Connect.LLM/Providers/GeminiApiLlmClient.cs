@@ -87,19 +87,21 @@ internal sealed partial class GeminiApiLlmClient(HttpClient http)
     {
         cancellationToken.ThrowIfCancellationRequested();
         var built = BuildRequest(connection, request);
+        using var consumption = SdkHttpConsumption.Enter(Http, cancellationToken); cancellationToken = consumption.Token;
         built.Payload["model"] = "models/" + request.ModelId;
         using var message = new HttpRequestMessage(HttpMethod.Post, $"{DefaultEndpoint}/v1beta/models/{request.ModelId}:countTokens")
         { Content = JsonContent.Create(new JsonObject { ["generateContentRequest"] = built.Payload }) };
         message.Headers.TryAddWithoutValidation(KeyHeader, Key(built.Connection));
         LlmProviderInputTokenCount result = await ProviderTokenCounting.SendAsync(Http, message, Transport, request.ModelId, false,
             cancellationToken).ConfigureAwait(false);
-        return result with { OmittedContinuationStateCount = built.Omitted };
+        return consumption.Publish(result with { OmittedContinuationStateCount = built.Omitted });
     }
 
     public override async IAsyncEnumerable<LlmStreamEvent> StreamAsync(LlmConnection connection, LlmChatRequest request,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         var built = BuildRequest(connection, request);
+        using var consumption = SdkHttpConsumption.Enter(Http, cancellationToken); cancellationToken = consumption.Token;
         connection = built.Connection;
         request = built.Request;
         var capabilities = built.Capabilities;
@@ -125,18 +127,19 @@ internal sealed partial class GeminiApiLlmClient(HttpClient http)
                 throw new LlmProviderException("Gemini API generation failed. Check the model, request configuration and key.", Transport);
             }
             if (!moved) { yield break; }
-            yield return iterator.Current is LlmChatCompletionEvent completion
+            yield return consumption.Publish<LlmStreamEvent>(iterator.Current is LlmChatCompletionEvent completion
                 ? new LlmChatCompletionEvent(completion.Result with
                 {
                     OmittedContinuationStateCount = checked(completion.Result.OmittedContinuationStateCount + omitted),
                     Diagnostics = completion.Result.Diagnostics with { RawFinalResponseJson = null }
-                }) : iterator.Current;
+                }) : iterator.Current);
         }
     }
 
     public override async Task<IReadOnlyList<LlmModel>> ListModelsAsync(LlmConnection connection, CancellationToken cancellationToken = default)
     {
         Validate(connection);
+        using var consumption = SdkHttpConsumption.Enter(Http, cancellationToken); cancellationToken = consumption.Token;
         var models = new List<LlmModel>();
         var seen = new HashSet<string>(StringComparer.Ordinal);
         var seenPages = new HashSet<string>(StringComparer.Ordinal);
@@ -150,7 +153,7 @@ internal sealed partial class GeminiApiLlmClient(HttpClient http)
             CheckStatus(response);
             try
             {
-                using JsonDocument document = JsonDocument.Parse(await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false));
+                using JsonDocument document = JsonDocument.Parse(await SdkHttpConsumption.ReadAsStringAsync(response.Content, cancellationToken).ConfigureAwait(false));
                 JsonElement root = document.RootElement;
                 if (root.TryGetProperty("models", out JsonElement entries))
                 {
@@ -165,7 +168,7 @@ internal sealed partial class GeminiApiLlmClient(HttpClient http)
             catch (Exception error) when (error is JsonException or InvalidOperationException)
             { throw new LlmProviderException("Gemini API model discovery returned an invalid catalog page.", Transport); }
         } while (!string.IsNullOrEmpty(page));
-        return models;
+        return consumption.Publish<IReadOnlyList<LlmModel>>(models);
     }
 
     public string? EstimateDiagnostic => "Local text estimate; opaque reasoning and media occupancy are unknown. This is not a provider admission check.";

@@ -145,13 +145,14 @@ internal sealed class XaiResponsesLlmClient(HttpClient http) : ResponsesLlmClien
         // Plain text and model identity are opaque data; changing either changes the provider's tokens.
         var payload = new JsonObject { ["model"] = modelId, ["text"] = text };
         request.Content = new StringContent(payload.ToJsonString(), Encoding.UTF8, "application/json");
+        using var consumption = SdkHttpConsumption.Enter(Http, cancellationToken); cancellationToken = consumption.Token;
         using HttpResponseMessage response = await Http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken)
             .ConfigureAwait(false);
         cancellationToken.ThrowIfCancellationRequested();
         await XaiErrorClassifier.ThrowIfUnsuccessfulAsync(response, LlmCredential.Parse(connection.Credential), [], cancellationToken)
             .ConfigureAwait(false);
         cancellationToken.ThrowIfCancellationRequested();
-        string body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+        string body = await SdkHttpConsumption.ReadAsStringAsync(response.Content, cancellationToken).ConfigureAwait(false);
         cancellationToken.ThrowIfCancellationRequested();
         try
         {
@@ -180,7 +181,7 @@ internal sealed class XaiResponsesLlmClient(HttpClient http) : ResponsesLlmClien
                 tokens.Add(new(number, display.GetString()!, data));
             }
             cancellationToken.ThrowIfCancellationRequested();
-            return new(tokens.ToArray());
+            return consumption.Publish(new LlmTokenization(tokens.ToArray()));
         }
         catch (Exception error) when (error is JsonException or InvalidOperationException or FormatException)
         {
@@ -194,6 +195,7 @@ internal sealed class XaiResponsesLlmClient(HttpClient http) : ResponsesLlmClien
     public override async Task<IReadOnlyList<LlmModel>> ListModelsAsync(LlmConnection connection, CancellationToken cancellationToken = default)
     {
         if (!GetCapabilities(connection).SupportsModelListing) return [];
+        using var consumption = SdkHttpConsumption.Enter(Http, cancellationToken); cancellationToken = consumption.Token;
         JsonArray generic = await ListingAsync(connection, "models", "data", cancellationToken);
         JsonArray language = await ListingAsync(connection, "language-models", "models", cancellationToken);
         var results = new List<LlmModel>();
@@ -226,8 +228,8 @@ internal sealed class XaiResponsesLlmClient(HttpClient http) : ResponsesLlmClien
             });
         }
         LlmConnection published = connection with { Catalog = results };
-        return [.. results.Select(model => model with { Capabilities = GetCapabilities(published, model.Id) })
-            .OrderBy(model => model.DisplayName, StringComparer.OrdinalIgnoreCase)];
+        return consumption.Publish<IReadOnlyList<LlmModel>>([.. results.Select(model => model with { Capabilities = GetCapabilities(published, model.Id) })
+            .OrderBy(model => model.DisplayName, StringComparer.OrdinalIgnoreCase)]);
     }
 
     private async Task<JsonArray> ListingAsync(LlmConnection connection, string path, string array, CancellationToken cancellationToken)
@@ -236,7 +238,7 @@ internal sealed class XaiResponsesLlmClient(HttpClient http) : ResponsesLlmClien
         ApplyHeaders(request, connection, false);
         using HttpResponseMessage response = await Http.SendAsync(request, cancellationToken);
         await XaiErrorClassifier.ThrowIfUnsuccessfulAsync(response, LlmCredential.Parse(connection.Credential), [], cancellationToken);
-        string body = await response.Content.ReadAsStringAsync(cancellationToken);
+        string body = await SdkHttpConsumption.ReadAsStringAsync(response.Content, cancellationToken);
         try
         {
             if (JsonNode.Parse(body) is JsonObject root && root[array] is JsonArray models

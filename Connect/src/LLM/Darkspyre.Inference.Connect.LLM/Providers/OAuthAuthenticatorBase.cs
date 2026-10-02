@@ -33,6 +33,7 @@ internal abstract class OAuthAuthenticatorBase(HttpClient http) : ILlmAuthentica
         }
 
         using HttpRequestMessage request = BuildRefreshRequest(credential.OAuth);
+        using var consumption = SdkHttpConsumption.Enter(Http, cancellationToken); cancellationToken = consumption.Token;
         using HttpResponseMessage response = await Http.SendAsync(request, cancellationToken);
         cancellationToken.ThrowIfCancellationRequested();
         await ValidateRefreshResponseAsync(response, credential, cancellationToken);
@@ -40,7 +41,7 @@ internal abstract class OAuthAuthenticatorBase(HttpClient http) : ILlmAuthentica
         cancellationToken.ThrowIfCancellationRequested();
         LlmCredential refreshed = MapTokens(document.RootElement, credential.OAuth);
         cancellationToken.ThrowIfCancellationRequested();
-        return refreshed;
+        return consumption.Publish(refreshed);
     }
 
     protected virtual Task ValidateRefreshResponseAsync(
@@ -59,10 +60,12 @@ internal abstract class OAuthAuthenticatorBase(HttpClient http) : ILlmAuthentica
         HttpResponseMessage response,
         CancellationToken cancellationToken)
     {
-        await using Stream stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+        await using Stream stream = await SdkHttpConsumption.ReadAsStreamAsync(response.Content, cancellationToken);
         try
         {
-            return await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
+            JsonDocument result = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
+            try { return SdkHttpConsumption.Publish(response.Content, result, cancellationToken); }
+            catch { result.Dispose(); throw; }
         }
         catch (JsonException)
         {
@@ -81,7 +84,7 @@ internal abstract class OAuthAuthenticatorBase(HttpClient http) : ILlmAuthentica
             return;
         }
 
-        string body = await response.Content.ReadAsStringAsync(cancellationToken);
+        string body = await SdkHttpConsumption.ReadAsStringAsync(response.Content, cancellationToken);
         string safe = SecretRedactor.Sanitize(body, credential);
         throw new InvalidOperationException(
             $"{operation} failed ({(int)response.StatusCode}): {safe}");

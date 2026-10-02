@@ -74,10 +74,11 @@ internal sealed class ClaudeAuthenticator(HttpClient http)
                 ["state"] = state
             })
         };
+        using var consumption = SdkHttpConsumption.Enter(Http, cancellationToken); cancellationToken = consumption.Token;
         using HttpResponseMessage response = await Http.SendAsync(request, cancellationToken);
         await ThrowIfUnsuccessfulAsync(response, "Claude token exchange", cancellationToken);
         using JsonDocument document = await ParseJsonAsync(response, cancellationToken);
-        return BuildCredential(document.RootElement, previous: null);
+        return consumption.Publish(BuildCredential(document.RootElement, previous: null));
     }
 
     protected override HttpRequestMessage BuildRefreshRequest(LlmOAuthTokens tokens) =>

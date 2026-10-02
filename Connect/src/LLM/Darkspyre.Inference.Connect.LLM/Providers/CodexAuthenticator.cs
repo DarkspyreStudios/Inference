@@ -25,6 +25,7 @@ internal sealed class CodexAuthenticator(HttpClient http)
         {
             Content = JsonContent.Create(new JsonObject { ["client_id"] = ClientId })
         };
+        using var consumption = SdkHttpConsumption.Enter(Http, cancellationToken); cancellationToken = consumption.Token;
         using HttpResponseMessage response = await Http.SendAsync(request, cancellationToken);
         await ThrowIfUnsuccessfulAsync(response, "ChatGPT login code request", cancellationToken);
         using JsonDocument document = await ParseJsonAsync(response, cancellationToken);
@@ -38,11 +39,11 @@ internal sealed class CodexAuthenticator(HttpClient http)
         }
 
         int interval = LlmJson.GetInt(document.RootElement, "interval") ?? DefaultIntervalSeconds;
-        return new LlmDeviceCode(
+        return consumption.Publish(new LlmDeviceCode(
             $"{AuthBaseUrl}/codex/device",
             userCode,
             deviceAuthId,
-            interval > 0 ? interval : DefaultIntervalSeconds);
+            interval > 0 ? interval : DefaultIntervalSeconds));
     }
 
     public async Task<LlmCredential> CompleteAsync(
@@ -60,6 +61,7 @@ internal sealed class CodexAuthenticator(HttpClient http)
                 ["user_code"] = userCode
             })
         };
+        using var consumption = SdkHttpConsumption.Enter(Http, cancellationToken); cancellationToken = consumption.Token;
         using HttpResponseMessage response = await Http.SendAsync(request, cancellationToken);
         if (response.StatusCode is HttpStatusCode.Forbidden or HttpStatusCode.NotFound)
         {
@@ -75,10 +77,10 @@ internal sealed class CodexAuthenticator(HttpClient http)
             throw new InvalidOperationException("ChatGPT returned an incomplete authorization response.");
         }
 
-        return await ExchangeAuthorizationCodeAsync(
+        return consumption.Publish(await ExchangeAuthorizationCodeAsync(
             authorizationCode,
             codeVerifier,
-            cancellationToken);
+            cancellationToken));
     }
 
     protected override HttpRequestMessage BuildRefreshRequest(LlmOAuthTokens tokens) =>
@@ -114,13 +116,14 @@ internal sealed class CodexAuthenticator(HttpClient http)
             ["code_verifier"] = codeVerifier
         });
         using var request = new HttpRequestMessage(HttpMethod.Post, TokenEndpoint) { Content = content };
+        using var consumption = SdkHttpConsumption.Enter(Http, cancellationToken); cancellationToken = consumption.Token;
         using HttpResponseMessage response = await Http.SendAsync(request, cancellationToken);
         await ThrowIfUnsuccessfulAsync(response, "ChatGPT token exchange", cancellationToken);
         using JsonDocument document = await ParseJsonAsync(response, cancellationToken);
-        return CredentialFromTokens(
+        return consumption.Publish(CredentialFromTokens(
             LlmJson.GetString(document.RootElement, "id_token"),
             LlmJson.GetString(document.RootElement, "access_token"),
-            LlmJson.GetString(document.RootElement, "refresh_token"));
+            LlmJson.GetString(document.RootElement, "refresh_token")));
     }
 
     private static LlmCredential CredentialFromTokens(

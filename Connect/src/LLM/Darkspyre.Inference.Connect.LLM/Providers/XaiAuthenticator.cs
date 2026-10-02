@@ -21,6 +21,7 @@ internal sealed class XaiAuthenticator(HttpClient http) : OAuthAuthenticatorBase
             ["client_id"] = ClientId,
             ["scope"] = Scopes
         });
+        using var consumption = SdkHttpConsumption.Enter(Http, cancellationToken); cancellationToken = consumption.Token;
         using HttpResponseMessage response = await Http.SendAsync(request, cancellationToken);
         await XaiErrorClassifier.ThrowIfUnsuccessfulAsync(response, cancellationToken: cancellationToken);
         using JsonDocument document = await ParseJsonAsync(response, cancellationToken);
@@ -38,10 +39,10 @@ internal sealed class XaiAuthenticator(HttpClient http) : OAuthAuthenticatorBase
 
         int expiresIn = PositiveSeconds(root, "expires_in") ?? throw ProtocolFailure();
         int interval = PositiveSeconds(root, "interval") ?? 5;
-        return new LlmDeviceCode(verificationUri, userCode, deviceCode, interval)
+        return consumption.Publish(new LlmDeviceCode(verificationUri, userCode, deviceCode, interval)
         {
             ExpiresAt = DateTimeOffset.UtcNow.AddSeconds(expiresIn)
-        };
+        });
     }
 
     public async Task<LlmCredential> CompleteAsync(
@@ -58,11 +59,12 @@ internal sealed class XaiAuthenticator(HttpClient http) : OAuthAuthenticatorBase
             ["device_code"] = deviceAuthId,
             ["client_id"] = ClientId
         });
+        using var consumption = SdkHttpConsumption.Enter(Http, cancellationToken); cancellationToken = consumption.Token;
         using HttpResponseMessage response = await Http.SendAsync(request, cancellationToken);
         cancellationToken.ThrowIfCancellationRequested();
         if (!response.IsSuccessStatusCode)
         {
-            string body = await response.Content.ReadAsStringAsync(cancellationToken);
+            string body = await SdkHttpConsumption.ReadAsStringAsync(response.Content, cancellationToken);
             cancellationToken.ThrowIfCancellationRequested();
             string? code = ReadDeviceError(body);
             if (response.StatusCode == System.Net.HttpStatusCode.BadRequest)
@@ -108,7 +110,7 @@ internal sealed class XaiAuthenticator(HttpClient http) : OAuthAuthenticatorBase
             }
         }
 
-        return credential with { OAuth = credential.OAuth with { AccountId = userId } };
+        return consumption.Publish(credential with { OAuth = credential.OAuth with { AccountId = userId } });
     }
 
     protected override HttpRequestMessage BuildRefreshRequest(LlmOAuthTokens tokens) =>

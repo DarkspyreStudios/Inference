@@ -54,6 +54,7 @@ internal sealed class OpenAiEmbeddingClient(HttpClient http) : ILlmEmbeddingClie
         };
         ProviderHttp.ApplyHeaders(httpRequest, connection);
         LlmCredential? credential = LlmCredential.Parse(connection.Credential);
+        using var consumption = SdkHttpConsumption.Enter(http, cancellationToken); cancellationToken = consumption.Token;
         using HttpResponseMessage response = await http.SendAsync(httpRequest, cancellationToken);
         await ProviderHttp.ThrowIfUnsuccessfulAsync(
             response,
@@ -61,7 +62,7 @@ internal sealed class OpenAiEmbeddingClient(HttpClient http) : ILlmEmbeddingClie
             credential,
             "Embedding request",
             cancellationToken);
-        string raw = await response.Content.ReadAsStringAsync(cancellationToken);
+        string raw = await SdkHttpConsumption.ReadAsStringAsync(response.Content, cancellationToken);
         try
         {
             using JsonDocument document = JsonDocument.Parse(raw);
@@ -117,7 +118,7 @@ internal sealed class OpenAiEmbeddingClient(HttpClient http) : ILlmEmbeddingClie
                 totalTokens = ReadInt(usage, "total_tokens");
             }
 
-            return new LlmEmbeddingResult
+            return consumption.Publish(new LlmEmbeddingResult
             {
                 Vectors = vectors,
                 Usage = new LlmEmbeddingUsage(inputTokens, totalTokens),
@@ -125,7 +126,7 @@ internal sealed class OpenAiEmbeddingClient(HttpClient http) : ILlmEmbeddingClie
                     (int)response.StatusCode,
                     ProviderHttp.ReadRequestId(response),
                     SecretRedactor.Sanitize(raw, credential))
-            };
+            });
         }
         catch (JsonException exception)
         {
