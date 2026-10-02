@@ -132,6 +132,7 @@ internal sealed class XaiFileClient(HttpClient http) : IDisposable, IAsyncDispos
             Check(fence, cancellationToken);
             long written = await TransferAsync(content, destination, () => Check(fence, cancellationToken), cancellationToken).ConfigureAwait(false);
             Check(fence, cancellationToken);
+            if (response.Content.Headers.ContentLength is { } declared && written < declared) throw Invalid();
             result = new(written, response.Content.Headers.ContentType?.ToString(), response.Content.Headers.ContentLength);
         }
         Check(fence, cancellationToken);
