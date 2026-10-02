@@ -38,6 +38,23 @@ public sealed class GoogleCacheRequestOwnershipTests
         Assert.Equal(1, handler.Probe!.Calls); Assert.Equal(1, handler.Content!.Calls); Assert.True(source.CanRead);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task OperationResponseAndRequestFailuresRemainIndependentAndOrdered(bool vertex)
+    {
+        using var handler = new Handler(vertex, HttpStatusCode.ServiceUnavailable, true) { RefuseResponse = true };
+        using var http = new HttpClient(handler); using var source = new MemoryStream("abc"u8.ToArray());
+        Exception error = await Assert.ThrowsAnyAsync<Exception>(() => Upload(vertex, http, source));
+        Exception[] cleanup = Errors(error).Where(value => value is InferenceResourceOperationException
+        { Failure.Phase: InferenceResourceOperationPhase.Cleanup }).ToArray();
+        Assert.Equal(2, cleanup.Length);
+        Assert.Contains("response cleanup", cleanup[0].InnerException!.Message, StringComparison.Ordinal);
+        Assert.Contains("request cleanup", cleanup[1].InnerException!.Message, StringComparison.Ordinal);
+        Assert.Equal(1, handler.Content!.Calls); Assert.Equal(1, handler.ResponseContent!.Calls);
+        Assert.DoesNotContain("private-request-secret", error.ToString(), StringComparison.Ordinal); Assert.True(source.CanRead);
+    }
+
     [Fact]
     public void SuccessfullyDisposedMediaReleasesBorrowedSourceAndFenceWhileContentIsRetained()
     {
@@ -84,6 +101,8 @@ public sealed class GoogleCacheRequestOwnershipTests
         internal HttpRequestMessage? Request { get; private set; }
         internal CountContent? Content { get; private set; }
         internal CountContent? Probe { get; private set; }
+        internal CountContent? ResponseContent { get; private set; }
+        internal bool RefuseResponse { get; init; }
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken token)
         {
             Request = request;
@@ -99,7 +118,8 @@ public sealed class GoogleCacheRequestOwnershipTests
                 { ["bucket"] = "cache-bucket", ["name"] = name, ["generation"] = "42", ["size"] = bytes.Length.ToString(System.Globalization.CultureInfo.InvariantCulture), ["contentType"] = "text/plain" });
             }
             else body = "{\"file\":{\"name\":\"files/staged\",\"uri\":\"https://generativelanguage.googleapis.com/v1beta/files/staged\",\"state\":\"ACTIVE\",\"mimeType\":\"text/plain\",\"sizeBytes\":\"3\"}}";
-            return new(status) { Content = new StringContent(body) };
+            ResponseContent = new(new StringContent(body), RefuseResponse);
+            return new(status) { Content = ResponseContent };
         }
     }
     private sealed class CountContent(HttpContent inner, bool refuse) : HttpContent

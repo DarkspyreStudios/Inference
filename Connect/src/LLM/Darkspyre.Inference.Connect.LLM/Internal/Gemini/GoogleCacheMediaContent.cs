@@ -6,10 +6,10 @@ namespace Darkspyre.Inference.Connect.LLM.Internal;
 // Content owns no source stream; the admitted resource reader owns the opened handle.
 internal sealed class GoogleCacheMediaContent : HttpContent
 {
-    private readonly Stream _source;
+    private Stream? _source;
     private readonly long? _length;
     private readonly long _maximum;
-    private readonly Action<CancellationToken> _fence;
+    private Action<CancellationToken>? _fence;
     internal long BytesWritten { get; private set; }
 
     internal GoogleCacheMediaContent(Stream source, string mime, long? length, long maximum, Action<CancellationToken> fence)
@@ -23,21 +23,30 @@ internal sealed class GoogleCacheMediaContent : HttpContent
     protected override Task SerializeToStreamAsync(Stream destination, TransportContext? context, CancellationToken token) => WriteAsync(destination, token);
     private async Task WriteAsync(Stream destination, CancellationToken token)
     {
+        Stream source = _source ?? throw new ObjectDisposedException(nameof(GoogleCacheMediaContent));
+        Action<CancellationToken> fence = _fence ?? throw new ObjectDisposedException(nameof(GoogleCacheMediaContent));
         byte[] buffer = new byte[32 * 1024];
         while (true)
         {
-            token.ThrowIfCancellationRequested(); _fence(token);
-            int read = await _source.ReadAsync(buffer, token).ConfigureAwait(false);
-            token.ThrowIfCancellationRequested(); _fence(token);
+            token.ThrowIfCancellationRequested(); fence(token);
+            int read = await source.ReadAsync(buffer, token).ConfigureAwait(false);
+            token.ThrowIfCancellationRequested(); fence(token);
             if (read == 0) break;
             long total = checked(BytesWritten + read);
             if (total > _maximum || _length is { } expected && total > expected)
                 throw new InvalidOperationException("The staged content exceeds its permitted byte count.");
             await destination.WriteAsync(buffer.AsMemory(0, read), token).ConfigureAwait(false);
             BytesWritten = total;
-            token.ThrowIfCancellationRequested(); _fence(token);
+            token.ThrowIfCancellationRequested(); fence(token);
         }
         if (_length is { } actual && BytesWritten != actual)
             throw new InvalidOperationException("The staged content does not match its observed byte count.");
     }
+
+    protected override void Dispose(bool disposing)
+    {
+        try { base.Dispose(disposing); }
+        finally { if (disposing) DetachBorrowed(); }
+    }
+    internal void DetachBorrowed() { _source = null; _fence = null; }
 }

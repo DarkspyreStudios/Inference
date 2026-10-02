@@ -17,8 +17,10 @@ internal sealed partial class GeminiApiLlmClient
     { ArgumentNullException.ThrowIfNull(reference); _ = GeminiCacheReads.ResourceId(reference.ResourceName); _ = ParseModel(reference.ModelId); }
     void ILlmContextCacheAdapter.ValidateCachedSuffix(LlmChatRequest request) => ValidateCachedSuffix(request);
     void ILlmContextCacheAdapter.ValidateCacheCreate(LlmConnection connection, LlmContextCacheCreate request)
-    { Validate(connection); _ = ParseModel(request.ModelId); LlmResourcePreparation.ValidateArguments(new()
-        { ModelId = request.ModelId, Messages = request.Messages, Tools = request.Tools, Resources = request.Resources }); }
+    {
+        Validate(connection); _ = ParseModel(request.ModelId); LlmResourcePreparation.ValidateArguments(new()
+        { ModelId = request.ModelId, Messages = request.Messages, Tools = request.Tools, Resources = request.Resources });
+    }
     Task<ILlmContextCacheOperation> ILlmContextCacheAdapter.PrepareCacheOperationAsync(LlmConnection connection,
         Action<CancellationToken> fence, CancellationToken token)
     {

@@ -34,21 +34,21 @@ internal static class VertexCacheFiles
         Action<CancellationToken> fence, CancellationToken token)
     {
         ValidateMedia(mimeType, length); token.ThrowIfCancellationRequested(); fence(token);
-        string name = staging.ObjectPrefix + Guid.NewGuid().ToString("N");
-        using var content = new GoogleCacheMediaContent(source, mimeType, length, MaximumObjectBytes, fence);
-        using var request = new HttpRequestMessage(HttpMethod.Post,
-            "https://storage.googleapis.com/upload/storage/v1/b/" + Uri.EscapeDataString(staging.Bucket)
-            + "/o?uploadType=media&name=" + Uri.EscapeDataString(name) + "&ifGenerationMatch=0") { Content = content };
-        if (length is null) request.Headers.TransferEncodingChunked = true;
-        access.Authorize(request);
         using var consumption = SdkHttpConsumption.Enter(http, token); token = consumption.Token;
         void Check() { token.ThrowIfCancellationRequested(); fence(token); consumption.Fence(); }
         Check();
+        string name = staging.ObjectPrefix + Guid.NewGuid().ToString("N");
+        var content = new GoogleCacheMediaContent(source, mimeType, length, MaximumObjectBytes, fence);
+        var request = new HttpRequestMessage(HttpMethod.Post,
+            "https://storage.googleapis.com/upload/storage/v1/b/" + Uri.EscapeDataString(staging.Bucket)
+            + "/o?uploadType=media&name=" + Uri.EscapeDataString(name) + "&ifGenerationMatch=0") { Content = content };
+        if (length is null) request.Headers.TransferEncodingChunked = true;
         HttpResponseMessage? response = null;
         HttpStatusCode? status = null; string? requestId = null; TimeSpan? retry = null;
         File? observed = null; Exception? failure = null; bool canceled = false;
         try
         {
+            access.Authorize(request); Check();
             response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token).ConfigureAwait(false);
             status = response.StatusCode; requestId = ProviderHttp.ReadRequestId(response); retry = response.Headers.RetryAfter?.Delta;
             Check();
@@ -82,6 +82,14 @@ internal static class VertexCacheFiles
                 canceled |= cleanup is OperationCanceledException;
             }
         }
+        try { request.Dispose(); }
+        catch (Exception cleanup)
+        {
+            Exception owned = LlmResourcePreparation.AsCleanupFailure(Safe(cleanup, "Vertex cache staging request cleanup failed."), reference, request);
+            failure = failure is null ? owned : new AggregateException(failure, owned);
+            canceled |= cleanup is OperationCanceledException;
+        }
+        finally { content.DetachBorrowed(); }
         try { Check(); }
         catch (Exception error) { canceled |= error is OperationCanceledException; failure ??= Safe(error, "Vertex cache staging was interrupted."); }
         if (failure is not null)

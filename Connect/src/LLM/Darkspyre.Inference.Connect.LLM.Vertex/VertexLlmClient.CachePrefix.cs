@@ -60,6 +60,17 @@ internal sealed partial class VertexLlmClient
 
     private sealed partial class CacheOperation
     {
+        private sealed class MediaComparer : IEqualityComparer<(string Mime, ReadOnlyMemory<byte> Data)>
+        {
+            public bool Equals((string Mime, ReadOnlyMemory<byte> Data) x, (string Mime, ReadOnlyMemory<byte> Data) y)
+                => StringComparer.Ordinal.Equals(x.Mime, y.Mime) && x.Data.Span.SequenceEqual(y.Data.Span);
+            public int GetHashCode((string Mime, ReadOnlyMemory<byte> Data) value)
+            {
+                var hash = new HashCode(); hash.Add(value.Mime, StringComparer.Ordinal); hash.AddBytes(value.Data.Span);
+                return hash.ToHashCode();
+            }
+        }
+
         private sealed record PreparedMedia(string Mime, ReadOnlyMemory<byte> Data, VertexCacheFiles.File? File)
         {
             internal JsonObject Part() => File is { } staged
@@ -75,7 +86,7 @@ internal sealed partial class VertexLlmClient
             var capabilities = Owner.GetCapabilities(Connection, request.ModelId);
             var reasoning = GeminiModelProfiles.Get(VertexEndpoints.ParseModel(request.ModelId).Model, null);
             var logical = new Dictionary<InferenceResourceReference, PreparedMedia>();
-            var media = new Dictionary<(string Mime, ReadOnlyMemory<byte> Data), PreparedMedia>();
+            var media = new Dictionary<(string Mime, ReadOnlyMemory<byte> Data), PreparedMedia>(new MediaComparer());
             var native = new Dictionary<string, PreparedMedia>(StringComparer.Ordinal);
             var occurrences = new Dictionary<InferenceResourceReference, int>();
             var promptReferences = chat.Messages.Where(message => message.ContinuationState is null)

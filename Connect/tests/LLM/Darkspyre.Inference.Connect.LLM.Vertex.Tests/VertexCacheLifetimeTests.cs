@@ -342,6 +342,79 @@ public sealed class VertexCacheLifetimeTests
 
     public static HttpResponseMessage CreateRefusedResponse() => new(HttpStatusCode.OK) { Content = new RefusingContent(Receipt) };
 
+    [Fact]
+    public void ActualForeignRefusedUploadRequestRemainsOwnedUntilFacadeIsReleased()
+    {
+        WeakReference[] roots = ExerciseForeignRefusedRequest();
+        for (int attempt = 0; roots.Any(root => root.IsAlive) && attempt < 20; attempt++)
+        { GC.Collect(); GC.WaitForPendingFinalizers(); GC.Collect(); }
+        Assert.All(roots, root => Assert.False(root.IsAlive));
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static WeakReference[] ExerciseForeignRefusedRequest()
+    {
+        var generation = new Generation(Path.GetDirectoryName(typeof(VertexCacheLifetimeTests).Assembly.Location)!);
+        try
+        {
+            Assembly fixture = generation.LoadFromAssemblyPath(typeof(VertexCacheLifetimeTests).Assembly.Location);
+            Assert.Same(generation, AssemblyLoadContext.GetLoadContext(fixture));
+            Assert.Equal(typeof(VertexCacheLifetimeTests).Assembly.ManifestModule.ModuleVersionId, fixture.ManifestModule.ModuleVersionId);
+            Type type = fixture.GetType(typeof(VertexCacheLifetimeTests).FullName!, true)!;
+            MethodInfo factory = type.GetMethod(nameof(CreateRefusedRequestContent))!;
+            Assert.Same(fixture, factory.Module.Assembly);
+            var wrap = factory.CreateDelegate<Func<HttpContent, HttpContent>>();
+            using var handler = new StagingHandler { Wrap = wrap }; using var http = new HttpClient(handler);
+            var source = new Source { Staging = true }; var auth = new Authentication();
+            var facade = new LlmProviderService(source, [new VertexLlmClient(http, auth)]);
+            var caches = facade.BindContextCacheAsync("connection").GetAwaiter().GetResult();
+            Exception operation = Assert.Throws<InferenceResourceOperationException>(() => caches.CreateAsync(new()
+            { ModelId = Model, Correlation = new("operation", "display"), TimeToLive = TimeSpan.FromHours(1),
+                Messages = [new("user", "prefix") { Attachments = [new LlmAttachment { Kind = LlmBinaryKind.Image,
+                    MediaType = "image/png", FileName = "image.png", Data = "abc"u8.ToArray() }] }] }).GetAwaiter().GetResult());
+            Exception cleanup = FindCleanup(operation);
+            Assert.Same(cleanup, Assert.Throws<InferenceResourceOperationException>(() => facade.Dispose()));
+            Assert.Same(cleanup, Assert.Throws<InferenceResourceOperationException>(() => facade.Dispose()));
+            var request = handler.Request!; object content = request.Content!;
+            Assert.Same(fixture, content.GetType().Assembly); Assert.Same(generation, AssemblyLoadContext.GetLoadContext(content.GetType().Assembly));
+            Assert.Equal(1, content.GetType().GetProperty(nameof(RefusingRequestContent.CleanupAttempts))!.GetValue(content));
+            Assert.Equal(0, source.DisposeCalls); Assert.Equal(0, auth.DisposeCalls);
+            Assert.DoesNotContain("private-token-or-prefix", operation.ToString(), StringComparison.Ordinal);
+            handler.Request = null; handler.Wrap = null;
+            var roots = new WeakReference[] { new(generation), new(fixture), new(type), new(factory), new(request), new(content), new(content.GetType()) };
+            for (int attempt = 0; attempt < 3; attempt++) { GC.Collect(); GC.WaitForPendingFinalizers(); GC.Collect(); }
+            Assert.All(roots, root => Assert.True(root.IsAlive)); GC.KeepAlive(facade);
+            return roots;
+        }
+        finally { generation.Unload(); }
+    }
+
+    public static HttpContent CreateRefusedRequestContent(HttpContent original) => new RefusingRequestContent(original);
+
+    private sealed class StagingHandler : HttpMessageHandler
+    {
+        internal Func<HttpContent, HttpContent>? Wrap { get; set; }
+        internal HttpRequestMessage? Request { get; set; }
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken token)
+        {
+            Assert.Equal("storage.googleapis.com", request.RequestUri!.Host);
+            Request = request; byte[] bytes = await request.Content!.ReadAsByteArrayAsync(token);
+            string name = Uri.UnescapeDataString(request.RequestUri.Query.Split('&').Single(part => part.StartsWith("name=", StringComparison.Ordinal))[5..]);
+            request.Content = Wrap!(request.Content);
+            return new(HttpStatusCode.OK) { Content = new StringContent(System.Text.Json.JsonSerializer.Serialize(
+                new Dictionary<string, string> { ["bucket"] = "cache-bucket", ["name"] = name, ["generation"] = "42",
+                    ["size"] = bytes.Length.ToString(System.Globalization.CultureInfo.InvariantCulture), ["contentType"] = "image/png" })) };
+        }
+    }
+    private sealed class RefusingRequestContent(HttpContent original) : HttpContent
+    {
+        public int CleanupAttempts { get; private set; }
+        protected override Task SerializeToStreamAsync(Stream stream, TransportContext? context) => original.CopyToAsync(stream);
+        protected override bool TryComputeLength(out long length) { length = 0; return false; }
+        protected override void Dispose(bool disposing)
+        { if (disposing) { CleanupAttempts++; throw new InvalidOperationException("private-token-or-prefix"); } base.Dispose(disposing); }
+    }
+
     private static InferenceResourceOperationException FindCleanup(Exception error) => error switch
     {
         InferenceResourceOperationException resource when resource.Failure.Phase == InferenceResourceOperationPhase.Cleanup => resource,
@@ -354,10 +427,11 @@ public sealed class VertexCacheLifetimeTests
     private static async Task Observe(Task operation) { try { await operation; } catch (OperationCanceledException) { } }
     private sealed class Source : ILlmConnectionSource, IDisposable
     {
+        internal bool Staging { get; init; }
         public int DisposeCalls { get; private set; }
         public Task<LlmConnection?> GetConnectionAsync(string connectionId, CancellationToken cancellationToken = default) => Task.FromResult<LlmConnection?>(new()
         { Transport = LlmTransport.GoogleVertexAi, Version = "1", Endpoint = "https://aiplatform.googleapis.com",
-            Vertex = new() { ProjectId = "project-id", Location = "global" }, CapabilityOverrides = new() { SupportsModelListing = false } });
+            Vertex = new() { ProjectId = "project-id", Location = "global", CacheStaging = Staging ? new("cache-bucket", "prefix/") : null }, CapabilityOverrides = new() { SupportsModelListing = false } });
         public Task SaveCredentialAsync(string connectionId, string credentialJson, string expectedVersion, CancellationToken cancellationToken = default) => throw new InvalidOperationException();
         public void Dispose() => DisposeCalls++;
     }
