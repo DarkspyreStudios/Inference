@@ -80,12 +80,33 @@ public sealed class AzureBoundaryTests
             new() { ApiKey = "key", OAuth = new() { AccessToken = "token" } },
             new() { ApiKey = "key", Aws = new() },
             new() { ApiKey = "key", Google = new() { ServiceAccountJson = "{}" } },
+            new() { ApiKey = "key", Azure = new LlmAzureSecret.ClientSecret("protected-secret") },
+            new() { ApiKey = "key", Azure = new LlmAzureSecret.CertificatePkcs12("protected-certificate") },
             new() { ApiKey = "key\ninvalid" }
         })
         {
             await Assert.ThrowsAsync<ArgumentException>(() => AzureProtocolTests.Complete(AzureProtocolTests.Client(http, responses),
                 AzureProtocolTests.Connection(responses, false) with { Credential = credential.Serialize() }, AzureProtocolTests.Request));
         }
+        Assert.Equal(0, handler.Calls);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task UnimplementedConfigurationCannotUseTheExistingV1Route(bool responses)
+    {
+        using var handler = new AzureProtocolTests.Handler(responses, false);
+        using var http = new HttpClient(handler);
+        LlmConnection connection = AzureProtocolTests.Connection(responses, false);
+        foreach (LlmAzureConfiguration configuration in new[]
+        {
+            connection.Azure! with { ApiVersion = "2025-01-01" },
+            connection.Azure! with { Entra = new(LlmAzureCloud.Public, LlmAzureTokenAudience.Foundry,
+                new LlmAzureIdentitySelection.SystemAssignedManagedIdentity()) }
+        })
+            await Assert.ThrowsAsync<NotSupportedException>(() => AzureProtocolTests.Complete(
+                AzureProtocolTests.Client(http, responses), connection with { Azure = configuration }, AzureProtocolTests.Request));
         Assert.Equal(0, handler.Calls);
     }
 

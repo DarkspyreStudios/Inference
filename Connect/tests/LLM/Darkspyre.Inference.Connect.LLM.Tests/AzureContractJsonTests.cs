@@ -5,6 +5,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization.Metadata;
 using Darkspyre.Inference.Common;
+using Darkspyre.Inference.Connect.LLM.Internal;
 
 namespace Darkspyre.Inference.Connect.LLM.Tests;
 
@@ -70,11 +71,77 @@ public sealed class AzureContractJsonTests
         const string json = """{"azure":{"type":"certificate-pkcs12","base64":"exact-protected-bytes","password":" exact password "}}""";
         LlmCredential credential = JsonSerializer.Deserialize(json, ConnectLlmJson.Credential)!;
         Assert.NotNull(typeof(LlmCredential).GetProperty("Azure"));
-        Assert.Equal(json, credential.Serialize());
+        using JsonDocument written = JsonDocument.Parse(credential.Serialize());
+        using JsonDocument expected = JsonDocument.Parse(json);
+        Assert.True(JsonNode.DeepEquals(JsonNode.Parse(expected.RootElement.GetProperty("azure").GetRawText()),
+            JsonNode.Parse(written.RootElement.GetProperty("azure").GetRawText())));
+        Assert.False(written.RootElement.TryGetProperty("apiKey", out _));
+        Assert.Equal("{}", written.RootElement.GetProperty("secretHeaders").GetRawText());
         Assert.Equal("LlmCredential { [redacted] }", credential.ToString());
         object secret = typeof(LlmCredential).GetProperty("Azure")!.GetValue(credential)!;
         Assert.DoesNotContain("exact-protected-bytes", secret.ToString());
         Assert.DoesNotContain("password", secret.ToString());
+    }
+
+    [Theory]
+    [InlineData("LlmAzureEntraConfiguration", "{}")]
+    [InlineData("LlmAzureEntraConfiguration", "{\"Cloud\":0,\"Audience\":0}")]
+    [InlineData("LlmAzureIdentitySelection", "{\"type\":\"system-managed\",\"ClientId\":\"ignored\"}")]
+    [InlineData("LlmAzureManagedIdentityId", "{\"type\":\"client-id\",\"Value\":\"id\",\"ObjectId\":\"ignored\"}")]
+    [InlineData("LlmAzureSecret", "{\"type\":\"certificate-pkcs12\",\"base64\":\"opaque\",\"file\":\"ignored\"}")]
+    [InlineData("LlmAzureSecret", "{\"type\":\"client-secret\"}")]
+    public void MissingOrForeignIdentityFieldsRefuse(string name, string json)
+        => Assert.Throws<JsonException>(() => JsonSerializer.Deserialize(json, Metadata(typeof(ConnectLlmJson), name)));
+
+    [Fact]
+    public void OptionalPasswordAndDefaultsRemainExactWithoutOpeningFiles()
+    {
+        Assert.Equal(LlmAzureApiMode.V1, new LlmAzureConfiguration().ApiMode);
+        Assert.Equal(LlmAzureAuthenticationMode.ApiKey, new LlmAzureConfiguration().AuthenticationMode);
+        Assert.Null(JsonSerializer.Deserialize("{\"base64\":\"opaque\"}", ConnectLlmJson.CertificatePkcs12)!.Password);
+        Assert.Equal(string.Empty, JsonSerializer.Deserialize("{\"base64\":\"opaque\",\"password\":\"\"}", ConnectLlmJson.CertificatePkcs12)!.Password);
+        var identity = new LlmAzureIdentitySelection.WorkloadIdentity("tenant", "client", "/not-opened/assertion");
+        Assert.Equal("/not-opened/assertion", identity.FederatedTokenFile);
+        Assert.DoesNotContain("assertion", identity.ToString());
+        Assert.Throws<ArgumentException>(() => identity with { TenantId = " tenant " });
+        Assert.Throws<ArgumentException>(() => identity with { FederatedTokenFile = "relative/assertion" });
+    }
+
+    [Fact]
+    public void ConnectionAndSetupMetadataRefuseUnknownAzureModes()
+    {
+        const string json = "{\"Transport\":14,\"Azure\":{\"ApiMode\":999}}";
+        Assert.Throws<JsonException>(() => JsonSerializer.Deserialize(json, ConnectLlmJson.Connection));
+        Assert.Throws<JsonException>(() => JsonSerializer.Deserialize("{\"Connection\":" + json + ",\"ModelId\":\"deployment\"}", ConnectLlmJson.SetupConfiguration));
+    }
+
+    [Fact]
+    public void DiagnosticRedactionIncludesEveryProtectedAzureValue()
+    {
+        const string secret = "explicit-client-secret";
+        const string certificate = "opaque-pkcs12-material";
+        const string password = "explicit-pfx-password";
+        Assert.Equal("echo [REDACTED]", SecretRedactor.Sanitize("echo " + secret,
+            new() { Azure = new LlmAzureSecret.ClientSecret(secret) }));
+        Assert.Equal("echo [REDACTED] [REDACTED]", SecretRedactor.Sanitize("echo " + certificate + " " + password,
+            new() { Azure = new LlmAzureSecret.CertificatePkcs12(certificate, password) }));
+    }
+
+    [Theory]
+    [InlineData(LlmTransport.AzureOpenAiResponses)]
+    [InlineData(LlmTransport.AzureOpenAiChat)]
+    public async Task ApiKeySetterCannotReplaceAnEntraCredential(LlmTransport transport)
+    {
+        var source = new CredentialSource(new LlmConnection
+        {
+            Transport = transport, Version = "current", Endpoint = "https://selected.openai.azure.com",
+            Azure = new() { AuthenticationMode = LlmAzureAuthenticationMode.Entra },
+            Credential = new LlmCredential { Azure = new LlmAzureSecret.ClientSecret("original") }.Serialize()
+        });
+        await using var service = new LlmProviderService(source, [], []);
+        await Assert.ThrowsAsync<NotSupportedException>(() => service.SetApiKeyAsync("selected", "replacement", "current"));
+        Assert.Equal(0, source.Saves);
+        Assert.Equal("original", Assert.IsType<LlmAzureSecret.ClientSecret>(LlmCredential.Parse(source.Connection.Credential)!.Azure).Value);
     }
 
     [Theory, MemberData(nameof(Shapes))]
@@ -105,13 +172,28 @@ public sealed class AzureContractJsonTests
             JsonTypeInfo metadata = Metadata(facade, name);
             Assert.Same(connect, metadata.Type.Assembly);
             Assert.Same(connect, metadata.Options.TypeInfoResolver!.GetType().Assembly);
-            RoundTrip(metadata, json);
+            object value = RoundTrip(metadata, json);
+            object? nested = name switch
+            {
+                "LlmAzureConfiguration" => value.GetType().GetProperty("Entra")!.GetValue(value),
+                "LlmAzureEntraConfiguration" => value.GetType().GetProperty("Identity")!.GetValue(value),
+                "UserAssignedManagedIdentity" => value.GetType().GetProperty("Id")!.GetValue(value),
+                "LlmAzureIdentitySelection" when value.GetType().Name == "UserAssignedManagedIdentity"
+                    => value.GetType().GetProperty("Id")!.GetValue(value),
+                _ => null
+            };
+            if (nested is not null)
+            {
+                Assert.Same(connect, nested.GetType().Assembly);
+                object? identity = nested.GetType().GetProperty("Identity")?.GetValue(nested);
+                if (identity is not null) Assert.Same(connect, identity.GetType().Assembly);
+            }
         }
         finally { generation.Unload(); }
         return weak;
     }
 
-    private static void RoundTrip(JsonTypeInfo metadata, string json)
+    private static object RoundTrip(JsonTypeInfo metadata, string json)
     {
         object value = JsonSerializer.Deserialize(json, metadata)!;
         using JsonDocument original = JsonDocument.Parse(json);
@@ -123,6 +205,7 @@ public sealed class AzureContractJsonTests
         }
         else
             Assert.Equal(original.RootElement.GetRawText(), written.RootElement.GetRawText());
+        return value;
     }
 
     private static JsonTypeInfo Metadata(Type facade, string name)
@@ -137,5 +220,19 @@ public sealed class AzureContractJsonTests
     {
         protected override Assembly? Load(AssemblyName name) => name.Name is { } id && id.StartsWith("Darkspyre.Inference", StringComparison.Ordinal)
             ? LoadFromAssemblyPath(Path.Combine(directory, id + ".dll")) : null;
+    }
+
+    private sealed class CredentialSource(LlmConnection connection) : ILlmConnectionSource
+    {
+        public LlmConnection Connection { get; } = connection;
+        public int Saves { get; private set; }
+        public Task<LlmConnection?> GetConnectionAsync(string connectionId, CancellationToken cancellationToken = default)
+            => Task.FromResult<LlmConnection?>(Connection);
+        public Task SaveCredentialAsync(string connectionId, string credentialJson, string expectedVersion,
+            CancellationToken cancellationToken = default)
+        {
+            Saves++;
+            return Task.CompletedTask;
+        }
     }
 }

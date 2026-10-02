@@ -63,7 +63,10 @@ internal static class SecretRedactor
             credential.OAuth?.IdToken,
             credential.Aws?.AccessKeyId,
             credential.Aws?.SecretAccessKey,
-            credential.Aws?.SessionToken
+            credential.Aws?.SessionToken,
+            (credential.Azure as LlmAzureSecret.ClientSecret)?.Value,
+            (credential.Azure as LlmAzureSecret.CertificatePkcs12)?.Base64,
+            (credential.Azure as LlmAzureSecret.CertificatePkcs12)?.Password
         ];
         return candidates.Where(value => !string.IsNullOrWhiteSpace(value)).Cast<string>()
             .Concat(credential.SecretHeaders.Values);

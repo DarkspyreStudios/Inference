@@ -15,7 +15,9 @@ internal static class AzureEndpoints
             || !(endpoint.OriginalString.Equals(endpoint.GetLeftPart(UriPartial.Authority), StringComparison.OrdinalIgnoreCase)
                 || endpoint.OriginalString.Equals(endpoint.GetLeftPart(UriPartial.Authority) + "/", StringComparison.OrdinalIgnoreCase)))
             throw new ArgumentException("Use only an HTTPS Azure resource authority without paths, credentials, query or fragment.");
-        if (!ValidId(config.DeploymentId) || config.ModelProfileId is { } profile && !ValidId(profile))
+        if (config.ApiVersion is not null || config.Entra is not null)
+            throw new NotSupportedException("The selected Azure route does not implement versioned routing or Entra authentication.");
+        if (!AzureConfigurationData.ValidId(config.DeploymentId) || config.ModelProfileId is { } profile && !AzureConfigurationData.ValidId(profile))
             throw new ArgumentException("Supply an exact deployment name and a nonempty underlying model profile when configured.");
         if (deployment is not null && deployment != config.DeploymentId)
             throw new ArgumentException("The request model must match the configured Azure deployment.");
@@ -27,7 +29,8 @@ internal static class AzureEndpoints
         if (connection.AdditionalHeaders.Keys.Any(IsAuthenticationHeader)
             || credential?.SecretHeaders.Keys.Any(IsAuthenticationHeader) == true)
             throw new ArgumentException("Azure owns Authorization and api-key headers.");
-        if (credential is not null && (credential.OAuth is not null || credential.Aws is not null || credential.Google is not null))
+        if (credential is not null && (credential.OAuth is not null || credential.Aws is not null || credential.Google is not null
+            || credential.Azure is not null || credential.Copilot is not null || credential.CopilotRuntime is not null))
             throw new ArgumentException("Azure API-key mode accepts no other authentication credential.");
         if (requireCredential && string.IsNullOrWhiteSpace(credential?.ApiKey)
             || credential?.ApiKey?.Any(char.IsControl) == true)
@@ -52,6 +55,4 @@ internal static class AzureEndpoints
     private static bool IsAuthenticationHeader(string name) => name.Equals("Authorization", StringComparison.OrdinalIgnoreCase)
         || name.Equals("api-key", StringComparison.OrdinalIgnoreCase);
 
-    private static bool ValidId(string value) => !string.IsNullOrWhiteSpace(value)
-        && value == value.Trim() && !value.Any(char.IsControl);
 }

@@ -15,6 +15,8 @@ public sealed record LlmCredential
 
     public LlmGoogleCredentials? Google { get; init; }
 
+    public LlmAzureSecret? Azure { get; init; }
+
     public LlmCopilotCredentials? Copilot { get; init; }
 
     public LlmCopilotRuntimeConnectionCredential? CopilotRuntime { get; init; }
