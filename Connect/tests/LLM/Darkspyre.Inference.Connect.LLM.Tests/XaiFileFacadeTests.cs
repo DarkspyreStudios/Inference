@@ -102,6 +102,129 @@ public sealed class XaiFileFacadeTests
         await Assert.ThrowsAsync<NotSupportedException>(() => service.GetAsync("selected", "file-a"));
     }
 
+    [Theory]
+    [InlineData("source")]
+    [InlineData("refresh")]
+    [InlineData("http")]
+    public async Task RetirementDrainsIgnoringCallbackAndNeverPublishesLateFile(string boundary)
+    {
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var source = new Source
+        {
+            Read = boundary == "source" ? async _ => { entered.SetResult(); await release.Task; return Connection(); } : null
+        };
+        var auth = new Authenticator
+        {
+            Refresh = boundary == "refresh" ? async credential => { entered.SetResult(); await release.Task; return credential; } : null
+        };
+        int calls = 0;
+        using var http = new HttpClient(new Handler(async _ =>
+        {
+            calls++;
+            if (boundary == "http") { entered.SetResult(); await release.Task; }
+            return new(HttpStatusCode.OK) { Content = new StringContent(File) };
+        }));
+        var service = new LlmProviderService(source, [new XaiResponsesLlmClient(http)], [auth]);
+        Task<LlmProviderFile> request = service.GetAsync("selected", "file-a");
+        Task? retirement = null;
+        try
+        {
+            await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            retirement = service.DisposeAsync().AsTask();
+            Task repeated = service.DisposeAsync().AsTask();
+            Assert.Same(retirement, repeated);
+            Assert.False(retirement.IsCompleted);
+            release.SetResult();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => request);
+            await retirement.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.Equal(boundary == "http" ? 1 : 0, calls);
+            await Assert.ThrowsAsync<ObjectDisposedException>(() => service.GetAsync("selected", "file-a"));
+        }
+        finally
+        {
+            retirement ??= service.DisposeAsync().AsTask();
+            release.TrySetResult();
+            try { await request.WaitAsync(TimeSpan.FromSeconds(5)); } catch (OperationCanceledException) { }
+            await retirement.WaitAsync(TimeSpan.FromSeconds(5));
+        }
+    }
+
+    [Fact]
+    public async Task SnapshotHeadersSurviveCallerMutationDuringRefresh()
+    {
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var headers = new Dictionary<string, string> { ["X-Admitted"] = "original" };
+        var source = new Source { Connection = Connection() with { AdditionalHeaders = headers } };
+        var auth = new Authenticator { Refresh = async credential => { entered.SetResult(); await release.Task; return credential; } };
+        using var http = new HttpClient(new Handler(request =>
+        {
+            Assert.Equal("original", request.Headers.GetValues("X-Admitted").Single());
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(File) });
+        }));
+        await using var service = new LlmProviderService(source, [new XaiResponsesLlmClient(http)], [auth]);
+        Task<LlmProviderFile> request = service.GetAsync("selected", "file-a");
+        try
+        {
+            await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            headers["X-Admitted"] = "changed";
+            headers["Authorization"] = "forbidden-late-change";
+            release.SetResult();
+            Assert.Equal("file-a", (await request).Id);
+            Assert.Equal(1, source.Reads);
+            Assert.Equal(0, source.Writes);
+        }
+        finally
+        {
+            release.TrySetResult();
+            await request.WaitAsync(TimeSpan.FromSeconds(5));
+        }
+    }
+
+    [Fact]
+    public async Task CancellationCallbackFaultDoesNotReleaseBorrowedGraphBeforeSourceDrain()
+    {
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var callbackEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var failure = new InvalidOperationException("host-owned cancellation failure");
+        var source = new Source
+        {
+            Read = async token =>
+            {
+                using var registration = token.Register(() => { callbackEntered.TrySetResult(); throw failure; });
+                entered.SetResult();
+                await release.Task;
+                return Connection();
+            }
+        };
+        using var http = new HttpClient(new Handler(_ => throw new InvalidOperationException("Late HTTP.")));
+        var service = new LlmProviderService(source, [new XaiResponsesLlmClient(http)]);
+        Task<LlmProviderFile> request = service.GetAsync("selected", "file-a");
+        Task? retirement = null;
+        try
+        {
+            await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            retirement = service.DisposeAsync().AsTask();
+            await callbackEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.False(retirement.IsCompleted);
+            release.SetResult();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => request);
+            Exception first = await Assert.ThrowsAnyAsync<Exception>(() => retirement);
+            Exception repeated = await Assert.ThrowsAnyAsync<Exception>(() => service.DisposeAsync().AsTask());
+            Assert.Same(first, repeated);
+            Assert.Contains(failure, ((AggregateException)first).Flatten().InnerExceptions);
+        }
+        finally
+        {
+            retirement ??= service.DisposeAsync().AsTask();
+            release.TrySetResult();
+            try { await request.WaitAsync(TimeSpan.FromSeconds(5)); } catch (OperationCanceledException) { }
+            try { await retirement.WaitAsync(TimeSpan.FromSeconds(5)); } catch (AggregateException) { }
+        }
+    }
+
     private static LlmConnection Connection() => new()
     {
         Transport = LlmTransport.XaiResponses,
@@ -112,22 +235,24 @@ public sealed class XaiFileFacadeTests
 
     private sealed class Source : ILlmConnectionSource
     {
+        public Func<CancellationToken, Task<LlmConnection?>>? Read { get; init; }
         public LlmConnection Connection { get; init; } = XaiFileFacadeTests.Connection();
         public int Reads { get; private set; }
         public int Writes { get; private set; }
         public string? ExpectedVersion { get; private set; }
         public Task<LlmConnection?> GetConnectionAsync(string connectionId, CancellationToken cancellationToken = default)
-        { Reads++; return Task.FromResult<LlmConnection?>(Connection); }
+        { Reads++; return Read?.Invoke(cancellationToken) ?? Task.FromResult<LlmConnection?>(Connection); }
         public Task SaveCredentialAsync(string connectionId, string credentialJson, string expectedVersion, CancellationToken cancellationToken = default)
         { Writes++; ExpectedVersion = expectedVersion; return Task.CompletedTask; }
     }
 
     private sealed class Authenticator : ILlmAuthenticator
     {
+        public Func<LlmCredential, Task<LlmCredential>>? Refresh { get; init; }
         public LlmTransport Transport => LlmTransport.XaiResponses;
         public int Calls { get; private set; }
         public Task<LlmCredential> EnsureFreshAsync(LlmCredential credential, CancellationToken cancellationToken = default)
-        { Calls++; return Task.FromResult(credential with { OAuth = new() { AccessToken = "refreshed-token" } }); }
+        { Calls++; return Refresh?.Invoke(credential) ?? Task.FromResult(credential with { OAuth = new() { AccessToken = "refreshed-token" } }); }
     }
 
     private sealed class Handler(Func<HttpRequestMessage, Task<HttpResponseMessage>> callback) : HttpMessageHandler
