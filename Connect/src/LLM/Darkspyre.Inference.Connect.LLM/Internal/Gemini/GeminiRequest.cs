@@ -10,7 +10,8 @@ internal static class GeminiRequest
 
     /// <summary>Converts an admitted frozen cache prefix through the generation codec, without issuing resource scope.</summary>
     internal static JsonObject BuildCachePrefix(LlmConnection connection, LlmContextCacheCreate request,
-        Func<LlmToolOutput, ProjectedToolOutput> project, GeminiModelProfile reasoning)
+        Func<LlmToolOutput, ProjectedToolOutput> project, GeminiModelProfile reasoning,
+        Func<LlmMessageAttachment, JsonObject>? attachment = null, Func<string, JsonObject>? nativeFile = null)
     {
         var prefix = new LlmChatRequest
         {
@@ -21,7 +22,7 @@ internal static class GeminiRequest
             ToolChoice = request.ToolChoice,
             Resources = request.Resources
         };
-        (JsonArray contents, JsonArray system) = BuildContents(connection, prefix, project, reasoning);
+        (JsonArray contents, JsonArray system) = BuildContents(connection, prefix, project, reasoning, attachment, nativeFile);
         ValidateToolOptions(connection, prefix);
         var payload = new JsonObject { ["contents"] = contents };
         AppendPrefixConfiguration(payload, system, prefix, reasoning, streamArguments: false);
@@ -29,7 +30,8 @@ internal static class GeminiRequest
     }
 
     private static (JsonArray Contents, JsonArray System) BuildContents(LlmConnection connection,
-        LlmChatRequest request, Func<LlmToolOutput, ProjectedToolOutput> project, GeminiModelProfile reasoning)
+        LlmChatRequest request, Func<LlmToolOutput, ProjectedToolOutput> project, GeminiModelProfile reasoning,
+        Func<LlmMessageAttachment, JsonObject>? attachmentProjection = null, Func<string, JsonObject>? nativeFile = null)
     {
         var contents = new JsonArray();
         var calls = new Dictionary<string, (string Name, string? WireId)>(StringComparer.Ordinal);
@@ -64,8 +66,10 @@ internal static class GeminiRequest
             {
                 parts = new JsonArray();
                 if (message.Content.Length > 0) { parts.Add(Text(message.Content)); }
-                foreach (LlmAttachment attachment in message.Attachments.Select(LlmAttachments.RequireBinary))
+                foreach (LlmMessageAttachment source in message.Attachments)
                 {
+                    if (attachmentProjection is not null) { parts.Add(attachmentProjection(source)); continue; }
+                    LlmAttachment attachment = LlmAttachments.RequireBinary(source);
                     string mime = LlmAttachments.ResolveMediaType(attachment);
                     parts.Add(new JsonObject
                     {
@@ -108,6 +112,15 @@ internal static class GeminiRequest
                 var references = new JsonArray();
                 foreach (SentToolPart part in output.Parts)
                 {
+                    if (part is SentNativeFile fileReference && nativeFile is not null)
+                    {
+                        JsonObject filePart = nativeFile(fileReference.FileId);
+                        string fileName = DisplayName(nested.Count + 1, null);
+                        filePart["fileData"]!["displayName"] = fileName;
+                        nested.Add(filePart);
+                        references.Add(new JsonObject { ["$ref"] = fileName });
+                        continue;
+                    }
                     (string? mime, ReadOnlyMemory<byte> data, string? name) = part switch
                     {
                         SentImage image => (image.MediaType, image.Data, image.FileName),
@@ -175,7 +188,8 @@ internal static class GeminiRequest
         ValidateToolOptions(connection, request);
         RequestJson.ApplyProviderOptions(generation, connection, request);
         var payload = new JsonObject { ["contents"] = contents, ["generationConfig"] = generation };
-        AppendPrefixConfiguration(payload, system, request, reasoning, streamArguments);
+        if (request.ExplicitCache is { } cache) { payload["cachedContent"] = cache.ResourceName; }
+        else { AppendPrefixConfiguration(payload, system, request, reasoning, streamArguments); }
         return payload;
     }
 

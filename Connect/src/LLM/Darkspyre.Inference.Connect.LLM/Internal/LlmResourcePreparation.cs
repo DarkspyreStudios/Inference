@@ -14,10 +14,56 @@ internal sealed class LlmResourcePreparation : IAsyncDisposable
     private readonly Dictionary<InferenceResourceReference, LlmProviderFile> _files = [];
     private readonly object _gate = new();
     private Task? _retirement;
+    private Scope? _readScope;
 
     private LlmResourcePreparation(LlmChatRequest request) => Request = request;
 
     internal LlmChatRequest Request { get; private set; }
+
+    internal static LlmResourcePreparation ForNamedReads(LlmChatRequest request)
+    { ValidateArguments(request); return new(request); }
+
+    internal static IEnumerable<InferenceResourceReference> NamedReferences(LlmChatRequest request) => References(request).Distinct();
+
+    internal async Task<(InferenceResourceDescriptor Descriptor, CountingReadStream Content)> OpenNamedAsync(
+        IInferenceResourceAccess access, InferenceResourceReference reference, Action<InferenceResourceDescriptor> preflight,
+        Action fence, CancellationToken token)
+    {
+        Scope scope = _readScope ??= ReadScope(access, fence, token);
+        InferenceResourceDescriptor descriptor = await RequireDescriptorAsync(access, reference, scope, fence, token).ConfigureAwait(false);
+        preflight(descriptor);
+        Check(fence, token);
+        IInferenceResourceReadHandle handle = await access.OpenReadAsync(reference, token).ConfigureAwait(false);
+        ArgumentNullException.ThrowIfNull(handle);
+        _handles.Add((handle, reference));
+        Check(fence, token);
+        InferenceResourceDescriptor observed = handle.Resource;
+        Check(fence, token);
+        CheckScope(access, scope, fence, token);
+        observed = ValidateDescriptor(observed, reference, scope);
+        ValidateImmutableFacts(descriptor, observed);
+        Stream content = handle.Content;
+        Check(fence, token);
+        CheckScope(access, scope, fence, token);
+        if (content is null || !content.CanRead) throw new InvalidOperationException("The resource handle has no readable content.");
+        Check(fence, token);
+        CheckScope(access, scope, fence, token);
+        return (descriptor with
+        {
+            FileName = descriptor.FileName ?? observed.FileName,
+            ContentType = descriptor.ContentType ?? observed.ContentType,
+            Bytes = descriptor.Bytes ?? observed.Bytes
+        }, new(content, fence, token));
+    }
+
+    internal void VerifyRead(IInferenceResourceAccess access, InferenceResourceDescriptor descriptor,
+        CountingReadStream content, Action fence, CancellationToken token)
+    {
+        Check(fence, token);
+        CheckScope(access, _readScope ?? throw InvalidScope(), fence, token);
+        if (descriptor.Bytes is { } expected && content.BytesRead != expected)
+            throw new InvalidOperationException("The resource content does not match its observed byte count.");
+    }
 
     internal static void ValidateArguments(LlmChatRequest request)
     {
@@ -167,38 +213,22 @@ internal sealed class LlmResourcePreparation : IAsyncDisposable
             InferenceResourceSelection selection = await ReadSelectionAsync(access, fence, token).ConfigureAwait(false);
             request = AppendSelection(request, selection);
             Scope scope = new(selection.WorkspaceId, selection.SessionId);
+            operation._readScope = scope;
             CheckScope(access, scope, fence, token);
             foreach (InferenceResourceReference reference in References(request).Distinct())
             {
                 current = reference;
                 phase = InferenceResourceOperationPhase.OpenRead;
-                InferenceResourceDescriptor descriptor = await RequireDescriptorAsync(access, reference, scope, fence, token).ConfigureAwait(false);
-                if (string.IsNullOrWhiteSpace(descriptor.FileName))
-                    throw new NotSupportedException("The file destination requires an observed resource filename.");
-                Check(fence, token);
-                IInferenceResourceReadHandle handle = await access.OpenReadAsync(reference, token).ConfigureAwait(false);
-                // Admission owns the returned handle before a cancellation fence can refuse publication.
-                ArgumentNullException.ThrowIfNull(handle);
-                operation._handles.Add((handle, reference));
-                Check(fence, token);
-                InferenceResourceDescriptor observed = handle.Resource;
-                Check(fence, token);
-                CheckScope(access, scope, fence, token);
-                observed = ValidateDescriptor(observed, reference, scope);
-                ValidateImmutableFacts(descriptor, observed);
-                Stream content = handle.Content;
-                Check(fence, token);
-                CheckScope(access, scope, fence, token);
-                if (content is null || !content.CanRead) throw new InvalidOperationException("The resource handle has no readable content.");
-                Check(fence, token);
-                CheckScope(access, scope, fence, token);
-                reading = new(content, fence, token);
+                var opened = await operation.OpenNamedAsync(access, reference, descriptor =>
+                {
+                    if (string.IsNullOrWhiteSpace(descriptor.FileName))
+                        throw new NotSupportedException("The file destination requires an observed resource filename.");
+                }, fence, token).ConfigureAwait(false);
+                InferenceResourceDescriptor descriptor = opened.Descriptor;
+                reading = opened.Content;
                 phase = InferenceResourceOperationPhase.Materialize;
-                LlmProviderFile uploaded = await files.UploadAsync(connection, reading, descriptor.FileName, null, fence, token).ConfigureAwait(false);
-                Check(fence, token);
-                CheckScope(access, scope, fence, token);
-                if ((descriptor.Bytes ?? observed.Bytes) is { } expected && reading.BytesRead != expected)
-                    throw new InvalidOperationException("The resource content does not match its observed byte count.");
+                LlmProviderFile uploaded = await files.UploadAsync(connection, reading, descriptor.FileName!, null, fence, token).ConfigureAwait(false);
+                operation.VerifyRead(access, descriptor, reading, fence, token);
                 operation._files.Add(reference, uploaded);
                 reading = null;
             }
@@ -330,7 +360,7 @@ internal sealed class LlmResourcePreparation : IAsyncDisposable
     }
 
     private sealed record Scope(string WorkspaceId, string SessionId);
-    private sealed class CountingReadStream(Stream inner, Action fence, CancellationToken owner) : Stream
+    internal sealed class CountingReadStream(Stream inner, Action fence, CancellationToken owner) : Stream
     {
         internal long BytesRead { get; private set; }
         public override bool CanRead => inner.CanRead;
