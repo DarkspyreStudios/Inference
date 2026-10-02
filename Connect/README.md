@@ -664,6 +664,11 @@ read the same list, and a failed listing is not kept. Common's `ILlmInference` c
 `ListModelsAsync` may answer from a kept list, and `RefreshModelsAsync` lists again. A service built by
 hand without the shared cache keeps its own.
 
+A version change or explicit refresh fences publication from the replaced in-flight listing.
+Its waiting callers receive cancellation if it returns after replacement. The current entry remains
+unchanged. Replacement does not cancel the provider's entered call. An already-cancelled request
+does not start or replace a listing.
+
 `AddLlmConnect` also registers one disposable `LlmAccountUsageObservations` for its owning service
 provider. That provider owns one dependency generation, not an application-global store shared across
 reloads. Chat and native-agent facades in that provider share the observation store.
