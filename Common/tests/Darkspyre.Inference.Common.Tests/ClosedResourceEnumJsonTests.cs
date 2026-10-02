@@ -64,6 +64,22 @@ public sealed class ClosedResourceEnumJsonTests
             InferenceJson.ImageCapabilities));
 
     [Fact]
+    public void CleanupPhaseAppendsNineWithoutChangingExistingNumericIdentities()
+    {
+        Assert.Equal("Cleanup", Enum.GetName((InferenceResourceOperationPhase)9));
+        for (int number = 0; number < 10; number++)
+        {
+            string json = number.ToString(CultureInfo.InvariantCulture);
+            Assert.Equal(json, JsonSerializer.Serialize(JsonSerializer.Deserialize(json, InferenceJson.InferenceResourceOperationPhase),
+                InferenceJson.InferenceResourceOperationPhase));
+        }
+        var failure = new InferenceResourceOperationFailure((InferenceResourceOperationPhase)9,
+            new("workspace", "resource"), InferenceResourceCommitOutcome.NotAttempted);
+        Assert.Equal(failure, JsonSerializer.Deserialize(JsonSerializer.Serialize(failure, InferenceJson.InferenceResourceOperationFailure),
+            InferenceJson.InferenceResourceOperationFailure));
+    }
+
+    [Fact]
     public void DefinedNumericValuesAndObservedUnknownOrZeroRemainExact()
     {
         foreach (string name in new[] { "InferenceMediaSourceKind", "InferenceResourceOperationPhase", "InferenceResourceCommitOutcome" })
@@ -97,7 +113,8 @@ public sealed class ClosedResourceEnumJsonTests
         foreach (int field in new[] { 0, 1, 2 }) test.NestedFailureWriteRefusesUndefined(field);
         test.NestedCapabilityReadRefusesUndefined(); test.NestedCapabilityWriteRefusesUndefined();
         test.DefinedNumericValuesAndObservedUnknownOrZeroRemainExact();
-        return 33;
+        test.CleanupPhaseAppendsNineWithoutChangingExistingNumericIdentities();
+        return 34;
     }
 
     [Fact]
@@ -134,7 +151,7 @@ public sealed class ClosedResourceEnumJsonTests
                 Assert.Same(generation, AssemblyLoadContext.GetLoadContext(converter.GetType().Assembly));
                 roots.Add(new(metadata)); roots.Add(new(metadata.Type)); roots.Add(new(converter)); roots.Add(new(metadata.Options.TypeInfoResolver!));
             }
-            Assert.Equal(33, proof.Invoke(null, null));
+            Assert.Equal(34, proof.Invoke(null, null));
         }
         finally { generation.Unload(); }
         return roots.ToArray();

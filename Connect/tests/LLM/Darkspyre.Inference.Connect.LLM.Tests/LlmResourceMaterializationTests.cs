@@ -188,6 +188,8 @@ internal sealed class ControlledSessionResources : IInferenceResourceAccess, IDi
     internal int DisposeCalls { get; private set; }
     internal Func<CancellationToken, Task>? BeforeSelection { get; set; }
     internal Func<CancellationToken, Task>? BeforeRead { get; set; }
+    internal Exception? ReadCleanupFailure { get; set; }
+    internal int ReadCleanupAttempts { get; private set; }
 
     internal async Task<InferenceResourceReference> RegisterAsync(string name, string type, string content)
     {
@@ -204,7 +206,8 @@ internal sealed class ControlledSessionResources : IInferenceResourceAccess, IDi
         lock (_gate)
         {
             var value = _content[reference]; OpenedReads++;
-            return Task.FromResult<IInferenceResourceReadHandle>(new ReadHandle(value.Descriptor, value.Bytes, () => DisposedReads++, BeforeRead));
+            return Task.FromResult<IInferenceResourceReadHandle>(new ReadHandle(value.Descriptor, value.Bytes, () => DisposedReads++, BeforeRead,
+                () => { ReadCleanupAttempts++; if (ReadCleanupFailure is { } failure) throw failure; }));
         }
     }
     public Task<IInferenceResourceWriteHandle> OpenWriteAsync(InferenceResourceCreate resource, CancellationToken cancellationToken = default)
@@ -238,11 +241,11 @@ internal sealed class ControlledSessionResources : IInferenceResourceAccess, IDi
     private InferenceResourceSelection Selection() => new(WorkspaceId, SessionId, _revision, _selected);
     public void Dispose() => DisposeCalls++;
     private sealed class ReadHandle(InferenceResourceDescriptor descriptor, byte[] bytes, Action disposed,
-        Func<CancellationToken, Task>? beforeRead) : IInferenceResourceReadHandle
+        Func<CancellationToken, Task>? beforeRead, Action beforeCleanup) : IInferenceResourceReadHandle
     {
         public InferenceResourceDescriptor Resource => descriptor;
         public Stream Content { get; } = beforeRead is null ? new MemoryStream(bytes, writable: false) : new HeldReadStream(bytes, beforeRead);
-        public ValueTask DisposeAsync() { Content.Dispose(); disposed(); return ValueTask.CompletedTask; }
+        public ValueTask DisposeAsync() { beforeCleanup(); Content.Dispose(); disposed(); return ValueTask.CompletedTask; }
     }
     private sealed class HeldReadStream(byte[] bytes, Func<CancellationToken, Task> beforeRead) : MemoryStream(bytes, writable: false)
     {
