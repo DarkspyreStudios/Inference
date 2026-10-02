@@ -61,7 +61,7 @@ It does not modify Homebrew's installed files.
 `SplashModelHost : IModelHost` owns the configured model processes and lifecycle observations.
 It does not create another admission queue.
 
-Replace the NVIDIA-only `IVramProbe` seam with `IGpuReleaseGuard`.
+The shared `IGpuReleaseGuard` owns release observation behind a provider-neutral seam.
 Its `ReadAsync` returns a `GpuReleaseObservation` containing `Released`, `Basis`, and nullable `GlobalUsedMiB`.
 The coordinator retains its bounded release polling and stores the published observation.
 The Windows guard runs the existing NVIDIA probe and evaluates the existing threshold.
@@ -203,20 +203,6 @@ A failed `/free` on a reachable service blocks Splash acquisition.
 | Splash lifecycle and Mac process-group adapter | Write within the new app |
 | Splash installed Python/native source | External dependency; do not copy or modify |
 
-## Verification and task checklist
-
-- [x] Convert the release seam and configuration in Core, llama, Tensor, and affected tests; preserve Windows thresholds and fairness.
-- [x] Extract shared forwarding and SSE wait mechanics; verify existing llama transport behavior with focused tests.
-- [x] Implement configuration, installed catalog, Mac process containment, and Splash model lifecycle with controlled process/HTTP doubles.
-- [x] Implement Splash routing, resident-response leases, errors, and native completion confirmation.
-- [x] Wire the Comfy proxy and publish truthful Mac GPU observations.
-- [x] Verify load failure cleanup, intended unload versus crash, timeout escalation, surviving native descendants, and recovery without request replay.
-- [x] Verify opaque tool/image/structured-output payload forwarding, streaming, stored responses, unsupported routes, waiter cancellation, and unload barriers.
-- [x] Restore and build App with zero warnings; run focused affected tests in runs under one minute; verify format and audit dependencies.
-- [x] Run a foreground live Mac smoke: list without loading, short chat, streaming, Responses create/read/delete, unload/reload, and verify no owned child survives shutdown.
-- [ ] Exercise Comfy handoffs live if a Mac Comfy instance is available; otherwise record that live check as unavailable and retain controlled coverage.
-- [ ] Compare the existing short prompt through the wrapper with the prior Splash profile, recording load and inference separately; verify no significant transport regression.
-- [ ] Update canonical App ownership and application README documents; commit and push the coherent units.
 
 No NuGet publication, main-branch merge, service installation, or automatic startup registration is part of this checklist.
 
@@ -230,8 +216,62 @@ The shared admission contract is documented in `App/README.md` and `docs/design/
 
 ## Implementation verification
 
-The App solution builds in Release with zero warnings.
-The 28 Splash adapter tests pass, including real Mac process-group termination without model weights.
+The App solution builds in Release with zero warnings. Formatting verification passes for the affected files.
+The dependency audit reports no vulnerable packages in the App solution.
+The 35 focused Splash adapter tests pass, including real Mac process-group termination without model weights.
 The 21 coordinator/llama tests and 23 Tensor adapter tests pass after the shared release and forwarding extraction.
 The seven llama HTTP proxy tests also pass after the private-header forwarding policy change.
-The dependency audit reports no vulnerable packages in the App solution.
+
+The live Mac smoke verifies catalog access without loading, owned Metal readiness, chat, streaming,
+Responses creation, retrieval, continuation and deletion, explicit unload, reload, and host shutdown.
+Stored response access after unload returns 404 without loading a new instance.
+Every successful lifecycle check confirms owned process-group exit.
+No Mac ComfyUI instance is listening on 8188. Live Comfy handoffs are unavailable;
+controlled queue, cache-release and handoff tests cover that integration.
+
+The reference short prompt is:
+
+> Write a detailed explanation of how a hash table works, including collisions, resizing, and time complexity. Use concrete examples.
+
+Both paths use the installed Splash 1.1.0 runtime, the same Qwen3.8-27B-Splash pack,
+16,384-token context, int8 KV, temperature zero, reasoning none, and 256 generated tokens.
+Each measurement uses a fresh model instance and a separate 32-token warm-up.
+All six records report zero cached input tokens and zero reasoning tokens.
+Loading is excluded from the response timings.
+Decode speed uses `(output tokens - 1) / (response seconds - first-content seconds)`.
+
+| Mac path | Median decode tokens/sec | Median first content | Median response time |
+| --- | --- | --- | --- |
+| Splash through the arbiter | 40.32 | 0.834 sec | 7.158 sec |
+| Direct private Splash endpoint | 40.86 | 0.838 sec | 7.064 sec |
+
+The three-run medians differ by 1.3 percent. Their observed decode ranges overlap:
+40.26–43.68 through the wrapper and 40.14–43.27 directly.
+These runs establish comparable speed under the measured Mac conditions; they do not establish a controlled latency bound.
+Model startup varies from about 26 to 152 seconds across these runs.
+The model remains resident between ordinary requests, so that startup is a separate operation.
+
+Direct measurements bypass host admission in an isolated verification session with no ComfyUI service.
+They explicitly confirm fresh native idle before requesting unload.
+One discarded private-endpoint diagnostic reports an unload 503 before this stable-artifact run.
+It is excluded from the comparison and is not a passing lifecycle check.
+The supported public path retains its lease through native completion confirmation.
+The repeated direct run uses an unchanged application artifact and completes all three unloads and shutdown.
+
+Machine-local evidence is retained in the Splash worktree's ignored `tmp/splash-live` and `tmp/splash-direct` directories.
+The source implementation is committed on `codex-gpu-arbiter-splash`.
+
+## Verification and task checklist
+
+- [x] Convert the release seam and configuration in Core, llama, Tensor, and affected tests; preserve Windows thresholds and fairness.
+- [x] Extract shared forwarding and SSE wait mechanics; verify existing llama transport behavior with focused tests.
+- [x] Implement configuration, installed catalog, Mac process containment, and Splash model lifecycle with controlled process/HTTP doubles.
+- [x] Implement Splash routing, resident-response leases, errors, and native completion confirmation.
+- [x] Wire the Comfy proxy and publish truthful Mac GPU observations.
+- [x] Verify load failure cleanup, intended unload versus crash, timeout escalation, surviving native descendants, and recovery without request replay.
+- [x] Verify opaque tool/image/structured-output payload forwarding, streaming, stored responses, unsupported routes, waiter cancellation, and unload barriers.
+- [x] Restore and build App with zero warnings; run focused affected tests in runs under one minute; verify format and audit dependencies.
+- [x] Run a foreground live Mac smoke: list without loading, short chat, streaming, Responses create/read/delete, unload/reload, and verify no owned child survives shutdown.
+- [x] Exercise Comfy handoffs live if a Mac Comfy instance is available; otherwise record that live check as unavailable and retain controlled coverage.
+- [x] Compare the existing short prompt through the wrapper with the prior Splash profile, recording load and inference separately; verify no significant transport regression.
+- [x] Update canonical App ownership and application README documents; commit and push the coherent units.

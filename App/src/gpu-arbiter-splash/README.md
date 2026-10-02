@@ -23,6 +23,7 @@ dotnet run --project src/gpu-arbiter-splash -c Release --no-build
 The inference and control listener is `http://127.0.0.1:8084`.
 The ComfyUI proxy is `http://127.0.0.1:8191`.
 The private Splash server uses loopback port 8085.
+Clients must use port 8084; direct calls to 8085 bypass arbiter leases.
 ComfyUI remains independently operated on port 8188.
 The app starts no model until a load or inference request arrives.
 
@@ -100,3 +101,12 @@ Prompts, responses, credentials, and arbitrary native diagnostics are not logged
 The public listeners default to loopback and have no host API-key authentication.
 
 The [technical design](../../../docs/design/gpu-arbiter-splash-tech.md) defines lifecycle and forwarding ownership.
+
+## Verification
+
+The App solution builds with zero warnings. The 35 focused Splash tests pass.
+Live Mac checks verify chat, streaming, stored Responses and continuation, unload/reload, and process cleanup.
+Three 256-token hash-table runs measure 40.3 tokens/sec through the wrapper versus 40.9 directly.
+Both paths use the same installed pack, 16K context, int8 KV, reasoning none, and no prompt-cache hits.
+Loading is excluded. The observed ranges overlap.
+No Mac ComfyUI instance is available for a live handoff check; controlled tests cover that integration.
