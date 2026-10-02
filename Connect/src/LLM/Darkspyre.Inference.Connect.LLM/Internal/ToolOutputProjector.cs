@@ -21,6 +21,8 @@ internal sealed record SentResourceLink(string Uri, string? Name, string? MediaT
 
 internal sealed record SentEmbeddedText(string Uri, string? MediaType, string Text) : SentToolPart;
 
+internal sealed record SentNativeFile(string FileId) : SentToolPart;
+
 internal sealed record SentStructured(JsonElement Value) : SentToolPart;
 
 /// <summary>A projected tool output: what is sent, whether the error flag goes natively, and the report.</summary>
@@ -46,7 +48,8 @@ internal static class ToolOutputProjector
     public static ProjectedToolOutput Project(
         LlmToolOutput output,
         LlmRichContentSupported route,
-        LlmRichContentSupported model)
+        LlmRichContentSupported model,
+        Func<Common.Resources.InferenceResourceReference, SentToolPart>? resource = null)
     {
         ArgumentNullException.ThrowIfNull(output);
         var sent = new List<SentToolPart>();
@@ -73,7 +76,8 @@ internal static class ToolOutputProjector
             {
                 LlmToolOutputText text => Add(sent, new SentText(text.Text), LlmToolPartDelivery.Delivered),
                 LlmToolOutputBinary binary => Binary(sent, binary.Kind, binary.MediaType, binary.Data, binary.FileName, route, model),
-                LlmToolOutputResource resource => Resource(sent, resource, route, model),
+                LlmToolOutputResource embedded => Resource(sent, embedded, route, model),
+                LlmToolOutputSessionResource logical when resource is not null => Add(sent, resource(logical.Resource), LlmToolPartDelivery.Delivered),
                 LlmToolOutputSessionResource => throw new NotSupportedException("This route cannot materialize workspace tool content."),
                 _ => new LlmToolPartProjection(LlmToolPartDelivery.Omitted, LlmToolPartOmission.InvalidContent)
             });

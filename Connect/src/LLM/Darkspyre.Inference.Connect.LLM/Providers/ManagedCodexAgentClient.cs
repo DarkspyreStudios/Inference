@@ -28,8 +28,8 @@ internal sealed class ManagedCodexAgentClient(OpenAiCodexLlmClient client, LlmPr
         // Metadata is optional, never invented. Discovery and generation share the existing OAuth path.
         var models = await providers.ListModelsAsync(connectionId, cancellationToken);
         string scope = ProviderContinuationStateCodec.Scope(connection);
-        return new ManagedAgentSession(connection, options, models, client,
+        return await ManagedAgentSession.CreateAsync(connection, options, models, client,
             (request, token) => providers.StreamAgentAsync(connectionId, request, scope, token),
-            model => client.GetCapabilities(connection, model));
+            model => client.GetCapabilities(connection, model), cancellationToken: cancellationToken).ConfigureAwait(false);
     }
 }

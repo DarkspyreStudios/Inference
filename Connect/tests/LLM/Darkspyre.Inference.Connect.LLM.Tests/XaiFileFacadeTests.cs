@@ -135,13 +135,13 @@ public sealed class XaiFileFacadeTests
     }
 
     [Fact]
-    public async Task BuiltinCapabilitiesExposeOnlyImplementedNativeFiles()
+    public async Task BuiltinCapabilitiesExposeImplementedFilesAndPromptReferences()
     {
         using var http = new HttpClient(new Handler(_ => throw new InvalidOperationException("Unexpected HTTP.")));
         var client = new XaiResponsesLlmClient(http);
         LlmProviderCapabilities capabilities = client.GetCapabilities(Connection());
         Assert.Equal(new LlmFileCapabilities { Upload = true, List = true, Get = true, Download = true, Delete = true, TextDownload = true, PublicUrls = true }, capabilities.Files);
-        Assert.False(capabilities.SupportsFileReferences);
+        Assert.True(capabilities.SupportsFileReferences);
         var source = new Source();
         await using var service = new LlmProviderService(source, []);
         await Assert.ThrowsAsync<NotSupportedException>(() => service.GetAsync("selected", "file-a"));

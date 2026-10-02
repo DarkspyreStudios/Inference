@@ -26,8 +26,8 @@ internal sealed class ManagedSelfHostAgentClient(SelfHostLlmClient client, LlmPr
             throw new NotSupportedException("The selected engine or model disables the requested agent operation.");
         }
         string scope = ProviderContinuationStateCodec.Scope(connection);
-        return new ManagedAgentSession(connection, options, models, client,
+        return await ManagedAgentSession.CreateAsync(connection, options, models, client,
             (request, token) => providers.StreamAgentAsync(connectionId, request, scope, token),
-            model => client.GetCapabilities(connection, model));
+            model => client.GetCapabilities(connection, model), cancellationToken: cancellationToken).ConfigureAwait(false);
     }
 }

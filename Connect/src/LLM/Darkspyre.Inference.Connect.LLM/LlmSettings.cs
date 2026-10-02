@@ -425,7 +425,7 @@ public sealed class LlmSettings : InferenceSettings<LlmSetupChanges>
         if (UsesAzure) _draft = _draft with { Azure = (_draft.Azure ?? new()) with { DeploymentId = value } };
     }
 
-    protected override SetupChoicePage? GetLocalChoices(string fieldId, SetupChoiceQuery query)
+    protected internal override SetupChoicePage? GetLocalChoices(string fieldId, SetupChoiceQuery query)
     {
         _ = CreateSteps(); // Registers the override field IDs for the current transport.
         if (UsesXai && fieldId == "xai-region")
@@ -629,7 +629,7 @@ public sealed class LlmSettings : InferenceSettings<LlmSetupChanges>
     /// <summary>The connection these settings describe, as their own sign-in and tests use it.</summary>
     internal LlmConnection CurrentConnection() => _draft with { Version = DraftVersion };
 
-    protected override LlmSetupChanges CreateChanges() => new(Identity,
+    protected internal override LlmSetupChanges CreateChanges() => new(Identity,
         new(_draft with { Credential = null, Version = Identity.ExpectedVersion ?? string.Empty }, _model),
         _credentialChange == SetupSecretEditKind.Keep ? SetupSecretEdit.Keep
             : _draft.Credential is null ? SetupSecretEdit.Clear : SetupSecretEdit.Replace(_draft.Credential),

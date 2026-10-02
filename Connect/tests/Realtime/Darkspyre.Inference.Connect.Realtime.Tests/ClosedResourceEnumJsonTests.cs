@@ -41,12 +41,15 @@ public sealed class ClosedResourceEnumJsonTests
         Assert.Throws<JsonException>(() => JsonSerializer.Serialize(Envelope(failure), Metadata));
     }
 
-    [Fact]
-    public void DefinedFailureFactsAndActualCommonConverterOwnershipRemainExact()
+    [Theory]
+    [InlineData(InferenceResourceOperationPhase.Commit)]
+    [InlineData(InferenceResourceOperationPhase.Cleanup)]
+    public void DefinedFailureFactsAndActualCommonConverterOwnershipRemainExact(InferenceResourceOperationPhase phase)
     {
-        var failure = new InferenceResourceOperationFailure(InferenceResourceOperationPhase.Commit, null, InferenceResourceCommitOutcome.Unknown, 0)
+        var failure = new InferenceResourceOperationFailure(phase, null, InferenceResourceCommitOutcome.Unknown, 0)
         { SelectionOutcome = InferenceResourceCommitOutcome.NotAttempted };
         string json = JsonSerializer.Serialize(Envelope(failure), Metadata);
+        Assert.Equal((int)phase, JsonNode.Parse(json)!["Error"]!["Resource"]!["Phase"]!.GetValue<int>());
         object restored = JsonSerializer.Deserialize(json, Metadata)!;
         Assert.True(JsonNode.DeepEquals(JsonNode.Parse(json), JsonNode.Parse(JsonSerializer.Serialize(restored, Metadata))));
         foreach (Type type in new[] { typeof(InferenceResourceOperationPhase), typeof(InferenceResourceCommitOutcome) })

@@ -8,7 +8,7 @@ internal static class Sse
         Stream stream,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        using var reader = new StreamReader(stream);
+        using var reader = new StreamReader(stream, leaveOpen: true);
         var dataLines = new List<string>();
 
         while (true)

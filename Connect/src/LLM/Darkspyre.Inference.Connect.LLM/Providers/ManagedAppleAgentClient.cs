@@ -22,8 +22,8 @@ internal sealed class ManagedAppleAgentClient(AppleFoundationModelsClient client
         if (!capabilities.SupportsAgentSessions || (options.Tools.Any(tool => tool is LlmAgentToolDefinition) && !capabilities.SupportsAgentToolUse))
             throw new NotSupportedException("The Apple connection disables this agent operation.");
         string scope = ProviderContinuationStateCodec.Scope(connection);
-        return new ManagedAgentSession(connection, options, models, client,
+        return await ManagedAgentSession.CreateAsync(connection, options, models, client,
             (request, token) => providers.StreamAgentAsync(connectionId, request, scope, token),
-            model => client.GetCapabilities(connection, model));
+            model => client.GetCapabilities(connection, model), cancellationToken: cancellationToken).ConfigureAwait(false);
     }
 }

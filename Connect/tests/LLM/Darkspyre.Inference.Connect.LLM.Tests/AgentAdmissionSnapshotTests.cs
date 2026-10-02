@@ -138,8 +138,8 @@ public sealed class AgentAdmissionSnapshotTests
         { Resume = options; return Open(connection); }
         public Task<ILlmAgentSession> ForkSessionAsync(string connectionId, LlmConnection connection, string threadId, string? lastTurnId = null, LlmAgentResumeOptions? options = null, CancellationToken cancellationToken = default)
         { Resume = options; return Open(connection); }
-        private Task<ILlmAgentSession> Open(LlmConnection connection) => Task.FromResult<ILlmAgentSession>(new ManagedAgentSession(connection,
-            new() { ModelId = "model" }, [], this, (_, token) => Empty(token), _ => new() { SupportsAgentSessions = true, Agent = ManagedAgentPolicy.Capabilities }));
+        private async Task<ILlmAgentSession> Open(LlmConnection connection) => await ManagedAgentSession.CreateAsync(connection,
+            new() { ModelId = "model" }, [], this, (_, token) => Empty(token), _ => new() { SupportsAgentSessions = true, Agent = ManagedAgentPolicy.Capabilities });
         public ContextEstimate? EstimateInputTokens(LlmConnection connection, LlmChatRequest request) => new(1);
         public string? EstimateDiagnostic => null;
         private static async IAsyncEnumerable<LlmStreamEvent> Empty([EnumeratorCancellation] CancellationToken token)

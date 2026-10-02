@@ -751,7 +751,7 @@ retired-facade admission retain the existing lifetime behavior.
 Facade capability queries suppress Files flags for clients without an implemented facade route.
 They fence publication after the adapter's capability getter returns.
 Upload and download streams remain borrowed, including on rejection and facade disposal. These
-resource interfaces do not enable native-file prompt references or skill generation attachment.
+resource interfaces alone do not enable native-file prompt references or skill generation attachment.
 
 The private xAI Files transport implements upload, bounded one-page listing, metadata retrieval,
 raw download, deletion and explicit public-URL creation/revocation against an admitted connection
@@ -770,6 +770,33 @@ classification, but exclude provider response bodies and capability URLs from di
 drains admitted operations before retiring its private Files helper. Borrowed clients, authenticators,
 sources and streams are not disposed. Logical Session/Workspace materialization remains a separate
 resource path; native file IDs and public URLs are not portable resource identities.
+
+The builtin xAI Responses route accepts native file prompt references and materializes logical
+document resources through one borrowed `LlmChatRequest.Resources` authority. It freezes one selected
+membership snapshot after continuation projection. Explicit history occurrences retain their order
+and duplicates. Selected references absent from the supplied graph append to the current user prompt.
+The route reads authorized committed bytes through owned handles and uploads them through the same
+private Files transport. Unknown byte counts remain unknown; missing filenames refuse the file
+destination. Native receipts belong to the admitted request and do not replace logical captured history.
+Local accounting does not read or upload selected resources. Grok registration remains inactive.
+Managed sessions created through the shared internal factory validate resource-bound imported
+contexts against the caller's exact scoped selection snapshot. Only a new session without an imported
+context adopts the current selection; an unbound manual or upgraded legacy context must be explicitly
+bound first. Capture freezes transcript state, then reads selection outside the session lock and
+rechecks transcript revision before publication. Replacement and continuation similarly recheck idle
+state and revision after caller callbacks, without mutating the store. Committed caller-tool resource
+outputs are authorized before settlement; they remain logical history, not provider file IDs.
+Resource-backed requests do not automatically retry a failed model request after upload.
+Typed resource cancellation reaches a live reader even when session retirement cancels the producer.
+Healthy cleanup leaves session disposal successful. Actual owned handle or HTTP cleanup refusal uses
+`InferenceResourceOperationPhase.Cleanup` and remains the same cached reader/disposer failure;
+independent operation and cleanup causes remain visible. Borrowed authority detaches after callback
+drain, while refused owned resources remain reachable through the actual retained cleanup failure.
+SSE parsing borrows its caller-owned stream. A refused async body-stream release skips dependent
+response/content cleanup rather than retrying that same stream synchronously; the failed stream and
+dependent response stay with the cleanup error until that error's references are released. This is
+not process-exit quarantine. This controlled managed
+xAI composition does not activate a public Grok agent opener or qualify other destinations.
 
 ### Embedding lifetime
 

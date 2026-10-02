@@ -10,7 +10,7 @@ public sealed class HostedManagedLifetimeTests
     public async Task InterruptCancellationFailureStillDrainsIgnoringProducer()
     {
         var harness = new Harness();
-        var session = new ManagedAgentSession(new() { Transport = LlmTransport.OpenAiResponses, Endpoint = "https://example.test", Version = "v" },
+        var session = await ManagedAgentSession.CreateAsync(new() { Transport = LlmTransport.OpenAiResponses, Endpoint = "https://example.test", Version = "v" },
             new() { ModelId = "model" }, [], harness, harness.Stream, _ => new()
             { SupportsAgentSessions = true, Agent = ManagedAgentPolicy.Capabilities });
         var started = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -44,7 +44,7 @@ public sealed class HostedManagedLifetimeTests
     public async Task AbandonedIteratorCancellationFailureStillDrainsIgnoringProducer()
     {
         var harness = new Harness();
-        var session = new ManagedAgentSession(new() { Transport = LlmTransport.OpenAiResponses, Endpoint = "https://example.test", Version = "v" },
+        var session = await ManagedAgentSession.CreateAsync(new() { Transport = LlmTransport.OpenAiResponses, Endpoint = "https://example.test", Version = "v" },
             new() { ModelId = "model" }, [], harness, harness.Stream, _ => new()
             { SupportsAgentSessions = true, Agent = ManagedAgentPolicy.Capabilities });
         IAsyncEnumerator<LlmAgentEvent> iterator = session.RunTurnAsync(new() { Input = [new LlmAgentTextContent("hello")] }).GetAsyncEnumerator();
@@ -79,7 +79,7 @@ public sealed class HostedManagedLifetimeTests
     public async Task CancellationFailureStillDrainsProducerAndAllDisposersShareFailure()
     {
         var harness = new Harness();
-        var session = new ManagedAgentSession(new() { Transport = LlmTransport.OpenAiResponses, Endpoint = "https://example.test", Version = "v" },
+        var session = await ManagedAgentSession.CreateAsync(new() { Transport = LlmTransport.OpenAiResponses, Endpoint = "https://example.test", Version = "v" },
             new() { ModelId = "model" }, [], harness, harness.Stream, _ => new()
             { SupportsAgentSessions = true, Agent = ManagedAgentPolicy.Capabilities });
         Task<IReadOnlyList<LlmAgentEvent>> turn = Read(session.RunTurnAsync(new() { Input = [new LlmAgentTextContent("hello")] }));
