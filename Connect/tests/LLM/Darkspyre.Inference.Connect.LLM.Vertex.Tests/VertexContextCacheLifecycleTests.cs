@@ -108,6 +108,32 @@ public sealed class VertexContextCacheLifecycleTests
     }
 
     [Theory]
+    [InlineData("google/embedding-model")]
+    [InlineData("google/gemini-embedding-001")]
+    [InlineData("google/gemini-image-preview")]
+    public async Task CacheReferencesUseExistingTextModelBoundaryBeforeAuthentication(string model)
+    {
+        using var handler = new Handler(); using var http = new HttpClient(handler);
+        var auth = new Authentication();
+        await using var facade = new LlmProviderService(new Source(Connection()), [new VertexLlmClient(http, auth)]);
+        var caches = await facade.BindContextCacheAsync("connection");
+        await Assert.ThrowsAsync<NotSupportedException>(() => caches.GetAsync(new(Name, model, "imported")));
+        Assert.Equal(0, auth.Calls); Assert.Empty(handler.Paths);
+    }
+
+    [Fact]
+    public async Task CacheReferenceUnknownTextModelDoesNotRequireCatalogMembership()
+    {
+        const string unknown = "gemini-future-text";
+        using var handler = new Handler(nativeModel: "models/" + unknown); using var http = new HttpClient(handler);
+        var auth = new Authentication();
+        await using var facade = new LlmProviderService(new Source(Connection()), [new VertexLlmClient(http, auth)]);
+        var caches = await facade.BindContextCacheAsync("connection");
+        Assert.Equal("google/" + unknown, (await caches.GetAsync(new(Name, "google/" + unknown, "imported"))).Reference.ModelId);
+        Assert.Equal(1, auth.Calls); Assert.Single(handler.Paths);
+    }
+
+    [Theory]
     [InlineData("projects/123456/locations/us-central1/cachedContents/cache-1", "project-id")]
     [InlineData(Name, "654321")]
     [InlineData("https://aiplatform.googleapis.com/" + Name, "project-id")]

@@ -19,6 +19,8 @@ public sealed class VertexCacheConfigurationTests
         Assert.Equal("", copied.ObjectPrefix); Assert.Equal("prefix/+%/", staging.ObjectPrefix);
         Assert.Throws<ArgumentException>(() => staging with { Bucket = "https://bucket" });
         Assert.Throws<ArgumentException>(() => staging with { ObjectPrefix = "bad\n" });
+        Assert.Throws<ArgumentException>(() => staging with { ObjectPrefix = "bad#value" });
+        Assert.Throws<ArgumentException>(() => staging with { ObjectPrefix = "bad?value" });
         Assert.DoesNotContain("cache-bucket", staging.ToString(), StringComparison.Ordinal);
         string json = JsonSerializer.Serialize(staging, ConnectLlmJson.LlmVertexCacheStaging);
         Assert.Equal(staging, JsonSerializer.Deserialize(json, ConnectLlmJson.LlmVertexCacheStaging));
@@ -88,6 +90,10 @@ public sealed class VertexCacheConfigurationTests
             Assert.Same(connect, getter.GetMethod!.Module.Assembly);
             JsonTypeInfo metadata = (JsonTypeInfo)getter.GetValue(null)!;
             Assert.Same(connect, metadata.Type.Assembly);
+            object resolver = metadata.Options.TypeInfoResolver!;
+            Assert.Same(connect, resolver.GetType().Assembly);
+            Assert.Same(context, AssemblyLoadContext.GetLoadContext(resolver.GetType().Assembly));
+            object converter = metadata.Converter;
             object staging = JsonSerializer.Deserialize("{\"Bucket\":\"cache-bucket\",\"ObjectPrefix\":\"prefix/\"}", metadata)!;
             Assert.Same(connect, staging.GetType().Assembly);
             Assert.Equal("{\"Bucket\":\"cache-bucket\",\"ObjectPrefix\":\"prefix/\"}", JsonSerializer.Serialize(staging, metadata));
@@ -100,7 +106,7 @@ public sealed class VertexCacheConfigurationTests
             Assert.Same(connect, nested.GetType().Assembly);
             Assert.Equal("cache-bucket", nested.GetType().GetProperty("Bucket")!.GetValue(nested));
             return [new(context), new(common), new(connect), new(vertex), new(fixture), new(owner), new(getter), new(metadata),
-                new(metadata.Type), new(staging), new(setupMetadata), new(restored), new(nested)];
+                new(metadata.Type), new(staging), new(setupMetadata), new(restored), new(nested), new(resolver), new(converter)];
         }
         finally { context.Unload(); }
     }

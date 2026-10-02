@@ -4,6 +4,7 @@ using System.Runtime.CompilerServices;
 using System.Runtime.Loader;
 using Darkspyre.Inference.Common.LLM;
 using Darkspyre.Inference.Common.Resources;
+using Darkspyre.Inference.Connect.LLM.Internal;
 
 namespace Darkspyre.Inference.Connect.LLM.Vertex.Tests;
 
@@ -158,21 +159,71 @@ public sealed class VertexCacheLifetimeTests
         }
     }
 
-    [Fact]
-    public void RetainedDefaultFacadeReleasesActualForeignVertexAndBorrowedCallbacksAfterDrain()
+    [Theory]
+    [InlineData(false, false, false)]
+    [InlineData(false, true, false)]
+    [InlineData(true, true, false)]
+    [InlineData(false, false, true)]
+    [InlineData(false, true, true)]
+    public void RetainedDefaultFacadeReleasesActualForeignVertexAndBorrowedCallbacksAfterDrain(bool read, bool retain, bool neutral)
     {
-        var (facade, roots) = ExerciseForeign();
-        try
-        {
-            for (int attempt = 0; roots.Any(root => root.IsAlive) && attempt < 20; attempt++)
-            { GC.Collect(); GC.WaitForPendingFinalizers(); GC.Collect(); }
-            Assert.All(roots, root => Assert.False(root.IsAlive)); GC.KeepAlive(facade);
-        }
-        finally { facade.Dispose(); }
+        WeakReference[] roots = HoldThenReleaseForeign(read, retain, neutral);
+        Collect(roots);
+        Assert.All(roots, root => Assert.False(root.IsAlive));
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private static (LlmProviderService Facade, WeakReference[] Roots) ExerciseForeign()
+    private static WeakReference[] HoldThenReleaseForeign(bool read, bool retain, bool neutral)
+    {
+        var (facade, roots) = ExerciseForeign(read, retain, neutral);
+        try
+        {
+            Collect(roots);
+            Assert.All(roots, root => Assert.False(root.IsAlive));
+            GC.KeepAlive(facade);
+            return roots;
+        }
+        finally { facade?.Dispose(); }
+    }
+
+    private static void Collect(WeakReference[] roots)
+    {
+        for (int attempt = 0; roots.Any(root => root.IsAlive) && attempt < 20; attempt++)
+        { GC.Collect(); GC.WaitForPendingFinalizers(); GC.Collect(); Thread.Sleep(10); }
+    }
+
+    [Fact]
+    public async Task RetainedProviderMetadataAloneReleasesActualForeignVertex()
+    {
+        var (metadata, roots) = ExerciseForeignMetadata();
+        for (int attempt = 0; attempt < 20; attempt++)
+        { await Task.Yield(); GC.Collect(); GC.WaitForPendingFinalizers(); GC.Collect(); }
+        Assert.All(roots, root => Assert.False(root.IsAlive));
+        Assert.Equal(3, metadata.SetupSteps.Count); GC.KeepAlive(metadata);
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static (LlmProviderDefinition Metadata, WeakReference[] Roots) ExerciseForeignMetadata()
+    {
+        var generation = new Generation(Path.GetDirectoryName(typeof(VertexCacheLifetimeTests).Assembly.Location)!);
+        try
+        {
+            Assembly vertex = generation.LoadFromAssemblyPath(typeof(VertexLlmClient).Assembly.Location);
+            Assert.Same(generation, AssemblyLoadContext.GetLoadContext(vertex));
+            Assert.Equal(typeof(VertexLlmClient).Assembly.ManifestModule.ModuleVersionId, vertex.ManifestModule.ModuleVersionId);
+            Type type = vertex.GetType(typeof(VertexProviderDefinition).FullName!, true)!;
+            MethodInfo getter = type.GetProperty(nameof(VertexProviderDefinition.Value))!.GetMethod!;
+            Assert.Same(vertex, getter.Module.Assembly);
+            var metadata = (LlmProviderDefinition)getter.Invoke(null, null)!;
+            Assert.Same(AssemblyLoadContext.Default, AssemblyLoadContext.GetLoadContext(metadata.GetType().Assembly));
+            Assert.Equal("System.Private.CoreLib", metadata.SetupSteps.GetType().Assembly.GetName().Name);
+            return (metadata, [new(generation), new(vertex), new(type), new(getter)]);
+        }
+        finally { generation.Unload(); }
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static (LlmProviderService? Facade, WeakReference[] Roots) ExerciseForeign(bool read, bool retain, bool neutral)
     {
         var generation = new Generation(Path.GetDirectoryName(typeof(VertexCacheLifetimeTests).Assembly.Location)!);
         try
@@ -183,23 +234,33 @@ public sealed class VertexCacheLifetimeTests
             Assert.Equal(typeof(VertexLlmClient).Assembly.ManifestModule.ModuleVersionId, vertex.ManifestModule.ModuleVersionId);
             Assert.Equal(typeof(VertexCacheLifetimeTests).Assembly.ManifestModule.ModuleVersionId, fixture.ManifestModule.ModuleVersionId);
             Type type = fixture.GetType(typeof(VertexCacheLifetimeTests).FullName!, true)!;
-            MethodInfo factory = type.GetMethod(nameof(CreateBorrowedGraph))!;
+            MethodInfo factory = type.GetMethod(neutral ? nameof(CreateNeutralBorrowedGraph) : nameof(CreateBorrowedGraph))!;
             Assert.Same(fixture, factory.Module.Assembly);
             var graph = (object[])factory.Invoke(null, null)!;
             var source = (ILlmConnectionSource)graph[0]; var client = (ILlmClient)graph[1]; var auth = graph[2]; var http = (HttpClient)graph[3];
-            Assert.Same(fixture, source.GetType().Assembly); Assert.Same(fixture, auth.GetType().Assembly); Assert.Same(vertex, client.GetType().Assembly);
-            Assert.Contains(typeof(ILlmClient), client.GetType().GetInterfaces());
+            Assert.Same(fixture, source.GetType().Assembly); Assert.Same(fixture, auth.GetType().Assembly); Assert.Same(neutral ? fixture : vertex, client.GetType().Assembly);
+            Assert.Same(AssemblyLoadContext.Default, AssemblyLoadContext.GetLoadContext(client.ProviderDefinition.GetType().Assembly));
+            Assert.Equal("System.Private.CoreLib", client.ProviderDefinition.SetupSteps.GetType().Assembly.GetName().Name);
+            foreach (var step in client.ProviderDefinition.SetupSteps)
+            {
+                Assert.Same(AssemblyLoadContext.Default, AssemblyLoadContext.GetLoadContext(step.GetType().Assembly));
+                Assert.Same(AssemblyLoadContext.Default, AssemblyLoadContext.GetLoadContext(step.Sections.GetType().Assembly));
+            }
+            Assert.Equal(1, client.GetType().GetInterfaces().Count(candidate => candidate == typeof(ILlmClient)));
             MethodInfo callback = source.GetType().GetMethod(nameof(ILlmConnectionSource.GetConnectionAsync))!;
             Assert.Same(fixture, callback.Module.Assembly);
             var facade = new LlmProviderService(source, [client]);
-            var cache = facade.BindContextCacheAsync("connection").GetAwaiter().GetResult();
-            Assert.Equal(Name, cache.GetAsync(new(Name, Model, "imported")).GetAwaiter().GetResult().Reference.ResourceName);
+            if (read)
+            {
+                var cache = facade.BindContextCacheAsync("connection").GetAwaiter().GetResult();
+                Assert.Equal(Name, cache.GetAsync(new(Name, Model, "imported")).GetAwaiter().GetResult().Reference.ResourceName);
+            }
             facade.Dispose();
             Assert.Equal(0, source.GetType().GetProperty(nameof(Source.DisposeCalls))!.GetValue(source));
             Assert.Equal(0, auth.GetType().GetProperty(nameof(Authentication.DisposeCalls))!.GetValue(auth));
-            Assert.Equal(1, auth.GetType().GetProperty(nameof(Authentication.Calls))!.GetValue(auth));
+            Assert.Equal(read ? 1 : 0, auth.GetType().GetProperty(nameof(Authentication.Calls))!.GetValue(auth));
             http.Dispose();
-            return (facade, [new(generation), new(vertex), new(fixture), new(type), new(factory), new(callback),
+            return (retain ? facade : null, [new(generation), new(vertex), new(fixture), new(type), new(factory), new(callback),
                 new(source), new(client), new(auth), new(client.GetType()), new(http)]);
         }
         finally { generation.Unload(); }
@@ -210,6 +271,76 @@ public sealed class VertexCacheLifetimeTests
         var auth = new Authentication(); var http = new HttpClient(new Handler());
         return [new Source(), new VertexLlmClient(http, auth), auth, http];
     }
+
+    public static object[] CreateNeutralBorrowedGraph()
+    {
+        var auth = new Authentication(); var http = new HttpClient(new Handler());
+        return [new Source(), new NeutralClient(), auth, http];
+    }
+
+    private sealed class NeutralClient : ILlmClient, ILlmConnectionPreparation, ILlmContextEstimator, ILlmProviderTokenCounter, ILlmContextCacheAdapter
+    {
+        public LlmTransport Transport => LlmTransport.GoogleVertexAi;
+        public LlmProviderDefinition ProviderDefinition { get; } = new()
+        { Id = "neutral", DisplayName = "Neutral", Description = "Controlled interface caller", Transport = LlmTransport.GoogleVertexAi,
+            DefaultEndpoint = "https://aiplatform.googleapis.com", SetupSteps = Array.AsReadOnly<Common.Setup.SetupStep>([]) };
+        public LlmProviderCapabilities GetCapabilities(LlmConnection connection, string? modelId = null) => throw new NotSupportedException();
+        public IAsyncEnumerable<LlmStreamEvent> StreamAsync(LlmConnection connection, LlmChatRequest request, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<IReadOnlyList<LlmModel>> ListModelsAsync(LlmConnection connection, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<LlmConnection> PrepareAsync(LlmConnection connection, CancellationToken cancellationToken) => throw new NotSupportedException();
+        public ContextEstimate? EstimateInputTokens(LlmConnection connection, LlmChatRequest request) => throw new NotSupportedException();
+        public string? EstimateDiagnostic => null;
+        public Task<LlmProviderInputTokenCount> CountInputTokensAsync(LlmConnection connection, LlmChatRequest request, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public void ValidateCacheConnection(LlmConnection connection) => throw new NotSupportedException();
+        public void ValidateCacheReference(LlmConnection connection, LlmExplicitCacheReference reference) => throw new NotSupportedException();
+        public void ValidateCacheCreate(LlmConnection connection, LlmContextCacheCreate request) => throw new NotSupportedException();
+        public void ValidateCachedSuffix(LlmChatRequest request) => throw new NotSupportedException();
+        public Task<ILlmContextCacheOperation> PrepareCacheOperationAsync(LlmConnection connection, Action<CancellationToken> fence, CancellationToken token) => throw new NotSupportedException();
+    }
+
+    [Fact]
+    public void ActualForeignRefusedResponseRemainsOwnedUntilFacadeIsReleased()
+    {
+        WeakReference[] roots = ExerciseForeignRefusedResponse();
+        for (int attempt = 0; roots.Any(root => root.IsAlive) && attempt < 20; attempt++)
+        { GC.Collect(); GC.WaitForPendingFinalizers(); GC.Collect(); }
+        Assert.All(roots, root => Assert.False(root.IsAlive));
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static WeakReference[] ExerciseForeignRefusedResponse()
+    {
+        var generation = new Generation(Path.GetDirectoryName(typeof(VertexCacheLifetimeTests).Assembly.Location)!);
+        try
+        {
+            Assembly fixture = generation.LoadFromAssemblyPath(typeof(VertexCacheLifetimeTests).Assembly.Location);
+            Assert.Same(generation, AssemblyLoadContext.GetLoadContext(fixture));
+            Assert.Equal(typeof(VertexCacheLifetimeTests).Assembly.ManifestModule.ModuleVersionId, fixture.ManifestModule.ModuleVersionId);
+            Type type = fixture.GetType(typeof(VertexCacheLifetimeTests).FullName!, true)!;
+            MethodInfo factory = type.GetMethod(nameof(CreateRefusedResponse))!;
+            Assert.Same(fixture, factory.Module.Assembly);
+            var response = (HttpResponseMessage)factory.Invoke(null, null)!;
+            object content = response.Content;
+            Assert.Same(fixture, content.GetType().Assembly);
+            using var handler = new Handler { Next = response }; using var http = new HttpClient(handler);
+            var facade = new LlmProviderService(new Source(), [new VertexLlmClient(http, new Authentication())]);
+            var caches = facade.BindContextCacheAsync("connection").GetAwaiter().GetResult();
+            Exception failure = Assert.Throws<InferenceResourceOperationException>(() =>
+                caches.GetAsync(new(Name, Model, "imported")).GetAwaiter().GetResult());
+            Assert.Same(failure, Assert.Throws<InferenceResourceOperationException>(() => facade.Dispose()));
+            Assert.Same(failure, Assert.Throws<InferenceResourceOperationException>(() => facade.Dispose()));
+            Assert.Equal(1, content.GetType().GetProperty(nameof(RefusingContent.CleanupAttempts))!.GetValue(content));
+            Assert.DoesNotContain("private-token-or-prefix", failure.ToString(), StringComparison.Ordinal);
+            var roots = new WeakReference[] { new(generation), new(fixture), new(type), new(factory), new(response), new(content), new(content.GetType()) };
+            for (int attempt = 0; attempt < 3; attempt++) { GC.Collect(); GC.WaitForPendingFinalizers(); GC.Collect(); }
+            Assert.All(roots, root => Assert.True(root.IsAlive));
+            GC.KeepAlive(facade);
+            return roots;
+        }
+        finally { generation.Unload(); }
+    }
+
+    public static HttpResponseMessage CreateRefusedResponse() => new(HttpStatusCode.OK) { Content = new RefusingContent(Receipt) };
 
     private static InferenceResourceOperationException FindCleanup(Exception error) => error switch
     {
@@ -250,7 +381,7 @@ public sealed class VertexCacheLifetimeTests
     }
     private sealed class RefusingContent(string body) : StringContent(body)
     {
-        internal int CleanupAttempts { get; private set; }
+        public int CleanupAttempts { get; private set; }
         protected override void Dispose(bool disposing)
         { base.Dispose(disposing); if (disposing) { CleanupAttempts++; throw new InvalidOperationException("private-token-or-prefix"); } }
     }

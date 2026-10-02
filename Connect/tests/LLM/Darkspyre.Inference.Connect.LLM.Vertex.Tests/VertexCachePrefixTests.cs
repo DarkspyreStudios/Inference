@@ -144,6 +144,81 @@ public sealed class VertexCachePrefixTests
         Assert.Equal("image/gif", body.RootElement.GetProperty("contents")[0].GetProperty("parts")[2].GetProperty("fileData").GetProperty("mimeType").GetString());
     }
 
+    [Fact]
+    public async Task OpaqueObjectPrefixIsEncodedOnceOnlyForHttpAndRetainedInNativeUri()
+    {
+        const string prefix = "path/+/%2F/\u00e9/";
+        var resources = new Resources("abc"u8.ToArray(), 3);
+        using var handler = new Handler(); using var http = new HttpClient(handler);
+        var connection = Connection(true) with { Vertex = Connection(true).Vertex! with { CacheStaging = new("cache-bucket", prefix) } };
+        await using var facade = new LlmProviderService(new Source(connection), [new VertexLlmClient(http, new Authentication())]);
+        var caches = await facade.BindContextCacheAsync("connection");
+        _ = await caches.CreateAsync(Request() with { Resources = resources, Messages = [new("user", "prefix")
+        { Attachments = [new LlmResourceAttachment(resources.Reference)] }] });
+        Assert.StartsWith(prefix, handler.UploadName!, StringComparison.Ordinal);
+        Assert.Contains("%252F", handler.Paths[0], StringComparison.Ordinal);
+        using JsonDocument body = JsonDocument.Parse(handler.CacheBody!);
+        Assert.Equal("gs://cache-bucket/" + handler.UploadName,
+            body.RootElement.GetProperty("contents")[0].GetProperty("parts")[1].GetProperty("fileData").GetProperty("fileUri").GetString());
+    }
+
+    [Theory]
+    [InlineData("text/plain")]
+    [InlineData(null)]
+    public async Task HandleMaySupplyPreviouslyUnknownMimeWithoutGuessing(string? observedMime)
+    {
+        var resources = new Resources("abc"u8.ToArray(), 3, null, observedMime);
+        using var handler = new Handler(); using var http = new HttpClient(handler);
+        await using var facade = new LlmProviderService(new Source(Connection()), [new VertexLlmClient(http, new Authentication())]);
+        var caches = await facade.BindContextCacheAsync("connection");
+        var request = Request() with { Resources = resources, Messages = [new("user", "prefix")
+        { Attachments = [new LlmResourceAttachment(resources.Reference)] }] };
+        if (observedMime is null) { await Assert.ThrowsAsync<InferenceResourceOperationException>(() => caches.CreateAsync(request)); Assert.Empty(handler.Paths); }
+        else { _ = await caches.CreateAsync(request); Assert.Single(handler.Paths); }
+        Assert.Equal(1, resources.Opened); Assert.Equal(1, resources.Closed);
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.OK)]
+    [InlineData(HttpStatusCode.ServiceUnavailable)]
+    public async Task StagingCancellationPreservesOnlyActualSafeResponseFacts(HttpStatusCode status)
+    {
+        using var cancellation = new CancellationTokenSource();
+        using var handler = new InterruptedUploadHandler(status); using var http = new HttpClient(handler);
+        using var source = new MemoryStream("abc"u8.ToArray(), writable: false);
+        var error = await Assert.ThrowsAsync<InferenceResourceOperationCanceledException>(() => VertexCacheFiles.UploadAsync(
+            http, new("controlled", "source"), new("cache-bucket", "prefix/"), "text/plain", 3,
+            null, source, token =>
+            {
+                if (handler.Returned) cancellation.Cancel();
+                token.ThrowIfCancellationRequested();
+            }, cancellation.Token));
+        Assert.Equal(cancellation.Token, error.CancellationToken);
+        var interrupted = Assert.IsType<OperationCanceledException>(error.InnerException);
+        var observed = Assert.IsType<LlmProviderException>(interrupted.InnerException);
+        Assert.Equal(status, observed.StatusCode); Assert.Equal("observed-request", observed.RequestId);
+        Assert.Equal(TimeSpan.FromSeconds(5), observed.RetryAfter);
+        Assert.Null(observed.InnerException); Assert.DoesNotContain("private-secret", error.ToString(), StringComparison.Ordinal);
+        Assert.Equal(InferenceResourceOperationPhase.Materialize, error.Failure.Phase);
+        Assert.Equal(InferenceResourceCommitOutcome.NotAttempted, error.Failure.CommitOutcome);
+        Assert.Equal(3, error.Failure.BytesTransferred); Assert.Equal(1, handler.Sends);
+    }
+
+    private sealed class InterruptedUploadHandler(HttpStatusCode status) : HttpMessageHandler
+    {
+        internal int Sends { get; private set; }
+        internal bool Returned { get; private set; }
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken token)
+        {
+            Sends++; Assert.Equal("abc"u8.ToArray(), await request.Content!.ReadAsByteArrayAsync(token));
+            var response = new HttpResponseMessage(status) { Content = new StringContent("private-secret") };
+            response.Headers.TryAddWithoutValidation("x-request-id", "observed-request");
+            response.Headers.RetryAfter = new(TimeSpan.FromSeconds(5));
+            Returned = true;
+            return response;
+        }
+    }
+
     private static LlmContextCacheCreate Request() => new() { ModelId = Model, Correlation = new("operation", "display"),
         TimeToLive = TimeSpan.FromHours(1), Messages = [new("user", "prefix")] };
     private static LlmConnection Connection(bool staging = false) => new() { Transport = LlmTransport.GoogleVertexAi,
@@ -167,6 +242,7 @@ public sealed class VertexCachePrefixTests
         internal List<long?> Lengths { get; } = [];
         internal List<bool> Chunked { get; } = [];
         internal byte[]? UploadBytes { get; private set; }
+        internal string? UploadName { get; private set; }
         internal string? CacheBody { get; private set; }
         internal Action? BeforePost { get; init; }
         internal string? BadField { get; init; }
@@ -178,6 +254,7 @@ public sealed class VertexCachePrefixTests
                 Lengths.Add(request.Content!.Headers.ContentLength); Chunked.Add(request.Headers.TransferEncodingChunked == true);
                 UploadBytes = await request.Content.ReadAsByteArrayAsync(token);
                 string name = Uri.UnescapeDataString(request.RequestUri.Query.Split('&').Single(part => part.StartsWith("name=", StringComparison.Ordinal))[5..]);
+                UploadName = name;
                 var facts = new Dictionary<string, string> { ["bucket"] = "cache-bucket", ["name"] = name,
                     ["generation"] = "42", ["size"] = UploadBytes.Length.ToString(CultureInfo.InvariantCulture), ["contentType"] = request.Content.Headers.ContentType!.MediaType! };
                 if (BadField is { } field) facts[field == "mime" ? "contentType" : field] = "private-secret";
@@ -187,7 +264,7 @@ public sealed class VertexCachePrefixTests
             return new(HttpStatusCode.OK) { Content = new StringContent("{\"name\":\"projects/123456/locations/global/cachedContents/cache-1\",\"model\":\"models/gemini-2.5-flash\",\"expireTime\":\"2050-01-01T00:00:00Z\"}") };
         }
     }
-    private sealed class Resources(byte[] bytes, long? known) : IInferenceResourceAccess
+    private sealed class Resources(byte[] bytes, long? known, string? descriptorMime = "text/plain", string? handleMime = "text/plain") : IInferenceResourceAccess
     {
         internal InferenceResourceReference Reference { get; } = new("workspace", "resource");
         public string WorkspaceId => "workspace";
@@ -196,7 +273,8 @@ public sealed class VertexCachePrefixTests
         internal int Closed { get; private set; }
         internal long BytesRead { get; private set; }
         internal int SelectionCalls { get; private set; }
-        private InferenceResourceDescriptor Descriptor => new(Reference, SessionId, "source", "text/plain", known);
+        private InferenceResourceDescriptor Descriptor => new(Reference, SessionId, "source", descriptorMime, known);
+        private InferenceResourceDescriptor ObservedDescriptor => Descriptor with { ContentType = handleMime };
         public Task<InferenceResourceDescriptor?> GetAsync(InferenceResourceReference reference, CancellationToken cancellationToken = default) => Task.FromResult<InferenceResourceDescriptor?>(Descriptor);
         public Task<IInferenceResourceReadHandle> OpenReadAsync(InferenceResourceReference reference, CancellationToken cancellationToken = default)
         { Opened++; return Task.FromResult<IInferenceResourceReadHandle>(new Read(this, new MemoryStream(bytes, writable: false))); }
@@ -206,7 +284,7 @@ public sealed class VertexCachePrefixTests
         public Task<InferenceResourceSelection> ReplaceSelectionAsync(IReadOnlyList<InferenceResourceReference> references, long expectedRevision, CancellationToken cancellationToken = default) => throw new InvalidOperationException();
         private sealed class Read(Resources owner, MemoryStream stream) : IInferenceResourceReadHandle
         {
-            public InferenceResourceDescriptor Resource => owner.Descriptor;
+            public InferenceResourceDescriptor Resource => owner.ObservedDescriptor;
             public Stream Content => stream;
             public ValueTask DisposeAsync() { owner.BytesRead = stream.Position; owner.Closed++; stream.Dispose(); return ValueTask.CompletedTask; }
         }
