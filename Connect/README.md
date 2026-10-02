@@ -1,5 +1,48 @@
 # Darkspyre.Inference.Connect
 
+## SDK HTTP composition
+
+SDK HTTP registrations use one generation-owned pool for the sixteen existing named pipelines,
+including ComfyUI's empty default name. Named `AddHttpClient` actions, public handler-builder filters,
+handler scopes and selected meter factories configure the owned chains. Direct client and factory
+constructors remain borrowed. The SDK never replaces the application's `IHttpClientFactory`.
+
+`AddLlmConnect(configureHttp)` and `ConfigureInferenceHttpPipelines(configureHttp)` select
+`SdkGenerationOwned` or explicit `BorrowHostFactory`. The latter delegates creation to the registered
+host factory and does not dispose it. Configuration accepts only the sixteen SDK names and freezes
+before client construction. Conflicting creation modes are rejected.
+
+Custom logger registrations in owned mode use `ConfigureLogging(name, logging => ...)` and its
+`AddLogger` methods. Legacy framework `AddLogger` actions are not inspected or automatically migrated.
+Logger factories run after the named handler-builder actions in the actual handler scope. Public
+default logging, header redaction and meter filters remain active. HTTP configuration objects refuse
+nonnull JSON serialization and contain no transferable credential authority.
+Their attributes name one public closed converter factory for the two configuration types, so
+nonfriend generated contexts preserve the same nonnull refusal and null handling.
+
+Handler expiry stops new assignment to the old chain. Live issued clients and response/body leases
+keep it alive; weak client registrations do not retain dropped typed consumers. A generation-owned
+10-second cleanup timer reconciles collected wrappers while expired entries remain pending. Root
+retirement stops and drains that timer, closes live wrappers and awaits owned chain cleanup. Cleanup
+failures remain owned and are returned to all repeated disposers; borrowed host resources are untouched.
+
+All SDK-owned response consumption and result/event publication use one internal helper. It fences
+cached strings/bytes/copies and buffered streams as well as unbuffered reads, without changing HTTP
+completion options or body values. Raw arbitrary caller use of .NET `HttpContent` is not transparently
+intercepted: its nonvirtual cached APIs can bypass content overrides. Direct supplied clients and
+`BorrowHostFactory` keep ordinary body and ownership semantics.
+
+Mapped task results publish after response, body and request cleanup completes; retirement begun by
+cleanup prevents late success without replacing an earlier operation failure. If an owned logger
+fails after receiving a response, that unhanded response is cleaned up once. Refused cleanup remains
+owned with its exact error; independent logger and cleanup failures are preserved together.
+
+Comfy's in-transport reference materialization stays admitted through resource commit and cleanup.
+Returned Image inference has a separate caller-owned lifetime across download, resource commit and
+publication. Pool retirement alone does not drain that inference after copied download bytes return;
+whole-generation retirement must also retire the returned inference owner. Committed and uncertain
+resource facts remain actual observations, not rollback claims.
+
 ## Batch and deferred contracts
 
 `Darkspyre.Inference.Connect.Resources` declares `ILlmBatchClient` for explicit-connection batch

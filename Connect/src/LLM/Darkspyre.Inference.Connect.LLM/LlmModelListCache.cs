@@ -7,7 +7,7 @@ namespace Darkspyre.Inference.Connect.LLM;
 /// Model lists kept for the registration owner's lifetime and shared by its <see cref="LlmProviderService"/> instances. A
 /// connection's list stays until its <see cref="LlmConnection.Version"/> changes or a refresh replaces it.
 /// Concurrent requests for one connection share a single listing, and a failed listing is not kept.
-/// <see cref="ServiceCollectionExtensions.AddLlmConnect"/> registers one instance.
+/// <see cref="ServiceCollectionExtensions.AddLlmConnect(Microsoft.Extensions.DependencyInjection.IServiceCollection)"/> registers one instance.
 /// </summary>
 public sealed class LlmModelListCache : IDisposable, IAsyncDisposable
 {

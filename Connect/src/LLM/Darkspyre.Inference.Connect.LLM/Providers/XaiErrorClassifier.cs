@@ -28,7 +28,7 @@ public static class XaiErrorClassifier
         cancellationToken.ThrowIfCancellationRequested();
         if (response.IsSuccessStatusCode) return;
 
-        string body = await response.Content.ReadAsStringAsync(cancellationToken);
+        string body = await SdkHttpConsumption.ReadAsStringAsync(response.Content, cancellationToken);
         cancellationToken.ThrowIfCancellationRequested();
         string safe = SecretRedactor.Sanitize(body, credential, additionalSecrets);
         (string? code, string? message) = ReadError(body);

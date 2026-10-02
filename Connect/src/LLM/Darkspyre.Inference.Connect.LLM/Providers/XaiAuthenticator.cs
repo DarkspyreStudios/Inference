@@ -16,32 +16,37 @@ internal sealed class XaiAuthenticator(HttpClient http) : OAuthAuthenticatorBase
     public async Task<LlmDeviceCode> StartAsync(CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        using var request = FormRequest($"{AuthBase}/oauth2/device/code", new()
+        using var consumption = SdkHttpConsumption.Enter(Http, cancellationToken); cancellationToken = consumption.Token;
+        LlmDeviceCode result;
         {
-            ["client_id"] = ClientId,
-            ["scope"] = Scopes
-        });
-        using HttpResponseMessage response = await Http.SendAsync(request, cancellationToken);
-        await XaiErrorClassifier.ThrowIfUnsuccessfulAsync(response, cancellationToken: cancellationToken);
-        using JsonDocument document = await ParseJsonAsync(response, cancellationToken);
-        cancellationToken.ThrowIfCancellationRequested();
-        JsonElement root = document.RootElement;
-        string deviceCode = RequiredString(root, "device_code");
-        string userCode = RequiredString(root, "user_code");
-        string verificationUri = RequiredString(root, "verification_uri");
-        ValidateVerificationUri(verificationUri);
-        if (OptionalString(root, "verification_uri_complete") is { } completeUri)
-        {
-            ValidateVerificationUri(completeUri);
-            verificationUri = completeUri;
-        }
+            using var request = FormRequest($"{AuthBase}/oauth2/device/code", new()
+            {
+                ["client_id"] = ClientId,
+                ["scope"] = Scopes
+            });
+            using HttpResponseMessage response = await Http.SendAsync(request, cancellationToken);
+            await XaiErrorClassifier.ThrowIfUnsuccessfulAsync(response, cancellationToken: cancellationToken);
+            using JsonDocument document = await ParseJsonAsync(response, cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+            JsonElement root = document.RootElement;
+            string deviceCode = RequiredString(root, "device_code");
+            string userCode = RequiredString(root, "user_code");
+            string verificationUri = RequiredString(root, "verification_uri");
+            ValidateVerificationUri(verificationUri);
+            if (OptionalString(root, "verification_uri_complete") is { } completeUri)
+            {
+                ValidateVerificationUri(completeUri);
+                verificationUri = completeUri;
+            }
 
-        int expiresIn = PositiveSeconds(root, "expires_in") ?? throw ProtocolFailure();
-        int interval = PositiveSeconds(root, "interval") ?? 5;
-        return new LlmDeviceCode(verificationUri, userCode, deviceCode, interval)
-        {
-            ExpiresAt = DateTimeOffset.UtcNow.AddSeconds(expiresIn)
-        };
+            int expiresIn = PositiveSeconds(root, "expires_in") ?? throw ProtocolFailure();
+            int interval = PositiveSeconds(root, "interval") ?? 5;
+            result = new LlmDeviceCode(verificationUri, userCode, deviceCode, interval)
+            {
+                ExpiresAt = DateTimeOffset.UtcNow.AddSeconds(expiresIn)
+            };
+        }
+        return consumption.Publish(result);
     }
 
     public async Task<LlmCredential> CompleteAsync(
@@ -52,63 +57,68 @@ internal sealed class XaiAuthenticator(HttpClient http) : OAuthAuthenticatorBase
         ArgumentException.ThrowIfNullOrWhiteSpace(deviceAuthId);
         ArgumentException.ThrowIfNullOrWhiteSpace(userCode);
         cancellationToken.ThrowIfCancellationRequested();
-        using var request = FormRequest(TokenEndpoint, new()
+        using var consumption = SdkHttpConsumption.Enter(Http, cancellationToken); cancellationToken = consumption.Token;
+        LlmCredential result;
         {
-            ["grant_type"] = "urn:ietf:params:oauth:grant-type:device_code",
-            ["device_code"] = deviceAuthId,
-            ["client_id"] = ClientId
-        });
-        using HttpResponseMessage response = await Http.SendAsync(request, cancellationToken);
-        cancellationToken.ThrowIfCancellationRequested();
-        if (!response.IsSuccessStatusCode)
-        {
-            string body = await response.Content.ReadAsStringAsync(cancellationToken);
+            using var request = FormRequest(TokenEndpoint, new()
+            {
+                ["grant_type"] = "urn:ietf:params:oauth:grant-type:device_code",
+                ["device_code"] = deviceAuthId,
+                ["client_id"] = ClientId
+            });
+            using HttpResponseMessage response = await Http.SendAsync(request, cancellationToken);
             cancellationToken.ThrowIfCancellationRequested();
-            string? code = ReadDeviceError(body);
-            if (response.StatusCode == System.Net.HttpStatusCode.BadRequest)
+            if (!response.IsSuccessStatusCode)
             {
-                if (code is "authorization_pending" or "slow_down")
+                string body = await SdkHttpConsumption.ReadAsStringAsync(response.Content, cancellationToken);
+                cancellationToken.ThrowIfCancellationRequested();
+                string? code = ReadDeviceError(body);
+                if (response.StatusCode == System.Net.HttpStatusCode.BadRequest)
                 {
-                    throw new LlmAuthPendingException("Grok login is waiting for browser approval.")
+                    if (code is "authorization_pending" or "slow_down")
                     {
-                        SlowDown = code == "slow_down"
-                    };
+                        throw new LlmAuthPendingException("Grok login is waiting for browser approval.")
+                        {
+                            SlowDown = code == "slow_down"
+                        };
+                    }
+
+                    if (code is "access_denied" or "expired_token")
+                    {
+                        throw new LlmProviderException("Grok device authorization ended; start sign-in again.",
+                            Transport, response.StatusCode, code,
+                            sanitizedResponseBody: SecretRedactor.Sanitize(body, null, [deviceAuthId, userCode]));
+                    }
                 }
 
-                if (code is "access_denied" or "expired_token")
-                {
-                    throw new LlmProviderException("Grok device authorization ended; start sign-in again.",
-                        Transport, response.StatusCode, code,
-                        sanitizedResponseBody: SecretRedactor.Sanitize(body, null, [deviceAuthId, userCode]));
-                }
+                await XaiErrorClassifier.ThrowIfUnsuccessfulAsync(response, null,
+                    [deviceAuthId, userCode], cancellationToken);
             }
 
-            await XaiErrorClassifier.ThrowIfUnsuccessfulAsync(response, null,
+            using JsonDocument document = await ParseJsonAsync(response, cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+            LlmCredential credential = BuildCredential(document.RootElement, null);
+            using var meRequest = new HttpRequestMessage(HttpMethod.Get, "https://api.x.ai/v1/me");
+            meRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", credential.OAuth!.AccessToken);
+            using HttpResponseMessage meResponse = await Http.SendAsync(meRequest, cancellationToken);
+            await XaiErrorClassifier.ThrowIfUnsuccessfulAsync(meResponse, credential,
                 [deviceAuthId, userCode], cancellationToken);
-        }
-
-        using JsonDocument document = await ParseJsonAsync(response, cancellationToken);
-        cancellationToken.ThrowIfCancellationRequested();
-        LlmCredential credential = BuildCredential(document.RootElement, null);
-        using var meRequest = new HttpRequestMessage(HttpMethod.Get, "https://api.x.ai/v1/me");
-        meRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", credential.OAuth!.AccessToken);
-        using HttpResponseMessage meResponse = await Http.SendAsync(meRequest, cancellationToken);
-        await XaiErrorClassifier.ThrowIfUnsuccessfulAsync(meResponse, credential,
-            [deviceAuthId, userCode], cancellationToken);
-        using JsonDocument me = await ParseJsonAsync(meResponse, cancellationToken);
-        cancellationToken.ThrowIfCancellationRequested();
-        string userId = RequiredString(me.RootElement, "user_id");
-        if (me.RootElement.TryGetProperty("team_blocked", out JsonElement blocked))
-        {
-            if (blocked.ValueKind is not (JsonValueKind.True or JsonValueKind.False)) throw ProtocolFailure();
-            if (blocked.GetBoolean())
+            using JsonDocument me = await ParseJsonAsync(meResponse, cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+            string userId = RequiredString(me.RootElement, "user_id");
+            if (me.RootElement.TryGetProperty("team_blocked", out JsonElement blocked))
             {
-                throw XaiErrorClassifier.EntitlementFailure(System.Net.HttpStatusCode.Forbidden,
-                    "The Grok account's team is blocked.");
+                if (blocked.ValueKind is not (JsonValueKind.True or JsonValueKind.False)) throw ProtocolFailure();
+                if (blocked.GetBoolean())
+                {
+                    throw XaiErrorClassifier.EntitlementFailure(System.Net.HttpStatusCode.Forbidden,
+                        "The Grok account's team is blocked.");
+                }
             }
-        }
 
-        return credential with { OAuth = credential.OAuth with { AccountId = userId } };
+            result = credential with { OAuth = credential.OAuth with { AccountId = userId } };
+        }
+        return consumption.Publish(result);
     }
 
     protected override HttpRequestMessage BuildRefreshRequest(LlmOAuthTokens tokens) =>

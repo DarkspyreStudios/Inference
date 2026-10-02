@@ -85,11 +85,12 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
         ApplyRequestHeaders(httpRequest, connection, request);
 
         LlmCredential? credential = LlmCredential.Parse(connection.Credential);
+        using var consumption = SdkHttpConsumption.Enter(Http, cancellationToken); cancellationToken = consumption.Token;
         using HttpResponseMessage response = await Http.SendAsync(
             httpRequest,
             HttpCompletionOption.ResponseHeadersRead,
             cancellationToken);
-        if (ObserveAccountUsage(response) is { } observed) { yield return new AccountUsageObservedEvent(observed); }
+        if (ObserveAccountUsage(response) is { } observed) { yield return consumption.Publish<LlmStreamEvent>(new AccountUsageObservedEvent(observed)); }
         if (Transport == LlmTransport.XaiResponses)
         {
             await XaiErrorClassifier.ThrowIfUnsuccessfulAsync(response, credential, [], cancellationToken);
@@ -102,17 +103,17 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
 
         if (!capabilities.SupportsStreaming)
         {
-            string body = await response.Content.ReadAsStringAsync(cancellationToken);
+            string body = await SdkHttpConsumption.ReadAsStringAsync(response.Content, cancellationToken);
             foreach (LlmStreamEvent completeEvent in ReadCompleteResponse(
                          body, response, request, enforcement, credential, connection, capabilities.SupportsReasoningText))
             {
-                yield return completeEvent;
+                yield return consumption.Publish<LlmStreamEvent>(completeEvent);
             }
 
             yield break;
         }
 
-        await using Stream stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+        await using Stream stream = await SdkHttpConsumption.ReadAsStreamAsync(response.Content, cancellationToken);
         var text = new StringBuilder();
         var refusal = new StringBuilder();
         var toolCallStream = new OpenAiToolCallStream();
@@ -158,7 +159,7 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
                             if (delta.Length > 0)
                             {
                                 text.Append(delta);
-                                yield return new LlmTextDeltaEvent(delta);
+                                yield return consumption.Publish<LlmStreamEvent>(new LlmTextDeltaEvent(delta));
                             }
 
                             break;
@@ -168,8 +169,8 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
                     case "response.reasoning_text.delta":
                         if (capabilities.SupportsReasoningText && LlmJson.GetString(root, "delta") is { Length: > 0 } reasoning)
                         {
-                            yield return new LlmReasoningDeltaEvent(reasoning,
-                                type == "response.reasoning_summary_text.delta");
+                            yield return consumption.Publish<LlmStreamEvent>(new LlmReasoningDeltaEvent(reasoning,
+                                type == "response.reasoning_summary_text.delta"));
                         }
                         break;
                     case "response.refusal.delta":
@@ -178,7 +179,7 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
                             if (delta.Length > 0)
                             {
                                 refusal.Append(delta);
-                                yield return new LlmRefusalDeltaEvent(delta);
+                                yield return consumption.Publish<LlmStreamEvent>(new LlmRefusalDeltaEvent(delta));
                             }
 
                             break;
@@ -187,7 +188,7 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
                     case "response.output_item.added":
                         foreach (LlmStreamEvent toolEvent in toolCallStream.ObserveAdded(root))
                         {
-                            yield return toolEvent;
+                            yield return consumption.Publish<LlmStreamEvent>(toolEvent);
                         }
 
                         break;
@@ -195,7 +196,7 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
                     case "response.function_call_arguments.delta":
                         foreach (LlmStreamEvent toolEvent in toolCallStream.ObserveArgumentsDelta(root))
                         {
-                            yield return toolEvent;
+                            yield return consumption.Publish<LlmStreamEvent>(toolEvent);
                         }
 
                         break;
@@ -209,7 +210,7 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
                         }
                         foreach (LlmStreamEvent toolEvent in toolCallStream.ObserveDone(root))
                         {
-                            yield return toolEvent;
+                            yield return consumption.Publish<LlmStreamEvent>(toolEvent);
                         }
 
                         break;
@@ -242,11 +243,11 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
                             foreach (LlmStreamEvent toolEvent in toolCallStream.CompleteMissing(ClientTools.Functions(result.ToolCalls),
                                          emitMissingArguments: Transport == LlmTransport.XaiResponses))
                             {
-                                yield return toolEvent;
+                                yield return consumption.Publish<LlmStreamEvent>(toolEvent);
                             }
 
                             completed = true;
-                            yield return new LlmChatCompletionEvent(result);
+                            yield return consumption.Publish<LlmStreamEvent>(new LlmChatCompletionEvent(result));
                             break;
                         }
 

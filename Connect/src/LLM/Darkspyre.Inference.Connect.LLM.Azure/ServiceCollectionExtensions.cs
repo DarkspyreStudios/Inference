@@ -13,10 +13,10 @@ public static class ServiceCollectionExtensions
         services.AddSingleton(AzureProviderDefinition.Chat);
         services.AddSingleton<ILlmSetupEnvironment>(new AzureSetupEnvironment(LlmTransport.AzureOpenAiResponses));
         services.AddSingleton<ILlmSetupEnvironment>(new AzureSetupEnvironment(LlmTransport.AzureOpenAiChat));
-        services.AddHttpClient<AzureResponsesLlmClient>()
+        services.AddInferenceHttpClient<AzureResponsesLlmClient>()
             .ConfigureHttpClient(client => client.Timeout = ProviderHttp.GenerationTimeout)
             .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
-        services.AddHttpClient<AzureChatLlmClient>()
+        services.AddInferenceHttpClient<AzureChatLlmClient>()
             .ConfigureHttpClient(client => client.Timeout = ProviderHttp.GenerationTimeout)
             .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
         services.AddTransient<ILlmClient>(provider => provider.GetRequiredService<AzureResponsesLlmClient>());

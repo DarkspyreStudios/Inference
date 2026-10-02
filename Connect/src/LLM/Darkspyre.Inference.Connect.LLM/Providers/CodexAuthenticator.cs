@@ -19,30 +19,35 @@ internal sealed class CodexAuthenticator(HttpClient http)
 
     public async Task<LlmDeviceCode> StartAsync(CancellationToken cancellationToken = default)
     {
-        using var request = new HttpRequestMessage(
-            HttpMethod.Post,
-            $"{AuthBaseUrl}/api/accounts/deviceauth/usercode")
+        using var consumption = SdkHttpConsumption.Enter(Http, cancellationToken); cancellationToken = consumption.Token;
+        LlmDeviceCode result;
         {
-            Content = JsonContent.Create(new JsonObject { ["client_id"] = ClientId })
-        };
-        using HttpResponseMessage response = await Http.SendAsync(request, cancellationToken);
-        await ThrowIfUnsuccessfulAsync(response, "ChatGPT login code request", cancellationToken);
-        using JsonDocument document = await ParseJsonAsync(response, cancellationToken);
+            using var request = new HttpRequestMessage(
+                HttpMethod.Post,
+                $"{AuthBaseUrl}/api/accounts/deviceauth/usercode")
+            {
+                Content = JsonContent.Create(new JsonObject { ["client_id"] = ClientId })
+            };
+            using HttpResponseMessage response = await Http.SendAsync(request, cancellationToken);
+            await ThrowIfUnsuccessfulAsync(response, "ChatGPT login code request", cancellationToken);
+            using JsonDocument document = await ParseJsonAsync(response, cancellationToken);
 
-        string? deviceAuthId = LlmJson.GetString(document.RootElement, "device_auth_id");
-        string? userCode = LlmJson.GetString(document.RootElement, "user_code")
-            ?? LlmJson.GetString(document.RootElement, "usercode");
-        if (string.IsNullOrEmpty(deviceAuthId) || string.IsNullOrEmpty(userCode))
-        {
-            throw new InvalidOperationException("ChatGPT returned an incomplete device login code.");
+            string? deviceAuthId = LlmJson.GetString(document.RootElement, "device_auth_id");
+            string? userCode = LlmJson.GetString(document.RootElement, "user_code")
+                ?? LlmJson.GetString(document.RootElement, "usercode");
+            if (string.IsNullOrEmpty(deviceAuthId) || string.IsNullOrEmpty(userCode))
+            {
+                throw new InvalidOperationException("ChatGPT returned an incomplete device login code.");
+            }
+
+            int interval = LlmJson.GetInt(document.RootElement, "interval") ?? DefaultIntervalSeconds;
+            result = new LlmDeviceCode(
+                $"{AuthBaseUrl}/codex/device",
+                userCode,
+                deviceAuthId,
+                interval > 0 ? interval : DefaultIntervalSeconds);
         }
-
-        int interval = LlmJson.GetInt(document.RootElement, "interval") ?? DefaultIntervalSeconds;
-        return new LlmDeviceCode(
-            $"{AuthBaseUrl}/codex/device",
-            userCode,
-            deviceAuthId,
-            interval > 0 ? interval : DefaultIntervalSeconds);
+        return consumption.Publish(result);
     }
 
     public async Task<LlmCredential> CompleteAsync(
@@ -50,35 +55,40 @@ internal sealed class CodexAuthenticator(HttpClient http)
         string userCode,
         CancellationToken cancellationToken = default)
     {
-        using var request = new HttpRequestMessage(
-            HttpMethod.Post,
-            $"{AuthBaseUrl}/api/accounts/deviceauth/token")
+        using var consumption = SdkHttpConsumption.Enter(Http, cancellationToken); cancellationToken = consumption.Token;
+        LlmCredential result;
         {
-            Content = JsonContent.Create(new JsonObject
+            using var request = new HttpRequestMessage(
+                HttpMethod.Post,
+                $"{AuthBaseUrl}/api/accounts/deviceauth/token")
             {
-                ["device_auth_id"] = deviceAuthId,
-                ["user_code"] = userCode
-            })
-        };
-        using HttpResponseMessage response = await Http.SendAsync(request, cancellationToken);
-        if (response.StatusCode is HttpStatusCode.Forbidden or HttpStatusCode.NotFound)
-        {
-            throw new LlmAuthPendingException("ChatGPT login is still waiting for browser approval.");
-        }
+                Content = JsonContent.Create(new JsonObject
+                {
+                    ["device_auth_id"] = deviceAuthId,
+                    ["user_code"] = userCode
+                })
+            };
+            using HttpResponseMessage response = await Http.SendAsync(request, cancellationToken);
+            if (response.StatusCode is HttpStatusCode.Forbidden or HttpStatusCode.NotFound)
+            {
+                throw new LlmAuthPendingException("ChatGPT login is still waiting for browser approval.");
+            }
 
-        await ThrowIfUnsuccessfulAsync(response, "ChatGPT login", cancellationToken);
-        using JsonDocument document = await ParseJsonAsync(response, cancellationToken);
-        string? authorizationCode = LlmJson.GetString(document.RootElement, "authorization_code");
-        string? codeVerifier = LlmJson.GetString(document.RootElement, "code_verifier");
-        if (string.IsNullOrEmpty(authorizationCode) || string.IsNullOrEmpty(codeVerifier))
-        {
-            throw new InvalidOperationException("ChatGPT returned an incomplete authorization response.");
-        }
+            await ThrowIfUnsuccessfulAsync(response, "ChatGPT login", cancellationToken);
+            using JsonDocument document = await ParseJsonAsync(response, cancellationToken);
+            string? authorizationCode = LlmJson.GetString(document.RootElement, "authorization_code");
+            string? codeVerifier = LlmJson.GetString(document.RootElement, "code_verifier");
+            if (string.IsNullOrEmpty(authorizationCode) || string.IsNullOrEmpty(codeVerifier))
+            {
+                throw new InvalidOperationException("ChatGPT returned an incomplete authorization response.");
+            }
 
-        return await ExchangeAuthorizationCodeAsync(
-            authorizationCode,
-            codeVerifier,
-            cancellationToken);
+            result = await ExchangeAuthorizationCodeAsync(
+                authorizationCode,
+                codeVerifier,
+                cancellationToken);
+        }
+        return consumption.Publish(result);
     }
 
     protected override HttpRequestMessage BuildRefreshRequest(LlmOAuthTokens tokens) =>
@@ -105,22 +115,27 @@ internal sealed class CodexAuthenticator(HttpClient http)
         string codeVerifier,
         CancellationToken cancellationToken)
     {
-        using var content = new FormUrlEncodedContent(new Dictionary<string, string>
+        using var consumption = SdkHttpConsumption.Enter(Http, cancellationToken); cancellationToken = consumption.Token;
+        LlmCredential result;
         {
-            ["grant_type"] = "authorization_code",
-            ["code"] = authorizationCode,
-            ["redirect_uri"] = $"{AuthBaseUrl}/deviceauth/callback",
-            ["client_id"] = ClientId,
-            ["code_verifier"] = codeVerifier
-        });
-        using var request = new HttpRequestMessage(HttpMethod.Post, TokenEndpoint) { Content = content };
-        using HttpResponseMessage response = await Http.SendAsync(request, cancellationToken);
-        await ThrowIfUnsuccessfulAsync(response, "ChatGPT token exchange", cancellationToken);
-        using JsonDocument document = await ParseJsonAsync(response, cancellationToken);
-        return CredentialFromTokens(
-            LlmJson.GetString(document.RootElement, "id_token"),
-            LlmJson.GetString(document.RootElement, "access_token"),
-            LlmJson.GetString(document.RootElement, "refresh_token"));
+            using var content = new FormUrlEncodedContent(new Dictionary<string, string>
+            {
+                ["grant_type"] = "authorization_code",
+                ["code"] = authorizationCode,
+                ["redirect_uri"] = $"{AuthBaseUrl}/deviceauth/callback",
+                ["client_id"] = ClientId,
+                ["code_verifier"] = codeVerifier
+            });
+            using var request = new HttpRequestMessage(HttpMethod.Post, TokenEndpoint) { Content = content };
+            using HttpResponseMessage response = await Http.SendAsync(request, cancellationToken);
+            await ThrowIfUnsuccessfulAsync(response, "ChatGPT token exchange", cancellationToken);
+            using JsonDocument document = await ParseJsonAsync(response, cancellationToken);
+            result = CredentialFromTokens(
+                LlmJson.GetString(document.RootElement, "id_token"),
+                LlmJson.GetString(document.RootElement, "access_token"),
+                LlmJson.GetString(document.RootElement, "refresh_token"));
+        }
+        return consumption.Publish(result);
     }
 
     private static LlmCredential CredentialFromTokens(

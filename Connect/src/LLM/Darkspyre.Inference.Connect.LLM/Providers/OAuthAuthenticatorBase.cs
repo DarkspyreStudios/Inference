@@ -32,15 +32,19 @@ internal abstract class OAuthAuthenticatorBase(HttpClient http) : ILlmAuthentica
                 $"{Transport} credentials have expired and have no refresh token; sign in again.");
         }
 
-        using HttpRequestMessage request = BuildRefreshRequest(credential.OAuth);
-        using HttpResponseMessage response = await Http.SendAsync(request, cancellationToken);
-        cancellationToken.ThrowIfCancellationRequested();
-        await ValidateRefreshResponseAsync(response, credential, cancellationToken);
-        using JsonDocument document = await ParseJsonAsync(response, cancellationToken);
-        cancellationToken.ThrowIfCancellationRequested();
-        LlmCredential refreshed = MapTokens(document.RootElement, credential.OAuth);
-        cancellationToken.ThrowIfCancellationRequested();
-        return refreshed;
+        using var consumption = SdkHttpConsumption.Enter(Http, cancellationToken); cancellationToken = consumption.Token;
+        LlmCredential refreshed;
+        {
+            using HttpRequestMessage request = BuildRefreshRequest(credential.OAuth);
+            using HttpResponseMessage response = await Http.SendAsync(request, cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+            await ValidateRefreshResponseAsync(response, credential, cancellationToken);
+            using JsonDocument document = await ParseJsonAsync(response, cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+            refreshed = MapTokens(document.RootElement, credential.OAuth);
+            cancellationToken.ThrowIfCancellationRequested();
+        }
+        return consumption.Publish(refreshed);
     }
 
     protected virtual Task ValidateRefreshResponseAsync(
@@ -59,14 +63,23 @@ internal abstract class OAuthAuthenticatorBase(HttpClient http) : ILlmAuthentica
         HttpResponseMessage response,
         CancellationToken cancellationToken)
     {
-        await using Stream stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+        JsonDocument? result = null;
         try
         {
-            return await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
+            await using (Stream stream = await SdkHttpConsumption.ReadAsStreamAsync(response.Content, cancellationToken))
+            {
+                try { result = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken); }
+                catch (JsonException)
+                {
+                    throw new InvalidOperationException("The authorization server returned invalid JSON.");
+                }
+            }
+            return result;
         }
-        catch (JsonException)
+        catch
         {
-            throw new InvalidOperationException("The authorization server returned invalid JSON.");
+            result?.Dispose();
+            throw;
         }
     }
 
@@ -81,7 +94,7 @@ internal abstract class OAuthAuthenticatorBase(HttpClient http) : ILlmAuthentica
             return;
         }
 
-        string body = await response.Content.ReadAsStringAsync(cancellationToken);
+        string body = await SdkHttpConsumption.ReadAsStringAsync(response.Content, cancellationToken);
         string safe = SecretRedactor.Sanitize(body, credential);
         throw new InvalidOperationException(
             $"{operation} failed ({(int)response.StatusCode}): {safe}");

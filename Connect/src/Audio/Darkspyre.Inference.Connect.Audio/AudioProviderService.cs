@@ -1,4 +1,5 @@
 using Darkspyre.Inference.Common.Setup;
+using Darkspyre.Inference.Connect.LLM.Internal;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Darkspyre.Inference.Connect.Audio;
@@ -26,7 +27,7 @@ public static class ServiceCollectionExtensions
     public static IServiceCollection AddAudioConnect(this IServiceCollection services)
     {
         ArgumentNullException.ThrowIfNull(services);
-        services.AddHttpClient<TangoFluxHttpProvider>(client => client.Timeout = Timeout.InfiniteTimeSpan)
+        services.AddInferenceHttpClient<TangoFluxHttpProvider>(client => client.Timeout = Timeout.InfiniteTimeSpan)
             .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
         services.AddTransient<IAudioProvider>(provider => provider.GetRequiredService<TangoFluxHttpProvider>());
         services.AddTransient<AudioProviderService>();

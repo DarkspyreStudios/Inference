@@ -21,6 +21,7 @@ internal static class GeminiStream
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         using HttpRequestMessage owned = message;
+        using var consumption = SdkHttpConsumption.Enter(http, cancellationToken); cancellationToken = consumption.Token;
         using HttpResponseMessage response = await http.SendAsync(owned, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
         route.CheckStatus(response);
         LlmProviderException Failure(string reason) => new(reason, route.Transport);
@@ -57,7 +58,7 @@ internal static class GeminiStream
                 total = LlmJson.GetInt(usage, "totalTokenCount") ?? total;
                 if (deltas.Next(Usage(Input(), visibleOutput, thoughts, cached, total)) is { } observation)
                 {
-                    yield return observation;
+                    yield return consumption.Publish<LlmStreamEvent>(observation);
                 }
             }
             if (LlmJson.GetObject(root, "promptFeedback") is { } feedback)
@@ -87,8 +88,8 @@ internal static class GeminiStream
                     {
                         string delta = value.GetValue<string>();
                         if ((bool?)part["thought"] == true)
-                        { if (reasoningText) { yield return new LlmReasoningDeltaEvent(delta, true); } }
-                        else { text.Append(delta); yield return new LlmTextDeltaEvent(delta); }
+                        { if (reasoningText) { yield return consumption.Publish<LlmStreamEvent>(new LlmReasoningDeltaEvent(delta, true)); } }
+                        else { text.Append(delta); yield return consumption.Publish<LlmStreamEvent>(new LlmTextDeltaEvent(delta)); }
                     }
                     if (part["functionCall"] is JsonObject function)
                     {
@@ -104,7 +105,7 @@ internal static class GeminiStream
                                 string streamedName = (string)observation.Part["functionCall"]!["name"]!;
                                 if (!callIds.Add(streamedId)) { throw Failure($"{route.Name} returned a duplicate function identity."); }
                                 parts.Add(observation.Part);
-                                yield return new LlmToolCallStartedEvent(streamedId, streamedName, calls.Count);
+                                yield return consumption.Publish<LlmStreamEvent>(new LlmToolCallStartedEvent(streamedId, streamedName, calls.Count));
                             }
                             if (observation.Completed is { } completed) { calls.Add(completed); }
                             continue;
@@ -120,7 +121,7 @@ internal static class GeminiStream
                         { throw Failure($"{route.Name} returned an invalid or duplicate function identity."); }
                         part["connectCallId"] = id;
                         calls.Add(new(id, name, arguments.ToJsonString()));
-                        yield return new LlmToolCallStartedEvent(id, name, calls.Count - 1);
+                        yield return consumption.Publish<LlmStreamEvent>(new LlmToolCallStartedEvent(id, name, calls.Count - 1));
                     }
                     parts.Add(part);
                 }
@@ -139,12 +140,12 @@ internal static class GeminiStream
         if (argumentStream.IsOpen && status is LlmCompletionStatus.Completed or LlmCompletionStatus.RequiresAction)
         { throw Failure($"{route.Name} returned incomplete function arguments."); }
         LlmToolCall[] completeCalls = status == LlmCompletionStatus.RequiresAction ? calls.ToArray() : [];
-        foreach (LlmToolCall call in completeCalls) { yield return new LlmToolCallCompletedEvent(call); }
+        foreach (LlmToolCall call in completeCalls) { yield return consumption.Publish<LlmStreamEvent>(new LlmToolCallCompletedEvent(call)); }
         int? input = Input();
         LlmUsage? counts = Usage(input, visibleOutput, thoughts, cached, total);
         LlmContinuationState? state = status is LlmCompletionStatus.Completed or LlmCompletionStatus.RequiresAction
             ? route.Encode(connection, request.ModelId, parts) with { InputTokens = input, OutputTokens = counts?.OutputTokens } : null;
-        yield return new LlmChatCompletionEvent(new()
+        yield return consumption.Publish<LlmStreamEvent>(new LlmChatCompletionEvent(new()
         {
             Text = text.ToString(),
             Status = status,
@@ -159,7 +160,7 @@ internal static class GeminiStream
             StructuredOutput = request.StructuredOutput is { } schema && enforcement is { } mode && status == LlmCompletionStatus.Completed
                 ? StructuredOutput.Validate(text.ToString(), schema, mode) : null,
             Diagnostics = new((int)response.StatusCode, null, null)
-        });
+        }));
 
         int? Input() => prompt is int known ? checked(known + (toolPrompt ?? 0)) : null;
     }
@@ -174,17 +175,17 @@ internal static class GeminiStream
     private static async IAsyncEnumerable<string> ReadStreamAsync(HttpResponseMessage response,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
-        await using Stream body = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+        await using Stream body = await SdkHttpConsumption.ReadAsStreamAsync(response.Content, cancellationToken).ConfigureAwait(false);
         await foreach (string data in Sse.ReadDataPayloadsAsync(body, cancellationToken).ConfigureAwait(false))
         {
-            yield return data;
+            yield return SdkHttpConsumption.Publish(response.Content, data, cancellationToken);
         }
     }
 
     private static async IAsyncEnumerable<string> ReadCompleteAsync(HttpResponseMessage response,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
-        yield return await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+        yield return SdkHttpConsumption.Publish(response.Content, await SdkHttpConsumption.ReadAsStringAsync(response.Content, cancellationToken).ConfigureAwait(false), cancellationToken);
     }
 
     private static string? SafeReason(string? reason) => reason is null ? null

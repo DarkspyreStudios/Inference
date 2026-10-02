@@ -11,31 +11,35 @@ internal static class ProviderTokenCounting
         LlmTransport transport, string modelId, bool anthropic, CancellationToken cancellationToken,
         TimeSpan? timeout = null)
     {
+        using var consumption = SdkHttpConsumption.Enter(http, cancellationToken); cancellationToken = consumption.Token;
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         deadline.CancelAfter(timeout ?? ControlTimeout);
         try
         {
-            using HttpResponseMessage response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead,
-                deadline.Token).ConfigureAwait(false);
-            deadline.Token.ThrowIfCancellationRequested();
-            if (!response.IsSuccessStatusCode)
-                throw new LlmProviderException("The provider rejected token counting. Check credentials, model access, request configuration and quota.",
-                    transport, response.StatusCode, retryAfter: response.Headers.RetryAfter?.Delta);
-            await using Stream stream = await response.Content.ReadAsStreamAsync(deadline.Token).ConfigureAwait(false);
-            using JsonDocument document = await JsonDocument.ParseAsync(stream, cancellationToken: deadline.Token).ConfigureAwait(false);
-            JsonElement root = document.RootElement;
-            var result = new LlmProviderInputTokenCount
+            LlmProviderInputTokenCount result;
             {
-                ModelId = modelId,
-                InputTokens = RequiredCount(root, anthropic ? "input_tokens" : "totalTokens"),
-                CachedInputTokens = anthropic ? null : OptionalCount(root, "cachedContentTokenCount"),
-                BillableCharacters = anthropic ? null : OptionalCount(root, "totalBillableCharacters"),
-                InputTokenDetails = anthropic ? [] : Details(root, "promptTokensDetails"),
-                CacheTokenDetails = anthropic ? [] : Details(root, "cacheTokensDetails")
-            };
-            if (result.CachedInputTokens > result.InputTokens) throw new JsonException();
-            deadline.Token.ThrowIfCancellationRequested();
-            return result;
+                using HttpResponseMessage response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead,
+                    deadline.Token).ConfigureAwait(false);
+                deadline.Token.ThrowIfCancellationRequested();
+                if (!response.IsSuccessStatusCode)
+                    throw new LlmProviderException("The provider rejected token counting. Check credentials, model access, request configuration and quota.",
+                        transport, response.StatusCode, retryAfter: response.Headers.RetryAfter?.Delta);
+                await using Stream stream = await SdkHttpConsumption.ReadAsStreamAsync(response.Content, deadline.Token).ConfigureAwait(false);
+                using JsonDocument document = await JsonDocument.ParseAsync(stream, cancellationToken: deadline.Token).ConfigureAwait(false);
+                JsonElement root = document.RootElement;
+                result = new LlmProviderInputTokenCount
+                {
+                    ModelId = modelId,
+                    InputTokens = RequiredCount(root, anthropic ? "input_tokens" : "totalTokens"),
+                    CachedInputTokens = anthropic ? null : OptionalCount(root, "cachedContentTokenCount"),
+                    BillableCharacters = anthropic ? null : OptionalCount(root, "totalBillableCharacters"),
+                    InputTokenDetails = anthropic ? [] : Details(root, "promptTokensDetails"),
+                    CacheTokenDetails = anthropic ? [] : Details(root, "cacheTokensDetails")
+                };
+                if (result.CachedInputTokens > result.InputTokens) throw new JsonException();
+                deadline.Token.ThrowIfCancellationRequested();
+            }
+            return consumption.Publish(result);
         }
         catch (Exception) when (cancellationToken.IsCancellationRequested)
         { throw new OperationCanceledException(cancellationToken); }

@@ -69,13 +69,18 @@ internal abstract class ChatCompletionsLlmClientBase(HttpClient http) : LlmClien
     public async Task<LlmAccountUsageSnapshot> GetAccountUsageAsync(LlmConnection connection, CancellationToken cancellationToken = default)
     {
         if (!GetCapabilities(connection).SupportsAccountUsage) { throw new NotSupportedException("This connection does not expose account usage."); }
-        using var request = new HttpRequestMessage(HttpMethod.Get, ProviderHttp.BuildUri(connection, "key"));
-        ProviderHttp.ApplyHeaders(request, connection);
-        using HttpResponseMessage response = await Http.SendAsync(request, cancellationToken);
-        await ProviderHttp.ThrowIfUnsuccessfulAsync(response, Transport, LlmCredential.Parse(connection.Credential),
-            "OpenRouter key usage", cancellationToken);
-        using JsonDocument document = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(cancellationToken), cancellationToken: cancellationToken);
-        return OpenRouterAccountUsageParser.Parse(document.RootElement, DateTimeOffset.UtcNow, LlmCredential.Parse(connection.Credential));
+        using var consumption = SdkHttpConsumption.Enter(Http, cancellationToken); cancellationToken = consumption.Token;
+        LlmAccountUsageSnapshot result;
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, ProviderHttp.BuildUri(connection, "key"));
+            ProviderHttp.ApplyHeaders(request, connection);
+            using HttpResponseMessage response = await Http.SendAsync(request, cancellationToken);
+            await ProviderHttp.ThrowIfUnsuccessfulAsync(response, Transport, LlmCredential.Parse(connection.Credential),
+                "OpenRouter key usage", cancellationToken);
+            using JsonDocument document = await JsonDocument.ParseAsync(await SdkHttpConsumption.ReadAsStreamAsync(response.Content, cancellationToken), cancellationToken: cancellationToken);
+            result = OpenRouterAccountUsageParser.Parse(document.RootElement, DateTimeOffset.UtcNow, LlmCredential.Parse(connection.Credential));
+        }
+        return consumption.Publish(result);
     }
 
     public Task<LlmConnection> PrepareAsync(LlmConnection connection, CancellationToken cancellationToken)
@@ -117,12 +122,13 @@ internal abstract class ChatCompletionsLlmClientBase(HttpClient http) : LlmClien
         ApplyRequestHeaders(httpRequest, connection, request);
 
         LlmCredential? credential = LlmCredential.Parse(connection.Credential);
+        using var consumption = SdkHttpConsumption.Enter(Http, cancellationToken); cancellationToken = consumption.Token;
         using HttpResponseMessage response = await Http.SendAsync(
             httpRequest,
             HttpCompletionOption.ResponseHeadersRead,
             cancellationToken);
         if (ObserveAccountUsage(response) is { } observed)
-        { yield return new AccountUsageObservedEvent(observed); }
+        { yield return consumption.Publish<LlmStreamEvent>(new AccountUsageObservedEvent(observed)); }
         await ProviderHttp.ThrowIfUnsuccessfulAsync(
             response,
             Transport,
@@ -132,16 +138,16 @@ internal abstract class ChatCompletionsLlmClientBase(HttpClient http) : LlmClien
 
         if (!capabilities.SupportsStreaming)
         {
-            string body = await response.Content.ReadAsStringAsync(cancellationToken);
+            string body = await SdkHttpConsumption.ReadAsStringAsync(response.Content, cancellationToken);
             foreach (LlmStreamEvent completeEvent in ReadCompleteResponse(body, response, request, enforcement, credential, connection, omitted, capabilities.SupportsReasoningText))
             {
-                yield return completeEvent;
+                yield return consumption.Publish<LlmStreamEvent>(completeEvent);
             }
 
             yield break;
         }
 
-        await using Stream stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+        await using Stream stream = await SdkHttpConsumption.ReadAsStreamAsync(response.Content, cancellationToken);
         var text = new StringBuilder();
         var refusal = new StringBuilder();
         string? finishReason = null;
@@ -189,7 +195,7 @@ internal abstract class ChatCompletionsLlmClientBase(HttpClient http) : LlmClien
                 usage = ReadUsage(root) ?? usage;
                 if (usageDeltas.Next(usage) is { } observation)
                 {
-                    yield return observation;
+                    yield return consumption.Publish<LlmStreamEvent>(observation);
                 }
 
                 if (!root.TryGetProperty("choices", out JsonElement choices)
@@ -208,18 +214,18 @@ internal abstract class ChatCompletionsLlmClientBase(HttpClient http) : LlmClien
                 }
 
                 string contentDelta = LlmJson.GetString(delta, "content") ?? string.Empty;
-                if (reasoning.Observe(delta) is { } reasoningDelta && capabilities.SupportsReasoningText) { yield return reasoningDelta; }
+                if (reasoning.Observe(delta) is { } reasoningDelta && capabilities.SupportsReasoningText) { yield return consumption.Publish<LlmStreamEvent>(reasoningDelta); }
                 if (contentDelta.Length > 0)
                 {
                     text.Append(contentDelta);
-                    yield return new LlmTextDeltaEvent(contentDelta);
+                    yield return consumption.Publish<LlmStreamEvent>(new LlmTextDeltaEvent(contentDelta));
                 }
 
                 string refusalDelta = LlmJson.GetString(delta, "refusal") ?? string.Empty;
                 if (refusalDelta.Length > 0)
                 {
                     refusal.Append(refusalDelta);
-                    yield return new LlmRefusalDeltaEvent(refusalDelta);
+                    yield return consumption.Publish<LlmStreamEvent>(new LlmRefusalDeltaEvent(refusalDelta));
                 }
 
                 if (delta.TryGetProperty("tool_calls", out JsonElement toolCallDeltas)
@@ -253,10 +259,10 @@ internal abstract class ChatCompletionsLlmClientBase(HttpClient http) : LlmClien
                         {
                             builder.EnsureId();
                             builder.Started = true;
-                            yield return new LlmToolCallStartedEvent(builder.Id!, name, index);
+                            yield return consumption.Publish<LlmStreamEvent>(new LlmToolCallStartedEvent(builder.Id!, name, index));
                             if (builder.Pending.Length > 0)
                             {
-                                yield return new LlmToolCallArgumentsDeltaEvent(builder.Id!, builder.Pending.ToString());
+                                yield return consumption.Publish<LlmStreamEvent>(new LlmToolCallArgumentsDeltaEvent(builder.Id!, builder.Pending.ToString()));
                                 builder.Pending.Clear();
                             }
                         }
@@ -266,9 +272,9 @@ internal abstract class ChatCompletionsLlmClientBase(HttpClient http) : LlmClien
                             builder.Arguments.Append(argumentsDelta);
                             if (builder.Started)
                             {
-                                yield return new LlmToolCallArgumentsDeltaEvent(
+                                yield return consumption.Publish<LlmStreamEvent>(new LlmToolCallArgumentsDeltaEvent(
                                     builder.Id!,
-                                    argumentsDelta);
+                                    argumentsDelta));
                             }
                             else builder.Pending.Append(argumentsDelta);
                         }
@@ -292,10 +298,10 @@ internal abstract class ChatCompletionsLlmClientBase(HttpClient http) : LlmClien
             .ToArray();
         foreach (LlmToolCall toolCall in completedToolCalls)
         {
-            yield return new LlmToolCallCompletedEvent(toolCall);
+            yield return consumption.Publish<LlmStreamEvent>(new LlmToolCallCompletedEvent(toolCall));
         }
 
-        yield return new LlmChatCompletionEvent(BuildResult(
+        yield return consumption.Publish<LlmStreamEvent>(new LlmChatCompletionEvent(BuildResult(
             request,
             enforcement,
             text.ToString(),
@@ -309,7 +315,7 @@ internal abstract class ChatCompletionsLlmClientBase(HttpClient http) : LlmClien
             credential,
             connection,
             reasoning,
-            omitted));
+            omitted)));
     }
 
     /// <summary>Maps a response that arrived as one chat.completion object.</summary>

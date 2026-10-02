@@ -21,6 +21,12 @@
     <ProjectReference Include="..\..\..\src\LLM\Darkspyre.Inference.Connect.LLM\Darkspyre.Inference.Connect.LLM.csproj" />
     <ProjectReference Include="../../../tools/AppleFoundationModelsPrototype/AppleFoundationModelsPrototype.csproj" />
     <ProjectReference Include="../Darkspyre.Inference.Connect.LLM.ProcessProbe/Darkspyre.Inference.Connect.LLM.ProcessProbe.csproj" />
+    <ProjectReference Include="../Darkspyre.Inference.Connect.HttpConfiguration.Consumer/Darkspyre.Inference.Connect.HttpConfiguration.Consumer.csproj" />
+    <ProjectReference Include="../../../src/LLM/Darkspyre.Inference.Connect.LLM.Azure/Darkspyre.Inference.Connect.LLM.Azure.csproj" />
+    <ProjectReference Include="../../../src/LLM/Darkspyre.Inference.Connect.LLM.Vertex/Darkspyre.Inference.Connect.LLM.Vertex.csproj" />
+    <ProjectReference Include="../../../src/TTS/Darkspyre.Inference.Connect.TTS/Darkspyre.Inference.Connect.TTS.csproj" />
+    <ProjectReference Include="../../../src/Audio/Darkspyre.Inference.Connect.Audio/Darkspyre.Inference.Connect.Audio.csproj" />
+    <ProjectReference Include="../../../src/Image/Darkspyre.Inference.Connect.Image/Darkspyre.Inference.Connect.Image.csproj" />
   </ItemGroup>
 
   <ItemGroup>

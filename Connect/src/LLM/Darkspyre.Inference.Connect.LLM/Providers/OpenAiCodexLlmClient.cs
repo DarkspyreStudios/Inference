@@ -161,37 +161,40 @@ internal sealed class OpenAiCodexLlmClient(HttpClient http)
         LlmConnection connection, CancellationToken cancellationToken = default)
     {
         if (!GetCapabilities(connection).SupportsModelListing) { return []; }
-        using var request = new HttpRequestMessage(HttpMethod.Get,
-            ProviderHttp.BuildUri(connection, $"models?client_version={CodexCompatibilityVersion}"));
-        ApplyCodexHeaders(request, connection);
-        using var response = await Http.SendAsync(request, cancellationToken);
-        await ProviderHttp.ThrowIfUnsuccessfulAsync(response, Transport, LlmCredential.Parse(connection.Credential),
-            "Codex model discovery", cancellationToken);
-        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync(cancellationToken));
-        if (!document.RootElement.TryGetProperty("models", out var models) || models.ValueKind != JsonValueKind.Array)
-        {
-            throw new LlmProviderException("Codex model discovery did not return a model catalog.", Transport);
-        }
+        using var consumption = SdkHttpConsumption.Enter(Http, cancellationToken); cancellationToken = consumption.Token;
         var result = new List<LlmModel>();
-        foreach (var model in models.EnumerateArray())
         {
-            string? id = LlmJson.GetString(model, "slug") ?? LlmJson.GetString(model, "id");
-            if (string.IsNullOrWhiteSpace(id) || LlmJson.GetString(model, "visibility") == "hide")
+            using var request = new HttpRequestMessage(HttpMethod.Get,
+                ProviderHttp.BuildUri(connection, $"models?client_version={CodexCompatibilityVersion}"));
+            ApplyCodexHeaders(request, connection);
+            using var response = await Http.SendAsync(request, cancellationToken);
+            await ProviderHttp.ThrowIfUnsuccessfulAsync(response, Transport, LlmCredential.Parse(connection.Credential),
+                "Codex model discovery", cancellationToken);
+            using var document = JsonDocument.Parse(await SdkHttpConsumption.ReadAsStringAsync(response.Content, cancellationToken));
+            if (!document.RootElement.TryGetProperty("models", out var models) || models.ValueKind != JsonValueKind.Array)
             {
-                continue;
+                throw new LlmProviderException("Codex model discovery did not return a model catalog.", Transport);
             }
-            if (!model.TryGetProperty("context_window", out JsonElement limit) || limit.ValueKind == JsonValueKind.Null)
+            foreach (var model in models.EnumerateArray())
             {
-                model.TryGetProperty("max_context_window", out limit);
+                string? id = LlmJson.GetString(model, "slug") ?? LlmJson.GetString(model, "id");
+                if (string.IsNullOrWhiteSpace(id) || LlmJson.GetString(model, "visibility") == "hide")
+                {
+                    continue;
+                }
+                if (!model.TryGetProperty("context_window", out JsonElement limit) || limit.ValueKind == JsonValueKind.Null)
+                {
+                    model.TryGetProperty("max_context_window", out limit);
+                }
+                result.Add(new LlmModel(id, LlmJson.GetString(model, "display_name") ?? id)
+                {
+                    CatalogEntry = model.Clone(),
+                    MaxContextTokens = limit.ValueKind == JsonValueKind.Number
+                        && limit.TryGetInt64(out long context) && context > 0 ? context : null
+                });
             }
-            result.Add(new LlmModel(id, LlmJson.GetString(model, "display_name") ?? id)
-            {
-                CatalogEntry = model.Clone(),
-                MaxContextTokens = limit.ValueKind == JsonValueKind.Number
-                    && limit.TryGetInt64(out long context) && context > 0 ? context : null
-            });
         }
-        return result;
+        return consumption.Publish<IReadOnlyList<LlmModel>>(result);
     }
 
     public async Task<LlmAccountUsageSnapshot> GetAccountUsageAsync(
@@ -203,23 +206,28 @@ internal sealed class OpenAiCodexLlmClient(HttpClient http)
         }
         // Usage is a sibling of /codex, on the same configured origin; credentials never cross origins.
         var endpoint = new Uri(connection.Endpoint.TrimEnd('/') + "/");
-        using var request = new HttpRequestMessage(HttpMethod.Get, new Uri(endpoint, "../wham/usage"));
-        ApplyCodexHeaders(request, connection);
-        using var response = await Http.SendAsync(request, cancellationToken);
-        await ProviderHttp.ThrowIfUnsuccessfulAsync(response, Transport, LlmCredential.Parse(connection.Credential),
-            "Codex account usage", cancellationToken);
-        string body = await response.Content.ReadAsStringAsync(cancellationToken);
-        try
+        using var consumption = SdkHttpConsumption.Enter(Http, cancellationToken); cancellationToken = consumption.Token;
+        LlmAccountUsageSnapshot result;
         {
-            using var document = JsonDocument.Parse(body);
-            if (document.RootElement.ValueKind != JsonValueKind.Object) { throw new JsonException(); }
-            return CodexAccountUsageParser.Parse(document.RootElement, DateTimeOffset.UtcNow);
+            using var request = new HttpRequestMessage(HttpMethod.Get, new Uri(endpoint, "../wham/usage"));
+            ApplyCodexHeaders(request, connection);
+            using var response = await Http.SendAsync(request, cancellationToken);
+            await ProviderHttp.ThrowIfUnsuccessfulAsync(response, Transport, LlmCredential.Parse(connection.Credential),
+                "Codex account usage", cancellationToken);
+            string body = await SdkHttpConsumption.ReadAsStringAsync(response.Content, cancellationToken);
+            try
+            {
+                using var document = JsonDocument.Parse(body);
+                if (document.RootElement.ValueKind != JsonValueKind.Object) { throw new JsonException(); }
+                result = CodexAccountUsageParser.Parse(document.RootElement, DateTimeOffset.UtcNow);
+            }
+            catch (JsonException error)
+            {
+                throw ProtocolException("Codex account usage returned invalid JSON.", response,
+                body, LlmCredential.Parse(connection.Credential), error);
+            }
         }
-        catch (JsonException error)
-        {
-            throw ProtocolException("Codex account usage returned invalid JSON.", response,
-            body, LlmCredential.Parse(connection.Credential), error);
-        }
+        return consumption.Publish(result);
     }
 
     private static void ValidateConnection(LlmConnection connection)

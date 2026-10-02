@@ -476,6 +476,7 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
 
         LlmOAuthTokens catalogCredential = credential!.OAuth!;
 
+        using var consumption = SdkHttpConsumption.Enter(Http, cancellationToken); cancellationToken = consumption.Token;
         var models = new List<LlmModel>();
         string? afterId = null;
         while (true)
@@ -493,7 +494,7 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
                 credential,
                 "Anthropic model discovery",
                 cancellationToken);
-            string body = await response.Content.ReadAsStringAsync(cancellationToken);
+            string body = await SdkHttpConsumption.ReadAsStringAsync(response.Content, cancellationToken);
             JsonDocument document;
             try
             {
@@ -536,7 +537,7 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
             }
         }
 
-        return [.. models.OrderBy(model => model.DisplayName, StringComparer.OrdinalIgnoreCase)];
+        return consumption.Publish<IReadOnlyList<LlmModel>>([.. models.OrderBy(model => model.DisplayName, StringComparer.OrdinalIgnoreCase)]);
     }
 
     private static void ValidateClaudeCliRequest(

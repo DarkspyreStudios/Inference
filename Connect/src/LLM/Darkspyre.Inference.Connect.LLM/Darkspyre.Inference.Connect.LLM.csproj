@@ -27,6 +27,7 @@
     <InternalsVisibleTo Include="Darkspyre.Inference.Connect.Video" />
     <InternalsVisibleTo Include="Darkspyre.Inference.Connect.Realtime" />
     <InternalsVisibleTo Include="Darkspyre.Inference.Connect.TTS" />
+    <InternalsVisibleTo Include="Darkspyre.Inference.Connect.Audio" />
   </ItemGroup>
 
 </Project>
