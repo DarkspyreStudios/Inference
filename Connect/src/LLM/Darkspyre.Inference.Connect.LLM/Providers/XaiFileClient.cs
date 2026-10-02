@@ -20,13 +20,9 @@ internal sealed class XaiFileClient(HttpClient http) : IDisposable, IAsyncDispos
         using LlmOperationLifetime.Lease operation = _lifetime.Enter(cancellationToken);
         cancellationToken = operation.Token;
         Check(fence, cancellationToken);
-        ArgumentNullException.ThrowIfNull(source);
-        ArgumentException.ThrowIfNullOrWhiteSpace(fileName);
-        if (fileName.Any(char.IsControl)) throw new ArgumentException("The filename contains control characters.", nameof(fileName));
-        if (!source.CanRead) throw new ArgumentException("Upload source must be readable.", nameof(source));
-        long? expiry = Expiry(options?.ExpiresAfter);
+        long? expiry = XaiFileRequestData.Upload(source, fileName, options);
         connection = EmbeddingRequestData.Snapshot(connection);
-        _ = XaiRequestHeaders.Require(connection);
+        XaiFileRequestData.Connection(connection);
         Check(fence, cancellationToken);
         using var consumption = SdkHttpConsumption.Enter(_http!, cancellationToken);
         cancellationToken = consumption.Token;
@@ -43,25 +39,8 @@ internal sealed class XaiFileClient(HttpClient http) : IDisposable, IAsyncDispos
     internal Task<LlmFilePage> ListAsync(LlmConnection connection, LlmFileListRequest request,
         Action fence, CancellationToken cancellationToken)
     {
-        ArgumentNullException.ThrowIfNull(request);
-        int limit = FileContractData.Limit(request.Limit);
-        var query = new List<KeyValuePair<string, string>> { new("limit", limit.ToString(CultureInfo.InvariantCulture)) };
-        if (request.PaginationToken is { } token) query.Add(new("pagination_token", token));
-        if (request.Order is { } order) query.Add(new("order", order switch
-        {
-            LlmFileOrder.Ascending => "asc",
-            LlmFileOrder.Descending => "desc",
-            _ => throw new ArgumentOutOfRangeException(nameof(request))
-        }));
-        if (request.Sort is { } sort) query.Add(new("sort_by", sort switch
-        {
-            LlmFileSort.CreatedAt => "created_at",
-            LlmFileSort.FileName => "filename",
-            LlmFileSort.Size => "size",
-            _ => throw new ArgumentOutOfRangeException(nameof(request))
-        }));
-        if (request.Filter is { } filter) query.Add(new("filter", filter));
-        string path = "files?" + string.Join('&', query.Select(pair => Uri.EscapeDataString(pair.Key) + "=" + Uri.EscapeDataString(pair.Value)));
+        string path = XaiFileRequestData.List(request);
+        int limit = request.Limit;
         return JsonAsync(connection, HttpMethod.Get, path, null, root =>
         {
             JsonElement data = Required(root, "data");
@@ -71,27 +50,27 @@ internal sealed class XaiFileClient(HttpClient http) : IDisposable, IAsyncDispos
     }
 
     internal Task<LlmProviderFile> GetAsync(LlmConnection connection, string fileId, Action fence, CancellationToken cancellationToken) =>
-        JsonAsync(connection, HttpMethod.Get, Path(fileId), null, ReadFile, fence, cancellationToken);
+        JsonAsync(connection, HttpMethod.Get, XaiFileRequestData.Path(fileId), null, ReadFile, fence, cancellationToken);
 
     internal Task<LlmFileDeletion> DeleteAsync(LlmConnection connection, string fileId, Action fence, CancellationToken cancellationToken) =>
-        JsonAsync(connection, HttpMethod.Delete, Path(fileId), null, root =>
+        JsonAsync(connection, HttpMethod.Delete, XaiFileRequestData.Path(fileId), null, root =>
         {
             if (Text(root, "object") != "file") throw Invalid();
-            return new LlmFileDeletion(Identity(Text(root, "id")), Boolean(root, "deleted"));
+            return new LlmFileDeletion(XaiFileRequestData.Identity(Text(root, "id")), Boolean(root, "deleted"));
         }, fence, cancellationToken);
 
     internal Task<XaiPublicUrl> CreatePublicUrlAsync(LlmConnection connection, string fileId,
         XaiPublicUrlOptions? options, Action fence, CancellationToken cancellationToken)
     {
         var body = new JsonObject();
-        if (Expiry(options?.ExpiresAfter) is { } seconds) body["expires_after"] = seconds;
-        return JsonAsync(connection, HttpMethod.Post, Path(fileId) + "/public-url", body.ToJsonString(),
+        if (XaiFileRequestData.Expiry(options?.ExpiresAfter) is { } seconds) body["expires_after"] = seconds;
+        return JsonAsync(connection, HttpMethod.Post, XaiFileRequestData.Path(fileId) + "/public-url", body.ToJsonString(),
             root => new XaiPublicUrl(PublicUrl(Text(root, "public_url"))!, OptionalDate(root, "expires_at")), fence, cancellationToken);
     }
 
     internal Task<XaiPublicUrlRevocation> RevokePublicUrlAsync(LlmConnection connection, string fileId, Action fence, CancellationToken cancellationToken) =>
-        JsonAsync(connection, HttpMethod.Post, Path(fileId) + "/public-url/revoke", null,
-            root => new XaiPublicUrlRevocation(Identity(Text(root, "id")), Boolean(root, "revoked"), PublicUrl(OptionalString(root, "public_url"))), fence, cancellationToken);
+        JsonAsync(connection, HttpMethod.Post, XaiFileRequestData.Path(fileId) + "/public-url/revoke", null,
+            root => new XaiPublicUrlRevocation(XaiFileRequestData.Identity(Text(root, "id")), Boolean(root, "revoked"), PublicUrl(OptionalString(root, "public_url"))), fence, cancellationToken);
 
     internal async Task<ResourceDownloadReceipt> DownloadAsync(LlmConnection connection, string fileId, Stream destination,
         LlmFileDownloadOptions? options, Action fence, CancellationToken cancellationToken)
@@ -99,17 +78,9 @@ internal sealed class XaiFileClient(HttpClient http) : IDisposable, IAsyncDispos
         using LlmOperationLifetime.Lease operation = _lifetime.Enter(cancellationToken);
         cancellationToken = operation.Token;
         Check(fence, cancellationToken);
-        ArgumentNullException.ThrowIfNull(destination);
-        if (!destination.CanWrite) throw new ArgumentException("Download destination must be writable.", nameof(destination));
-        string path = Path(fileId) + "/content";
-        if (options?.Format is { } format) path += "?format=" + (format switch
-        {
-            LlmFileContentFormat.Original => "original",
-            LlmFileContentFormat.Text => "text",
-            _ => throw new ArgumentOutOfRangeException(nameof(options))
-        });
+        string path = XaiFileRequestData.Download(fileId, destination, options);
         connection = EmbeddingRequestData.Snapshot(connection);
-        _ = XaiRequestHeaders.Require(connection);
+        XaiFileRequestData.Connection(connection);
         using var consumption = SdkHttpConsumption.Enter(_http!, cancellationToken);
         cancellationToken = consumption.Token;
         ResourceDownloadReceipt result = await ExchangeAsync(connection, HttpMethod.Get, path, request =>
@@ -137,7 +108,7 @@ internal sealed class XaiFileClient(HttpClient http) : IDisposable, IAsyncDispos
         cancellationToken = operation.Token;
         Check(fence, cancellationToken);
         connection = EmbeddingRequestData.Snapshot(connection);
-        _ = XaiRequestHeaders.Require(connection);
+        XaiFileRequestData.Connection(connection);
         using var consumption = SdkHttpConsumption.Enter(_http!, cancellationToken);
         cancellationToken = consumption.Token;
         T result = await ExchangeAsync(connection, method, path, request =>
@@ -213,14 +184,6 @@ internal sealed class XaiFileClient(HttpClient http) : IDisposable, IAsyncDispos
         catch { request.Dispose(); throw; }
     }
 
-    private static string Identity(string value)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(value);
-        if (value is "." or ".." || value.Any(char.IsControl)) throw new ArgumentException("Invalid literal file identifier.", nameof(value));
-        return value;
-    }
-    private static string Path(string id) => "files/" + Uri.EscapeDataString(Identity(id));
-    private static long? Expiry(TimeSpan? value) => FileContractData.Expiry(value) is { } duration ? duration.Ticks / TimeSpan.TicksPerSecond : null;
     private static LlmProviderException Invalid() => new("Grok Files returned invalid protocol data.", LlmTransport.XaiResponses);
 
     private static JsonElement Required(JsonElement root, string name)
@@ -254,7 +217,7 @@ internal sealed class XaiFileClient(HttpClient http) : IDisposable, IAsyncDispos
         if (Text(root, "object") != "file") throw Invalid();
         long bytes = Integer(Required(root, "bytes"));
         if (bytes < 0) throw Invalid();
-        return new(Identity(Text(root, "id")), Text(root, "filename"), bytes,
+        return new(XaiFileRequestData.Identity(Text(root, "id")), Text(root, "filename"), bytes,
             DateTimeOffset.FromUnixTimeSeconds(Integer(Required(root, "created_at"))), OptionalDate(root, "expires_at"))
         { PublicUrl = PublicUrl(OptionalString(root, "public_url")), PublicUrlExpiresAt = OptionalDate(root, "public_url_expires_at") };
     }

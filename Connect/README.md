@@ -740,10 +740,16 @@ The facade owns their admission and retirement; resolving an interface does not 
 connection source or credential owner. Skills methods use the `IXaiSkillClient` interface to
 distinguish skill IDs and results from file IDs and results.
 
-`LlmProviderCapabilities.Files` and `.Skills` report separate resource-operation facts. Every
-current registered adapter leaves those facts false. No Files or Skills route is selected by the facade;
-the facade rejects them before resolving connections, refreshing credentials or inspecting caller
-streams. Caller cancellation and retired-facade admission retain the existing lifetime behavior.
+`LlmProviderCapabilities.Files` and `.Skills` report separate resource-operation facts. An explicitly
+composed builtin xAI Responses client exposes the seven implemented native Files operations through
+the facade. The facade resolves one selected connection, snapshots its configuration and validates
+arguments and headers before its existing credential owner refreshes that connection. The private
+transport borrows the same HTTP client as chat. The default registration does not activate Grok.
+Other Files routes and all Skills routes remain unavailable. When no builtin Files adapter is
+composed, refusal precedes source resolution and stream inspection. Caller cancellation and
+retired-facade admission retain the existing lifetime behavior.
+Facade capability queries suppress Files flags for clients without an implemented facade route.
+They fence publication after the adapter's capability getter returns.
 Upload and download streams remain borrowed, including on rejection and facade disposal. These
 resource interfaces do not enable native-file prompt references or skill generation attachment.
 
@@ -760,8 +766,10 @@ The transport fences each awaited boundary and drains entered work before droppi
 client. Owned response and request cleanup each runs once. Independent operation and cleanup failures
 remain visible together; a lone failure retains its original identity. Publication follows cleanup
 and the final owner fence. Its protocol errors retain actual status and authentication/entitlement
-classification, but exclude provider response bodies and capability URLs from diagnostics. No facade route, provider
-capability or logical Session/Workspace materialization is activated by this private implementation.
+classification, but exclude provider response bodies and capability URLs from diagnostics. The facade
+drains admitted operations before retiring its private Files helper. Borrowed clients, authenticators,
+sources and streams are not disposed. Logical Session/Workspace materialization remains a separate
+resource path; native file IDs and public URLs are not portable resource identities.
 
 ### Embedding lifetime
 
