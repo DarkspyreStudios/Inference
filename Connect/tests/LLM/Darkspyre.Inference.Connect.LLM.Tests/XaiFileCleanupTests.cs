@@ -113,6 +113,43 @@ public sealed class XaiFileCleanupTests
         Assert.Equal(0, stream.Disposals);
     }
 
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    public async Task InvalidProtocolAndCleanupFailuresAreBothReported(int route)
+    {
+        var cleanup = new IOException("controlled response cleanup");
+        var content = new Content("{", cleanup);
+        using var http = new HttpClient(new Handler((_, _) => Task.FromResult(
+            new HttpResponseMessage(HttpStatusCode.OK) { Content = content })));
+        await using var adapter = new XaiFileClient(http);
+        using var stream = new BorrowedStream();
+
+        AggregateException failure = await Assert.ThrowsAsync<AggregateException>(() => Invoke(adapter, route, stream, () => { }));
+        Assert.Collection(failure.InnerExceptions,
+            error => Assert.IsType<LlmProviderException>(error), error => Assert.Same(cleanup, error));
+        Assert.Equal(1, content.Disposals);
+        Assert.Equal(0, stream.Disposals);
+    }
+
+    [Fact]
+    public async Task PartialDestinationFailureIsNotHiddenByResponseCleanup()
+    {
+        var primary = new IOException("controlled partial destination failure");
+        var cleanup = new IOException("controlled response cleanup");
+        var content = new Content("abc", cleanup);
+        using var http = new HttpClient(new Handler((_, _) => Task.FromResult(
+            new HttpResponseMessage(HttpStatusCode.OK) { Content = content })));
+        await using var adapter = new XaiFileClient(http);
+        using var stream = new FailingDestination(primary);
+
+        AggregateException failure = await Assert.ThrowsAsync<AggregateException>(() => Invoke(adapter, 2, stream, () => { }));
+        Assert.Collection(failure.InnerExceptions, error => Assert.Same(primary, error), error => Assert.Same(cleanup, error));
+        Assert.Equal("abc"u8.ToArray(), stream.ToArray());
+        Assert.Equal(1, content.Disposals);
+        Assert.Equal(0, stream.Disposals);
+    }
+
     private static Task Invoke(XaiFileClient adapter, int route, Stream stream, Action fence) => route switch
     {
         0 => adapter.UploadAsync(Connection(), stream, "a", null, fence, CancellationToken.None),
@@ -151,9 +188,18 @@ public sealed class XaiFileCleanupTests
         protected override void Dispose(bool disposing) { if (disposing) Disposals++; base.Dispose(disposing); }
     }
 
-    private sealed class BorrowedStream : MemoryStream
+    private class BorrowedStream : MemoryStream
     {
         internal int Disposals { get; private set; }
         protected override void Dispose(bool disposing) { if (disposing) Disposals++; base.Dispose(disposing); }
+    }
+
+    private sealed class FailingDestination(Exception failure) : BorrowedStream
+    {
+        public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            Write(buffer.Span);
+            throw failure;
+        }
     }
 }

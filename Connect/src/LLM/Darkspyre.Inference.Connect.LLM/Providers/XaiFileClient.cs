@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Net;
 using System.Net.Http.Headers;
+using System.Runtime.ExceptionServices;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -27,22 +28,15 @@ internal sealed class XaiFileClient(HttpClient http) : IDisposable, IAsyncDispos
         connection = EmbeddingRequestData.Snapshot(connection);
         _ = XaiRequestHeaders.Require(connection);
         Check(fence, cancellationToken);
-        LlmProviderFile result;
         using var consumption = SdkHttpConsumption.Enter(_http!, cancellationToken);
         cancellationToken = consumption.Token;
+        LlmProviderFile result = await ExchangeAsync(connection, HttpMethod.Post, "files", request =>
         {
-            using var request = Request(connection, HttpMethod.Post, "files");
-            using var multipart = new MultipartFormDataContent();
+            var multipart = new MultipartFormDataContent();
+            request.Content = multipart;
             if (expiry is { } seconds) multipart.Add(new StringContent(seconds.ToString(CultureInfo.InvariantCulture)), "expires_after");
             multipart.Add(new UploadContent(source, () => Check(fence, cancellationToken), cancellationToken), "file", fileName);
-            request.Content = multipart;
-            Check(fence, cancellationToken);
-            using HttpResponseMessage response = await _http!.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
-            Check(fence, cancellationToken);
-            result = await ReadAsync(connection, response, ReadFile, fence, cancellationToken).ConfigureAwait(false);
-            Check(fence, cancellationToken);
-        }
-        Check(fence, cancellationToken);
+        }, response => ReadAsync(connection, response, ReadFile, fence, cancellationToken), fence, cancellationToken).ConfigureAwait(false);
         return consumption.Publish(result);
     }
 
@@ -116,16 +110,14 @@ internal sealed class XaiFileClient(HttpClient http) : IDisposable, IAsyncDispos
         });
         connection = EmbeddingRequestData.Snapshot(connection);
         _ = XaiRequestHeaders.Require(connection);
-        ResourceDownloadReceipt result;
         using var consumption = SdkHttpConsumption.Enter(_http!, cancellationToken);
         cancellationToken = consumption.Token;
+        ResourceDownloadReceipt result = await ExchangeAsync(connection, HttpMethod.Get, path, request =>
         {
-            using var request = Request(connection, HttpMethod.Get, path);
             request.Headers.Accept.Clear();
             request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/octet-stream"));
-            Check(fence, cancellationToken);
-            using HttpResponseMessage response = await _http!.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
-            Check(fence, cancellationToken);
+        }, async response =>
+        {
             await XaiErrorClassifier.ThrowIfUnsuccessfulAsync(response, LlmCredential.Parse(connection.Credential), [], cancellationToken, diagnosticBody: false).ConfigureAwait(false);
             Check(fence, cancellationToken);
             Stream content = await SdkHttpConsumption.ReadAsStreamAsync(response.Content, cancellationToken).ConfigureAwait(false);
@@ -133,9 +125,8 @@ internal sealed class XaiFileClient(HttpClient http) : IDisposable, IAsyncDispos
             long written = await TransferAsync(content, destination, () => Check(fence, cancellationToken), cancellationToken).ConfigureAwait(false);
             Check(fence, cancellationToken);
             if (response.Content.Headers.ContentLength is { } declared && written < declared) throw Invalid();
-            result = new(written, response.Content.Headers.ContentType?.ToString(), response.Content.Headers.ContentLength);
-        }
-        Check(fence, cancellationToken);
+            return new ResourceDownloadReceipt(written, response.Content.Headers.ContentType?.ToString(), response.Content.Headers.ContentLength);
+        }, fence, cancellationToken).ConfigureAwait(false);
         return consumption.Publish(result);
     }
 
@@ -149,18 +140,42 @@ internal sealed class XaiFileClient(HttpClient http) : IDisposable, IAsyncDispos
         _ = XaiRequestHeaders.Require(connection);
         using var consumption = SdkHttpConsumption.Enter(_http!, cancellationToken);
         cancellationToken = consumption.Token;
-        T result;
+        T result = await ExchangeAsync(connection, method, path, request =>
         {
-            using var request = Request(connection, method, path);
             if (body is not null) request.Content = new StringContent(body, Encoding.UTF8, "application/json");
-            Check(fence, cancellationToken);
-            using HttpResponseMessage response = await _http!.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
-            Check(fence, cancellationToken);
-            result = await ReadAsync(connection, response, parse, fence, cancellationToken).ConfigureAwait(false);
-            Check(fence, cancellationToken);
-        }
-        Check(fence, cancellationToken);
+        }, response => ReadAsync(connection, response, parse, fence, cancellationToken), fence, cancellationToken).ConfigureAwait(false);
         return consumption.Publish(result);
+    }
+
+    private async Task<T> ExchangeAsync<T>(LlmConnection connection, HttpMethod method, string path,
+        Action<HttpRequestMessage> configure, Func<HttpResponseMessage, Task<T>> read, Action fence, CancellationToken token)
+    {
+        HttpRequestMessage? request = null;
+        HttpResponseMessage? response = null;
+        T result = default!;
+        var failures = new List<Exception>();
+        try
+        {
+            request = Request(connection, method, path);
+            configure(request);
+            Check(fence, token);
+            response = await _http!.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token).ConfigureAwait(false);
+            Check(fence, token);
+            result = await read(response).ConfigureAwait(false);
+            Check(fence, token);
+        }
+        catch (Exception error) { failures.Add(error); }
+        finally
+        {
+            try { response?.Dispose(); }
+            catch (Exception cleanup) { failures.Add(cleanup); }
+            try { request?.Dispose(); }
+            catch (Exception cleanup) { failures.Add(cleanup); }
+        }
+        if (failures.Count == 1) ExceptionDispatchInfo.Throw(failures[0]);
+        if (failures.Count > 1) throw new AggregateException("Grok Files operation and cleanup failed.", failures);
+        Check(fence, token);
+        return result;
     }
 
     private async Task<T> ReadAsync<T>(LlmConnection connection, HttpResponseMessage response,
