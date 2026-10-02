@@ -1,5 +1,4 @@
 using System.Collections.Frozen;
-using System.Net.Http.Headers;
 using System.Globalization;
 using System.Numerics;
 using System.Text;
@@ -15,7 +14,7 @@ namespace Darkspyre.Inference.Connect.LLM.Providers;
 internal sealed class XaiResponsesLlmClient(HttpClient http) : ResponsesLlmClientBase(http), ILlmCatalogCapabilities,
     ILlmTextTokenizerClient, ILlmCredentialAdmissionPolicy
 {
-    void ILlmCredentialAdmissionPolicy.ValidateCredential(LlmConnection connection) => _ = Authorization(connection);
+    void ILlmCredentialAdmissionPolicy.ValidateCredential(LlmConnection connection) => _ = XaiRequestHeaders.Require(connection);
 
     private const int MaxImageBytes = 20 * 1024 * 1024;
     private static readonly FrozenSet<string> ReservedOptions = new[]
@@ -118,7 +117,7 @@ internal sealed class XaiResponsesLlmClient(HttpClient http) : ResponsesLlmClien
 
     public override LlmProviderCapabilities GetCapabilities(LlmConnection connection, string? modelId = null)
     {
-        ValidateEndpoint(connection);
+        XaiRequestHeaders.ValidateEndpoint(connection);
         XaiModelProfile profile = XaiModelProfiles.Get(connection, modelId);
         LlmProviderCapabilities defaults = DefaultCapabilities with
         {
@@ -151,7 +150,7 @@ internal sealed class XaiResponsesLlmClient(HttpClient http) : ResponsesLlmClien
         LlmStructuredOutputEnforcement? enforcement, bool stream)
     {
         request = ProviderControlPolicy.Resolve(connection, request);
-        _ = Authorization(connection);
+        _ = XaiRequestHeaders.Require(connection);
         if (connection.ProviderOptions.Keys.Concat(request.ProviderOptions.Keys).Any(ReservedOptions.Contains))
             throw new ArgumentException("Grok protocol controls use typed request and connection properties, not provider options.", nameof(request));
         if (request.Temperature is < 0 or > 2)
@@ -196,7 +195,7 @@ internal sealed class XaiResponsesLlmClient(HttpClient http) : ResponsesLlmClien
             XaiSchemaLimits.Fits(output.Schema) ? capabilities : capabilities with { SupportsJsonSchema = false, SupportsJsonObject = false }) : null;
 
     protected override void ApplyRequestHeaders(HttpRequestMessage message, LlmConnection connection, LlmChatRequest request) =>
-        ApplyHeaders(message, connection, message.Method == HttpMethod.Post && GetCapabilities(connection, request.ModelId).SupportsStreaming);
+        XaiRequestHeaders.Apply(message, connection, message.Method == HttpMethod.Post && GetCapabilities(connection, request.ModelId).SupportsStreaming);
 
     public async Task<LlmTokenization> TokenizeAsync(LlmConnection connection, string modelId, string text,
         CancellationToken cancellationToken = default)
@@ -204,12 +203,12 @@ internal sealed class XaiResponsesLlmClient(HttpClient http) : ResponsesLlmClien
         cancellationToken.ThrowIfCancellationRequested();
         ArgumentException.ThrowIfNullOrWhiteSpace(modelId);
         ArgumentNullException.ThrowIfNull(text);
-        _ = Authorization(connection);
+        _ = XaiRequestHeaders.Require(connection);
         using var consumption = SdkHttpConsumption.Enter(Http, cancellationToken); cancellationToken = consumption.Token;
         LlmTokenization result;
         {
             using var request = new HttpRequestMessage(HttpMethod.Post, ProviderHttp.BuildUri(connection, "tokenize-text"));
-            ApplyHeaders(request, connection, false);
+            XaiRequestHeaders.Apply(request, connection, false);
             // Plain text and model identity are opaque data; changing either changes the provider's tokens.
             var payload = new JsonObject { ["model"] = modelId, ["text"] = text };
             request.Content = new StringContent(payload.ToJsonString(), Encoding.UTF8, "application/json");
@@ -304,7 +303,7 @@ internal sealed class XaiResponsesLlmClient(HttpClient http) : ResponsesLlmClien
     private async Task<JsonArray> ListingAsync(LlmConnection connection, string path, string array, CancellationToken cancellationToken)
     {
         using var request = new HttpRequestMessage(HttpMethod.Get, ProviderHttp.BuildUri(connection, path));
-        ApplyHeaders(request, connection, false);
+        XaiRequestHeaders.Apply(request, connection, false);
         using HttpResponseMessage response = await Http.SendAsync(request, cancellationToken);
         await XaiErrorClassifier.ThrowIfUnsuccessfulAsync(response, LlmCredential.Parse(connection.Credential), [], cancellationToken);
         string body = await SdkHttpConsumption.ReadAsStringAsync(response.Content, cancellationToken);
@@ -322,28 +321,4 @@ internal sealed class XaiResponsesLlmClient(HttpClient http) : ResponsesLlmClien
     private static IEnumerable<string> Aliases(JsonObject item) => item["aliases"] is JsonArray aliases
         ? aliases.OfType<JsonValue>().Select(value => value.TryGetValue(out string? text) ? text : null).OfType<string>() : [];
 
-    private static void ApplyHeaders(HttpRequestMessage message, LlmConnection connection, bool stream)
-    {
-        AuthenticationHeaderValue authorization = Authorization(connection);
-        ProviderHttp.ApplyHeaders(message, connection, applyApiKeyAsBearer: false);
-        message.Headers.Authorization = authorization;
-        message.Headers.Accept.Clear();
-        message.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue(stream ? "text/event-stream" : "application/json"));
-    }
-
-    private static AuthenticationHeaderValue Authorization(LlmConnection connection)
-    {
-        ValidateEndpoint(connection);
-        return XaiAuthorization.Require(connection);
-    }
-
-    private static void ValidateEndpoint(LlmConnection connection)
-    {
-        RuntimeInputAdmission.Validate(connection);
-        if (connection.Transport != LlmTransport.XaiResponses) throw new ArgumentException("Select the Grok Responses transport.", nameof(connection));
-        XaiConnectionOptions options = connection.Xai ?? new();
-        if (!Enum.IsDefined(options.ServiceTier)) throw new ArgumentOutOfRangeException(nameof(connection), "Select an xAI service tier.");
-        if (!string.Equals(connection.Endpoint.TrimEnd('/'), options.GetEndpoint(), StringComparison.Ordinal))
-            throw new ArgumentException("The Grok endpoint must match its typed region.", nameof(connection));
-    }
 }

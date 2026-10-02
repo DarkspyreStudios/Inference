@@ -22,7 +22,8 @@ public static class XaiErrorClassifier
         HttpResponseMessage response,
         LlmCredential? credential,
         IEnumerable<string> additionalSecrets,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool diagnosticBody = true)
     {
         ArgumentNullException.ThrowIfNull(response);
         cancellationToken.ThrowIfCancellationRequested();
@@ -30,7 +31,8 @@ public static class XaiErrorClassifier
 
         string body = await SdkHttpConsumption.ReadAsStringAsync(response.Content, cancellationToken);
         cancellationToken.ThrowIfCancellationRequested();
-        string safe = SecretRedactor.Sanitize(body, credential, additionalSecrets);
+        string safe = diagnosticBody ? SecretRedactor.Sanitize(body, credential, additionalSecrets)
+            : "Provider rejected the Files request.";
         (string? code, string? message) = ReadError(body);
         bool requiresSignIn = response.StatusCode == HttpStatusCode.Unauthorized
             || (response.StatusCode == HttpStatusCode.Forbidden
