@@ -92,6 +92,28 @@ files change. Raw measurements, output, DLL hashes, configuration, console and
 restoration evidence remain in this worktree's ignored `tmp/ggml-cuda-benchmark/`
 and on GPU box under `G:\AI\benchmarks\qwen-ggml-cuda-20261002`.
 
+## GGML CUDA build audit
+
+The audited native build is Release with optimized compiler flags and both
+`sm_86` machine code and `compute_86` PTX. CUDA, flash attention and CUDA graph
+support are enabled. The loaded process module hash matches the benchmark's
+`GgmlOps.dll`. cuBLAS and cudart resolve to the installed CUDA 12.8 directory.
+
+A 16-token request through the arbiter with the existing node profiler reports
+`qwen35 model decode`: eight profiled whole-model graphs with 3,717 nodes each.
+This confirms whole-model graph execution rather than the direct CUDA per-op
+fallback. Profiling synchronizes every node and disables normal graph replay
+behavior; its timings do not replace the uninstrumented benchmark or isolate
+the normal throughput gap. The original llama model is restored afterward.
+The build flags, loaded modules, profile output and response remain in this
+worktree's ignored `tmp/ggml-cuda-audit/`.
+
+The Mac benchmark bridge reports GGML 0.25.3, commit `353b63b`. The Windows
+benchmark bridge uses GGML 0.24.0, commit `456172e`. The measured GGML CUDA row
+therefore uses a different upstream revision from the Mac. The audit establishes
+successful optimized building and native execution, not matching GGML revisions
+or an explanation for the throughput difference.
+
 ## Direct CUDA execution verification
 
 A separate 16-token generation uses the same prompt, model and default FP16
