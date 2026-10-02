@@ -10,9 +10,10 @@ using Microsoft.Extensions.DependencyInjection;
 namespace Darkspyre.Inference.Connect.STT;
 
 /// <summary>Resolves only registered hosted-STT adapters. Registration never implies OAuth qualification.</summary>
-public sealed class SttProviderService
+public sealed class SttProviderService : IDisposable, IAsyncDisposable
 {
-    private readonly IReadOnlyDictionary<SttTransport, ISttProvider> _providers;
+    private readonly LlmOperationLifetime _lifetime = new();
+    private IReadOnlyDictionary<SttTransport, ISttProvider>? _providers;
     public SttProviderService(IEnumerable<ISttProvider> providers)
     {
         ArgumentNullException.ThrowIfNull(providers);
@@ -21,24 +22,50 @@ public sealed class SttProviderService
         foreach (ISttProvider provider in registered) SttData.Transport(provider.Transport);
         _providers = new ReadOnlyDictionary<SttTransport, ISttProvider>(registered.ToDictionary(provider => provider.Transport));
     }
-    public IReadOnlyList<InferenceSetupDefinition> SetupDefinitions => Array.AsReadOnly(_providers.Values.Select(provider => provider.SetupDefinition).ToArray());
+    public IReadOnlyList<InferenceSetupDefinition> SetupDefinitions
+    {
+        get
+        {
+            using LlmOperationLifetime.Lease operation = _lifetime.Enter(default);
+            return Array.AsReadOnly(Providers.Values.Select(provider => provider.SetupDefinition).ToArray());
+        }
+    }
     public ISttProvider GetRequiredProvider(SttTransport transport)
     {
+        using LlmOperationLifetime.Lease operation = _lifetime.Enter(default);
+        return GetProvider(transport);
+    }
+    private IReadOnlyDictionary<SttTransport, ISttProvider> Providers => _providers ?? throw new ObjectDisposedException(nameof(SttProviderService));
+    private ISttProvider GetProvider(SttTransport transport)
+    {
         SttData.Transport(transport);
-        return _providers.TryGetValue(transport, out ISttProvider? provider) ? provider
+        return Providers.TryGetValue(transport, out ISttProvider? provider) ? provider
             : throw new InferenceException(InferenceFailureCode.UnsupportedFeature, "The selected hosted-STT transport is not registered.");
     }
     public ISpeechTranscriptionClient Bind(SttConnection connection, XaiFamilyBinding? xai = null,
         IInferenceResourceAccess? resources = null)
     {
+        using LlmOperationLifetime.Lease operation = _lifetime.Enter(default);
         ArgumentNullException.ThrowIfNull(connection);
-        ISttProvider provider = GetRequiredProvider(connection.Transport);
+        ISttProvider provider = GetProvider(connection.Transport);
         ValidateBinding(connection, xai);
         return provider.Bind(connection, xai, resources);
     }
     public SttSettingsManager CreateSettingsManager(ISetupCommitTarget<SttSetupChanges> target,
         Func<XaiConnectionSelection, XaiFamilyBinding>? xaiBindings = null,
-        IInferenceResourceAccess? resources = null) => new(this, target, xaiBindings, resources);
+        IInferenceResourceAccess? resources = null)
+    {
+        using LlmOperationLifetime.Lease operation = _lifetime.Enter(default);
+        return new(this, target, xaiBindings, resources);
+    }
+    private Task RetireAsync() => _lifetime.RetireAsync(() =>
+    {
+        _providers = null;
+        return Task.CompletedTask;
+    });
+    /// <summary>Fences new facade calls and drains admitted callbacks without disposing borrowed adapters or returned clients.</summary>
+    public ValueTask DisposeAsync() => new(RetireAsync());
+    public void Dispose() => RetireAsync().GetAwaiter().GetResult();
     internal static void ValidateBinding(SttConnection connection, XaiFamilyBinding? xai)
     {
         ValidateConnection(connection);

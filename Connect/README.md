@@ -62,6 +62,13 @@ propagates. Admitted saves preserve the host's actual committed or uncertain out
 Checks retain matching borrowed authorization. Portable setup changes omit that runtime authority;
 the selected connection ID remains data, and only explicit named header edits reach the commit target.
 
+`SttProviderService` and `VideoProviderService` implement `IDisposable` and `IAsyncDisposable`.
+Retirement immediately fences new facade calls, drains admitted synchronous setup/binding callbacks,
+then releases borrowed adapter references. It does not interrupt those callbacks or replace their
+original results/exceptions. Adapters, handed-off clients/inference and settings managers keep their
+independent caller ownership; facade disposal never disposes them. Concurrent retirement callers share
+the same completion. Use asynchronous disposal while another thread is inside a facade callback.
+
 > **Proprietary software.** Copyright © 2026 Brandon Mathis. All rights reserved.
 > No permission is granted to use, copy, modify, or distribute this software
 > without prior written authorization. See [LICENSE.md](LICENSE.md).
