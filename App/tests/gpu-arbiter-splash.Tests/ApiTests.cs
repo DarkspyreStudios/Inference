@@ -6,6 +6,29 @@ namespace GpuArbiter.Splash.Tests;
 
 public sealed class ApiTests
 {
+    [Theory]
+    [InlineData("/v1/messages")]
+    [InlineData("/v1/responses")]
+    public async Task QueuedStreamUsesCommentsAndProtocolErrorAfterHeadersStart(string route)
+    {
+        await using var rig = new ApiRig(); await rig.StartAsync();
+        using var comfy = await rig.Coordinator.AcquireAsync(GpuTarget.Comfy, CancellationToken.None);
+        rig.Status = HttpStatusCode.BadRequest;
+        using var message = new HttpRequestMessage(HttpMethod.Post, route)
+        {
+            Content = new StringContent("{\"model\":\"incoai/Qwen3.8-27B-Splash\",\"stream\":true}", System.Text.Encoding.UTF8, "application/json")
+        };
+        using var response = await rig.Client.SendAsync(message, HttpCompletionOption.ResponseHeadersRead).WaitAsync(TimeSpan.FromSeconds(5));
+        using var reader = new StreamReader(await response.Content.ReadAsStreamAsync());
+        Assert.StartsWith(": waiting for GPU:", await reader.ReadLineAsync());
+        comfy.Dispose();
+        var rest = await reader.ReadToEndAsync().WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Contains("event: error", rest);
+        Assert.Contains("\"type\":\"error\"", rest);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        await ApiRig.WaitFor(() => rig.Coordinator.Snapshot().LlmInFlight == 0);
+    }
+
     [Fact]
     public async Task DiscoveryDoesNotStartModelAndGpuNeverFabricatesGlobalVram()
     {

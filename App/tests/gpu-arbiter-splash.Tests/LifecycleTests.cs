@@ -6,6 +6,19 @@ namespace GpuArbiter.Splash.Tests;
 public sealed class LifecycleTests
 {
     [Fact]
+    public async Task FailedStartupRecordsExitCodeAndConfirmsChildCleanup()
+    {
+        await using var rig = new ApiRig();
+        var process = new FakeProcess(); process.Crash(19); rig.Processes.Next = process;
+        var error = await Assert.ThrowsAsync<GpuException>(() => rig.Models.LoadAsync("incoai/Qwen3.8-27B-Splash", CancellationToken.None));
+        Assert.Contains("19", error.Message);
+        var state = (await rig.Models.ModelsAsync(CancellationToken.None))[0];
+        Assert.True(state.Failed);
+        Assert.Equal(19, state.ExitCode);
+        Assert.True(rig.Models.GroupsReleased);
+    }
+
+    [Fact]
     public async Task ReadinessTimeoutStopsGroupBeforeReturningFailedLoad()
     {
         await using var rig = new ApiRig();

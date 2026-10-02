@@ -74,10 +74,18 @@ public sealed class SplashModelHost(SplashOptions options, ISplashProcessFactory
             }
             catch
             {
-                await StopOwnedAsync().ConfigureAwait(false);
-                SetState(model, "unloaded", failed: true);
+                int? exitCode;
+                lock (_gate) exitCode = _process?.Exit.IsCompletedSuccessfully == true ? _process.Exit.Result : null;
+                logger.LogWarning("Splash model {Model} load failed; server exit code {ExitCode}", model, exitCode);
+                try { await StopOwnedAsync().ConfigureAwait(false); }
+                finally
+                {
+                    bool released;
+                    lock (_gate) released = _process is null;
+                    SetState(model, released ? "unloaded" : "failed", failed: true, exitCode: exitCode);
+                }
                 if (token.IsCancellationRequested) throw;
-                throw new GpuException("Splash model load failed or timed out");
+                throw new GpuException($"Splash model load failed or timed out; server exit code: {exitCode?.ToString() ?? "unavailable"}");
             }
         }
         finally { _lifecycle.Release(); }
@@ -154,7 +162,12 @@ public sealed class SplashModelHost(SplashOptions options, ISplashProcessFactory
         ISplashProcess? process;
         lock (_gate) process = _process;
         if (process is null) return;
-        await process.StopAsync(TimeSpan.FromSeconds(options.StopTimeoutSeconds), CancellationToken.None).ConfigureAwait(false);
+        try { await process.StopAsync(TimeSpan.FromSeconds(options.StopTimeoutSeconds), CancellationToken.None).ConfigureAwait(false); }
+        catch (Exception error)
+        {
+            logger.LogError("Splash process cleanup failed for {Pid}; failure type {FailureType}", process.Pid, error.GetType().Name);
+            throw new GpuException($"Splash process cleanup failed ({error.GetType().Name})");
+        }
         if (process.GroupAlive) throw new GpuException("Owned Splash native process remains alive");
         await process.DisposeAsync().ConfigureAwait(false);
         lock (_gate) { _process = null; _model = null; }
