@@ -7,6 +7,27 @@ namespace GpuArbiter.Tests;
 public sealed class CoordinatorTests
 {
     [Fact]
+    public async Task ResidentLeasePinsInstanceWithoutLoadingAndRejectsPendingHandoff()
+    {
+        using var rig = new Rig();
+        Assert.Equal(404, Assert.Throws<GpuException>(() => rig.Gpu.AcquireResident()).StatusCode);
+        using var first = await rig.Admit("qwen");
+        first.Dispose();
+        using var resident = rig.Gpu.AcquireResident();
+        Assert.Equal(1, rig.Gpu.Snapshot().LlmInFlight);
+        using var cancel = new CancellationTokenSource();
+        var unload = rig.Gpu.UnloadAsync("qwen", cancel.Token);
+        Assert.Equal(503, Assert.Throws<GpuException>(() => rig.Gpu.AcquireResident()).StatusCode);
+        await rig.Gpu.StepAsync(CancellationToken.None);
+        Assert.False(unload.IsCompleted);
+        resident.Dispose();
+        await rig.Gpu.StepAsync(CancellationToken.None);
+        await unload;
+        Assert.Equal(404, Assert.Throws<GpuException>(() => rig.Gpu.AcquireResident()).StatusCode);
+        Assert.Equal(["load:qwen", "unload:qwen"], rig.Llama.Calls);
+    }
+
+    [Fact]
     public async Task AcquisitionFromNoneFreesCachedComfyAndLoadsModel()
     {
         using var rig = new Rig();
@@ -95,7 +116,7 @@ public sealed class CoordinatorTests
         using var rig = new Rig();
         using var lease = await rig.Admit("qwen");
         lease.Dispose();
-        rig.Options.Vram.ReleaseTimeoutSeconds = 1;
+        rig.Options.ReleaseTimeoutSeconds = 1;
         rig.Vram.Used = 20000;
         var pending = rig.Gpu.AcquireAsync(GpuTarget.Comfy, CancellationToken.None);
         var step = rig.Gpu.StepAsync(CancellationToken.None);

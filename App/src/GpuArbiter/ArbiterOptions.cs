@@ -16,7 +16,7 @@ public sealed class ArbiterOptions : CoordinatorOptions
         if (llm.Scheme != "http" || comfy.Scheme != "http" || llm.Port == comfy.Port ||
             Llama.Port is < 1 or > 65535 || Llama.Port == llm.Port || Llama.Port == comfy.Port ||
             KeepaliveSeconds <= 0 || Comfy.PollSeconds <= 0 || Llama.LoadTimeoutSeconds <= 0 ||
-            Vram.ReleaseTimeoutSeconds <= 0 || Vram.ReleasedMaxUsedMiB < 0)
+            ReleaseTimeoutSeconds <= 0 || Vram.ReleasedMaxUsedMiB < 0)
             throw new InvalidOperationException("Invalid arbiter ports or timing configuration.");
         if (!Uri.TryCreate(Comfy.Url, UriKind.Absolute, out var backend) || backend.Scheme != "http" || !backend.IsLoopback)
             throw new InvalidOperationException("Comfy.Url must be a loopback HTTP address.");

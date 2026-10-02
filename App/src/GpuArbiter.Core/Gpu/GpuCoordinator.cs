@@ -3,7 +3,7 @@ using GpuArbiter.Backends;
 namespace GpuArbiter.Gpu;
 
 // The lock owns admission and counters. Only the hosted loop calls backend mutation APIs.
-public sealed class GpuCoordinator(IModelHost models, IComfyClient comfy, IVramProbe vram,
+public sealed class GpuCoordinator(IModelHost models, IComfyClient comfy, IGpuReleaseGuard releaseGuard,
     CoordinatorOptions options, TimeProvider clock, ILogger<GpuCoordinator> logger) : BackgroundService
 {
     private readonly object _gate = new();
@@ -12,7 +12,7 @@ public sealed class GpuCoordinator(IModelHost models, IComfyClient comfy, IVramP
     private ComfyState _comfy = new(false, 0, 0);
     private int _llmInFlight;
     private int _promptInFlight;
-    private int? _vramUsed;
+    private GpuReleaseObservation? _release;
     private string _phase = "idle";
     private bool _ready;
     private bool _holderUsable;
@@ -25,13 +25,13 @@ public sealed class GpuCoordinator(IModelHost models, IComfyClient comfy, IVramP
         lock (_gate)
             return new(_holder?.ToString() ?? "none", _switching ? "switching" : (_llmInFlight > 0 || ComfyBusy) ? "busy" : "idle",
                 _switching ? _phase : null, _llmInFlight, _comfy, _waiters.Select(w => new WaiterView(w.Target.ToString(), w.Kind,
-                    (clock.GetUtcNow() - w.Since).TotalSeconds)).ToArray(), _vramUsed);
+                    (clock.GetUtcNow() - w.Since).TotalSeconds)).ToArray(), _release?.GlobalUsedMiB, _release?.Basis, _release is not null);
     }
 
     public async Task<GpuView> SnapshotAsync(CancellationToken token)
     {
-        var used = await vram.ReadAsync(token).ConfigureAwait(false);
-        lock (_gate) _vramUsed = used;
+        var observation = await releaseGuard.ReadAsync(token).ConfigureAwait(false);
+        lock (_gate) _release = observation;
         return Snapshot();
     }
 
@@ -60,6 +60,18 @@ public sealed class GpuCoordinator(IModelHost models, IComfyClient comfy, IVramP
         }
         using var registration = cancellationToken.Register(() => Cancel(waiter, cancellationToken));
         return (await waiter.Completion.Task.ConfigureAwait(false))!;
+    }
+
+    public GpuLease AcquireResident()
+    {
+        lock (_gate)
+        {
+            if (_switching || _waiters.Any(w => w.Kind == "unload" || w.Target != _holder))
+                throw new GpuException("Model handoff is pending");
+            if (!_ready || !_holderUsable || _holder?.Model is null)
+                throw new GpuException("No resident model instance", 404);
+            return Lease(_holder);
+        }
     }
 
     public async Task UnloadAsync(string model, CancellationToken cancellationToken)
@@ -287,7 +299,7 @@ public sealed class GpuCoordinator(IModelHost models, IComfyClient comfy, IVramP
         SetPhase($"switching: unloading {model}");
         lock (_gate) { if (_holder?.Model == model) _holderUsable = false; }
         await models.UnloadAsync(model, token).ConfigureAwait(false);
-        await WaitModelAsync(model, "unloaded", options.Vram.ReleaseTimeoutSeconds, token).ConfigureAwait(false);
+        await WaitModelAsync(model, "unloaded", options.ReleaseTimeoutSeconds, token).ConfigureAwait(false);
     }
 
     private async Task WaitModelAsync(string model, string status, double timeout, CancellationToken token)
@@ -311,18 +323,18 @@ public sealed class GpuCoordinator(IModelHost models, IComfyClient comfy, IVramP
 
     private async Task ConfirmReleaseAsync(CancellationToken token)
     {
-        SetPhase("switching: waiting for VRAM release");
-        var deadline = clock.GetUtcNow().AddSeconds(options.Vram.ReleaseTimeoutSeconds);
-        int used;
+        SetPhase("switching: waiting for GPU release");
+        var deadline = clock.GetUtcNow().AddSeconds(options.ReleaseTimeoutSeconds);
+        GpuReleaseObservation? observation = null;
         do
         {
-            used = await vram.ReadAsync(token).ConfigureAwait(false);
-            lock (_gate) _vramUsed = used;
-            logger.LogInformation("VRAM used: {UsedMiB} MiB", used);
-            if (used <= options.Vram.ReleasedMaxUsedMiB) return;
+            observation = await releaseGuard.ReadAsync(token).ConfigureAwait(false);
+            lock (_gate) _release = observation;
+            logger.LogInformation("GPU release check: {Basis}, released {Released}", observation.Basis, observation.Released);
+            if (observation.Released) return;
             await Task.Delay(TimeSpan.FromMilliseconds(500), clock, token).ConfigureAwait(false);
         } while (clock.GetUtcNow() < deadline);
-        throw new GpuException($"GPU was not released: {used} MiB in use");
+        throw new GpuException($"GPU was not released: {observation.Basis}" + (observation.GlobalUsedMiB is { } used ? $", {used} MiB in use" : ""));
     }
 
     public override void Dispose()

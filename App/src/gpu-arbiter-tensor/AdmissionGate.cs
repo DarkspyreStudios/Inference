@@ -1,4 +1,5 @@
 using GpuArbiter.Gpu;
+using GpuArbiter.Proxy;
 
 namespace GpuArbiter.Tensor;
 
@@ -10,23 +11,7 @@ public sealed class AdmissionGate(GpuCoordinator coordinator, TensorOptions opti
         var admission = coordinator.AcquireAsync(GpuTarget.Llm(model), cancellation.Token);
         try
         {
-            if (stream)
-            {
-                var delay = Task.Delay(TimeSpan.FromSeconds(2), clock, cancellation.Token);
-                if (await Task.WhenAny(admission, delay) != admission)
-                {
-                    await delay;
-                    while (!admission.IsCompleted)
-                    {
-                        OpenAiOutput.BeginStream(context);
-                        await context.Response.WriteAsync($": waiting for GPU: {coordinator.WaitingReason()}\n\n", context.RequestAborted);
-                        await context.Response.Body.FlushAsync(context.RequestAborted);
-                        delay = Task.Delay(TimeSpan.FromSeconds(options.KeepaliveSeconds), clock, cancellation.Token);
-                        if (await Task.WhenAny(admission, delay) == admission) break;
-                        await delay;
-                    }
-                }
-            }
+            if (stream) await AdmissionWait.CommentsAsync(context, admission, coordinator, clock, options.KeepaliveSeconds);
             return await admission;
         }
         catch

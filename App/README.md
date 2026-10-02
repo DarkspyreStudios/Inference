@@ -6,7 +6,7 @@ application can own GPU admission on a machine at a time.
 
 The GPU arbiter shares one Windows x64 NVIDIA GPU between llama.cpp and a user-launched
 ComfyUI instance. The llama.cpp app targets .NET 10. The App solution uses the installed .NET 11 SDK.
-`GpuArbiter.Core` owns the shared GPU admission, Comfy handoff, VRAM probe and operational logging. Its solution, version and dependencies live in
+`GpuArbiter.Core` owns the shared GPU admission, Comfy handoff, GPU release guard and operational logging. Its solution, version and dependencies live in
 `App/`. The four Inference NuGet packages have a separate release.
 
 The app listens on HTTP port 8080 for OpenAI-compatible inference and port 8189 for the
@@ -39,7 +39,7 @@ Gated prompts and LLM acquisitions retain the VRAM release check.
 
 ## HTTP interface
 
-- `GET /gpu` returns holder, phase, handoff step, LLM request count, ComfyUI queue state, waiters and measured VRAM usage.
+- `GET /gpu` returns holder, phase, handoff step, LLM request count, ComfyUI queue state, waiters and measured VRAM usage with its release basis and observation availability.
 - `POST /models/load {"model":"id"}` waits for admission and a loaded model before returning `{"success":true}`.
 - `POST /models/unload {"model":"id"}` drains requests and waits for confirmed unload.
 - Inference POST routes include chat completions, completions, embeddings, responses, messages,
@@ -56,6 +56,10 @@ traffic. A router exit cancels active forwards and clears LLM ownership. The rou
 with exponential backoff from one second to thirty seconds. Daily arbiter and llama-server
 logs live in the configured log directory. Request bodies and credentials are not logged.
 
+The shared `IGpuReleaseGuard` publishes a release decision and its measurement basis.
+The Windows adapter measures global NVIDIA memory. `ReleaseTimeoutSeconds` bounds release polling
+and model unload independently of the NVIDIA threshold.
+
 ## Configuration and build
 
 `deploy/appsettings.json` is the configuration source copied into the build output. All
@@ -65,7 +69,7 @@ RTX 3090 Ti. One request can use the full pool; concurrent requests share its ca
 An 88,473-token prompt completes with at least 1,299 MiB free with ComfyUI running and idle.
 The 131,072-token profile leaves less than the required 1 GiB margin.
 Deployment on a different GPU requires measurement.
-`ReleasedMaxUsedMiB` is 2,482 MiB: the measured 1,458 MiB idle usage after ComfyUI frees
+`Vram.ReleasedMaxUsedMiB` is 2,482 MiB: the measured 1,458 MiB idle usage after ComfyUI frees
 its cached Chroma model, plus 1,024 MiB. Other hosts require their own idle measurement.
 
 Run from `App/` so `global.json` selects the .NET 11 SDK:

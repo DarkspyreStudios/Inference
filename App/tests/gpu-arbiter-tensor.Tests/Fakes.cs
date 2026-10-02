@@ -112,9 +112,9 @@ internal sealed class FakeComfy : IComfyClient
     public Task FreeAsync(CancellationToken token) => Task.CompletedTask;
 }
 
-internal sealed class FakeVram : IVramProbe
+internal sealed class FakeVram : IGpuReleaseGuard
 {
-    public Task<int> ReadAsync(CancellationToken token) => Task.FromResult(0);
+    public Task<GpuReleaseObservation> ReadAsync(CancellationToken token) => Task.FromResult(new GpuReleaseObservation(true, "test-global-memory", 0));
 }
 
 internal sealed class ApiRig : IAsyncDisposable

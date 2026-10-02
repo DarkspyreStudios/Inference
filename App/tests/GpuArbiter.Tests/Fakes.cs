@@ -54,10 +54,10 @@ internal sealed class FakeComfy : IComfyClient
     public Task<ComfyState> QueueAsync(CancellationToken token) => Task.FromResult(State);
     public Task FreeAsync(CancellationToken token) { Frees++; return Task.CompletedTask; }
 }
-internal sealed class FakeVram : IVramProbe
+internal sealed class FakeVram : IGpuReleaseGuard
 {
     public int Used { get; set; } = 700;
-    public Task<int> ReadAsync(CancellationToken token) => Task.FromResult(Used);
+    public Task<GpuReleaseObservation> ReadAsync(CancellationToken token) => Task.FromResult(new GpuReleaseObservation(Used <= 2500, "test-global-memory", Used));
 }
 
 internal sealed class TestClock : FakeTimeProvider

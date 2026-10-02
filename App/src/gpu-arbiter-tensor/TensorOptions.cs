@@ -22,7 +22,7 @@ public sealed class TensorOptions : CoordinatorOptions
             !Path.IsPathFullyQualified(Store) || !Path.IsPathFullyQualified(LogDir) ||
             KeepaliveSeconds <= 0 || MaximumChoices <= 0 || MaximumRequestBytes <= 0 || MaximumRequestBytes > 128 * 1024 * 1024 ||
             ModelLoadTimeoutSeconds <= 0 || Comfy.PollSeconds <= 0 ||
-            Vram.ReleaseTimeoutSeconds <= 0 || Vram.ReleasedMaxUsedMiB < 0)
+            ReleaseTimeoutSeconds <= 0 || Vram.ReleasedMaxUsedMiB < 0)
             throw new InvalidOperationException("Invalid Tensor arbiter paths, ports or limits.");
         var aliases = new HashSet<string>(StringComparer.Ordinal);
         foreach (var model in Models)

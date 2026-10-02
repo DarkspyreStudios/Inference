@@ -56,7 +56,7 @@ One host coordinator owns admission, waiters, resident-model selection, request 
 handoffs. Tensor's execution coordinator continues to serialize execution inside an engine; it
 does not become a second owner of host admission or Comfy state.
 
-`GpuArbiter.Core` owns the shared coordinator, Comfy proxy gate, VRAM probe and logging.
+`GpuArbiter.Core` owns the shared coordinator, Comfy proxy gate, GPU release guard and logging.
 The existing llama.cpp app implements `IModelHost` over its router. The sibling Tensor app
 implements that seam over `ITensorModelInstance`. It hosts no llama-server supervisor or
 inference HTTP forwarder. Only one app can own the GPU at a time. Different listening ports

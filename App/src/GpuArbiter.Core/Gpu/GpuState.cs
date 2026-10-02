@@ -8,7 +8,7 @@ public sealed record GpuTarget(string? Model)
 }
 public sealed record WaiterView(string Target, string Kind, double WaitingSeconds);
 public sealed record GpuView(string Holder, string Phase, string? HandoffStep, int LlmInFlight,
-    Backends.ComfyState Comfy, IReadOnlyList<WaiterView> Waiters, int? VramUsedMiB);
+    Backends.ComfyState Comfy, IReadOnlyList<WaiterView> Waiters, int? VramUsedMiB, string? ReleaseBasis, bool ReleaseObservationAvailable);
 public sealed class GpuException(string message, int statusCode = 503) : Exception(message)
 {
     public int StatusCode { get; } = statusCode;

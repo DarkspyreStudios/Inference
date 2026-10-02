@@ -45,7 +45,7 @@ builder.Services.AddSingleton<TensorModelHost>();
 builder.Services.AddSingleton<ITensorModelHost>(services => services.GetRequiredService<TensorModelHost>());
 builder.Services.AddSingleton<IModelHost>(services => services.GetRequiredService<TensorModelHost>());
 builder.Services.AddHttpClient<IComfyClient, ComfyClient>(http => { http.BaseAddress = new(options.Comfy.Url); http.Timeout = TimeSpan.FromSeconds(5); });
-builder.Services.AddSingleton<IVramProbe, VramProbe>();
+builder.Services.AddSingleton<IGpuReleaseGuard, NvidiaReleaseGuard>();
 builder.Services.AddSingleton<GpuCoordinator>();
 builder.Services.AddHostedService(services => services.GetRequiredService<TensorModelHost>());
 builder.Services.AddHostedService(services => services.GetRequiredService<GpuCoordinator>());

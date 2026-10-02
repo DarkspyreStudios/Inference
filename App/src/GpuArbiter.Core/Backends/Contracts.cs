@@ -16,7 +16,9 @@ public interface IComfyClient
     Task<ComfyState> QueueAsync(CancellationToken cancellationToken);
     Task FreeAsync(CancellationToken cancellationToken);
 }
-public interface IVramProbe
+public sealed record GpuReleaseObservation(bool Released, string Basis, int? GlobalUsedMiB);
+
+public interface IGpuReleaseGuard
 {
-    Task<int> ReadAsync(CancellationToken cancellationToken);
+    Task<GpuReleaseObservation> ReadAsync(CancellationToken cancellationToken);
 }

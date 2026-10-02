@@ -30,7 +30,7 @@ builder.Services.AddHttpClient<IComfyClient, ComfyClient>(http =>
 builder.Services.AddHttpClient("health", http => http.Timeout = TimeSpan.FromSeconds(2));
 builder.Services.AddHttpClient("llm", http => http.Timeout = Timeout.InfiniteTimeSpan)
     .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler { AllowAutoRedirect = false, UseCookies = false });
-builder.Services.AddSingleton<IVramProbe, VramProbe>();
+builder.Services.AddSingleton<IGpuReleaseGuard, NvidiaReleaseGuard>();
 builder.Services.AddSingleton<GpuCoordinator>();
 builder.Services.AddHostedService(services => services.GetRequiredService<GpuCoordinator>());
 builder.Services.AddHostedService<ComfyWatcher>();

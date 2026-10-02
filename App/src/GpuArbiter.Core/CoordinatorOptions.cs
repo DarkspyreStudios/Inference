@@ -4,6 +4,7 @@ public class CoordinatorOptions
 {
     public virtual int ModelLoadTimeoutSeconds { get; set; } = 300;
     public ComfyOptions Comfy { get; set; } = new();
+    public double ReleaseTimeoutSeconds { get; set; } = 60;
     public VramOptions Vram { get; set; } = new();
 }
 
@@ -16,5 +17,4 @@ public sealed class ComfyOptions
 public sealed class VramOptions
 {
     public int ReleasedMaxUsedMiB { get; set; } = 2500;
-    public double ReleaseTimeoutSeconds { get; set; } = 60;
 }
