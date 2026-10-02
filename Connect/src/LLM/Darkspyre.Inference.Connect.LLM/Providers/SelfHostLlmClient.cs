@@ -56,6 +56,7 @@ internal sealed class SelfHostLlmClient(ILlmSelfHost host) : ILlmClient, ILlmCon
     {
         ArgumentNullException.ThrowIfNull(connection);
         ArgumentNullException.ThrowIfNull(request);
+        request = ClientTools.Snapshot(request);
         ValidateOptions(connection, request);
         HostedTools.Validate(request, GetCapabilities(connection, request.ModelId));
         ClientTools.Validate(request, GetCapabilities(connection, request.ModelId).SupportsShellTools);

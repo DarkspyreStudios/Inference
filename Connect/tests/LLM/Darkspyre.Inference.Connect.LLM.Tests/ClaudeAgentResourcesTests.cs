@@ -626,12 +626,13 @@ public sealed class ClaudeAgentResourcesTests : IDisposable
             if (holdControl) Assert.True(await first);
             Assert.IsType<LlmAgentTurnStartedEvent>(turn.Current);
             drain = DrainTurnAsync();
-            _ = await process.WaitForUserMessage(limit.Token);
+            string uuid = await process.WaitForUserMessage(limit.Token);
             JsonElement user = Assert.Single(process.Writes(), root => root.GetProperty("type").GetString() == "user");
             JsonElement content = user.GetProperty("message").GetProperty("content");
             JsonElement document = Assert.Single(content.EnumerateArray(), part => part.GetProperty("type").GetString() == "document");
             Assert.Equal("text", document.GetProperty("source").GetProperty("type").GetString());
             Assert.Equal("original", document.GetProperty("source").GetProperty("data").GetString());
+            process.Push(new { type = "user", isReplay = true, uuid, message = new { role = "user", content = "hello" } });
             process.Push(new { type = "result", uuid = "result", subtype = "success", result = "actual" });
             await drain;
         }

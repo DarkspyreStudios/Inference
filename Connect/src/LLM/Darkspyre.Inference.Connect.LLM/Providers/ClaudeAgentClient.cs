@@ -560,6 +560,7 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             using LlmOperationLifetime.Lease operation = _lifetime.Enter(cancellationToken);
             cancellationToken = operation.Token;
             ArgumentNullException.ThrowIfNull(request);
+            request = ClientTools.Snapshot(request);
             NativeAgentContract.ValidateTurn(request);
             if (request.Input.Count == 0 && request.Attachments.Count == 0)
             {

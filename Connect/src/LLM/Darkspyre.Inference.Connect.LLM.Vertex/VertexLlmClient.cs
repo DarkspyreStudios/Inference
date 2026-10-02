@@ -55,6 +55,7 @@ internal sealed class VertexLlmClient(HttpClient http, IVertexAuthentication aut
         LlmConnection connection, LlmChatRequest request, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
+        request = ClientTools.Snapshot(request);
         VertexModelProfile profile = VertexModelProfiles.Get(request.ModelId);
         LlmProviderCapabilities capabilities = GetCapabilities(connection, request.ModelId);
         ValidateRequest(connection, request, capabilities, profile.IsClaude ? AnthropicTools.Resolve(connection, request).NativeNames : null);

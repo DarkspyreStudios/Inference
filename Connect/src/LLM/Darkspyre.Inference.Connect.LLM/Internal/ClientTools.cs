@@ -66,6 +66,11 @@ internal static class ClientTools
         HostedTools = HostedTools.Snapshot(options.HostedTools)
     };
 
+    internal static LlmAgentTurnRequest Snapshot(LlmAgentTurnRequest request) => request with
+    {
+        Attachments = Array.AsReadOnly(request.Attachments.Select(LlmAttachments.Copy).ToArray())
+    };
+
     private static ReadOnlyCollection<LlmAgentClientToolDefinition> Snapshot(IReadOnlyList<LlmAgentClientToolDefinition> tools) =>
         Array.AsReadOnly(tools.Select(tool => tool switch
         {
@@ -84,6 +89,8 @@ internal static class ClientTools
         }).ToArray()),
         Messages = Array.AsReadOnly(request.Messages.Select(message => message with
         {
+            Attachments = Array.AsReadOnly(message.Attachments.Select(LlmAttachments.Copy).ToArray()),
+            OmittedAttachments = Array.AsReadOnly(message.OmittedAttachments.ToArray()),
             ToolCalls = Array.AsReadOnly(message.ToolCalls.Select(Snapshot).ToArray()),
             ToolResults = Array.AsReadOnly(message.ToolResults.Select(result => result switch
             {

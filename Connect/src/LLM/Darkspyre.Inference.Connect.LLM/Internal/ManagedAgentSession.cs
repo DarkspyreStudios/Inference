@@ -749,12 +749,11 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
         {
             throw new NotSupportedException("The selected model disables the requested agent operation.");
         }
-        return turn with
+        return ClientTools.Snapshot(turn) with
         {
             ModelId = turn.ModelId ?? _options.ModelId,
             ProviderControls = effective.ProviderControls,
             Input = Array.AsReadOnly(turn.Input.ToArray()),
-            Attachments = Array.AsReadOnly(turn.Attachments.Select(LlmAttachments.Copy).ToArray()),
             OutputSchema = turn.OutputSchema?.Clone()
         };
     }
