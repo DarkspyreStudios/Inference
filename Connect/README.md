@@ -1533,6 +1533,13 @@ Read failures retain safe status and request identifiers as ordinary provider or
 with both safe operation and cleanup facts when they fail together. They do not imply a mutation,
 publish late receipts or establish resource/account authority.
 
+The internal Gemini cache read adapter builds fixed GET and one-page LIST routes from an admitted
+connection. It reuses the Gemini API endpoint and API-key rules, validates native resource names and
+model IDs, and replaces imported receipt scope data with the caller-supplied scope after an exact
+GET identity check. LIST preserves actual page order and continuation tokens. Requests are owned;
+HTTP and owner fences are borrowed. The adapter issues no scope authority, retains no cache catalog
+and does not enable public binding, generation selection or cache creation.
+
 The private Google cache mutation boundary borrows already-authorized PATCH or DELETE requests and
 the existing caller and SDK-generation owners. It validates update receipt identity and observed
 expiry before publication. Delete success acknowledges `AlreadyAbsent=false`; only HTTP 404 can
