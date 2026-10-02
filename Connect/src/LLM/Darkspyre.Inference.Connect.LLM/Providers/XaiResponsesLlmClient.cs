@@ -269,6 +269,7 @@ internal sealed class XaiResponsesLlmClient(HttpClient http) : ResponsesLlmClien
 
     private static void ValidateEndpoint(LlmConnection connection)
     {
+        RuntimeInputAdmission.Validate(connection);
         if (connection.Transport != LlmTransport.XaiResponses) throw new ArgumentException("Select the Grok Responses transport.", nameof(connection));
         XaiConnectionOptions options = connection.Xai ?? new();
         if (!Enum.IsDefined(options.ServiceTier)) throw new ArgumentOutOfRangeException(nameof(connection), "Select an xAI service tier.");

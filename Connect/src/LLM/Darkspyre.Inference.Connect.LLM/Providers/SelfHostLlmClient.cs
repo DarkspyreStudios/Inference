@@ -29,6 +29,7 @@ internal sealed class SelfHostLlmClient(ILlmSelfHost host) : ILlmClient, ILlmCon
     public LlmProviderCapabilities GetCapabilities(LlmConnection connection, string? modelId = null)
     {
         ArgumentNullException.ThrowIfNull(connection);
+        RuntimeInputAdmission.Validate(connection);
         CommonLlm.LlmCapabilities? engine = host.GetCapabilities(connection.Endpoint, modelId);
         return engine is null
             ? new LlmProviderCapabilities { SupportsStreaming = true, SupportsModelListing = true, SupportsAgentSessions = true, Agent = Agent }
@@ -38,6 +39,7 @@ internal sealed class SelfHostLlmClient(ILlmSelfHost host) : ILlmClient, ILlmCon
     public async Task<IReadOnlyList<LlmModel>> ListModelsAsync(LlmConnection connection, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(connection);
+        RuntimeInputAdmission.Validate(connection);
         CommonLlm.ILlmInference engine = await host.GetInferenceAsync(connection.Endpoint, cancellationToken).ConfigureAwait(false);
         IReadOnlyList<CommonLlm.LlmModelInfo> models = await engine.ListModelsAsync(cancellationToken).ConfigureAwait(false);
         return models.Select(model => new LlmModel(model.Id, model.DisplayName, model.OwnedBy,
@@ -104,6 +106,8 @@ internal sealed class SelfHostLlmClient(ILlmSelfHost host) : ILlmClient, ILlmCon
 
     internal static (string Code, string Message)? UnsupportedOptions(LlmConnection connection, LlmChatRequest? request = null)
     {
+        try { RuntimeInputAdmission.Validate(connection); }
+        catch (NotSupportedException error) { return ("self-host-runtime-inputs", error.Message); }
         if (request?.ExplicitCache is not null)
         { return ("self-host-explicit-cache", "SelfHost does not forward native provider cache receipts."); }
         if (request?.Resources is not null)

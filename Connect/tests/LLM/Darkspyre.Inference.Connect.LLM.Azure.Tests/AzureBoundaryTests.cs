@@ -6,6 +6,34 @@ namespace Darkspyre.Inference.Connect.LLM.Azure.Tests;
 
 public sealed class AzureBoundaryTests
 {
+    [Theory]
+    [InlineData("acp")]
+    [InlineData("copilot")]
+    [InlineData("launch")]
+    [InlineData("copilot-token")]
+    [InlineData("runtime-token")]
+    public async Task BothAzureProtocolsRefuseForeignRuntimeInputsBeforeHttp(string input)
+    {
+        foreach (bool responses in new[] { true, false })
+        {
+            using var handler = new AzureProtocolTests.Handler(responses, false);
+            using var http = new HttpClient(handler);
+            LlmConnection connection = AzureProtocolTests.Connection(responses, false);
+            var profile = new LlmAgentRuntimeProfile { Id = "profile", DeclaredRuntimeVersion = "declared" };
+            connection = input switch
+            {
+                "acp" => connection with { Acp = new() { Profile = profile, State = new LlmAgentAdoptedRuntimeState("/selected/state"), Authentication = new LlmAcpExternalAuthentication() } },
+                "copilot" => connection with { Copilot = new() { Profile = profile, Authentication = new LlmCopilotRuntimeAccount() } },
+                "launch" => connection with { RuntimeLaunchInputs = new() },
+                "copilot-token" => connection with { Credential = (LlmCredential.Parse(connection.Credential)! with { Copilot = new() { AccessToken = "foreign" } }).Serialize() },
+                _ => connection with { Credential = (LlmCredential.Parse(connection.Credential)! with { CopilotRuntime = new() { ConnectionToken = "foreign" } }).Serialize() }
+            };
+            Assert.Throws<NotSupportedException>(() => AzureEndpoints.Validate(connection));
+            await Assert.ThrowsAsync<NotSupportedException>(() => AzureProtocolTests.Complete(AzureProtocolTests.Client(http, responses), connection, AzureProtocolTests.Request));
+            Assert.Equal(0, handler.Calls);
+        }
+    }
+
     [Fact]
     public void TransportDiscriminatorsPreserveExistingIdsAndReservedGrokSlot()
     {

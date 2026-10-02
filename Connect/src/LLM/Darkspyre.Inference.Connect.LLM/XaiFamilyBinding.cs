@@ -60,6 +60,7 @@ public sealed class XaiFamilyBinding
 
     private static void ValidateConnection(LlmConnection connection)
     {
+        Internal.RuntimeInputAdmission.Validate(connection);
         if (connection.Transport != LlmTransport.XaiResponses)
             throw new ArgumentException("A cross-family xAI binding requires the xAI transport.");
         if (!string.Equals(connection.Endpoint.TrimEnd('/'), (connection.Xai ?? new()).GetEndpoint(), StringComparison.Ordinal))

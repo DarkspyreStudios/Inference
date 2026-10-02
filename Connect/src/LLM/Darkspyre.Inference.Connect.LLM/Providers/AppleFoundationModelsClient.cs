@@ -296,6 +296,7 @@ internal sealed class AppleFoundationModelsClient(HttpClient http, IAppleProcess
 
     internal static void ValidateConnection(LlmConnection connection)
     {
+        RuntimeInputAdmission.Validate(connection);
         ArgumentNullException.ThrowIfNull(connection);
         if (connection.Transport != LlmTransport.AppleFoundationModels) throw new ArgumentException("Wrong Apple connection transport.");
         if (string.IsNullOrWhiteSpace(connection.Endpoint) || connection.Endpoint.IndexOfAny(['\0', '\r', '\n']) >= 0

@@ -14,6 +14,7 @@ internal sealed class OpenAiEmbeddingClient(HttpClient http) : ILlmEmbeddingClie
     public void ValidateRequest(LlmConnection connection, LlmEmbeddingRequest request)
     {
         ArgumentNullException.ThrowIfNull(connection);
+        RuntimeInputAdmission.Validate(connection);
         ArgumentNullException.ThrowIfNull(request);
         if (!Supports(connection.Transport))
             throw new NotSupportedException("The configured transport does not support this embedding client.");

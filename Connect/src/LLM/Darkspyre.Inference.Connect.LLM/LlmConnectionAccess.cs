@@ -45,6 +45,7 @@ public sealed class LlmConnectionAccess : IDisposable, IAsyncDisposable
         using LlmOperationLifetime.Lease operation = _lifetime.Enter(cancellationToken);
         LlmConnection connection = await LlmConnectionResolver.ResolveAsync(Connections, connectionId, operation.Token);
         ThrowIfAcquisitionCanceled(operation.Token);
+        RuntimeInputAdmission.Validate(connection);
         if (validate is not null)
         {
             connection = EmbeddingRequestData.Snapshot(connection);
@@ -71,6 +72,7 @@ public sealed class LlmConnectionAccess : IDisposable, IAsyncDisposable
     private async Task<LlmConnection> RefreshCoreAsync(string connectionId, LlmConnection connection, CancellationToken cancellationToken)
     {
         ThrowIfAcquisitionCanceled(cancellationToken);
+        RuntimeInputAdmission.Validate(connection);
         if (_ignoresStoredCredential.Contains(connection.Transport)) return connection;
         LlmCredential? credential = LlmCredential.Parse(connection.Credential);
         if (credential?.OAuth is null || !_authenticators.TryGetValue(connection.Transport, out ILlmAuthenticator? authenticator))
@@ -78,6 +80,7 @@ public sealed class LlmConnectionAccess : IDisposable, IAsyncDisposable
 
         LlmCredential fresh = await authenticator.EnsureFreshAsync(credential, cancellationToken);
         ThrowIfAcquisitionCanceled(cancellationToken);
+        RuntimeInputAdmission.ValidateCredential(connection.Transport, fresh);
         if (fresh == credential) return connection;
         string json = fresh.Serialize();
         ThrowIfAcquisitionCanceled(cancellationToken);

@@ -1,3 +1,5 @@
+using Darkspyre.Inference.Connect.LLM.Internal;
+
 namespace Darkspyre.Inference.Connect.LLM.Providers;
 
 internal static class ClaudeCliConfiguration
@@ -5,6 +7,7 @@ internal static class ClaudeCliConfiguration
     public static LlmCredential? ValidateConnection(LlmConnection connection)
     {
         ArgumentNullException.ThrowIfNull(connection);
+        RuntimeInputAdmission.Validate(connection);
         if (connection.Transport != LlmTransport.AnthropicClaudeCli)
         {
             throw new ArgumentException(

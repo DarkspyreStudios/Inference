@@ -6,6 +6,7 @@ internal static class AzureEndpoints
 {
     internal static Uri Validate(LlmConnection connection, string? deployment = null, bool requireCredential = true)
     {
+        RuntimeInputAdmission.Validate(connection);
         if (connection.Transport is not (LlmTransport.AzureOpenAiResponses or LlmTransport.AzureOpenAiChat)
             || connection.Azure is not { ApiMode: LlmAzureApiMode.V1, AuthenticationMode: LlmAzureAuthenticationMode.ApiKey } config)
             throw new ArgumentException("Select an Azure v1 transport and API-key configuration.");

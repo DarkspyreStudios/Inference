@@ -481,6 +481,7 @@ internal sealed class BedrockAgentCoreLlmClient(IBedrockAgentCoreInvoker invoker
 
     private void ValidateConnection(LlmConnection connection)
     {
+        RuntimeInputAdmission.Validate(connection);
         ArgumentNullException.ThrowIfNull(connection);
         if (connection.Transport != Transport)
         {

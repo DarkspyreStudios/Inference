@@ -366,6 +366,7 @@ internal abstract class LlmClientBase(HttpClient http) : ILlmClient
 
     protected void EnsureTransport(LlmConnection connection)
     {
+        RuntimeInputAdmission.Validate(connection);
         if (connection.Transport != Transport)
         {
             throw new ArgumentException(

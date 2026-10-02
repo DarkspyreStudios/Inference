@@ -792,6 +792,7 @@ internal sealed class AntigravityCliLlmClient(IAntigravityCliRunner runner)
     /// <summary>Rejects a connection of another transport or one that carries configuration the CLI owns.</summary>
     internal static void ValidateConnection(LlmConnection connection)
     {
+        RuntimeInputAdmission.Validate(connection);
         ArgumentNullException.ThrowIfNull(connection);
         if (connection.Transport != LlmTransport.GoogleAntigravityCli)
         {
