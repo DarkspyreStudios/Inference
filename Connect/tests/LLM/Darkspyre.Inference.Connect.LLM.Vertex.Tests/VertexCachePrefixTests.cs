@@ -84,6 +84,29 @@ public sealed class VertexCachePrefixTests
     }
 
     [Fact]
+    public async Task ClonedRawOccurrencesDeduplicateExactBytesAndMimeWithoutDroppingOrder()
+    {
+        using var handler = new Handler(); using var http = new HttpClient(handler);
+        await using var facade = new LlmProviderService(new Source(Connection(true)), [new VertexLlmClient(http, new Authentication())]);
+        var caches = await facade.BindContextCacheAsync("connection");
+        LlmAttachment Image(string mime, string text) => new()
+        { Kind = LlmBinaryKind.Image, FileName = "image", MediaType = mime, Data = System.Text.Encoding.UTF8.GetBytes(text) };
+        _ = await caches.CreateAsync(Request() with { Messages = [new("user", "prefix")
+        { Attachments = [Image("image/png", "abc"), Image("image/png", "abc"), Image("image/jpeg", "abc"), Image("image/png", "xyz")] }] });
+        Assert.Equal(4, handler.Paths.Count);
+        Assert.Equal(2, handler.UploadBodies.Count(bytes => bytes.AsSpan().SequenceEqual("abc"u8)));
+        Assert.Equal(1, handler.UploadBodies.Count(bytes => bytes.AsSpan().SequenceEqual("xyz"u8)));
+        using JsonDocument body = JsonDocument.Parse(handler.CacheBody!);
+        var parts = body.RootElement.GetProperty("contents")[0].GetProperty("parts");
+        Assert.Equal(5, parts.GetArrayLength());
+        Assert.Equal("prefix", parts[0].GetProperty("text").GetString());
+        string UriAt(int index) => parts[index].GetProperty("fileData").GetProperty("fileUri").GetString()!;
+        Assert.Equal(UriAt(1), UriAt(2)); Assert.NotEqual(UriAt(1), UriAt(3)); Assert.NotEqual(UriAt(1), UriAt(4));
+        Assert.Equal("image/jpeg", parts[3].GetProperty("fileData").GetProperty("mimeType").GetString());
+        Assert.Equal("image/png", parts[4].GetProperty("fileData").GetProperty("mimeType").GetString());
+    }
+
+    [Fact]
     public async Task UnknownNamedLengthReadsOnceThroughRemainingOccurrenceBudgetWithoutTruncating()
     {
         var resources = new Resources(new byte[InlineBytes / 2 + 1], null);
@@ -204,6 +227,49 @@ public sealed class VertexCachePrefixTests
         Assert.Equal(3, error.Failure.BytesTransferred); Assert.Equal(1, handler.Sends);
     }
 
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public async Task NamedReadRetirementDrainsAndNeverCreatesCache(bool staging, bool ignoresCancellation)
+    {
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var resources = new Resources("abc"u8.ToArray(), null)
+        {
+            ReadWait = token =>
+            {
+                entered.TrySetResult();
+                return ignoresCancellation ? release.Task : release.Task.WaitAsync(token);
+            }
+        };
+        using var handler = new Handler(); using var http = new HttpClient(handler);
+        var facade = new LlmProviderService(new Source(Connection(staging)), [new VertexLlmClient(http, new Authentication())]);
+        Task<LlmContextCache>? create = null; Task? retirement = null;
+        try
+        {
+            var caches = await facade.BindContextCacheAsync("connection");
+            create = caches.CreateAsync(Request() with { Resources = resources, Messages = [new("user", "prefix")
+            { Attachments = [new LlmResourceAttachment(resources.Reference)] }] });
+            await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            retirement = facade.DisposeAsync().AsTask();
+            if (ignoresCancellation) { Assert.False(retirement.IsCompleted); Assert.False(create.IsCompleted); }
+            release.TrySetResult();
+            var error = await Assert.ThrowsAsync<InferenceResourceOperationCanceledException>(() => create);
+            Assert.Equal(InferenceResourceCommitOutcome.NotAttempted, error.Failure.CommitOutcome);
+            await retirement;
+            Assert.Null(handler.CacheBody); Assert.Equal(staging ? 1 : 0, handler.Paths.Count);
+            Assert.Equal(1, resources.Opened); Assert.Equal(1, resources.Closed); Assert.Equal(0, resources.SelectionCalls);
+        }
+        finally
+        {
+            retirement ??= facade.DisposeAsync().AsTask(); release.TrySetResult();
+            try { if (create is not null) { try { await create; } catch (OperationCanceledException) { } } }
+            finally { await retirement; }
+        }
+    }
+
     private sealed class InterruptedUploadHandler(HttpStatusCode status) : HttpMessageHandler
     {
         internal int Sends { get; private set; }
@@ -242,6 +308,7 @@ public sealed class VertexCachePrefixTests
         internal List<long?> Lengths { get; } = [];
         internal List<bool> Chunked { get; } = [];
         internal byte[]? UploadBytes { get; private set; }
+        internal List<byte[]> UploadBodies { get; } = [];
         internal string? UploadName { get; private set; }
         internal string? CacheBody { get; private set; }
         internal Action? BeforePost { get; init; }
@@ -253,6 +320,7 @@ public sealed class VertexCachePrefixTests
             {
                 Lengths.Add(request.Content!.Headers.ContentLength); Chunked.Add(request.Headers.TransferEncodingChunked == true);
                 UploadBytes = await request.Content.ReadAsByteArrayAsync(token);
+                UploadBodies.Add(UploadBytes);
                 string name = Uri.UnescapeDataString(request.RequestUri.Query.Split('&').Single(part => part.StartsWith("name=", StringComparison.Ordinal))[5..]);
                 UploadName = name;
                 var facts = new Dictionary<string, string> { ["bucket"] = "cache-bucket", ["name"] = name,
@@ -273,11 +341,12 @@ public sealed class VertexCachePrefixTests
         internal int Closed { get; private set; }
         internal long BytesRead { get; private set; }
         internal int SelectionCalls { get; private set; }
+        internal Func<CancellationToken, Task>? ReadWait { get; init; }
         private InferenceResourceDescriptor Descriptor => new(Reference, SessionId, "source", descriptorMime, known);
         private InferenceResourceDescriptor ObservedDescriptor => Descriptor with { ContentType = handleMime };
         public Task<InferenceResourceDescriptor?> GetAsync(InferenceResourceReference reference, CancellationToken cancellationToken = default) => Task.FromResult<InferenceResourceDescriptor?>(Descriptor);
         public Task<IInferenceResourceReadHandle> OpenReadAsync(InferenceResourceReference reference, CancellationToken cancellationToken = default)
-        { Opened++; return Task.FromResult<IInferenceResourceReadHandle>(new Read(this, new MemoryStream(bytes, writable: false))); }
+        { Opened++; return Task.FromResult<IInferenceResourceReadHandle>(new Read(this, new HeldStream(this, bytes))); }
         public Task<IInferenceResourceWriteHandle> OpenWriteAsync(InferenceResourceCreate resource, CancellationToken cancellationToken = default) => throw new InvalidOperationException();
         public Task<InferenceResourceSelection> GetSelectionAsync(CancellationToken cancellationToken = default) { SelectionCalls++; throw new InvalidOperationException(); }
         public Task<InferenceResourceSelection> SelectAsync(IReadOnlyList<InferenceResourceReference> references, CancellationToken cancellationToken = default) => throw new InvalidOperationException();
@@ -287,6 +356,14 @@ public sealed class VertexCachePrefixTests
             public InferenceResourceDescriptor Resource => owner.ObservedDescriptor;
             public Stream Content => stream;
             public ValueTask DisposeAsync() { owner.BytesRead = stream.Position; owner.Closed++; stream.Dispose(); return ValueTask.CompletedTask; }
+        }
+        private sealed class HeldStream(Resources owner, byte[] bytes) : MemoryStream(bytes, writable: false)
+        {
+            public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+            {
+                if (owner.ReadWait is { } wait) await wait(cancellationToken);
+                return await base.ReadAsync(buffer, CancellationToken.None);
+            }
         }
     }
 }

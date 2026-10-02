@@ -42,6 +42,18 @@ public sealed class VertexCacheConfigurationTests
         Assert.ThrowsAny<Exception>(() => JsonSerializer.Deserialize(json, ConnectLlmJson.LlmVertexCacheStaging));
 
     [Fact]
+    public void OlderConnectionWithoutStagingKeepsUnknownOptionalConfiguration()
+    {
+        const string json = "{\"Version\":\"1\",\"Transport\":11,\"Endpoint\":\"https://aiplatform.googleapis.com\",\"Vertex\":{\"ProjectId\":\"project\",\"Location\":\"global\",\"AuthenticationMode\":0}}";
+        var connection = JsonSerializer.Deserialize(json, ConnectLlmJson.Connection)!;
+        Assert.Equal("project", connection.Vertex!.ProjectId);
+        Assert.Equal("global", connection.Vertex.Location);
+        Assert.Null(connection.Vertex.CacheStaging);
+        var restored = JsonSerializer.Deserialize(JsonSerializer.Serialize(connection, ConnectLlmJson.Connection), ConnectLlmJson.Connection)!;
+        Assert.Equal(connection.Vertex, restored.Vertex);
+    }
+
+    [Fact]
     public void SettingsRetainEditClearAndValidateExplicitStagingWithoutEffects()
     {
         var existing = Connection(new("cache-bucket", "original/"));
