@@ -95,6 +95,18 @@ $env:PATH = 'G:\AI\llama.cpp\b11238;' + $env:PATH
 .\gpu-arbiter-tensor.exe
 ```
 
+The reference RTX 3090 Ti native smoke is blocked with this dependency pin. Both shipped
+CUDA PTX files target `sm_120`; the GPU reports compute capability 8.6. The driver rejects the
+main module with CUDA error 218 and TensorSharp reports a slow CPU fallback. Successful
+startup and model listing do not prove GPU execution. Do not use this artifact's fallback
+for a speed comparison or deploy it for CUDA inference on that GPU.
+
+A compatible dependency needs PTX rebuilt from the matching TensorSharp source with
+`CudaArch=compute_86` (or a verified portable target), then published under a new immutable
+package version. The GPU box has no `nvcc` installation. Building there requires NVIDIA
+CUDA Toolkit 12.8 or newer with its compiler and supported Visual Studio C++ build tools.
+The app continues to consume the package; it does not rewrite PTX or copy engine source.
+
 `GgmlCuda` is a distinct backend. Its CUDA bridge is not included in the published TensorSharp
 2.8.6.7 package. Provision that bridge through the TensorSharp native build documented in
 `Tensor/README.md` before selecting it. A managed package restore does not certify native GPU

@@ -124,6 +124,24 @@ only identifiers, lifecycle transitions, timings and failures without protected 
 - Prepare a Windows publish artifact and run a side-by-side live Qwen smoke test on an unused port.
 - Install or deploy the sibling service only after explicit deployment approval.
 
+## Verification evidence
+
+The App solution builds in Release with zero warnings. The 23 Tensor adapter tests and 20
+shared/llama arbiter tests pass. Formatting verification for the new app and tests passes.
+The dependency vulnerability audit reports no vulnerable packages. The Windows x64
+self-contained publish contains both owned CUDA PTX files and its .NET runtime.
+
+On the reference GPU box, the host starts on 8082 and lists the configured Qwen alias without
+loading it. The Qwen GGUF imports through the public resolver and pack manager. Native
+inference is blocked: TensorSharp CUDA 2.8.6.7 supplies PTX targeting `sm_120`, while the
+RTX 3090 Ti reports compute capability 8.6. PTX JIT fails with CUDA error 218. The runtime
+reports CPU fallback, so the live test stops without a performance result. The original
+llama.cpp Qwen holder is restored. The sibling service is not installed or deployed.
+
+A compatible, newly versioned TensorSharp dependency is required before the native smoke and
+speed comparison can pass. Building the kernels on the GPU box also requires installation of
+CUDA Toolkit with `nvcc`; the existing cuBLAS runtime DLLs do not provide a compiler.
+
 ## References
 
 - `App/README.md` — existing admission and Comfy handoff contract.
