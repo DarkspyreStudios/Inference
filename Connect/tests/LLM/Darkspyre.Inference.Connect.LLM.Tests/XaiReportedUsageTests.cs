@@ -1,4 +1,5 @@
 using System.Net;
+using System.Globalization;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Runtime.Loader;
@@ -119,6 +120,39 @@ public sealed class XaiReportedUsageTests
     }
 
     [Theory]
+    [InlineData("1", "0.0000000001")]
+    [InlineData("18446744073709551615", "1844674407.3709551615")]
+    [InlineData("79228162514264337593543950335", "7922816251426433759.3543950335")]
+    [InlineData("792281625142643375935439503350000000000", "79228162514264337593543950335")]
+    public async Task TickConversionIsExactAcrossRepresentableDecimalScales(string ticks, string expected)
+    {
+        LlmUsage usage = Assert.IsType<LlmUsage>((await Complete("{\"cost_in_usd_ticks\":" + ticks + "}", true)).Usage);
+        Assert.Equal(decimal.Parse(expected, CultureInfo.InvariantCulture), usage.ProviderReportedCostUsd);
+    }
+
+    [Fact]
+    public async Task UnrepresentableTickPrecisionStaysUnknownWithoutRounding()
+    {
+        LlmUsage usage = Assert.IsType<LlmUsage>((await Complete("""{"cost_in_usd_ticks":79228162514264337593543950336,"num_sources_used":1}""", true)).Usage);
+        Assert.Null(usage.ProviderReportedCostUsd);
+        Assert.Equal(1, usage.HostedSourcesUsed);
+    }
+
+    [Theory]
+    [InlineData("response.incomplete", "incomplete", LlmCompletionStatus.Incomplete)]
+    [InlineData("response.failed", "failed", LlmCompletionStatus.Failed)]
+    public async Task ActualNonSuccessTerminalPreservesItsReportedUsage(string eventType, string status, LlmCompletionStatus expected)
+    {
+        string answer = Answer(Facts).Replace("\"status\":\"completed\"", "\"status\":\"" + status + "\"", StringComparison.Ordinal);
+        string body = "data: {\"type\":\"" + eventType + "\",\"response\":" + answer + "}\n\n";
+        using var http = new HttpClient(new Handler(body, true));
+        LlmChatResult result = Assert.Single((await Read(new XaiResponsesLlmClient(http).StreamAsync(Connection(true), Request()))).OfType<LlmChatCompletionEvent>()).Result;
+        Assert.Equal(expected, result.Status);
+        Assert.Equal(0.0037756001m, result.Usage!.ProviderReportedCostUsd);
+        Assert.Equal(23, result.Usage.HostedToolCallCount);
+    }
+
+    [Theory]
     [InlineData(false)]
     [InlineData(true)]
     public async Task TerminalUsageAloneIsAuthoritativeAndDuplicateTerminalNeverAddsCost(bool absentFinal)
@@ -142,7 +176,9 @@ public sealed class XaiReportedUsageTests
         using var http = new HttpClient(new Handler(Answer(Facts), false));
         var connection = new LlmConnection
         {
-            Version = "1", Transport = LlmTransport.OpenAiResponses, Endpoint = "https://provider.test/v1",
+            Version = "1",
+            Transport = LlmTransport.OpenAiResponses,
+            Endpoint = "https://provider.test/v1",
             Credential = new LlmCredential { ApiKey = "controlled" }.Serialize(),
             CapabilityOverrides = new() { SupportsStreaming = false }
         };
@@ -228,7 +264,9 @@ public sealed class XaiReportedUsageTests
     private static LlmChatRequest Request() => new() { ModelId = "grok-4.7", Messages = [new("user", "question")] };
     private static LlmConnection Connection(bool streaming) => new()
     {
-        Version = "1", Transport = LlmTransport.XaiResponses, Endpoint = "https://api.x.ai/v1",
+        Version = "1",
+        Transport = LlmTransport.XaiResponses,
+        Endpoint = "https://api.x.ai/v1",
         Credential = new LlmCredential { OAuth = new() { AccessToken = "controlled-oauth" } }.Serialize(),
         CapabilityOverrides = new() { SupportsStreaming = streaming }
     };
