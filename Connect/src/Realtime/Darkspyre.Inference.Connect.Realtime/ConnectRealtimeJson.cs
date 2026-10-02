@@ -64,7 +64,7 @@ public static class ConnectRealtimeJson
     {
         var options = new JsonSerializerOptions(ConnectRealtimeJsonContext.Default.Options) { TypeInfoResolver = new RealtimeTypeInfoResolver() };
         foreach (Type type in new[] { typeof(IProviderAuthorization), typeof(IInferenceResourceAccess), typeof(IInferenceResourceReadHandle),
-            typeof(IInferenceResourceWriteHandle), typeof(LlmHostedToolPhase), typeof(LlmImageGenerationAction), typeof(RealtimeAudioEncoding),
+            typeof(IInferenceResourceWriteHandle), typeof(LlmHostedToolKind), typeof(LlmHostedToolPhase), typeof(LlmImageGenerationAction), typeof(RealtimeAudioEncoding),
             typeof(RealtimeAudioTransport), typeof(RealtimeModality), typeof(RealtimeMessageRole), typeof(IRealtimeVoiceSession) })
             options.Converters.Add(InferenceJson.RealtimeSessionConfig.Options.Converters.Single(converter => converter.CanConvert(type)));
         options.Converters.Add(ConnectLlmJson.Connection.Options.Converters.Single(converter => converter.CanConvert(typeof(XaiFamilyBinding))));

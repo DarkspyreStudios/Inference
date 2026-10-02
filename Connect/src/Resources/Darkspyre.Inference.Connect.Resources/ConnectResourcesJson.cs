@@ -48,7 +48,7 @@ public static class ConnectResourcesJson
         var options = new JsonSerializerOptions(ConnectResourcesJsonContext.Default.Options) { TypeInfoResolver = new ResourcesResolver() };
         foreach (Type type in new[] { typeof(IProviderAuthorization), typeof(IInferenceResourceAccess),
             typeof(IInferenceResourceReadHandle), typeof(IInferenceResourceWriteHandle),
-            typeof(LlmHostedToolPhase), typeof(LlmImageGenerationAction), typeof(VideoJobState), typeof(VideoOperation) })
+            typeof(LlmHostedToolKind), typeof(LlmHostedToolPhase), typeof(LlmImageGenerationAction), typeof(VideoJobState), typeof(VideoOperation) })
             options.Converters.Add(InferenceJson.VideoRequest.Options.Converters.Single(converter => converter.CanConvert(type)));
         foreach (Type type in new[] { typeof(LlmAgentCallerServices), typeof(ILlmAgentPermissionSelector),
             typeof(ILlmAgentTextFileReader), typeof(ILlmAgentTextFileWriter), typeof(ILlmAgentTerminalFactory),
