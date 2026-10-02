@@ -253,6 +253,9 @@ public sealed class LlmProviderService : ILlmTextTokenizer, ILlmFileClient, IXai
             cancellationToken);
         if (connection.Transport == LlmTransport.XaiResponses)
             throw new NotSupportedException("Grok requires OAuth sign-in; an API key is not supported.");
+        if (connection.Transport is LlmTransport.AzureOpenAiResponses or LlmTransport.AzureOpenAiChat
+            && connection.Azure is { AuthenticationMode: not LlmAzureAuthenticationMode.ApiKey })
+            throw new NotSupportedException("The selected Azure authentication mode does not accept an API key.");
         await Connections.SaveCredentialAsync(
             connectionId,
             new LlmCredential { ApiKey = apiKey }.Serialize(),
@@ -501,6 +504,7 @@ public sealed class LlmProviderService : ILlmTextTokenizer, ILlmFileClient, IXai
             cancellationToken);
         ThrowIfOperationCanceled(cancellationToken);
         RequestJson.ValidateSamplingOptions(connection, request);
+        request = ProviderControlPolicy.Resolve(connection, request);
         ILlmClient client = ClientFor(connection.Transport);
         string? resolvedCredential = connection.Credential;
         if (request.ExplicitCache is not null)
@@ -617,6 +621,7 @@ public sealed class LlmProviderService : ILlmTextTokenizer, ILlmFileClient, IXai
         LlmConnection connection = await LlmConnectionResolver.ResolveAsync(Connections, connectionId, cancellationToken);
         ThrowIfOperationCanceled(cancellationToken);
         RequestJson.ValidateSamplingOptions(connection, request);
+        request = ProviderControlPolicy.Resolve(connection, request);
         ILlmClient client = ClientFor(connection.Transport);
         if (client is not ILlmProviderTokenCounter counter)
             throw new NotSupportedException("This route does not implement provider input-token counting.");
@@ -660,6 +665,7 @@ public sealed class LlmProviderService : ILlmTextTokenizer, ILlmFileClient, IXai
         var connection = await LlmConnectionResolver.ResolveAsync(Connections, connectionId, cancellationToken);
         ThrowIfOperationCanceled(cancellationToken);
         RequestJson.ValidateSamplingOptions(connection, request);
+        request = ProviderControlPolicy.Resolve(connection, request);
         var client = ClientFor(connection.Transport);
         // Measure what would be sent: the same projection as the request path.
         if (request.ExplicitCache is not null)

@@ -96,6 +96,11 @@ reference grants no authority. `LlmInferenceRequest.ExplicitCache` selects this 
 of advisory `PromptCache` hints. Owned request metadata preserves it and validates required
 resource, model and scope facts. Native cache identities do not become portable workspace content.
 
+`LlmInferenceRequest.ProviderControls` is an optional `LlmProviderControls` extension owned by
+the selected implementation. Common declares no provider-specific subtype. Its exact
+`InferenceJson.LlmProviderControls` metadata permits null and refuses non-null read/write;
+Connect-owned metadata supplies its fixed provider discriminator without a reverse dependency.
+
 `LlmClientToolDefinition`, `LlmClientToolCall` and `LlmClientToolResult` are closed
 function/shell data unions. Existing function record names and constructors remain intact.
 Shell data preserves ordered commands and outputs, nullable raw 64-bit timeout milliseconds,

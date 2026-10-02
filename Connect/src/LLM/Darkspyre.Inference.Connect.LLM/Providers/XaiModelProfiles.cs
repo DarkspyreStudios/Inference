@@ -54,6 +54,13 @@ internal static class XaiModelProfiles
         return profile;
     }
 
+    internal static string MultiAgentEffort(XaiMultiAgentProfile profile, int count)
+    {
+        if (profile.AgentCounts.TryGetValue("low", out int low) && count == low) return "low";
+        if (profile.AgentCounts.TryGetValue("high", out int high) && count == high) return "high";
+        throw new NotSupportedException("The selected multi-agent profile does not support the requested agent count.");
+    }
+
     private static LlmReasoningLevel? Level(string? word) => word switch
     {
         "low" => LlmReasoningLevel.Low,

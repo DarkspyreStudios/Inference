@@ -7,6 +7,24 @@ namespace Darkspyre.Inference.Tensor.LLM.Qwen.Tests;
 public sealed class QwenLlmInferenceTests
 {
     [Fact]
+    public async Task ProviderControlsRefuseBeforeModelOrNativeEntry()
+    {
+        await using var inference = new QwenLlmInference(new MissingPackManager());
+        var failure = await Assert.ThrowsAsync<InferenceException>(async () =>
+        {
+            await foreach (var unused in inference.StreamAsync(new()
+            {
+                ModelId = TensorLlmModels.Qwen3FourBillionQ4Km.Key.ModelId,
+                Messages = [new("user", "hello")],
+                ProviderControls = new UnsupportedControls()
+            })) { }
+        });
+        Assert.Equal(InferenceFailureCode.UnsupportedFeature, failure.Code);
+    }
+
+    private sealed record UnsupportedControls : LlmProviderControls;
+
+    [Fact]
     public async Task ExplicitCacheRefusesBeforeModelOrNativeEntry()
     {
         await using var inference = new QwenLlmInference(new MissingPackManager());

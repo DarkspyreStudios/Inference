@@ -84,6 +84,9 @@ public sealed record LlmChatRequest
     /// <summary>An explicitly selected native cache, independently of advisory prompt-cache hints.</summary>
     public LlmExplicitCacheReference? ExplicitCache { get; init; }
 
+    /// <summary>Typed provider controls. Null inherits the selected connection default.</summary>
+    public LlmProviderControls? ProviderControls { get; init; }
+
     /// <summary>Per-operation provider JSON properties; standard request fields cannot be replaced.</summary>
     public IReadOnlyDictionary<string, JsonElement> ProviderOptions { get; init; } =
         new Dictionary<string, JsonElement>(StringComparer.Ordinal);

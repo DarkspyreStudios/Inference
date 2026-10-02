@@ -664,6 +664,8 @@ public sealed class QwenLlmInference : ITensorLlmInference
 
     private static void ValidateRequest(LlmInferenceRequest request)
     {
+        if (request.ProviderControls is not null)
+            throw new InferenceException(InferenceFailureCode.UnsupportedFeature, "Qwen does not implement connector-owned provider controls.");
         if (request.ExplicitCache is not null)
             throw new InferenceException(InferenceFailureCode.UnsupportedFeature, "Qwen does not implement native provider cache selection.");
         if (request.Tools.Any(tool => tool is not LlmToolDefinition)

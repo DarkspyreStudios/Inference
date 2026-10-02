@@ -1735,9 +1735,20 @@ This numeric check does not implement the provider's complete regex and schema s
 The client does not interpret unqualified xAI headers as OpenAI account-usage evidence. Its usage
 header names and units require separate provider qualification; no quota snapshot is fabricated.
 
+`LlmChatRequest.ProviderControls`, its Common request projection and `LlmAgentTurnRequest`
+carry `XaiMultiAgentControls`. An absent control inherits `XaiConnectionOptions.MultiAgent`;
+a present control with `AgentCount = null` suppresses the saved count and leaves the provider
+default unspecified. The existing `grok-4.20-multi-agent` profile supports 4 or 16 agents, encoded
+as REST `reasoning.effort = "low"` or `"high"`, never `agent_count`. Profile-backed setup offers
+those counts and a provider-default choice. Explicit unsupported models/counts, non-xAI routes,
+neutral or raw reasoning combined with a multi-agent control, and raw agent-count injection
+refuse before refresh, catalog access or generation. Managed turns retain their effective control
+through tool iterations; Connect and batch Resources metadata preserve the fixed
+`xai-multi-agent` discriminator, while Common metadata refuses this Connect subtype.
+
 `AddLlmConnect` does not register a Grok provider, authenticator or runtime client. This internal client
-is not an enabled or live-qualified provider. Cross-family catalog ownership and multi-agent setup
-controls are not wired; the multi-agent profile records agent counts separately from reasoning levels.
+is not an enabled or live-qualified provider. Controlled local wire tests are not live qualification;
+cross-family catalog ownership remains separate. Agent counts are distinct from reasoning levels.
 The region and tier premiums follow [xAI pricing](https://docs.x.ai/developers/pricing).
 
 `LlmProviderService` implements Connect's `ILlmTextTokenizer`. `TokenizeAsync` accepts a connection
@@ -1787,6 +1798,14 @@ The underlying profile selects existing model reasoning and sampling validation.
 the wire deployment or proves Azure availability. Manual deployment entry requires no discovery or
 management-plane privileges. Deployment discovery and queried account usage are not implemented.
 This adapter does not discover context/output limits or deployment availability.
+
+The shared SDK also exposes the closed `Versioned` and `Entra` selections, explicit cloud/audience
+and five identity kinds. `ConnectLlmJson` exports their exact type-name metadata, including managed
+identity selectors and protected `LlmAzureSecret` variants. Unknown selections and fields refuse.
+Client secrets and PKCS12 bytes/passwords belong only in `LlmCredential.Azure`; their diagnostic
+strings are redacted. Metadata never opens a workload file or loads a certificate. These declarations
+do not enable Entra or versioned routes: the current Azure adapters reject them before dispatch.
+The API-key setter refuses Entra mode, and its settings do not expose an API-key field.
 
 Unknown profiles advertise no media, structured-output, reasoning-level or sampling support.
 Implemented paths can be selected through supported explicit connection/model overrides; model

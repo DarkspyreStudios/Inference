@@ -11,7 +11,27 @@ namespace Darkspyre.Inference.Connect.LLM;
 /// <summary>Connect-owned metadata for closed connection, request and captured-context contracts.</summary>
 public static class ConnectLlmJson
 {
+    public static JsonTypeInfo<XaiMultiAgentControls> XaiMultiAgentControls => Metadata<XaiMultiAgentControls>();
     public static JsonTypeInfo<LlmAgentCapabilities> LlmAgentCapabilities => Metadata<LlmAgentCapabilities>();
+    public static JsonTypeInfo<LlmAzureConfiguration> LlmAzureConfiguration => Metadata<LlmAzureConfiguration>();
+    public static JsonTypeInfo<LlmAzureApiMode> LlmAzureApiMode => Metadata<LlmAzureApiMode>();
+    public static JsonTypeInfo<LlmAzureAuthenticationMode> LlmAzureAuthenticationMode => Metadata<LlmAzureAuthenticationMode>();
+    public static JsonTypeInfo<LlmAzureCloud> LlmAzureCloud => Metadata<LlmAzureCloud>();
+    public static JsonTypeInfo<LlmAzureTokenAudience> LlmAzureTokenAudience => Metadata<LlmAzureTokenAudience>();
+    public static JsonTypeInfo<LlmAzureEntraConfiguration> LlmAzureEntraConfiguration => Metadata<LlmAzureEntraConfiguration>();
+    public static JsonTypeInfo<LlmAzureIdentitySelection> LlmAzureIdentitySelection => Metadata<LlmAzureIdentitySelection>();
+    public static JsonTypeInfo<LlmAzureIdentitySelection.ServicePrincipalSecret> ServicePrincipalSecret => Metadata<LlmAzureIdentitySelection.ServicePrincipalSecret>();
+    public static JsonTypeInfo<LlmAzureIdentitySelection.ServicePrincipalCertificate> ServicePrincipalCertificate => Metadata<LlmAzureIdentitySelection.ServicePrincipalCertificate>();
+    public static JsonTypeInfo<LlmAzureIdentitySelection.WorkloadIdentity> WorkloadIdentity => Metadata<LlmAzureIdentitySelection.WorkloadIdentity>();
+    public static JsonTypeInfo<LlmAzureIdentitySelection.SystemAssignedManagedIdentity> SystemAssignedManagedIdentity => Metadata<LlmAzureIdentitySelection.SystemAssignedManagedIdentity>();
+    public static JsonTypeInfo<LlmAzureIdentitySelection.UserAssignedManagedIdentity> UserAssignedManagedIdentity => Metadata<LlmAzureIdentitySelection.UserAssignedManagedIdentity>();
+    public static JsonTypeInfo<LlmAzureManagedIdentityId> LlmAzureManagedIdentityId => Metadata<LlmAzureManagedIdentityId>();
+    public static JsonTypeInfo<LlmAzureManagedIdentityId.ClientId> ClientId => Metadata<LlmAzureManagedIdentityId.ClientId>();
+    public static JsonTypeInfo<LlmAzureManagedIdentityId.ResourceId> ResourceId => Metadata<LlmAzureManagedIdentityId.ResourceId>();
+    public static JsonTypeInfo<LlmAzureManagedIdentityId.ObjectId> ObjectId => Metadata<LlmAzureManagedIdentityId.ObjectId>();
+    public static JsonTypeInfo<LlmAzureSecret> LlmAzureSecret => LlmCredentialJsonContext.Default.LlmAzureSecret;
+    public static JsonTypeInfo<LlmAzureSecret.ClientSecret> ClientSecret => LlmCredentialJsonContext.Default.ClientSecret;
+    public static JsonTypeInfo<LlmAzureSecret.CertificatePkcs12> CertificatePkcs12 => LlmCredentialJsonContext.Default.CertificatePkcs12;
     public static JsonTypeInfo<LlmAgentRuntimeProfile> LlmAgentRuntimeProfile => Metadata<LlmAgentRuntimeProfile>();
     public static JsonTypeInfo<LlmAgentRuntimeStateConfiguration> LlmAgentRuntimeStateConfiguration => Metadata<LlmAgentRuntimeStateConfiguration>();
     public static JsonTypeInfo<LlmAgentIsolatedRuntimeState> LlmAgentIsolatedRuntimeState => Metadata<LlmAgentIsolatedRuntimeState>();
@@ -125,6 +145,10 @@ public static class ConnectLlmJson
         options.Converters.Add(new DocumentRagPipelineJsonConverter());
         options.Converters.Add(new CallerEnumConverter<LlmAgentCallerServiceKind>());
         options.Converters.Add(new CallerEnumConverter<LlmAgentPermissionChoiceKind>());
+        options.Converters.Add(new CallerEnumConverter<LlmAzureApiMode>());
+        options.Converters.Add(new CallerEnumConverter<LlmAzureAuthenticationMode>());
+        options.Converters.Add(new CallerEnumConverter<LlmAzureCloud>());
+        options.Converters.Add(new CallerEnumConverter<LlmAzureTokenAudience>());
         options.Converters.Add(new CallerEnumConverter<LlmCopilotEndpointMode>());
         options.Converters.Add(new CallerEnumConverter<LlmAcpAuthenticationFlow>());
         options.Converters.Add(new CallerEnumConverter<LlmAgentStagedStateDisposition>());
@@ -149,6 +173,13 @@ public static class ConnectLlmJson
             if (LlmAgentCallerJson.RuntimeMetadata(type, options) is { } runtime) return runtime;
             if (LlmRuntimeAuthenticationJson.RuntimeMetadata(type, options) is { } authentication) return authentication;
             var metadata = ((IJsonTypeInfoResolver)ConnectLlmJsonContext.Default).GetTypeInfo(type, options);
+            if (type == typeof(LlmProviderControls) && metadata is not null)
+                metadata.PolymorphismOptions = new JsonPolymorphismOptions
+                {
+                    TypeDiscriminatorPropertyName = "type",
+                    UnknownDerivedTypeHandling = JsonUnknownDerivedTypeHandling.FailSerialization,
+                    DerivedTypes = { new JsonDerivedType(typeof(XaiMultiAgentControls), "xai-multi-agent") }
+                };
             if (type == typeof(LlmAgentRuntimePolicy) && metadata is not null)
                 metadata.PolymorphismOptions = new JsonPolymorphismOptions
                 {
@@ -234,6 +265,22 @@ public static class ConnectLlmJson
         typeof(CallerAuthorityConverter<ILlmAgentRuntimeAuthentication>),
         typeof(CallerAuthorityConverter<LlmAgentRuntimeLoginTerminalRequest>),
         typeof(CallerAuthorityConverter<ILlmAuthPrompt>)])]
+[JsonSerializable(typeof(LlmAzureConfiguration))]
+[JsonSerializable(typeof(LlmAzureApiMode))]
+[JsonSerializable(typeof(LlmAzureAuthenticationMode))]
+[JsonSerializable(typeof(LlmAzureCloud))]
+[JsonSerializable(typeof(LlmAzureTokenAudience))]
+[JsonSerializable(typeof(LlmAzureEntraConfiguration))]
+[JsonSerializable(typeof(LlmAzureIdentitySelection))]
+[JsonSerializable(typeof(LlmAzureIdentitySelection.ServicePrincipalSecret))]
+[JsonSerializable(typeof(LlmAzureIdentitySelection.ServicePrincipalCertificate))]
+[JsonSerializable(typeof(LlmAzureIdentitySelection.WorkloadIdentity))]
+[JsonSerializable(typeof(LlmAzureIdentitySelection.SystemAssignedManagedIdentity))]
+[JsonSerializable(typeof(LlmAzureIdentitySelection.UserAssignedManagedIdentity))]
+[JsonSerializable(typeof(LlmAzureManagedIdentityId))]
+[JsonSerializable(typeof(LlmAzureManagedIdentityId.ClientId))]
+[JsonSerializable(typeof(LlmAzureManagedIdentityId.ResourceId))]
+[JsonSerializable(typeof(LlmAzureManagedIdentityId.ObjectId))]
 [JsonSerializable(typeof(LlmAgentRuntimeProfile))]
 [JsonSerializable(typeof(LlmAgentCapabilities))]
 [JsonSerializable(typeof(LlmAgentRuntimeStateConfiguration))]
@@ -261,6 +308,8 @@ public static class ConnectLlmJson
 [JsonSerializable(typeof(LlmAgentStagedStateSnapshot))]
 [JsonSerializable(typeof(LlmAgentStagedStateCommitResult))]
 [JsonSerializable(typeof(LlmConnection))]
+[JsonSerializable(typeof(XaiMultiAgentControls))]
+[JsonSerializable(typeof(LlmAgentTurnRequest))]
 [JsonSerializable(typeof(XaiStoragePublicUrlRequest))]
 [JsonSerializable(typeof(XaiStoragePublicUrlFlag))]
 [JsonSerializable(typeof(XaiStoragePublicUrlConfiguration))]
@@ -378,6 +427,9 @@ internal sealed partial class ConnectLlmJsonContext : JsonSerializerContext;
 [JsonSourceGenerationOptions(JsonSerializerDefaults.Web, GenerationMode = JsonSourceGenerationMode.Metadata,
     DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)]
 [JsonSerializable(typeof(LlmCredential))]
+[JsonSerializable(typeof(LlmAzureSecret))]
+[JsonSerializable(typeof(LlmAzureSecret.ClientSecret))]
+[JsonSerializable(typeof(LlmAzureSecret.CertificatePkcs12))]
 [JsonSerializable(typeof(LlmCopilotCredentials))]
 [JsonSerializable(typeof(LlmCopilotRuntimeConnectionCredential))]
 internal sealed partial class LlmCredentialJsonContext : JsonSerializerContext;

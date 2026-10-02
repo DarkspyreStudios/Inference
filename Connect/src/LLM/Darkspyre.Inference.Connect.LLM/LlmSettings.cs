@@ -3,6 +3,7 @@ using Darkspyre.Inference.Common.LLM;
 using Darkspyre.Inference.Connect.LLM.Providers;
 using Darkspyre.Inference.Connect.LLM.Internal;
 using Darkspyre.Inference.Common.Setup;
+using System.Globalization;
 
 namespace Darkspyre.Inference.Connect.LLM;
 
@@ -119,7 +120,8 @@ public sealed class LlmSettings : InferenceSettings<LlmSetupChanges>
     private LlmVertexConfiguration Vertex => _draft.Vertex ?? new();
     private bool UsesAws => _draft.Transport is LlmTransport.AwsBedrockConverse or LlmTransport.AwsBedrockAgentCore;
     private bool UsesApiKey => _draft.Transport is LlmTransport.OpenAiResponses or LlmTransport.OpenAiCompatibleChat or LlmTransport.AnthropicMessages
-        or LlmTransport.GoogleGeminiApi || UsesVertex && Vertex.AuthenticationMode == LlmGoogleAuthenticationMode.ApiKey || UsesAzure;
+        or LlmTransport.GoogleGeminiApi || UsesVertex && Vertex.AuthenticationMode == LlmGoogleAuthenticationMode.ApiKey
+        || UsesAzure && (_draft.Azure?.AuthenticationMode ?? LlmAzureAuthenticationMode.ApiKey) == LlmAzureAuthenticationMode.ApiKey;
     private LlmCredential Credential => LlmCredential.Parse(_draft.Credential) ?? new();
 
     protected override bool IsDraftDirty =>
@@ -188,6 +190,16 @@ public sealed class LlmSettings : InferenceSettings<LlmSetupChanges>
         }
         if (UsesXai)
         {
+            if (XaiModelProfiles.Get(_draft, _model).MultiAgent is { } multiAgent)
+                fields.Add(new SetupChoiceField(new("xai-agent-count", "Agent count"),
+                    Xai.MultiAgent?.AgentCount?.ToString(CultureInfo.InvariantCulture) ?? "default", "default", value =>
+                    {
+                        if (value == "default") return Edit(() => _draft = _draft with { Xai = Xai with { MultiAgent = null } });
+                        if (!int.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out int count)
+                            || !multiAgent.AgentCounts.Values.Contains(count))
+                            return new(SetupEditState.Invalid, [new("xai-agent-count-invalid", "Select an agent count supported by this model.", "xai-agent-count")]);
+                        return Edit(() => _draft = _draft with { Xai = Xai with { MultiAgent = new(count) } });
+                    }, false));
             fields.Add(new SetupChoiceField(new("xai-region", "API region")
             {
                 IsRequired = true,
@@ -420,6 +432,9 @@ public sealed class LlmSettings : InferenceSettings<LlmSetupChanges>
             return Page(query, [new(XaiRegion.Global.ToString(), "Global"), new(XaiRegion.UnitedStates.ToString(), "United States", "1.1x global rate")]);
         if (UsesXai && fieldId == "xai-service-tier")
             return Page(query, [new(XaiServiceTier.Default.ToString(), "Default"), new(XaiServiceTier.Priority.ToString(), "Priority", "2x default rate")]);
+        if (UsesXai && fieldId == "xai-agent-count" && XaiModelProfiles.Get(_draft, _model).MultiAgent is { } multiAgent)
+            return Page(query, [new("default", "Provider default"), .. multiAgent.AgentCounts.Values.Distinct().Order()
+                .Select(count => new SetupChoice(count.ToString(CultureInfo.InvariantCulture), $"{count} agents"))]);
         return fieldId == "google-authentication" && UsesVertex
             ? Page(query, [new(LlmGoogleAuthenticationMode.ApplicationDefault.ToString(), "Application default credentials"),
                 new(LlmGoogleAuthenticationMode.ServiceAccount.ToString(), "Service-account key"),
@@ -548,6 +563,12 @@ public sealed class LlmSettings : InferenceSettings<LlmSetupChanges>
     {
         List<SetupIssue> issues = [.. ConnectionValidation().Issues];
         if (string.IsNullOrWhiteSpace(_model)) { issues.Add(new("model-required", "Select or enter a model.", "model")); }
+        if (UsesXai && !string.IsNullOrWhiteSpace(_model))
+        {
+            try { ProviderControlPolicy.Validate(_draft, new() { ModelId = _model }); }
+            catch (Exception error) when (error is ArgumentException or NotSupportedException)
+            { issues.Add(new("xai-agent-count-invalid", error.Message, "xai-agent-count")); }
+        }
         return new(issues.AsReadOnly());
     }
 

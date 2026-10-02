@@ -63,6 +63,13 @@ public static class ConnectResourcesJson
         public JsonTypeInfo? GetTypeInfo(Type type, JsonSerializerOptions options)
         {
             JsonTypeInfo? metadata = ((IJsonTypeInfoResolver)ConnectResourcesJsonContext.Default).GetTypeInfo(type, options);
+            if (type == typeof(LlmProviderControls) && metadata is not null)
+                metadata.PolymorphismOptions = new()
+                {
+                    TypeDiscriminatorPropertyName = "type",
+                    UnknownDerivedTypeHandling = JsonUnknownDerivedTypeHandling.FailSerialization,
+                    DerivedTypes = { new JsonDerivedType(typeof(XaiMultiAgentControls), "xai-multi-agent") }
+                };
             if (type == typeof(LlmHostedTool) && metadata?.PolymorphismOptions is { } hosted)
                 hosted.DerivedTypes.Add(new JsonDerivedType(typeof(XaiXSearchTool), "xai-x-search"));
             if (type == typeof(VideoProviderOptions) && metadata is not null)
@@ -111,6 +118,7 @@ public static class ConnectResourcesJson
 [JsonSerializable(typeof(LlmMediaMaterializationOptions))]
 [JsonSerializable(typeof(MaterializedVideoResult))]
 [JsonSerializable(typeof(XaiXSearchTool))]
+[JsonSerializable(typeof(XaiMultiAgentControls))]
 [JsonSerializable(typeof(XaiVideoOptions))]
 [JsonSerializable(typeof(XaiFileStorageOptions))]
 [JsonSerializable(typeof(XaiStoragePublicUrlRequest))]

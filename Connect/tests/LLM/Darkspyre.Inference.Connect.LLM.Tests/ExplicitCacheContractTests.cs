@@ -145,6 +145,21 @@ public sealed class ExplicitCacheContractTests
     [InlineData("selfhost", false)]
     [InlineData("selfhost", true)]
     public async Task LocalRoutesRefuseBeforeProcessOrEngineEntry(string route, bool estimate)
+        => await RefuseLocalAsync(route, estimate, cache: true);
+
+    [Theory]
+    [InlineData("claude", false)]
+    [InlineData("claude", true)]
+    [InlineData("antigravity", false)]
+    [InlineData("antigravity", true)]
+    [InlineData("apple", false)]
+    [InlineData("apple", true)]
+    [InlineData("selfhost", false)]
+    [InlineData("selfhost", true)]
+    public async Task ProviderControlsRefuseBeforeProcessOrEngineEntry(string route, bool estimate)
+        => await RefuseLocalAsync(route, estimate, cache: false);
+
+    private static async Task RefuseLocalAsync(string route, bool estimate, bool cache)
     {
         var runner = new Runner();
         var host = new Host();
@@ -157,7 +172,8 @@ public sealed class ExplicitCacheContractTests
             _ => new SelfHostLlmClient(host)
         };
         var connection = new LlmConnection { Version = "1", Transport = client.Transport, Endpoint = "controlled-executable" };
-        var request = Select(new() { ModelId = route == "apple" ? AppleProtocol.ModelId : "model", Messages = [new("user", "hello")] });
+        var request = new LlmChatRequest { ModelId = route == "apple" ? AppleProtocol.ModelId : "model", Messages = [new("user", "hello")] };
+        request = cache ? Select(request) : request with { ProviderControls = new XaiMultiAgentControls(4) };
         Assert.False(client.GetCapabilities(connection, request.ModelId).SupportsExplicitCache);
         await Assert.ThrowsAsync<NotSupportedException>(async () =>
         {
@@ -175,6 +191,19 @@ public sealed class ExplicitCacheContractTests
     [InlineData(2, true)]
     [InlineData(3, true)]
     public async Task LateResolutionPreservesCancellationAndDrainsBeforeRetirement(int operation, bool retire)
+        => await LateResolutionAsync(operation, retire, cache: true);
+
+    [Theory]
+    [InlineData(0, false)]
+    [InlineData(2, false)]
+    [InlineData(3, false)]
+    [InlineData(0, true)]
+    [InlineData(2, true)]
+    [InlineData(3, true)]
+    public async Task ProviderControlsPreserveLateResolutionCancellationAndDrain(int operation, bool retire)
+        => await LateResolutionAsync(operation, retire, cache: false);
+
+    private static async Task LateResolutionAsync(int operation, bool retire, bool cache)
     {
         var source = new HeldSource();
         var client = new Client(false);
@@ -184,7 +213,8 @@ public sealed class ExplicitCacheContractTests
         Task? retirement = null;
         try
         {
-            var request = Select(new() { ModelId = "model" });
+            var request = new LlmChatRequest { ModelId = "model" };
+            request = cache ? Select(request) : request with { ProviderControls = new XaiMultiAgentControls(4) };
             run = RunFacade();
             await source.Entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
             if (retire) retirement = facade.DisposeAsync().AsTask();

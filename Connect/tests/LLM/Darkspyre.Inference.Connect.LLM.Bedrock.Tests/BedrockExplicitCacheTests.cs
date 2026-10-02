@@ -12,7 +12,15 @@ public sealed class BedrockExplicitCacheTests
     [InlineData(false, false)]
     [InlineData(false, true)]
     [InlineData(true, false)]
-    public async Task SelectionRefusesBeforeSdkInvocation(bool agentCore, bool estimate)
+    public async Task SelectionRefusesBeforeSdkInvocation(bool agentCore, bool estimate) => await Refuse(agentCore, estimate, true);
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    public async Task ProviderControlsRefuseBeforeSdkInvocation(bool agentCore, bool estimate) => await Refuse(agentCore, estimate, false);
+
+    private static async Task Refuse(bool agentCore, bool estimate, bool cache)
     {
         using var factory = new BedrockClientFactory();
         using var guard = new BedrockLoggingGuard();
@@ -33,6 +41,7 @@ public sealed class BedrockExplicitCacheTests
             ExplicitCache = new("cachedContents/cache", "model", "scope")
         };
         Assert.False(client.GetCapabilities(connection, request.ModelId).SupportsExplicitCache);
+        if (!cache) request = request with { ExplicitCache = null, ProviderControls = new XaiMultiAgentControls(4) };
         await Assert.ThrowsAsync<NotSupportedException>(async () =>
         {
             if (estimate) ((ILlmContextEstimator)client).EstimateInputTokens(connection, request);

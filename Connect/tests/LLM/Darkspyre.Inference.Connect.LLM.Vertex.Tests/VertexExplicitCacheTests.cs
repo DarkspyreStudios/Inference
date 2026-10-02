@@ -15,7 +15,20 @@ public sealed class VertexExplicitCacheTests
     [InlineData(true, 1)]
     [InlineData(true, 2)]
     [InlineData(true, 3)]
-    public async Task CacheSelectionRefusesBeforeAuthentication(bool claude, int operation)
+    public async Task CacheSelectionRefusesBeforeAuthentication(bool claude, int operation) => await Refuse(claude, operation, true);
+
+    [Theory]
+    [InlineData(false, 0)]
+    [InlineData(false, 1)]
+    [InlineData(false, 2)]
+    [InlineData(false, 3)]
+    [InlineData(true, 0)]
+    [InlineData(true, 1)]
+    [InlineData(true, 2)]
+    [InlineData(true, 3)]
+    public async Task ProviderControlsRefuseBeforeAuthentication(bool claude, int operation) => await Refuse(claude, operation, false);
+
+    private static async Task Refuse(bool claude, int operation, bool cache)
     {
         using var http = new HttpClient(new Handler());
         var authentication = new Authentication();
@@ -30,6 +43,7 @@ public sealed class VertexExplicitCacheTests
         };
         string model = claude ? "anthropic/claude-sonnet-4-6" : "google/gemini-2.5-flash";
         var request = JsonSerializer.Deserialize("{\"ModelId\":\"" + model + "\",\"Messages\":[{\"Role\":\"user\",\"Content\":\"hello\"}],\"ExplicitCache\":{\"ResourceName\":\"cachedContents/test\",\"ModelId\":\"" + model + "\",\"ScopeId\":\"scope\"}}", ConnectLlmJson.ChatRequest)!;
+        if (!cache) request = request with { ExplicitCache = null, ProviderControls = new XaiMultiAgentControls(4) };
         await Assert.ThrowsAsync<NotSupportedException>(async () =>
         {
             if (operation == 2) await client.CountInputTokensAsync(connection, request);
