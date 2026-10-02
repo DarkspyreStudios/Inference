@@ -63,16 +63,23 @@ internal abstract class OAuthAuthenticatorBase(HttpClient http) : ILlmAuthentica
         HttpResponseMessage response,
         CancellationToken cancellationToken)
     {
-        await using Stream stream = await SdkHttpConsumption.ReadAsStreamAsync(response.Content, cancellationToken);
+        JsonDocument? result = null;
         try
         {
-            JsonDocument result = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
-            try { return SdkHttpConsumption.Publish(response.Content, result, cancellationToken); }
-            catch { result.Dispose(); throw; }
+            await using (Stream stream = await SdkHttpConsumption.ReadAsStreamAsync(response.Content, cancellationToken))
+            {
+                try { result = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken); }
+                catch (JsonException)
+                {
+                    throw new InvalidOperationException("The authorization server returned invalid JSON.");
+                }
+            }
+            return result;
         }
-        catch (JsonException)
+        catch
         {
-            throw new InvalidOperationException("The authorization server returned invalid JSON.");
+            result?.Dispose();
+            throw;
         }
     }
 

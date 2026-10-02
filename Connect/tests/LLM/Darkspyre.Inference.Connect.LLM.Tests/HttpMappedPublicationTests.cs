@@ -8,6 +8,40 @@ namespace Darkspyre.Inference.Connect.LLM.Tests;
 public sealed class HttpMappedPublicationTests
 {
     [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task OAuthParserDoesNotHandOffDocumentWhenActualStreamCleanupRefuses(bool jsonCleanupError)
+    {
+        Exception failure = jsonCleanupError ? new System.Text.Json.JsonException("controlled OAuth stream cleanup refusal")
+            : new IOException("controlled OAuth stream cleanup refusal");
+        var stream = new RefusingStream(failure);
+        var services = new ServiceCollection();
+        services.AddLlmConnect();
+        services.AddHttpClient("ClaudeAuthenticator").ConfigurePrimaryHttpMessageHandler(() => new Handler(new StreamContent(stream)));
+        ServiceProvider root = services.BuildServiceProvider();
+        SdkHttpGenerationPool pool = root.GetRequiredService<SdkHttpGenerationPool>();
+        using HttpClient client = pool.CreateClient("ClaudeAuthenticator");
+        using HttpResponseMessage response = await client.GetAsync("https://controlled.invalid", HttpCompletionOption.ResponseHeadersRead);
+        try
+        {
+            Assert.Same(failure, await Assert.ThrowsAnyAsync<Exception>(() => ParserProbe.ParseAsync(response)));
+            Assert.Equal(1, stream.AsyncDisposals);
+            Assert.Equal(0, stream.SyncDisposals);
+            Assert.Same(failure, await Assert.ThrowsAnyAsync<Exception>(() => pool.DisposeAsync().AsTask()));
+            Assert.Same(failure, await Assert.ThrowsAnyAsync<Exception>(() => pool.DisposeAsync().AsTask()));
+            Assert.Equal(1, stream.AsyncDisposals);
+            Assert.Equal(0, stream.SyncDisposals);
+        }
+        finally
+        {
+            response.Dispose();
+            client.Dispose();
+            try { await root.DisposeAsync(); }
+            catch (Exception error) when (ReferenceEquals(error, failure)) { }
+        }
+    }
+
+    [Theory]
     [InlineData("embedding")]
     [InlineData("models")]
     [InlineData("account")]
@@ -139,5 +173,22 @@ public sealed class HttpMappedPublicationTests
             if (disposing) { Disposals++; retire(); }
             base.Dispose(disposing);
         }
+    }
+    private sealed class RefusingStream(Exception failure) : MemoryStream("{\"actual\":true}"u8.ToArray())
+    {
+        public int AsyncDisposals { get; private set; }
+        public int SyncDisposals { get; private set; }
+        [System.Diagnostics.CodeAnalysis.SuppressMessage("Usage", "CA2215", Justification = "This controlled fixture refuses actual cleanup and detects a forbidden dependent synchronous retry.")]
+        public override ValueTask DisposeAsync() { AsyncDisposals++; return ValueTask.FromException(failure); }
+        protected override void Dispose(bool disposing) { if (disposing) SyncDisposals++; base.Dispose(disposing); }
+    }
+    private sealed class ParserProbe(HttpClient client) : OAuthAuthenticatorBase(client)
+    {
+        public static Task<System.Text.Json.JsonDocument> ParseAsync(HttpResponseMessage response) => ParseJsonAsync(response, default);
+        public override LlmTransport Transport => LlmTransport.AnthropicClaudeCli;
+        protected override string ClientId => "controlled";
+        protected override string TokenEndpoint => "https://controlled.invalid";
+        protected override HttpRequestMessage BuildRefreshRequest(LlmOAuthTokens tokens) => throw new NotSupportedException();
+        protected override LlmCredential MapTokens(System.Text.Json.JsonElement tokenResponse, LlmOAuthTokens previous) => throw new NotSupportedException();
     }
 }
