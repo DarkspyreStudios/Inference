@@ -1,5 +1,36 @@
 # Darkspyre.Inference.Connect
 
+## Hosted STT bindings
+
+`Darkspyre.Inference.Connect.STT` binds a host-selected `SttConnection` to the Common hosted
+`ISpeechTranscriptionClient`. `SttProviderService` resolves registered `ISttProvider` adapters.
+`AddSttConnect()` registers the facade only. It registers no xAI adapter, advertises no setup
+definitions without an adapter, and refuses an unregistered transport before credential or resource
+effects. Hosted STT does not replace Tensor's model-instance transcription API.
+
+The connection carries a durable `XaiConnectionSelection`, optional borrowed authorization and copied
+case-insensitive protected headers. `Bind(connection, xai, resources)` passes the matching borrowed
+`XaiFamilyBinding` and caller workspace access to the selected adapter. These collaborators remain
+caller-owned. A session owns its streaming transport; Common clients gain no additional disposal API.
+Adapter operations require one validated snapshot and known-incompatibility validation before
+credential refresh or source effects. Binding validates the existing fixed xAI regional API bases,
+positive timeout and matching selection without acquisition. Direct binding and setup use the shared
+header validator before provider or binding-factory callbacks. Reserved, malformed and newline-bearing
+headers refuse; static authentication headers cannot override the borrowed authorization. The
+five-minute request timeout is a library default, not a provider limit.
+
+`ConnectSttJson` exports exact connection/transport/setup data getters with a complete generated graph.
+Live authorization, family bindings, factories, services and sessions refuse nonnull portable JSON.
+Diagnostics hide connection and header values. Setup preserves all nullable transcription/streaming
+defaults and explicit stream budgets; omitted limits remain omitted. Commands still require explicit
+valid budgets before opening a stream. Field edits are effect-free. Only registered adapters supply
+capability checks. The disposable settings manager fences and drains admitted operations and saves,
+then releases borrowed targets/factories/access without disposing them. Its own synchronous retirement
+fence returns structured cancellation for admitted checks/queries even before linked cancellation
+propagates. Admitted saves preserve the host's actual committed or uncertain outcome.
+Checks retain matching borrowed authorization. Portable setup changes omit that runtime authority;
+the selected connection ID remains data, and only explicit named header edits reach the commit target.
+
 > **Proprietary software.** Copyright © 2026 Brandon Mathis. All rights reserved.
 > No permission is granted to use, copy, modify, or distribute this software
 > without prior written authorization. See [LICENSE.md](LICENSE.md).
@@ -362,8 +393,19 @@ feed before draining admitted work. No automatic replay/reconnect is part of the
 
 These streaming interfaces are inert declarations. PocketTTS implements neither interface,
 advertises all new capability flags false and leaves unknown rate lists null. `XaiTts` is a
-declared transport identity without a registered provider. The current binding signature remains
-`Bind(TtsConnection)`; there is no xAI family-binding or resource-access argument on it.
+declared transport identity without a registered provider. `Bind(TtsConnection, XaiFamilyBinding?,
+IInferenceResourceAccess?)` borrows the entered owners without acquiring credentials or making
+requests. Connection headers are copied, and xAI selection/authorization must match the binding.
+PocketTTS refuses the new xAI authority fields before HTTP; existing static-header workflows
+remain supported. Runtime authority, resource access, binding factories and settings owners refuse
+non-null serialization through the owned codec without invoking callbacks.
+
+TTS settings managers fence new admissions synchronously, drain admitted actions and conditional
+commits, then release borrowed collaborators without disposing them. Opening settings checks the
+owner fence after reading the borrowed setup definition. Late check/test/query results
+cannot verify an edited or retiring draft. Portable changes omit runtime authorization and retain
+protected-header patches separately. Typed xAI setup controls preserve explicit false, zero and
+empty values; these declarations do not register an xAI provider or activate capabilities.
 
 ## TangoFlux audio
 
@@ -1030,6 +1072,40 @@ remain separate; ComfyUI does not advertise a built-in workflow catalog.
 The shared [`XaiFamilyBinding` contract](docs/media-bindings.md) uses explicit selection and the
 existing credential-access owner. It does not register or qualify an xAI Image transport.
 
+## Video contracts
+
+`Darkspyre.Inference.Connect.Video` supplies `VideoConnection`, `IVideoTransport`,
+`VideoProviderService.Bind(connection, xai, resources)` and the five-operation Common
+`IVideoInference` facade. Capability lookup, submit, one-poll lookup and owned download
+remain explicit calls. Materialization streams actual downloaded bytes into the borrowed
+caller resource store and atomically commits content with session selection. It retains
+actual nullable MIME, duration and expiry instead of inferring them from request policy.
+Returned download streams hold their operation lease until closure. Facade disposal closes
+owned downloads, fences new operations and drains admitted work before detaching borrowed
+transports, bindings and resource access. Callers can dispose the bound facade through
+`IDisposable` or `IAsyncDisposable`. Returned-stream operations check the synchronous owner
+fence before effects and before returning, even when linked cancellation propagation is delayed.
+Cancellation during successful materialization cleanup retains the observed committed reference,
+session-selection outcome and revision in `InferenceResourceOperationCanceledException`.
+
+`XaiVideoOptions` is the fixed Video-owned subtype for Files-owned storage controls, signed
+upload destinations and explicit user data. Common metadata refuses these provider options;
+`ConnectVideoJson` owns their complete generation/edit/extension and scoped receipt graph.
+Serialized job/output scope is data, not proof of authority. Each implemented transport owns
+receipt validation and download-origin authorization before effects. Lookup and download receive
+the same borrowed binding for adapter-owned validation before acquisition or refresh.
+Materialization performs one download, not a second credential acquisition. Extension requests
+refuse an explicit `User` instead of dropping it. New settings carry an explicit xAI connection selection;
+rendering, opening and saving do not acquire credentials. Only the explicit capability action
+uses the supplied borrowed binding factory. Header changes use the typed protected commit target.
+The existing LLM header parser rejects reserved or malformed explicit and acquired-snapshot
+headers before credential refresh. The bound facade copies source bytes at operation admission;
+the shared `BinaryMediaSource` data constructor still borrows its input.
+
+`AddVideoConnect` registers the family service only. No xAI Video transport is registered, so
+binding or opening settings for that unimplemented transport fails as unsupported. The data and
+SDK contracts do not establish provider availability, wire compatibility or download-origin safety.
+
 ## Host-executed tools
 
 For complete, compile-checked implementations for every supported provider, including connection
@@ -1198,8 +1274,16 @@ by these declarations.
 
 `ILlmContextCacheClient` declares explicit create, get, one-page list, expiry update and delete
 operations. Its request, correlation, receipt, usage, page and delete-result records have exact
-type-name getters on `ConnectLlmJson`. These declarations are inert: no facade cache binding or
-provider cache implementation is registered. They do not enable cached generation.
+type-name getters on `ConnectLlmJson`. `BindContextCacheAsync` validates a selected connection
+without effects and refuses because no provider cache implementation is registered.
+`LlmChatRequest.ExplicitCache` and Common's request carry the same data-only selection.
+`SupportsExplicitCache` defaults to false on both capability shapes; overrides cannot enable it.
+Every built-in route refuses a supplied selection before credential refresh, catalog discovery,
+counting, remote requests or engine/process entry. Registered implementations own their declared
+capability and selection validation. Vertex exact cached counting refuses independently of
+generation support. SelfHost does not forward native provider cache receipts. Portable projection
+preserves the selection; advisory `PromptCache` remains separate. These contracts do not create,
+renew, transfer or fall back from a paid cache.
 
 Receipts require observed expiry and preserve unknown usage/timestamps as null. List page size is
 explicit and positive; a short page with a continuation token remains nonterminal. Collection
@@ -1686,6 +1770,39 @@ The adapter refuses 3xx responses without retry. Replacing the named Azure clien
 transfers redirect-policy responsibility to the caller; response checks cannot undo credential
 forwarding by a handler that already followed a redirect. The Azure clients have no public
 constructor accepting an arbitrary borrowed `HttpClient`.
+
+## Realtime Voice Contracts
+
+`AddRealtimeConnect()` registers `RealtimeProviderService`, not an xAI adapter. Its setup catalog
+contains only supplied `IRealtimeProvider` implementations. An unregistered transport refuses;
+the registration does not advertise usable realtime sessions.
+
+The facade exposes `GetCapabilitiesAsync(connection, modelId?, cancellationToken)` and
+`OpenSessionAsync(connection, config, limits, xai?, resources?, cancellationToken)`.
+`RealtimeConnection` carries the endpoint, a five-minute library request timeout, copied headers,
+data-only xAI selection and optional borrowed authorization. Runtime bindings and resource access
+remain explicit operation arguments. `InferenceStreamLimits` contains three positive caller-local
+budgets with no implicit defaults. A returned `IRealtimeVoiceSession` owns its socket and tasks;
+the caller disposes it. The facade retires a session returned after cancellation before handoff.
+
+`RealtimeSessionConfig` retains the complete typed instructions, audio, tools, turn detection,
+transcription, speed and explicit scoped resumption settings. Tool schemas and hosted-tool data
+are snapshotted before provider entry. `XaiRealtimeOptions.Replace` distinguishes omitted and
+explicit empty maps. `XaiRealtimeForceMessageItem` retains text and optional interruptibility;
+an inherited client ID refuses because that variant has no declared ID mapping.
+
+`ConnectRealtimeJson` exposes exact data-type getters for connections, settings changes,
+configuration, content, conversation items and concrete events. Its complete graphs admit the
+fixed xAI options, force-message item and X search tool. Common's metadata does not admit these
+Connect-only extensions. Non-null runtime collaborators refuse portable JSON without invoking
+them. Required audio uses Common's targeted byte policy.
+
+`CreateSettingsManager(target)` borrows the conditional commit target. Setup preserves every typed
+session default, separates protected header edits and removes live authorization from saved data.
+Capability inspection does not prove authentication or session readiness. Manager retirement
+fences new operations, drains admitted work and detaches borrowed collaborators. An admitted Save
+retains its actual committed or uncertain outcome. The real xAI socket protocol, native resumption
+and resource/tool materialization remain unimplemented under DSA-131.
 
 ## Account usage
 

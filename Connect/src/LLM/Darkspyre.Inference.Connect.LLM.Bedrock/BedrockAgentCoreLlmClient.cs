@@ -73,6 +73,7 @@ internal sealed class BedrockAgentCoreLlmClient(IBedrockAgentCoreInvoker invoker
         ArgumentNullException.ThrowIfNull(request);
         LlmProviderCapabilities capabilities = GetCapabilities(connection, request.ModelId);
         HostedTools.Validate(request, capabilities);
+        ExplicitCaches.Validate(request, capabilities.SupportsExplicitCache);
         ClientTools.Validate(request, capabilities.SupportsShellTools);
         ValidateChatRequest(request, capabilities);
         if (request.Messages.Any(message => message.ContinuationState is not null))

@@ -8,6 +8,7 @@ using System.Text.Json.Serialization.Metadata;
 using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Common.Media;
 using Darkspyre.Inference.Common.Setup;
+using Darkspyre.Inference.Connect.LLM;
 
 namespace Darkspyre.Inference.Connect.TTS.Tests;
 
@@ -18,7 +19,7 @@ public sealed class TtsContractTests
     {
         { "TtsTransport", "1" }, { "PocketTtsProtocol", "1" }, { "TtsAudioFormat", "4" },
         { "PocketTtsEndpointOptions", "{}" },
-        { "TtsConnection", "{\"Endpoint\":\"https://example.invalid/\"}" },
+        { "TtsConnection", "{\"Endpoint\":\"https://example.invalid/\",\"Xai\":{\"ConnectionId\":\"selected\"}}" },
         { "TtsRequest", "{\"Text\":\"<&>\",\"Language\":\"en\",\"SampleRate\":24000,\"BitRate\":128000,\"IncludeTimestamps\":false,\"Xai\":{\"OptimizeStreamingLatency\":2,\"TextNormalization\":false,\"Replace\":{\"A\":\"B\"}}}" },
         { "TtsVoice", "{\"Id\":\"voice\",\"DisplayName\":\"name\",\"Locale\":null}" },
         { "TtsCapabilities", "{\"SupportsVoiceListing\":false,\"SupportsSpeed\":false,\"Formats\":[0,1],\"SampleRates\":null,\"BitRates\":[]}" },
@@ -223,11 +224,18 @@ public sealed class TtsContractTests
         {
             Assembly tts = generation.LoadFromAssemblyPath(typeof(ConnectTtsJson).Assembly.Location);
             Assembly common = generation.LoadFromAssemblyPath(typeof(InferenceJson).Assembly.Location);
+            Assembly llm = generation.LoadFromAssemblyPath(typeof(ConnectLlmJson).Assembly.Location);
             Assembly fixture = generation.LoadFromAssemblyPath(typeof(TtsContractTests).Assembly.Location);
-            foreach ((Assembly actual, Assembly original) in new[] { (tts, typeof(ConnectTtsJson).Assembly), (common, typeof(InferenceJson).Assembly), (fixture, typeof(TtsContractTests).Assembly) })
+            foreach ((Assembly actual, Assembly original) in new[] { (tts, typeof(ConnectTtsJson).Assembly), (common, typeof(InferenceJson).Assembly), (llm, typeof(ConnectLlmJson).Assembly), (fixture, typeof(TtsContractTests).Assembly) })
             { Assert.NotSame(original, actual); Assert.Same(generation, AssemblyLoadContext.GetLoadContext(actual)); Assert.Equal(original.ManifestModule.ModuleVersionId, actual.ManifestModule.ModuleVersionId); }
             JsonTypeInfo metadata = Metadata(tts.GetType(typeof(ConnectTtsJson).FullName!, true)!, name);
             object value = RoundTrip(json, metadata); Assert.Same(tts, value.GetType().Assembly);
+            if (name == "TtsConnection")
+            {
+                object selection = value.GetType().GetProperty("Xai")!.GetValue(value)!;
+                Assert.Same(llm, selection.GetType().Assembly);
+                Assert.Same(llm, metadata.Properties.Single(property => property.Name == "Xai").PropertyType.Assembly);
+            }
             if (name == "TtsResult" || name == "TtsStreamError")
             {
                 string field = name == "TtsResult" ? "Provenance" : "Error";
@@ -239,6 +247,10 @@ public sealed class TtsContractTests
             Assert.Same(common, limits.Type.Assembly); RoundTrip("{\"MaximumBufferedEvents\":1,\"MaximumBufferedPayloadBytes\":2,\"MaximumMessageBytes\":3}", limits);
             MethodInfo entry = fixture.GetType(typeof(TtsContractTests).FullName!, true)!.GetMethod(nameof(ExerciseRuntimeRefusal))!;
             Assert.Same(fixture, entry.Module.Assembly); Assert.Equal(0, entry.Invoke(null, null));
+            MethodInfo bindingEntry = fixture.GetType(typeof(TtsBindingTests).FullName!, true)!.GetMethod(nameof(TtsBindingTests.RuntimeEnvelopeUsesActualOwnedAuthorityConvertersWithoutEffects))!;
+            Assert.Same(fixture, bindingEntry.Module.Assembly);
+            bindingEntry.Invoke(Activator.CreateInstance(bindingEntry.DeclaringType!), null);
+            Assert.Same(llm, metadata.Options.GetConverter(llm.GetType(typeof(XaiFamilyBinding).FullName!, true)!).GetType().Assembly);
             Type runtimeType = tts.GetType(typeof(ITtsStreamingSession).FullName!, true)!;
             Assert.Same(tts, metadata.Options.GetConverter(runtimeType).GetType().Assembly);
             if (name == "TtsAudioChunk" || name == "TtsResult")
@@ -300,7 +312,8 @@ public sealed class TtsContractTests
         public TtsTransport Transport => throw Touched();
         public InferenceSetupDefinition SetupDefinition => throw Touched();
         public IAsyncEnumerable<TtsStreamEvent> Events => throw Touched();
-        public ITtsClient Bind(TtsConnection connection) => throw Touched();
+        public ITtsClient Bind(TtsConnection connection, Darkspyre.Inference.Connect.LLM.XaiFamilyBinding? xai = null,
+            Darkspyre.Inference.Common.Resources.IInferenceResourceAccess? resources = null) => throw Touched();
         public Task<TtsCapabilities> GetCapabilitiesAsync(CancellationToken cancellationToken = default) => throw Touched();
         public Task<IReadOnlyList<TtsVoice>> ListVoicesAsync(CancellationToken cancellationToken = default) => throw Touched();
         public Task<TtsResult> SpeakAsync(TtsRequest request, CancellationToken cancellationToken = default) => throw Touched();

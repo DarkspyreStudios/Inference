@@ -2,6 +2,8 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
 using Darkspyre.Inference.Common;
+using Darkspyre.Inference.Common.Resources;
+using Darkspyre.Inference.Connect.LLM;
 
 namespace Darkspyre.Inference.Connect.TTS;
 
@@ -40,6 +42,13 @@ public static class ConnectTtsJson
         options.Converters.Add(new TtsRuntimeJsonConverter<ITtsProvider>());
         options.Converters.Add(new TtsRuntimeJsonConverter<ITtsStreamingClient>());
         options.Converters.Add(new TtsRuntimeJsonConverter<ITtsStreamingSession>());
+        foreach (Type type in new[] { typeof(IProviderAuthorization), typeof(IInferenceResourceAccess), typeof(IInferenceResourceReadHandle), typeof(IInferenceResourceWriteHandle) })
+            options.Converters.Add(InferenceJson.InferenceResourceReference.Options.Converters.Single(converter => converter.CanConvert(type)));
+        options.Converters.Add(ConnectLlmJson.Connection.Options.Converters.Single(converter => converter.CanConvert(typeof(XaiFamilyBinding))));
+        options.Converters.Add(new TtsRuntimeJsonConverter<Func<XaiConnectionSelection, XaiFamilyBinding>>());
+        options.Converters.Add(new TtsRuntimeJsonConverter<TtsProviderService>());
+        options.Converters.Add(new TtsRuntimeJsonConverter<TtsSettings>());
+        options.Converters.Add(new TtsRuntimeJsonConverter<TtsSettingsManager>());
         options.MakeReadOnly();
         return options;
     }
@@ -54,11 +63,22 @@ public static class ConnectTtsJson
             if (type == typeof(ITtsProvider)) return JsonMetadataServices.CreateValueInfo<ITtsProvider>(options, new TtsRuntimeJsonConverter<ITtsProvider>());
             if (type == typeof(ITtsStreamingClient)) return JsonMetadataServices.CreateValueInfo<ITtsStreamingClient>(options, new TtsRuntimeJsonConverter<ITtsStreamingClient>());
             if (type == typeof(ITtsStreamingSession)) return JsonMetadataServices.CreateValueInfo<ITtsStreamingSession>(options, new TtsRuntimeJsonConverter<ITtsStreamingSession>());
+            if (type == typeof(IProviderAuthorization)) return RuntimeValue<IProviderAuthorization>(options);
+            if (type == typeof(IInferenceResourceAccess)) return RuntimeValue<IInferenceResourceAccess>(options);
+            if (type == typeof(IInferenceResourceReadHandle)) return RuntimeValue<IInferenceResourceReadHandle>(options);
+            if (type == typeof(IInferenceResourceWriteHandle)) return RuntimeValue<IInferenceResourceWriteHandle>(options);
+            if (type == typeof(XaiFamilyBinding)) return RuntimeValue<XaiFamilyBinding>(options);
+            if (type == typeof(Func<XaiConnectionSelection, XaiFamilyBinding>)) return RuntimeValue<Func<XaiConnectionSelection, XaiFamilyBinding>>(options);
+            if (type == typeof(TtsProviderService)) return RuntimeValue<TtsProviderService>(options);
+            if (type == typeof(TtsSettings)) return RuntimeValue<TtsSettings>(options);
+            if (type == typeof(TtsSettingsManager)) return RuntimeValue<TtsSettingsManager>(options);
             JsonTypeInfo? metadata = ((IJsonTypeInfoResolver)ConnectTtsJsonContext.Default).GetTypeInfo(type, options);
             if ((type == typeof(TtsResult) || type == typeof(TtsAudioChunk)) && metadata is not null)
                 metadata.Properties.Single(property => property.Name == "Audio").CustomConverter = audio;
             return metadata;
         }
+        private static JsonTypeInfo<T> RuntimeValue<T>(JsonSerializerOptions options) where T : class =>
+            JsonMetadataServices.CreateValueInfo<T>(options, (JsonConverter<T>)options.Converters.Single(converter => converter.CanConvert(typeof(T))));
     }
 }
 

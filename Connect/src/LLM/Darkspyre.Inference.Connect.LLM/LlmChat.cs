@@ -81,6 +81,9 @@ public sealed record LlmChatRequest
 
     public LlmPromptCacheHint? PromptCache { get; init; }
 
+    /// <summary>An explicitly selected native cache, independently of advisory prompt-cache hints.</summary>
+    public LlmExplicitCacheReference? ExplicitCache { get; init; }
+
     /// <summary>Per-operation provider JSON properties; standard request fields cannot be replaced.</summary>
     public IReadOnlyDictionary<string, JsonElement> ProviderOptions { get; init; } =
         new Dictionary<string, JsonElement>(StringComparer.Ordinal);
