@@ -13,15 +13,20 @@ internal sealed class BedrockLoggingGuard : IDisposable, IAsyncDisposable
         StringComparer.OrdinalIgnoreCase);
 
     public Task EnsureLoggingDisabledAsync(
-        IAmazonBedrock control,
+        BedrockClientFactory.Lease<AmazonBedrockClient> control,
         LlmAwsCredentials aws,
         CancellationToken cancellationToken = default) =>
         EnsureLoggingDisabledAsync(
             BedrockClientFactory.ScopeKey(aws),
             aws.Region!,
-            async ct => (await control.GetModelInvocationLoggingConfigurationAsync(
-                new GetModelInvocationLoggingConfigurationRequest(),
-                ct)).LoggingConfig,
+            async ct =>
+            {
+                control.ThrowIfCanceled();
+                GetModelInvocationLoggingConfigurationResponse response = await control.Client.GetModelInvocationLoggingConfigurationAsync(
+                    new GetModelInvocationLoggingConfigurationRequest(), ct);
+                control.ThrowIfCanceled();
+                return response.LoggingConfig;
+            },
             cancellationToken);
 
     internal async Task EnsureLoggingDisabledAsync(
@@ -32,6 +37,7 @@ internal sealed class BedrockLoggingGuard : IDisposable, IAsyncDisposable
     {
         using LlmOperationLifetime.Lease operation = _lifetime.Enter(cancellationToken);
         cancellationToken = operation.Token;
+        ThrowIfOperationCanceled(cancellationToken);
         if (_verifiedAt.TryGetValue(scopeKey, out DateTimeOffset verified)
             && DateTimeOffset.UtcNow - verified < CacheTtl)
         {
@@ -52,7 +58,7 @@ internal sealed class BedrockLoggingGuard : IDisposable, IAsyncDisposable
                 exception);
         }
 
-        cancellationToken.ThrowIfCancellationRequested();
+        ThrowIfOperationCanceled(cancellationToken);
         if (DescribeEnabledLogging(config) is { } detail)
         {
             throw new InvalidOperationException(
@@ -70,6 +76,13 @@ internal sealed class BedrockLoggingGuard : IDisposable, IAsyncDisposable
     }));
 
     public void Dispose() => DisposeAsync().AsTask().GetAwaiter().GetResult();
+
+    private void ThrowIfOperationCanceled(CancellationToken token)
+    {
+        token.ThrowIfCancellationRequested();
+        try { _lifetime.ThrowIfStopping(); }
+        catch (ObjectDisposedException) { throw new OperationCanceledException("Bedrock logging verification is retiring.", token); }
+    }
 
     internal static string? DescribeEnabledLogging(LoggingConfig? config)
     {

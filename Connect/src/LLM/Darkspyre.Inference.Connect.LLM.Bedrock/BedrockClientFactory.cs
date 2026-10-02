@@ -24,11 +24,12 @@ internal sealed class BedrockClientFactory : IDisposable, IAsyncDisposable
     private readonly Dictionary<string, Lazy<AmazonBedrockAgentCoreClient>> _agentCore = new(StringComparer.Ordinal);
     private readonly List<IDisposable> _credentials = [];
     private readonly List<Exception> _cleanupFailures = [];
+    private readonly List<IDisposable> _failedResources = [];
     private readonly IdentityResolvers _identities = new();
     private readonly BedrockHttpClientFactory _httpClients = new();
-    private readonly Func<LlmAwsCredentials, AmazonBedrockRuntimeClient> _createRuntime;
-    private readonly Func<LlmAwsCredentials, AmazonBedrockClient> _createControl;
-    private readonly Func<LlmAwsCredentials, AmazonBedrockAgentCoreClient> _createAgentCore;
+    private Func<LlmAwsCredentials, AmazonBedrockRuntimeClient>? _createRuntime;
+    private Func<LlmAwsCredentials, AmazonBedrockClient>? _createControl;
+    private Func<LlmAwsCredentials, AmazonBedrockAgentCoreClient>? _createAgentCore;
 
     public BedrockClientFactory()
     {
@@ -50,13 +51,13 @@ internal sealed class BedrockClientFactory : IDisposable, IAsyncDisposable
     }
 
     public Lease<AmazonBedrockRuntimeClient> Runtime(LlmAwsCredentials aws, CancellationToken cancellationToken = default) =>
-        Acquire(_runtime, aws, _createRuntime, cancellationToken);
+        Acquire(_runtime, aws, _createRuntime!, cancellationToken);
 
     public Lease<AmazonBedrockClient> Control(LlmAwsCredentials aws, CancellationToken cancellationToken = default) =>
-        Acquire(_control, aws, _createControl, cancellationToken);
+        Acquire(_control, aws, _createControl!, cancellationToken);
 
     public Lease<AmazonBedrockAgentCoreClient> AgentCore(LlmAwsCredentials aws, CancellationToken cancellationToken = default) =>
-        Acquire(_agentCore, aws, _createAgentCore, cancellationToken);
+        Acquire(_agentCore, aws, _createAgentCore!, cancellationToken);
 
     private Lease<T> Acquire<T>(Dictionary<string, Lazy<T>> clients, LlmAwsCredentials aws,
         Func<LlmAwsCredentials, T> create, CancellationToken caller) where T : class, IDisposable
@@ -75,7 +76,7 @@ internal sealed class BedrockClientFactory : IDisposable, IAsyncDisposable
                     clients.Add(key, entry);
                 }
             }
-            operation.Token.ThrowIfCancellationRequested();
+            ThrowIfOperationCanceled(operation.Token);
             T client;
             try { client = entry.Value; }
             catch
@@ -86,8 +87,8 @@ internal sealed class BedrockClientFactory : IDisposable, IAsyncDisposable
                 }
                 throw;
             }
-            operation.Token.ThrowIfCancellationRequested();
-            var lease = new Lease<T>(client, operation, RecordCleanupFailure);
+            ThrowIfOperationCanceled(operation.Token);
+            var lease = new Lease<T>(client, operation, ThrowIfOperationCanceled, RecordCleanupFailure);
             transferred = true;
             return lease;
         }
@@ -138,9 +139,16 @@ internal sealed class BedrockClientFactory : IDisposable, IAsyncDisposable
     public ValueTask DisposeAsync() => new(_lifetime.RetireAsync(ReleaseAsync));
     public void Dispose() => DisposeAsync().AsTask().GetAwaiter().GetResult();
 
-    private void RecordCleanupFailure(Exception error)
+    private void ThrowIfOperationCanceled(CancellationToken token)
     {
-        lock (_gate) { _cleanupFailures.Add(error); }
+        token.ThrowIfCancellationRequested();
+        try { _lifetime.ThrowIfStopping(); }
+        catch (ObjectDisposedException) { throw new OperationCanceledException("Bedrock resource ownership is retiring.", token); }
+    }
+
+    private void RecordCleanupFailure(IDisposable resource, Exception error)
+    {
+        lock (_gate) { _cleanupFailures.Add(error); _failedResources.Add(resource); }
     }
 
     [SuppressMessage("Design", "CA1031", Justification = "Every owned resource is retired before disposal failures are returned together.")]
@@ -160,23 +168,37 @@ internal sealed class BedrockClientFactory : IDisposable, IAsyncDisposable
             _control.Clear();
             _agentCore.Clear();
             _credentials.Clear();
+            _createRuntime = null;
+            _createControl = null;
+            _createAgentCore = null;
         }
         foreach (IDisposable resource in resources.Distinct<IDisposable>(ReferenceEqualityComparer.Instance))
         {
             try { resource.Dispose(); }
-            catch (Exception error) { failures.Add(error); }
+            catch (Exception error)
+            {
+                failures.Add(error);
+                lock (_gate) { _failedResources.Add(resource); }
+            }
         }
         if (failures.Count > 0) throw new AggregateException("Bedrock resource retirement failed.", failures);
         return Task.CompletedTask;
     }
 
-    internal sealed class Lease<T>(T client, LlmOperationLifetime.Lease operation, Action<Exception> recordFailure) : IDisposable where T : class
+    internal sealed class Lease<T>(T client, LlmOperationLifetime.Lease operation,
+        Action<CancellationToken> checkLifetime, Action<IDisposable, Exception> recordFailure) : IDisposable where T : class
     {
         private LlmOperationLifetime.Lease? _operation = operation;
         private T? _client = client;
-        private Action<Exception>? _recordFailure = recordFailure;
+        private Action<IDisposable, Exception>? _recordFailure = recordFailure;
+        private Action<CancellationToken>? _checkLifetime = checkLifetime;
         public T Client => _client ?? throw new ObjectDisposedException(nameof(Lease<T>));
         public CancellationToken Token { get; } = operation.Token;
+        public void ThrowIfCanceled()
+        {
+            ObjectDisposedException.ThrowIf(_operation is null, this);
+            _checkLifetime!(Token);
+        }
         public IDisposable OwnResponse(IDisposable response) => new ResponseScope(() => DisposeResponse(response));
 
         public void DisposeResponse(IDisposable response)
@@ -184,7 +206,7 @@ internal sealed class BedrockClientFactory : IDisposable, IAsyncDisposable
             try { response.Dispose(); }
             catch (Exception error)
             {
-                _recordFailure?.Invoke(error);
+                _recordFailure?.Invoke(response, error);
                 throw;
             }
         }
@@ -194,6 +216,7 @@ internal sealed class BedrockClientFactory : IDisposable, IAsyncDisposable
             Interlocked.Exchange(ref _operation, null)?.Dispose();
             _client = null;
             _recordFailure = null;
+            _checkLifetime = null;
         }
 
         private sealed class ResponseScope(Action dispose) : IDisposable

@@ -12,7 +12,7 @@ using Amazon.Runtime.Identity;
 
 namespace Darkspyre.Inference.Connect.LLM.Bedrock.Tests;
 
-public sealed class BedrockLifetimeTests
+public sealed partial class BedrockLifetimeTests
 {
     private static readonly TimeSpan Bound = TimeSpan.FromSeconds(5);
     private static readonly LlmAwsCredentials Aws = new()
