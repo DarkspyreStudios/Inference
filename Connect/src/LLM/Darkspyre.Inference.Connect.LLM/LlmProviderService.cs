@@ -43,6 +43,20 @@ public sealed class LlmProviderService : ILlmTextTokenizer, ILlmFileClient, IXai
         LlmModelListCache? modelLists = null,
         LlmAccountUsageObservations? observations = null,
         LlmConnectionAccess? connectionAccess = null)
+        : this(connections, clients, authenticators, setupEnvironments, modelLists, observations, connectionAccess, null)
+    {
+    }
+
+    internal LlmProviderService(ILlmConnectionSource connections, IEnumerable<ILlmClient> clients,
+        IEnumerable<ILlmAuthenticator> authenticators, Action admission)
+        : this(connections, clients, authenticators, null, null, null, null, admission)
+    {
+    }
+
+    private LlmProviderService(ILlmConnectionSource connections, IEnumerable<ILlmClient> clients,
+        IEnumerable<ILlmAuthenticator> authenticators, IEnumerable<ILlmSetupEnvironment>? setupEnvironments,
+        LlmModelListCache? modelLists, LlmAccountUsageObservations? observations,
+        LlmConnectionAccess? connectionAccess, Action? admission)
     {
         ArgumentNullException.ThrowIfNull(connections);
         ArgumentNullException.ThrowIfNull(clients);
@@ -58,7 +72,7 @@ public sealed class LlmProviderService : ILlmTextTokenizer, ILlmFileClient, IXai
         _ownsObservations = observations is null;
         ILlmClient[] clientArray = [.. clients];
         IGrouping<LlmTransport, ILlmClient>? duplicate = clientArray
-            .GroupBy(client => client.Transport)
+            .GroupBy(client => LlmConstructionAdmission.Read(admission, () => client.Transport))
             .FirstOrDefault(group => group.Skip(1).Any());
         if (duplicate is not null)
         {
@@ -66,14 +80,15 @@ public sealed class LlmProviderService : ILlmTextTokenizer, ILlmFileClient, IXai
                 $"Multiple LLM clients are registered for transport {duplicate.Key}.");
         }
         ILlmClient? inconsistent = clientArray.FirstOrDefault(
-            client => client.ProviderDefinition.Transport != client.Transport);
+            client => LlmConstructionAdmission.Read(admission, () => client.ProviderDefinition).Transport
+                != LlmConstructionAdmission.Read(admission, () => client.Transport));
         if (inconsistent is not null)
         {
             throw new InvalidOperationException(
-                $"Provider definition '{inconsistent.ProviderDefinition.Id}' does not match transport {inconsistent.Transport}.");
+                $"Provider definition '{LlmConstructionAdmission.Read(admission, () => inconsistent.ProviderDefinition).Id}' does not match transport {LlmConstructionAdmission.Read(admission, () => inconsistent.Transport)}.");
         }
         IGrouping<string, ILlmClient>? duplicateProvider = clientArray
-            .GroupBy(client => client.ProviderDefinition.Id, StringComparer.Ordinal)
+            .GroupBy(client => LlmConstructionAdmission.Read(admission, () => client.ProviderDefinition).Id, StringComparer.Ordinal)
             .FirstOrDefault(group => group.Skip(1).Any());
         if (duplicateProvider is not null)
         {
@@ -81,20 +96,20 @@ public sealed class LlmProviderService : ILlmTextTokenizer, ILlmFileClient, IXai
                 $"Multiple LLM clients are registered for provider '{duplicateProvider.Key}'.");
         }
 
-        _clients = clientArray.ToDictionary(client => client.Transport);
+        _clients = clientArray.ToDictionary(client => LlmConstructionAdmission.Read(admission, () => client.Transport));
         _accountUsageClients = clientArray
             .OfType<ILlmAccountUsageClient>()
-            .ToDictionary(client => client.Transport);
+            .ToDictionary(client => LlmConstructionAdmission.Read(admission, () => client.Transport));
         ILlmAuthenticator[] authenticatorArray = [.. authenticators];
-        _authenticators = authenticatorArray.ToDictionary(authenticator => authenticator.Transport);
-        _connectionAccess = connectionAccess ?? new LlmConnectionAccess(connections, authenticatorArray, clientArray);
+        _authenticators = authenticatorArray.ToDictionary(authenticator => LlmConstructionAdmission.Read(admission, () => authenticator.Transport));
+        _connectionAccess = connectionAccess ?? new LlmConnectionAccess(connections, authenticatorArray, clientArray, admission);
         _ownsConnectionAccess = connectionAccess is null;
-        _setupEnvironments = (setupEnvironments ?? []).ToDictionary(environment => environment.Transport);
+        _setupEnvironments = (setupEnvironments ?? []).ToDictionary(environment => LlmConstructionAdmission.Read(admission, () => environment.Transport));
         SupportedTransports = [.. _clients.Keys.OrderBy(transport => transport)];
         SupportedProviders =
         [
             .. clientArray
-                .Select(client => client.ProviderDefinition)
+                .Select(client => LlmConstructionAdmission.Read(admission, () => client.ProviderDefinition))
                 .OrderBy(provider => provider.DisplayOrder)
                 .ThenBy(provider => provider.DisplayName, StringComparer.Ordinal)
         ];
@@ -109,10 +124,12 @@ public sealed class LlmProviderService : ILlmTextTokenizer, ILlmFileClient, IXai
         SupportedProviders.Select(provider => provider.SetupDefinition).ToArray();
 
     /// <summary>Creates the settings manager that opens, acts on and saves LLM settings through <paramref name="target"/>.</summary>
-    public LlmSettingsManager CreateSettingsManager(Common.Setup.ISetupCommitTarget<LlmSetupChanges> target)
+    public LlmSettingsManager CreateSettingsManager(Common.Setup.ISetupCommitTarget<LlmSetupChanges> target,
+        LlmAgentProviderService? agents = null)
     {
         using var operation = _lifetime.Enter(CancellationToken.None);
-        return new(_clients, _authenticators.Values, _setupEnvironments, target);
+        agents?.ValidateSource(Connections);
+        return new(_clients, _authenticators.Values, _setupEnvironments, target, agents);
     }
 
     public const string ClaudeManualRedirectUri =

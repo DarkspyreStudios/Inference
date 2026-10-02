@@ -87,6 +87,22 @@ record exposes no credential values or account metadata. Their properties, recor
 protected-store `Serialize`/`Parse` wire format retain the original values. Serialized credential
 JSON remains secret and is not a diagnostic representation.
 
+ACP and Copilot runtime configuration uses closed typed profiles, state selections and
+authentication selections. `ConnectLlmJson` exports the corresponding data and staged-login
+observation metadata. Live launch inputs, login services, factories and runtime authentication
+owners refuse non-null serialization without invoking borrowed callbacks. Null runtime inputs
+round-trip. Copilot credentials use the existing protected Web/null-omit codec; their diagnostic
+strings redact tokens. These declarations do not register an ACP or Copilot adapter, launch a
+runtime, perform login, validate state-directory isolation or certify a runtime/SDK version.
+
+`LlmAgentProviderService.BindRuntimeAuthentication` exposes saved-ID and explicit draft/identity
+overloads. Both reject runtime authentication as unavailable before resolving a connection or
+starting login. `CreateSettingsManager(target, agents)` optionally borrows the agent facade from
+the same connection source. The settings manager fences new actions, choices, opens and saves
+when retirement starts, drains admitted calls, then drops borrowed collaborators and its commit
+target. It never disposes them. A save that settles during retirement retains its actual commit
+state and version, including committed or uncertain outcomes.
+
 Every returned `LlmConnection` includes a required opaque `Version`. The version must cover both
 connection metadata and credential state. `SaveCredentialAsync` must atomically compare
 `expectedVersion` and replace only the credential when it still matches; it must reject changed,
@@ -423,6 +439,15 @@ protected-header patches separately. Typed xAI setup controls preserve explicit 
 empty values; these declarations do not register an xAI provider or activate capabilities.
 
 ## TangoFlux audio
+
+`ConnectAudioJson` exports exact type-name metadata getters for the nine public Audio
+connection, generation, capability and setup data roots. Its finite generated graph preserves
+optional defaults, explicit zero/false values and unknown measured duration. Observed capability
+and result facts cannot be omitted or replaced with null. Unknown transport/member values refuse.
+Use these getters for portable data; the private TangoFlux wire codec retains its own Web naming
+and seed/cache omission policy. Audio-owned options refuse non-null live clients, providers,
+settings, managers, commit targets, streams and authorization. Null runtime values round-trip;
+metadata does not invoke callbacks or acquire provider resources.
 
 `IAudioGenerationClient` accepts typed generation requests and returns WAV bytes and provenance.
 Register `services.AddAudioConnect()`, then bind a host-supplied `AudioConnection` with

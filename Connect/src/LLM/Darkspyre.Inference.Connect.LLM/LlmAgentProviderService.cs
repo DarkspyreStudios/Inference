@@ -1,4 +1,5 @@
 using System.Diagnostics.CodeAnalysis;
+using Darkspyre.Inference.Common.Setup;
 using Darkspyre.Inference.Connect.LLM.Internal;
 
 namespace Darkspyre.Inference.Connect.LLM;
@@ -42,6 +43,34 @@ public sealed class LlmAgentProviderService : IDisposable, IAsyncDisposable
     }
 
     public IReadOnlyList<LlmTransport> SupportedTransports { get; }
+
+    /// <summary>Runtime login is unavailable until an adapter implements its complete owned lifecycle.</summary>
+    public ILlmAgentRuntimeAuthentication BindRuntimeAuthentication(string connectionId)
+    {
+        using var operation = Enter(CancellationToken.None);
+        ArgumentException.ThrowIfNullOrWhiteSpace(connectionId);
+        throw new NotSupportedException("No runtime authentication adapter is available.");
+    }
+
+    /// <summary>Validates an explicit draft without resolving, refreshing, launching or signing in.</summary>
+    public ILlmAgentRuntimeAuthentication BindRuntimeAuthentication(LlmConnection draft, SetupConfigurationIdentity identity)
+    {
+        using var operation = Enter(CancellationToken.None);
+        ArgumentNullException.ThrowIfNull(draft);
+        ArgumentNullException.ThrowIfNull(identity);
+        identity.Validate();
+        _ = RuntimeAuthData.Transport(draft.Transport);
+        ArgumentException.ThrowIfNullOrWhiteSpace(draft.Version);
+        _ = CallerData.Path(draft.Endpoint);
+        throw new NotSupportedException("No runtime authentication adapter is available.");
+    }
+
+    internal void ValidateSource(ILlmConnectionSource connections)
+    {
+        using var operation = Enter(CancellationToken.None);
+        if (!ReferenceEquals(Connections, connections))
+            throw new ArgumentException("The agent facade must borrow the same connection source.", nameof(connections));
+    }
 
     public async Task<ILlmAgentSession> StartSessionAsync(
         string connectionId,

@@ -30,5 +30,11 @@ public enum LlmTransport
     AzureOpenAiResponses = 14,
 
     /// <summary>Azure resource OpenAI Chat Completions, with explicit deployment and authentication configuration.</summary>
-    AzureOpenAiChat = 15
+    AzureOpenAiChat = 15,
+
+    /// <summary>Declared Copilot runtime identity; no adapter is registered by this value.</summary>
+    GitHubCopilot = 16,
+
+    /// <summary>Declared ACP runtime identity; no adapter is registered by this value.</summary>
+    AgentClientProtocol = 17
 }
