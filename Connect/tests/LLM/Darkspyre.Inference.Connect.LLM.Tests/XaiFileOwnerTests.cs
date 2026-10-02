@@ -11,6 +11,7 @@ namespace Darkspyre.Inference.Connect.LLM.Tests;
 public sealed class XaiFileOwnerTests
 {
     private const string FileJson = "{\"id\":\"file-a\",\"filename\":\"a\",\"bytes\":3,\"created_at\":0,\"object\":\"file\"}";
+    private static readonly int[] BorrowedCounters = [1, 1, 0, 0, 0];
 
     [Theory]
     [InlineData(0)]
@@ -72,14 +73,80 @@ public sealed class XaiFileOwnerTests
         Assert.All(roots, root => Assert.False(root.IsAlive));
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    [SuppressMessage("Usage", "CA2201", Justification = "Controlled OOM tests prove independent cleanup without exhausting process memory.")]
+    public async Task CleanupPreservesControlledOomAndCancellationWithoutRetry(bool canceledCleanup)
+    {
+        var primary = new OutOfMemoryException("controlled operation failure");
+        using var cancellation = new CancellationTokenSource();
+        Exception cause = canceledCleanup ? new OperationCanceledException("controlled cleanup cancellation", cancellation.Token)
+            : new OutOfMemoryException("controlled cleanup failure");
+        var content = new RefusingContent(FileJson, cause);
+        bool returned = false;
+        using var http = new HttpClient(new Handler(_ => { returned = true; return new(HttpStatusCode.OK) { Content = content }; }));
+        var adapter = new XaiFileClient(http);
+        AggregateException failure = await Assert.ThrowsAsync<AggregateException>(() => adapter.GetAsync(Connection(), "file-a", () =>
+        { if (returned) throw primary; }, CancellationToken.None));
+        Assert.Same(primary, failure.InnerExceptions[0]);
+        Exception cleanup = failure.InnerExceptions[1];
+        Assert.Same(cause, cleanup.InnerException);
+        if (canceledCleanup)
+        {
+            var canceled = Assert.IsType<InferenceResourceOperationCanceledException>(cleanup);
+            Assert.Equal(cancellation.Token, canceled.CancellationToken);
+            Assert.Equal(InferenceResourceOperationPhase.Cleanup, canceled.Failure.Phase);
+            Assert.Same(cleanup, await Assert.ThrowsAsync<InferenceResourceOperationCanceledException>(() => adapter.DisposeAsync().AsTask()));
+        }
+        else
+        {
+            AssertCleanup(cleanup, cause);
+            Assert.Same(cleanup, await Assert.ThrowsAsync<InferenceResourceOperationException>(() => adapter.DisposeAsync().AsTask()));
+        }
+        Assert.Equal(1, content.Disposals);
+    }
+
+    [Fact]
+    public async Task RetirementDrainsIgnoringCleanupBeforeRecordingItsActualRefusal()
+    {
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var cause = new IOException("controlled late disposal refusal");
+        var content = new BlockingContent(entered, release.Task, cause);
+        using var http = new HttpClient(new Handler(_ => new(HttpStatusCode.OK) { Content = content }));
+        var adapter = new XaiFileClient(http);
+        Task<LlmProviderFile> operation = Task.Run(() => adapter.GetAsync(Connection(), "file-a", () => { }, CancellationToken.None));
+        Task? retirement = null;
+        try
+        {
+            await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            retirement = adapter.DisposeAsync().AsTask();
+            Assert.False(retirement.IsCompleted);
+            Assert.Same(http, typeof(XaiFileClient).GetField("_http", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(adapter));
+            release.SetResult();
+            Exception failure = await Assert.ThrowsAsync<InferenceResourceOperationException>(() => operation);
+            AssertCleanup(failure, cause);
+            Assert.Same(failure, await Assert.ThrowsAsync<InferenceResourceOperationException>(() => retirement));
+            Assert.Equal(1, content.Disposals);
+        }
+        finally
+        {
+            release.TrySetResult();
+            try { await operation.WaitAsync(TimeSpan.FromSeconds(5)); } catch (InferenceResourceOperationException) { }
+            try { await (retirement ?? adapter.DisposeAsync().AsTask()).WaitAsync(TimeSpan.FromSeconds(5)); } catch (InferenceResourceOperationException) { }
+        }
+    }
+
     public static HttpResponseMessage CreateForeignResponse(bool refuse) => new(HttpStatusCode.OK)
     { Content = refuse ? new RefusingContent(FileJson, new IOException("controlled foreign refusal")) : new StringContent(FileJson) };
 
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static async Task<WeakReference[]> HoldThenRelease(bool refuse)
     {
-        (WeakReference[] roots, XaiFileClient retained) = await ExerciseForeign(refuse);
+        (WeakReference[] roots, WeakReference[] borrowed, LlmProviderService retained) = await ExerciseForeign(refuse);
         await Collect();
+        Assert.All(borrowed, root => Assert.False(root.IsAlive));
         if (refuse) Assert.All(roots, root => Assert.True(root.IsAlive));
         else Assert.All(roots, root => Assert.False(root.IsAlive));
         GC.KeepAlive(retained);
@@ -87,9 +154,10 @@ public sealed class XaiFileOwnerTests
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private static async Task<(WeakReference[], XaiFileClient)> ExerciseForeign(bool refuse)
+    private static async Task<(WeakReference[], WeakReference[], LlmProviderService)> ExerciseForeign(bool refuse)
     {
         var generation = new Generation();
+        var sourceGeneration = new Generation();
         try
         {
             Assembly fixture = generation.LoadFromAssemblyPath(typeof(XaiFileOwnerTests).Assembly.Location);
@@ -99,22 +167,34 @@ public sealed class XaiFileOwnerTests
             MethodInfo method = type.GetMethod(nameof(CreateForeignResponse))!;
             var response = (HttpResponseMessage)method.Invoke(null, [refuse])!;
             if (refuse) Assert.Same(generation, AssemblyLoadContext.GetLoadContext(response.Content.GetType().Assembly));
+            Assembly sourceAssembly = sourceGeneration.LoadFromAssemblyPath(typeof(XaiFileOwnerTests).Assembly.Location);
+            Assert.Equal(fixture.ManifestModule.ModuleVersionId, sourceAssembly.ManifestModule.ModuleVersionId);
+            Assert.NotSame(fixture, sourceAssembly);
+            Type sourceType = sourceAssembly.GetType(typeof(XaiFileFacadeGenerationTests).FullName!, true)!;
+            MethodInfo create = sourceType.GetMethod(nameof(XaiFileFacadeGenerationTests.CreateBorrowed))!;
+            object[] collaborators = (object[])create.Invoke(null, [null, null])!;
+            Assert.Same(sourceGeneration, AssemblyLoadContext.GetLoadContext(collaborators[0].GetType().Assembly));
+            Assert.Same(sourceGeneration, AssemblyLoadContext.GetLoadContext(collaborators[1].GetType().Assembly));
             using var http = new HttpClient(new Handler(_ => response));
-            var adapter = new XaiFileClient(http);
+            using var unusedHttp = (HttpClient)collaborators[2];
+            var adapter = new LlmProviderService((ILlmConnectionSource)collaborators[0], [new XaiResponsesLlmClient(http)], [(ILlmAuthenticator)collaborators[1]]);
             if (refuse)
             {
-                Exception failure = await Assert.ThrowsAsync<InferenceResourceOperationException>(() => adapter.GetAsync(Connection(), "file-a", () => { }, CancellationToken.None));
+                Exception failure = await Assert.ThrowsAsync<InferenceResourceOperationException>(() => adapter.GetAsync("selected", "file-a"));
                 Assert.Same(failure, await Assert.ThrowsAsync<InferenceResourceOperationException>(() => adapter.DisposeAsync().AsTask()));
             }
             else
             {
-                Assert.Equal("file-a", (await adapter.GetAsync(Connection(), "file-a", () => { }, CancellationToken.None)).Id);
+                Assert.Equal("file-a", (await adapter.GetAsync("selected", "file-a")).Id);
                 await adapter.DisposeAsync();
             }
-            // Reflection call sites are diagnostic only. The actual refused message/content root the generation.
-            return ([new(generation), new(fixture), new(response), new(response.Content)], adapter);
+            int[] counters = (int[])sourceType.GetMethod(nameof(XaiFileFacadeGenerationTests.Counters))!.Invoke(null, [collaborators])!;
+            Assert.Equal(BorrowedCounters, counters);
+            // The source and auth methods execute in a separate generation from the refused content.
+            return ([new(generation), new(fixture), new(response), new(response.Content)],
+                [new(sourceGeneration), new(sourceAssembly), new(collaborators[0]), new(collaborators[1])], adapter);
         }
-        finally { generation.Unload(); }
+        finally { generation.Unload(); sourceGeneration.Unload(); }
     }
 
     private static async Task Collect()
@@ -156,7 +236,9 @@ public sealed class XaiFileOwnerTests
 
     private static LlmConnection Connection() => new()
     {
-        Transport = LlmTransport.XaiResponses, Endpoint = "https://api.x.ai/v1", Version = "v1",
+        Transport = LlmTransport.XaiResponses,
+        Endpoint = "https://api.x.ai/v1",
+        Version = "v1",
         Credential = new LlmCredential { OAuth = new() { AccessToken = "oauth-token" } }.Serialize()
     };
 
@@ -176,6 +258,17 @@ public sealed class XaiFileOwnerTests
         [SuppressMessage("Usage", "CA2215", Justification = "The controlled network wrapper retains its actual owned multipart and refuses cleanup before release.")]
         protected override void Dispose(bool disposing)
         { if (disposing) { Disposals++; GC.KeepAlive(inner); throw cause; } base.Dispose(disposing); }
+    }
+
+    private sealed class BlockingContent(TaskCompletionSource entered, Task release, Exception cause) : StringContent(FileJson)
+    {
+        internal int Disposals;
+        [SuppressMessage("Usage", "CA2215", Justification = "The controlled content blocks and then refuses actual cleanup before releasing state.")]
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing) { Disposals++; entered.SetResult(); release.GetAwaiter().GetResult(); throw cause; }
+            base.Dispose(disposing);
+        }
     }
 
     private sealed class Handler(Func<HttpRequestMessage, HttpResponseMessage> send) : HttpMessageHandler
