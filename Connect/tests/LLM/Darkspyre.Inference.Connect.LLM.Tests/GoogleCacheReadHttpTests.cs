@@ -38,7 +38,7 @@ public sealed class GoogleCacheReadHttpTests
                 : Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = content });
         });
         using var http = new HttpClient(handler);
-        using var request = Request();
+        var request = Request();
         Exception failure = (await Record.ExceptionAsync(() => Read(list, http, request,
             _ => { if (boundary == "parse") throw original; }, _ => { }, CancellationToken.None)))!;
         LlmProviderException error = boundary == "cleanup"
@@ -65,7 +65,7 @@ public sealed class GoogleCacheReadHttpTests
         var content = new Content(ReceiptBody);
         using var handler = new Handler((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = content }));
         using var http = new HttpClient(handler);
-        using var request = Request();
+        var request = Request();
         try
         {
             var error = await Assert.ThrowsAnyAsync<OperationCanceledException>(() => Read(list, http, request,
@@ -97,7 +97,7 @@ public sealed class GoogleCacheReadHttpTests
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = content });
         });
         using var http = new HttpClient(handler);
-        using var request = Request();
+        var request = Request();
         request.Headers.Add("x-goog-api-key", "selected-key");
         object result = await Read(list, http, request, _ => parses++, _ => { }, CancellationToken.None);
         if (list) Assert.Equal("cachedContents/id", Assert.Single(Assert.IsType<LlmContextCachePage>(result).Items).Reference.ResourceName);
@@ -129,7 +129,7 @@ public sealed class GoogleCacheReadHttpTests
             return Task.FromResult(response);
         });
         using var http = new HttpClient(handler);
-        using var request = Request();
+        var request = Request();
         var error = await Assert.ThrowsAsync<LlmProviderException>(() => Read(list, http, request,
             _ => throw new InvalidOperationException("No parse."), _ => { }, CancellationToken.None));
         Assert.Equal((HttpStatusCode)status, error.StatusCode);
@@ -155,7 +155,7 @@ public sealed class GoogleCacheReadHttpTests
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new Content(page) });
         });
         using var http = new HttpClient(handler);
-        using var request = new HttpRequestMessage(HttpMethod.Get, "https://controlled.invalid/cache?pageSize=7&pageToken=prior%2B%2F%3D");
+        var request = new HttpRequestMessage(HttpMethod.Get, "https://controlled.invalid/cache?pageSize=7&pageToken=prior%2B%2F%3D");
         var result = await GoogleCacheHttp.ListAsync(http, request, LlmTransport.GoogleVertexAi,
             root => GoogleCacheData.Page(root, Parse), _ => { }, CancellationToken.None);
         Assert.Equal("cachedContents/second", result.Items[0].Reference.ResourceName);
@@ -175,7 +175,7 @@ public sealed class GoogleCacheReadHttpTests
         if (!wrongMethod) stop.Cancel();
         using var handler = new Handler((_, _) => throw new InvalidOperationException("No dispatch."));
         using var http = new HttpClient(handler);
-        using var request = Request();
+        var request = Request();
         if (wrongMethod) request.Method = HttpMethod.Post;
         if (wrongMethod) await Assert.ThrowsAsync<ArgumentException>(() => Read(list, http, request, _ => { }, _ => { }, stop.Token));
         else
@@ -194,7 +194,7 @@ public sealed class GoogleCacheReadHttpTests
         var content = new Content(ReceiptBody, new IOException(Secret), new IOException(Secret));
         using var handler = new Handler((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = content }));
         using var http = new HttpClient(handler);
-        using var request = Request();
+        var request = Request();
         var error = await Assert.ThrowsAsync<AggregateException>(() => Read(list, http, request, _ => { }, _ => { }, CancellationToken.None));
         Assert.Equal(2, error.InnerExceptions.Count);
         Assert.Contains("resource facts", error.InnerExceptions[0].Message, StringComparison.Ordinal);
@@ -215,7 +215,7 @@ public sealed class GoogleCacheReadHttpTests
         var content = new Content(ReceiptBody, new OperationCanceledException(Secret), new IOException(Secret));
         using var handler = new Handler((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = content }));
         using var http = new HttpClient(handler);
-        using var request = Request();
+        var request = Request();
         var error = await Assert.ThrowsAnyAsync<OperationCanceledException>(() => Read(list, http, request, _ => { }, _ => { }, CancellationToken.None));
         var aggregate = Assert.IsType<AggregateException>(error.InnerException);
         Assert.IsType<OperationCanceledException>(aggregate.InnerExceptions[0]);
@@ -234,7 +234,7 @@ public sealed class GoogleCacheReadHttpTests
         var content = new Content("{\"" + Secret + "\":");
         using var handler = new Handler((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = content }));
         using var http = new HttpClient(handler);
-        using var request = Request();
+        var request = Request();
         var error = await Assert.ThrowsAsync<LlmProviderException>(() => Read(list, http, request,
             _ => throw new InvalidOperationException("No parse."), _ => { }, CancellationToken.None));
         Assert.Null(error.InnerException);
@@ -260,7 +260,7 @@ public sealed class GoogleCacheReadHttpTests
             return new HttpResponseMessage(HttpStatusCode.OK) { Content = new Content(ReceiptBody) };
         });
         using var http = new HttpClient(handler);
-        using var request = Request();
+        var request = Request();
         Task<object>? operation = null;
         try
         {
@@ -304,7 +304,7 @@ public sealed class GoogleCacheReadHttpTests
             return new HttpResponseMessage(HttpStatusCode.OK) { Content = content };
         });
         using var http = new HttpClient(handler);
-        using var request = Request();
+        var request = Request();
         Task<object>? operation = null;
         Task? retirement = null;
         CancellationTokenRegistration blocker = default;
@@ -355,7 +355,7 @@ public sealed class GoogleCacheReadHttpTests
         await using var root = services.BuildServiceProvider();
         var pool = root.GetRequiredService<SdkHttpGenerationPool>();
         using var http = pool.CreateClient("GeminiApiLlmClient");
-        using var request = Request();
+        var request = Request();
         Task? retirement = null;
         try
         {
@@ -446,7 +446,7 @@ public sealed class GoogleCacheReadHttpTests
             throw new InvalidOperationException("The actual helper, fixture and Common must execute in the private generation.");
         var owner = new LlmOperationLifetime();
         var lease = owner.Enter(CancellationToken.None);
-        using var heldRequest = Request();
+        var heldRequest = Request();
         Task<LlmContextCache>? held = null;
         Task? retirement = null;
         Action<CancellationToken> ownedFence = token => { fence(token); Fence(owner, token); };
@@ -466,10 +466,10 @@ public sealed class GoogleCacheReadHttpTests
             try { if (held is not null) await Observe(held); }
             finally { lease.Dispose(); await retirement; }
         }
-        using var getRequest = Request();
+        var getRequest = Request();
         Task<LlmContextCache> get = GoogleCacheHttp.GetAsync(http, getRequest, LlmTransport.GoogleGeminiApi, Parse, fence, CancellationToken.None);
         var receipt = await get;
-        using var listRequest = Request();
+        var listRequest = Request();
         Task<LlmContextCachePage> list = GoogleCacheHttp.ListAsync(http, listRequest, LlmTransport.GoogleVertexAi,
             root => GoogleCacheData.Page(root, Parse), fence, CancellationToken.None);
         var page = await list;

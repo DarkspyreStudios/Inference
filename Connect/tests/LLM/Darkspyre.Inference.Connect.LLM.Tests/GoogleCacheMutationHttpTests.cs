@@ -20,7 +20,7 @@ public sealed class GoogleCacheMutationHttpTests
     private static LlmContextCache Parse(JsonElement root) => GoogleCacheData.Receipt(root, "scope", name => Assert.Equal("cachedContents/id", name), model => { Assert.Equal("models/m", model); return "m"; }, false);
 
     [Fact]
-    public async Task UpdateUsesPatchAndCanonicalReceiptWithoutDisposingBorrowedRequest()
+    public async Task UpdateUsesPatchAndCanonicalReceiptThenDisposesOwnedRequest()
     {
         using var content = new TrackedContent(ReceiptBody);
         using var handler = new Handler((request, _) =>
@@ -29,13 +29,13 @@ public sealed class GoogleCacheMutationHttpTests
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = content });
         });
         using var http = new HttpClient(handler);
-        using var requestBody = new TrackedContent("{\"expireTime\":\"2030-01-01T00:00:00Z\"}");
-        using var request = new HttpRequestMessage(HttpMethod.Patch, "https://generativelanguage.googleapis.com/v1beta/cachedContents/id") { Content = requestBody };
+        var requestBody = new TrackedContent("{\"expireTime\":\"2030-01-01T00:00:00Z\"}");
+        var request = new HttpRequestMessage(HttpMethod.Patch, "https://generativelanguage.googleapis.com/v1beta/cachedContents/id") { Content = requestBody };
         LlmContextCache result = await Update(http, request, Reference(), Parse, _ => { });
         Assert.Equal("cachedContents/id", result.Reference.ResourceName);
         Assert.Equal(DateTimeOffset.Parse("2030-01-01T00:00:00Z", System.Globalization.CultureInfo.InvariantCulture), result.ExpiresAt);
         Assert.Equal(1, handler.Calls); Assert.Equal(1, content.Disposals);
-        Assert.Equal(0, requestBody.Disposals); Assert.Equal(0, handler.Disposals);
+        Assert.Equal(1, requestBody.Disposals); Assert.Equal(0, handler.Disposals);
     }
 
     [Theory]
@@ -50,7 +50,7 @@ public sealed class GoogleCacheMutationHttpTests
             return Task.FromResult(new HttpResponseMessage(status) { Content = content });
         });
         using var http = new HttpClient(handler);
-        using var request = new HttpRequestMessage(HttpMethod.Delete, "https://generativelanguage.googleapis.com/v1beta/cachedContents/id");
+        var request = new HttpRequestMessage(HttpMethod.Delete, "https://generativelanguage.googleapis.com/v1beta/cachedContents/id");
         var reference = Reference();
         int authorizations = 0;
         var trace = new List<string>();
@@ -74,7 +74,7 @@ public sealed class GoogleCacheMutationHttpTests
         using var content = new TrackedContent("untrusted response", forbidRead: true);
         using var handler = new Handler((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound) { Content = content }));
         using var http = new HttpClient(handler);
-        using var request = new HttpRequestMessage(HttpMethod.Delete, "https://generativelanguage.googleapis.com/v1beta/cachedContents/id");
+        var request = new HttpRequestMessage(HttpMethod.Delete, "https://generativelanguage.googleapis.com/v1beta/cachedContents/id");
         var reference = Reference();
         var error = await Assert.ThrowsAsync<LlmContextCacheMutationUncertainException>(() => Delete(http, request, reference, _ => false, _ => { }));
         Assert.Same(reference, error.Reference); Assert.Null(error.ObservedDelete);
@@ -87,7 +87,7 @@ public sealed class GoogleCacheMutationHttpTests
     {
         using var handler = new Handler((_, _) => throw new InvalidOperationException("Must not dispatch."));
         using var http = new HttpClient(handler);
-        using var request = new HttpRequestMessage(HttpMethod.Get, "https://generativelanguage.googleapis.com/v1beta/cachedContents/id");
+        var request = new HttpRequestMessage(HttpMethod.Get, "https://generativelanguage.googleapis.com/v1beta/cachedContents/id");
         await Assert.ThrowsAsync<ArgumentException>(() => Update(http, request, Reference(), Parse, _ => { }));
         await Assert.ThrowsAsync<ArgumentException>(() => Delete(http, request, Reference(), _ => true, _ => { }));
         Assert.Equal(0, handler.Calls);
@@ -117,7 +117,7 @@ public sealed class GoogleCacheMutationHttpTests
             return Task.FromResult(response);
         });
         using var http = new HttpClient(handler);
-        using var request = Request(update);
+        var request = Request(update);
         int authorizations = 0;
         var error = await Assert.ThrowsAsync<LlmContextCacheMutationUncertainException>(() => Mutate(update, http, request, Parse,
             _ => { authorizations++; return false; }, _ => { }));
@@ -148,7 +148,7 @@ public sealed class GoogleCacheMutationHttpTests
         using var handler = new Handler((_, _) => boundary == "send" ? throw malicious
             : Task.FromResult(new HttpResponseMessage(boundary == "authorize" ? HttpStatusCode.NotFound : HttpStatusCode.OK) { Content = content }));
         using var http = new HttpClient(handler);
-        using var request = Request(update);
+        var request = Request(update);
         var error = await Assert.ThrowsAsync<LlmContextCacheMutationUncertainException>(() => Mutate(update, http, request,
             root => boundary == "parse" ? throw malicious : Parse(root), _ => boundary == "authorize" ? throw malicious : true, _ => { }));
         if (boundary == "cleanup")
@@ -181,7 +181,7 @@ public sealed class GoogleCacheMutationHttpTests
         var content = new TrackedContent(ReceiptBody, cleanup: () => throw new InvalidOperationException(Secret));
         using var handler = new Handler((_, _) => Task.FromResult(new HttpResponseMessage(update ? HttpStatusCode.OK : HttpStatusCode.NotFound) { Content = content }));
         using var http = new HttpClient(handler);
-        using var request = Request(update);
+        var request = Request(update);
         Exception error = cancellation
             ? await Assert.ThrowsAsync<LlmContextCacheMutationCancelledException>(() => Mutate(update, http, request,
                 _ => throw operationFailure, _ => throw operationFailure, _ => { }, caller.Token))
@@ -208,7 +208,7 @@ public sealed class GoogleCacheMutationHttpTests
         var content = new TrackedContent(ReceiptBody);
         using var handler = new Handler((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = content }));
         using var http = new HttpClient(handler);
-        using var request = Request(true);
+        var request = Request(true);
         var error = await Assert.ThrowsAsync<LlmContextCacheMutationUncertainException>(() => Update(http, request, Reference(), root =>
         {
             var receipt = Parse(root);
@@ -232,7 +232,7 @@ public sealed class GoogleCacheMutationHttpTests
     {
         using var handler = new Handler((_, _) => throw new InvalidOperationException("Must not send."));
         using var http = new HttpClient(handler);
-        using var request = Request(update);
+        var request = Request(update);
         using var cancellation = new CancellationTokenSource(); cancellation.Cancel();
         var error = await Assert.ThrowsAnyAsync<OperationCanceledException>(() => Mutate(update, http, request, Parse, _ => true, _ => { }, cancellation.Token));
         Assert.IsNotType<LlmContextCacheMutationCancelledException>(error);
@@ -252,7 +252,7 @@ public sealed class GoogleCacheMutationHttpTests
         var content = new TrackedContent(ReceiptBody, cleanup: !update ? () => retiring = true : null);
         using var handler = new Handler((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = content }));
         using var http = new HttpClient(handler);
-        using var request = Request(update);
+        var request = Request(update);
         var error = await Assert.ThrowsAsync<LlmContextCacheMutationCancelledException>(() => Mutate(update, http, request,
             root => { var receipt = Parse(root); retiring = true; return receipt; }, _ => true,
             token => { if (retiring) throw new OperationCanceledException("Owner retired.", token); }));
@@ -268,7 +268,7 @@ public sealed class GoogleCacheMutationHttpTests
         var content = new TrackedContent(Secret, forbidRead: true, cleanup: () => retiring = true);
         using var handler = new Handler((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound) { Content = content }));
         using var http = new HttpClient(handler);
-        using var request = Request(false);
+        var request = Request(false);
         var error = await Assert.ThrowsAsync<LlmContextCacheMutationCancelledException>(() => Delete(http, request, Reference(), _ => true,
             token => { if (retiring) throw new OperationCanceledException("Owner retired.", token); }));
         Assert.True(error.ObservedDelete!.AlreadyAbsent); Assert.Null(error.ObservedUpdate);
@@ -282,7 +282,7 @@ public sealed class GoogleCacheMutationHttpTests
         var content = new TrackedContent(Secret, forbidRead: true);
         using var handler = new Handler((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound) { Content = content }));
         using var http = new HttpClient(handler);
-        using var request = Request(false);
+        var request = Request(false);
         int authorizations = 0;
         var error = await Assert.ThrowsAsync<LlmContextCacheMutationCancelledException>(() => Delete(http, request, Reference(), _ =>
         { authorizations++; retiring = true; return true; }, token => { if (retiring) throw new OperationCanceledException("Owner retired.", token); }));
@@ -297,7 +297,7 @@ public sealed class GoogleCacheMutationHttpTests
     {
         using var handler = new Handler((_, _) => throw new InvalidOperationException("Must not send."));
         using var http = new HttpClient(handler);
-        using var request = Request(update);
+        var request = Request(update);
         int callbacks = 0;
         Action<CancellationToken> fence = _ => callbacks++;
         Func<JsonElement, LlmContextCache> parse = root => { callbacks++; return Parse(root); };
@@ -330,7 +330,7 @@ public sealed class GoogleCacheMutationHttpTests
             return Task.FromResult(response);
         });
         using var http = new HttpClient(handler);
-        using var request = Request(true);
+        var request = Request(true);
         var error = await Assert.ThrowsAsync<LlmContextCacheMutationCancelledException>(() => Update(http, request, Reference(), Parse,
             token => { if (retiring) throw new OperationCanceledException(Secret, token); }, caller.Token));
         Assert.Equal(caller.Token, error.CancellationToken);
@@ -351,7 +351,7 @@ public sealed class GoogleCacheMutationHttpTests
         using var caller = new CancellationTokenSource();
         using var handler = new Handler((_, token) => throw new OperationCanceledException(Secret, token));
         using var http = new HttpClient(handler);
-        using var request = Request(true);
+        var request = Request(true);
         var error = await Assert.ThrowsAsync<LlmContextCacheMutationCancelledException>(() => Update(http, request, Reference(), Parse, _ => { }, caller.Token));
         var cancellation = Assert.IsType<OperationCanceledException>(error.InnerException);
         Assert.Null(cancellation.InnerException); Assert.Null(error.RequestId);
@@ -377,7 +377,7 @@ public sealed class GoogleCacheMutationHttpTests
             return new HttpResponseMessage(HttpStatusCode.OK) { Content = content };
         });
         using var http = new HttpClient(handler);
-        using var request = Request(update);
+        var request = Request(update);
         Task<object>? operation = null;
         try
         {
@@ -419,7 +419,7 @@ public sealed class GoogleCacheMutationHttpTests
             return new HttpResponseMessage(boundary == "authorize" ? HttpStatusCode.NotFound : HttpStatusCode.OK) { Content = content };
         });
         using var http = new HttpClient(handler);
-        using var request = Request(update);
+        var request = Request(update);
         Task<object>? operation = null; Task? retirement = null;
         CancellationTokenRegistration blocker = default;
         try
@@ -470,7 +470,7 @@ public sealed class GoogleCacheMutationHttpTests
         await using var root = services.BuildServiceProvider();
         pool = root.GetRequiredService<SdkHttpGenerationPool>();
         using var http = pool.CreateClient("GeminiApiLlmClient");
-        using var request = Request(update);
+        var request = Request(update);
         try
         {
             var error = await Assert.ThrowsAsync<LlmContextCacheMutationCancelledException>(() => Mutate(update, http, request,
@@ -550,7 +550,7 @@ public sealed class GoogleCacheMutationHttpTests
             throw new InvalidOperationException("The real mutation helper, fixture and Common must execute in the private generation.");
         var owner = new LlmOperationLifetime();
         var lease = owner.Enter(CancellationToken.None);
-        using var heldRequest = Request(true);
+        var heldRequest = Request(true);
         Task<LlmContextCache>? held = null; Task? retirement = null;
         Action<CancellationToken> ownedFence = token => { fence(token); Fence(owner, token); };
         Func<JsonElement, LlmContextCache> parse = Parse;
@@ -578,13 +578,13 @@ public sealed class GoogleCacheMutationHttpTests
             try { if (held is not null) await Observe(held); }
             finally { lease.Dispose(); await retirement; }
         }
-        using var updateRequest = Request(true);
+        var updateRequest = Request(true);
         Task<LlmContextCache> updatedTask = Update(http, updateRequest, Reference(), parse, fence);
         var updated = await updatedTask;
-        using var absentRequest = Request(false);
+        var absentRequest = Request(false);
         Task<LlmContextCacheDeleteResult> absentTask = Delete(http, absentRequest, Reference(), authorize, fence);
         var absent = await absentTask;
-        using var deleteRequest = Request(false);
+        var deleteRequest = Request(false);
         Task<LlmContextCacheDeleteResult> deleteTask = Delete(http, deleteRequest, Reference(), authorize, fence);
         var deleted = await deleteTask;
         var metadata = ConnectLlmJson.LlmContextCache;

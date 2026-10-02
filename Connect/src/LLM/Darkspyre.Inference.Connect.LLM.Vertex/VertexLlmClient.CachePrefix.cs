@@ -211,7 +211,7 @@ internal sealed partial class VertexLlmClient
             prefix!["model"] = $"projects/{Connection.Vertex!.ProjectId}/locations/{Connection.Vertex.Location}/publishers/google/models/{VertexEndpoints.ParseModel(request.ModelId).Model}";
             prefix["displayName"] = request.Correlation.ReconciliationDisplayName;
             GoogleCacheData.AddExpiration(prefix, request);
-            using var post = Message(HttpMethod.Post); post.Content = JsonContent.Create(prefix);
+            var post = Message(HttpMethod.Post); post.Content = JsonContent.Create(prefix);
             return await GoogleCacheHttp.CreateAsync(Owner.Http, post, Owner.Transport, request.Correlation,
                 root => Parse(root, admission, null, request.ModelId, fence, token), fence, token).ConfigureAwait(false);
 

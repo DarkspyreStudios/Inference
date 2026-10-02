@@ -138,7 +138,7 @@ internal sealed partial class VertexLlmClient
         public async Task<LlmContextCache> GetAsync(LlmExplicitCacheReference reference, GeminiCacheBindings.Admission admission,
             Action<CancellationToken> fence, CancellationToken token)
         {
-            using var message = Message(HttpMethod.Get, "/" + SelectId(reference));
+            var message = Message(HttpMethod.Get, "/" + SelectId(reference));
             try
             {
                 return await GoogleCacheHttp.GetAsync(Owner.Http, message, Owner.Transport,
@@ -154,7 +154,7 @@ internal sealed partial class VertexLlmClient
             GoogleCacheData.ValidatePage(request);
             string query = "?pageSize=" + request.PageSize.ToString(CultureInfo.InvariantCulture)
                 + (request.PageToken is null ? "" : "&pageToken=" + Uri.EscapeDataString(request.PageToken));
-            using var message = Message(HttpMethod.Get, query);
+            var message = Message(HttpMethod.Get, query);
             return await GoogleCacheHttp.ListAsync(Owner.Http, message, Owner.Transport, root =>
             {
                 LlmContextCachePage page = GoogleCacheData.Page(root, item => Parse(item, admission, null, null, fence, token, observe: false));
@@ -174,7 +174,7 @@ internal sealed partial class VertexLlmClient
         public async Task<LlmContextCache> UpdateExpiryAsync(LlmExplicitCacheReference reference, DateTimeOffset expiry,
             GeminiCacheBindings.Admission admission, Action<CancellationToken> fence, CancellationToken token)
         {
-            using var message = Message(HttpMethod.Patch, "/" + SelectId(reference) + "?updateMask=expireTime");
+            var message = Message(HttpMethod.Patch, "/" + SelectId(reference) + "?updateMask=expireTime");
             message.Content = JsonContent.Create(new JsonObject { ["expireTime"] = GoogleCacheData.Timestamp(expiry) });
             return await GoogleCacheHttp.UpdateExpiryAsync(Owner.Http, message, Owner.Transport, reference,
                 root => Parse(root, admission, reference.ResourceName, reference.ModelId, fence, token), fence, token).ConfigureAwait(false);
@@ -184,7 +184,7 @@ internal sealed partial class VertexLlmClient
             Func<LlmExplicitCacheReference, bool> authorizeAlreadyAbsent, GeminiCacheBindings.Admission admission,
             Action<CancellationToken> fence, CancellationToken token)
         {
-            using var message = Message(HttpMethod.Delete, "/" + SelectId(reference));
+            var message = Message(HttpMethod.Delete, "/" + SelectId(reference));
             return await GoogleCacheHttp.DeleteAsync(Owner.Http, message, Owner.Transport, reference, authorizeAlreadyAbsent, fence, token).ConfigureAwait(false);
         }
 

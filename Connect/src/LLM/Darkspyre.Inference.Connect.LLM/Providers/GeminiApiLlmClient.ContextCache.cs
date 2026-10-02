@@ -179,7 +179,7 @@ internal sealed partial class GeminiApiLlmClient
         prefix!["model"] = "models/" + request.ModelId;
         prefix["displayName"] = request.Correlation.ReconciliationDisplayName;
         GoogleCacheData.AddExpiration(prefix, request);
-        using var message = GeminiCacheReads.Request(string.Empty, Key(connection));
+        var message = GeminiCacheReads.Request(string.Empty, Key(connection));
         message.Method = HttpMethod.Post;
         message.Content = JsonContent.Create(prefix);
         return await GoogleCacheHttp.CreateAsync(Http, message, Transport, request.Correlation,
@@ -193,7 +193,7 @@ internal sealed partial class GeminiApiLlmClient
         string id = GeminiCacheReads.ResourceId(reference.ResourceName);
         _ = ParseModel(reference.ModelId);
         Validate(connection);
-        using var message = GeminiCacheReads.Request("/" + Uri.EscapeDataString(id) + "?updateMask=expireTime", Key(connection));
+        var message = GeminiCacheReads.Request("/" + Uri.EscapeDataString(id) + "?updateMask=expireTime", Key(connection));
         message.Method = HttpMethod.Patch;
         message.Content = JsonContent.Create(new JsonObject { ["expireTime"] = GoogleCacheData.Timestamp(expiresAt) });
         return await GoogleCacheHttp.UpdateExpiryAsync(Http, message, Transport, reference,
@@ -207,7 +207,7 @@ internal sealed partial class GeminiApiLlmClient
         string id = GeminiCacheReads.ResourceId(reference.ResourceName);
         _ = ParseModel(reference.ModelId);
         Validate(connection);
-        using var message = GeminiCacheReads.Request("/" + Uri.EscapeDataString(id), Key(connection));
+        var message = GeminiCacheReads.Request("/" + Uri.EscapeDataString(id), Key(connection));
         message.Method = HttpMethod.Delete;
         return await GoogleCacheHttp.DeleteAsync(Http, message, Transport, reference, authorizeAlreadyAbsent, fence, token).ConfigureAwait(false);
     }

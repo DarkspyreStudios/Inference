@@ -41,7 +41,7 @@ public sealed class GoogleCacheHttpTests
             });
         });
         using var http = new HttpClient(handler);
-        using var request = new HttpRequestMessage(HttpMethod.Post, "https://generativelanguage.googleapis.com/v1beta/cachedContents");
+        var request = new HttpRequestMessage(HttpMethod.Post, "https://generativelanguage.googleapis.com/v1beta/cachedContents");
         var error = await Assert.ThrowsAsync<LlmContextCacheCreateUncertainException>(() =>
             GoogleCacheHttp.CreateAsync(http, request, LlmTransport.GoogleGeminiApi, Correlation,
                 Parse, _ => { }, CancellationToken.None));
@@ -64,7 +64,7 @@ public sealed class GoogleCacheHttpTests
         stop.Cancel();
         using var handler = new Handler((_, _) => throw new InvalidOperationException("No dispatch."));
         using var http = new HttpClient(handler);
-        using var request = Request();
+        var request = Request();
         var error = await Assert.ThrowsAnyAsync<OperationCanceledException>(() => Create(http, request,
             _ => throw new InvalidOperationException("No parse."), _ => { }, stop.Token));
         Assert.IsNotType<LlmContextCacheCreateCancelledException>(error);
@@ -76,7 +76,7 @@ public sealed class GoogleCacheHttpTests
     {
         using var handler = new Handler((_, _) => throw new InvalidOperationException("No dispatch."));
         using var http = new HttpClient(handler);
-        using var request = Request();
+        var request = Request();
         var original = new OperationCanceledException("Owned cancellation.");
         Assert.Same(original, await Assert.ThrowsAnyAsync<OperationCanceledException>(() => Create(http, request,
             Parse, _ => throw original, CancellationToken.None)));
@@ -96,7 +96,7 @@ public sealed class GoogleCacheHttpTests
             return Task.FromResult(response);
         });
         using var http = new HttpClient(handler);
-        using var request = Request();
+        var request = Request();
         request.Headers.Add("x-goog-api-key", "selected-key");
         var receipt = await Create(http, request, Parse, _ => fences++, CancellationToken.None);
         Assert.Equal("cachedContents/id", receipt.Reference.ResourceName);
@@ -124,7 +124,7 @@ public sealed class GoogleCacheHttpTests
             return Task.FromResult(response);
         });
         using var http = new HttpClient(handler);
-        using var request = Request();
+        var request = Request();
         var error = await Assert.ThrowsAsync<LlmContextCacheCreateUncertainException>(() => Create(http, request,
             _ => throw new InvalidOperationException("No parse."), _ => { }, CancellationToken.None));
         var provider = Assert.IsType<LlmProviderException>(error.InnerException);
@@ -151,7 +151,7 @@ public sealed class GoogleCacheHttpTests
         using var handler = new Handler((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
         { Content = new StringContent(ReceiptBody) }));
         using var http = new HttpClient(handler);
-        using var request = Request();
+        var request = Request();
         var error = await Assert.ThrowsAsync<LlmContextCacheCreateUncertainException>(() => Create(http, request,
             _ => throw original, _ => { }, CancellationToken.None));
         var safe = Assert.IsType<LlmProviderException>(error.InnerException);
@@ -176,7 +176,7 @@ public sealed class GoogleCacheHttpTests
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = content });
         });
         using var http = new HttpClient(handler);
-        using var request = Request();
+        var request = Request();
         var error = await Assert.ThrowsAsync<LlmContextCacheCreateUncertainException>(() => Create(http, request,
             Parse, _ => { }, CancellationToken.None));
         var aggregate = Assert.IsType<AggregateException>(error.InnerException);
@@ -200,7 +200,7 @@ public sealed class GoogleCacheHttpTests
         using var handler = new Handler((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
         { Content = new StringContent(ReceiptBody) }));
         using var http = new HttpClient(handler);
-        using var request = Request();
+        var request = Request();
         try
         {
             var error = await Assert.ThrowsAsync<LlmContextCacheCreateCancelledException>(() => Create(http, request,
@@ -224,7 +224,7 @@ public sealed class GoogleCacheHttpTests
         var content = new TrackedContent(ReceiptBody, cleanupFailure: new IOException(Secret + Prefix));
         using var handler = new Handler((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = content }));
         using var http = new HttpClient(handler);
-        using var request = Request();
+        var request = Request();
         var error = await Assert.ThrowsAsync<LlmContextCacheCreateUncertainException>(() => Create(http, request,
             Parse, _ => { }, CancellationToken.None));
         Assert.Equal("cachedContents/id", error.ObservedReceipt!.Reference.ResourceName);
@@ -253,7 +253,7 @@ public sealed class GoogleCacheHttpTests
             return new HttpResponseMessage(HttpStatusCode.OK) { Content = content };
         });
         using var http = new HttpClient(handler);
-        using var request = Request();
+        var request = Request();
         CancellationTokenRegistration registration = default;
         Task<LlmContextCache>? operation = null;
         Task? retirement = null;
@@ -307,7 +307,7 @@ public sealed class GoogleCacheHttpTests
             return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(ReceiptBody) };
         });
         using var http = new HttpClient(handler);
-        using var request = Request();
+        var request = Request();
         Task<LlmContextCache>? operation = null;
         try
         {
@@ -329,7 +329,7 @@ public sealed class GoogleCacheHttpTests
         using var handler = new Handler((_, _) => Task.FromException<HttpResponseMessage>(
             new OperationCanceledException(Secret + Prefix, new IOException(Secret + Prefix))));
         using var http = new HttpClient(handler);
-        using var request = Request();
+        var request = Request();
         var error = await Assert.ThrowsAsync<LlmContextCacheCreateCancelledException>(() => Create(http, request,
             Parse, _ => { }, CancellationToken.None));
         Assert.DoesNotContain(Secret, error.ToString(), StringComparison.Ordinal);
@@ -397,7 +397,7 @@ public sealed class GoogleCacheHttpTests
         if (!generation.IsCollectible || !ReferenceEquals(generation, AssemblyLoadContext.GetLoadContext(typeof(GoogleCacheHttp).Assembly))
             || !ReferenceEquals(generation, AssemblyLoadContext.GetLoadContext(typeof(LlmExplicitCacheReference).Assembly)))
             throw new InvalidOperationException("The helper, Common and fixture must belong to the actual private generation.");
-        using var request = Request();
+        var request = Request();
         Task<LlmContextCache> operation = Create(http, request, Parse, fence, CancellationToken.None);
         LlmContextCache receipt = await operation;
         var metadata = ConnectLlmJson.LlmContextCache;
