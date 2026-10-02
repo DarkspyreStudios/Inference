@@ -424,6 +424,15 @@ empty values; these declarations do not register an xAI provider or activate cap
 
 ## TangoFlux audio
 
+`ConnectAudioJson` exports exact type-name metadata getters for the nine public Audio
+connection, generation, capability and setup data roots. Its finite generated graph preserves
+optional defaults, explicit zero/false values and unknown measured duration. Observed capability
+and result facts cannot be omitted or replaced with null. Unknown transport/member values refuse.
+Use these getters for portable data; the private TangoFlux wire codec retains its own Web naming
+and seed/cache omission policy. Audio-owned options refuse non-null live clients, providers,
+settings, managers, commit targets, streams and authorization. Null runtime values round-trip;
+metadata does not invoke callbacks or acquire provider resources.
+
 `IAudioGenerationClient` accepts typed generation requests and returns WAV bytes and provenance.
 Register `services.AddAudioConnect()`, then bind a host-supplied `AudioConnection` with
 `AudioProviderService`:
