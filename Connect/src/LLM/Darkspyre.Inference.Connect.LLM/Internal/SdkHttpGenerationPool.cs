@@ -1,0 +1,261 @@
+using System.Runtime.ExceptionServices;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Http;
+using Microsoft.Extensions.Options;
+
+namespace Darkspyre.Inference.Connect.LLM.Internal;
+
+internal sealed class SdkHttpGenerationPool : IHttpClientFactory, IDisposable, IAsyncDisposable
+{
+    private readonly Lock _gate = new();
+    private readonly LlmOperationLifetime _lifetime = new();
+    private readonly Dictionary<string, Lazy<SdkHttpPipelineEntry>> _active = new(StringComparer.Ordinal);
+    private readonly HashSet<SdkHttpPipelineEntry> _entries = [];
+    private readonly HashSet<SdkHttpClientLease> _clients = [];
+    private IServiceProvider? _services;
+    private IOptionsMonitor<HttpClientFactoryOptions>? _options;
+    private IHttpMessageHandlerBuilderFilter[]? _filters;
+    private SdkHttpConfiguration? _configuration;
+    private TimeProvider? _clock;
+    private readonly InferenceHttpCreationMode _mode;
+
+    public SdkHttpGenerationPool(IServiceProvider services, SdkHttpConfiguration configuration, TimeProvider clock)
+    {
+        _services = services; _configuration = configuration.Snapshot(); _mode = configuration.Mode; _clock = clock;
+        if (_mode == InferenceHttpCreationMode.SdkGenerationOwned)
+        {
+            _options = services.GetRequiredService<IOptionsMonitor<HttpClientFactoryOptions>>();
+            _filters = services.GetServices<IHttpMessageHandlerBuilderFilter>().ToArray();
+        }
+    }
+
+    public HttpClient CreateClient(string name)
+    {
+        SdkHttpRegistration.ValidateName(name);
+        using LlmOperationLifetime.Lease operation = _lifetime.Enter(default);
+        if (_mode == InferenceHttpCreationMode.BorrowHostFactory) return _services!.GetRequiredService<IHttpClientFactory>().CreateClient(name);
+        Lazy<SdkHttpPipelineEntry> selected;
+        lock (_gate)
+        {
+            if (!_active.TryGetValue(name, out selected!) || (selected.IsValueCreated && selected.Value.Expired))
+                _active[name] = selected = new(() => BuildEntry(name));
+        }
+        SdkHttpPipelineEntry entry = selected.Value;
+        var client = new SdkHttpClientLease(this, entry);
+        lock (_gate) { _clients.Add(client); entry.Holders++; }
+        try
+        {
+            foreach (Action<HttpClient> action in _options!.Get(name).HttpClientActions) action(client);
+            Fence(operation.Token);
+            entry.StartTimer(_clock!);
+            return client;
+        }
+        catch (Exception original)
+        {
+            try { client.Dispose(); }
+            catch (Exception cleanup) { throw new AggregateException(original, cleanup); }
+            throw;
+        }
+    }
+
+    private SdkHttpPipelineEntry BuildEntry(string name)
+    {
+        HttpClientFactoryOptions options = _options!.Get(name);
+        IServiceScope? scope = options.SuppressHandlerScope ? null : _services!.CreateScope();
+        var entry = new SdkHttpPipelineEntry(this, scope, options.HandlerLifetime);
+        lock (_gate) _entries.Add(entry);
+        var builder = new SdkHttpMessageHandlerBuilder(name, scope?.ServiceProvider ?? _services!, options.HandlerLifetime, _configuration!);
+        try
+        {
+            Action<HttpMessageHandlerBuilder> configure = handler =>
+            {
+                foreach (Action<HttpMessageHandlerBuilder> action in options.HttpMessageHandlerBuilderActions) action(handler);
+                ((SdkHttpMessageHandlerBuilder)handler).BuildLoggers();
+            };
+            for (int index = _filters!.Length - 1; index >= 0; index--) configure = _filters[index].Configure(configure);
+            configure(builder);
+            entry.Handler = builder.Build();
+            entry.Invoker = new(entry.Handler, disposeHandler: false);
+            return entry;
+        }
+        catch (Exception original)
+        {
+            var errors = new List<Exception> { original };
+            foreach (DelegatingHandler handler in builder.AdditionalHandlers.Distinct())
+                try { handler.Dispose(); } catch (Exception cleanup) { errors.Add(cleanup); entry.Failures.Add((handler, cleanup)); }
+            if (builder.CreatedPrimary is { } primary)
+                try { primary.Dispose(); } catch (Exception cleanup) { errors.Add(cleanup); entry.Failures.Add((primary, cleanup)); }
+            if (entry.Failures.Count == 0)
+                try { entry.DisposeScopeAsync().GetAwaiter().GetResult(); } catch (Exception cleanup) { errors.Add(cleanup); entry.Failures.Add((scope!, cleanup)); }
+            ThrowFailures(errors); throw;
+        }
+    }
+
+    internal LlmOperationLifetime.Lease EnterSend(SdkHttpPipelineEntry entry, CancellationToken cancellationToken)
+    {
+        LlmOperationLifetime.Lease operation = _lifetime.Enter(cancellationToken);
+        lock (_gate) entry.Holders++;
+        return operation;
+    }
+    internal LlmOperationLifetime.Lease EnterBody(SdkHttpPipelineEntry entry, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        try { return EnterSend(entry, cancellationToken); }
+        catch (ObjectDisposedException) { throw new OperationCanceledException("The SDK HTTP generation is retiring.", cancellationToken); }
+    }
+    internal void Fence(CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        try { _lifetime.ThrowIfStopping(); }
+        catch (ObjectDisposedException) { throw new OperationCanceledException("The SDK HTTP generation is retiring.", cancellationToken); }
+    }
+    internal void ReleaseUse(SdkHttpPipelineEntry entry, LlmOperationLifetime.Lease operation)
+    {
+        lock (_gate) { entry.Holders--; StartUnusedRetirement(entry); }
+        operation.Dispose();
+    }
+    internal void ReleaseClient(SdkHttpClientLease client, SdkHttpPipelineEntry entry, Exception? failure)
+    {
+        lock (_gate)
+        {
+            _clients.Remove(client); entry.Holders--;
+            if (failure is not null) entry.Failures.Add((client, failure));
+            StartUnusedRetirement(entry);
+        }
+    }
+    internal void RecordFailure(SdkHttpPipelineEntry entry, object resource, Exception failure)
+    { lock (_gate) entry.Failures.Add((resource, failure)); }
+    internal void Expire(SdkHttpPipelineEntry entry)
+    { lock (_gate) { entry.Expired = true; StartUnusedRetirement(entry); } }
+    private static void StartUnusedRetirement(SdkHttpPipelineEntry entry)
+    {
+        if (entry.Expired && entry.Holders == 0) entry.Cleanup ??= Task.Run(entry.CleanupAsync);
+    }
+
+    private async Task ReleaseAsync()
+    {
+        SdkHttpClientLease[] clients; SdkHttpPipelineEntry[] entries;
+        lock (_gate) { clients = _clients.ToArray(); entries = _entries.ToArray(); _active.Clear(); }
+        var errors = new List<Exception>();
+        foreach (SdkHttpClientLease client in clients)
+            try { client.Dispose(); } catch (Exception) { /* The client records its exact failure on its owned entry. */ }
+        foreach (SdkHttpPipelineEntry entry in entries)
+        {
+            Task cleanup; lock (_gate) cleanup = entry.Cleanup ??= Task.Run(entry.CleanupAsync);
+            try { await cleanup.ConfigureAwait(false); }
+            catch (Exception error) { errors.Add(error); }
+        }
+        lock (_gate)
+        {
+            _clients.Clear(); _entries.RemoveWhere(entry => entry.Released);
+            _services = null; _options = null; _filters = null; _clock = null;
+            _configuration!.Detach(); _configuration = null;
+        }
+        ThrowFailures(errors);
+    }
+    internal static void ThrowFailures(IReadOnlyList<Exception> failures)
+    {
+        if (failures.Count == 1) ExceptionDispatchInfo.Capture(failures[0]).Throw();
+        if (failures.Count > 1) throw new AggregateException(failures);
+    }
+    public void Dispose() => _lifetime.RetireAsync(ReleaseAsync).GetAwaiter().GetResult();
+    public ValueTask DisposeAsync() => new(_lifetime.RetireAsync(ReleaseAsync));
+}
+
+internal sealed class SdkHttpPipelineEntry(SdkHttpGenerationPool owner, IServiceScope? scope, TimeSpan lifetime)
+{
+    private readonly Lock _timerGate = new();
+    private ITimer? _timer;
+    internal HttpMessageHandler? Handler { get; set; }
+    internal HttpMessageInvoker? Invoker { get; set; }
+    internal int Holders { get; set; }
+    internal bool Expired { get; set; }
+    internal bool Released { get; private set; }
+    internal Task? Cleanup { get; set; }
+    internal List<(object Resource, Exception Error)> Failures { get; } = [];
+    internal void StartTimer(TimeProvider clock)
+    {
+        lock (_timerGate)
+        {
+            if (lifetime != Timeout.InfiniteTimeSpan && _timer is null)
+                _timer = clock.CreateTimer(_ => owner.Expire(this), null, lifetime, Timeout.InfiniteTimeSpan);
+        }
+    }
+    internal async Task DisposeScopeAsync()
+    {
+        if (scope is IAsyncDisposable asynchronous) await asynchronous.DisposeAsync().ConfigureAwait(false);
+        else scope?.Dispose();
+        scope = null;
+    }
+    internal async Task CleanupAsync()
+    {
+        var errors = Failures.Select(failure => failure.Error).ToList();
+        if (_timer is not null)
+            try { await _timer.DisposeAsync().ConfigureAwait(false); _timer = null; }
+            catch (Exception error) { errors.Add(error); }
+        if (Failures.Count == 0)
+        {
+            bool handlerReleased = false;
+            try { Handler?.Dispose(); Handler = null; Invoker?.Dispose(); Invoker = null; handlerReleased = true; }
+            catch (Exception error) { errors.Add(error); }
+            if (handlerReleased)
+                try { await DisposeScopeAsync().ConfigureAwait(false); }
+                catch (Exception error) { errors.Add(error); }
+        }
+        Released = errors.Count == 0;
+        SdkHttpGenerationPool.ThrowFailures(errors);
+    }
+}
+
+internal sealed class SdkHttpClientLease(SdkHttpGenerationPool owner, SdkHttpPipelineEntry entry)
+    : HttpClient(new SdkHttpSendHandler(owner, entry), disposeHandler: true)
+{
+    private int _disposed;
+    protected override void Dispose(bool disposing)
+    {
+        if (!disposing || Interlocked.Exchange(ref _disposed, 1) != 0) return;
+        Exception? failure = null;
+        try { base.Dispose(true); }
+        catch (Exception error) { failure = error; throw; }
+        finally { owner.ReleaseClient(this, entry, failure); }
+    }
+}
+
+internal sealed class SdkHttpSendHandler(SdkHttpGenerationPool owner, SdkHttpPipelineEntry entry) : HttpMessageHandler
+{
+    protected override HttpResponseMessage Send(HttpRequestMessage request, CancellationToken cancellationToken)
+    {
+        LlmOperationLifetime.Lease operation = owner.EnterSend(entry, cancellationToken); bool transferred = false;
+        try
+        {
+            HttpResponseMessage response = entry.Invoker!.Send(request, operation.Token);
+            return Transfer(response, operation, ref transferred);
+        }
+        finally { if (!transferred) owner.ReleaseUse(entry, operation); }
+    }
+    protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+    {
+        LlmOperationLifetime.Lease operation = owner.EnterSend(entry, cancellationToken); bool transferred = false;
+        try
+        {
+            HttpResponseMessage response = await entry.Invoker!.SendAsync(request, operation.Token).ConfigureAwait(false);
+            return Transfer(response, operation, ref transferred);
+        }
+        finally { if (!transferred) owner.ReleaseUse(entry, operation); }
+    }
+    private HttpResponseMessage Transfer(HttpResponseMessage response, LlmOperationLifetime.Lease operation, ref bool transferred)
+    {
+        try
+        {
+            owner.Fence(operation.Token);
+            response.Content = new SdkHttpResponseLease(owner, entry, response.Content, operation);
+            transferred = true; return response;
+        }
+        catch (Exception original)
+        {
+            try { response.Dispose(); }
+            catch (Exception cleanup) { owner.RecordFailure(entry, response, cleanup); throw new AggregateException(original, cleanup); }
+            throw;
+        }
+    }
+}

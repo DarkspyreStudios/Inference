@@ -1,5 +1,23 @@
 # Darkspyre.Inference.Connect
 
+## SDK HTTP composition
+
+SDK HTTP registrations use one generation-owned pool for the sixteen existing named pipelines,
+including ComfyUI's empty default name. Named `AddHttpClient` actions, public handler-builder filters,
+handler scopes and selected meter factories configure the owned chains. Direct client and factory
+constructors remain borrowed. The SDK never replaces the application's `IHttpClientFactory`.
+
+`AddLlmConnect(configureHttp)` and `ConfigureInferenceHttpPipelines(configureHttp)` select
+`SdkGenerationOwned` or explicit `BorrowHostFactory`. The latter delegates creation to the registered
+host factory and does not dispose it. Configuration accepts only the sixteen SDK names and freezes
+before client construction. Conflicting creation modes are rejected.
+
+Custom logger registrations in owned mode use `ConfigureLogging(name, logging => ...)` and its
+`AddLogger` methods. Legacy framework `AddLogger` actions are not inspected or automatically migrated.
+Logger factories run after the named handler-builder actions in the actual handler scope. Public
+default logging, header redaction and meter filters remain active. HTTP configuration objects refuse
+nonnull JSON serialization and contain no transferable credential authority.
+
 ## Batch and deferred contracts
 
 `Darkspyre.Inference.Connect.Resources` declares `ILlmBatchClient` for explicit-connection batch

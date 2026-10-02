@@ -12,7 +12,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton(VertexProviderDefinition.Value);
         services.AddSingleton<IVertexAuthentication, VertexAuthentication>();
         services.AddSingleton<ILlmSetupEnvironment, VertexSetupEnvironment>();
-        services.AddHttpClient<VertexLlmClient>()
+        services.AddInferenceHttpClient<VertexLlmClient>()
             .ConfigureHttpClient(client => client.Timeout = ProviderHttp.GenerationTimeout)
             .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
         services.AddTransient<ILlmClient>(provider => provider.GetRequiredService<VertexLlmClient>());

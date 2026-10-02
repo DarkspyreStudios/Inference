@@ -69,7 +69,7 @@ public static class ServiceCollectionExtensions
     public static IServiceCollection AddTtsConnect(this IServiceCollection services)
     {
         ArgumentNullException.ThrowIfNull(services);
-        services.AddHttpClient<PocketTtsHttpProvider>(client => client.Timeout = Timeout.InfiniteTimeSpan)
+        services.AddInferenceHttpClient<PocketTtsHttpProvider>(client => client.Timeout = Timeout.InfiniteTimeSpan)
             .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
         services.AddTransient<ITtsProvider>(provider => provider.GetRequiredService<PocketTtsHttpProvider>());
         services.AddTransient<TtsProviderService>();

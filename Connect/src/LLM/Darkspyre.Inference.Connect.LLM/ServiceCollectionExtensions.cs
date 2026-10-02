@@ -6,6 +6,24 @@ namespace Darkspyre.Inference.Connect.LLM;
 
 public static class ServiceCollectionExtensions
 {
+    /// <summary>Registers LLM connections with an explicit HTTP creation and logging policy.</summary>
+    public static IServiceCollection AddLlmConnect(this IServiceCollection services, Action<InferenceHttpPipelineOptions> configureHttp)
+    {
+        services.ConfigureInferenceHttpPipelines(configureHttp);
+        return services.AddLlmConnect();
+    }
+
+    /// <summary>Configures the finite SDK HTTP pipelines before building the service provider.</summary>
+    public static IServiceCollection ConfigureInferenceHttpPipelines(this IServiceCollection services, Action<InferenceHttpPipelineOptions> configureHttp)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        ArgumentNullException.ThrowIfNull(configureHttp);
+        SdkHttpConfiguration configuration = SdkHttpRegistration.Register(services);
+        var options = new InferenceHttpPipelineOptions();
+        configureHttp(options);
+        options.Apply(services, configuration);
+        return services;
+    }
     /// <summary>
     /// Registers the SelfHost transport. The host registers its own <see cref="ILlmSelfHost"/>, which
     /// resolves each engine a SelfHost connection names.
@@ -37,24 +55,24 @@ public static class ServiceCollectionExtensions
         services.AddSingleton(ProviderDefinitions.GeminiApi);
         services.AddSingleton(ProviderDefinitions.AppleFoundationModels);
         services.AddSingleton<IAppleProcessRunner, AppleProcessRunner>();
-        services.AddHttpClient<AppleFoundationModelsClient>();
+        services.AddInferenceHttpClient<AppleFoundationModelsClient>();
         services.AddTransient<ILlmClient>(provider => provider.GetRequiredService<AppleFoundationModelsClient>());
         services.AddTransient<ManagedAppleAgentClient>();
         services.AddTransient<ILlmAgentClient>(provider => provider.GetRequiredService<ManagedAppleAgentClient>());
         services.AddSingleton<LlmProviderCatalog>();
-        services.AddHttpClient<GeminiApiLlmClient>()
+        services.AddInferenceHttpClient<GeminiApiLlmClient>()
             .ConfigureHttpClient(client => client.Timeout = ProviderHttp.GenerationTimeout)
             .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
         services.AddTransient<ILlmClient>(provider => provider.GetRequiredService<GeminiApiLlmClient>());
         services.AddTransient<ILlmAgentClient, ManagedGeminiApiAgentClient>();
-        services.AddHttpClient<OpenAiResponsesLlmClient>()
+        services.AddInferenceHttpClient<OpenAiResponsesLlmClient>()
             .ConfigureHttpClient(client => client.Timeout = ProviderHttp.GenerationTimeout);
-        services.AddHttpClient<OpenAiCompatibleChatLlmClient>()
+        services.AddInferenceHttpClient<OpenAiCompatibleChatLlmClient>()
             .ConfigureHttpClient(client => client.Timeout = ProviderHttp.GenerationTimeout);
-        services.AddHttpClient<AnthropicMessagesLlmClient>()
+        services.AddInferenceHttpClient<AnthropicMessagesLlmClient>()
             .ConfigureHttpClient(client => client.Timeout = ProviderHttp.GenerationTimeout);
-        services.AddHttpClient<ClaudeCliLlmClient>();
-        services.AddHttpClient<OpenAiEmbeddingClient>();
+        services.AddInferenceHttpClient<ClaudeCliLlmClient>();
+        services.AddInferenceHttpClient<OpenAiEmbeddingClient>();
         services.AddSingleton<IAntigravityCliSessionProcessFactory, AntigravityCliSessionProcessFactory>();
         services.AddSingleton<IAntigravityCliRunner, AntigravityCliProcessRunner>();
         services.AddSingleton<IClaudeCliRunner, ClaudeCliProcessRunner>();
@@ -67,7 +85,7 @@ public static class ServiceCollectionExtensions
             provider.GetRequiredService<AnthropicMessagesLlmClient>());
         services.AddTransient<ILlmClient>(provider =>
             provider.GetRequiredService<ClaudeCliLlmClient>());
-        services.AddHttpClient<OpenAiCodexLlmClient>();
+        services.AddInferenceHttpClient<OpenAiCodexLlmClient>();
         services.AddTransient<ILlmClient>(provider =>
             provider.GetRequiredService<OpenAiCodexLlmClient>());
         services.AddTransient<ManagedCodexAgentClient>();
@@ -82,8 +100,8 @@ public static class ServiceCollectionExtensions
         services.AddTransient<AntigravityAgentClient>();
         services.AddTransient<ILlmAgentClient>(provider =>
             provider.GetRequiredService<AntigravityAgentClient>());
-        services.AddHttpClient<CodexAuthenticator>();
-        services.AddHttpClient<ClaudeAuthenticator>();
+        services.AddInferenceHttpClient<CodexAuthenticator>();
+        services.AddInferenceHttpClient<ClaudeAuthenticator>();
         services.AddTransient<ILlmAuthenticator>(provider =>
             provider.GetRequiredService<CodexAuthenticator>());
         services.AddTransient<ILlmAuthenticator>(provider =>
