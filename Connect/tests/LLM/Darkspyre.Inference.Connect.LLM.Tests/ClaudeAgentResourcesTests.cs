@@ -601,6 +601,62 @@ public sealed class ClaudeAgentResourcesTests : IDisposable
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
+    public async Task TurnAttachmentsAreFrozenBeforeControlAcknowledgmentAndPausedStart(bool holdControl)
+    {
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var process = new ManualProcess { ModelWriteRelease = holdControl ? release.Task : null };
+        ILlmAgentSession session = await Start(process);
+        byte[] bytes = "original"u8.ToArray();
+        List<LlmMessageAttachment> attachments = [new LlmAttachment { Kind = LlmBinaryKind.Document,
+            FileName = "original.txt", MediaType = "text/plain", Data = bytes }];
+        using var limit = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        IAsyncEnumerator<LlmAgentEvent> turn = session.RunTurnAsync(new()
+        { ModelId = holdControl ? "claude-changed" : null, Input = [new LlmAgentTextContent("hello")], Attachments = attachments }, limit.Token)
+            .GetAsyncEnumerator(limit.Token);
+        Task<bool> first = turn.MoveNextAsync().AsTask();
+        Task? drain = null;
+        try
+        {
+            if (holdControl) await process.ModelWriteEntered.Task.WaitAsync(limit.Token);
+            else Assert.True(await first);
+            bytes[0] = (byte)'X';
+            attachments.Add(new LlmAttachment { Kind = LlmBinaryKind.Document, FileName = "late.txt",
+                MediaType = "text/plain", Data = "late"u8.ToArray() });
+            release.TrySetResult();
+            if (holdControl) Assert.True(await first);
+            Assert.IsType<LlmAgentTurnStartedEvent>(turn.Current);
+            drain = DrainTurnAsync();
+            _ = await process.WaitForUserMessage(limit.Token);
+            JsonElement user = Assert.Single(process.Writes(), root => root.GetProperty("type").GetString() == "user");
+            JsonElement content = user.GetProperty("message").GetProperty("content");
+            JsonElement document = Assert.Single(content.EnumerateArray(), part => part.GetProperty("type").GetString() == "document");
+            Assert.Equal("text", document.GetProperty("source").GetProperty("type").GetString());
+            Assert.Equal("original", document.GetProperty("source").GetProperty("data").GetString());
+            process.Push(new { type = "result", uuid = "result", subtype = "success", result = "actual" });
+            await drain;
+        }
+        finally
+        {
+            Task retirement = session.DisposeAsync().AsTask();
+            release.TrySetResult();
+            try { await first.WaitAsync(TimeSpan.FromSeconds(5)); }
+            catch (Exception) when (first.IsCompleted) { }
+            if (drain is not null)
+            {
+                try { await drain.WaitAsync(TimeSpan.FromSeconds(5)); }
+                catch (Exception) when (drain.IsCompleted) { }
+            }
+            try { await turn.DisposeAsync(); }
+            finally { await retirement.WaitAsync(TimeSpan.FromSeconds(5)); }
+        }
+
+        async Task DrainTurnAsync()
+        { while (await turn.MoveNextAsync()) { } }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
     public async Task NumericAndStringToolRequestIdsHaveIndependentCancellation(bool cancelString)
     {
         var entered = new ConcurrentDictionary<string, CancellationToken>();
@@ -862,10 +918,12 @@ public sealed class ClaudeAgentResourcesTests : IDisposable
         public Task? DisposalRelease { get; init; }
         public Exception? DisposalFailure { get; init; }
         public Task? ToolWriteRelease { get; init; }
+        public Task? ModelWriteRelease { get; init; }
         public Exception? ToolWriteFailure { get; init; }
         public bool WithholdStopReplies { get; init; }
         public TaskCompletionSource DisposalEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public TaskCompletionSource ToolWriteEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource ModelWriteEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public int Disposals { get; private set; }
 
         public void Push(object value) => _output.Writer.TryWrite(JsonSerializer.Serialize(value));
@@ -874,6 +932,12 @@ public sealed class ClaudeAgentResourcesTests : IDisposable
         {
             using JsonDocument document = JsonDocument.Parse(line);
             JsonElement root = document.RootElement;
+            if (ModelWriteRelease is not null && root.GetProperty("type").GetString() == "control_request"
+                && root.GetProperty("request").GetProperty("subtype").GetString() == "set_model")
+            {
+                ModelWriteEntered.TrySetResult();
+                await ModelWriteRelease;
+            }
             if (ToolWriteRelease is not null && root.GetProperty("type").GetString() == "control_response")
             {
                 ToolWriteEntered.TrySetResult();
