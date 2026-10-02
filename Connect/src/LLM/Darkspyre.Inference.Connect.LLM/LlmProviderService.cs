@@ -789,7 +789,7 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, ILlmFileClie
             {
                 try
                 {
-                    models = await _modelLists.GetAsync(connectionId, connection.Version,
+                    models = await _modelLists.GetAsync(connectionId, new(connection.Version, connection.ResolvedContinuationScope),
                         token => client.ListModelsAsync(connection, token), cancellationToken);
                 }
                 catch (Exception error) when (error is HttpRequestException or LlmProviderException or NotSupportedException)
@@ -855,7 +855,7 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, ILlmFileClie
     }
 
     /// <summary>
-    /// The connection's models. A list is kept until the connection's version changes or
+    /// The connection's models. A list is kept until its exact version and resolved continuation-scope tuple changes or
     /// <see cref="RefreshModelsAsync"/> replaces it, so repeated calls do not ask the provider again.
     /// </summary>
     public async Task<IReadOnlyList<LlmModel>> ListModelsAsync(
@@ -870,7 +870,7 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, ILlmFileClie
         {
             connection = await preparation.PrepareAsync(connection, cancellationToken).ConfigureAwait(false);
         }
-        return await _modelLists.GetAsync(connectionId, connection.Version + connection.ResolvedContinuationScope,
+        return await _modelLists.GetAsync(connectionId, new(connection.Version, connection.ResolvedContinuationScope),
             token => client.ListModelsAsync(connection, token), cancellationToken);
     }
 
@@ -887,7 +887,7 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, ILlmFileClie
         {
             connection = await preparation.PrepareAsync(connection, cancellationToken).ConfigureAwait(false);
         }
-        return await _modelLists.RefreshAsync(connectionId, connection.Version + connection.ResolvedContinuationScope,
+        return await _modelLists.RefreshAsync(connectionId, new(connection.Version, connection.ResolvedContinuationScope),
             token => client.ListModelsAsync(connection, token), cancellationToken);
     }
 
@@ -1016,7 +1016,7 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, ILlmFileClie
         try
         {
             IReadOnlyList<LlmModel> models = await _modelLists.GetAsync(connectionId,
-                connection.Version + connection.ResolvedContinuationScope,
+                new(connection.Version, connection.ResolvedContinuationScope),
                 token => client.ListModelsAsync(connection, token), cancellationToken);
             return connection with { Catalog = models };
         }
