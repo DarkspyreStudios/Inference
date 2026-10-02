@@ -1799,6 +1799,14 @@ the wire deployment or proves Azure availability. Manual deployment entry requir
 management-plane privileges. Deployment discovery and queried account usage are not implemented.
 This adapter does not discover context/output limits or deployment availability.
 
+The shared SDK also exposes the closed `Versioned` and `Entra` selections, explicit cloud/audience
+and five identity kinds. `ConnectLlmJson` exports their exact type-name metadata, including managed
+identity selectors and protected `LlmAzureSecret` variants. Unknown selections and fields refuse.
+Client secrets and PKCS12 bytes/passwords belong only in `LlmCredential.Azure`; their diagnostic
+strings are redacted. Metadata never opens a workload file or loads a certificate. These declarations
+do not enable Entra or versioned routes: the current Azure adapters reject them before dispatch.
+The API-key setter refuses Entra mode, and its settings do not expose an API-key field.
+
 Unknown profiles advertise no media, structured-output, reasoning-level or sampling support.
 Implemented paths can be selected through supported explicit connection/model overrides; model
 overrides take precedence. Tool schema strictness remains Unknown without evidence. The Azure

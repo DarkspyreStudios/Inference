@@ -120,7 +120,8 @@ public sealed class LlmSettings : InferenceSettings<LlmSetupChanges>
     private LlmVertexConfiguration Vertex => _draft.Vertex ?? new();
     private bool UsesAws => _draft.Transport is LlmTransport.AwsBedrockConverse or LlmTransport.AwsBedrockAgentCore;
     private bool UsesApiKey => _draft.Transport is LlmTransport.OpenAiResponses or LlmTransport.OpenAiCompatibleChat or LlmTransport.AnthropicMessages
-        or LlmTransport.GoogleGeminiApi || UsesVertex && Vertex.AuthenticationMode == LlmGoogleAuthenticationMode.ApiKey || UsesAzure;
+        or LlmTransport.GoogleGeminiApi || UsesVertex && Vertex.AuthenticationMode == LlmGoogleAuthenticationMode.ApiKey
+        || UsesAzure && (_draft.Azure?.AuthenticationMode ?? LlmAzureAuthenticationMode.ApiKey) == LlmAzureAuthenticationMode.ApiKey;
     private LlmCredential Credential => LlmCredential.Parse(_draft.Credential) ?? new();
 
     protected override bool IsDraftDirty =>

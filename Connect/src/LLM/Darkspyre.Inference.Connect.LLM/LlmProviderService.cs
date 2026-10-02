@@ -253,6 +253,9 @@ public sealed class LlmProviderService : ILlmTextTokenizer, ILlmFileClient, IXai
             cancellationToken);
         if (connection.Transport == LlmTransport.XaiResponses)
             throw new NotSupportedException("Grok requires OAuth sign-in; an API key is not supported.");
+        if (connection.Transport is LlmTransport.AzureOpenAiResponses or LlmTransport.AzureOpenAiChat
+            && connection.Azure is { AuthenticationMode: not LlmAzureAuthenticationMode.ApiKey })
+            throw new NotSupportedException("The selected Azure authentication mode does not accept an API key.");
         await Connections.SaveCredentialAsync(
             connectionId,
             new LlmCredential { ApiKey = apiKey }.Serialize(),

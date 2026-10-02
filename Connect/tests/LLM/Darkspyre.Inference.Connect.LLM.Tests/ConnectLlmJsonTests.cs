@@ -22,9 +22,9 @@ public sealed class ConnectLlmJsonTests
     private const string VertexAdcJson = "{\"ProjectId\":\"project\",\"Location\":\"us-east5\",\"AuthenticationMode\":0}";
     private const string VertexServiceAccountJson = "{\"ProjectId\":\"project\",\"Location\":\"global\",\"AuthenticationMode\":1}";
     private const string VertexExpressJson = "{\"ProjectId\":null,\"Location\":null,\"AuthenticationMode\":2}";
-    private const string AzureProfileJson = "{\"ApiMode\":0,\"AuthenticationMode\":0,\"DeploymentId\":\"alias\",\"ModelProfileId\":\"gpt-4o\"}";
-    private const string AzureUnknownProfileJson = "{\"ApiMode\":0,\"AuthenticationMode\":0,\"DeploymentId\":\"alias\",\"ModelProfileId\":null}";
-    private const string AzureFutureModesJson = "{\"ApiMode\":999,\"AuthenticationMode\":999,\"DeploymentId\":\"alias\",\"ModelProfileId\":null}";
+    private const string AzureProfileJson = "{\"ApiMode\":0,\"AuthenticationMode\":0,\"DeploymentId\":\"alias\",\"ModelProfileId\":\"gpt-4o\",\"ApiVersion\":null,\"Entra\":null}";
+    private const string AzureUnknownProfileJson = "{\"ApiMode\":0,\"AuthenticationMode\":0,\"DeploymentId\":\"alias\",\"ModelProfileId\":null,\"ApiVersion\":null,\"Entra\":null}";
+    private const string AzureVersionedModesJson = "{\"ApiMode\":1,\"AuthenticationMode\":1,\"DeploymentId\":\"alias\",\"ModelProfileId\":null,\"ApiVersion\":\"2025-01-01\",\"Entra\":null}";
     private const string XaiGlobalJson = "{\"Region\":0,\"ServiceTier\":0,\"MultiAgent\":null}";
     private const string XaiUnitedStatesPriorityJson = "{\"Region\":1,\"ServiceTier\":1,\"MultiAgent\":null}";
     private const string XaiFutureModesJson = "{\"Region\":999,\"ServiceTier\":999,\"MultiAgent\":null}";
@@ -230,7 +230,7 @@ public sealed class ConnectLlmJsonTests
     [Theory]
     [InlineData(AzureProfileJson)]
     [InlineData(AzureUnknownProfileJson)]
-    [InlineData(AzureFutureModesJson)]
+    [InlineData(AzureVersionedModesJson)]
     public void ConnectionAndSetupMetadataRetainAzureDeploymentProfileAndNumericModes(string configuration)
     {
         LlmConnection connection = JsonSerializer.Deserialize(AzureConnectionJson(configuration), ConnectLlmJson.Connection)!;
@@ -252,7 +252,7 @@ public sealed class ConnectLlmJsonTests
         { "Connection", VertexConnectionJson(VertexExpressJson) },
         { "Connection", AzureConnectionJson(AzureProfileJson) },
         { "Connection", AzureConnectionJson(AzureUnknownProfileJson) },
-        { "Connection", AzureConnectionJson(AzureFutureModesJson) },
+        { "Connection", AzureConnectionJson(AzureVersionedModesJson) },
         { "Connection", XaiConnectionJson(XaiGlobalJson) },
         { "Connection", XaiConnectionJson(XaiUnitedStatesPriorityJson) },
         { "Connection", XaiConnectionJson(XaiFutureModesJson) },
@@ -263,7 +263,7 @@ public sealed class ConnectLlmJsonTests
         { "SetupConfiguration", "{\"Connection\":" + VertexConnectionJson(VertexExpressJson) + ",\"ModelId\":\"model\"}" },
         { "SetupConfiguration", "{\"Connection\":" + AzureConnectionJson(AzureProfileJson) + ",\"ModelId\":\"alias\"}" },
         { "SetupConfiguration", "{\"Connection\":" + AzureConnectionJson(AzureUnknownProfileJson) + ",\"ModelId\":\"alias\"}" },
-        { "SetupConfiguration", "{\"Connection\":" + AzureConnectionJson(AzureFutureModesJson) + ",\"ModelId\":\"alias\"}" },
+        { "SetupConfiguration", "{\"Connection\":" + AzureConnectionJson(AzureVersionedModesJson) + ",\"ModelId\":\"alias\"}" },
         { "SetupConfiguration", "{\"Connection\":" + XaiConnectionJson(XaiGlobalJson) + ",\"ModelId\":\"grok-4.7\"}" },
         { "SetupConfiguration", "{\"Connection\":" + XaiConnectionJson(XaiUnitedStatesPriorityJson) + ",\"ModelId\":\"grok-4.7\"}" },
         { "SetupConfiguration", "{\"Connection\":" + XaiConnectionJson(XaiFutureModesJson) + ",\"ModelId\":\"grok-4.7\"}" },
