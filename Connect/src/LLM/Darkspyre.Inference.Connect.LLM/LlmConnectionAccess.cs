@@ -52,9 +52,7 @@ public sealed class LlmConnectionAccess : IDisposable, IAsyncDisposable
             validate(connection);
         }
         ThrowIfAcquisitionCanceled(operation.Token);
-        connection = await RefreshCoreAsync(connectionId, connection, operation.Token);
-        ThrowIfAcquisitionCanceled(operation.Token);
-        validate?.Invoke(connection);
+        connection = await RefreshCoreAsync(connectionId, connection, validate, operation.Token);
         ThrowIfAcquisitionCanceled(operation.Token);
         return connection;
     }
@@ -64,29 +62,43 @@ public sealed class LlmConnectionAccess : IDisposable, IAsyncDisposable
     internal async Task<LlmConnection> RefreshAsync(string connectionId, LlmConnection connection, CancellationToken cancellationToken)
     {
         using LlmOperationLifetime.Lease operation = _lifetime.Enter(cancellationToken);
-        connection = await RefreshCoreAsync(connectionId, connection, operation.Token);
+        connection = await RefreshCoreAsync(connectionId, connection, null, operation.Token);
         ThrowIfAcquisitionCanceled(operation.Token);
         return connection;
     }
 
-    private async Task<LlmConnection> RefreshCoreAsync(string connectionId, LlmConnection connection, CancellationToken cancellationToken)
+    private async Task<LlmConnection> RefreshCoreAsync(string connectionId, LlmConnection connection,
+        Action<LlmConnection>? validate, CancellationToken cancellationToken)
     {
         ThrowIfAcquisitionCanceled(cancellationToken);
         RuntimeInputAdmission.Validate(connection);
-        if (_ignoresStoredCredential.Contains(connection.Transport)) return connection;
+        if (_ignoresStoredCredential.Contains(connection.Transport))
+        {
+            validate?.Invoke(connection);
+            return connection;
+        }
         LlmCredential? credential = LlmCredential.Parse(connection.Credential);
         if (credential?.OAuth is null || !_authenticators.TryGetValue(connection.Transport, out ILlmAuthenticator? authenticator))
+        {
+            validate?.Invoke(connection);
             return connection;
+        }
 
         LlmCredential fresh = await authenticator.EnsureFreshAsync(credential, cancellationToken);
         ThrowIfAcquisitionCanceled(cancellationToken);
         RuntimeInputAdmission.ValidateCredential(connection.Transport, fresh);
-        if (fresh == credential) return connection;
+        if (fresh == credential)
+        {
+            validate?.Invoke(connection);
+            return connection;
+        }
         string json = fresh.Serialize();
+        LlmConnection refreshed = connection with { Credential = json };
+        validate?.Invoke(refreshed);
         ThrowIfAcquisitionCanceled(cancellationToken);
         await Connections.SaveCredentialAsync(connectionId, json, connection.Version, cancellationToken);
         ThrowIfAcquisitionCanceled(cancellationToken);
-        return connection with { Credential = json };
+        return refreshed;
     }
 
     private void ThrowIfAcquisitionCanceled(CancellationToken token)
