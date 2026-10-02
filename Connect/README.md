@@ -1174,6 +1174,7 @@ The shared [`XaiFamilyBinding` contract](docs/media-bindings.md) uses explicit s
 existing credential-access owner. It does not register or qualify an xAI Image transport.
 Family acquisition rejects incompatible credentials before refresh and incompatible refresh results
 before credential save; the Responses client uses the same OAuth-only authorization validator before HTTP.
+The chat facade applies that selected adapter policy before credential refresh, credential save and catalog callbacks.
 
 ## Video contracts
 
