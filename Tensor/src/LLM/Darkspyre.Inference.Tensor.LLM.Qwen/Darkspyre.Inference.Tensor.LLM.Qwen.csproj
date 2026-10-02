@@ -8,6 +8,7 @@
 
   <ItemGroup>
     <PackageReference Include="Darkspyre.TensorSharp.Backends.Cuda" GeneratePathProperty="true" />
+    <PackageReference Include="Darkspyre.TensorSharp.Backends.GGML" />
     <PackageReference Include="Darkspyre.TensorSharp.Chat" />
   </ItemGroup>
 

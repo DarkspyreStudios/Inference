@@ -327,13 +327,11 @@ lazy Qwen owner factory. A factory-created owner is container-owned; an explicit
 instance remains borrowed. Model instances release their own leases and never shut down the shared
 runtime. Stop/dispose instances before terminal runtime shutdown.
 
-The Qwen runtime-owner source requires the TensorSharp 2.8.6.8 managed loader APIs. Its managed
-verification uses an ignored, test-only project-reference overlay over genuine supplier source;
-the shipping 2.8.6.7 package references are unchanged and do not supply those APIs. That verification
-is not a successful shipping-package restore/build or native-backend qualification. The actual
-private-generation test composes Qwen with the genuine Chat/Models/GGML/Core/Runtime assemblies,
-checks an explicit empty plan, and retires owned metadata and zero-handle runtime state. It does
-not initialize a backend, resolve a catalog or load a model.
+Qwen consumes the TensorSharp 2.8.6.8 managed loader APIs through ordinary PackageReferences.
+GGML is a direct Qwen and Tensor package dependency. Source restore and compilation do not substitute
+supplier project references. The actual private-generation test composes Qwen with the package's
+Chat/Models/GGML/Core/Runtime assemblies, checks an explicit empty plan, and retires owned metadata
+and zero-handle runtime state. It does not initialize a backend, resolve a catalog or load a model.
 
 Null candidates resolve the supplier's finite deployed package catalog once at the first admitted
 GGML check/load. Empty candidates admit nothing and never resolve or load ambient libraries. Auto
@@ -722,15 +720,17 @@ the Audio / SpeechTranscription task without provider-name renderer branches.
 ## Package dependency boundary
 
 Tensor depends on **Darkspyre.Inference.Common [11.14.0-rc.1]** and the **Darkspyre.TensorSharp.*
-2.8.6.7** dependency closure through NuGet. None of their DLLs is embedded in Tensor. TensorSharp
-2.8.6.7 loads model files from paths and provides bounded metadata inspection through its GGUF,
-safetensors and restricted PyTorch readers. `Darkspyre.TensorSharp.Backends.GGML` ships prebuilt GGML
-native bridges at `runtimes/<rid>/native/`: CPU and Metal for osx-arm64, and CPU for linux-x64,
-linux-arm64 and win-x64. Qwen and Supra therefore load on those backends without a native build. The
-Linux bridges need glibc 2.39 or later. CUDA, Vulkan and win-arm64 build the bridge from a
-TensorSharp checkout with its `TensorSharp.GGML.Native/build-*` script.
+2.8.6.8** dependency closure through NuGet. None of their DLLs is embedded in Tensor. TensorSharp
+loads model files from paths and provides bounded metadata inspection through its GGUF,
+safetensors and restricted PyTorch readers. `Darkspyre.TensorSharp.Backends.GGML` is managed-only.
+Its restore graph does not select a GGML native package. Consumers supply compatible native
+packages or an explicit runtime candidate plan before an admitted backend check or model load.
+An empty candidate plan never falls through to ambient probing. Package presence does not establish
+backend availability or successful model allocation.
 
-Use the root `NuGet.Config` and process-scoped private-feed credentials for normal restores.
+Use the root `NuGet.Config` and process-scoped private-feed credentials for normal restores when the
+required package version is available on the feed. A local archive source for verification is an
+explicit separate restore configuration, not a permanent shipping-source redirect.
 Darkspyre dependencies come from the private feed; Microsoft.ML.OnnxRuntime, Whisper.net, its
 runtime and NAudio.Core come from public NuGet. Their own packages own their assemblies/native runtime assets. Tensor contains
 only its capability, engine and registry assemblies and their XML documentation, README and license.
@@ -741,3 +741,7 @@ device availability. Explicit backend observations retain the documented availab
 host native-runtime provisioning and full-weight/device validation are not inferred from package
 installation. Whisper's advertised CPU runtime and ONNX Runtime's native library, including its
 Core ML execution provider, are supplied by their public package dependencies.
+The CUDA dependency retains its committed PTX payload; disabling native builds does not remove that
+payload. Tensor's archive boundary excludes those foreign shader files. The strict
+`VerifyRuntimeInventory --require-managed-ggml` gate checks actual restored GGML package identities
+and payloads while retaining the separate Whisper, ONNX, image-runtime and GPU asset inventory.
