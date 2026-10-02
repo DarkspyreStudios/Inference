@@ -98,8 +98,35 @@ public sealed class XaiFileFacadeTests
         LlmProviderCapabilities capabilities = client.GetCapabilities(Connection());
         Assert.Equal(new LlmFileCapabilities { Upload = true, List = true, Get = true, Download = true, Delete = true, TextDownload = true, PublicUrls = true }, capabilities.Files);
         Assert.False(capabilities.SupportsFileReferences);
-        await using var service = new LlmProviderService(new Source(), []);
+        var source = new Source();
+        await using var service = new LlmProviderService(source, []);
         await Assert.ThrowsAsync<NotSupportedException>(() => service.GetAsync("selected", "file-a"));
+        using var untouched = new CallbackStream(() => throw new InvalidOperationException("Unexpected stream inspection."));
+        await Assert.ThrowsAsync<NotSupportedException>(() => service.UploadAsync("selected", untouched, "file.txt"));
+        Assert.Equal(0, source.Reads);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task BorrowedStreamPreflightCallbackCannotPassSynchronousRetirementFence(bool download)
+    {
+        var source = new Source();
+        var auth = new Authenticator();
+        using var http = new HttpClient(new Handler(_ => throw new InvalidOperationException("Unexpected HTTP.")));
+        var service = new LlmProviderService(source, [new XaiResponsesLlmClient(http)], [auth]);
+        Task? retirement = null;
+        using var stream = new CallbackStream(() => { retirement = service.DisposeAsync().AsTask(); return true; });
+        try
+        {
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => download
+                ? service.DownloadAsync("selected", "file-a", stream)
+                : service.UploadAsync("selected", stream, "file.txt"));
+            await retirement!.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.Equal(0, auth.Calls);
+            Assert.Equal(0, source.Writes);
+        }
+        finally { await service.DisposeAsync(); }
     }
 
     [Theory]
@@ -258,5 +285,11 @@ public sealed class XaiFileFacadeTests
     private sealed class Handler(Func<HttpRequestMessage, Task<HttpResponseMessage>> callback) : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) => callback(request);
+    }
+
+    private sealed class CallbackStream(Func<bool> capability) : MemoryStream
+    {
+        public override bool CanRead => capability();
+        public override bool CanWrite => capability();
     }
 }
