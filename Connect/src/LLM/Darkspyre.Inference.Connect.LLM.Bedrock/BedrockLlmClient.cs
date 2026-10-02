@@ -920,6 +920,7 @@ internal sealed class BedrockLlmClient(
 
     private void EnsureTransport(LlmConnection connection)
     {
+        RuntimeInputAdmission.Validate(connection);
         if (connection.Transport != Transport)
         {
             throw new ArgumentException(

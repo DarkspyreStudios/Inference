@@ -20,6 +20,7 @@ internal abstract class OAuthAuthenticatorBase(HttpClient http) : ILlmAuthentica
         CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        RuntimeInputAdmission.ValidateCredential(Transport, credential);
         if (credential.OAuth is null || !ShouldRefresh(credential.OAuth))
         {
             return credential;

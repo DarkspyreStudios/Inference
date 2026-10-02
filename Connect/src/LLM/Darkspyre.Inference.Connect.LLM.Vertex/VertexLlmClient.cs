@@ -46,6 +46,8 @@ internal sealed class VertexLlmClient(HttpClient http, IVertexAuthentication aut
 
     public async Task<LlmConnection> PrepareAsync(LlmConnection connection, CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
+        RuntimeInputAdmission.Validate(connection);
         VertexAccess access = await authentication.ResolveAsync(connection, cancellationToken).ConfigureAwait(false);
         return connection with { ContinuationCodec = new VertexContinuationCodec(), ResolvedContinuationScope = access.Scope };
     }

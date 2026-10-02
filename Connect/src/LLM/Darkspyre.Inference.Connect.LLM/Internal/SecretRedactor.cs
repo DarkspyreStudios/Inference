@@ -58,6 +58,8 @@ internal static class SecretRedactor
         string?[] candidates =
         [
             credential.ApiKey,
+            credential.Copilot?.AccessToken,
+            credential.CopilotRuntime?.ConnectionToken,
             credential.OAuth?.AccessToken,
             credential.OAuth?.RefreshToken,
             credential.OAuth?.IdToken,

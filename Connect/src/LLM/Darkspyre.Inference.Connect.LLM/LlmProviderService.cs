@@ -151,7 +151,7 @@ public sealed class LlmProviderService : ILlmTextTokenizer, ILlmFileClient, IXai
         string connectionId, CancellationToken cancellationToken = default)
     {
         using var operation = _lifetime.Enter(cancellationToken);
-        LlmConnection connection = await LlmConnectionResolver.ResolveAsync(Connections, connectionId, operation.Token)
+        LlmConnection connection = await ResolveConnectionAsync(connectionId, operation.Token)
             .ConfigureAwait(false);
         ThrowIfOperationCanceled(operation.Token);
         connection = EmbeddingRequestData.Snapshot(connection);
@@ -213,6 +213,8 @@ public sealed class LlmProviderService : ILlmTextTokenizer, ILlmFileClient, IXai
         using var operation = _lifetime.Enter(cancellationToken);
         cancellationToken = operation.Token;
         LlmConnection? connection = await Connections.GetConnectionAsync(connectionId, cancellationToken);
+        ThrowIfOperationCanceled(cancellationToken);
+        if (connection is not null) RuntimeInputAdmission.Validate(connection);
         LlmCredential? credential = LlmCredential.Parse(connection?.Credential);
         if (connection?.Transport == LlmTransport.XaiResponses
             && (string.IsNullOrWhiteSpace(credential?.OAuth?.AccessToken)
@@ -286,6 +288,8 @@ public sealed class LlmProviderService : ILlmTextTokenizer, ILlmFileClient, IXai
             deviceAuthId,
             userCode,
             cancellationToken);
+        ThrowIfOperationCanceled(cancellationToken);
+        RuntimeInputAdmission.ValidateCredential(connection.Transport, credential);
         await Connections.SaveCredentialAsync(
             connectionId,
             credential.Serialize(),
@@ -388,6 +392,8 @@ public sealed class LlmProviderService : ILlmTextTokenizer, ILlmFileClient, IXai
             code,
             state,
             cancellationToken);
+        ThrowIfOperationCanceled(cancellationToken);
+        RuntimeInputAdmission.ValidateCredential(connection.Transport, credential);
         await Connections.SaveCredentialAsync(
             connectionId,
             credential.Serialize(),
@@ -428,8 +434,7 @@ public sealed class LlmProviderService : ILlmTextTokenizer, ILlmFileClient, IXai
         using var operation = _lifetime.Enter(cancellationToken);
         cancellationToken = operation.Token;
         ArgumentNullException.ThrowIfNull(prompt);
-        LlmConnection connection = await LlmConnectionResolver.ResolveAsync(
-            Connections,
+        LlmConnection connection = await ResolveConnectionAsync(
             connectionId,
             cancellationToken);
         switch (connection.Transport)
@@ -438,6 +443,8 @@ public sealed class LlmProviderService : ILlmTextTokenizer, ILlmFileClient, IXai
                 LlmDeviceCode code = await CodexLogin().StartAsync(cancellationToken);
                 await prompt.ShowDeviceCodeAsync(code, cancellationToken);
                 LlmCredential codexCredential = await PollCodexAsync(code, cancellationToken);
+                ThrowIfOperationCanceled(cancellationToken);
+                RuntimeInputAdmission.ValidateCredential(connection.Transport, codexCredential);
                 await Connections.SaveCredentialAsync(
                     connectionId,
                     codexCredential.Serialize(),
@@ -498,8 +505,7 @@ public sealed class LlmProviderService : ILlmTextTokenizer, ILlmFileClient, IXai
         ArgumentNullException.ThrowIfNull(request);
         request = ClientTools.Snapshot(request with { HostedTools = HostedTools.Snapshot(request.HostedTools) });
         LlmAccountUsageObservations.Reservation observationReservation = _observations.Reserve(connectionId);
-        LlmConnection connection = await LlmConnectionResolver.ResolveAsync(
-            Connections,
+        LlmConnection connection = await ResolveConnectionAsync(
             connectionId,
             cancellationToken);
         ThrowIfOperationCanceled(cancellationToken);
@@ -588,7 +594,7 @@ public sealed class LlmProviderService : ILlmTextTokenizer, ILlmFileClient, IXai
         ArgumentException.ThrowIfNullOrWhiteSpace(connectionId);
         ArgumentException.ThrowIfNullOrWhiteSpace(modelId);
         ArgumentNullException.ThrowIfNull(text);
-        LlmConnection connection = await LlmConnectionResolver.ResolveAsync(Connections, connectionId, cancellationToken);
+        LlmConnection connection = await ResolveConnectionAsync(connectionId, cancellationToken);
         ThrowIfOperationCanceled(cancellationToken);
         ILlmClient client = ClientFor(connection.Transport);
         if (client is not ILlmTextTokenizerClient tokenizer)
@@ -618,7 +624,7 @@ public sealed class LlmProviderService : ILlmTextTokenizer, ILlmFileClient, IXai
         ArgumentNullException.ThrowIfNull(request);
         ArgumentException.ThrowIfNullOrWhiteSpace(request.ModelId);
         request = ClientTools.Snapshot(request with { HostedTools = HostedTools.Snapshot(request.HostedTools) });
-        LlmConnection connection = await LlmConnectionResolver.ResolveAsync(Connections, connectionId, cancellationToken);
+        LlmConnection connection = await ResolveConnectionAsync(connectionId, cancellationToken);
         ThrowIfOperationCanceled(cancellationToken);
         RequestJson.ValidateSamplingOptions(connection, request);
         request = ProviderControlPolicy.Resolve(connection, request);
@@ -662,7 +668,7 @@ public sealed class LlmProviderService : ILlmTextTokenizer, ILlmFileClient, IXai
         policy ??= new();
         ManagedAgentPolicy.Validate(new() { ContextPolicy = policy }, null);
         request = ClientTools.Snapshot(request with { HostedTools = HostedTools.Snapshot(request.HostedTools) });
-        var connection = await LlmConnectionResolver.ResolveAsync(Connections, connectionId, cancellationToken);
+        var connection = await ResolveConnectionAsync(connectionId, cancellationToken);
         ThrowIfOperationCanceled(cancellationToken);
         RequestJson.ValidateSamplingOptions(connection, request);
         request = ProviderControlPolicy.Resolve(connection, request);
@@ -819,7 +825,7 @@ public sealed class LlmProviderService : ILlmTextTokenizer, ILlmFileClient, IXai
     {
         using var operation = _lifetime.Enter(cancellationToken);
         LlmAccountUsageObservations.Reservation reservation = _observations.Reserve(connectionId);
-        LlmConnection connection = await LlmConnectionResolver.ResolveAsync(Connections, connectionId, operation.Token);
+        LlmConnection connection = await ResolveConnectionAsync(connectionId, operation.Token);
         operation.Token.ThrowIfCancellationRequested();
         return reservation.Get(connection);
     }
@@ -830,8 +836,7 @@ public sealed class LlmProviderService : ILlmTextTokenizer, ILlmFileClient, IXai
     {
         using var operation = _lifetime.Enter(cancellationToken);
         cancellationToken = operation.Token;
-        LlmConnection connection = await LlmConnectionResolver.ResolveAsync(
-            Connections,
+        LlmConnection connection = await ResolveConnectionAsync(
             connectionId,
             cancellationToken);
         ILlmClient client = ClientFor(connection.Transport);
@@ -883,7 +888,7 @@ public sealed class LlmProviderService : ILlmTextTokenizer, ILlmFileClient, IXai
         {
             throw new ArgumentOutOfRangeException(nameof(lane));
         }
-        LlmConnection connection = await LlmConnectionResolver.ResolveAsync(Connections, connectionId, cancellationToken);
+        LlmConnection connection = await ResolveConnectionAsync(connectionId, cancellationToken);
         ILlmClient client = ClientFor(connection.Transport);
         connection = await AttachCatalogAsync(connectionId, connection, client, cancellationToken);
         LlmProviderCapabilities route = client.GetCapabilities(connection);
@@ -936,12 +941,20 @@ public sealed class LlmProviderService : ILlmTextTokenizer, ILlmFileClient, IXai
         }
     }
 
+    private async Task<LlmConnection> ResolveConnectionAsync(string connectionId, CancellationToken cancellationToken)
+    {
+        LlmConnection connection = await LlmConnectionResolver.ResolveAsync(Connections, connectionId, cancellationToken)
+            .ConfigureAwait(false);
+        ThrowIfOperationCanceled(cancellationToken);
+        RuntimeInputAdmission.Validate(connection);
+        return connection;
+    }
+
     private async Task<LlmConnection> ResolveFreshConnectionAsync(
         string connectionId,
         CancellationToken cancellationToken)
     {
-        LlmConnection connection = await LlmConnectionResolver.ResolveAsync(
-            Connections,
+        LlmConnection connection = await ResolveConnectionAsync(
             connectionId,
             cancellationToken);
         _ = ClientFor(connection.Transport);
@@ -958,8 +971,7 @@ public sealed class LlmProviderService : ILlmTextTokenizer, ILlmFileClient, IXai
             throw new ArgumentException("An expected connection version is required.", nameof(expectedVersion));
         }
 
-        LlmConnection connection = await LlmConnectionResolver.ResolveAsync(
-            Connections,
+        LlmConnection connection = await ResolveConnectionAsync(
             connectionId,
             cancellationToken);
         return string.Equals(connection.Version, expectedVersion, StringComparison.Ordinal)
@@ -1024,6 +1036,7 @@ public sealed class LlmProviderService : ILlmTextTokenizer, ILlmFileClient, IXai
     private async Task SaveXaiCredentialAsync(string connectionId, string version, LlmCredential credential, CancellationToken token)
     {
         ThrowIfOperationCanceled(token);
+        RuntimeInputAdmission.ValidateCredential(LlmTransport.XaiResponses, credential);
         if (string.IsNullOrWhiteSpace(credential.OAuth?.AccessToken)
             || !string.IsNullOrEmpty(credential.ApiKey) || credential.SecretHeaders.Count != 0)
             throw new InvalidOperationException("Grok sign-in did not return an OAuth credential.");

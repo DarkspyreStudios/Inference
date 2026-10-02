@@ -95,6 +95,15 @@ round-trip. Copilot credentials use the existing protected Web/null-omit codec; 
 strings redact tokens. These declarations do not register an ACP or Copilot adapter, launch a
 runtime, perform login, validate state-directory isolation or certify a runtime/SDK version.
 
+Existing transports reject foreign ACP/Copilot configuration, explicit runtime launch inputs
+(including an empty object), and dedicated Copilot credentials before refresh, catalog, process,
+HTTP or host inference effects. Direct adapters and resolved facade calls use the same admission
+rule. Credential refresh and login results also refuse foreign runtime credentials before a
+conditional save. Settings report invalid foreign inputs without calling environments or the
+commit target. Runtime profiles and launch inputs copy their collections on initialization;
+admission does not remove supplied inputs or select a different transport. Diagnostic redaction
+includes both the GitHub token and the separate runtime connection token.
+
 `LlmAgentProviderService.BindRuntimeAuthentication` exposes saved-ID and explicit draft/identity
 overloads. Both reject runtime authentication as unavailable before resolving a connection or
 starting login. `CreateSettingsManager(target, agents)` optionally borrows the agent facade from
