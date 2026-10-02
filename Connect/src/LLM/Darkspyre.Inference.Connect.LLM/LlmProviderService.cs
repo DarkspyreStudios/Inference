@@ -223,8 +223,7 @@ public sealed class LlmProviderService : ILlmTextTokenizer, ILlmFileClient, IXai
         if (connection is not null) RuntimeInputAdmission.Validate(connection);
         LlmCredential? credential = LlmCredential.Parse(connection?.Credential);
         if (connection?.Transport == LlmTransport.XaiResponses
-            && (string.IsNullOrWhiteSpace(credential?.OAuth?.AccessToken)
-                || !string.IsNullOrEmpty(credential.ApiKey) || credential.SecretHeaders.Count != 0))
+            && (!string.IsNullOrEmpty(credential?.ApiKey) || !XaiAuthorization.IsValid(credential)))
             return false;
         if (connection is not null
             && _clients.TryGetValue(connection.Transport, out ILlmClient? client)
@@ -527,9 +526,10 @@ public sealed class LlmProviderService : ILlmTextTokenizer, ILlmFileClient, IXai
         if (client is not IStreamingCredentialRefreshPolicy refreshPolicy
             || refreshPolicy.RequiresFreshOAuthCredentialForStreaming(connection))
         {
-            connection = await ConnectionAccess.RefreshAsync(
+            connection = await RefreshConnectionAsync(
                 connectionId,
                 connection,
+                client,
                 cancellationToken);
         }
         LlmAccountUsageObservations.Binding? observationBinding;
@@ -605,7 +605,7 @@ public sealed class LlmProviderService : ILlmTextTokenizer, ILlmFileClient, IXai
         ILlmClient client = ClientFor(connection.Transport);
         if (client is not ILlmTextTokenizerClient tokenizer)
             throw new NotSupportedException("This route does not implement plain-text tokenization.");
-        connection = await ConnectionAccess.RefreshAsync(connectionId, connection, cancellationToken);
+        connection = await RefreshConnectionAsync(connectionId, connection, client, cancellationToken);
         ThrowIfOperationCanceled(cancellationToken);
         LlmTokenization result;
         try { result = await tokenizer.TokenizeAsync(connection, modelId, text, cancellationToken).ConfigureAwait(false); }
@@ -642,7 +642,7 @@ public sealed class LlmProviderService : ILlmTextTokenizer, ILlmFileClient, IXai
         LlmAttachments.ValidateReferences(request, () => client.GetCapabilities(connection, request.ModelId).SupportsFileReferences);
         HostedTools.Validate(request, client.GetCapabilities(connection, request.ModelId));
         ClientTools.Validate(request, client.GetCapabilities(connection, request.ModelId).SupportsShellTools);
-        connection = await ConnectionAccess.RefreshAsync(connectionId, connection, cancellationToken);
+        connection = await RefreshConnectionAsync(connectionId, connection, client, cancellationToken);
         if (client is ILlmConnectionPreparation preparation)
             connection = await preparation.PrepareAsync(connection, cancellationToken).ConfigureAwait(false);
         (request, int omitted) = ContinuationStateProjection.Project(request, connection);
@@ -857,7 +857,7 @@ public sealed class LlmProviderService : ILlmTextTokenizer, ILlmFileClient, IXai
 
         if (connection.Transport == LlmTransport.OpenAiCodex)
         {
-            connection = await ConnectionAccess.RefreshAsync(connectionId, connection, cancellationToken);
+            connection = await RefreshConnectionAsync(connectionId, connection, client, cancellationToken);
         }
         return await usageClient.GetAccountUsageAsync(connection, cancellationToken);
     }
@@ -934,6 +934,13 @@ public sealed class LlmProviderService : ILlmTextTokenizer, ILlmFileClient, IXai
         {
             return connection;
         }
+        if (client is ILlmCredentialAdmissionPolicy policy)
+        {
+            ThrowIfOperationCanceled(cancellationToken);
+            connection = EmbeddingRequestData.Snapshot(connection);
+            policy.ValidateCredential(connection);
+            ThrowIfOperationCanceled(cancellationToken);
+        }
         try
         {
             IReadOnlyList<LlmModel> models = await _modelLists.GetAsync(connectionId,
@@ -963,8 +970,32 @@ public sealed class LlmProviderService : ILlmTextTokenizer, ILlmFileClient, IXai
         LlmConnection connection = await ResolveConnectionAsync(
             connectionId,
             cancellationToken);
-        _ = ClientFor(connection.Transport);
-        return await ConnectionAccess.RefreshAsync(connectionId, connection, cancellationToken);
+        ILlmClient client = ClientFor(connection.Transport);
+        return await RefreshConnectionAsync(connectionId, connection, client, cancellationToken);
+    }
+
+    private Task<LlmConnection> RefreshConnectionAsync(string connectionId, LlmConnection connection,
+        ILlmClient client, CancellationToken cancellationToken)
+    {
+        if (client is not ILlmCredentialAdmissionPolicy policy)
+            return ConnectionAccess.RefreshAsync(connectionId, connection, cancellationToken);
+
+        return RefreshValidatedAsync();
+
+        async Task<LlmConnection> RefreshValidatedAsync()
+        {
+            LlmConnection refreshed = await ConnectionAccess.RefreshAsync(connectionId, connection, Validate,
+                () => ThrowIfOperationCanceled(cancellationToken), cancellationToken);
+            ThrowIfOperationCanceled(cancellationToken);
+            return refreshed;
+        }
+
+        void Validate(LlmConnection snapshot)
+        {
+            ThrowIfOperationCanceled(cancellationToken);
+            policy.ValidateCredential(snapshot);
+            ThrowIfOperationCanceled(cancellationToken);
+        }
     }
 
     private async Task<LlmConnection> RequireExpectedVersionAsync(
@@ -1043,8 +1074,7 @@ public sealed class LlmProviderService : ILlmTextTokenizer, ILlmFileClient, IXai
     {
         ThrowIfOperationCanceled(token);
         RuntimeInputAdmission.ValidateCredential(LlmTransport.XaiResponses, credential);
-        if (string.IsNullOrWhiteSpace(credential.OAuth?.AccessToken)
-            || !string.IsNullOrEmpty(credential.ApiKey) || credential.SecretHeaders.Count != 0)
+        if (!string.IsNullOrEmpty(credential.ApiKey) || !XaiAuthorization.IsValid(credential))
             throw new InvalidOperationException("Grok sign-in did not return an OAuth credential.");
         string serialized = credential.Serialize();
         ThrowIfOperationCanceled(token);
