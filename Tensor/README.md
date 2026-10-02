@@ -1,6 +1,6 @@
 # Darkspyre.Inference.Tensor
 
-Source package version **11.15.0-rc.1** uses the shared typed reasoning-level contract; Qwen supports `None` and `High`.
+Source package version **11.15.1-rc.1** uses the shared typed reasoning-level contract; Qwen supports `None` and `High`.
 It includes Laya's CPU/GPU-only Core ML update and retains the ONNX and user-selected
 model-location/import contracts introduced in 11.4.0-rc.1.
 
@@ -266,7 +266,7 @@ the configuration and reconstruct registrations when composing the manager after
 does not perform that unload. Stop remains terminal, and an
 already-cancelled teardown action token reaches the engine as urgency rather than skipping cleanup.
 See the [shared editor example](../Common/examples/Darkspyre.Inference.Setup.Examples/README.md).
-These setup contracts use the synchronized source package version 11.15.0-rc.1, including
+These setup contracts use the synchronized source package version 11.15.1-rc.1, including
 provider-owned dirty state and explicit choice capabilities for the shared Settings editor.
 
 `TensorJson` exports assembly-owned `JsonTypeInfo<T>` for `SetupConfiguration`, `SetupChanges`,
@@ -329,7 +329,7 @@ runtime. Stop/dispose instances before terminal runtime shutdown.
 Dispose a service provider that resolves these registrations asynchronously with `await using` or
 `DisposeAsync`. Its factory-created Qwen runtime owner has an asynchronous terminal lifetime.
 
-Qwen consumes the TensorSharp 2.8.6.8 managed loader APIs through ordinary PackageReferences.
+Qwen consumes the TensorSharp 2.8.6.9 managed loader APIs through ordinary PackageReferences.
 GGML is a direct Qwen and Tensor package dependency. Source restore and compilation do not substitute
 supplier project references. The actual private-generation test composes Qwen with the package's
 Chat/Models/GGML/Core/Runtime assemblies, checks an explicit empty plan, and retires owned metadata
@@ -721,14 +721,20 @@ the Audio / SpeechTranscription task without provider-name renderer branches.
 
 ## Package dependency boundary
 
-Tensor depends on **Darkspyre.Inference.Common [11.15.0-rc.1]** and the **Darkspyre.TensorSharp.*
-2.8.6.8** dependency closure through NuGet. None of their DLLs is embedded in Tensor. TensorSharp
+Tensor depends on **Darkspyre.Inference.Common [11.15.1-rc.1]** and the **Darkspyre.TensorSharp.*
+2.8.6.9** dependency closure through NuGet. None of their DLLs is embedded in Tensor. TensorSharp
 loads model files from paths and provides bounded metadata inspection through its GGUF,
 safetensors and restricted PyTorch readers. `Darkspyre.TensorSharp.Backends.GGML` is managed-only.
 Its restore graph does not select a GGML native package. Consumers supply compatible native
 packages or an explicit runtime candidate plan before an admitted backend check or model load.
 An empty candidate plan never falls through to ambient probing. Package presence does not establish
 backend availability or successful model allocation.
+
+For the macOS ARM64 engine, explicitly reference
+`Darkspyre.TensorSharp.Backends.GGML.Native.osx-arm64` version **2.8.6.9** alongside Tensor.
+The native 2.8.6.8 package's catalog does not satisfy this managed wrapper's contract.
+The managed Tensor package does not select this native dependency. Local archives are not a claim
+of private-feed publication, native execution or full-model qualification.
 
 Use the root `NuGet.Config` and process-scoped private-feed credentials for normal restores when the
 required package version is available on the feed. A local archive source for verification is an

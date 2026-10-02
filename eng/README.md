@@ -154,7 +154,7 @@ executing those files; every runtime qualification remains `NotRun`.
 native payloads, missing required managed dependencies and restored versions that differ from the
 central policy. It writes the inventory before reporting a closure failure. This gate distinguishes
 Tensor's managed-only GGML dependency requirement from standalone consumer native selection. The
-source graph uses synchronized TensorSharp `2.8.6.8` packages and requires an explicit managed GGML
+source graph uses synchronized TensorSharp `2.8.6.9` packages and requires an explicit managed GGML
 dependency. The genuine managed package graph passes this gate without GGML native package edges or
 payloads. CUDA retains committed PTX dependency assets; Whisper, ONNX and image runtime native assets
 remain separate inventory entries, not a claim that the entire Tensor graph is native-free.

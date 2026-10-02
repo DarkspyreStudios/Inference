@@ -132,7 +132,7 @@ The package also includes `Darkspyre.Inference.Connect.TTS` for external
 PocketTTS HTTP synthesis and `Darkspyre.Inference.Connect.Audio` for external TangoFlux generation.
 They are included in the Connect product project, not separate NuGets. See
 [PocketTTS integration](#pockettts-speech) and
-[TangoFlux integration](#tangoflux-audio). The coordinated source package version is **11.15.0-rc.1**.
+[TangoFlux integration](#tangoflux-audio). The coordinated source package version is **11.15.1-rc.1**.
 
 The packages target .NET 11. Credentials
 for direct API transports remain owned by the host through `ILlmConnectionSource`; the connector
@@ -1910,7 +1910,7 @@ uncertain outcome requires readback first. The
 [generic editor example](../Common/examples/Darkspyre.Inference.Setup.Examples/README.md) compiles the
 same renderer against both Connect and Tensor. No UI framework is shipped in these packages.
 
-These contracts use the synchronized source package version 11.15.0-rc.1. The old LLM setup-input/action description
+These contracts use the synchronized source package version 11.15.1-rc.1. The old LLM setup-input/action description
 types were replaced by Common setup contracts in the 11.3.0-rc.1 breaking-contract release.
 Settings objects carry provider-owned unsaved-change state, the current authentication interaction and
 explicit choice capabilities for the shared Settings editor.

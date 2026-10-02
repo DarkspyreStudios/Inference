@@ -26,6 +26,11 @@ The technical assembly and namespace prefix is `Darkspyre.Inference`.
 
 ## Current Private Release
 
+Current source version is `11.15.1-rc.1` with synchronized TensorSharp `2.8.6.9` dependencies.
+The patch archives are not a publication or native qualification claim. A macOS ARM64 engine
+explicitly selects `Darkspyre.TensorSharp.Backends.GGML.Native.osx-arm64` `2.8.6.9`.
+The native `2.8.6.8` catalog does not satisfy the current managed wrapper's contract.
+
 All four `11.15.0-rc.1` packages are available at
 `https://nuget.pkg.github.com/DarkspyreStudios/index.json`. Their archive source identity is
 `59ef4f1522f29bff66f183d84d754985d91494f9`, on the Inference epic branch.
@@ -41,8 +46,8 @@ eighty-five native/GPU assets; it does not qualify cross-RID execution. Whisper 
 is available without loading model weights. Unimplemented provider capabilities remain unavailable.
 GPU drivers remain separate existing artifacts, not rebuilt payloads in this release.
 GGML engine activation also requires a compatible per-RID native package and its bound catalog.
-`Darkspyre.TensorSharp.Backends.GGML.Native.*` packages are not on the private feed yet.
-The managed GGML package alone does not satisfy that runtime prerequisite.
+The managed GGML package alone does not satisfy that runtime prerequisite. Native patch publication
+and execution qualification are recorded separately from this existing four-package release.
 
 ## Package families
 

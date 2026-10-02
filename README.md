@@ -11,13 +11,17 @@ directly without an HTTP bridge. A web service can host the same libraries and t
 into their typed contracts. In either case, the application owns startup, configuration, credentials,
 persistence, user consent, and shutdown.
 
-Current source and published package version: **11.15.0-rc.1**, targeting **.NET 11**.
+Current source version: **11.15.1-rc.1**, targeting **.NET 11**. The published family remains
+**11.15.0-rc.1** until the patch archives pass verification and private-feed readback.
 The four-package family is distributed through the private
 [DarkspyreStudios GitHub Packages feed](https://github.com/orgs/DarkspyreStudios/packages).
 The restore source is `https://nuget.pkg.github.com/DarkspyreStudios/index.json`.
 Unimplemented provider capabilities remain unavailable; publishing their contracts does not enable them.
-GGML engine activation additionally requires a compatible per-RID native package; those native
-packages are not on the private feed yet. The managed TensorSharp GGML wrapper is not a native driver.
+GGML engine activation additionally requires a compatible per-RID native package and catalog.
+The current Tensor source uses TensorSharp **2.8.6.9**. A macOS ARM64 engine explicitly selects
+`Darkspyre.TensorSharp.Backends.GGML.Native.osx-arm64` **2.8.6.9**; the native 2.8.6.8 catalog is
+not compatible with its managed wrapper. Local archive presence does not establish publication,
+backend execution or model qualification. The managed GGML wrapper is not a native driver.
 
 ## Goals
 
@@ -120,12 +124,15 @@ Provide credentials through your approved local credential mechanism; never comm
 The projects currently use the .NET 11 RC SDK pinned in each product's `global.json`.
 
 Install only the products your application needs, keeping their versions synchronized:
+The commands below select the current source version. Before its private-feed release, use verified
+local patch archives with an explicit preflight restore configuration, or select the published
+`11.15.0-rc.1` family from the normal feed.
 
 ```bash
-dotnet add package Darkspyre.Inference.Connect --version 11.15.0-rc.1
-dotnet add package Darkspyre.Inference.Tensor --version 11.15.0-rc.1
+dotnet add package Darkspyre.Inference.Connect --version 11.15.1-rc.1
+dotnet add package Darkspyre.Inference.Tensor --version 11.15.1-rc.1
 # Optional, for a Blazor host:
-dotnet add package Darkspyre.Inference.UI.Settings --version 11.15.0-rc.1
+dotnet add package Darkspyre.Inference.UI.Settings --version 11.15.1-rc.1
 ```
 
 Common is brought in transitively. An application that only consumes the shared contracts can
