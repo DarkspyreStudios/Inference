@@ -1581,7 +1581,8 @@ expiry versus cache lifetime and real model entitlement remain provider qualific
 Vertex's optional typed `LlmVertexCacheStaging` selects a Cloud Storage bucket and object prefix
 under the same acquired Google authorization. It creates no bucket and accepts no separate staging
 credential. Named and raw file media stream to derived objects with observed bucket, object name,
-generation, size and MIME validation. Duplicate named references open and upload once while every
+generation and size. Any present response MIME is validated; absent response MIME remains unknown.
+Duplicate named references open and upload once while every
 sent inline occurrence counts its raw bytes. Without staging, inline media preparation uses a
 10 MiB aggregate raw-content budget; this is a local preparation bound, not a claim about the
 backend's encoded-body measurement. The 10,000,000-to-10,485,760-byte interval reaches the provider

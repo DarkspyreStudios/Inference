@@ -150,16 +150,28 @@ public sealed class GoogleCacheCrudRequestTests
     [Fact]
     public void ActualForeignCrudRequestOwnerIsRetainedByDefaultFacadeThenCollects()
     {
-        WeakReference[] roots = ExerciseForeign();
+        WeakReference[] roots = HoldThenReleaseForeign();
         for (int attempt = 0; roots.Any(root => root.IsAlive) && attempt < 20; attempt++)
         { GC.Collect(); GC.WaitForPendingFinalizers(); GC.Collect(); }
         Assert.All(roots, root => Assert.False(root.IsAlive));
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private static WeakReference[] ExerciseForeign()
+    private static WeakReference[] HoldThenReleaseForeign()
+    {
+        var proof = ExerciseForeign();
+        for (int attempt = 0; attempt < 3; attempt++) { GC.Collect(); GC.WaitForPendingFinalizers(); GC.Collect(); }
+        // Executed MethodInfo provenance is checked in the creator; its reflection wrapper is not owned by the facade.
+        Assert.All(proof.Roots.Where((_, index) => index != 3), root => Assert.True(root.IsAlive));
+        GC.KeepAlive(proof.Facade);
+        return proof.Roots;
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static (LlmProviderService Facade, WeakReference[] Roots) ExerciseForeign()
     {
         var generation = new Generation(Path.GetDirectoryName(typeof(GoogleCacheCrudRequestTests).Assembly.Location)!);
+        using var handler = new Handler(true); using var http = new HttpClient(handler);
         try
         {
             Assembly fixture = generation.LoadFromAssemblyPath(typeof(GoogleCacheCrudRequestTests).Assembly.Location);
@@ -167,7 +179,7 @@ public sealed class GoogleCacheCrudRequestTests
             Assert.Equal(typeof(GoogleCacheCrudRequestTests).Assembly.ManifestModule.ModuleVersionId, fixture.ManifestModule.ModuleVersionId);
             Type type = fixture.GetType(typeof(GoogleCacheCrudRequestTests).FullName!, true)!;
             MethodInfo method = type.GetMethod(nameof(RefusingRequest))!; Assert.Same(fixture, method.Module.Assembly);
-            using var handler = new Handler(true) { Wrap = method.CreateDelegate<Func<HttpContent, HttpContent>>() }; using var http = new HttpClient(handler);
+            handler.Wrap = method.CreateDelegate<Func<HttpContent, HttpContent>>();
             var facade = new LlmProviderService(new Source(true), [new VertexLlmClient(http, new Authentication())]);
             var caches = facade.BindContextCacheAsync("connection").GetAwaiter().GetResult();
             var operation = Assert.Throws<InferenceResourceOperationException>(() => caches.GetAsync(new(Name(true), Model(true), "import")).GetAwaiter().GetResult());
@@ -176,13 +188,14 @@ public sealed class GoogleCacheCrudRequestTests
             var request = handler.Request!; var content = request.Content!;
             Assert.Same(fixture, content.GetType().Assembly); Assert.Same(generation, AssemblyLoadContext.GetLoadContext(content.GetType().Assembly));
             Assert.Equal(1, content.GetType().GetProperty(nameof(Content.Calls))!.GetValue(content));
-            handler.Request = null; handler.RequestContent = null; handler.Wrap = null;
             var roots = new WeakReference[] { new(generation), new(fixture), new(type), new(method), new(request), new(content), new(content.GetType()) };
-            for (int attempt = 0; attempt < 3; attempt++) { GC.Collect(); GC.WaitForPendingFinalizers(); GC.Collect(); }
-            Assert.All(roots, root => Assert.True(root.IsAlive)); GC.KeepAlive(facade);
-            return roots;
+            return (facade, roots);
         }
-        finally { generation.Unload(); }
+        finally
+        {
+            handler.Request = null; handler.RequestContent = null; handler.Wrap = null;
+            generation.Unload();
+        }
     }
 
     public static HttpContent RefusingRequest(HttpContent original) => new Content(original, true);
