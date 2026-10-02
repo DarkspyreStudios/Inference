@@ -35,6 +35,7 @@ internal static class GoogleCacheHttp
         HttpStatusCode? status = null;
         TimeSpan? retryAfter = null;
         Exception? failure = null;
+        LlmProviderException? ownedStatusFailure = null;
         bool canceled = false;
         string category = "Google cache create transport failed.";
         try
@@ -45,19 +46,23 @@ internal static class GoogleCacheHttp
             retryAfter = response.Headers.RetryAfter?.Delta;
             Fence();
             if (!response.IsSuccessStatusCode)
-                throw new LlmProviderException("Google rejected cache creation.", transport, status,
+            {
+                ownedStatusFailure = new LlmProviderException("Google rejected cache creation.", transport, status,
                     requestId: requestId, retryAfter: retryAfter);
+                throw ownedStatusFailure;
+            }
             category = "Google cache create returned invalid or unavailable receipt facts.";
             string body = await SdkHttpConsumption.ReadAsStringAsync(response.Content, cancellationToken).ConfigureAwait(false);
             Fence();
             using JsonDocument document = JsonDocument.Parse(body);
-            observed = parseReceipt(document.RootElement);
+            observed = parseReceipt(document.RootElement) ?? throw new JsonException();
             Fence();
         }
         catch (Exception error)
         {
             canceled = error is OperationCanceledException;
-            failure = SafeFailure(error, category, transport, status, requestId, retryAfter, cancellationToken);
+            failure = ReferenceEquals(error, ownedStatusFailure) ? error
+                : SafeFailure(error, category, transport, status, requestId, retryAfter, cancellationToken);
         }
         if (response is not null)
         {
@@ -76,7 +81,7 @@ internal static class GoogleCacheHttp
             canceled |= error is OperationCanceledException;
             Exception retirement = SafeFailure(error, "Google cache create was interrupted before publication.",
                 transport, status, requestId, retryAfter, cancellationToken);
-            failure = failure is null ? retirement : new AggregateException(failure, retirement);
+            failure ??= retirement;
         }
         if (failure is not null)
         {
@@ -88,5 +93,18 @@ internal static class GoogleCacheHttp
     }
 
     private static Exception SafeFailure(Exception error, string category, LlmTransport transport,
-        HttpStatusCode? status, string? requestId, TimeSpan? retryAfter, CancellationToken token) => error;
+        HttpStatusCode? status, string? requestId, TimeSpan? retryAfter, CancellationToken token)
+    {
+        if (error is OperationCanceledException)
+            return new OperationCanceledException("Google cache creation was interrupted.", token);
+        // Even a caller/parser LlmProviderException can contain raw credentials or cached content.
+        // Only primitive status facts survive; response identifiers remain data, never message text.
+        status ??= error switch
+        {
+            HttpRequestException request => request.StatusCode,
+            LlmProviderException provider => provider.StatusCode,
+            _ => null
+        };
+        return new LlmProviderException(category, transport, status, requestId: requestId, retryAfter: retryAfter);
+    }
 }

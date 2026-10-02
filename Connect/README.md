@@ -1453,6 +1453,15 @@ finer than representable CLR precision. Its receipt parser preserves independent
 observed expiry and returns one ordered page with its actual continuation token. These effect-free
 helpers do not establish native resource/principal authority or enable cache dispatch.
 
+The private Google cache create send boundary borrows an already-authorized request and client.
+It disposes the response, checks the existing caller and HTTP-generation fences, and never retries.
+Cancellation before send remains ordinary cancellation. Failed acknowledgement after invoking send,
+including a non-success HTTP status, conservatively reports possible creation through the typed
+reconciliation errors. A local acknowledgement does not prove rollback or permit retry. A validated
+late receipt remains exception evidence when retirement or response cleanup prevents success. Fixed diagnostics preserve
+observed status and request identifiers without retaining untrusted body or exception text. This
+boundary does not authorize routes, issue receipt scopes or make a provider cache route available.
+
 `LlmContextCacheCreateCancelledException` and `LlmContextCacheCreateUncertainException` retain
 correlation, the actual request ID and an optional observed receipt without declaring success or
 rollback. They are runtime exceptions, not portable metadata roots. Their presence does not
