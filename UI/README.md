@@ -38,7 +38,7 @@ provider-owned fields or actions.
 
 The canonical technical design is [the Settings UI design](../docs/settings.ui.tech-design.md).
 
-## Unpublished source: optional native path selection
+## Optional native path selection
 
 An interaction host may also implement `IInferenceSettingsPathPicker.SelectPathAsync`. Text fields
 with a `SetupPathSelectionKind.File` or `.Folder` hint, plus executable fields, then offer Browse.
@@ -46,7 +46,7 @@ Return an absolute path or null for cancellation. The host owns the native dialo
 manual entry remains available when no picker is supplied. A completion that arrives after a later
 edit cannot overwrite that edit. This capability is included starting with 11.4.0-rc.1.
 
-## Unpublished source: host-framed presentation
+## Host-framed presentation
 
 A host that frames the editor with its own title sets `ShowHeading="false"`; the editor then omits
 its provider name and description. A host that treats the person's click as consent for declared

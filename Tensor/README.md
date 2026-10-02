@@ -559,8 +559,8 @@ set, integrity and per-artifact source/license provenance. Artifact/source order
 identity. Exact built-in matches retain their established keys and provenance; different companion
 or revision manifests do not reuse those keys. Resolved manifests snapshot their input collections.
 
-The host may supply `TensorSourceAccess` to the source and pack manager. On the unpublished 11.10
-branch its return type is `Task<TensorSourceCredential?>`: credential resolution is awaited, not a
+The host may supply `TensorSourceAccess` to the source and pack manager. Its return type is
+`Task<TensorSourceCredential?>`: credential resolution is awaited, not a
 notification. The host may return a completed Task for a credential already in memory. It returns a short-lived
 credential for the exact requested origin: `TensorSourceCredential.Bearer(token)` or
 `TensorSourceCredential.Basic(username, password)`. The credential exposes no secret through a public

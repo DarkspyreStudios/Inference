@@ -2561,7 +2561,8 @@ can explicitly attach the optional browser-authorized catalog OAuth credential t
 ## Antigravity CLI subscription transport
 
 The [DSA-74 technical design](docs/antigravity-agent-tech-design.md) holds the evidence and mapping for
-native agent sessions. They are unreleased: the published 11.14.0-rc.1 adapter is chat-only.
+native agent sessions. The published 11.15.0-rc.1 adapter includes chat and native agent sessions;
+installed CLI and target-platform execution remain separate qualification requirements.
 
 `GoogleAntigravityCli` wraps the official [Antigravity CLI headless mode](https://antigravity.google/docs/cli/headless/). Darkspyre.Inference.Connect.LLM sends prompts over the documented stdin NDJSON protocol, consumes stdout events line by line, and emits model text and activity while the CLI is still running. It does not read, copy, or store Antigravity OAuth credentials. The CLI process starts and ends as [Wrapped CLI processes](#wrapped-cli-processes) describes.
 

@@ -18,11 +18,28 @@ specifications.
 | Version line | `<net>.<release>.<minor>`: .NET generation, breaking-contract release, compatible tweak/fix |
 | Release model | `Common`, `Connect`, `Tensor`, and `UI.Settings` publish together at the one version declared in `/Directory.Build.props` |
 | Primary branch | `master` |
-| Lifecycle stage | Four-package `11.14.0-rc.1` published privately |
+| Lifecycle stage | Four-package `11.15.0-rc.1` early contract release published privately |
 | Jira project and parent | TBD |
 | Jira subject label | TBD |
 
 The technical assembly and namespace prefix is `Darkspyre.Inference`.
+
+## Current Private Release
+
+All four `11.15.0-rc.1` packages are available at
+`https://nuget.pkg.github.com/DarkspyreStudios/index.json`. Their archive source identity is
+`59ef4f1522f29bff66f183d84d754985d91494f9`, on the Inference epic branch.
+Tensor depends on genuine `Darkspyre.TensorSharp.*` `2.8.6.8` packages from source
+`da9fcf3b93f542f5a4b1b2e56268aab90048b450`; all thirteen managed supplier packages are on that feed.
+The release has no master merge or release tag.
+
+A fresh normal-feed PackageReference-only consumer passes Debug and Release with zero warnings
+and errors. All seventeen downloaded archives match their verified producer hashes, and all
+twenty-three Inference assemblies match the archives in both configurations. The consumer audit
+reports no vulnerabilities. Its strict managed-GGML inventory records seventy-seven packages and
+eighty-five native/GPU assets; it does not qualify cross-RID execution. Whisper runtime information
+is available without loading model weights. Unimplemented provider capabilities remain unavailable.
+GPU drivers remain separate existing artifacts, not rebuilt payloads in this release.
 
 ## Package families
 
