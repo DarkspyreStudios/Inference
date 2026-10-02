@@ -11,7 +11,8 @@ directly without an HTTP bridge. A web service can host the same libraries and t
 into their typed contracts. In either case, the application owns startup, configuration, credentials,
 persistence, user consent, and shutdown.
 
-Current release: **11.14.0-rc.1**, targeting **.NET 11**, distributed through the private
+Current source package version: **11.15.0-rc.1**, targeting **.NET 11**.
+The published family remains **11.14.0-rc.1**, distributed through the private
 [DarkspyreStudios GitHub Packages feed](https://github.com/orgs/DarkspyreStudios/packages).
 
 ## Goals
