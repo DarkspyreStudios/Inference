@@ -1,8 +1,64 @@
+using System.Text.Json;
+using Darkspyre.Inference.Common.LLM;
+
 namespace Darkspyre.Inference.Connect.LLM.Tests;
 
 public sealed class ModelListPublicationTests
 {
     private static readonly TimeSpan Bound = TimeSpan.FromSeconds(5);
+
+    [Fact]
+    public async Task PublicationOwnsTheListAndAllMutableCapabilitySets()
+    {
+        await using var cache = new LlmModelListCache();
+        var levels = new HashSet<LlmReasoningLevel> { LlmReasoningLevel.Low };
+        var choices = new HashSet<LlmToolChoiceMode> { LlmToolChoiceMode.Auto };
+        var policies = new HashSet<LlmAgentRuntimePolicyKind> { LlmAgentRuntimePolicyKind.HostControlled };
+        var retentions = new HashSet<LlmPromptCacheRetention> { LlmPromptCacheRetention.Default };
+        var source = new List<LlmModel>
+        {
+            new("model", "Model", Capabilities: new()
+            {
+                ReasoningLevels = levels,
+                Tools = new() { ChoiceModes = choices },
+                Agent = new() { SupportedRuntimePolicies = policies },
+                PromptCache = new() { Retentions = retentions }
+            })
+        };
+
+        IReadOnlyList<LlmModel> published = await cache.GetAsync("connection", "v1",
+            _ => Task.FromResult<IReadOnlyList<LlmModel>>(source), CancellationToken.None);
+        source.Clear();
+        levels.Clear();
+        choices.Clear();
+        policies.Clear();
+        retentions.Clear();
+
+        LlmModel model = Assert.Single(published);
+        Assert.Equal(LlmReasoningLevel.Low, Assert.Single(model.Capabilities!.ReasoningLevels));
+        Assert.Equal(LlmToolChoiceMode.Auto, Assert.Single(model.Capabilities.Tools.ChoiceModes));
+        Assert.Equal(LlmAgentRuntimePolicyKind.HostControlled, Assert.Single(model.Capabilities.Agent.SupportedRuntimePolicies));
+        Assert.Equal(LlmPromptCacheRetention.Default, Assert.Single(model.Capabilities.PromptCache.Retentions));
+        Assert.True(Assert.IsAssignableFrom<IList<LlmModel>>(published).IsReadOnly);
+        Assert.Same(published, await cache.GetAsync("connection", "v1",
+            _ => throw new InvalidOperationException("The published snapshot must remain cached."), CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task PublicationOwnsTheProviderCatalogJson()
+    {
+        await using var cache = new LlmModelListCache();
+        JsonDocument document = JsonDocument.Parse("{\"aliases\":[\"actual-alias\"]}");
+        IReadOnlyList<LlmModel> published;
+        try
+        {
+            published = await cache.GetAsync("connection", "v1",
+                _ => Task.FromResult<IReadOnlyList<LlmModel>>([new("model", "Model") { CatalogEntry = document.RootElement }]), CancellationToken.None);
+        }
+        finally { document.Dispose(); }
+
+        Assert.Equal("actual-alias", Assert.Single(published).CatalogEntry!.Value.GetProperty("aliases")[0].GetString());
+    }
 
     [Theory]
     [InlineData(false)]
