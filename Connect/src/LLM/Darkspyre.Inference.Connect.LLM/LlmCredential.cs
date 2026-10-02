@@ -15,6 +15,10 @@ public sealed record LlmCredential
 
     public LlmGoogleCredentials? Google { get; init; }
 
+    public LlmCopilotCredentials? Copilot { get; init; }
+
+    public LlmCopilotRuntimeConnectionCredential? CopilotRuntime { get; init; }
+
     /// <summary>Protected custom headers, for providers that use credentials such as <c>x-api-key</c>.</summary>
     public IReadOnlyDictionary<string, string> SecretHeaders { get; init; } =
         new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -32,7 +36,7 @@ public sealed record LlmCredential
         {
             return JsonSerializer.Deserialize(raw, ConnectLlmJson.Credential);
         }
-        catch (JsonException)
+        catch (Exception ex) when (ex is JsonException or ArgumentException)
         {
             return null;
         }
