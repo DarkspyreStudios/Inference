@@ -149,8 +149,11 @@ public sealed class PocketTtsHttpProvider(HttpClient httpClient) : ITtsProvider
             }
             Fence(cancellationToken);
             if (_resources is not null)
-                result = result with { Resource = await TtsResourceWriter.CommitAsync(_resources, scope!, result.Audio,
-                    result.ContentType, () => Fence(cancellationToken), RecordCleanup, cancellationToken).ConfigureAwait(false) };
+                result = result with
+                {
+                    Resource = await TtsResourceWriter.CommitAsync(_resources, scope!, result.Audio,
+                    result.ContentType, () => Fence(cancellationToken), RecordCleanup, cancellationToken).ConfigureAwait(false)
+                };
             Fence(cancellationToken);
             return consumption.Publish(result);
         }

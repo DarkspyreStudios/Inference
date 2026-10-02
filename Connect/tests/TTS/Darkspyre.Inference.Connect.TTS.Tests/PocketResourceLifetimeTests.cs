@@ -166,13 +166,23 @@ public sealed class PocketResourceLifetimeTests
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static WeakReference[] ExerciseFailedOwner()
     {
-        var access = new VoiceResourceFixture { CleanupFailure = new InvalidOperationException("refused handle") };
+        var generation = new FixtureGeneration();
+        Assembly assembly = generation.LoadFromAssemblyPath(typeof(VoiceResourceFixture).Assembly.Location);
+        Type type = assembly.GetType(typeof(VoiceResourceFixture).FullName!, true)!;
+        Assert.Same(generation, AssemblyLoadContext.GetLoadContext(assembly));
+        Assert.Equal(typeof(VoiceResourceFixture).Module.ModuleVersionId, type.Module.ModuleVersionId);
+        var access = (IInferenceResourceAccess)Activator.CreateInstance(type)!;
+        type.GetProperty(nameof(VoiceResourceFixture.CleanupFailure))!.SetValue(access, new InvalidOperationException("refused handle"));
         using var http = new HttpClient(new Handler((_, _) => Task.FromResult(Wave())));
         ITtsClient client = new PocketTtsHttpProvider(http).Bind(Connection, resources: access);
         Exception? failure = Record.Exception(() => client.SpeakAsync(new() { Text = "actual" }).GetAwaiter().GetResult());
         Assert.NotNull(failure); Assert.Same(failure, Record.Exception(client.Dispose));
-        WeakReference[] roots = [new(access.LastHandle!), new(access.LastWriter!)];
+        object handle = type.GetProperty(nameof(VoiceResourceFixture.LastHandle))!.GetValue(access)!;
+        object writer = type.GetProperty(nameof(VoiceResourceFixture.LastWriter))!.GetValue(access)!;
+        Assert.Same(assembly, handle.GetType().Assembly); Assert.Same(assembly, writer.GetType().Assembly);
+        WeakReference[] roots = [new(generation), new(assembly), new(type), new(access), new(handle), new(writer)];
         access = null!;
+        generation.Unload();
         GC.Collect(); GC.WaitForPendingFinalizers(); GC.Collect();
         Assert.All(roots, root => Assert.True(root.IsAlive));
         GC.KeepAlive(failure); GC.KeepAlive(client); return roots;

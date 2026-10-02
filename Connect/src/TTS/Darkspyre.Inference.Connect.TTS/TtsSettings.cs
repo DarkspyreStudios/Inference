@@ -357,23 +357,23 @@ public sealed class TtsSettingsManager : InferenceSettingsManager<TtsSettings, T
             if (settings.Generation != generation) return new(SetupActionState.Cancelled);
             switch (action.Id)
             {
-            case "check":
-                settings.Status = settings.Status with { Verified = SetupObservation.Unknown };
-                await client.ListVoicesAsync(cancellationToken).ConfigureAwait(false);
-                Fence(cancellationToken);
-                if (settings.Generation != generation) return new(SetupActionState.Cancelled);
-                settings.Status = settings.Status with { Verified = SetupObservation.Known(true) };
-                return SetupActionResult.Completed;
-            case "test":
-                settings.Status = settings.Status with { Ready = SetupObservation.Unknown };
-                await client.SpeakAsync(draft.Request("This is a speech test."),
-                    cancellationToken).ConfigureAwait(false);
-                Fence(cancellationToken);
-                if (settings.Generation != generation) return new(SetupActionState.Cancelled);
-                settings.Status = settings.Status with { Ready = SetupObservation.Known(true), Verified = SetupObservation.Known(true) };
-                return SetupActionResult.Completed;
-            default:
-                return new(SetupActionState.Unavailable);
+                case "check":
+                    settings.Status = settings.Status with { Verified = SetupObservation.Unknown };
+                    await client.ListVoicesAsync(cancellationToken).ConfigureAwait(false);
+                    Fence(cancellationToken);
+                    if (settings.Generation != generation) return new(SetupActionState.Cancelled);
+                    settings.Status = settings.Status with { Verified = SetupObservation.Known(true) };
+                    return SetupActionResult.Completed;
+                case "test":
+                    settings.Status = settings.Status with { Ready = SetupObservation.Unknown };
+                    await client.SpeakAsync(draft.Request("This is a speech test."),
+                        cancellationToken).ConfigureAwait(false);
+                    Fence(cancellationToken);
+                    if (settings.Generation != generation) return new(SetupActionState.Cancelled);
+                    settings.Status = settings.Status with { Ready = SetupObservation.Known(true), Verified = SetupObservation.Known(true) };
+                    return SetupActionResult.Completed;
+                default:
+                    return new(SetupActionState.Unavailable);
             }
         }, cancellationToken).ConfigureAwait(false);
     }

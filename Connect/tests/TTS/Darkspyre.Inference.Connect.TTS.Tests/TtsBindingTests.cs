@@ -181,8 +181,12 @@ public sealed class TtsBindingTests
         await using TtsSettingsManager manager = new TtsProviderService([fixture]).CreateSettingsManager(fixture, _ => { factories++; return binding; }, fixture);
         var original = Configuration with
         {
-            Connection = Connection with { Authorization = binding.Authorization, Headers = new Dictionary<string, string> { ["X-Keep"] = "protected" },
-                XaiDefaults = new(0, false, new Dictionary<string, string> { ["actual"] = "" }) },
+            Connection = Connection with
+            {
+                Authorization = binding.Authorization,
+                Headers = new Dictionary<string, string> { ["X-Keep"] = "protected" },
+                XaiDefaults = new(0, false, new Dictionary<string, string> { ["actual"] = "" })
+            },
             Speed = 1.25,
             VoiceId = "manual",
             SampleRate = 0,

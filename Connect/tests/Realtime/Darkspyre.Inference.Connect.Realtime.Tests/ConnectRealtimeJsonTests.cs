@@ -82,7 +82,7 @@ public sealed class ConnectRealtimeJsonTests
     [Fact]
     public void AllExactGettersHavePopulatedCoverageWithoutRuntimeRoots()
     {
-        Assert.Equal(46, typeof(ConnectRealtimeJson).GetProperties().Length);
+        Assert.Equal(47, typeof(ConnectRealtimeJson).GetProperties().Length);
         Assert.Equal(typeof(ConnectRealtimeJson).GetProperties().Select(property => property.Name).Order(), Shapes.Select(row => (string)row[0]).Order());
         foreach (string runtime in new[] { nameof(IRealtimeProvider), nameof(RealtimeProviderService), nameof(RealtimeSettings), nameof(RealtimeSettingsManager), nameof(XaiFamilyBinding), nameof(IRealtimeVoiceSession) })
             Assert.Null(typeof(ConnectRealtimeJson).GetProperty(runtime));
