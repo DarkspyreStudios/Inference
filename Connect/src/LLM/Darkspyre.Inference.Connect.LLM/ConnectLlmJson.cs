@@ -11,6 +11,33 @@ namespace Darkspyre.Inference.Connect.LLM;
 /// <summary>Connect-owned metadata for closed connection, request and captured-context contracts.</summary>
 public static class ConnectLlmJson
 {
+    public static JsonTypeInfo<LlmAgentRuntimeProfile> LlmAgentRuntimeProfile => Metadata<LlmAgentRuntimeProfile>();
+    public static JsonTypeInfo<LlmAgentRuntimeStateConfiguration> LlmAgentRuntimeStateConfiguration => Metadata<LlmAgentRuntimeStateConfiguration>();
+    public static JsonTypeInfo<LlmAgentIsolatedRuntimeState> LlmAgentIsolatedRuntimeState => Metadata<LlmAgentIsolatedRuntimeState>();
+    public static JsonTypeInfo<LlmAgentAdoptedRuntimeState> LlmAgentAdoptedRuntimeState => Metadata<LlmAgentAdoptedRuntimeState>();
+    public static JsonTypeInfo<LlmAcpConfiguration> LlmAcpConfiguration => Metadata<LlmAcpConfiguration>();
+    public static JsonTypeInfo<LlmAcpToolRelayConfiguration> LlmAcpToolRelayConfiguration => Metadata<LlmAcpToolRelayConfiguration>();
+    public static JsonTypeInfo<LlmCopilotEndpointMode> LlmCopilotEndpointMode => Metadata<LlmCopilotEndpointMode>();
+    public static JsonTypeInfo<LlmCopilotConfiguration> LlmCopilotConfiguration => Metadata<LlmCopilotConfiguration>();
+    public static JsonTypeInfo<LlmAcpAuthenticationConfiguration> LlmAcpAuthenticationConfiguration => Metadata<LlmAcpAuthenticationConfiguration>();
+    public static JsonTypeInfo<LlmAcpExternalAuthentication> LlmAcpExternalAuthentication => Metadata<LlmAcpExternalAuthentication>();
+    public static JsonTypeInfo<LlmAcpAgentAuthentication> LlmAcpAgentAuthentication => Metadata<LlmAcpAgentAuthentication>();
+    public static JsonTypeInfo<LlmAcpTerminalAuthentication> LlmAcpTerminalAuthentication => Metadata<LlmAcpTerminalAuthentication>();
+    public static JsonTypeInfo<LlmAcpAuthenticationFlow> LlmAcpAuthenticationFlow => Metadata<LlmAcpAuthenticationFlow>();
+    public static JsonTypeInfo<LlmAcpAuthenticationMethod> LlmAcpAuthenticationMethod => Metadata<LlmAcpAuthenticationMethod>();
+    public static JsonTypeInfo<LlmCopilotAuthenticationConfiguration> LlmCopilotAuthenticationConfiguration => Metadata<LlmCopilotAuthenticationConfiguration>();
+    public static JsonTypeInfo<LlmCopilotExplicitGitHubToken> LlmCopilotExplicitGitHubToken => Metadata<LlmCopilotExplicitGitHubToken>();
+    public static JsonTypeInfo<LlmCopilotRuntimeAccount> LlmCopilotRuntimeAccount => Metadata<LlmCopilotRuntimeAccount>();
+    public static JsonTypeInfo<LlmAgentRuntimeLoginScope> LlmAgentRuntimeLoginScope => Metadata<LlmAgentRuntimeLoginScope>();
+    public static JsonTypeInfo<LlmAgentRuntimeAuthenticationSnapshot> LlmAgentRuntimeAuthenticationSnapshot => Metadata<LlmAgentRuntimeAuthenticationSnapshot>();
+    public static JsonTypeInfo<LlmAgentRuntimeLoginOptions> LlmAgentRuntimeLoginOptions => Metadata<LlmAgentRuntimeLoginOptions>();
+    public static JsonTypeInfo<LlmAgentStagedLoginState> LlmAgentStagedLoginState => Metadata<LlmAgentStagedLoginState>();
+    public static JsonTypeInfo<LlmAgentRuntimeLoginResult> LlmAgentRuntimeLoginResult => Metadata<LlmAgentRuntimeLoginResult>();
+    public static JsonTypeInfo<LlmAgentStagedStateDisposition> LlmAgentStagedStateDisposition => Metadata<LlmAgentStagedStateDisposition>();
+    public static JsonTypeInfo<LlmAgentStagedStateSnapshot> LlmAgentStagedStateSnapshot => Metadata<LlmAgentStagedStateSnapshot>();
+    public static JsonTypeInfo<LlmAgentStagedStateCommitResult> LlmAgentStagedStateCommitResult => Metadata<LlmAgentStagedStateCommitResult>();
+    public static JsonTypeInfo<LlmCopilotCredentials> LlmCopilotCredentials => LlmCredentialJsonContext.Default.LlmCopilotCredentials;
+    public static JsonTypeInfo<LlmCopilotRuntimeConnectionCredential> LlmCopilotRuntimeConnectionCredential => LlmCredentialJsonContext.Default.LlmCopilotRuntimeConnectionCredential;
     public static JsonTypeInfo<XaiStoragePublicUrlRequest> XaiStoragePublicUrlRequest => Metadata<XaiStoragePublicUrlRequest>();
     public static JsonTypeInfo<XaiStoragePublicUrlFlag> XaiStoragePublicUrlFlag => Metadata<XaiStoragePublicUrlFlag>();
     public static JsonTypeInfo<XaiStoragePublicUrlConfiguration> XaiStoragePublicUrlConfiguration => Metadata<XaiStoragePublicUrlConfiguration>();
@@ -97,6 +124,9 @@ public static class ConnectLlmJson
         options.Converters.Add(new DocumentRagPipelineJsonConverter());
         options.Converters.Add(new CallerEnumConverter<LlmAgentCallerServiceKind>());
         options.Converters.Add(new CallerEnumConverter<LlmAgentPermissionChoiceKind>());
+        options.Converters.Add(new CallerEnumConverter<LlmCopilotEndpointMode>());
+        options.Converters.Add(new CallerEnumConverter<LlmAcpAuthenticationFlow>());
+        options.Converters.Add(new CallerEnumConverter<LlmAgentStagedStateDisposition>());
         options.Converters.Add(new FileOrderJsonConverter());
         options.Converters.Add(new FileSortJsonConverter());
         options.Converters.Add(new FileContentFormatJsonConverter());
@@ -116,6 +146,7 @@ public static class ConnectLlmJson
         public JsonTypeInfo? GetTypeInfo(Type type, JsonSerializerOptions options)
         {
             if (LlmAgentCallerJson.RuntimeMetadata(type, options) is { } runtime) return runtime;
+            if (LlmRuntimeAuthenticationJson.RuntimeMetadata(type, options) is { } authentication) return authentication;
             var metadata = ((IJsonTypeInfoResolver)ConnectLlmJsonContext.Default).GetTypeInfo(type, options);
             if (type == typeof(LlmAgentRuntimePolicy) && metadata is not null)
                 metadata.PolymorphismOptions = new JsonPolymorphismOptions
@@ -195,7 +226,38 @@ public static class ConnectLlmJson
 }
 
 [JsonSourceGenerationOptions(GenerationMode = JsonSourceGenerationMode.Metadata,
-    Converters = [typeof(LlmAgentContextJsonConverter), typeof(XaiFamilyBindingJsonConverter)])]
+    Converters = [typeof(LlmAgentContextJsonConverter), typeof(XaiFamilyBindingJsonConverter),
+        typeof(CallerAuthorityConverter<LlmAgentRuntimeLaunchInputs>),
+        typeof(CallerAuthorityConverter<LlmAgentRuntimeLoginServices>),
+        typeof(CallerAuthorityConverter<ILlmAgentRuntimeLoginTerminalFactory>),
+        typeof(CallerAuthorityConverter<ILlmAgentRuntimeAuthentication>),
+        typeof(CallerAuthorityConverter<LlmAgentRuntimeLoginTerminalRequest>),
+        typeof(CallerAuthorityConverter<ILlmAuthPrompt>)])]
+[JsonSerializable(typeof(LlmAgentRuntimeProfile))]
+[JsonSerializable(typeof(LlmAgentRuntimeStateConfiguration))]
+[JsonSerializable(typeof(LlmAgentIsolatedRuntimeState))]
+[JsonSerializable(typeof(LlmAgentAdoptedRuntimeState))]
+[JsonSerializable(typeof(LlmAcpConfiguration))]
+[JsonSerializable(typeof(LlmAcpToolRelayConfiguration))]
+[JsonSerializable(typeof(LlmCopilotEndpointMode))]
+[JsonSerializable(typeof(LlmCopilotConfiguration))]
+[JsonSerializable(typeof(LlmAcpAuthenticationConfiguration))]
+[JsonSerializable(typeof(LlmAcpExternalAuthentication))]
+[JsonSerializable(typeof(LlmAcpAgentAuthentication))]
+[JsonSerializable(typeof(LlmAcpTerminalAuthentication))]
+[JsonSerializable(typeof(LlmAcpAuthenticationFlow))]
+[JsonSerializable(typeof(LlmAcpAuthenticationMethod))]
+[JsonSerializable(typeof(LlmCopilotAuthenticationConfiguration))]
+[JsonSerializable(typeof(LlmCopilotExplicitGitHubToken))]
+[JsonSerializable(typeof(LlmCopilotRuntimeAccount))]
+[JsonSerializable(typeof(LlmAgentRuntimeLoginScope))]
+[JsonSerializable(typeof(LlmAgentRuntimeAuthenticationSnapshot))]
+[JsonSerializable(typeof(LlmAgentRuntimeLoginOptions))]
+[JsonSerializable(typeof(LlmAgentStagedLoginState))]
+[JsonSerializable(typeof(LlmAgentRuntimeLoginResult))]
+[JsonSerializable(typeof(LlmAgentStagedStateDisposition))]
+[JsonSerializable(typeof(LlmAgentStagedStateSnapshot))]
+[JsonSerializable(typeof(LlmAgentStagedStateCommitResult))]
 [JsonSerializable(typeof(LlmConnection))]
 [JsonSerializable(typeof(XaiStoragePublicUrlRequest))]
 [JsonSerializable(typeof(XaiStoragePublicUrlFlag))]
@@ -314,6 +376,8 @@ internal sealed partial class ConnectLlmJsonContext : JsonSerializerContext;
 [JsonSourceGenerationOptions(JsonSerializerDefaults.Web, GenerationMode = JsonSourceGenerationMode.Metadata,
     DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)]
 [JsonSerializable(typeof(LlmCredential))]
+[JsonSerializable(typeof(LlmCopilotCredentials))]
+[JsonSerializable(typeof(LlmCopilotRuntimeConnectionCredential))]
 internal sealed partial class LlmCredentialJsonContext : JsonSerializerContext;
 
 internal sealed record ConnectContinuationScopeIdentity(LlmTransport Transport, string Endpoint, string? ApiKey,

@@ -33,6 +33,14 @@ record exposes no credential values or account metadata. Their properties, recor
 protected-store `Serialize`/`Parse` wire format retain the original values. Serialized credential
 JSON remains secret and is not a diagnostic representation.
 
+ACP and Copilot runtime configuration uses closed typed profiles, state selections and
+authentication selections. `ConnectLlmJson` exports the corresponding data and staged-login
+observation metadata. Live launch inputs, login services, factories and runtime authentication
+owners refuse non-null serialization without invoking borrowed callbacks. Null runtime inputs
+round-trip. Copilot credentials use the existing protected Web/null-omit codec; their diagnostic
+strings redact tokens. These declarations do not register an ACP or Copilot adapter, launch a
+runtime, perform login, validate state-directory isolation or certify a runtime/SDK version.
+
 Every returned `LlmConnection` includes a required opaque `Version`. The version must cover both
 connection metadata and credential state. `SaveCredentialAsync` must atomically compare
 `expectedVersion` and replace only the credential when it still matches; it must reject changed,
