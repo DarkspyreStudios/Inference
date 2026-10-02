@@ -33,6 +33,9 @@
   <Folder Name="/src/Video/">
     <Project Path="src/Video/Darkspyre.Inference.Connect.Video/Darkspyre.Inference.Connect.Video.csproj" />
   </Folder>
+  <Folder Name="/src/Resources/">
+    <Project Path="src/Resources/Darkspyre.Inference.Connect.Resources/Darkspyre.Inference.Connect.Resources.csproj" />
+  </Folder>
   <Folder Name="/src/Audio/">
     <Project Path="src/Audio/Darkspyre.Inference.Connect.Audio/Darkspyre.Inference.Connect.Audio.csproj" />
   </Folder>
@@ -50,6 +53,9 @@
   </Folder>
   <Folder Name="/tests/Video/">
     <Project Path="tests/Video/Darkspyre.Inference.Connect.Video.Tests/Darkspyre.Inference.Connect.Video.Tests.csproj" />
+  </Folder>
+  <Folder Name="/tests/Resources/">
+    <Project Path="tests/Resources/Darkspyre.Inference.Connect.Resources.Tests/Darkspyre.Inference.Connect.Resources.Tests.csproj" />
   </Folder>
   <Folder Name="/tests/LLM/">
     <Project Path="tests/LLM/Darkspyre.Inference.Connect.LLM.Azure.Tests/Darkspyre.Inference.Connect.LLM.Azure.Tests.csproj" />

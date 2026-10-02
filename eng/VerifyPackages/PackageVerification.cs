@@ -110,7 +110,8 @@ internal static class PackageVerification
             "Darkspyre.Inference.Connect.LLM", "Darkspyre.Inference.Connect.LLM.Bedrock", "Darkspyre.Inference.Connect.LLM.Vertex",
             "Darkspyre.Inference.Connect.LLM.Azure",
             "Darkspyre.Inference.Connect.Image", "Darkspyre.Inference.Connect.TTS", "Darkspyre.Inference.Connect.Audio",
-            "Darkspyre.Inference.Connect.STT", "Darkspyre.Inference.Connect.Video", "Darkspyre.Inference.Connect.Realtime"
+            "Darkspyre.Inference.Connect.STT", "Darkspyre.Inference.Connect.Video", "Darkspyre.Inference.Connect.Realtime",
+            "Darkspyre.Inference.Connect.Resources"
         ],
         ["Darkspyre.Inference.Tensor"] =
         [
