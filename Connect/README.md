@@ -1511,6 +1511,21 @@ correlation, the actual request ID and an optional observed receipt without decl
 rollback. They are runtime exceptions, not portable metadata roots. Their presence does not
 implement dispatch tracking, automatic retries, reconciliation or paid cache creation.
 
+`LlmContextCacheUnavailableException` distinguishes a selected route's observed missing cache from
+elapsed selected or observed expiry. Missing permits an absent HTTP status or HTTP 404, never a
+contradictory authentication or transport status. Expiry does not establish deletion or account entitlement.
+`LlmContextCacheMutationUncertainException` and `LlmContextCacheMutationCancelledException` identify
+an expiry update or deletion that may have committed. They retain the selected reference, actual
+request ID and optional matching late update or deletion evidence without declaring success or
+authorizing another mutation. Update evidence preserves the same resource, model and scope while
+allowing changed expiry; a supplied reference expiry must match that receipt's observed expiry.
+Cancellation retains its token. The existing create errors remain
+distinct. These runtime exceptions have fixed diagnostics and retain already-safe inner failures;
+the adapter boundary must sanitize untrusted failures before construction. They are not portable
+metadata roots. `LlmContextCacheUnavailableReason` and `LlmContextCacheMutation` have closed,
+numeric owned metadata. Constructor validation does not prove provider authority. These
+contracts do not implement update/delete dispatch or make a cache provider available.
+
 ### Tool output
 
 `LlmAgentCallerServices` groups borrowed permission, text-file, terminal-factory, shell-executor
