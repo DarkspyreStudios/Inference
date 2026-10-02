@@ -252,6 +252,372 @@ public sealed class GoogleCacheMutationHttpTests
         Assert.Equal(1, content.Disposals); Assert.Equal(1, handler.Calls);
     }
 
+    [Fact]
+    public async Task AuthorizedNotFoundLateCleanupRetainsObservedAbsenceWithoutSuccess()
+    {
+        bool retiring = false;
+        var content = new TrackedContent(Secret, forbidRead: true, cleanup: () => retiring = true);
+        using var handler = new Handler((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound) { Content = content }));
+        using var http = new HttpClient(handler);
+        using var request = Request(false);
+        var error = await Assert.ThrowsAsync<LlmContextCacheMutationCancelledException>(() => Delete(http, request, Reference(), _ => true,
+            token => { if (retiring) throw new OperationCanceledException("Owner retired.", token); }));
+        Assert.True(error.ObservedDelete!.AlreadyAbsent); Assert.Null(error.ObservedUpdate);
+        Assert.Equal(0, content.Reads); Assert.Equal(1, content.Disposals); Assert.Equal(1, handler.Calls);
+    }
+
+    [Fact]
+    public async Task AbsenceAuthorityCallbackRetirementCannotPublishAnAbsenceReceipt()
+    {
+        bool retiring = false;
+        var content = new TrackedContent(Secret, forbidRead: true);
+        using var handler = new Handler((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound) { Content = content }));
+        using var http = new HttpClient(handler);
+        using var request = Request(false);
+        int authorizations = 0;
+        var error = await Assert.ThrowsAsync<LlmContextCacheMutationCancelledException>(() => Delete(http, request, Reference(), _ =>
+        { authorizations++; retiring = true; return true; }, token => { if (retiring) throw new OperationCanceledException("Owner retired.", token); }));
+        Assert.Null(error.ObservedDelete); Assert.Null(error.ObservedUpdate);
+        Assert.Equal(1, authorizations); Assert.Equal(0, content.Reads); Assert.Equal(1, content.Disposals);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task RequiredBorrowedInputsRefuseBeforeAnyCallbackOrDispatch(bool update)
+    {
+        using var handler = new Handler((_, _) => throw new InvalidOperationException("Must not send."));
+        using var http = new HttpClient(handler);
+        using var request = Request(update);
+        int callbacks = 0;
+        Action<CancellationToken> fence = _ => callbacks++;
+        Func<JsonElement, LlmContextCache> parse = root => { callbacks++; return Parse(root); };
+        Func<LlmExplicitCacheReference, bool> authorize = _ => { callbacks++; return true; };
+        Func<Task>[] calls = update
+            ? [() => Update(null!, request, Reference(), parse, fence), () => Update(http, null!, Reference(), parse, fence),
+                () => Update(http, request, null!, parse, fence), () => Update(http, request, Reference(), null!, fence),
+                () => Update(http, request, Reference(), parse, null!)]
+            : [() => Delete(null!, request, Reference(), authorize, fence), () => Delete(http, null!, Reference(), authorize, fence),
+                () => Delete(http, request, null!, authorize, fence), () => Delete(http, request, Reference(), null!, fence),
+                () => Delete(http, request, Reference(), authorize, null!)];
+        foreach (Func<Task> call in calls) await Assert.ThrowsAsync<ArgumentNullException>(call);
+        Assert.Equal(0, callbacks); Assert.Equal(0, handler.Calls);
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.OK)]
+    [InlineData(HttpStatusCode.ServiceUnavailable)]
+    public async Task CancellationAfterResponsePreservesOnlyActualStatusEvidence(HttpStatusCode status)
+    {
+        using var caller = new CancellationTokenSource();
+        bool retiring = false;
+        var content = new TrackedContent(Secret, forbidRead: true);
+        using var handler = new Handler((_, _) =>
+        {
+            var response = new HttpResponseMessage(status) { Content = content };
+            response.Headers.TryAddWithoutValidation("x-request-id", "actual-request");
+            response.Headers.RetryAfter = new(TimeSpan.FromSeconds(3));
+            retiring = true;
+            return Task.FromResult(response);
+        });
+        using var http = new HttpClient(handler);
+        using var request = Request(true);
+        var error = await Assert.ThrowsAsync<LlmContextCacheMutationCancelledException>(() => Update(http, request, Reference(), Parse,
+            token => { if (retiring) throw new OperationCanceledException(Secret, token); }, caller.Token));
+        Assert.Equal(caller.Token, error.CancellationToken);
+        Assert.Null(error.ObservedUpdate); Assert.Null(error.ObservedDelete);
+        var cancellation = Assert.IsType<OperationCanceledException>(error.InnerException);
+        Assert.Equal(caller.Token, cancellation.CancellationToken);
+        var facts = Assert.IsType<LlmProviderException>(cancellation.InnerException);
+        Assert.Equal(status, facts.StatusCode); Assert.Equal("actual-request", facts.RequestId);
+        Assert.Equal("actual-request", error.RequestId); Assert.Equal(TimeSpan.FromSeconds(3), facts.RetryAfter);
+        Assert.Equal("Google cache mutation response observed before interruption.", facts.Message);
+        Assert.Null(facts.InnerException); Assert.DoesNotContain(Secret, error.ToString());
+        Assert.Equal(0, content.Reads); Assert.Equal(1, content.Disposals); Assert.Equal(1, handler.Calls);
+    }
+
+    [Fact]
+    public async Task CancellationBeforeAnyResponseDoesNotInventResponseFacts()
+    {
+        using var caller = new CancellationTokenSource();
+        using var handler = new Handler((_, token) => throw new OperationCanceledException(Secret, token));
+        using var http = new HttpClient(handler);
+        using var request = Request(true);
+        var error = await Assert.ThrowsAsync<LlmContextCacheMutationCancelledException>(() => Update(http, request, Reference(), Parse, _ => { }, caller.Token));
+        var cancellation = Assert.IsType<OperationCanceledException>(error.InnerException);
+        Assert.Null(cancellation.InnerException); Assert.Null(error.RequestId);
+        Assert.Null(error.ObservedUpdate); Assert.Null(error.ObservedDelete);
+        Assert.DoesNotContain(Secret, error.ToString()); Assert.Equal(1, handler.Calls);
+    }
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public async Task CallerCancellationDrainsCooperativeAndIgnoringSend(bool update, bool ignoring)
+    {
+        using var caller = new CancellationTokenSource();
+        var entered = Signal(); var release = Signal();
+        var content = new TrackedContent(ReceiptBody);
+        using var handler = new Handler(async (_, token) =>
+        {
+            entered.TrySetResult();
+            if (ignoring) await release.Task;
+            else await release.Task.WaitAsync(token);
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = content };
+        });
+        using var http = new HttpClient(handler);
+        using var request = Request(update);
+        Task<object>? operation = null;
+        try
+        {
+            operation = Mutate(update, http, request, Parse, _ => true, _ => { }, caller.Token);
+            await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            caller.Cancel();
+            if (ignoring) Assert.False(operation.IsCompleted);
+            release.TrySetResult();
+            var error = await Assert.ThrowsAsync<LlmContextCacheMutationCancelledException>(() => operation);
+            Assert.Equal(caller.Token, error.CancellationToken);
+            Assert.Null(error.ObservedDelete); Assert.Null(error.ObservedUpdate);
+            Assert.Equal(ignoring ? 1 : 0, content.Disposals); Assert.Equal(1, handler.Calls);
+        }
+        finally { release.TrySetResult(); if (operation is not null) await Observe(operation); }
+    }
+
+    [Theory]
+    [InlineData(false, "send")]
+    [InlineData(false, "authorize")]
+    [InlineData(false, "cleanup")]
+    [InlineData(true, "send")]
+    [InlineData(true, "read")]
+    [InlineData(true, "cleanup")]
+    public async Task DelayedOwnerCancellationFencesAndDrainsActualBoundaries(bool update, string boundary)
+    {
+        using var caller = new CancellationTokenSource();
+        var owner = new LlmOperationLifetime();
+        var lease = owner.Enter(caller.Token);
+        var anchor = owner.Enter(CancellationToken.None);
+        var entered = Signal(); var release = Signal();
+        var callbackEntered = Signal(); var callbackRelease = Signal();
+        var content = new TrackedContent(ReceiptBody, cleanup: boundary == "cleanup"
+            ? () => { entered.TrySetResult(); release.Task.GetAwaiter().GetResult(); } : null,
+            entered: boundary == "read" ? entered : null, release: boundary == "read" ? release : null);
+        using var handler = new Handler(async (_, _) =>
+        {
+            if (boundary == "send") { entered.TrySetResult(); await release.Task; }
+            return new HttpResponseMessage(boundary == "authorize" ? HttpStatusCode.NotFound : HttpStatusCode.OK) { Content = content };
+        });
+        using var http = new HttpClient(handler);
+        using var request = Request(update);
+        Task<object>? operation = null; Task? retirement = null;
+        CancellationTokenRegistration blocker = default;
+        try
+        {
+            blocker = anchor.Token.Register(() => { callbackEntered.TrySetResult(); callbackRelease.Task.GetAwaiter().GetResult(); });
+            operation = Task.Run(() => Mutate(update, http, request, Parse, _ =>
+            {
+                entered.TrySetResult(); release.Task.GetAwaiter().GetResult(); return true;
+            }, token => Fence(owner, token), lease.Token));
+            await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            retirement = owner.RetireAsync();
+            await callbackEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.False(lease.Token.IsCancellationRequested);
+            Assert.False(retirement.IsCompleted); Assert.False(operation.IsCompleted);
+            release.TrySetResult();
+            var error = await Assert.ThrowsAsync<LlmContextCacheMutationCancelledException>(() => operation);
+            Assert.Equal(lease.Token, error.CancellationToken);
+            Assert.False(retirement.IsCompleted); Assert.Equal(1, content.Disposals);
+            if (boundary == "cleanup")
+            {
+                if (update) Assert.NotNull(error.ObservedUpdate);
+                else Assert.False(error.ObservedDelete!.AlreadyAbsent);
+            }
+        }
+        finally
+        {
+            retirement ??= owner.RetireAsync(); callbackRelease.TrySetResult(); release.TrySetResult();
+            try { if (operation is not null) await Observe(operation); }
+            finally
+            {
+                lease.Dispose(); anchor.Dispose();
+                try { await retirement; } finally { blocker.Dispose(); }
+            }
+        }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ActualSdkOwnerRetirementRefusesAcknowledgedMutation(bool update)
+    {
+        var services = new ServiceCollection(); services.AddLlmConnect();
+        Task? retirement = null;
+        SdkHttpGenerationPool? pool = null;
+        var content = new TrackedContent(ReceiptBody, cleanup: !update ? () => retirement = pool!.DisposeAsync().AsTask() : null);
+        services.AddHttpClient("GeminiApiLlmClient").ConfigurePrimaryHttpMessageHandler(() =>
+            new Handler((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = content })));
+        await using var root = services.BuildServiceProvider();
+        pool = root.GetRequiredService<SdkHttpGenerationPool>();
+        using var http = pool.CreateClient("GeminiApiLlmClient");
+        using var request = Request(update);
+        try
+        {
+            var error = await Assert.ThrowsAsync<LlmContextCacheMutationCancelledException>(() => Mutate(update, http, request,
+                json => { var receipt = Parse(json); retirement = pool.DisposeAsync().AsTask(); Assert.False(retirement.IsCompleted); return receipt; },
+                _ => true, _ => { }));
+            await retirement!.WaitAsync(TimeSpan.FromSeconds(5));
+            if (update) Assert.NotNull(error.ObservedUpdate);
+            else Assert.False(error.ObservedDelete!.AlreadyAbsent);
+            Assert.Equal(1, content.Disposals);
+        }
+        finally { await (retirement ?? pool.DisposeAsync().AsTask()); }
+    }
+
+    [Fact]
+    public void ActualForeignMutationCallbacksAndMetadataDrainAndRetireWithDefaultBorrowersRetained()
+    {
+        var entered = Signal(); var release = Signal(); var retiring = Signal();
+        int sends = 0, fences = 0;
+        using var handler = new Handler(async (_, _) =>
+        {
+            int current = Interlocked.Increment(ref sends);
+            if (current == 1) { entered.TrySetResult(); await release.Task; }
+            return new HttpResponseMessage(current == 3 ? HttpStatusCode.NotFound : HttpStatusCode.OK)
+            { Content = new TrackedContent(ReceiptBody, forbidRead: current >= 3) };
+        });
+        using var http = new HttpClient(handler);
+        Action<CancellationToken> fence = _ => fences++;
+        WeakReference[] roots = ExerciseForeign(http, fence, entered, release, retiring);
+        Assert.Equal(4, sends); Assert.True(fences >= 12); Assert.Equal(0, handler.Disposals);
+        for (int attempt = 0; roots.Any(root => root.IsAlive) && attempt < 20; attempt++)
+        { GC.Collect(); GC.WaitForPendingFinalizers(); GC.Collect(); }
+        foreach (WeakReference root in roots) Assert.False(root.IsAlive);
+        GC.KeepAlive(http); GC.KeepAlive(fence); GC.KeepAlive(entered); GC.KeepAlive(release); GC.KeepAlive(retiring);
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static WeakReference[] ExerciseForeign(HttpClient http, Action<CancellationToken> fence,
+        TaskCompletionSource entered, TaskCompletionSource release, TaskCompletionSource retiring)
+    {
+        var generation = new Generation(Path.GetDirectoryName(typeof(GoogleCacheMutationHttpTests).Assembly.Location)!);
+        var roots = new List<WeakReference> { new(generation) };
+        Task<WeakReference[]>? operation = null;
+        try
+        {
+            Assembly fixture = generation.LoadFromAssemblyPath(typeof(GoogleCacheMutationHttpTests).Assembly.Location);
+            Assembly connect = generation.LoadFromAssemblyPath(typeof(ConnectLlmJson).Assembly.Location);
+            Assembly common = generation.LoadFromAssemblyPath(typeof(InferenceJson).Assembly.Location);
+            foreach ((Assembly source, Assembly actual) in new[]
+                { (typeof(GoogleCacheMutationHttpTests).Assembly, fixture), (typeof(ConnectLlmJson).Assembly, connect), (typeof(InferenceJson).Assembly, common) })
+            {
+                Assert.NotSame(source, actual); Assert.Equal(source.ManifestModule.ModuleVersionId, actual.ManifestModule.ModuleVersionId);
+                Assert.Same(generation, AssemblyLoadContext.GetLoadContext(actual)); roots.Add(new(actual));
+            }
+            Type caller = fixture.GetType(typeof(GoogleCacheMutationHttpTests).FullName!, true)!;
+            MethodInfo method = caller.GetMethod(nameof(ExerciseMutationsInOwningGeneration))!;
+            roots.Add(new(caller)); roots.Add(new(method));
+            operation = (Task<WeakReference[]>)method.Invoke(null, [http, fence, entered, retiring])!;
+            retiring.Task.WaitAsync(TimeSpan.FromSeconds(5)).GetAwaiter().GetResult();
+            Assert.False(operation.IsCompleted); release.TrySetResult();
+            roots.Add(new(operation)); roots.AddRange(operation.GetAwaiter().GetResult());
+        }
+        finally
+        {
+            release.TrySetResult();
+            try { if (operation is not null) operation.GetAwaiter().GetResult(); }
+            finally { generation.Unload(); }
+        }
+        return roots.ToArray();
+    }
+
+    public static async Task<WeakReference[]> ExerciseMutationsInOwningGeneration(HttpClient http,
+        Action<CancellationToken> fence, TaskCompletionSource entered, TaskCompletionSource retiring)
+    {
+        AssemblyLoadContext generation = AssemblyLoadContext.GetLoadContext(typeof(GoogleCacheMutationHttpTests).Assembly)!;
+        if (!generation.IsCollectible || !ReferenceEquals(generation, AssemblyLoadContext.GetLoadContext(typeof(GoogleCacheHttp).Assembly))
+            || !ReferenceEquals(generation, AssemblyLoadContext.GetLoadContext(typeof(LlmExplicitCacheReference).Assembly)))
+            throw new InvalidOperationException("The real mutation helper, fixture and Common must execute in the private generation.");
+        var owner = new LlmOperationLifetime();
+        var lease = owner.Enter(CancellationToken.None);
+        using var heldRequest = Request(true);
+        Task<LlmContextCache>? held = null; Task? retirement = null;
+        Action<CancellationToken> ownedFence = token => { fence(token); Fence(owner, token); };
+        Func<JsonElement, LlmContextCache> parse = Parse;
+        Func<LlmExplicitCacheReference, bool> authorize = reference => reference == Reference();
+        var roots = new List<WeakReference> { new(owner), new(lease), new(ownedFence), new(parse), new(authorize) };
+        try
+        {
+            held = Update(http, heldRequest, Reference(), parse, ownedFence, lease.Token);
+            await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            retirement = owner.RetireAsync();
+            if (retirement.IsCompleted || held.IsCompleted) throw new InvalidOperationException("Ignoring foreign mutation must remain admitted during retirement.");
+            retiring.TrySetResult();
+            try { await held; throw new InvalidOperationException("Retired mutation cannot publish a late receipt."); }
+            catch (LlmContextCacheMutationCancelledException error)
+            {
+                if (!ReferenceEquals(error.GetType().Assembly, typeof(GoogleCacheHttp).Assembly)
+                    || !ReferenceEquals(error.Reference.GetType().Assembly, typeof(LlmExplicitCacheReference).Assembly))
+                    throw new InvalidOperationException("The real mutation error and reference must use the private assemblies.");
+                roots.Add(new(error)); roots.Add(new(error.Reference));
+            }
+        }
+        finally
+        {
+            retirement ??= owner.RetireAsync();
+            try { if (held is not null) await Observe(held); }
+            finally { lease.Dispose(); await retirement; }
+        }
+        using var updateRequest = Request(true);
+        Task<LlmContextCache> updatedTask = Update(http, updateRequest, Reference(), parse, fence);
+        var updated = await updatedTask;
+        using var absentRequest = Request(false);
+        Task<LlmContextCacheDeleteResult> absentTask = Delete(http, absentRequest, Reference(), authorize, fence);
+        var absent = await absentTask;
+        using var deleteRequest = Request(false);
+        Task<LlmContextCacheDeleteResult> deleteTask = Delete(http, deleteRequest, Reference(), authorize, fence);
+        var deleted = await deleteTask;
+        var metadata = ConnectLlmJson.LlmContextCache;
+        var deleteMetadata = ConnectLlmJson.LlmContextCacheDeleteResult;
+        var operationMetadata = ConnectLlmJson.LlmContextCacheMutation;
+        var referenceMetadata = InferenceJson.LlmExplicitCacheReference;
+        if (!ReferenceEquals(metadata.Type.Assembly, typeof(GoogleCacheHttp).Assembly)
+            || !ReferenceEquals(deleteMetadata.Type.Assembly, typeof(GoogleCacheHttp).Assembly)
+            || !ReferenceEquals(operationMetadata.Converter.GetType().Assembly, typeof(GoogleCacheHttp).Assembly)
+            || !ReferenceEquals(referenceMetadata.Type.Assembly, typeof(LlmExplicitCacheReference).Assembly)
+            || !ReferenceEquals(parse.Method.DeclaringType!.Assembly, typeof(GoogleCacheMutationHttpTests).Assembly)
+            || !ReferenceEquals(authorize.Method.DeclaringType!.Assembly, typeof(GoogleCacheMutationHttpTests).Assembly))
+            throw new InvalidOperationException("Actual owned metadata, converter and callbacks must have private defining provenance.");
+        var restored = JsonSerializer.Deserialize(JsonSerializer.Serialize(updated, metadata), metadata)!;
+        if (restored.Reference != updated.Reference || !absent.AlreadyAbsent || deleted.AlreadyAbsent)
+            throw new InvalidOperationException("Actual foreign mutation and owned codec facts changed.");
+        roots.AddRange(new WeakReference[] { new(typeof(GoogleCacheHttp)), new(held!), new(updatedTask), new(absentTask), new(deleteTask),
+            new(updated), new(absent), new(deleted), new(restored), new(updated.Reference), new(metadata), new(deleteMetadata),
+            new(operationMetadata), new(operationMetadata.Converter), new(metadata.Options.TypeInfoResolver!), new(referenceMetadata) });
+        return roots.ToArray();
+    }
+
+    private sealed class Generation(string directory) : AssemblyLoadContext(isCollectible: true)
+    {
+        protected override Assembly? Load(AssemblyName name) => name.Name is
+            "Darkspyre.Inference.Common" or "Darkspyre.Inference.Connect.LLM" or "Darkspyre.Inference.Connect.LLM.Tests"
+            ? LoadFromAssemblyPath(Path.Combine(directory, name.Name + ".dll")) : null;
+    }
+
+    private static TaskCompletionSource Signal() => new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private static void Fence(LlmOperationLifetime owner, CancellationToken token)
+    {
+        token.ThrowIfCancellationRequested();
+        try { owner.ThrowIfStopping(); }
+        catch (ObjectDisposedException) { throw new OperationCanceledException("Owned cache mutation retired.", token); }
+    }
+
+    private static async Task Observe(Task operation)
+    {
+        try { await operation; }
+        catch (LlmContextCacheMutationCancelledException) { }
+    }
+
     private static Task<LlmContextCache> Update(HttpClient http, HttpRequestMessage request, LlmExplicitCacheReference reference,
         Func<JsonElement, LlmContextCache> parse, Action<CancellationToken> fence, CancellationToken token = default) =>
         GoogleCacheHttp.UpdateExpiryAsync(http, request, LlmTransport.GoogleGeminiApi, reference, parse, fence, token);
