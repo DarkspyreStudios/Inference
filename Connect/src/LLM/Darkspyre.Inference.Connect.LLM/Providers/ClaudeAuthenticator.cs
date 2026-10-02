@@ -62,23 +62,27 @@ internal sealed class ClaudeAuthenticator(HttpClient http)
             throw new InvalidOperationException("Claude login state mismatch; start the login again.");
         }
 
-        using var request = new HttpRequestMessage(HttpMethod.Post, TokenEndpoint)
-        {
-            Content = JsonContent.Create(new JsonObject
-            {
-                ["grant_type"] = "authorization_code",
-                ["code"] = code,
-                ["redirect_uri"] = session.RedirectUri,
-                ["client_id"] = ClientId,
-                ["code_verifier"] = session.CodeVerifier,
-                ["state"] = state
-            })
-        };
         using var consumption = SdkHttpConsumption.Enter(Http, cancellationToken); cancellationToken = consumption.Token;
-        using HttpResponseMessage response = await Http.SendAsync(request, cancellationToken);
-        await ThrowIfUnsuccessfulAsync(response, "Claude token exchange", cancellationToken);
-        using JsonDocument document = await ParseJsonAsync(response, cancellationToken);
-        return consumption.Publish(BuildCredential(document.RootElement, previous: null));
+        LlmCredential result;
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Post, TokenEndpoint)
+            {
+                Content = JsonContent.Create(new JsonObject
+                {
+                    ["grant_type"] = "authorization_code",
+                    ["code"] = code,
+                    ["redirect_uri"] = session.RedirectUri,
+                    ["client_id"] = ClientId,
+                    ["code_verifier"] = session.CodeVerifier,
+                    ["state"] = state
+                })
+            };
+            using HttpResponseMessage response = await Http.SendAsync(request, cancellationToken);
+            await ThrowIfUnsuccessfulAsync(response, "Claude token exchange", cancellationToken);
+            using JsonDocument document = await ParseJsonAsync(response, cancellationToken);
+            result = BuildCredential(document.RootElement, previous: null);
+        }
+        return consumption.Publish(result);
     }
 
     protected override HttpRequestMessage BuildRefreshRequest(LlmOAuthTokens tokens) =>

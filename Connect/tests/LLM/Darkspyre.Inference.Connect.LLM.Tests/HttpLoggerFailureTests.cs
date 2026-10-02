@@ -8,16 +8,21 @@ namespace Darkspyre.Inference.Connect.LLM.Tests;
 public sealed class HttpLoggerFailureTests
 {
     [Theory]
-    [InlineData(true, false)]
-    [InlineData(false, false)]
-    [InlineData(true, true)]
-    [InlineData(false, true)]
-    public async Task StopFailureReleasesUnhandedResponseOrRetainsExactRefusedCleanup(bool synchronous, bool failCleanup)
+    [InlineData(true, false, false)]
+    [InlineData(false, false, false)]
+    [InlineData(true, true, false)]
+    [InlineData(false, true, false)]
+    [InlineData(true, false, true)]
+    [InlineData(false, false, true)]
+    [InlineData(true, true, true)]
+    [InlineData(false, true, true)]
+    public async Task StopFailureReleasesUnhandedResponseOrRetainsExactRefusedCleanup(bool synchronous, bool failCleanup, bool failFailedCallback)
     {
         var original = new InvalidOperationException("controlled logger stop failure");
         var cleanup = new IOException("controlled response cleanup failure");
+        var callback = new ArgumentException("controlled failed logger callback failure");
         var content = new ControlledContent(failCleanup ? cleanup : null);
-        var logger = new StopLogger(original);
+        var logger = new StopLogger(original, failFailedCallback ? callback : null);
         var services = new ServiceCollection();
         services.AddLlmConnect(options => options.ConfigureLogging("OpenAiResponsesLlmClient", logging => logging.RemoveAllLoggers().AddLogger(_ => logger)));
         services.AddHttpClient("OpenAiResponsesLlmClient").ConfigurePrimaryHttpMessageHandler(() => new Handler(content));
@@ -32,15 +37,20 @@ public sealed class HttpLoggerFailureTests
             Assert.Same(original, logger.Observed);
             Assert.NotNull(logger.Response);
             Assert.Equal(1, content.Disposals);
+            if (failCleanup || failFailedCallback)
+            {
+                Exception[] expected = failFailedCallback ? failCleanup ? [original, callback, cleanup] : [original, callback] : [original, cleanup];
+                Assert.Equal(expected, Assert.IsType<AggregateException>(actual).InnerExceptions);
+            }
+            else Assert.Same(original, actual);
             if (failCleanup)
             {
-                Assert.Equal([original, cleanup], Assert.IsType<AggregateException>(actual).InnerExceptions);
                 Exception first = await Assert.ThrowsAsync<IOException>(() => pool.DisposeAsync().AsTask());
                 Assert.Same(cleanup, first);
                 Assert.Same(first, await Assert.ThrowsAsync<IOException>(() => pool.DisposeAsync().AsTask()));
                 Assert.Equal(1, content.Disposals);
             }
-            else { Assert.Same(original, actual); await pool.DisposeAsync(); }
+            else await pool.DisposeAsync();
         }
         finally
         {
@@ -64,14 +74,14 @@ public sealed class HttpLoggerFailureTests
             base.Dispose(disposing);
         }
     }
-    private sealed class StopLogger(Exception failure) : IHttpClientAsyncLogger
+    private sealed class StopLogger(Exception failure, Exception? failedCallback) : IHttpClientAsyncLogger
     {
         public Exception? Observed { get; private set; }
         public HttpResponseMessage? Response { get; private set; }
         public object? LogRequestStart(HttpRequestMessage request) => null;
         public void LogRequestStop(object? context, HttpRequestMessage request, HttpResponseMessage response, TimeSpan elapsed) => throw failure;
         public void LogRequestFailed(object? context, HttpRequestMessage request, HttpResponseMessage? response, Exception exception, TimeSpan elapsed)
-        { Observed = exception; Response = response; }
+        { Observed = exception; Response = response; if (failedCallback is not null) throw failedCallback; }
         public ValueTask<object?> LogRequestStartAsync(HttpRequestMessage request, CancellationToken cancellationToken = default) => ValueTask.FromResult<object?>(null);
         public ValueTask LogRequestStopAsync(object? context, HttpRequestMessage request, HttpResponseMessage response, TimeSpan elapsed, CancellationToken cancellationToken = default) => ValueTask.FromException(failure);
         public ValueTask LogRequestFailedAsync(object? context, HttpRequestMessage request, HttpResponseMessage? response, Exception exception, TimeSpan elapsed, CancellationToken cancellationToken = default)

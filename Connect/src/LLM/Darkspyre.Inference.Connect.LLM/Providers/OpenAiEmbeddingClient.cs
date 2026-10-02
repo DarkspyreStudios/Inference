@@ -46,100 +46,104 @@ internal sealed class OpenAiEmbeddingClient(HttpClient http) : ILlmEmbeddingClie
         if (request.Dimensions is { } dimensions) payload["dimensions"] = dimensions;
         ApplyOptions(payload, connection.ProviderOptions);
         ApplyOptions(payload, request.ProviderOptions);
-        using var httpRequest = new HttpRequestMessage(
-            HttpMethod.Post,
-            ProviderHttp.BuildUri(connection, "embeddings"))
-        {
-            Content = JsonContent.Create(payload)
-        };
-        ProviderHttp.ApplyHeaders(httpRequest, connection);
-        LlmCredential? credential = LlmCredential.Parse(connection.Credential);
         using var consumption = SdkHttpConsumption.Enter(http, cancellationToken); cancellationToken = consumption.Token;
-        using HttpResponseMessage response = await http.SendAsync(httpRequest, cancellationToken);
-        await ProviderHttp.ThrowIfUnsuccessfulAsync(
-            response,
-            connection.Transport,
-            credential,
-            "Embedding request",
-            cancellationToken);
-        string raw = await SdkHttpConsumption.ReadAsStringAsync(response.Content, cancellationToken);
-        try
+        LlmEmbeddingResult result;
         {
-            using JsonDocument document = JsonDocument.Parse(raw);
-            JsonElement root = document.RootElement;
-            if (root.ValueKind != JsonValueKind.Object
-                || !root.TryGetProperty("data", out JsonElement data) || data.ValueKind != JsonValueKind.Array)
+            using var httpRequest = new HttpRequestMessage(
+                HttpMethod.Post,
+                ProviderHttp.BuildUri(connection, "embeddings"))
             {
-                throw new JsonException("Embedding response did not contain a data array.");
-            }
-
-            List<(int Index, float[] Vector)> indexed = [];
-            var indexes = new HashSet<int>();
-            foreach (JsonElement item in data.EnumerateArray())
-            {
-                if (item.ValueKind != JsonValueKind.Object
-                    || !item.TryGetProperty("index", out JsonElement indexElement)
-                    || indexElement.ValueKind != JsonValueKind.Number
-                    || !indexElement.TryGetInt32(out int index)
-                    || index < 0 || index >= request.Inputs.Count || !indexes.Add(index)
-                    || !item.TryGetProperty("embedding", out JsonElement embedding)
-                    || embedding.ValueKind != JsonValueKind.Array)
-                {
-                    throw new JsonException("Embedding response contained an invalid item.");
-                }
-
-                var vector = new float[embedding.GetArrayLength()];
-                int offset = 0;
-                foreach (JsonElement value in embedding.EnumerateArray())
-                {
-                    if (value.ValueKind != JsonValueKind.Number || !value.TryGetSingle(out float number) || !float.IsFinite(number))
-                        throw new JsonException("Embedding vectors must contain finite numeric values.");
-                    vector[offset++] = number;
-                }
-                if (vector.Length == 0 || (request.Dimensions is { } expected && vector.Length != expected))
-                {
-                    throw new JsonException("Embedding vector dimensions did not match the request.");
-                }
-
-                indexed.Add((index, vector));
-            }
-
-            List<float[]> vectors = indexed.OrderBy(value => value.Index).Select(value => value.Vector).ToList();
-            if (vectors.Count != request.Inputs.Count || vectors.Select(value => value.Length).Distinct().Count() != 1)
-            {
-                throw new JsonException("Embedding response count or dimensions did not match the request.");
-            }
-
-            int? inputTokens = null;
-            int? totalTokens = null;
-            if (root.TryGetProperty("usage", out JsonElement usage) && usage.ValueKind == JsonValueKind.Object)
-            {
-                inputTokens = ReadInt(usage, "prompt_tokens") ?? ReadInt(usage, "input_tokens");
-                totalTokens = ReadInt(usage, "total_tokens");
-            }
-
-            return consumption.Publish(new LlmEmbeddingResult
-            {
-                Vectors = vectors,
-                Usage = new LlmEmbeddingUsage(inputTokens, totalTokens),
-                Diagnostics = new LlmProviderDiagnostics(
-                    (int)response.StatusCode,
-                    ProviderHttp.ReadRequestId(response),
-                    SecretRedactor.Sanitize(raw, credential))
-            });
-        }
-        catch (JsonException exception)
-        {
-            throw new LlmProviderException(
-                $"Embedding response was invalid: {exception.Message}",
+                Content = JsonContent.Create(payload)
+            };
+            ProviderHttp.ApplyHeaders(httpRequest, connection);
+            LlmCredential? credential = LlmCredential.Parse(connection.Credential);
+            using HttpResponseMessage response = await http.SendAsync(httpRequest, cancellationToken);
+            await ProviderHttp.ThrowIfUnsuccessfulAsync(
+                response,
                 connection.Transport,
-                response.StatusCode,
-                "invalid_embedding_response",
-                ProviderHttp.ReadRequestId(response),
-                null,
-                SecretRedactor.Sanitize(raw, credential),
-                exception);
+                credential,
+                "Embedding request",
+                cancellationToken);
+            string raw = await SdkHttpConsumption.ReadAsStringAsync(response.Content, cancellationToken);
+            try
+            {
+                using JsonDocument document = JsonDocument.Parse(raw);
+                JsonElement root = document.RootElement;
+                if (root.ValueKind != JsonValueKind.Object
+                    || !root.TryGetProperty("data", out JsonElement data) || data.ValueKind != JsonValueKind.Array)
+                {
+                    throw new JsonException("Embedding response did not contain a data array.");
+                }
+
+                List<(int Index, float[] Vector)> indexed = [];
+                var indexes = new HashSet<int>();
+                foreach (JsonElement item in data.EnumerateArray())
+                {
+                    if (item.ValueKind != JsonValueKind.Object
+                        || !item.TryGetProperty("index", out JsonElement indexElement)
+                        || indexElement.ValueKind != JsonValueKind.Number
+                        || !indexElement.TryGetInt32(out int index)
+                        || index < 0 || index >= request.Inputs.Count || !indexes.Add(index)
+                        || !item.TryGetProperty("embedding", out JsonElement embedding)
+                        || embedding.ValueKind != JsonValueKind.Array)
+                    {
+                        throw new JsonException("Embedding response contained an invalid item.");
+                    }
+
+                    var vector = new float[embedding.GetArrayLength()];
+                    int offset = 0;
+                    foreach (JsonElement value in embedding.EnumerateArray())
+                    {
+                        if (value.ValueKind != JsonValueKind.Number || !value.TryGetSingle(out float number) || !float.IsFinite(number))
+                            throw new JsonException("Embedding vectors must contain finite numeric values.");
+                        vector[offset++] = number;
+                    }
+                    if (vector.Length == 0 || (request.Dimensions is { } expected && vector.Length != expected))
+                    {
+                        throw new JsonException("Embedding vector dimensions did not match the request.");
+                    }
+
+                    indexed.Add((index, vector));
+                }
+
+                List<float[]> vectors = indexed.OrderBy(value => value.Index).Select(value => value.Vector).ToList();
+                if (vectors.Count != request.Inputs.Count || vectors.Select(value => value.Length).Distinct().Count() != 1)
+                {
+                    throw new JsonException("Embedding response count or dimensions did not match the request.");
+                }
+
+                int? inputTokens = null;
+                int? totalTokens = null;
+                if (root.TryGetProperty("usage", out JsonElement usage) && usage.ValueKind == JsonValueKind.Object)
+                {
+                    inputTokens = ReadInt(usage, "prompt_tokens") ?? ReadInt(usage, "input_tokens");
+                    totalTokens = ReadInt(usage, "total_tokens");
+                }
+
+                result = new LlmEmbeddingResult
+                {
+                    Vectors = vectors,
+                    Usage = new LlmEmbeddingUsage(inputTokens, totalTokens),
+                    Diagnostics = new LlmProviderDiagnostics(
+                        (int)response.StatusCode,
+                        ProviderHttp.ReadRequestId(response),
+                        SecretRedactor.Sanitize(raw, credential))
+                };
+            }
+            catch (JsonException exception)
+            {
+                throw new LlmProviderException(
+                    $"Embedding response was invalid: {exception.Message}",
+                    connection.Transport,
+                    response.StatusCode,
+                    "invalid_embedding_response",
+                    ProviderHttp.ReadRequestId(response),
+                    null,
+                    SecretRedactor.Sanitize(raw, credential),
+                    exception);
+            }
         }
+        return consumption.Publish(result);
     }
 
     private static void ApplyOptions(JsonObject payload, IReadOnlyDictionary<string, JsonElement> options)

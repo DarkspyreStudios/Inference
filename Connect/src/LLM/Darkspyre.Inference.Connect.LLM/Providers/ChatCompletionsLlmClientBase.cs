@@ -69,14 +69,18 @@ internal abstract class ChatCompletionsLlmClientBase(HttpClient http) : LlmClien
     public async Task<LlmAccountUsageSnapshot> GetAccountUsageAsync(LlmConnection connection, CancellationToken cancellationToken = default)
     {
         if (!GetCapabilities(connection).SupportsAccountUsage) { throw new NotSupportedException("This connection does not expose account usage."); }
-        using var request = new HttpRequestMessage(HttpMethod.Get, ProviderHttp.BuildUri(connection, "key"));
-        ProviderHttp.ApplyHeaders(request, connection);
         using var consumption = SdkHttpConsumption.Enter(Http, cancellationToken); cancellationToken = consumption.Token;
-        using HttpResponseMessage response = await Http.SendAsync(request, cancellationToken);
-        await ProviderHttp.ThrowIfUnsuccessfulAsync(response, Transport, LlmCredential.Parse(connection.Credential),
-            "OpenRouter key usage", cancellationToken);
-        using JsonDocument document = await JsonDocument.ParseAsync(await SdkHttpConsumption.ReadAsStreamAsync(response.Content, cancellationToken), cancellationToken: cancellationToken);
-        return consumption.Publish(OpenRouterAccountUsageParser.Parse(document.RootElement, DateTimeOffset.UtcNow, LlmCredential.Parse(connection.Credential)));
+        LlmAccountUsageSnapshot result;
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, ProviderHttp.BuildUri(connection, "key"));
+            ProviderHttp.ApplyHeaders(request, connection);
+            using HttpResponseMessage response = await Http.SendAsync(request, cancellationToken);
+            await ProviderHttp.ThrowIfUnsuccessfulAsync(response, Transport, LlmCredential.Parse(connection.Credential),
+                "OpenRouter key usage", cancellationToken);
+            using JsonDocument document = await JsonDocument.ParseAsync(await SdkHttpConsumption.ReadAsStreamAsync(response.Content, cancellationToken), cancellationToken: cancellationToken);
+            result = OpenRouterAccountUsageParser.Parse(document.RootElement, DateTimeOffset.UtcNow, LlmCredential.Parse(connection.Credential));
+        }
+        return consumption.Publish(result);
     }
 
     public Task<LlmConnection> PrepareAsync(LlmConnection connection, CancellationToken cancellationToken)

@@ -143,56 +143,60 @@ internal sealed class XaiResponsesLlmClient(HttpClient http) : ResponsesLlmClien
         ArgumentException.ThrowIfNullOrWhiteSpace(modelId);
         ArgumentNullException.ThrowIfNull(text);
         _ = Authorization(connection);
-        using var request = new HttpRequestMessage(HttpMethod.Post, ProviderHttp.BuildUri(connection, "tokenize-text"));
-        ApplyHeaders(request, connection, false);
-        // Plain text and model identity are opaque data; changing either changes the provider's tokens.
-        var payload = new JsonObject { ["model"] = modelId, ["text"] = text };
-        request.Content = new StringContent(payload.ToJsonString(), Encoding.UTF8, "application/json");
         using var consumption = SdkHttpConsumption.Enter(Http, cancellationToken); cancellationToken = consumption.Token;
-        using HttpResponseMessage response = await Http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken)
-            .ConfigureAwait(false);
-        cancellationToken.ThrowIfCancellationRequested();
-        await XaiErrorClassifier.ThrowIfUnsuccessfulAsync(response, LlmCredential.Parse(connection.Credential), [], cancellationToken)
-            .ConfigureAwait(false);
-        cancellationToken.ThrowIfCancellationRequested();
-        string body = await SdkHttpConsumption.ReadAsStringAsync(response.Content, cancellationToken).ConfigureAwait(false);
-        cancellationToken.ThrowIfCancellationRequested();
-        try
+        LlmTokenization result;
         {
-            using JsonDocument document = JsonDocument.Parse(body);
-            if (document.RootElement.ValueKind != JsonValueKind.Object
-                || !document.RootElement.TryGetProperty("token_ids", out JsonElement entries)
-                || entries.ValueKind != JsonValueKind.Array)
-                throw InvalidTokens();
-            var tokens = new List<LlmToken>(entries.GetArrayLength());
-            foreach (JsonElement entry in entries.EnumerateArray())
+            using var request = new HttpRequestMessage(HttpMethod.Post, ProviderHttp.BuildUri(connection, "tokenize-text"));
+            ApplyHeaders(request, connection, false);
+            // Plain text and model identity are opaque data; changing either changes the provider's tokens.
+            var payload = new JsonObject { ["model"] = modelId, ["text"] = text };
+            request.Content = new StringContent(payload.ToJsonString(), Encoding.UTF8, "application/json");
+            using HttpResponseMessage response = await Http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken)
+                .ConfigureAwait(false);
+            cancellationToken.ThrowIfCancellationRequested();
+            await XaiErrorClassifier.ThrowIfUnsuccessfulAsync(response, LlmCredential.Parse(connection.Credential), [], cancellationToken)
+                .ConfigureAwait(false);
+            cancellationToken.ThrowIfCancellationRequested();
+            string body = await SdkHttpConsumption.ReadAsStringAsync(response.Content, cancellationToken).ConfigureAwait(false);
+            cancellationToken.ThrowIfCancellationRequested();
+            try
             {
-                cancellationToken.ThrowIfCancellationRequested();
-                if (entry.ValueKind != JsonValueKind.Object
-                    || !entry.TryGetProperty("token_id", out JsonElement id) || !id.TryGetUInt32(out uint number)
-                    || !entry.TryGetProperty("string_token", out JsonElement display) || display.ValueKind != JsonValueKind.String
-                    || !entry.TryGetProperty("token_bytes", out JsonElement bytes) || bytes.ValueKind != JsonValueKind.Array)
+                using JsonDocument document = JsonDocument.Parse(body);
+                if (document.RootElement.ValueKind != JsonValueKind.Object
+                    || !document.RootElement.TryGetProperty("token_ids", out JsonElement entries)
+                    || entries.ValueKind != JsonValueKind.Array)
                     throw InvalidTokens();
-                var data = new byte[bytes.GetArrayLength()];
-                int index = 0;
-                foreach (JsonElement item in bytes.EnumerateArray())
+                var tokens = new List<LlmToken>(entries.GetArrayLength());
+                foreach (JsonElement entry in entries.EnumerateArray())
                 {
                     cancellationToken.ThrowIfCancellationRequested();
-                    if (!item.TryGetByte(out byte value)) throw InvalidTokens();
-                    data[index++] = value;
+                    if (entry.ValueKind != JsonValueKind.Object
+                        || !entry.TryGetProperty("token_id", out JsonElement id) || !id.TryGetUInt32(out uint number)
+                        || !entry.TryGetProperty("string_token", out JsonElement display) || display.ValueKind != JsonValueKind.String
+                        || !entry.TryGetProperty("token_bytes", out JsonElement bytes) || bytes.ValueKind != JsonValueKind.Array)
+                        throw InvalidTokens();
+                    var data = new byte[bytes.GetArrayLength()];
+                    int index = 0;
+                    foreach (JsonElement item in bytes.EnumerateArray())
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+                        if (!item.TryGetByte(out byte value)) throw InvalidTokens();
+                        data[index++] = value;
+                    }
+                    tokens.Add(new(number, display.GetString()!, data));
                 }
-                tokens.Add(new(number, display.GetString()!, data));
+                cancellationToken.ThrowIfCancellationRequested();
+                result = new LlmTokenization(tokens.ToArray());
             }
-            cancellationToken.ThrowIfCancellationRequested();
-            return consumption.Publish(new LlmTokenization(tokens.ToArray()));
-        }
-        catch (Exception error) when (error is JsonException or InvalidOperationException or FormatException)
-        {
-            throw InvalidTokens();
-        }
+            catch (Exception error) when (error is JsonException or InvalidOperationException or FormatException)
+            {
+                throw InvalidTokens();
+            }
 
-        LlmProviderException InvalidTokens() => ProtocolException(
-            "Grok tokenization returned an invalid token sequence.", response, string.Empty, LlmCredential.Parse(connection.Credential));
+            LlmProviderException InvalidTokens() => ProtocolException(
+                "Grok tokenization returned an invalid token sequence.", response, string.Empty, LlmCredential.Parse(connection.Credential));
+        }
+        return consumption.Publish(result);
     }
 
     public override async Task<IReadOnlyList<LlmModel>> ListModelsAsync(LlmConnection connection, CancellationToken cancellationToken = default)

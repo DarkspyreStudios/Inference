@@ -109,23 +109,27 @@ public sealed class PocketTtsHttpProvider(HttpClient httpClient) : ITtsProvider
             ValidateRequest(connection, request);
             using var consumption = provider.Enter(cancellationToken); cancellationToken = consumption.Token;
             long started = Stopwatch.GetTimestamp();
-            using HttpContent body = CreateContent(request);
-            byte[] audio = await SendAsync(HttpMethod.Post, connection.PocketTts.SpeakPath, body, async (response, token) =>
+            TtsResult result;
             {
-                if (response.Content.Headers.ContentType?.MediaType is { } contentType
-                    && !contentType.Equals("audio/wav", StringComparison.OrdinalIgnoreCase)
-                    && !contentType.Equals("audio/x-wav", StringComparison.OrdinalIgnoreCase)) { throw Protocol(); }
-                byte[] bytes = await SdkHttpConsumption.ReadAsByteArrayAsync(response.Content, token).ConfigureAwait(false);
-                ValidateWave(bytes);
-                return bytes;
-            }, cancellationToken).ConfigureAwait(false);
-            return consumption.Publish(new TtsResult("audio/wav", audio, new()
-            {
-                ImplementationId = Descriptor.Id,
-                ModelId = "pockettts",
-                Runtime = "HTTP",
-                Elapsed = Stopwatch.GetElapsedTime(started)
-            }));
+                using HttpContent body = CreateContent(request);
+                byte[] audio = await SendAsync(HttpMethod.Post, connection.PocketTts.SpeakPath, body, async (response, token) =>
+                {
+                    if (response.Content.Headers.ContentType?.MediaType is { } contentType
+                        && !contentType.Equals("audio/wav", StringComparison.OrdinalIgnoreCase)
+                        && !contentType.Equals("audio/x-wav", StringComparison.OrdinalIgnoreCase)) { throw Protocol(); }
+                    byte[] bytes = await SdkHttpConsumption.ReadAsByteArrayAsync(response.Content, token).ConfigureAwait(false);
+                    ValidateWave(bytes);
+                    return bytes;
+                }, cancellationToken).ConfigureAwait(false);
+                result = new TtsResult("audio/wav", audio, new()
+                {
+                    ImplementationId = Descriptor.Id,
+                    ModelId = "pockettts",
+                    Runtime = "HTTP",
+                    Elapsed = Stopwatch.GetElapsedTime(started)
+                });
+            }
+            return consumption.Publish(result);
         }
 
         private HttpContent CreateContent(TtsRequest request)

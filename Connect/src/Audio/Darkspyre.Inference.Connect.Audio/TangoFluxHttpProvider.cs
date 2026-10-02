@@ -77,45 +77,49 @@ public sealed class TangoFluxHttpProvider(HttpClient httpClient) : IAudioProvide
             ValidateRequest(request);
             using var consumption = provider.Enter(cancellationToken); cancellationToken = consumption.Token;
             long started = Stopwatch.GetTimestamp();
-            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            timeout.CancelAfter(connection.RequestTimeout);
-            using var message = new HttpRequestMessage(HttpMethod.Post,
-                new Uri(new Uri(connection.Endpoint.AbsoluteUri.TrimEnd('/') + "/"), connection.TangoFlux.GeneratePath.TrimStart('/')))
+            AudioGenerationResult result;
             {
-                Content = JsonContent.Create(new TangoFluxGeneratePayload(request.Prompt, request.Duration.TotalSeconds,
-                    request.Steps ?? 10, request.GuidanceScale ?? 4.5, request.Seed, request.UseCache), TangoFluxJsonContext.Default.TangoFluxGeneratePayload)
-            };
-            foreach ((string name, string value) in connection.Headers)
-            { if (!message.Headers.TryAddWithoutValidation(name, value)) { throw Invalid("A configured header cannot be used on this request."); } }
-            try
-            {
-                using HttpResponseMessage response = await provider.SendAsync(message, timeout.Token).ConfigureAwait(false);
-                if (!response.IsSuccessStatusCode)
+                using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                timeout.CancelAfter(connection.RequestTimeout);
+                using var message = new HttpRequestMessage(HttpMethod.Post,
+                    new Uri(new Uri(connection.Endpoint.AbsoluteUri.TrimEnd('/') + "/"), connection.TangoFlux.GeneratePath.TrimStart('/')))
                 {
-                    throw new InferenceException(response.StatusCode switch
+                    Content = JsonContent.Create(new TangoFluxGeneratePayload(request.Prompt, request.Duration.TotalSeconds,
+                        request.Steps ?? 10, request.GuidanceScale ?? 4.5, request.Seed, request.UseCache), TangoFluxJsonContext.Default.TangoFluxGeneratePayload)
+                };
+                foreach ((string name, string value) in connection.Headers)
+                { if (!message.Headers.TryAddWithoutValidation(name, value)) { throw Invalid("A configured header cannot be used on this request."); } }
+                try
+                {
+                    using HttpResponseMessage response = await provider.SendAsync(message, timeout.Token).ConfigureAwait(false);
+                    if (!response.IsSuccessStatusCode)
                     {
-                        HttpStatusCode.Unauthorized => InferenceFailureCode.AuthenticationRequired,
-                        HttpStatusCode.Forbidden => InferenceFailureCode.AccessDenied,
-                        >= HttpStatusCode.MultipleChoices and < HttpStatusCode.BadRequest => InferenceFailureCode.ProtocolFailure,
-                        _ => InferenceFailureCode.ExecutionFailed
-                    }, $"TangoFlux request failed with HTTP {((int)response.StatusCode).ToString(CultureInfo.InvariantCulture)}.");
+                        throw new InferenceException(response.StatusCode switch
+                        {
+                            HttpStatusCode.Unauthorized => InferenceFailureCode.AuthenticationRequired,
+                            HttpStatusCode.Forbidden => InferenceFailureCode.AccessDenied,
+                            >= HttpStatusCode.MultipleChoices and < HttpStatusCode.BadRequest => InferenceFailureCode.ProtocolFailure,
+                            _ => InferenceFailureCode.ExecutionFailed
+                        }, $"TangoFlux request failed with HTTP {((int)response.StatusCode).ToString(CultureInfo.InvariantCulture)}.");
+                    }
+                    if (response.Content.Headers.ContentType?.MediaType is { } contentType
+                        && !contentType.Equals("audio/wav", StringComparison.OrdinalIgnoreCase)) { throw Protocol(); }
+                    byte[] bytes = await SdkHttpConsumption.ReadAsByteArrayAsync(response.Content, timeout.Token).ConfigureAwait(false);
+                    ValidateWave(bytes);
+                    result = new AudioGenerationResult("audio/wav", bytes, null, new()
+                    {
+                        ImplementationId = Descriptor.Id,
+                        ModelId = "tangoflux",
+                        Runtime = "HTTP",
+                        Elapsed = Stopwatch.GetElapsedTime(started)
+                    });
                 }
-                if (response.Content.Headers.ContentType?.MediaType is { } contentType
-                    && !contentType.Equals("audio/wav", StringComparison.OrdinalIgnoreCase)) { throw Protocol(); }
-                byte[] bytes = await SdkHttpConsumption.ReadAsByteArrayAsync(response.Content, timeout.Token).ConfigureAwait(false);
-                ValidateWave(bytes);
-                return consumption.Publish(new AudioGenerationResult("audio/wav", bytes, null, new()
-                {
-                    ImplementationId = Descriptor.Id,
-                    ModelId = "tangoflux",
-                    Runtime = "HTTP",
-                    Elapsed = Stopwatch.GetElapsedTime(started)
-                }));
+                catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+                { throw new InferenceException(InferenceFailureCode.TimedOut, "TangoFlux request timed out; it was not retried."); }
+                catch (HttpRequestException) { throw new InferenceException(InferenceFailureCode.ExecutionFailed, "TangoFlux HTTP transport failed; it was not retried."); }
+                catch (IOException) { throw new InferenceException(InferenceFailureCode.ExecutionFailed, "TangoFlux response could not be read; it was not retried."); }
             }
-            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
-            { throw new InferenceException(InferenceFailureCode.TimedOut, "TangoFlux request timed out; it was not retried."); }
-            catch (HttpRequestException) { throw new InferenceException(InferenceFailureCode.ExecutionFailed, "TangoFlux HTTP transport failed; it was not retried."); }
-            catch (IOException) { throw new InferenceException(InferenceFailureCode.ExecutionFailed, "TangoFlux response could not be read; it was not retried."); }
+            return consumption.Publish(result);
         }
     }
 

@@ -41,68 +41,74 @@ internal abstract class LlmClientBase(HttpClient http) : ILlmClient
         }
 
         LlmCredential? credential = LlmCredential.Parse(connection.Credential);
-        using var request = new HttpRequestMessage(HttpMethod.Get, ProviderHttp.BuildUri(connection, "models"));
-        ProviderHttp.ApplyHeaders(request, connection);
-
         using var consumption = SdkHttpConsumption.Enter(Http, cancellationToken); cancellationToken = consumption.Token;
-        using HttpResponseMessage response = await Http.SendAsync(request, cancellationToken);
-        await ProviderHttp.ThrowIfUnsuccessfulAsync(
-            response,
-            Transport,
-            credential,
-            "Model discovery",
-            cancellationToken);
-
-        string body = await SdkHttpConsumption.ReadAsStringAsync(response.Content, cancellationToken);
-        try
+        IReadOnlyList<LlmModel> result;
         {
-            using JsonDocument document = JsonDocument.Parse(body);
-            JsonElement root = document.RootElement;
-            JsonElement models = root.TryGetProperty("data", out JsonElement data)
-                && data.ValueKind == JsonValueKind.Array
-                    ? data
-                    : root.TryGetProperty("models", out JsonElement alternate)
-                        && alternate.ValueKind == JsonValueKind.Array
-                            ? alternate
-                            : default;
+            using var request = new HttpRequestMessage(HttpMethod.Get, ProviderHttp.BuildUri(connection, "models"));
+            ProviderHttp.ApplyHeaders(request, connection);
 
-            if (models.ValueKind != JsonValueKind.Array)
-            {
-                return consumption.Publish<IReadOnlyList<LlmModel>>([]);
-            }
-
-            var results = new List<LlmModel>();
-            foreach (JsonElement model in models.EnumerateArray())
-            {
-                string? id = LlmJson.GetString(model, "id");
-                if (string.IsNullOrWhiteSpace(id))
-                {
-                    continue;
-                }
-
-                string displayName = LlmJson.GetString(model, "name")
-                    ?? LlmJson.GetString(model, "display_name")
-                    ?? id;
-                results.Add(new LlmModel(id, displayName, LlmJson.GetString(model, "owned_by"))
-                {
-                    MaxContextTokens = PositiveLong(model, "context_length")
-                        ?? PositiveLong(LlmJson.GetObject(model, "top_provider"), "context_length")
-                        ?? PositiveLong(model, "max_model_len"),
-                    MaxOutputTokens = PositiveLong(LlmJson.GetObject(model, "top_provider"), "max_completion_tokens")
-                });
-            }
-
-            return consumption.Publish<IReadOnlyList<LlmModel>>([.. results.OrderBy(model => model.DisplayName, StringComparer.OrdinalIgnoreCase)]);
-        }
-        catch (JsonException exception)
-        {
-            throw ProtocolException(
-                "Model discovery returned invalid JSON.",
+            using HttpResponseMessage response = await Http.SendAsync(request, cancellationToken);
+            await ProviderHttp.ThrowIfUnsuccessfulAsync(
                 response,
-                body,
+                Transport,
                 credential,
-                exception);
+                "Model discovery",
+                cancellationToken);
+
+            string body = await SdkHttpConsumption.ReadAsStringAsync(response.Content, cancellationToken);
+            try
+            {
+                using JsonDocument document = JsonDocument.Parse(body);
+                JsonElement root = document.RootElement;
+                JsonElement models = root.TryGetProperty("data", out JsonElement data)
+                    && data.ValueKind == JsonValueKind.Array
+                        ? data
+                        : root.TryGetProperty("models", out JsonElement alternate)
+                            && alternate.ValueKind == JsonValueKind.Array
+                                ? alternate
+                                : default;
+
+                if (models.ValueKind != JsonValueKind.Array)
+                {
+                    result = [];
+                }
+                else
+                {
+                    var results = new List<LlmModel>();
+                    foreach (JsonElement model in models.EnumerateArray())
+                    {
+                        string? id = LlmJson.GetString(model, "id");
+                        if (string.IsNullOrWhiteSpace(id))
+                        {
+                            continue;
+                        }
+
+                        string displayName = LlmJson.GetString(model, "name")
+                            ?? LlmJson.GetString(model, "display_name")
+                            ?? id;
+                        results.Add(new LlmModel(id, displayName, LlmJson.GetString(model, "owned_by"))
+                        {
+                            MaxContextTokens = PositiveLong(model, "context_length")
+                                ?? PositiveLong(LlmJson.GetObject(model, "top_provider"), "context_length")
+                                ?? PositiveLong(model, "max_model_len"),
+                            MaxOutputTokens = PositiveLong(LlmJson.GetObject(model, "top_provider"), "max_completion_tokens")
+                        });
+                    }
+
+                    result = [.. results.OrderBy(model => model.DisplayName, StringComparer.OrdinalIgnoreCase)];
+                }
+            }
+            catch (JsonException exception)
+            {
+                throw ProtocolException(
+                    "Model discovery returned invalid JSON.",
+                    response,
+                    body,
+                    credential,
+                    exception);
+            }
         }
+        return consumption.Publish(result);
     }
 
     private static long? PositiveLong(JsonElement? value, string field) =>

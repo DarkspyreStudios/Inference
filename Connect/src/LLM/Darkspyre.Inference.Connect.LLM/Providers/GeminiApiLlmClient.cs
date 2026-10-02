@@ -89,11 +89,14 @@ internal sealed partial class GeminiApiLlmClient(HttpClient http)
         var built = BuildRequest(connection, request);
         using var consumption = SdkHttpConsumption.Enter(Http, cancellationToken); cancellationToken = consumption.Token;
         built.Payload["model"] = "models/" + request.ModelId;
-        using var message = new HttpRequestMessage(HttpMethod.Post, $"{DefaultEndpoint}/v1beta/models/{request.ModelId}:countTokens")
-        { Content = JsonContent.Create(new JsonObject { ["generateContentRequest"] = built.Payload }) };
-        message.Headers.TryAddWithoutValidation(KeyHeader, Key(built.Connection));
-        LlmProviderInputTokenCount result = await ProviderTokenCounting.SendAsync(Http, message, Transport, request.ModelId, false,
-            cancellationToken).ConfigureAwait(false);
+        LlmProviderInputTokenCount result;
+        {
+            using var message = new HttpRequestMessage(HttpMethod.Post, $"{DefaultEndpoint}/v1beta/models/{request.ModelId}:countTokens")
+            { Content = JsonContent.Create(new JsonObject { ["generateContentRequest"] = built.Payload }) };
+            message.Headers.TryAddWithoutValidation(KeyHeader, Key(built.Connection));
+            result = await ProviderTokenCounting.SendAsync(Http, message, Transport, request.ModelId, false,
+                cancellationToken).ConfigureAwait(false);
+        }
         return consumption.Publish(result with { OmittedContinuationStateCount = built.Omitted });
     }
 

@@ -129,8 +129,13 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
             payload.Remove(name);
         if (payload.Any(field => !IsTokenCountField(field.Key)))
             throw new NotSupportedException("The Anthropic count API cannot represent one of the configured provider fields.");
-        using HttpRequestMessage message = CreateTokenCountRequest(connection, request, payload);
-        return await ProviderTokenCounting.SendAsync(Http, message, Transport, request.ModelId, true, cancellationToken).ConfigureAwait(false);
+        using var consumption = SdkHttpConsumption.Enter(Http, cancellationToken); cancellationToken = consumption.Token;
+        LlmProviderInputTokenCount result;
+        {
+            using HttpRequestMessage message = CreateTokenCountRequest(connection, request, payload);
+            result = await ProviderTokenCounting.SendAsync(Http, message, Transport, request.ModelId, true, cancellationToken).ConfigureAwait(false);
+        }
+        return consumption.Publish(result);
     }
 
     internal static void ValidateTokenCountOptions(LlmConnection connection, LlmChatRequest request)

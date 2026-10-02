@@ -8,6 +8,64 @@ namespace Darkspyre.Inference.Connect.LLM.Tests;
 public sealed class HttpMappedPublicationTests
 {
     [Theory]
+    [InlineData("embedding")]
+    [InlineData("models")]
+    [InlineData("account")]
+    public async Task FailedMappingIsNotReplacedByCleanupRetirementFence(string route)
+    {
+        SdkHttpGenerationPool? pool = null;
+        Task? retirement = null;
+        var content = new RetiringContent("{", () => retirement ??= pool!.DisposeAsync().AsTask(), null);
+        var services = new ServiceCollection();
+        services.AddLlmConnect();
+        services.AddHttpClient(route == "embedding" ? "OpenAiEmbeddingClient" : "OpenAiCompatibleChatLlmClient")
+            .ConfigurePrimaryHttpMessageHandler(() => new Handler(content));
+        await using ServiceProvider root = services.BuildServiceProvider();
+        pool = root.GetRequiredService<SdkHttpGenerationPool>();
+        var connection = new LlmConnection
+        {
+            Version = "controlled",
+            Transport = route == "embedding" ? LlmTransport.OpenAiResponses : LlmTransport.OpenAiCompatibleChat,
+            Endpoint = route == "account" ? "https://openrouter.ai/api/v1" : "https://controlled.invalid"
+        };
+        Task pending = route switch
+        {
+            "models" => root.GetRequiredService<OpenAiCompatibleChatLlmClient>().ListModelsAsync(connection),
+            "account" => root.GetRequiredService<OpenAiCompatibleChatLlmClient>().GetAccountUsageAsync(connection),
+            _ => root.GetRequiredService<OpenAiEmbeddingClient>().EmbedAsync(connection,
+                new LlmEmbeddingRequest { ModelId = "actual", Inputs = ["actual"] })
+        };
+        if (route == "account")
+            await Assert.ThrowsAnyAsync<System.Text.Json.JsonException>(() => pending);
+        else
+            Assert.IsAssignableFrom<System.Text.Json.JsonException>(
+                (await Assert.ThrowsAsync<LlmProviderException>(() => pending)).InnerException);
+        await retirement!.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal(1, content.Disposals);
+    }
+
+    [Fact]
+    public async Task FailedBodyAwaitPreservesOriginalErrorWhenResponseCleanupStartsRetirement()
+    {
+        var failure = new IOException("controlled body read failure");
+        SdkHttpGenerationPool? pool = null;
+        Task? retirement = null;
+        var content = new FailedContent(failure, () => retirement ??= pool!.DisposeAsync().AsTask());
+        var services = new ServiceCollection();
+        services.AddLlmConnect();
+        services.AddHttpClient("OpenAiEmbeddingClient").ConfigurePrimaryHttpMessageHandler(() => new Handler(content));
+        await using ServiceProvider root = services.BuildServiceProvider();
+        pool = root.GetRequiredService<SdkHttpGenerationPool>();
+        var connection = new LlmConnection { Version = "controlled", Transport = LlmTransport.OpenAiResponses, Endpoint = "https://controlled.invalid" };
+        HttpRequestException actual = await Assert.ThrowsAsync<HttpRequestException>(() =>
+            root.GetRequiredService<OpenAiEmbeddingClient>().EmbedAsync(connection,
+                new LlmEmbeddingRequest { ModelId = "actual", Inputs = ["actual"] }));
+        Assert.Same(failure, actual.InnerException);
+        await retirement!.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal(1, content.Disposals);
+    }
+
+    [Theory]
     [InlineData("embedding", false)]
     [InlineData("embedding", true)]
     [InlineData("models", false)]
@@ -68,6 +126,17 @@ public sealed class HttpMappedPublicationTests
         protected override void Dispose(bool disposing)
         {
             if (disposing) { Disposals++; retire(); if (failure is not null) throw failure; }
+            base.Dispose(disposing);
+        }
+    }
+    private sealed class FailedContent(Exception failure, Action retire) : HttpContent
+    {
+        public int Disposals { get; private set; }
+        protected override Task SerializeToStreamAsync(Stream stream, TransportContext? context) => Task.FromException(failure);
+        protected override bool TryComputeLength(out long length) { length = 0; return false; }
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing) { Disposals++; retire(); }
             base.Dispose(disposing);
         }
     }

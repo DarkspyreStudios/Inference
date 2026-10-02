@@ -4,7 +4,8 @@ using Microsoft.Extensions.Http.Logging;
 
 namespace Darkspyre.Inference.Connect.LLM.Internal;
 
-internal sealed class SdkHttpMessageHandlerBuilder(string name, IServiceProvider services, TimeSpan lifetime, SdkHttpConfiguration configuration) : HttpMessageHandlerBuilder
+internal sealed class SdkHttpMessageHandlerBuilder(string name, IServiceProvider services, TimeSpan lifetime, SdkHttpConfiguration configuration,
+    SdkHttpGenerationPool owner, SdkHttpPipelineEntry entry) : HttpMessageHandlerBuilder
 {
     public override string? Name { get; set; } = name;
     public override IServiceProvider Services => services;
@@ -26,7 +27,7 @@ internal sealed class SdkHttpMessageHandlerBuilder(string name, IServiceProvider
     {
         foreach (SdkHttpLoggerDefinition definition in Loggers)
         {
-            var handler = new SdkHttpLoggerHandler(definition.Factory(Services));
+            var handler = new SdkHttpLoggerHandler(definition.Factory(Services), owner, entry);
             if (definition.Wrap) AdditionalHandlers.Insert(0, handler); else AdditionalHandlers.Add(handler);
         }
         Loggers = [];
@@ -40,13 +41,19 @@ internal sealed class SdkHttpMessageHandlerBuilder(string name, IServiceProvider
     }
 }
 
-internal sealed class SdkHttpLoggerHandler(IHttpClientLogger logger) : DelegatingHandler
+internal sealed class SdkHttpLoggerHandler(IHttpClientLogger logger, SdkHttpGenerationPool owner, SdkHttpPipelineEntry entry) : DelegatingHandler
 {
     protected override HttpResponseMessage Send(HttpRequestMessage request, CancellationToken cancellationToken)
     {
         long start = Stopwatch.GetTimestamp(); object? context = logger.LogRequestStart(request); HttpResponseMessage? response = null;
         try { response = base.Send(request, cancellationToken); logger.LogRequestStop(context, request, response, Stopwatch.GetElapsedTime(start)); return response; }
-        catch (Exception error) { logger.LogRequestFailed(context, request, response, error, Stopwatch.GetElapsedTime(start)); throw; }
+        catch (Exception error)
+        {
+            Exception? loggingFailure = null;
+            try { logger.LogRequestFailed(context, request, response, error, Stopwatch.GetElapsedTime(start)); }
+            catch (Exception failure) { loggingFailure = failure; }
+            Fail(error, loggingFailure, response); throw;
+        }
     }
     protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
@@ -61,9 +68,23 @@ internal sealed class SdkHttpLoggerHandler(IHttpClientLogger logger) : Delegatin
         }
         catch (Exception error)
         {
-            if (asynchronous is null) logger.LogRequestFailed(context, request, response, error, Stopwatch.GetElapsedTime(start));
-            else await asynchronous.LogRequestFailedAsync(context, request, response, error, Stopwatch.GetElapsedTime(start), cancellationToken).ConfigureAwait(false);
-            throw;
+            Exception? loggingFailure = null;
+            try
+            {
+                if (asynchronous is null) logger.LogRequestFailed(context, request, response, error, Stopwatch.GetElapsedTime(start));
+                else await asynchronous.LogRequestFailedAsync(context, request, response, error, Stopwatch.GetElapsedTime(start), cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception failure) { loggingFailure = failure; }
+            Fail(error, loggingFailure, response); throw;
         }
+    }
+    private void Fail(Exception original, Exception? loggingFailure, HttpResponseMessage? response)
+    {
+        var errors = new List<Exception> { original };
+        if (loggingFailure is not null) errors.Add(loggingFailure);
+        if (response is not null)
+            try { response.Dispose(); }
+            catch (Exception cleanup) { owner.RecordFailure(entry, response, cleanup); errors.Add(cleanup); }
+        SdkHttpGenerationPool.ThrowFailures(errors);
     }
 }

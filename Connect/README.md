@@ -30,6 +30,11 @@ completion options or body values. Raw arbitrary caller use of .NET `HttpContent
 intercepted: its nonvirtual cached APIs can bypass content overrides. Direct supplied clients and
 `BorrowHostFactory` keep ordinary body and ownership semantics.
 
+Mapped task results publish after response, body and request cleanup completes; retirement begun by
+cleanup prevents late success without replacing an earlier operation failure. If an owned logger
+fails after receiving a response, that unhanded response is cleaned up once. Refused cleanup remains
+owned with its exact error; independent logger and cleanup failures are preserved together.
+
 Comfy's in-transport reference materialization stays admitted through resource commit and cleanup.
 Returned Image inference has a separate caller-owned lifetime across download, resource commit and
 publication. Pool retirement alone does not drain that inference after copied download bytes return;

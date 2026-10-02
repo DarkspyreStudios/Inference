@@ -87,7 +87,7 @@ internal sealed class SdkHttpGenerationPool : IHttpClientFactory, IDisposable, I
         IServiceScope? scope = options.SuppressHandlerScope ? null : _services!.CreateScope();
         entry.Scope = scope;
         entry.Lifetime = options.HandlerLifetime;
-        var builder = new SdkHttpMessageHandlerBuilder(name, scope?.ServiceProvider ?? _services!, options.HandlerLifetime, _configuration!);
+        var builder = new SdkHttpMessageHandlerBuilder(name, scope?.ServiceProvider ?? _services!, options.HandlerLifetime, _configuration!, this, entry);
         try
         {
             Action<HttpMessageHandlerBuilder> configure = handler =>

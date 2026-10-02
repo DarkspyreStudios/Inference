@@ -32,15 +32,18 @@ internal abstract class OAuthAuthenticatorBase(HttpClient http) : ILlmAuthentica
                 $"{Transport} credentials have expired and have no refresh token; sign in again.");
         }
 
-        using HttpRequestMessage request = BuildRefreshRequest(credential.OAuth);
         using var consumption = SdkHttpConsumption.Enter(Http, cancellationToken); cancellationToken = consumption.Token;
-        using HttpResponseMessage response = await Http.SendAsync(request, cancellationToken);
-        cancellationToken.ThrowIfCancellationRequested();
-        await ValidateRefreshResponseAsync(response, credential, cancellationToken);
-        using JsonDocument document = await ParseJsonAsync(response, cancellationToken);
-        cancellationToken.ThrowIfCancellationRequested();
-        LlmCredential refreshed = MapTokens(document.RootElement, credential.OAuth);
-        cancellationToken.ThrowIfCancellationRequested();
+        LlmCredential refreshed;
+        {
+            using HttpRequestMessage request = BuildRefreshRequest(credential.OAuth);
+            using HttpResponseMessage response = await Http.SendAsync(request, cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+            await ValidateRefreshResponseAsync(response, credential, cancellationToken);
+            using JsonDocument document = await ParseJsonAsync(response, cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+            refreshed = MapTokens(document.RootElement, credential.OAuth);
+            cancellationToken.ThrowIfCancellationRequested();
+        }
         return consumption.Publish(refreshed);
     }
 
