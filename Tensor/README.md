@@ -326,6 +326,8 @@ package catalog, inspects files, initializes a backend or establishes availabili
 lazy Qwen owner factory. A factory-created owner is container-owned; an explicitly registered owner
 instance remains borrowed. Model instances release their own leases and never shut down the shared
 runtime. Stop/dispose instances before terminal runtime shutdown.
+Dispose a service provider that resolves these registrations asynchronously with `await using` or
+`DisposeAsync`. Its factory-created Qwen runtime owner has an asynchronous terminal lifetime.
 
 Qwen consumes the TensorSharp 2.8.6.8 managed loader APIs through ordinary PackageReferences.
 GGML is a direct Qwen and Tensor package dependency. Source restore and compilation do not substitute

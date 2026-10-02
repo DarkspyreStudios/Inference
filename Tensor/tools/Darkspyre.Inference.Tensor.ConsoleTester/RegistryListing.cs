@@ -20,7 +20,7 @@ internal static class RegistryListing
         }
 
         string store = Path.GetFullPath(args[2]);
-        using ServiceProvider services = new ServiceCollection().AddTensorEngines().BuildServiceProvider();
+        await using ServiceProvider services = new ServiceCollection().AddTensorEngines().BuildServiceProvider();
         TensorEngineRegistry registry = services.GetRequiredService<TensorEngineRegistry>();
         Console.WriteLine($"store   : {store}");
         foreach (TensorEngineDefinition definition in registry.Definitions)
