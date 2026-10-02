@@ -4,6 +4,7 @@ using System.Runtime.Loader;
 using Darkspyre.Inference.Common.LLM;
 using Darkspyre.Inference.Common.Setup;
 using Darkspyre.Inference.Connect.LLM.Providers;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Darkspyre.Inference.Connect.LLM.Tests;
 
@@ -56,6 +57,26 @@ public sealed class RuntimeAuthenticationBindingTests
             Assert.Equal(0, source.Effects); Assert.Equal(0, source.Disposals);
         }
         finally { await agents.DisposeAsync(); }
+    }
+
+    [Fact]
+    public async Task ContractDeclarationsDoNotRegisterNewRuntimeAdapters()
+    {
+        var source = new Source();
+        var services = new ServiceCollection();
+        services.AddSingleton<ILlmConnectionSource>(source);
+        services.AddLlmConnect();
+        await using ServiceProvider container = services.BuildServiceProvider();
+        await using AsyncServiceScope scope = container.CreateAsyncScope();
+        var agents = scope.ServiceProvider.GetRequiredService<LlmAgentProviderService>();
+        var llms = scope.ServiceProvider.GetRequiredService<LlmProviderService>();
+        foreach (LlmTransport transport in new[] { LlmTransport.GitHubCopilot, LlmTransport.AgentClientProtocol })
+        {
+            Assert.DoesNotContain(transport, agents.SupportedTransports);
+            Assert.DoesNotContain(transport, llms.SupportedTransports);
+        }
+        Assert.Throws<NotSupportedException>(() => agents.BindRuntimeAuthentication("connection"));
+        Assert.Equal(0, source.Effects);
     }
 
     [Fact]
@@ -204,6 +225,42 @@ public sealed class RuntimeAuthenticationBindingTests
         finally
         {
             client.OnTransport = null;
+            await (retirement ?? manager.DisposeAsync().AsTask()).WaitAsync(Bound);
+        }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task NestedCredentialConstructionSharesAdmissionAndPreservesHealthyGetterCounts(bool retire)
+    {
+        var client = new Client();
+        var first = new Authenticator(LlmTransport.OpenAiCompatibleChat);
+        var second = new Authenticator(LlmTransport.OpenAiCodex);
+        await using var provider = new LlmProviderService(new Source(), [client], [first, second]);
+        var manager = provider.CreateSettingsManager(new Target());
+        Task? retirement = null;
+        try
+        {
+            LlmSettings settings = await Open(manager);
+            int firstReads = first.Reads, secondReads = second.Reads;
+            int transportReads = client.TransportReads, definitionReads = client.DefinitionReads;
+            if (retire)
+                first.OnRead = () => { if (first.Reads == firstReads + 2) retirement = manager.DisposeAsync().AsTask(); };
+            SetupActionResult result = await manager.RunAsync(settings, "check");
+            Assert.Equal(retire ? SetupActionState.Cancelled : SetupActionState.Completed, result.State);
+            Assert.Equal(firstReads + 2, first.Reads);
+            Assert.Equal(secondReads + (retire ? 1 : 2), second.Reads);
+            if (!retire)
+            {
+                Assert.Equal(transportReads + 3, client.TransportReads);
+                Assert.Equal(definitionReads + 3, client.DefinitionReads);
+            }
+            await (retirement ?? manager.DisposeAsync().AsTask()).WaitAsync(Bound);
+        }
+        finally
+        {
+            first.OnRead = null;
             await (retirement ?? manager.DisposeAsync().AsTask()).WaitAsync(Bound);
         }
     }
@@ -374,6 +431,13 @@ public sealed class RuntimeAuthenticationBindingTests
         { OperationToken = cancellationToken; Entered.TrySetResult(); if (Held) await Release.Task; return [new("model", "Model")]; }
         public IAsyncEnumerable<LlmStreamEvent> StreamAsync(LlmConnection connection, LlmChatRequest request, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public void Dispose() => Disposals++;
+    }
+    private sealed class Authenticator(LlmTransport transport) : ILlmAuthenticator
+    {
+        public int Reads { get; private set; }
+        public Action? OnRead { get; set; }
+        public LlmTransport Transport { get { Reads++; OnRead?.Invoke(); return transport; } }
+        public Task<LlmCredential> EnsureFreshAsync(LlmCredential credential, CancellationToken cancellationToken = default) => Task.FromResult(credential);
     }
     private sealed class CollaboratorGeneration() : AssemblyLoadContext(isCollectible: true);
 }

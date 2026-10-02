@@ -261,6 +261,13 @@ public sealed class RuntimeAuthenticationContractTests
             JsonTypeInfo metadata = Metadata(facade, name);
             Assert.Same(connect, metadata.Type.Assembly);
             object value = RoundTrip(json, metadata); Assert.Same(connect, value.GetType().Assembly);
+            if (name == "LlmAgentCapabilities")
+            {
+                object rich = value.GetType().GetProperty("RichContentSupported")!.GetValue(value)!;
+                Assert.Same(connect, rich.GetType().Assembly);
+                object hosted = value.GetType().GetProperty("HostedTools")!.GetValue(value)!;
+                foreach (object kind in (System.Collections.IEnumerable)hosted) Assert.Same(common, kind.GetType().Assembly);
+            }
             object scope = RoundTrip("""{"Identity":""" + Identity + ""","Transport":17,"ProfileId":"profile","WorkingDirectory":"/selected"}""", Metadata(facade, "LlmAgentRuntimeLoginScope"));
             Assert.Same(common, scope.GetType().GetProperty("Identity")!.GetValue(scope)!.GetType().Assembly);
             Type services = connect.GetType(typeof(LlmAgentRuntimeLoginServices).FullName!, true)!;

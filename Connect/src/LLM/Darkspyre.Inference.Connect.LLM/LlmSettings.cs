@@ -678,7 +678,7 @@ public sealed class LlmSettingsManager : InferenceSettingsManager<LlmSettings, L
     protected override async Task<SetupActionResult> RunCoreAsync(LlmSettings settings, SetupActionDescriptor action,
         IProgress<SetupProgress>? progress, CancellationToken cancellationToken)
     {
-        await using LlmProviderService service = Service(settings);
+        await using LlmProviderService service = Service(settings, cancellationToken);
         Fence(cancellationToken);
         switch (action.Id)
         {
@@ -729,7 +729,7 @@ public sealed class LlmSettingsManager : InferenceSettingsManager<LlmSettings, L
                 return InferenceSettings.Page(query, regions);
             case "model":
                 {
-                    await using LlmProviderService service = Service(settings);
+                    await using LlmProviderService service = Service(settings, cancellationToken);
                     Fence(cancellationToken);
                     LlmProviderCapabilities capabilities = await service.GetCapabilitiesAsync(settings.Identity.Id, cancellationToken).ConfigureAwait(false);
                     Fence(cancellationToken);
@@ -900,8 +900,12 @@ public sealed class LlmSettingsManager : InferenceSettingsManager<LlmSettings, L
         : throw new NotSupportedException($"No LLM client is registered for transport {transport}.");
 
     /// <summary>A provider service whose one connection is these settings' current connection.</summary>
-    private LlmProviderService Service(LlmSettings settings) =>
-        new(new SettingsSource(settings, this), [Client(settings.Transport)], _authenticators!);
+    private LlmProviderService Service(LlmSettings settings, CancellationToken token)
+    {
+        Fence(token);
+        return new(new SettingsSource(settings, this), [Client(settings.Transport)], _authenticators!,
+            () => Fence(token));
+    }
 
     private sealed class SettingsSource(LlmSettings settings, LlmSettingsManager owner) : ILlmConnectionSource
     {

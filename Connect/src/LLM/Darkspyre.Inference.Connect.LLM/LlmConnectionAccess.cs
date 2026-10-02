@@ -13,12 +13,18 @@ public sealed class LlmConnectionAccess : IDisposable, IAsyncDisposable
 
     public LlmConnectionAccess(ILlmConnectionSource connections, IEnumerable<ILlmAuthenticator> authenticators,
         IEnumerable<ILlmClient>? clients = null)
+        : this(connections, authenticators, clients, null)
+    {
+    }
+
+    internal LlmConnectionAccess(ILlmConnectionSource connections, IEnumerable<ILlmAuthenticator> authenticators,
+        IEnumerable<ILlmClient>? clients, Action? admission)
     {
         _connections = connections ?? throw new ArgumentNullException(nameof(connections));
         ArgumentNullException.ThrowIfNull(authenticators);
-        _authenticators = authenticators.ToDictionary(authenticator => authenticator.Transport);
+        _authenticators = authenticators.ToDictionary(authenticator => LlmConstructionAdmission.Read(admission, () => authenticator.Transport));
         _ignoresStoredCredential = (clients ?? []).Where(client => client is IIgnoresStoredCredential)
-            .Select(client => client.Transport).ToHashSet();
+            .Select(client => LlmConstructionAdmission.Read(admission, () => client.Transport)).ToHashSet();
     }
 
     /// <summary>Resolves a connection and saves a refreshed OAuth credential against its expected version.</summary>
