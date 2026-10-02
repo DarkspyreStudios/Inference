@@ -4,8 +4,9 @@ using Darkspyre.Inference.Tensor.Common;
 namespace Darkspyre.Inference.Tensor.LLM.Qwen;
 
 /// <summary>Registers Qwen text generation. Its packs live under the <c>Qwen</c> store key.</summary>
-public sealed class QwenEngineProvider : ITensorEngineProvider
+public sealed class QwenEngineProvider(QwenRuntimeOwner? runtimeOwner = null) : ITensorEngineProvider
 {
+    private readonly QwenRuntimeOwner _runtimeOwner = runtimeOwner ?? QwenRuntimeOwner.GetOrCreate();
     public TensorEngineDefinition Definition { get; } = new(QwenSetup.Definition, "Qwen");
 
     public async Task<IReadOnlyList<TensorModelPackDefinition>> GetOfferedModelsAsync(ITensorModelPackManager packs,
@@ -21,7 +22,7 @@ public sealed class QwenEngineProvider : ITensorEngineProvider
     }
 
     public ITensorModelInstance CreateInstance(ITensorModelPackManager packs, TensorBackendKind backend) =>
-        new QwenLlmInference(packs, backend);
+        new QwenLlmInference(packs, backend, runtimeOwner: _runtimeOwner);
 
     public TensorSettingsManager CreateSettingsManager(ISetupCommitTarget<TensorSetupChanges> target, ITensorModelPackManager packs,
         IReadOnlyList<TensorModelPackDefinition> offeredModels, ITensorModelInstance? instance = null,
@@ -34,6 +35,6 @@ public sealed class QwenEngineProvider : ITensorEngineProvider
             ITensorLlmInference llm when llm.Descriptor.Id == Definition.Setup.Implementation.Id => llm,
             _ => throw new ArgumentException("The instance does not belong to the Qwen implementation.", nameof(instance))
         };
-        return QwenSetup.CreateSettingsManager(target, packs, live, offeredModels, source, reader, backendProbe);
+        return QwenSetup.CreateSettingsManager(target, packs, live, offeredModels, source, reader, backendProbe, _runtimeOwner);
     }
 }

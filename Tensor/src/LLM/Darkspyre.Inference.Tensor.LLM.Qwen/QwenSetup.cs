@@ -14,10 +14,11 @@ public static class QwenSetup
     public static TensorSettingsManager CreateSettingsManager(ISetupCommitTarget<TensorSetupChanges> target,
         ITensorModelPackManager packs, ITensorLlmInference? instance = null,
         IReadOnlyList<TensorModelPackDefinition>? offeredModels = null, ITensorModelSource? source = null, ITensorArtifactReader? reader = null,
-        ITensorBackendProbe? backendProbe = null)
+        ITensorBackendProbe? backendProbe = null, QwenRuntimeOwner? runtimeOwner = null)
     {
         IReadOnlyList<TensorModelPackDefinition> models = offeredModels ?? [TensorLlmModels.Qwen3FourBillionQ4Km];
         foreach (TensorModelPackDefinition model in models) { QwenModelCompatibility.Validate(model); }
-        return new(Definition, target, models, packs, instance, backendProbe ?? new QwenBackendProbe(), new QwenModelResolver(source, reader));
+        QwenRuntimeOwner owner = runtimeOwner ?? QwenRuntimeOwner.GetOrCreate();
+        return new(Definition, target, models, packs, instance, backendProbe ?? new QwenBackendProbe(owner), new QwenModelResolver(source, reader, owner));
     }
 }
