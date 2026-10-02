@@ -93,8 +93,26 @@ public sealed class XaiTtsLifetimeTests
         Assert.All(roots, root => Assert.False(root.IsAlive)); GC.KeepAlive(retained);
     }
 
+    [Fact]
+    public void ActualRefusedForeignWriterSurvivesHeldFailureThenCollects()
+    {
+        WeakReference[] roots = HoldFailedWriter();
+        for (int i = 0; roots.Any(root => root.IsAlive) && i < 30; i++) { GC.Collect(); GC.WaitForPendingFinalizers(); GC.Collect(); Thread.Sleep(10); }
+        Assert.All(roots, root => Assert.False(root.IsAlive));
+    }
+
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private static (ITtsClient, WeakReference[]) ExerciseForeign()
+    private static WeakReference[] HoldFailedWriter()
+    {
+        (ITtsClient client, WeakReference[] roots) = ExerciseForeign(fails: true);
+        GC.Collect(); GC.WaitForPendingFinalizers(); GC.Collect();
+        // OpenWrite MethodInfo is only an execution witness, not an owner retained by the failure.
+        Assert.All(roots.Where((_, index) => index != 4), root => Assert.True(root.IsAlive)); GC.KeepAlive(client);
+        return roots;
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static (ITtsClient, WeakReference[]) ExerciseForeign(bool fails = false)
     {
         var generation = new FixtureGeneration(); Assembly assembly = generation.LoadFromAssemblyPath(typeof(VoiceResourceFixture).Assembly.Location);
         Type type = assembly.GetType(typeof(VoiceResourceFixture).FullName!, true)!;
@@ -102,15 +120,27 @@ public sealed class XaiTtsLifetimeTests
         Assert.Same(generation, AssemblyLoadContext.GetLoadContext(assembly));
         var executed = new List<(string Method, Guid Mvid)>();
         var resource = (IInferenceResourceAccess)Activator.CreateInstance(type, new Action<string, Guid>((name, mvid) => executed.Add((name, mvid))))!;
+        var original = new InvalidOperationException("actual refused writer");
+        if (fails) type.GetProperty(nameof(VoiceResourceFixture.CleanupFailure))!.SetValue(resource, original);
         using var access = new LlmConnectionAccess(new XaiTtsTests.Source(), []);
         using var http = new HttpClient(new XaiTtsTests.Handler(_ => Task.FromResult(Audio())));
         ITtsClient client = XaiTtsTests.Provider(http).Bind(XaiTtsTests.Connection, new(new("selected"), access), resource);
-        TtsResult result = client.SpeakAsync(XaiTtsTests.Request).GetAwaiter().GetResult(); Assert.NotNull(result.Resource);
-        client.Dispose();
+        TtsResult? result = null;
+        Exception? failure = Record.Exception(() => result = client.SpeakAsync(XaiTtsTests.Request).GetAwaiter().GetResult());
+        if (fails)
+        {
+            var refused = Assert.IsType<InferenceResourceOperationException>(failure);
+            Assert.Same(original, refused.InnerException); Assert.Same(refused, Record.Exception(client.Dispose));
+            Assert.Equal(InferenceResourceCommitOutcome.Committed, refused.Failure.CommitOutcome);
+            Assert.Equal(InferenceResourceCommitOutcome.Committed, refused.Failure.SelectionOutcome);
+        }
+        else { Assert.Null(failure); Assert.NotNull(result!.Resource); client.Dispose(); }
         Assert.Contains(executed, call => call.Method == "OpenWriteAsync" && call.Mvid == assembly.ManifestModule.ModuleVersionId);
         Assert.Contains(executed, call => call.Method == "CommitAsync"); Assert.DoesNotContain(executed, call => call.Method == "Dispose");
         MethodInfo method = type.GetMethod(nameof(VoiceResourceFixture.OpenWriteAsync))!;
-        WeakReference[] roots = [new(generation), new(assembly), new(type), new(resource), new(method)];
+        object handle = type.GetProperty(nameof(VoiceResourceFixture.LastHandle))!.GetValue(resource)!;
+        object writer = type.GetProperty(nameof(VoiceResourceFixture.LastWriter))!.GetValue(resource)!;
+        WeakReference[] roots = [new(generation), new(assembly), new(type), new(resource), new(method), new(handle), new(writer)];
         generation.Unload(); return (client, roots);
     }
 

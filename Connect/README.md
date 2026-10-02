@@ -553,6 +553,10 @@ fence, cancel, drain and detach borrowed references; genuine refused cleanup own
 retained without retry. No automatic reconnect/replay occurs. OAuth endpoint acceptance and real
 voice/latency qualification remain open: the guide's latency value 2 is passed through unchanged despite
 the standalone schema's narrower 0/1 declaration. Controlled tests do not qualify live provider access.
+Failed BCL WebSocket upgrades use only collected actual HTTP status: 401/402 retain the shared
+authentication/entitlement status rules, while 400/403 cannot imply hidden body-dependent facts.
+Unobserved status remains a safe transport failure. Raw bodies, headers and transport diagnostics
+are not public errors; original transport evidence remains internal. Cancellation is not reclassified.
 
 `TtsProviderService` supports synchronous and asynchronous disposal. Retirement fences new facade
 calls, drains admitted synchronous setup/binding callbacks, then releases borrowed provider references.

@@ -35,7 +35,7 @@ internal sealed class XaiTtsSession : ITtsStreamingSession
         _events = Channel.CreateBounded<(TtsStreamEvent, long)>(new BoundedChannelOptions(limits.MaximumBufferedEvents)
         { FullMode = BoundedChannelFullMode.Wait, SingleReader = true, SingleWriter = true });
     }
-    internal static async Task<XaiTtsSession> OpenAsync(Func<Uri, HttpRequestMessage, CancellationToken, Task<WebSocket>> connect,
+    internal static async Task<XaiTtsSession> OpenAsync(Func<Uri, HttpRequestMessage, Action<Exception>, CancellationToken, Task<WebSocket>> connect,
         LlmConnection snapshot, TtsConnection connection, TtsStreamOptions options, InferenceStreamLimits limits,
         IInferenceResourceAccess? resources, Action openingFence, Action<Exception> recordOpeningCleanup, CancellationToken token)
     {
@@ -48,7 +48,7 @@ internal sealed class XaiTtsSession : ITtsStreamingSession
         WebSocket? socket = null; XaiTtsSession? session = null;
         try
         {
-            socket = await connect(XaiTtsProtocol.StreamUri(connection.Endpoint, options), headers, token).ConfigureAwait(false);
+            socket = await connect(XaiTtsProtocol.StreamUri(connection.Endpoint, options), headers, recordOpeningCleanup, token).ConfigureAwait(false);
             openingFence(); if (socket is null) throw XaiTtsProtocol.Protocol();
             session = new(socket, limits, resources, scope);
             if (options.Xai?.Replace is { } replacements) await session.UpdateReplacementsAsync(replacements, token).ConfigureAwait(false);

@@ -17,9 +17,9 @@ namespace Darkspyre.Inference.Connect.TTS;
 public sealed class XaiTtsProvider : ITtsProvider
 {
     private readonly HttpClient _http;
-    private readonly Func<Uri, HttpRequestMessage, CancellationToken, Task<WebSocket>> _connect;
+    private readonly Func<Uri, HttpRequestMessage, Action<Exception>, CancellationToken, Task<WebSocket>> _connect;
     public XaiTtsProvider(HttpClient httpClient) { _http = httpClient ?? throw new ArgumentNullException(nameof(httpClient)); _connect = ConnectAsync; }
-    internal XaiTtsProvider(HttpClient httpClient, Func<Uri, HttpRequestMessage, CancellationToken, Task<WebSocket>> connect)
+    internal XaiTtsProvider(HttpClient httpClient, Func<Uri, HttpRequestMessage, Action<Exception>, CancellationToken, Task<WebSocket>> connect)
     { _http = httpClient; _connect = connect; }
     public TtsTransport Transport => TtsTransport.XaiTts;
     public InferenceSetupDefinition SetupDefinition { get; } = new(new("darkspyre.connect.xai.tts", "xAI speech", InferenceImplementationKind.Connect, InferenceTask.SpeechSynthesis), "Synthesize speech through the selected xAI OAuth connection.");
@@ -28,18 +28,29 @@ public sealed class XaiTtsProvider : ITtsProvider
         ArgumentNullException.ThrowIfNull(connection); TtsProviderService.ValidateBinding(connection, xai);
         return new Client(this, connection, xai!, resources);
     }
-    private async Task<WebSocket> ConnectAsync(Uri uri, HttpRequestMessage headers, CancellationToken token)
+    private async Task<WebSocket> ConnectAsync(Uri uri, HttpRequestMessage headers, Action<Exception> recordCleanup, CancellationToken token)
     {
         var socket = new ClientWebSocket();
+        bool dispatched = false;
         try
         {
             foreach (var header in headers.Headers) socket.Options.SetRequestHeader(header.Key, string.Join(", ", header.Value));
+            socket.Options.CollectHttpResponseDetails = true;
+            dispatched = true;
             await socket.ConnectAsync(uri, _http, token).ConfigureAwait(false); return socket;
         }
         catch (Exception original)
         {
-            try { socket.Dispose(); } catch (Exception cleanup) { throw new AggregateException(original, cleanup); }
-            throw;
+            Exception failure = dispatched && original is not OperationCanceledException
+                ? XaiErrorClassifier.SpeechUpgradeFailure(socket.HttpStatusCode, original) : original;
+            try { socket.Dispose(); }
+            catch (Exception error)
+            {
+                Exception cleanup = LlmResourcePreparation.AsCleanupFailure(error, refusedOwner: socket);
+                recordCleanup(cleanup);
+                throw new AggregateException(failure, cleanup);
+            }
+            ExceptionDispatchInfo.Capture(failure).Throw(); throw;
         }
     }
 

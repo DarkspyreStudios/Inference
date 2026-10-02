@@ -209,8 +209,9 @@ public sealed class XaiTtsStreamingTests
     internal static ITtsProvider Provider(HttpClient http, Func<Uri, HttpRequestMessage, CancellationToken, Task<WebSocket>> connect)
     {
         Type type = typeof(ITtsProvider).Assembly.GetType("Darkspyre.Inference.Connect.TTS.XaiTtsProvider", throwOnError: true)!;
-        ConstructorInfo constructor = type.GetConstructor(BindingFlags.Instance | BindingFlags.NonPublic, null, [typeof(HttpClient), connect.GetType()], null)!;
-        return Assert.IsAssignableFrom<ITtsProvider>(constructor.Invoke([http, connect]));
+        Func<Uri, HttpRequestMessage, Action<Exception>, CancellationToken, Task<WebSocket>> opening = (uri, headers, _, token) => connect(uri, headers, token);
+        ConstructorInfo constructor = type.GetConstructor(BindingFlags.Instance | BindingFlags.NonPublic, null, [typeof(HttpClient), opening.GetType()], null)!;
+        return Assert.IsAssignableFrom<ITtsProvider>(constructor.Invoke([http, opening]));
     }
     private static string Type(string value) { using JsonDocument document = JsonDocument.Parse(value); return document.RootElement.GetProperty("type").GetString()!; }
 
