@@ -333,6 +333,9 @@ shutdown counts/state/flags and an explicitly nullable actual candidate ID. Miss
 they do not become zero, false, Completed or a default timestamp. Plan candidates remain optional.
 The two runtime-state enums retain their numeric wire values. Their owned JSON readers and writers
 reject undefined values, strings, nulls and numbers outside the Int32 range.
+The finite converters belong to `TensorJson` options, not attributes on public enum declarations.
+Caller-owned generated DTO metadata can compose those actual converter instances from the owned
+enum metadata options. This composition leaves the established `TensorBackendKind` data policy unchanged.
 
 `TensorRuntimeShutdownResult` snapshots its ordered safe diagnostics and carries the actual
 observation time, operation ID, outstanding owner leases and possible surviving native state.

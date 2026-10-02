@@ -190,6 +190,9 @@ operation exceptions preserve the original inner exception; cancellation remains
 `InferenceJson` exports typed metadata named after each resource data contract, including the scoped
 selection version, commit result and failure facts. Required scope, revision and membership fields
 cannot disappear into defaults during JSON import. Its metadata options also contain fixed internal
+numeric guards for `InferenceMediaSourceKind`, `InferenceResourceOperationPhase` and
+`InferenceResourceCommitOutcome`. Their exact roots and nested owned graphs reject undefined values
+and preserve every defined numeric value. Existing enum policies remain unchanged. The options contain
 refusal converters for the three resource interfaces: null is allowed, but non-null values refuse
 before any collaborator callback. A closed caller-owned JSON context can compose those exact
 converters from `InferenceJson.InferenceResourceReference.Options.Converters` by the known interface

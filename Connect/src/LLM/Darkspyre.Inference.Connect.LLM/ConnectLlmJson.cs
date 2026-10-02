@@ -145,6 +145,7 @@ public static class ConnectLlmJson
         options.Converters.Add(new DocumentRagPipelineJsonConverter());
         options.Converters.Add(new CallerEnumConverter<LlmAgentCallerServiceKind>());
         options.Converters.Add(new CallerEnumConverter<LlmAgentPermissionChoiceKind>());
+        options.Converters.Add(new CallerEnumConverter<LlmAgentRuntimePolicyKind>());
         options.Converters.Add(new CallerEnumConverter<LlmAzureApiMode>());
         options.Converters.Add(new CallerEnumConverter<LlmAzureAuthenticationMode>());
         options.Converters.Add(new CallerEnumConverter<LlmAzureCloud>());

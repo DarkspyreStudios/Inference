@@ -1467,6 +1467,8 @@ Runtime services have no public metadata getters. Their internal owned codecs re
 read/write without invoking callbacks or diagnostic methods. Start/Resume are not data-codec roots.
 Callback RuntimePolicy uses fixed `host-controlled` and `provider-configured` variants. Scope data
 freezes caller-selected policy roots and does not grant filesystem or resource access.
+The exact `LlmAgentRuntimePolicyKind` root and nested capability data reject undefined numeric values
+and preserve both defined numeric values.
 
 `LlmAgentClientToolDefinition` is a closed function/shell data union. The existing
 `LlmAgentToolDefinition` retains its schema, strictness, deferred-loading and sequential-execution
