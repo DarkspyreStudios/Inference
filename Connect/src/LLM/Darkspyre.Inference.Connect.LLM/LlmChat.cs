@@ -16,10 +16,10 @@ public sealed record LlmChatMessage(string Role, string Content)
     public IReadOnlyList<LlmMessageAttachment> Attachments { get; init; } = [];
 
     /// <summary>Tool calls previously requested by the assistant.</summary>
-    public IReadOnlyList<LlmToolCall> ToolCalls { get; init; } = [];
+    public IReadOnlyList<LlmClientToolCall> ToolCalls { get; init; } = [];
 
     /// <summary>Host-executed results for previous tool calls.</summary>
-    public IReadOnlyList<LlmToolResult> ToolResults { get; init; } = [];
+    public IReadOnlyList<LlmClientToolResult> ToolResults { get; init; } = [];
 }
 
 /// <summary>Provider-neutral generation request. The model is selected per request.</summary>
@@ -63,7 +63,7 @@ public sealed record LlmChatRequest
 
     public LlmStructuredOutputRequest? StructuredOutput { get; init; }
 
-    public IReadOnlyList<LlmToolDefinition> Tools { get; init; } = [];
+    public IReadOnlyList<LlmClientToolDefinition> Tools { get; init; } = [];
 
     public IReadOnlyList<LlmHostedTool> HostedTools { get; init; } = [];
 
@@ -120,7 +120,7 @@ public sealed record LlmChatResult
 
     public string? ProviderResponseId { get; init; }
 
-    public IReadOnlyList<LlmToolCall> ToolCalls { get; init; } = [];
+    public IReadOnlyList<LlmClientToolCall> ToolCalls { get; init; } = [];
 
     public IReadOnlyList<LlmCitation> Citations { get; init; } = [];
 

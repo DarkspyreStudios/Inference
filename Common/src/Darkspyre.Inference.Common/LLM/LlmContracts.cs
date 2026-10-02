@@ -11,9 +11,9 @@ public sealed record LlmMessage(string Role, string Content)
 
     public IReadOnlyList<LlmMessageAttachment> Attachments { get; init; } = [];
 
-    public IReadOnlyList<LlmToolCall> ToolCalls { get; init; } = [];
+    public IReadOnlyList<LlmClientToolCall> ToolCalls { get; init; } = [];
 
-    public IReadOnlyList<LlmToolResult> ToolResults { get; init; } = [];
+    public IReadOnlyList<LlmClientToolResult> ToolResults { get; init; } = [];
 }
 
 /// <summary>
@@ -182,7 +182,7 @@ public sealed record LlmInferenceRequest
 
     public LlmStructuredOutputRequest? StructuredOutput { get; init; }
 
-    public IReadOnlyList<LlmToolDefinition> Tools { get; init; } = [];
+    public IReadOnlyList<LlmClientToolDefinition> Tools { get; init; } = [];
 
     public IReadOnlyList<LlmHostedTool> HostedTools { get; init; } = [];
 
@@ -265,7 +265,7 @@ public sealed record LlmInferenceResult
 
     public LlmUsage? Usage { get; init; }
 
-    public IReadOnlyList<LlmToolCall> ToolCalls { get; init; } = [];
+    public IReadOnlyList<LlmClientToolCall> ToolCalls { get; init; } = [];
 
     public IReadOnlyList<LlmCitation> Citations { get; init; } = [];
 

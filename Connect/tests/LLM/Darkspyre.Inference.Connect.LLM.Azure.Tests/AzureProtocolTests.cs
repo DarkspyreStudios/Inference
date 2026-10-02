@@ -185,7 +185,7 @@ public sealed class AzureProtocolTests
         LlmChatRequest next = Request with
         {
             Messages = [new("assistant", first.Text) { ContinuationState = first.ContinuationState }, new("user", "next")],
-            Tools = [new() { Name = "lookup", InputSchema = JsonSerializer.SerializeToElement(new { type = "object" }) }]
+            Tools = [new LlmToolDefinition() { Name = "lookup", InputSchema = JsonSerializer.SerializeToElement(new { type = "object" }) }]
         };
         await Complete(client, connection, next);
         Assert.Contains(responses ? "encrypted_content" : "reasoning_content", handler.Body!.ToJsonString(), StringComparison.Ordinal);

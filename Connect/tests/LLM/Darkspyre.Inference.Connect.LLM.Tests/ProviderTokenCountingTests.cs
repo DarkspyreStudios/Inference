@@ -37,7 +37,7 @@ public sealed class ProviderTokenCountingTests
             TopK = 10,
             StopSequences = ["END"],
             ReasoningLevel = LlmReasoningLevel.Medium,
-            Tools = [Request(model).Tools[0] with { Strict = true }]
+            Tools = [Assert.IsType<LlmToolDefinition>(Request(model).Tools[0]) with { Strict = true }]
         };
         string original = JsonSerializer.Serialize(request);
         LlmProviderInputTokenCount count = await client.CountInputTokensAsync(connection, request);
@@ -238,7 +238,7 @@ public sealed class ProviderTokenCountingTests
         MaxOutputTokens = 100,
         Messages = [new("system", "Be precise."), new("user", "Inspect this image.")
         { Attachments = [new LlmAttachment { Kind = LlmBinaryKind.Image, FileName = "picture.png", MediaType = "image/png", Data = new byte[] { 1, 2, 3 } }] }],
-        Tools = [new() { Name = "run", InputSchema = JsonElement.Parse(Schema) }],
+        Tools = [new LlmToolDefinition() { Name = "run", InputSchema = JsonElement.Parse(Schema) }],
         ToolChoice = new() { Mode = LlmToolChoiceMode.Auto },
         StructuredOutput = new() { Name = "result", Schema = JsonElement.Parse(Schema) }
     };

@@ -1,3 +1,5 @@
+using System.Diagnostics.CodeAnalysis;
+
 namespace Darkspyre.Inference.Connect.LLM;
 
 public enum LlmOperationSupport
@@ -63,18 +65,31 @@ public enum LlmAgentResourceChange
 
 /// <summary>A resource was added, changed or ended. Carried on the session feed, outside any turn.</summary>
 public sealed record LlmAgentResourceEvent(string ThreadId, LlmAgentResourceChange Change, LlmAgentResource Resource)
-    : LlmAgentEvent(ThreadId, string.Empty);
+    : LlmAgentEvent(ThreadId, null);
 
 /// <summary>New output is readable up to LatestCursor. A hint, not the data.</summary>
 public sealed record LlmAgentResourceOutputEvent(string ThreadId, string ResourceId, string LatestCursor)
-    : LlmAgentEvent(ThreadId, string.Empty);
+    : LlmAgentEvent(ThreadId, null);
+
+/// <summary>Coalescible hint for committed selected-resource membership, not a per-resource feed.</summary>
+public sealed record LlmAgentResourceSelectionChangedEvent(string ThreadId, string? TurnId,
+    [property: System.Text.Json.Serialization.JsonRequired] long ResourceSelectionRevision) : LlmAgentEvent(HostedEventFacts.Identity(ThreadId), TurnId is null ? null : HostedEventFacts.Identity(TurnId))
+{
+    [System.Text.Json.Serialization.JsonRequired]
+    public override string ThreadId { get => base.ThreadId; init => base.ThreadId = HostedEventFacts.Identity(value); }
+    public override string? TurnId { get => base.TurnId; init => base.TurnId = value is null ? null : HostedEventFacts.Identity(value); }
+}
 
 /// <summary>
 /// The runtime started a turn without host input. ResourceId names the resource whose end or report
 /// immediately preceded it, or is null when the runtime gives no such signal.
 /// </summary>
 public sealed record LlmAgentProviderTurnStartedEvent(string ThreadId, string TurnId, string? ResourceId)
-    : LlmAgentEvent(ThreadId, TurnId);
+    : LlmAgentEvent(ThreadId, HostedEventFacts.Identity(TurnId))
+{
+    [AllowNull]
+    public override string TurnId { get => base.TurnId!; init => base.TurnId = HostedEventFacts.Identity(value); }
+}
 
 public enum LlmAgentResourceOutputStatus
 {

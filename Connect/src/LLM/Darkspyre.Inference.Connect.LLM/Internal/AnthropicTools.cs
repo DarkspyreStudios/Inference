@@ -24,7 +24,7 @@ internal sealed class AnthropicTools
         if (options.EnumerateObject().Any(field => field.Name is not ("server_tools" or "client_tools")))
             throw Invalid();
 
-        var allNames = new HashSet<string>(request.Tools.Select(tool => tool.Name), StringComparer.Ordinal);
+        var allNames = new HashSet<string>(ClientTools.Functions(request.Tools).Select(tool => tool.Name), StringComparer.Ordinal);
         if (options.TryGetProperty("server_tools", out JsonElement native))
         {
             if (native.ValueKind != JsonValueKind.Array) throw Invalid();
@@ -49,7 +49,7 @@ internal sealed class AnthropicTools
             RequireObject(clients);
             foreach (JsonProperty field in clients.EnumerateObject())
             {
-                LlmToolDefinition? definition = request.Tools.FirstOrDefault(tool => tool.Name == field.Name);
+                LlmToolDefinition? definition = ClientTools.Functions(request.Tools).FirstOrDefault(tool => tool.Name == field.Name);
                 if (definition is null) throw new ArgumentException("Claude client metadata must name a typed request tool.");
                 RequireObject(field.Value);
                 if (field.Value.EnumerateObject().Any(property => property.Name is not ("allowed_callers" or "defer_loading" or "input_examples")))

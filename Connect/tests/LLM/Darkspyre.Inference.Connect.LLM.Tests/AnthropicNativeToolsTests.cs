@@ -85,7 +85,7 @@ public sealed class AnthropicNativeToolsTests
         Assert.True(JsonNode.DeepEquals(payload["tools"], JsonNode.Parse(handler.Bodies[1])!["tools"]));
         Assert.Equal(Mixed, connection.ProviderOptions[AnthropicTools.OptionName].GetRawText());
         Assert.Empty(request.ProviderOptions);
-        Assert.Equal(Schema, request.Tools[0].InputSchema.GetRawText());
+        Assert.Equal(Schema, Assert.IsType<LlmToolDefinition>(request.Tools[0]).InputSchema.GetRawText());
     }
 
     [Theory]

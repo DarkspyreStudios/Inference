@@ -29,7 +29,7 @@ internal static class CodexProtocolProbe
         };
         LlmChatResult result = await llms.CompleteAsync(connectionId, request, cancellationToken);
         if (result.Status != LlmCompletionStatus.RequiresAction || result.ToolCalls.Count != 1
-            || result.ToolCalls[0].Name != tool.Name || result.ContinuationState is null)
+            || result.ToolCalls[0] is not LlmToolCall { Name: var name } || name != tool.Name || result.ContinuationState is null)
         {
             throw new InvalidOperationException("Protocol probe expected one complete tool call with retained state.");
         }
@@ -37,7 +37,7 @@ internal static class CodexProtocolProbe
         messages.Add(new("assistant", result.Text) { ToolCalls = result.ToolCalls, ContinuationState = result.ContinuationState });
         messages.Add(new("user", "")
         {
-            ToolResults = [new(result.ToolCalls[0].Id, new LlmToolOutput
+            ToolResults = [new LlmToolResult(result.ToolCalls[0].Id, new LlmToolOutput
             {
                 Parts =
                 [

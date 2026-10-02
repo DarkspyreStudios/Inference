@@ -19,13 +19,13 @@ internal static class TranscriptText
         {
             text.Append('[').Append(message.Role.Trim().ToUpperInvariant()).AppendLine("]");
             text.AppendLine(message.Content);
-            foreach (LlmToolCall call in message.ToolCalls)
+            foreach (LlmToolCall call in ClientTools.Functions(message.ToolCalls))
             {
                 text.Append("[TOOL CALL id=").Append(call.Id).Append(" name=").Append(call.Name).AppendLine("]");
                 text.AppendLine(call.ArgumentsJson);
             }
             var omittedNames = new List<string>();
-            foreach (LlmToolResult result in message.ToolResults)
+            foreach (LlmToolResult result in ClientTools.Functions(message.ToolResults))
             {
                 ProjectedToolOutput projected = ToolOutputProjector.Project(result.Output, Support, Support);
                 text.Append("[TOOL RESULT id=").Append(result.ToolCallId)

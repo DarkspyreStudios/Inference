@@ -89,7 +89,7 @@ internal static class ManagedAgentContext
         }
         var ids = new HashSet<string>(StringComparer.Ordinal);
         var calls = new HashSet<string>(StringComparer.Ordinal);
-        var pending = new HashSet<string>(StringComparer.Ordinal);
+        var pending = new Dictionary<string, LlmClientToolCall>(StringComparer.Ordinal);
         var entries = new List<LlmAgentContextEntry>(context.Entries.Count);
         foreach (var entry in context.Entries)
         {
@@ -119,28 +119,36 @@ internal static class ManagedAgentContext
             foreach (var call in message.ToolCalls)
             {
                 ArgumentNullException.ThrowIfNull(call);
-                if (string.IsNullOrWhiteSpace(call.Id) || string.IsNullOrWhiteSpace(call.Name) || !calls.Add(call.Id))
+                if (string.IsNullOrWhiteSpace(call.Id) || !calls.Add(call.Id))
                 {
                     throw new ArgumentException("Context tool-call IDs must be unique and names nonempty.");
                 }
-                using var arguments = JsonDocument.Parse(call.ArgumentsJson);
-                if (arguments.RootElement.ValueKind != JsonValueKind.Object)
+                if (call is LlmToolCall function)
                 {
-                    throw new ArgumentException("Context tool arguments must be JSON objects.");
+                    ArgumentException.ThrowIfNullOrWhiteSpace(function.Name);
+                    using var arguments = JsonDocument.Parse(function.ArgumentsJson);
+                    if (arguments.RootElement.ValueKind != JsonValueKind.Object)
+                        throw new ArgumentException("Context tool arguments must be JSON objects.");
                 }
-                pending.Add(call.Id);
+                else if (call is not LlmShellCall) throw new NotSupportedException("Unknown context tool call.");
+                pending.Add(call.Id, call);
             }
             foreach (var result in message.ToolResults)
             {
                 ArgumentNullException.ThrowIfNull(result);
-                ArgumentNullException.ThrowIfNull(result.Output);
-                ArgumentNullException.ThrowIfNull(result.Output.Parts);
-                foreach (var part in result.Output.Parts)
-                    ArgumentNullException.ThrowIfNull(part);
-                if (!pending.Remove(result.ToolCallId))
+                if (!pending.Remove(result.ToolCallId, out LlmClientToolCall? call)
+                    || (call is LlmToolCall && result is not LlmToolResult)
+                    || (call is LlmShellCall && result is not LlmShellCallResult))
                 {
-                    throw new ArgumentException("Each tool result must match exactly one preceding call.");
+                    throw new ArgumentException("Each tool result must match exactly one preceding call of the same kind.");
                 }
+                if (result is LlmToolResult function)
+                {
+                    ArgumentNullException.ThrowIfNull(function.Output);
+                    ArgumentNullException.ThrowIfNull(function.Output.Parts);
+                    foreach (var part in function.Output.Parts) ArgumentNullException.ThrowIfNull(part);
+                }
+                else if (result is not LlmShellCallResult) throw new NotSupportedException("Unknown context tool result.");
             }
             var omissions = new HashSet<(string?, int)>();
             foreach (var omitted in message.OmittedAttachments)
@@ -148,7 +156,8 @@ internal static class ManagedAgentContext
                 ArgumentNullException.ThrowIfNull(omitted);
                 if (!Enum.IsDefined(omitted.Kind) || string.IsNullOrWhiteSpace(omitted.FileName)
                     || omitted.Index < 0 || !omissions.Add((omitted.ToolCallId, omitted.Index))
-                    || (omitted.ToolCallId is not null && !message.ToolResults.Any(result => result.ToolCallId == omitted.ToolCallId)))
+                    || (omitted.ToolCallId is not null && !message.ToolResults.Any(result => result is LlmToolResult
+                        && result.ToolCallId == omitted.ToolCallId)))
                 {
                     throw new ArgumentException("Invalid omitted-attachment descriptor.");
                 }
@@ -156,7 +165,7 @@ internal static class ManagedAgentContext
             foreach (var group in message.OmittedAttachments.GroupBy(omitted => omitted.ToolCallId))
             {
                 int retained = group.Key is null ? message.Attachments.Count
-                    : message.ToolResults.Single(result => result.ToolCallId == group.Key).Output.Parts.Count;
+                    : ((LlmToolResult)message.ToolResults.Single(result => result.ToolCallId == group.Key)).Output.Parts.Count;
                 long conceptualCount = (long)retained + group.Count();
                 if (group.Any(omitted => omitted.Index >= conceptualCount))
                     throw new ArgumentException("Omitted-attachment positions must refer to the original ordered content.");
@@ -229,14 +238,19 @@ internal static class ManagedAgentContext
             return output with { Parts = Array.AsReadOnly(parts.ToArray()), StructuredContent = output.StructuredContent?.Clone() };
         }
         var attachments = CopyAttachments(message.Attachments, null);
-        var results = message.ToolResults.Select(result => result with
+        var results = message.ToolResults.Select(result => result switch
         {
-            Output = includeAttachmentData ? CopyOutput(result.Output) : StripOutput(result.Output, result.ToolCallId)
+            LlmToolResult function => (LlmClientToolResult)(function with
+            {
+                Output = includeAttachmentData ? CopyOutput(function.Output) : StripOutput(function.Output, function.ToolCallId)
+            }),
+            LlmShellCallResult shell => ClientTools.Snapshot(shell),
+            _ => throw new NotSupportedException("Unknown context tool result.")
         }).ToArray();
         return message with
         {
             Attachments = attachments,
-            ToolCalls = Array.AsReadOnly(message.ToolCalls.ToArray()),
+            ToolCalls = Array.AsReadOnly(message.ToolCalls.Select(ClientTools.Snapshot).ToArray()),
             ToolResults = Array.AsReadOnly(results),
             OmittedAttachments = Array.AsReadOnly(omitted.ToArray())
         };

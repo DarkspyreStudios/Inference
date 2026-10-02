@@ -46,14 +46,14 @@ public sealed class GeminiArgumentStreamingTests
         Assert.Empty(events.OfType<LlmToolCallArgumentsDeltaEvent>());
         LlmChatResult result = Assert.Single(events.OfType<LlmChatCompletionEvent>()).Result;
         Assert.Equal(LlmCompletionStatus.RequiresAction, result.Status);
-        JsonNode args = JsonNode.Parse(result.ToolCalls[0].ArgumentsJson)!;
+        JsonNode args = JsonNode.Parse(Assert.IsType<LlmToolCall>(result.ToolCalls[0]).ArgumentsJson)!;
         Assert.Equal("hello", (string?)args["command"]);
         Assert.Equal(12, (int?)args["nested"]!["a b"]![0]);
         Assert.True((bool?)args["enabled"]);
         Assert.Null(args["nothing"]);
         Assert.Null(args["names"]![0]);
         Assert.Equal("second", (string?)args["names"]![1]);
-        Assert.Equal("world", (string?)JsonNode.Parse(result.ToolCalls[1].ArgumentsJson)!["command"]);
+        Assert.Equal("world", (string?)JsonNode.Parse(Assert.IsType<LlmToolCall>(result.ToolCalls[1]).ArgumentsJson)!["command"]);
         JsonArray retained = JsonNode.Parse(result.ContinuationState!.Payload)!.AsArray();
         Assert.Equal("signature", (string?)retained[0]!["thoughtSignature"]);
         Assert.Equal("between", (string?)retained[1]!["text"]);
@@ -68,7 +68,7 @@ public sealed class GeminiArgumentStreamingTests
             Tools = [Tool],
             Messages =
             [new("assistant", result.Text) { ToolCalls = result.ToolCalls, ContinuationState = result.ContinuationState },
-                new("tool", "") { ToolResults = [new("second", LlmToolOutput.FromText("two")), new("first", LlmToolOutput.FromText("one"))] }]
+                new("tool", "") { ToolResults = [new LlmToolResult("second", LlmToolOutput.FromText("two")), new LlmToolResult("first", LlmToolOutput.FromText("one"))] }]
         }));
         JsonNode contents = JsonNode.Parse(handler.Bodies[1])!["contents"]!;
         Assert.Equal("signature", (string?)contents[0]!["parts"]![0]!["thoughtSignature"]);

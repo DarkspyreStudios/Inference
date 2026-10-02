@@ -143,7 +143,7 @@ internal sealed class AppleFoundationModelsClient(HttpClient http, IAppleProcess
                 instructions = $"{instructions}\nReturn only a JSON value matching this schema:\n{structured.Schema.GetRawText()}";
             }
         }
-        LlmToolDefinition[] active = request.ToolChoice?.Mode == LlmToolChoiceMode.None ? [] : request.Tools.ToArray();
+        LlmToolDefinition[] active = request.ToolChoice?.Mode == LlmToolChoiceMode.None ? [] : ClientTools.Functions(request.Tools).ToArray();
         AppleTool[] tools = active.Select(static tool =>
         {
             AppleSchemaNode schema = AppleSchema.Convert(tool.InputSchema);
@@ -163,14 +163,14 @@ internal sealed class AppleFoundationModelsClient(HttpClient http, IAppleProcess
             if (pending.Count > 0 && message.ToolResults.Count == 0)
                 throw new ArgumentException("Every pending tool call requires a result before another message.");
             var calls = new List<AppleCall>();
-            foreach (LlmToolCall call in message.ToolCalls)
+            foreach (LlmToolCall call in ClientTools.Functions(message.ToolCalls))
             {
                 if (message.Role != "assistant" || !names.TryAdd(call.Id, call.Name)) throw new ArgumentException("Tool calls require unique IDs on assistant messages.");
                 pending.Add(call.Id);
                 calls.Add(new(call.Id, call.Name, call.ArgumentsJson));
             }
             var results = new List<AppleResult>();
-            foreach (LlmToolResult result in message.ToolResults)
+            foreach (LlmToolResult result in ClientTools.Functions(message.ToolResults))
             {
                 if (message.Role != "user" || !pending.Remove(result.ToolCallId)) throw new ArgumentException("A tool result must match one pending call exactly once.");
                 results.Add(new(result.ToolCallId, names[result.ToolCallId], ProjectToolOutput(connection, request.ModelId, result.Output).Text));

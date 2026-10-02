@@ -61,7 +61,7 @@ public sealed class AnthropicProgrammaticSchemaTests
     {
         var request = Request(schema);
         Assert.Throws<NotSupportedException>(() => AnthropicTools.Resolve(Connection(false), request));
-        Assert.Equal(schema, request.Tools[0].InputSchema.GetRawText());
+        Assert.Equal(schema, Assert.IsType<LlmToolDefinition>(request.Tools[0]).InputSchema.GetRawText());
         Assert.Equal(Programmatic, request.ProviderOptions[AnthropicTools.OptionName].GetRawText());
     }
 
@@ -102,7 +102,7 @@ public sealed class AnthropicProgrammaticSchemaTests
     {
         var request = Request(schema);
         AnthropicTools.Resolve(Connection(false), request);
-        Assert.Equal(schema, request.Tools[0].InputSchema.GetRawText());
+        Assert.Equal(schema, Assert.IsType<LlmToolDefinition>(request.Tools[0]).InputSchema.GetRawText());
         Assert.Equal(Programmatic, request.ProviderOptions[AnthropicTools.OptionName].GetRawText());
     }
 
@@ -201,15 +201,15 @@ public sealed class AnthropicProgrammaticSchemaTests
         using var http = new HttpClient(handler);
         var client = new AnthropicMessagesLlmClient(http);
         var connection = Connection(operation == 0);
-        var request = Request(acyclic) with { Tools = [Request(acyclic).Tools[0], Request(Recursive).Tools[0] with { Name = "direct" }] };
+        var request = Request(acyclic) with { Tools = [Request(acyclic).Tools[0], Assert.IsType<LlmToolDefinition>(Request(Recursive).Tools[0]) with { Name = "direct" }] };
         await Invoke(client, connection, request with { ProviderOptions = new Dictionary<string, JsonElement>() }, operation);
         await Invoke(client, connection, request, operation);
         var baseline = JsonElement.Parse(handler.Bodies[0]).GetProperty("tools");
         var programmatic = JsonElement.Parse(handler.Bodies[1]).GetProperty("tools");
         for (int index = 0; index < 2; index++)
             Assert.Equal(baseline[index].GetProperty("input_schema").GetRawText(), programmatic[index].GetProperty("input_schema").GetRawText());
-        Assert.Equal(acyclic, request.Tools[0].InputSchema.GetRawText());
-        Assert.Equal(Recursive, request.Tools[1].InputSchema.GetRawText());
+        Assert.Equal(acyclic, Assert.IsType<LlmToolDefinition>(request.Tools[0]).InputSchema.GetRawText());
+        Assert.Equal(Recursive, Assert.IsType<LlmToolDefinition>(request.Tools[1]).InputSchema.GetRawText());
         Assert.Equal(Programmatic, request.ProviderOptions[AnthropicTools.OptionName].GetRawText());
     }
 
@@ -250,7 +250,7 @@ public sealed class AnthropicProgrammaticSchemaTests
         await Invoke(client, connection, request, operation);
         Assert.Equal(JsonElement.Parse(handler.Bodies[0]).GetProperty("tools")[0].GetProperty("input_schema").GetRawText(),
             JsonElement.Parse(handler.Bodies[1]).GetProperty("tools")[0].GetProperty("input_schema").GetRawText());
-        Assert.Equal(schema, request.Tools[0].InputSchema.GetRawText());
+        Assert.Equal(schema, Assert.IsType<LlmToolDefinition>(request.Tools[0]).InputSchema.GetRawText());
     }
 
     private static LlmConnection Connection(bool streaming) => new()
@@ -267,7 +267,7 @@ public sealed class AnthropicProgrammaticSchemaTests
         ModelId = "claude-sonnet-4-6",
         ReasoningLevel = LlmReasoningLevel.None,
         Messages = [new("user", "hello")],
-        Tools = [new() { Name = "run", InputSchema = JsonElement.Parse(schema) }],
+        Tools = [new LlmToolDefinition() { Name = "run", InputSchema = JsonElement.Parse(schema) }],
         ProviderOptions = new Dictionary<string, JsonElement>
         { [AnthropicTools.OptionName] = JsonElement.Parse(Programmatic) }
     };

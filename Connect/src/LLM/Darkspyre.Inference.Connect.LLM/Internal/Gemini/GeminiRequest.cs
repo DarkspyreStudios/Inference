@@ -44,7 +44,7 @@ internal static class GeminiRequest
             {
                 parts = new JsonArray();
                 if (message.Content.Length > 0) { parts.Add(Text(message.Content)); }
-        foreach (LlmAttachment attachment in message.Attachments.Select(LlmAttachments.RequireBinary))
+                foreach (LlmAttachment attachment in message.Attachments.Select(LlmAttachments.RequireBinary))
                 {
                     string mime = LlmAttachments.ResolveMediaType(attachment);
                     parts.Add(new JsonObject
@@ -54,7 +54,7 @@ internal static class GeminiRequest
                     });
                 }
                 bool first = true;
-                foreach (LlmToolCall call in message.ToolCalls)
+                foreach (LlmToolCall call in ClientTools.Functions(message.ToolCalls))
                 {
                     if (request.UnboundContinuationState != LlmUnboundContinuationState.Omit)
                     { throw new ArgumentException("Gemini tool-call history requires its original continuation state."); }
@@ -71,7 +71,7 @@ internal static class GeminiRequest
             // Without native call IDs, Gemini associates repeated names by their original order.
             // Restore that order from Connect IDs rather than trusting host result arrival order.
             string[] callOrder = calls.Keys.ToArray();
-            foreach (LlmToolResult result in message.ToolResults.OrderBy(result => Array.IndexOf(callOrder, result.ToolCallId)))
+            foreach (LlmToolResult result in ClientTools.Functions(message.ToolResults).OrderBy(result => Array.IndexOf(callOrder, result.ToolCallId)))
             {
                 if (!calls.TryGetValue(result.ToolCallId, out var call) || !pending.Remove(result.ToolCallId))
                 { throw new ArgumentException("A Gemini tool result must match one unresolved call in the retained history."); }
@@ -146,7 +146,7 @@ internal static class GeminiRequest
         if (request.Tools.Count > 0)
         {
             var declarations = new JsonArray();
-            foreach (LlmToolDefinition tool in request.Tools)
+            foreach (LlmToolDefinition tool in ClientTools.Functions(request.Tools))
             {
                 var definition = new JsonObject
                 { ["name"] = tool.Name, ["parametersJsonSchema"] = JsonNode.Parse(tool.InputSchema.GetRawText()) };

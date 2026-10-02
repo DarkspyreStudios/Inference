@@ -43,17 +43,17 @@ public sealed class AttachmentReferenceTests
         var resource = new InferenceResourceReference("workspace", "generated");
         var message = new LlmChatMessage("user", "")
         {
-            ToolResults = [new("call", new()
+            ToolResults = [new LlmToolResult("call", new()
             {
                 Parts = [new LlmToolOutputBinary(LlmBinaryKind.Document, "text/plain", new byte[] { 1 }, "inline.txt"),
                     new LlmToolOutputSessionResource(resource), new LlmToolOutputText("done")]
             })]
         };
         LlmChatMessage copy = ManagedAgentContext.CopyMessage(message, false);
-        Assert.Equal(resource, Assert.IsType<LlmToolOutputSessionResource>(copy.ToolResults[0].Output.Parts[0]).Resource);
-        Assert.Equal("done", Assert.IsType<LlmToolOutputText>(copy.ToolResults[0].Output.Parts[1]).Text);
+        Assert.Equal(resource, Assert.IsType<LlmToolOutputSessionResource>(Assert.IsType<LlmToolResult>(copy.ToolResults[0]).Output.Parts[0]).Resource);
+        Assert.Equal("done", Assert.IsType<LlmToolOutputText>(Assert.IsType<LlmToolResult>(copy.ToolResults[0]).Output.Parts[1]).Text);
         Assert.Equal(new LlmOmittedAttachment(LlmBinaryKind.Document, "inline.txt", 0, "call"), Assert.Single(copy.OmittedAttachments));
-        Assert.Equal(3, message.ToolResults[0].Output.Parts.Count);
+        Assert.Equal(3, Assert.IsType<LlmToolResult>(message.ToolResults[0]).Output.Parts.Count);
     }
 
     [Fact]
@@ -83,7 +83,7 @@ public sealed class AttachmentReferenceTests
         {
             "native-file" => message with { Attachments = [new LlmFileReference(new("native"))] },
             "resource" => message with { Attachments = [new LlmResourceAttachment(new("workspace", "original"))] },
-            "tool-resource" => message with { ToolResults = [new("call", new() { Parts = [new LlmToolOutputSessionResource(new("workspace", "generated"))] })] },
+            "tool-resource" => message with { ToolResults = [new LlmToolResult("call", new() { Parts = [new LlmToolOutputSessionResource(new("workspace", "generated"))] })] },
             _ => message
         };
         var request = new LlmChatRequest { ModelId = "model", Messages = [message], Resources = variant == "authority" ? authority : null };
@@ -130,7 +130,7 @@ public sealed class AttachmentReferenceTests
         var message = new LlmChatMessage("user", "")
         {
             OmittedAttachments = [new(LlmBinaryKind.Document, "old.txt", 0, "call")],
-            ToolResults = [new("call", new()
+            ToolResults = [new LlmToolResult("call", new()
             {
                 Parts = [new LlmToolOutputText("keep"),
                     new LlmToolOutputBinary(LlmBinaryKind.Document, "text/plain", new byte[] { 1 }, "new.txt")]
@@ -138,7 +138,7 @@ public sealed class AttachmentReferenceTests
         };
         var copy = ManagedAgentContext.CopyMessage(message, false);
         Assert.Equal([0, 2], copy.OmittedAttachments.Select(item => item.Index));
-        Assert.IsType<LlmToolOutputText>(Assert.Single(copy.ToolResults[0].Output.Parts));
+        Assert.IsType<LlmToolOutputText>(Assert.Single(Assert.IsType<LlmToolResult>(copy.ToolResults[0]).Output.Parts));
         Assert.Equal(copy.OmittedAttachments, ManagedAgentContext.CopyMessage(copy, false).OmittedAttachments);
     }
 

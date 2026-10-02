@@ -138,9 +138,9 @@ public sealed class VertexProtocolTests
             Tools = [Tool],
             ProviderOptions = variant == "native" ? new Dictionary<string, JsonElement>() : new Dictionary<string, JsonElement>
             { [AnthropicTools.OptionName] = JsonElement.Parse("""{"server_tools":[{"type":"code_execution_20260120","name":"code_execution"}]}""") },
-            Messages = [new("user", "start"), new("assistant", "") { ContinuationState = state, ToolCalls = [new("client_1", "run", "{}")] },
+            Messages = [new("user", "start"), new("assistant", "") { ContinuationState = state, ToolCalls = [new LlmToolCall("client_1", "run", "{}")] },
                 new("tool", variant == "text" ? "extra" : "")
-                { ToolResults = variant == "partial" ? [] : [new("client_1", LlmToolOutput.FromText("result"))] }]
+                { ToolResults = variant == "partial" ? [] : [new LlmToolResult("client_1", LlmToolOutput.FromText("result"))] }]
         };
         var error = await Assert.ThrowsAsync<ArgumentException>(() => Complete(client, prepared, request));
         Assert.Contains("Claude", error.Message, StringComparison.Ordinal);
@@ -461,8 +461,8 @@ public sealed class VertexProtocolTests
         {
             ModelId = Gemini,
             Messages = [new("assistant", "") { ContinuationState = state,
-                ToolCalls = [new("one", "run", """{"command":"first"}"""), new("two", "run", """{"command":"second"}""")] },
-                new("user", "") { ToolResults = [new("two", LlmToolOutput.FromText("second-result")), new("one", LlmToolOutput.FromText("first-result"))] }]
+                ToolCalls = [new LlmToolCall("one", "run", """{"command":"first"}"""), new LlmToolCall("two", "run", """{"command":"second"}""")] },
+                new("user", "") { ToolResults = [new LlmToolResult("two", LlmToolOutput.FromText("second-result")), new LlmToolResult("one", LlmToolOutput.FromText("first-result"))] }]
         };
         var payload = GeminiRequest.Build(prepared, request, null,
             output => ToolOutputProjector.Project(output, RichContentRoutes.TextOnly, RichContentRoutes.TextOnly),
@@ -486,7 +486,7 @@ public sealed class VertexProtocolTests
         var options = new LlmAgentSessionOptions
         {
             ModelId = Gemini,
-            Tools = [new() { Name = Tool.Name, InputSchema = Tool.InputSchema }],
+            Tools = [new LlmAgentToolDefinition() { Name = Tool.Name, InputSchema = Tool.InputSchema }],
             ToolHandler = (_, _) => { calls++; return Task.FromResult(LlmToolOutput.FromText("/tmp")); }
         };
         await using var session = await agent.StartSessionAsync("fixture", Connection, options);
@@ -523,7 +523,7 @@ public sealed class VertexProtocolTests
         var options = new LlmAgentSessionOptions
         {
             ModelId = Claude,
-            Tools = [new() { Name = Tool.Name, InputSchema = Tool.InputSchema }],
+            Tools = [new LlmAgentToolDefinition() { Name = Tool.Name, InputSchema = Tool.InputSchema }],
             ToolHandler = (_, _) => throw new InvalidOperationException("Server execution must not become a host call.")
         };
         await using var session = await agent.StartSessionAsync("fixture", connection, options);
@@ -585,7 +585,7 @@ public sealed class VertexProtocolTests
         var options = new LlmAgentSessionOptions
         {
             ModelId = Claude,
-            Tools = [new() { Name = Tool.Name, InputSchema = Tool.InputSchema }],
+            Tools = [new LlmAgentToolDefinition() { Name = Tool.Name, InputSchema = Tool.InputSchema }],
             ToolHandler = (call, _) =>
             {
                 Assert.Equal("client_1", call.CallId);
@@ -647,7 +647,7 @@ public sealed class VertexProtocolTests
         {
             ModelId = Gemini,
             Messages = [new("user", "Run pwd"), assistant,
-                new("tool", "") { ToolResults = [new(first.ToolCalls[0].Id, new LlmToolOutput { Parts = [new LlmToolOutputText("/tmp")] })] }]
+                new("tool", "") { ToolResults = [new LlmToolResult(first.ToolCalls[0].Id, new LlmToolOutput { Parts = [new LlmToolOutputText("/tmp")] })] }]
         }, null, output => ToolOutputProjector.Project(output, new(), new()), GeminiModelProfiles.Get("gemini-3-flash-preview", catalogThinking: null), reasoningText: true);
         Assert.Equal("signed", (string?)next["contents"]?[1]?["parts"]?[0]?["thoughtSignature"]);
         Assert.DoesNotContain("connectCallId", next.ToJsonString(), StringComparison.Ordinal);

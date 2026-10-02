@@ -406,8 +406,19 @@ feed before draining admitted work. No automatic replay/reconnect is part of the
 
 These streaming interfaces are inert declarations. PocketTTS implements neither interface,
 advertises all new capability flags false and leaves unknown rate lists null. `XaiTts` is a
-declared transport identity without a registered provider. The current binding signature remains
-`Bind(TtsConnection)`; there is no xAI family-binding or resource-access argument on it.
+declared transport identity without a registered provider. `Bind(TtsConnection, XaiFamilyBinding?,
+IInferenceResourceAccess?)` borrows the entered owners without acquiring credentials or making
+requests. Connection headers are copied, and xAI selection/authorization must match the binding.
+PocketTTS refuses the new xAI authority fields before HTTP; existing static-header workflows
+remain supported. Runtime authority, resource access, binding factories and settings owners refuse
+non-null serialization through the owned codec without invoking callbacks.
+
+TTS settings managers fence new admissions synchronously, drain admitted actions and conditional
+commits, then release borrowed collaborators without disposing them. Opening settings checks the
+owner fence after reading the borrowed setup definition. Late check/test/query results
+cannot verify an edited or retiring draft. Portable changes omit runtime authorization and retain
+protected-header patches separately. Typed xAI setup controls preserve explicit false, zero and
+empty values; these declarations do not register an xAI provider or activate capabilities.
 
 ## TangoFlux audio
 
@@ -583,6 +594,34 @@ Use asynchronous disposal while provider work is active. Consume or dispose acti
 enumerators so their owned operations can leave. Disposal does not report completion while an
 operation remains active. A registration owner disposes its shared cache; sharing a cache across
 containers does not transfer that responsibility to a scoped facade.
+
+### Explicit cache binding
+
+`LlmProviderService.BindContextCacheAsync(connectionId, ct)` is the asynchronous entry point for
+`ILlmContextCacheClient`. It resolves one versioned connection, snapshots its data and validates that
+the selected transport is registered. Binding does not refresh credentials, prepare a provider,
+discover models or create a cache. No current adapter implements explicit cache operations, so a
+valid binding attempt reports `NotSupportedException` instead of returning a usable client.
+
+The facade's admission and retirement cover the source read. Cancellation waits for a source that
+ignores its token to return, then rejects its late result. Facade retirement also drains that read
+before releasing borrowed collaborators. This endpoint does not enable explicit cache generation
+selection, paid cache creation or provider-specific cache scope validation.
+
+### Files and Skills facade
+
+`LlmProviderService` exposes `ILlmFileClient`, `IXaiFilePublicUrlClient` and
+`IXaiSkillClient`. `AddLlmConnect` registers those interfaces as aliases of the same scoped facade.
+The facade owns their admission and retirement; resolving an interface does not create another
+connection source or credential owner. Skills methods use the `IXaiSkillClient` interface to
+distinguish skill IDs and results from file IDs and results.
+
+`LlmProviderCapabilities.Files` and `.Skills` report separate resource-operation facts. Every
+current adapter leaves those facts false. No Files or Skills adapter implements these operations;
+the facade rejects them before resolving connections, refreshing credentials or inspecting caller
+streams. Caller cancellation and retired-facade admission retain the existing lifetime behavior.
+Upload and download streams remain borrowed, including on rejection and facade disposal. These
+resource interfaces do not enable native-file prompt references or skill generation attachment.
 
 ### Embedding lifetime
 
@@ -1264,12 +1303,49 @@ implement dispatch tracking, automatic retries, reconciliation or paid cache cre
 
 ### Tool output
 
+`LlmAgentCallerServices` groups borrowed permission, text-file, terminal-factory, shell-executor
+and resource-access interfaces. The typed callback DTOs preserve actual session/turn scope,
+informational content/diffs/locations, raw JSON, ordered permission choices and artifact descriptors.
+New DTOs copy lists, binary data and JSON values on constructor/init/with assignment. Diagnostic
+strings omit callback contents, paths and environment values. File read StartLine is one-based;
+MaxLines=0 remains zero. Terminal OutputByteLimit preserves nullable/zero/64-bit values.
+Absolute POSIX, Windows drive-rooted and server/share UNC path text survives across decoding hosts
+without normalization or filesystem access. File URLs and relative paths are not operational paths.
+
+Factories and caller services remain borrowed. A returned terminal handle is owned by its session;
+Kill preserves readability, while DisposeAsync must kill/drain and invalidate that handle. These
+interfaces contain no filesystem, process or shell implementation. Start/Resume borrow the typed
+composition and reject unsupported supplied services before runtime work. Built-in adapters do not
+advertise caller-service or shell mappings. Managed sessions release their borrowed handler/service
+references only after admitted work drains; they do not dispose them.
+The current managed lane remains function-only even when a caller-owned SelfHost engine truthfully
+advertises portable shell support. That portable fact does not enable a managed shell executor or
+caller-service mapping; supplied managed shell definitions/services refuse before engine resolution.
+
+`ConnectLlmJson` exports the callback data through exact type-name getters and closed fixed unions.
+Runtime services have no public metadata getters. Their internal owned codecs refuse all non-null
+read/write without invoking callbacks or diagnostic methods. Start/Resume are not data-codec roots.
+Callback RuntimePolicy uses fixed `host-controlled` and `provider-configured` variants. Scope data
+freezes caller-selected policy roots and does not grant filesystem or resource access.
+
 `LlmAgentClientToolDefinition` is a closed function/shell data union. The existing
 `LlmAgentToolDefinition` retains its schema, strictness, deferred-loading and sequential-execution
 fields. `LlmAgentShellTool` wraps the Common shell definition. `ConnectLlmJson` exports these three
-types with exact type-name getters and fixed `function`/`shell` discriminators. Current Start/Resume
-tool collections remain function-only. These declarations do not enable shell execution or change
-provider capabilities.
+types with exact type-name getters and fixed `function`/`shell` discriminators. Start/Resume definitions
+and Common/Connect request, history and terminal collections preserve one ordered function/shell
+union. Unsupported shell definitions/history refuse before refresh, catalog, provider counting or
+native entry. Facades freeze the new tool graphs before their first awaited resolution. Agent
+Start/Resume/Fork freezes definitions before connection resolution. Managed openers freeze definitions
+and supplied context before preparation or catalog awaits. Schemas and context bytes are copied;
+handlers and caller services stay borrowed. Shell results
+match actual preceding calls; output limits remain on that call, not duplicated on the result.
+
+`LlmAgentEvent.TurnId` is nullable for actual session-only observations. Concrete turn-scoped events
+retain guarded non-null IDs, including construction and base-typed `with` assignments. Resource and
+resource-output observations carry null, not an empty synthetic turn. The owned
+`LlmAgentResourceSelectionChangedEvent` metadata preserves an observed revision and nullable actual
+turn; its declaration does not implement selected-resource membership or hint publication.
+Common shell-call observations and typed history remain distinct from function-shaped agent events.
 
 A tool result carries one `LlmToolOutput`: ordered parts, optional structured JSON, and an error flag.
 A chat request sends it as `new LlmToolResult(call.Id, output)`, and an agent `ToolHandler` returns it.

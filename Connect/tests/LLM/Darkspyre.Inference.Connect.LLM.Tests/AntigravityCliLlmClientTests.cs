@@ -676,7 +676,7 @@ public sealed class AntigravityCliLlmClientTests
         {
             ModelId = "auto",
             Messages = ToolHistory(),
-            Tools = [new() { Name = "lookup", InputSchema = System.Text.Json.JsonSerializer.SerializeToElement(new { type = "object" }) }]
+            Tools = [new LlmToolDefinition() { Name = "lookup", InputSchema = System.Text.Json.JsonSerializer.SerializeToElement(new { type = "object" }) }]
         })));
     }
 
