@@ -74,8 +74,10 @@ public sealed class DocumentSearchFacadeTests
     {
         var client = new UnusedSearchClient();
         JsonTypeInfo<DocumentSearchRuntimeEnvelope> metadata = RuntimeMetadata();
-        Assert.Throws<NotSupportedException>(() => JsonSerializer.Serialize(new DocumentSearchRuntimeEnvelope { Client = client }, metadata));
-        Assert.Throws<NotSupportedException>(() => JsonSerializer.Deserialize("{\"Client\":{}}", metadata));
+        Assert.StartsWith("Live document-search clients are not portable data.",
+            Assert.Throws<NotSupportedException>(() => JsonSerializer.Serialize(new DocumentSearchRuntimeEnvelope { Client = client }, metadata)).Message);
+        Assert.StartsWith("Live document-search clients are not portable data.",
+            Assert.Throws<NotSupportedException>(() => JsonSerializer.Deserialize("{\"Client\":{}}", metadata)).Message);
         Assert.Throws<NotSupportedException>(() => JsonSerializer.Deserialize("{\"Client\":{\"authority\":true}}", metadata));
         Assert.Null(JsonSerializer.Deserialize("{\"Client\":null}", metadata)!.Client);
         var empty = new DocumentSearchRuntimeEnvelope { Request = Request };

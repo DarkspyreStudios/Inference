@@ -158,14 +158,17 @@ public sealed class FileResourceContractTests
         JsonSerializerOptions options = RuntimeMetadata().Options;
         foreach (object input in inputs)
         {
-            Assert.Throws<NotSupportedException>(() => JsonSerializer.Serialize(input, input.GetType(), options));
-            Assert.Throws<NotSupportedException>(() => JsonSerializer.Deserialize("{}", input.GetType(), options));
+            Assert.StartsWith("File and skill runtime inputs are not portable data.",
+                Assert.Throws<NotSupportedException>(() => JsonSerializer.Serialize(input, input.GetType(), options)).Message);
+            Assert.StartsWith("File and skill runtime inputs are not portable data.",
+                Assert.Throws<NotSupportedException>(() => JsonSerializer.Deserialize("{}", input.GetType(), options)).Message);
         }
         var envelope = new FileRuntimeEnvelope { Upload = (XaiSkillUpload)inputs[0] };
         Assert.Throws<NotSupportedException>(() => JsonSerializer.Serialize(envelope, RuntimeMetadata()));
         foreach (string field in new[] { "Upload", "Zip", "DirectoryFile", "Directory", "Files", "PublicUrls", "Skills" })
         {
-            Assert.Throws<NotSupportedException>(() => JsonSerializer.Deserialize("{\"" + field + "\":{}}", RuntimeMetadata()));
+            Assert.StartsWith("File and skill runtime inputs are not portable data.",
+                Assert.Throws<NotSupportedException>(() => JsonSerializer.Deserialize("{\"" + field + "\":{}}", RuntimeMetadata())).Message);
             Assert.NotNull(JsonSerializer.Deserialize("{\"" + field + "\":null}", RuntimeMetadata()));
         }
         Assert.Equal(0, stream.Calls);

@@ -162,7 +162,7 @@ public static class ConnectLlmJson
         options.Converters.Add(new FileRuntimeJsonConverter<ILlmFileClient>());
         options.Converters.Add(new FileRuntimeJsonConverter<IXaiFilePublicUrlClient>());
         options.Converters.Add(new FileRuntimeJsonConverter<IXaiSkillClient>());
-        options.Converters.Add(new DocumentSearchRuntimeJsonConverter());
+        options.Converters.Add(new FileRuntimeJsonConverter<IDocumentSearchClient>("Live document-search clients are not portable data."));
         options.MakeReadOnly();
         return options;
     }
