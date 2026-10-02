@@ -271,7 +271,7 @@ internal sealed partial class GeminiApiLlmClient(HttpClient http)
         { throw new NotSupportedException("Unsupported Gemini API attachment media type or size."); }
     }
 
-    private static string Key(LlmConnection connection) => LlmCredential.Parse(connection.Credential)?.ApiKey is { Length: > 0 } key
+    internal static string Key(LlmConnection connection) => LlmCredential.Parse(connection.Credential)?.ApiKey is { Length: > 0 } key
         ? key : throw new LlmProviderException("A Gemini API key is required.", LlmTransport.GoogleGeminiApi, HttpStatusCode.Unauthorized);
 
     private static string KeyScope(LlmConnection connection) =>
