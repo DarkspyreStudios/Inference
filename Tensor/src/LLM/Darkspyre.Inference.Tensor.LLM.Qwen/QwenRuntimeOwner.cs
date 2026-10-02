@@ -355,6 +355,8 @@ public sealed class QwenRuntimeOwner : ITensorRuntimeOwner
         {
             if (_state == TensorRuntimeState.Stopped)
                 return Task.FromResult(ShutdownResult(TensorRuntimeShutdownState.AlreadyStopped, 0, false));
+            if (_shutdown is { IsCompleted: true })
+                return _shutdown.WaitAsync(cancellationToken);
             if (_leases != 0 && _leases != _failedRollbackLeases.Count)
                 return Task.FromResult(ShutdownResult(TensorRuntimeShutdownState.Busy, _leases, _nativeMayRemain));
             _fenced = true;
@@ -432,7 +434,8 @@ public sealed class QwenRuntimeOwner : ITensorRuntimeOwner
         lock (_gate)
         {
             _fenced = true;
-            _state = _state == TensorRuntimeState.Stopped ? TensorRuntimeState.Stopped : TensorRuntimeState.Stopping;
+            _state = _state is TensorRuntimeState.Stopped or TensorRuntimeState.RequiresProcessRestart
+                ? _state : TensorRuntimeState.Stopping;
             return new(_disposal ??= DisposeCoreAsync());
         }
     }

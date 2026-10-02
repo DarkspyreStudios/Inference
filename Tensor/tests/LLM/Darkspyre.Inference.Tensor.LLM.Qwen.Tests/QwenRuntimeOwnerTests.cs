@@ -102,6 +102,30 @@ public sealed class QwenRuntimeOwnerTests
     }
 
     [Fact]
+    public async Task TerminalShutdownFailureKeepsItsStateAndSharedOutcomeOnRepeatedCalls()
+    {
+        var supplier = new Supplier { Poison = true };
+        var owner = new QwenRuntimeOwner(new(Build, Rid, [Candidate("cpu", TensorBackendKind.GgmlCpu)]), supplier);
+        await owner.CheckAsync(Request());
+        TensorRuntimeShutdownResult failure = await owner.ShutdownAsync();
+        Assert.Equal(TensorRuntimeShutdownState.FailedRequiresProcessExit, failure.State);
+        Assert.Equal(TensorRuntimeState.RequiresProcessRestart, owner.State);
+
+        Assert.Same(failure, await owner.ShutdownAsync());
+        Assert.Equal(TensorRuntimeState.RequiresProcessRestart, owner.State);
+        Task disposal = owner.DisposeAsync().AsTask();
+        InferenceException first = await Assert.ThrowsAsync<InferenceException>(() => disposal);
+        Assert.Equal(TensorRuntimeState.RequiresProcessRestart, owner.State);
+        Assert.Same(disposal, owner.DisposeAsync().AsTask());
+        Assert.Same(first, await Assert.ThrowsAsync<InferenceException>(() => owner.DisposeAsync().AsTask()));
+        Assert.Equal(TensorRuntimeState.RequiresProcessRestart, owner.State);
+        Assert.Same(failure, await owner.ShutdownAsync());
+        Assert.Equal(TensorRuntimeState.RequiresProcessRestart, owner.State);
+        Assert.Equal(1, supplier.Shutdowns);
+        Assert.Throws<ObjectDisposedException>(() => owner.EnterExecution());
+    }
+
+    [Fact]
     public async Task DefaultCatalogFreezesOnlyAtFirstAdmittedCheck()
     {
         var supplier = new Supplier { PackageCandidates = [Native(Candidate("cpu", TensorBackendKind.GgmlCpu))] };
