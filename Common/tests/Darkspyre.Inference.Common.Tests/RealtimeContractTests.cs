@@ -7,6 +7,7 @@ using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
 using Darkspyre.Inference.Common.LLM;
 using Darkspyre.Inference.Common.Realtime;
+using Darkspyre.Inference.Common.Resources;
 
 namespace Darkspyre.Inference.Common.Tests;
 
@@ -152,6 +153,15 @@ public sealed class RealtimeContractTests
         var options = new RealtimeResponseOptions("", modes, map);
         var response = new RealtimeResponseEvent(new(), "native.stage", null, null, map);
         map.Clear(); modes.Clear(); Assert.Equal("actual", options.Metadata!["key"]); Assert.Single(options.Modalities!); Assert.Equal("actual", response.Metadata!["key"]);
+        var artifact = new RealtimeAudioArtifact(new(ItemId: "actual"), new(new("workspace", "audio"), "session", null, null, 3));
+        List<RealtimeAudioArtifact> artifacts = [artifact, artifact];
+        var terminal = response with { AudioArtifacts = artifacts, ProviderStatus = "reported-unknown-status" };
+        var error = new RealtimeErrorEvent(new(), new(InferenceFailureCode.ExecutionFailed, null, "safe")) { AudioArtifacts = artifacts };
+        artifacts.Clear(); Assert.Equal(new[] { artifact, artifact }, terminal.AudioArtifacts!); Assert.Equal(2, error.AudioArtifacts!.Count);
+        Assert.Throws<NotSupportedException>(() => ((IList<RealtimeAudioArtifact>)terminal.AudioArtifacts!).Clear());
+        Assert.Throws<ArgumentException>(() => terminal with { AudioArtifacts = new RealtimeAudioArtifact[] { null! } });
+        Assert.Null(response.AudioArtifacts); Assert.Empty((terminal with { AudioArtifacts = [] }).AudioArtifacts!);
+        Assert.Equal("reported-unknown-status", terminal.ProviderStatus); Assert.Null(artifact.Audio); Assert.Null(artifact.SelectionVersion);
         HashSet<RealtimeAudioEncoding> encodings = [RealtimeAudioEncoding.Opus]; List<int> rates = [0];
         var capabilities = new RealtimeCapabilities { InputEncodings = encodings, InputSampleRates = rates };
         encodings.Clear(); rates.Clear(); Assert.Single(capabilities.InputEncodings); Assert.Equal(0, Assert.Single(capabilities.InputSampleRates!));
