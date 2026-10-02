@@ -1,5 +1,6 @@
 using System.Net;
 using System.Text;
+using Darkspyre.Inference.Common.LLM;
 using Darkspyre.Inference.Connect.LLM.Providers;
 
 namespace Darkspyre.Inference.Connect.LLM.Tests;
@@ -7,6 +8,28 @@ namespace Darkspyre.Inference.Connect.LLM.Tests;
 public sealed class XaiFileFacadeTests
 {
     private const string File = "{\"id\":\"file-a\",\"filename\":\"actual.txt\",\"bytes\":3,\"created_at\":0,\"object\":\"file\"}";
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task FacadeCapabilitiesDoNotClaimAnUnimplementedCustomFilesRoute(bool model)
+    {
+        var source = new Source();
+        var auth = new Authenticator();
+        using var http = new HttpClient(new Handler(_ => throw new InvalidOperationException("Unexpected HTTP.")));
+        var custom = new CustomClient(new XaiResponsesLlmClient(http));
+        await using var service = new LlmProviderService(source, [custom], [auth]);
+        LlmProviderCapabilities capabilities = model
+            ? await service.GetModelCapabilitiesAsync("selected", "grok-4")
+            : await service.GetCapabilitiesAsync("selected");
+        Assert.Equal(new LlmFileCapabilities(), capabilities.Files);
+        Assert.True(custom.GetCapabilities(Connection()).Files.Upload);
+        int reads = source.Reads;
+        int refreshes = auth.Calls;
+        await Assert.ThrowsAsync<NotSupportedException>(() => service.GetAsync("selected", "file-a"));
+        Assert.Equal(reads, source.Reads);
+        Assert.Equal(refreshes, auth.Calls);
+    }
 
     [Theory]
     [InlineData("upload")]
@@ -291,5 +314,14 @@ public sealed class XaiFileFacadeTests
     {
         public override bool CanRead => capability();
         public override bool CanWrite => capability();
+    }
+
+    private sealed class CustomClient(XaiResponsesLlmClient metadata) : ILlmClient
+    {
+        public LlmTransport Transport => LlmTransport.XaiResponses;
+        public LlmProviderDefinition ProviderDefinition => metadata.ProviderDefinition;
+        public LlmProviderCapabilities GetCapabilities(LlmConnection connection, string? modelId = null) => metadata.GetCapabilities(connection, modelId);
+        public IAsyncEnumerable<LlmStreamEvent> StreamAsync(LlmConnection connection, LlmChatRequest request, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<IReadOnlyList<LlmModel>> ListModelsAsync(LlmConnection connection, CancellationToken cancellationToken = default) => throw new InvalidOperationException("Unexpected catalog.");
     }
 }
