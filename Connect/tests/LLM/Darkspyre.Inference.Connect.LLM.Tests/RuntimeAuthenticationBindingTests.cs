@@ -186,6 +186,29 @@ public sealed class RuntimeAuthenticationBindingTests
     }
 
     [Fact]
+    public async Task ReentrantTemporaryServiceConstructionDoesNotReachLaterMetadataGetters()
+    {
+        var client = new Client();
+        await using var provider = new LlmProviderService(new Source(), [client]);
+        var manager = provider.CreateSettingsManager(new Target());
+        Task? retirement = null;
+        try
+        {
+            LlmSettings settings = await Open(manager);
+            int definitions = client.DefinitionReads;
+            client.OnTransport = () => { client.OnTransport = null; retirement = manager.DisposeAsync().AsTask(); };
+            Assert.Equal(SetupActionState.Cancelled, (await manager.RunAsync(settings, "check")).State);
+            Assert.Equal(definitions, client.DefinitionReads);
+            await retirement!.WaitAsync(Bound);
+        }
+        finally
+        {
+            client.OnTransport = null;
+            await (retirement ?? manager.DisposeAsync().AsTask()).WaitAsync(Bound);
+        }
+    }
+
+    [Fact]
     public async Task SynchronousRetirementFenceRejectsLateQueryBeforeLinkedCancellationPropagates()
     {
         var client = new Client { Held = true };
@@ -337,11 +360,13 @@ public sealed class RuntimeAuthenticationBindingTests
     {
         public bool Held { get; init; }
         public Action? OnDefinition { get; set; }
+        public Action? OnTransport { get; set; }
         public int TransportReads { get; private set; }
+        public int DefinitionReads { get; private set; }
         public int Disposals { get; private set; }
         public CancellationToken OperationToken { get; private set; }
-        public LlmTransport Transport { get { TransportReads++; return LlmTransport.OpenAiCompatibleChat; } }
-        public LlmProviderDefinition ProviderDefinition { get { OnDefinition?.Invoke(); return ProviderDefinitions.OpenAiCompatible; } }
+        public LlmTransport Transport { get { TransportReads++; OnTransport?.Invoke(); return LlmTransport.OpenAiCompatibleChat; } }
+        public LlmProviderDefinition ProviderDefinition { get { DefinitionReads++; OnDefinition?.Invoke(); return ProviderDefinitions.OpenAiCompatible; } }
         public TaskCompletionSource Entered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public LlmProviderCapabilities GetCapabilities(LlmConnection connection, string? modelId = null) => new() { SupportsModelListing = true };

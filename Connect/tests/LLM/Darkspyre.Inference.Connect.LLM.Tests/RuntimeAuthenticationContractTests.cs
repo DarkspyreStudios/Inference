@@ -20,7 +20,7 @@ public sealed class RuntimeAuthenticationContractTests
         "LlmCopilotExplicitGitHubToken", "LlmCopilotRuntimeAccount", "LlmAgentRuntimeLoginScope",
         "LlmAgentRuntimeAuthenticationSnapshot", "LlmAgentRuntimeLoginOptions", "LlmAgentStagedLoginState",
         "LlmAgentRuntimeLoginResult", "LlmAgentStagedStateDisposition", "LlmAgentStagedStateSnapshot", "LlmAgentStagedStateCommitResult",
-        "LlmCopilotCredentials", "LlmCopilotRuntimeConnectionCredential"
+        "LlmCopilotCredentials", "LlmCopilotRuntimeConnectionCredential", "LlmAgentCapabilities"
     };
 
     [Theory, MemberData(nameof(DataRoots))]
@@ -77,7 +77,8 @@ public sealed class RuntimeAuthenticationContractTests
         { "LlmAgentStagedStateSnapshot", """{"AttemptId":"11111111-1111-1111-1111-111111111111","Disposition":2}""" },
         { "LlmAgentStagedStateCommitResult", """{"Commit":{"State":5,"Version":null,"Issues":null},"State":{"AttemptId":"11111111-1111-1111-1111-111111111111","Disposition":2}}""" },
         { "LlmCopilotCredentials", """{"accessToken":"  exact-protected-token  ","expiresAt":"2030-01-01T00:00:00+00:00"}""" },
-        { "LlmCopilotRuntimeConnectionCredential", """{"connectionToken":"  separate-runtime-token  "}""" }
+        { "LlmCopilotRuntimeConnectionCredential", """{"connectionToken":"  separate-runtime-token  "}""" },
+        { "LlmAgentCapabilities", """{"HostedTools":[0],"SupportsShellTools":false,"SupportedCallerServices":[],"ContextOwnership":1,"ContextImport":1,"SupportsContextCapture":true,"SupportsContextReplacement":true,"SupportsContextStatus":true,"SupportsCompactionHandoff":true,"SupportsNativeResume":false,"NativeFork":0,"CompactionOwnership":1,"Steering":1,"SupportsInterrupt":true,"ResourceObservation":0,"ToolExecutionOwnership":1,"RichContentSupported":{"Images":1,"ImageMediaTypes":["image/png"],"MaxBinaryBytes":null},"SupportedRuntimePolicies":[]}""" }
     };
 
     [Theory, MemberData(nameof(Shapes))]
