@@ -2,10 +2,11 @@
 
 The 2026-10-02 comparison runs both engines on Windows `gpu-box`, using the
 RTX 3090 Ti (24 GB, compute capability 8.6) and NVIDIA driver 595.97.
-TensorSharp's `GgmlCuda` rerun measures 28.77 tokens/sec, 6.87 times its direct
-`Cuda` result. The saved llama.cpp result is 41.10 tokens/sec. `GgmlCuda` has
-29.98 percent lower throughput than that llama.cpp baseline. The rerun changes
-the Tensor backend and native bridge; it does not rerun llama.cpp.
+TensorSharp's `GgmlCuda` build matching the Mac's GGML revision measures
+33.71 tokens/sec, 8.05 times its direct `Cuda` result. The saved llama.cpp result
+is 41.10 tokens/sec. The matched GGML CUDA run has 17.98 percent lower throughput
+than that llama.cpp baseline. The Tensor reruns change the backend/native bridge;
+they do not rerun llama.cpp.
 
 ## Matched input and measurement
 
@@ -38,7 +39,8 @@ reasoning-token usage fields are null. Those null fields are not measured zeroes
 | --- | ---: | ---: | ---: | ---: |
 | llama.cpp b11238, CUDA | 41.10 | 41.09–41.11 | 0.259 sec | 6.462 sec |
 | Tensor arbiter, TensorSharp direct CUDA | 4.19 | 4.18–4.19 | 6.672 sec | 67.719 sec |
-| Tensor arbiter, TensorSharp GGML CUDA | 28.77 | 28.75–33.69 | 0.900 sec | 9.724 sec |
+| Tensor arbiter, GGML CUDA 0.24.0 | 28.77 | 28.75–33.69 | 0.900 sec | 9.724 sec |
+| Tensor arbiter, GGML CUDA 0.25.3 (Mac revision) | 33.71 | 31.91–33.76 | 0.869 sec | 8.517 sec |
 
 The temporary llama server uses one sequence slot, all GPU layers and flash attention.
 Its observed VRAM use is 19,763 MiB. It listens on loopback 8083; the normal llama
@@ -113,6 +115,33 @@ benchmark bridge uses GGML 0.24.0, commit `456172e`. The measured GGML CUDA row
 therefore uses a different upstream revision from the Mac. The audit establishes
 successful optimized building and native execution, not matching GGML revisions
 or an explanation for the throughput difference.
+
+## Matched Mac GGML revision rerun
+
+The corrected Windows bridge uses unchanged upstream GGML 0.25.3 at
+`353b63b439f27ab2cc19dac97ab1681ba6d2d084`, matching the Mac bridge's exported
+version/commit. The TensorSharp native bridge, Models, Runtime and Chat source
+files have no changes between the Mac source commit `513de7b9` and the Windows
+source commit `c7fd85b5`. The Windows build keeps Release, CUDA 12.8, MSVC 14.44,
+`sm_86`, flash attention and CUDA graphs. Its DLL SHA-256 is
+`0e487a5bcb446515a9ad2ec719a77bd9d7ae2d488af5c4e9997f539cc03f339d`.
+
+Native attention and managed CUDA backend identity/fill/add/matmul checks pass.
+The three uninstrumented requests keep the previous GPU-box benchmark settings:
+16k context, default FP16 KV, temperature zero, reasoning disabled, the separate
+array-definition warm-up and 256 generated tokens. Their decode speeds are
+33.71, 33.76 and 31.91 tokens/sec. Every run reports 36 prompt tokens, 256 output
+tokens and length termination. The console has no CUDA error or fallback
+warning. The median is 17.14 percent above the older GGML run, but the ranges
+overlap. These sequential observations do not isolate the revision's causal
+contribution or explain the remaining gap to the saved llama.cpp result.
+
+The original model/preset reloads. The copied app is removed and the SSH tunnel
+closes. The matched-revision logs, timings, responses, configuration and DLL
+hashes remain in this worktree's ignored `tmp/ggml-cuda-audit/` and on GPU box
+under `G:\AI\benchmarks\qwen-ggml-cuda-353b63b-20261002`. The compatible native
+DLL remains under the separate build directory
+`G:\AI\builds\tensorsharp-ggml-2.8.6.7-cuda12-sm86-ggml353b63b\build`.
 
 ## Direct CUDA execution verification
 

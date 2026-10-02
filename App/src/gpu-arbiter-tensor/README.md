@@ -111,8 +111,10 @@ The app continues to consume the package; it does not rewrite PTX or copy engine
 
 The [RTX 3090 Ti Qwen comparison](../../../docs/design/gpu-box-qwen-benchmark.md)
 uses local rebuilt dependencies in isolated test applications. Its three-run medians
-are 28.77 tokens/sec for `GgmlCuda`, 4.19 for direct CUDA and 41.10 for llama.cpp.
-The GGML CUDA rerun uses the separately built CUDA 12 `GgmlOps.dll` bridge.
+are 33.71 tokens/sec for `GgmlCuda` with the Mac's GGML 0.25.3 revision,
+4.19 for direct CUDA and 41.10 for the saved llama.cpp baseline. The earlier
+GGML 0.24.0 run measures 28.77 tokens/sec. The GGML CUDA reruns use separately
+built CUDA 12 `GgmlOps.dll` bridges.
 These measurements do not change the published dependency pin or deployed application.
 
 `GgmlCuda` is a distinct backend. Its CUDA bridge is not included in the published TensorSharp
