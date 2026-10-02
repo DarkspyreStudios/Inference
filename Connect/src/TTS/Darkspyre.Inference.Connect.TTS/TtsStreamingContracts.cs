@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.Text.Json.Serialization;
 using Darkspyre.Inference.Common.Media;
+using Darkspyre.Inference.Common.Resources;
 
 namespace Darkspyre.Inference.Connect.TTS;
 
@@ -27,6 +28,12 @@ public sealed record TtsStreamOptions(string? VoiceId = null, double? Speed = nu
     public override string ToString() => "TtsStreamOptions { <data> }";
 }
 
+[JsonPolymorphic(TypeDiscriminatorPropertyName = "type")]
+[JsonDerivedType(typeof(TtsAudioChunk), "audio")]
+[JsonDerivedType(typeof(TtsUtteranceCompleted), "utterance-completed")]
+[JsonDerivedType(typeof(TtsStreamError), "error")]
+[JsonDerivedType(typeof(TtsReplacementsUpdated), "replacements-updated")]
+[JsonDerivedType(typeof(TtsUtteranceCleared), "utterance-cleared")]
 public abstract record TtsStreamEvent
 {
     private protected TtsStreamEvent() { }
@@ -42,7 +49,19 @@ public sealed record TtsAudioChunk(ReadOnlyMemory<byte> Audio, string? ContentTy
 
 public sealed record TtsUtteranceCompleted(string? ProviderTraceId = null) : TtsStreamEvent
 {
+    public InferenceResourceDescriptor? Resource { get; init; }
     public override string ToString() => "TtsUtteranceCompleted { <data> }";
+}
+
+public sealed record TtsReplacementsUpdated(IReadOnlyDictionary<string, string> Replace) : TtsStreamEvent
+{
+    [JsonRequired] public IReadOnlyDictionary<string, string> Replace { get; init => field = TtsData.Copy(TtsData.Required(value))!; } = TtsData.Copy(TtsData.Required(Replace))!;
+    public override string ToString() => "TtsReplacementsUpdated { <data> }";
+}
+
+public sealed record TtsUtteranceCleared : TtsStreamEvent
+{
+    public override string ToString() => "TtsUtteranceCleared { <data> }";
 }
 
 public sealed record TtsStreamError(InferenceResourceFailure Error) : TtsStreamEvent
@@ -56,6 +75,8 @@ public interface ITtsStreamingSession : IAsyncDisposable
 {
     Task AppendTextAsync(string text, CancellationToken cancellationToken = default);
     Task CompleteUtteranceAsync(CancellationToken cancellationToken = default);
+    Task UpdateReplacementsAsync(IReadOnlyDictionary<string, string> replacements, CancellationToken cancellationToken = default);
+    Task ClearUtteranceAsync(CancellationToken cancellationToken = default);
     IAsyncEnumerable<TtsStreamEvent> Events { get; }
 }
 
@@ -64,13 +85,18 @@ public interface ITtsStreamingClient
     Task<ITtsStreamingSession> OpenStreamAsync(TtsStreamOptions options,
         InferenceStreamLimits limits, CancellationToken cancellationToken = default);
     /// <summary>Opens and retires one ephemeral session using the supplied explicit budgets.</summary>
-    IAsyncEnumerable<TtsAudioChunk> SpeakStreamAsync(IAsyncEnumerable<string> text,
+    IAsyncEnumerable<TtsStreamEvent> SpeakStreamAsync(IAsyncEnumerable<string> text,
         TtsStreamOptions options, InferenceStreamLimits limits,
         CancellationToken cancellationToken = default);
 }
 
 internal static class TtsData
 {
+    internal static XaiTtsOptions? EffectiveOptions(XaiTtsOptions? defaults, XaiTtsOptions? options) =>
+        defaults is null && options is null ? null : new(
+            options?.OptimizeStreamingLatency ?? defaults?.OptimizeStreamingLatency,
+            options?.TextNormalization ?? defaults?.TextNormalization,
+            options?.Replace ?? defaults?.Replace);
     internal static T Required<T>(T value) where T : class => value ?? throw new ArgumentNullException(nameof(value));
 
     internal static ReadOnlyCollection<T> Copy<T>(IReadOnlyList<T> value)

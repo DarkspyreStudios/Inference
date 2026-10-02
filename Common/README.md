@@ -60,6 +60,12 @@ conversation/content unions, scoped resumption references and concrete observati
 `RealtimeVoice = 7` maps to the existing Audio capability. Common provides the data and
 runtime interface; the Connect provider owns session opening and protocol implementation.
 
+`RealtimeAudioArtifact` carries a committed logical descriptor, actual output identity,
+nullable observed audio configuration and selection version. Response and error events retain
+ordered copied artifacts and raw provider status. An audio-done observation alone is not a
+durable artifact. Hosted speech clients implement synchronous and asynchronous disposal;
+their callers own returned clients and sessions. Transcription does not create transcript files.
+
 Realtime data roots have exact type-name getters on `InferenceJson`. Turn detection uses
 `manual`/`server-vad`, content uses `text`/`audio`, and conversation items use
 `message`/`function-call`/`function-output`. Concrete events use their individual getters;

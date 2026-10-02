@@ -475,7 +475,10 @@ the host owns that client's lifetime. Endpoint paths cannot select a different o
 ### TTS data and streaming contracts
 
 `TtsRequest` and `TtsSetupConfiguration` carry optional language, sample rate in Hz, bit rate in
-bits per second, timestamp selection and typed `XaiTtsOptions`. The xAI options preserve nullable
+bits per second and timestamp selection. `TtsConnection.XaiDefaults` owns saved typed
+`XaiTtsOptions`; request options inherit each null member, while false, zero and empty maps
+override it. The owned setup codec rejects the removed setup-level `Xai` field instead of
+silently discarding saved values. The xAI options preserve nullable
 latency/normalization controls and an ordinal text-replacement map. Absent and explicit empty
 maps remain distinct. PocketTTS rejects every explicit new control, including `false`, before
 HTTP. Its settings preserve the controls but refuse unsupported test/save actions.
@@ -491,6 +494,17 @@ capability, result, option and concrete event data. Its closed generated graph c
 provenance/failure data without reflection fallback. Non-null runtime clients/providers/sessions
 refuse serialization and restoration without inspecting their callbacks; null remains null.
 The provider-private Pocket wire codec remains separate and preserves its existing request bytes.
+`ConnectTtsJson.TtsStreamEvent` owns the closed audio, completion, error, replacement-update and
+utterance-clear union. Replacement updates and clear commands complete after send; their
+observations preserve the actual acknowledgment. The convenience stream returns all events.
+
+Bound `ITtsClient` instances support synchronous and asynchronous disposal. Pocket clients
+fence new calls, cancel and drain admitted work, then drop borrowed HTTP/provider/resource
+references. A nonnull resource argument selects artifact mode: Pocket commits validated WAV
+bytes and session membership atomically before returning `TtsResult.Resource`. It does not
+invent a filename. Null resources preserve standalone bytes. The caller owns the access and
+returned clients; facade retirement does not retire handed-off clients. Settings retire their
+temporary clients and do not bind resources for readiness checks or sample clips.
 
 `ITtsStreamingClient` and `ITtsStreamingSession` declare reusable disposable streaming and one
 ephemeral iterator wrapper. Opens and wrappers require explicit positive `InferenceStreamLimits`
@@ -2116,6 +2130,12 @@ configuration, content, conversation items and concrete events. Its complete gra
 fixed xAI options, force-message item and X search tool. Common's metadata does not admit these
 Connect-only extensions. Non-null runtime collaborators refuse portable JSON without invoking
 them. Required audio uses Common's targeted byte policy.
+
+Response and error events carry nullable ordered `AudioArtifacts` and raw `ProviderStatus`.
+Each `RealtimeAudioArtifact` preserves the actual output identity, committed descriptor,
+optional observed audio configuration and actual selection version. Null differs from an
+observed empty list. These data contracts do not implement output staging or an xAI adapter;
+`RealtimeAudioDoneEvent` remains a separate native observation without a resource receipt.
 
 `CreateSettingsManager(target)` borrows the conditional commit target. Setup preserves every typed
 session default, separates protected header edits and removes live authorization from saved data.

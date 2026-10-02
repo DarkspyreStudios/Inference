@@ -225,6 +225,7 @@ public sealed class SpeechContractTests
     }
     private sealed class UntouchableRuntime : ISpeechTranscriptionClient, ISpeechTranscriptionSession
     {
+        public void Dispose() => throw Touched();
         public int Effects { get; private set; }
         private InvalidOperationException Touched() { Effects++; return new("Runtime collaborator was inspected."); }
         public override string ToString() => throw Touched();

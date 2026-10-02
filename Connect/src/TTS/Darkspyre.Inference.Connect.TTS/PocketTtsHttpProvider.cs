@@ -1,6 +1,7 @@
 using System.Buffers.Binary;
 using System.Diagnostics;
 using System.Globalization;
+using System.Runtime.ExceptionServices;
 using System.Net;
 using System.Net.Http.Json;
 using Darkspyre.Inference.Connect.LLM.Internal;
@@ -30,11 +31,13 @@ public sealed class PocketTtsHttpProvider(HttpClient httpClient) : ITtsProvider
         if (xai is not null || connection.Xai is not null || connection.Authorization is not null)
             throw new InferenceException(InferenceFailureCode.UnsupportedFeature, "PocketTTS does not implement borrowed provider authorization or xAI binding.");
         ValidateConnection(connection);
-        return new Client(this, connection with { Headers = new Dictionary<string, string>(connection.Headers, StringComparer.OrdinalIgnoreCase) });
+        return new Client(this, connection with { Headers = new Dictionary<string, string>(connection.Headers, StringComparer.OrdinalIgnoreCase) }, resources);
     }
 
     internal static void ValidateConnection(TtsConnection connection)
     {
+        if (connection.XaiDefaults is not null)
+            throw new InferenceException(InferenceFailureCode.UnsupportedFeature, "PocketTTS does not implement xAI speech defaults.");
         if (connection.Transport != TtsTransport.PocketTtsHttp || !Enum.IsDefined(connection.PocketTts.Protocol)
             || connection.Endpoint is not { IsAbsoluteUri: true } || connection.Endpoint.Scheme is not ("http" or "https")
             || connection.Endpoint.UserInfo.Length != 0 || connection.Endpoint.Query.Length != 0 || connection.Endpoint.Fragment.Length != 0
@@ -73,22 +76,34 @@ public sealed class PocketTtsHttpProvider(HttpClient httpClient) : ITtsProvider
         { throw new InferenceException(InferenceFailureCode.UnsupportedFeature, "PocketTTS does not implement these explicit speech controls."); }
     }
 
-    private sealed class Client(PocketTtsHttpProvider provider, TtsConnection connection) : ITtsClient
+    private sealed class Client : ITtsClient
     {
-        public InferenceImplementationDescriptor Descriptor => provider.SetupDefinition.Implementation;
+        private readonly LlmOperationLifetime _lifetime = new();
+        private PocketTtsHttpProvider? _provider;
+        private TtsConnection? _connection;
+        private IInferenceResourceAccess? _resources;
+        private readonly List<Exception> _cleanupFailures = [];
+        internal Client(PocketTtsHttpProvider provider, TtsConnection connection, IInferenceResourceAccess? resources)
+        { _provider = provider; _connection = connection; _resources = resources; }
+        public InferenceImplementationDescriptor Descriptor
+        {
+            get { using var lease = _lifetime.Enter(default); return _provider!.SetupDefinition.Implementation; }
+        }
 
         public Task<TtsCapabilities> GetCapabilitiesAsync(CancellationToken cancellationToken = default)
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            return Task.FromResult(new TtsCapabilities(true, connection.PocketTts.Protocol == PocketTtsProtocol.BridgeJson,
+            using var lease = _lifetime.Enter(cancellationToken);
+            return Task.FromResult(new TtsCapabilities(true, _connection!.PocketTts.Protocol == PocketTtsProtocol.BridgeJson,
                 Array.AsReadOnly(new[] { TtsAudioFormat.Wav })));
         }
 
         public async Task<IReadOnlyList<TtsVoice>> ListVoicesAsync(CancellationToken cancellationToken = default)
         {
-            using var consumption = provider.Enter(cancellationToken); cancellationToken = consumption.Token;
-            IReadOnlyList<TtsVoice> voices = await ListAsync(connection.PocketTts.VoicesPath, cancellationToken).ConfigureAwait(false);
-            if (voices.Count == 0) { voices = await ListAsync(connection.PocketTts.HealthPath, cancellationToken).ConfigureAwait(false); }
+            using var lease = _lifetime.Enter(cancellationToken);
+            using var consumption = _provider!.Enter(lease.Token); cancellationToken = consumption.Token;
+            IReadOnlyList<TtsVoice> voices = await ListAsync(_connection!.PocketTts.VoicesPath, cancellationToken).ConfigureAwait(false);
+            Fence(cancellationToken);
+            if (voices.Count == 0) { voices = await ListAsync(_connection.PocketTts.HealthPath, cancellationToken).ConfigureAwait(false); Fence(cancellationToken); }
             return consumption.Publish(voices.Count > 0 ? voices : throw Protocol());
         }
 
@@ -106,13 +121,16 @@ public sealed class PocketTtsHttpProvider(HttpClient httpClient) : ITtsProvider
 
         public async Task<TtsResult> SpeakAsync(TtsRequest request, CancellationToken cancellationToken = default)
         {
-            ValidateRequest(connection, request);
-            using var consumption = provider.Enter(cancellationToken); cancellationToken = consumption.Token;
+            using var lease = _lifetime.Enter(cancellationToken);
+            ValidateRequest(_connection!, request);
+            using var consumption = _provider!.Enter(lease.Token); cancellationToken = consumption.Token;
+            InferenceResourceSelectionVersion? scope = _resources is null ? null
+                : await TtsResourceWriter.ReadScopeAsync(_resources, () => Fence(cancellationToken), cancellationToken).ConfigureAwait(false);
             long started = Stopwatch.GetTimestamp();
             TtsResult result;
             {
-                using HttpContent body = CreateContent(request);
-                byte[] audio = await SendAsync(HttpMethod.Post, connection.PocketTts.SpeakPath, body, async (response, token) =>
+                HttpContent body = CreateContent(request);
+                byte[] audio = await SendAsync(HttpMethod.Post, _connection!.PocketTts.SpeakPath, body, async (response, token) =>
                 {
                     if (response.Content.Headers.ContentType?.MediaType is { } contentType
                         && !contentType.Equals("audio/wav", StringComparison.OrdinalIgnoreCase)
@@ -123,18 +141,23 @@ public sealed class PocketTtsHttpProvider(HttpClient httpClient) : ITtsProvider
                 }, cancellationToken).ConfigureAwait(false);
                 result = new TtsResult("audio/wav", audio, new()
                 {
-                    ImplementationId = Descriptor.Id,
+                    ImplementationId = _provider.SetupDefinition.Implementation.Id,
                     ModelId = "pockettts",
                     Runtime = "HTTP",
                     Elapsed = Stopwatch.GetElapsedTime(started)
                 });
             }
+            Fence(cancellationToken);
+            if (_resources is not null)
+                result = result with { Resource = await TtsResourceWriter.CommitAsync(_resources, scope!, result.Audio,
+                    result.ContentType, () => Fence(cancellationToken), RecordCleanup, cancellationToken).ConfigureAwait(false) };
+            Fence(cancellationToken);
             return consumption.Publish(result);
         }
 
         private HttpContent CreateContent(TtsRequest request)
         {
-            if (connection.PocketTts.Protocol == PocketTtsProtocol.BridgeJson)
+            if (_connection!.PocketTts.Protocol == PocketTtsProtocol.BridgeJson)
             {
                 return JsonContent.Create(new PocketTtsBridgePayload(request.Text, request.VoiceId,
                     request.VoiceId, request.Speed ?? 1, "wav"), PocketTtsJsonContext.Default.PocketTtsBridgePayload);
@@ -144,22 +167,26 @@ public sealed class PocketTtsHttpProvider(HttpClient httpClient) : ITtsProvider
                 { new StringContent(request.Text), "text" },
                 { new StringContent("wav"), "output_format" }
             };
-            if (!string.IsNullOrWhiteSpace(request.VoiceId)) { form.Add(new StringContent(request.VoiceId), connection.PocketTts.VoiceFormField); }
+            if (!string.IsNullOrWhiteSpace(request.VoiceId)) { form.Add(new StringContent(request.VoiceId), _connection.PocketTts.VoiceFormField); }
             return form;
         }
 
         private async Task<T> SendAsync<T>(HttpMethod method, string path, HttpContent? body,
             Func<HttpResponseMessage, CancellationToken, Task<T>> read, CancellationToken cancellationToken)
         {
-            cancellationToken.ThrowIfCancellationRequested();
+            Fence(cancellationToken);
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            timeout.CancelAfter(connection.RequestTimeout);
-            using var request = new HttpRequestMessage(method, new Uri(new Uri(connection.Endpoint.AbsoluteUri.TrimEnd('/') + "/"), path.TrimStart('/'))) { Content = body };
-            foreach ((string name, string value) in connection.Headers)
-            { if (!request.Headers.TryAddWithoutValidation(name, value)) { throw Invalid("A configured header cannot be used on this request."); } }
+            timeout.CancelAfter(_connection!.RequestTimeout);
+            var request = new HttpRequestMessage(method, new Uri(new Uri(_connection.Endpoint.AbsoluteUri.TrimEnd('/') + "/"), path.TrimStart('/'))) { Content = body };
+            HttpResponseMessage? response = null;
+            Exception? failure = null;
+            T result = default!;
             try
             {
-                using HttpResponseMessage response = await provider.SendAsync(request, timeout.Token).ConfigureAwait(false);
+                foreach ((string name, string value) in _connection.Headers)
+                { if (!request.Headers.TryAddWithoutValidation(name, value)) { throw Invalid("A configured header cannot be used on this request."); } }
+                response = await _provider!.SendAsync(request, timeout.Token).ConfigureAwait(false);
+                Fence(cancellationToken);
                 if (!response.IsSuccessStatusCode)
                 {
                     throw new InferenceException(response.StatusCode switch
@@ -170,13 +197,44 @@ public sealed class PocketTtsHttpProvider(HttpClient httpClient) : ITtsProvider
                         _ => InferenceFailureCode.ExecutionFailed
                     }, $"PocketTTS request failed with HTTP {((int)response.StatusCode).ToString(CultureInfo.InvariantCulture)}.");
                 }
-                return await read(response, timeout.Token).ConfigureAwait(false);
+                result = await read(response, timeout.Token).ConfigureAwait(false);
+                Fence(cancellationToken);
             }
-            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
-            { throw new InferenceException(InferenceFailureCode.TimedOut, "PocketTTS request timed out; it was not retried."); }
-            catch (HttpRequestException) { throw new InferenceException(InferenceFailureCode.ExecutionFailed, "PocketTTS HTTP transport failed; it was not retried."); }
-            catch (JsonException) { throw Protocol(); }
+            catch (OperationCanceledException error) when (!cancellationToken.IsCancellationRequested && !IsStopping())
+            { failure = new InferenceException(InferenceFailureCode.TimedOut, "PocketTTS request timed out; it was not retried.", error); }
+            catch (HttpRequestException error) { failure = new InferenceException(InferenceFailureCode.ExecutionFailed, "PocketTTS HTTP transport failed; it was not retried.", error); }
+            catch (JsonException) { failure = Protocol(); }
+            catch (Exception error) { failure = error; }
+            var failures = new List<Exception>();
+            if (failure is not null) failures.Add(failure);
+            try { response?.Dispose(); } catch (Exception error) { failures.Add(error); }
+            try { request.Dispose(); } catch (Exception error) { failures.Add(error); }
+            if (failures.Count == 1) ExceptionDispatchInfo.Capture(failures[0]).Throw();
+            if (failures.Count > 1) throw new AggregateException(failures);
+            Fence(cancellationToken);
+            return result;
         }
+
+        private void Fence(CancellationToken token)
+        {
+            token.ThrowIfCancellationRequested();
+            if (IsStopping()) throw new OperationCanceledException("The speech client is retiring.", token);
+        }
+        private bool IsStopping()
+        {
+            try { _lifetime.ThrowIfStopping(); return false; }
+            catch (ObjectDisposedException) { return true; }
+        }
+        private void RecordCleanup(Exception error) { lock (_cleanupFailures) _cleanupFailures.Add(error); }
+        public void Dispose() => RetireAsync().GetAwaiter().GetResult();
+        public ValueTask DisposeAsync() => new(RetireAsync());
+        private Task RetireAsync() => _lifetime.RetireAsync(() =>
+        {
+            _provider = null; _connection = null; _resources = null;
+            if (_cleanupFailures.Count == 1) return Task.FromException(_cleanupFailures[0]);
+            if (_cleanupFailures.Count > 1) return Task.FromException(new AggregateException(_cleanupFailures));
+            return Task.CompletedTask;
+        });
     }
 
     private Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken token) =>

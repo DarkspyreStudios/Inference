@@ -44,6 +44,7 @@ public static class ConnectRealtimeJson
     public static JsonTypeInfo<RealtimeTranscriptEvent> RealtimeTranscriptEvent => Metadata<RealtimeTranscriptEvent>();
     public static JsonTypeInfo<RealtimeAudioDeltaEvent> RealtimeAudioDeltaEvent => Metadata<RealtimeAudioDeltaEvent>();
     public static JsonTypeInfo<RealtimeAudioDoneEvent> RealtimeAudioDoneEvent => Metadata<RealtimeAudioDoneEvent>();
+    public static JsonTypeInfo<RealtimeAudioArtifact> RealtimeAudioArtifact => Metadata<RealtimeAudioArtifact>();
     public static JsonTypeInfo<RealtimeTextDeltaEvent> RealtimeTextDeltaEvent => Metadata<RealtimeTextDeltaEvent>();
     public static JsonTypeInfo<RealtimeFunctionArgumentsEvent> RealtimeFunctionArgumentsEvent => Metadata<RealtimeFunctionArgumentsEvent>();
     public static JsonTypeInfo<RealtimeHostedStartedEvent> RealtimeHostedStartedEvent => Metadata<RealtimeHostedStartedEvent>();
@@ -161,6 +162,7 @@ public static class ConnectRealtimeJson
 [JsonSerializable(typeof(RealtimeTranscriptEvent))]
 [JsonSerializable(typeof(RealtimeAudioDeltaEvent))]
 [JsonSerializable(typeof(RealtimeAudioDoneEvent))]
+[JsonSerializable(typeof(RealtimeAudioArtifact))]
 [JsonSerializable(typeof(RealtimeTextDeltaEvent))]
 [JsonSerializable(typeof(RealtimeFunctionArgumentsEvent))]
 [JsonSerializable(typeof(RealtimeHostedStartedEvent))]

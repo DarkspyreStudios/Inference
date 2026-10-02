@@ -235,11 +235,24 @@ public sealed class SttSettingsManager : InferenceSettingsManager<SttSettings, S
         Fence(cancellationToken);
         if (settings.Generation != generation) return new(SetupActionState.Cancelled);
         ISpeechTranscriptionClient client = _service!.Bind(connection, binding, _resources);
-        SpeechTranscriptionCapabilities capabilities = await client.GetCapabilitiesAsync(settings.Draft.Transcription.ModelId, cancellationToken).ConfigureAwait(false);
-        Fence(cancellationToken);
-        if (settings.Generation != generation) return new(SetupActionState.Cancelled);
-        settings.Status = settings.Status with { Verified = SetupObservation.Known(capabilities.Transcription.Available), Ready = SetupObservation.Known(capabilities.Transcription.Available) };
-        return SetupActionResult.Completed;
+        Exception? failure = null;
+        SetupActionResult result = new(SetupActionState.Cancelled);
+        try
+        {
+            Fence(cancellationToken);
+            SpeechTranscriptionCapabilities capabilities = await client.GetCapabilitiesAsync(settings.Draft.Transcription.ModelId, cancellationToken).ConfigureAwait(false);
+            Fence(cancellationToken);
+            if (settings.Generation == generation)
+            {
+                settings.Status = settings.Status with { Verified = SetupObservation.Known(capabilities.Transcription.Available), Ready = SetupObservation.Known(capabilities.Transcription.Available) };
+                result = SetupActionResult.Completed;
+            }
+        }
+        catch (Exception original) { failure = original; }
+        try { await client.DisposeAsync().ConfigureAwait(false); }
+        catch (Exception cleanup) { failure = failure is null ? cleanup : new AggregateException(failure, cleanup); }
+        if (failure is not null) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(failure).Throw();
+        return result;
     }
     private void Fence(CancellationToken token)
     {

@@ -90,7 +90,7 @@ public sealed class SttBindingTests
         var resources = new UntouchableResources();
         SttConnection connection = Connection;
         ISpeechTranscriptionClient client = service.Bind(connection, binding, resources);
-        Assert.Same(provider, client); Assert.Same(binding, provider.Binding); Assert.Same(resources, provider.Resources); Assert.Same(connection, provider.Connection);
+        Assert.Same(provider.LastClient, client); Assert.Same(binding, provider.Binding); Assert.Same(resources, provider.Resources); Assert.Same(connection, provider.Connection);
         Assert.Throws<ArgumentException>(() => service.Bind(Connection, new(new("other"), access), resources));
         Assert.Throws<ArgumentException>(() => service.Bind(Connection with { Authorization = new UntouchableAuthorization() }, binding, resources));
         Assert.Throws<InvalidOperationException>(() => service.Bind(Connection with { AdditionalHeaders = new Dictionary<string, string> { ["aUtHoRiZaTiOn"] = "secret" } }, binding, resources));
@@ -416,17 +416,28 @@ public sealed class SttBindingTests
         public XaiFamilyBinding? Binding { get; private set; }
         public IInferenceResourceAccess? Resources { get; private set; }
         public int Binds { get; private set; }
+        public ISpeechTranscriptionClient? LastClient { get; private set; }
         public bool Hold { get; init; }
         public bool Disposed { get; private set; }
         public CancellationToken LastToken { get; private set; }
         public Exception? CapabilityFailure { get; init; }
         public TaskCompletionSource Entered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously); public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        public ISpeechTranscriptionClient Bind(SttConnection connection, XaiFamilyBinding? xai = null, IInferenceResourceAccess? resources = null) { Connection = connection; Binding = xai; Resources = resources; Binds++; return this; }
+        public ISpeechTranscriptionClient Bind(SttConnection connection, XaiFamilyBinding? xai = null, IInferenceResourceAccess? resources = null) { Connection = connection; Binding = xai; Resources = resources; Binds++; return LastClient = new BoundClient(this); }
         public async Task<SpeechTranscriptionCapabilities> GetCapabilitiesAsync(string? modelId = null, CancellationToken cancellationToken = default) { LastToken = cancellationToken; Entered.TrySetResult(); if (Hold) await Release.Task; if (CapabilityFailure is not null) throw CapabilityFailure; return new() { Transcription = new() { Available = true } }; }
         public Task<SpeechTranscriptionResult> TranscribeAsync(SpeechTranscriptionInput input, SpeechTranscriptionOptions options, CancellationToken cancellationToken = default) => throw new InvalidOperationException();
         public Task<ISpeechTranscriptionSession> OpenStreamAsync(SpeechStreamOptions options, InferenceStreamLimits limits, CancellationToken cancellationToken = default) => throw new InvalidOperationException();
         public IAsyncEnumerable<SpeechTranscriptEvent> TranscribeStreamAsync(IAsyncEnumerable<ReadOnlyMemory<byte>> audio, SpeechStreamOptions options, InferenceStreamLimits limits, CancellationToken cancellationToken = default) => throw new InvalidOperationException();
         public void Dispose() => Disposed = true;
+        public ValueTask DisposeAsync() { Dispose(); return ValueTask.CompletedTask; }
+        private sealed class BoundClient(ControlledProvider owner) : ISpeechTranscriptionClient
+        {
+            public Task<SpeechTranscriptionCapabilities> GetCapabilitiesAsync(string? modelId = null, CancellationToken cancellationToken = default) => owner.GetCapabilitiesAsync(modelId, cancellationToken);
+            public Task<SpeechTranscriptionResult> TranscribeAsync(SpeechTranscriptionInput input, SpeechTranscriptionOptions options, CancellationToken cancellationToken = default) => owner.TranscribeAsync(input, options, cancellationToken);
+            public Task<ISpeechTranscriptionSession> OpenStreamAsync(SpeechStreamOptions options, InferenceStreamLimits limits, CancellationToken cancellationToken = default) => owner.OpenStreamAsync(options, limits, cancellationToken);
+            public IAsyncEnumerable<SpeechTranscriptEvent> TranscribeStreamAsync(IAsyncEnumerable<ReadOnlyMemory<byte>> audio, SpeechStreamOptions options, InferenceStreamLimits limits, CancellationToken cancellationToken = default) => owner.TranscribeStreamAsync(audio, options, limits, cancellationToken);
+            public void Dispose() { }
+            public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+        }
     }
     private sealed class UntouchableResources : IInferenceResourceAccess, IDisposable
     {

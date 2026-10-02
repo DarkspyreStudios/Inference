@@ -42,7 +42,7 @@ public sealed class TtsFacadeLifetimeTests
             Assert.Throws<ObjectDisposedException>(() => facade.CreateSettingsManager(new Target()));
             release.Set();
             if (fails) Assert.Same(failure, await Record.ExceptionAsync(() => request.WaitAsync(Deadline)));
-            else if (bind) Assert.Same(provider, await request.WaitAsync(Deadline));
+            else if (bind) Assert.Same(provider.LastClient, await request.WaitAsync(Deadline));
             else Assert.Single(Assert.IsAssignableFrom<IReadOnlyList<InferenceSetupDefinition>>(await request.WaitAsync(Deadline)));
             await retirement.WaitAsync(Deadline); Assert.Same(retirement, Retire(facade));
             Assert.Equal(0, provider.DisposeCalls);
@@ -66,7 +66,7 @@ public sealed class TtsFacadeLifetimeTests
         try
         {
             Assert.IsAssignableFrom<IDisposable>(facade).Dispose(); await Retire(facade);
-            Assert.Same(provider, client); Assert.Equal(0, provider.DisposeCalls); Assert.Equal(0, target.DisposeCalls);
+            Assert.Same(provider.LastClient, client); Assert.Equal(0, provider.DisposeCalls); Assert.Equal(0, target.DisposeCalls);
             Assert.False((await client.GetCapabilitiesAsync()).SupportsStreaming);
             await manager.DisposeAsync(); Assert.Equal(0, target.DisposeCalls);
             provider.Dispose(); Assert.Equal(1, provider.DisposeCalls);
@@ -163,9 +163,10 @@ public sealed class TtsFacadeLifetimeTests
     }
 }
 
-public sealed class ForeignTtsFacadeProvider(Action? definition, Action? bind, Action<string, Guid> executed) : ITtsProvider, ITtsClient, IDisposable
+public sealed class ForeignTtsFacadeProvider(Action? definition, Action? bind, Action<string, Guid> executed) : ITtsProvider, IDisposable
 {
     public int DisposeCalls { get; private set; }
+    public ITtsClient? LastClient { get; private set; }
     private void Record(string method) => executed(method, typeof(ForeignTtsFacadeProvider).Assembly.ManifestModule.ModuleVersionId);
     public TtsTransport Transport { get { Record("Transport"); return TtsTransport.XaiTts; } }
     public InferenceSetupDefinition SetupDefinition
@@ -173,10 +174,15 @@ public sealed class ForeignTtsFacadeProvider(Action? definition, Action? bind, A
         get { Record("SetupDefinition"); definition?.Invoke(); return new(new("controlled", "Controlled", InferenceImplementationKind.Connect, InferenceTask.SpeechSynthesis), "Controlled provider"); }
     }
     public ITtsClient Bind(TtsConnection connection, XaiFamilyBinding? xai = null, IInferenceResourceAccess? resources = null)
-    { Record("Bind"); bind?.Invoke(); return this; }
-    InferenceImplementationDescriptor ITtsClient.Descriptor => SetupDefinition.Implementation;
-    public Task<TtsCapabilities> GetCapabilitiesAsync(CancellationToken cancellationToken = default) => Task.FromResult(new TtsCapabilities(false, false, []));
-    public Task<IReadOnlyList<TtsVoice>> ListVoicesAsync(CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<TtsVoice>>([]);
-    public Task<TtsResult> SpeakAsync(TtsRequest request, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+    { Record("Bind"); bind?.Invoke(); return LastClient = new Client(this); }
     public void Dispose() { DisposeCalls++; Record("Dispose"); }
+    private sealed class Client(ForeignTtsFacadeProvider owner) : ITtsClient
+    {
+        public InferenceImplementationDescriptor Descriptor => owner.SetupDefinition.Implementation;
+        public Task<TtsCapabilities> GetCapabilitiesAsync(CancellationToken cancellationToken = default) => Task.FromResult(new TtsCapabilities(false, false, []));
+        public Task<IReadOnlyList<TtsVoice>> ListVoicesAsync(CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<TtsVoice>>([]);
+        public Task<TtsResult> SpeakAsync(TtsRequest request, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public void Dispose() => owner.Record("Client.Dispose");
+        public ValueTask DisposeAsync() { Dispose(); return ValueTask.CompletedTask; }
+    }
 }
