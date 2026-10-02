@@ -1328,6 +1328,11 @@ transports, bindings and resource access. Callers can dispose the bound facade t
 fence before effects and before returning, even when linked cancellation propagation is delayed.
 Cancellation during successful materialization cleanup retains the observed committed reference,
 session-selection outcome and revision in `InferenceResourceOperationCanceledException`.
+Materialization validates admitted workspace/session scope and actual content/selection receipts.
+Owned download and writer cleanup each runs once, including independent refusals. Cleanup failures
+use the typed Cleanup phase and retain the actual unsafe owner. Bound retirement preserves those
+failures even when a returned stream is disposed before the facade. Repeated disposal shares the
+same outcome after drain and borrowed detachment; ordinary operations do not poison retirement.
 
 `XaiVideoOptions` is the fixed Video-owned subtype for Files-owned storage controls, signed
 upload destinations and explicit user data. Common metadata refuses these provider options;
