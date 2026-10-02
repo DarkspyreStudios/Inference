@@ -4,6 +4,10 @@ Version **11.14.0-rc.1** adopts the shared typed reasoning-level contract; Qwen 
 It includes Laya's CPU/GPU-only Core ML update and retains the ONNX and user-selected
 model-location/import contracts introduced in 11.4.0-rc.1.
 
+CUDA dependencies in the primary Windows build must satisfy the [GPU box compatibility baseline](../docs/design/windows-cuda-baseline.md).
+The reference RTX 3090 Ti requires kernels compatible with compute capability 8.6 and its existing driver.
+Separate native build variants may support other GPU and driver baselines.
+
 In-process, first-class .NET inference built on TensorSharp, ONNX Runtime and Whisper.net and distributed as the
 `Darkspyre.Inference.Tensor` NuGet. The current package targets .NET 11 and references the synchronized
 `Darkspyre.Inference.Common` NuGet rather than embedding Common. Model weights are installed

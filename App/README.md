@@ -10,6 +10,9 @@ ComfyUI instance. The llama.cpp app targets .NET 10. The App solution uses the i
 `GpuArbiter.Core` owns the shared GPU admission, Comfy handoff, GPU release guard and operational logging. Its solution, version and dependencies live in
 `App/`. The four Inference NuGet packages have a separate release.
 
+The primary Windows CUDA build must satisfy the [GPU box compatibility baseline](../docs/design/windows-cuda-baseline.md).
+The reference RTX 3090 Ti and its existing driver define that target. Separate native build variants may support other baselines.
+
 The app listens on HTTP port 8080 for OpenAI-compatible inference and port 8189 for the
 ComfyUI proxy. The supervised llama.cpp router listens on loopback port 8081. ComfyUI
 listens on port 8188. The app does not start, stop or modify ComfyUI.

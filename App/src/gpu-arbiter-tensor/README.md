@@ -103,8 +103,10 @@ for a speed comparison or deploy it for CUDA inference on that GPU.
 
 A compatible dependency needs PTX rebuilt from the matching TensorSharp source with
 `CudaArch=compute_86` (or a verified portable target), then published under a new immutable
-package version. The GPU box has no `nvcc` installation. Building there requires NVIDIA
-CUDA Toolkit 12.8 or newer with its compiler and supported Visual Studio C++ build tools.
+package version. Windows builds must satisfy the [GPU box compatibility baseline](../../../docs/design/windows-cuda-baseline.md).
+The GPU box has no `nvcc` installation. A native build machine requires a CUDA compiler
+and supported Visual Studio C++ build tools. Its compiler must produce kernels compatible
+with the deployment driver; installing the newest toolkit alone does not establish compatibility.
 The app continues to consume the package; it does not rewrite PTX or copy engine source.
 
 `GgmlCuda` is a distinct backend. Its CUDA bridge is not included in the published TensorSharp
