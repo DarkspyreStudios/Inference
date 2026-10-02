@@ -48,6 +48,8 @@ public sealed class LlmSettings : InferenceSettings<LlmSetupChanges>
     private string _callback = string.Empty;
     private bool _editingCallback;
     private string _callbackFieldId = string.Empty;
+    private string _cacheBucket = string.Empty;
+    private string _cachePrefix = string.Empty;
 
     internal LlmSettings(LlmProviderDefinition definition, LlmTransport transport, SetupConfigurationIdentity identity,
         LlmConnection? existing, string? modelId, ILlmSetupEnvironment? environment)
@@ -85,6 +87,8 @@ public sealed class LlmSettings : InferenceSettings<LlmSetupChanges>
         _model = _originalModel = modelId ?? (UsesAzure ? existing?.Azure?.DeploymentId : null) ?? definition.DefaultModelId;
         if (UsesAzure && _draft.Azure is null) _draft = _draft with { Azure = new() { DeploymentId = _model } };
         _baseline = opened;
+        _cacheBucket = opened.Vertex?.CacheStaging?.Bucket ?? string.Empty;
+        _cachePrefix = opened.Vertex?.CacheStaging?.ObjectPrefix ?? string.Empty;
         Status = new() { Configured = SetupObservation.Known(existing is not null), Authenticated = SetupObservation.Unknown };
     }
 
@@ -127,6 +131,8 @@ public sealed class LlmSettings : InferenceSettings<LlmSetupChanges>
     protected override bool IsDraftDirty =>
         _draft.Endpoint != _baseline.Endpoint || _draft.Vertex != _baseline.Vertex || _draft.Azure != _baseline.Azure || _draft.ChatCompletions != _baseline.ChatCompletions || _draft.Xai != _baseline.Xai || _model != _originalModel
             || (_draft.CapabilityOverrides ?? new()) != (_baseline.CapabilityOverrides ?? new()) || _callback.Length != 0
+            || UsesVertex && (_cacheBucket != (_baseline.Vertex?.CacheStaging?.Bucket ?? string.Empty)
+                || _cachePrefix != (_baseline.Vertex?.CacheStaging?.ObjectPrefix ?? string.Empty))
             || (UsesAws ? NormalizeAws(Credential.Aws) != NormalizeAws(LlmCredential.Parse(_baseline.Credential)?.Aws)
                 : _credentialChange != SetupSecretEditKind.Keep);
 
@@ -275,6 +281,10 @@ public sealed class LlmSettings : InferenceSettings<LlmSetupChanges>
                         _draft = _draft with { Credential = (Credential with { Google = google }).Serialize() };
                     })));
             }
+            fields.Add(new SetupTextField(new("google-cache-bucket", "Cache staging bucket"), _cacheBucket,
+                string.Empty, value => Edit(() => _cacheBucket = value)));
+            fields.Add(new SetupTextField(new("google-cache-prefix", "Cache staging object prefix"), _cachePrefix,
+                string.Empty, value => Edit(() => _cachePrefix = value)));
         }
         if (UsesAws)
         {
@@ -575,6 +585,12 @@ public sealed class LlmSettings : InferenceSettings<LlmSetupChanges>
     private SetupValidation ConnectionValidation()
     {
         var issues = new List<SetupIssue>();
+        if (UsesVertex)
+        {
+            try { _ = CacheStaging(); }
+            catch (ArgumentException)
+            { return new([new("google-cache-staging-invalid", "Enter a valid staging bucket, or clear both staging fields.", "google-cache-bucket")]); }
+        }
         try { RuntimeInputAdmission.Validate(_draft); }
         catch (NotSupportedException error)
         { return new([new("runtime-inputs-unsupported", error.Message)]); }
@@ -627,15 +643,27 @@ public sealed class LlmSettings : InferenceSettings<LlmSetupChanges>
     }
 
     /// <summary>The connection these settings describe, as their own sign-in and tests use it.</summary>
-    internal LlmConnection CurrentConnection() => _draft with { Version = DraftVersion };
+    internal LlmConnection CurrentConnection() => _draft with
+    { Version = DraftVersion, Vertex = UsesVertex ? Vertex with { CacheStaging = CacheStaging() } : _draft.Vertex };
 
-    protected internal override LlmSetupChanges CreateChanges() => new(Identity,
-        new(_draft with { Credential = null, Version = Identity.ExpectedVersion ?? string.Empty }, _model),
+    private LlmVertexCacheStaging? CacheStaging()
+    {
+        if (_cacheBucket.Length != 0) return new(_cacheBucket, _cachePrefix);
+        if (_cachePrefix.Length != 0) throw new ArgumentException("Staging prefixes require a bucket.");
+        return null;
+    }
+
+    protected internal override LlmSetupChanges CreateChanges()
+    {
+        LlmConnection draft = CurrentConnection();
+        return new(Identity,
+        new(draft with { Credential = null, Version = Identity.ExpectedVersion ?? string.Empty }, _model),
         _credentialChange == SetupSecretEditKind.Keep ? SetupSecretEdit.Keep
             : _draft.Credential is null ? SetupSecretEdit.Clear : SetupSecretEdit.Replace(_draft.Credential),
-        _original is not null && (_original.Endpoint != _draft.Endpoint || _original.Vertex != _draft.Vertex || _original.Azure != _draft.Azure),
-        _original is null || _original.Endpoint != _draft.Endpoint || _original.Vertex != _draft.Vertex || _original.Azure != _draft.Azure || _original.Xai != _draft.Xai || _originalModel != _model
+        _original is not null && (_original.Endpoint != _draft.Endpoint || _original.Vertex != draft.Vertex || _original.Azure != _draft.Azure),
+        _original is null || _original.Endpoint != _draft.Endpoint || _original.Vertex != draft.Vertex || _original.Azure != _draft.Azure || _original.Xai != _draft.Xai || _originalModel != _model
             || _original.ChatCompletions != _draft.ChatCompletions || _original.CapabilityOverrides != _draft.CapabilityOverrides || _credentialChange != SetupSecretEditKind.Keep);
+    }
 }
 
 /// <summary>

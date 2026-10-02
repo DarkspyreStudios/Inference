@@ -700,14 +700,16 @@ OpenAI-style discovery preserves positive integer `context_length`, `top_provide
 values remain unknown. The adapter does not invent limits for OpenAI model-list entries.
 
 `LlmProviderService.ListModelsAsync` keeps each connection's model list in `LlmModelListCache`, which
-`AddLlmConnect` registers once for the registration owner's lifetime. A list stays until the connection's `Version` changes,
-which every connection or credential edit does, or until `RefreshModelsAsync` lists again and replaces it.
+`AddLlmConnect` registers once for the registration owner's lifetime. A list stays until the exact
+tuple of connection `Version` and nullable resolved continuation scope changes, or until
+`RefreshModelsAsync` lists again and replaces it. Every connection or credential edit changes
+`Version`. The tuple compares both components separately and distinguishes null from empty scope.
 Concurrent requests for one connection share a single listing, request accounting and managed sessions
 read the same list, and a failed listing is not kept. Common's `ILlmInference` carries the same pair:
 `ListModelsAsync` may answer from a kept list, and `RefreshModelsAsync` lists again. A service built by
 hand without the shared cache keeps its own.
 
-A version change or explicit refresh fences publication from the replaced in-flight listing.
+A tuple change or explicit refresh fences publication from the replaced in-flight listing.
 Its waiting callers receive cancellation if it returns after replacement. The current entry remains
 unchanged. Replacement does not cancel the provider's entered call. An already-cancelled request
 does not start or replace a listing.
@@ -762,13 +764,14 @@ containers does not transfer that responsibility to a scoped facade.
 `LlmProviderService.BindContextCacheAsync(connectionId, ct)` is the asynchronous entry point for
 `ILlmContextCacheClient`. It resolves one versioned connection, snapshots its data and validates that
 the selected transport is registered. Binding does not refresh credentials, prepare a provider,
-discover models or create a cache. No current adapter implements explicit cache operations, so a
-valid binding attempt reports `NotSupportedException` instead of returning a usable client.
+discover models or create a cache. Gemini API and standard-project Vertex Gemini implement these
+operations. Other adapters and projectless Vertex express mode report `NotSupportedException`.
 
 The facade's admission and retirement cover the source read. Cancellation waits for a source that
 ignores its token to return, then rejects its late result. Facade retirement also drains that read
-before releasing borrowed collaborators. This endpoint does not enable explicit cache generation
-selection, paid cache creation or provider-specific cache scope validation.
+before releasing borrowed collaborators. The returned client borrows the facade. Later operations
+perform explicit cache mutations or validate receipt scope through that same owner; binding itself
+does not create a paid resource.
 
 Exact provider-token counting rejects explicitly cached Vertex requests before credential refresh,
 authentication, connection preparation, model discovery or HTTP dispatch. This restriction is
@@ -1554,10 +1557,10 @@ by these declarations.
 `ILlmContextCacheClient` declares explicit create, get, one-page list, expiry update and delete
 operations. Its request, correlation, receipt, usage, page and delete-result records have exact
 type-name getters on `ConnectLlmJson`. `BindContextCacheAsync` validates a selected connection
-without remote effects and binds the implemented Gemini API route; other routes remain unavailable.
+without remote effects and binds Gemini API or standard-project Vertex Gemini; other routes remain unavailable.
 `LlmChatRequest.ExplicitCache` and Common's request carry the same data-only selection.
 `SupportsExplicitCache` defaults to false on both capability shapes; overrides cannot enable it.
-The Gemini facade advertises its owner-admitted selection path; a raw direct adapter without this
+The Google facade advertises its owner-admitted selection path; a raw direct adapter without this
 internal admission remains unavailable. Other built-in routes refuse a supplied selection before
 credential refresh, catalog discovery, counting, remote requests or engine/process entry. Registered implementations own their declared
 capability and selection validation. Vertex exact cached counting refuses independently of
@@ -1565,7 +1568,7 @@ generation support. SelfHost does not forward native provider cache receipts. Po
 preserves the selection; advisory `PromptCache` remains separate. No operation creates, renews,
 transfers or falls back from a paid cache implicitly.
 
-Each Gemini cache operation resolves one selected connection snapshot. The same facade retains
+Each Google cache operation resolves one selected connection snapshot. The same facade retains
 only derived provider-validated receipt facts, swept at observed expiry and cleared at retirement;
 it retains neither prefixes nor complete listings. Scope IDs are data, not account authority.
 Matching owned record/JSON copies can reuse that receipt evidence. Unknown or new-owner imports
@@ -1573,7 +1576,14 @@ require explicit `Get`; observed credential/configuration replacement revalidate
 through the current fixed-route `Get` before use. Credential equality is only change detection,
 never a claim of rotation-stable principal identity. List does not authorize generation.
 
-Generation and exact Gemini counting use the same canonical cached-content suffix body. Cached
+Vertex requests use the fixed configured project/location route. An authorized create, get or
+consistent list response can establish that route's observed numeric project parent on the same
+binding. Conflicting project, location, model or native-name facts refuse. Short `models/gemini-*`
+response names preserve model identity but do not establish a project association. Replacement
+configuration clears this derived association; imported names never select a request endpoint.
+Express mode and Claude explicit caches remain unavailable.
+
+Google generation and exact Gemini API counting use the same canonical cached-content suffix body. Cached
 suffixes cannot replace system instructions, tools or tool configuration. Advisory occupancy is
 unknown rather than a suffix-only total, and it never performs cache revalidation. Actual usage
 remains the provider's observation. Create, expiry-only update and delete are explicit operations;
@@ -1584,7 +1594,7 @@ reads use distinct typed unavailable reasons; authentication failures do not imp
 
 Cache creation materializes only explicitly named logical prefix resources, not the session's
 selected chat resources or the workspace catalog. The shared scope/descriptor/read-handle owner
-validates immutable metadata and counts streamed bytes. Google Files staging uses a fixed-origin
+validates immutable metadata and counts streamed bytes. Gemini API Files staging uses a fixed-origin
 multipart route, validates returned native identity/MIME/observed size, and observes PROCESSING via
 fixed-route readiness reads under the same connection until ACTIVE. FAILED or contradictory facts
 refuse; cancellation drains admitted work. Opened handles and responses are owned; workspace
@@ -1592,7 +1602,36 @@ access, source content and HTTP are borrowed. Derived staging copies follow Goog
 expiry without implicit deletion, reupload or retry. Unknown-length multipart acceptance, staging
 expiry versus cache lifetime and real model entitlement remain provider qualification gates.
 
-If owned response or read-handle cleanup refuses, the same facade retains the actual refused
+Vertex's optional typed `LlmVertexCacheStaging` selects a Cloud Storage bucket and object prefix
+under the same acquired Google authorization. It creates no bucket and accepts no separate staging
+credential. Named and raw file media stream to derived objects with observed bucket, object name,
+generation and size. Any present response MIME is validated; absent response MIME remains unknown.
+Duplicate named references open and upload once while every
+sent inline occurrence counts its raw bytes. Without staging, inline media preparation uses a
+10 MiB aggregate raw-content budget; this is a local preparation bound, not a claim about the
+backend's encoded-body measurement. The 10,000,000-to-10,485,760-byte interval reaches the provider
+unchanged. System instructions, tool schemas, text, base64 and metadata have no added body-size cap.
+Unknown-length named content reads once through the remaining occurrence budget plus a boundary
+byte; oversize content refuses without truncation, reopening or automatic staging.
+
+Cloud Storage upload query parameters encode the exact object name once. Native `gs://` file URI
+values preserve slash, plus, percent and Unicode text without normalization or percent decoding.
+The local unqualified-URI representation rejects literal `#`, `?` and controls in the configured
+prefix; this is not a Cloud Storage object-naming prohibition. Insert-only upload preconditions
+do not make an object immune to later external replacement. The caller maintains derived object
+availability and unchanged content for cache use. The adapter does not append a generation fragment,
+delete objects, retry uploads or recreate caches implicitly. Partial staging effects remain distinct
+from dispatched cache-create uncertainty. Unknown-length upload acceptance, native URI character
+interpretation, external object retention and actual model entitlement are not established by local
+validation or controlled transport fixtures.
+
+Upload requests own their content and receive one cleanup attempt after response cleanup. Media
+content detaches its borrowed source and fence after admitted upload work drains, including when an
+outer request-content wrapper refuses cleanup. The source stream remains borrowed.
+Cache CRUD exchanges also own their authorized requests. They attempt response then request cleanup
+before result publication or typed uncertainty, preserving validated late receipt evidence. Admission
+failures still clean requests once and do not imply a dispatched mutation.
+If owned request, response or read-handle cleanup refuses, the same facade retains the actual refused
 owner through a safe cleanup carrier. Retirement drains admitted operations, attempts independent
 owned cleanup and reports its cached cleanup failure to every disposal caller; it does not retry
 the refused release. Ordinary provider/transport/receipt failures do not fault retirement, and

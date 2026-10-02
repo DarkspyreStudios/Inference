@@ -5,7 +5,7 @@ using Darkspyre.Inference.Common.LLM;
 
 namespace Darkspyre.Inference.Connect.LLM.Internal;
 
-/// <summary>Sends already-authorized cache requests. Routing and receipt authority remain the caller's responsibility.</summary>
+/// <summary>Owns already-authorized cache requests. Routing and receipt authority remain the caller's responsibility.</summary>
 internal static class GoogleCacheHttp
 {
     internal static Task<LlmContextCache> GetAsync(HttpClient http, HttpRequestMessage request,
@@ -38,19 +38,18 @@ internal static class GoogleCacheHttp
         Func<LlmExplicitCacheReference, bool>? authorizeAlreadyAbsent,
         Action<CancellationToken> ownerFence, CancellationToken cancellationToken) where T : class
     {
-        ArgumentNullException.ThrowIfNull(http);
-        ArgumentNullException.ThrowIfNull(request);
-        ArgumentNullException.ThrowIfNull(reference);
-        ArgumentNullException.ThrowIfNull(ownerFence);
-        if (operation == LlmContextCacheMutation.UpdateExpiry) ArgumentNullException.ThrowIfNull(parseUpdate);
-        else
+        using var consumption = Admit(http, request, transport, () =>
         {
-            ArgumentNullException.ThrowIfNull(deletionReceipt);
-            ArgumentNullException.ThrowIfNull(authorizeAlreadyAbsent);
-        }
-        HttpMethod expected = operation == LlmContextCacheMutation.UpdateExpiry ? HttpMethod.Patch : HttpMethod.Delete;
-        if (request.Method != expected) throw new ArgumentException("Cache mutation request method does not match its operation.", nameof(request));
-        using var consumption = SdkHttpConsumption.Enter(http, cancellationToken);
+            ArgumentNullException.ThrowIfNull(reference);
+            if (operation == LlmContextCacheMutation.UpdateExpiry) ArgumentNullException.ThrowIfNull(parseUpdate);
+            else
+            {
+                ArgumentNullException.ThrowIfNull(deletionReceipt);
+                ArgumentNullException.ThrowIfNull(authorizeAlreadyAbsent);
+            }
+            HttpMethod expected = operation == LlmContextCacheMutation.UpdateExpiry ? HttpMethod.Patch : HttpMethod.Delete;
+            if (request.Method != expected) throw new ArgumentException("Cache mutation request method does not match its operation.", nameof(request));
+        }, ownerFence, cancellationToken);
         cancellationToken = consumption.Token;
         void Fence()
         {
@@ -58,7 +57,6 @@ internal static class GoogleCacheHttp
             ownerFence(cancellationToken);
             consumption.Fence();
         }
-        Fence();
         HttpResponseMessage? response = null;
         T? observed = null;
         string? requestId = null;
@@ -109,9 +107,8 @@ internal static class GoogleCacheHttp
         catch (Exception error)
         {
             // The second admission fence can fail without invoking the effectful send.
-            if (!dispatched) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(error).Throw();
             canceled = error is OperationCanceledException;
-            failure = ReferenceEquals(error, ownedStatusFailure) ? error : SafeMutationFailure(error, category);
+            failure = !dispatched || ReferenceEquals(error, ownedStatusFailure) ? error : SafeMutationFailure(error, category);
         }
         if (response is not null)
         {
@@ -124,6 +121,11 @@ internal static class GoogleCacheHttp
                 canceled |= error is OperationCanceledException;
             }
         }
+        if (DisposeRequest(request, error => SafeMutationFailure(error, "Google cache mutation request cleanup failed.")) is { } requestCleanup)
+        {
+            failure = failure is null ? requestCleanup : new AggregateException(failure, requestCleanup);
+            canceled |= requestCleanup is OperationCanceledException or Common.Resources.InferenceResourceOperationCanceledException;
+        }
         try { Fence(); }
         catch (Exception error)
         {
@@ -132,6 +134,7 @@ internal static class GoogleCacheHttp
         }
         if (failure is not null)
         {
+            if (!dispatched) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(failure).Throw();
             var update = observed as LlmContextCache;
             var deletion = observed as LlmContextCacheDeleteResult;
             if (canceled)
@@ -154,12 +157,11 @@ internal static class GoogleCacheHttp
         LlmTransport transport, Func<JsonElement, T> parse, Action<CancellationToken> ownerFence,
         CancellationToken cancellationToken)
     {
-        ArgumentNullException.ThrowIfNull(http);
-        ArgumentNullException.ThrowIfNull(request);
-        ArgumentNullException.ThrowIfNull(parse);
-        ArgumentNullException.ThrowIfNull(ownerFence);
-        if (request.Method != HttpMethod.Get) throw new ArgumentException("Cache reads require a GET request.", nameof(request));
-        using var consumption = SdkHttpConsumption.Enter(http, cancellationToken);
+        using var consumption = Admit(http, request, transport, () =>
+        {
+            ArgumentNullException.ThrowIfNull(parse);
+            if (request.Method != HttpMethod.Get) throw new ArgumentException("Cache reads require a GET request.", nameof(request));
+        }, ownerFence, cancellationToken);
         cancellationToken = consumption.Token;
         void Fence()
         {
@@ -167,7 +169,6 @@ internal static class GoogleCacheHttp
             ownerFence(cancellationToken);
             consumption.Fence();
         }
-        Fence();
         HttpResponseMessage? response = null;
         T? observed = default;
         string? requestId = null;
@@ -179,6 +180,7 @@ internal static class GoogleCacheHttp
         string category = "Google cache read transport failed.";
         try
         {
+            Fence();
             response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
             status = response.StatusCode;
             requestId = ProviderHttp.ReadRequestId(response);
@@ -214,6 +216,11 @@ internal static class GoogleCacheHttp
                 canceled |= error is OperationCanceledException;
             }
         }
+        if (DisposeRequest(request, error => SafeReadFailure(error, "Google cache read request cleanup failed.")) is { } requestCleanup)
+        {
+            failure = failure is null ? requestCleanup : new AggregateException(failure, requestCleanup);
+            canceled |= requestCleanup is OperationCanceledException or Common.Resources.InferenceResourceOperationCanceledException;
+        }
         try { Fence(); }
         catch (Exception error)
         {
@@ -238,12 +245,11 @@ internal static class GoogleCacheHttp
         Func<JsonElement, LlmContextCache> parseReceipt, Action<CancellationToken> ownerFence,
         CancellationToken cancellationToken)
     {
-        ArgumentNullException.ThrowIfNull(http);
-        ArgumentNullException.ThrowIfNull(request);
-        ArgumentNullException.ThrowIfNull(correlation);
-        ArgumentNullException.ThrowIfNull(parseReceipt);
-        ArgumentNullException.ThrowIfNull(ownerFence);
-        using var consumption = SdkHttpConsumption.Enter(http, cancellationToken);
+        using var consumption = Admit(http, request, transport, () =>
+        {
+            ArgumentNullException.ThrowIfNull(correlation);
+            ArgumentNullException.ThrowIfNull(parseReceipt);
+        }, ownerFence, cancellationToken);
         cancellationToken = consumption.Token;
         void Fence()
         {
@@ -253,7 +259,6 @@ internal static class GoogleCacheHttp
         }
 
         // Failures before invoking SendAsync do not imply a dispatched mutation.
-        Fence();
         HttpResponseMessage? response = null;
         LlmContextCache? observed = null;
         string? requestId = null;
@@ -262,9 +267,11 @@ internal static class GoogleCacheHttp
         Exception? failure = null;
         LlmProviderException? ownedStatusFailure = null;
         bool canceled = false;
+        bool dispatched = false;
         string category = "Google cache create transport failed.";
         try
         {
+            Fence(); dispatched = true;
             response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
             status = response.StatusCode;
             requestId = ProviderHttp.ReadRequestId(response);
@@ -286,7 +293,7 @@ internal static class GoogleCacheHttp
         catch (Exception error)
         {
             canceled = error is OperationCanceledException;
-            failure = ReferenceEquals(error, ownedStatusFailure) ? error
+            failure = !dispatched || ReferenceEquals(error, ownedStatusFailure) ? error
                 : SafeFailure(error, category, transport, status, requestId, retryAfter, cancellationToken);
         }
         if (response is not null)
@@ -301,6 +308,12 @@ internal static class GoogleCacheHttp
                 canceled |= error is OperationCanceledException;
             }
         }
+        if (DisposeRequest(request, error => SafeFailure(error, "Google cache create request cleanup failed.",
+            transport, status, requestId, retryAfter, cancellationToken)) is { } requestCleanup)
+        {
+            failure = failure is null ? requestCleanup : new AggregateException(failure, requestCleanup);
+            canceled |= requestCleanup is OperationCanceledException or Common.Resources.InferenceResourceOperationCanceledException;
+        }
         try { Fence(); }
         catch (Exception error)
         {
@@ -311,11 +324,43 @@ internal static class GoogleCacheHttp
         }
         if (failure is not null)
         {
+            if (!dispatched) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(failure).Throw();
             if (canceled)
                 throw new LlmContextCacheCreateCancelledException(correlation, cancellationToken, failure, requestId, observed);
             throw new LlmContextCacheCreateUncertainException(correlation, failure, requestId, observed);
         }
         return observed!;
+    }
+
+    [SuppressMessage("Design", "CA1031", Justification = "Admission preserves the original failure and separately retains a refused owned request.")]
+    private static SdkHttpConsumption.Operation Admit(HttpClient http, HttpRequestMessage request, LlmTransport transport,
+        Action validate, Action<CancellationToken> ownerFence, CancellationToken token)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        SdkHttpConsumption.Operation? consumption = null;
+        try
+        {
+            ArgumentNullException.ThrowIfNull(http); ArgumentNullException.ThrowIfNull(ownerFence);
+            validate();
+            consumption = SdkHttpConsumption.Enter(http, token); token = consumption.Token;
+            token.ThrowIfCancellationRequested(); ownerFence(token); consumption.Fence();
+            return consumption;
+        }
+        catch (Exception original)
+        {
+            Exception? cleanup = DisposeRequest(request, error => SafeFailure(error, "Google cache request admission cleanup failed.",
+                transport, null, null, null, token));
+            consumption?.Dispose();
+            if (cleanup is not null) throw new AggregateException(original, cleanup);
+            throw;
+        }
+    }
+
+    [SuppressMessage("Design", "CA1031", Justification = "Request cleanup projects fixed safe facts and retains the actual refused owner without retry.")]
+    private static Exception? DisposeRequest(HttpRequestMessage request, Func<Exception, Exception> safe)
+    {
+        try { request.Dispose(); return null; }
+        catch (Exception error) { return LlmResourcePreparation.AsCleanupFailure(safe(error), refusedOwner: request); }
     }
 
     private static Exception SafeFailure(Exception error, string category, LlmTransport transport,

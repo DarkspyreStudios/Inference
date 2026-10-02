@@ -8,8 +8,8 @@ using Darkspyre.Inference.Connect.LLM.Providers;
 
 namespace Darkspyre.Inference.Connect.LLM.Vertex;
 
-internal sealed class VertexLlmClient(HttpClient http, IVertexAuthentication authentication)
-    : LlmClientBase(http), ILlmConnectionPreparation, ILlmContextEstimator, ILlmProviderTokenCounter
+internal sealed partial class VertexLlmClient(HttpClient http, IVertexAuthentication authentication)
+    : LlmClientBase(http), ILlmConnectionPreparation, ILlmContextEstimator, ILlmProviderTokenCounter, ILlmContextCacheAdapter
 {
     public override LlmTransport Transport => LlmTransport.GoogleVertexAi;
     public override LlmProviderDefinition ProviderDefinition => VertexProviderDefinition.Value;
@@ -27,9 +27,15 @@ internal sealed class VertexLlmClient(HttpClient http, IVertexAuthentication aut
         if (express && modelId is not null && VertexModelProfiles.Get(modelId).IsClaude)
             throw new NotSupportedException("Vertex express mode serves Gemini models only.");
         if (express) capabilities = capabilities with { SupportsModelListing = false };
+        capabilities = capabilities with
+        {
+            SupportsExplicitCache = !express && connection.CacheBindings is not null
+            && (modelId is null || !VertexModelProfiles.Get(modelId).IsClaude)
+        };
         LlmProviderCapabilities implemented = capabilities;
         capabilities = LlmCapabilityOverrideLookup.Apply(capabilities, connection, modelId);
         if (capabilities.SupportsJsonObject || capabilities.SupportsAccountUsage
+            || capabilities.SupportsExplicitCache && !implemented.SupportsExplicitCache
             || capabilities.SupportsTemperature && !implemented.SupportsTemperature
             || capabilities.SupportsTopP && !implemented.SupportsTopP
             || capabilities.SupportsTopK && !implemented.SupportsTopK
@@ -48,7 +54,7 @@ internal sealed class VertexLlmClient(HttpClient http, IVertexAuthentication aut
     {
         cancellationToken.ThrowIfCancellationRequested();
         RuntimeInputAdmission.Validate(connection);
-        VertexAccess access = await authentication.ResolveAsync(connection, cancellationToken).ConfigureAwait(false);
+        VertexAccess access = await ResolveAccessAsync(connection, cancellationToken).ConfigureAwait(false);
         return connection with { ContinuationCodec = new VertexContinuationCodec(), ResolvedContinuationScope = access.Scope };
     }
 
@@ -62,7 +68,14 @@ internal sealed class VertexLlmClient(HttpClient http, IVertexAuthentication aut
         LlmProviderCapabilities capabilities = GetCapabilities(connection, request.ModelId);
         ValidateRequest(connection, request, capabilities, profile.IsClaude ? AnthropicTools.Resolve(connection, request).NativeNames : null);
         ValidateVertexRequest(connection, request, profile, capabilities);
-        VertexAccess access = await authentication.ResolveAsync(connection, cancellationToken).ConfigureAwait(false);
+        if (request.ExplicitCache is { } cache)
+        {
+            ValidateCachedSuffix(request);
+            if (connection.CacheAdmission is not { } admission || admission.Owner != connection.CacheBindings)
+                throw new ArgumentException("The selected cache requires admission through its binding owner.", nameof(request));
+            admission.Check(connection, cache);
+        }
+        VertexAccess access = await ResolveAccessAsync(connection, cancellationToken).ConfigureAwait(false);
         if (connection.ResolvedContinuationScope is { } pinned && pinned != access.Scope)
         { throw new InvalidOperationException("The Google credential identity changed before dispatch."); }
         connection = connection with { ContinuationCodec = new VertexContinuationCodec(), ResolvedContinuationScope = access.Scope };
@@ -129,6 +142,7 @@ internal sealed class VertexLlmClient(HttpClient http, IVertexAuthentication aut
                     Transport, error is LlmProviderException provider ? provider.StatusCode : null);
             }
             if (!moved) { yield break; }
+            connection.CacheAdmission?.Check(connection, request.ExplicitCache);
             yield return consumption.Publish<LlmStreamEvent>(iterator.Current is LlmChatCompletionEvent completion
                 ? new LlmChatCompletionEvent(completion.Result with
                 {
@@ -144,7 +158,7 @@ internal sealed class VertexLlmClient(HttpClient http, IVertexAuthentication aut
         VertexEndpoints.Validate(connection);
         if (connection.Vertex!.AuthenticationMode == LlmGoogleAuthenticationMode.ApiKey) return [];
         using var consumption = SdkHttpConsumption.Enter(Http, cancellationToken); cancellationToken = consumption.Token;
-        VertexAccess access = await authentication.ResolveAsync(connection, cancellationToken).ConfigureAwait(false);
+        VertexAccess access = await ResolveAccessAsync(connection, cancellationToken).ConfigureAwait(false);
         if (connection.ResolvedContinuationScope is { } pinned && pinned != access.Scope)
         { throw new InvalidOperationException("The Google credential identity changed before model discovery."); }
         var catalog = new Dictionary<string, JsonElement>(StringComparer.Ordinal);
@@ -212,6 +226,7 @@ internal sealed class VertexLlmClient(HttpClient http, IVertexAuthentication aut
         VertexModelProfile profile = VertexModelProfiles.Get(request.ModelId);
         ValidateRequest(connection, request, capabilities, profile.IsClaude ? AnthropicTools.Resolve(connection, request).NativeNames : null);
         ValidateVertexRequest(connection, request, profile, capabilities);
+        if (request.ExplicitCache is not null) { ValidateCachedSuffix(request); return null; }
         if (request.Messages.Any(message => message.ContinuationState is not null || message.Attachments.Count != 0
             || ClientTools.Functions(message.ToolResults).Any(result => result.Output.Parts.Any(part => part is not LlmToolOutputText)))) { return null; }
         string projection = JsonSerializer.Serialize(request, ConnectLlmJson.ChatRequest);

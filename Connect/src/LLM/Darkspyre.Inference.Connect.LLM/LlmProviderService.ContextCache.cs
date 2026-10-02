@@ -20,16 +20,22 @@ public sealed partial class LlmProviderService
             owner.DeleteContextCacheAsync(connectionId, reference, cancellationToken);
     }
 
-    private async Task<(GeminiApiLlmClient Client, LlmConnection Connection, GeminiCacheBindings.Admission Admission)>
-        ResolveContextCacheAsync(string connectionId, CancellationToken token)
+    private async Task<(ILlmContextCacheOperation Client, LlmConnection Connection, GeminiCacheBindings.Admission Admission)>
+        ResolveContextCacheAsync(string connectionId, CancellationToken token,
+            LlmExplicitCacheReference? reference = null, LlmContextCacheCreate? create = null, bool requireKnown = false, bool allowDeleted = false)
     {
         long sequence = _cacheBindings.BeginOperation();
         LlmConnection connection = EmbeddingRequestData.Snapshot(await ResolveConnectionAsync(connectionId, token).ConfigureAwait(false));
         ThrowIfOperationCanceled(token);
-        if (ClientFor(connection.Transport) is not GeminiApiLlmClient client)
+        if (ClientFor(connection.Transport) is not ILlmContextCacheAdapter adapter)
             throw new NotSupportedException("No explicit context cache adapter is implemented.");
-        GeminiApiLlmClient.Validate(connection);
-        _ = GeminiApiLlmClient.Key(connection);
+        adapter.ValidateCacheConnection(connection);
+        if (reference is not null) adapter.ValidateCacheReference(connection, reference);
+        if (requireKnown) _cacheBindings.RequireObserved(connectionId, reference!, allowDeleted);
+        if (create is not null) adapter.ValidateCacheCreate(connection, create);
+        ILlmContextCacheOperation client = await adapter.PrepareCacheOperationAsync(connection, ThrowIfOperationCanceled, token).ConfigureAwait(false);
+        ThrowIfOperationCanceled(token);
+        connection = client.Connection with { CacheOperation = client };
         GeminiCacheBindings.Binding binding = _cacheBindings.Select(connectionId, connection, sequence);
         return (client, connection, _cacheBindings.Capture(binding, connection, sequence));
     }
@@ -49,8 +55,8 @@ public sealed partial class LlmProviderService
         return await CaptureCacheCleanupAsync(async () =>
         {
             request = GoogleCacheData.Snapshot(request, DateTimeOffset.UtcNow);
-            var selected = await ResolveContextCacheAsync(connectionId, token).ConfigureAwait(false);
-            LlmContextCache receipt = await selected.Client.CreateCacheAsync(selected.Connection, request, selected.Admission.Scope,
+            var selected = await ResolveContextCacheAsync(connectionId, token, create: request).ConfigureAwait(false);
+            LlmContextCache receipt = await selected.Client.CreateAsync(request, selected.Admission,
                 current => CheckContextCache(selected.Admission, current), token).ConfigureAwait(false);
             try
             {
@@ -70,9 +76,9 @@ public sealed partial class LlmProviderService
         using var operation = _lifetime.Enter(token); token = operation.Token;
         return await CaptureCacheCleanupAsync(async () =>
         {
-            ValidateCacheReference(reference);
-            var selected = await ResolveContextCacheAsync(connectionId, token).ConfigureAwait(false);
-            LlmContextCache receipt = await selected.Client.GetCacheAsync(selected.Connection, reference, selected.Admission.Scope,
+            ArgumentNullException.ThrowIfNull(reference);
+            var selected = await ResolveContextCacheAsync(connectionId, token, reference).ConfigureAwait(false);
+            LlmContextCache receipt = await selected.Client.GetAsync(reference, selected.Admission,
                 current => CheckContextCache(selected.Admission, current), token).ConfigureAwait(false);
             CheckContextCache(selected.Admission, token);
             _ = _cacheBindings.Admit(selected.Admission, receipt);
@@ -87,7 +93,7 @@ public sealed partial class LlmProviderService
         {
             GoogleCacheData.ValidatePage(request);
             var selected = await ResolveContextCacheAsync(connectionId, token).ConfigureAwait(false);
-            LlmContextCachePage page = await selected.Client.ListCachesAsync(selected.Connection, request, selected.Admission.Scope,
+            LlmContextCachePage page = await selected.Client.ListAsync(request, selected.Admission,
                 current => CheckContextCache(selected.Admission, current), token).ConfigureAwait(false);
             CheckContextCache(selected.Admission, token);
             return page;
@@ -95,15 +101,15 @@ public sealed partial class LlmProviderService
     }
 
     private async Task<GeminiCacheBindings.Admission> RequireContextCacheAsync(string connectionId, LlmConnection connection,
-        GeminiApiLlmClient client, LlmExplicitCacheReference reference, long sequence, bool allowDeleted, CancellationToken token)
+        ILlmContextCacheOperation client, LlmExplicitCacheReference reference, long sequence, bool allowDeleted, CancellationToken token)
     {
-        ValidateCacheReference(reference);
+        ((ILlmContextCacheAdapter)ClientFor(connection.Transport)).ValidateCacheReference(connection, reference);
         GeminiCacheBindings.Binding binding = _cacheBindings.Select(connectionId, connection, sequence);
         GeminiCacheBindings.Admission admission = _cacheBindings.Capture(binding, connection, sequence);
         GeminiCacheBindings.Observation known = _cacheBindings.RequireKnown(admission, reference, allowDeleted);
         if (known.Epoch != admission.Epoch)
         {
-            LlmContextCache checkedReceipt = await CaptureCacheCleanupAsync(() => client.GetCacheAsync(connection, reference, admission.Scope,
+            LlmContextCache checkedReceipt = await CaptureCacheCleanupAsync(() => client.GetAsync(reference, admission,
                 current => CheckContextCache(admission, current), token)).ConfigureAwait(false);
             CheckContextCache(admission, token);
             admission = _cacheBindings.Admit(admission, checkedReceipt);
@@ -119,14 +125,14 @@ public sealed partial class LlmProviderService
         using var operation = _lifetime.Enter(token); token = operation.Token;
         return await CaptureCacheCleanupAsync(async () =>
         {
-            ValidateCacheReference(reference);
+            ArgumentNullException.ThrowIfNull(reference);
             ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(expiry, DateTimeOffset.UtcNow);
-            var selected = await ResolveContextCacheAsync(connectionId, token).ConfigureAwait(false);
+            var selected = await ResolveContextCacheAsync(connectionId, token, reference, requireKnown: true).ConfigureAwait(false);
             var admission = await RequireContextCacheAsync(connectionId, selected.Connection, selected.Client, reference, selected.Admission.Sequence, false, token).ConfigureAwait(false);
             LlmContextCache? observed = null;
             try
             {
-                LlmContextCache receipt = await selected.Client.UpdateCacheExpiryAsync(selected.Connection, admission.Reference!, expiry, admission.Scope,
+                LlmContextCache receipt = await selected.Client.UpdateExpiryAsync(admission.Reference!, expiry, admission,
                     current => CheckContextCache(admission, current), token).ConfigureAwait(false);
                 observed = receipt;
                 CheckContextCache(admission, token);
@@ -154,15 +160,15 @@ public sealed partial class LlmProviderService
         using var operation = _lifetime.Enter(token); token = operation.Token;
         return await CaptureCacheCleanupAsync(async () =>
         {
-            ValidateCacheReference(reference);
-            var selected = await ResolveContextCacheAsync(connectionId, token).ConfigureAwait(false);
+            ArgumentNullException.ThrowIfNull(reference);
+            var selected = await ResolveContextCacheAsync(connectionId, token, reference, requireKnown: true, allowDeleted: true).ConfigureAwait(false);
             var admission = await RequireContextCacheAsync(connectionId, selected.Connection, selected.Client, reference, selected.Admission.Sequence, true, token).ConfigureAwait(false);
             LlmContextCacheDeleteResult? observed = null;
             try
             {
-                LlmContextCacheDeleteResult receipt = await selected.Client.DeleteCacheAsync(selected.Connection, admission.Reference!,
+                LlmContextCacheDeleteResult receipt = await selected.Client.DeleteAsync(admission.Reference!,
                     candidate => { CheckContextCache(admission, token); return candidate == admission.Reference; },
-                    current => CheckContextCache(admission, current), token).ConfigureAwait(false);
+                    admission, current => CheckContextCache(admission, current), token).ConfigureAwait(false);
                 observed = receipt;
                 CheckContextCache(admission, token);
                 _ = _cacheBindings.ChangedResource(admission, deleted: true, uncertain: false);
@@ -182,24 +188,16 @@ public sealed partial class LlmProviderService
         }).ConfigureAwait(false);
     }
 
-    private static void ValidateCacheReference(LlmExplicitCacheReference reference)
-    {
-        ArgumentNullException.ThrowIfNull(reference);
-        _ = GeminiCacheReads.ResourceId(reference.ResourceName);
-        _ = GeminiApiLlmClient.ParseModel(reference.ModelId);
-    }
-
     private LlmConnection WithContextCache(LlmConnection connection, ILlmClient client) =>
-        client is GeminiApiLlmClient ? connection with { CacheBindings = _cacheBindings } : connection;
+        client is ILlmContextCacheAdapter ? connection with { CacheBindings = _cacheBindings } : connection;
 
     private void ValidateCacheEstimate(string connectionId, LlmConnection connection, ILlmClient client,
         LlmChatRequest request, long sequence)
     {
-        if (client is not GeminiApiLlmClient || request.ExplicitCache is not { } reference) return;
-        GeminiApiLlmClient.ValidateCachedSuffix(request);
-        ValidateCacheReference(reference);
-        GeminiCacheBindings.Binding binding = _cacheBindings.Select(connectionId, connection, sequence);
-        _ = _cacheBindings.RequireKnown(_cacheBindings.Capture(binding, connection, sequence), reference, false);
+        if (client is not ILlmContextCacheAdapter adapter || request.ExplicitCache is not { } reference) return;
+        adapter.ValidateCachedSuffix(request);
+        adapter.ValidateCacheReference(connection, reference);
+        _cacheBindings.ValidateEstimate(connectionId, connection, reference, sequence);
         // A replaced selection is not revalidated for advisory accounting; occupancy stays unknown.
     }
 
@@ -207,9 +205,15 @@ public sealed partial class LlmProviderService
         LlmConnection connection, ILlmClient client, LlmChatRequest request, long sequence, CancellationToken token)
     {
         connection = WithContextCache(connection, client);
-        if (client is not GeminiApiLlmClient gemini || request.ExplicitCache is not { } reference) return (connection, request);
-        GeminiApiLlmClient.ValidateCachedSuffix(request);
-        var admission = await RequireContextCacheAsync(connectionId, connection, gemini, reference, sequence, false, token).ConfigureAwait(false);
+        if (client is not ILlmContextCacheAdapter adapter || request.ExplicitCache is not { } reference) return (connection, request);
+        adapter.ValidateCachedSuffix(request);
+        adapter.ValidateCacheReference(connection, reference);
+        adapter.ValidateCacheConnection(connection);
+        _cacheBindings.RequireObserved(connectionId, reference, false);
+        ILlmContextCacheOperation selected = await adapter.PrepareCacheOperationAsync(connection, ThrowIfOperationCanceled, token).ConfigureAwait(false);
+        ThrowIfOperationCanceled(token);
+        connection = selected.Connection with { CacheBindings = _cacheBindings, CacheOperation = selected };
+        var admission = await RequireContextCacheAsync(connectionId, connection, selected, reference, sequence, false, token).ConfigureAwait(false);
         return (connection with { CacheAdmission = admission }, request with { ExplicitCache = admission.Reference });
     }
 }

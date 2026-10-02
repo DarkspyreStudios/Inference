@@ -16,7 +16,7 @@ internal static class GeminiCacheReads
         string id = ResourceId(importedReference.ResourceName);
         string model = GeminiApiLlmClient.ParseModel(importedReference.ModelId);
         string key = Validate(http, admittedConnection, ownerIssuedScopeId, ownerFence, token);
-        using var request = Request("/" + Uri.EscapeDataString(id), key);
+        var request = Request("/" + Uri.EscapeDataString(id), key);
         return await GoogleCacheHttp.GetAsync(http, request, LlmTransport.GoogleGeminiApi,
             root => ParseReceipt(root, ownerIssuedScopeId, importedReference.ResourceName, model),
             ownerFence, token).ConfigureAwait(false);
@@ -30,7 +30,7 @@ internal static class GeminiCacheReads
         string key = Validate(http, admittedConnection, ownerIssuedScopeId, ownerFence, token);
         string query = "?pageSize=" + request.PageSize.ToString(CultureInfo.InvariantCulture)
             + (request.PageToken is null ? string.Empty : "&pageToken=" + Uri.EscapeDataString(request.PageToken));
-        using var message = Request(query, key);
+        var message = Request(query, key);
         return await GoogleCacheHttp.ListAsync(http, message, LlmTransport.GoogleGeminiApi,
             root => GoogleCacheData.Page(root, item => ParseReceipt(item, ownerIssuedScopeId, null, null)),
             ownerFence, token).ConfigureAwait(false);

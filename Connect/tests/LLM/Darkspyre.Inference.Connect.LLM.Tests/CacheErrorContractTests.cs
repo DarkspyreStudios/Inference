@@ -208,7 +208,7 @@ public sealed class CacheErrorContractTests
     {
         using var handler = new MaliciousHandler();
         using var http = new HttpClient(handler);
-        using var request = new HttpRequestMessage(HttpMethod.Get, "https://generativelanguage.googleapis.com/v1beta/cachedContents/example");
+        var request = new HttpRequestMessage(HttpMethod.Get, "https://generativelanguage.googleapis.com/v1beta/cachedContents/example");
         Exception safe = await Assert.ThrowsAsync<LlmProviderException>(() => GoogleCacheHttp.GetAsync(http, request, LlmTransport.GoogleGeminiApi,
             _ => throw new InvalidOperationException("unreachable"), _ => { }, default));
         var errors = new Exception[]

@@ -19,9 +19,9 @@ public sealed class ConnectLlmJsonTests
     private const string ConnectionJson = "{\"Version\":\"1\",\"Transport\":0,\"Endpoint\":\"https://provider.invalid\"}";
     private const string ChatConfigurationJson = "{\"OutputLimitField\":1,\"UsePromptCacheKey\":false}";
     private const string ChatConnectionJson = "{\"Version\":\"1\",\"Transport\":0,\"Endpoint\":\"https://provider.invalid\",\"ChatCompletions\":" + ChatConfigurationJson + "}";
-    private const string VertexAdcJson = "{\"ProjectId\":\"project\",\"Location\":\"us-east5\",\"AuthenticationMode\":0}";
-    private const string VertexServiceAccountJson = "{\"ProjectId\":\"project\",\"Location\":\"global\",\"AuthenticationMode\":1}";
-    private const string VertexExpressJson = "{\"ProjectId\":null,\"Location\":null,\"AuthenticationMode\":2}";
+    private const string VertexAdcJson = "{\"ProjectId\":\"project\",\"Location\":\"us-east5\",\"AuthenticationMode\":0,\"CacheStaging\":null}";
+    private const string VertexServiceAccountJson = "{\"ProjectId\":\"project\",\"Location\":\"global\",\"AuthenticationMode\":1,\"CacheStaging\":null}";
+    private const string VertexExpressJson = "{\"ProjectId\":null,\"Location\":null,\"AuthenticationMode\":2,\"CacheStaging\":null}";
     private const string AzureProfileJson = "{\"ApiMode\":0,\"AuthenticationMode\":0,\"DeploymentId\":\"alias\",\"ModelProfileId\":\"gpt-4o\",\"ApiVersion\":null,\"Entra\":null}";
     private const string AzureUnknownProfileJson = "{\"ApiMode\":0,\"AuthenticationMode\":0,\"DeploymentId\":\"alias\",\"ModelProfileId\":null,\"ApiVersion\":null,\"Entra\":null}";
     private const string AzureVersionedModesJson = "{\"ApiMode\":1,\"AuthenticationMode\":1,\"DeploymentId\":\"alias\",\"ModelProfileId\":null,\"ApiVersion\":\"2025-01-01\",\"Entra\":null}";
