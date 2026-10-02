@@ -7,6 +7,67 @@ namespace Darkspyre.Inference.Connect.LLM.Tests;
 public sealed class ManagedResourceCleanupTests
 {
     [Fact]
+    public void CachedCleanupFailureRetainsTheActualRefusedStreamAndResponseOnlyUntilReleased()
+    {
+        object?[] retained = CreateRetainedFailure();
+        WeakReference[] roots = AssertRetainedThenRelease(retained);
+        for (int attempt = 0; roots.Any(root => root.IsAlive) && attempt < 30; attempt++)
+        {
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+            GC.Collect();
+        }
+        Assert.All(roots, root => Assert.False(root.IsAlive));
+        GC.KeepAlive(retained);
+    }
+
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private static object?[] CreateRetainedFailure() => [CreateRetainedFailureAsync().GetAwaiter().GetResult()];
+
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private static async Task<RetainedFailure> CreateRetainedFailureAsync()
+    {
+        var resources = new ControlledSessionResources();
+        await resources.RegisterAsync("source.txt", "text/plain", "source");
+        using var destination = new LlmResourceMaterializationTests.ResourceDestination();
+        var stream = new RefusedBodyStream(new OperationCanceledException("actual raw stream cleanup refusal"));
+        using var handler = new StreamingDestination(destination, stream);
+        using var http = new HttpClient(handler);
+        var connection = LlmResourceMaterializationTests.Connection() with { CapabilityOverrides = new() { SupportsStreaming = true } };
+        var client = new XaiResponsesLlmClient(http);
+        var session = await ManagedAgentSession.CreateAsync(connection,
+            new() { ModelId = "grok-4", CallerServices = new() { Resources = resources } }, [], client,
+            (request, token) => client.StreamAsync(connection, request, token),
+            model => ManagedResourceMaterializationTests.ManagedCapabilities(client, model));
+        Exception failure;
+        try
+        {
+            failure = await Assert.ThrowsAsync<InferenceResourceOperationCanceledException>(() => ManagedResourceMaterializationTests.Read(
+                session.RunTurnAsync(new() { Input = [new LlmAgentTextContent("inspect")] })));
+            Assert.Same(failure, await Assert.ThrowsAsync<InferenceResourceOperationCanceledException>(() => session.DisposeAsync().AsTask()));
+        }
+        finally { await Drain(session.DisposeAsync().AsTask()); }
+        Assert.NotNull(handler.Response);
+        return new(session, failure, [new(stream), handler.Response]);
+    }
+
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private static WeakReference[] AssertRetainedThenRelease(object?[] retained)
+    {
+        var actual = Assert.IsType<RetainedFailure>(retained[0]);
+        GC.Collect();
+        GC.WaitForPendingFinalizers();
+        GC.Collect();
+        Assert.All(actual.Roots, root => Assert.True(root.IsAlive));
+        GC.KeepAlive(actual.Session);
+        GC.KeepAlive(actual.Failure);
+        retained[0] = null;
+        return actual.Roots;
+    }
+
+    private sealed record RetainedFailure(ILlmAgentSession Session, Exception Failure, WeakReference[] Roots);
+
+    [Fact]
     public async Task RefusedRawBodyStreamCleanupNeverRetriesThroughDependentResponseContent()
     {
         var resources = new ControlledSessionResources();
@@ -189,11 +250,12 @@ public sealed class ManagedResourceCleanupTests
     private sealed class StreamingDestination(HttpMessageHandler destination, Stream body) : HttpMessageHandler
     {
         private readonly HttpMessageInvoker _destination = new(destination, disposeHandler: false);
+        internal WeakReference? Response { get; private set; }
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken token)
         {
             HttpResponseMessage response = await _destination.SendAsync(request, token);
             if (request.RequestUri!.AbsolutePath.EndsWith("/responses", StringComparison.Ordinal))
-            { response.Content.Dispose(); response.Content = new StreamContent(body); }
+            { response.Content.Dispose(); response.Content = new StreamContent(body); Response = new(response); }
             return response;
         }
         protected override void Dispose(bool disposing) { if (disposing) _destination.Dispose(); base.Dispose(disposing); }
