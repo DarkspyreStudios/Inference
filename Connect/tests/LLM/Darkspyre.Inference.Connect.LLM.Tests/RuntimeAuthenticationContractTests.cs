@@ -20,7 +20,7 @@ public sealed class RuntimeAuthenticationContractTests
         "LlmCopilotExplicitGitHubToken", "LlmCopilotRuntimeAccount", "LlmAgentRuntimeLoginScope",
         "LlmAgentRuntimeAuthenticationSnapshot", "LlmAgentRuntimeLoginOptions", "LlmAgentStagedLoginState",
         "LlmAgentRuntimeLoginResult", "LlmAgentStagedStateDisposition", "LlmAgentStagedStateSnapshot", "LlmAgentStagedStateCommitResult",
-        "LlmCopilotCredentials", "LlmCopilotRuntimeConnectionCredential"
+        "LlmCopilotCredentials", "LlmCopilotRuntimeConnectionCredential", "LlmAgentCapabilities"
     };
 
     [Theory, MemberData(nameof(DataRoots))]
@@ -77,7 +77,8 @@ public sealed class RuntimeAuthenticationContractTests
         { "LlmAgentStagedStateSnapshot", """{"AttemptId":"11111111-1111-1111-1111-111111111111","Disposition":2}""" },
         { "LlmAgentStagedStateCommitResult", """{"Commit":{"State":5,"Version":null,"Issues":null},"State":{"AttemptId":"11111111-1111-1111-1111-111111111111","Disposition":2}}""" },
         { "LlmCopilotCredentials", """{"accessToken":"  exact-protected-token  ","expiresAt":"2030-01-01T00:00:00+00:00"}""" },
-        { "LlmCopilotRuntimeConnectionCredential", """{"connectionToken":"  separate-runtime-token  "}""" }
+        { "LlmCopilotRuntimeConnectionCredential", """{"connectionToken":"  separate-runtime-token  "}""" },
+        { "LlmAgentCapabilities", """{"HostedTools":[0],"SupportsShellTools":false,"SupportedCallerServices":[],"ContextOwnership":1,"ContextImport":1,"SupportsContextCapture":true,"SupportsContextReplacement":true,"SupportsContextStatus":true,"SupportsCompactionHandoff":true,"SupportsNativeResume":false,"NativeFork":0,"CompactionOwnership":1,"Steering":1,"SupportsInterrupt":true,"ResourceObservation":0,"ToolExecutionOwnership":1,"RichContentSupported":{"Images":1,"ImageMediaTypes":["image/png"],"MaxBinaryBytes":null},"SupportedRuntimePolicies":[]}""" }
     };
 
     [Theory, MemberData(nameof(Shapes))]
@@ -260,6 +261,13 @@ public sealed class RuntimeAuthenticationContractTests
             JsonTypeInfo metadata = Metadata(facade, name);
             Assert.Same(connect, metadata.Type.Assembly);
             object value = RoundTrip(json, metadata); Assert.Same(connect, value.GetType().Assembly);
+            if (name == "LlmAgentCapabilities")
+            {
+                object rich = value.GetType().GetProperty("RichContentSupported")!.GetValue(value)!;
+                Assert.Same(connect, rich.GetType().Assembly);
+                object hosted = value.GetType().GetProperty("HostedTools")!.GetValue(value)!;
+                foreach (object kind in (System.Collections.IEnumerable)hosted) Assert.Same(common, kind.GetType().Assembly);
+            }
             object scope = RoundTrip("""{"Identity":""" + Identity + ""","Transport":17,"ProfileId":"profile","WorkingDirectory":"/selected"}""", Metadata(facade, "LlmAgentRuntimeLoginScope"));
             Assert.Same(common, scope.GetType().GetProperty("Identity")!.GetValue(scope)!.GetType().Assembly);
             Type services = connect.GetType(typeof(LlmAgentRuntimeLoginServices).FullName!, true)!;

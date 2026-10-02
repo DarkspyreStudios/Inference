@@ -95,6 +95,14 @@ round-trip. Copilot credentials use the existing protected Web/null-omit codec; 
 strings redact tokens. These declarations do not register an ACP or Copilot adapter, launch a
 runtime, perform login, validate state-directory isolation or certify a runtime/SDK version.
 
+`LlmAgentProviderService.BindRuntimeAuthentication` exposes saved-ID and explicit draft/identity
+overloads. Both reject runtime authentication as unavailable before resolving a connection or
+starting login. `CreateSettingsManager(target, agents)` optionally borrows the agent facade from
+the same connection source. The settings manager fences new actions, choices, opens and saves
+when retirement starts, drains admitted calls, then drops borrowed collaborators and its commit
+target. It never disposes them. A save that settles during retirement retains its actual commit
+state and version, including committed or uncertain outcomes.
+
 Every returned `LlmConnection` includes a required opaque `Version`. The version must cover both
 connection metadata and credential state. `SaveCredentialAsync` must atomically compare
 `expectedVersion` and replace only the credential when it still matches; it must reject changed,
