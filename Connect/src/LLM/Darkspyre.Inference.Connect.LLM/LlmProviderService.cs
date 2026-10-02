@@ -209,7 +209,7 @@ public sealed class LlmProviderService : ILlmTextTokenizer, ILlmFileClient, IXai
         ThrowIfOperationCanceled(cancellationToken);
         connection = EmbeddingRequestData.Snapshot(connection);
         ILlmClient client = ClientFor(connection.Transport);
-        if (client is not Providers.XaiResponsesLlmClient)
+        if (!HasFileRoute(client))
             throw new NotSupportedException("The selected transport has no Files resource adapter.");
         validate();
         ThrowIfOperationCanceled(cancellationToken);
@@ -221,6 +221,11 @@ public sealed class LlmProviderService : ILlmTextTokenizer, ILlmFileClient, IXai
         ThrowIfOperationCanceled(cancellationToken);
         return result;
     }
+
+    private bool HasFileRoute(ILlmClient client) => _xaiFiles is not null && client is Providers.XaiResponsesLlmClient;
+
+    private LlmProviderCapabilities FileCapabilities(ILlmClient client, LlmProviderCapabilities capabilities) =>
+        HasFileRoute(client) ? capabilities : capabilities with { Files = new() };
 
     Task<XaiSkill> IXaiSkillClient.UploadAsync(string connectionId, XaiSkillUpload upload,
         CancellationToken cancellationToken) => UnavailableResourceAsync<XaiSkill>(cancellationToken);
@@ -909,7 +914,7 @@ public sealed class LlmProviderService : ILlmTextTokenizer, ILlmFileClient, IXai
         LlmConnection connection = await ResolveFreshConnectionAsync(connectionId, cancellationToken);
         ILlmClient client = ClientFor(connection.Transport);
         connection = await AttachCatalogAsync(connectionId, connection, client, cancellationToken);
-        return client.GetCapabilities(connection);
+        return FileCapabilities(client, client.GetCapabilities(connection));
     }
 
     /// <summary>
@@ -952,7 +957,7 @@ public sealed class LlmProviderService : ILlmTextTokenizer, ILlmFileClient, IXai
         LlmConnection connection = await ResolveFreshConnectionAsync(connectionId, cancellationToken);
         ILlmClient client = ClientFor(connection.Transport);
         connection = await AttachCatalogAsync(connectionId, connection, client, cancellationToken);
-        return client.GetCapabilities(connection, modelId);
+        return FileCapabilities(client, client.GetCapabilities(connection, modelId));
     }
 
     /// <summary>
