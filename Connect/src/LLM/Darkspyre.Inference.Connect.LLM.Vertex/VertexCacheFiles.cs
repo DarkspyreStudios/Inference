@@ -95,7 +95,9 @@ internal static class VertexCacheFiles
         return observed!;
 
         Exception Safe(Exception error, string category) => error is OperationCanceledException
-            ? new OperationCanceledException("Vertex cache staging was interrupted.", token)
+            ? new OperationCanceledException("Vertex cache staging was interrupted.", status is null ? null
+                : new LlmProviderException("Vertex cache staging response observed before interruption.", LlmTransport.GoogleVertexAi,
+                    status, requestId: requestId, retryAfter: retry), token)
             : new LlmProviderException(category, LlmTransport.GoogleVertexAi, status, requestId: requestId, retryAfter: retry);
     }
 }

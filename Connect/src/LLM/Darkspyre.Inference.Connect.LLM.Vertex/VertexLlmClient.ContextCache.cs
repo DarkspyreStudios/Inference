@@ -29,6 +29,7 @@ internal sealed partial class VertexLlmClient
         _ = CacheIdentity(reference.ResourceName);
         if (VertexEndpoints.ParseModel(reference.ModelId).Publisher != "google")
             throw new NotSupportedException("Vertex explicit caches serve Gemini models only.");
+        _ = VertexModelProfiles.Get(reference.ModelId);
     }
 
     private static void ValidateCacheReference(LlmConnection connection, LlmExplicitCacheReference reference)
@@ -121,7 +122,7 @@ internal sealed partial class VertexLlmClient
                     && (parts[1] == config.ProjectId || parts[1] == numericProject) && parts[3] == config.Location)
                     canonical = "google/" + parts[7];
                 else throw new JsonException();
-                _ = VertexEndpoints.ParseModel(canonical);
+                _ = VertexModelProfiles.Get(canonical);
                 if (expectedModel is not null && canonical != expectedModel) throw new JsonException();
                 return canonical;
             }, vertex: true);

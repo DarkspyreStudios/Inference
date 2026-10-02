@@ -43,6 +43,8 @@ public sealed record LlmVertexCacheStaging(string Bucket, string ObjectPrefix)
     {
         ArgumentNullException.ThrowIfNull(value);
         if (value.Any(char.IsControl)) throw new ArgumentException("Object prefixes cannot contain controls.", nameof(value));
+        if (value.IndexOfAny(['#', '?']) >= 0)
+            throw new ArgumentException("The local unqualified gs:// representation cannot preserve this prefix without ambiguity.", nameof(value));
         return value;
     }
 }

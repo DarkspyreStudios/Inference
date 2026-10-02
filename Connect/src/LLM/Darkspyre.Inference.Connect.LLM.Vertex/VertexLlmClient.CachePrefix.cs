@@ -106,6 +106,8 @@ internal sealed partial class VertexLlmClient
             logical.Clear();
             var reading = LlmResourcePreparation.ForNamedReads(chat);
             InferenceResourceReference? current = null;
+            InferenceResourceOperationPhase phase = InferenceResourceOperationPhase.OpenRead;
+            long? transferred = null;
             LlmResourcePreparation.CountingReadStream? content = null;
             Exception? failure = null;
             JsonObject? prefix = null;
@@ -114,18 +116,25 @@ internal sealed partial class VertexLlmClient
                 foreach (InferenceResourceReference reference in LlmResourcePreparation.NamedReferences(chat))
                 {
                     current = reference;
+                    phase = InferenceResourceOperationPhase.OpenRead;
+                    transferred = null;
                     int count = occurrences[reference];
                     long available = (InlineCacheMediaBytes - usedInline) / count;
                     var opened = await reading.OpenNamedAsync(request.Resources!, reference, descriptor =>
                     {
-                        VertexCacheFiles.ValidateDescriptor(descriptor);
-                        if (promptReferences.Contains(reference)
+                        if (descriptor.ContentType is not null) VertexCacheFiles.ValidateDescriptor(descriptor);
+                        if (promptReferences.Contains(reference) && descriptor.ContentType is not null
                             && (descriptor.ContentType!.StartsWith("image/", StringComparison.Ordinal) ? !capabilities.SupportsPromptImages : !capabilities.SupportsPromptDocuments))
                             throw new NotSupportedException("The selected connection disables this named prompt media.");
                         if (Connection.Vertex!.CacheStaging is null && descriptor.Bytes > available)
                             throw new NotSupportedException("The named cache media requires explicitly configured Cloud Storage staging.");
                     }, () => fence(token), token).ConfigureAwait(false);
                     content = opened.Content;
+                    phase = InferenceResourceOperationPhase.Materialize;
+                    VertexCacheFiles.ValidateDescriptor(opened.Descriptor);
+                    if (promptReferences.Contains(reference)
+                        && (opened.Descriptor.ContentType!.StartsWith("image/", StringComparison.Ordinal) ? !capabilities.SupportsPromptImages : !capabilities.SupportsPromptDocuments))
+                        throw new NotSupportedException("The selected connection disables this named prompt media.");
                     PreparedMedia prepared;
                     if (Connection.Vertex!.CacheStaging is { } staging)
                     {
@@ -140,25 +149,30 @@ internal sealed partial class VertexLlmClient
                         prepared = new(opened.Descriptor.ContentType!, bytes, null);
                     }
                     reading.VerifyRead(request.Resources!, opened.Descriptor, content, () => fence(token), token);
+                    transferred = content.BytesRead;
                     logical.Add(reference, prepared); content = null;
                 }
                 if (Connection.Vertex!.CacheStaging is { } configured)
                     foreach (var (key, prepared) in media.ToArray())
                     {
+                        current = null;
+                        phase = InferenceResourceOperationPhase.Materialize;
+                        transferred = null;
                         if (!MemoryMarshal.TryGetArray(prepared.Data, out ArraySegment<byte> bytes))
                             throw new InvalidOperationException("The admitted media snapshot has no immutable array backing.");
                         using var source = new MemoryStream(bytes.Array!, bytes.Offset, bytes.Count, writable: false);
                         VertexCacheFiles.File file = await VertexCacheFiles.UploadAsync(Owner.Http, Access, configured,
                             prepared.Mime, prepared.Data.Length, null, source, fence, token).ConfigureAwait(false);
                         var replacement = prepared with { Data = default, File = file };
+                        transferred = file.Bytes;
                         media[key] = replacement; native.Add(file.Uri, replacement);
                     }
                 prefix = GeminiRequest.BuildCachePrefix(Connection, request, Project, reasoning, Attachment, Native);
             }
             catch (Exception error)
             {
-                var facts = new InferenceResourceOperationFailure(InferenceResourceOperationPhase.Materialize, current,
-                    InferenceResourceCommitOutcome.NotAttempted, content?.BytesRead);
+                var facts = new InferenceResourceOperationFailure(phase, current,
+                    InferenceResourceCommitOutcome.NotAttempted, content?.BytesRead ?? transferred);
                 failure = error is InferenceResourceOperationException or InferenceResourceOperationCanceledException ? error
                     : error is OperationCanceledException ? new InferenceResourceOperationCanceledException(facts, token, error)
                     : new InferenceResourceOperationException(InferenceFailureCode.ExecutionFailed,
@@ -171,7 +185,7 @@ internal sealed partial class VertexLlmClient
             catch (OperationCanceledException error)
             {
                 throw new InferenceResourceOperationCanceledException(new(InferenceResourceOperationPhase.Materialize, current,
-                    InferenceResourceCommitOutcome.NotAttempted, content?.BytesRead), token, error);
+                    InferenceResourceCommitOutcome.NotAttempted, content?.BytesRead ?? transferred), token, error);
             }
             prefix!["model"] = $"projects/{Connection.Vertex!.ProjectId}/locations/{Connection.Vertex.Location}/publishers/google/models/{VertexEndpoints.ParseModel(request.ModelId).Model}";
             prefix["displayName"] = request.Correlation.ReconciliationDisplayName;
