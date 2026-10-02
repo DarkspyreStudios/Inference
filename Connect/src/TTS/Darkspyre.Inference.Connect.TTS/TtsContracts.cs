@@ -1,5 +1,7 @@
 using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Common.Setup;
+using Darkspyre.Inference.Common.Resources;
+using Darkspyre.Inference.Connect.LLM;
 using System.Text.Json.Serialization;
 
 namespace Darkspyre.Inference.Connect.TTS;
@@ -23,8 +25,10 @@ public sealed record TtsConnection
     public required Uri Endpoint { get; init => field = TtsData.Required(value); }
     public TimeSpan RequestTimeout { get; init; } = TimeSpan.FromMinutes(5);
     /// <summary>Short-lived protected values supplied by the host. Never log or display this map.</summary>
-    public IReadOnlyDictionary<string, string> Headers { get; init; } = new Dictionary<string, string>();
-    public PocketTtsEndpointOptions PocketTts { get; init; } = new();
+    public IReadOnlyDictionary<string, string> Headers { get; init => field = TtsData.Copy(TtsData.Required(value), StringComparer.OrdinalIgnoreCase)!; } = TtsData.Copy(new Dictionary<string, string>(), StringComparer.OrdinalIgnoreCase)!;
+    public PocketTtsEndpointOptions PocketTts { get; init => field = TtsData.Required(value); } = new();
+    public XaiConnectionSelection? Xai { get; init; }
+    public IProviderAuthorization? Authorization { get; init; }
     public override string ToString() => "TtsConnection { <data> }";
 }
 
@@ -89,5 +93,6 @@ public interface ITtsProvider
 {
     TtsTransport Transport { get; }
     InferenceSetupDefinition SetupDefinition { get; }
-    ITtsClient Bind(TtsConnection connection);
+    ITtsClient Bind(TtsConnection connection, XaiFamilyBinding? xai = null,
+        IInferenceResourceAccess? resources = null);
 }

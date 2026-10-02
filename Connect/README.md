@@ -385,8 +385,19 @@ feed before draining admitted work. No automatic replay/reconnect is part of the
 
 These streaming interfaces are inert declarations. PocketTTS implements neither interface,
 advertises all new capability flags false and leaves unknown rate lists null. `XaiTts` is a
-declared transport identity without a registered provider. The current binding signature remains
-`Bind(TtsConnection)`; there is no xAI family-binding or resource-access argument on it.
+declared transport identity without a registered provider. `Bind(TtsConnection, XaiFamilyBinding?,
+IInferenceResourceAccess?)` borrows the entered owners without acquiring credentials or making
+requests. Connection headers are copied, and xAI selection/authorization must match the binding.
+PocketTTS refuses the new xAI authority fields before HTTP; existing static-header workflows
+remain supported. Runtime authority, resource access, binding factories and settings owners refuse
+non-null serialization through the owned codec without invoking callbacks.
+
+TTS settings managers fence new admissions synchronously, drain admitted actions and conditional
+commits, then release borrowed collaborators without disposing them. Opening settings checks the
+owner fence after reading the borrowed setup definition. Late check/test/query results
+cannot verify an edited or retiring draft. Portable changes omit runtime authorization and retain
+protected-header patches separately. Typed xAI setup controls preserve explicit false, zero and
+empty values; these declarations do not register an xAI provider or activate capabilities.
 
 ## TangoFlux audio
 
