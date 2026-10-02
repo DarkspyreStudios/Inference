@@ -1171,6 +1171,7 @@ Workflow selection stores both `ImageWorkflowOrigin` and the exact ID. Host and 
 remain separate; ComfyUI does not advertise a built-in workflow catalog.
 Owned workflow-origin and selection metadata preserve `Host=0` and `BuiltIn=1` and reject undefined
 numeric origins. This guard does not change other Image enum policies.
+Each present selection requires an explicit origin; an omitted origin cannot silently select Host.
 
 The shared [`XaiFamilyBinding` contract](docs/media-bindings.md) uses explicit selection and the
 existing credential-access owner. It does not register or qualify an xAI Image transport.
