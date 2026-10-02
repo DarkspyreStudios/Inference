@@ -73,6 +73,62 @@ public sealed class XaiAuthorizationTests
         Assert.Equal("version", source.ExpectedVersion);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task UnchangedCredentialKeepsTwoValidationsWithoutSave(bool hasAuthenticator)
+    {
+        LlmCredential credential = OAuth();
+        var source = new Source { Connection = Connection(credential) };
+        var authenticator = new Authenticator { ReturnUnchanged = true };
+        await using var access = new LlmConnectionAccess(source, hasAuthenticator ? [authenticator] : []);
+        int validations = 0;
+        LlmConnection result = await access.AcquireAsync("connection", _ => validations++, CancellationToken.None);
+        Assert.Equal(2, validations);
+        Assert.Equal(hasAuthenticator ? 1 : 0, authenticator.Calls);
+        Assert.Equal(0, source.Writes);
+        Assert.Equal(source.Connection.Credential, result.Credential);
+    }
+
+    [Fact]
+    public async Task CancellationFromRefreshedValidationFencesCredentialSave()
+    {
+        using var cancellation = new CancellationTokenSource();
+        var source = new Source { Connection = Connection(OAuth()) };
+        var authenticator = new Authenticator { Result = OAuth() with { OAuth = new() { AccessToken = "fresh-token" } } };
+        await using var access = new LlmConnectionAccess(source, [authenticator]);
+        int validations = 0;
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => access.AcquireAsync("connection", _ =>
+        {
+            if (++validations == 2) cancellation.Cancel();
+        }, cancellation.Token));
+        Assert.Equal(2, validations);
+        Assert.Equal(1, authenticator.Calls);
+        Assert.Equal(0, source.Writes);
+    }
+
+    [Fact]
+    public async Task EndpointRefusalStillPrecedesCredentialRefusal()
+    {
+        var source = new Source
+        {
+            Connection = Connection(Invalid("api-key")) with { Endpoint = "https://other.test/v1" }
+        };
+        var authenticator = new Authenticator();
+        await using var access = new LlmConnectionAccess(source, [authenticator]);
+        await Assert.ThrowsAsync<ArgumentException>(() => new XaiFamilyBinding(new("connection"), access).AcquireAsync());
+        using var handler = new Handler();
+        using var http = new HttpClient(handler);
+        await Assert.ThrowsAsync<ArgumentException>(async () =>
+        {
+            await foreach (LlmStreamEvent _ in new XaiResponsesLlmClient(http).StreamAsync(source.Connection,
+                new() { ModelId = "grok-4", Messages = [new("user", "hello")] })) { }
+        });
+        Assert.Equal(0, authenticator.Calls);
+        Assert.Equal(0, source.Writes);
+        Assert.Equal(0, handler.Calls);
+    }
+
     private static void AssertRefusal(Exception? error, string kind)
     {
         if (kind is "copilot" or "copilot-runtime")
@@ -134,11 +190,12 @@ public sealed class XaiAuthorizationTests
     {
         public LlmTransport Transport => LlmTransport.XaiResponses;
         public LlmCredential Result { get; init; } = OAuth();
+        public bool ReturnUnchanged { get; init; }
         public int Calls { get; private set; }
         public Task<LlmCredential> EnsureFreshAsync(LlmCredential credential, CancellationToken cancellationToken = default)
         {
             Calls++;
-            return Task.FromResult(Result);
+            return Task.FromResult(ReturnUnchanged ? credential : Result);
         }
     }
 
