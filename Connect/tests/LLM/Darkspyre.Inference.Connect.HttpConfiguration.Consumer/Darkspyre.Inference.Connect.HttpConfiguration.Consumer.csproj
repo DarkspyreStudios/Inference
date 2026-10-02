@@ -1,0 +1,8 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../../src/LLM/Darkspyre.Inference.Connect.LLM/Darkspyre.Inference.Connect.LLM.csproj" />
+  </ItemGroup>
+</Project>

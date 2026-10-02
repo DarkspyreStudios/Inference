@@ -58,6 +58,7 @@
     <Project Path="tests/Resources/Darkspyre.Inference.Connect.Resources.Tests/Darkspyre.Inference.Connect.Resources.Tests.csproj" />
   </Folder>
   <Folder Name="/tests/LLM/">
+    <Project Path="tests/LLM/Darkspyre.Inference.Connect.HttpConfiguration.Consumer/Darkspyre.Inference.Connect.HttpConfiguration.Consumer.csproj" />
     <Project Path="tests/LLM/Darkspyre.Inference.Connect.LLM.Azure.Tests/Darkspyre.Inference.Connect.LLM.Azure.Tests.csproj" />
     <Project Path="tests/LLM/Darkspyre.Inference.Connect.LLM.ProcessProbe/Darkspyre.Inference.Connect.LLM.ProcessProbe.csproj" />
     <Project Path="tests/LLM/Darkspyre.Inference.Connect.LLM.Bedrock.Tests/Darkspyre.Inference.Connect.LLM.Bedrock.Tests.csproj" />
