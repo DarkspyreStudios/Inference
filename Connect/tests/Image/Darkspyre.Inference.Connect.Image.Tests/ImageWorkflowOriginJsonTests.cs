@@ -3,6 +3,7 @@ using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Runtime.Loader;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.Json.Serialization.Metadata;
 using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Connect.LLM;
@@ -45,6 +46,30 @@ public sealed class ImageWorkflowOriginJsonTests
         JsonSerializer.Serialize(new ImageWorkflowSelection((ImageWorkflowOrigin)value, "workflow"), ConnectImageJson.ImageWorkflowSelection));
 
     [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ActualSelectionAndNestedSetupRefuseMissingOrigin(bool nested)
+    {
+        if (!nested)
+        {
+            Assert.Throws<JsonException>(() => JsonSerializer.Deserialize("{\"Id\":\"same\"}", ConnectImageJson.ImageWorkflowSelection));
+            return;
+        }
+        var configuration = new ImageSetupConfiguration(ImageTransport.ComfyUi, new("http://localhost:8188"),
+            TimeSpan.FromMinutes(5), new(ImageWorkflowOrigin.Host, "same"));
+        JsonNode json = JsonNode.Parse(JsonSerializer.Serialize(configuration, ConnectImageJson.ImageSetupConfiguration))!;
+        Assert.True(((JsonObject)json["Workflow"]!).Remove("Origin"));
+        Assert.Throws<JsonException>(() => JsonSerializer.Deserialize(json.ToJsonString(), ConnectImageJson.ImageSetupConfiguration));
+    }
+
+    [Fact]
+    public void EntireNullSelectionRemainsAbsent()
+    {
+        Assert.Null(JsonSerializer.Deserialize("null", ConnectImageJson.ImageWorkflowSelection));
+        Assert.Equal("null", JsonSerializer.Serialize((object?)null, (JsonTypeInfo)ConnectImageJson.ImageWorkflowSelection));
+    }
+
+    [Theory]
     [InlineData(ImageWorkflowOrigin.Host, 0)]
     [InlineData(ImageWorkflowOrigin.BuiltIn, 1)]
     public void DefinedNumericValuesAndSelectionIdentityRemainExact(ImageWorkflowOrigin value, int number)
@@ -72,7 +97,10 @@ public sealed class ImageWorkflowOriginJsonTests
         }
         test.DefinedNumericValuesAndSelectionIdentityRemainExact(ImageWorkflowOrigin.Host, 0);
         test.DefinedNumericValuesAndSelectionIdentityRemainExact(ImageWorkflowOrigin.BuiltIn, 1);
-        return 18;
+        test.ActualSelectionAndNestedSetupRefuseMissingOrigin(false);
+        test.ActualSelectionAndNestedSetupRefuseMissingOrigin(true);
+        test.EntireNullSelectionRemainsAbsent();
+        return 21;
     }
 
     [Fact]
@@ -127,7 +155,7 @@ public sealed class ImageWorkflowOriginJsonTests
             Type proofType = fixture.GetType(typeof(ImageWorkflowOriginJsonTests).FullName!, true)!;
             MethodInfo proof = proofType.GetMethod(nameof(ExerciseClosedOriginPolicy))!;
             Assert.Same(fixture, proof.Module.Assembly);
-            Assert.Equal(18, proof.Invoke(null, null));
+            Assert.Equal(21, proof.Invoke(null, null));
             roots.Add(new(proofType)); roots.Add(new(proof));
         }
         finally { generation.Unload(); }
