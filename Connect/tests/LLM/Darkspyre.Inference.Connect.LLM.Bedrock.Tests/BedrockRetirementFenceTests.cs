@@ -1,10 +1,119 @@
 using Amazon.Bedrock.Model;
 using Amazon.BedrockRuntime.Model;
+using Darkspyre.Inference.Common.LLM;
 
 namespace Darkspyre.Inference.Connect.LLM.Bedrock.Tests;
 
 public sealed partial class BedrockLifetimeTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task RetirementFencesHeldCreatorWithoutReplacingItsOriginalFailure(bool fails)
+    {
+        using var caller = new CancellationTokenSource();
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var original = new InvalidOperationException("Original SDK creator failure.");
+        var factory = Factory(aws =>
+        {
+            if (aws.Region != Aws.Region)
+            {
+                started.TrySetResult(); release.Task.GetAwaiter().GetResult();
+                if (fails) throw original;
+            }
+            return new RuntimeClient();
+        });
+        using var anchor = factory.Runtime(Aws);
+        using var stop = new HeldCancellation();
+        Task? operation = null; Task? retirement = null;
+        BedrockClientFactory.Lease<Amazon.BedrockRuntime.AmazonBedrockRuntimeClient>? escaped = null;
+        try
+        {
+            operation = Task.Run(() => escaped = factory.Runtime(Aws with { Region = "us-west-2" }, caller.Token));
+            await started.Task.WaitAsync(Bound);
+            stop.Register(anchor.Token); retirement = factory.DisposeAsync().AsTask();
+            await stop.Started.Task.WaitAsync(Bound);
+            release.TrySetResult();
+            if (fails) Assert.Same(original, await Record.ExceptionAsync(() => operation.WaitAsync(Bound)));
+            else await Assert.ThrowsAnyAsync<OperationCanceledException>(() => operation.WaitAsync(Bound));
+            Assert.Null(escaped);
+        }
+        finally
+        {
+            retirement ??= factory.DisposeAsync().AsTask(); stop.Release.TrySetResult(); release.TrySetResult();
+            try { if (operation is not null) await Record.ExceptionAsync(() => operation.WaitAsync(Bound)); }
+            finally { escaped?.Dispose(); anchor.Dispose(); await retirement.WaitAsync(Bound); }
+        }
+    }
+
+    [Fact]
+    public async Task PausedNonStreamingResponseCannotPublishItsRemainingEventsAfterRetirement()
+    {
+        var factory = new BedrockClientFactory(_ => throw new NotSupportedException(), _ => new ControlClient(), _ => throw new NotSupportedException());
+        await using var guard = new BedrockLoggingGuard();
+        await guard.EnsureLoggingDisabledAsync(BedrockClientFactory.ScopeKey(Aws), Aws.Region!, _ => Task.FromResult<LoggingConfig?>(null));
+        var invoker = new StubConverseInvoker { Response = StubConverseInvoker.Converse([new() { Text = "answer" }], "end_turn", new() { InputTokens = 2, OutputTokens = 3, TotalTokens = 5 }) };
+        var client = new BedrockLlmClient(factory, guard, invoker);
+        IAsyncEnumerator<LlmStreamEvent>? events = null; Task? retirement = null;
+        try
+        {
+            events = client.StreamAsync(new()
+            {
+                Version = "v1", Transport = LlmTransport.AwsBedrockConverse, Endpoint = "aws://bedrock",
+                Credential = new LlmCredential { Aws = Aws }.Serialize(), CapabilityOverrides = new() { SupportsStreaming = false }
+            }, new() { ModelId = "us.fixture-model", Messages = [new("user", "question")] }).GetAsyncEnumerator();
+            Assert.True(await events.MoveNextAsync()); Assert.IsType<LlmTextDeltaEvent>(events.Current);
+            retirement = factory.DisposeAsync().AsTask(); Assert.False(retirement.IsCompleted);
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => events.MoveNextAsync().AsTask());
+        }
+        finally
+        {
+            retirement ??= factory.DisposeAsync().AsTask();
+            try { if (events is not null) await events.DisposeAsync(); }
+            finally { await retirement.WaitAsync(Bound); }
+        }
+    }
+
+    [Fact]
+    public async Task LateOpeningPreservesBothCancellationAndResponseCleanupFailure()
+    {
+        using var caller = new CancellationTokenSource();
+        var cleanup = new InvalidOperationException("Original response cleanup failure.");
+        var body = new IdentityFailureStream(cleanup);
+        var runtime = new RuntimeClient { BlockCalls = true, IgnoreCancellation = true, Body = body };
+        var factory = Factory(_ => runtime);
+        using var anchor = factory.Runtime(Aws);
+        using var stop = new HeldCancellation();
+        Task? opening = null; Task? retirement = null;
+        try
+        {
+            opening = new BedrockConverseInvoker(factory).ConverseStreamAsync(Aws, new(), caller.Token);
+            await runtime.Started.Task.WaitAsync(Bound);
+            stop.Register(anchor.Token); retirement = factory.DisposeAsync().AsTask();
+            await stop.Started.Task.WaitAsync(Bound); runtime.Release.TrySetResult();
+            AggregateException failure = await Assert.ThrowsAsync<AggregateException>(() => opening.WaitAsync(Bound));
+            Assert.Equal(2, failure.InnerExceptions.Count);
+            Assert.IsType<OperationCanceledException>(failure.InnerExceptions[0]);
+            Assert.Same(cleanup, failure.InnerExceptions[1]);
+            stop.Release.TrySetResult(); anchor.Dispose();
+            AggregateException ownerFailure = await Assert.ThrowsAsync<AggregateException>(() => retirement.WaitAsync(Bound));
+            Assert.Same(cleanup, Assert.Single(ownerFailure.InnerExceptions));
+            Assert.Same(retirement, factory.DisposeAsync().AsTask());
+        }
+        finally
+        {
+            retirement ??= factory.DisposeAsync().AsTask(); stop.Release.TrySetResult(); runtime.Release.TrySetResult();
+            try { if (opening is not null) await Record.ExceptionAsync(() => opening.WaitAsync(Bound)); }
+            finally { anchor.Dispose(); await Record.ExceptionAsync(() => retirement.WaitAsync(Bound)); }
+        }
+    }
+
+    private sealed class IdentityFailureStream(Exception failure) : TrackedStream
+    {
+        protected override void Dispose(bool disposing) { base.Dispose(disposing); if (disposing) throw failure; }
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
