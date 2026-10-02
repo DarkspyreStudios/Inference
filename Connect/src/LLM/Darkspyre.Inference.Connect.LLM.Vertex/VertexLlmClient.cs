@@ -79,8 +79,7 @@ internal sealed class VertexLlmClient(HttpClient http, IVertexAuthentication aut
         cancellationToken.ThrowIfCancellationRequested();
         ArgumentNullException.ThrowIfNull(request);
         Uri endpoint = VertexEndpoints.CountTokens(connection, request.ModelId);
-        if (request.ExplicitCache is not null)
-            throw new NotSupportedException("Vertex does not implement exact counting for an explicitly cached request.");
+        ExplicitCaches.ValidateProviderTokenCount(connection, request);
         if (VertexModelProfiles.Get(request.ModelId).IsClaude) AnthropicMessagesLlmClient.ValidateTokenCountOptions(connection, request);
         using var consumption = SdkHttpConsumption.Enter(Http, cancellationToken); cancellationToken = consumption.Token;
         var built = await PrepareRequestAsync(connection, request, cancellationToken).ConfigureAwait(false);
