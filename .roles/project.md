@@ -18,7 +18,7 @@ specifications.
 | Version line | `<net>.<release>.<minor>`: .NET generation, breaking-contract release, compatible tweak/fix |
 | Release model | `Common`, `Connect`, `Tensor`, and `UI.Settings` publish together at the one version declared in `/Directory.Build.props` |
 | Primary branch | `master` |
-| Lifecycle stage | Four-package `11.15.0-rc.1` early contract release published privately |
+| Lifecycle stage | Four-package `11.15.1-rc.1` early contract release published privately |
 | Jira project and parent | TBD |
 | Jira subject label | TBD |
 
@@ -26,28 +26,28 @@ The technical assembly and namespace prefix is `Darkspyre.Inference`.
 
 ## Current Private Release
 
-Current source version is `11.15.1-rc.1` with synchronized TensorSharp `2.8.6.9` dependencies.
-The patch archives are not a publication or native qualification claim. A macOS ARM64 engine
-explicitly selects `Darkspyre.TensorSharp.Backends.GGML.Native.osx-arm64` `2.8.6.9`.
-The native `2.8.6.8` catalog does not satisfy the current managed wrapper's contract.
-
-All four `11.15.0-rc.1` packages are available at
+All four `11.15.1-rc.1` packages are available at
 `https://nuget.pkg.github.com/DarkspyreStudios/index.json`. Their archive source identity is
-`59ef4f1522f29bff66f183d84d754985d91494f9`, on the Inference epic branch.
-Tensor depends on genuine `Darkspyre.TensorSharp.*` `2.8.6.8` packages from source
-`da9fcf3b93f542f5a4b1b2e56268aab90048b450`; all thirteen managed supplier packages are on that feed.
+`4bed5333e808702b9e0df9826602b558b5e78803`, on the Inference epic branch.
+Tensor depends on genuine `Darkspyre.TensorSharp.*` `2.8.6.9` packages from source
+`b281bee3a922632e19b7be4dc194f9828d41cf93`; all thirteen managed supplier packages are on that feed.
+The explicit `Darkspyre.TensorSharp.Backends.GGML.Native.osx-arm64` `2.8.6.9` package is also available.
 The release has no master merge or release tag.
 
 A fresh normal-feed PackageReference-only consumer passes Debug and Release with zero warnings
-and errors. All seventeen downloaded archives match their verified producer hashes, and all
+and errors. All eighteen downloaded archives match their verified producer hashes, and all
 twenty-three Inference assemblies match the archives in both configurations. The consumer audit
-reports no vulnerabilities. Its strict managed-GGML inventory records seventy-seven packages and
-eighty-five native/GPU assets; it does not qualify cross-RID execution. Whisper runtime information
-is available without loading model weights. Unimplemented provider capabilities remain unavailable.
-GPU drivers remain separate existing artifacts, not rebuilt payloads in this release.
-GGML engine activation also requires a compatible per-RID native package and its bound catalog.
-The managed GGML package alone does not satisfy that runtime prerequisite. Native patch publication
-and execution qualification are recorded separately from this existing four-package release.
+reports no vulnerabilities. Missing GGML native packages remain unavailable without initialization.
+With the explicit Mac package, CPU, Metal and Auto initialization pass in separate processes, with
+exact version/ABI/file validation and clean terminal shutdown in both configurations. Auto selects
+Metal. This verifies package activation, not model execution or cross-RID qualification. Whisper
+runtime information is available without loading model weights. Unimplemented provider capabilities
+remain unavailable. Existing large GPU driver archives remain unchanged.
+
+The managed GGML package alone does not select or replace a compatible per-RID native package and
+its bound catalog. The native `2.8.6.8` catalog does not satisfy the managed wrapper's contract;
+consumers explicitly select the corrected `2.8.6.9` Mac package. Its production preserves all
+fifty-nine retained object/archive inputs and compiles only the current build identity object.
 
 ## Package families
 
