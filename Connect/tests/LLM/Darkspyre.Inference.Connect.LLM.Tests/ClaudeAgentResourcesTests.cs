@@ -609,9 +609,10 @@ public sealed class ClaudeAgentResourcesTests : IDisposable
         byte[] bytes = "original"u8.ToArray();
         List<LlmMessageAttachment> attachments = [new LlmAttachment { Kind = LlmBinaryKind.Document,
             FileName = "original.txt", MediaType = "text/plain", Data = bytes }];
+        List<LlmAgentContent> input = [new LlmAgentTextContent("hello")];
         using var limit = new CancellationTokenSource(TimeSpan.FromSeconds(5));
         IAsyncEnumerator<LlmAgentEvent> turn = session.RunTurnAsync(new()
-        { ModelId = holdControl ? "claude-changed" : null, Input = [new LlmAgentTextContent("hello")], Attachments = attachments }, limit.Token)
+        { ModelId = holdControl ? "claude-changed" : null, Input = input, Attachments = attachments }, limit.Token)
             .GetAsyncEnumerator(limit.Token);
         Task<bool> first = turn.MoveNextAsync().AsTask();
         Task? drain = null;
@@ -620,8 +621,15 @@ public sealed class ClaudeAgentResourcesTests : IDisposable
             if (holdControl) await process.ModelWriteEntered.Task.WaitAsync(limit.Token);
             else Assert.True(await first);
             bytes[0] = (byte)'X';
-            attachments.Add(new LlmAttachment { Kind = LlmBinaryKind.Document, FileName = "late.txt",
-                MediaType = "text/plain", Data = "late"u8.ToArray() });
+            input[0] = new LlmAgentTextContent("changed");
+            input.Add(new LlmAgentTextContent("late"));
+            attachments.Add(new LlmAttachment
+            {
+                Kind = LlmBinaryKind.Document,
+                FileName = "late.txt",
+                MediaType = "text/plain",
+                Data = "late"u8.ToArray()
+            });
             release.TrySetResult();
             if (holdControl) Assert.True(await first);
             Assert.IsType<LlmAgentTurnStartedEvent>(turn.Current);
@@ -629,6 +637,8 @@ public sealed class ClaudeAgentResourcesTests : IDisposable
             string uuid = await process.WaitForUserMessage(limit.Token);
             JsonElement user = Assert.Single(process.Writes(), root => root.GetProperty("type").GetString() == "user");
             JsonElement content = user.GetProperty("message").GetProperty("content");
+            JsonElement text = Assert.Single(content.EnumerateArray(), part => part.GetProperty("type").GetString() == "text");
+            Assert.Equal("hello", text.GetProperty("text").GetString());
             JsonElement document = Assert.Single(content.EnumerateArray(), part => part.GetProperty("type").GetString() == "document");
             Assert.Equal("text", document.GetProperty("source").GetProperty("type").GetString());
             Assert.Equal("original", document.GetProperty("source").GetProperty("data").GetString());
