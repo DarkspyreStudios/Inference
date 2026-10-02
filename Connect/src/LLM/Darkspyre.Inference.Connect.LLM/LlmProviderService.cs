@@ -27,6 +27,7 @@ public sealed class LlmProviderService : ILlmTextTokenizer, ILlmFileClient, IXai
     private readonly LlmOperationLifetime _lifetime = new();
     private readonly Lock _disposeGate = new();
     private Task? _disposal;
+    private Providers.XaiFileClient? _xaiFiles;
 
     public LlmProviderService(
         ILlmConnectionSource connections,
@@ -113,6 +114,7 @@ public sealed class LlmProviderService : ILlmTextTokenizer, ILlmFileClient, IXai
                 .OrderBy(provider => provider.DisplayOrder)
                 .ThenBy(provider => provider.DisplayName, StringComparer.Ordinal)
         ];
+        _xaiFiles = clientArray.OfType<Providers.XaiResponsesLlmClient>().SingleOrDefault()?.CreateFileClient();
     }
 
     public IReadOnlyList<LlmTransport> SupportedTransports { get; }
@@ -160,30 +162,70 @@ public sealed class LlmProviderService : ILlmTextTokenizer, ILlmFileClient, IXai
         throw new NotSupportedException("No explicit context cache adapter is implemented.");
     }
 
-    /// <summary>Native file operations remain unavailable until a resource adapter implements this route.</summary>
+    /// <summary>Uploads borrowed source bytes through the selected implemented native file route.</summary>
     public Task<LlmProviderFile> UploadAsync(string connectionId, Stream source, string fileName,
         LlmFileUploadOptions? options = null, CancellationToken cancellationToken = default) =>
-        UnavailableResourceAsync<LlmProviderFile>(cancellationToken);
+        FileOperationAsync(connectionId, () => { _ = XaiFileRequestData.Upload(source, fileName, options); },
+            (client, connection, fence, token) => client.UploadAsync(connection, source, fileName, options, fence, token), cancellationToken);
 
     public Task<LlmFilePage> ListAsync(string connectionId, LlmFileListRequest request,
-        CancellationToken cancellationToken = default) => UnavailableResourceAsync<LlmFilePage>(cancellationToken);
+        CancellationToken cancellationToken = default) => FileOperationAsync(connectionId,
+            () => { _ = XaiFileRequestData.List(request); },
+            (client, connection, fence, token) => client.ListAsync(connection, request, fence, token), cancellationToken);
 
     public Task<LlmProviderFile> GetAsync(string connectionId, string fileId,
-        CancellationToken cancellationToken = default) => UnavailableResourceAsync<LlmProviderFile>(cancellationToken);
+        CancellationToken cancellationToken = default) => FileOperationAsync(connectionId,
+            () => { _ = XaiFileRequestData.Path(fileId); },
+            (client, connection, fence, token) => client.GetAsync(connection, fileId, fence, token), cancellationToken);
 
     public Task<ResourceDownloadReceipt> DownloadAsync(string connectionId, string fileId, Stream destination,
         LlmFileDownloadOptions? options = null, CancellationToken cancellationToken = default) =>
-        UnavailableResourceAsync<ResourceDownloadReceipt>(cancellationToken);
+        FileOperationAsync(connectionId, () => { _ = XaiFileRequestData.Download(fileId, destination, options); },
+            (client, connection, fence, token) => client.DownloadAsync(connection, fileId, destination, options, fence, token), cancellationToken);
 
     public Task<LlmFileDeletion> DeleteAsync(string connectionId, string fileId,
-        CancellationToken cancellationToken = default) => UnavailableResourceAsync<LlmFileDeletion>(cancellationToken);
+        CancellationToken cancellationToken = default) => FileOperationAsync(connectionId,
+            () => { _ = XaiFileRequestData.Path(fileId); },
+            (client, connection, fence, token) => client.DeleteAsync(connection, fileId, fence, token), cancellationToken);
 
     public Task<XaiPublicUrl> CreatePublicUrlAsync(string connectionId, string fileId,
         XaiPublicUrlOptions? options = null, CancellationToken cancellationToken = default) =>
-        UnavailableResourceAsync<XaiPublicUrl>(cancellationToken);
+        FileOperationAsync(connectionId, () => { _ = XaiFileRequestData.Path(fileId); _ = XaiFileRequestData.Expiry(options?.ExpiresAfter); },
+            (client, connection, fence, token) => client.CreatePublicUrlAsync(connection, fileId, options, fence, token), cancellationToken);
 
     public Task<XaiPublicUrlRevocation> RevokePublicUrlAsync(string connectionId, string fileId,
-        CancellationToken cancellationToken = default) => UnavailableResourceAsync<XaiPublicUrlRevocation>(cancellationToken);
+        CancellationToken cancellationToken = default) => FileOperationAsync(connectionId,
+            () => { _ = XaiFileRequestData.Path(fileId); },
+            (client, connection, fence, token) => client.RevokePublicUrlAsync(connection, fileId, fence, token), cancellationToken);
+
+    private async Task<T> FileOperationAsync<T>(string connectionId, Action validate,
+        Func<Providers.XaiFileClient, LlmConnection, Action, CancellationToken, Task<T>> dispatch,
+        CancellationToken cancellationToken)
+    {
+        using var operation = _lifetime.Enter(cancellationToken);
+        cancellationToken = operation.Token;
+        Providers.XaiFileClient files = _xaiFiles ?? throw new NotSupportedException("No Files resource adapter is implemented.");
+        LlmConnection connection = await ResolveConnectionAsync(connectionId, cancellationToken).ConfigureAwait(false);
+        ThrowIfOperationCanceled(cancellationToken);
+        connection = EmbeddingRequestData.Snapshot(connection);
+        ILlmClient client = ClientFor(connection.Transport);
+        if (!HasFileRoute(client))
+            throw new NotSupportedException("The selected transport has no Files resource adapter.");
+        validate();
+        ThrowIfOperationCanceled(cancellationToken);
+        XaiFileRequestData.Connection(connection);
+        ThrowIfOperationCanceled(cancellationToken);
+        connection = await RefreshConnectionAsync(connectionId, connection, client, cancellationToken).ConfigureAwait(false);
+        ThrowIfOperationCanceled(cancellationToken);
+        T result = await dispatch(files, connection, () => ThrowIfOperationCanceled(cancellationToken), cancellationToken).ConfigureAwait(false);
+        ThrowIfOperationCanceled(cancellationToken);
+        return result;
+    }
+
+    private bool HasFileRoute(ILlmClient client) => _xaiFiles is not null && client is Providers.XaiResponsesLlmClient;
+
+    private LlmProviderCapabilities FileCapabilities(ILlmClient client, LlmProviderCapabilities capabilities) =>
+        HasFileRoute(client) ? capabilities : capabilities with { Files = new() };
 
     Task<XaiSkill> IXaiSkillClient.UploadAsync(string connectionId, XaiSkillUpload upload,
         CancellationToken cancellationToken) => UnavailableResourceAsync<XaiSkill>(cancellationToken);
@@ -872,7 +914,9 @@ public sealed class LlmProviderService : ILlmTextTokenizer, ILlmFileClient, IXai
         LlmConnection connection = await ResolveFreshConnectionAsync(connectionId, cancellationToken);
         ILlmClient client = ClientFor(connection.Transport);
         connection = await AttachCatalogAsync(connectionId, connection, client, cancellationToken);
-        return client.GetCapabilities(connection);
+        LlmProviderCapabilities capabilities = FileCapabilities(client, client.GetCapabilities(connection));
+        ThrowIfOperationCanceled(cancellationToken);
+        return capabilities;
     }
 
     /// <summary>
@@ -915,7 +959,9 @@ public sealed class LlmProviderService : ILlmTextTokenizer, ILlmFileClient, IXai
         LlmConnection connection = await ResolveFreshConnectionAsync(connectionId, cancellationToken);
         ILlmClient client = ClientFor(connection.Transport);
         connection = await AttachCatalogAsync(connectionId, connection, client, cancellationToken);
-        return client.GetCapabilities(connection, modelId);
+        LlmProviderCapabilities capabilities = FileCapabilities(client, client.GetCapabilities(connection, modelId));
+        ThrowIfOperationCanceled(cancellationToken);
+        return capabilities;
     }
 
     /// <summary>
@@ -1135,7 +1181,10 @@ public sealed class LlmProviderService : ILlmTextTokenizer, ILlmFileClient, IXai
 
     private async Task RetireAsync()
     {
-        Task operations = _lifetime.RetireAsync();
+        Task operations = _lifetime.RetireAsync(async () =>
+        {
+            if (_xaiFiles is { } files) await files.DisposeAsync().ConfigureAwait(false);
+        });
         Task credentials = _ownsConnectionAccess ? ConnectionAccess.DisposeAsync().AsTask() : Task.CompletedTask;
         Task catalogs = _ownsModelLists ? _modelLists.DisposeAsync().AsTask() : Task.CompletedTask;
         Task retirement = Task.WhenAll(operations, credentials, catalogs);
@@ -1153,6 +1202,7 @@ public sealed class LlmProviderService : ILlmTextTokenizer, ILlmFileClient, IXai
             _setupEnvironments.Clear();
             _connections = null;
             _connectionAccess = null;
+            _xaiFiles = null;
             if (_ownsObservations) { _observations.Dispose(); }
         }
     }

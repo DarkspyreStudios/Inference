@@ -93,6 +93,8 @@ internal sealed class XaiResponsesLlmClient(HttpClient http) : ResponsesLlmClien
         return new decimal(bits[0], bits[1], bits[2], false, scale);
     }
 
+    internal XaiFileClient CreateFileClient() => new(Http);
+
     protected override LlmProviderCapabilities DefaultCapabilities { get; } = new()
     {
         OutputLimitEnforcement = LlmOutputLimitEnforcement.ProviderEnforced,
@@ -112,6 +114,7 @@ internal sealed class XaiResponsesLlmClient(HttpClient http) : ResponsesLlmClien
             SupportsArgumentStreaming = true
         },
         SupportsPromptDocuments = true,
+        Files = new() { Upload = true, List = true, Get = true, Download = true, Delete = true, TextDownload = true, PublicUrls = true },
         RichContentSupported = RichContentRoutes.Responses
     };
 
