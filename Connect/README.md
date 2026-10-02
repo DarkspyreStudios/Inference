@@ -1498,6 +1498,14 @@ late receipt remains exception evidence when retirement or response cleanup prev
 observed status and request identifiers without retaining untrusted body or exception text. This
 boundary does not authorize routes, issue receipt scopes or make a provider cache route available.
 
+The private Google cache read boundary borrows an already-authorized GET request and client.
+It owns the response and executes one receipt or page callback without retrying or chasing pages.
+Existing caller and SDK-generation fences cover send, body read, parsing and final publication after
+response cleanup. Ignoring send, read and cleanup work drains before the admitted operation exits.
+Read failures retain safe status and request identifiers as ordinary provider or cancellation errors,
+with both safe operation and cleanup facts when they fail together. They do not imply a mutation,
+publish late receipts or establish resource/account authority.
+
 `LlmContextCacheCreateCancelledException` and `LlmContextCacheCreateUncertainException` retain
 correlation, the actual request ID and an optional observed receipt without declaring success or
 rollback. They are runtime exceptions, not portable metadata roots. Their presence does not
