@@ -1,3 +1,4 @@
+using System.Collections.Frozen;
 using System.Diagnostics.CodeAnalysis;
 using Darkspyre.Inference.Connect.LLM.Internal;
 
@@ -73,6 +74,17 @@ public sealed class LlmModelListCache : IDisposable, IAsyncDisposable
                 operation.Token.ThrowIfCancellationRequested();
                 IReadOnlyList<LlmModel> models = await list(operation.Token).ConfigureAwait(false);
                 operation.Token.ThrowIfCancellationRequested();
+                models = Array.AsReadOnly(models.Select(model => model with
+                {
+                    CatalogEntry = model.CatalogEntry?.Clone(),
+                    Capabilities = model.Capabilities is not { } capabilities ? null : capabilities with
+                    {
+                        ReasoningLevels = capabilities.ReasoningLevels.ToFrozenSet(),
+                        PromptCache = capabilities.PromptCache with { Retentions = capabilities.PromptCache.Retentions.ToFrozenSet() },
+                        Tools = capabilities.Tools with { ChoiceModes = capabilities.Tools.ChoiceModes.ToFrozenSet() },
+                        Agent = capabilities.Agent with { SupportedRuntimePolicies = capabilities.Agent.SupportedRuntimePolicies.ToFrozenSet() }
+                    }
+                }).ToArray());
                 lock (_gate)
                 {
                     if (_disposed || !_entries.TryGetValue(connectionId, out Entry? current) || !ReferenceEquals(current, entry))

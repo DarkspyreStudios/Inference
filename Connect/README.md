@@ -668,6 +668,9 @@ A version change or explicit refresh fences publication from the replaced in-fli
 Its waiting callers receive cancellation if it returns after replacement. The current entry remains
 unchanged. Replacement does not cancel the provider's entered call. An already-cancelled request
 does not start or replace a listing.
+Publication copies the ordered list, catalog JSON and mutable capability sets. Adapter-owned lists,
+sets and JSON documents do not remain authoritative after publication. Every caller reads the same
+read-only snapshot until replacement.
 
 `AddLlmConnect` also registers one disposable `LlmAccountUsageObservations` for its owning service
 provider. That provider owns one dependency generation, not an application-global store shared across
