@@ -1278,6 +1278,12 @@ session before ComfyUI uploads the authorized logical resource. Resource reads a
 the endpoint/header snapshot admitted before the first callback. Generated outputs are likewise
 committed and selected before the composite publishes completion. Typed failures preserve known
 content/selection outcomes; a dispatched commit with no matching response remains unknown.
+Resource callbacks retain the admitted workspace and session scope. Returned content and selection
+receipts must match the actual artifact. Successful owned-handle cleanup is followed by a final
+scope and retirement fence before publication. Refused cleanup uses the typed Cleanup phase and
+retains the actual unsafe handle. Independent operation and cleanup errors remain ordered. Bound
+inference retirement reports the same retained cleanup failure to repeated disposal callers,
+including reader refusals before job submission. Healthy borrowed collaborators detach after drain.
 
 Image facades and settings managers fence new calls on disposal and drain admitted operations before
 releasing borrowed transports, workflow catalogs, binding factories, resource access and commit
@@ -1322,6 +1328,11 @@ transports, bindings and resource access. Callers can dispose the bound facade t
 fence before effects and before returning, even when linked cancellation propagation is delayed.
 Cancellation during successful materialization cleanup retains the observed committed reference,
 session-selection outcome and revision in `InferenceResourceOperationCanceledException`.
+Materialization validates admitted workspace/session scope and actual content/selection receipts.
+Owned download and writer cleanup each runs once, including independent refusals. Cleanup failures
+use the typed Cleanup phase and retain the actual unsafe owner. Bound retirement preserves those
+failures even when a returned stream is disposed before the facade. Repeated disposal shares the
+same outcome after drain and borrowed detachment; ordinary operations do not poison retirement.
 
 `XaiVideoOptions` is the fixed Video-owned subtype for Files-owned storage controls, signed
 upload destinations and explicit user data. Common metadata refuses these provider options;

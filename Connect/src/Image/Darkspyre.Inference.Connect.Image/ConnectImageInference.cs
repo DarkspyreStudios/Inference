@@ -19,6 +19,7 @@ internal sealed class ConnectImageInference : IImageInference, IDisposable, IAsy
     private ImageWorkflow? _workflow;
     private XaiFamilyBinding? _xai;
     private IInferenceResourceAccess? _resources;
+    private readonly List<Exception> _cleanupFailures = [];
 
     internal ConnectImageInference(IImageTransport transport, ImageConnection connection,
         ImageWorkflow workflow, XaiFamilyBinding? xai, IInferenceResourceAccess? resources,
@@ -26,8 +27,11 @@ internal sealed class ConnectImageInference : IImageInference, IDisposable, IAsy
     {
         _transport = transport;
         _connection = connection;
-        _workflow = workflow with { TransportConfiguration = workflow.TransportConfiguration.ValueKind == System.Text.Json.JsonValueKind.Undefined
-            ? default : workflow.TransportConfiguration.Clone() };
+        _workflow = workflow with
+        {
+            TransportConfiguration = workflow.TransportConfiguration.ValueKind == System.Text.Json.JsonValueKind.Undefined
+            ? default : workflow.TransportConfiguration.Clone()
+        };
         _xai = xai;
         _resources = resources;
         _pollInterval = pollInterval;
@@ -52,6 +56,13 @@ internal sealed class ConnectImageInference : IImageInference, IDisposable, IAsy
         IProgress<ImageGenerationProgress>? progress = null, CancellationToken cancellationToken = default)
     {
         using LlmOperationLifetime.Lease lease = _lifetime.Enter(cancellationToken);
+        try { return await GenerateAdmittedAsync(request, progress, lease).ConfigureAwait(false); }
+        catch (Exception error) { RecordCleanup(error); throw; }
+    }
+
+    private async Task<ImageGenerationResult> GenerateAdmittedAsync(ImageGenerationRequest request,
+        IProgress<ImageGenerationProgress>? progress, LlmOperationLifetime.Lease lease)
+    {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(request.References);
         IImageTransport transport = _transport!;
@@ -99,10 +110,17 @@ internal sealed class ConnectImageInference : IImageInference, IDisposable, IAsy
         long? seed = request.Seed ?? (connection.Transport == ImageTransport.ComfyUi ? Random.Shared.NextInt64() : null);
         PreparedImageTransportRequest prepared = transport.Prepare(new ImageTransportPreparationRequest
         {
-            Workflow = workflow, PositivePrompt = request.Prompt, NegativePrompt = request.NegativePrompt,
-            Width = request.Width, Height = request.Height, Seed = seed,
-            Steps = request.Steps, GuidanceScale = request.GuidanceScale, Count = request.Count,
-            CacheKey = Guid.NewGuid().ToString("N"), Label = workflow.Label,
+            Workflow = workflow,
+            PositivePrompt = request.Prompt,
+            NegativePrompt = request.NegativePrompt,
+            Width = request.Width,
+            Height = request.Height,
+            Seed = seed,
+            Steps = request.Steps,
+            GuidanceScale = request.GuidanceScale,
+            Count = request.Count,
+            CacheKey = Guid.NewGuid().ToString("N"),
+            Label = workflow.Label,
             References = receipts.AsReadOnly()
         });
         Fence(lease.Token);
@@ -150,8 +168,12 @@ internal sealed class ConnectImageInference : IImageInference, IDisposable, IAsy
                             Images = images.AsReadOnly(),
                             Provenance = new InferenceProvenance
                             {
-                                ImplementationId = Descriptor.Id, ModelId = workflow.Id, ModelRevision = workflow.Version,
-                                Runtime = transport.Descriptor.DisplayName, Backend = "connect", Elapsed = Stopwatch.GetElapsedTime(started)
+                                ImplementationId = Descriptor.Id,
+                                ModelId = workflow.Id,
+                                ModelRevision = workflow.Version,
+                                Runtime = transport.Descriptor.DisplayName,
+                                Backend = "connect",
+                                Elapsed = Stopwatch.GetElapsedTime(started)
                             }
                         };
                     case ImageTransportJobState.Failed:
@@ -223,6 +245,28 @@ internal sealed class ConnectImageInference : IImageInference, IDisposable, IAsy
     private Task RetireAsync() => _lifetime.RetireAsync(() =>
     {
         _transport = null; _connection = null; _workflow = null; _xai = null; _resources = null;
+        if (_cleanupFailures.Count == 1) return Task.FromException(_cleanupFailures[0]);
+        if (_cleanupFailures.Count > 1) return Task.FromException(new AggregateException(_cleanupFailures));
         return Task.CompletedTask;
     });
+
+    private void RecordCleanup(Exception error)
+    {
+        var pending = new Stack<Exception>();
+        var visited = new HashSet<Exception>(ReferenceEqualityComparer.Instance);
+        pending.Push(error);
+        lock (_cleanupFailures)
+        {
+            while (pending.TryPop(out Exception? current))
+            {
+                if (!visited.Add(current)) continue;
+                if (current is InferenceResourceOperationException resource && resource.Failure.Phase == InferenceResourceOperationPhase.Cleanup
+                    || current is InferenceResourceOperationCanceledException canceled && canceled.Failure.Phase == InferenceResourceOperationPhase.Cleanup)
+                    if (!_cleanupFailures.Any(existing => ReferenceEquals(existing, current))) _cleanupFailures.Add(current);
+                if (current is AggregateException aggregate)
+                    for (int index = aggregate.InnerExceptions.Count - 1; index >= 0; index--) pending.Push(aggregate.InnerExceptions[index]);
+                else if (current.InnerException is { } inner) pending.Push(inner);
+            }
+        }
+    }
 }

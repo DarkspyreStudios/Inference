@@ -1,6 +1,7 @@
 using System.Runtime.ExceptionServices;
 using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Common.Resources;
+using Darkspyre.Inference.Connect.LLM.Internal;
 
 namespace Darkspyre.Inference.Connect.Image.Internal;
 
@@ -9,10 +10,10 @@ internal static class ImageResourceOperations
     internal static async Task<InferenceResourceDescriptor> CommitAsync(IInferenceResourceAccess resources,
         string? fileName, string? contentType, ReadOnlyMemory<byte> bytes, Action<CancellationToken>? fence = null, CancellationToken token = default)
     {
-        Fence(fence, token);
-        string workspaceId = resources.WorkspaceId;
-        string sessionId = resources.SessionId;
+        string? workspaceId = null;
+        string? sessionId = null;
         IInferenceResourceWriteHandle? writer = null;
+        InferenceResourceReference? reference = null;
         Exception? failure = null;
         InferenceResourceOperationPhase phase = InferenceResourceOperationPhase.OpenWrite;
         InferenceResourceCommitOutcome outcome = InferenceResourceCommitOutcome.NotAttempted;
@@ -22,58 +23,106 @@ internal static class ImageResourceOperations
         InferenceResourceDescriptor? result = null;
         try
         {
-            writer = await resources.OpenWriteAsync(new(sessionId, fileName, contentType, bytes.Length), token).ConfigureAwait(false);
             Fence(fence, token);
-            if (writer.Reference.WorkspaceId != workspaceId)
+            workspaceId = resources.WorkspaceId;
+            Fence(fence, token);
+            sessionId = resources.SessionId;
+            CheckScope();
+            writer = await resources.OpenWriteAsync(new(sessionId, fileName, contentType, bytes.Length), token).ConfigureAwait(false);
+            CheckScope();
+            if (writer is null) throw Invalid();
+            reference = writer.Reference;
+            CheckScope();
+            if (reference is null || reference.WorkspaceId != workspaceId || string.IsNullOrEmpty(reference.Id))
                 throw new InferenceException(InferenceFailureCode.ProtocolFailure, "Resource access returned an allocation for a different workspace.");
+            Stream content = writer.Content;
+            CheckScope();
+            if (content is null || !content.CanWrite) throw Invalid();
+            CheckScope();
             phase = InferenceResourceOperationPhase.Write;
             written = null;
-            await writer.Content.WriteAsync(bytes, token).ConfigureAwait(false);
+            await content.WriteAsync(bytes, token).ConfigureAwait(false);
             written = bytes.Length;
-            Fence(fence, token);
+            CheckScope();
             phase = InferenceResourceOperationPhase.Commit;
             outcome = InferenceResourceCommitOutcome.Unknown;
             selectionOutcome = InferenceResourceCommitOutcome.Unknown;
             InferenceResourceCommitResult committed = await writer.CommitAsync(written.Value,
                 new InferenceResourceCommitOptions { SelectForSession = true }, token).ConfigureAwait(false);
-            if (committed.Resource.Reference != writer.Reference || committed.Resource.Reference.WorkspaceId != workspaceId
-                || committed.Resource.SessionId != sessionId)
-                throw new InferenceException(InferenceFailureCode.ProtocolFailure, "Resource commit returned a mismatched content identity.");
-            outcome = InferenceResourceCommitOutcome.Committed;
-            if (committed.Selection is null || committed.Selection.WorkspaceId != workspaceId
-                || committed.Selection.SessionId != sessionId || !committed.Selection.SelectedResources.Contains(writer.Reference))
-                throw new InferenceException(InferenceFailureCode.ProtocolFailure, "Resource commit returned mismatched content or session selection.");
-            selectionOutcome = InferenceResourceCommitOutcome.Committed;
-            selectionVersion = new(committed.Selection.WorkspaceId, committed.Selection.SessionId, committed.Selection.Revision);
-            Fence(fence, token);
-            result = committed.Resource;
-        }
-        catch (Exception error) when (error is not OutOfMemoryException)
-        {
-            var facts = new InferenceResourceOperationFailure(phase, writer?.Reference, outcome, written)
-            { SelectionOutcome = selectionOutcome, SelectionVersion = selectionVersion };
-            failure = error switch
+            // Returned receipts retain actual effects even when a later fence refuses publication.
+            if (committed?.Resource?.Reference == reference)
             {
-                InferenceResourceOperationException or InferenceResourceOperationCanceledException => error,
-                OperationCanceledException => new InferenceResourceOperationCanceledException(facts, token, error),
-                _ => new InferenceResourceOperationException(error is InferenceException provider ? provider.Code : InferenceFailureCode.ExecutionFailed,
-                    "The image resource operation failed.", facts, error)
+                outcome = InferenceResourceCommitOutcome.Committed;
+                if (committed.Selection is { } observed && observed.WorkspaceId == workspaceId
+                    && observed.SessionId == sessionId && observed.Revision >= 0 && observed.SelectedResources.Contains(reference))
+                {
+                    selectionOutcome = InferenceResourceCommitOutcome.Committed;
+                    selectionVersion = new(observed.WorkspaceId, observed.SessionId, observed.Revision);
+                }
+            }
+            CheckScope();
+            result = committed?.Resource;
+            if (result is null || result.Reference != reference || result.SessionId != sessionId
+                || result.Bytes is { } size && size != written
+                || result.ContentType is { } type && type != contentType
+                || selectionOutcome != InferenceResourceCommitOutcome.Committed) throw Invalid();
+            _ = new InferenceResourceSelection(workspaceId!, sessionId!, committed!.Selection!.Revision, committed.Selection.SelectedResources);
+            if (committed.Selection.SelectedResources.Any(item => string.IsNullOrEmpty(item.Id))) throw Invalid();
+        }
+        catch (Exception error)
+        {
+            failure = error is InferenceResourceOperationException or InferenceResourceOperationCanceledException ? error : Wrap(error, phase);
+            InferenceResourceOperationFailure? observed = error switch
+            {
+                InferenceResourceOperationException resource => resource.Failure,
+                InferenceResourceOperationCanceledException resource => resource.Failure,
+                _ => null
             };
+            if (observed is not null)
+            {
+                outcome = observed.CommitOutcome; selectionOutcome = observed.SelectionOutcome;
+                selectionVersion = observed.SelectionVersion; written = observed.BytesTransferred;
+            }
         }
         if (writer is not null)
         {
             try { await writer.DisposeAsync().ConfigureAwait(false); }
-            catch (Exception cleanup) when (cleanup is not OutOfMemoryException)
+            catch (Exception cleanup)
             {
-                if (failure is not null) throw new AggregateException(failure, cleanup);
-                throw new InferenceResourceOperationException(InferenceFailureCode.ExecutionFailed, "The image resource cleanup failed.",
-                    new(phase, writer.Reference, outcome, written) { SelectionOutcome = selectionOutcome, SelectionVersion = selectionVersion }, cleanup);
+                Exception refused = LlmResourcePreparation.AsCleanupFailure(LlmResourcePreparation.IsCleanupFailure(cleanup)
+                    ? cleanup : Wrap(cleanup, InferenceResourceOperationPhase.Cleanup), reference, writer);
+                failure = failure is null ? refused : new AggregateException(failure, refused);
             }
         }
         if (failure is not null) ExceptionDispatchInfo.Throw(failure);
+        try { CheckScope(); }
+        catch (Exception error) { ExceptionDispatchInfo.Throw(Wrap(error, phase)); }
         return result!;
+
+        void CheckScope()
+        {
+            Fence(fence, token);
+            if (string.IsNullOrEmpty(workspaceId) || string.IsNullOrEmpty(sessionId)) throw Invalid();
+            string currentWorkspace = resources.WorkspaceId;
+            Fence(fence, token);
+            if (currentWorkspace != workspaceId) throw Invalid();
+            string currentSession = resources.SessionId;
+            Fence(fence, token);
+            if (currentSession != sessionId) throw Invalid();
+        }
+        Exception Wrap(Exception error, InferenceResourceOperationPhase actualPhase)
+        {
+            var facts = new InferenceResourceOperationFailure(actualPhase, reference, outcome, written)
+            { SelectionOutcome = selectionOutcome, SelectionVersion = selectionVersion };
+            return error is OperationCanceledException canceled
+                ? new InferenceResourceOperationCanceledException(facts, canceled.CancellationToken, error)
+                : new InferenceResourceOperationException(error is InferenceException provider ? provider.Code : InferenceFailureCode.ExecutionFailed,
+                    "The image resource operation failed.", facts, error);
+        }
     }
 
     private static void Fence(Action<CancellationToken>? fence, CancellationToken token)
     { token.ThrowIfCancellationRequested(); fence?.Invoke(token); }
+
+    private static InferenceException Invalid() => new(InferenceFailureCode.ProtocolFailure, "The image resource scope or receipt does not match the admitted artifact.");
 }
