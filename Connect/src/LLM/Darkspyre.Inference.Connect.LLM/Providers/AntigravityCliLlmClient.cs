@@ -72,7 +72,7 @@ internal sealed class AntigravityCliLlmClient(IAntigravityCliRunner runner)
     {
         ArgumentNullException.ThrowIfNull(request);
         LlmProviderCapabilities capabilities = GetCapabilities(connection, request.ModelId);
-        LlmStructuredOutputEnforcement? enforcement = ValidateRequest(request, capabilities);
+        LlmStructuredOutputEnforcement? enforcement = ValidateRequest(connection, request, capabilities);
         string prompt = BuildPrompt(request, enforcement);
         if (request.Tools.Count > 0
             || request.ToolChoice is not null
@@ -558,11 +558,13 @@ internal sealed class AntigravityCliLlmClient(IAntigravityCliRunner runner)
         innerException: exception);
 
     private static LlmStructuredOutputEnforcement? ValidateRequest(
+        LlmConnection connection,
         LlmChatRequest request,
         LlmProviderCapabilities capabilities)
     {
         HostedTools.Validate(request, capabilities);
         ExplicitCaches.Validate(request, capabilities.SupportsExplicitCache);
+        ProviderControlPolicy.Validate(connection, request);
         if (string.IsNullOrWhiteSpace(request.ModelId))
         {
             throw new ArgumentException("A model id is required.", nameof(request));
@@ -610,7 +612,7 @@ internal sealed class AntigravityCliLlmClient(IAntigravityCliRunner runner)
     public ContextEstimate? EstimateInputTokens(LlmConnection connection, LlmChatRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
-        LlmStructuredOutputEnforcement? enforcement = ValidateRequest(request, GetCapabilities(connection, request.ModelId));
+        LlmStructuredOutputEnforcement? enforcement = ValidateRequest(connection, request, GetCapabilities(connection, request.ModelId));
         if (request.Tools.Count > 0 || request.ToolChoice is not null || request.AllowParallelToolCalls is not null)
         {
             throw new NotSupportedException("Antigravity CLI does not expose host-executed tool calls.");

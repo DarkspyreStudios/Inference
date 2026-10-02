@@ -18,7 +18,7 @@ internal sealed class XaiResponsesLlmClient(HttpClient http) : ResponsesLlmClien
         "model", "input", "stream", "store", "include", "previous_response_id", "service_tier", "instructions",
         "temperature", "top_p", "top_k", "seed", "presence_penalty", "frequency_penalty", "stop", "stop_sequences",
         "max_output_tokens", "reasoning", "reasoning_effort", "tools", "tool_choice", "parallel_tool_calls", "text",
-        "prompt_cache_key", "background", "deferred"
+        "prompt_cache_key", "background", "deferred", "agent_count"
     }.ToFrozenSet(StringComparer.Ordinal);
 
     public override LlmTransport Transport => LlmTransport.XaiResponses;
@@ -85,6 +85,7 @@ internal sealed class XaiResponsesLlmClient(HttpClient http) : ResponsesLlmClien
     protected override JsonObject BuildPayload(LlmConnection connection, LlmChatRequest request,
         LlmStructuredOutputEnforcement? enforcement, bool stream)
     {
+        request = ProviderControlPolicy.Resolve(connection, request);
         _ = Authorization(connection);
         if (connection.ProviderOptions.Keys.Concat(request.ProviderOptions.Keys).Any(ReservedOptions.Contains))
             throw new ArgumentException("Grok protocol controls use typed request and connection properties, not provider options.", nameof(request));
@@ -112,6 +113,11 @@ internal sealed class XaiResponsesLlmClient(HttpClient http) : ResponsesLlmClien
             && GetCapabilities(connection, request.ModelId).ReasoningLevels.Contains(defaultLevel))
             request = request with { ReasoningLevel = defaultLevel };
         JsonObject payload = base.BuildPayload(connection, request, enforcement, stream);
+        if (request.ProviderControls is XaiMultiAgentControls { AgentCount: { } count })
+            payload["reasoning"] = new JsonObject
+            {
+                ["effort"] = XaiModelProfiles.MultiAgentEffort(profile.MultiAgent!, count)
+            };
         payload["service_tier"] = (connection.Xai?.ServiceTier ?? XaiServiceTier.Default) == XaiServiceTier.Priority ? "priority" : "default";
         return payload;
     }

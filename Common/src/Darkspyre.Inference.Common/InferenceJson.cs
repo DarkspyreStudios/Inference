@@ -16,6 +16,7 @@ namespace Darkspyre.Inference.Common;
 /// <summary>Common-owned metadata for closed data contracts. No reflection fallback is installed.</summary>
 public static class InferenceJson
 {
+    public static JsonTypeInfo<LlmProviderControls> LlmProviderControls => Metadata<LlmProviderControls>();
     public static JsonTypeInfo<SpeechAudioEncoding> SpeechAudioEncoding => Metadata<SpeechAudioEncoding>();
     public static JsonTypeInfo<SpeechTranscriptionInput> SpeechTranscriptionInput => Metadata<SpeechTranscriptionInput>();
     public static JsonTypeInfo<BinarySpeechInput> BinarySpeechInput => Metadata<BinarySpeechInput>();
@@ -109,6 +110,7 @@ public static class InferenceJson
     private static JsonSerializerOptions CreateOptions()
     {
         var options = new JsonSerializerOptions(InferenceJsonContext.Default.Options) { TypeInfoResolver = new HostedTypeInfoResolver() };
+        options.Converters.Add(new CommonProviderControlsJsonConverter());
         options.Converters.Add(new VideoJobStateJsonConverter());
         options.Converters.Add(new VideoOperationJsonConverter());
         options.Converters.Add(new VideoProviderOptionsJsonConverter());
@@ -318,6 +320,7 @@ public static class InferenceJson
 [JsonSerializable(typeof(InferenceResourceScope))]
 [JsonSerializable(typeof(InferenceResourceFailure))]
 [JsonSerializable(typeof(LlmInferenceRequest))]
+[JsonSerializable(typeof(LlmProviderControls))]
 [JsonSerializable(typeof(LlmInferenceResult))]
 [JsonSerializable(typeof(LlmMessage))]
 [JsonSerializable(typeof(LlmMessageAttachment))]
