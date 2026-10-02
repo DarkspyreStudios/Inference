@@ -7,6 +7,20 @@ namespace Darkspyre.Inference.Connect.LLM.Internal;
 internal static class GeminiRequest
 {
     internal const string DummyThoughtSignature = "skip_thought_signature_validator";
+
+    /// <summary>Converts a frozen cache prefix through the same message and tool codec as generation.</summary>
+    internal static JsonObject BuildCachePrefix(LlmConnection connection, LlmContextCacheCreate request,
+        Func<LlmToolOutput, ProjectedToolOutput> project, GeminiModelProfile reasoning) =>
+        Build(connection, new LlmChatRequest
+        {
+            ModelId = request.ModelId,
+            Instructions = request.Instructions,
+            Messages = request.Messages,
+            Tools = request.Tools,
+            ToolChoice = request.ToolChoice,
+            Resources = request.Resources
+        }, null, project, reasoning, reasoningText: false);
+
     public static JsonObject Build(LlmConnection connection, LlmChatRequest request,
         LlmStructuredOutputEnforcement? enforcement, Func<LlmToolOutput, ProjectedToolOutput> project,
         GeminiModelProfile reasoning, bool reasoningText, bool streamArguments = false)
