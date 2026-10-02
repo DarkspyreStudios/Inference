@@ -54,7 +54,8 @@ public sealed class SplashOptions : CoordinatorOptions
     private static void ValidatePack(string pack)
     {
         using var manifest = JsonDocument.Parse(File.ReadAllBytes(Path.Combine(pack, "manifest.json")));
-        if (manifest.RootElement.GetProperty("format").GetString() != "splash-packed-q4")
+        if (manifest.RootElement.GetProperty("schema_version").GetInt32() != 3 ||
+            manifest.RootElement.GetProperty("format").GetProperty("name").GetString() != "splash-packed-q4")
             throw new InvalidOperationException("The model must be an installed Splash q4 pack.");
         foreach (var directory in new[] { "target", "draft", "tokenizer" })
             if (!Directory.Exists(Path.Combine(pack, directory))) throw new InvalidOperationException($"Incomplete Splash pack: {directory}");
