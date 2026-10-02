@@ -57,6 +57,9 @@ public sealed record LlmCapabilities
 
     public LlmPromptCacheCapabilities PromptCache { get; init; } = new();
 
+    /// <summary>The selected route implements explicit native cache selection.</summary>
+    public bool SupportsExplicitCache { get; init; }
+
     /// <summary>The reasoning levels the model accepts. Empty when the model accepts no reasoning control.</summary>
     public IReadOnlySet<LlmReasoningLevel> ReasoningLevels { get; init; } = FrozenSet<LlmReasoningLevel>.Empty;
 

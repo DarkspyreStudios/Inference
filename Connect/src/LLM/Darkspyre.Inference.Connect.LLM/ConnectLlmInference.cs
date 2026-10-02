@@ -145,6 +145,7 @@ internal sealed class ConnectLlmInference(
         UnboundContinuationState = request.UnboundContinuationState,
         ConversationKey = request.ConversationKey,
         PromptCache = request.PromptCache,
+        ExplicitCache = request.ExplicitCache,
         Resources = request.Resources
     };
 
@@ -159,6 +160,7 @@ internal sealed class ConnectLlmInference(
         SupportsJsonSchema = capabilities.SupportsJsonSchema,
         SupportsJsonObject = capabilities.SupportsJsonObject,
         PromptCache = capabilities.PromptCache,
+        SupportsExplicitCache = capabilities.SupportsExplicitCache,
         ReasoningLevels = capabilities.ReasoningLevels,
         SupportsTemperature = capabilities.SupportsTemperature,
         SupportsTopP = capabilities.SupportsTopP,

@@ -6,6 +6,7 @@ using System.Text.Json.Nodes;
 using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Common.LLM;
 using Darkspyre.Inference.Connect.LLM.Internal;
+using Darkspyre.Inference.Connect.LLM.Providers;
 
 namespace Darkspyre.Inference.Connect.LLM.Tests;
 
@@ -27,12 +28,15 @@ public sealed class ExplicitCacheContractTests
             Assert.Equal("cachedContents/cache", reference.ResourceName);
             Assert.Equal("model", reference.ModelId); Assert.Equal("scope", reference.ScopeId); Assert.Null(reference.ExpiresAt);
         }
-        Assert.Equal(common.PromptCache, connect.PromptCache);
+        Assert.Equal((int)common.PromptCache!.Scope, (int)connect.PromptCache!.Scope);
+        Assert.Equal((int)common.PromptCache.Retention, (int)connect.PromptCache.Retention);
         using JsonDocument written = JsonDocument.Parse(JsonSerializer.Serialize(connect, ConnectLlmJson.ChatRequest));
-        Assert.Equal(Selection, written.RootElement.GetProperty("ExplicitCache").GetRawText());
+        Assert.Equal(JsonSerializer.Serialize(new LlmExplicitCacheReference("cachedContents/cache", "model", "scope"), InferenceJson.LlmExplicitCacheReference),
+            written.RootElement.GetProperty("ExplicitCache").GetRawText());
         var empty = JsonSerializer.Deserialize("{\"ModelId\":\"model\",\"ExplicitCache\":null}", InferenceJson.LlmRequest)!;
         Assert.Null(empty.GetType().GetProperty("ExplicitCache")!.GetValue(empty));
-        Assert.ThrowsAny<Exception>(() => JsonSerializer.Deserialize("{\"ModelId\":\"model\",\"ExplicitCache\":{}}", ConnectLlmJson.ChatRequest));
+        Assert.Throws<JsonException>(() => JsonSerializer.Deserialize("{\"ModelId\":\"model\",\"ExplicitCache\":{}}", ConnectLlmJson.ChatRequest));
+        Assert.Throws<JsonException>(() => JsonSerializer.Deserialize("{\"ModelId\":\"model\",\"ExplicitCache\":{}}", InferenceJson.LlmRequest));
     }
 
     [Fact]
@@ -99,17 +103,143 @@ public sealed class ExplicitCacheContractTests
         Assert.Equal(0, handler.Calls);
     }
 
-    [Fact]
-    public void ActualForeignOwnedNestedMetadataAndRefusalCallerRetire()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task PortableCapabilityAndSelectionRespectTheRegisteredImplementation(bool supported)
     {
-        WeakReference weak = ExerciseForeign();
+        var source = new Source(new() { Version = "1", Transport = LlmTransport.OpenAiResponses, Endpoint = "https://example.invalid" });
+        var client = new Client(supported);
+        await using var facade = new LlmProviderService(source, [client]);
+        var portable = facade.Bind("connection");
+        var common = JsonSerializer.Deserialize("{\"ModelId\":\"model\",\"ExplicitCache\":" + Selection + "}", InferenceJson.LlmRequest)!;
+        Assert.Equal(supported, (await portable.GetCapabilitiesAsync("model")).SupportsExplicitCache);
+        var capabilities = client.GetCapabilities(source.Connection);
+        Assert.Equal(supported, capabilities.Apply(new() { SupportsStreaming = false }).SupportsExplicitCache);
+        if (supported)
+        {
+            await foreach (var unused in portable.StreamAsync(common)) { }
+            Assert.Same(common.ExplicitCache, Assert.Single(client.Requests).ExplicitCache);
+        }
+        else
+        {
+            bool refused = false;
+            try { await foreach (var unused in portable.StreamAsync(common)) { } }
+            catch (InferenceException failure)
+            {
+                Assert.Equal(InferenceFailureCode.UnsupportedFeature, failure.Code);
+                refused = true;
+            }
+            Assert.True(refused);
+            Assert.Equal(0, client.RequestCount);
+        }
+    }
+
+    [Theory]
+    [InlineData("claude", false)]
+    [InlineData("claude", true)]
+    [InlineData("antigravity", false)]
+    [InlineData("antigravity", true)]
+    [InlineData("apple", false)]
+    [InlineData("apple", true)]
+    [InlineData("selfhost", false)]
+    [InlineData("selfhost", true)]
+    public async Task LocalRoutesRefuseBeforeProcessOrEngineEntry(string route, bool estimate)
+    {
+        var runner = new Runner();
+        var host = new Host();
+        using var http = new HttpClient(new RawSamplingGuardsTests.Handler("responses"));
+        ILlmClient client = route switch
+        {
+            "claude" => new ClaudeCliLlmClient(http, runner),
+            "antigravity" => new AntigravityCliLlmClient(runner),
+            "apple" => new AppleFoundationModelsClient(http, runner),
+            _ => new SelfHostLlmClient(host)
+        };
+        var connection = new LlmConnection { Version = "1", Transport = client.Transport, Endpoint = "controlled-executable" };
+        var request = Select(new() { ModelId = route == "apple" ? AppleProtocol.ModelId : "model", Messages = [new("user", "hello")] });
+        Assert.False(client.GetCapabilities(connection, request.ModelId).SupportsExplicitCache);
+        await Assert.ThrowsAsync<NotSupportedException>(async () =>
+        {
+            if (estimate) ((ILlmContextEstimator)client).EstimateInputTokens(connection, request);
+            else await foreach (var unused in client.StreamAsync(connection, request)) { }
+        });
+        Assert.Equal(0, runner.Calls); Assert.Equal(0, host.Entries);
+    }
+
+    [Theory]
+    [InlineData(0, false)]
+    [InlineData(2, false)]
+    [InlineData(3, false)]
+    [InlineData(0, true)]
+    [InlineData(2, true)]
+    [InlineData(3, true)]
+    public async Task LateResolutionPreservesCancellationAndDrainsBeforeRetirement(int operation, bool retire)
+    {
+        var source = new HeldSource();
+        var client = new Client(false);
+        var facade = new LlmProviderService(source, [client]);
+        using var cancellation = new CancellationTokenSource();
+        Task? run = null;
+        Task? retirement = null;
+        try
+        {
+            var request = Select(new() { ModelId = "model" });
+            run = RunFacade();
+            await source.Entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            if (retire) retirement = facade.DisposeAsync().AsTask();
+            else cancellation.Cancel();
+            Assert.False(run.IsCompleted);
+            if (retirement is not null) Assert.False(retirement.IsCompleted);
+            source.Release.TrySetResult();
+            bool canceled = false;
+            try { await run.WaitAsync(TimeSpan.FromSeconds(5)); }
+            catch (OperationCanceledException) { canceled = true; }
+            Assert.True(canceled);
+            await (retirement ??= facade.DisposeAsync().AsTask()).WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.Equal(0, client.RequestCount); Assert.False(source.Disposed);
+
+            async Task RunFacade()
+            {
+                if (operation == 2) await facade.CountInputTokensAsync("connection", request, cancellation.Token);
+                else if (operation == 3) await facade.MeasureRequestAsync("connection", request, cancellationToken: cancellation.Token);
+                else await foreach (var unused in facade.StreamAsync("connection", request, cancellation.Token)) { }
+            }
+        }
+        finally
+        {
+            retirement ??= facade.DisposeAsync().AsTask();
+            source.Release.TrySetResult();
+            try
+            {
+                if (run is not null)
+                {
+                    try { await run.WaitAsync(TimeSpan.FromSeconds(5)); }
+                    catch (OperationCanceledException) when (run.IsCanceled) { }
+                }
+            }
+            finally { await retirement.WaitAsync(TimeSpan.FromSeconds(5)); }
+        }
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(2)]
+    [InlineData(3)]
+    [InlineData(4)]
+    [InlineData(5)]
+    [InlineData(6)]
+    public void ActualForeignOwnedNestedMetadataAndRefusalCallerRetire(int lane)
+    {
+        WeakReference weak = ExerciseForeign(lane);
         for (int attempt = 0; weak.IsAlive && attempt < 20; attempt++)
         { GC.Collect(); GC.WaitForPendingFinalizers(); GC.Collect(); Thread.Sleep(10); }
         Assert.False(weak.IsAlive);
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private static WeakReference ExerciseForeign()
+    private static WeakReference ExerciseForeign(int lane)
     {
         var generation = new Generation(Path.GetDirectoryName(typeof(ExplicitCacheContractTests).Assembly.Location)!);
         var weak = new WeakReference(generation);
@@ -124,24 +254,33 @@ public sealed class ExplicitCacheContractTests
                 if (original == typeof(ExplicitCacheContractTests).Assembly) fixture = loaded;
             }
             Type caller = fixture!.GetType(typeof(ExplicitCacheContractTests).FullName!, true)!;
-            ((Task)caller.GetMethod(nameof(ForeignCaller), BindingFlags.NonPublic | BindingFlags.Static)!.Invoke(null, null)!)
-                .WaitAsync(TimeSpan.FromSeconds(10)).GetAwaiter().GetResult();
+            var operation = (Task)caller.GetMethod(nameof(ForeignCaller), BindingFlags.NonPublic | BindingFlags.Static)!.Invoke(null, [lane])!;
+            Assert.True(operation.Wait(TimeSpan.FromSeconds(10)));
+            operation.GetAwaiter().GetResult();
         }
         finally { generation.Unload(); }
         return weak;
     }
 
-    private static async Task ForeignCaller()
+    private static async Task ForeignCaller(int lane)
     {
         var generation = AssemblyLoadContext.GetLoadContext(typeof(ExplicitCacheContractTests).Assembly);
         Assert.True(generation!.IsCollectible);
         Assert.Same(generation, AssemblyLoadContext.GetLoadContext(InferenceJson.LlmRequest.Type.Assembly));
         Assert.Same(generation, AssemblyLoadContext.GetLoadContext(ConnectLlmJson.ChatRequest.Type.Assembly));
         var fixture = new ExplicitCacheContractTests();
-        fixture.BothOwnedRequestsCarrySelectionIndependentlyOfAdvisoryHints();
-        fixture.CapabilitiesDefaultToUnavailableAndOverridesCannotEnableThem();
-        await fixture.FacadeRefusesBeforeRefreshCatalogCountingAndGeneration("gemini", 2);
-        await fixture.PortableProjectionDoesNotLoseExplicitSelection();
+        switch (lane)
+        {
+            case 0:
+                fixture.BothOwnedRequestsCarrySelectionIndependentlyOfAdvisoryHints();
+                fixture.CapabilitiesDefaultToUnavailableAndOverridesCannotEnableThem(); break;
+            case 1: await fixture.FacadeRefusesBeforeRefreshCatalogCountingAndGeneration("gemini", 2); break;
+            case 2: await fixture.PortableProjectionDoesNotLoseExplicitSelection(); break;
+            case 3: await fixture.PortableCapabilityAndSelectionRespectTheRegisteredImplementation(false); break;
+            case 4: await fixture.PortableCapabilityAndSelectionRespectTheRegisteredImplementation(true); break;
+            case 5: await fixture.LateResolutionPreservesCancellationAndDrainsBeforeRetirement(0, true); break;
+            case 6: await fixture.LateResolutionPreservesCancellationAndDrainsBeforeRetirement(2, false); break;
+        }
     }
 
     private static LlmChatRequest Select(LlmChatRequest request)
@@ -169,12 +308,68 @@ public sealed class ExplicitCacheContractTests
         { Saves++; throw new InvalidOperationException("No credential save during cache refusal."); }
     }
 
+    private sealed class HeldSource : ILlmConnectionSource, IDisposable
+    {
+        internal bool Disposed { get; private set; }
+        internal TaskCompletionSource Entered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        internal TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public async Task<LlmConnection?> GetConnectionAsync(string connectionId, CancellationToken cancellationToken = default)
+        {
+            Entered.TrySetResult(); await Release.Task;
+            return new() { Version = "1", Transport = LlmTransport.OpenAiResponses, Endpoint = "https://example.invalid" };
+        }
+        public Task SaveCredentialAsync(string connectionId, string credentialJson, string expectedVersion, CancellationToken cancellationToken = default) =>
+            throw new InvalidOperationException("No credential save during cache refusal.");
+        public void Dispose() => Disposed = true;
+    }
+
     private sealed class Authenticator(LlmTransport transport) : ILlmAuthenticator
     {
         public LlmTransport Transport => transport;
         internal int Calls { get; private set; }
         public Task<LlmCredential> EnsureFreshAsync(LlmCredential credential, CancellationToken cancellationToken = default)
         { Calls++; throw new InvalidOperationException("No refresh during cache refusal."); }
+    }
+
+    private sealed class Client(bool supportsExplicitCache) : ILlmClient
+    {
+        internal List<LlmChatRequest> Requests { get; } = [];
+        // Scalar assertions avoid external assertion caches inspecting collectible element types.
+        internal int RequestCount => Requests.Count;
+        public LlmTransport Transport => LlmTransport.OpenAiResponses;
+        public LlmProviderDefinition ProviderDefinition => ProviderDefinitions.OpenAiApiKey;
+        public LlmProviderCapabilities GetCapabilities(LlmConnection connection, string? modelId = null) =>
+            new() { SupportsStreaming = true, SupportsExplicitCache = supportsExplicitCache };
+        public Task<IReadOnlyList<LlmModel>> ListModelsAsync(LlmConnection connection, CancellationToken cancellationToken = default) =>
+            throw new InvalidOperationException("This fixture does not offer discovery.");
+        public async IAsyncEnumerable<LlmStreamEvent> StreamAsync(LlmConnection connection, LlmChatRequest request,
+            [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested(); Requests.Add(request);
+            await Task.CompletedTask;
+            yield return new LlmChatCompletionEvent(new() { Text = "done", Status = LlmCompletionStatus.Completed, Diagnostics = new(200, null, null) });
+        }
+    }
+
+    private sealed class Runner : IClaudeCliRunner, IAntigravityCliRunner, IAppleProcessRunner
+    {
+        internal int Calls { get; private set; }
+        public Task<ClaudeCliProcessResult> RunAsync(ClaudeCliInvocation invocation, CancellationToken cancellationToken = default)
+        { Calls++; throw new InvalidOperationException("No process entry during cache refusal."); }
+        public Task<AntigravityCliProcessResult> RunAsync(AntigravityCliInvocation invocation, CancellationToken cancellationToken = default)
+        { Calls++; throw new InvalidOperationException("No process entry during cache refusal."); }
+        public IAsyncEnumerable<JsonElement> RunAsync(string executable, AppleCommand command, AppleProcessLimits limits, CancellationToken cancellationToken = default)
+        { Calls++; throw new InvalidOperationException("No helper entry during cache refusal."); }
+    }
+
+    private sealed class Host : ILlmSelfHost
+    {
+        internal int Entries { get; private set; }
+        public LlmCapabilities? GetCapabilities(string engineId, string? modelId) => new() { SupportsStreaming = true, SupportsExplicitCache = true };
+        public Task<ILlmInference> GetInferenceAsync(string engineId, CancellationToken cancellationToken = default)
+        { Entries++; throw new InvalidOperationException("Native provider cache receipts do not transfer to an engine."); }
+        public Task<IReadOnlyList<LlmSelfHostEngine>> ListEnginesAsync(CancellationToken cancellationToken = default)
+        { Entries++; throw new InvalidOperationException("No engine discovery during cache refusal."); }
     }
 
     private sealed class Generation(string directory) : AssemblyLoadContext(isCollectible: true)

@@ -195,6 +195,9 @@ public sealed record LlmInferenceRequest
     public string? ConversationKey { get; init; }
 
     public LlmPromptCacheHint? PromptCache { get; init; }
+
+    /// <summary>An explicitly selected native cache. It is separate from advisory prompt-cache hints.</summary>
+    public LlmExplicitCacheReference? ExplicitCache { get; init; }
 }
 
 public sealed record LlmUsage(int? InputTokens, int? OutputTokens, int? TotalTokens)

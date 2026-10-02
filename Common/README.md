@@ -91,7 +91,10 @@ progress, duration, expiry and content type; zero and false remain actual values
 
 `LlmExplicitCacheReference` carries a native cache resource name, model, opaque scope and optional
 observed expiry. `InferenceJson.LlmExplicitCacheReference` exports its data-only metadata. The
-reference grants no authority and is not yet a generation-request selection.
+reference grants no authority. `LlmInferenceRequest.ExplicitCache` selects this native receipt;
+`LlmCapabilities.SupportsExplicitCache` defaults to false. The nullable selection is independent
+of advisory `PromptCache` hints. Owned request metadata preserves it and validates required
+resource, model and scope facts. Native cache identities do not become portable workspace content.
 
 `LlmClientToolDefinition`, `LlmClientToolCall` and `LlmClientToolResult` are closed
 function/shell data unions. Existing function record names and constructors remain intact.

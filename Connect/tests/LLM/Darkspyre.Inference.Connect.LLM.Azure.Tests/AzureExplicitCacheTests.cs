@@ -17,7 +17,7 @@ public sealed class AzureExplicitCacheTests
         using var http = new HttpClient(handler);
         var client = AzureProtocolTests.Client(http, responses);
         var connection = AzureProtocolTests.Connection(responses, operation == 0) with { Credential = "" };
-        var request = JsonSerializer.Deserialize("{\"ModelId\":\"deployment\",\"ExplicitCache\":{\"ResourceName\":\"cachedContents/test\",\"ModelId\":\"deployment\",\"ScopeId\":\"scope\"}}", ConnectLlmJson.ChatRequest)!;
+        var request = JsonSerializer.Deserialize("{\"ModelId\":\"deployment-alias\",\"ExplicitCache\":{\"ResourceName\":\"cachedContents/test\",\"ModelId\":\"deployment-alias\",\"ScopeId\":\"scope\"}}", ConnectLlmJson.ChatRequest)!;
         await Assert.ThrowsAsync<NotSupportedException>(async () =>
         {
             if (operation == 3) ((ILlmContextEstimator)client).EstimateInputTokens(connection, request);

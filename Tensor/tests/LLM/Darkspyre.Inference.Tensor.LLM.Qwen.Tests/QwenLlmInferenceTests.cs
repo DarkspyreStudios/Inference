@@ -6,6 +6,23 @@ namespace Darkspyre.Inference.Tensor.LLM.Qwen.Tests;
 
 public sealed class QwenLlmInferenceTests
 {
+    [Fact]
+    public async Task ExplicitCacheRefusesBeforeModelOrNativeEntry()
+    {
+        await using var inference = new QwenLlmInference(new MissingPackManager());
+        var request = new LlmInferenceRequest
+        {
+            ModelId = TensorLlmModels.Qwen3FourBillionQ4Km.Key.ModelId,
+            Messages = [new("user", "hello")],
+            ExplicitCache = new("cachedContents/cache", "model", "scope"),
+            PromptCache = new() { Retention = LlmPromptCacheRetention.Extended }
+        };
+        var failure = await Assert.ThrowsAsync<InferenceException>(async () =>
+        { await foreach (var unused in inference.StreamAsync(request)) { } });
+        Assert.Equal(InferenceFailureCode.UnsupportedFeature, failure.Code);
+        Assert.False((await inference.GetCapabilitiesAsync(request.ModelId)).SupportsExplicitCache);
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]

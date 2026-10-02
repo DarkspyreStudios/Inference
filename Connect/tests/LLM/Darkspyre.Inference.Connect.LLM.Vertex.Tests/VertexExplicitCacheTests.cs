@@ -22,7 +22,9 @@ public sealed class VertexExplicitCacheTests
         var client = new VertexLlmClient(http, authentication);
         var connection = new LlmConnection
         {
-            Transport = LlmTransport.GoogleVertexAi, Version = "1", Endpoint = "https://aiplatform.googleapis.com",
+            Transport = LlmTransport.GoogleVertexAi,
+            Version = "1",
+            Endpoint = "https://aiplatform.googleapis.com",
             Vertex = new() { ProjectId = "project", Location = "global" },
             CapabilityOverrides = new() { SupportsStreaming = operation == 0 }
         };

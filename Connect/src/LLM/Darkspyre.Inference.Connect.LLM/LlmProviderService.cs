@@ -486,6 +486,8 @@ public sealed class LlmProviderService : ILlmTextTokenizer, ILlmFileClient, IXai
         RequestJson.ValidateSamplingOptions(connection, request);
         ILlmClient client = ClientFor(connection.Transport);
         string? resolvedCredential = connection.Credential;
+        if (request.ExplicitCache is not null)
+            ExplicitCaches.Validate(request, client.GetCapabilities(connection, request.ModelId).SupportsExplicitCache);
         LlmAttachments.ValidateReferences(request, () => client.GetCapabilities(connection, request.ModelId).SupportsFileReferences);
         HostedTools.Validate(request, client.GetCapabilities(connection, request.ModelId));
         ClientTools.Validate(request, client.GetCapabilities(connection, request.ModelId).SupportsShellTools);
@@ -601,6 +603,8 @@ public sealed class LlmProviderService : ILlmTextTokenizer, ILlmFileClient, IXai
         ILlmClient client = ClientFor(connection.Transport);
         if (client is not ILlmProviderTokenCounter counter)
             throw new NotSupportedException("This route does not implement provider input-token counting.");
+        if (request.ExplicitCache is not null)
+            ExplicitCaches.Validate(request, client.GetCapabilities(connection, request.ModelId).SupportsExplicitCache);
         LlmAttachments.ValidateReferences(request, () => client.GetCapabilities(connection, request.ModelId).SupportsFileReferences);
         HostedTools.Validate(request, client.GetCapabilities(connection, request.ModelId));
         ClientTools.Validate(request, client.GetCapabilities(connection, request.ModelId).SupportsShellTools);
@@ -641,6 +645,8 @@ public sealed class LlmProviderService : ILlmTextTokenizer, ILlmFileClient, IXai
         RequestJson.ValidateSamplingOptions(connection, request);
         var client = ClientFor(connection.Transport);
         // Measure what would be sent: the same projection as the request path.
+        if (request.ExplicitCache is not null)
+            ExplicitCaches.Validate(request, client.GetCapabilities(connection, request.ModelId).SupportsExplicitCache);
         LlmAttachments.ValidateReferences(request, () => client.GetCapabilities(connection, request.ModelId).SupportsFileReferences);
         HostedTools.Validate(request, client.GetCapabilities(connection, request.ModelId));
         ClientTools.Validate(request, client.GetCapabilities(connection, request.ModelId).SupportsShellTools);

@@ -45,6 +45,9 @@ public sealed record LlmProviderCapabilities
 
     public LlmPromptCacheCapabilities PromptCache { get; init; } = new();
 
+    /// <summary>The route implements explicit native cache selection. Overrides cannot enable it.</summary>
+    public bool SupportsExplicitCache { get; init; }
+
     /// <summary>The reasoning levels the model accepts. Empty when it accepts no reasoning control.</summary>
     public IReadOnlySet<LlmReasoningLevel> ReasoningLevels { get; init; } = FrozenSet<LlmReasoningLevel>.Empty;
 

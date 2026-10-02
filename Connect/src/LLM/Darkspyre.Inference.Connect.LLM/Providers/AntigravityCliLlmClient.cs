@@ -562,6 +562,7 @@ internal sealed class AntigravityCliLlmClient(IAntigravityCliRunner runner)
         LlmProviderCapabilities capabilities)
     {
         HostedTools.Validate(request, capabilities);
+        ExplicitCaches.Validate(request, capabilities.SupportsExplicitCache);
         if (string.IsNullOrWhiteSpace(request.ModelId))
         {
             throw new ArgumentException("A model id is required.", nameof(request));
