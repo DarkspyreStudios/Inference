@@ -42,7 +42,8 @@ public static class ConnectTtsJson
         options.Converters.Add(new TtsRuntimeJsonConverter<ITtsProvider>());
         options.Converters.Add(new TtsRuntimeJsonConverter<ITtsStreamingClient>());
         options.Converters.Add(new TtsRuntimeJsonConverter<ITtsStreamingSession>());
-        foreach (Type type in new[] { typeof(IProviderAuthorization), typeof(IInferenceResourceAccess), typeof(IInferenceResourceReadHandle), typeof(IInferenceResourceWriteHandle) })
+        foreach (Type type in new[] { typeof(IProviderAuthorization), typeof(IInferenceResourceAccess), typeof(IInferenceResourceReadHandle), typeof(IInferenceResourceWriteHandle),
+            typeof(InferenceResourceOperationPhase), typeof(InferenceResourceCommitOutcome) })
             options.Converters.Add(InferenceJson.InferenceResourceReference.Options.Converters.Single(converter => converter.CanConvert(type)));
         options.Converters.Add(ConnectLlmJson.Connection.Options.Converters.Single(converter => converter.CanConvert(typeof(XaiFamilyBinding))));
         options.Converters.Add(new TtsRuntimeJsonConverter<Func<XaiConnectionSelection, XaiFamilyBinding>>());

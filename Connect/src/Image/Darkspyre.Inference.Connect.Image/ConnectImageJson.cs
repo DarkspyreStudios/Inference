@@ -18,7 +18,8 @@ public static class ConnectImageJson
     private static JsonSerializerOptions CreateOptions()
     {
         var options = new JsonSerializerOptions(ConnectImageJsonContext.Default.Options) { TypeInfoResolver = new ImageTypeInfoResolver() };
-        foreach (Type type in new[] { typeof(IProviderAuthorization), typeof(IInferenceResourceAccess), typeof(IInferenceResourceReadHandle), typeof(IInferenceResourceWriteHandle) })
+        foreach (Type type in new[] { typeof(IProviderAuthorization), typeof(IInferenceResourceAccess), typeof(IInferenceResourceReadHandle), typeof(IInferenceResourceWriteHandle),
+            typeof(InferenceResourceOperationPhase), typeof(InferenceResourceCommitOutcome) })
             options.Converters.Add(InferenceJson.InferenceResourceReference.Options.Converters.Single(converter => converter.CanConvert(type)));
         options.MakeReadOnly();
         return options;

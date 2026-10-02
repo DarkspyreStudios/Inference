@@ -110,6 +110,9 @@ public static class InferenceJson
     private static JsonSerializerOptions CreateOptions()
     {
         var options = new JsonSerializerOptions(InferenceJsonContext.Default.Options) { TypeInfoResolver = new HostedTypeInfoResolver() };
+        options.Converters.Add(new MediaSourceKindJsonConverter());
+        options.Converters.Add(new ResourceOperationPhaseJsonConverter());
+        options.Converters.Add(new ResourceCommitOutcomeJsonConverter());
         options.Converters.Add(new CommonProviderControlsJsonConverter());
         options.Converters.Add(new VideoJobStateJsonConverter());
         options.Converters.Add(new VideoOperationJsonConverter());
