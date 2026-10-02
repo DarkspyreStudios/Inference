@@ -914,7 +914,9 @@ public sealed class LlmProviderService : ILlmTextTokenizer, ILlmFileClient, IXai
         LlmConnection connection = await ResolveFreshConnectionAsync(connectionId, cancellationToken);
         ILlmClient client = ClientFor(connection.Transport);
         connection = await AttachCatalogAsync(connectionId, connection, client, cancellationToken);
-        return FileCapabilities(client, client.GetCapabilities(connection));
+        LlmProviderCapabilities capabilities = FileCapabilities(client, client.GetCapabilities(connection));
+        ThrowIfOperationCanceled(cancellationToken);
+        return capabilities;
     }
 
     /// <summary>
@@ -957,7 +959,9 @@ public sealed class LlmProviderService : ILlmTextTokenizer, ILlmFileClient, IXai
         LlmConnection connection = await ResolveFreshConnectionAsync(connectionId, cancellationToken);
         ILlmClient client = ClientFor(connection.Transport);
         connection = await AttachCatalogAsync(connectionId, connection, client, cancellationToken);
-        return FileCapabilities(client, client.GetCapabilities(connection, modelId));
+        LlmProviderCapabilities capabilities = FileCapabilities(client, client.GetCapabilities(connection, modelId));
+        ThrowIfOperationCanceled(cancellationToken);
+        return capabilities;
     }
 
     /// <summary>

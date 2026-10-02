@@ -748,6 +748,8 @@ transport borrows the same HTTP client as chat. The default registration does no
 Other Files routes and all Skills routes remain unavailable. When no builtin Files adapter is
 composed, refusal precedes source resolution and stream inspection. Caller cancellation and
 retired-facade admission retain the existing lifetime behavior.
+Facade capability queries suppress Files flags for clients without an implemented facade route.
+They fence publication after the adapter's capability getter returns.
 Upload and download streams remain borrowed, including on rejection and facade disposal. These
 resource interfaces do not enable native-file prompt references or skill generation attachment.
 
