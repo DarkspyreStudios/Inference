@@ -12,6 +12,24 @@ public sealed class LlmResourceMaterializationTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
+    public async Task KnownInvalidReferenceRefusesBeforeCredentialRefresh(bool native)
+    {
+        var auth = new RefreshObserver();
+        var connection = Connection() with { Credential = new LlmCredential { OAuth = new() { AccessToken = "expired", RefreshToken = "refresh", ExpiresAtUnixSeconds = 0 } }.Serialize() };
+        using var http = new HttpClient(new ResourceDestination());
+        await using var service = new LlmProviderService(new Source(connection), [new XaiResponsesLlmClient(http)], [auth]);
+        var request = new LlmChatRequest
+        {
+            ModelId = "grok-4",
+            Messages = [new("user", "inspect") { Attachments = [native ? new LlmFileReference(new("..")) : new LlmResourceAttachment(new("workspace", "missing-authority"))] }]
+        };
+        await Assert.ThrowsAnyAsync<ArgumentException>(() => ReadAsync(service.StreamAsync("selected", request)));
+        Assert.Equal(0, auth.Refreshes);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
     public async Task ActualXaiDestinationUploadsSelectedOriginalAndGeneratedBytes(bool facade)
     {
         var resources = new ControlledSessionResources();
@@ -114,7 +132,15 @@ public sealed class LlmResourceMaterializationTests
     internal sealed class Source(LlmConnection connection) : ILlmConnectionSource
     {
         public Task<LlmConnection?> GetConnectionAsync(string id, CancellationToken cancellationToken = default) => Task.FromResult<LlmConnection?>(connection);
-        public Task SaveCredentialAsync(string id, string credential, string expectedVersion, CancellationToken cancellationToken = default) => throw new InvalidOperationException("Unexpected credential save.");
+        public Task SaveCredentialAsync(string id, string credential, string expectedVersion, CancellationToken cancellationToken = default) => Task.CompletedTask;
+    }
+
+    private sealed class RefreshObserver : ILlmAuthenticator
+    {
+        public LlmTransport Transport => LlmTransport.XaiResponses;
+        internal int Refreshes { get; private set; }
+        public Task<LlmCredential> EnsureFreshAsync(LlmCredential credential, CancellationToken cancellationToken = default)
+        { Refreshes++; return Task.FromResult(credential with { OAuth = new() { AccessToken = "refreshed" } }); }
     }
 
     internal sealed class ResourceDestination : HttpMessageHandler
@@ -124,6 +150,8 @@ public sealed class LlmResourceMaterializationTests
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken token)
         {
             string path = request.RequestUri!.AbsolutePath;
+            if (path.EndsWith("/models", StringComparison.Ordinal)) return Json("{\"data\":[]}");
+            if (path.EndsWith("/language-models", StringComparison.Ordinal)) return Json("{\"models\":[]}");
             if (path.EndsWith("/files", StringComparison.Ordinal))
             {
                 var multipart = Assert.IsType<MultipartFormDataContent>(request.Content);
