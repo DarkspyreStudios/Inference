@@ -23,24 +23,26 @@ internal sealed class BedrockAgentCoreInvoker(BedrockClientFactory factory)
     {
         using BedrockClientFactory.Lease<AmazonBedrockAgentCoreClient> lease = factory.AgentCore(aws, cancellationToken);
         cancellationToken = lease.Token;
+        lease.ThrowIfCanceled();
         InvokeHarnessResponse response = await lease.Client.InvokeHarnessAsync(
             request,
             cancellationToken);
         using IDisposable ownedResponse = lease.OwnResponse(response);
-        cancellationToken.ThrowIfCancellationRequested();
+        lease.ThrowIfCanceled();
         await using IAsyncEnumerator<IEventStreamEvent> events = response.Stream.GetAsyncEnumerator(cancellationToken);
         while (true)
         {
+            lease.ThrowIfCanceled();
             bool moved;
             try { moved = await events.MoveNextAsync(); }
             catch (BedrockAgentCoreEventStreamException) when (cancellationToken.IsCancellationRequested)
             {
                 throw new OperationCanceledException(cancellationToken);
             }
-            cancellationToken.ThrowIfCancellationRequested();
+            lease.ThrowIfCanceled();
             if (!moved) break;
             yield return events.Current;
         }
-        cancellationToken.ThrowIfCancellationRequested();
+        lease.ThrowIfCanceled();
     }
 }

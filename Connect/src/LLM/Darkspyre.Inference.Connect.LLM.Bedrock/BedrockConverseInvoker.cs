@@ -36,8 +36,9 @@ internal sealed class BedrockConverseInvoker(BedrockClientFactory factory) : IBe
         CancellationToken cancellationToken)
     {
         using BedrockClientFactory.Lease<AmazonBedrockRuntimeClient> lease = factory.Runtime(aws, cancellationToken);
+        lease.ThrowIfCanceled();
         ConverseResponse response = await lease.Client.ConverseAsync(request, lease.Token);
-        lease.Token.ThrowIfCancellationRequested();
+        lease.ThrowIfCanceled();
         return response;
     }
 
@@ -51,8 +52,9 @@ internal sealed class BedrockConverseInvoker(BedrockClientFactory factory) : IBe
         bool transferred = false;
         try
         {
+            lease.ThrowIfCanceled();
             response = await lease.Client.ConverseStreamAsync(request, lease.Token);
-            lease.Token.ThrowIfCancellationRequested();
+            lease.ThrowIfCanceled();
             var stream = new EventStream(response, lease);
             transferred = true;
             return stream;
@@ -88,12 +90,14 @@ internal sealed class BedrockConverseInvoker(BedrockClientFactory factory) : IBe
             using LlmOperationLifetime.Lease reader = _readers.Enter(cancellationToken);
             using var linked = CancellationTokenSource.CreateLinkedTokenSource(reader.Token, lease.Token);
             cancellationToken = linked.Token;
+            ThrowIfReadCanceled(cancellationToken);
             // C# forbids yield inside try/catch, so each MoveNextAsync is guarded on its own.
             IAsyncEnumerator<IEventStreamEvent> events = response.Stream.GetAsyncEnumerator(cancellationToken);
             await using (events)
             {
                 while (true)
                 {
+                    ThrowIfReadCanceled(cancellationToken);
                     bool moved;
                     try
                     {
@@ -106,17 +110,25 @@ internal sealed class BedrockConverseInvoker(BedrockClientFactory factory) : IBe
 
                     if (!moved)
                     {
-                        cancellationToken.ThrowIfCancellationRequested();
+                        ThrowIfReadCanceled(cancellationToken);
                         yield break;
                     }
 
-                    cancellationToken.ThrowIfCancellationRequested();
+                    ThrowIfReadCanceled(cancellationToken);
                     yield return events.Current;
                 }
             }
         }
 
         public ValueTask DisposeAsync() => new(_readers.RetireAsync(ReleaseAsync));
+
+        private void ThrowIfReadCanceled(CancellationToken token)
+        {
+            token.ThrowIfCancellationRequested();
+            lease.ThrowIfCanceled();
+            try { _readers.ThrowIfStopping(); }
+            catch (ObjectDisposedException) { throw new OperationCanceledException("Bedrock stream ownership is retiring.", token); }
+        }
 
         private Task ReleaseAsync()
         {

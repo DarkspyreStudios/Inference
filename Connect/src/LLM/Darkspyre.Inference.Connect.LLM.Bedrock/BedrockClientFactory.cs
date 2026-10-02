@@ -87,7 +87,7 @@ internal sealed class BedrockClientFactory : IDisposable, IAsyncDisposable
                 throw;
             }
             operation.Token.ThrowIfCancellationRequested();
-            var lease = new Lease<T>(client, operation, RecordCleanupFailure);
+            var lease = new Lease<T>(client, operation, ThrowIfOperationCanceled, RecordCleanupFailure);
             transferred = true;
             return lease;
         }
@@ -138,6 +138,13 @@ internal sealed class BedrockClientFactory : IDisposable, IAsyncDisposable
     public ValueTask DisposeAsync() => new(_lifetime.RetireAsync(ReleaseAsync));
     public void Dispose() => DisposeAsync().AsTask().GetAwaiter().GetResult();
 
+    private void ThrowIfOperationCanceled(CancellationToken token)
+    {
+        token.ThrowIfCancellationRequested();
+        try { _lifetime.ThrowIfStopping(); }
+        catch (ObjectDisposedException) { throw new OperationCanceledException("Bedrock resource ownership is retiring.", token); }
+    }
+
     private void RecordCleanupFailure(Exception error)
     {
         lock (_gate) { _cleanupFailures.Add(error); }
@@ -170,13 +177,20 @@ internal sealed class BedrockClientFactory : IDisposable, IAsyncDisposable
         return Task.CompletedTask;
     }
 
-    internal sealed class Lease<T>(T client, LlmOperationLifetime.Lease operation, Action<Exception> recordFailure) : IDisposable where T : class
+    internal sealed class Lease<T>(T client, LlmOperationLifetime.Lease operation,
+        Action<CancellationToken> checkLifetime, Action<Exception> recordFailure) : IDisposable where T : class
     {
         private LlmOperationLifetime.Lease? _operation = operation;
         private T? _client = client;
         private Action<Exception>? _recordFailure = recordFailure;
+        private Action<CancellationToken>? _checkLifetime = checkLifetime;
         public T Client => _client ?? throw new ObjectDisposedException(nameof(Lease<T>));
         public CancellationToken Token { get; } = operation.Token;
+        public void ThrowIfCanceled()
+        {
+            ObjectDisposedException.ThrowIf(_operation is null, this);
+            _checkLifetime!(Token);
+        }
         public IDisposable OwnResponse(IDisposable response) => new ResponseScope(() => DisposeResponse(response));
 
         public void DisposeResponse(IDisposable response)
@@ -194,6 +208,7 @@ internal sealed class BedrockClientFactory : IDisposable, IAsyncDisposable
             Interlocked.Exchange(ref _operation, null)?.Dispose();
             _client = null;
             _recordFailure = null;
+            _checkLifetime = null;
         }
 
         private sealed class ResponseScope(Action dispose) : IDisposable
