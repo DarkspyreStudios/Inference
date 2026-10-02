@@ -1679,6 +1679,39 @@ transfers redirect-policy responsibility to the caller; response checks cannot u
 forwarding by a handler that already followed a redirect. The Azure clients have no public
 constructor accepting an arbitrary borrowed `HttpClient`.
 
+## Realtime Voice Contracts
+
+`AddRealtimeConnect()` registers `RealtimeProviderService`, not an xAI adapter. Its setup catalog
+contains only supplied `IRealtimeProvider` implementations. An unregistered transport refuses;
+the registration does not advertise usable realtime sessions.
+
+The facade exposes `GetCapabilitiesAsync(connection, modelId?, cancellationToken)` and
+`OpenSessionAsync(connection, config, limits, xai?, resources?, cancellationToken)`.
+`RealtimeConnection` carries the endpoint, a five-minute library request timeout, copied headers,
+data-only xAI selection and optional borrowed authorization. Runtime bindings and resource access
+remain explicit operation arguments. `InferenceStreamLimits` contains three positive caller-local
+budgets with no implicit defaults. A returned `IRealtimeVoiceSession` owns its socket and tasks;
+the caller disposes it. The facade retires a session returned after cancellation before handoff.
+
+`RealtimeSessionConfig` retains the complete typed instructions, audio, tools, turn detection,
+transcription, speed and explicit scoped resumption settings. Tool schemas and hosted-tool data
+are snapshotted before provider entry. `XaiRealtimeOptions.Replace` distinguishes omitted and
+explicit empty maps. `XaiRealtimeForceMessageItem` retains text and optional interruptibility;
+an inherited client ID refuses because that variant has no declared ID mapping.
+
+`ConnectRealtimeJson` exposes exact data-type getters for connections, settings changes,
+configuration, content, conversation items and concrete events. Its complete graphs admit the
+fixed xAI options, force-message item and X search tool. Common's metadata does not admit these
+Connect-only extensions. Non-null runtime collaborators refuse portable JSON without invoking
+them. Required audio uses Common's targeted byte policy.
+
+`CreateSettingsManager(target)` borrows the conditional commit target. Setup preserves every typed
+session default, separates protected header edits and removes live authorization from saved data.
+Capability inspection does not prove authentication or session readiness. Manager retirement
+fences new operations, drains admitted work and detaches borrowed collaborators. An admitted Save
+retains its actual committed or uncertain outcome. The real xAI socket protocol, native resumption
+and resource/tool materialization remain unimplemented under DSA-131.
+
 ## Account usage
 
 Subscription adapters that can read account-level quotas report `SupportsAccountUsage = true` and
