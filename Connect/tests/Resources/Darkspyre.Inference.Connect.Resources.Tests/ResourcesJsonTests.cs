@@ -23,7 +23,7 @@ public sealed class ResourcesJsonTests
     private const string Batch = "{\"Id\":\"b\",\"Name\":\"name\",\"Scope\":" + Scope + ",\"Counts\":{\"Requests\":null,\"Pending\":0,\"Success\":1,\"Error\":0,\"Cancelled\":null}}";
     private const string ChatRequest = "{\"ModelId\":\"manual-model\",\"Resources\":null,\"Messages\":[{\"Role\":\"user\",\"Content\":\"text\",\"Attachments\":[{\"type\":\"binary\",\"Kind\":2,\"FileName\":\"reference.txt\",\"Data\":\"AQI=\",\"MediaType\":\"text/plain\"},{\"type\":\"workspace-resource\",\"Resource\":{\"WorkspaceId\":\"w\",\"Id\":\"r\"}}]}],\"HostedTools\":[{\"type\":\"xai-x-search\",\"AllowedHandles\":[\"actual\"]},{\"type\":\"remote-mcp\",\"ServerUrl\":\"https://example.invalid/mcp\",\"ServerLabel\":\"server\",\"Authorization\":null}],\"ProviderOptions\":{\"opaque\":{\"value\":1}}}";
     private const string ChatResult = "{\"Text\":\"answer\",\"Status\":0,\"Diagnostics\":{\"HttpStatusCode\":200,\"RequestId\":null,\"RawFinalResponseJson\":null}}";
-    private const string FunctionChatRequest = "{\"ModelId\":\"m\",\"Tools\":[{\"Name\":\"tool\",\"InputSchema\":{\"type\":\"object\"},\"Strict\":false}],\"Messages\":[{\"Role\":\"assistant\",\"Content\":\"\",\"ToolCalls\":[{\"Id\":\"call\",\"Name\":\"tool\",\"ArgumentsJson\":\"{}\"}],\"ContinuationState\":{\"FormatVersion\":2,\"ImplementationId\":\"owner\",\"ModelId\":\"m\",\"ScopeId\":\"scope\",\"Payload\":\"opaque\"}},{\"Role\":\"tool\",\"Content\":\"\",\"ToolResults\":[{\"ToolCallId\":\"call\",\"Output\":{\"Parts\":[{\"type\":\"text\",\"Text\":\"text\"},{\"type\":\"binary\",\"Kind\":1,\"MediaType\":\"text/plain\",\"Data\":\"AQI=\"},{\"type\":\"workspace-resource\",\"Resource\":{\"WorkspaceId\":\"w\",\"Id\":\"r\"}}],\"StructuredContent\":{\"actual\":1}}}]}]}";
+    private const string FunctionChatRequest = "{\"ModelId\":\"m\",\"Tools\":[{\"type\":\"function\",\"Name\":\"tool\",\"InputSchema\":{\"type\":\"object\"},\"Strict\":false}],\"Messages\":[{\"Role\":\"assistant\",\"Content\":\"\",\"ToolCalls\":[{\"type\":\"function\",\"Id\":\"call\",\"Name\":\"tool\",\"ArgumentsJson\":\"{}\"}],\"ContinuationState\":{\"FormatVersion\":2,\"ImplementationId\":\"owner\",\"ModelId\":\"m\",\"ScopeId\":\"scope\",\"Payload\":\"opaque\"}},{\"Role\":\"tool\",\"Content\":\"\",\"ToolResults\":[{\"type\":\"function\",\"ToolCallId\":\"call\",\"Output\":{\"Parts\":[{\"type\":\"text\",\"Text\":\"text\"},{\"type\":\"binary\",\"Kind\":1,\"MediaType\":\"text/plain\",\"Data\":\"AQI=\"},{\"type\":\"workspace-resource\",\"Resource\":{\"WorkspaceId\":\"w\",\"Id\":\"r\"}}],\"StructuredContent\":{\"actual\":1}}}]}]}";
     private const string ObservedChatResult = "{\"Text\":\"answer\",\"Status\":0,\"Usage\":{\"InputTokens\":null,\"OutputTokens\":0,\"TotalTokens\":null,\"ProviderReportedCostUsd\":0.001,\"HostedToolCalls\":{\"WebSearch\":0},\"HostedToolCallCount\":0,\"HostedSourcesUsed\":null},\"Citations\":[{\"Url\":\"https://example.invalid/source\",\"StartIndex\":null,\"EndIndex\":null}],\"Diagnostics\":{\"HttpStatusCode\":200,\"RequestId\":null,\"RawFinalResponseJson\":null}}";
     private const string ImageRequest = "{\"ModelId\":\"image-model\",\"Prompt\":\"prompt\",\"Count\":2,\"References\":[{\"type\":\"binary\",\"ContentType\":null,\"Data\":\"AQI=\"},{\"type\":\"resource\",\"Resource\":{\"WorkspaceId\":\"w\",\"Id\":\"r\"}}]}";
     private const string Workflow = "{\"Id\":\"w\",\"Label\":\"workflow\",\"Transport\":0,\"TransportConfiguration\":{\"opaque\":1}}";
@@ -47,6 +47,7 @@ public sealed class ResourcesJsonTests
         { "LlmBatchOperation", "{\"type\":\"video-extension\",\"Request\":" + VideoExtension + "}" },
         { "LlmBatchChatOperation", "{\"Request\":" + ChatRequest + "}" },
         { "LlmBatchChatOperation", "{\"Request\":" + FunctionChatRequest + "}" },
+        { "LlmBatchChatOperation", "{\"Request\":{\"ModelId\":\"m\",\"Tools\":[{\"type\":\"function\",\"Name\":\"function\",\"InputSchema\":{\"type\":\"object\"}},{\"type\":\"shell\",\"Skills\":[{\"Name\":\"skill\",\"Description\":\"actual\",\"Path\":\"/skills/actual\"}]}],\"Messages\":[{\"Role\":\"assistant\",\"Content\":\"\",\"ToolCalls\":[{\"type\":\"function\",\"Id\":\"f\",\"Name\":\"function\",\"ArgumentsJson\":\"{}\"},{\"type\":\"shell\",\"Id\":\"sh\",\"Commands\":[\"first\",\"second\"],\"TimeoutMs\":-9223372036854775808,\"MaxOutputLength\":2147483647}]},{\"Role\":\"tool\",\"Content\":\"\",\"ToolResults\":[{\"type\":\"function\",\"ToolCallId\":\"f\",\"Output\":{\"Parts\":[{\"type\":\"text\",\"Text\":\"actual\"}]}},{\"type\":\"shell\",\"ToolCallId\":\"sh\",\"Output\":[{\"Stdout\":\"raw\",\"Stderr\":null,\"Outcome\":{\"type\":\"exit\",\"ExitCode\":-2147483648}},{\"Stdout\":null,\"Stderr\":\"error\",\"Outcome\":{\"type\":\"timeout\"}},{\"Stdout\":\"\",\"Stderr\":\"\",\"Outcome\":{\"type\":\"exit\",\"ExitCode\":0}}]}]}]}}" },
         { "LlmBatchImageOperation", "{\"Request\":" + ImageRequest + ",\"Workflow\":" + Workflow + "}" },
         { "LlmBatchVideoGenerationOperation", "{\"Request\":" + VideoGeneration + "}" },
         { "LlmBatchVideoEditOperation", "{\"Request\":" + VideoEdit + "}" },
@@ -61,6 +62,7 @@ public sealed class ResourcesJsonTests
         { "LlmBatchResult", "{\"type\":\"failure\",\"CustomId\":\"c\",\"Error\":" + Failure + "}" },
         { "LlmBatchChatResult", "{\"CustomId\":\"c\",\"Result\":" + ChatResult + "}" },
         { "LlmBatchChatResult", "{\"CustomId\":\"c\",\"Result\":" + ObservedChatResult + "}" },
+        { "LlmBatchChatResult", "{\"CustomId\":\"c\",\"Result\":{\"Text\":\"\",\"Status\":4,\"ToolCalls\":[{\"type\":\"function\",\"Id\":\"f\",\"Name\":\"function\",\"ArgumentsJson\":\"{}\"},{\"type\":\"shell\",\"Id\":\"sh\",\"Commands\":[],\"TimeoutMs\":0,\"MaxOutputLength\":null}],\"Diagnostics\":{\"HttpStatusCode\":200,\"RequestId\":null,\"RawFinalResponseJson\":null}}}" },
         { "LlmBatchImageResult", "{\"CustomId\":\"c\",\"Result\":" + ImageResult + "}" },
         { "LlmBatchVideoResult", "{\"CustomId\":\"c\",\"Result\":" + VideoSnapshot + ",\"Materialization\":" + Materialization + "}" },
         { "LlmBatchFailure", "{\"CustomId\":\"c\",\"Error\":" + Failure + "}" },
@@ -148,6 +150,17 @@ public sealed class ResourcesJsonTests
 
     [Fact]
     public void RuntimeClientsReadAndWriteRefuseWithoutEffects() => ExerciseRuntimeRefusal();
+
+    [Fact]
+    public void JoinedCallerAuthorityCannotBecomePortableThroughResourcesOptions() => ExerciseCallerAuthorityRefusal();
+
+    internal static void ExerciseCallerAuthorityRefusal()
+    {
+        JsonTypeInfo<ResourcesRuntimeEnvelope> metadata = RuntimeMetadata();
+        Assert.Throws<NotSupportedException>(() => JsonSerializer.Serialize(new ResourcesRuntimeEnvelope { CallerServices = new() }, metadata));
+        Assert.Throws<NotSupportedException>(() => JsonSerializer.Deserialize("{\"CallerServices\":{}}", metadata));
+        Assert.NotNull(JsonSerializer.Deserialize("{\"CallerServices\":null}", metadata));
+    }
 
     [Fact]
     public void UnknownNestedProviderClrVariantsRefuseInsteadOfDroppingFields()
@@ -377,6 +390,7 @@ public sealed record ResourcesRuntimeEnvelope
     public IInferenceResourceWriteHandle? Write { get; init; }
     public IProviderAuthorization? Authorization { get; init; }
     public ILlmBatchClient? Client { get; init; }
+    public LlmAgentCallerServices? CallerServices { get; init; }
 }
 [JsonSourceGenerationOptions(GenerationMode = JsonSourceGenerationMode.Metadata)]
 [JsonSerializable(typeof(ResourcesRuntimeEnvelope))]
