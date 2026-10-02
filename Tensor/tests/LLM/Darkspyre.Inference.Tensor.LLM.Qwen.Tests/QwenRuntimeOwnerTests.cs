@@ -205,6 +205,41 @@ public sealed class QwenRuntimeOwnerTests
     }
 
     [Fact]
+    public async Task ProvenReadyGuardRefusalKeepsTheFenceAndAllowsExplicitRetryAfterExternalDrain()
+    {
+        var supplier = new Supplier { ExternalResourcesActive = true };
+        var owner = new QwenRuntimeOwner(new(Build, Rid, [Candidate("cpu", TensorBackendKind.GgmlCpu)]), supplier);
+        Task? disposal = null;
+        try
+        {
+            Assert.True((await owner.CheckAsync(Request())).IsAvailable);
+            TensorRuntimeShutdownResult busy = await owner.ShutdownAsync();
+            Assert.Equal(TensorRuntimeShutdownState.Busy, busy.State);
+            Assert.Equal(0, busy.OutstandingLeases);
+            Assert.True(busy.NativeStateMayRemain);
+            Assert.NotNull(owner.Current);
+            Assert.Equal(0, supplier.Teardowns);
+            Assert.Throws<ObjectDisposedException>(() => owner.EnterExecution());
+            disposal = owner.DisposeAsync().AsTask();
+            await Assert.ThrowsAsync<InferenceException>(() => disposal);
+            Assert.Same(disposal, owner.DisposeAsync().AsTask());
+
+            supplier.ExternalResourcesActive = false;
+            Assert.Equal(TensorRuntimeShutdownState.Completed, (await owner.ShutdownAsync()).State);
+            Assert.Equal(1, supplier.Teardowns);
+            Assert.Null(owner.Current);
+            Assert.Throws<ObjectDisposedException>(() => owner.EnterExecution());
+        }
+        finally
+        {
+            supplier.ExternalResourcesActive = false;
+            await owner.ShutdownAsync();
+            if (disposal is not null) { try { await disposal; } catch (InferenceException) { } }
+            else { try { await owner.DisposeAsync(); } catch (InferenceException) { } }
+        }
+    }
+
+    [Fact]
     public async Task ModelAndExecutionLeasesPreventTeardownAndDisposalFencesSynchronously()
     {
         var supplier = new Supplier();
@@ -297,6 +332,7 @@ public sealed class QwenRuntimeOwnerTests
         public int Catalogs { get; private set; }
         public int Initializations { get; private set; }
         public int Shutdowns { get; private set; }
+        public int Teardowns { get; private set; }
         public int ModelReleases { get; private set; }
         public List<GgmlBackendType> Configured { get; } = [];
         public IReadOnlyList<GgmlNativeCandidate> PackageCandidates { get; init; } = [];
@@ -305,6 +341,7 @@ public sealed class QwenRuntimeOwnerTests
         public bool HoldInitialization { get; init; }
         public bool HoldShutdown { get; init; }
         public bool RefuseValidation { get; init; }
+        public bool ExternalResourcesActive { get; set; }
         public Action? OnAcquire { get; init; }
         public int CleanupFailuresRemaining { get; set; }
         public Exception CleanupFailure { get; } = new InvalidOperationException("private-error cleanup");
@@ -357,6 +394,8 @@ public sealed class QwenRuntimeOwnerTests
             ShutdownStarted.TrySetResult();
             if (HoldShutdown) ShutdownRelease.Task.GetAwaiter().GetResult();
             if (Poison) return new(false, "private-error");
+            if (ExternalResourcesActive) return new(false, "private-error unrelated diagnostic");
+            Teardowns++;
             State = GgmlRuntimeState.Stopped;
             return new(true, null);
         }
