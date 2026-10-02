@@ -9,9 +9,9 @@ internal static class ManagedAgentContext
     /// <summary>Validates portable data without decoding provider state or invoking resource authority.</summary>
     internal static LlmAgentContext ValidatePortable(LlmAgentContext context) => Validate(context, static message => message);
 
-    public static LlmAgentContext Import(LlmAgentContext context, LlmConnection connection, string modelId)
+    public static LlmAgentContext Import(LlmAgentContext context, LlmConnection connection, string modelId, bool supportsResources = false)
     {
-        ValidateRuntimeResources(context);
+        if (!supportsResources) ValidateRuntimeResources(context);
         return Validate(context, message =>
         {
             _ = ProviderContinuationStateCodec.DecodeMessage(message, connection, modelId);
@@ -21,7 +21,7 @@ internal static class ManagedAgentContext
 
     /// <summary>Imports a start context; with Omit, state this target cannot replay is removed and counted.</summary>
     public static (LlmAgentContext Context, int Omitted) Import(
-        LlmAgentContext context, LlmConnection connection, string modelId, LlmUnboundContinuationState unbound)
+        LlmAgentContext context, LlmConnection connection, string modelId, LlmUnboundContinuationState unbound, bool supportsResources = false)
     {
         if (!Enum.IsDefined(unbound))
         {
@@ -29,9 +29,9 @@ internal static class ManagedAgentContext
         }
         if (unbound == LlmUnboundContinuationState.Reject)
         {
-            return (Import(context, connection, modelId), 0);
+            return (Import(context, connection, modelId, supportsResources), 0);
         }
-        ValidateRuntimeResources(context);
+        if (!supportsResources) ValidateRuntimeResources(context);
         int omitted = 0;
         LlmAgentContext imported = Validate(context, message =>
         {

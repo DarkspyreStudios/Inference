@@ -12,6 +12,7 @@ internal sealed class LlmResourcePreparation : IAsyncDisposable
 {
     private readonly List<IInferenceResourceReadHandle> _handles = [];
     private readonly Dictionary<InferenceResourceReference, LlmProviderFile> _files = [];
+    private readonly object _gate = new();
     private Task? _retirement;
 
     private LlmResourcePreparation(LlmChatRequest request) => Request = request;
@@ -32,19 +33,34 @@ internal sealed class LlmResourcePreparation : IAsyncDisposable
         Scope scope = ReadScope(access, fence, token);
         InferenceResourceSelection selected = await access.GetSelectionAsync(token).ConfigureAwait(false);
         Check(fence, token);
+        CheckScope(access, scope, fence, token);
         ValidateSelection(selected, scope);
         return new(selected.WorkspaceId, selected.SessionId, selected.Revision,
             selected.SelectedResources.Select(LlmAttachments.CopyResource).ToArray());
+    }
+
+    internal static void ValidateScope(IInferenceResourceAccess access, InferenceResourceSelectionVersion expected,
+        Action fence, CancellationToken token)
+    {
+        CheckScope(access, new(expected.WorkspaceId, expected.SessionId), fence, token);
     }
 
     internal static async Task<InferenceResourceDescriptor> RequireDescriptorAsync(
         IInferenceResourceAccess access, InferenceResourceReference reference, Action fence, CancellationToken token)
     {
         Scope scope = ReadScope(access, fence, token);
+        return await RequireDescriptorAsync(access, reference, scope, fence, token).ConfigureAwait(false);
+    }
+
+    private static async Task<InferenceResourceDescriptor> RequireDescriptorAsync(
+        IInferenceResourceAccess access, InferenceResourceReference reference, Scope scope, Action fence, CancellationToken token)
+    {
+        CheckScope(access, scope, fence, token);
         ValidateReference(reference);
         if (reference.WorkspaceId != scope.WorkspaceId) throw InvalidScope();
         InferenceResourceDescriptor? descriptor = await access.GetAsync(reference, token).ConfigureAwait(false);
         Check(fence, token);
+        CheckScope(access, scope, fence, token);
         return ValidateDescriptor(descriptor, reference, scope);
     }
 
@@ -58,22 +74,41 @@ internal sealed class LlmResourcePreparation : IAsyncDisposable
             || version.Revision != selection.Revision || !context.SelectedResources.SequenceEqual(selection.SelectedResources))
             throw new ArgumentException("The imported resource selection does not match the current caller-owned snapshot.", nameof(context));
         foreach (InferenceResourceReference reference in context.SelectedResources.Concat(
-            References(new() { ModelId = "context", Messages = context.Entries.Select(entry => entry.Message).ToArray() })).Distinct())
-            _ = await RequireDescriptorAsync(access, reference, fence, token).ConfigureAwait(false);
+            References(new() { ModelId = "context", Messages = context.Entries.Select(entry => entry.Message).ToArray() }, actualOnly: false)).Distinct())
+            _ = await RequireDescriptorAsync(access, reference, scope, fence, token).ConfigureAwait(false);
         Check(fence, token);
     }
 
     internal static async Task AuthorizeToolOutputAsync(LlmToolOutput output,
         IInferenceResourceAccess access, Action fence, CancellationToken token)
     {
-        InferenceResourceSelection selection = await ReadSelectionAsync(access, fence, token).ConfigureAwait(false);
-        foreach (LlmToolOutputSessionResource part in output.Parts.OfType<LlmToolOutputSessionResource>())
+        try
         {
-            _ = await RequireDescriptorAsync(access, part.Resource, fence, token).ConfigureAwait(false);
-            if (!selection.SelectedResources.Contains(part.Resource))
-                throw new ArgumentException("A registered tool artifact must already be selected in the caller-owned session.", nameof(output));
+            InferenceResourceSelection selection = await ReadSelectionAsync(access, fence, token).ConfigureAwait(false);
+            Scope scope = new(selection.WorkspaceId, selection.SessionId);
+            foreach (LlmToolOutputSessionResource part in output.Parts.OfType<LlmToolOutputSessionResource>())
+            {
+                _ = await RequireDescriptorAsync(access, part.Resource, scope, fence, token).ConfigureAwait(false);
+                if (!selection.SelectedResources.Contains(part.Resource))
+                    throw new ArgumentException("A registered tool artifact must already be selected in the caller-owned session.", nameof(output));
+            }
+            Check(fence, token);
         }
-        Check(fence, token);
+        catch (Exception error) { ExceptionDispatchInfo.Capture(AsResourceFailure(error, token)).Throw(); throw; }
+    }
+
+    internal static bool IsResourceFailure(Exception error) => error is InferenceResourceOperationException or InferenceResourceOperationCanceledException
+        || error is AggregateException aggregate && aggregate.InnerExceptions.Any(IsResourceFailure);
+
+    internal static Exception AsResourceFailure(Exception error, CancellationToken token)
+    {
+        if (IsResourceFailure(error)) return error;
+        var facts = new InferenceResourceOperationFailure(InferenceResourceOperationPhase.Materialize, null,
+            InferenceResourceCommitOutcome.NotAttempted);
+        return error is OperationCanceledException
+            ? new InferenceResourceOperationCanceledException(facts, token, error)
+            : new InferenceResourceOperationException(InferenceFailureCode.ExecutionFailed,
+                "The admitted resource operation failed.", facts, error);
     }
 
     internal static async Task<LlmResourcePreparation> PrepareAsync(LlmConnection connection, LlmChatRequest request,
@@ -90,12 +125,13 @@ internal sealed class LlmResourcePreparation : IAsyncDisposable
             if (request.Resources is not { } access) return operation;
             InferenceResourceSelection selection = await ReadSelectionAsync(access, fence, token).ConfigureAwait(false);
             request = AppendSelection(request, selection);
-            Scope scope = ReadScope(access, fence, token);
+            Scope scope = new(selection.WorkspaceId, selection.SessionId);
+            CheckScope(access, scope, fence, token);
             foreach (InferenceResourceReference reference in References(request).Distinct())
             {
                 current = reference;
                 phase = InferenceResourceOperationPhase.OpenRead;
-                InferenceResourceDescriptor descriptor = await RequireDescriptorAsync(access, reference, fence, token).ConfigureAwait(false);
+                InferenceResourceDescriptor descriptor = await RequireDescriptorAsync(access, reference, scope, fence, token).ConfigureAwait(false);
                 if (string.IsNullOrWhiteSpace(descriptor.FileName))
                     throw new NotSupportedException("The file destination requires an observed resource filename.");
                 Check(fence, token);
@@ -104,16 +140,23 @@ internal sealed class LlmResourcePreparation : IAsyncDisposable
                 ArgumentNullException.ThrowIfNull(handle);
                 operation._handles.Add(handle);
                 Check(fence, token);
-                _ = ValidateDescriptor(handle.Resource, reference, scope);
+                InferenceResourceDescriptor observed = handle.Resource;
+                Check(fence, token);
+                CheckScope(access, scope, fence, token);
+                observed = ValidateDescriptor(observed, reference, scope);
+                ValidateImmutableFacts(descriptor, observed);
                 Stream content = handle.Content;
                 Check(fence, token);
+                CheckScope(access, scope, fence, token);
                 if (content is null || !content.CanRead) throw new InvalidOperationException("The resource handle has no readable content.");
                 Check(fence, token);
+                CheckScope(access, scope, fence, token);
                 reading = new(content, fence, token);
                 phase = InferenceResourceOperationPhase.Materialize;
                 LlmProviderFile uploaded = await files.UploadAsync(connection, reading, descriptor.FileName, null, fence, token).ConfigureAwait(false);
                 Check(fence, token);
-                if (descriptor.Bytes is { } expected && reading.BytesRead != expected)
+                CheckScope(access, scope, fence, token);
+                if ((descriptor.Bytes ?? observed.Bytes) is { } expected && reading.BytesRead != expected)
                     throw new InvalidOperationException("The resource content does not match its observed byte count.");
                 operation._files.Add(reference, uploaded);
                 reading = null;
@@ -167,8 +210,8 @@ internal sealed class LlmResourcePreparation : IAsyncDisposable
         return request with { Messages = messages };
     }
 
-    private static IEnumerable<InferenceResourceReference> References(LlmChatRequest request) => request.Messages
-        .Where(message => message.ContinuationState is null)
+    private static IEnumerable<InferenceResourceReference> References(LlmChatRequest request, bool actualOnly = true) => request.Messages
+        .Where(message => !actualOnly || message.ContinuationState is null)
         .SelectMany(message => message.Attachments.OfType<LlmResourceAttachment>().Select(part => part.Resource)
             .Concat(message.ToolResults.OfType<LlmToolResult>().SelectMany(result => result.Output.Parts)
                 .OfType<LlmToolOutputSessionResource>().Select(part => part.Resource)));
@@ -184,6 +227,20 @@ internal sealed class LlmResourcePreparation : IAsyncDisposable
         ArgumentException.ThrowIfNullOrEmpty(workspace);
         ArgumentException.ThrowIfNullOrEmpty(session);
         return new(workspace, session);
+    }
+
+    private static void CheckScope(IInferenceResourceAccess access, Scope scope, Action fence, CancellationToken token)
+    {
+        if (ReadScope(access, fence, token) != scope) throw InvalidScope();
+    }
+
+    private static void ValidateImmutableFacts(InferenceResourceDescriptor lookup, InferenceResourceDescriptor handle)
+    {
+        if (lookup.SessionId != handle.SessionId
+            || lookup.FileName is { } name && handle.FileName is { } observedName && name != observedName
+            || lookup.ContentType is { } type && handle.ContentType is { } observedType && type != observedType
+            || lookup.Bytes is { } bytes && handle.Bytes is { } observedBytes && bytes != observedBytes)
+            throw new InvalidOperationException("The resource handle contradicts the observed immutable content metadata.");
     }
 
     private static void ValidateReference(InferenceResourceReference reference)
@@ -207,16 +264,22 @@ internal sealed class LlmResourcePreparation : IAsyncDisposable
     private static ArgumentException InvalidScope() => new("The resource does not belong to the admitted workspace/session scope.");
     internal static void Check(Action fence, CancellationToken token) { token.ThrowIfCancellationRequested(); fence(); token.ThrowIfCancellationRequested(); }
 
-    public ValueTask DisposeAsync() => new(_retirement ??= RetireAsync());
+    public ValueTask DisposeAsync()
+    { lock (_gate) return new(_retirement ??= RetireAsync()); }
     private async Task RetireAsync()
     {
         var failures = new List<Exception>();
+        var failedHandles = new List<IInferenceResourceReadHandle>();
         foreach (IInferenceResourceReadHandle handle in _handles)
         {
             try { await handle.DisposeAsync().ConfigureAwait(false); }
-            catch (Exception cleanup) { failures.Add(cleanup); }
+            catch (Exception cleanup) { failedHandles.Add(handle); failures.Add(cleanup); }
         }
-        if (failures.Count == 0) { _handles.Clear(); _files.Clear(); return; }
+        _handles.Clear();
+        _handles.AddRange(failedHandles);
+        _files.Clear();
+        Request = Request with { Resources = null };
+        if (failures.Count == 0) return;
         if (failures.Count == 1) ExceptionDispatchInfo.Capture(failures[0]).Throw();
         throw new AggregateException(failures);
     }

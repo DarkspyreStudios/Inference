@@ -37,7 +37,7 @@ public sealed class HostedBorrowedAuthorizationTests
             (Action)(() => tracker.Calls++), (Action)(() => tracker.Disposals++))!;
         Assert.Same(typeof(IProviderAuthorization), authorization.GetType().GetInterfaces().Single(type => type == typeof(IProviderAuthorization)));
         var harness = new Harness(callbackFailure);
-        var session = new ManagedAgentSession(new() { Transport = LlmTransport.OpenAiResponses, Version = "1", Endpoint = "https://example.test" },
+        var session = await ManagedAgentSession.CreateAsync(new() { Transport = LlmTransport.OpenAiResponses, Version = "1", Endpoint = "https://example.test" },
             new() { ModelId = "model", HostedTools = [new LlmRemoteMcpTool("https://example.test", "server", Authorization: authorization)] },
             [], harness, harness.Stream, _ => new()
             {

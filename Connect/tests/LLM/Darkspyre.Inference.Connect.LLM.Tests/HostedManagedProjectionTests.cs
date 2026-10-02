@@ -67,14 +67,14 @@ public sealed class HostedManagedProjectionTests
         internal List<LlmChatRequest> Estimates { get; } = [];
         internal LlmCitation FirstCitation { get; } = new("https://same.test", StartIndex: 0, EndIndex: 2);
         internal LlmCitation SecondCitation { get; } = new("https://same.test", StartIndex: null, EndIndex: 3);
-        internal ManagedAgentSession Create(LlmAgentSessionOptions options) => new(
+        internal ManagedAgentSession Create(LlmAgentSessionOptions options) => ManagedAgentSession.CreateAsync(
             new() { Transport = LlmTransport.OpenAiResponses, Version = "1", Endpoint = "https://example.test" },
             options, [], this, Stream, model => new()
             {
                 SupportsAgentSessions = true,
                 Agent = ManagedAgentPolicy.Capabilities,
                 HostedTools = model == "unsupported" ? new HashSet<LlmHostedToolKind>() : new HashSet<LlmHostedToolKind> { LlmHostedToolKind.WebSearch }
-            });
+            }).GetAwaiter().GetResult();
         public string? EstimateDiagnostic => null;
         public ContextEstimate? EstimateInputTokens(LlmConnection connection, LlmChatRequest request)
         { Estimates.Add(request); return new(1); }

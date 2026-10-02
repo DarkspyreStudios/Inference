@@ -751,7 +751,7 @@ retired-facade admission retain the existing lifetime behavior.
 Facade capability queries suppress Files flags for clients without an implemented facade route.
 They fence publication after the adapter's capability getter returns.
 Upload and download streams remain borrowed, including on rejection and facade disposal. These
-resource interfaces do not enable native-file prompt references or skill generation attachment.
+resource interfaces alone do not enable native-file prompt references or skill generation attachment.
 
 The private xAI Files transport implements upload, bounded one-page listing, metadata retrieval,
 raw download, deletion and explicit public-URL creation/revocation against an admitted connection
@@ -770,6 +770,15 @@ classification, but exclude provider response bodies and capability URLs from di
 drains admitted operations before retiring its private Files helper. Borrowed clients, authenticators,
 sources and streams are not disposed. Logical Session/Workspace materialization remains a separate
 resource path; native file IDs and public URLs are not portable resource identities.
+
+The builtin xAI Responses route accepts native file prompt references and materializes logical
+document resources through one borrowed `LlmChatRequest.Resources` authority. It freezes one selected
+membership snapshot after continuation projection. Explicit history occurrences retain their order
+and duplicates. Selected references absent from the supplied graph append to the current user prompt.
+The route reads authorized committed bytes through owned handles and uploads them through the same
+private Files transport. Unknown byte counts remain unknown; missing filenames refuse the file
+destination. Native receipts belong to the admitted request and do not replace logical captured history.
+Local accounting does not read or upload selected resources. Grok registration remains inactive.
 
 ### Embedding lifetime
 

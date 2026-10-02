@@ -201,7 +201,7 @@ public sealed class ProviderControlContractTests
             Tools = [new LlmAgentToolDefinition { Name = "echo", InputSchema = JsonElement.Parse("{\"type\":\"object\"}") }],
             ToolHandler = (_, _) => Task.FromResult(LlmToolOutput.FromText("actual tool result"))
         };
-        await using var session = new ManagedAgentSession(connection, options, [new(options.ModelId, "Multi-agent")], probe, probe.Stream,
+        await using var session = await ManagedAgentSession.CreateAsync(connection, options, [new(options.ModelId, "Multi-agent")], probe, probe.Stream,
             _ => new() { SupportsAgentSessions = true, SupportsAgentToolUse = true, Agent = ManagedAgentPolicy.Capabilities });
         await Read(session.RunTurnAsync(new()
         {
@@ -234,7 +234,7 @@ public sealed class ProviderControlContractTests
                 return Task.FromResult(LlmToolOutput.FromText("actual tool result"));
             }
         };
-        await using var session = new ManagedAgentSession(current, options, [new(options.ModelId, "Multi-agent")], probe,
+        await using var session = await ManagedAgentSession.CreateAsync(current, options, [new(options.ModelId, "Multi-agent")], probe,
             (request, token) => probe.Stream(ProviderControlPolicy.Resolve(current, request), token),
             _ => new() { SupportsAgentSessions = true, SupportsAgentToolUse = true, Agent = ManagedAgentPolicy.Capabilities });
         await Read(session.RunTurnAsync(new() { Input = [new LlmAgentTextContent("question")] }));
@@ -262,7 +262,7 @@ public sealed class ProviderControlContractTests
             Tools = [new LlmAgentToolDefinition { Name = "echo", InputSchema = JsonElement.Parse("{\"type\":\"object\"}") }],
             ToolHandler = (_, _) => Task.FromResult(LlmToolOutput.FromText("actual tool result"))
         };
-        await using var session = new ManagedAgentSession(current, options, [new(options.ModelId, "Multi-agent")], probe,
+        await using var session = await ManagedAgentSession.CreateAsync(current, options, [new(options.ModelId, "Multi-agent")], probe,
             (request, token) => probe.Stream(ProviderControlPolicy.Resolve(current, request), token),
             _ => new() { SupportsAgentSessions = true, SupportsAgentToolUse = true, Agent = ManagedAgentPolicy.Capabilities });
         var events = new List<LlmAgentEvent>();

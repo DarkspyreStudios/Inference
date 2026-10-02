@@ -782,7 +782,7 @@ public sealed class ManagedAgentTests
         public IReadOnlyList<JsonElement> Snapshots { get; init; } = [];
         public bool UnknownEstimate { get; init; }
         public bool ExposeBeforeFailure { get; init; }
-        public ManagedAgentSession Create(LlmAgentSessionOptions? options = null) => new(
+        public ManagedAgentSession Create(LlmAgentSessionOptions? options = null) => ManagedAgentSession.CreateAsync(
             new() { Version = "1", Transport = LlmTransport.OpenAiCodex, Endpoint = "https://provider.test/codex" },
             options ?? Options(), [new("test", "Test") { MaxContextTokens = 1000 }, new("other", "Other") { MaxContextTokens = 2000 }], this, Stream,
             _ => new()
@@ -792,7 +792,7 @@ public sealed class ManagedAgentTests
                 SupportsAgentTurnInstructions = true,
                 RichContentSupported = RichContentRoutes.Responses,
                 Agent = ManagedAgentPolicy.Capabilities
-            });
+            }).GetAwaiter().GetResult();
         public string? EstimateDiagnostic => null;
 
         public ContextEstimate? EstimateInputTokens(LlmConnection connection, LlmChatRequest request)

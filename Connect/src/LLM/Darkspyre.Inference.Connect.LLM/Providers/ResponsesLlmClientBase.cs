@@ -19,6 +19,8 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
         ValidateRequest(connection, request, capabilities);
         ValidateModelSampling(connection, request);
         var enforcement = ResolveStructuredOutputEnforcement(connection, request, capabilities);
+        // Selected caller-owned content is unknown to local accounting. Accounting never reads or uploads it.
+        if (request.Resources is not null) return null;
         JsonObject payload = BuildPayload(connection, request, enforcement, capabilities.SupportsStreaming);
         RequestJson.ApplyProviderOptions(payload, connection, request);
 
@@ -115,7 +117,12 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
             {
                 bool moved;
                 try { moved = await iterator.MoveNextAsync().ConfigureAwait(false); Fence(); }
-                catch (Exception error) { failure = error; throw; }
+                catch (Exception error)
+                {
+                    failure = resources is null ? error : LlmResourcePreparation.AsResourceFailure(error, cancellationToken);
+                    ExceptionDispatchInfo.Capture(failure).Throw();
+                    throw;
+                }
                 if (!moved) break;
                 if (resources is not null && iterator.Current is LlmChatCompletionEvent completion) terminal = completion;
                 else yield return iterator.Current;
@@ -127,7 +134,7 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
             try { if (iterator is not null) await iterator.DisposeAsync().ConfigureAwait(false); }
             catch (Exception error) { cleanup.Add(error); }
             try { if (resources is not null) await resources.DisposeAsync().ConfigureAwait(false); }
-            catch (Exception error) { cleanup.Add(error); }
+            catch (Exception error) { cleanup.Add(LlmResourcePreparation.AsResourceFailure(error, cancellationToken)); }
             try { if (ownedFiles is not null) await ownedFiles.DisposeAsync().ConfigureAwait(false); }
             catch (Exception error) { cleanup.Add(error); }
             if (cleanup.Count > 0)

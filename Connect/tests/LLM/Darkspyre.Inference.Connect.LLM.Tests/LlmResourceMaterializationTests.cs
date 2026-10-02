@@ -146,6 +146,7 @@ public sealed class LlmResourceMaterializationTests
     internal sealed class ResourceDestination : HttpMessageHandler
     {
         internal List<(string Name, byte[] Bytes)> Uploads { get; } = [];
+        internal Queue<string> Responses { get; } = new();
         internal string? Prompt { get; private set; }
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken token)
         {
@@ -164,7 +165,7 @@ public sealed class LlmResourceMaterializationTests
             if (path.EndsWith("/responses", StringComparison.Ordinal))
             {
                 Prompt = await request.Content!.ReadAsStringAsync(token);
-                return Json("{\"id\":\"response-one\",\"status\":\"completed\",\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"done\"}]}]}");
+                return Json(Responses.TryDequeue(out string? response) ? response : "{\"id\":\"response-one\",\"status\":\"completed\",\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"done\"}]}]}");
             }
             throw new InvalidOperationException("Unexpected endpoint: " + path);
         }
@@ -185,6 +186,8 @@ internal sealed class ControlledSessionResources : IInferenceResourceAccess, IDi
     internal int OpenedReads { get; private set; }
     internal int DisposedReads { get; private set; }
     internal int DisposeCalls { get; private set; }
+    internal Func<CancellationToken, Task>? BeforeSelection { get; set; }
+    internal Func<CancellationToken, Task>? BeforeRead { get; set; }
 
     internal async Task<InferenceResourceReference> RegisterAsync(string name, string type, string content)
     {
@@ -201,13 +204,16 @@ internal sealed class ControlledSessionResources : IInferenceResourceAccess, IDi
         lock (_gate)
         {
             var value = _content[reference]; OpenedReads++;
-            return Task.FromResult<IInferenceResourceReadHandle>(new ReadHandle(value.Descriptor, value.Bytes, () => DisposedReads++));
+            return Task.FromResult<IInferenceResourceReadHandle>(new ReadHandle(value.Descriptor, value.Bytes, () => DisposedReads++, BeforeRead));
         }
     }
     public Task<IInferenceResourceWriteHandle> OpenWriteAsync(InferenceResourceCreate resource, CancellationToken cancellationToken = default)
     { lock (_gate) return Task.FromResult<IInferenceResourceWriteHandle>(new WriteHandle(this, new(WorkspaceId, "resource-" + ++_next), resource)); }
-    public Task<InferenceResourceSelection> GetSelectionAsync(CancellationToken cancellationToken = default)
-    { lock (_gate) { SelectionReads++; return Task.FromResult(Selection()); } }
+    public async Task<InferenceResourceSelection> GetSelectionAsync(CancellationToken cancellationToken = default)
+    {
+        if (BeforeSelection is { } before) await before(cancellationToken);
+        lock (_gate) { SelectionReads++; return Selection(); }
+    }
     public Task<InferenceResourceSelection> SelectAsync(IReadOnlyList<InferenceResourceReference> references, CancellationToken cancellationToken = default)
     {
         lock (_gate)
@@ -231,11 +237,17 @@ internal sealed class ControlledSessionResources : IInferenceResourceAccess, IDi
     }
     private InferenceResourceSelection Selection() => new(WorkspaceId, SessionId, _revision, _selected);
     public void Dispose() => DisposeCalls++;
-    private sealed class ReadHandle(InferenceResourceDescriptor descriptor, byte[] bytes, Action disposed) : IInferenceResourceReadHandle
+    private sealed class ReadHandle(InferenceResourceDescriptor descriptor, byte[] bytes, Action disposed,
+        Func<CancellationToken, Task>? beforeRead) : IInferenceResourceReadHandle
     {
         public InferenceResourceDescriptor Resource => descriptor;
-        public Stream Content { get; } = new MemoryStream(bytes, writable: false);
+        public Stream Content { get; } = beforeRead is null ? new MemoryStream(bytes, writable: false) : new HeldReadStream(bytes, beforeRead);
         public ValueTask DisposeAsync() { Content.Dispose(); disposed(); return ValueTask.CompletedTask; }
+    }
+    private sealed class HeldReadStream(byte[] bytes, Func<CancellationToken, Task> beforeRead) : MemoryStream(bytes, writable: false)
+    {
+        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        { await beforeRead(cancellationToken); return Read(buffer.Span); }
     }
     private sealed class WriteHandle(ControlledSessionResources owner, InferenceResourceReference reference, InferenceResourceCreate create) : IInferenceResourceWriteHandle
     {

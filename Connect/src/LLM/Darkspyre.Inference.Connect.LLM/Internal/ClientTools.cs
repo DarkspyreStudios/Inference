@@ -13,7 +13,7 @@ internal static class ClientTools
         SupportedCallerServices = FrozenSet<LlmAgentCallerServiceKind>.Empty
     };
 
-    internal static void ValidateCallerServices(LlmAgentCallerServices? services, LlmAgentCapabilities capabilities)
+    internal static void ValidateCallerServices(LlmAgentCallerServices? services, LlmAgentCapabilities capabilities, bool supportsResources = false)
     {
         if (services is null) return;
         if ((services.Permissions is not null && !capabilities.SupportedCallerServices.Contains(LlmAgentCallerServiceKind.Permission))
@@ -22,14 +22,14 @@ internal static class ClientTools
             || (services.Terminals is not null && !capabilities.SupportedCallerServices.Contains(LlmAgentCallerServiceKind.Terminal))
             || (services.ShellExecutor is not null && !capabilities.SupportedCallerServices.Contains(LlmAgentCallerServiceKind.ShellExecution)))
             throw new NotSupportedException("This agent lane does not map the supplied caller service.");
-        if (services.Resources is not null)
+        if (services.Resources is not null && !supportsResources)
             throw new NotSupportedException("This agent lane does not bind caller-owned resource access.");
     }
 
-    internal static void ValidateManagedOpening(LlmAgentSessionOptions options, LlmProviderCapabilities capabilities)
+    internal static void ValidateManagedOpening(LlmAgentSessionOptions options, LlmProviderCapabilities capabilities, bool supportsResources = false)
     {
         LlmAgentCapabilities managed = ManagedCapabilities(capabilities);
-        ValidateCallerServices(options.CallerServices, managed);
+        ValidateCallerServices(options.CallerServices, managed, supportsResources);
         if (options.Tools.Any(tool => tool is LlmAgentShellTool))
         {
             if (!managed.SupportsShellTools)

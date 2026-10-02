@@ -40,8 +40,8 @@ internal sealed class ManagedVertexAgentClient(VertexLlmClient client, LlmProvid
         connection = await client.PrepareAsync(connection, cancellationToken).ConfigureAwait(false);
         var models = await providers.ListModelsAsync(connectionId, cancellationToken).ConfigureAwait(false);
         string scope = ProviderContinuationStateCodec.Scope(connection);
-        return new ManagedAgentSession(connection, options, models, client,
+        return await ManagedAgentSession.CreateAsync(connection, options, models, client,
             (request, token) => providers.StreamAgentAsync(connectionId, request, scope, token),
-            model => client.GetCapabilities(connection, model));
+            model => client.GetCapabilities(connection, model), cancellationToken: cancellationToken).ConfigureAwait(false);
     }
 }

@@ -176,6 +176,7 @@ internal abstract class LlmClientBase(HttpClient http) : ILlmClient
     }
 
     protected virtual bool SupportsResourcePreparation => false;
+    internal bool CanPrepareResources => SupportsResourcePreparation;
 
     protected virtual void ValidateAdditionalRequest(LlmConnection connection, LlmChatRequest request) { }
 
