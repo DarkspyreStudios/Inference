@@ -35,7 +35,7 @@ public sealed class LlmResourceGenerationTests
             var access = (IInferenceResourceAccess)Activator.CreateInstance(type, nonPublic: true)!;
             Assert.Same(typeof(IInferenceResourceAccess).Assembly, type.GetInterface(typeof(IInferenceResourceAccess).FullName!)!.Assembly);
             MethodInfo register = type.GetMethod("RegisterAsync", BindingFlags.Instance | BindingFlags.NonPublic)!;
-            InferenceResourceReference reference = await (Task<InferenceResourceReference>)register.Invoke(access, ["source.txt", "text/plain", "foreign source"] )!;
+            InferenceResourceReference reference = await (Task<InferenceResourceReference>)register.Invoke(access, ["source.txt", "text/plain", "foreign source"])!;
             Assert.Equal("resource-1", reference.Id);
             using var destination = new LlmResourceMaterializationTests.ResourceDestination();
             using var http = new HttpClient(destination);
@@ -61,23 +61,42 @@ public sealed class LlmResourceGenerationTests
         finally { generation.Unload(); }
     }
 
-    [Fact]
-    public async Task ActualForeignCommonConnectMetadataAndMaterializationCallersExecuteAndRetire()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ActualForeignCommonConnectMetadataAndMaterializationCallersExecuteAndRetire(bool executeRoute)
     {
-        WeakReference[] roots = await ExerciseOwnedGraphAsync();
+        WeakReference[] roots = ExerciseOwnedGraph(executeRoute);
         Collect(roots);
     }
 
     public static async Task<int> ExerciseOwnedGraphAsyncCaller()
     {
-        await new ManagedResourceMaterializationTests().ActualToolCommittedArtifactAndOriginalSurviveProviderOwnerSwitch();
-        await new ManagedResourceCleanupTests().ActualHandleCleanupCancellationPreservesSameReaderAndRetirementFailure(false);
-        await new ManagedResourceCleanupTests().ActualHandleCleanupCancellationPreservesSameReaderAndRetirementFailure(true);
-        return 3;
+        foreach (bool facade in new[] { false, true })
+        {
+            var resources = new ControlledSessionResources();
+            await resources.RegisterAsync("original.txt", "text/plain", "foreign original");
+            await resources.RegisterAsync("generated.json", "application/json", "{\"foreign\":true}");
+            using var destination = new LlmResourceMaterializationTests.ResourceDestination();
+            using var http = new HttpClient(destination);
+            var client = new XaiResponsesLlmClient(http);
+            await using var service = new LlmProviderService(new LlmResourceMaterializationTests.Source(LlmResourceMaterializationTests.Connection()), [client]);
+            int completions = 0;
+            await foreach (var item in facade ? service.StreamAsync("selected", LlmResourceMaterializationTests.Request(resources))
+                : client.StreamAsync(LlmResourceMaterializationTests.Connection(), LlmResourceMaterializationTests.Request(resources)))
+                if (item is LlmChatCompletionEvent) completions++;
+            Assert.Equal(1, completions);
+            Assert.Equal(2, destination.Uploads.Count);
+            Assert.Equal("foreign original", System.Text.Encoding.UTF8.GetString(destination.Uploads[0].Bytes));
+            Assert.Equal("{\"foreign\":true}", System.Text.Encoding.UTF8.GetString(destination.Uploads[1].Bytes));
+            Assert.Equal(2, resources.DisposedReads);
+            Assert.Equal(0, resources.DisposeCalls);
+        }
+        return 2;
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private static async Task<WeakReference[]> ExerciseOwnedGraphAsync()
+    private static WeakReference[] ExerciseOwnedGraph(bool executeRoute)
     {
         var generation = new Generation();
         var roots = new List<WeakReference> { new(generation) };
@@ -96,7 +115,7 @@ public sealed class LlmResourceGenerationTests
             foreach ((Assembly owner, Type sourceFacade, string name, string json) in new[]
             {
                 (common, typeof(InferenceJson), nameof(InferenceJson.InferenceResourceOperationFailure), "{\"Phase\":9,\"Reference\":null,\"CommitOutcome\":0,\"BytesTransferred\":null,\"SelectionOutcome\":0,\"SelectionVersion\":null}"),
-                (connect, typeof(ConnectLlmJson), nameof(ConnectLlmJson.LlmAgentContext), "{\"FormatVersion\":3,\"Revision\":0,\"Entries\":[],\"SelectedResources\":[],\"ResourceSelectionVersion\":null}")
+                (connect, typeof(ConnectLlmJson), nameof(ConnectLlmJson.AgentContext), "{\"FormatVersion\":3,\"Revision\":0,\"Entries\":[],\"SelectedResources\":[],\"ResourceSelectionVersion\":null}")
             })
             {
                 Type facade = owner.GetType(sourceFacade.FullName!, true)!;
@@ -114,7 +133,7 @@ public sealed class LlmResourceGenerationTests
             Type proof = fixture.GetType(typeof(LlmResourceGenerationTests).FullName!, true)!;
             MethodInfo caller = proof.GetMethod(nameof(ExerciseOwnedGraphAsyncCaller))!;
             Assert.Same(fixture, caller.Module.Assembly);
-            Assert.Equal(3, await (Task<int>)caller.Invoke(null, null)!);
+            if (executeRoute) Assert.Equal(2, ((Task<int>)caller.Invoke(null, null)!).GetAwaiter().GetResult());
             roots.AddRange([new(proof), new(caller)]);
         }
         finally { generation.Unload(); }
@@ -125,7 +144,7 @@ public sealed class LlmResourceGenerationTests
     {
         for (int attempt = 0; roots.Any(root => root.IsAlive) && attempt < 30; attempt++)
         { GC.Collect(); GC.WaitForPendingFinalizers(); GC.Collect(); Thread.Sleep(10); }
-        foreach (WeakReference root in roots) Assert.False(root.IsAlive);
+        for (int index = 0; index < roots.Length; index++) Assert.False(roots[index].IsAlive, $"Root {index} remains alive.");
     }
 
     private sealed class Generation() : AssemblyLoadContext(isCollectible: true)

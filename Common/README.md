@@ -186,6 +186,10 @@ outcomes preserve unknown effects independently. Reconcile the known reference a
 after the attempt is terminal, without automatic retry or inferred historical outcomes. Runtime
 operation exceptions preserve the original inner exception; cancellation remains an
 `OperationCanceledException`. Exceptions, authority and handles are not portable data.
+`InferenceResourceOperationPhase.Cleanup` has numeric value 9; existing values 0 through 8 are
+unchanged. It reports actual owned-handle disposal refusal, retaining the original cleanup error and
+already observed reference without invoking handle metadata during cleanup. Healthy operation
+cancellation does not itself report a cleanup failure.
 
 `InferenceJson` exports typed metadata named after each resource data contract, including the scoped
 selection version, commit result and failure facts. Required scope, revision and membership fields

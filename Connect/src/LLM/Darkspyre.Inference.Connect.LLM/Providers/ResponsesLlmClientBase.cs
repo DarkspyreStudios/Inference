@@ -89,6 +89,7 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
         ValidateRequest(connection, request, capabilities);
         ValidateModelSampling(connection, request);
         LlmStructuredOutputEnforcement? enforcement = ResolveStructuredOutputEnforcement(connection, request, capabilities);
+        bool resourceAdmitted = request.Resources is not null;
 
         XaiFileClient? ownedFiles = null;
         LlmResourcePreparation? resources = null;
@@ -109,10 +110,15 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
                 }
                 JsonObject payload = BuildPayload(connection, request, enforcement, capabilities.SupportsStreaming, resources);
                 RequestJson.ApplyProviderOptions(payload, connection, request);
-                iterator = StreamResponseAsync(connection, request, payload, capabilities, enforcement, consumption, cancellationToken)
+                iterator = StreamResponseAsync(connection, request, payload, capabilities, enforcement, consumption, resources is not null, cancellationToken)
                     .GetAsyncEnumerator(cancellationToken);
             }
-            catch (Exception error) { failure = error; throw; }
+            catch (Exception error)
+            {
+                failure = resources is null ? error : LlmResourcePreparation.AsResourceFailure(error, cancellationToken);
+                ExceptionDispatchInfo.Capture(failure).Throw();
+                throw;
+            }
             while (true)
             {
                 bool moved;
@@ -132,11 +138,11 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
         {
             var cleanup = new List<Exception>();
             try { if (iterator is not null) await iterator.DisposeAsync().ConfigureAwait(false); }
-            catch (Exception error) { cleanup.Add(error); }
+            catch (Exception error) { cleanup.Add(resources is null ? error : LlmResourcePreparation.AsCleanupFailure(error)); }
             try { if (resources is not null) await resources.DisposeAsync().ConfigureAwait(false); }
             catch (Exception error) { cleanup.Add(LlmResourcePreparation.AsResourceFailure(error, cancellationToken)); }
             try { if (ownedFiles is not null) await ownedFiles.DisposeAsync().ConfigureAwait(false); }
-            catch (Exception error) { cleanup.Add(error); }
+            catch (Exception error) { cleanup.Add(resourceAdmitted ? LlmResourcePreparation.AsCleanupFailure(error) : error); }
             if (cleanup.Count > 0)
             {
                 if (failure is not null) cleanup.Insert(0, failure);
@@ -144,38 +150,82 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
                 ExceptionDispatchInfo.Capture(new AggregateException(cleanup)).Throw();
             }
         }
-        Fence();
+        try { Fence(); }
+        catch (Exception error) when (resourceAdmitted)
+        { ExceptionDispatchInfo.Capture(LlmResourcePreparation.AsResourceFailure(error, cancellationToken)).Throw(); throw; }
         if (terminal is not null) yield return terminal;
     }
 
     private async IAsyncEnumerable<LlmStreamEvent> StreamResponseAsync(LlmConnection connection, LlmChatRequest request,
         JsonObject payload, LlmProviderCapabilities capabilities, LlmStructuredOutputEnforcement? enforcement,
-        SdkHttpConsumption.Operation consumption, [EnumeratorCancellation] CancellationToken cancellationToken)
+        SdkHttpConsumption.Operation consumption, bool resourceAdmitted, [EnumeratorCancellation] CancellationToken cancellationToken)
     {
-        using var httpRequest = new HttpRequestMessage(
-            HttpMethod.Post,
-            BuildRequestUri(connection, request))
+        HttpRequestMessage? httpRequest = null;
+        HttpResponseMessage? response = null;
+        Stream? stream = null;
+        IAsyncEnumerator<LlmStreamEvent>? body = null;
+        Exception? failure = null;
+        try
         {
-            Content = JsonContent.Create(payload)
-        };
-        ApplyRequestHeaders(httpRequest, connection, request);
-
-        LlmCredential? credential = LlmCredential.Parse(connection.Credential);
-        using HttpResponseMessage response = await Http.SendAsync(
-            httpRequest,
-            HttpCompletionOption.ResponseHeadersRead,
-            cancellationToken);
-        if (ObserveAccountUsage(response) is { } observed) { yield return consumption.Publish<LlmStreamEvent>(new AccountUsageObservedEvent(observed)); }
-        if (Transport == LlmTransport.XaiResponses)
-        {
-            await XaiErrorClassifier.ThrowIfUnsuccessfulAsync(response, credential, [], cancellationToken);
+            LlmCredential? credential;
+            LlmStreamEvent? observation;
+            try
+            {
+                httpRequest = new(HttpMethod.Post, BuildRequestUri(connection, request)) { Content = JsonContent.Create(payload) };
+                ApplyRequestHeaders(httpRequest, connection, request);
+                credential = LlmCredential.Parse(connection.Credential);
+                response = await Http.SendAsync(httpRequest, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
+                observation = ObserveAccountUsage(response) is { } observed
+                    ? consumption.Publish<LlmStreamEvent>(new AccountUsageObservedEvent(observed)) : null;
+            }
+            catch (Exception error) { failure = error; throw; }
+            if (observation is not null) yield return observation;
+            try
+            {
+                if (Transport == LlmTransport.XaiResponses)
+                    await XaiErrorClassifier.ThrowIfUnsuccessfulAsync(response, credential, [], cancellationToken).ConfigureAwait(false);
+                else
+                    await ProviderHttp.ThrowIfUnsuccessfulAsync(response, Transport, credential, "OpenAI Responses request", cancellationToken).ConfigureAwait(false);
+                if (capabilities.SupportsStreaming)
+                    stream = await SdkHttpConsumption.ReadAsStreamAsync(response.Content, cancellationToken).ConfigureAwait(false);
+                body = ReadResponseBodyAsync(connection, request, response, stream, capabilities, enforcement, credential, consumption, cancellationToken)
+                    .GetAsyncEnumerator(cancellationToken);
+            }
+            catch (Exception error) { failure = error; throw; }
+            while (true)
+            {
+                bool moved;
+                try { moved = await body.MoveNextAsync().ConfigureAwait(false); }
+                catch (Exception error) { failure = error; throw; }
+                if (!moved) break;
+                yield return body.Current;
+            }
         }
-        else
+        finally
         {
-            await ProviderHttp.ThrowIfUnsuccessfulAsync(
-                response, Transport, credential, "OpenAI Responses request", cancellationToken);
+            var cleanup = new List<Exception>();
+            void Record(Exception error) => cleanup.Add(resourceAdmitted ? LlmResourcePreparation.AsCleanupFailure(error) : error);
+            try { if (body is not null) await body.DisposeAsync().ConfigureAwait(false); }
+            catch (Exception error) { Record(error); }
+            try { if (stream is not null) await stream.DisposeAsync().ConfigureAwait(false); }
+            catch (Exception error) { Record(error); }
+            try { response?.Dispose(); }
+            catch (Exception error) { Record(error); }
+            try { httpRequest?.Dispose(); }
+            catch (Exception error) { Record(error); }
+            if (cleanup.Count > 0)
+            {
+                if (failure is not null) cleanup.Insert(0, failure);
+                if (cleanup.Count == 1) ExceptionDispatchInfo.Capture(cleanup[0]).Throw();
+                ExceptionDispatchInfo.Capture(new AggregateException(cleanup)).Throw();
+            }
         }
+    }
 
+    private async IAsyncEnumerable<LlmStreamEvent> ReadResponseBodyAsync(LlmConnection connection, LlmChatRequest request,
+        HttpResponseMessage response, Stream? stream, LlmProviderCapabilities capabilities, LlmStructuredOutputEnforcement? enforcement,
+        LlmCredential? credential, SdkHttpConsumption.Operation consumption, [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
         if (!capabilities.SupportsStreaming)
         {
             string body = await SdkHttpConsumption.ReadAsStringAsync(response.Content, cancellationToken);
@@ -188,14 +238,13 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
             yield break;
         }
 
-        await using Stream stream = await SdkHttpConsumption.ReadAsStreamAsync(response.Content, cancellationToken);
         var text = new StringBuilder();
         var refusal = new StringBuilder();
         var toolCallStream = new OpenAiToolCallStream();
         var completedOutput = new SortedDictionary<int, JsonElement>();
         bool completed = false;
 
-        await foreach (string data in Sse.ReadDataPayloadsAsync(stream, cancellationToken))
+        await foreach (string data in Sse.ReadDataPayloadsAsync(stream!, cancellationToken))
         {
             if (data == "[DONE]")
             {

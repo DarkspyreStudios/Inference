@@ -201,6 +201,7 @@ internal sealed class ControlledSessionResources : IInferenceResourceAccess, IDi
     internal Func<CancellationToken, Task>? BeforeSelection { get; set; }
     internal Func<CancellationToken, Task>? BeforeRead { get; set; }
     internal Exception? ReadCleanupFailure { get; set; }
+    internal Action? BeforeReadCleanup { get; set; }
     internal int ReadCleanupAttempts { get; private set; }
 
     internal async Task<InferenceResourceReference> RegisterAsync(string name, string type, string content)
@@ -219,7 +220,7 @@ internal sealed class ControlledSessionResources : IInferenceResourceAccess, IDi
         {
             var value = _content[reference]; OpenedReads++;
             return Task.FromResult<IInferenceResourceReadHandle>(new ReadHandle(value.Descriptor, value.Bytes, () => DisposedReads++, BeforeRead,
-                () => { ReadCleanupAttempts++; if (ReadCleanupFailure is { } failure) throw failure; }));
+                () => { ReadCleanupAttempts++; BeforeReadCleanup?.Invoke(); if (ReadCleanupFailure is { } failure) throw failure; }));
         }
     }
     public Task<IInferenceResourceWriteHandle> OpenWriteAsync(InferenceResourceCreate resource, CancellationToken cancellationToken = default)

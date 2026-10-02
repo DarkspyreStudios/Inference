@@ -10,7 +10,7 @@ namespace Darkspyre.Inference.Connect.LLM.Internal;
 /// <summary>One admitted resource graph. Caller authority is borrowed; opened handles are owned.</summary>
 internal sealed class LlmResourcePreparation : IAsyncDisposable
 {
-    private readonly List<IInferenceResourceReadHandle> _handles = [];
+    private readonly List<(IInferenceResourceReadHandle Handle, InferenceResourceReference Reference)> _handles = [];
     private readonly Dictionary<InferenceResourceReference, LlmProviderFile> _files = [];
     private readonly object _gate = new();
     private Task? _retirement;
@@ -100,6 +100,25 @@ internal sealed class LlmResourcePreparation : IAsyncDisposable
     internal static bool IsResourceFailure(Exception error) => error is InferenceResourceOperationException or InferenceResourceOperationCanceledException
         || error is AggregateException aggregate && aggregate.InnerExceptions.Any(IsResourceFailure);
 
+    internal static bool IsCleanupFailure(Exception error) => error switch
+    {
+        InferenceResourceOperationException resource => resource.Failure.Phase == InferenceResourceOperationPhase.Cleanup,
+        InferenceResourceOperationCanceledException resource => resource.Failure.Phase == InferenceResourceOperationPhase.Cleanup,
+        AggregateException aggregate => aggregate.InnerExceptions.Any(IsCleanupFailure),
+        _ => false
+    };
+
+    internal static Exception AsCleanupFailure(Exception cleanup, InferenceResourceReference? reference = null)
+    {
+        if (IsCleanupFailure(cleanup)) return cleanup;
+        var facts = new InferenceResourceOperationFailure(InferenceResourceOperationPhase.Cleanup, reference,
+            InferenceResourceCommitOutcome.NotAttempted);
+        return cleanup is OperationCanceledException canceled
+            ? new InferenceResourceOperationCanceledException(facts, canceled.CancellationToken, cleanup)
+            : new InferenceResourceOperationException(InferenceFailureCode.ExecutionFailed,
+                "The owned resource could not be released.", facts, cleanup);
+    }
+
     internal static Exception AsResourceFailure(Exception error, CancellationToken token)
     {
         if (IsResourceFailure(error)) return error;
@@ -138,7 +157,7 @@ internal sealed class LlmResourcePreparation : IAsyncDisposable
                 IInferenceResourceReadHandle handle = await access.OpenReadAsync(reference, token).ConfigureAwait(false);
                 // Admission owns the returned handle before a cancellation fence can refuse publication.
                 ArgumentNullException.ThrowIfNull(handle);
-                operation._handles.Add(handle);
+                operation._handles.Add((handle, reference));
                 Check(fence, token);
                 InferenceResourceDescriptor observed = handle.Resource;
                 Check(fence, token);
@@ -269,11 +288,15 @@ internal sealed class LlmResourcePreparation : IAsyncDisposable
     private async Task RetireAsync()
     {
         var failures = new List<Exception>();
-        var failedHandles = new List<IInferenceResourceReadHandle>();
-        foreach (IInferenceResourceReadHandle handle in _handles)
+        var failedHandles = new List<(IInferenceResourceReadHandle Handle, InferenceResourceReference Reference)>();
+        foreach (var owned in _handles)
         {
-            try { await handle.DisposeAsync().ConfigureAwait(false); }
-            catch (Exception cleanup) { failedHandles.Add(handle); failures.Add(cleanup); }
+            try { await owned.Handle.DisposeAsync().ConfigureAwait(false); }
+            catch (Exception cleanup)
+            {
+                failedHandles.Add(owned);
+                failures.Add(AsCleanupFailure(cleanup, owned.Reference));
+            }
         }
         _handles.Clear();
         _handles.AddRange(failedHandles);

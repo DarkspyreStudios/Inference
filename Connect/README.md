@@ -779,6 +779,20 @@ The route reads authorized committed bytes through owned handles and uploads the
 private Files transport. Unknown byte counts remain unknown; missing filenames refuse the file
 destination. Native receipts belong to the admitted request and do not replace logical captured history.
 Local accounting does not read or upload selected resources. Grok registration remains inactive.
+Managed sessions created through the shared internal factory validate resource-bound imported
+contexts against the caller's exact scoped selection snapshot. Only a new session without an imported
+context adopts the current selection; an unbound manual or upgraded legacy context must be explicitly
+bound first. Capture freezes transcript state, then reads selection outside the session lock and
+rechecks transcript revision before publication. Replacement and continuation similarly recheck idle
+state and revision after caller callbacks, without mutating the store. Committed caller-tool resource
+outputs are authorized before settlement; they remain logical history, not provider file IDs.
+Resource-backed requests do not automatically retry a failed model request after upload.
+Typed resource cancellation reaches a live reader even when session retirement cancels the producer.
+Healthy cleanup leaves session disposal successful. Actual owned handle or HTTP cleanup refusal uses
+`InferenceResourceOperationPhase.Cleanup` and remains the same cached reader/disposer failure;
+independent operation and cleanup causes remain visible. Borrowed authority detaches after callback
+drain, while refused owned resources and their actual failures are retained. This controlled managed
+xAI composition does not activate a public Grok agent opener or qualify other destinations.
 
 ### Embedding lifetime
 

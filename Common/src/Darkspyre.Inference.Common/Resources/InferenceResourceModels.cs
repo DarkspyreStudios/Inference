@@ -110,7 +110,8 @@ public enum InferenceResourceOperationPhase
     Materialize = 5,
     ReadSelection = 6,
     Select = 7,
-    ReplaceSelection = 8
+    ReplaceSelection = 8,
+    Cleanup = 9
 }
 
 public enum InferenceResourceCommitOutcome

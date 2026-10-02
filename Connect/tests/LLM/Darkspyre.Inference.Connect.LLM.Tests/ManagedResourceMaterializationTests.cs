@@ -23,7 +23,8 @@ public sealed class ManagedResourceMaterializationTests
         var events = new List<LlmAgentEvent>();
         session = await ManagedAgentSession.CreateAsync(LlmResourceMaterializationTests.Connection(), new()
         {
-            ModelId = "grok-4", CallerServices = new() { Resources = resources },
+            ModelId = "grok-4",
+            CallerServices = new() { Resources = resources },
             Tools = [new LlmAgentToolDefinition { Name = "generate", InputSchema = JsonElement.Parse("{\"type\":\"object\",\"properties\":{}}") }],
             ToolHandler = async (_, _) =>
             {
@@ -108,15 +109,18 @@ public sealed class ManagedResourceMaterializationTests
         }
     }
 
-    [Fact]
-    public async Task ExplicitUnboundImportedContextNeverAcquiresCurrentSessionProvenance()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ExplicitUnboundImportedContextNeverAcquiresCurrentSessionProvenance(bool legacy)
     {
         var resources = new ControlledSessionResources();
         await resources.RegisterAsync("existing.txt", "text/plain", "existing-session-content");
         using var http = new HttpClient(new LlmResourceMaterializationTests.ResourceDestination());
         var client = new XaiResponsesLlmClient(http);
+        LlmAgentContext supplied = legacy ? JsonSerializer.Deserialize("{\"FormatVersion\":2,\"Revision\":0,\"Entries\":[]}", ConnectLlmJson.AgentContext)! : new();
         await Assert.ThrowsAsync<ArgumentException>(() => ManagedAgentSession.CreateAsync(LlmResourceMaterializationTests.Connection(),
-            new() { ModelId = "grok-4", Context = new(), CallerServices = new() { Resources = resources } }, [], client,
+            new() { ModelId = "grok-4", Context = supplied, CallerServices = new() { Resources = resources } }, [], client,
             (request, token) => client.StreamAsync(LlmResourceMaterializationTests.Connection(), request, token), model => ManagedCapabilities(client, model)));
     }
 

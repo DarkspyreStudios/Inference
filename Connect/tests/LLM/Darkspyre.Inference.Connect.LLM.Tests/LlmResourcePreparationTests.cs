@@ -7,6 +7,35 @@ namespace Darkspyre.Inference.Connect.LLM.Tests;
 public sealed class LlmResourcePreparationTests
 {
     [Fact]
+    public async Task RetainedPreparationDropsBorrowedAuthorityAndPreservesFailedHandleWithoutMetadataRetry()
+    {
+        var store = new ControlledSessionResources();
+        InferenceResourceReference reference = await store.RegisterAsync("file.txt", "text/plain", "abc");
+        bool retiring = false;
+        var access = new ObservedAccess(store) { OnHandleMetadata = () => { if (retiring) throw new InvalidOperationException("Unexpected cleanup metadata callback."); } };
+        using var handler = new LlmResourceMaterializationTests.ResourceDestination();
+        using var http = new HttpClient(handler);
+        await using var files = new XaiFileClient(http);
+        LlmChatRequest original = LlmResourceMaterializationTests.Request(access);
+        LlmResourcePreparation retained = await LlmResourcePreparation.PrepareAsync(
+            LlmResourceMaterializationTests.Connection(), original, files, static () => { }, CancellationToken.None);
+        var cleanup = new InvalidOperationException("controlled handle cleanup refusal");
+        store.ReadCleanupFailure = cleanup;
+        retiring = true;
+        var failure = await Assert.ThrowsAsync<InferenceResourceOperationException>(() => retained.DisposeAsync().AsTask());
+        Assert.Equal(InferenceResourceOperationPhase.Cleanup, failure.Failure.Phase);
+        Assert.Equal(reference, failure.Failure.Reference);
+        Assert.Same(cleanup, failure.InnerException);
+        Assert.Same(failure, await Assert.ThrowsAsync<InferenceResourceOperationException>(() => retained.DisposeAsync().AsTask()));
+        Assert.Null(retained.Request.Resources);
+        Assert.Same(access, original.Resources);
+        Assert.Equal(1, store.ReadCleanupAttempts);
+        Assert.Equal(0, store.DisposedReads);
+        Assert.Equal(0, store.DisposeCalls);
+        GC.KeepAlive(retained);
+    }
+
+    [Fact]
     public async Task HandleMetadataCallbackCannotCrossRetirementIntoContentGetter()
     {
         var store = new ControlledSessionResources();

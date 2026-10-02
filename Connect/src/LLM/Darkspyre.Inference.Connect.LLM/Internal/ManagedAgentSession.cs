@@ -64,7 +64,7 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
             {
                 InferenceResourceSelection selection = await LlmResourcePreparation.ReadSelectionAsync(access, Fence, operation.Token).ConfigureAwait(false);
                 LlmAgentContext context = session._context;
-                if (context.ResourceSelectionVersion is null && context.SelectedResources.Count == 0)
+                if (options.Context is null)
                     context = WithSelection(context, selection);
                 await LlmResourcePreparation.ValidateContextAsync(context, selection, access, Fence, operation.Token).ConfigureAwait(false);
                 Fence();
@@ -478,7 +478,17 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
             SingleWriter = false,
             FullMode = BoundedChannelFullMode.Wait
         });
-        _producer = Task.Run(() => ProduceAsync(run, continuedPause, channel.Writer, cancellation.Token), CancellationToken.None);
+        var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _producer = completion.Task;
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await ProduceAsync(run, continuedPause, channel.Writer, cancellation.Token).ConfigureAwait(false);
+                completion.TrySetResult();
+            }
+            catch (Exception error) { completion.TrySetException(error); }
+        }, CancellationToken.None);
         return new(channel.Reader, cancellation, _producer);
     }
 
@@ -658,7 +668,7 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
             }
             await CompleteAsync(run, writer, LlmAgentCompletionReason.IterationLimit, token);
         }
-        catch (OperationCanceledException) when (token.IsCancellationRequested)
+        catch (OperationCanceledException error) when (token.IsCancellationRequested && !LlmResourcePreparation.IsResourceFailure(error))
         {
             // Best effort only: a cancelled/abandoned reader must never block tool settlement.
             writer.TryWrite(new LlmAgentTurnCompletedEvent(ThreadId, run.Id, LlmAgentCompletionReason.Interruption, null));
@@ -673,6 +683,7 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
             }
             catch (OperationCanceledException) when (token.IsCancellationRequested) { }
             if (LlmResourcePreparation.IsResourceFailure(error)) writer.TryComplete(error);
+            if (LlmResourcePreparation.IsCleanupFailure(error)) throw;
         }
         finally
         {
@@ -731,26 +742,30 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
                     arguments.RootElement.Clone(), null, "started"), token);
                 token.ThrowIfCancellationRequested();
                 started = true;
-                var output = await _toolHandler!(new(ThreadId, run.Id, call.Id, null, call.Name,
+                var returned = await _toolHandler!(new(ThreadId, run.Id, call.Id, null, call.Name,
                     arguments.RootElement.Clone()), token);
+                var output = ManagedAgentContext.CopyOutput(returned);
                 if (output.Parts.OfType<LlmToolOutputSessionResource>().Any())
                 {
-                    using var callback = _resourceCallbacks.Enter(token);
-                    IInferenceResourceAccess access;
-                    lock (_sync)
+                    try
                     {
+                        using var callback = _resourceCallbacks.Enter(token);
+                        IInferenceResourceAccess access;
+                        lock (_sync)
+                        {
+                            FenceResourceCallback(callback.Token);
+                            access = _callerServices?.Resources ?? throw new NotSupportedException("Tool resources require caller-owned access.");
+                        }
+                        if (_resourceScope is { } scope)
+                            LlmResourcePreparation.ValidateScope(access, scope, () => FenceResourceCallback(callback.Token), callback.Token);
+                        await LlmResourcePreparation.AuthorizeToolOutputAsync(output, access,
+                            () => FenceResourceCallback(callback.Token), callback.Token).ConfigureAwait(false);
                         FenceResourceCallback(callback.Token);
-                        access = _callerServices?.Resources ?? throw LlmResourcePreparation.AsResourceFailure(
-                            new NotSupportedException("Tool resources require caller-owned access."), callback.Token);
                     }
-                    if (_resourceScope is { } scope)
-                        LlmResourcePreparation.ValidateScope(access, scope, () => FenceResourceCallback(callback.Token), callback.Token);
-                    await LlmResourcePreparation.AuthorizeToolOutputAsync(output, access,
-                        () => FenceResourceCallback(callback.Token), callback.Token).ConfigureAwait(false);
-                    FenceResourceCallback(callback.Token);
+                    catch (Exception error) { ExceptionDispatchInfo.Capture(LlmResourcePreparation.AsResourceFailure(error, token)).Throw(); throw; }
                 }
                 // The output is kept whole; the route's projection decides what reaches the model when it is sent.
-                var mapped = new LlmToolResult(call.Id, ManagedAgentContext.CopyOutput(output));
+                var mapped = new LlmToolResult(call.Id, output);
                 // A completed external effect is retained even if cancellation prevents its event.
                 if (!token.IsCancellationRequested)
                 {

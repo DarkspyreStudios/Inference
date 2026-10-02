@@ -6,6 +6,34 @@ namespace Darkspyre.Inference.Connect.LLM.Tests;
 
 public sealed class ManagedResourceCleanupTests
 {
+    [Fact]
+    public async Task HealthyHandleCleanupStartingRetirementCannotEraseFinalResourceCancellationFacts()
+    {
+        var resources = new ControlledSessionResources();
+        await resources.RegisterAsync("source.txt", "text/plain", "source");
+        using var destination = new LlmResourceMaterializationTests.ResourceDestination();
+        using var http = new HttpClient(destination);
+        var client = new XaiResponsesLlmClient(http);
+        var session = await ManagedAgentSession.CreateAsync(LlmResourceMaterializationTests.Connection(),
+            new() { ModelId = "grok-4", CallerServices = new() { Resources = resources } }, [], client,
+            (request, token) => client.StreamAsync(LlmResourceMaterializationTests.Connection(), request, token),
+            model => ManagedResourceMaterializationTests.ManagedCapabilities(client, model));
+        Task? retirement = null;
+        resources.BeforeReadCleanup = () => retirement = session.DisposeAsync().AsTask();
+        try
+        {
+            var failure = await Assert.ThrowsAsync<InferenceResourceOperationCanceledException>(() => ManagedResourceMaterializationTests.Read(
+                session.RunTurnAsync(new() { Input = [new LlmAgentTextContent("inspect")] })));
+            Assert.Equal(InferenceResourceOperationPhase.Materialize, failure.Failure.Phase);
+            Assert.NotNull(retirement);
+            await retirement;
+            Assert.Equal(1, resources.DisposedReads);
+            Assert.Equal(1, destination.ResponseCleanupAttempts);
+            Assert.Single(destination.Uploads);
+        }
+        finally { retirement ??= session.DisposeAsync().AsTask(); await Drain(retirement); }
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
