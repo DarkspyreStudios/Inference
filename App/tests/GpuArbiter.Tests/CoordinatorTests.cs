@@ -136,7 +136,7 @@ public sealed class CoordinatorTests
         {
             var failure = await Assert.ThrowsAsync<GpuException>(() => waiter);
             Assert.Equal(503, failure.StatusCode);
-            Assert.Equal("Model load timed out; router exit code: unavailable", failure.Message);
+            Assert.Equal("Model load timed out; backend exit code: unavailable", failure.Message);
         }
         Assert.Equal("none", rig.Gpu.Snapshot().Holder);
         Assert.Empty(rig.Gpu.Snapshot().Waiters);
@@ -194,14 +194,14 @@ public sealed class CoordinatorTests
     {
         using var rig = new Rig();
         using var lease = await rig.Admit("qwen");
-        rig.Gpu.RouterExited(11);
-        Assert.True(lease.RouterStopped.IsCancellationRequested);
+        rig.Gpu.ModelHostExited(11);
+        Assert.True(lease.HostStopped.IsCancellationRequested);
         Assert.Equal("none", rig.Gpu.Snapshot().Holder);
         var pending = rig.Gpu.AcquireAsync(GpuTarget.Llm("other"), CancellationToken.None);
         await rig.Gpu.StepAsync(CancellationToken.None);
         Assert.False(pending.IsCompleted);
         rig.Llama.Models["qwen"] = new("qwen", "unloaded", false, null);
-        rig.Gpu.RouterReady();
+        rig.Gpu.ModelHostReady();
         await rig.Gpu.StepAsync(CancellationToken.None);
         using var next = await pending;
         lease.Dispose();

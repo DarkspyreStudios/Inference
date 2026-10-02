@@ -2,7 +2,7 @@ using GpuArbiter.Backends;
 
 namespace GpuArbiter.Gpu;
 
-public sealed class ComfyWatcher(IComfyClient client, GpuCoordinator coordinator, ArbiterOptions options,
+public sealed class ComfyWatcher(IComfyClient client, GpuCoordinator coordinator, CoordinatorOptions options,
     TimeProvider clock, ILogger<ComfyWatcher> logger) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)

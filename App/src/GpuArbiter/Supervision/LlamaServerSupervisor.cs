@@ -45,7 +45,7 @@ public sealed class LlamaServerSupervisor(ArbiterOptions options, GpuCoordinator
                     try
                     {
                         using var response = await client.GetAsync(options.Llama.Url + "/health", stoppingToken).ConfigureAwait(false);
-                        if (response.IsSuccessStatusCode) { coordinator.RouterReady(); break; }
+                        if (response.IsSuccessStatusCode) { coordinator.ModelHostReady(); break; }
                     }
                     catch (HttpRequestException) { }
                     catch (OperationCanceledException) when (!stoppingToken.IsCancellationRequested) { }
@@ -62,7 +62,7 @@ public sealed class LlamaServerSupervisor(ArbiterOptions options, GpuCoordinator
             {
                 if (started && !process.HasExited) process.Kill(entireProcessTree: true);
                 if (started) await process.WaitForExitAsync(CancellationToken.None).ConfigureAwait(false);
-                coordinator.RouterExited(started ? process.ExitCode : null);
+                coordinator.ModelHostExited(started ? process.ExitCode : null);
                 try { await Task.WhenAll(stdout, stderr).ConfigureAwait(false); }
                 catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { }
             }

@@ -3,8 +3,8 @@ using GpuArbiter.Backends;
 namespace GpuArbiter.Gpu;
 
 // The lock owns admission and counters. Only the hosted loop calls backend mutation APIs.
-public sealed class GpuCoordinator(ILlamaRouterClient llama, IComfyClient comfy, IVramProbe vram,
-    ArbiterOptions options, TimeProvider clock, ILogger<GpuCoordinator> logger) : BackgroundService
+public sealed class GpuCoordinator(IModelHost models, IComfyClient comfy, IVramProbe vram,
+    CoordinatorOptions options, TimeProvider clock, ILogger<GpuCoordinator> logger) : BackgroundService
 {
     private readonly object _gate = new();
     private readonly List<Waiter> _waiters = [];
@@ -18,7 +18,7 @@ public sealed class GpuCoordinator(ILlamaRouterClient llama, IComfyClient comfy,
     private bool _holderUsable;
     private bool _switching;
     private long _generation;
-    private CancellationTokenSource _routerStopped = new();
+    private CancellationTokenSource _hostStopped = new();
 
     public GpuView Snapshot()
     {
@@ -39,7 +39,7 @@ public sealed class GpuCoordinator(ILlamaRouterClient llama, IComfyClient comfy,
     {
         lock (_gate)
         {
-            if (!_ready) return "starting llama-server";
+            if (!_ready) return "starting model host";
             if (_switching) return _phase;
             if (ComfyBusy) return $"ComfyUI running {_comfy.Running} job, {_comfy.Pending} pending";
             return $"{_llmInFlight} LLM requests in flight";
@@ -87,26 +87,26 @@ public sealed class GpuCoordinator(ILlamaRouterClient llama, IComfyClient comfy,
         }
     }
 
-    public void RouterReady()
+    public void ModelHostReady()
     {
         lock (_gate) _ready = true;
     }
 
-    public void RouterExited(int? exitCode)
+    public void ModelHostExited(int? exitCode)
     {
         CancellationTokenSource previous;
         lock (_gate)
         {
             _ready = false;
             _generation++;
-            previous = _routerStopped;
-            _routerStopped = new();
+            previous = _hostStopped;
+            _hostStopped = new();
             if (_holder?.Model is not null) { _holder = null; _holderUsable = false; }
             _llmInFlight = 0;
         }
         previous.Cancel();
         previous.Dispose();
-        logger.LogWarning("Router exited with code {ExitCode}", exitCode);
+        logger.LogWarning("Model host exited with code {ExitCode}", exitCode);
     }
 
     public void ObserveComfy(ComfyState state)
@@ -140,7 +140,7 @@ public sealed class GpuCoordinator(ILlamaRouterClient llama, IComfyClient comfy,
                 if (target.Model is null) _promptInFlight--;
                 else if (generation == _generation) _llmInFlight--;
             }
-        }, target.Model is null ? CancellationToken.None : _routerStopped.Token);
+        }, target.Model is null ? CancellationToken.None : _hostStopped.Token);
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -203,7 +203,7 @@ public sealed class GpuCoordinator(ILlamaRouterClient llama, IComfyClient comfy,
             if (!same)
             {
                 SetPhase("switching: evicting models");
-                foreach (var model in _ready ? await llama.ModelsAsync(cancellationToken).ConfigureAwait(false) : [])
+                foreach (var model in _ready ? await models.ModelsAsync(cancellationToken).ConfigureAwait(false) : [])
                     if (model.Id != head.Target.Model && model.Status != "unloaded")
                         await UnloadModelAsync(model.Id, cancellationToken).ConfigureAwait(false);
                 if (head.Target.Model is not null)
@@ -219,8 +219,8 @@ public sealed class GpuCoordinator(ILlamaRouterClient llama, IComfyClient comfy,
                 }
                 // A target already loaded still needs all other users evicted, but its own VRAM
                 // cannot meet an unloaded threshold. Owned models normally reach here unloaded.
-                var models = _ready ? await llama.ModelsAsync(cancellationToken).ConfigureAwait(false) : [];
-                var targetLoaded = head.Target.Model is not null && models.Any(m => m.Id == head.Target.Model && m.Status == "loaded");
+                var states = _ready ? await models.ModelsAsync(cancellationToken).ConfigureAwait(false) : [];
+                var targetLoaded = head.Target.Model is not null && states.Any(m => m.Id == head.Target.Model && m.Status == "loaded");
                 bool directComfyBusy;
                 lock (_gate) directComfyBusy = head.Target == GpuTarget.Comfy && _comfy.Busy;
                 // A direct 8188 job can allocate before the watcher observes it. Confirmed
@@ -232,8 +232,8 @@ public sealed class GpuCoordinator(ILlamaRouterClient llama, IComfyClient comfy,
                     SetPhase($"switching: loading {head.Target.Model}");
                     try
                     {
-                        await llama.LoadAsync(head.Target.Model, cancellationToken).ConfigureAwait(false);
-                        await WaitModelAsync(head.Target.Model, "loaded", options.Llama.LoadTimeoutSeconds, cancellationToken).ConfigureAwait(false);
+                        await models.LoadAsync(head.Target.Model, cancellationToken).ConfigureAwait(false);
+                        await WaitModelAsync(head.Target.Model, "loaded", options.ModelLoadTimeoutSeconds, cancellationToken).ConfigureAwait(false);
                     }
                     catch
                     {
@@ -244,7 +244,7 @@ public sealed class GpuCoordinator(ILlamaRouterClient llama, IComfyClient comfy,
             }
             lock (_gate)
             {
-                if (head.Target.Model is not null && (generation != _generation || !_ready)) throw new GpuException("llama-server restarted during handoff", 502);
+                if (head.Target.Model is not null && (generation != _generation || !_ready)) throw new GpuException("Model host stopped during handoff", 502);
                 _holder = head.Target;
                 _holderUsable = true;
                 // The first target wins the handoff; its queued requests share the acquired holder.
@@ -286,7 +286,7 @@ public sealed class GpuCoordinator(ILlamaRouterClient llama, IComfyClient comfy,
     {
         SetPhase($"switching: unloading {model}");
         lock (_gate) { if (_holder?.Model == model) _holderUsable = false; }
-        await llama.UnloadAsync(model, token).ConfigureAwait(false);
+        await models.UnloadAsync(model, token).ConfigureAwait(false);
         await WaitModelAsync(model, "unloaded", options.Vram.ReleaseTimeoutSeconds, token).ConfigureAwait(false);
     }
 
@@ -296,16 +296,16 @@ public sealed class GpuCoordinator(ILlamaRouterClient llama, IComfyClient comfy,
         int? lastExitCode = null;
         do
         {
-            var state = (await llama.ModelsAsync(token).ConfigureAwait(false)).FirstOrDefault(m => m.Id == model);
+            var state = (await models.ModelsAsync(token).ConfigureAwait(false)).FirstOrDefault(m => m.Id == model);
             if (state is null) throw new GpuException("Unknown model");
             lastExitCode = state.ExitCode;
             if (status == "loaded" && state.Failed)
-                throw new GpuException($"Model load failed; router exit code: {state.ExitCode?.ToString() ?? "unavailable"}");
+                throw new GpuException($"Model load failed; backend exit code: {state.ExitCode?.ToString() ?? "unavailable"}");
             if (state.Status == status) return;
             await Task.Delay(TimeSpan.FromMilliseconds(500), clock, token).ConfigureAwait(false);
         } while (clock.GetUtcNow() < deadline);
         throw new GpuException(status == "loaded"
-            ? $"Model load timed out; router exit code: {lastExitCode?.ToString() ?? "unavailable"}"
+            ? $"Model load timed out; backend exit code: {lastExitCode?.ToString() ?? "unavailable"}"
             : $"Timed out waiting for model to become {status}");
     }
 
@@ -328,7 +328,7 @@ public sealed class GpuCoordinator(ILlamaRouterClient llama, IComfyClient comfy,
     public override void Dispose()
     {
         base.Dispose();
-        _routerStopped.Dispose();
+        _hostStopped.Dispose();
     }
 
     private sealed class Waiter(GpuTarget target, string kind, DateTimeOffset since)

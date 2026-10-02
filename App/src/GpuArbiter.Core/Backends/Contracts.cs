@@ -5,7 +5,7 @@ public sealed record ComfyState(bool Reachable, int Running, int Pending)
 {
     public bool Busy => Running + Pending > 0;
 }
-public interface ILlamaRouterClient
+public interface IModelHost
 {
     Task<IReadOnlyList<ModelState>> ModelsAsync(CancellationToken cancellationToken);
     Task LoadAsync(string model, CancellationToken cancellationToken);

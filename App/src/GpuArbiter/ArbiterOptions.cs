@@ -1,14 +1,13 @@
 namespace GpuArbiter;
 
-public sealed class ArbiterOptions
+public sealed class ArbiterOptions : CoordinatorOptions
 {
     public string LlmUrl { get; set; } = "http://0.0.0.0:8080";
     public string ComfyProxyUrl { get; set; } = "http://0.0.0.0:8189";
     public int KeepaliveSeconds { get; set; } = 5;
     public string LogDir { get; set; } = @"G:\AI\gpu-arbiter\logs";
     public LlamaOptions Llama { get; set; } = new();
-    public ComfyOptions Comfy { get; set; } = new();
-    public VramOptions Vram { get; set; } = new();
+    public override int ModelLoadTimeoutSeconds { get => Llama.LoadTimeoutSeconds; set => Llama.LoadTimeoutSeconds = value; }
 
     public void Validate()
     {
@@ -32,14 +31,4 @@ public sealed class LlamaOptions
     public int Port { get; set; } = 8081;
     public int LoadTimeoutSeconds { get; set; } = 300;
     public string Url => $"http://127.0.0.1:{Port}";
-}
-public sealed class ComfyOptions
-{
-    public string Url { get; set; } = "http://127.0.0.1:8188";
-    public double PollSeconds { get; set; } = 1;
-}
-public sealed class VramOptions
-{
-    public int ReleasedMaxUsedMiB { get; set; } = 2500;
-    public double ReleaseTimeoutSeconds { get; set; } = 60;
 }

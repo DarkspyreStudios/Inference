@@ -16,6 +16,6 @@ public sealed class GpuException(string message, int statusCode = 503) : Excepti
 public sealed class GpuLease(Action release, CancellationToken routerStopped) : IDisposable
 {
     private Action? _release = release;
-    public CancellationToken RouterStopped { get; } = routerStopped;
+    public CancellationToken HostStopped { get; } = routerStopped;
     public void Dispose() => Interlocked.Exchange(ref _release, null)?.Invoke();
 }

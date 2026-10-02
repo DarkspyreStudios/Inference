@@ -1,0 +1,3 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup><InternalsVisibleTo Include="GpuArbiter.Tests" /><InternalsVisibleTo Include="GpuArbiter.Tensor.Tests" /><FrameworkReference Include="Microsoft.AspNetCore.App" /></ItemGroup>
+</Project>

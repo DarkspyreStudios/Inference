@@ -13,6 +13,7 @@ var options = builder.Configuration.GetSection("Arbiter").Get<ArbiterOptions>() 
 options.Validate();
 builder.WebHost.UseUrls(options.LlmUrl, options.ComfyProxyUrl);
 builder.Services.AddSingleton(options);
+builder.Services.AddSingleton<CoordinatorOptions>(options);
 builder.Services.AddSingleton(TimeProvider.System);
 var files = new FileLoggerProvider(options.LogDir);
 builder.Logging.ClearProviders();
@@ -22,7 +23,7 @@ builder.Logging.AddFilter("Microsoft", LogLevel.Warning);
 builder.Logging.AddFilter("System.Net.Http", LogLevel.None);
 builder.Logging.AddFilter("Yarp", LogLevel.None);
 builder.Services.AddSingleton(files);
-builder.Services.AddHttpClient<ILlamaRouterClient, LlamaRouterClient>(http =>
+builder.Services.AddHttpClient<IModelHost, LlamaRouterClient>(http =>
 { http.BaseAddress = new(options.Llama.Url); http.Timeout = TimeSpan.FromSeconds(10); });
 builder.Services.AddHttpClient<IComfyClient, ComfyClient>(http =>
 { http.BaseAddress = new(options.Comfy.Url); http.Timeout = TimeSpan.FromSeconds(5); });

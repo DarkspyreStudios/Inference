@@ -28,7 +28,7 @@ public sealed class LlmProxy(GpuCoordinator coordinator, IHttpClientFactory clie
                 if (body.Stream) await KeepAliveAsync(context, admission).ConfigureAwait(false);
                 lease = await admission.ConfigureAwait(false);
             }
-            using var linked = CancellationTokenSource.CreateLinkedTokenSource(context.RequestAborted, lease?.RouterStopped ?? CancellationToken.None);
+            using var linked = CancellationTokenSource.CreateLinkedTokenSource(context.RequestAborted, lease?.HostStopped ?? CancellationToken.None);
             using var request = new HttpRequestMessage(HttpMethod.Post,
                 options.Llama.Url + context.Request.Path + context.Request.QueryString)
             { Content = new ByteArrayContent(body.Bytes) };

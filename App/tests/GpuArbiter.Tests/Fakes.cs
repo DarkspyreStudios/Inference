@@ -16,7 +16,7 @@ internal sealed class Rig : IDisposable
     public Rig(bool ready = true)
     {
         Gpu = new(Llama, Comfy, Vram, Options, Clock, NullLogger<GpuCoordinator>.Instance);
-        if (ready) Gpu.RouterReady();
+        if (ready) Gpu.ModelHostReady();
     }
     public async Task<GpuLease> Admit(string? model)
     {
@@ -26,7 +26,7 @@ internal sealed class Rig : IDisposable
     }
     public void Dispose() => Gpu.Dispose();
 }
-internal sealed class FakeLlama : ILlamaRouterClient
+internal sealed class FakeLlama : IModelHost
 {
     public Dictionary<string, ModelState> Models { get; } = new()
     { ["qwen"] = new("qwen", "unloaded", false, null), ["other"] = new("other", "unloaded", false, null) };

@@ -113,7 +113,7 @@ public sealed class ProxyTests
         var pending = harness.Send(stream: false);
         await WaitFor(() => harness.UpstreamCalls == 1);
         Assert.Equal(2, rig.Gpu.Snapshot().LlmInFlight);
-        rig.Gpu.RouterExited(12);
+        rig.Gpu.ModelHostExited(12);
         using var response = await pending.WaitAsync(TimeSpan.FromSeconds(5));
         Assert.Equal(HttpStatusCode.BadGateway, response.StatusCode);
         Assert.Contains("llama-server restarted", await response.Content.ReadAsStringAsync());

@@ -3,7 +3,7 @@ using System.Text.Json;
 
 namespace GpuArbiter.Backends;
 
-public sealed class LlamaRouterClient(HttpClient http) : ILlamaRouterClient
+public sealed class LlamaRouterClient(HttpClient http) : IModelHost
 {
     public async Task<IReadOnlyList<ModelState>> ModelsAsync(CancellationToken cancellationToken)
     {
