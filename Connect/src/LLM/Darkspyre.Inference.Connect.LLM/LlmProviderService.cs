@@ -981,7 +981,15 @@ public sealed class LlmProviderService : ILlmTextTokenizer, ILlmFileClient, IXai
         if (client is not ILlmCredentialAdmissionPolicy policy)
             return ConnectionAccess.RefreshAsync(connectionId, connection, cancellationToken);
 
-        return ConnectionAccess.RefreshAsync(connectionId, connection, Validate, cancellationToken);
+        return RefreshValidatedAsync();
+
+        async Task<LlmConnection> RefreshValidatedAsync()
+        {
+            LlmConnection refreshed = await ConnectionAccess.RefreshAsync(connectionId, connection, Validate,
+                () => ThrowIfOperationCanceled(cancellationToken), cancellationToken);
+            ThrowIfOperationCanceled(cancellationToken);
+            return refreshed;
+        }
 
         void Validate(LlmConnection snapshot)
         {

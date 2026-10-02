@@ -275,6 +275,70 @@ public sealed class XaiFacadeAdmissionTests
     }
 
     [Theory]
+    [InlineData("refresh", "not-supported")]
+    [InlineData("refresh", "invalid-operation")]
+    [InlineData("save", "not-supported")]
+    [InlineData("save", "invalid-operation")]
+    [InlineData("save", "success")]
+    public async Task SuccessfulAwaitFencesDoNotMaskOriginalCollaboratorFaults(string boundary, string outcome)
+    {
+        Exception? failure = outcome switch
+        {
+            "not-supported" => new NotSupportedException("Controlled collaborator fault."),
+            "invalid-operation" => new InvalidOperationException("Controlled collaborator fault."),
+            _ => null
+        };
+        var source = new Source(OAuth()) { HoldSave = boundary == "save", SaveFailure = boundary == "save" ? failure : null };
+        var auth = new Authenticator { Hold = boundary == "refresh", Failure = boundary == "refresh" ? failure : null };
+        using var handler = new Handler();
+        using var http = new HttpClient(handler);
+        await using var access = new LlmConnectionAccess(source, [auth]);
+        await using var service = new LlmProviderService(source, [new XaiResponsesLlmClient(http)], [auth], connectionAccess: access);
+        using var caller = new CancellationTokenSource();
+        var callbackEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var callbackRelease = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        Task? request = null;
+        Task? stopping = null;
+        CancellationTokenRegistration registration = default;
+        try
+        {
+            await service.GetObservedAccountUsageAsync("connection");
+            CancellationToken stop = source.LastToken;
+            request = service.ListModelsAsync("connection", caller.Token);
+            await (boundary == "save" ? source.SaveEntered.Task : auth.Entered.Task).WaitAsync(Bound);
+            registration = stop.Register(() =>
+            {
+                callbackEntered.TrySetResult();
+                callbackRelease.Task.GetAwaiter().GetResult();
+            });
+            stopping = service.DisposeAsync().AsTask();
+            await callbackEntered.Task.WaitAsync(Bound);
+            Assert.True(stop.IsCancellationRequested);
+            Assert.False((boundary == "save" ? source.SaveToken : auth.Token).IsCancellationRequested);
+            source.SaveRelease.TrySetResult();
+            auth.Release.TrySetResult();
+            Exception? error = await Record.ExceptionAsync(() => request.WaitAsync(Bound));
+            if (failure is not null) Assert.Same(failure, error);
+            else Assert.IsAssignableFrom<OperationCanceledException>(error);
+            Assert.Equal(boundary == "save" ? 1 : 0, source.SaveCalls);
+            Assert.Equal(outcome == "success" ? 1 : 0, source.Writes);
+            Assert.Equal(outcome == "success" ? "v1" : null, source.ExpectedVersion);
+            Assert.Equal(0, handler.Calls);
+        }
+        finally
+        {
+            Task disposal = service.DisposeAsync().AsTask();
+            callbackRelease.TrySetResult();
+            source.SaveRelease.TrySetResult();
+            auth.Release.TrySetResult();
+            if (request is not null) await Record.ExceptionAsync(() => request.WaitAsync(Bound));
+            if (stopping is not null) await Record.ExceptionAsync(() => stopping.WaitAsync(Bound));
+            await disposal.WaitAsync(Bound);
+            registration.Dispose();
+        }
+    }
+
+    [Theory]
     [InlineData(false)]
     [InlineData(true)]
     public async Task ReentrantSelectedPolicyFencesBeforeRefreshAndCatalog(bool catalog)
@@ -353,6 +417,8 @@ public sealed class XaiFacadeAdmissionTests
             var access = new LlmConnectionAccess(source, [(ILlmAuthenticator)client]);
             var service = new LlmProviderService(source, [client], [(ILlmAuthenticator)client], connectionAccess: access);
             service.GetCapabilitiesAsync("connection").GetAwaiter().GetResult();
+            Assert.Equal(3, (int)client.GetType().GetProperty(nameof(PolicyClient.Validations))!.GetValue(client)!);
+            Assert.Equal(1, (int)client.GetType().GetProperty(nameof(PolicyClient.CatalogCalls))!.GetValue(client)!);
             service.Dispose();
             // The access remains caller-owned and usable until its own explicit retirement.
             Assert.Equal("v1", access.AcquireAsync("connection").GetAwaiter().GetResult().Version);
@@ -408,10 +474,24 @@ public sealed class XaiFacadeAdmissionTests
         public int Writes { get; private set; }
         public string? ExpectedVersion { get; private set; }
         public CancellationToken LastToken { get; private set; }
+        public int SaveCalls { get; private set; }
+        public bool HoldSave { get; init; }
+        public Exception? SaveFailure { get; init; }
+        public CancellationToken SaveToken { get; private set; }
+        public TaskCompletionSource SaveEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource SaveRelease { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public Task<LlmConnection?> GetConnectionAsync(string connectionId, CancellationToken cancellationToken = default)
         { Reads++; LastToken = cancellationToken; return Task.FromResult<LlmConnection?>(Connection); }
-        public Task SaveCredentialAsync(string connectionId, string credentialJson, string expectedVersion, CancellationToken cancellationToken = default)
-        { Writes++; ExpectedVersion = expectedVersion; return Task.CompletedTask; }
+        public async Task SaveCredentialAsync(string connectionId, string credentialJson, string expectedVersion, CancellationToken cancellationToken = default)
+        {
+            SaveCalls++;
+            SaveToken = cancellationToken;
+            SaveEntered.TrySetResult();
+            if (HoldSave) await SaveRelease.Task;
+            if (SaveFailure is not null) throw SaveFailure;
+            Writes++;
+            ExpectedVersion = expectedVersion;
+        }
     }
 
     private sealed class Authenticator : ILlmAuthenticator
@@ -422,10 +502,18 @@ public sealed class XaiFacadeAdmissionTests
         public bool Hold { get; init; }
         public int Calls { get; private set; }
         public CancellationToken Token { get; private set; }
+        public Exception? Failure { get; init; }
         public TaskCompletionSource Entered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public async Task<LlmCredential> EnsureFreshAsync(LlmCredential credential, CancellationToken cancellationToken = default)
-        { Calls++; Token = cancellationToken; Entered.TrySetResult(); if (Hold) await Release.Task; return Unchanged ? credential : Result; }
+        {
+            Calls++;
+            Token = cancellationToken;
+            Entered.TrySetResult();
+            if (Hold) await Release.Task;
+            if (Failure is not null) throw Failure;
+            return Unchanged ? credential : Result;
+        }
     }
 
     private sealed class Handler : HttpMessageHandler
