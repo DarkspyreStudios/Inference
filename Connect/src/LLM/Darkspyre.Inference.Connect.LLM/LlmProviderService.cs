@@ -9,7 +9,7 @@ namespace Darkspyre.Inference.Connect.LLM;
 /// retries against, or falls back to, another provider.
 /// </summary>
 public sealed class LlmProviderService : ILlmTextTokenizer, ILlmFileClient, IXaiFilePublicUrlClient,
-    IXaiSkillClient, IDisposable, IAsyncDisposable
+    IXaiSkillClient, IDocumentSearchClient, IDisposable, IAsyncDisposable
 {
     private ILlmConnectionSource? _connections;
     private ILlmConnectionSource Connections => _connections ?? throw new ObjectDisposedException(nameof(LlmProviderService));
@@ -200,10 +200,16 @@ public sealed class LlmProviderService : ILlmTextTokenizer, ILlmFileClient, IXai
     Task<XaiSkillDeletion> IXaiSkillClient.DeleteAsync(string connectionId, string skillId,
         CancellationToken cancellationToken) => UnavailableResourceAsync<XaiSkillDeletion>(cancellationToken);
 
-    private Task<T> UnavailableResourceAsync<T>(CancellationToken cancellationToken)
+    /// <summary>Search remains unavailable until a document-search adapter implements this route.</summary>
+    public Task<DocumentSearchResult> SearchAsync(string connectionId, DocumentSearchRequest request,
+        CancellationToken cancellationToken = default) =>
+        UnavailableResourceAsync<DocumentSearchResult>(cancellationToken, "No document-search adapter is implemented.");
+
+    private Task<T> UnavailableResourceAsync<T>(CancellationToken cancellationToken,
+        string message = "No Files or Skills resource adapter is implemented.")
     {
         using var operation = _lifetime.Enter(cancellationToken);
-        return Task.FromException<T>(new NotSupportedException("No Files or Skills resource adapter is implemented."));
+        return Task.FromException<T>(new NotSupportedException(message));
     }
 
     public async Task<bool> IsAuthenticatedAsync(
