@@ -244,13 +244,51 @@ public sealed class ProviderControlContractTests
             Assert.Null(Assert.IsType<XaiMultiAgentControls>(request.ProviderControls).AgentCount);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CompactionContinuationPreservesAdmittedControl(bool suppressSaved)
+    {
+        var probe = new ManagedProbe { MeasureText = true };
+        var current = Connection() with { Xai = new() { MultiAgent = new(16) } };
+        var options = new LlmAgentSessionOptions
+        {
+            ModelId = Request().ModelId,
+            Context = new() { Entries = [new("old", "previous", new("user", new string('x', 90)))] },
+            ExecutionOptions = new()
+            {
+                ContextPolicy = new() { MaxContextTokens = 100, ReservedOutputTokens = 10, SafetyMarginTokens = 0, CompactionThresholdRatio = .8 }
+            },
+            Tools = [new LlmAgentToolDefinition { Name = "echo", InputSchema = JsonElement.Parse("{\"type\":\"object\"}") }],
+            ToolHandler = (_, _) => Task.FromResult(LlmToolOutput.FromText("actual tool result"))
+        };
+        await using var session = new ManagedAgentSession(current, options, [new(options.ModelId, "Multi-agent")], probe,
+            (request, token) => probe.Stream(ProviderControlPolicy.Resolve(current, request), token),
+            _ => new() { SupportsAgentSessions = true, SupportsAgentToolUse = true, Agent = ManagedAgentPolicy.Capabilities });
+        var events = new List<LlmAgentEvent>();
+        await foreach (LlmAgentEvent item in session.RunTurnAsync(new()
+        {
+            Input = [new LlmAgentTextContent("question")],
+            ProviderControls = suppressSaved ? new XaiMultiAgentControls() : null
+        })) events.Add(item);
+        var pause = Assert.Single(events.OfType<LlmAgentCompactionRequiredEvent>());
+        Assert.Equal(0, probe.RequestCount);
+        LlmAgentContext captured = await session.CaptureContextAsync();
+        current = current with { Xai = new() { MultiAgent = new(4) } };
+        await Read(session.ContinueTurnAsync(new(pause.TurnId, pause.PauseId, captured.Revision,
+            captured with { Entries = captured.Entries.Skip(1).ToArray() })));
+        Assert.Equal(2, probe.RequestCount);
+        foreach (LlmChatRequest request in probe.Requests)
+            Assert.Equal(suppressSaved ? null : (int?)16, Assert.IsType<XaiMultiAgentControls>(request.ProviderControls).AgentCount);
+    }
+
     [Fact]
     public async Task SetupOffersProfileCountsAndConditionallySavesTypedDefaults()
     {
         using var handler = new RawSamplingGuardsTests.Handler("xai");
         using var http = new HttpClient(handler);
         var target = new Target(); var client = new XaiResponsesLlmClient(http);
-        var manager = new LlmSettingsManager(new Dictionary<LlmTransport, ILlmClient> { [client.Transport] = client }, [],
+        await using var manager = new LlmSettingsManager(new Dictionary<LlmTransport, ILlmClient> { [client.Transport] = client }, [],
             new Dictionary<LlmTransport, ILlmSetupEnvironment>(), target);
         var saved = Connection() with { Xai = new() { MultiAgent = new(16) } };
         LlmSettings settings = await manager.OpenAsync(client.Transport, new(SetupChangeIntent.Edit, "id", saved.Version), saved, Request().ModelId);
@@ -340,6 +378,7 @@ public sealed class ProviderControlContractTests
         {
             await fixture.ManagedRunFreezesEffectiveControlThroughToolIterations(true);
             await fixture.ManagedProviderDefaultDoesNotInheritLaterSettingDuringToolExecution();
+            await fixture.CompactionContinuationPreservesAdmittedControl(true);
             var local = new ExplicitCacheContractTests();
             await local.ProviderControlsRefuseBeforeProcessOrEngineEntry("selfhost", false);
             await local.ProviderControlsPreserveLateResolutionCancellationAndDrain(0, true);
@@ -380,12 +419,13 @@ public sealed class ProviderControlContractTests
     }
     private sealed class ManagedProbe : ILlmContextEstimator
     {
+        internal bool MeasureText { get; init; }
         internal List<LlmChatRequest> Requests { get; } = [];
         internal int RequestCount => Requests.Count;
         internal List<LlmChatRequest> Estimates { get; } = [];
         public string? EstimateDiagnostic => null;
         public ContextEstimate? EstimateInputTokens(LlmConnection connection, LlmChatRequest request)
-        { Estimates.Add(request); return new(1); }
+        { Estimates.Add(request); return new(MeasureText ? request.Messages.Sum(message => message.Content?.Length ?? 0) : 1); }
         internal async IAsyncEnumerable<LlmStreamEvent> Stream(LlmChatRequest request,
             [EnumeratorCancellation] CancellationToken cancellationToken)
         {

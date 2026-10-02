@@ -25,9 +25,9 @@ public sealed class ConnectLlmJsonTests
     private const string AzureProfileJson = "{\"ApiMode\":0,\"AuthenticationMode\":0,\"DeploymentId\":\"alias\",\"ModelProfileId\":\"gpt-4o\"}";
     private const string AzureUnknownProfileJson = "{\"ApiMode\":0,\"AuthenticationMode\":0,\"DeploymentId\":\"alias\",\"ModelProfileId\":null}";
     private const string AzureFutureModesJson = "{\"ApiMode\":999,\"AuthenticationMode\":999,\"DeploymentId\":\"alias\",\"ModelProfileId\":null}";
-    private const string XaiGlobalJson = "{\"Region\":0,\"ServiceTier\":0}";
-    private const string XaiUnitedStatesPriorityJson = "{\"Region\":1,\"ServiceTier\":1}";
-    private const string XaiFutureModesJson = "{\"Region\":999,\"ServiceTier\":999}";
+    private const string XaiGlobalJson = "{\"Region\":0,\"ServiceTier\":0,\"MultiAgent\":null}";
+    private const string XaiUnitedStatesPriorityJson = "{\"Region\":1,\"ServiceTier\":1,\"MultiAgent\":null}";
+    private const string XaiFutureModesJson = "{\"Region\":999,\"ServiceTier\":999,\"MultiAgent\":null}";
     private const string StateJson = "{\"FormatVersion\":2,\"ImplementationId\":\"fixture\",\"ModelId\":\"model\",\"ScopeId\":\"scope\",\"Payload\":\"opaque\"}";
     private const string MessageJson = "{\"Role\":\"user\",\"Content\":\"text\",\"Attachments\":[{\"type\":\"binary\",\"Kind\":0,\"FileName\":\"image.png\",\"Data\":\"AQID\"}],\"ToolResults\":[{\"type\":\"function\",\"ToolCallId\":\"call\",\"Output\":{\"Parts\":[{\"type\":\"text\",\"Text\":\"text\"},{\"type\":\"binary\",\"Kind\":2,\"MediaType\":\"audio/wav\",\"Data\":\"BA==\"},{\"type\":\"resource\",\"Uri\":\"urn:test\",\"Data\":\"\"}]}}]}";
     private const string EntryJson = "{\"Id\":\"entry\",\"TurnId\":\"turn\",\"Message\":" + MessageJson + "}";
