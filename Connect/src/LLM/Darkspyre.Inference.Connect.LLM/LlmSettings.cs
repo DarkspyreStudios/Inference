@@ -618,43 +618,80 @@ public sealed class LlmSettings : InferenceSettings<LlmSetupChanges>
 /// Opens, acts on and saves LLM connection settings. Sign-in, checks, tests and model lists run against
 /// the settings' current values through a provider service that reads its connection from the settings.
 /// </summary>
-public sealed class LlmSettingsManager : InferenceSettingsManager<LlmSettings, LlmSetupChanges>
+public sealed class LlmSettingsManager : InferenceSettingsManager<LlmSettings, LlmSetupChanges>, IDisposable, IAsyncDisposable
 {
-    private readonly IReadOnlyDictionary<LlmTransport, ILlmClient> _clients;
-    private readonly IReadOnlyList<ILlmAuthenticator> _authenticators;
-    private readonly IReadOnlyDictionary<LlmTransport, ILlmSetupEnvironment> _environments;
+    private IReadOnlyDictionary<LlmTransport, ILlmClient>? _clients;
+    private IReadOnlyList<ILlmAuthenticator>? _authenticators;
+    private IReadOnlyDictionary<LlmTransport, ILlmSetupEnvironment>? _environments;
+    private LlmAgentProviderService? _agents;
+    private readonly LlmOperationLifetime _lifetime = new();
 
     internal LlmSettingsManager(IReadOnlyDictionary<LlmTransport, ILlmClient> clients, IEnumerable<ILlmAuthenticator> authenticators,
-        IReadOnlyDictionary<LlmTransport, ILlmSetupEnvironment> environments, ISetupCommitTarget<LlmSetupChanges> target)
+        IReadOnlyDictionary<LlmTransport, ILlmSetupEnvironment> environments, ISetupCommitTarget<LlmSetupChanges> target,
+        LlmAgentProviderService? agents = null)
         : base(target)
     {
         _clients = clients;
         _authenticators = [.. authenticators];
         _environments = environments;
+        _agents = agents;
     }
 
     /// <summary>Returns settings for <paramref name="transport"/>, blank or from the saved connection.</summary>
     public Task<LlmSettings> OpenAsync(LlmTransport transport, SetupConfigurationIdentity identity,
         LlmConnection? existing = null, string? modelId = null, CancellationToken cancellationToken = default)
     {
-        cancellationToken.ThrowIfCancellationRequested();
+        using var operation = _lifetime.Enter(cancellationToken);
         ILlmClient client = Client(transport);
-        return Task.FromResult(new LlmSettings(client.ProviderDefinition, client.Transport, identity, existing, modelId,
-            _environments.GetValueOrDefault(transport)));
+        LlmProviderDefinition definition = client.ProviderDefinition;
+        Fence(operation.Token);
+        LlmTransport actualTransport = client.Transport;
+        Fence(operation.Token);
+        var settings = new LlmSettings(definition, actualTransport, identity, existing, modelId,
+            _environments!.GetValueOrDefault(transport));
+        Fence(operation.Token);
+        return Task.FromResult(settings);
+    }
+
+    public override async Task<SetupActionResult> RunAsync(InferenceSettings settings, string actionId,
+        IProgress<SetupProgress>? progress = null, CancellationToken cancellationToken = default)
+    {
+        using var operation = _lifetime.Enter(cancellationToken);
+        SetupActionResult result = await base.RunAsync(settings, actionId, progress, operation.Token).ConfigureAwait(false);
+        return IsStopping(operation.Token) ? new(SetupActionState.Cancelled) : result;
+    }
+
+    public override async Task<SetupChoicePage> QueryChoicesAsync(InferenceSettings settings, string fieldId,
+        SetupChoiceQuery query, CancellationToken cancellationToken = default)
+    {
+        using var operation = _lifetime.Enter(cancellationToken);
+        SetupChoicePage result = await base.QueryChoicesAsync(settings, fieldId, query, operation.Token).ConfigureAwait(false);
+        return IsStopping(operation.Token) ? new([], State: SetupChoiceState.Cancelled) : result;
+    }
+
+    public override async Task<SetupCommitResult> SaveAsync(InferenceSettings settings, CancellationToken cancellationToken = default)
+    {
+        using var operation = _lifetime.Enter(cancellationToken);
+        return await base.SaveAsync(settings, operation.Token).ConfigureAwait(false);
     }
 
     protected override async Task<SetupActionResult> RunCoreAsync(LlmSettings settings, SetupActionDescriptor action,
         IProgress<SetupProgress>? progress, CancellationToken cancellationToken)
     {
         await using LlmProviderService service = Service(settings);
+        Fence(cancellationToken);
         switch (action.Id)
         {
             case "authorize":
-                settings.BeginDeviceAuthorization(await (settings.Transport == LlmTransport.XaiResponses
-                    ? service.StartXaiLoginAsync(cancellationToken) : service.StartCodexLoginAsync(cancellationToken)).ConfigureAwait(false));
+                LlmDeviceCode code = await (settings.Transport == LlmTransport.XaiResponses
+                    ? service.StartXaiLoginAsync(cancellationToken) : service.StartCodexLoginAsync(cancellationToken)).ConfigureAwait(false);
+                Fence(cancellationToken);
+                settings.BeginDeviceAuthorization(code);
                 return new(SetupActionState.NeedsInteraction, Interaction: settings.Interaction);
             case "authorize-catalog":
-                settings.BeginBrowserAuthorization(await service.StartClaudeLoginAsync(cancellationToken).ConfigureAwait(false));
+                LlmAuthorizationSession authorization = await service.StartClaudeLoginAsync(cancellationToken).ConfigureAwait(false);
+                Fence(cancellationToken);
+                settings.BeginBrowserAuthorization(authorization);
                 return new(SetupActionState.NeedsInteraction, Interaction: settings.Interaction);
             case "continue-authorization":
                 return await ContinueAuthorizationAsync(settings, service, progress, cancellationToken).ConfigureAwait(false);
@@ -673,26 +710,36 @@ public sealed class LlmSettingsManager : InferenceSettingsManager<LlmSettings, L
     protected override async Task<SetupChoicePage> QueryProviderChoicesAsync(LlmSettings settings, string fieldId,
         SetupChoiceQuery query, CancellationToken cancellationToken)
     {
-        ILlmSetupEnvironment? environment = _environments.GetValueOrDefault(settings.Transport);
+        Fence(cancellationToken);
+        ILlmSetupEnvironment? environment = _environments!.GetValueOrDefault(settings.Transport);
         switch (fieldId)
         {
-            case "engine" when _clients.GetValueOrDefault(LlmTransport.SelfHost) is Providers.SelfHostLlmClient selfHost:
-                return InferenceSettings.Page(query, (await selfHost.ListEnginesAsync(cancellationToken).ConfigureAwait(false))
+            case "engine" when _clients!.GetValueOrDefault(LlmTransport.SelfHost) is Providers.SelfHostLlmClient selfHost:
+                var engines = await selfHost.ListEnginesAsync(cancellationToken).ConfigureAwait(false);
+                Fence(cancellationToken);
+                return InferenceSettings.Page(query, engines
                     .Select(engine => new SetupChoice(engine.Id, engine.DisplayName)));
             case "aws-profile" when environment is not null:
-                return InferenceSettings.Page(query, await environment.GetProfilesAsync(cancellationToken).ConfigureAwait(false));
+                var profiles = await environment.GetProfilesAsync(cancellationToken).ConfigureAwait(false);
+                Fence(cancellationToken);
+                return InferenceSettings.Page(query, profiles);
             case "aws-region" when environment is not null:
-                return InferenceSettings.Page(query, await environment.GetRegionsAsync(settings.AwsProfile, cancellationToken).ConfigureAwait(false));
+                var regions = await environment.GetRegionsAsync(settings.AwsProfile, cancellationToken).ConfigureAwait(false);
+                Fence(cancellationToken);
+                return InferenceSettings.Page(query, regions);
             case "model":
                 {
                     await using LlmProviderService service = Service(settings);
+                    Fence(cancellationToken);
                     LlmProviderCapabilities capabilities = await service.GetCapabilitiesAsync(settings.Identity.Id, cancellationToken).ConfigureAwait(false);
+                    Fence(cancellationToken);
                     if (!capabilities.SupportsModelListing)
                     {
                         return new([], State: SetupChoiceState.Unavailable,
                             Issues: [new("manual-model", "This connection requires manual model entry.", "model", Severity: SetupIssueSeverity.Warning)]);
                     }
                     IReadOnlyList<LlmModel> models = await service.ListModelsAsync(settings.Identity.Id, cancellationToken).ConfigureAwait(false);
+                    Fence(cancellationToken);
                     return InferenceSettings.Page(query, models.Select(model => new SetupChoice(model.Id, model.DisplayName, model.AvailabilityReason ?? model.OwnedBy))
                         .OrderBy(choice => choice.Value, StringComparer.Ordinal));
                 }
@@ -701,41 +748,47 @@ public sealed class LlmSettingsManager : InferenceSettingsManager<LlmSettings, L
         }
     }
 
-    private static async Task<SetupActionResult> ContinueAuthorizationAsync(LlmSettings settings, LlmProviderService service,
+    private async Task<SetupActionResult> ContinueAuthorizationAsync(LlmSettings settings, LlmProviderService service,
         IProgress<SetupProgress>? progress, CancellationToken token)
     {
         if (settings.DeviceCode is { } code)
         {
             progress?.Report(new("authorizing", "Waiting for device authorization."));
+            Fence(token);
             try
             {
                 if (settings.Transport == LlmTransport.XaiResponses)
                 {
                     await XaiDevicePolling.WaitAsync(code, token).ConfigureAwait(false);
+                    Fence(token);
                     await service.CompleteXaiLoginAsync(settings.Identity.Id, code.DeviceAuthId, code.UserCode,
                         LlmSettings.DraftVersion, token).ConfigureAwait(false);
                 }
                 else
                 {
                     await Task.Delay(TimeSpan.FromSeconds(Math.Max(1, code.IntervalSeconds)), token).ConfigureAwait(false);
+                    Fence(token);
                     await service.CompleteCodexLoginAsync(settings.Identity.Id, code.DeviceAuthId, code.UserCode,
                         LlmSettings.DraftVersion, token).ConfigureAwait(false);
                 }
             }
             catch (LlmAuthPendingException pending)
             {
+                Fence(token);
                 if (settings.Transport == LlmTransport.XaiResponses) settings.UpdateDevicePolling(pending);
                 return new(SetupActionState.NeedsInteraction, Interaction: settings.Interaction);
             }
             catch (LlmProviderException error) when (settings.Transport == LlmTransport.XaiResponses
                 && error.ProviderCode is "expired_token" or "access_denied")
             {
+                Fence(token);
                 settings.ClearAuthorization();
                 throw;
             }
             catch (InferenceException error) when (settings.Transport == LlmTransport.XaiResponses
                 && error.Code is InferenceFailureCode.AuthenticationRequired or InferenceFailureCode.AccessDenied)
             {
+                Fence(token);
                 settings.ClearAuthorization();
                 throw;
             }
@@ -746,6 +799,7 @@ public sealed class LlmSettingsManager : InferenceSettingsManager<LlmSettings, L
                 LlmSettings.DraftVersion, token).ConfigureAwait(false);
         }
         else { return new(SetupActionState.Unavailable); }
+        Fence(token);
         settings.ClearAuthorization();
         // Catalog OAuth does not establish CLI authentication.
         if (settings.Transport is LlmTransport.OpenAiCodex or LlmTransport.XaiResponses)
@@ -757,6 +811,7 @@ public sealed class LlmSettingsManager : InferenceSettingsManager<LlmSettings, L
 
     private async Task<SetupActionResult> CheckAsync(LlmSettings settings, LlmProviderService service, CancellationToken token)
     {
+        Fence(token);
         settings.Status = settings.Status with { Authenticated = SetupObservation.Unknown, Verified = SetupObservation.Unknown };
         if (settings.UsesApple)
         {
@@ -764,14 +819,17 @@ public sealed class LlmSettingsManager : InferenceSettingsManager<LlmSettings, L
             settings.Status = settings.Status with { Ready = SetupObservation.Unknown };
             try
             {
-                AppleProtocol.Ready(await ((AppleFoundationModelsClient)Client(settings.Transport))
-                    .ProbeAsync(settings.CurrentConnection(), token).ConfigureAwait(false));
+                var probe = await ((AppleFoundationModelsClient)Client(settings.Transport))
+                    .ProbeAsync(settings.CurrentConnection(), token).ConfigureAwait(false);
+                Fence(token);
+                AppleProtocol.Ready(probe);
                 settings.Status = settings.Status with { Verified = SetupObservation.Known(true) };
                 settings.RefreshInteraction();
                 return SetupActionResult.Completed;
             }
             catch (InferenceException error) when (error.Code is InferenceFailureCode.BackendUnavailable or InferenceFailureCode.ModelUnavailable)
             {
+                Fence(token);
                 settings.Status = settings.Status with { Verified = SetupObservation.Known(false), Ready = SetupObservation.Known(false) };
                 settings.ApplePrerequisite = error.Message;
                 settings.RefreshInteraction();
@@ -782,15 +840,18 @@ public sealed class LlmSettingsManager : InferenceSettingsManager<LlmSettings, L
         if (settings.UsesCli)
         {
             authenticated = await service.IsAuthenticatedAsync(settings.Identity.Id, token).ConfigureAwait(false);
+            Fence(token);
         }
         else
         {
             LlmProviderCapabilities capabilities = await service.GetCapabilitiesAsync(settings.Identity.Id, token).ConfigureAwait(false);
+            Fence(token);
             if (!capabilities.SupportsModelListing)
             {
                 return new(SetupActionState.Unavailable, [new("explicit-test-required", "This provider requires an explicit inference test to confirm remote access.")]);
             }
             await service.ListModelsAsync(settings.Identity.Id, token).ConfigureAwait(false);
+            Fence(token);
             authenticated = true;
         }
         settings.Status = settings.Status with { Authenticated = SetupObservation.Known(authenticated), Verified = settings.Transport is LlmTransport.GoogleVertexAi or LlmTransport.AzureOpenAiResponses or LlmTransport.AzureOpenAiChat ? SetupObservation.Unknown : SetupObservation.Known(authenticated) };
@@ -801,6 +862,7 @@ public sealed class LlmSettingsManager : InferenceSettingsManager<LlmSettings, L
 
     private async Task<SetupActionResult> TestAsync(LlmSettings settings, LlmProviderService service, CancellationToken token)
     {
+        Fence(token);
         settings.Status = settings.Status with { Ready = SetupObservation.Unknown };
         bool completed;
         if (settings.Transport == LlmTransport.AwsBedrockAgentCore && Client(settings.Transport) is ILlmAgentClient agent)
@@ -811,10 +873,12 @@ public sealed class LlmSettingsManager : InferenceSettingsManager<LlmSettings, L
                 Runtime = new() { WorkingDirectory = string.Empty, Policy = new LlmAgentHostRuntimePolicy { Sandbox = LlmAgentSandboxMode.ReadOnly } },
                 ToolHandler = (_, _) => throw new NotSupportedException("Setup tests grant no host tools.")
             }, token).ConfigureAwait(false);
+            Fence(token);
             completed = false;
             await foreach (LlmAgentEvent item in session.RunTurnAsync(new()
             { Input = [new LlmAgentTextContent("Reply with OK. Do not use tools.")] }, token).ConfigureAwait(false))
             {
+                Fence(token);
                 if (item is LlmAgentTurnCompletedEvent done) { completed = done.Status == LlmAgentTurnStatus.Completed; }
             }
         }
@@ -822,32 +886,34 @@ public sealed class LlmSettingsManager : InferenceSettingsManager<LlmSettings, L
         {
             LlmChatResult result = await service.CompleteAsync(settings.Identity.Id, new()
             { ModelId = settings.ModelId, Messages = [new LlmChatMessage("user", "Reply with OK.")] }, token).ConfigureAwait(false);
+            Fence(token);
             completed = result.Status == LlmCompletionStatus.Completed
                 || settings.UsesApple && result.Status == LlmCompletionStatus.Unknown && !string.IsNullOrWhiteSpace(result.Text);
         }
+        Fence(token);
         settings.Status = settings.Status with { Ready = SetupObservation.Known(completed), Verified = SetupObservation.Known(completed) };
         return completed ? SetupActionResult.Completed : new(SetupActionState.Failed, [new("test-incomplete", "The provider did not complete the test.")]);
     }
 
-    private ILlmClient Client(LlmTransport transport) => _clients.TryGetValue(transport, out ILlmClient? client)
+    private ILlmClient Client(LlmTransport transport) => _clients!.TryGetValue(transport, out ILlmClient? client)
         ? client
         : throw new NotSupportedException($"No LLM client is registered for transport {transport}.");
 
     /// <summary>A provider service whose one connection is these settings' current connection.</summary>
     private LlmProviderService Service(LlmSettings settings) =>
-        new(new SettingsSource(settings), [Client(settings.Transport)], _authenticators);
+        new(new SettingsSource(settings, this), [Client(settings.Transport)], _authenticators!);
 
-    private sealed class SettingsSource(LlmSettings settings) : ILlmConnectionSource
+    private sealed class SettingsSource(LlmSettings settings, LlmSettingsManager owner) : ILlmConnectionSource
     {
         public Task<LlmConnection?> GetConnectionAsync(string connectionId, CancellationToken cancellationToken = default)
         {
-            cancellationToken.ThrowIfCancellationRequested();
+            owner.Fence(cancellationToken);
             return Task.FromResult(connectionId == settings.Identity.Id ? settings.CurrentConnection() : null);
         }
 
         public Task SaveCredentialAsync(string connectionId, string credentialJson, string expectedVersion, CancellationToken cancellationToken = default)
         {
-            cancellationToken.ThrowIfCancellationRequested();
+            owner.Fence(cancellationToken);
             if (connectionId != settings.Identity.Id || expectedVersion != LlmSettings.DraftVersion)
             {
                 throw new InvalidOperationException("The sign-in does not belong to these settings.");
@@ -856,4 +922,28 @@ public sealed class LlmSettingsManager : InferenceSettingsManager<LlmSettings, L
             return Task.CompletedTask;
         }
     }
+
+    private void Fence(CancellationToken token)
+    {
+        token.ThrowIfCancellationRequested();
+        try { _lifetime.ThrowIfStopping(); }
+        catch (ObjectDisposedException error) { throw new OperationCanceledException("The LLM settings owner is retiring.", error, token); }
+    }
+
+    private bool IsStopping(CancellationToken token)
+    {
+        if (token.IsCancellationRequested) return true;
+        try { _lifetime.ThrowIfStopping(); return false; }
+        catch (ObjectDisposedException) { return true; }
+    }
+
+    public void Dispose() => Retire().GetAwaiter().GetResult();
+    public ValueTask DisposeAsync() => new(Retire());
+    private Task Retire() => _lifetime.RetireAsync(() =>
+    {
+        _clients = null; _authenticators = null; _environments = null;
+        Interlocked.Exchange(ref _agents, null);
+        DetachCommitTarget();
+        return Task.CompletedTask;
+    });
 }

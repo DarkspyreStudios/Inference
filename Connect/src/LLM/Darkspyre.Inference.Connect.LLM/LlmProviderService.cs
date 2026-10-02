@@ -109,10 +109,12 @@ public sealed class LlmProviderService : ILlmTextTokenizer, ILlmFileClient, IXai
         SupportedProviders.Select(provider => provider.SetupDefinition).ToArray();
 
     /// <summary>Creates the settings manager that opens, acts on and saves LLM settings through <paramref name="target"/>.</summary>
-    public LlmSettingsManager CreateSettingsManager(Common.Setup.ISetupCommitTarget<LlmSetupChanges> target)
+    public LlmSettingsManager CreateSettingsManager(Common.Setup.ISetupCommitTarget<LlmSetupChanges> target,
+        LlmAgentProviderService? agents = null)
     {
         using var operation = _lifetime.Enter(CancellationToken.None);
-        return new(_clients, _authenticators.Values, _setupEnvironments, target);
+        agents?.ValidateSource(Connections);
+        return new(_clients, _authenticators.Values, _setupEnvironments, target, agents);
     }
 
     public const string ClaudeManualRedirectUri =
