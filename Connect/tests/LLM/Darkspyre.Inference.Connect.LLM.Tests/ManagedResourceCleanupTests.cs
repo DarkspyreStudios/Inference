@@ -7,6 +7,38 @@ namespace Darkspyre.Inference.Connect.LLM.Tests;
 public sealed class ManagedResourceCleanupTests
 {
     [Fact]
+    public async Task RefusedRawBodyStreamCleanupNeverRetriesThroughDependentResponseContent()
+    {
+        var resources = new ControlledSessionResources();
+        await resources.RegisterAsync("source.txt", "text/plain", "source");
+        var cleanup = new OperationCanceledException("actual raw body stream cleanup refusal");
+        using var destination = new LlmResourceMaterializationTests.ResourceDestination();
+        var stream = new RefusedBodyStream(cleanup);
+        using var handler = new StreamingDestination(destination, stream);
+        using var http = new HttpClient(handler);
+        var connection = LlmResourceMaterializationTests.Connection() with { CapabilityOverrides = new() { SupportsStreaming = true } };
+        var client = new XaiResponsesLlmClient(http);
+        var session = await ManagedAgentSession.CreateAsync(connection,
+            new() { ModelId = "grok-4", CallerServices = new() { Resources = resources } }, [], client,
+            (request, token) => client.StreamAsync(connection, request, token),
+            model => ManagedResourceMaterializationTests.ManagedCapabilities(client, model));
+        Task? retirement = null;
+        try
+        {
+            var failure = await Assert.ThrowsAsync<InferenceResourceOperationCanceledException>(() => ManagedResourceMaterializationTests.Read(
+                session.RunTurnAsync(new() { Input = [new LlmAgentTextContent("inspect")] })));
+            Assert.Equal(InferenceResourceOperationPhase.Cleanup, failure.Failure.Phase);
+            Assert.Same(cleanup, failure.InnerException);
+            retirement = session.DisposeAsync().AsTask();
+            Assert.Same(failure, await Assert.ThrowsAsync<InferenceResourceOperationCanceledException>(() => retirement));
+            Assert.Equal(1, stream.AsyncCleanupAttempts);
+            Assert.Equal(0, stream.SyncCleanupAttempts);
+            Assert.Equal(1, resources.DisposedReads);
+        }
+        finally { retirement ??= session.DisposeAsync().AsTask(); await Drain(retirement); }
+    }
+
+    [Fact]
     public async Task HealthyHandleCleanupStartingRetirementCannotEraseFinalResourceCancellationFacts()
     {
         var resources = new ControlledSessionResources();
@@ -144,4 +176,26 @@ public sealed class ManagedResourceCleanupTests
         ? aggregate.InnerExceptions.SelectMany(Leaves) : [error];
     private static async Task Drain(Task task)
     { try { await task.WaitAsync(TimeSpan.FromSeconds(5)); } catch (Exception) when (task.IsCompleted) { } }
+
+    private sealed class RefusedBodyStream(Exception failure) : MemoryStream(System.Text.Encoding.UTF8.GetBytes(
+        "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"response-one\",\"status\":\"completed\",\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"done\"}]}]}}\n\n"))
+    {
+        internal int AsyncCleanupAttempts { get; private set; }
+        internal int SyncCleanupAttempts { get; private set; }
+        [System.Diagnostics.CodeAnalysis.SuppressMessage("Usage", "CA2215", Justification = "The controlled cleanup refusal deliberately leaves the resource unreleased.")]
+        public override ValueTask DisposeAsync() { AsyncCleanupAttempts++; return ValueTask.FromException(failure); }
+        protected override void Dispose(bool disposing) { if (disposing) SyncCleanupAttempts++; base.Dispose(disposing); }
+    }
+    private sealed class StreamingDestination(HttpMessageHandler destination, Stream body) : HttpMessageHandler
+    {
+        private readonly HttpMessageInvoker _destination = new(destination, disposeHandler: false);
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken token)
+        {
+            HttpResponseMessage response = await _destination.SendAsync(request, token);
+            if (request.RequestUri!.AbsolutePath.EndsWith("/responses", StringComparison.Ordinal))
+            { response.Content.Dispose(); response.Content = new StreamContent(body); }
+            return response;
+        }
+        protected override void Dispose(bool disposing) { if (disposing) _destination.Dispose(); base.Dispose(disposing); }
+    }
 }
