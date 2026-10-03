@@ -207,6 +207,10 @@ additive selection must publish atomically in the same caller store transaction;
 select is not equivalent. Null/default options do not select content. These are implementation
 obligations of the caller-owned authority, not an implementation supplied by Common.
 
+`LlmInferenceResult.GeneratedResources` copies the ordered actual content-commit and full selection
+receipts from completed artifact materialization. It is empty until materialization occurs through
+the existing caller-owned resource authority; it grants no new access or provider-native authority.
+
 Cancellation or a lost acknowledgment does not prove rollback. Primitive content and selection
 outcomes preserve unknown effects independently. Reconcile the known reference and current selection
 after the attempt is terminal, without automatic retry or inferred historical outcomes. Runtime
