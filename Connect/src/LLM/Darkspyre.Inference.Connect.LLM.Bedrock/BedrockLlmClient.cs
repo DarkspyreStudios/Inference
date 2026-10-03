@@ -79,6 +79,7 @@ internal sealed class BedrockLlmClient(
             Defaults with
             {
                 ReasoningLevels = offered,
+                PromptCache = BedrockPromptCache.Capabilities(modelId ?? string.Empty),
                 SupportsTemperature = claudeSampling,
                 SupportsTopP = claudeSampling,
                 SupportsTopK = family == BedrockModelFamily.AmazonNova2
@@ -697,7 +698,7 @@ internal sealed class BedrockLlmClient(
         {
             [RequestIdMetadataKey] = $"request-{Interlocked.Increment(ref _requestCounter)}"
         };
-
+        BedrockPromptCache.Apply(result, request.PromptCache, modelId);
         return result;
     }
 

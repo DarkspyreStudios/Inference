@@ -34,6 +34,7 @@ internal sealed class OpenAiCodexLlmClient(HttpClient http)
         SupportsStreamingUsage = true,
         SupportsModelListing = true,
         SupportsAccountUsage = true,
+        PromptCache = PromptCaching.Automatic,
         SupportsJsonSchema = true,
         // A model whose catalog entry lists its reasoning levels offers exactly those; see GetCapabilities.
         ReasoningLevels = LlmReasoningEffort.Levels(

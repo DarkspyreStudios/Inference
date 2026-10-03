@@ -60,7 +60,11 @@ internal abstract class ChatCompletionsLlmClientBase(HttpClient http) : LlmClien
         if (connection.CapabilityOverrides?.SupportsAccountUsage is { } routeEnabled) { enabled = routeEnabled; }
         if (modelId is not null && connection.ModelCapabilityOverrides.TryGetValue(modelId, out var modelOverrides)
             && modelOverrides.SupportsAccountUsage is { } modelEnabled) { enabled = modelEnabled; }
-        return capabilities with { SupportsAccountUsage = enabled };
+        return capabilities with
+        {
+            SupportsAccountUsage = enabled,
+            PromptCache = openRouter ? OpenRouterPromptCache.Capabilities(modelId) : capabilities.PromptCache
+        };
     }
 
     protected virtual bool IsOpenRouter(LlmConnection connection) => Uri.TryCreate(connection.Endpoint, UriKind.Absolute, out Uri? endpoint)
@@ -767,6 +771,7 @@ internal abstract class ChatCompletionsLlmClientBase(HttpClient http) : LlmClien
             && UsePromptCacheKey(connection))
             payload["prompt_cache_key"] = key;
 
+        if (IsOpenRouter(connection)) OpenRouterPromptCache.Apply(payload, connection, request);
         RequestJson.ApplyProviderOptions(payload, connection, request);
         return payload;
     }

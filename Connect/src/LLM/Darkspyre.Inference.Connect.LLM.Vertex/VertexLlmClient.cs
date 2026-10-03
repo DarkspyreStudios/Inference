@@ -257,6 +257,7 @@ internal sealed partial class VertexLlmClient(HttpClient http, IVertexAuthentica
         { throw new NotSupportedException("Vertex accepts only declared request controls."); }
         if (profile.IsClaude)
         {
+            AnthropicPromptCache.ValidateOptions(connection, request);
             AnthropicModelProfiles.ValidateSampling(request, AnthropicModelProfiles.Resolve(VertexEndpoints.ParseModel(request.ModelId).Model, null));
             _ = AnthropicSchemas.Enforcement(request, capabilities);
         }

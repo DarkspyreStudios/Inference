@@ -51,6 +51,7 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
         SupportsUsageDeltas = true,
         SupportsModelListing = false,
         SupportsAccountUsage = true,
+        PromptCache = PromptCaching.Automatic,
         SupportsJsonSchema = true,
         SupportsJsonObject = false,
         ReasoningLevels = ReasoningLevels,

@@ -54,6 +54,7 @@ internal sealed class OpenAiResponsesLlmClient(HttpClient http) : ResponsesLlmCl
         OpenAiModelProfile profile = OpenAiModelProfiles.Get(modelId);
         return capabilities with
         {
+            PromptCache = profile.SupportsPromptCacheOptions ? PromptCaching.OpenAi : PromptCaching.Automatic,
             ReasoningLevels = LlmCapabilityOverrideLookup.Overrides(connection, modelId, overrides => overrides.ReasoningLevels)
                 ? capabilities.ReasoningLevels
                 : profile.ReasoningLevels,

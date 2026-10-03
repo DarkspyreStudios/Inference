@@ -41,6 +41,7 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
         SupportsUsageDeltas = true,
         SupportsModelListing = true,
         SupportsAccountUsage = false,
+        PromptCache = PromptCaching.Claude,
         SupportsJsonSchema = false,
         SupportsJsonObject = false,
         SupportsTemperature = false,
@@ -172,6 +173,7 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
     internal static void ValidateTokenCountOptions(LlmConnection connection, LlmChatRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
+        AnthropicPromptCache.ValidateOptions(connection, request);
         if (connection.ProviderOptions.Keys.Concat(request.ProviderOptions.Keys).Any(name => name != AnthropicTools.OptionName
             && !IsTokenCountField(name) && !CountExcludedFields.Contains(name, StringComparer.Ordinal)))
             throw new NotSupportedException("The Anthropic count API cannot represent one of the configured provider fields.");
@@ -882,6 +884,7 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
         }
 
         AnthropicToolContinuation.Validate(payload);
+        AnthropicPromptCache.Apply(payload, connection, request);
         RequestJson.ApplyProviderOptions(payload, connection, request, AnthropicTools.OptionName);
         return payload;
     }

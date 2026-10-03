@@ -17,6 +17,7 @@ internal static class GeminiCapabilities
             SupportsStreamingUsage = true,
             SupportsUsageDeltas = true,
             SupportsModelListing = true,
+            PromptCache = PromptCaching.Automatic,
             OutputLimitEnforcement = LlmOutputLimitEnforcement.ProviderEnforced,
             SupportsJsonSchema = true,
             SupportsTemperature = profile.AllowsSampling,

@@ -2314,6 +2314,33 @@ including tool continuations and accounting projections. A hint does not promise
 savings or a billed cache resource. Reported cache reads and writes remain in `CachedInputTokens`
 and `CacheWriteInputTokens`.
 
+Anthropic API and Vertex Claude share cache markers in generation and exact-count requests. Prefix
+marks the last nonempty system block, or the last tool when no system text exists. Conversation also
+sets the top-level automatic marker. Extended requests one hour; Default leaves the provider TTL
+unchanged. Signed and opaque continuation blocks are not modified. A supplied hint conflicts with
+raw `cache_control` options.
+
+Bedrock Converse and ConverseStream share one exact model-ID cache fact lookup after the existing
+geographic-prefix removal. Only documented Claude and Nova IDs receive markers or cache support.
+Claude supports system, tool and message points; Nova supports system and message points only.
+Default uses five minutes. Extended uses one hour only for documented supporting Claude IDs and
+otherwise falls back to five minutes. Supported Claude and Nova IDs report implicit caching too.
+Unknown IDs keep their prompt unchanged. No local token threshold or cache hit is inferred.
+
+OpenAI Responses uses `prompt_cache_options.ttl = "30m"` for Extended on its supported GPT-5.6
+and GPT-6 profile rows. Default and Scope add no field. Other OpenAI profiles, Codex, Claude CLI,
+Gemini API and Vertex Gemini report automatic-only caching. Responses cache options never flow
+into another transport through inheritance.
+
+The recognized OpenRouter Chat Completions endpoint projects documented content markers for Claude,
+supported OpenAI profiles, Gemini 2.5/3 and the listed Alibaba explicit-cache models. Claude
+Conversation uses the top-level automatic marker; other mapped conversations mark their last text
+block. Prefix marks a system/developer text block. A tool-only Prefix leaves the hint unused without
+changing the prompt or tools. Claude Extended requests one hour; supported OpenAI Extended requests
+30 minutes; other mapped retentions fall back to Default. Known automatic-only routes add no marker.
+Raw options cannot override the supported neutral cache control. These declarations describe request
+projection, not observed cache hits, access or provider qualification.
+
 ## Provider setup and editing
 
 `LlmProviderCatalog.SetupDefinitions` describes providers without resolving connections or
