@@ -91,10 +91,21 @@ Supplied page controls are forwarded without inferred limits or automatic paging
 cursors and timezone-qualified timestamps retain actual observations; date-only timestamps are not
 converted to invented instants. Mutation dispatch and validated prior/returned receipts survive late
 cancellation and failure, with response facts belonging only to the current HTTP stage.
-Incremental requests, result retrieval/materialization, JSONL creation and deferred submission/retrieval
+Deferred submission also uses that same selected snapshot, borrowed HTTP/Files owners and canonical
+Chat Completions body. Typed controls, schema numeric guarantees, function-only tools and supplied
+native history are checked before credential refresh or resource effects. Logical prompt resources
+use the existing chat preparation boundary; distinct uploads are observed at actual dispatch and
+receipt parsing before cleanup. The returned deferred receipt preserves the actual `request_id`;
+its scope describes the fixed deferred route and selected connection, not account authority.
+Submission timestamps and expiry remain unknown when absent from the response. Chat continuation
+state has a distinct xAI Chat-lane identity and is never replayed as Responses state.
+Incremental requests, result retrieval/materialization, JSONL creation and deferred retrieval
 remain explicitly unavailable before connection resolution, credential refresh or resource effects.
+Deferred retrieval still needs the agreed generated-output success receipt contract before it can
+publish `output_files` as actual committed session resources. Logical rich tool-output carriage in
+deferred Chat is likewise not implemented; it is refused before upload rather than omitted.
 Disposal fences entry, drains admitted operations, shares retirement completion and releases borrowed
-references without disposing them. Actual HTTP cleanup refusal retains the failed owner and is reported
+references without disposing them. Actual HTTP and preparation cleanup refusal retains the failed owner and is reported
 by retirement; ordinary operation failures do not poison retirement. No operation retries or rolls back.
 Caller cancellation retains the existing facade entry precedence. The owned codec refuses both
 nonnull concrete and interface facade values; null runtime values remain portable.

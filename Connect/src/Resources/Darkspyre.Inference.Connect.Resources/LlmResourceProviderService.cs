@@ -2,6 +2,7 @@ using System.Diagnostics.CodeAnalysis;
 using Darkspyre.Inference.Common.Resources;
 using Darkspyre.Inference.Connect.LLM;
 using Darkspyre.Inference.Connect.LLM.Internal;
+using Darkspyre.Inference.Connect.Resources.Internal;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Darkspyre.Inference.Connect.Resources;
@@ -62,9 +63,70 @@ public sealed class LlmResourceProviderService : ILlmBatchClient, IDisposable, I
                 return await protocol.CancelAsync(batch.Id, token).ConfigureAwait(false);
             }, cancellationToken);
 
-    public Task<LlmDeferredCompletion> SubmitDeferredAsync(string connectionId, LlmChatRequest request,
+    [SuppressMessage("Design", "CA1031", Justification = "The admitted deferred boundary preserves separately observed uploads, dispatch and actual cleanup outcomes.")]
+    public async Task<LlmDeferredCompletion> SubmitDeferredAsync(string connectionId, LlmChatRequest request,
         IInferenceResourceAccess? resources = null, CancellationToken cancellationToken = default)
-        => Task.FromException<LlmDeferredCompletion>(Unavailable(cancellationToken));
+    {
+        using LlmOperationLifetime.Lease operation = _lifetime.Enter(cancellationToken);
+        CancellationToken token = operation.Token;
+        void Fence()
+        {
+            token.ThrowIfCancellationRequested();
+            try { _lifetime.ThrowIfStopping(); }
+            catch (ObjectDisposedException error)
+            { throw new OperationCanceledException("The resource facade is stopping.", error, token); }
+        }
+        ArgumentException.ThrowIfNullOrWhiteSpace(connectionId);
+        ArgumentNullException.ThrowIfNull(request);
+        if (resources is not null && request.Resources is not null && !ReferenceEquals(resources, request.Resources))
+            throw new ArgumentException("The request and operation must borrow the same resource access.", nameof(resources));
+        Fence();
+        LlmChatRequest entered = ClientTools.Snapshot(request) with
+        {
+            Resources = resources ?? request.Resources,
+            HostedTools = HostedTools.Snapshot(request.HostedTools)
+        };
+        Fence();
+        LlmProviderService? core = _providerService;
+        if (core is null || !core.SupportsXaiSnapshot)
+            throw new NotSupportedException("The resource facade requires an implemented xAI LLM core route.");
+        Fence();
+        var observation = new XaiResourceHttp.Observation(LlmResourceOperation.SubmitDeferred);
+        try
+        {
+            LlmConnection snapshot = await _connectionAccess!.AcquireAsync(connectionId, selected =>
+            {
+                Fence();
+                core.ValidateXaiSnapshotRequest(selected, http =>
+                {
+                    var codec = new XaiDeferredChatCodec(http);
+                    codec.ValidatePreparedRequest(selected, entered, codec.GetCapabilities(selected, entered.ModelId));
+                    Fence();
+                    // This sealed private codec prepares immediately without I/O. Validate native history before refresh/upload.
+                    LlmConnection prepared = codec.PrepareAsync(selected, token).GetAwaiter().GetResult();
+                    _ = ContinuationStateProjection.Project(entered, prepared);
+                    Fence();
+                });
+                Fence();
+            }, token).ConfigureAwait(false);
+            Fence();
+            LlmDeferredCompletion result = await core.RunXaiSnapshotAsync(snapshot, Fence,
+                (http, selected, ownerFence, innerToken) => entered.Resources is null
+                    ? new XaiDeferredProtocol(http, selected, connectionId, observation, ownerFence)
+                        .SubmitAsync(entered, null, innerToken)
+                    : core.RunXaiFilesSnapshotAsync(selected, ownerFence, (files, current, filesFence, filesToken) =>
+                        new XaiDeferredProtocol(http, current, connectionId, observation, filesFence)
+                            .SubmitAsync(entered, files, filesToken), innerToken), token).ConfigureAwait(false);
+            Fence();
+            return result;
+        }
+        catch (Exception error)
+        {
+            Exception reported = XaiResourceHttp.OperationFailure(error, observation);
+            _cleanup.Record(reported);
+            throw reported;
+        }
+    }
 
     public Task<LlmDeferredResult> GetDeferredAsync(string connectionId, LlmDeferredCompletion completion,
         IInferenceResourceAccess? resources = null, CancellationToken cancellationToken = default)
@@ -103,7 +165,7 @@ public sealed class LlmResourceProviderService : ILlmBatchClient, IDisposable, I
         if (core is null || !core.SupportsXaiSnapshot)
             throw new NotSupportedException("The resource facade requires an implemented xAI LLM core route.");
         Fence();
-        var observation = new XaiBatchProtocol.Observation(kind, batch);
+        var observation = new XaiResourceHttp.Observation(kind, batch);
         try
         {
             LlmConnection snapshot = await _connectionAccess!.AcquireAsync(connectionId, connection =>
@@ -122,7 +184,7 @@ public sealed class LlmResourceProviderService : ILlmBatchClient, IDisposable, I
         catch (Exception error)
         {
             _cleanup.Record(error);
-            throw XaiBatchProtocol.OperationFailure(error, observation);
+            throw XaiResourceHttp.OperationFailure(error, observation);
         }
     }
 

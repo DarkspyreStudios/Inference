@@ -46,16 +46,19 @@ internal sealed class XaiDeferredChatCodec(HttpClient http) : ChatCompletionsLlm
             ReasoningLevels = profile.ReasoningLevels,
             SupportsTemperature = profile.AllowsSampling,
             SupportsTopP = profile.AllowsSampling,
+            SupportsPromptImages = profile.AcceptsImages,
             SupportsPresencePenalty = !reasoning,
             SupportsFrequencyPenalty = !reasoning,
             MaxStopSequences = reasoning ? 0 : 4
         };
-        return LlmCapabilityOverrideLookup.Apply(defaults, connection, modelId, false) with
+        LlmProviderCapabilities capabilities = LlmCapabilityOverrideLookup.Apply(defaults, connection, modelId, false);
+        return capabilities with
         {
             SupportsStreaming = false,
             SupportsStreamingUsage = false,
             SupportsTopK = false,
             SupportsExplicitCache = false,
+            SupportsPromptImages = capabilities.SupportsPromptImages && profile.AcceptsImages,
             SupportsShellTools = false,
             HostedTools = FrozenSet<LlmHostedToolKind>.Empty
         };
@@ -63,6 +66,7 @@ internal sealed class XaiDeferredChatCodec(HttpClient http) : ChatCompletionsLlm
 
     protected override void ValidateAdditionalRequest(LlmConnection connection, LlmChatRequest request)
     {
+        request = ProviderControlPolicy.Resolve(connection, request);
         _ = XaiRequestHeaders.Require(connection);
         ProviderHttp.ValidateAdditionalHeaders(connection.AdditionalHeaders);
         LlmResourcePreparation.ValidateArguments(request);
@@ -70,6 +74,8 @@ internal sealed class XaiDeferredChatCodec(HttpClient http) : ChatCompletionsLlm
             throw new ArgumentException("Deferred chat controls use typed request and connection properties.", nameof(request));
         if (request.Temperature is < 0 or > 2)
             throw new ArgumentOutOfRangeException(nameof(request), "Grok temperature must be in [0, 2].");
+        if (request.PresencePenalty is < -2 or > 2 || request.FrequencyPenalty is < -2 or > 2)
+            throw new ArgumentOutOfRangeException(nameof(request), "Grok sampling penalties must be in [-2, 2].");
         if (request.Tools.Count > 350)
             throw new NotSupportedException("Grok accepts at most 350 client functions.");
         foreach (LlmToolDefinition tool in ClientTools.Functions(request.Tools))
@@ -86,6 +92,7 @@ internal sealed class XaiDeferredChatCodec(HttpClient http) : ChatCompletionsLlm
         if (request.Messages.SelectMany(message => ClientTools.Functions(message.ToolResults))
             .SelectMany(result => result.Output.Parts).Any(part => part is LlmToolOutputSessionResource))
             throw new NotSupportedException("Deferred Chat tool messages have no native logical-resource output mapping.");
+        _ = XaiSchemaLimits.ResolveEnforcement(request.StructuredOutput, GetCapabilities(connection, request.ModelId));
     }
 
     protected override JsonObject BuildPayload(LlmConnection connection, LlmChatRequest request,

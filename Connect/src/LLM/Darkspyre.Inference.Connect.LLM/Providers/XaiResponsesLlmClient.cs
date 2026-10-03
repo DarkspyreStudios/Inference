@@ -244,8 +244,7 @@ internal sealed class XaiResponsesLlmClient(HttpClient http) : ResponsesLlmClien
 
     protected override LlmStructuredOutputEnforcement? ResolveStructuredOutputEnforcement(
         LlmConnection connection, LlmChatRequest request, LlmProviderCapabilities capabilities) =>
-        request.StructuredOutput is { } output ? StructuredOutput.ResolveEnforcement(output,
-            XaiSchemaLimits.Fits(output.Schema) ? capabilities : capabilities with { SupportsJsonSchema = false, SupportsJsonObject = false }) : null;
+        XaiSchemaLimits.ResolveEnforcement(request.StructuredOutput, capabilities);
 
     protected override void ApplyRequestHeaders(HttpRequestMessage message, LlmConnection connection, LlmChatRequest request) =>
         XaiRequestHeaders.Apply(message, connection, message.Method == HttpMethod.Post && GetCapabilities(connection, request.ModelId).SupportsStreaming);
