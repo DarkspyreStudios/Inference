@@ -11,13 +11,15 @@ internal static class OpenAiResponsesTools
         LlmChatRequest request,
         LlmConnection connection,
         Func<LlmChatMessage, JsonObject> mapTextMessage,
-        Func<LlmToolOutput, ProjectedToolOutput> projectToolOutput)
+        Func<LlmToolOutput, ProjectedToolOutput> projectToolOutput,
+        int? messageCount = null)
     {
         var input = new JsonArray();
         IReadOnlyDictionary<string, LlmShellCall> shellCalls = ClientTools.Validate(request,
             connection.Transport == LlmTransport.XaiResponses);
 
-        foreach (LlmChatMessage message in request.Messages)
+        // Accounting may project a prefix, but admission always validates the complete history.
+        foreach (LlmChatMessage message in request.Messages.Take(messageCount ?? request.Messages.Count))
         {
             if (message.ContinuationState is not null)
             {

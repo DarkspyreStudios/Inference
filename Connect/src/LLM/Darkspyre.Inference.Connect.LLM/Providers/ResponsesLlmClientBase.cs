@@ -70,9 +70,12 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
         // Input items are built message by message, so the prefix's own projection marks where the rest begins.
         // The reported input already includes that request's instructions and tools.
         JsonArray full = (JsonArray)payload["input"]!;
-        int prefixItems = ((JsonArray)BuildPayload(connection,
-            request with { Messages = [.. request.Messages.Take(reported + 1)] }, enforcement,
-            capabilities.SupportsStreaming)["input"]!).Count;
+        int prefixItems = Transport == LlmTransport.XaiResponses
+            ? OpenAiResponsesTools.BuildInput(request, connection, OpenAiResponsesTools.BuildMessage,
+                output => ProjectToolOutput(connection, request.ModelId, output), reported + 1).Count
+            : ((JsonArray)BuildPayload(connection,
+                request with { Messages = [.. request.Messages.Take(reported + 1)] }, enforcement,
+                capabilities.SupportsStreaming)["input"]!).Count;
         var tail = new JsonArray([.. full.Skip(prefixItems).Select(item => item?.DeepClone())]);
         LlmContinuationState state = request.Messages[reported].ContinuationState!;
         return new ContextEstimate(state.InputTokens!.Value + state.OutputTokens!.Value
