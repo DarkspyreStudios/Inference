@@ -114,18 +114,18 @@ public sealed record LlmHostedImageOutput(ReadOnlyMemory<byte> Data, string Medi
     [JsonRequired]
     public string MediaType { get; init => field = HostedSnapshot.Required(value); } = HostedSnapshot.Required(MediaType);
 }
-public sealed record LlmHostedToolCall(string CallId, LlmHostedToolKind Kind,
-    string Name, string Status,
+public sealed record LlmHostedToolCall(string? CallId, LlmHostedToolKind Kind,
+    string Name, string? Status,
     JsonElement? Input, LlmHostedToolOutput? Output)
 {
     [JsonRequired]
-    public string CallId { get; init => field = HostedSnapshot.Identity(value); } = HostedSnapshot.Identity(CallId);
+    public string? CallId { get; init; } = CallId;
     [JsonRequired]
     public LlmHostedToolKind Kind { get; init => field = HostedSnapshot.Defined(value); } = HostedSnapshot.Defined(Kind);
     [JsonRequired]
     public string Name { get; init => field = HostedSnapshot.Identity(value); } = HostedSnapshot.Identity(Name);
     [JsonRequired]
-    public string Status { get; init => field = HostedSnapshot.Required(value); } = HostedSnapshot.Required(Status);
+    public string? Status { get; init; } = Status;
     public JsonElement? Input { get; init; } = Input?.Clone();
 }
 public sealed record LlmHostedToolCallStartedEvent(string CallId,

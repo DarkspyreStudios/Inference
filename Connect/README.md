@@ -277,6 +277,11 @@ Anthropic server-tool configuration is separate and does not advertise the new h
 Managed sessions snapshot hosted data, borrow authorization and preserve actual streamed hosted
 and citation observations under the invocation RequestId; they never route hosted observations to
 the host function handler. Terminal chat/portable results preserve ordered citation lists.
+Completed hosted calls preserve independently nullable observed IDs and status through the same
+snapshot and nested agent/realtime metadata. Actual empty or whitespace strings remain unchanged;
+they are not usable lifecycle correlation IDs. Owned portable JSON requires both nullable members
+explicitly. Started/progress events still require usable actual IDs and observed lifecycle facts.
+Completion reports an actual terminal item, not successful tool execution or an inferred start.
 Facade generation, input counting and request measurement freeze hosted descriptors before the
 first connection-source await. Later caller mutations cannot change admitted filters or headers;
 authorization stays borrowed. Owned hosted-event metadata requires actual scope and observation

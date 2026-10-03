@@ -156,15 +156,19 @@ provider features or infer totals from partial observations.
 
 Hosted tools use a closed `type` union, separate from caller-executed functions. Requests carry
 ordered `HostedTools` and optional positive `MaxHostedTurns`; capability sets are frozen and empty
-by default. Hosted calls retain actual status, optional input/output and ordered source/log/error
-facts. Citation offsets are nullable UTF-16 positions in emitted text, with an exclusive end.
+by default. Completed hosted calls retain independently nullable observed IDs and status, optional
+input/output and ordered source/log/error facts. Actual strings, including empty or whitespace
+strings, remain unchanged. Started and progress events require usable actual IDs. A completed call
+does not imply a successful tool execution or a preceding start/progress event.
+Citation offsets are nullable UTF-16 positions in emitted text, with an exclusive end.
 Unknown positions and optional output remain absent, not inferred. Concrete hosted/citation events
 have exact-name `InferenceJson` getters; their event base has no discriminator. Live remote-MCP
 authorization is borrowed and refuses non-null owned JSON read/write without invoking its callback.
 Null authorization roundtrips; explicitly serialized header data remains secret data, while
 remote-MCP diagnostics are redacted. Common's union rejects caller-defined variants; Connect owns
 the fixed xAI search extension and its extension-aware portable metadata.
-Owned hosted metadata rejects missing observation identities, kind/phase facts and image bytes.
+Owned hosted metadata requires explicit completed-call ID/status members; null represents an
+unreported fact. Started/progress identities, kind/phase facts and image bytes remain mandatory.
 Hosted-tool kinds are closed on owned JSON read/write, including capability sets and usage dictionary
 keys. Defined values retain their numeric encoding and standard named/numeric dictionary-key reads;
 unknown kinds refuse without converting observed zero counts or absent facts into other values.
