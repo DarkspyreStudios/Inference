@@ -50,10 +50,15 @@ public sealed record ImagePreparedReference(ImageReference Metadata,
         = Scope ?? throw new ArgumentNullException(nameof(Scope));
     [JsonRequired]
     public JsonElement ProviderState { get; init => field = value.Clone(); } = ProviderState.Clone();
+
+    public override string ToString() => "ImagePreparedReference { <receipt> }";
 }
 
 /// <summary>Opaque adapter request state that can be persisted and submitted later.</summary>
-public sealed record PreparedImageTransportRequest(string ProviderRequest);
+public sealed record PreparedImageTransportRequest(string ProviderRequest)
+{
+    public override string ToString() => "PreparedImageTransportRequest { <request> }";
+}
 
 public enum ImageTransportJobState
 {
@@ -74,6 +79,8 @@ public sealed record ImageTransportOutput(string? FileName,
         = Scope ?? throw new ArgumentNullException(nameof(Scope));
     [JsonRequired]
     public JsonElement ProviderState { get; init => field = value.Clone(); } = ProviderState.Clone();
+
+    public override string ToString() => "ImageTransportOutput { <output> }";
 }
 
 public sealed record ImageTransportDownload(string? ContentType, ReadOnlyMemory<byte> Data)
@@ -97,6 +104,8 @@ public sealed record ImageTransportJobSnapshot(
     public IReadOnlyList<ImageTransportOutput>? Outputs { get; init => field = value is null ? null : Array.AsReadOnly(value.ToArray()); }
         = Outputs is null ? null : Array.AsReadOnly(Outputs.ToArray());
     public JsonElement? Diagnostics { get; init => field = value?.Clone(); } = Diagnostics?.Clone();
+
+    public override string ToString() => "ImageTransportJobSnapshot { <snapshot> }";
 }
 
 public enum ImageTransportProgressKind
