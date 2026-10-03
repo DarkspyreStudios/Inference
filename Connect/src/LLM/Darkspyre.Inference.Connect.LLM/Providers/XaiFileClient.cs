@@ -16,7 +16,8 @@ internal sealed class XaiFileClient(HttpClient http) : IDisposable, IAsyncDispos
     private HttpClient? _http = http;
 
     internal async Task<LlmProviderFile> UploadAsync(LlmConnection connection, Stream source, string fileName,
-        LlmFileUploadOptions? options, Action fence, CancellationToken cancellationToken)
+        LlmFileUploadOptions? options, Action fence, CancellationToken cancellationToken,
+        Action? onDispatched = null, Action<LlmProviderFile>? onObserved = null)
     {
         using LlmOperationLifetime.Lease operation = _lifetime.Enter(cancellationToken);
         cancellationToken = operation.Token;
@@ -37,7 +38,12 @@ internal sealed class XaiFileClient(HttpClient http) : IDisposable, IAsyncDispos
                 if (expiry is { } seconds) multipart.Add(new StringContent(seconds.ToString(CultureInfo.InvariantCulture)), "expires_after");
                 upload = new UploadContent(source, () => Check(fence, cancellationToken), cancellationToken);
                 multipart.Add(upload, "file", fileName);
-            }, response => ReadAsync(connection, response, ReadFile, fence, cancellationToken), fence, cancellationToken).ConfigureAwait(false);
+            }, response => ReadAsync(connection, response, root =>
+            {
+                LlmProviderFile observed = ReadFile(root);
+                onObserved?.Invoke(observed);
+                return observed;
+            }, fence, cancellationToken), fence, cancellationToken, onDispatched).ConfigureAwait(false);
             return consumption.Publish(result);
         }
         finally { upload?.DetachBorrowed(); }
@@ -126,7 +132,8 @@ internal sealed class XaiFileClient(HttpClient http) : IDisposable, IAsyncDispos
     }
 
     private async Task<T> ExchangeAsync<T>(LlmConnection connection, HttpMethod method, string path,
-        Action<HttpRequestMessage> configure, Func<HttpResponseMessage, Task<T>> read, Action fence, CancellationToken token)
+        Action<HttpRequestMessage> configure, Func<HttpResponseMessage, Task<T>> read, Action fence, CancellationToken token,
+        Action? onDispatched = null)
     {
         HttpRequestMessage? request = null;
         HttpResponseMessage? response = null;
@@ -138,6 +145,8 @@ internal sealed class XaiFileClient(HttpClient http) : IDisposable, IAsyncDispos
             XaiRequestHeaders.Apply(request, connection, false);
             configure(request);
             Check(fence, token);
+            // The internal sink records possible effects at the same boundary as SendAsync.
+            onDispatched?.Invoke();
             response = await _http!.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token).ConfigureAwait(false);
             Check(fence, token);
             result = await read(response).ConfigureAwait(false);
