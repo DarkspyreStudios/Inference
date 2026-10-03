@@ -1136,6 +1136,13 @@ stream response references. The owner retains exact resources whose cleanup fail
 errors; repeated disposal shares that failure and does not retry cleanup. A failed stream opening
 preserves both its original operation error and a response-cleanup error when both occur.
 
+Model discovery preserves every successful catalog lane, including an empty response. A failed lane
+logs a warning through the standard host logger. Two failed lanes also log an error and return ordered
+safe failures, not an empty catalog. An optional resolution failure logs a warning and retains the exact
+requested model ID for invocation. Diagnostics contain fixed operations, observed status and protected
+SDK error-code/request-ID fields, never raw exceptions or provider content. A refused logging sink
+preserves the discovery failure and the separate logging failure behind safe diagnostics.
+
 Clients use a private default AWS credential resolver and SDK-client-local HTTP caches. Retiring
 the SDK owner disposes the resolver and the SDK pipelines' HTTP pools. Runtime and AgentCore HTTP
 clients have infinite generation timeouts; control-plane clients retain their SDK timeout.
