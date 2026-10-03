@@ -12,7 +12,7 @@ using Darkspyre.Inference.Connect.LLM.Providers;
 namespace Darkspyre.Inference.Connect.Resources.Internal;
 
 /// <summary>The single admitted batch/deferred HTTP exchange; borrows the selected HTTP owner.</summary>
-internal sealed class XaiResourceHttp(HttpClient http, LlmConnection connection, Observation observation, Action fence)
+internal sealed class XaiResourceHttp(HttpClient http, LlmConnection connection, XaiResourceHttp.Observation observation, Action fence)
 {
     private readonly LlmCredential? _credential = LlmCredential.Parse(connection.Credential);
     private readonly string[] _secrets = connection.AdditionalHeaders.Values.ToArray();
@@ -92,18 +92,20 @@ internal sealed class XaiResourceHttp(HttpClient http, LlmConnection connection,
         if (error is InferenceResourceOperationException resource)
         {
             observation.ResourceFailure = resource.Failure;
+            if (IsOwnedSafe(resource.InnerException)) return resource;
             Exception safe = new InferenceResourceOperationException(resource.Code,
                 "The resource operation failed.", resource.Failure,
-                resource.InnerException is { } cause ? SafeFailure(cause, observation, true) : new FailureEvidence(resource));
+                new FailureEvidence(resource, resource.InnerException is { } cause ? SafeFailure(cause, observation, true) : null));
             return resource.Failure.Phase == InferenceResourceOperationPhase.Cleanup
                 ? LlmResourcePreparation.AsCleanupFailure(safe, refusedOwner: resource) : safe;
         }
         if (error is InferenceResourceOperationCanceledException canceledResource)
         {
             observation.ResourceFailure = canceledResource.Failure;
+            if (IsOwnedSafe(canceledResource.InnerException)) return canceledResource;
             Exception safe = new InferenceResourceOperationCanceledException(canceledResource.Failure,
                 canceledResource.CancellationToken,
-                canceledResource.InnerException is { } cause ? SafeFailure(cause, observation, true) : new FailureEvidence(canceledResource));
+                new FailureEvidence(canceledResource, canceledResource.InnerException is { } cause ? SafeFailure(cause, observation, true) : null));
             return canceledResource.Failure.Phase == InferenceResourceOperationPhase.Cleanup
                 ? LlmResourcePreparation.AsCleanupFailure(safe, refusedOwner: canceledResource) : safe;
         }
@@ -125,6 +127,9 @@ internal sealed class XaiResourceHttp(HttpClient http, LlmConnection connection,
         provider.ProviderCode is "xai_authentication_required" or "xai_entitlement_required" ? provider.ProviderCode : null,
         retryAfter: provider.RetryAfter, innerException: new FailureEvidence(original));
 
+    private static bool IsOwnedSafe(Exception? error) => error is FailureEvidence
+        || error is OperationCanceledException { InnerException: FailureEvidence };
+
     private static Exception CleanupFailure(Exception original, object owner)
     {
         var evidence = new FailureEvidence(original);
@@ -133,7 +138,8 @@ internal sealed class XaiResourceHttp(HttpClient http, LlmConnection connection,
         return LlmResourcePreparation.AsCleanupFailure(safe, refusedOwner: owner);
     }
 
-    private sealed class FailureEvidence(Exception original) : Exception("The resource HTTP boundary reported a failure.")
+    private sealed class FailureEvidence(Exception original, Exception? safeCause = null)
+        : Exception("The resource HTTP boundary reported a failure.", safeCause)
     {
         internal Exception Original { get; } = original;
     }

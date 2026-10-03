@@ -1,8 +1,10 @@
 using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Darkspyre.Inference.Common.Media;
 using Darkspyre.Inference.Common.Resources;
 using Darkspyre.Inference.Connect.LLM;
+using Darkspyre.Inference.Connect.LLM.Internal;
 using Darkspyre.Inference.Connect.LLM.Providers;
 using Darkspyre.Inference.Connect.Resources.Internal;
 

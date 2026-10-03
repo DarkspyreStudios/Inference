@@ -191,7 +191,7 @@ public sealed class LlmResourceProviderService : ILlmBatchClient, IDisposable, I
     private NotSupportedException Unavailable(CancellationToken cancellationToken)
     {
         using LlmOperationLifetime.Lease operation = _lifetime.Enter(cancellationToken);
-        return new NotSupportedException("No batch or deferred resource adapter is implemented.");
+        return new NotSupportedException("This batch or deferred operation is not implemented.");
     }
 
     /// <summary>Fences new work, drains admitted work and releases the borrowed access reference.</summary>
