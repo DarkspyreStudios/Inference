@@ -1314,23 +1314,26 @@ non-Windows run reports them as skipped; it does not qualify Windows invocation.
 
 `IDocumentSearchClient.SearchAsync` declares a connection-selected search over existing provider
 collections. `LlmProviderService` implements that exact operation. `AddLlmConnect` resolves the
-interface to the same scoped facade. Search remains unavailable before connection resolution,
-credential refresh or provider calls. The existing facade admission preserves caller cancellation
-and refuses calls after retirement. Supplied sources and authenticators remain borrowed.
+interface to the same scoped facade. Search dispatches only when the selected client is the built-in
+xAI Responses adapter. Other selected clients refuse before credential refresh or HTTP. The facade
+copies the request before connection resolution and uses one frozen connection for validation,
+credential refresh and search. Existing admission preserves caller cancellation and refuses calls
+after retirement. Supplied sources, authenticators and the selected HTTP client remain borrowed.
 
-Connect supplies the data contract and owned `ConnectLlmJson` metadata; it does not register a
-document-search adapter or advertise provider availability. Owned options reject non-null live
-`IDocumentSearchClient` values on read and write, including nested consumer-generated metadata;
+Connect supplies the data contract and owned `ConnectLlmJson` metadata. The facade route does not
+enable automatic Grok registration or establish OAuth or collection entitlement. Owned options
+reject non-null live `IDocumentSearchClient` values on read and write, including nested consumer-generated metadata;
 explicit null remains null. No runtime client is exported as portable data.
 
 The internal stateless xAI protocol maps typed search controls to `POST /v1/documents/search`.
 It uses a supplied immutable OAuth connection and the existing SDK consumption admission; it does
-not resolve or refresh credentials, register an adapter or activate the public facade. Chat
+not resolve or refresh credentials or register an adapter. Chat
 `ProviderOptions` are not copied into search JSON. Explicit non-default service tiers refuse
 before HTTP because the search route has no mapped tier control. Requests and responses have
 one cleanup owner; independent failures retain fixed-safe diagnostics and actual refused owners.
-Facade cleanup integration and the disposition of connection options remain separate from this
-private protocol. Subscription OAuth acceptance and collection entitlement remain unqualified.
+The facade applies the same connection validation before refresh and before saving refreshed
+credentials. It drains admitted search and retains actual cleanup refusals in its shared retirement
+result. Subscription OAuth acceptance and collection entitlement remain unqualified.
 
 `DocumentSearchRequest` carries ordered collection IDs, an opaque filter, optional grouping and a
 closed hybrid/semantic/keyword retrieval selection. Grouping supports `DocumentMinK` and

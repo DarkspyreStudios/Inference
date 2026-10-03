@@ -9,7 +9,7 @@ using Darkspyre.Inference.Connect.LLM.Internal;
 
 namespace Darkspyre.Inference.Connect.LLM.Providers;
 
-/// <summary>Unregistered stateless search protocol. The admitted connection, fence and HTTP client remain borrowed.</summary>
+/// <summary>Stateless search protocol consuming facade-admitted snapshots. The fence and HTTP client remain borrowed.</summary>
 internal static class XaiDocumentSearch
 {
     [SuppressMessage("Design", "CA1031", Justification = "Owned HTTP cleanup preserves independent failures and refused owners without exporting untrusted diagnostics.")]
@@ -22,14 +22,7 @@ internal static class XaiDocumentSearch
         using var consumption = SdkHttpConsumption.Enter(http, cancellationToken);
         void Fence() { consumption.Token.ThrowIfCancellationRequested(); consumption.Fence(); ownerFence(); }
         Fence();
-        connection = EmbeddingRequestData.Snapshot(connection);
-        request = Snapshot(request);
-        Fence();
-        XaiRequestHeaders.ValidateEndpoint(connection);
-        if ((connection.Xai?.ServiceTier ?? XaiServiceTier.Default) != XaiServiceTier.Default)
-            throw new NotSupportedException("This document-search adapter does not implement a service-tier control.");
-        ProviderHttp.ValidateAdditionalHeaders(connection.AdditionalHeaders);
-        _ = XaiAuthorization.Require(connection);
+        ValidateConnection(connection);
         Fence();
 
         HttpRequestMessage? message = null;
@@ -73,7 +66,17 @@ internal static class XaiDocumentSearch
         return consumption.Publish(result!);
     }
 
-    private static DocumentSearchRequest Snapshot(DocumentSearchRequest request)
+    internal static void ValidateConnection(LlmConnection connection)
+    {
+        ArgumentNullException.ThrowIfNull(connection);
+        XaiRequestHeaders.ValidateEndpoint(connection);
+        if ((connection.Xai?.ServiceTier ?? XaiServiceTier.Default) != XaiServiceTier.Default)
+            throw new NotSupportedException("This document-search adapter does not implement a service-tier control.");
+        ProviderHttp.ValidateAdditionalHeaders(connection.AdditionalHeaders);
+        _ = XaiAuthorization.Require(connection);
+    }
+
+    internal static DocumentSearchRequest Snapshot(DocumentSearchRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
         DocumentSearchGroupBy? group = request.GroupBy is { } grouping

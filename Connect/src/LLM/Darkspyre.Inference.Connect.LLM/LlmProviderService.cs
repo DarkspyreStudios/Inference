@@ -248,10 +248,41 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, ILlmFileClie
     Task<XaiSkillDeletion> IXaiSkillClient.DeleteAsync(string connectionId, string skillId,
         CancellationToken cancellationToken) => UnavailableResourceAsync<XaiSkillDeletion>(cancellationToken);
 
-    /// <summary>Search remains unavailable until a document-search adapter implements this route.</summary>
-    public Task<DocumentSearchResult> SearchAsync(string connectionId, DocumentSearchRequest request,
-        CancellationToken cancellationToken = default) =>
-        UnavailableResourceAsync<DocumentSearchResult>(cancellationToken, "No document-search adapter is implemented.");
+    /// <summary>Searches existing collections through the selected implemented document-search route.</summary>
+    public async Task<DocumentSearchResult> SearchAsync(string connectionId, DocumentSearchRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        using var operation = _lifetime.Enter(cancellationToken);
+        cancellationToken = operation.Token;
+        try
+        {
+            request = XaiDocumentSearch.Snapshot(request);
+            Fence();
+            LlmConnection connection = await ResolveConnectionAsync(connectionId, cancellationToken).ConfigureAwait(false);
+            Fence();
+            connection = EmbeddingRequestData.Snapshot(connection);
+            Fence();
+            if (ClientFor(connection.Transport) is not XaiResponsesLlmClient client)
+                throw new NotSupportedException("The selected transport has no document-search adapter.");
+            Validate(connection);
+            connection = await ConnectionAccess.RefreshAsync(connectionId, connection, Validate, Fence,
+                cancellationToken).ConfigureAwait(false);
+            Fence();
+            DocumentSearchResult result = await XaiDocumentSearch.SearchAsync(client.SharedHttp, connection,
+                request, Fence, cancellationToken).ConfigureAwait(false);
+            Fence();
+            return result;
+        }
+        catch (Exception error) { _cleanupOutcomes.Record(error); throw; }
+
+        void Fence() => ThrowIfOperationCanceled(cancellationToken);
+        void Validate(LlmConnection snapshot)
+        {
+            Fence();
+            XaiDocumentSearch.ValidateConnection(snapshot);
+            Fence();
+        }
+    }
 
     private Task<T> UnavailableResourceAsync<T>(CancellationToken cancellationToken,
         string message = "No Files or Skills resource adapter is implemented.")
