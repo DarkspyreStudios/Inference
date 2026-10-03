@@ -2488,9 +2488,12 @@ observed empty list. The data contracts alone do not stage audio;
 `RealtimeAudioDoneEvent` remains a separate native observation without a resource receipt.
 
 Common exposes `RealtimeOperationException` and `RealtimeOperationCanceledException` for copied
-error observations with actual causes. These declarations do not implement settled session
-completion or output-receipt recovery. The xAI realtime provider remains unregistered; its session
-completion and actual audio policy are not qualified by the exception contracts.
+error observations with actual causes. The xAI session uses one cached completion for Events and
+every disposer. It settles resource handles, socket cleanup and lifetime cancellation callbacks
+before reporting the final failure. A failure with pending committed audio carries its ordered
+actual artifacts and terminal provider status. A lone operation cancellation preserves its token;
+independent cleanup or publication failures remain faults. The adapter remains unregistered and
+provider execution remains unqualified.
 
 `XaiRealtimeProvider` implements the explicit xAI WebSocket command and observation route but is
 not registered by `AddRealtimeConnect()`. It borrows HTTP and the selected same-access binding.
@@ -2506,6 +2509,10 @@ stage. Command completion means local send completion, not provider acknowledgme
 do not wait for Events. The single Events consumer reads a bounded event/payload feed; retirement
 interrupts backpressure and drains admitted sends, receive work and resource callbacks.
 Dispatched send failure ends unsafe framing without reconnecting or replaying commands.
+Explicit disposal prevents late Events delivery and does not wait for a paused reader. Natural
+remote completion permits queued observations to drain, including when reading begins afterward.
+Caller-canceled enumeration exits without waiting for session cleanup; disposal still reports the
+settled session outcome.
 
 Explicit `session.update` model selectors follow the published WebSocket schema. An attempted
 routing change invalidates the original opening receipt proof before acknowledgment, including
@@ -2519,10 +2526,11 @@ actual compatible model/account evidence.
 Named tool documents use the shared scoped reader and once-only borrowed-content handling.
 Audio outputs use the shared speech writer; terminal publication carries actual committed
 descriptors and selection versions. Truncate and delete do not mutate immutable workspace bytes.
-Committed artifacts remain retained when terminal publication fails. The current runtime failure
-contracts do not expose their complete ordered artifact graph if the event cannot be published;
-the adapter remains unregistered. Owned cleanup failures retain their actual refused owners and
-the same retirement outcome. Healthy borrowed references detach after drain.
+The writer retains a validated actual commit receipt before a late scope fence. Session completion
+recovers pending artifacts when terminal publication fails, including a late post-commit refusal.
+Successful fenced publication releases that recovery snapshot; no session-wide artifact history is
+retained. Owned cleanup failures retain their actual refused owners and the same retirement outcome.
+Healthy borrowed references detach after drain.
 
 `CreateSettingsManager(target)` borrows the conditional commit target. Setup preserves every typed
 session default, separates protected header edits and removes live authorization from saved data.

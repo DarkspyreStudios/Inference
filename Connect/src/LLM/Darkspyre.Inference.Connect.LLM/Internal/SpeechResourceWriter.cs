@@ -71,6 +71,7 @@ internal static class SpeechResourceWriter
         private Task? _disposed;
 
         internal InferenceResourceSelectionVersion? SelectionVersion => _version;
+        internal InferenceResourceCommitResult? ObservedCommit { get; private set; }
 
         internal async Task OpenAsync(long? expectedBytes, CancellationToken token)
         {
@@ -115,13 +116,15 @@ internal static class SpeechResourceWriter
                         _version = new(observed.WorkspaceId, observed.SessionId, observed.Revision);
                     }
                 }
-                CheckScope(token);
                 var descriptor = receipt?.Resource;
                 if (descriptor is null || descriptor.Reference != _reference || descriptor.SessionId != scope.SessionId
                     || descriptor.Bytes is { } size && size != _bytes || contentType is not null && descriptor.ContentType is { } type && type != contentType
                     || _selection != InferenceResourceCommitOutcome.Committed) throw Invalid();
-                _ = new InferenceResourceSelection(scope.WorkspaceId, scope.SessionId, receipt!.Selection!.Revision, receipt.Selection.SelectedResources);
-                if (receipt.Selection.SelectedResources.Any(item => string.IsNullOrEmpty(item.Id))) throw Invalid();
+                var selection = new InferenceResourceSelection(receipt!.Selection!.WorkspaceId, receipt.Selection.SessionId,
+                    receipt.Selection.Revision, receipt.Selection.SelectedResources);
+                if (selection.SelectedResources.Any(item => string.IsNullOrEmpty(item.Id))) throw Invalid();
+                ObservedCommit = new(descriptor, selection);
+                CheckScope(token);
                 return descriptor;
             }
             catch (Exception error) { throw Failure(error); }

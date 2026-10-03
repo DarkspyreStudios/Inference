@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Net.WebSockets;
 using System.Runtime.CompilerServices;
 using System.Runtime.ExceptionServices;
@@ -44,7 +45,13 @@ internal sealed class XaiRealtimeSession : IRealtimeVoiceSession
     private long _attemptedModelBytes;
     private RealtimeConversationReference? _conversation;
     private Task _receiver = Task.CompletedTask;
-    private Exception? _terminalResource;
+    private Exception? _terminalFailure;
+    private readonly TaskCompletionSource _completion = Signal();
+    private bool _completionStarted;
+    private bool _explicitRetirement;
+    private RealtimeEventIdentity? _pendingIdentity;
+    private string? _pendingStatus;
+    private long _terminalMetadata;
     private TaskCompletionSource _space = Signal();
     private long _buffered;
     private long _pendingMetadata;
@@ -169,16 +176,32 @@ internal sealed class XaiRealtimeSession : IRealtimeVoiceSession
             }
             command.Sent?.Invoke(); Fence(token);
         }
-        catch { if (dispatched) _ = RetireAsync(); throw; }
+        catch (Exception error)
+        {
+            if (dispatched)
+            {
+                lock (_gate) { _terminalFailure = Combine(_terminalFailure, error); }
+                _ = RetireAsync(explicitRetirement: true);
+            }
+            throw;
+        }
         finally { _send.Release(); }
     }
 
     public IAsyncEnumerable<RealtimeEvent> Events => ReadAsync();
     private async IAsyncEnumerable<RealtimeEvent> ReadAsync([EnumeratorCancellation] CancellationToken caller = default)
     {
+        caller.ThrowIfCancellationRequested();
+        lock (_gate) { ObjectDisposedException.ThrowIf(_explicitRetirement, this); }
         if (Interlocked.Exchange(ref _reader, 1) != 0) throw new InvalidOperationException("A realtime session has one Events consumer.");
         await foreach (var item in _events.Reader.ReadAllAsync(caller).ConfigureAwait(false))
-        { Release(item.Bytes); caller.ThrowIfCancellationRequested(); yield return item.Event; }
+        {
+            Release(item.Bytes); caller.ThrowIfCancellationRequested();
+            bool retired; lock (_gate) { retired = _explicitRetirement; }
+            if (retired) break;
+            yield return item.Event;
+        }
+        await _completion.Task.WaitAsync(caller).ConfigureAwait(false);
     }
     private async Task ReceiveAsync()
     {
@@ -238,8 +261,8 @@ internal sealed class XaiRealtimeSession : IRealtimeVoiceSession
                 if (observation is not null) await ObserveAsync(observation, message.Length, token).ConfigureAwait(false);
             }
         }
-        catch (OperationCanceledException error) when (Stopping() && !LlmResourcePreparation.IsResourceFailure(error)) { }
-        catch (ChannelClosedException) when (Stopping()) { }
+        catch (OperationCanceledException error) when (Stopping() && _committed.Count == 0 && !LlmResourcePreparation.IsResourceFailure(error)) { }
+        catch (ChannelClosedException) when (Stopping() && _committed.Count == 0) { }
         catch (Exception error) { failure = error; }
         finally
         {
@@ -256,8 +279,8 @@ internal sealed class XaiRealtimeSession : IRealtimeVoiceSession
                     }
                 }
             _outputs.Clear();
-            if (failure is not null && LlmResourcePreparation.IsResourceFailure(failure)) _terminalResource = failure;
-            _events.Writer.TryComplete(failure);
+            lock (_gate) { _terminalFailure = Combine(_terminalFailure, failure); }
+            _events.Writer.TryComplete();
             _ = RetireAsync();
         }
     }
@@ -332,20 +355,28 @@ internal sealed class XaiRealtimeSession : IRealtimeVoiceSession
         {
             string? responseId = completed.Identity.ResponseId;
             if (responseId is null) throw XaiRealtimeProtocol.Malformed();
+            lock (_gate)
+            {
+                _terminalMetadata = StringSize(completed.Identity.EventId) + StringSize(responseId)
+                    + StringSize(completed.Identity.ItemId) + StringSize(completed.ProviderStatus) + 32;
+                if (!FitsMetadata(_terminalMetadata)) throw XaiRealtimeProtocol.Capacity();
+                _pendingMetadata += _terminalMetadata;
+                _pendingIdentity = completed.Identity; _pendingStatus = completed.ProviderStatus;
+            }
             var artifacts = new List<RealtimeAudioArtifact>();
             foreach (var pair in _outputs.Where(pair => pair.Key.ResponseId == responseId).ToArray())
             {
                 Output output = pair.Value;
                 if (output.Writer is { } writer)
                 {
-                    InferenceResourceDescriptor descriptor = await writer.CommitAsync(token).ConfigureAwait(false);
-                    var artifact = new RealtimeAudioArtifact(output.Identity, descriptor, output.Audio) { SelectionVersion = writer.SelectionVersion };
-                    _committed.Add(artifact); artifacts.Add(artifact);
-                    lock (_gate)
+                    try { _ = await writer.CommitAsync(token).ConfigureAwait(false); }
+                    catch
                     {
-                        _committedBytes = checked(_committedBytes + ArtifactSize(artifact));
-                        if (!FitsMetadata(0)) throw XaiRealtimeProtocol.Capacity();
+                        if (writer.ObservedCommit is not null) RetainArtifact(output, writer);
+                        throw;
                     }
+                    artifacts.Add(RetainArtifact(output, writer));
+                    if (!FitsMetadata(0)) throw XaiRealtimeProtocol.Capacity();
                     output.Writer = null;
                     await writer.DisposeAsync().ConfigureAwait(false); writer.Fence(token);
                 }
@@ -357,7 +388,27 @@ internal sealed class XaiRealtimeSession : IRealtimeVoiceSession
             // The terminal event owns the immutable receipts now; no unbounded committed history.
         }
         await PublishAsync(observation, size, token).ConfigureAwait(false);
-        if (observation is RealtimeResponseEvent { Stage: "response.done" }) { _committed.Clear(); lock (_gate) { _committedBytes = 0; } }
+        if (observation is RealtimeResponseEvent { Stage: "response.done" })
+        {
+            _committed.Clear();
+            lock (_gate)
+            {
+                _committedBytes = 0; _pendingMetadata -= _terminalMetadata; _terminalMetadata = 0;
+                _pendingIdentity = null; _pendingStatus = null;
+            }
+        }
+    }
+    private RealtimeAudioArtifact RetainArtifact(Output output, SpeechResourceWriter.Writer writer)
+    {
+        InferenceResourceCommitResult receipt = writer.ObservedCommit!;
+        var artifact = new RealtimeAudioArtifact(output.Identity, receipt.Resource, output.Audio)
+        { SelectionVersion = new(receipt.Selection!.WorkspaceId, receipt.Selection.SessionId, receipt.Selection.Revision) };
+        _committed.Add(artifact);
+        lock (_gate)
+        {
+            _committedBytes = checked(_committedBytes + ArtifactSize(artifact));
+        }
+        return artifact;
     }
     private sealed record OutputKey(string? ResponseId, string? ItemId, int? OutputIndex, int? ContentIndex);
     private sealed class Output(RealtimeEventIdentity identity, RealtimeAudioConfig? audio, long size)
@@ -449,25 +500,78 @@ internal sealed class XaiRealtimeSession : IRealtimeVoiceSession
     private static TaskCompletionSource Signal() => new(TaskCreationOptions.RunContinuationsAsynchronously);
     private bool Stopping() { try { _lifetime.ThrowIfStopping(); return false; } catch (ObjectDisposedException) { return true; } }
     private void Fence(CancellationToken token) { token.ThrowIfCancellationRequested(); if (Stopping()) throw new OperationCanceledException(token); }
-    public ValueTask DisposeAsync() => new(RetireAsync());
-    private Task RetireAsync()
+    public ValueTask DisposeAsync() => new(RetireAsync(explicitRetirement: true));
+    private Task RetireAsync(bool explicitRetirement = false)
     {
-        _events.Writer.TryComplete();
-        return _lifetime.RetireAsync(async () =>
+        bool start;
+        lock (_gate)
         {
-            await _receiver.ConfigureAwait(false);
-            _resources = null; _issue = null; _observeReceipt = null; _invalidateReceipt = null; _resumptionReceipt = null; _secrets = null;
-            WebSocket? socket = _socket; _socket = null;
-            try { socket?.Dispose(); } catch (Exception error) { _cleanup.Record(XaiRealtimeProvider.Cleanup(error, socket!)); }
-            _send.Dispose();
-            _responses.Clear(); _outputs.Clear(); _attemptedModels.Clear(); _input = null; _turn = null; _observedOutput = null;
+            _explicitRetirement |= explicitRetirement;
+            start = !_completionStarted; _completionStarted = true;
+        }
+        if (explicitRetirement) _events.Writer.TryComplete();
+        if (start) _ = CompleteAsync();
+        return _completion.Task;
+    }
+    [SuppressMessage("Design", "CA1031", Justification = "The cached completion preserves the settled failure for Events and every disposer.")]
+    private async Task CompleteAsync()
+    {
+        Exception? releaseFailure = null;
+        try
+        {
+            await _lifetime.RetireAsync(async () =>
+            {
+                await _receiver.ConfigureAwait(false);
+                _resources = null; _issue = null; _observeReceipt = null; _invalidateReceipt = null; _resumptionReceipt = null; _secrets = null;
+                WebSocket? socket = _socket; _socket = null;
+                try { socket?.Dispose(); } catch (Exception error) { _cleanup.Record(XaiRealtimeProvider.Cleanup(error, socket!)); }
+                _send.Dispose();
+                _responses.Clear(); _outputs.Clear(); _attemptedModels.Clear(); _input = null; _turn = null; _observedOutput = null;
+                var failures = new List<Exception>();
+                if (_terminalFailure is { } terminal) failures.Add(terminal);
+                try { await _cleanup.ReleaseAsync().ConfigureAwait(false); }
+                catch (Exception error) { AddUnseen(failures, error); }
+                releaseFailure = failures.Count switch { 0 => null, 1 => failures[0], _ => new AggregateException(failures) };
+                if (releaseFailure is not null) ExceptionDispatchInfo.Capture(releaseFailure).Throw();
+            }).ConfigureAwait(false);
+            _completion.TrySetResult();
+        }
+        catch (Exception error)
+        {
             var failures = new List<Exception>();
-            if (_terminalResource is { } terminal) failures.Add(terminal);
-            try { await _cleanup.ReleaseAsync().ConfigureAwait(false); }
-            catch (Exception error)
-            { AddUnseen(failures, error); }
-            XaiRealtimeProvider.Throw(failures);
-        });
+            if (releaseFailure is not null) failures.Add(releaseFailure);
+            AddUnseen(failures, error);
+            Exception cause = failures.Count == 1 ? failures[0] : new AggregateException(failures);
+            if (_committed.Count != 0)
+            {
+                var observation = new RealtimeErrorEvent(_pendingIdentity ?? _committed[0].Identity,
+                    new(InferenceFailureCode.ExecutionFailed, null, "The realtime operation could not deliver committed audio.", ResourceFailure(cause)))
+                { AudioArtifacts = _committed, ProviderStatus = _pendingStatus };
+                cause = cause is OperationCanceledException canceled && !LlmResourcePreparation.IsCleanupFailure(cause)
+                    ? new RealtimeOperationCanceledException(observation, canceled)
+                    : new RealtimeOperationException(observation, cause);
+            }
+            _completion.TrySetException(cause);
+        }
+        finally
+        {
+            _committed.Clear(); _pendingIdentity = null; _pendingStatus = null;
+            lock (_gate) { _committedBytes = 0; _pendingMetadata = 0; _terminalMetadata = 0; }
+        }
+    }
+    private static InferenceResourceOperationFailure? ResourceFailure(Exception error) => error switch
+    {
+        InferenceResourceOperationException resource => resource.Failure,
+        InferenceResourceOperationCanceledException resource => resource.Failure,
+        AggregateException aggregate => aggregate.InnerExceptions.Select(ResourceFailure).FirstOrDefault(failure => failure is not null),
+        _ => null
+    };
+    private static Exception? Combine(Exception? original, Exception? next)
+    {
+        if (next is null) return original;
+        if (original is null) return next;
+        var failures = new List<Exception> { original }; AddUnseen(failures, next);
+        return failures.Count == 1 ? original : new AggregateException(failures);
     }
     private static void AddUnseen(List<Exception> failures, Exception error)
     {
