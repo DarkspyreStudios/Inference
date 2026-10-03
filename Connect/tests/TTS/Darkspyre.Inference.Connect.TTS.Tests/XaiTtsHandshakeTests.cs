@@ -87,4 +87,38 @@ public sealed class XaiTtsHandshakeTests
             finally { _ = await Record.ExceptionAsync(() => retirement.WaitAsync(Bound)); }
         }
     }
+
+    [Fact]
+    public async Task SynchronousOpeningFencePrecedesUpgradeClassificationWhenCancellationPropagationIsHeld()
+    {
+        using var access = new LlmConnectionAccess(new XaiTtsTests.Source(), []);
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var callbackEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var callbackRelease = new ManualResetEventSlim();
+        using var http = new HttpClient(new XaiTtsTests.Handler(async _ =>
+        {
+            entered.TrySetResult(); await release.Task; return new(HttpStatusCode.Unauthorized);
+        }));
+        ITtsClient client = new XaiTtsProvider(http).Bind(XaiTtsTests.Connection, new(new("selected"), access));
+        Task<ITtsStreamingSession> opening = Assert.IsAssignableFrom<ITtsStreamingClient>(client).OpenStreamAsync(new(Language: "en"), Limits);
+        Task? retirement = null;
+        object lifetime = client.GetType().GetField("_lifetime", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(client)!;
+        var stop = (CancellationTokenSource)lifetime.GetType().GetField("_stop", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(lifetime)!;
+        using CancellationTokenRegistration callback = stop.Token.Register(() => { callbackEntered.TrySetResult(); callbackRelease.Wait(Bound); });
+        try
+        {
+            await entered.Task.WaitAsync(Bound);
+            retirement = client.DisposeAsync().AsTask(); await callbackEntered.Task.WaitAsync(Bound);
+            Assert.False(retirement.IsCompleted);
+            release.TrySetResult();
+            Assert.IsAssignableFrom<OperationCanceledException>(await Record.ExceptionAsync(() => opening.WaitAsync(Bound)));
+        }
+        finally
+        {
+            retirement ??= client.DisposeAsync().AsTask(); callbackRelease.Set(); release.TrySetResult();
+            try { _ = await Record.ExceptionAsync(() => opening.WaitAsync(Bound)); }
+            finally { _ = await Record.ExceptionAsync(() => retirement.WaitAsync(Bound)); }
+        }
+    }
 }
