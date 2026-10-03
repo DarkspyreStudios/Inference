@@ -201,7 +201,11 @@ internal static class XaiVideoProtocol
                 || moderation.ValueKind is not (JsonValueKind.True or JsonValueKind.False)) throw XaiMediaData.Malformed();
             var observed = new JsonObject { ["duration"] = seconds, ["respect_moderation"] = moderation.GetBoolean() };
             string? url = XaiMediaData.OptionalString(video, "url", protectedValue);
-            if (url is not null) { XaiMediaData.RequireHttpUrl(url); observed["url"] = url; }
+            if (url is not null)
+            {
+                if (url.Length != 0 || moderation.GetBoolean()) XaiMediaData.RequireHttpUrl(url);
+                observed["url"] = url;
+            }
             JsonObject? file = XaiMediaData.FileOutput(video, protectedValue);
             if (file is not null) observed["file_output"] = file;
             if (XaiMediaData.OptionalString(video, "storage_error", protectedValue) is not null) observed["storage_failed"] = true;
