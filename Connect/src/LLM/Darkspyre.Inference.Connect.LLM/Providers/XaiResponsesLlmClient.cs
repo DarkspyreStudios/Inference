@@ -118,6 +118,7 @@ internal sealed class XaiResponsesLlmClient(HttpClient http) : ResponsesLlmClien
     {
         if (connection.Xai?.ServiceTier == XaiServiceTier.Priority)
             throw new NotSupportedException("Grok Priority context compaction has not been qualified.");
+        ProviderHttp.ValidateAdditionalHeaders(connection.AdditionalHeaders);
         PreflightResourceRequest(connection, request);
     }
 
@@ -253,7 +254,7 @@ internal sealed class XaiResponsesLlmClient(HttpClient http) : ResponsesLlmClien
         LlmProviderException provider = original is InferenceException inference
             ? (LlmProviderException)inference.InnerException! : (LlmProviderException)original;
         var safe = new LlmProviderException("Grok context compaction request failed.", LlmTransport.XaiResponses,
-            provider.StatusCode, provider.ProviderCode is "xai_authentication_required" or "xai_entitlement_required" ? provider.ProviderCode : null,
+            provider.StatusCode, provider.ProviderCode is { } code ? SecretRedactor.Sanitize(code, credential, secrets) : null,
             provider.RequestId is { } id ? SecretRedactor.Sanitize(id, credential, secrets) : null, provider.RetryAfter,
             innerException: new CompactionEvidence(original), isContextOverflow: provider.IsContextOverflow);
         return original is InferenceException failure
