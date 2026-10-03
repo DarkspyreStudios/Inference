@@ -241,9 +241,9 @@ internal abstract class LlmClientBase(HttpClient http) : ILlmClient
         IReadOnlySet<string>? nativeToolNames = null)
     {
         bool hasToolHistory = request.Messages.Any(message =>
-            message.ToolCalls.Any(call => call is LlmToolCall) || message.ToolResults.Any(result => result is LlmToolResult));
+            message.ToolCalls.Count > 0 || message.ToolResults.Count > 0);
         // A text transcript carries tool history without asking the provider to run host tools.
-        bool requestsToolUse = request.Tools.Any(tool => tool is LlmToolDefinition)
+        bool requestsToolUse = request.Tools.Count > 0
             || request.ToolChoice is not null
             || request.AllowParallelToolCalls is not null
             || (hasToolHistory && capabilities.ToolHistory == LlmToolHistory.Structured);
@@ -292,12 +292,12 @@ internal abstract class LlmClientBase(HttpClient http) : ILlmClient
         }
 
         if (request.ToolChoice is { Mode: not LlmToolChoiceMode.None }
-            && toolNames.Count == 0)
+            && toolNames.Count == 0 && request.Tools.Count == 0)
         {
             throw new ArgumentException("Tool choice requires at least one request tool.", nameof(request));
         }
 
-        if (request.AllowParallelToolCalls is not null && toolNames.Count == 0)
+        if (request.AllowParallelToolCalls is not null && toolNames.Count == 0 && request.Tools.Count == 0)
         {
             throw new ArgumentException(
                 "Parallel tool-call control requires at least one request tool.",
