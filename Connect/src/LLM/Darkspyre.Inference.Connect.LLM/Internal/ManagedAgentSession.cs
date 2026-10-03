@@ -220,6 +220,14 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
         }
     }
 
+    public Task<LlmAgentContext> CompactWithProviderAsync(LlmProviderCompactionRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        using var operation = _resourceCallbacks.Enter(cancellationToken);
+        lock (_sync) { ThrowIfDisposed(); }
+        throw new NotSupportedException("This session does not support provider-created compaction proposals.");
+    }
+
     public async Task ReplaceContextAsync(LlmAgentContext context, long expectedRevision, CancellationToken cancellationToken = default)
     {
         using var operation = _resourceCallbacks.Enter(cancellationToken);
