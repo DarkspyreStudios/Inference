@@ -85,13 +85,27 @@ internal sealed class XaiFileClient(HttpClient http) : IDisposable, IAsyncDispos
         JsonAsync(connection, HttpMethod.Post, XaiFileRequestData.Path(fileId) + "/public-url/revoke", null,
             root => new XaiPublicUrlRevocation(XaiFileRequestData.Identity(Text(root, "id")), Boolean(root, "revoked"), PublicUrl(OptionalString(root, "public_url"))), fence, cancellationToken);
 
-    internal async Task<ResourceDownloadReceipt> DownloadAsync(LlmConnection connection, string fileId, Stream destination,
+    internal Task<ResourceDownloadReceipt> DownloadAsync(LlmConnection connection, string fileId, Stream destination,
         LlmFileDownloadOptions? options, Action fence, CancellationToken cancellationToken)
+        => DownloadCoreAsync(connection, () => XaiFileRequestData.Download(fileId, destination, options),
+            (_, _, _) => Task.FromResult(destination), fence, cancellationToken);
+
+    internal Task<ResourceDownloadReceipt> DownloadToAsync(LlmConnection connection, string fileId,
+        Func<string?, long?, CancellationToken, Task<Stream>> openDestination, Action fence,
+        CancellationToken cancellationToken, Action onDispatched, Action<HttpResponseMessage> onResponse)
+        => DownloadCoreAsync(connection, () => XaiFileRequestData.DownloadPath(fileId, null),
+            openDestination, fence, cancellationToken, onDispatched, onResponse);
+
+    private async Task<ResourceDownloadReceipt> DownloadCoreAsync(LlmConnection connection, Func<string> pathFactory,
+        Func<string?, long?, CancellationToken, Task<Stream>> openDestination, Action fence,
+        CancellationToken cancellationToken, Action? onDispatched = null, Action<HttpResponseMessage>? onResponse = null)
     {
         using LlmOperationLifetime.Lease operation = _lifetime.Enter(cancellationToken);
         cancellationToken = operation.Token;
         Check(fence, cancellationToken);
-        string path = XaiFileRequestData.Download(fileId, destination, options);
+        ArgumentNullException.ThrowIfNull(openDestination);
+        string path = pathFactory();
+        Check(fence, cancellationToken);
         connection = EmbeddingRequestData.Snapshot(connection);
         XaiFileRequestData.Connection(connection);
         using var consumption = SdkHttpConsumption.Enter(_http!, cancellationToken);
@@ -104,13 +118,19 @@ internal sealed class XaiFileClient(HttpClient http) : IDisposable, IAsyncDispos
         {
             await XaiErrorClassifier.ThrowIfUnsuccessfulAsync(response, LlmCredential.Parse(connection.Credential), [], cancellationToken, diagnosticBody: false).ConfigureAwait(false);
             Check(fence, cancellationToken);
+            string? contentType = response.Content.Headers.ContentType?.ToString();
+            long? declaredLength = response.Content.Headers.ContentLength;
+            Stream destination = await openDestination(contentType, declaredLength, cancellationToken).ConfigureAwait(false);
+            Check(fence, cancellationToken);
+            if (destination is null || !destination.CanWrite) throw new ArgumentException("Download destination must be writable.", nameof(openDestination));
+            Check(fence, cancellationToken);
             Stream content = await SdkHttpConsumption.ReadAsStreamAsync(response.Content, cancellationToken).ConfigureAwait(false);
             Check(fence, cancellationToken);
             long written = await TransferAsync(content, destination, () => Check(fence, cancellationToken), cancellationToken).ConfigureAwait(false);
             Check(fence, cancellationToken);
-            if (response.Content.Headers.ContentLength is { } declared && written < declared) throw Invalid();
-            return new ResourceDownloadReceipt(written, response.Content.Headers.ContentType?.ToString(), response.Content.Headers.ContentLength);
-        }, fence, cancellationToken).ConfigureAwait(false);
+            if (declaredLength is { } declared && written < declared) throw Invalid();
+            return new ResourceDownloadReceipt(written, contentType, declaredLength);
+        }, fence, cancellationToken, onDispatched, onResponse).ConfigureAwait(false);
         return consumption.Publish(result);
     }
 
@@ -133,7 +153,7 @@ internal sealed class XaiFileClient(HttpClient http) : IDisposable, IAsyncDispos
 
     private async Task<T> ExchangeAsync<T>(LlmConnection connection, HttpMethod method, string path,
         Action<HttpRequestMessage> configure, Func<HttpResponseMessage, Task<T>> read, Action fence, CancellationToken token,
-        Action? onDispatched = null)
+        Action? onDispatched = null, Action<HttpResponseMessage>? onResponse = null)
     {
         HttpRequestMessage? request = null;
         HttpResponseMessage? response = null;
@@ -148,6 +168,7 @@ internal sealed class XaiFileClient(HttpClient http) : IDisposable, IAsyncDispos
             // The internal sink records possible effects at the same boundary as SendAsync.
             onDispatched?.Invoke();
             response = await _http!.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token).ConfigureAwait(false);
+            onResponse?.Invoke(response);
             Check(fence, token);
             result = await read(response).ConfigureAwait(false);
             Check(fence, token);
@@ -161,10 +182,13 @@ internal sealed class XaiFileClient(HttpClient http) : IDisposable, IAsyncDispos
             catch (Exception cleanup) { failures.Add(RecordCleanup(cleanup, request!)); }
         }
         if (failures.Count == 1) ExceptionDispatchInfo.Throw(failures[0]);
-        if (failures.Count > 1) throw new AggregateException("Grok Files operation and cleanup failed.", failures);
+        if (failures.Count > 1) throw new ExchangeFailure(failures);
         Check(fence, token);
         return result;
     }
+
+    internal sealed class ExchangeFailure(IEnumerable<Exception> failures)
+        : AggregateException("Grok Files operation and cleanup failed.", failures);
 
     private async Task<T> ReadAsync<T>(LlmConnection connection, HttpResponseMessage response,
         Func<JsonElement, T> parse, Action fence, CancellationToken token)

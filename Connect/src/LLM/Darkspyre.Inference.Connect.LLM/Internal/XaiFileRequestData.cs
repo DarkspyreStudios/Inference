@@ -36,6 +36,11 @@ internal static class XaiFileRequestData
     {
         ArgumentNullException.ThrowIfNull(destination);
         if (!destination.CanWrite) throw new ArgumentException("Download destination must be writable.", nameof(destination));
+        return DownloadPath(fileId, options);
+    }
+
+    internal static string DownloadPath(string fileId, LlmFileDownloadOptions? options)
+    {
         string path = Path(fileId) + "/content";
         if (options?.Format is { } format) path += "?format=" + (format switch
         {
