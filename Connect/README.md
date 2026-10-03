@@ -48,14 +48,17 @@ resource facts remain actual observations, not rollback claims.
 `Darkspyre.Inference.Connect.Resources` declares `ILlmBatchClient` for explicit-connection batch
 creation, incremental requests, one-page queries/results, cancellation, JSONL creation and deferred
 submission/retrieval. Its closed operation union carries actual chat, image/workflow and video
-requests. Results retain caller `CustomId` correlation, native video snapshots and committed caller
+requests. Results retain caller `CustomId` correlation, terminal video outputs and committed caller
 resource descriptors. Counts and timestamps remain nullable observations; absent counts are not zero.
+`LlmBatchVideoResult.Result` carries the actual terminal `VideoOutput` without requiring a native job
+ID. Its optional `JobSnapshot` carries a separately observed real job only. Image and video batch
+results have optional `Usage` for actual provider-reported costs and counts, not estimates.
 `GeneratedImage.Selection` and `MaterializedVideoResult.Selection` carry optional full post-commit
 membership receipts. An absent receipt remains unknown; neither result reads current membership.
 Media materialization budgets are explicit positive caller policy, not provider defaults. Page limits
 retain the caller's raw nullable integer; these data declarations impose no provider paging bounds.
 
-`ConnectResourcesJson` exports 25 exact data-type getters with one generated closed Common/LLM/Image/
+`ConnectResourcesJson` exports 28 exact data-type getters with one generated closed Common/LLM/Image/
 Video graph. Pages copy their ordered lists, including assignments through `with`. Nested existing
 request/result objects retain their own contracts; constructing a batch wrapper does not admit a
 provider operation or resolve content. The codec preserves fixed xAI hosted-tool and video-option
@@ -63,13 +66,26 @@ variants and mixed function/shell tool graphs. It composes the existing LLM-owne
 policy and refuses nonnull resource access, handles, authorization and batch clients without calling
 them. Diagnostic strings hide resource, prompt and native receipt data.
 
-`LlmResourceProviderService(connectionAccess)` borrows an existing `LlmConnectionAccess`.
+`LlmResourceOperationObservation` carries ordered upload attempts, partial results and completed
+commits. Independent dispatch facts report possible batch mutation, deferred submission or consume-once
+retrieval; they do not prove remote success or authorize retry. Response status and request ID require
+an observed response. Upload receipts require dispatch, file and image receipts are exclusive, and
+operation-created JSONL belongs only to creation from requests. Collections copy their data, including
+result bytes and opaque JSON. The owned codec rejects contradictory facts and undefined operations.
+`LlmResourceOperationException` and `LlmResourceOperationCanceledException` expose a copied observation
+with fixed diagnostic text. Cancellation preserves its actual cause and token. Their constructors do
+not sanitize caller-supplied inner exceptions. Exceptions remain runtime objects, not JSON roots.
+
+`LlmResourceProviderService(connectionAccess, providerService: null)` borrows an existing
+`LlmConnectionAccess` and optionally an existing core `LlmProviderService`. A supplied core must borrow
+the same access; construction validates that identity before allocating owned state.
 `AddLlmResources()` registers one scoped concrete facade and its same-instance `ILlmBatchClient`
-alias. The caller registers connection access separately; this extension creates no connection source,
+alias with the existing access and optional registered core. The caller registers connection access
+separately; this extension creates no connection source,
 HTTP factory or provider adapter. All ten operations explicitly refuse as unavailable before connection
 resolution, credential refresh, resource callbacks, upload or deferred-result consumption. Disposal
-fences entry, shares retirement completion and releases the borrowed access reference without disposing
-it. Caller cancellation retains the existing facade entry precedence. The owned codec refuses both
+fences entry, shares retirement completion and releases borrowed references without disposing them.
+Caller cancellation retains the existing facade entry precedence. The owned codec refuses both
 nonnull concrete and interface facade values; null runtime values remain portable.
 
 This assembly registers no batch/deferred adapter and makes no OAuth or endpoint-availability claim.
@@ -274,8 +290,13 @@ Common's property-specific null-byte refusal and its new closed phase/action enu
 Managed disposal shares its completion across callers, drains the producer even after cancellation
 callback failure, then releases borrowed hosted authorization without disposing it. Cleanup failures
 remain visible to every disposer. These controlled contracts do not qualify provider wire mappings
-or native execution. Terminal-only citations have no managed-agent projection; streamed citation
-observations are not deduplicated against terminal copies.
+or native execution. Each accepted terminal model result projects one
+`LlmAgentCitationsSnapshotEvent` with its actual request and turn IDs and a copied ordered citation
+list, including non-successful result statuses. The snapshot precedes tool execution and turn
+completion. It is a terminal-collection observation, not an append, deletion or clearing instruction.
+An empty terminal collection does not prove provider-reported absence. Streamed individual citation
+observations are not compared or deduplicated against terminal snapshots. The new concrete event has
+an exact type-name getter on `ConnectLlmJson`; it adds no portable base-event union.
 
 `ConnectLlmJson` exposes owned source-generated metadata for closed LLM connections, saved setup
 configuration, chat messages/requests/results and captured agent context. Pass the matching typed
@@ -293,6 +314,14 @@ storage. Legacy captures upgrade to empty membership with unknown provenance, no
 Byte-excluded captures retain logical references and the selection snapshot. Current session
 implementations reject selections they cannot bind; import never silently installs or deletes caller
 membership.
+
+Portable context and its owned codec preserve a final incomplete mixed tool-call group with each
+actual completed same-kind result. No later transcript message can follow an unresolved group.
+Missing results do not imply an exit code, timeout, rollback or an unstarted call. Runnable imports,
+next turns, provider projection and `ReplaceContextAsync` still require settled matching groups.
+Callers reconcile with actual results and revision-checked replacement; the library does not replay
+an executor, manufacture outcomes or prune the transcript. This data contract does not enable managed
+shell execution.
 
 Chat messages and turns use the Common ordered binary/native-file/workspace-resource attachment
 union. `LlmChatRequest.Resources` and its Common projection preserve the same borrowed authority.

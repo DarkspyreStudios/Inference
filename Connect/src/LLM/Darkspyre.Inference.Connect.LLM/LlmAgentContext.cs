@@ -8,7 +8,7 @@ namespace Darkspyre.Inference.Connect.LLM;
 /// <summary>One stable record in model context, distinct from a display transcript.</summary>
 public sealed record LlmAgentContextEntry(string Id, string TurnId, LlmChatMessage Message);
 
-/// <summary>Settled model context. Contains no executable handlers or durable run checkpoint.</summary>
+/// <summary>Portable model context. An incomplete final tool group is data, not runnable input.</summary>
 [System.Text.Json.Serialization.JsonUnmappedMemberHandling(System.Text.Json.Serialization.JsonUnmappedMemberHandling.Disallow)]
 public sealed record LlmAgentContext
 {

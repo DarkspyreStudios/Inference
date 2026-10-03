@@ -42,6 +42,9 @@ public static class ConnectResourcesJson
     public static JsonTypeInfo<LlmDeferredCompleted> LlmDeferredCompleted => Metadata<LlmDeferredCompleted>();
     public static JsonTypeInfo<LlmMediaMaterializationOptions> LlmMediaMaterializationOptions => Metadata<LlmMediaMaterializationOptions>();
     public static JsonTypeInfo<MaterializedVideoResult> MaterializedVideoResult => Metadata<MaterializedVideoResult>();
+    public static JsonTypeInfo<LlmResourceOperation> LlmResourceOperation => Metadata<LlmResourceOperation>();
+    public static JsonTypeInfo<LlmResourceInputUploadObservation> LlmResourceInputUploadObservation => Metadata<LlmResourceInputUploadObservation>();
+    public static JsonTypeInfo<LlmResourceOperationObservation> LlmResourceOperationObservation => Metadata<LlmResourceOperationObservation>();
 
     private static JsonSerializerOptions CreateOptions()
     {
@@ -64,6 +67,11 @@ public static class ConnectResourcesJson
         public JsonTypeInfo? GetTypeInfo(Type type, JsonSerializerOptions options)
         {
             JsonTypeInfo? metadata = ((IJsonTypeInfoResolver)ConnectResourcesJsonContext.Default).GetTypeInfo(type, options);
+            if ((type == typeof(LlmResourceInputUploadObservation) || type == typeof(LlmResourceOperationObservation)) && metadata is not null)
+            {
+                metadata.OnSerializing = ResourceObservationData.Validate;
+                metadata.OnDeserialized = ResourceObservationData.Validate;
+            }
             if (type == typeof(LlmProviderControls) && metadata is not null)
                 metadata.PolymorphismOptions = new()
                 {
@@ -92,7 +100,12 @@ public static class ConnectResourcesJson
 }
 
 [JsonSourceGenerationOptions(GenerationMode = JsonSourceGenerationMode.Metadata,
-    Converters = [typeof(BatchClientJsonConverter<ILlmBatchClient>), typeof(BatchClientJsonConverter<LlmResourceProviderService>)])]
+    Converters = [typeof(ResourceRuntimeJsonConverter<ILlmBatchClient>), typeof(ResourceRuntimeJsonConverter<LlmResourceProviderService>),
+        typeof(ResourceRuntimeJsonConverter<LlmResourceOperationException>), typeof(ResourceRuntimeJsonConverter<LlmResourceOperationCanceledException>),
+        typeof(ResourceOperationJsonConverter)])]
+[JsonSerializable(typeof(LlmResourceOperation))]
+[JsonSerializable(typeof(LlmResourceInputUploadObservation))]
+[JsonSerializable(typeof(LlmResourceOperationObservation))]
 [JsonSerializable(typeof(LlmResourcePageRequest))]
 [JsonSerializable(typeof(LlmBatchCounts))]
 [JsonSerializable(typeof(LlmBatch))]
@@ -127,14 +140,28 @@ public static class ConnectResourcesJson
 [JsonSerializable(typeof(XaiStoragePublicUrlConfiguration))]
 internal sealed partial class ConnectResourcesJsonContext : JsonSerializerContext;
 
-internal sealed class BatchClientJsonConverter<T> : JsonConverter<T> where T : class
+internal sealed class ResourceRuntimeJsonConverter<T> : JsonConverter<T> where T : class
 {
     public override bool HandleNull => true;
     public override T? Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
-        => reader.TokenType == JsonTokenType.Null ? null : throw new NotSupportedException("Live batch clients are not portable data.");
+        => reader.TokenType == JsonTokenType.Null ? null : throw new NotSupportedException("Resource runtime objects are not portable data.");
     public override void Write(Utf8JsonWriter writer, T value, JsonSerializerOptions options)
     {
         if (value is null) writer.WriteNullValue();
-        else throw new NotSupportedException("Live batch clients are not portable data.");
+        else throw new NotSupportedException("Resource runtime objects are not portable data.");
+    }
+}
+
+internal sealed class ResourceOperationJsonConverter : JsonConverter<LlmResourceOperation>
+{
+    public override LlmResourceOperation Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+        => reader.TokenType == JsonTokenType.Number && reader.TryGetInt32(out int value)
+            && Enum.IsDefined((LlmResourceOperation)value) ? (LlmResourceOperation)value
+            : throw new JsonException("Unknown resource operation.");
+
+    public override void Write(Utf8JsonWriter writer, LlmResourceOperation value, JsonSerializerOptions options)
+    {
+        if (!Enum.IsDefined(value)) throw new JsonException("Unknown resource operation.");
+        writer.WriteNumberValue((int)value);
     }
 }
