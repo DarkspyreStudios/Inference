@@ -1,6 +1,7 @@
 using System.Collections.Frozen;
 using System.Collections.ObjectModel;
 using System.Globalization;
+using System.Net.Http.Headers;
 using System.Text.Json;
 using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Common.Media;
@@ -39,6 +40,20 @@ internal static class XaiSttProtocol
         if (rate is { } value && !Rates.Contains(value) || vad is < 0 or > 1 || channels is < 2 or > 8
             || terms is { Count: > 100 } || terms?.Any(string.IsNullOrWhiteSpace) == true) throw Invalid();
     }
+    internal static void ValidateFileMetadata(string? contentType, string? fileName, SpeechTranscriptionOptions options)
+    {
+        if (contentType is null || !MediaTypeHeaderValue.TryParse(contentType, out var parsed)) throw Invalid();
+        if (fileName is not null)
+        {
+            if (string.IsNullOrWhiteSpace(fileName)) throw Invalid();
+            var disposition = new ContentDispositionHeaderValue("form-data") { Name = "file", FileName = fileName, FileNameStar = fileName };
+            if (!ContentDispositionHeaderValue.TryParse(disposition.ToString(), out _)) throw Invalid();
+        }
+        // A declared container is not raw/headerless audio. Do not inspect bytes or infer a format from its name.
+        if (options.RawAudioFormat is not null && ContainerTypes.Contains(parsed.MediaType!)) throw Invalid();
+    }
+    private static readonly FrozenSet<string> ContainerTypes = new[]
+    { "audio/wav", "audio/x-wav", "audio/vnd.wave", "audio/mpeg", "audio/ogg", "audio/flac", "audio/aac", "audio/mp4", "video/mp4", "video/x-matroska", "audio/opus" }.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
     private static long? Milliseconds(TimeSpan? value, int minimum)
     {
         if (value is null) return null;
@@ -70,7 +85,8 @@ internal static class XaiSttProtocol
         if (Milliseconds(options.SmartTurnTimeout, 1) is { } timeout) fields.Add(new("smart_turn_timeout", Number(timeout)));
         return new UriBuilder(new Uri(endpoint.AbsoluteUri.TrimEnd('/') + "/stt"))
         {
-            Scheme = "wss", Port = -1,
+            Scheme = "wss",
+            Port = -1,
             Query = string.Join("&", fields.Select(field => Uri.EscapeDataString(field.Key) + "=" + Uri.EscapeDataString(field.Value)))
         }.Uri;
     }
@@ -93,20 +109,33 @@ internal static class XaiSttProtocol
     { SpeechAudioEncoding.Pcm16LittleEndian => "pcm", SpeechAudioEncoding.Mulaw => "mulaw", SpeechAudioEncoding.Alaw => "alaw", SpeechAudioEncoding.Opus => "opus", _ => throw Invalid() };
     internal static SpeechTranscriptionCapabilities Capabilities() => new()
     {
-        Transcription = Mode(false), Streaming = Mode(true)
+        Transcription = Mode(false),
+        Streaming = Mode(true)
     };
     private static SpeechTranscriptionModeCapabilities Mode(bool streaming) => new()
     {
-        Available = true, InputKinds = (streaming ? new[] { InferenceMediaSourceKind.Binary } : new[] { InferenceMediaSourceKind.Binary, InferenceMediaSourceKind.Url, InferenceMediaSourceKind.Resource }).ToFrozenSet(),
+        Available = true,
+        InputKinds = (streaming ? new[] { InferenceMediaSourceKind.Binary } : new[] { InferenceMediaSourceKind.Binary, InferenceMediaSourceKind.Url, InferenceMediaSourceKind.Resource }).ToFrozenSet(),
         Encodings = (streaming ? Enum.GetValues<SpeechAudioEncoding>() : new[] { SpeechAudioEncoding.Pcm16LittleEndian, SpeechAudioEncoding.Mulaw, SpeechAudioEncoding.Alaw }).ToFrozenSet(),
-        SampleRates = Rates, MaximumChannels = 8, SupportsLanguage = true, SupportsMultichannel = true,
-        SupportsDiarization = true, SupportsKeyTerms = true, SupportsFillerWords = true, SupportsVadThreshold = true,
-        SupportsTextNormalization = !streaming, SupportsInterimResults = streaming, SupportsEndpointing = streaming, SupportsSmartTurn = streaming, SupportsFinalize = streaming
+        SampleRates = Rates,
+        MaximumChannels = 8,
+        SupportsLanguage = true,
+        SupportsMultichannel = true,
+        SupportsDiarization = true,
+        SupportsKeyTerms = true,
+        SupportsFillerWords = true,
+        SupportsVadThreshold = true,
+        SupportsTextNormalization = !streaming,
+        SupportsInterimResults = streaming,
+        SupportsEndpointing = streaming,
+        SupportsSmartTurn = streaming,
+        SupportsFinalize = streaming
     };
     internal static SpeechTranscriptionResult Result(JsonElement root, InferenceProvenance provenance) => new(
         RequiredString(root, "text"), provenance, OptionalString(root, "language"), Seconds(root, "duration"), Words(root), Channels(root));
     internal static IReadOnlyList<SpeechWord>? Words(JsonElement root)
     {
+        Object(root);
         if (!root.TryGetProperty("words", out var words)) return null;
         if (words.ValueKind != JsonValueKind.Array) throw Protocol();
         return Array.AsReadOnly(words.EnumerateArray().Select(word =>
@@ -118,6 +147,7 @@ internal static class XaiSttProtocol
     }
     private static ReadOnlyCollection<SpeechChannelTranscript>? Channels(JsonElement root)
     {
+        Object(root);
         if (!root.TryGetProperty("channels", out var channels)) return null;
         if (channels.ValueKind != JsonValueKind.Array) throw Protocol();
         return Array.AsReadOnly(channels.EnumerateArray().Select(channel => new SpeechChannelTranscript(
@@ -126,11 +156,13 @@ internal static class XaiSttProtocol
     internal static string RequiredString(JsonElement root, string name) => OptionalString(root, name) ?? throw Protocol();
     internal static string? OptionalString(JsonElement root, string name)
     {
+        Object(root);
         if (!root.TryGetProperty(name, out var value)) return null;
         if (value.ValueKind != JsonValueKind.String) throw Protocol(); return value.GetString();
     }
     internal static double? OptionalNumber(JsonElement root, string name)
     {
+        Object(root);
         if (!root.TryGetProperty(name, out var value)) return null;
         if (value.ValueKind != JsonValueKind.Number || !value.TryGetDouble(out double number) || !double.IsFinite(number) || number < 0) throw Protocol(); return number;
     }
@@ -141,11 +173,13 @@ internal static class XaiSttProtocol
     }
     internal static int? OptionalInteger(JsonElement root, string name)
     {
+        Object(root);
         if (!root.TryGetProperty(name, out var value)) return null;
         if (value.ValueKind != JsonValueKind.Number || !value.TryGetInt32(out int number) || number < 0) throw Protocol(); return number;
     }
     internal static bool RequiredBoolean(JsonElement root, string name)
-    { if (!root.TryGetProperty(name, out var value) || value.ValueKind is not (JsonValueKind.True or JsonValueKind.False)) throw Protocol(); return value.GetBoolean(); }
+    { Object(root); if (!root.TryGetProperty(name, out var value) || value.ValueKind is not (JsonValueKind.True or JsonValueKind.False)) throw Protocol(); return value.GetBoolean(); }
+    private static void Object(JsonElement root) { if (root.ValueKind != JsonValueKind.Object) throw Protocol(); }
     internal static byte[] Command(string type, int? channel = null)
     {
         using var stream = new MemoryStream(); using (var writer = new Utf8JsonWriter(stream))

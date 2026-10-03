@@ -83,6 +83,7 @@ public sealed class XaiSttProvider : ISttProvider
         {
             using var operation = _lifetime.Enter(cancellationToken);
             SpeechTranscriptionInput admitted = XaiSttProtocol.Snapshot(input); SpeechTranscriptionOptions controls = XaiSttProtocol.Snapshot(options);
+            if (admitted is BinarySpeechInput binaryMetadata) XaiSttProtocol.ValidateFileMetadata(binaryMetadata.ContentType, binaryMetadata.FileName, controls);
             if (admitted is ResourceSpeechInput && _resources is null) throw XaiSttProtocol.Unsupported();
             using var consumption = SdkHttpConsumption.Enter(_provider!._http, operation.Token); CancellationToken token = consumption.Token;
             void Check() { Fence(token); consumption.Fence(); }
@@ -103,7 +104,7 @@ public sealed class XaiSttProvider : ISttProvider
                         try
                         {
                             opened = await reading.OpenNamedAsync(_resources!, resource.Resource,
-                                descriptor => { if (string.IsNullOrWhiteSpace(descriptor.ContentType)) throw XaiSttProtocol.Unsupported(); }, Check, token).ConfigureAwait(false);
+                                descriptor => XaiSttProtocol.ValidateFileMetadata(descriptor.ContentType, descriptor.FileName, controls), Check, token).ConfigureAwait(false);
                         }
                         catch (Exception error) { ExceptionDispatchInfo.Capture(ResourceFailure(error, InferenceResourceOperationPhase.OpenRead, resource.Resource, null, token)).Throw(); throw; }
                         AddFile(body, new ResourceContent(reading, _resources!, opened.Descriptor, opened.Content, Check, token), opened.Descriptor.ContentType!, opened.Descriptor.FileName);
@@ -194,10 +195,10 @@ public sealed class XaiSttProvider : ISttProvider
             IAsyncEnumerator<SpeechTranscriptEvent> reader = session.Events.GetAsyncEnumerator(cancellationToken); Exception? original = null;
             try
             {
-                while (await MoveNextAsync().ConfigureAwait(false)) { Fence(token); yield return reader.Current; }
+                while (await MoveNextAsync().ConfigureAwait(false)) { PublicationFence(); yield return reader.Current; }
                 finished.TrySetResult(); Exception? failure = await completion.ConfigureAwait(false);
                 if (failure is not null) { original = failure; ExceptionDispatchInfo.Capture(failure).Throw(); }
-                Fence(token);
+                PublicationFence();
             }
             finally { await DrainAsync().ConfigureAwait(false); }
             async Task DrainAsync()
@@ -210,6 +211,8 @@ public sealed class XaiSttProvider : ISttProvider
             }
             async Task<bool> MoveNextAsync()
             { try { return await reader.MoveNextAsync().ConfigureAwait(false); } catch (Exception error) { original = error; throw; } }
+            void PublicationFence()
+            { try { Fence(token); } catch (Exception error) { original = error; throw; } }
             async Task<Exception?> CompleteAsync()
             {
                 await finished.Task.ConfigureAwait(false);

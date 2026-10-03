@@ -114,6 +114,7 @@ internal sealed class XaiSttSession : ISpeechTranscriptionSession
                     frame = await _socket!.ReceiveAsync(buffer.AsMemory(), token).ConfigureAwait(false); Fence(token);
                     if (frame.MessageType == WebSocketMessageType.Close)
                     {
+                        if (assembled.Length != 0) throw XaiSttProtocol.Protocol();
                         lock (_sync) if (!_reportedError && (!_inputComplete || _done.Count != _channels)) throw XaiSttProtocol.Protocol();
                         if (!_created) throw XaiSttProtocol.Protocol();
                         _events.Writer.TryComplete(); return;
@@ -122,7 +123,7 @@ internal sealed class XaiSttSession : ISpeechTranscriptionSession
                     if (assembled.Length + frame.Count > _limits.MaximumMessageBytes || assembled.Length + frame.Count > int.MaxValue) throw Capacity();
                     assembled.Write(buffer, 0, frame.Count);
                 } while (!frame.EndOfMessage);
-                using JsonDocument document = JsonDocument.Parse(assembled.GetBuffer().AsMemory(0, checked((int)assembled.Length)));
+                using JsonDocument document = Parse(assembled.GetBuffer().AsMemory(0, checked((int)assembled.Length)));
                 JsonElement root = document.RootElement; string type = XaiSttProtocol.RequiredString(root, "type");
                 if (!_created && type is not ("transcript.created" or "error")) throw XaiSttProtocol.Protocol();
                 switch (type)
@@ -158,10 +159,12 @@ internal sealed class XaiSttSession : ISpeechTranscriptionSession
         }
         catch (OperationCanceledException) when (IsStopping()) { }
         catch (ChannelClosedException) when (IsStopping()) { }
-        catch (Exception error) { failure = error is JsonException or ArgumentException or InvalidOperationException ? XaiSttProtocol.Protocol() : error; }
+        catch (Exception error) { failure = error; }
         if (failure is not null) _ready.TrySetException(failure);
         _events.Writer.TryComplete(failure); if (failure is not null) _ = RetireAsync();
     }
+    private static JsonDocument Parse(ReadOnlyMemory<byte> data)
+    { try { return JsonDocument.Parse(data); } catch (JsonException) { throw XaiSttProtocol.Protocol(); } }
     private int? ReadChannel(JsonElement root)
     {
         int? channel = XaiSttProtocol.OptionalInteger(root, "channel_index");

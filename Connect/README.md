@@ -85,7 +85,8 @@ effects. Hosted STT does not replace Tensor's model-instance transcription API.
 The connection carries a durable `XaiConnectionSelection`, optional borrowed authorization and copied
 case-insensitive protected headers. `Bind(connection, xai, resources)` passes the matching borrowed
 `XaiFamilyBinding` and caller workspace access to the selected adapter. These collaborators remain
-caller-owned. A session owns its streaming transport; Common clients gain no additional disposal API.
+caller-owned. Bound Common clients implement `IDisposable` and `IAsyncDisposable`. A successfully
+handed-off streaming session owns its transport independently of the client.
 Adapter operations require one validated snapshot and known-incompatibility validation before
 credential refresh or source effects. Binding validates the existing fixed xAI regional API bases,
 positive timeout and matching selection without acquisition. Direct binding and setup use the shared
@@ -104,6 +105,28 @@ fence returns structured cancellation for admitted checks/queries even before li
 propagates. Admitted saves preserve the host's actual committed or uncertain outcome.
 Checks retain matching borrowed authorization. Portable setup changes omit that runtime authority;
 the selected connection ID remains data, and only explicit named header edits reach the commit target.
+
+`XaiSttProvider` supports explicit adapter composition without automatic registration. REST
+transcription sends one multipart request with the file field last, or asks the provider to fetch the
+supplied URL. Named workspace inputs use the existing resource reader without reading or changing
+selected-resource membership. The adapter borrows input streams through their owned read handles.
+It preserves actual transcript, channel, speaker and timestamp observations; absent response model
+identity remains null. Known-invalid media headers, filenames and incompatible declared-container
+raw controls refuse before connection acquisition. The adapter does not inspect payload bytes or
+infer audio format from filenames.
+
+The reusable WebSocket session waits for `transcript.created`, sends audio packets and ordered
+`finalize`/`audio.done` commands, and exposes one bounded event feed with caller-supplied limits.
+Opus packets remain indivisible; explicit accepted sample-rate controls are sent unchanged, but the
+provider ignores them for Opus. Streaming refuses the independent text-normalization control;
+language retains the provider's formatting semantics. Actual per-channel final observations remain
+ordered as received. The convenience stream owns one temporary session and its input enumerator,
+and client retirement cancels and drains that work without requiring a paused reader to resume.
+Explicitly handed-off sessions remain caller-owned. Cleanup refusals retain actual unsafe owners
+and failures; borrowed HTTP, authorization, resource access and input sources remain undisposed.
+Diagnostics use fixed speech labels without copying provider error messages. OAuth endpoint
+acceptance, the provider's ambiguous 500 MB/50-character limits and real-time behavior remain
+provider qualification boundaries; the library does not invent byte or Unicode cutoffs.
 
 `SttProviderService` and `VideoProviderService` implement `IDisposable` and `IAsyncDisposable`.
 Retirement immediately fences new facade calls, drains admitted synchronous setup/binding callbacks,
