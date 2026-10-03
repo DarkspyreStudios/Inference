@@ -3,7 +3,7 @@ using Darkspyre.Inference.Connect.LLM.Internal;
 
 namespace Darkspyre.Inference.Connect.LLM.Providers;
 
-/// <summary>Opt-in OAuth Responses registration with provider-owned automatic compaction.</summary>
+/// <summary>OAuth Responses managed lane with provider-owned automatic compaction.</summary>
 internal sealed class ManagedXaiAgentClient(XaiResponsesLlmClient client, LlmProviderService providers) : ILlmAgentClient
 {
     public LlmTransport Transport => LlmTransport.XaiResponses;
