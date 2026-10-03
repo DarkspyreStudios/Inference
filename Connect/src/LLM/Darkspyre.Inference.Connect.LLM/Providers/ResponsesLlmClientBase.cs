@@ -400,6 +400,7 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
                         throw StreamError(root, response, data, credential);
                 }
             }
+
             if (completed)
             {
                 yield break;

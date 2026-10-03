@@ -54,7 +54,8 @@ internal sealed class XaiDocumentSearchObserver(Func<Exception> malformed) : Res
         var matches = new List<LlmHostedDocumentMatch>();
         foreach (JsonElement result in results.EnumerateArray())
         {
-            if (result.ValueKind != JsonValueKind.Object || OptionalString(result, "file_id") is not { } fileId)
+            if (result.ValueKind != JsonValueKind.Object || OptionalString(result, "file_id") is not { } fileId
+                || OptionalString(result, "filename") is not { } filename || OptionalString(result, "text") is not { } text)
                 throw malformed();
             double? score = null;
             if (result.TryGetProperty("score", out JsonElement observedScore))
@@ -63,7 +64,7 @@ internal sealed class XaiDocumentSearchObserver(Func<Exception> malformed) : Res
                     || !double.IsFinite(number)) throw malformed();
                 score = number;
             }
-            matches.Add(new(fileId, OptionalString(result, "filename"), score, OptionalString(result, "text")));
+            matches.Add(new(fileId, filename, score, text));
         }
         return matches;
     }
