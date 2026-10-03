@@ -275,6 +275,13 @@ public sealed record LlmInferenceResult
 
     public IReadOnlyList<LlmCitation> Citations { get; init; } = [];
 
+    /// <summary>Ordered actual commit-and-selection receipts for generated session artifacts.</summary>
+    public IReadOnlyList<InferenceResourceCommitResult> GeneratedResources
+    {
+        get;
+        init => field = ResourceContract.CopyGeneratedResources(value);
+    } = [];
+
     public LlmStructuredOutputValidation? StructuredOutput { get; init; }
 
     public required InferenceProvenance Provenance { get; init; }

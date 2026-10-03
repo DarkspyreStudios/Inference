@@ -136,6 +136,13 @@ public sealed record LlmChatResult
 
     public IReadOnlyList<LlmCitation> Citations { get; init; } = [];
 
+    /// <summary>Ordered actual commit-and-selection receipts for generated session artifacts.</summary>
+    public IReadOnlyList<InferenceResourceCommitResult> GeneratedResources
+    {
+        get;
+        init => field = ResourceContract.CopyGeneratedResources(value);
+    } = [];
+
     /// <summary>Preserve unchanged on this response's assistant message, including ordinary turns.</summary>
     public LlmContinuationState? ContinuationState { get; init; }
 

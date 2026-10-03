@@ -106,6 +106,7 @@ internal sealed class ConnectLlmInference(
         OmittedContinuationStateCount = result.OmittedContinuationStateCount,
         ToolCalls = result.ToolCalls,
         Citations = result.Citations,
+        GeneratedResources = result.GeneratedResources,
         StructuredOutput = result.StructuredOutput,
         Provenance = new Common.InferenceProvenance
         {

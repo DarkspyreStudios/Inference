@@ -172,4 +172,30 @@ internal static class ResourceContract
         }
         return Array.AsReadOnly(copy);
     }
+
+    public static IReadOnlyList<InferenceResourceCommitResult> CopyGeneratedResources(
+        IReadOnlyList<InferenceResourceCommitResult> resources)
+    {
+        ArgumentNullException.ThrowIfNull(resources);
+        var copy = new InferenceResourceCommitResult[resources.Count];
+        for (int index = 0; index < resources.Count; index++)
+        {
+            InferenceResourceCommitResult receipt = resources[index];
+            ArgumentNullException.ThrowIfNull(receipt);
+            InferenceResourceDescriptor resource = receipt.Resource;
+            ArgumentNullException.ThrowIfNull(resource);
+            ArgumentNullException.ThrowIfNull(resource.Reference);
+            InferenceResourceSelection selection = receipt.Selection
+                ?? throw new ArgumentException("Generated resources require an actual commit-and-selection receipt.", nameof(resources));
+            var reference = new InferenceResourceReference(resource.Reference.WorkspaceId, resource.Reference.Id);
+            var selected = new InferenceResourceSelection(selection.WorkspaceId, selection.SessionId,
+                selection.Revision, selection.SelectedResources);
+            if (reference.WorkspaceId != selected.WorkspaceId
+                || resource.SessionId is { } session && session != selected.SessionId
+                || !selected.SelectedResources.Contains(reference))
+                throw new ArgumentException("The generated resource does not belong to its committed selection.", nameof(resources));
+            copy[index] = new(new(reference, resource.SessionId, resource.FileName, resource.ContentType, resource.Bytes), selected);
+        }
+        return Array.AsReadOnly(copy);
+    }
 }

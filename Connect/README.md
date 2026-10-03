@@ -55,6 +55,12 @@ ID. Its optional `JobSnapshot` carries a separately observed real job only. Imag
 results have optional `Usage` for actual provider-reported costs and counts, not estimates.
 `GeneratedImage.Selection` and `MaterializedVideoResult.Selection` carry optional full post-commit
 membership receipts. An absent receipt remains unknown; neither result reads current membership.
+`LlmChatResult.GeneratedResources` and Common `LlmInferenceResult.GeneratedResources` carry ordered,
+copied actual commit-and-selection receipts for generated session artifacts. Every receipt includes
+the generated resource in its exact successful selection snapshot. Workspace-owned resources can
+have a null session; a reported session must match that snapshot. Duplicate observations retain their
+order. These receipts grant no access and never substitute a later membership read. Current providers
+leave the collection empty until they perform actual generated-artifact materialization.
 Media materialization budgets are explicit positive caller policy, not provider defaults. Page limits
 retain the caller's raw nullable integer; these data declarations impose no provider paging bounds.
 
@@ -101,8 +107,8 @@ Submission timestamps and expiry remain unknown when absent from the response. C
 state has a distinct xAI Chat-lane identity and is never replayed as Responses state.
 Incremental requests, result retrieval/materialization, JSONL creation and deferred retrieval
 remain explicitly unavailable before connection resolution, credential refresh or resource effects.
-Deferred retrieval still needs the agreed generated-output success receipt contract before it can
-publish `output_files` as actual committed session resources. Logical rich tool-output carriage in
+Deferred retrieval does not yet materialize `output_files` into the generated-resource receipt
+collection. Logical rich tool-output carriage in
 deferred Chat is likewise not implemented; it is refused before upload rather than omitted.
 Disposal fences entry, drains admitted operations, shares retirement completion and releases borrowed
 references without disposing them. Actual HTTP and preparation cleanup refusal retains the failed owner and is reported
