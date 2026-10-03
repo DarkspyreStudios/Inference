@@ -25,6 +25,7 @@ internal sealed class XaiTtsSession : ITtsStreamingSession
     private readonly InferenceResourceSelectionVersion? _scope;
     private TtsResourceWriter.Writer? _artifact;
     private Task _receiver = Task.CompletedTask;
+    private Exception? _terminalResourceFailure;
     private long _buffered;
     private int _reader;
     private int _utterance;
@@ -172,11 +173,12 @@ internal sealed class XaiTtsSession : ITtsStreamingSession
                 }
             }
         }
-        catch (OperationCanceledException) when (IsStopping()) { }
+        catch (OperationCanceledException error) when (IsStopping() && !LlmResourcePreparation.IsResourceFailure(error)) { }
         catch (ChannelClosedException) when (IsStopping()) { }
         catch (Exception error) { failure = error is JsonException or ArgumentException or InvalidOperationException ? XaiTtsProtocol.Protocol() : error; }
         try { await DisposeArtifactAsync().ConfigureAwait(false); }
         catch (Exception cleanup) { failure = failure is null ? cleanup : new AggregateException(failure, cleanup); }
+        if (failure is not null && HasTerminalResourceFailure(failure)) _terminalResourceFailure = failure;
         _events.Writer.TryComplete(failure);
         if (failure is not null) _ = RetireAsync();
     }
@@ -229,8 +231,21 @@ internal sealed class XaiTtsSession : ITtsStreamingSession
             WebSocket? socket = _socket; _socket = null;
             try { socket?.Dispose(); } catch (Exception error) { RecordCleanup(LlmResourcePreparation.AsCleanupFailure(error, refusedOwner: socket)); }
             _send.Dispose();
-            if (_cleanup.Count == 1) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(_cleanup[0]).Throw();
-            if (_cleanup.Count > 1) throw new AggregateException(_cleanup);
+            var failures = new List<Exception>();
+            if (_terminalResourceFailure is { } terminal) failures.Add(terminal);
+            foreach (Exception cleanup in _cleanup)
+                if (!failures.Any(error => Contains(error, cleanup))) failures.Add(cleanup);
+            if (failures.Count == 1) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(failures[0]).Throw();
+            if (failures.Count > 1) throw new AggregateException(failures);
         });
     }
+    internal static bool Contains(Exception original, Exception candidate) => ReferenceEquals(original, candidate)
+        || original is AggregateException aggregate && aggregate.InnerExceptions.Any(error => Contains(error, candidate));
+    internal static bool HasTerminalResourceFailure(Exception error) => error switch
+    {
+        InferenceResourceOperationException resource => resource.Failure.Phase != InferenceResourceOperationPhase.Cleanup,
+        InferenceResourceOperationCanceledException resource => resource.Failure.Phase != InferenceResourceOperationPhase.Cleanup,
+        AggregateException aggregate => aggregate.InnerExceptions.Any(HasTerminalResourceFailure),
+        _ => false
+    };
 }

@@ -59,6 +59,7 @@ public sealed class XaiTtsProvider : ITtsProvider
     {
         private readonly LlmOperationLifetime _lifetime = new();
         private readonly List<Exception> _cleanup = [];
+        private readonly List<Exception> _terminalResources = [];
         private XaiTtsProvider? _provider;
         private TtsConnection? _connection;
         private XaiFamilyBinding? _binding;
@@ -251,8 +252,8 @@ public sealed class XaiTtsProvider : ITtsProvider
                 try
                 {
                     Task cancel = stop.CancelAsync(); Task retirement = session.DisposeAsync().AsTask();
-                    Exception? cancelFailure = await CaptureAsync(cancel).ConfigureAwait(false);
-                    Exception? sessionFailure = await CaptureAsync(retirement).ConfigureAwait(false);
+                    Exception? cancelFailure = await CaptureAsync(cancel, false).ConfigureAwait(false);
+                    Exception? sessionFailure = await CaptureAsync(retirement, true).ConfigureAwait(false);
                     var failures = new List<Exception>();
                     try { await sender.ConfigureAwait(false); }
                     catch (OperationCanceledException error) when (stop.IsCancellationRequested && !LlmResourcePreparation.IsCleanupFailure(error)) { }
@@ -262,10 +263,16 @@ public sealed class XaiTtsProvider : ITtsProvider
                     return failures.Count switch { 0 => null, 1 => failures[0], _ => new AggregateException(failures) };
                 }
                 finally { text = null!; signal.Dispose(); stop.Dispose(); lease.Dispose(); }
-                async Task<Exception?> CaptureAsync(Task task)
+                async Task<Exception?> CaptureAsync(Task task, bool sessionRetirement)
                 {
                     try { await task.ConfigureAwait(false); return null; }
-                    catch (Exception error) { RecordCleanup(error); return error; }
+                    catch (Exception error)
+                    {
+                        if (sessionRetirement && XaiTtsSession.HasTerminalResourceFailure(error))
+                            lock (_cleanup) _terminalResources.Add(error);
+                        else RecordCleanup(error);
+                        return error;
+                    }
                 }
             }
             async Task SendInputAsync()
@@ -306,7 +313,10 @@ public sealed class XaiTtsProvider : ITtsProvider
         private Task RetireAsync() => _lifetime.RetireAsync(() =>
         {
             _provider = null; _connection = null; _binding = null; _resources = null;
-            return _cleanup.Count switch { 0 => Task.CompletedTask, 1 => Task.FromException(_cleanup[0]), _ => Task.FromException(new AggregateException(_cleanup)) };
+            var failures = new List<Exception>(_terminalResources);
+            foreach (Exception cleanup in _cleanup)
+                if (!failures.Any(error => XaiTtsSession.Contains(error, cleanup))) failures.Add(cleanup);
+            return failures.Count switch { 0 => Task.CompletedTask, 1 => Task.FromException(failures[0]), _ => Task.FromException(new AggregateException(failures)) };
         });
     }
 }

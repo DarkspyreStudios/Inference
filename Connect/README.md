@@ -553,6 +553,9 @@ fence, cancel, drain and detach borrowed references; genuine refused cleanup own
 retained without retry. The convenience iterator owns its temporary session and input enumerator;
 client retirement closes that session and drains input even while the public iterator is paused.
 The wrapper uses the same bounded event feed. It never disposes the borrowed input enumerable.
+Session retirement closes observations promptly without publishing late completion. Its cached
+retirement result preserves actual late artifact commit/selection facts, including unknown acknowledgment,
+and any independent cleanup refusal. Ordinary receive cancellation remains healthy.
 No automatic reconnect/replay occurs. OAuth endpoint acceptance and real
 voice/latency qualification remain open: the guide's latency value 2 is passed through unchanged despite
 the standalone schema's narrower 0/1 declaration. Controlled tests do not qualify live provider access.
