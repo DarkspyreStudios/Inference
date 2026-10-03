@@ -888,7 +888,13 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
                 LlmClientToolResult result = call switch
                 {
                     LlmToolCall function => await InvokeFunctionAsync(run, function, writer, token,
-                        message => throw new InvalidOperationException(message), () => { }),
+                        message => throw new InvalidOperationException(message), () => { }, () =>
+                        {
+                            lock (_sync)
+                            {
+                                if (_disposed || !ReferenceEquals(_run, run)) throw new OperationCanceledException(token);
+                            }
+                        }),
                     LlmShellCall shell => await InvokeShellAsync(run, shell, token),
                     _ => throw new NotSupportedException("Unknown client tool call.")
                 };
@@ -945,7 +951,7 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
             {
                 await concurrency.WaitAsync(token);
                 entered = true;
-                return await InvokeFunctionAsync(run, call, writer, token, FailedAsync, () => started = true);
+                return await InvokeFunctionAsync(run, call, writer, token, FailedAsync, () => started = true, () => { });
             }
             catch (Exception error) when (LlmResourcePreparation.IsResourceFailure(error)) { throw; }
             catch (OperationCanceledException) when (token.IsCancellationRequested)
@@ -981,7 +987,7 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
 
     private async Task<LlmToolResult> InvokeFunctionAsync(LiveRun run, LlmToolCall call,
         ChannelWriter<LlmAgentEvent> writer, CancellationToken token,
-        Func<string, Task<LlmToolResult>> failed, Action started)
+        Func<string, Task<LlmToolResult>> failed, Action started, Action observeCompleted)
     {
         if (!_tools.TryGetValue(call.Name, out var definition)) return await failed("Unknown tool.");
         var validation = StructuredOutput.Validate(call.ArgumentsJson,
@@ -990,10 +996,11 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
         using var arguments = JsonDocument.Parse(call.ArgumentsJson);
         await writer.WriteAsync(new LlmAgentToolEvent(ThreadId, run.Id, call.Id, null, call.Name,
             arguments.RootElement.Clone(), null, "started"), token);
-        token.ThrowIfCancellationRequested();
+        FenceResourceCallback(token);
         started();
         var returned = await _toolHandler!(new(ThreadId, run.Id, call.Id, null, call.Name,
             arguments.RootElement.Clone()), token);
+        observeCompleted();
         var output = ManagedAgentContext.CopyOutput(returned);
         if (output.Parts.OfType<LlmToolOutputSessionResource>().Any())
         {
