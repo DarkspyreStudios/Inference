@@ -34,13 +34,17 @@ internal sealed class XaiEmbeddingClient(HttpClient http) : ILlmEmbeddingClient
         ValidateModel(connection.Catalog, request.ModelId);
     }
 
+    public Task<LlmEmbeddingResult> EmbedAsync(LlmConnection connection, LlmEmbeddingRequest request,
+        CancellationToken cancellationToken = default) => EmbedAsync(connection, request, static () => { }, cancellationToken);
+
     [SuppressMessage("Design", "CA1031", Justification = "The HTTP boundary preserves independent failures and actual refused cleanup owners without exporting untrusted diagnostics.")]
-    public async Task<LlmEmbeddingResult> EmbedAsync(LlmConnection connection, LlmEmbeddingRequest request,
-        CancellationToken cancellationToken = default)
+    internal async Task<LlmEmbeddingResult> EmbedAsync(LlmConnection connection, LlmEmbeddingRequest request,
+        Action ownerFence, CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(ownerFence);
         cancellationToken.ThrowIfCancellationRequested();
         using var consumption = SdkHttpConsumption.Enter(http, cancellationToken);
-        void Fence() { consumption.Token.ThrowIfCancellationRequested(); consumption.Fence(); }
+        void Fence() { consumption.Token.ThrowIfCancellationRequested(); consumption.Fence(); ownerFence(); }
         Fence();
         connection = EmbeddingRequestData.Snapshot(connection);
         request = EmbeddingRequestData.Snapshot(request);

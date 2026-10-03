@@ -30,6 +30,7 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, ILlmFileClie
     private Task? _disposal;
     private Providers.XaiFileClient? _xaiFiles;
     private readonly GeminiCacheBindings _cacheBindings = new();
+    private readonly LlmCleanupOutcomes _cleanupOutcomes = new();
 
     public LlmProviderService(
         ILlmConnectionSource connections,
@@ -163,6 +164,7 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, ILlmFileClie
         ThrowIfOperationCanceled(operation.Token);
         if (client is not ILlmContextCacheAdapter cache) throw new NotSupportedException("No explicit context cache adapter is implemented.");
         cache.ValidateCacheConnection(connection);
+        ThrowIfOperationCanceled(operation.Token);
         return new BoundContextCache(this, connectionId);
     }
 
@@ -1217,10 +1219,10 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, ILlmFileClie
             Task files;
             try { files = _xaiFiles is { } client ? client.DisposeAsync().AsTask() : Task.CompletedTask; }
             catch (Exception error) { files = Task.FromException(error); }
-            Task caches;
-            try { caches = _cacheBindings.ReleaseAsync(); }
-            catch (Exception error) { caches = Task.FromException(error); }
-            Task cleanup = Task.WhenAll(files, caches);
+            Task outcomes;
+            try { outcomes = _cleanupOutcomes.ReleaseAsync(); }
+            catch (Exception error) { outcomes = Task.FromException(error); }
+            Task cleanup = Task.WhenAll(files, outcomes);
             try { await cleanup.ConfigureAwait(false); }
             catch
             {
