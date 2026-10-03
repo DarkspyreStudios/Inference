@@ -28,8 +28,8 @@ public sealed class LlmLifetimeTests
                 return [];
             }
             requests[slot] = slot == 2
-                ? cache.RefreshAsync("connection", new("v2", null), List, CancellationToken.None)
-                : cache.GetAsync("connection", new($"v{slot + 1}", null), List, CancellationToken.None);
+                ? cache.RefreshAsync("connection", new("v2", null), new CacheListingClient(List), CacheListingClient.Connection("v2"), ModelCatalogFamily.Chat, CancellationToken.None)
+                : cache.GetAsync("connection", new($"v{slot + 1}", null), new CacheListingClient(List), CacheListingClient.Connection($"v{slot + 1}"), ModelCatalogFamily.Chat, CancellationToken.None);
             await started[slot].Task.WaitAsync(Bound);
         }
 
@@ -40,8 +40,8 @@ public sealed class LlmLifetimeTests
         {
             await Assert.ThrowsAnyAsync<OperationCanceledException>(() => request);
         }
-        await Assert.ThrowsAsync<ObjectDisposedException>(() => cache.GetAsync("connection", new("v3", null), _ => Task.FromResult<IReadOnlyList<LlmModel>>([]), CancellationToken.None));
-        await Assert.ThrowsAsync<ObjectDisposedException>(() => cache.RefreshAsync("connection", new("v3", null), _ => Task.FromResult<IReadOnlyList<LlmModel>>([]), CancellationToken.None));
+        await Assert.ThrowsAsync<ObjectDisposedException>(() => cache.GetAsync("connection", new("v3", null), new CacheListingClient(_ => Task.FromResult<IReadOnlyList<LlmModel>>([])), CacheListingClient.Connection("v3"), ModelCatalogFamily.Chat, CancellationToken.None));
+        await Assert.ThrowsAsync<ObjectDisposedException>(() => cache.RefreshAsync("connection", new("v3", null), new CacheListingClient(_ => Task.FromResult<IReadOnlyList<LlmModel>>([])), CacheListingClient.Connection("v3"), ModelCatalogFamily.Chat, CancellationToken.None));
     }
 
     [Fact]
@@ -51,12 +51,12 @@ public sealed class LlmLifetimeTests
         var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var stopped = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var release = new TaskCompletionSource<IReadOnlyList<LlmModel>>(TaskCreationOptions.RunContinuationsAsynchronously);
-        Task<IReadOnlyList<LlmModel>> request = cache.GetAsync("connection", new("v1", null), async token =>
+        Task<IReadOnlyList<LlmModel>> request = cache.GetAsync("connection", new("v1", null), new CacheListingClient(async token =>
         {
             using CancellationTokenRegistration registration = token.Register(() => stopped.TrySetResult());
             started.SetResult();
             return await release.Task;
-        }, CancellationToken.None);
+        }), CacheListingClient.Connection("v1"), ModelCatalogFamily.Chat, CancellationToken.None);
         await started.Task.WaitAsync(Bound);
         Task retirement = cache.DisposeAsync().AsTask();
         try
@@ -77,12 +77,12 @@ public sealed class LlmLifetimeTests
         var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         using var caller = new CancellationTokenSource();
-        Task<IReadOnlyList<LlmModel>> waiting = cache.GetAsync("connection", new("v1", null), async _ =>
+        Task<IReadOnlyList<LlmModel>> waiting = cache.GetAsync("connection", new("v1", null), new CacheListingClient(async _ =>
         {
             started.SetResult();
             await release.Task;
             throw new LlmProviderException("controlled failure", LlmTransport.OpenAiCompatibleChat);
-        }, caller.Token);
+        }), CacheListingClient.Connection("v1"), ModelCatalogFamily.Chat, caller.Token);
         await started.Task.WaitAsync(Bound);
         await caller.CancelAsync();
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => waiting);

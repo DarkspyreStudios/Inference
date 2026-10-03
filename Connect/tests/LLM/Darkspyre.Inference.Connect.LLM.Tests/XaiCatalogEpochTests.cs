@@ -75,6 +75,49 @@ public sealed class XaiCatalogEpochTests
         }
     }
 
+    [Fact]
+    public async Task FacadeRetirementDoesNotKillTheInjectedCachesAdmittedXaiProducer()
+    {
+        var source = new Source(Connection("old-token", "old"));
+        using var handler = new CatalogHandler { HoldOldGeneric = true };
+        using var http = new HttpClient(handler);
+        var client = new XaiResponsesLlmClient(http);
+        var cache = new LlmModelListCache();
+        var originalService = new LlmProviderService(source, [client], [], modelLists: cache);
+        LlmProviderService? secondService = null;
+        Task<IReadOnlyList<LlmModel>>? original = null;
+        Task<IReadOnlyList<LlmModel>>? resumed = null;
+        try
+        {
+            original = originalService.ListModelsAsync("selected");
+            await handler.OldGenericEntered.Task.WaitAsync(Bound);
+            await originalService.DisposeAsync().AsTask().WaitAsync(Bound);
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => original.WaitAsync(Bound));
+            Assert.Single(handler.Requests);
+            secondService = new(source, [client], [], modelLists: cache);
+            resumed = secondService.ListModelsAsync("selected");
+            handler.ReleaseOldGeneric.TrySetResult();
+            IReadOnlyList<LlmModel> models = await resumed.WaitAsync(Bound);
+            Assert.Equal("old-model", Assert.Single(models).Id);
+            Assert.Same(models, await secondService.ListModelsAsync("selected"));
+            Assert.Equal(1, handler.Requests.Count(request => request.Path == "/v1/models"));
+            Assert.Equal(1, handler.Requests.Count(request => request.Path == "/v1/language-models"));
+        }
+        finally
+        {
+            Task first = originalService.DisposeAsync().AsTask();
+            Task second = secondService?.DisposeAsync().AsTask() ?? Task.CompletedTask;
+            Task retirement = cache.DisposeAsync().AsTask();
+            handler.ReleaseOldGeneric.TrySetResult();
+            try
+            {
+                if (original is not null) await DrainAsync(original);
+                if (resumed is not null) await DrainAsync(resumed);
+            }
+            finally { await Task.WhenAll(first, second, retirement).WaitAsync(Bound); }
+        }
+    }
+
     private static async Task DrainAsync(Task task)
     {
         try { await task.WaitAsync(Bound); }

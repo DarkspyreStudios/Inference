@@ -790,7 +790,7 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, ILlmFileClie
                 try
                 {
                     models = await _modelLists.GetAsync(connectionId, new(connection.Version, connection.ResolvedContinuationScope),
-                        token => client.ListModelsAsync(connection, token), cancellationToken);
+                        client, connection, ModelCatalogFamily.Chat, cancellationToken);
                 }
                 catch (Exception error) when (error is HttpRequestException or LlmProviderException or NotSupportedException)
                 {
@@ -855,7 +855,7 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, ILlmFileClie
     }
 
     /// <summary>
-    /// The connection's models. A list is kept until its exact version and resolved continuation-scope tuple changes or
+    /// The connection's models. A list is kept until its exact version/scope or admitted xAI configuration changes or
     /// <see cref="RefreshModelsAsync"/> replaces it, so repeated calls do not ask the provider again.
     /// </summary>
     public async Task<IReadOnlyList<LlmModel>> ListModelsAsync(
@@ -870,8 +870,11 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, ILlmFileClie
         {
             connection = await preparation.PrepareAsync(connection, cancellationToken).ConfigureAwait(false);
         }
-        return await _modelLists.GetAsync(connectionId, new(connection.Version, connection.ResolvedContinuationScope),
-            token => client.ListModelsAsync(connection, token), cancellationToken);
+        ThrowIfOperationCanceled(cancellationToken);
+        IReadOnlyList<LlmModel> models = await _modelLists.GetAsync(connectionId, new(connection.Version, connection.ResolvedContinuationScope),
+            client, connection, ModelCatalogFamily.Chat, cancellationToken);
+        ThrowIfOperationCanceled(cancellationToken);
+        return models;
     }
 
     /// <summary>Asks the provider for the connection's models again and keeps the new list.</summary>
@@ -887,8 +890,11 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, ILlmFileClie
         {
             connection = await preparation.PrepareAsync(connection, cancellationToken).ConfigureAwait(false);
         }
-        return await _modelLists.RefreshAsync(connectionId, new(connection.Version, connection.ResolvedContinuationScope),
-            token => client.ListModelsAsync(connection, token), cancellationToken);
+        ThrowIfOperationCanceled(cancellationToken);
+        IReadOnlyList<LlmModel> models = await _modelLists.RefreshAsync(connectionId, new(connection.Version, connection.ResolvedContinuationScope),
+            client, connection, ModelCatalogFamily.Chat, cancellationToken);
+        ThrowIfOperationCanceled(cancellationToken);
+        return models;
     }
 
     /// <summary>Reads passive quota evidence without a provider call, or null when none is observed for this identity.</summary>
@@ -1017,7 +1023,7 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, ILlmFileClie
         {
             IReadOnlyList<LlmModel> models = await _modelLists.GetAsync(connectionId,
                 new(connection.Version, connection.ResolvedContinuationScope),
-                token => client.ListModelsAsync(connection, token), cancellationToken);
+                client, connection, ModelCatalogFamily.Chat, cancellationToken);
             return connection with { Catalog = models };
         }
         catch (Exception error) when (error is HttpRequestException or LlmProviderException or System.Text.Json.JsonException)
