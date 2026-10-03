@@ -54,10 +54,13 @@ internal sealed class XaiResponsesLlmClient(HttpClient http) : ResponsesLlmClien
         SupportsAgentSessions = true,
         SupportsAgentToolUse = true,
         SupportsAgentTurnInstructions = true,
+        SupportsShellTools = true,
         Agent = ManagedAgentPolicy.Capabilities with
         {
             SupportsCompactionHandoff = false,
             CompactionOwnership = LlmAgentOwnership.Provider,
+            SupportsShellTools = true,
+            SupportedCallerServices = new[] { LlmAgentCallerServiceKind.ShellExecution }.ToFrozenSet(),
             RichContentSupported = RichContentRoutes.Responses
         },
         HostedTools = new[] { LlmHostedToolKind.DocumentSearch }.ToFrozenSet(),
@@ -300,7 +303,7 @@ internal sealed class XaiResponsesLlmClient(HttpClient http) : ResponsesLlmClien
             else if (tool is XaiXSearchTool { AllowedHandles: not null, ExcludedHandles: not null })
                 throw new ArgumentException("Grok X search cannot combine allowed and excluded handles.", nameof(request));
         }
-        if (ClientTools.Functions(request.Tools).Any(tool => tool.Name == "web_search"))
+        if (request.Tools.OfType<LlmToolDefinition>().Any(tool => tool.Name == "web_search"))
             throw new ArgumentException("A Grok client function cannot be named web_search.", nameof(request));
         foreach (LlmFileReference file in request.Messages.SelectMany(message => message.Attachments).OfType<LlmFileReference>())
             _ = XaiFileRequestData.Identity(file.File.FileId);
@@ -310,12 +313,12 @@ internal sealed class XaiResponsesLlmClient(HttpClient http) : ResponsesLlmClien
             if (attachment.Kind == LlmBinaryKind.Image && attachment.Data.Length > MaxImageBytes)
                 throw new ArgumentException("Grok input images must not exceed 20 MiB.", nameof(request));
         if (GetCapabilities(connection, request.ModelId).RichContentSupported.Images == LlmRichContentCarriage.Native)
-            foreach (LlmToolOutputPart part in request.Messages.SelectMany(message => ClientTools.Functions(message.ToolResults))
+            foreach (LlmToolOutputPart part in request.Messages.SelectMany(message => message.ToolResults.OfType<LlmToolResult>())
                 .SelectMany(result => result.Output.Parts))
                 if (part is LlmToolOutputBinary { Kind: LlmBinaryKind.Image } binary && binary.Data.Length > MaxImageBytes
                     || part is LlmToolOutputResource { BodyKind: LlmBinaryKind.Image, Data: { } data } && data.Length > MaxImageBytes)
                     throw new ArgumentException("Grok tool input images must not exceed 20 MiB.", nameof(request));
-        foreach (LlmToolDefinition tool in ClientTools.Functions(request.Tools).Where(tool => tool.Strict))
+        foreach (LlmToolDefinition tool in request.Tools.OfType<LlmToolDefinition>().Where(tool => tool.Strict))
             if (!XaiSchemaLimits.Fits(tool.InputSchema))
                 throw new NotSupportedException("A strict Grok tool schema exceeds the published numeric guarantees. The schema is not weakened or sent as non-strict.");
     }

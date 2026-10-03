@@ -14,6 +14,8 @@ internal static class OpenAiResponsesTools
         Func<LlmToolOutput, ProjectedToolOutput> projectToolOutput)
     {
         var input = new JsonArray();
+        IReadOnlyDictionary<string, LlmShellCall> shellCalls = ClientTools.Validate(request,
+            connection.Transport == LlmTransport.XaiResponses);
 
         foreach (LlmChatMessage message in request.Messages)
         {
@@ -25,14 +27,42 @@ internal static class OpenAiResponsesTools
 
             if (message.ToolResults.Count > 0)
             {
-                foreach (LlmToolResult result in message.ToolResults)
+                foreach (LlmClientToolResult result in message.ToolResults)
                 {
-                    input.Add(new JsonObject
+                    if (result is LlmShellCallResult shell)
                     {
-                        ["type"] = "function_call_output",
-                        ["call_id"] = result.ToolCallId,
-                        ["output"] = BuildToolOutput(projectToolOutput(result.Output))
-                    });
+                        var output = new JsonArray();
+                        foreach (LlmShellCommandResult command in shell.Output)
+                        {
+                            var item = new JsonObject
+                            {
+                                ["outcome"] = command.Outcome switch
+                                {
+                                    LlmShellExitedOutcome exit => new JsonObject { ["type"] = "exit", ["exit_code"] = exit.ExitCode },
+                                    LlmShellTimedOutOutcome => new JsonObject { ["type"] = "timeout" },
+                                    _ => throw new NotSupportedException("Unknown shell outcome.")
+                                }
+                            };
+                            if (command.Stdout is not null) item["stdout"] = command.Stdout;
+                            if (command.Stderr is not null) item["stderr"] = command.Stderr;
+                            output.Add(item);
+                        }
+                        var itemOutput = new JsonObject
+                        {
+                            ["type"] = "shell_call_output", ["call_id"] = shell.ToolCallId, ["output"] = output
+                        };
+                        if (shellCalls[shell.ToolCallId].MaxOutputLength is { } limit)
+                            itemOutput["max_output_length"] = limit;
+                        input.Add(itemOutput);
+                    }
+                    else if (result is LlmToolResult function)
+                        input.Add(new JsonObject
+                        {
+                            ["type"] = "function_call_output",
+                            ["call_id"] = function.ToolCallId,
+                            ["output"] = BuildToolOutput(projectToolOutput(function.Output))
+                        });
+                    else throw new NotSupportedException("Unknown client tool result.");
                 }
 
                 if (message.Content.Length > 0 || message.Attachments.Count > 0)
@@ -48,15 +78,25 @@ internal static class OpenAiResponsesTools
                 input.Add(mapTextMessage(message));
             }
 
-            foreach (LlmToolCall call in message.ToolCalls)
+            foreach (LlmClientToolCall call in message.ToolCalls)
             {
-                input.Add(new JsonObject
+                if (call is LlmShellCall shell)
                 {
-                    ["type"] = "function_call",
-                    ["call_id"] = call.Id,
-                    ["name"] = call.Name,
-                    ["arguments"] = call.ArgumentsJson
-                });
+                    var action = new JsonObject
+                    {
+                        ["commands"] = new JsonArray(shell.Commands.Select(command => (JsonNode?)JsonValue.Create(command)).ToArray())
+                    };
+                    if (shell.TimeoutMs is { } timeout) action["timeout_ms"] = timeout;
+                    if (shell.MaxOutputLength is { } limit) action["max_output_length"] = limit;
+                    input.Add(new JsonObject { ["type"] = "shell_call", ["call_id"] = shell.Id, ["action"] = action });
+                }
+                else if (call is LlmToolCall function)
+                    input.Add(new JsonObject
+                    {
+                        ["type"] = "function_call", ["call_id"] = function.Id,
+                        ["name"] = function.Name, ["arguments"] = function.ArgumentsJson
+                    });
+                else throw new NotSupportedException("Unknown client tool call.");
             }
         }
 
@@ -153,21 +193,39 @@ internal static class OpenAiResponsesTools
         _ => throw new ArgumentOutOfRangeException(nameof(attachment))
     };
 
-    public static JsonArray BuildTools(IReadOnlyList<LlmToolDefinition> definitions)
+    public static JsonArray BuildTools(IReadOnlyList<LlmClientToolDefinition> definitions)
     {
         var tools = new JsonArray();
-        foreach (LlmToolDefinition definition in definitions)
+        foreach (LlmClientToolDefinition definition in definitions)
         {
+            if (definition is LlmShellTool shell)
+            {
+                tools.Add(new JsonObject
+                {
+                    ["type"] = "shell",
+                    ["environment"] = new JsonObject
+                    {
+                        ["type"] = "local",
+                        ["skills"] = new JsonArray(shell.Skills.Select(skill => (JsonNode)new JsonObject
+                        {
+                            ["name"] = skill.Name, ["description"] = skill.Description, ["path"] = skill.Path
+                        }).ToArray())
+                    }
+                });
+                continue;
+            }
+            if (definition is not LlmToolDefinition function)
+                throw new NotSupportedException("Unknown client tool definition.");
             var tool = new JsonObject
             {
                 ["type"] = "function",
-                ["name"] = definition.Name,
-                ["parameters"] = JsonNode.Parse(definition.InputSchema.GetRawText()),
-                ["strict"] = definition.Strict
+                ["name"] = function.Name,
+                ["parameters"] = JsonNode.Parse(function.InputSchema.GetRawText()),
+                ["strict"] = function.Strict
             };
-            if (!string.IsNullOrWhiteSpace(definition.Description))
+            if (!string.IsNullOrWhiteSpace(function.Description))
             {
-                tool["description"] = definition.Description;
+                tool["description"] = function.Description;
             }
 
             tools.Add(tool);
@@ -189,7 +247,7 @@ internal static class OpenAiResponsesTools
         _ => throw new ArgumentOutOfRangeException(nameof(choice))
     };
 
-    public static LlmToolCall[] ReadToolCalls(JsonElement responseRoot)
+    public static LlmClientToolCall[] ReadToolCalls(JsonElement responseRoot, bool supportsShell)
     {
         if (!responseRoot.TryGetProperty("output", out JsonElement output)
             || output.ValueKind != JsonValueKind.Array)
@@ -197,10 +255,10 @@ internal static class OpenAiResponsesTools
             return [];
         }
 
-        var calls = new List<LlmToolCall>();
+        var calls = new List<LlmClientToolCall>();
         foreach (JsonElement item in output.EnumerateArray())
         {
-            if (TryReadToolCall(item, out LlmToolCall? call) && call is not null)
+            if (TryReadToolCall(item, supportsShell, out LlmClientToolCall? call) && call is not null)
             {
                 calls.Add(call);
             }
@@ -209,9 +267,38 @@ internal static class OpenAiResponsesTools
         return [.. calls];
     }
 
-    public static bool TryReadToolCall(JsonElement item, out LlmToolCall? call)
+    public static bool TryReadToolCall(JsonElement item, bool supportsShell, out LlmClientToolCall? call)
     {
         call = null;
+        if (LlmJson.GetString(item, "type") == "shell_call")
+        {
+            if (!supportsShell) throw new NotSupportedException("This route does not implement shell calls.");
+            if (!item.TryGetProperty("call_id", out JsonElement identity)
+                || !item.TryGetProperty("action", out JsonElement action)
+                || action.ValueKind != JsonValueKind.Object || !action.TryGetProperty("commands", out JsonElement commands))
+                throw new ArgumentException("Shell calls require identity, action and commands.");
+            string id = identity.GetString()!;
+            ArgumentException.ThrowIfNullOrWhiteSpace(id);
+            if (action.TryGetProperty("type", out JsonElement actionType)
+                && actionType.ValueKind != JsonValueKind.Null && actionType.GetString() != "exec")
+                throw new ArgumentException("Unknown shell action.");
+            if (commands.ValueKind != JsonValueKind.Array)
+                throw new ArgumentException("Shell commands must be an ordered array.");
+            string[] commandText = commands.EnumerateArray().Select(command => command.GetString()
+                ?? throw new ArgumentException("Shell commands must be strings.")).ToArray();
+            long? timeout = null;
+            if (action.TryGetProperty("timeout_ms", out JsonElement timeoutValue) && timeoutValue.ValueKind != JsonValueKind.Null)
+                timeout = timeoutValue.TryGetInt64(out long actualTimeout) ? actualTimeout : throw new ArgumentException("Shell timeout must be INT64.");
+            int? limit = null;
+            if (action.TryGetProperty("max_output_length", out JsonElement limitValue) && limitValue.ValueKind != JsonValueKind.Null)
+                limit = limitValue.TryGetInt32(out int actualLimit) ? actualLimit : throw new ArgumentException("Shell output limit must be INT32.");
+            if (item.TryGetProperty("environment", out JsonElement environment)
+                && environment.ValueKind != JsonValueKind.Null
+                && (!environment.TryGetProperty("type", out JsonElement environmentType) || environmentType.GetString() != "local"))
+                throw new ArgumentException("Unknown shell environment.");
+            call = new LlmShellCall(id, commandText, timeout, limit);
+            return true;
+        }
         if (LlmJson.GetString(item, "type") != "function_call")
         {
             return false;
@@ -266,8 +353,9 @@ internal sealed class OpenAiToolCallStream
     public IReadOnlyList<LlmStreamEvent> ObserveAdded(JsonElement root)
     {
         if (!root.TryGetProperty("item", out JsonElement item)
-            || !OpenAiResponsesTools.TryReadToolCall(item, out LlmToolCall? call)
-            || call is null)
+            || LlmJson.GetString(item, "type") != "function_call"
+            || !OpenAiResponsesTools.TryReadToolCall(item, false, out LlmClientToolCall? observed)
+            || observed is not LlmToolCall call)
         {
             return [];
         }
@@ -298,8 +386,9 @@ internal sealed class OpenAiToolCallStream
     public IReadOnlyList<LlmStreamEvent> ObserveDone(JsonElement root)
     {
         if (!root.TryGetProperty("item", out JsonElement item)
-            || !OpenAiResponsesTools.TryReadToolCall(item, out LlmToolCall? call)
-            || call is null)
+            || LlmJson.GetString(item, "type") != "function_call"
+            || !OpenAiResponsesTools.TryReadToolCall(item, false, out LlmClientToolCall? observed)
+            || observed is not LlmToolCall call)
         {
             return [];
         }
@@ -319,13 +408,18 @@ internal sealed class OpenAiToolCallStream
         return events;
     }
 
-    public IReadOnlyList<LlmStreamEvent> CompleteMissing(IReadOnlyList<LlmToolCall> calls,
+    public IReadOnlyList<LlmStreamEvent> CompleteMissing(IReadOnlyList<LlmClientToolCall> calls,
         bool emitMissingArguments = false)
     {
         var events = new List<LlmStreamEvent>();
         for (int index = 0; index < calls.Count; index++)
         {
-            LlmToolCall call = calls[index];
+            if (calls[index] is LlmShellCall shell)
+            {
+                if (_completed.Add(shell.Id)) events.Add(new LlmShellCallEvent((LlmShellCall)ClientTools.Snapshot(shell)));
+                continue;
+            }
+            LlmToolCall call = calls[index] as LlmToolCall ?? throw new NotSupportedException("Unknown client tool call.");
             if (_started.Add(call.Id))
             {
                 events.Add(new LlmToolCallStartedEvent(call.Id, call.Name, index));

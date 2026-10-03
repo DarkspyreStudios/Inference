@@ -9,8 +9,10 @@ internal static class ClientTools
 {
     internal static LlmAgentCapabilities ManagedCapabilities(LlmProviderCapabilities capabilities) => capabilities.Agent with
     {
-        SupportsShellTools = false,
-        SupportedCallerServices = FrozenSet<LlmAgentCallerServiceKind>.Empty
+        SupportsShellTools = capabilities.SupportsShellTools && capabilities.Agent.SupportsShellTools,
+        SupportedCallerServices = capabilities.SupportsShellTools && capabilities.Agent.SupportsShellTools
+            ? new[] { LlmAgentCallerServiceKind.ShellExecution }.ToFrozenSet()
+            : FrozenSet<LlmAgentCallerServiceKind>.Empty
     };
 
     internal static void ValidateCallerServices(LlmAgentCallerServices? services, LlmAgentCapabilities capabilities, bool supportsResources = false)
@@ -111,7 +113,7 @@ internal static class ClientTools
         Array.AsReadOnly(tools.Select(tool => tool is LlmAgentToolDefinition function ? function
             : throw new NotSupportedException("This runtime implements function tools only.")).ToArray());
 
-    internal static void Validate(LlmChatRequest request, bool supportsShellTools)
+    internal static IReadOnlyDictionary<string, LlmShellCall> Validate(LlmChatRequest request, bool supportsShellTools)
     {
         ArgumentNullException.ThrowIfNull(request.Tools);
         ArgumentNullException.ThrowIfNull(request.Messages);
@@ -120,13 +122,15 @@ internal static class ClientTools
                 || message.ToolResults.Any(result => result is LlmShellCallResult));
         if (shell && !supportsShellTools)
             throw new NotSupportedException("This route does not implement shell tools or shell history.");
-        if (!shell) return;
+        if (!shell) return FrozenDictionary<string, LlmShellCall>.Empty;
 
         var calls = new Dictionary<string, LlmClientToolCall>(StringComparer.Ordinal);
         var shellIds = new HashSet<string>(StringComparer.Ordinal);
         var settled = new HashSet<string>(StringComparer.Ordinal);
         foreach (LlmChatMessage message in request.Messages)
         {
+            if (shellIds.Any(id => !settled.Contains(id)) && message.ToolResults.Count == 0)
+                throw new ArgumentException("Unresolved shell calls require ordered results before another message.");
             foreach (LlmClientToolCall call in message.ToolCalls)
             {
                 ArgumentNullException.ThrowIfNull(call);
@@ -161,6 +165,9 @@ internal static class ClientTools
                 else throw new NotSupportedException("Unknown client tool result.");
             }
         }
+        if (shellIds.Any(id => !settled.Contains(id)))
+            throw new ArgumentException("Runnable shell history requires every shell call to be settled.");
+        return shellIds.ToFrozenDictionary(id => id, id => (LlmShellCall)calls[id], StringComparer.Ordinal);
     }
 
     internal static IReadOnlyList<LlmToolDefinition> Functions(IReadOnlyList<LlmClientToolDefinition> tools) =>

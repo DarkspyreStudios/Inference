@@ -437,7 +437,7 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
                                 compaction);
                             if (compaction && (result.Status != LlmCompletionStatus.Completed || result.ContinuationState is null))
                                 throw ProtocolException("Codex compaction did not complete successfully.", response, string.Empty, credential);
-                            foreach (LlmStreamEvent toolEvent in toolCallStream.CompleteMissing(ClientTools.Functions(result.ToolCalls),
+                            foreach (LlmStreamEvent toolEvent in toolCallStream.CompleteMissing(result.ToolCalls,
                                          emitMissingArguments: Transport == LlmTransport.XaiResponses))
                             {
                                 yield return consumption.Publish<LlmStreamEvent>(toolEvent);
@@ -637,7 +637,7 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
         payload["include"] = new JsonArray("reasoning.encrypted_content");
         if (request.Tools.Count > 0)
         {
-            payload["tools"] = OpenAiResponsesTools.BuildTools(ClientTools.Functions(request.Tools));
+            payload["tools"] = OpenAiResponsesTools.BuildTools(request.Tools);
         }
 
         if (request.ToolChoice is { } toolChoice)
@@ -790,7 +790,8 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
             finalRefusal = finalRefusal.Length > 0 ? finalRefusal : streamedRefusal;
         }
 
-        LlmToolCall[] toolCalls = OpenAiResponsesTools.ReadToolCalls(responseRoot);
+        LlmClientToolCall[] toolCalls = OpenAiResponsesTools.ReadToolCalls(responseRoot,
+            connection.Transport == LlmTransport.XaiResponses);
 
         string? providerStatus = LlmJson.GetString(responseRoot, "status");
         string? incompleteReason = LlmJson.GetObject(responseRoot, "incomplete_details") is { } details

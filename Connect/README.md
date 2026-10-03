@@ -1970,12 +1970,12 @@ without normalization or filesystem access. File URLs and relative paths are not
 Factories and caller services remain borrowed. A returned terminal handle is owned by its session;
 Kill preserves readability, while DisposeAsync must kill/drain and invalidate that handle. These
 interfaces contain no filesystem, process or shell implementation. Start/Resume borrow the typed
-composition and reject unsupported supplied services before runtime work. Built-in adapters do not
-advertise caller-service or shell mappings. Managed sessions release their borrowed handler/service
+composition and reject unsupported supplied services before runtime work. The xAI Responses managed
+lane maps shell execution through the supplied borrowed `ShellExecutor`; other built-in managed
+adapters do not advertise that mapping. Managed sessions release their borrowed handler/service
 references only after admitted work drains; they do not dispose them.
-The current managed lane remains function-only even when a caller-owned SelfHost engine truthfully
-advertises portable shell support. That portable fact does not enable a managed shell executor or
-caller-service mapping; supplied managed shell definitions/services refuse before engine resolution.
+Caller-owned SelfHost portable shell support does not enable its managed shell executor or
+caller-service mapping; supplied managed shell definitions/services still refuse before engine resolution.
 
 `ConnectLlmJson` exports the callback data through exact type-name getters and closed fixed unions.
 Runtime services have no public metadata getters. Their internal owned codecs refuse all non-null
@@ -2009,6 +2009,17 @@ Start/Resume/Fork freezes definitions before connection resolution. Managed open
 and supplied context before preparation or catalog awaits. Schemas and context bytes are copied;
 handlers and caller services stay borrowed. Shell results
 match actual preceding calls; output limits remain on that call, not duplicated on the result.
+The xAI wire projection echoes the matched call's actual nullable output limit and preserves ordered
+commands, output members and exit/timeout outcomes without truncation or inferred execution facts.
+Terminal shell observations use the same Responses parser and opaque continuation codec; streamed
+observations do not invoke the executor. Managed mixed function/shell calls execute once in terminal
+order and retain each genuine completed result. A callback failure or interruption propagates and
+leaves the unfinished tail unresolved for explicit reconciliation. Function-only scheduling and
+error conversion are unchanged. Shell callbacks run outside the context lock with actual
+thread/session/turn scope and no inferred directory or runtime authority. Retirement drains admitted
+callbacks before detaching borrowed services. This source implementation is not OAuth/runtime
+qualification. Skills directory multipart and uploaded-skill generation attachment remain separate
+protocol gates; no local filesystem discovery, process runner or Skills upload is performed here.
 
 `LlmAgentEvent.TurnId` is nullable for actual session-only observations. Concrete turn-scoped events
 retain guarded non-null IDs, including construction and base-typed `with` assignments. Resource and

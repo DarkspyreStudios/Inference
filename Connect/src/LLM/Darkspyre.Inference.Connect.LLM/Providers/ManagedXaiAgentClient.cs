@@ -22,12 +22,17 @@ internal sealed class ManagedXaiAgentClient(XaiResponsesLlmClient client, LlmPro
             ModelId = options.ModelId,
             Instructions = options.Instructions,
             Messages = options.Context?.Entries.Select(entry => entry.Message).ToArray() ?? [],
-            Tools = ClientTools.Functions(options.Tools).Select(tool => (LlmClientToolDefinition)new LlmToolDefinition
+            Tools = options.Tools.Select(tool => tool switch
             {
-                Name = tool.Name,
-                Description = tool.Description,
-                InputSchema = tool.InputSchema,
-                Strict = tool.Strict
+                LlmAgentToolDefinition function => (LlmClientToolDefinition)new LlmToolDefinition
+                {
+                    Name = function.Name,
+                    Description = function.Description,
+                    InputSchema = function.InputSchema,
+                    Strict = function.Strict
+                },
+                LlmAgentShellTool shell => shell.Tool,
+                _ => throw new NotSupportedException("Unknown agent tool definition.")
             }).ToArray(),
             HostedTools = options.HostedTools,
             MaxHostedTurns = options.MaxHostedTurns,

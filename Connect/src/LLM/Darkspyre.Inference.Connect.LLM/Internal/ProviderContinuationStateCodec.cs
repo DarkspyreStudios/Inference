@@ -128,7 +128,7 @@ internal static class ProviderContinuationStateCodec
             throw new ArgumentException("Assistant text must match its opaque continuation state.");
         }
         var calls = output.OfType<JsonObject>()
-            .Where(item => item["type"]?.GetValue<string>() is "function_call" or "tool_use").ToArray();
+            .Where(item => item["type"]?.GetValue<string>() is "function_call" or "tool_use" or "shell_call").ToArray();
         if (calls.Length != message.ToolCalls.Count)
         {
             throw new ArgumentException("Assistant tool calls must match its opaque continuation state.");
@@ -136,8 +136,21 @@ internal static class ProviderContinuationStateCodec
         for (int index = 0; index < calls.Length; index++)
         {
             JsonObject call = calls[index];
+            if (call["type"]?.GetValue<string>() == "shell_call")
+            {
+                using JsonDocument shellDocument = JsonDocument.Parse(call.ToJsonString());
+                _ = OpenAiResponsesTools.TryReadToolCall(shellDocument.RootElement,
+                    connection.Transport == LlmTransport.XaiResponses, out LlmClientToolCall? observed);
+                if (observed is not LlmShellCall native || message.ToolCalls[index] is not LlmShellCall visibleShell
+                    || native.Id != visibleShell.Id || native.TimeoutMs != visibleShell.TimeoutMs
+                    || native.MaxOutputLength != visibleShell.MaxOutputLength
+                    || !native.Commands.SequenceEqual(visibleShell.Commands, StringComparer.Ordinal))
+                    throw new ArgumentException("Assistant shell calls must match their opaque continuation state.");
+                continue;
+            }
             bool anthropic = call["type"]?.GetValue<string>() == "tool_use";
-            var visible = ClientTools.Functions(message.ToolCalls)[index];
+            var visible = message.ToolCalls[index] as LlmToolCall
+                ?? throw new ArgumentException("Assistant tool-call kinds must match their opaque continuation state.");
             try
             {
                 if (call[anthropic ? "id" : "call_id"]?.GetValue<string>() != visible.Id
@@ -189,7 +202,7 @@ internal static class ProviderContinuationStateCodec
 
             if (transport == LlmTransport.XaiResponses)
             {
-                if (type is not ("message" or "reasoning" or "function_call" or "compaction" or "web_search_call"
+                if (type is not ("message" or "reasoning" or "function_call" or "shell_call" or "compaction" or "web_search_call"
                     or "x_search_call" or "code_interpreter_call" or "code_execution_call" or "file_search_call"
                     or "mcp_call" or "image_generation_call" or "view_image_call" or "view_x_video_call"))
                 {
@@ -329,6 +342,11 @@ internal static class ProviderContinuationStateCodec
         if (type == "function_call" && JsonNode.Parse(item["arguments"]!.GetValue<string>()) is not JsonObject)
         {
             throw new ArgumentException("Response-state tool arguments must be a JSON object.");
+        }
+        if (type == "shell_call")
+        {
+            using JsonDocument document = JsonDocument.Parse(item.ToJsonString());
+            _ = OpenAiResponsesTools.TryReadToolCall(document.RootElement, transport == LlmTransport.XaiResponses, out _);
         }
         if (transport == LlmTransport.AwsBedrockConverse && type == "redacted_reasoning")
         {

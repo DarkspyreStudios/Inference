@@ -649,6 +649,7 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
 
     private async Task ProduceAsync(LiveRun run, string? continuedPause, ChannelWriter<LlmAgentEvent> writer, CancellationToken token)
     {
+        bool executingMixedTools = false;
         try
         {
             await writer.WriteAsync(continuedPause is null
@@ -809,11 +810,13 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
                     return;
                 }
                 LlmAgentContextEntry assistant = AppendAssistant(stepId, run, result);
-                // Once calls enter context, every call must settle, even if an event write is cancelled.
+                // Mixed calls retain actual completed results; interruption leaves the remaining tail unresolved.
                 if (result.ToolCalls.Count > 0)
                 {
+                    executingMixedTools = result.ToolCalls.Any(call => call is LlmShellCall);
                     try { await writer.WriteAsync(new LlmAgentMessageCompletedEvent(ThreadId, run.Id, stepId, result.Text), token); }
                     finally { await ExecuteToolsAsync(run, result.ToolCalls, assistant.Id, writer, token); }
+                    executingMixedTools = false;
                     token.ThrowIfCancellationRequested();
                     continue;
                 }
@@ -840,6 +843,7 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
         {
             // Best effort only: a cancelled/abandoned reader must never block tool settlement.
             writer.TryWrite(new LlmAgentTurnCompletedEvent(ThreadId, run.Id, LlmAgentCompletionReason.Interruption, null));
+            if (executingMixedTools) writer.TryComplete(error);
         }
         catch (Exception error)
         {
@@ -850,7 +854,7 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
                     error is LlmProviderException provider ? provider.Message : "Managed execution failed; inspect the host operation boundary."), token);
             }
             catch (OperationCanceledException) when (token.IsCancellationRequested) { }
-            if (LlmResourcePreparation.IsResourceFailure(error)) writer.TryComplete(error);
+            if (executingMixedTools || LlmResourcePreparation.IsResourceFailure(error)) writer.TryComplete(error);
             if (LlmResourcePreparation.IsCleanupFailure(error)) throw;
         }
         finally
@@ -875,6 +879,46 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
     private async Task ExecuteToolsAsync(LiveRun run, IReadOnlyList<LlmClientToolCall> returnedCalls, string assistantId,
         ChannelWriter<LlmAgentEvent> writer, CancellationToken token)
     {
+        if (returnedCalls.Any(call => call is LlmShellCall))
+        {
+            string? entryId = null;
+            foreach (LlmClientToolCall call in returnedCalls)
+            {
+                FenceResourceCallback(token);
+                LlmClientToolResult result = call switch
+                {
+                    LlmToolCall function => await InvokeFunctionAsync(run, function, writer, token,
+                        message => throw new InvalidOperationException(message), () => { }),
+                    LlmShellCall shell => await InvokeShellAsync(run, shell, token),
+                    _ => throw new NotSupportedException("Unknown client tool call.")
+                };
+                lock (_sync)
+                {
+                    if (_disposed || !ReferenceEquals(_run, run)) throw new OperationCanceledException(token);
+                    if (entryId is null)
+                    {
+                        entryId = NewId();
+                        _context = Append(_context, new(entryId, run.Id, new("user", "") { ToolResults = [result] }));
+                    }
+                    else
+                    {
+                        _context = _context with
+                        {
+                            Revision = _context.Revision + 1,
+                            Entries = _context.Entries.Select(entry => entry.Id == entryId
+                                ? entry with { Message = entry.Message with { ToolResults = [.. entry.Message.ToolResults, result] } }
+                                : entry).ToArray()
+                        };
+                    }
+                    if (!_automaticProviderCompaction)
+                    {
+                        run.Protected.Clear();
+                        run.Protected.UnionWith([run.UserEntryId, assistantId, entryId]);
+                    }
+                }
+            }
+            return;
+        }
         IReadOnlyList<LlmToolCall> calls = ClientTools.Functions(returnedCalls);
         bool parallel = _execution.ToolExecutionMode == LlmAgentToolExecutionMode.Parallel
             && !calls.Any(call => _tools.TryGetValue(call.Name, out var tool) && tool.RequiresSequentialExecution);
@@ -901,50 +945,7 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
             {
                 await concurrency.WaitAsync(token);
                 entered = true;
-                if (!_tools.TryGetValue(call.Name, out var definition)) { return await FailedAsync("Unknown tool."); }
-                var validation = StructuredOutput.Validate(call.ArgumentsJson,
-                    new() { Name = definition.Name, Schema = definition.InputSchema }, LlmStructuredOutputEnforcement.LocalValidationOnly);
-                if (!validation.IsValid) { return await FailedAsync("Tool arguments do not satisfy the declared schema."); }
-                using var arguments = JsonDocument.Parse(call.ArgumentsJson);
-                await writer.WriteAsync(new LlmAgentToolEvent(ThreadId, run.Id, call.Id, null, call.Name,
-                    arguments.RootElement.Clone(), null, "started"), token);
-                token.ThrowIfCancellationRequested();
-                started = true;
-                var returned = await _toolHandler!(new(ThreadId, run.Id, call.Id, null, call.Name,
-                    arguments.RootElement.Clone()), token);
-                var output = ManagedAgentContext.CopyOutput(returned);
-                if (output.Parts.OfType<LlmToolOutputSessionResource>().Any())
-                {
-                    try
-                    {
-                        using var callback = _resourceCallbacks.Enter(token);
-                        IInferenceResourceAccess access;
-                        lock (_sync)
-                        {
-                            FenceResourceCallback(callback.Token);
-                            access = _callerServices?.Resources ?? throw new NotSupportedException("Tool resources require caller-owned access.");
-                        }
-                        if (_resourceScope is { } scope)
-                            LlmResourcePreparation.ValidateScope(access, scope, () => FenceResourceCallback(callback.Token), callback.Token);
-                        await LlmResourcePreparation.AuthorizeToolOutputAsync(output, access,
-                            () => FenceResourceCallback(callback.Token), callback.Token).ConfigureAwait(false);
-                        FenceResourceCallback(callback.Token);
-                    }
-                    catch (Exception error) { ExceptionDispatchInfo.Capture(LlmResourcePreparation.AsResourceFailure(error, token)).Throw(); throw; }
-                }
-                // The output is kept whole; the route's projection decides what reaches the model when it is sent.
-                var mapped = new LlmToolResult(call.Id, output);
-                // A completed external effect is retained even if cancellation prevents its event.
-                if (!token.IsCancellationRequested)
-                {
-                    try
-                    {
-                        await writer.WriteAsync(new LlmAgentToolEvent(ThreadId, run.Id, call.Id, null, call.Name,
-                            arguments.RootElement.Clone(), !output.IsError, "completed", mapped.Output), token);
-                    }
-                    catch (OperationCanceledException) when (token.IsCancellationRequested) { }
-                }
-                return mapped;
+                return await InvokeFunctionAsync(run, call, writer, token, FailedAsync, () => started = true);
             }
             catch (Exception error) when (LlmResourcePreparation.IsResourceFailure(error)) { throw; }
             catch (OperationCanceledException) when (token.IsCancellationRequested)
@@ -976,6 +977,76 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
                 run.Protected.UnionWith([run.UserEntryId, assistantId, entry.Id]);
             }
         }
+    }
+
+    private async Task<LlmToolResult> InvokeFunctionAsync(LiveRun run, LlmToolCall call,
+        ChannelWriter<LlmAgentEvent> writer, CancellationToken token,
+        Func<string, Task<LlmToolResult>> failed, Action started)
+    {
+        if (!_tools.TryGetValue(call.Name, out var definition)) return await failed("Unknown tool.");
+        var validation = StructuredOutput.Validate(call.ArgumentsJson,
+            new() { Name = definition.Name, Schema = definition.InputSchema }, LlmStructuredOutputEnforcement.LocalValidationOnly);
+        if (!validation.IsValid) return await failed("Tool arguments do not satisfy the declared schema.");
+        using var arguments = JsonDocument.Parse(call.ArgumentsJson);
+        await writer.WriteAsync(new LlmAgentToolEvent(ThreadId, run.Id, call.Id, null, call.Name,
+            arguments.RootElement.Clone(), null, "started"), token);
+        token.ThrowIfCancellationRequested();
+        started();
+        var returned = await _toolHandler!(new(ThreadId, run.Id, call.Id, null, call.Name,
+            arguments.RootElement.Clone()), token);
+        var output = ManagedAgentContext.CopyOutput(returned);
+        if (output.Parts.OfType<LlmToolOutputSessionResource>().Any())
+        {
+            try
+            {
+                using var callback = _resourceCallbacks.Enter(token);
+                IInferenceResourceAccess access;
+                lock (_sync)
+                {
+                    FenceResourceCallback(callback.Token);
+                    access = _callerServices?.Resources ?? throw new NotSupportedException("Tool resources require caller-owned access.");
+                }
+                if (_resourceScope is { } scope)
+                    LlmResourcePreparation.ValidateScope(access, scope, () => FenceResourceCallback(callback.Token), callback.Token);
+                await LlmResourcePreparation.AuthorizeToolOutputAsync(output, access,
+                    () => FenceResourceCallback(callback.Token), callback.Token).ConfigureAwait(false);
+                FenceResourceCallback(callback.Token);
+            }
+            catch (Exception error) { ExceptionDispatchInfo.Capture(LlmResourcePreparation.AsResourceFailure(error, token)).Throw(); throw; }
+        }
+        var mapped = new LlmToolResult(call.Id, output);
+        if (!token.IsCancellationRequested)
+        {
+            try
+            {
+                await writer.WriteAsync(new LlmAgentToolEvent(ThreadId, run.Id, call.Id, null, call.Name,
+                    arguments.RootElement.Clone(), !output.IsError, "completed", mapped.Output), token);
+            }
+            catch (OperationCanceledException) when (token.IsCancellationRequested) { }
+        }
+        return mapped;
+    }
+
+    private async Task<LlmShellCallResult> InvokeShellAsync(LiveRun run, LlmShellCall call, CancellationToken token)
+    {
+        using var callback = _resourceCallbacks.Enter(token);
+        ILlmAgentShellExecutor executor;
+        lock (_sync)
+        {
+            FenceResourceCallback(callback.Token);
+            executor = _callerServices?.ShellExecutor ?? throw new NotSupportedException("Shell calls require a borrowed caller executor.");
+        }
+        LlmShellCallResult returned = await executor.ExecuteAsync(new(new(ThreadId, SessionId, run.Id, null, null),
+            (LlmShellCall)ClientTools.Snapshot(call)), callback.Token).ConfigureAwait(false);
+        lock (_sync)
+        {
+            if (_disposed || !ReferenceEquals(_run, run)) throw new OperationCanceledException(callback.Token);
+        }
+        ArgumentNullException.ThrowIfNull(returned);
+        LlmShellCallResult result = ClientTools.Snapshot(returned);
+        if (result.ToolCallId != call.Id || result.Output.Any(output => output.Outcome is not (LlmShellExitedOutcome or LlmShellTimedOutOutcome)))
+            throw new InvalidOperationException("Shell executor returned an invalid result identity or outcome.");
+        return result;
     }
 
     private async Task PauseAsync(LiveRun run, LlmAgentContextStatus status, LlmAgentCompactionReason reason,
@@ -1205,20 +1276,27 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
     }
     private void ValidateCalls(IReadOnlyList<LlmClientToolCall> returnedCalls)
     {
-        IReadOnlyList<LlmToolCall> calls = ClientTools.Functions(returnedCalls);
         var ids = _context.Entries.SelectMany(entry => entry.Message.ToolCalls)
             .Select(call => call.Id).ToHashSet(StringComparer.Ordinal);
-        foreach (var call in calls)
+        foreach (var call in returnedCalls)
         {
-            if (string.IsNullOrWhiteSpace(call.Id) || string.IsNullOrWhiteSpace(call.Name) || !ids.Add(call.Id))
+            if (string.IsNullOrWhiteSpace(call.Id) || !ids.Add(call.Id))
             {
                 throw new InvalidOperationException("Model returned invalid or duplicate tool-call identities.");
             }
-            using var arguments = JsonDocument.Parse(call.ArgumentsJson);
-            if (arguments.RootElement.ValueKind != JsonValueKind.Object)
+            if (call is LlmShellCall)
             {
-                throw new InvalidOperationException("Model returned incomplete tool arguments.");
+                if (!_options.Tools.Any(tool => tool is LlmAgentShellTool) || !Capabilities.SupportsShellTools)
+                    throw new NotSupportedException("The session does not declare shell tools.");
             }
+            else if (call is LlmToolCall function)
+            {
+                if (string.IsNullOrWhiteSpace(function.Name)) throw new InvalidOperationException("Model returned an invalid tool name.");
+                using var arguments = JsonDocument.Parse(function.ArgumentsJson);
+                if (arguments.RootElement.ValueKind != JsonValueKind.Object)
+                    throw new InvalidOperationException("Model returned incomplete tool arguments.");
+            }
+            else throw new NotSupportedException("Unknown client tool call.");
         }
     }
 
