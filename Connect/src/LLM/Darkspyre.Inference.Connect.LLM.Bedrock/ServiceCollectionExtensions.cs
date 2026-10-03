@@ -7,6 +7,7 @@ public static class ServiceCollectionExtensions
     public static IServiceCollection AddLlmConnectBedrock(this IServiceCollection services)
     {
         ArgumentNullException.ThrowIfNull(services);
+        services.AddLogging();
         services.AddSingleton(BedrockProviderDefinitions.AwsProfile);
         services.AddSingleton(BedrockProviderDefinitions.AgentCoreHarness);
         services.AddSingleton<ILlmSetupEnvironment>(new BedrockSetupEnvironment(LlmTransport.AwsBedrockConverse));

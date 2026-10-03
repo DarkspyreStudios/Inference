@@ -1,14 +1,25 @@
 using Amazon.Bedrock;
 using Amazon.Bedrock.Model;
+using Darkspyre.Inference.Connect.LLM.Internal;
+using Microsoft.Extensions.Logging;
 
 namespace Darkspyre.Inference.Connect.LLM.Bedrock;
 
 internal sealed class BedrockModelResolver
 {
+    private static readonly Action<ILogger, string, int?, string?, string?, Exception?> DiscoveryFailed =
+        LoggerMessage.Define<string, int?, string?, string?>(LogLevel.Warning, new EventId(1, "DiscoveryFailed"),
+            "Bedrock {Operation} failed. StatusCode={StatusCode} ErrorCode={ErrorCode} RequestId={RequestId}");
+    private static readonly Action<ILogger, Exception?> ListingFailed =
+        LoggerMessage.Define(LogLevel.Error, new EventId(2, "ListingFailed"),
+            "Bedrock model listing failed after both catalog requests failed.");
+
     public static async Task<string> ResolveAsync(
         BedrockClientFactory.Lease<AmazonBedrockClient> control,
         string region,
         string requestedModelId,
+        ILogger<BedrockLlmClient> logger,
+        LlmCredential credential,
         CancellationToken cancellationToken)
     {
         control.ThrowIfCanceled();
@@ -37,15 +48,17 @@ internal sealed class BedrockModelResolver
                 return requestedModelId;
             }
 
-            return await FindProfileForModelAsync(
-                       control,
-                       region,
-                       requestedModelId,
-                       cancellationToken)
-                ?? requestedModelId;
+            string? profile = await FindProfileForModelAsync(
+                control,
+                region,
+                requestedModelId,
+                cancellationToken);
+            control.ThrowIfCanceled();
+            return profile ?? requestedModelId;
         }
-        catch (AmazonBedrockException)
+        catch (AmazonBedrockException error)
         {
+            _ = Warn(logger, credential, "ResolveModel", error);
             control.ThrowIfCanceled();
             return requestedModelId;
         }
@@ -54,23 +67,36 @@ internal sealed class BedrockModelResolver
     public static async Task<IReadOnlyList<LlmModel>> ListAsync(
         BedrockClientFactory.Lease<AmazonBedrockClient> control,
         string region,
+        ILogger<BedrockLlmClient> logger,
+        LlmCredential credential,
         CancellationToken cancellationToken)
     {
         control.ThrowIfCanceled();
         var byId = new Dictionary<string, LlmModel>(StringComparer.Ordinal);
-        foreach (InferenceProfileSummary profile in await ListInferenceProfilesAsync(
-                     control,
-                     cancellationToken))
+        var failures = new List<Exception>();
+        bool profilesSucceeded = false;
+        bool foundationsSucceeded = false;
+        try
         {
-            if (!string.IsNullOrEmpty(profile.InferenceProfileId))
+            List<InferenceProfileSummary> profiles = await ListInferenceProfilesAsync(control, cancellationToken);
+            profilesSucceeded = true;
+            foreach (InferenceProfileSummary profile in profiles)
             {
-                byId.TryAdd(
-                    profile.InferenceProfileId,
-                    new LlmModel(
+                if (!string.IsNullOrEmpty(profile.InferenceProfileId))
+                {
+                    byId.TryAdd(
                         profile.InferenceProfileId,
-                        profile.InferenceProfileName ?? profile.InferenceProfileId,
-                        region));
+                        new LlmModel(
+                            profile.InferenceProfileId,
+                            profile.InferenceProfileName ?? profile.InferenceProfileId,
+                            region));
+                }
             }
+        }
+        catch (AmazonBedrockException error)
+        {
+            failures.Add(Warn(logger, credential, "ListInferenceProfiles", error, failures));
+            control.ThrowIfCanceled();
         }
 
         try
@@ -80,6 +106,7 @@ internal sealed class BedrockModelResolver
                 new ListFoundationModelsRequest(),
                 cancellationToken);
             control.ThrowIfCanceled();
+            foundationsSucceeded = true;
             foreach (FoundationModelSummary model in models.ModelSummaries ?? [])
             {
                 if (!string.IsNullOrEmpty(model.ModelId) && !IsProvisionedOnly(model.InferenceTypesSupported))
@@ -90,10 +117,18 @@ internal sealed class BedrockModelResolver
                 }
             }
         }
-        catch (AmazonBedrockException)
+        catch (AmazonBedrockException error)
         {
+            failures.Add(Warn(logger, credential, "ListFoundationModels", error, failures));
             control.ThrowIfCanceled();
-            // Inference profiles alone remain useful when foundation-model listing is denied.
+        }
+
+        control.ThrowIfCanceled();
+        if (!profilesSucceeded && !foundationsSucceeded)
+        {
+            try { ListingFailed(logger, null); }
+            catch (Exception error) { failures.Add(new LoggingEvidence(error)); }
+            throw new AggregateException("Bedrock model listing failed.", failures);
         }
 
         return [.. byId.Values.OrderBy(model => model.Id, StringComparer.OrdinalIgnoreCase)];
@@ -139,20 +174,42 @@ internal sealed class BedrockModelResolver
         BedrockClientFactory.Lease<AmazonBedrockClient> control,
         CancellationToken cancellationToken)
     {
+        control.ThrowIfCanceled();
+        ListInferenceProfilesResponse response = await control.Client.ListInferenceProfilesAsync(
+            new ListInferenceProfilesRequest(),
+            cancellationToken);
+        control.ThrowIfCanceled();
+        return response.InferenceProfileSummaries ?? [];
+    }
+
+    private static LlmProviderException Warn(ILogger<BedrockLlmClient> logger, LlmCredential credential,
+        string operation, AmazonBedrockException error, IReadOnlyList<Exception>? earlierFailures = null)
+    {
+        System.Net.HttpStatusCode? status = (int)error.StatusCode == 0 ? null : error.StatusCode;
+        string? code = error.ErrorCode is null ? null : SecretRedactor.Sanitize(error.ErrorCode, credential);
+        string? requestId = error.RequestId is null ? null : SecretRedactor.Sanitize(error.RequestId, credential);
+        var failure = new LlmProviderException("Bedrock model discovery request failed.",
+            LlmTransport.AwsBedrockConverse, status, code, requestId, innerException: new SdkEvidence(error));
         try
         {
-            control.ThrowIfCanceled();
-            ListInferenceProfilesResponse response = await control.Client.ListInferenceProfilesAsync(
-                new ListInferenceProfilesRequest(),
-                cancellationToken);
-            control.ThrowIfCanceled();
-            return response.InferenceProfileSummaries ?? [];
+            DiscoveryFailed(logger, operation, status is null ? null : (int?)status.Value, code, requestId, null);
         }
-        catch (AmazonBedrockException)
+        catch (Exception loggingFailure)
         {
-            control.ThrowIfCanceled();
-            return [];
+            throw new AggregateException("Bedrock model discovery and diagnostic logging failed.",
+                [.. earlierFailures ?? [], failure, new LoggingEvidence(loggingFailure)]);
         }
+        return failure;
+    }
+
+    private sealed class SdkEvidence(AmazonBedrockException original) : Exception("Bedrock model discovery failed.")
+    {
+        internal AmazonBedrockException Original { get; } = original;
+    }
+
+    private sealed class LoggingEvidence(Exception original) : Exception("Bedrock diagnostic logging failed.")
+    {
+        internal Exception Original { get; } = original;
     }
 
     /// <summary>

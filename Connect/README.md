@@ -1136,6 +1136,13 @@ stream response references. The owner retains exact resources whose cleanup fail
 errors; repeated disposal shares that failure and does not retry cleanup. A failed stream opening
 preserves both its original operation error and a response-cleanup error when both occur.
 
+Model discovery preserves every successful catalog lane, including an empty response. A failed lane
+logs a warning through the standard host logger. Two failed lanes also log an error and return ordered
+safe failures, not an empty catalog. An optional resolution failure logs a warning and retains the exact
+requested model ID for invocation. Diagnostics contain fixed operations, observed status and protected
+SDK error-code/request-ID fields, never raw exceptions or provider content. A refused logging sink
+preserves the discovery failure and the separate logging failure behind safe diagnostics.
+
 Clients use a private default AWS credential resolver and SDK-client-local HTTP caches. Retiring
 the SDK owner disposes the resolver and the SDK pipelines' HTTP pools. Runtime and AgentCore HTTP
 clients have infinite generation timeouts; control-plane clients retain their SDK timeout.
@@ -3308,12 +3315,14 @@ completion.
 ### Model discovery
 
 `AnthropicMessages.ListModelsAsync` uses the API key against `GET /v1/models`. Each listed model carries
-`max_input_tokens` and `max_tokens` as its limits, and the reasoning levels its entry reports. The Claude CLI does not
-expose an equivalent machine-readable catalog. A subscription connection therefore reports
-`SupportsModelListing = false` by default and the host may accept a manually entered model ID. A host
-can explicitly attach the optional browser-authorized catalog OAuth credential to the
-`AnthropicClaudeCli` connection to enable the same paged HTTP catalog. That credential affects only
-`SupportsModelListing` and `ListModelsAsync`; prompts, CLI readiness, usage, and agent tools ignore it.
+`max_input_tokens` and `max_tokens` as its limits, and the reasoning levels its entry reports.
+`AnthropicClaudeCli` advertises model listing through a no-prompt initialize control exchange with
+the signed-in CLI. Selectable IDs and display names come from its actual `models` response;
+returned aliases stay aliases, and an empty list stays empty. The owned temporary process is
+retired before options are published. Manual model selection remains available. A host can
+explicitly attach the optional browser-authorized catalog OAuth credential to use the existing
+paged HTTP catalog instead. Prompts, CLI readiness, usage and agent tools ignore that credential.
+Installed CLI initialization compatibility remains a separate qualification requirement.
 
 ## Antigravity CLI subscription transport
 
