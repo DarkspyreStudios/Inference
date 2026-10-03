@@ -70,6 +70,11 @@ ordered copied artifacts and raw provider status. An audio-done observation alon
 durable artifact. Hosted speech clients implement synchronous and asynchronous disposal;
 their callers own returned clients and sessions. Transcription does not create transcript files.
 
+`RealtimeOperationException` and `RealtimeOperationCanceledException` carry a copied
+`RealtimeErrorEvent` snapshot and the actual operation cause. The cancellation carrier preserves
+the original cancellation token. Their messages are fixed. Consumers serialize `Error` with the
+existing event metadata; the runtime exceptions have no portable JSON roots or getters.
+
 Realtime data roots have exact type-name getters on `InferenceJson`. Turn detection uses
 `manual`/`server-vad`, content uses `text`/`audio`, and conversation items use
 `message`/`function-call`/`function-output`. Concrete events use their individual getters;

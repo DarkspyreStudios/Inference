@@ -2448,6 +2448,11 @@ optional observed audio configuration and actual selection version. Null differs
 observed empty list. These data contracts do not implement output staging or an xAI adapter;
 `RealtimeAudioDoneEvent` remains a separate native observation without a resource receipt.
 
+Common exposes `RealtimeOperationException` and `RealtimeOperationCanceledException` for copied
+error observations with actual causes. These declarations do not implement settled session
+completion or output-receipt recovery. The xAI realtime provider remains unregistered; its session
+completion and actual audio policy are not qualified by the exception contracts.
+
 `CreateSettingsManager(target)` borrows the conditional commit target. Setup preserves every typed
 session default, separates protected header edits and removes live authorization from saved data.
 Capability inspection does not prove authentication or session readiness. Manager retirement
