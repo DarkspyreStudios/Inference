@@ -2190,7 +2190,12 @@ its existing session store, restore/fork decisions and compactor; Darkspyre.Infe
 and output limits. Context occupancy includes cached input and differs from accumulated usage or
 account quota. A `LlmAgentCompactionRequiredEvent` ends an execution segment, **not the logical run**.
 After host compaction, `ContinueTurnAsync` uses the same turn ID, pause ID and expected revision,
-without resubmitting the prompt or re-executing settled tools. Only direct Codex currently enables this engine.
+without resubmitting the prompt or re-executing settled tools. Managed clients currently cover direct
+Codex, Gemini API and Apple Foundation Models. Separate registration extensions add Bedrock Converse
+and Vertex Gemini/Claude. SelfHost opens a managed session only after resolving the selected host
+engine/model and checking its requested operation capabilities. Each managed client checks the
+selected model/connection before opening. Anthropic Messages, API-key OpenAI Responses,
+OpenAI-compatible chat and xAI Responses currently have no managed agent client.
 Each model step permits at most two provider-overflow pauses, including across continued segments.
 A third overflow ends the run with `ProviderFailure` and
 "The context could not be reduced enough for this step." A completed model step resets the count.
