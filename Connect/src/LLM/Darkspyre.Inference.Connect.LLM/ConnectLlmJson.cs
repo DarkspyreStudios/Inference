@@ -212,7 +212,8 @@ public static class ConnectLlmJson
                 metadata.Properties.Single(property => property.Name == "Data").CustomConverter =
                     InferenceJson.LlmHostedImageOutput.Properties.Single(property => property.Name == "Data").CustomConverter;
             if (metadata is not null && (type == typeof(LlmAgentHostedToolCallStartedEvent) || type == typeof(LlmAgentHostedToolCallProgressEvent)
-                || type == typeof(LlmAgentHostedToolCallCompletedEvent) || type == typeof(LlmAgentCitationEvent) || type == typeof(LlmAgentCompactedEvent)))
+                || type == typeof(LlmAgentHostedToolCallCompletedEvent) || type == typeof(LlmAgentCitationEvent)
+                || type == typeof(LlmAgentCitationsSnapshotEvent) || type == typeof(LlmAgentCompactedEvent)))
             {
                 metadata.Properties.Single(property => property.Name == nameof(LlmAgentEvent.ThreadId)).IsRequired = true;
                 metadata.Properties.Single(property => property.Name == nameof(LlmAgentEvent.TurnId)).IsRequired = true;
@@ -239,6 +240,7 @@ public static class ConnectLlmJson
     public static JsonTypeInfo<LlmAgentHostedToolCallProgressEvent> LlmAgentHostedToolCallProgressEvent => Metadata<LlmAgentHostedToolCallProgressEvent>();
     public static JsonTypeInfo<LlmAgentHostedToolCallCompletedEvent> LlmAgentHostedToolCallCompletedEvent => Metadata<LlmAgentHostedToolCallCompletedEvent>();
     public static JsonTypeInfo<LlmAgentCitationEvent> LlmAgentCitationEvent => Metadata<LlmAgentCitationEvent>();
+    public static JsonTypeInfo<LlmAgentCitationsSnapshotEvent> LlmAgentCitationsSnapshotEvent => Metadata<LlmAgentCitationsSnapshotEvent>();
     public static JsonTypeInfo<LlmAgentCompactedEvent> LlmAgentCompactedEvent => Metadata<LlmAgentCompactedEvent>();
     public static JsonTypeInfo<LlmAgentResourceSelectionChangedEvent> LlmAgentResourceSelectionChangedEvent => Metadata<LlmAgentResourceSelectionChangedEvent>();
     public static JsonTypeInfo<LlmAgentToolPresentationEvent> LlmAgentToolPresentationEvent => Metadata<LlmAgentToolPresentationEvent>();
@@ -415,6 +417,7 @@ public static class ConnectLlmJson
 [JsonSerializable(typeof(LlmAgentHostedToolCallProgressEvent))]
 [JsonSerializable(typeof(LlmAgentHostedToolCallCompletedEvent))]
 [JsonSerializable(typeof(LlmAgentCitationEvent))]
+[JsonSerializable(typeof(LlmAgentCitationsSnapshotEvent))]
 [JsonSerializable(typeof(LlmAgentCompactedEvent))]
 [JsonSerializable(typeof(LlmAgentResourceSelectionChangedEvent))]
 [JsonSerializable(typeof(LlmAgentToolPresentationEvent))]

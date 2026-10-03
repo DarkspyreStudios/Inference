@@ -588,6 +588,9 @@ internal static class Program
             case LlmAgentReasoningDeltaEvent reasoning:
                 Console.Error.Write(reasoning.Delta);
                 break;
+            case LlmAgentCitationsSnapshotEvent citations:
+                Console.Error.WriteLine($"[citations snapshot] request={citations.RequestId} count={citations.Citations.Count}");
+                break;
             case LlmAgentToolEvent tool:
                 Console.Error.WriteLine(tool.Output is null
                     ? $"[tool:{tool.Status}] {tool.Tool}"

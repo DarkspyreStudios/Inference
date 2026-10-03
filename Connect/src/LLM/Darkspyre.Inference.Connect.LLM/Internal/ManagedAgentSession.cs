@@ -611,6 +611,8 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
                             case LlmChatCompletionEvent completion:
                                 if (result is not null) { throw new InvalidOperationException("Duplicate model completion."); }
                                 result = completion.Result;
+                                await writer.WriteAsync(new LlmAgentCitationsSnapshotEvent(
+                                    ThreadId, run.Id, stepId, result.Citations), token);
                                 break;
                         }
                     }
