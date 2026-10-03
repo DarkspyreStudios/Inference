@@ -516,7 +516,9 @@ internal abstract class ChatCompletionsLlmClientBase(HttpClient http) : LlmClien
                 ? LlmCompletionStatus.Incomplete
                 : completedToolCalls.Length > 0 || finishReason == "tool_calls"
                     ? LlmCompletionStatus.RequiresAction
-                    : LlmCompletionStatus.Completed;
+                    : finishReason == "stop"
+                        ? LlmCompletionStatus.Completed
+                        : LlmCompletionStatus.Unknown;
 
         LlmStructuredOutputValidation? validation = null;
         if (request?.StructuredOutput is { } structured
