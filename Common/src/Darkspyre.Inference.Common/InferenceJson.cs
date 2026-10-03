@@ -71,6 +71,7 @@ public static class InferenceJson
     public static JsonTypeInfo<RealtimeHostedStartedEvent> RealtimeHostedStartedEvent => Metadata<RealtimeHostedStartedEvent>();
     public static JsonTypeInfo<RealtimeHostedProgressEvent> RealtimeHostedProgressEvent => Metadata<RealtimeHostedProgressEvent>();
     public static JsonTypeInfo<RealtimeHostedCompletedEvent> RealtimeHostedCompletedEvent => Metadata<RealtimeHostedCompletedEvent>();
+    public static JsonTypeInfo<RealtimeHostedObservationEvent> RealtimeHostedObservationEvent => Metadata<RealtimeHostedObservationEvent>();
     public static JsonTypeInfo<RealtimeResponseEvent> RealtimeResponseEvent => Metadata<RealtimeResponseEvent>();
     public static JsonTypeInfo<RealtimeErrorEvent> RealtimeErrorEvent => Metadata<RealtimeErrorEvent>();
     public static JsonTypeInfo<VideoProviderOptions> VideoProviderOptions => Metadata<VideoProviderOptions>();
@@ -135,6 +136,8 @@ public static class InferenceJson
     private sealed class HostedTypeInfoResolver : IJsonTypeInfoResolver
     {
         private readonly HostedImageDataJsonConverter imageData = new((JsonConverter<ReadOnlyMemory<byte>>)InferenceJsonContext.Default.Options.GetConverter(typeof(ReadOnlyMemory<byte>)));
+        private readonly RealtimeNullableAudioJsonConverter observedAudio;
+        public HostedTypeInfoResolver() => observedAudio = new(imageData);
 
         public JsonTypeInfo? GetTypeInfo(Type type, JsonSerializerOptions options)
         {
@@ -143,7 +146,9 @@ public static class InferenceJson
             var metadata = ((IJsonTypeInfoResolver)InferenceJsonContext.Default).GetTypeInfo(type, options);
             if ((type == typeof(LlmHostedImageOutput) || type == typeof(BinaryMediaSource) || type == typeof(BinarySpeechInput)) && metadata is not null)
                 metadata.Properties.Single(property => property.Name == "Data").CustomConverter = imageData;
-            if ((type == typeof(RealtimeAudioContent) || type == typeof(RealtimeAudioDeltaEvent)) && metadata is not null)
+            if (type == typeof(RealtimeAudioContent) && metadata is not null)
+                metadata.Properties.Single(property => property.Name == "Audio").CustomConverter = observedAudio;
+            if (type == typeof(RealtimeAudioDeltaEvent) && metadata is not null)
                 metadata.Properties.Single(property => property.Name == "Audio").CustomConverter = imageData;
             return metadata;
         }
@@ -188,6 +193,7 @@ public static class InferenceJson
     public static JsonTypeInfo<LlmImageGenerationAction> LlmImageGenerationAction => Metadata<LlmImageGenerationAction>();
     public static JsonTypeInfo<LlmHostedTool> LlmHostedTool => Metadata<LlmHostedTool>();
     public static JsonTypeInfo<LlmWebSearchTool> LlmWebSearchTool => Metadata<LlmWebSearchTool>();
+    public static JsonTypeInfo<LlmWebSearchLocation> LlmWebSearchLocation => Metadata<LlmWebSearchLocation>();
     public static JsonTypeInfo<LlmCodeExecutionTool> LlmCodeExecutionTool => Metadata<LlmCodeExecutionTool>();
     public static JsonTypeInfo<LlmImageGenerationTool> LlmImageGenerationTool => Metadata<LlmImageGenerationTool>();
     public static JsonTypeInfo<LlmDocumentSearchTool> LlmDocumentSearchTool => Metadata<LlmDocumentSearchTool>();
@@ -297,6 +303,7 @@ public static class InferenceJson
 [JsonSerializable(typeof(RealtimeHostedStartedEvent))]
 [JsonSerializable(typeof(RealtimeHostedProgressEvent))]
 [JsonSerializable(typeof(RealtimeHostedCompletedEvent))]
+[JsonSerializable(typeof(RealtimeHostedObservationEvent))]
 [JsonSerializable(typeof(RealtimeResponseEvent))]
 [JsonSerializable(typeof(RealtimeErrorEvent))]
 [JsonSerializable(typeof(VideoProviderOptions))]
@@ -369,6 +376,7 @@ public static class InferenceJson
 [JsonSerializable(typeof(LlmImageGenerationAction))]
 [JsonSerializable(typeof(LlmHostedTool))]
 [JsonSerializable(typeof(LlmWebSearchTool))]
+[JsonSerializable(typeof(LlmWebSearchLocation))]
 [JsonSerializable(typeof(LlmCodeExecutionTool))]
 [JsonSerializable(typeof(LlmImageGenerationTool))]
 [JsonSerializable(typeof(LlmDocumentSearchTool))]

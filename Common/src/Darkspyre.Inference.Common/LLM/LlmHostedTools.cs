@@ -19,12 +19,16 @@ public abstract record LlmHostedTool
     [JsonIgnore] public abstract LlmHostedToolKind Kind { get; }
 }
 
+public sealed record LlmWebSearchLocation(string? Country = null,
+    string? City = null, string? Region = null, string? Timezone = null);
+
 public sealed record LlmWebSearchTool(
     IReadOnlyList<string>? AllowedDomains = null, IReadOnlyList<string>? ExcludedDomains = null,
     bool IncludeImageUnderstanding = false, bool IncludeImageSearch = false) : LlmHostedTool
 {
     public IReadOnlyList<string>? AllowedDomains { get; init; } = HostedSnapshot.List(AllowedDomains);
     public IReadOnlyList<string>? ExcludedDomains { get; init; } = HostedSnapshot.List(ExcludedDomains);
+    public LlmWebSearchLocation? Location { get; init; }
     [JsonIgnore] public override LlmHostedToolKind Kind => LlmHostedToolKind.WebSearch;
 }
 

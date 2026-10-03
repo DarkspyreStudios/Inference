@@ -49,7 +49,7 @@ internal static class HostedTools
     internal static IReadOnlyList<LlmHostedTool> Snapshot(IReadOnlyList<LlmHostedTool> tools) =>
         Array.AsReadOnly(tools.Select<LlmHostedTool, LlmHostedTool>(tool => tool switch
         {
-            LlmWebSearchTool web => web with { AllowedDomains = Copy(web.AllowedDomains), ExcludedDomains = Copy(web.ExcludedDomains) },
+            LlmWebSearchTool web => web with { AllowedDomains = Copy(web.AllowedDomains), ExcludedDomains = Copy(web.ExcludedDomains), Location = web.Location is { } location ? location with { } : null },
             LlmCodeExecutionTool code => code,
             LlmImageGenerationTool image => image,
             LlmDocumentSearchTool document => document with { CollectionIds = Copy(document.CollectionIds)! },

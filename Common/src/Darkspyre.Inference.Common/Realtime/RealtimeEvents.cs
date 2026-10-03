@@ -29,6 +29,7 @@ public sealed record RealtimeSessionEvent(RealtimeEventIdentity Identity,
     string Stage, string? SessionId, RealtimeSessionConfig? Configuration) : RealtimeEvent(Identity)
 {
     [JsonRequired] public string Stage { get; init => field = RealtimeData.Required(value); } = RealtimeData.Required(Stage);
+    public IReadOnlyList<RealtimeModality>? Modalities { get; init => field = value is null ? null : RealtimeData.Copy(value.Select(RealtimeData.Defined).ToArray()); }
     public override string ToString() => "RealtimeSessionEvent { <event> }";
 }
 public sealed record RealtimeConversationCreatedEvent(RealtimeEventIdentity Identity,
@@ -53,6 +54,7 @@ public sealed record RealtimeItemEvent(RealtimeEventIdentity Identity, string St
     TimeSpan? AudioEnd = null, string? Transcript = null) : RealtimeEvent(Identity)
 {
     [JsonRequired] public string Stage { get; init => field = RealtimeData.Required(value); } = RealtimeData.Required(Stage);
+    public string? ProviderStatus { get; init; }
     public override string ToString() => "RealtimeItemEvent { <event> }";
 }
 public sealed record RealtimeContentPartEvent(RealtimeEventIdentity Identity,
@@ -102,6 +104,14 @@ public sealed record RealtimeHostedCompletedEvent(RealtimeEventIdentity Identity
 {
     [JsonRequired] public LlmHostedToolCall Call { get; init => field = RealtimeData.Required(value); } = RealtimeData.Required(Call);
     public override string ToString() => "RealtimeHostedCompletedEvent { <event> }";
+}
+public sealed record RealtimeHostedObservationEvent(RealtimeEventIdentity Identity,
+    string Stage, LlmHostedToolKind Kind, string? CallId = null, string? Name = null,
+    string? Arguments = null, bool? IsArgumentsFinal = null, InferenceResourceFailure? Error = null) : RealtimeEvent(Identity)
+{
+    [JsonRequired] public string Stage { get; init => field = RealtimeData.Identity(value); } = RealtimeData.Identity(Stage);
+    [JsonRequired] public LlmHostedToolKind Kind { get; init => field = RealtimeData.Defined(value); } = RealtimeData.Defined(Kind);
+    public override string ToString() => "RealtimeHostedObservationEvent { <event> }";
 }
 public sealed record RealtimeResponseEvent(RealtimeEventIdentity Identity, string Stage,
     LlmCompletionStatus? Status, LlmUsage? Usage, IReadOnlyDictionary<string, string>? Metadata) : RealtimeEvent(Identity)

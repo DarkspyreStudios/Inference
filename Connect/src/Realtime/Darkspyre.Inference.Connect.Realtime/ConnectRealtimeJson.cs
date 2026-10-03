@@ -50,6 +50,7 @@ public static class ConnectRealtimeJson
     public static JsonTypeInfo<RealtimeHostedStartedEvent> RealtimeHostedStartedEvent => Metadata<RealtimeHostedStartedEvent>();
     public static JsonTypeInfo<RealtimeHostedProgressEvent> RealtimeHostedProgressEvent => Metadata<RealtimeHostedProgressEvent>();
     public static JsonTypeInfo<RealtimeHostedCompletedEvent> RealtimeHostedCompletedEvent => Metadata<RealtimeHostedCompletedEvent>();
+    public static JsonTypeInfo<RealtimeHostedObservationEvent> RealtimeHostedObservationEvent => Metadata<RealtimeHostedObservationEvent>();
     public static JsonTypeInfo<RealtimeResponseEvent> RealtimeResponseEvent => Metadata<RealtimeResponseEvent>();
     public static JsonTypeInfo<RealtimeErrorEvent> RealtimeErrorEvent => Metadata<RealtimeErrorEvent>();
     public static JsonTypeInfo<RealtimeConnection> RealtimeConnection => Metadata<RealtimeConnection>();
@@ -118,9 +119,12 @@ public static class ConnectRealtimeJson
             if (type == typeof(LlmHostedImageOutput))
                 metadata.Properties.Single(property => property.Name == "Data").CustomConverter =
                     InferenceJson.LlmHostedImageOutput.Properties.Single(property => property.Name == "Data").CustomConverter;
-            if (type == typeof(RealtimeAudioContent) || type == typeof(RealtimeAudioDeltaEvent))
+            if (type == typeof(RealtimeAudioContent))
                 metadata.Properties.Single(property => property.Name == "Audio").CustomConverter =
                     InferenceJson.RealtimeAudioContent.Properties.Single(property => property.Name == "Audio").CustomConverter;
+            if (type == typeof(RealtimeAudioDeltaEvent))
+                metadata.Properties.Single(property => property.Name == "Audio").CustomConverter =
+                    InferenceJson.RealtimeAudioDeltaEvent.Properties.Single(property => property.Name == "Audio").CustomConverter;
             return metadata;
         }
 
@@ -168,6 +172,7 @@ public static class ConnectRealtimeJson
 [JsonSerializable(typeof(RealtimeHostedStartedEvent))]
 [JsonSerializable(typeof(RealtimeHostedProgressEvent))]
 [JsonSerializable(typeof(RealtimeHostedCompletedEvent))]
+[JsonSerializable(typeof(RealtimeHostedObservationEvent))]
 [JsonSerializable(typeof(RealtimeResponseEvent))]
 [JsonSerializable(typeof(RealtimeErrorEvent))]
 [JsonSerializable(typeof(RealtimeConnection))]

@@ -101,7 +101,7 @@ internal static class RealtimeRequestData
         ProviderOptions = config.ProviderOptions switch
         {
             null => null,
-            XaiRealtimeOptions options => options,
+            XaiRealtimeOptions options => options with { Replace = options.Replace },
             _ => throw new NotSupportedException("This realtime provider-options variant is not supported.")
         }
     };
