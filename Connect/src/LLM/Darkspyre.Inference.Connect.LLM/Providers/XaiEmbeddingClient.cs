@@ -39,11 +39,14 @@ internal sealed class XaiEmbeddingClient(HttpClient http) : ILlmEmbeddingClient
         CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        connection = EmbeddingRequestData.Snapshot(connection);
-        request = EmbeddingRequestData.Snapshot(request);
-        ValidateRequest(connection, request);
         using var consumption = SdkHttpConsumption.Enter(http, cancellationToken);
         void Fence() { consumption.Token.ThrowIfCancellationRequested(); consumption.Fence(); }
+        Fence();
+        connection = EmbeddingRequestData.Snapshot(connection);
+        request = EmbeddingRequestData.Snapshot(request);
+        Fence();
+        ValidateRequest(connection, request);
+        Fence();
         IReadOnlyList<LlmModel>? models = connection.Catalog;
         HttpRequestMessage? message = null;
         HttpResponseMessage? response = null;
