@@ -11,7 +11,7 @@ using LlmReasoningLevel = Darkspyre.Inference.Common.LLM.LlmReasoningLevel;
 namespace Darkspyre.Inference.Connect.LLM.Providers;
 
 /// <summary>Chat-style adapter over the separately authenticated official Claude CLI.</summary>
-internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runner)
+internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runner, IClaudeCliSessionProcessFactory processFactory)
     : LlmClientBase(http),
         ILlmContextEstimator,
         ILlmAccountUsageClient,
@@ -49,7 +49,7 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
         SupportsReasoningText = true,
         SupportsStreamingUsage = true,
         SupportsUsageDeltas = true,
-        SupportsModelListing = false,
+        SupportsModelListing = true,
         SupportsAccountUsage = true,
         PromptCache = PromptCaching.Automatic,
         SupportsJsonSchema = true,
@@ -74,11 +74,11 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
 
     internal static LlmProviderCapabilities ResolveCapabilities(LlmConnection connection, string? modelId)
     {
-        LlmCredential? credential = ClaudeCliConfiguration.ValidateConnection(connection);
+        _ = ClaudeCliConfiguration.ValidateConnection(connection);
         LlmProviderCapabilities capabilities = LlmCapabilityOverrideLookup.Apply(Capabilities, connection, modelId);
         return capabilities with
         {
-            SupportsModelListing = HasCatalogCredential(credential),
+            SupportsModelListing = true,
             SupportsJsonObject = false,
             SupportsTemperature = false,
             SupportsTopP = false,
@@ -476,8 +476,11 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
         LlmCredential? credential = ClaudeCliConfiguration.ValidateConnection(connection);
         if (!HasCatalogCredential(credential))
         {
-            throw new NotSupportedException(
-                "Claude CLI does not expose model discovery. Configure the optional catalog OAuth credential or enter a model id manually.");
+            using var cliConsumption = SdkHttpConsumption.Enter(Http, cancellationToken);
+            void Fence() { cliConsumption.Token.ThrowIfCancellationRequested(); cliConsumption.Fence(); }
+            IReadOnlyList<LlmModel> options = await ClaudeCliModelCatalog.ReadAsync(processFactory,
+                ClaudeCliConfiguration.ResolveExecutable(connection.Endpoint), Fence, cliConsumption.Token).ConfigureAwait(false);
+            return cliConsumption.Publish(options);
         }
 
         LlmOAuthTokens catalogCredential = credential!.OAuth!;
