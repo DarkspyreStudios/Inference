@@ -125,7 +125,7 @@ internal sealed partial class VertexLlmClient
             // This canonical dry projection checks call/replay/schema ordering before source callbacks or uploads.
             _ = GeminiRequest.BuildCachePrefix(Connection, request, Project, reasoning, Attachment, Native);
             logical.Clear();
-            var reading = LlmResourcePreparation.ForNamedReads(chat);
+            var reading = LlmResourcePreparation.ForNamedReads();
             InferenceResourceReference? current = null;
             InferenceResourceOperationPhase phase = InferenceResourceOperationPhase.OpenRead;
             long? transferred = null;

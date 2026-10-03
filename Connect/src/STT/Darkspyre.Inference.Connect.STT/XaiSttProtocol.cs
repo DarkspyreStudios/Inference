@@ -1,0 +1,158 @@
+using System.Collections.Frozen;
+using System.Collections.ObjectModel;
+using System.Globalization;
+using System.Text.Json;
+using Darkspyre.Inference.Common;
+using Darkspyre.Inference.Common.Media;
+using Darkspyre.Inference.Common.STT;
+
+namespace Darkspyre.Inference.Connect.STT;
+
+internal static class XaiSttProtocol
+{
+    internal static readonly int[] Rates = [8000, 16000, 22050, 24000, 44100, 48000];
+    internal static SpeechTranscriptionOptions Snapshot(SpeechTranscriptionOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        var snapshot = options with { KeyTerms = options.KeyTerms };
+        Validate(snapshot.SampleRate, snapshot.VadThreshold, snapshot.KeyTerms, snapshot.Channels);
+        if (snapshot.RawAudioFormat == SpeechAudioEncoding.Opus) throw Unsupported();
+        if (snapshot.RawAudioFormat is not null && snapshot.SampleRate is null
+            || snapshot.TextNormalization == true && string.IsNullOrWhiteSpace(snapshot.Language)
+            || snapshot.Multichannel == true && snapshot.RawAudioFormat is not null && snapshot.Channels is null) throw Invalid();
+        return snapshot;
+    }
+    internal static SpeechStreamOptions Snapshot(SpeechStreamOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        var snapshot = options with { KeyTerms = options.KeyTerms };
+        Validate(snapshot.SampleRate, snapshot.VadThreshold, snapshot.KeyTerms, snapshot.Channels);
+        if (snapshot.TextNormalization is not null) throw Unsupported();
+        if (snapshot.Multichannel == true && (snapshot.Channels is null || snapshot.Encoding == SpeechAudioEncoding.Opus)) throw Invalid();
+        Milliseconds(snapshot.Endpointing, 0); Milliseconds(snapshot.SmartTurnTimeout, 1);
+        if (snapshot.SmartTurnThreshold is < 0 or > 1
+            || snapshot.SmartTurnTimeout is not null && snapshot.SmartTurnThreshold is null) throw Invalid();
+        return snapshot;
+    }
+    private static void Validate(int? rate, double? vad, IReadOnlyList<string>? terms, int? channels)
+    {
+        if (rate is { } value && !Rates.Contains(value) || vad is < 0 or > 1 || channels is < 2 or > 8
+            || terms is { Count: > 100 } || terms?.Any(string.IsNullOrWhiteSpace) == true) throw Invalid();
+    }
+    private static long? Milliseconds(TimeSpan? value, int minimum)
+    {
+        if (value is null) return null;
+        if (value.Value.Ticks % TimeSpan.TicksPerMillisecond != 0 || value.Value.TotalMilliseconds < minimum || value.Value.TotalMilliseconds > 5000) throw Invalid();
+        return value.Value.Ticks / TimeSpan.TicksPerMillisecond;
+    }
+    internal static SpeechTranscriptionInput Snapshot(SpeechTranscriptionInput input) => input switch
+    {
+        BinarySpeechInput binary when !string.IsNullOrWhiteSpace(binary.ContentType) => binary with { Data = binary.Data },
+        UrlSpeechInput url when url.Url.IsAbsoluteUri && !url.Url.OriginalString.Any(char.IsControl) => url with { },
+        ResourceSpeechInput resource => resource with { Resource = new(resource.Resource.WorkspaceId, resource.Resource.Id) },
+        _ => throw Invalid()
+    };
+    internal static IEnumerable<KeyValuePair<string, string>> Fields(SpeechTranscriptionOptions options)
+    {
+        foreach (var field in Common(options.ModelId, options.Language, options.SampleRate, options.Diarization, options.Multichannel,
+            options.Channels, options.KeyTerms, options.IncludeFillerWords, options.VadThreshold)) yield return field;
+        if (options.RawAudioFormat is { } encoding) yield return new("audio_format", Encoding(encoding));
+        if (options.TextNormalization is { } normalize) yield return new("format", Boolean(normalize));
+    }
+    internal static Uri StreamUri(Uri endpoint, SpeechStreamOptions options)
+    {
+        var fields = Common(options.ModelId, options.Language, options.SampleRate, options.Diarization, options.Multichannel,
+            options.Channels, options.KeyTerms, options.IncludeFillerWords, options.VadThreshold).ToList();
+        if (options.Encoding is { } encoding) fields.Add(new("encoding", Encoding(encoding)));
+        if (options.InterimResults is { } interim) fields.Add(new("interim_results", Boolean(interim)));
+        if (Milliseconds(options.Endpointing, 0) is { } endpointing) fields.Add(new("endpointing", Number(endpointing)));
+        if (options.SmartTurnThreshold is { } smart) fields.Add(new("smart_turn", Number(smart)));
+        if (Milliseconds(options.SmartTurnTimeout, 1) is { } timeout) fields.Add(new("smart_turn_timeout", Number(timeout)));
+        return new UriBuilder(new Uri(endpoint.AbsoluteUri.TrimEnd('/') + "/stt"))
+        {
+            Scheme = "wss", Port = -1,
+            Query = string.Join("&", fields.Select(field => Uri.EscapeDataString(field.Key) + "=" + Uri.EscapeDataString(field.Value)))
+        }.Uri;
+    }
+    private static IEnumerable<KeyValuePair<string, string>> Common(string? model, string? language, int? rate, bool? diarize,
+        bool? multichannel, int? channels, IReadOnlyList<string>? terms, bool? filler, double? vad)
+    {
+        if (model is not null) yield return new("model", model);
+        if (language is not null) yield return new("language", language);
+        if (rate is { } sampleRate) yield return new("sample_rate", Number(sampleRate));
+        if (diarize is { } speakers) yield return new("diarize", Boolean(speakers));
+        if (multichannel is { } multiple) yield return new("multichannel", Boolean(multiple));
+        if (channels is { } count) yield return new("channels", Number(count));
+        if (terms is not null) foreach (string term in terms) yield return new("keyterm", term);
+        if (filler is { } fillers) yield return new("filler_words", Boolean(fillers));
+        if (vad is { } threshold) yield return new("vad_threshold", Number(threshold));
+    }
+    private static string Number<T>(T value) where T : IFormattable => value.ToString(null, CultureInfo.InvariantCulture);
+    private static string Boolean(bool value) => value ? "true" : "false";
+    private static string Encoding(SpeechAudioEncoding value) => value switch
+    { SpeechAudioEncoding.Pcm16LittleEndian => "pcm", SpeechAudioEncoding.Mulaw => "mulaw", SpeechAudioEncoding.Alaw => "alaw", SpeechAudioEncoding.Opus => "opus", _ => throw Invalid() };
+    internal static SpeechTranscriptionCapabilities Capabilities() => new()
+    {
+        Transcription = Mode(false), Streaming = Mode(true)
+    };
+    private static SpeechTranscriptionModeCapabilities Mode(bool streaming) => new()
+    {
+        Available = true, InputKinds = (streaming ? new[] { InferenceMediaSourceKind.Binary } : new[] { InferenceMediaSourceKind.Binary, InferenceMediaSourceKind.Url, InferenceMediaSourceKind.Resource }).ToFrozenSet(),
+        Encodings = (streaming ? Enum.GetValues<SpeechAudioEncoding>() : new[] { SpeechAudioEncoding.Pcm16LittleEndian, SpeechAudioEncoding.Mulaw, SpeechAudioEncoding.Alaw }).ToFrozenSet(),
+        SampleRates = Rates, MaximumChannels = 8, SupportsLanguage = true, SupportsMultichannel = true,
+        SupportsDiarization = true, SupportsKeyTerms = true, SupportsFillerWords = true, SupportsVadThreshold = true,
+        SupportsTextNormalization = !streaming, SupportsInterimResults = streaming, SupportsEndpointing = streaming, SupportsSmartTurn = streaming, SupportsFinalize = streaming
+    };
+    internal static SpeechTranscriptionResult Result(JsonElement root, InferenceProvenance provenance) => new(
+        RequiredString(root, "text"), provenance, OptionalString(root, "language"), Seconds(root, "duration"), Words(root), Channels(root));
+    internal static IReadOnlyList<SpeechWord>? Words(JsonElement root)
+    {
+        if (!root.TryGetProperty("words", out var words)) return null;
+        if (words.ValueKind != JsonValueKind.Array) throw Protocol();
+        return Array.AsReadOnly(words.EnumerateArray().Select(word =>
+        {
+            TimeSpan start = Seconds(word, "start") ?? throw Protocol(), end = Seconds(word, "end") ?? throw Protocol();
+            if (end < start) throw Protocol();
+            return new SpeechWord(RequiredString(word, "text"), start, end, OptionalNumber(word, "confidence"), OptionalInteger(word, "speaker"));
+        }).ToArray());
+    }
+    private static ReadOnlyCollection<SpeechChannelTranscript>? Channels(JsonElement root)
+    {
+        if (!root.TryGetProperty("channels", out var channels)) return null;
+        if (channels.ValueKind != JsonValueKind.Array) throw Protocol();
+        return Array.AsReadOnly(channels.EnumerateArray().Select(channel => new SpeechChannelTranscript(
+            OptionalInteger(channel, "index") ?? throw Protocol(), RequiredString(channel, "text"), OptionalString(channel, "language"), Words(channel))).ToArray());
+    }
+    internal static string RequiredString(JsonElement root, string name) => OptionalString(root, name) ?? throw Protocol();
+    internal static string? OptionalString(JsonElement root, string name)
+    {
+        if (!root.TryGetProperty(name, out var value)) return null;
+        if (value.ValueKind != JsonValueKind.String) throw Protocol(); return value.GetString();
+    }
+    internal static double? OptionalNumber(JsonElement root, string name)
+    {
+        if (!root.TryGetProperty(name, out var value)) return null;
+        if (value.ValueKind != JsonValueKind.Number || !value.TryGetDouble(out double number) || !double.IsFinite(number) || number < 0) throw Protocol(); return number;
+    }
+    internal static TimeSpan? Seconds(JsonElement root, string name)
+    {
+        double? number = OptionalNumber(root, name); if (number is null) return null;
+        try { return TimeSpan.FromSeconds(number.Value); } catch (OverflowException) { throw Protocol(); }
+    }
+    internal static int? OptionalInteger(JsonElement root, string name)
+    {
+        if (!root.TryGetProperty(name, out var value)) return null;
+        if (value.ValueKind != JsonValueKind.Number || !value.TryGetInt32(out int number) || number < 0) throw Protocol(); return number;
+    }
+    internal static bool RequiredBoolean(JsonElement root, string name)
+    { if (!root.TryGetProperty(name, out var value) || value.ValueKind is not (JsonValueKind.True or JsonValueKind.False)) throw Protocol(); return value.GetBoolean(); }
+    internal static byte[] Command(string type, int? channel = null)
+    {
+        using var stream = new MemoryStream(); using (var writer = new Utf8JsonWriter(stream))
+        { writer.WriteStartObject(); writer.WriteString("type", type); if (channel is { } index) writer.WriteNumber("channel", index); writer.WriteEndObject(); }
+        return stream.ToArray();
+    }
+    internal static ArgumentException Invalid() => new("The xAI transcription input or controls are invalid.");
+    internal static NotSupportedException Unsupported() => new("The selected xAI transcription route does not support that control.");
+    internal static InferenceException Protocol() => new(InferenceFailureCode.ProtocolFailure, "The xAI transcription response contains invalid protocol facts.");
+}

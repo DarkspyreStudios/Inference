@@ -125,7 +125,7 @@ internal sealed partial class GeminiApiLlmClient
         _ = GeminiRequest.BuildCachePrefix(connection, request, Project, Reasoning(connection, request.ModelId), Attachment,
             _ => new() { ["fileData"] = new JsonObject() });
         files.Clear();
-        var reading = LlmResourcePreparation.ForNamedReads(chat);
+        var reading = LlmResourcePreparation.ForNamedReads();
         InferenceResourceReference? currentReference = null;
         InferenceResourceOperationPhase phase = InferenceResourceOperationPhase.OpenRead;
         LlmResourcePreparation.CountingReadStream? content = null;
