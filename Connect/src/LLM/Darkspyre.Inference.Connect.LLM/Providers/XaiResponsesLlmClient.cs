@@ -1,5 +1,7 @@
 using System.Collections.Frozen;
 using System.Globalization;
+using System.Diagnostics.CodeAnalysis;
+using System.Runtime.ExceptionServices;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -49,6 +51,15 @@ internal sealed class XaiResponsesLlmClient(HttpClient http) : ResponsesLlmClien
         SupportsJsonSchema = true,
         SupportsJsonObject = true,
         SupportsToolUse = true,
+        SupportsAgentSessions = true,
+        SupportsAgentToolUse = true,
+        SupportsAgentTurnInstructions = true,
+        Agent = ManagedAgentPolicy.Capabilities with
+        {
+            SupportsCompactionHandoff = false,
+            CompactionOwnership = LlmAgentOwnership.Provider,
+            RichContentSupported = RichContentRoutes.Responses
+        },
         HostedTools = new[] { LlmHostedToolKind.DocumentSearch }.ToFrozenSet(),
         Tools = new()
         {
@@ -101,6 +112,165 @@ internal sealed class XaiResponsesLlmClient(HttpClient http) : ResponsesLlmClien
         ValidateRequest(connection, request, capabilities);
         ValidateModelSampling(connection, request);
         _ = ResolveStructuredOutputEnforcement(connection, request, capabilities);
+    }
+
+    internal void PreflightCompactionRequest(LlmConnection connection, LlmChatRequest request)
+    {
+        if (connection.Xai?.ServiceTier == XaiServiceTier.Priority)
+            throw new NotSupportedException("Grok Priority context compaction has not been qualified.");
+        PreflightResourceRequest(connection, request);
+    }
+
+    internal Task<ProviderCompactionResult> CompactAsync(LlmConnection connection, LlmChatRequest request,
+        CancellationToken cancellationToken) => CompactCoreAsync(connection, request, null, null, cancellationToken);
+
+    internal Task<ProviderCompactionResult> CompactWithResourcesAsync(LlmConnection connection, LlmChatRequest request,
+        XaiFileClient files, Action fence, CancellationToken cancellationToken) =>
+        CompactCoreAsync(connection, request, files, fence, cancellationToken);
+
+    [SuppressMessage("Design", "CA1031", Justification = "Attempt all owned cleanup and retain independent safe failures and actual refused owners.")]
+    private async Task<ProviderCompactionResult> CompactCoreAsync(LlmConnection connection, LlmChatRequest request,
+        XaiFileClient? suppliedFiles, Action? outerFence, CancellationToken cancellationToken)
+    {
+        using var consumption = SdkHttpConsumption.Enter(Http, cancellationToken);
+        void Fence() { consumption.Token.ThrowIfCancellationRequested(); consumption.Fence(); outerFence?.Invoke(); }
+        Fence();
+        connection = EmbeddingRequestData.Snapshot(connection);
+        request = ClientTools.Snapshot(request) with { HostedTools = HostedTools.Snapshot(request.HostedTools) };
+        Fence();
+        PreflightCompactionRequest(connection, request);
+        Fence();
+        LlmProviderCapabilities capabilities = GetCapabilities(connection, request.ModelId);
+        LlmStructuredOutputEnforcement? enforcement = ResolveStructuredOutputEnforcement(connection, request, capabilities);
+        LlmCredential? credential = LlmCredential.Parse(connection.Credential);
+        LlmResourcePreparation? resources = null;
+        XaiFileClient? ownedFiles = null;
+        HttpRequestMessage? message = null;
+        HttpResponseMessage? response = null;
+        string[] secrets = [];
+        var failures = new List<Exception>();
+        ProviderCompactionResult? result = null;
+        Exception? classifiedFailure = null;
+        try
+        {
+            if (request.Resources is not null)
+            {
+                XaiFileClient files = suppliedFiles ?? (ownedFiles = CreateFileClient());
+                resources = await LlmResourcePreparation.PrepareAsync(connection, request, files, Fence, consumption.Token).ConfigureAwait(false);
+                Fence();
+                request = resources.Request;
+            }
+            JsonObject canonical = BuildPayload(connection, request, enforcement, stream: false, resources);
+            var input = (JsonArray)canonical["input"]!.DeepClone();
+            if (request.Instructions is { } instructions)
+                input.Insert(0, new JsonObject { ["role"] = "system", ["content"] = instructions });
+            var payload = new JsonObject { ["model"] = request.ModelId, ["input"] = input };
+            Fence();
+            message = new(HttpMethod.Post, ProviderHttp.BuildUri(connection, "responses/compact"));
+            message.Content = new StringContent(payload.ToJsonString(), Encoding.UTF8, "application/json");
+            XaiRequestHeaders.Apply(message, connection, stream: false);
+            secrets = message.Headers.SelectMany(header => header.Value).ToArray();
+            Fence();
+            response = await Http.SendAsync(message, HttpCompletionOption.ResponseHeadersRead, consumption.Token).ConfigureAwait(false);
+            Fence();
+            try
+            {
+                await XaiErrorClassifier.ThrowIfUnsuccessfulAsync(response, credential, secrets, consumption.Token).ConfigureAwait(false);
+            }
+            catch (LlmProviderException error) { classifiedFailure = error; throw; }
+            catch (InferenceException error) when (error.InnerException is LlmProviderException) { classifiedFailure = error; throw; }
+            Fence();
+            string body = await SdkHttpConsumption.ReadAsStringAsync(response.Content, consumption.Token).ConfigureAwait(false);
+            Fence();
+            using JsonDocument document = JsonDocument.Parse(body);
+            JsonElement root = document.RootElement;
+            if (root.ValueKind != JsonValueKind.Object
+                || !root.TryGetProperty("object", out JsonElement kind) || kind.ValueKind != JsonValueKind.String || kind.GetString() != "response.compaction"
+                || !root.TryGetProperty("id", out JsonElement id) || id.ValueKind != JsonValueKind.String || string.IsNullOrWhiteSpace(id.GetString())
+                || !root.TryGetProperty("model", out JsonElement model) || model.ValueKind != JsonValueKind.String || string.IsNullOrWhiteSpace(model.GetString())
+                || !root.TryGetProperty("output", out JsonElement output) || output.ValueKind != JsonValueKind.Array || output.GetArrayLength() != 1)
+                throw new InvalidOperationException("Invalid compact response.");
+            JsonElement item = output[0];
+            if (item.ValueKind != JsonValueKind.Object
+                || !item.TryGetProperty("type", out JsonElement type) || type.ValueKind != JsonValueKind.String || type.GetString() != "compaction"
+                || !item.TryGetProperty("encrypted_content", out JsonElement encrypted) || encrypted.ValueKind != JsonValueKind.String
+                || string.IsNullOrEmpty(encrypted.GetString()))
+                throw new InvalidOperationException("Invalid compact output.");
+            string requestId = id.GetString()!;
+            if (SecretRedactor.Sanitize(requestId, credential, secrets) != requestId
+                || SecretRedactor.Sanitize(model.GetString()!, credential, secrets) != model.GetString())
+                throw new InvalidOperationException("Compact response metadata cannot be published safely.");
+            int? dropped = null;
+            if (root.TryGetProperty("usage", out JsonElement usage) && usage.ValueKind != JsonValueKind.Null)
+            {
+                if (usage.ValueKind != JsonValueKind.Object) throw new InvalidOperationException("Invalid compact usage.");
+                if (usage.TryGetProperty("dropped_message_count", out JsonElement count))
+                {
+                    if (!count.TryGetInt32(out int value) || value < 0) throw new InvalidOperationException("Invalid dropped-message count.");
+                    dropped = value;
+                }
+            }
+            var state = ProviderContinuationStateCodec.Encode(connection, request.ModelId, (JsonArray)JsonNode.Parse(output.GetRawText())!);
+            result = new(state, requestId, ReadUsage(root), dropped);
+            Fence();
+        }
+        catch (Exception error)
+        {
+            failures.Add(LlmResourcePreparation.IsResourceFailure(error) ? error
+                : ReferenceEquals(error, classifiedFailure) ? ClassifiedCompactionFailure(error, credential, secrets)
+                : CompactionFailure(error, response, credential, secrets));
+        }
+        finally
+        {
+            if (response is not null)
+                try { response.Dispose(); }
+                catch (Exception error) { failures.Add(CompactionCleanupFailure(error, response)); }
+            if (message is not null)
+                try { message.Dispose(); }
+                catch (Exception error) { failures.Add(CompactionCleanupFailure(error, message)); }
+            if (resources is not null)
+                try { await resources.DisposeAsync().ConfigureAwait(false); }
+                catch (Exception error) { failures.Add(error); }
+            if (ownedFiles is not null)
+                try { await ownedFiles.DisposeAsync().ConfigureAwait(false); }
+                catch (Exception error) { failures.Add(CompactionCleanupFailure(error, ownedFiles)); }
+        }
+        if (failures.Count == 1) ExceptionDispatchInfo.Capture(failures[0]).Throw();
+        if (failures.Count > 1) throw new AggregateException("Grok context compaction and owned cleanup failed.", failures);
+        Fence();
+        return consumption.Publish(result!);
+    }
+
+    private static Exception CompactionFailure(Exception original, HttpResponseMessage? response,
+        LlmCredential? credential, string[] secrets) => original is OperationCanceledException canceled
+        ? new OperationCanceledException("Grok context compaction was interrupted.", new CompactionEvidence(original), canceled.CancellationToken)
+        : new LlmProviderException("Grok context compaction failed.", LlmTransport.XaiResponses, response?.StatusCode,
+            requestId: response is null ? null : ProviderHttp.ReadRequestId(response) is { } id ? SecretRedactor.Sanitize(id, credential, secrets) : null,
+            innerException: new CompactionEvidence(original));
+
+    private static Exception ClassifiedCompactionFailure(Exception original, LlmCredential? credential, string[] secrets)
+    {
+        LlmProviderException provider = original is InferenceException inference
+            ? (LlmProviderException)inference.InnerException! : (LlmProviderException)original;
+        var safe = new LlmProviderException("Grok context compaction request failed.", LlmTransport.XaiResponses,
+            provider.StatusCode, provider.ProviderCode is "xai_authentication_required" or "xai_entitlement_required" ? provider.ProviderCode : null,
+            provider.RequestId is { } id ? SecretRedactor.Sanitize(id, credential, secrets) : null, provider.RetryAfter,
+            innerException: new CompactionEvidence(original), isContextOverflow: provider.IsContextOverflow);
+        return original is InferenceException failure
+            ? new InferenceException(failure.Code, "Grok context compaction authorization or access failed.", safe) : safe;
+    }
+
+    private static Exception CompactionCleanupFailure(Exception original, object owner)
+    {
+        var evidence = new CompactionEvidence(original);
+        Exception safe = original is OperationCanceledException canceled
+            ? new OperationCanceledException("Grok context compaction cleanup was interrupted.", evidence, canceled.CancellationToken) : evidence;
+        return LlmResourcePreparation.AsCleanupFailure(safe, refusedOwner: owner);
+    }
+
+    private sealed class CompactionEvidence(Exception original) : Exception("Grok context compaction HTTP boundary reported a failure.")
+    {
+        internal Exception Original { get; } = original;
     }
 
     protected override void ValidateAdditionalRequest(LlmConnection connection, LlmChatRequest request)
