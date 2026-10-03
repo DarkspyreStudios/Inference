@@ -81,14 +81,25 @@ not sanitize caller-supplied inner exceptions. Exceptions remain runtime objects
 the same access; construction validates that identity before allocating owned state.
 `AddLlmResources()` registers one scoped concrete facade and its same-instance `ILlmBatchClient`
 alias with the existing access and optional registered core. The caller registers connection access
-separately; this extension creates no connection source,
-HTTP factory or provider adapter. All ten operations explicitly refuse as unavailable before connection
-resolution, credential refresh, resource callbacks, upload or deferred-result consumption. Disposal
-fences entry, shares retirement completion and releases borrowed references without disposing them.
+separately; this extension creates no connection source or HTTP factory. With an implemented xAI core
+route, creation, retrieval, one-page batch/request listing and cancellation use one acquired connection
+snapshot and the core's selected HTTP owner. Cancellation and request listing first authorize the
+literal batch ID through one nondestructive Get using that same snapshot. Receipt scope records the
+fixed batches route and originally selected connection ID, not account or principal proof; imported
+receipts can use another selected connection ID when the route matches and the current token authorizes.
+Supplied page controls are forwarded without inferred limits or automatic paging. Response counts,
+cursors and timezone-qualified timestamps retain actual observations; date-only timestamps are not
+converted to invented instants. Mutation dispatch and validated prior/returned receipts survive late
+cancellation and failure, with response facts belonging only to the current HTTP stage.
+Incremental requests, result retrieval/materialization, JSONL creation and deferred submission/retrieval
+remain explicitly unavailable before connection resolution, credential refresh or resource effects.
+Disposal fences entry, drains admitted operations, shares retirement completion and releases borrowed
+references without disposing them. Actual HTTP cleanup refusal retains the failed owner and is reported
+by retirement; ordinary operation failures do not poison retirement. No operation retries or rolls back.
 Caller cancellation retains the existing facade entry precedence. The owned codec refuses both
 nonnull concrete and interface facade values; null runtime values remain portable.
 
-This assembly registers no batch/deferred adapter and makes no OAuth or endpoint-availability claim.
+This assembly activates no global provider registration and makes no OAuth or endpoint-qualification claim.
 Caller workspace storage remains caller-owned. Constructing or serializing a receipt performs no
 upload, polling, materialization, cache creation or tool execution.
 
@@ -274,6 +285,10 @@ The private xAI Responses adapter implements hosted `DocumentSearch` and positiv
 limits. It sends explicit document descriptors as `file_search` with exact collection IDs and optional
 result limits. Each descriptor accepts at most ten collections. Actual built `input_file` content
 also enables the implicit document-search observations. Both paths request `file_search_call.results`.
+The private payload builder also projects WebSearch's flat domain/image controls and XSearch's
+handle/date/image/video controls. That plumbing is inert: capabilities and observations remain
+DocumentSearch-only, so the existing hosted-tool validator rejects WebSearch and SocialSearch before
+provider effects. It does not advertise those families or infer their lifecycle and terminal facts.
 The other built-in adapters and hosted kinds reject unmapped hosted options before provider effects.
 Native start/resume also rejects these unmapped options. Existing Anthropic server-tool configuration
 is separate and does not advertise the new hosted API.
