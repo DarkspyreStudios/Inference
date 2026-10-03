@@ -126,7 +126,7 @@ public sealed class XaiTtsProvider : ITtsProvider
             using var lease = _lifetime.Enter(cancellationToken); TtsRequest admitted = XaiTtsProtocol.Snapshot(_connection!, request);
             using var consumption = SdkHttpConsumption.Enter(_provider!._http, lease.Token); CancellationToken token = consumption.Token;
             LlmConnection snapshot = await AcquireAsync(token).ConfigureAwait(false);
-            var scope = _resources is null ? null : await TtsResourceWriter.ReadScopeAsync(_resources, () => Fence(token), token).ConfigureAwait(false);
+            var scope = _resources is null ? null : await SpeechResourceWriter.ReadScopeAsync(_resources, () => Fence(token), token).ConfigureAwait(false);
             Fence(token); long started = Stopwatch.GetTimestamp();
             var content = new ByteArrayContent(XaiTtsProtocol.Payload(admitted)); content.Headers.ContentType = new("application/json");
             TtsResult result = await SendAsync(snapshot, "tts", content, async (response, current) =>
@@ -146,7 +146,7 @@ public sealed class XaiTtsProvider : ITtsProvider
                 return new TtsResult(contentType, audio, new() { ImplementationId = _provider!.SetupDefinition.Implementation.Id, ModelId = null, Runtime = "HTTP", Elapsed = Stopwatch.GetElapsedTime(started) }) { Duration = duration, Timestamps = timestamps };
             }, token).ConfigureAwait(false);
             Fence(token);
-            if (_resources is not null) result = result with { Resource = await TtsResourceWriter.CommitAsync(_resources, scope!, result.Audio, result.ContentType, () => Fence(token), RecordCleanup, token).ConfigureAwait(false) };
+            if (_resources is not null) result = result with { Resource = await SpeechResourceWriter.CommitAsync(_resources, scope!, result.Audio, result.ContentType, () => Fence(token), RecordCleanup, token).ConfigureAwait(false) };
             Fence(token); return consumption.Publish(result);
         }
         private async Task<T> SendAsync<T>(LlmConnection snapshot, string path, HttpContent? body,

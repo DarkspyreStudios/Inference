@@ -125,7 +125,7 @@ public sealed class PocketTtsHttpProvider(HttpClient httpClient) : ITtsProvider
             ValidateRequest(_connection!, request);
             using var consumption = _provider!.Enter(lease.Token); cancellationToken = consumption.Token;
             InferenceResourceSelectionVersion? scope = _resources is null ? null
-                : await TtsResourceWriter.ReadScopeAsync(_resources, () => Fence(cancellationToken), cancellationToken).ConfigureAwait(false);
+                : await SpeechResourceWriter.ReadScopeAsync(_resources, () => Fence(cancellationToken), cancellationToken).ConfigureAwait(false);
             long started = Stopwatch.GetTimestamp();
             TtsResult result;
             {
@@ -151,7 +151,7 @@ public sealed class PocketTtsHttpProvider(HttpClient httpClient) : ITtsProvider
             if (_resources is not null)
                 result = result with
                 {
-                    Resource = await TtsResourceWriter.CommitAsync(_resources, scope!, result.Audio,
+                    Resource = await SpeechResourceWriter.CommitAsync(_resources, scope!, result.Audio,
                     result.ContentType, () => Fence(cancellationToken), RecordCleanup, cancellationToken).ConfigureAwait(false)
                 };
             Fence(cancellationToken);

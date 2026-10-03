@@ -1,11 +1,10 @@
 using System.Runtime.ExceptionServices;
 using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Common.Resources;
-using Darkspyre.Inference.Connect.LLM.Internal;
 
-namespace Darkspyre.Inference.Connect.TTS;
+namespace Darkspyre.Inference.Connect.LLM.Internal;
 
-internal static class TtsResourceWriter
+internal static class SpeechResourceWriter
 {
     internal static async Task<InferenceResourceSelectionVersion> ReadScopeAsync(
         IInferenceResourceAccess access, Action fence, CancellationToken token)
@@ -70,6 +69,8 @@ internal static class TtsResourceWriter
         private InferenceResourceCommitOutcome _selection = InferenceResourceCommitOutcome.NotAttempted;
         private long? _bytes = 0;
         private Task? _disposed;
+
+        internal InferenceResourceSelectionVersion? SelectionVersion => _version;
 
         internal async Task OpenAsync(long? expectedBytes, CancellationToken token)
         {

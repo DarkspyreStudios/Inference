@@ -23,7 +23,7 @@ internal sealed class XaiTtsSession : ITtsStreamingSession
     private WebSocket? _socket;
     private IInferenceResourceAccess? _resources;
     private readonly InferenceResourceSelectionVersion? _scope;
-    private TtsResourceWriter.Writer? _artifact;
+    private SpeechResourceWriter.Writer? _artifact;
     private Task _receiver = Task.CompletedTask;
     private Exception? _terminalResourceFailure;
     private long _buffered;
@@ -42,7 +42,7 @@ internal sealed class XaiTtsSession : ITtsStreamingSession
     {
         if (limits.MaximumBufferedEvents <= 0 || limits.MaximumBufferedPayloadBytes <= 0 || limits.MaximumMessageBytes <= 0) throw XaiTtsProtocol.Invalid();
         openingFence();
-        InferenceResourceSelectionVersion? scope = resources is null ? null : await TtsResourceWriter.ReadScopeAsync(resources, openingFence, token).ConfigureAwait(false);
+        InferenceResourceSelectionVersion? scope = resources is null ? null : await SpeechResourceWriter.ReadScopeAsync(resources, openingFence, token).ConfigureAwait(false);
         openingFence();
         using var headers = new HttpRequestMessage(); XaiRequestHeaders.Apply(headers, snapshot, false); headers.Headers.Accept.Clear();
         foreach (var header in connection.Headers) if (!headers.Headers.TryAddWithoutValidation(header.Key, header.Value)) throw XaiTtsProtocol.Invalid();
@@ -139,7 +139,7 @@ internal sealed class XaiTtsSession : ITtsStreamingSession
                         lock (_sync) { if (_utterance == 0) throw XaiTtsProtocol.Protocol(); }
                         if (_resources is not null)
                         {
-                            _artifact ??= await TtsResourceWriter.OpenAsync(_resources, _scope!, null, null, () => Fence(token), RecordCleanup, token).ConfigureAwait(false);
+                            _artifact ??= await SpeechResourceWriter.OpenAsync(_resources, _scope!, null, null, () => Fence(token), RecordCleanup, token).ConfigureAwait(false);
                             await _artifact.WriteAsync(audio, token).ConfigureAwait(false); Fence(token);
                         }
                         await PublishAsync(chunk, token).ConfigureAwait(false); break;

@@ -583,7 +583,10 @@ pairs; raw responses preserve their observed media type. Speech with no reported
 Streaming commands map `text.delta`, `text.done`, `text.clear` and `session.update`; observations
 preserve actual `audio.delta`, `audio.done`, `audio.clear`, `session.updated` and sanitized errors.
 Resources use one incremental handle per utterance and commit bytes plus selected membership before
-completion publication. Chunks remain transient; clear discards uncommitted staging. The handed-off
+completion publication. Pocket and xAI speech use the same internal `SpeechResourceWriter` in the
+LLM assembly for scope validation, commit/select receipts and owned-handle cleanup. Its selection
+version exposes only the actual observed commit receipt; it does not query the store again.
+Chunks remain transient; clear discards uncommitted staging. The handed-off
 session is independently caller-owned and survives client retirement. Client and session retirement
 fence, cancel, drain and detach borrowed references; genuine refused cleanup owners and failures remain
 retained without retry. The convenience iterator owns its temporary session and input enumerator;
