@@ -8,14 +8,15 @@ namespace Darkspyre.Inference.Connect.Image.Internal;
 internal static class XaiImageProtocol
 {
     internal static (string Route, JsonObject Body) Build(ImageTransportPreparationRequest request,
-        IReadOnlyList<string> fileIds)
+        IReadOnlyList<JsonObject> references)
     {
         ArgumentNullException.ThrowIfNull(request);
-        ArgumentNullException.ThrowIfNull(fileIds);
+        ArgumentNullException.ThrowIfNull(references);
         ArgumentException.ThrowIfNullOrWhiteSpace(request.PositivePrompt);
         if (request.Count is < 1 or > 10) throw new ArgumentOutOfRangeException(nameof(request));
-        if (fileIds.Count > 5 || fileIds.Count != request.References.Count
-            || fileIds.Any(string.IsNullOrWhiteSpace)) throw new ArgumentException("Invalid ordered image references.", nameof(fileIds));
+        if (references.Count > 5 || references.Count != request.References.Count)
+            throw new ArgumentException("Invalid ordered image references.", nameof(references));
+        JsonObject[] nativeReferences = references.Select(CopyReference).ToArray();
         if (!string.IsNullOrEmpty(request.NegativePrompt) || request.Width is not null || request.Height is not null
             || request.Seed is not null || request.Steps is not null || request.GuidanceScale is not null)
             throw new NotSupportedException("The supplied image sampling control has no xAI mapping.");
@@ -34,7 +35,7 @@ internal static class XaiImageProtocol
             switch (property.Name)
             {
                 case "aspect_ratio":
-                    if (fileIds.Count == 1 && property.Value.ValueKind != JsonValueKind.Null)
+                    if (nativeReferences.Length == 1 && property.Value.ValueKind != JsonValueKind.Null)
                         throw new NotSupportedException("Single-image edits derive their aspect ratio from the reference.");
                     RequireChoice(property.Value, ["1:1", "3:4", "4:3", "9:16", "16:9", "2:3", "3:2", "9:19.5", "19.5:9", "9:20", "20:9", "1:2", "2:1", "21:9", "5:2", "auto"]);
                     break;
@@ -48,10 +49,24 @@ internal static class XaiImageProtocol
             }
             body[property.Name] = JsonNode.Parse(property.Value.GetRawText());
         }
-        if (fileIds.Count == 1) body["image"] = new JsonObject { ["file_id"] = fileIds[0] };
-        else if (fileIds.Count > 1)
-            body["images"] = new JsonArray(fileIds.Select(id => (JsonNode)new JsonObject { ["file_id"] = id }).ToArray());
-        return (fileIds.Count == 0 ? "images/generations" : "images/edits", body);
+        if (nativeReferences.Length == 1) body["image"] = nativeReferences[0];
+        else if (nativeReferences.Length > 1) body["images"] = new JsonArray(nativeReferences.Cast<JsonNode>().ToArray());
+        return (nativeReferences.Length == 0 ? "images/generations" : "images/edits", body);
+    }
+
+    private static JsonObject CopyReference(JsonObject reference)
+    {
+        ArgumentNullException.ThrowIfNull(reference);
+        // REST image sources carry exactly one native URL or file ID, not arbitrary metadata or inferred links.
+        if (reference.Count != 1 || reference.First() is not { Key: var field, Value: JsonValue value }
+            || field is not ("url" or "file_id") || !value.TryGetValue(out string? text) || string.IsNullOrWhiteSpace(text))
+            throw new ArgumentException("An image reference has no supported native source.", nameof(reference));
+        if (field == "url")
+        {
+            try { XaiMediaData.RequireHttpUrl(text); }
+            catch (JsonException) { throw new ArgumentException("An image reference requires a valid HTTP or HTTPS URL.", nameof(reference)); }
+        }
+        return new JsonObject { [field] = text };
     }
 
     private static void RequireChoice(JsonElement value, string[] choices)
