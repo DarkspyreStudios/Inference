@@ -281,8 +281,7 @@ internal sealed class XaiRealtimeSession : IRealtimeVoiceSession
                     requested = _attemptedModels.Contains(model);
                     routingChanged = _routingChanged;
                     bool changed = _observedModel is not null && _observedModel != model;
-                    contradiction = !requested && (changed || routingChanged && _observedModel is null
-                        || !routingChanged && _expectedModel is not null && _expectedModel != model);
+                    contradiction = !requested && (changed || !routingChanged && _expectedModel is not null && _expectedModel != model);
                     resumed = _resumptionReceipt; conversation = _conversation;
                     if (!contradiction) _observedModel = model;
                 }
