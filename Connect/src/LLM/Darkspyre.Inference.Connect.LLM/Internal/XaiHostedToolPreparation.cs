@@ -10,16 +10,18 @@ namespace Darkspyre.Inference.Connect.LLM.Internal;
 internal sealed class XaiHostedToolPreparation : IDisposable
 {
     private Action? _fence;
+    private Action<Exception>? _recordCleanup;
     private IInferenceResourceAccess? _resources;
     private readonly List<string> _secrets = [];
     private readonly CancellationToken _token;
 
     private XaiHostedToolPreparation(LlmChatRequest request, IInferenceResourceAccess? resources, InferenceResourceSelectionVersion? selection,
-        Action fence, CancellationToken token)
+        Action fence, Action<Exception>? recordCleanup, CancellationToken token)
     {
         _resources = resources;
         Selection = selection;
         _fence = fence;
+        _recordCleanup = recordCleanup;
         _token = token;
         foreach (LlmRemoteMcpTool tool in request.HostedTools.OfType<LlmRemoteMcpTool>())
             if (tool.Headers is { } headers) _secrets.AddRange(headers.Values);
@@ -29,6 +31,8 @@ internal sealed class XaiHostedToolPreparation : IDisposable
     internal IInferenceResourceAccess? Resources => _resources;
     internal InferenceResourceSelectionVersion? Selection { get; }
 
+    internal void RecordCleanup(Exception error) => _recordCleanup?.Invoke(error);
+
     internal void Fence()
     {
         _token.ThrowIfCancellationRequested();
@@ -37,9 +41,10 @@ internal sealed class XaiHostedToolPreparation : IDisposable
     }
 
     internal static async Task<XaiHostedToolPreparation> PrepareAsync(JsonObject payload, LlmChatRequest request,
-        IInferenceResourceAccess? resources, InferenceResourceSelectionVersion? selection, Action fence, CancellationToken token)
+        IInferenceResourceAccess? resources, InferenceResourceSelectionVersion? selection, Action fence,
+        Action<Exception>? recordCleanup, CancellationToken token)
     {
-        var frame = new XaiHostedToolPreparation(request, resources, selection, fence, token);
+        var frame = new XaiHostedToolPreparation(request, resources, selection, fence, recordCleanup, token);
         try
         {
             var resolved = new Dictionary<IProviderAuthorization, string>(ReferenceEqualityComparer.Instance);
@@ -72,6 +77,7 @@ internal sealed class XaiHostedToolPreparation : IDisposable
     public void Dispose()
     {
         _fence = null;
+        _recordCleanup = null;
         _resources = null;
         _secrets.Clear();
     }

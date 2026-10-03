@@ -91,19 +91,21 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
             && function.Output.Parts.Any(part => part is LlmToolOutputBinary or LlmToolOutputResource { Data: not null }));
 
     public override IAsyncEnumerable<LlmStreamEvent> StreamAsync(LlmConnection connection, LlmChatRequest request,
-        CancellationToken cancellationToken = default) => StreamCoreAsync(connection, request, null, null, false, cancellationToken);
+        CancellationToken cancellationToken = default) => StreamCoreAsync(connection, request, null, null, null, false, cancellationToken);
 
     internal IAsyncEnumerable<LlmStreamEvent> StreamWithResourcesAsync(LlmConnection connection, LlmChatRequest request,
-        XaiFileClient files, Action outerFence, CancellationToken token) => StreamCoreAsync(connection, request, files, outerFence, false, token);
+        XaiFileClient files, Action outerFence, Action<Exception> recordCleanup, CancellationToken token) =>
+        StreamCoreAsync(connection, request, files, outerFence, recordCleanup, false, token);
 
     protected IAsyncEnumerable<LlmStreamEvent> StreamCompactionCoreAsync(LlmConnection connection, LlmChatRequest request,
-        CancellationToken token) => StreamCoreAsync(connection, request, null, null, true, token);
+        CancellationToken token) => StreamCoreAsync(connection, request, null, null, null, true, token);
 
     private async IAsyncEnumerable<LlmStreamEvent> StreamCoreAsync(
         LlmConnection connection,
         LlmChatRequest request,
         XaiFileClient? suppliedFiles,
         Action? outerFence,
+        Action<Exception>? recordCleanup,
         bool compaction,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
@@ -147,7 +149,7 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
                 RequestJson.ApplyProviderOptions(payload, connection, request);
                 if (Transport == LlmTransport.XaiResponses)
                     hostedPreparation = await XaiHostedToolPreparation.PrepareAsync(payload, request,
-                        resourceAccess, resources?.SelectionVersion, Fence, cancellationToken).ConfigureAwait(false);
+                        resourceAccess, resources?.SelectionVersion, Fence, recordCleanup, cancellationToken).ConfigureAwait(false);
                 if (compaction)
                 {
                     payload.Remove("text");

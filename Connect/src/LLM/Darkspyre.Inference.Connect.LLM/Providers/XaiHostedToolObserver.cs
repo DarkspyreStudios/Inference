@@ -227,7 +227,7 @@ internal sealed class XaiHostedToolObserver(Func<Exception> malformed, XaiHosted
         {
             preparation.Fence();
             writer = await SpeechResourceWriter.OpenAsync(access, scope, media, bytes.Length,
-                preparation.Fence, _ => { }, token).ConfigureAwait(false);
+                preparation.Fence, preparation.RecordCleanup, token).ConfigureAwait(false);
             await writer.WriteAsync(bytes, token).ConfigureAwait(false);
             InferenceResourceDescriptor descriptor = await writer.CommitAsync(token).ConfigureAwait(false);
             InferenceResourceCommitResult receipt = writer.ObservedCommit ?? throw malformed();

@@ -697,7 +697,8 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, ILlmFileClie
         IAsyncEnumerable<LlmStreamEvent> stream = publishCompaction is not null && client is OpenAiCodexLlmClient codex
             ? codex.StreamCompactionAsync(connection, request, cancellationToken)
             : client is Providers.XaiResponsesLlmClient xai
-            ? xai.StreamWithResourcesAsync(connection, request, _xaiFiles!, () => ThrowIfOperationCanceled(cancellationToken), cancellationToken)
+            ? xai.StreamWithResourcesAsync(connection, request, _xaiFiles!, () => ThrowIfOperationCanceled(cancellationToken),
+                _cleanupOutcomes.Record, cancellationToken)
             : client.StreamAsync(connection, request, cancellationToken);
         ProviderCompactionResult? compactionResult = null;
         await foreach (LlmStreamEvent streamEvent in stream)
