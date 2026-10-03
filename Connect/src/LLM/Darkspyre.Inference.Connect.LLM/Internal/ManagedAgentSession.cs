@@ -327,9 +327,10 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
             var oldProtected = _context.Entries.Where(entry => run.Protected.Contains(entry.Id)).ToArray();
             var newProtected = replacement.Entries.Where(entry => run.Protected.Contains(entry.Id)).ToArray();
             if (oldProtected.Length != newProtected.Length
-                || oldProtected.Where((entry, index) => !ManagedAgentContext.Equivalent(entry, newProtected[index])).Any())
+                || oldProtected.Where((entry, index) => !ManagedAgentContext.Equivalent(entry, newProtected[index])
+                    && !ManagedAgentContext.IsReducedToolResults(entry, newProtected[index])).Any())
             {
-                throw new ArgumentException("Compaction must retain protected records intact and in order.");
+                throw new ArgumentException("Compaction must retain protected records intact or reduce only their tool-result parts, in order.");
             }
             var projected = WithQueuedSteering(replacement, run);
             var before = Measure(WithQueuedSteering(_context, run), run.Turn);
@@ -835,9 +836,15 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
         {
             run.PauseId = NewId();
             var protectedOnly = _context with { Entries = _context.Entries.Where(entry => run.Protected.Contains(entry.Id)).ToArray() };
+            bool? needsCompaction = Measure(protectedOnly, run.Turn).NeedsCompaction;
             bool compactable = protectedOnly.Entries.Count < _context.Entries.Count
-                && Measure(protectedOnly, run.Turn).NeedsCompaction is not true;
-            pause = new(ThreadId, run.Id, run.PauseId, status, reason, compactable, run.Protected.ToArray());
+                || protectedOnly.Entries.SelectMany(entry => entry.Message.ToolResults).OfType<LlmToolResult>()
+                    .SelectMany(result => result.Output.Parts)
+                    .Any(part => part is LlmToolOutputText { Text: { Length: > 2000 } } or LlmToolOutputBinary);
+            pause = new(ThreadId, run.Id, run.PauseId, status, reason, compactable, run.Protected.ToArray())
+            {
+                ProtectedFits = needsCompaction is { } known ? !known : null
+            };
         }
         await writer.WriteAsync(pause, token);
     }
