@@ -169,8 +169,8 @@ internal sealed class ConnectImageInference : IImageInference, IDisposable, IAsy
                             Provenance = new InferenceProvenance
                             {
                                 ImplementationId = Descriptor.Id,
-                                ModelId = workflow.Id,
-                                ModelRevision = workflow.Version,
+                                ModelId = snapshot.ModelId,
+                                ModelRevision = snapshot.ModelRevision,
                                 Runtime = transport.Descriptor.DisplayName,
                                 Backend = "connect",
                                 Elapsed = Stopwatch.GetElapsedTime(started)

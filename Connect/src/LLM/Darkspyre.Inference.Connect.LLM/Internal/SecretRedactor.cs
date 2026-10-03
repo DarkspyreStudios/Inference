@@ -66,12 +66,27 @@ internal static class SecretRedactor
             credential.Aws?.AccessKeyId,
             credential.Aws?.SecretAccessKey,
             credential.Aws?.SessionToken,
+            credential.Google?.ServiceAccountJson,
+            GooglePrivateKey(credential.Google?.ServiceAccountJson),
             (credential.Azure as LlmAzureSecret.ClientSecret)?.Value,
             (credential.Azure as LlmAzureSecret.CertificatePkcs12)?.Base64,
             (credential.Azure as LlmAzureSecret.CertificatePkcs12)?.Password
         ];
         return candidates.Where(value => !string.IsNullOrWhiteSpace(value)).Cast<string>()
             .Concat(credential.SecretHeaders.Values);
+    }
+
+    private static string? GooglePrivateKey(string? json)
+    {
+        if (json is null) return null;
+        try
+        {
+            using JsonDocument document = JsonDocument.Parse(json);
+            return document.RootElement.ValueKind == JsonValueKind.Object
+                && document.RootElement.TryGetProperty("private_key", out JsonElement value)
+                && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
+        }
+        catch (JsonException) { return null; }
     }
 
     internal static bool ContainsProtectedValue(string value, LlmCredential? credential, IEnumerable<string> additionalSecrets) =>

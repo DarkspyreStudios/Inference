@@ -165,6 +165,8 @@ internal sealed class SelfHostLlmClient(ILlmSelfHost host) : ILlmClient, ILlmCon
     private static LlmChatResult ToConnect(CommonLlm.LlmInferenceResult result) => new()
     {
         Text = result.Text,
+        ModelId = result.Provenance?.ModelId,
+        ModelRevision = result.Provenance?.ModelRevision,
         Refusal = result.Refusal,
         RefusalCategory = result.RefusalCategory,
         Status = result.Status,

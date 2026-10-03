@@ -250,6 +250,7 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
         var toolCallStream = new OpenAiToolCallStream();
         var completedOutput = new SortedDictionary<int, JsonElement>();
         bool completed = false;
+        string? observedModel = null;
 
         await foreach (string data in Sse.ReadDataPayloadsAsync(stream!, cancellationToken))
         {
@@ -281,6 +282,9 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
                     throw ProtocolException($"{ResponseName} returned a malformed stream event.", response, string.Empty, credential);
                 }
                 string? type = LlmJson.GetString(root, "type");
+                if (LlmJson.GetObject(root, "response") is { } modelResponse)
+                    observedModel = ObservedModel.Read(modelResponse, "model", Transport, connection,
+                        credential, response.RequestMessage, observedModel);
                 switch (type)
                 {
                     case "response.text.delta":
@@ -370,7 +374,8 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
                                 enforcement,
                                 credential,
                                 connection,
-                                request.ModelId);
+                                request.ModelId,
+                                observedModel);
                             foreach (LlmStreamEvent toolEvent in toolCallStream.CompleteMissing(ClientTools.Functions(result.ToolCalls),
                                          emitMissingArguments: Transport == LlmTransport.XaiResponses))
                             {
@@ -666,12 +671,13 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
         LlmStructuredOutputEnforcement? enforcement,
         LlmCredential? credential,
         LlmConnection connection,
-        string modelId)
+        string modelId,
+        string? observedModel = null)
     {
         try
         {
             return BuildResultCore(eventRoot, response, rawEvent, streamedText, streamedRefusal,
-                structuredRequest, enforcement, credential, connection, modelId);
+                structuredRequest, enforcement, credential, connection, modelId, observedModel);
         }
         catch (Exception error) when (Transport == LlmTransport.XaiResponses
             && error is JsonException or ArgumentException or InvalidOperationException or NotSupportedException)
@@ -691,7 +697,8 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
         LlmStructuredOutputEnforcement? enforcement,
         LlmCredential? credential,
         LlmConnection connection,
-        string modelId)
+        string modelId,
+        string? observedModel)
     {
         JsonElement responseRoot = eventRoot.TryGetProperty("response", out JsonElement nested)
             && nested.ValueKind == JsonValueKind.Object
@@ -761,6 +768,8 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
         return new LlmChatResult
         {
             Text = finalText,
+            ModelId = ObservedModel.Read(responseRoot, "model", Transport, connection, credential,
+                response.RequestMessage, observedModel),
             Refusal = finalRefusal.Length == 0 ? null : finalRefusal,
             Status = status,
             FinishReason = status == LlmCompletionStatus.RequiresAction ? "tool_calls" : providerStatus,
