@@ -584,12 +584,16 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, ILlmFileClie
         string connectionId, LlmChatRequest request, string expectedScope, CancellationToken cancellationToken)
     {
         ProviderCompactionResult? result = null;
-        await foreach (LlmStreamEvent _ in StreamCoreAsync(connectionId, request, expectedScope, cancellationToken,
-            compacted => result = compacted).ConfigureAwait(false))
+        try
         {
-            throw new InvalidOperationException("Provider compaction cannot dispatch generation events.");
+            await foreach (LlmStreamEvent _ in StreamCoreAsync(connectionId, request, expectedScope, cancellationToken,
+                compacted => result = compacted).ConfigureAwait(false))
+            {
+                throw new InvalidOperationException("Provider compaction cannot dispatch generation events.");
+            }
+            return result ?? throw new InvalidOperationException("Provider compaction returned no result.");
         }
-        return result ?? throw new InvalidOperationException("Provider compaction returned no result.");
+        catch (Exception error) { _cleanupOutcomes.Record(error); throw; }
     }
 
     private async IAsyncEnumerable<LlmStreamEvent> StreamCoreAsync(
