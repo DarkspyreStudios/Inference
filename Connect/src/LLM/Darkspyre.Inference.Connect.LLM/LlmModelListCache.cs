@@ -1,8 +1,6 @@
 using System.Collections.Frozen;
 using System.Diagnostics.CodeAnalysis;
-using System.Runtime.ExceptionServices;
 using System.Text.Json;
-using Darkspyre.Inference.Common.Resources;
 using Darkspyre.Inference.Connect.LLM.Internal;
 
 namespace Darkspyre.Inference.Connect.LLM;
@@ -16,7 +14,7 @@ public sealed class LlmModelListCache : IDisposable, IAsyncDisposable
     private readonly Lock _gate = new();
     private readonly Dictionary<string, Epoch> _entries = new(StringComparer.Ordinal);
     private readonly LlmOperationLifetime _lifetime = new();
-    private readonly List<Exception> _cleanupFailures = [];
+    private readonly LlmCleanupOutcomes _cleanupOutcomes = new();
     private bool _disposed;
 
     internal readonly record struct Scope(string Version, string? ResolvedContinuationScope);
@@ -184,30 +182,9 @@ public sealed class LlmModelListCache : IDisposable, IAsyncDisposable
 
     private void CompleteFailure<T>(TaskCompletionSource<T> completion, Exception error)
     {
-        RecordCleanupFailure(error);
+        _cleanupOutcomes.Record(error);
         if (error is OperationCanceledException canceled && !LlmResourcePreparation.IsCleanupFailure(error)) completion.TrySetCanceled(canceled.CancellationToken);
         else { completion.TrySetException(error); _ = completion.Task.Exception; }
-    }
-
-    private void RecordCleanupFailure(Exception error)
-    {
-        var pending = new Stack<Exception>();
-        var visited = new HashSet<Exception>(ReferenceEqualityComparer.Instance);
-        var failures = new List<Exception>();
-        pending.Push(error);
-        while (pending.TryPop(out Exception? current))
-        {
-            if (!visited.Add(current)) continue;
-            if (current is InferenceResourceOperationException resource && resource.Failure.Phase == InferenceResourceOperationPhase.Cleanup
-                || current is InferenceResourceOperationCanceledException canceled && canceled.Failure.Phase == InferenceResourceOperationPhase.Cleanup)
-                failures.Add(current);
-            if (current is AggregateException aggregate)
-                for (int index = aggregate.InnerExceptions.Count - 1; index >= 0; index--) pending.Push(aggregate.InnerExceptions[index]);
-            else if (current.InnerException is { } inner) pending.Push(inner);
-        }
-        lock (_gate)
-            foreach (Exception failure in failures)
-                if (!_cleanupFailures.Any(existing => ReferenceEquals(existing, failure))) _cleanupFailures.Add(failure);
     }
 
     private static bool SameEvidence(CatalogConnectionData.Evidence? left, CatalogConnectionData.Evidence? right) =>
@@ -237,16 +214,7 @@ public sealed class LlmModelListCache : IDisposable, IAsyncDisposable
     public ValueTask DisposeAsync()
     {
         lock (_gate) { _disposed = true; _entries.Clear(); }
-        return new(_lifetime.RetireAsync(ReleaseAsync));
-    }
-
-    private Task ReleaseAsync()
-    {
-        Exception[] failures;
-        lock (_gate) failures = _cleanupFailures.ToArray();
-        if (failures.Length == 1) ExceptionDispatchInfo.Capture(failures[0]).Throw();
-        if (failures.Length > 1) throw new AggregateException(failures);
-        return Task.CompletedTask;
+        return new(_lifetime.RetireAsync(_cleanupOutcomes.ReleaseAsync));
     }
 
     /// <summary>Synchronously retires this cache. Use asynchronous disposal while listings are active.</summary>

@@ -711,6 +711,11 @@ hand without an injected access owner creates and retires its own. An injected o
 same connection source and remains borrowed. Retiring a facade cancels its credential operations
 without retiring a shared owner.
 
+The embedding facade accepts an optional borrowed `LlmProviderService` for the shared xAI family
+catalog. Supplying it requires an explicit credential-access owner shared by both facades.
+Construction rejects a mismatched pair before allocating private access. `AddLlmConnect` passes
+the same scoped access and provider facade to embeddings.
+
 Access retirement fences acquisition, cancels and drains resolution, refresh and saving, and clears
 borrowed source and authenticator references without disposing those collaborators. Late refreshes are
 not saved; late save results do not return credentials. Cancellation during a save can race a source
@@ -775,7 +780,7 @@ after admitted work drains. Chat and embedding facades also release credential-a
 chat releases setup environments and adapter collections. Cleanup failures do not skip this release.
 Concurrent disposal callers share the same completion and retained failure. Chat disposal preserves
 failures from its operation, credential and privately owned catalog retirement. Embedding disposal
-preserves operation and owned credential-retirement failures. Agent disposal preserves opening and
+preserves admitted cleanup outcomes and owned credential-retirement failures. Agent disposal preserves opening and
 every owned session-retirement failure. Each waits for all owned cleanup before reporting failure.
 A single original error remains unchanged; multiple errors are retained in an `AggregateException`.
 Repeated disposal returns the same cached failure instance. Synchronous settings
@@ -909,6 +914,17 @@ and headers before refresh. OpenAI-compatible responses require one unique in-ra
 finite nonempty vectors and the requested dimensions. The three embedding data types expose owned
 metadata through their exact type-name getters on `ConnectLlmJson`.
 
+`LlmEmbeddingProviderService.ListModelsAsync(connectionId)` lists observed xAI embedding-family
+models through the explicitly borrowed LLM facade and its sole model cache. Other transports and
+missing catalog composition refuse before credential refresh. The xAI embedding path consumes one
+resolved and refreshed connection snapshot for catalog and POST; nested catalog work does not
+reacquire credentials. The returned facts are installed only on that admitted internal snapshot.
+An unknown manually selected model remains unknown, not unsupported solely because a listing omits
+it. Without the shared facade, catalog-dependent xAI embedding calls refuse before refresh.
+Non-xAI embedding calls retain their existing construction without a catalog facade. Live embedding
+facades are runtime composition, not portable data: owned options preserve null and refuse non-null
+values without serializing their collaborators. No runtime facade getter is exported.
+
 The internal xAI embedding adapter implements ordered text inputs, float vectors and typed dimensions.
 It accepts at most 128 non-empty inputs and preserves supplied `user` and boolean/null `preview`
 options, including explicit nulls. Its direct path consumes the supplied OAuth connection and the
@@ -932,6 +948,12 @@ only that request. A provider that ignores cancellation keeps retirement pending
 is rejected. Use asynchronous scope disposal while embedding requests are active.
 Post-await boundaries check the synchronous retirement fence even when a cancellation callback
 delays propagation to a request's linked token.
+The internal xAI dispatch also checks that same facade fence through send, read, parsing and
+publication. Cache and embedding owners share one finite cleanup-outcome policy with separate
+owner-scoped state. Only actual cleanup carriers affect retirement; ordinary provider, validation
+and cancellation failures do not. Refused cleanup retains its actual safe carrier and resource,
+and repeated disposal reports the same result without retry. Borrowed catalog facades are detached
+after drain and are never disposed by embeddings.
 
 ### Agent-session lifetime
 

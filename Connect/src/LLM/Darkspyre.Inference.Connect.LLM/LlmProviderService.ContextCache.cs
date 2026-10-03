@@ -46,7 +46,7 @@ public sealed partial class LlmProviderService
     private async Task<T> CaptureCacheCleanupAsync<T>(Func<Task<T>> action)
     {
         try { return await action().ConfigureAwait(false); }
-        catch (Exception error) { _cacheBindings.RecordCleanupFailure(error); throw; }
+        catch (Exception error) { _cleanupOutcomes.Record(error); throw; }
     }
 
     private async Task<LlmContextCache> CreateContextCacheAsync(string connectionId, LlmContextCacheCreate request, CancellationToken token)

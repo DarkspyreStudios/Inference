@@ -169,6 +169,7 @@ public static class ConnectLlmJson
         options.Converters.Add(new FileRuntimeJsonConverter<IXaiFilePublicUrlClient>());
         options.Converters.Add(new FileRuntimeJsonConverter<IXaiSkillClient>());
         options.Converters.Add(new FileRuntimeJsonConverter<IDocumentSearchClient>("Live document-search clients are not portable data."));
+        options.Converters.Add(new FileRuntimeJsonConverter<LlmEmbeddingProviderService>("Live embedding facades are not portable data."));
         options.MakeReadOnly();
         return options;
     }
@@ -177,6 +178,9 @@ public static class ConnectLlmJson
     {
         public JsonTypeInfo? GetTypeInfo(Type type, JsonSerializerOptions options)
         {
+            if (type == typeof(LlmEmbeddingProviderService))
+                return JsonMetadataServices.CreateValueInfo<LlmEmbeddingProviderService>(options,
+                    new FileRuntimeJsonConverter<LlmEmbeddingProviderService>("Live embedding facades are not portable data."));
             if (LlmAgentCallerJson.RuntimeMetadata(type, options) is { } runtime) return runtime;
             if (LlmRuntimeAuthenticationJson.RuntimeMetadata(type, options) is { } authentication) return authentication;
             var metadata = ((IJsonTypeInfoResolver)ConnectLlmJsonContext.Default).GetTypeInfo(type, options);
