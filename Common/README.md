@@ -169,6 +169,8 @@ remote-MCP diagnostics are redacted. Common's union rejects caller-defined varia
 the fixed xAI search extension and its extension-aware portable metadata.
 Owned hosted metadata requires explicit completed-call ID/status members; null represents an
 unreported fact. Started/progress identities, kind/phase facts and image bytes remain mandatory.
+`LlmHostedSearchSource.Url` also requires an explicit JSON member and may be null when the source
+URL is unreported. Reported URL strings, including empty or whitespace strings, remain unchanged.
 Hosted-tool kinds are closed on owned JSON read/write, including capability sets and usage dictionary
 keys. Defined values retain their numeric encoding and standard named/numeric dictionary-key reads;
 unknown kinds refuse without converting observed zero counts or absent facts into other values.
