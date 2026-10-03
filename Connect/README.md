@@ -1303,6 +1303,15 @@ document-search adapter or advertise provider availability. Owned options reject
 `IDocumentSearchClient` values on read and write, including nested consumer-generated metadata;
 explicit null remains null. No runtime client is exported as portable data.
 
+The internal stateless xAI protocol maps typed search controls to `POST /v1/documents/search`.
+It uses a supplied immutable OAuth connection and the existing SDK consumption admission; it does
+not resolve or refresh credentials, register an adapter or activate the public facade. Chat
+`ProviderOptions` are not copied into search JSON. Explicit non-default service tiers refuse
+before HTTP because the search route has no mapped tier control. Requests and responses have
+one cleanup owner; independent failures retain fixed-safe diagnostics and actual refused owners.
+Facade cleanup integration and the disposition of connection options remain separate from this
+private protocol. Subscription OAuth acceptance and collection entitlement remain unqualified.
+
 `DocumentSearchRequest` carries ordered collection IDs, an opaque filter, optional grouping and a
 closed hybrid/semantic/keyword retrieval selection. Grouping supports `DocumentMinK` and
 `DocumentMaxK`. Hybrid retrieval accepts model or RRF rerankers; semantic and keyword retrieval
