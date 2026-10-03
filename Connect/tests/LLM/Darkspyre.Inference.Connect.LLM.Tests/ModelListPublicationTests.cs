@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Darkspyre.Inference.Common.LLM;
+using Darkspyre.Inference.Connect.LLM.Internal;
 
 namespace Darkspyre.Inference.Connect.LLM.Tests;
 
@@ -17,14 +18,17 @@ public sealed class ModelListPublicationTests
         var firstScope = new LlmModelListCache.Scope("version", originalScope);
         var currentScope = new LlmModelListCache.Scope("version", replacementScope);
         IReadOnlyList<LlmModel> original = await cache.GetAsync("connection", firstScope,
-            _ => Task.FromResult<IReadOnlyList<LlmModel>>([new("original", "Original")]), CancellationToken.None);
+            new CacheListingClient(_ => Task.FromResult<IReadOnlyList<LlmModel>>([new("original", "Original")])),
+            CacheListingClient.Connection("version"), ModelCatalogFamily.Chat, CancellationToken.None);
         IReadOnlyList<LlmModel> current = await cache.GetAsync("connection", currentScope,
-            _ => Task.FromResult<IReadOnlyList<LlmModel>>([new("current", "Current")]), CancellationToken.None);
+            new CacheListingClient(_ => Task.FromResult<IReadOnlyList<LlmModel>>([new("current", "Current")])),
+            CacheListingClient.Connection("version"), ModelCatalogFamily.Chat, CancellationToken.None);
 
         Assert.NotSame(original, current);
         Assert.Equal("current", Assert.Single(current).Id);
         Assert.Same(current, await cache.GetAsync("connection", new("version", replacementScope),
-            _ => throw new InvalidOperationException("An equal tuple must reuse the published snapshot."), CancellationToken.None));
+            new CacheListingClient(_ => throw new InvalidOperationException("An equal tuple must reuse the published snapshot.")),
+            CacheListingClient.Connection("version"), ModelCatalogFamily.Chat, CancellationToken.None));
     }
 
     [Fact]
@@ -47,7 +51,8 @@ public sealed class ModelListPublicationTests
         };
 
         IReadOnlyList<LlmModel> published = await cache.GetAsync("connection", new("v1", null),
-            _ => Task.FromResult<IReadOnlyList<LlmModel>>(source), CancellationToken.None);
+            new CacheListingClient(_ => Task.FromResult<IReadOnlyList<LlmModel>>(source)),
+            CacheListingClient.Connection("v1"), ModelCatalogFamily.Chat, CancellationToken.None);
         source.Clear();
         levels.Clear();
         choices.Clear();
@@ -61,7 +66,8 @@ public sealed class ModelListPublicationTests
         Assert.Equal(LlmPromptCacheRetention.Default, Assert.Single(model.Capabilities.PromptCache.Retentions));
         Assert.True(Assert.IsAssignableFrom<IList<LlmModel>>(published).IsReadOnly);
         Assert.Same(published, await cache.GetAsync("connection", new("v1", null),
-            _ => throw new InvalidOperationException("The published snapshot must remain cached."), CancellationToken.None));
+            new CacheListingClient(_ => throw new InvalidOperationException("The published snapshot must remain cached.")),
+            CacheListingClient.Connection("v1"), ModelCatalogFamily.Chat, CancellationToken.None));
     }
 
     [Fact]
@@ -73,7 +79,8 @@ public sealed class ModelListPublicationTests
         try
         {
             published = await cache.GetAsync("connection", new("v1", null),
-                _ => Task.FromResult<IReadOnlyList<LlmModel>>([new("model", "Model") { CatalogEntry = document.RootElement }]), CancellationToken.None);
+                new CacheListingClient(_ => Task.FromResult<IReadOnlyList<LlmModel>>([new("model", "Model") { CatalogEntry = document.RootElement }])),
+                CacheListingClient.Connection("v1"), ModelCatalogFamily.Chat, CancellationToken.None);
         }
         finally { document.Dispose(); }
 
@@ -89,17 +96,17 @@ public sealed class ModelListPublicationTests
         var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var release = new TaskCompletionSource<IReadOnlyList<LlmModel>>(TaskCreationOptions.RunContinuationsAsynchronously);
         CancellationToken providerToken = default;
-        Task<IReadOnlyList<LlmModel>> old = cache.GetAsync("connection", new("v1", null), token =>
+        Task<IReadOnlyList<LlmModel>> old = cache.GetAsync("connection", new("v1", null), new CacheListingClient(token =>
         {
             providerToken = token;
             entered.SetResult();
             return release.Task;
-        }, CancellationToken.None);
+        }), CacheListingClient.Connection("v1"), ModelCatalogFamily.Chat, CancellationToken.None);
         await entered.Task.WaitAsync(Bound);
         string version = refresh ? "v1" : "v2";
         Task<IReadOnlyList<LlmModel>> current = refresh
-            ? cache.RefreshAsync("connection", new(version, null), _ => Task.FromResult<IReadOnlyList<LlmModel>>([new("current", "Current")]), CancellationToken.None)
-            : cache.GetAsync("connection", new(version, null), _ => Task.FromResult<IReadOnlyList<LlmModel>>([new("current", "Current")]), CancellationToken.None);
+            ? cache.RefreshAsync("connection", new(version, null), new CacheListingClient(_ => Task.FromResult<IReadOnlyList<LlmModel>>([new("current", "Current")])), CacheListingClient.Connection(version), ModelCatalogFamily.Chat, CancellationToken.None)
+            : cache.GetAsync("connection", new(version, null), new CacheListingClient(_ => Task.FromResult<IReadOnlyList<LlmModel>>([new("current", "Current")])), CacheListingClient.Connection(version), ModelCatalogFamily.Chat, CancellationToken.None);
         try
         {
             IReadOnlyList<LlmModel> models = await current.WaitAsync(Bound);
@@ -108,7 +115,8 @@ public sealed class ModelListPublicationTests
             release.SetResult([new("stale", "Stale")]);
             await Assert.ThrowsAnyAsync<OperationCanceledException>(() => old.WaitAsync(Bound));
             Assert.Same(models, await cache.GetAsync("connection", new(version, null),
-                _ => throw new InvalidOperationException("The current listing must remain cached."), CancellationToken.None));
+                new CacheListingClient(_ => throw new InvalidOperationException("The current listing must remain cached.")),
+                CacheListingClient.Connection(version), ModelCatalogFamily.Chat, CancellationToken.None));
         }
         finally { release.TrySetResult([]); }
     }
@@ -120,7 +128,8 @@ public sealed class ModelListPublicationTests
     {
         await using var cache = new LlmModelListCache();
         IReadOnlyList<LlmModel> current = await cache.GetAsync("connection", new("v1", null),
-            _ => Task.FromResult<IReadOnlyList<LlmModel>>([new("current", "Current")]), CancellationToken.None);
+            new CacheListingClient(_ => Task.FromResult<IReadOnlyList<LlmModel>>([new("current", "Current")])),
+            CacheListingClient.Connection("v1"), ModelCatalogFamily.Chat, CancellationToken.None);
         using var caller = new CancellationTokenSource();
         await caller.CancelAsync();
         int calls = 0;
@@ -132,8 +141,8 @@ public sealed class ModelListPublicationTests
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
         {
-            if (refresh) await cache.RefreshAsync("connection", new("v1", null), List, caller.Token);
-            else await cache.GetAsync("connection", new("v2", null), List, caller.Token);
+            if (refresh) await cache.RefreshAsync("connection", new("v1", null), new CacheListingClient(List), CacheListingClient.Connection("v1"), ModelCatalogFamily.Chat, caller.Token);
+            else await cache.GetAsync("connection", new("v2", null), new CacheListingClient(List), CacheListingClient.Connection("v2"), ModelCatalogFamily.Chat, caller.Token);
         });
         await cache.DisposeAsync();
         Assert.Equal(0, Volatile.Read(ref calls));
@@ -146,13 +155,13 @@ public sealed class ModelListPublicationTests
         await using var cache = new LlmModelListCache();
         var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var release = new TaskCompletionSource<IReadOnlyList<LlmModel>>(TaskCreationOptions.RunContinuationsAsynchronously);
-        Task<IReadOnlyList<LlmModel>> old = cache.GetAsync("connection", new("v1", null), _ =>
+        Task<IReadOnlyList<LlmModel>> old = cache.GetAsync("connection", new("v1", null), new CacheListingClient(_ =>
         {
             entered.SetResult();
             return release.Task;
-        }, CancellationToken.None);
+        }), CacheListingClient.Connection("v1"), ModelCatalogFamily.Chat, CancellationToken.None);
         await entered.Task.WaitAsync(Bound);
-        await cache.GetAsync("connection", new("v2", null), _ => Task.FromResult<IReadOnlyList<LlmModel>>([]), CancellationToken.None);
+        await cache.GetAsync("connection", new("v2", null), new CacheListingClient(_ => Task.FromResult<IReadOnlyList<LlmModel>>([])), CacheListingClient.Connection("v2"), ModelCatalogFamily.Chat, CancellationToken.None);
         Task retirement = cache.DisposeAsync().AsTask();
         try
         {

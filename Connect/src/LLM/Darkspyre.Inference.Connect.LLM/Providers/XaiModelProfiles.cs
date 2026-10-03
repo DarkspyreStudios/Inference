@@ -34,9 +34,7 @@ internal static class XaiModelProfiles
 
     internal static XaiModelProfile Get(LlmConnection connection, string? modelId)
     {
-        LlmModel? model = modelId is null ? null : connection.Catalog?.FirstOrDefault(candidate => candidate.Id == modelId)
-            ?? connection.Catalog?.FirstOrDefault(candidate => candidate.CatalogEntry is { } entry
-                && Contains(entry, "aliases", modelId));
+        LlmModel? model = XaiCatalog.FindModel(connection.Catalog, modelId);
         string? canonicalId = model?.Id ?? modelId;
         XaiModelProfile profile = Rows.FirstOrDefault(row => canonicalId?.StartsWith(row.Prefix, StringComparison.OrdinalIgnoreCase) == true).Profile ?? Unknown;
         if (model?.CatalogEntry is not { } catalog) return profile;

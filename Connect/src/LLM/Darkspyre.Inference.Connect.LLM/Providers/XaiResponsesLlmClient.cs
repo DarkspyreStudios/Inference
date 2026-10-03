@@ -12,7 +12,7 @@ namespace Darkspyre.Inference.Connect.LLM.Providers;
 
 /// <summary>OAuth-only Grok Responses adapter. The facade owns its published chat catalog.</summary>
 internal sealed class XaiResponsesLlmClient(HttpClient http) : ResponsesLlmClientBase(http), ILlmCatalogCapabilities,
-    ILlmTextTokenizerClient, ILlmCredentialAdmissionPolicy
+    ILlmTextTokenizerClient, ILlmCredentialAdmissionPolicy, ILlmModelCatalogClient
 {
     void ILlmCredentialAdmissionPolicy.ValidateCredential(LlmConnection connection) => _ = XaiRequestHeaders.Require(connection);
 
@@ -287,62 +287,28 @@ internal sealed class XaiResponsesLlmClient(HttpClient http) : ResponsesLlmClien
     public override async Task<IReadOnlyList<LlmModel>> ListModelsAsync(LlmConnection connection, CancellationToken cancellationToken = default)
     {
         if (!GetCapabilities(connection).SupportsModelListing) return [];
-        using var consumption = SdkHttpConsumption.Enter(Http, cancellationToken); cancellationToken = consumption.Token;
-        JsonArray generic = await ListingAsync(connection, "models", "data", cancellationToken);
-        JsonArray language = await ListingAsync(connection, "language-models", "models", cancellationToken);
-        var results = new List<LlmModel>();
-        var ids = new HashSet<string>(StringComparer.Ordinal);
-        foreach (JsonObject item in language.OfType<JsonObject>())
-        {
-            string? id = String(item, "id");
-            if (string.IsNullOrWhiteSpace(id)) continue;
-            if (!ids.Add(id)) throw new LlmProviderException("Grok model discovery returned duplicate model identifiers.", Transport);
-            JsonObject metadata = (JsonObject)item.DeepClone();
-            JsonObject? match = generic.OfType<JsonObject>().FirstOrDefault(candidate => String(candidate, "id") == id)
-                ?? generic.OfType<JsonObject>().FirstOrDefault(candidate => Aliases(candidate).Contains(id, StringComparer.Ordinal)
-                    || String(candidate, "id") is { } genericId && Aliases(item).Contains(genericId, StringComparer.Ordinal));
-            if (match is not null)
-            {
-                foreach ((string key, JsonNode? value) in match)
-                    if (!metadata.ContainsKey(key)) metadata[key] = value?.DeepClone();
-                if (metadata["capabilities"] is JsonObject capabilities && match["capabilities"] is JsonObject genericCapabilities)
-                    foreach ((string key, JsonNode? value) in genericCapabilities)
-                        if (!capabilities.ContainsKey(key)) capabilities[key] = value?.DeepClone();
-                string[] aliases = [.. Aliases(item).Concat(Aliases(match)).Distinct(StringComparer.Ordinal)];
-                if (aliases.Length > 0) metadata["aliases"] = JsonSerializer.SerializeToNode(aliases);
-            }
-            JsonElement entry = JsonSerializer.SerializeToElement(metadata);
-            results.Add(new LlmModel(id, String(item, "name") ?? id, String(item, "owned_by"))
-            {
-                CatalogEntry = entry,
-                MaxContextTokens = entry.TryGetProperty("context_length", out JsonElement length) && length.ValueKind == JsonValueKind.Number
-                    && length.TryGetInt64(out long count) && count > 0 ? count : null
-            });
-        }
-        LlmConnection published = connection with { Catalog = results };
-        return consumption.Publish<IReadOnlyList<LlmModel>>([.. results.Select(model => model with { Capabilities = GetCapabilities(published, model.Id) })
-            .OrderBy(model => model.DisplayName, StringComparer.OrdinalIgnoreCase)]);
+        using var consumption = SdkHttpConsumption.Enter(Http, cancellationToken);
+        void Fence() { consumption.Token.ThrowIfCancellationRequested(); consumption.Fence(); }
+        IReadOnlyList<JsonElement> generic = await XaiCatalog.ReadAsync(Http, connection, ModelCatalogPart.Generic, Fence, consumption.Token);
+        Fence();
+        IReadOnlyList<JsonElement> language = await XaiCatalog.ReadAsync(Http, connection, ModelCatalogPart.Chat, Fence, consumption.Token);
+        Fence();
+        return consumption.Publish(ProjectCatalog(connection, ModelCatalogFamily.Chat, generic, language));
     }
 
-    private async Task<JsonArray> ListingAsync(LlmConnection connection, string path, string array, CancellationToken cancellationToken)
+    Task<IReadOnlyList<JsonElement>> ILlmModelCatalogClient.ReadCatalogPartAsync(LlmConnection snapshot, ModelCatalogPart part,
+        Action ownerFence, CancellationToken cancellationToken) => XaiCatalog.ReadAsync(Http, snapshot, part, ownerFence, cancellationToken);
+
+    IReadOnlyList<LlmModel> ILlmModelCatalogClient.ProjectCatalog(LlmConnection snapshot, ModelCatalogFamily family,
+        IReadOnlyList<JsonElement> generic, IReadOnlyList<JsonElement> specific) => ProjectCatalog(snapshot, family, generic, specific);
+
+    private IReadOnlyList<LlmModel> ProjectCatalog(LlmConnection snapshot, ModelCatalogFamily family,
+        IReadOnlyList<JsonElement> generic, IReadOnlyList<JsonElement> specific)
     {
-        using var request = new HttpRequestMessage(HttpMethod.Get, ProviderHttp.BuildUri(connection, path));
-        XaiRequestHeaders.Apply(request, connection, false);
-        using HttpResponseMessage response = await Http.SendAsync(request, cancellationToken);
-        await XaiErrorClassifier.ThrowIfUnsuccessfulAsync(response, LlmCredential.Parse(connection.Credential), [], cancellationToken);
-        string body = await SdkHttpConsumption.ReadAsStringAsync(response.Content, cancellationToken);
-        try
-        {
-            if (JsonNode.Parse(body) is JsonObject root && root[array] is JsonArray models
-                && models.All(item => item is JsonObject)) return (JsonArray)models.DeepClone();
-        }
-        catch (JsonException) { }
-        throw ProtocolException("Grok model discovery returned an invalid catalog.", response, body, LlmCredential.Parse(connection.Credential));
+        IReadOnlyList<LlmModel> results = XaiCatalog.Project(generic, specific);
+        if (family != ModelCatalogFamily.Chat) return results;
+        LlmConnection published = snapshot with { Catalog = results };
+        return Array.AsReadOnly(results.Select(model => model with { Capabilities = GetCapabilities(published, model.Id) }).ToArray());
     }
-
-    private static string? String(JsonObject item, string name) => item[name] is JsonValue value && value.TryGetValue(out string? text) ? text : null;
-
-    private static IEnumerable<string> Aliases(JsonObject item) => item["aliases"] is JsonArray aliases
-        ? aliases.OfType<JsonValue>().Select(value => value.TryGetValue(out string? text) ? text : null).OfType<string>() : [];
 
 }
