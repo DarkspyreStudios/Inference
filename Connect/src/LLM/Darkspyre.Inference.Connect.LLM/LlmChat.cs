@@ -111,6 +111,12 @@ public sealed record LlmChatResult
 {
     public required string Text { get; init; }
 
+    /// <summary>The actual model identity reported by the adapter; null when unknown.</summary>
+    public string? ModelId { get; init; }
+
+    /// <summary>A separately observed model revision; null when unknown.</summary>
+    public string? ModelRevision { get; init; }
+
     public string? Refusal { get; init; }
 
     /// <summary>Provider refusal category when the provider names one.</summary>

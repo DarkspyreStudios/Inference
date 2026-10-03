@@ -152,6 +152,7 @@ internal abstract class ChatCompletionsLlmClientBase(HttpClient http) : LlmClien
         var refusal = new StringBuilder();
         string? finishReason = null;
         string? responseId = null;
+        string? observedModel = null;
         LlmUsage? usage = null;
         string? lastEvent = null;
         bool sawDone = false;
@@ -187,6 +188,8 @@ internal abstract class ChatCompletionsLlmClientBase(HttpClient http) : LlmClien
             {
                 JsonElement root = document.RootElement;
                 responseId ??= LlmJson.GetString(root, "id");
+                observedModel = ObservedModel.Read(root, "model", Transport, connection, credential,
+                    response.RequestMessage, observedModel);
                 if (LlmJson.GetObject(root, "error") is { } error)
                 {
                     throw StreamError(error, response, data, credential);
@@ -308,6 +311,7 @@ internal abstract class ChatCompletionsLlmClientBase(HttpClient http) : LlmClien
             refusal.ToString(),
             finishReason,
             responseId,
+            observedModel,
             usage,
             completedToolCalls,
             response,
@@ -390,6 +394,7 @@ internal abstract class ChatCompletionsLlmClientBase(HttpClient http) : LlmClien
                 LlmJson.GetString(message, "refusal") ?? string.Empty,
                 LlmJson.GetString(choices[0], "finish_reason"),
                 LlmJson.GetString(root, "id"),
+                ObservedModel.Read(root, "model", Transport, connection, credential, response.RequestMessage),
                 ReadUsage(root),
                 [.. toolCalls],
                 response,
@@ -410,6 +415,7 @@ internal abstract class ChatCompletionsLlmClientBase(HttpClient http) : LlmClien
         string finalRefusal,
         string? finishReason,
         string? responseId,
+        string? observedModel,
         LlmUsage? usage,
         LlmToolCall[] completedToolCalls,
         HttpResponseMessage response,
@@ -444,6 +450,7 @@ internal abstract class ChatCompletionsLlmClientBase(HttpClient http) : LlmClien
         return new LlmChatResult
         {
             Text = finalText,
+            ModelId = observedModel,
             Refusal = finalRefusal.Length == 0 ? null : finalRefusal,
             Status = status,
             FinishReason = finishReason,

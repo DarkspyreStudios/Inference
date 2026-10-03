@@ -82,18 +82,18 @@ internal sealed class ConnectLlmInference(
                     yield break;
                 }
 
-                yield return ToCommon(enumerator.Current, request.ModelId);
+                yield return ToCommon(enumerator.Current);
             }
         }
     }
 
     // Connect streams Common's events; only its completion event carries a Connect-only result.
-    private CommonLlm.LlmStreamEvent ToCommon(CommonLlm.LlmStreamEvent streamEvent, string modelId) =>
+    private CommonLlm.LlmStreamEvent ToCommon(CommonLlm.LlmStreamEvent streamEvent) =>
         streamEvent is LlmChatCompletionEvent completion
-            ? new CommonLlm.LlmCompletionEvent(ToCommon(completion.Result, modelId))
+            ? new CommonLlm.LlmCompletionEvent(ToCommon(completion.Result))
             : streamEvent;
 
-    private CommonLlm.LlmInferenceResult ToCommon(LlmChatResult result, string modelId) => new()
+    private CommonLlm.LlmInferenceResult ToCommon(LlmChatResult result) => new()
     {
         Text = result.Text,
         Refusal = result.Refusal,
@@ -110,7 +110,8 @@ internal sealed class ConnectLlmInference(
         Provenance = new Common.InferenceProvenance
         {
             ImplementationId = Descriptor.Id,
-            ModelId = modelId,
+            ModelId = result.ModelId,
+            ModelRevision = result.ModelRevision,
             Runtime = "Darkspyre.Inference.Connect.LLM",
             Backend = "connect"
         }

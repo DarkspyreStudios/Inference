@@ -427,6 +427,19 @@ Image workflows expose the same boundary through `ImageProviderService.Bind(conn
 Binding is explicit and retains exactly one backend. Neither adapter retries through a different
 provider nor falls back from Connect to Tensor.
 
+`LlmChatResult.ModelId` and `ModelRevision` carry actual adapter observations. Both are nullable.
+The portable result preserves them in Common provenance; it does not substitute the requested
+model. A self-hosted result preserves its actual loaded model identity and separately reported
+revision. Existing result metadata and nested batch/deferred graphs carry both optional fields.
+
+HTTP chat adapters read the returned `model`. Gemini and Vertex Gemini read the actual
+`modelVersion` unchanged as the model identity, without deriving a separate revision from its name.
+Missing observations remain unknown. Conflicting observations within one HTTP response, malformed
+values and protected credential/header values refuse publication through a fixed safe error.
+Claude streaming reads the most recent actual main assistant message or message-start observation;
+init selections, subagent messages and aggregate usage keys do not supply identity. Its non-streaming
+terminal format and the current Apple, Antigravity and Bedrock protocols report no model identity.
+
 ### Reasoning levels
 
 `LlmInferenceRequest.ReasoningLevel` takes an `LlmReasoningLevel`: `None`, `Minimal`, `Low`, `Medium`,
@@ -1332,6 +1345,11 @@ resolve credentials, fetch files, group results or evaluate filters.
 
 ## Image provider integration
 
+`ImageTransportJobSnapshot.ModelId` and `ModelRevision` are optional observed execution facts.
+The portable image result preserves them in Common provenance. Workflow IDs and versions remain
+workflow selection facts, not model provenance. ComfyUI history currently reports no execution-model
+identity or revision, so both remain null.
+
 Register the image capability and resolve its provider-neutral transport through
 `ImageProviderService`:
 
@@ -1839,6 +1857,19 @@ Callback RuntimePolicy uses fixed `host-controlled` and `provider-configured` va
 freezes caller-selected policy roots and does not grant filesystem or resource access.
 The exact `LlmAgentRuntimePolicyKind` root and nested capability data reject undefined numeric values
 and preserve both defined numeric values.
+
+`LlmAgentToolPresentationEvent` carries a copied complete tool presentation without requiring a
+tool name or turn ID. `LlmAgentContentObservationEvent` carries ordered typed user, assistant or
+reasoning content. Both preserve actual nullable turn/item identities and explicit replay facts;
+neither invents completion or invokes a tool. Append adds blocks. Replace requires an actual item
+ID and represents the complete known item content. Changing an Append observation to Replace
+through an initializer requires assigning its item ID first. Event payloads copy binary data,
+JSON and nested collections. Diagnostic strings redact presentation contents.
+`ConnectLlmJson` exports these two concrete events and their two closed enums through exact
+type-name getters. Existing streams carry the events through `LlmAgentEvent`; there is no base-event
+data codec. Resource links remain observations without fetching or artifact registration.
+These contracts do not register an ACP/Copilot adapter or implement protocol replay and tool-update
+merging.
 
 `LlmAgentClientToolDefinition` is a closed function/shell data union. The existing
 `LlmAgentToolDefinition` retains its schema, strictness, deferred-loading and sequential-execution

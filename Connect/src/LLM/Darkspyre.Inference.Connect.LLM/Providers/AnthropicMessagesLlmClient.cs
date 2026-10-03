@@ -192,6 +192,7 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
         int? cacheWriteTokens = null;
         int? outputTokens = null;
         string? responseId = null;
+        string? observedModel = null;
         string? stopReason = null;
         string? containerId = null;
         string? refusalCategory = null;
@@ -228,6 +229,8 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
                         if (LlmJson.GetObject(root, "message") is { } message)
                         {
                             responseId = LlmJson.GetString(message, "id");
+                            observedModel = ObservedModel.Read(message, "model", Transport, connection,
+                                credential, response.RequestMessage, observedModel);
                             if (message.TryGetProperty("container", out _)) containerId = ReadContainer(message, connection.Transport);
                             inputTokens = ReadToken(message, "usage", "input_tokens") ?? inputTokens;
                             cachedTokens = ReadToken(message, "usage", "cache_read_input_tokens") ?? cachedTokens;
@@ -361,6 +364,7 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
                             completedToolCalls,
                             AnthropicUsage.Create(inputTokens, outputTokens, cachedTokens, cacheWriteTokens),
                             responseId,
+                            observedModel,
                             streamedContent.BuildContent(),
                             containerId,
                             response,
@@ -472,6 +476,7 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
                     ReadToken(root, "usage", "cache_read_input_tokens"),
                     ReadToken(root, "usage", "cache_creation_input_tokens")),
                 LlmJson.GetString(root, "id"),
+                ObservedModel.Read(root, "model", Transport, connection, credential, response.RequestMessage),
                 content.GetArrayLength() == 0 ? null : JsonNode.Parse(content.GetRawText())!.AsArray(),
                 ReadContainer(root, connection.Transport),
                 response,
@@ -492,6 +497,7 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
         LlmToolCall[] toolCalls,
         LlmUsage? usage,
         string? responseId,
+        string? observedModel,
         JsonArray? content,
         string? containerId,
         HttpResponseMessage response,
@@ -528,6 +534,7 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
         return new LlmChatResult
         {
             Text = text,
+            ModelId = observedModel,
             Refusal = refused ? refusalExplanation ?? string.Empty : null,
             RefusalCategory = refused ? refusalCategory : null,
             Status = completionStatus,
