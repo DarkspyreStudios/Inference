@@ -127,8 +127,7 @@ internal sealed class XaiResponsesLlmClient(HttpClient http) : ResponsesLlmClien
     {
         if (connection.Xai?.ServiceTier == XaiServiceTier.Priority)
             throw new NotSupportedException("Grok Priority context compaction has not been qualified.");
-        ProviderHttp.ValidateAdditionalHeaders(connection.AdditionalHeaders);
-        PreflightResourceRequest(connection, request);
+        PreflightManagedOpeningRequest(connection, request);
     }
 
     internal Task<ProviderCompactionResult> CompactAsync(LlmConnection connection, LlmChatRequest request,
@@ -149,6 +148,7 @@ internal sealed class XaiResponsesLlmClient(HttpClient http) : ResponsesLlmClien
         request = ClientTools.Snapshot(request) with { HostedTools = HostedTools.Snapshot(request.HostedTools) };
         Fence();
         PreflightCompactionRequest(connection, request);
+        PreflightResourceRequest(connection, request);
         Fence();
         LlmProviderCapabilities capabilities = GetCapabilities(connection, request.ModelId);
         LlmStructuredOutputEnforcement? enforcement = ResolveStructuredOutputEnforcement(connection, request, capabilities);
