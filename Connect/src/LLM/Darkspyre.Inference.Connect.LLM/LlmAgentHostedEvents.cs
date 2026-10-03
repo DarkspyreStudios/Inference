@@ -1,4 +1,5 @@
 using Darkspyre.Inference.Common.LLM;
+using System.Collections.ObjectModel;
 using System.Diagnostics.CodeAnalysis;
 using System.Text.Json.Serialization;
 
@@ -54,6 +55,26 @@ public sealed record LlmAgentCitationEvent(string ThreadId, string TurnId, strin
     public string RequestId { get; init => field = HostedEventFacts.Identity(value); } = HostedEventFacts.Scope(ThreadId, TurnId, RequestId);
     [JsonRequired]
     public LlmCitation Citation { get; init => field = HostedEventFacts.Required(value); } = HostedEventFacts.Required(Citation);
+}
+/// <summary>The terminal result's ordered citation collection, not an append or clearing instruction.</summary>
+public sealed record LlmAgentCitationsSnapshotEvent(string ThreadId, string TurnId, string RequestId,
+    IReadOnlyList<LlmCitation> Citations) : LlmAgentEvent(ThreadId, HostedEventFacts.Identity(TurnId))
+{
+    [AllowNull]
+    public override string TurnId { get => base.TurnId!; init => base.TurnId = HostedEventFacts.Identity(value); }
+
+    [JsonRequired]
+    public string RequestId { get; init => field = HostedEventFacts.Identity(value); } = HostedEventFacts.Scope(ThreadId, TurnId, RequestId);
+    [JsonRequired]
+    public IReadOnlyList<LlmCitation> Citations { get; init => field = CopyCitations(value); } = CopyCitations(Citations);
+
+    private static ReadOnlyCollection<LlmCitation> CopyCitations(IReadOnlyList<LlmCitation> citations)
+    {
+        ArgumentNullException.ThrowIfNull(citations);
+        LlmCitation[] copy = citations.ToArray();
+        foreach (LlmCitation citation in copy) ArgumentNullException.ThrowIfNull(citation);
+        return Array.AsReadOnly(copy);
+    }
 }
 public sealed record LlmAgentCompactedEvent(string ThreadId, string TurnId, string RequestId,
     [property: JsonRequired] long ContextRevision, int? DroppedMessageCount, LlmUsage? Usage) : LlmAgentEvent(ThreadId, HostedEventFacts.Identity(TurnId))

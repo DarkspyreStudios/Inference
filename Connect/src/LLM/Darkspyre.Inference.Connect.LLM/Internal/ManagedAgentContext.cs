@@ -7,7 +7,8 @@ namespace Darkspyre.Inference.Connect.LLM.Internal;
 internal static class ManagedAgentContext
 {
     /// <summary>Validates portable data without decoding provider state or invoking resource authority.</summary>
-    internal static LlmAgentContext ValidatePortable(LlmAgentContext context) => Validate(context, static message => message);
+    internal static LlmAgentContext ValidatePortable(LlmAgentContext context) =>
+        Validate(context, static message => message, allowIncompleteTail: true);
 
     public static LlmAgentContext Import(LlmAgentContext context, LlmConnection connection, string modelId, bool supportsResources = false)
     {
@@ -78,7 +79,8 @@ internal static class ManagedAgentContext
     /// One structural pass over a context. <paramref name="continuationState"/> validates or rewrites each message
     /// that carries continuation state.
     /// </summary>
-    private static LlmAgentContext Validate(LlmAgentContext context, Func<LlmChatMessage, LlmChatMessage> continuationState)
+    private static LlmAgentContext Validate(LlmAgentContext context, Func<LlmChatMessage, LlmChatMessage> continuationState,
+        bool allowIncompleteTail = false)
     {
         ArgumentNullException.ThrowIfNull(context);
         context.ValidateResourceSelection();
@@ -171,7 +173,7 @@ internal static class ManagedAgentContext
                     throw new ArgumentException("Omitted-attachment positions must refer to the original ordered content.");
             }
         }
-        if (pending.Count > 0)
+        if (pending.Count > 0 && !allowIncompleteTail)
         {
             throw new ArgumentException("Context must end at a settled tool-group boundary.");
         }

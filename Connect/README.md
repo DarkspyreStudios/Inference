@@ -269,8 +269,13 @@ Common's property-specific null-byte refusal and its new closed phase/action enu
 Managed disposal shares its completion across callers, drains the producer even after cancellation
 callback failure, then releases borrowed hosted authorization without disposing it. Cleanup failures
 remain visible to every disposer. These controlled contracts do not qualify provider wire mappings
-or native execution. Terminal-only citations have no managed-agent projection; streamed citation
-observations are not deduplicated against terminal copies.
+or native execution. Each accepted terminal model result projects one
+`LlmAgentCitationsSnapshotEvent` with its actual request and turn IDs and a copied ordered citation
+list, including non-successful result statuses. The snapshot precedes tool execution and turn
+completion. It is a terminal-collection observation, not an append, deletion or clearing instruction.
+An empty terminal collection does not prove provider-reported absence. Streamed individual citation
+observations are not compared or deduplicated against terminal snapshots. The new concrete event has
+an exact type-name getter on `ConnectLlmJson`; it adds no portable base-event union.
 
 `ConnectLlmJson` exposes owned source-generated metadata for closed LLM connections, saved setup
 configuration, chat messages/requests/results and captured agent context. Pass the matching typed
@@ -288,6 +293,14 @@ storage. Legacy captures upgrade to empty membership with unknown provenance, no
 Byte-excluded captures retain logical references and the selection snapshot. Current session
 implementations reject selections they cannot bind; import never silently installs or deletes caller
 membership.
+
+Portable context and its owned codec preserve a final incomplete mixed tool-call group with each
+actual completed same-kind result. No later transcript message can follow an unresolved group.
+Missing results do not imply an exit code, timeout, rollback or an unstarted call. Runnable imports,
+next turns, provider projection and `ReplaceContextAsync` still require settled matching groups.
+Callers reconcile with actual results and revision-checked replacement; the library does not replay
+an executor, manufacture outcomes or prune the transcript. This data contract does not enable managed
+shell execution.
 
 Chat messages and turns use the Common ordered binary/native-file/workspace-resource attachment
 union. `LlmChatRequest.Resources` and its Common projection preserve the same borrowed authority.
