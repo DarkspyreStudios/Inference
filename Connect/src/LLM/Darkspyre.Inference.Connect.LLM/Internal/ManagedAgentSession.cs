@@ -887,14 +887,14 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
                 FenceResourceCallback(token);
                 LlmClientToolResult result = call switch
                 {
-                    LlmToolCall function => await InvokeFunctionAsync(run, function, writer, token,
+                    LlmToolCall function => await InvokeFunctionAsync(run, function, writer,
                         message => throw new InvalidOperationException(message), () => { }, () =>
                         {
                             lock (_sync)
                             {
                                 if (_disposed || !ReferenceEquals(_run, run)) throw new OperationCanceledException(token);
                             }
-                        }),
+                        }, token),
                     LlmShellCall shell => await InvokeShellAsync(run, shell, token),
                     _ => throw new NotSupportedException("Unknown client tool call.")
                 };
@@ -951,7 +951,7 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
             {
                 await concurrency.WaitAsync(token);
                 entered = true;
-                return await InvokeFunctionAsync(run, call, writer, token, FailedAsync, () => started = true, () => { });
+                return await InvokeFunctionAsync(run, call, writer, FailedAsync, () => started = true, () => { }, token);
             }
             catch (Exception error) when (LlmResourcePreparation.IsResourceFailure(error)) { throw; }
             catch (OperationCanceledException) when (token.IsCancellationRequested)
@@ -986,8 +986,8 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
     }
 
     private async Task<LlmToolResult> InvokeFunctionAsync(LiveRun run, LlmToolCall call,
-        ChannelWriter<LlmAgentEvent> writer, CancellationToken token,
-        Func<string, Task<LlmToolResult>> failed, Action started, Action observeCompleted)
+        ChannelWriter<LlmAgentEvent> writer, Func<string, Task<LlmToolResult>> failed,
+        Action started, Action observeCompleted, CancellationToken token)
     {
         if (!_tools.TryGetValue(call.Name, out var definition)) return await failed("Unknown tool.");
         var validation = StructuredOutput.Validate(call.ArgumentsJson,
@@ -1197,7 +1197,7 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
             && _connection.Transport == LlmTransport.XaiResponses
             && XaiModelProfiles.Get(_connection, effective.ModelId).MultiAgent is not null)
             effective = effective with { ProviderControls = new XaiMultiAgentControls() };
-        if (!capabilities.SupportsAgentSessions || (_tools.Count > 0 && !capabilities.SupportsAgentToolUse)
+        if (!capabilities.SupportsAgentSessions || (_options.Tools.Count > 0 && !capabilities.SupportsAgentToolUse)
             || (turn.Instructions is not null && !capabilities.SupportsAgentTurnInstructions))
         {
             throw new NotSupportedException("The selected model disables the requested agent operation.");

@@ -277,8 +277,8 @@ internal static class OpenAiResponsesTools
                 || !item.TryGetProperty("action", out JsonElement action)
                 || action.ValueKind != JsonValueKind.Object || !action.TryGetProperty("commands", out JsonElement commands))
                 throw new ArgumentException("Shell calls require identity, action and commands.");
-            string id = identity.GetString()!;
-            ArgumentException.ThrowIfNullOrWhiteSpace(id);
+            string shellId = identity.GetString()!;
+            ArgumentException.ThrowIfNullOrWhiteSpace(shellId);
             if (action.TryGetProperty("type", out JsonElement actionType)
                 && actionType.ValueKind != JsonValueKind.Null && actionType.GetString() != "exec")
                 throw new ArgumentException("Unknown shell action.");
@@ -296,7 +296,7 @@ internal static class OpenAiResponsesTools
                 && environment.ValueKind != JsonValueKind.Null
                 && (!environment.TryGetProperty("type", out JsonElement environmentType) || environmentType.GetString() != "local"))
                 throw new ArgumentException("Unknown shell environment.");
-            call = new LlmShellCall(id, commandText, timeout, limit);
+            call = new LlmShellCall(shellId, commandText, timeout, limit);
             return true;
         }
         if (LlmJson.GetString(item, "type") != "function_call")
