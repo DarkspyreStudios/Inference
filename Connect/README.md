@@ -2191,6 +2191,9 @@ and output limits. Context occupancy includes cached input and differs from accu
 account quota. A `LlmAgentCompactionRequiredEvent` ends an execution segment, **not the logical run**.
 After host compaction, `ContinueTurnAsync` uses the same turn ID, pause ID and expected revision,
 without resubmitting the prompt or re-executing settled tools. Only direct Codex currently enables this engine.
+Each model step permits at most two provider-overflow pauses, including across continued segments.
+A third overflow ends the run with `ProviderFailure` and
+"The context could not be reduced enough for this step." A completed model step resets the count.
 
 Capture defaults to omitting attachment bytes and recording `OmittedAttachments` metadata. For a
 tool-output part, the entry's `Index` is the part's position in `Parts` and `ToolCallId` names the
