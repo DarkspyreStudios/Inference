@@ -74,6 +74,10 @@ internal static class SecretRedactor
             .Concat(credential.SecretHeaders.Values);
     }
 
+    internal static bool ContainsProtectedValue(string value, LlmCredential? credential, IEnumerable<string> additionalSecrets) =>
+        (credential is null ? [] : CredentialSecrets(credential)).Concat(additionalSecrets)
+            .Any(secret => !string.IsNullOrWhiteSpace(secret) && value.Contains(secret, StringComparison.Ordinal));
+
     private static string ReplaceSecrets(string value, string[] secrets)
     {
         foreach (string secret in secrets)

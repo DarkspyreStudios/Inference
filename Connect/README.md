@@ -893,7 +893,11 @@ stateless embedding catalog reader; it does not refresh credentials or own anoth
 It refuses non-default typed service tiers and raw `service_tier` options before HTTP because it
 does not implement an embedding tier mapping. Raw `encoding_format` accepts only `float`.
 Responses require complete unique input indexes, finite consistent vectors, actual model provenance
-and nonnegative observed usage. HTTP request/response cleanup preserves independent failures and
+and nonnegative observed usage. Successful diagnostics serialize only validated model and numeric
+facts. A model string containing a known credential or protected header value causes a local
+confidentiality refusal after the response; it is not provider rejection or remote rollback proof.
+Input text is not a secret-replacement authority, and numeric JSON is not text-redacted.
+HTTP request/response cleanup preserves independent failures and
 retains actual refused owners behind safe diagnostics. The adapter is not registered. Subscription
 OAuth, model entitlement, preview format and the published input-schema/example disagreement remain
 unqualified; no default embedding model or working xAI availability is advertised.

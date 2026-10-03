@@ -49,7 +49,7 @@ internal sealed class XaiEmbeddingClient(HttpClient http) : ILlmEmbeddingClient
         HttpResponseMessage? response = null;
         LlmEmbeddingResult? result = null;
         LlmCredential? credential = LlmCredential.Parse(connection.Credential);
-        string[] secrets = connection.AdditionalHeaders.Values.Concat(request.Inputs).ToArray();
+        string[] secrets = connection.AdditionalHeaders.Values.ToArray();
         var failures = new List<Exception>();
         try
         {
@@ -70,7 +70,8 @@ internal sealed class XaiEmbeddingClient(HttpClient http) : ILlmEmbeddingClient
             message = new(HttpMethod.Post, ProviderHttp.BuildUri(connection, "embeddings"));
             XaiRequestHeaders.Apply(message, connection, false);
             message.Content = JsonContent.Create(payload);
-            secrets = message.Headers.SelectMany(header => header.Value).Concat(request.Inputs).ToArray();
+            secrets = message.Headers.Where(header => header.Key == "Authorization" || connection.AdditionalHeaders.ContainsKey(header.Key))
+                .SelectMany(header => header.Value).ToArray();
             Fence();
             response = await http.SendAsync(message, HttpCompletionOption.ResponseHeadersRead, consumption.Token).ConfigureAwait(false);
             Fence();
@@ -81,7 +82,7 @@ internal sealed class XaiEmbeddingClient(HttpClient http) : ILlmEmbeddingClient
             result = Parse(body, request, models, response, credential, secrets, Fence);
             Fence();
         }
-        catch (Exception error) { failures.Add(SafeFailure(error, response, credential, secrets, consumption.Token)); }
+        catch (Exception error) { failures.Add(SafeFailure(error, response, credential, secrets)); }
         finally
         {
             if (response is not null)
@@ -149,6 +150,8 @@ internal sealed class XaiEmbeddingClient(HttpClient http) : ILlmEmbeddingClient
                 || !root.TryGetProperty("data", out JsonElement data) || data.ValueKind != JsonValueKind.Array)
                 throw new JsonException();
             string actualModel = RequiredString(root, "model");
+            if (SecretRedactor.ContainsProtectedValue(actualModel, credential, secrets))
+                throw new ProtocolFailure(response.StatusCode, ProviderHttp.ReadRequestId(response), unpublishableMetadata: true);
             LlmModel? requested = XaiCatalog.FindModel(models, request.ModelId);
             LlmModel? actual = XaiCatalog.FindModel(models, actualModel);
             if (requested is not null && actual is not null && requested.Id != actual.Id) throw new JsonException();
@@ -201,14 +204,12 @@ internal sealed class XaiEmbeddingClient(HttpClient http) : ILlmEmbeddingClient
             {
                 Vectors = Array.AsReadOnly(vectors),
                 Usage = usage,
-                Diagnostics = new((int)response.StatusCode, ProviderHttp.ReadRequestId(response),
-                    SecretRedactor.Sanitize(owned.ToJsonString(), credential, secrets))
+                Diagnostics = new((int)response.StatusCode, ProviderHttp.ReadRequestId(response), owned.ToJsonString())
             };
         }
         catch (Exception error) when (error is JsonException or InvalidOperationException or FormatException or OverflowException)
         {
-            throw new LlmProviderException("Grok returned invalid embedding protocol data.", LlmTransport.XaiResponses,
-                response.StatusCode, requestId: ProviderHttp.ReadRequestId(response));
+            throw new ProtocolFailure(response.StatusCode, ProviderHttp.ReadRequestId(response), unpublishableMetadata: false);
         }
     }
 
@@ -221,14 +222,17 @@ internal sealed class XaiEmbeddingClient(HttpClient http) : ILlmEmbeddingClient
         ? count : throw new JsonException();
 
     private static Exception SafeFailure(Exception error, HttpResponseMessage? response,
-        LlmCredential? credential, string[] secrets, CancellationToken token)
+        LlmCredential? credential, string[] secrets)
     {
         if (error is InferenceResourceOperationException or InferenceResourceOperationCanceledException) return error;
+        if (error is ProtocolFailure protocol)
+            return new LlmProviderException(protocol.Message, LlmTransport.XaiResponses, protocol.StatusCode,
+                requestId: protocol.RequestId is null ? null : SecretRedactor.Sanitize(protocol.RequestId, credential, secrets),
+                innerException: new FailureEvidence(protocol));
         if (error is AggregateException aggregate)
-            return new AggregateException("Grok embedding operation failed.", aggregate.InnerExceptions.Select(item => SafeFailure(item, response, credential, secrets, token)));
+            return new AggregateException("Grok embedding operation failed.", aggregate.InnerExceptions.Select(item => SafeFailure(item, response, credential, secrets)));
         if (error is OperationCanceledException canceled)
-            return new OperationCanceledException("Grok embedding operation was interrupted.", new FailureEvidence(canceled),
-                canceled.CancellationToken.CanBeCanceled ? canceled.CancellationToken : token);
+            return new OperationCanceledException("Grok embedding operation was interrupted.", new FailureEvidence(canceled), canceled.CancellationToken);
         if (error is InferenceException inference && inference.InnerException is LlmProviderException provider)
             return new InferenceException(inference.Code, "Grok embedding authorization or access failed.", SafeProviderFailure(provider, inference, credential, secrets));
         if (error is LlmProviderException failure) return SafeProviderFailure(failure, failure, credential, secrets);
@@ -258,5 +262,13 @@ internal sealed class XaiEmbeddingClient(HttpClient http) : ILlmEmbeddingClient
     private sealed class FailureEvidence(Exception original) : Exception("Grok embedding HTTP boundary reported a failure.")
     {
         internal Exception Original { get; } = original;
+    }
+
+    private sealed class ProtocolFailure(System.Net.HttpStatusCode statusCode, string? requestId, bool unpublishableMetadata)
+        : Exception(unpublishableMetadata ? "Grok embedding response metadata cannot be published safely."
+            : "Grok returned invalid embedding protocol data.")
+    {
+        internal System.Net.HttpStatusCode StatusCode { get; } = statusCode;
+        internal string? RequestId { get; } = requestId;
     }
 }
