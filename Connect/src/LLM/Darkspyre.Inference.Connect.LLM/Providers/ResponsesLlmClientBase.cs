@@ -870,8 +870,7 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
             FinishReason = status == LlmCompletionStatus.RequiresAction ? "tool_calls" : providerStatus,
             IncompleteReason = incompleteReason,
             Usage = usage,
-            ProviderResponseId = LlmJson.GetString(responseRoot, "id") is { } responseId && extraSecrets is not null
-                ? SecretRedactor.Sanitize(responseId, credential, extraSecrets) : LlmJson.GetString(responseRoot, "id"),
+            ProviderResponseId = LlmJson.GetString(responseRoot, "id"),
             ToolCalls = toolCalls,
             // The reported counts travel with the state, so later accounting can use them for this history.
             ContinuationState = status is LlmCompletionStatus.Failed or LlmCompletionStatus.Incomplete
