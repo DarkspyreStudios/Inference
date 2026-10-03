@@ -853,7 +853,8 @@ internal abstract class ChatCompletionsLlmClientBase(HttpClient http) : LlmClien
             response.StatusCode,
             LlmJson.GetString(error, "code"),
             ProviderHttp.ReadRequestId(response),
-            sanitizedResponseBody: SecretRedactor.Sanitize(rawEvent, credential));
+            sanitizedResponseBody: SecretRedactor.Sanitize(rawEvent, credential),
+            isContextOverflow: LlmContextOverflow.Chat(LlmJson.GetString(error, "code"), LlmJson.GetString(error, "message")));
 
     private sealed class ToolCallBuilder
     {

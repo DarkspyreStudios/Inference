@@ -139,7 +139,8 @@ internal sealed partial class VertexLlmClient(HttpClient http, IVertexAuthentica
             {
                 // Native payloads and tokens must not escape via nested exceptions or diagnostics.
                 throw new LlmProviderException("Vertex generation failed. Check the HTTP status, model access and request configuration.",
-                    Transport, error is LlmProviderException provider ? provider.StatusCode : null);
+                    Transport, error is LlmProviderException provider ? provider.StatusCode : null,
+                    isContextOverflow: error is LlmProviderException { IsContextOverflow: true });
             }
             if (!moved) { yield break; }
             connection.CacheAdmission?.Check(connection, request.ExplicitCache);
@@ -174,7 +175,8 @@ internal sealed partial class VertexLlmClient(HttpClient http, IVertexAuthentica
                 access.Authorize(request);
                 using HttpResponseMessage response = await Http.SendAsync(request, cancellationToken).ConfigureAwait(false);
                 if (publisher == "anthropic" && response.StatusCode is HttpStatusCode.Forbidden or HttpStatusCode.NotFound) break;
-                CheckStatus(response);
+                await CheckStatusAsync(response, cancellationToken).ConfigureAwait(false);
+                consumption.Fence();
                 try
                 {
                     using JsonDocument document = JsonDocument.Parse(await SdkHttpConsumption.ReadAsStringAsync(response.Content, cancellationToken).ConfigureAwait(false));
@@ -233,7 +235,7 @@ internal sealed partial class VertexLlmClient(HttpClient http, IVertexAuthentica
         return new(LocalTokenCount.Count(projection));
     }
 
-    private static readonly GeminiRoute GeminiRoute = new(LlmTransport.GoogleVertexAi, "Vertex", "vertex_", CheckStatus,
+    private static readonly GeminiRoute GeminiRoute = new(LlmTransport.GoogleVertexAi, "Vertex", "vertex_", CheckStatusAsync,
         (connection, modelId, parts) => new VertexContinuationCodec().Encode(connection, modelId, parts));
 
     private static HttpRequestMessage GeminiMessage(LlmConnection connection, LlmChatRequest request, JsonObject payload, VertexAccess access,
@@ -245,14 +247,9 @@ internal sealed partial class VertexLlmClient(HttpClient http, IVertexAuthentica
         return message;
     }
 
-    internal static void CheckStatus(HttpResponseMessage response)
-    {
-        if (!response.IsSuccessStatusCode)
-        {
-            throw new LlmProviderException("Vertex rejected the operation. Verify credentials, model access, request configuration and quota.",
-                LlmTransport.GoogleVertexAi, response.StatusCode);
-        }
-    }
+    internal static Task CheckStatusAsync(HttpResponseMessage response, CancellationToken cancellationToken) =>
+        GoogleProviderFailure.ThrowIfUnsuccessfulAsync(response, LlmTransport.GoogleVertexAi,
+            "Vertex rejected the operation. Verify credentials, model access, request configuration and quota.", cancellationToken);
 
     private static void ValidateVertexRequest(LlmConnection connection, LlmChatRequest request, VertexModelProfile profile, LlmProviderCapabilities capabilities)
     {

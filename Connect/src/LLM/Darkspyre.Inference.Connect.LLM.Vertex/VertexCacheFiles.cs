@@ -107,6 +107,7 @@ internal static class VertexCacheFiles
             ? new OperationCanceledException("Vertex cache staging was interrupted.", status is null ? null
                 : new LlmProviderException("Vertex cache staging response observed before interruption.", LlmTransport.GoogleVertexAi,
                     status, requestId: requestId, retryAfter: retry), token)
-            : new LlmProviderException(category, LlmTransport.GoogleVertexAi, status, requestId: requestId, retryAfter: retry);
+            : new LlmProviderException(category, LlmTransport.GoogleVertexAi, status, requestId: requestId, retryAfter: retry,
+                isContextOverflow: error is LlmProviderException { IsContextOverflow: true });
     }
 }

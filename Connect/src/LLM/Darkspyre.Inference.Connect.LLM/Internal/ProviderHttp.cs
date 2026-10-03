@@ -79,8 +79,10 @@ internal static class ProviderHttp
         }
 
         string body = await SdkHttpConsumption.ReadAsStringAsync(response.Content, cancellationToken);
+        (string? actualCode, string? actualMessage, string? actualType) = ReadProviderError(body);
+        bool overflow = LlmContextOverflow.Http(transport, actualCode, actualType, actualMessage);
         string sanitized = SecretRedactor.Sanitize(body, credential);
-        (string? code, string? providerMessage) = ReadProviderError(sanitized);
+        (string? code, string? providerMessage, _) = ReadProviderError(sanitized);
         string requestId = ReadRequestId(response) ?? "unknown";
         string summary = string.IsNullOrWhiteSpace(providerMessage) ? sanitized : providerMessage;
         string message = $"{operation} failed ({(int)response.StatusCode}, request {requestId}): {summary}";
@@ -92,7 +94,8 @@ internal static class ProviderHttp
             code,
             ReadRequestId(response),
             response.Headers.RetryAfter?.Delta,
-            sanitized);
+            sanitized,
+            isContextOverflow: overflow);
     }
 
     public static string? ReadRequestId(HttpResponseMessage response)
@@ -133,18 +136,18 @@ internal static class ProviderHttp
         }
     }
 
-    private static (string? Code, string? Message) ReadProviderError(string body)
+    private static (string? Code, string? Message, string? Type) ReadProviderError(string body)
     {
         try
         {
             using JsonDocument document = JsonDocument.Parse(body);
             JsonElement root = document.RootElement;
             JsonElement error = LlmJson.GetObject(root, "error") ?? root;
-            return (LlmJson.GetString(error, "code"), LlmJson.GetString(error, "message"));
+            return (LlmJson.GetString(error, "code"), LlmJson.GetString(error, "message"), LlmJson.GetString(error, "type"));
         }
         catch (JsonException)
         {
-            return (null, null);
+            return (null, null, null);
         }
     }
 }

@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using System.Runtime.ExceptionServices;
 using Amazon.BedrockRuntime;
 using Amazon.BedrockRuntime.Model;
 using Amazon.Runtime.EventStreams;
@@ -22,8 +23,8 @@ internal interface IBedrockEventStream : IAsyncDisposable
     string? RequestId { get; }
 
     /// <summary>
-    /// The stream's events. A stream exception is thrown as its typed AmazonBedrockRuntimeException, and a cancelled
-    /// token as OperationCanceledException.
+    /// The stream's events. A recognized input overflow is a provider failure; other stream failures retain their
+    /// typed AmazonBedrockRuntimeException. A cancelled token is OperationCanceledException.
     /// </summary>
     IAsyncEnumerable<IEventStreamEvent> ReadAsync(CancellationToken cancellationToken);
 }
@@ -37,7 +38,12 @@ internal sealed class BedrockConverseInvoker(BedrockClientFactory factory) : IBe
     {
         using BedrockClientFactory.Lease<AmazonBedrockRuntimeClient> lease = factory.Runtime(aws, cancellationToken);
         lease.ThrowIfCanceled();
-        ConverseResponse response = await lease.Client.ConverseAsync(request, lease.Token);
+        ConverseResponse response;
+        try { response = await lease.Client.ConverseAsync(request, lease.Token); }
+        catch (ValidationException error) when (LlmContextOverflow.BedrockValidation(error.Message))
+        {
+            throw ContextOverflow(error);
+        }
         lease.ThrowIfCanceled();
         return response;
     }
@@ -61,11 +67,13 @@ internal sealed class BedrockConverseInvoker(BedrockClientFactory factory) : IBe
         }
         catch (Exception operationFailure)
         {
+            Exception failure = Classify(operationFailure);
             try { if (response is not null) lease.DisposeResponse(response); }
             catch (Exception cleanup)
             {
-                throw new AggregateException("Bedrock stream opening and response cleanup failed.", operationFailure, cleanup);
+                throw new AggregateException("Bedrock stream opening and response cleanup failed.", failure, cleanup);
             }
+            ExceptionDispatchInfo.Throw(failure);
             throw;
         }
         finally
@@ -78,13 +86,25 @@ internal sealed class BedrockConverseInvoker(BedrockClientFactory factory) : IBe
     }
 
     /// <summary>
-    /// The exception a stream failure surfaces as: cancellation when the token is cancelled, otherwise the typed
-    /// exception the SDK wrapped, so a stream error has the same type as the error Converse throws.
+    /// Classifies the SDK's actual input overflow after cancellation, and preserves other typed stream failures.
     /// </summary>
     internal static Exception Unwrap(BedrockRuntimeEventStreamException exception, CancellationToken cancellationToken) =>
         cancellationToken.IsCancellationRequested
             ? new OperationCanceledException(cancellationToken)
-            : exception.InnerException as AmazonBedrockRuntimeException ?? (Exception)exception;
+            : Classify(exception.InnerException as AmazonBedrockRuntimeException ?? (Exception)exception);
+
+    private static Exception Classify(Exception error) => error is ValidationException validation
+        && LlmContextOverflow.BedrockValidation(validation.Message) ? ContextOverflow(validation) : error;
+
+    private static LlmProviderException ContextOverflow(ValidationException error) => new(
+        "Bedrock rejected input that exceeds the model context window.", LlmTransport.AwsBedrockConverse,
+        error.StatusCode, error.ErrorCode, error.RequestId, innerException: new OverflowEvidence(error),
+        isContextOverflow: true);
+
+    private sealed class OverflowEvidence(ValidationException original) : Exception("Bedrock reported an input context overflow.")
+    {
+        internal ValidationException Original { get; } = original;
+    }
 
     private sealed class EventStream(ConverseStreamResponse response,
         BedrockClientFactory.Lease<AmazonBedrockRuntimeClient> lease) : IBedrockEventStream
@@ -116,6 +136,10 @@ internal sealed class BedrockConverseInvoker(BedrockClientFactory factory) : IBe
                     catch (BedrockRuntimeEventStreamException exception)
                     {
                         throw Unwrap(exception, cancellationToken);
+                    }
+                    catch (ValidationException error) when (LlmContextOverflow.BedrockValidation(error.Message))
+                    {
+                        throw ContextOverflow(error);
                     }
 
                     if (!moved)

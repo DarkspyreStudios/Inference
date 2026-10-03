@@ -18,7 +18,7 @@ internal sealed partial class GeminiApiLlmClient(HttpClient http)
     private const string KeyHeader = "x-goog-api-key";
 
     private static readonly GeminiContinuationCodec Codec = new(Owner, RouteName);
-    private static readonly GeminiRoute Route = new(LlmTransport.GoogleGeminiApi, RouteName, "gemini_", CheckStatus,
+    private static readonly GeminiRoute Route = new(LlmTransport.GoogleGeminiApi, RouteName, "gemini_", CheckStatusAsync,
         (connection, modelId, parts) => Codec.Encode(connection, modelId, parts));
 
     // Catalog entries whose output is not text chat. They answer generateContent but not with this protocol's parts.
@@ -137,7 +137,8 @@ internal sealed partial class GeminiApiLlmClient(HttpClient http)
             catch (Exception error) when (error is LlmProviderException or HttpRequestException or JsonException or InvalidOperationException)
             {
                 // Native payloads and the key must not escape through nested exceptions or diagnostics.
-                throw new LlmProviderException("Gemini API generation failed. Check the model, request configuration and key.", Transport);
+                throw new LlmProviderException("Gemini API generation failed. Check the model, request configuration and key.", Transport,
+                    isContextOverflow: error is LlmProviderException { IsContextOverflow: true });
             }
             if (!moved) { yield break; }
             connection.CacheAdmission?.Check(connection, request.ExplicitCache);
@@ -164,7 +165,8 @@ internal sealed partial class GeminiApiLlmClient(HttpClient http)
             using var request = new HttpRequestMessage(HttpMethod.Get, path);
             request.Headers.TryAddWithoutValidation(KeyHeader, Key(connection));
             using HttpResponseMessage response = await Http.SendAsync(request, cancellationToken).ConfigureAwait(false);
-            CheckStatus(response);
+            await CheckStatusAsync(response, cancellationToken).ConfigureAwait(false);
+            consumption.Fence();
             try
             {
                 using JsonDocument document = JsonDocument.Parse(await SdkHttpConsumption.ReadAsStringAsync(response.Content, cancellationToken).ConfigureAwait(false));
@@ -220,9 +222,8 @@ internal sealed partial class GeminiApiLlmClient(HttpClient http)
         return modelId;
     }
 
-    internal static void CheckStatus(HttpResponseMessage response)
+    internal static Task CheckStatusAsync(HttpResponseMessage response, CancellationToken cancellationToken)
     {
-        if (response.IsSuccessStatusCode) { return; }
         string message = response.StatusCode switch
         {
             HttpStatusCode.BadRequest => "The Gemini API rejected the request. Check the model and request configuration.",
@@ -231,7 +232,7 @@ internal sealed partial class GeminiApiLlmClient(HttpClient http)
             HttpStatusCode.TooManyRequests => "The Gemini API rate limit or quota was reached.",
             _ => "The Gemini API failed to complete the operation."
         };
-        throw new LlmProviderException(message, LlmTransport.GoogleGeminiApi, response.StatusCode, retryAfter: response.Headers.RetryAfter?.Delta);
+        return GoogleProviderFailure.ThrowIfUnsuccessfulAsync(response, LlmTransport.GoogleGeminiApi, message, cancellationToken);
     }
 
     /// <summary>Families whose reasoning and structured-output behaviour has been reviewed against the Gemini API.</summary>
