@@ -39,6 +39,13 @@ public static class XaiErrorClassifier
             ProviderHttp.ReadRequestId(response), response.Headers.RetryAfter?.Delta, cancellationToken);
     }
 
+    internal static Task ThrowIfUnsuccessfulDocumentSearchAsync(HttpResponseMessage response, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(response);
+        return ThrowIfUnsuccessfulCoreAsync(response, null, [], false, "Provider rejected the document-search request.",
+            ProviderHttp.ReadRequestId(response), response.Headers.RetryAfter?.Delta, cancellationToken);
+    }
+
     private static async Task ThrowIfUnsuccessfulCoreAsync(HttpResponseMessage response, LlmCredential? credential,
         IEnumerable<string> additionalSecrets, bool diagnosticBody, string diagnosticMessage,
         string? requestId, TimeSpan? retryAfter, CancellationToken cancellationToken)
