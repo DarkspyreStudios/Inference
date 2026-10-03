@@ -78,8 +78,8 @@ internal sealed class XaiTtsSession : ITtsStreamingSession
     public Task ClearUtteranceAsync(CancellationToken cancellationToken = default) => SendAsync("text.clear", null, state => state != 3, 3, cancellationToken);
     public Task UpdateReplacementsAsync(IReadOnlyDictionary<string, string> replacements, CancellationToken cancellationToken = default)
     {
-        ArgumentNullException.ThrowIfNull(replacements); var snapshot = TtsData.Copy(replacements)!;
-        return SendAsync("session.update", writer => XaiTtsProtocol.WriteReplace(writer, snapshot), _ => true, null, cancellationToken);
+        ArgumentNullException.ThrowIfNull(replacements);
+        return SendAsync("session.update", writer => XaiTtsProtocol.WriteReplace(writer, TtsData.Copy(replacements)!), _ => true, null, cancellationToken);
     }
     private async Task SendAsync(string type, Action<Utf8JsonWriter>? fields, Func<int, bool> allowed, int? next, CancellationToken caller)
     {
@@ -104,7 +104,10 @@ internal sealed class XaiTtsSession : ITtsStreamingSession
     public IAsyncEnumerable<TtsStreamEvent> Events => ReadAsync();
     private async IAsyncEnumerable<TtsStreamEvent> ReadAsync([EnumeratorCancellation] CancellationToken token = default)
     {
-        if (Interlocked.Exchange(ref _reader, 1) != 0) throw new InvalidOperationException("A speech session has one Events consumer.");
+        using (_lifetime.Enter(token))
+        {
+            if (Interlocked.Exchange(ref _reader, 1) != 0) throw new InvalidOperationException("A speech session has one Events consumer.");
+        }
         await foreach (var item in _events.Reader.ReadAllAsync(token).ConfigureAwait(false))
         {
             Release(item.Bytes);

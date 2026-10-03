@@ -535,6 +535,8 @@ The provider-private Pocket wire codec remains separate and preserves its existi
 `ConnectTtsJson.TtsStreamEvent` owns the closed audio, completion, error, replacement-update and
 utterance-clear union. Replacement updates and clear commands complete after send; their
 observations preserve the actual acknowledgment. The convenience stream returns all events.
+Replacement updates copy caller maps inside session admission before waiting to send. Events
+reader admission refuses a retired session without holding a lease across event yields.
 
 Bound `ITtsClient` instances support synchronous and asynchronous disposal. Pocket clients
 fence new calls, cancel and drain admitted work, then drop borrowed HTTP/provider/resource
