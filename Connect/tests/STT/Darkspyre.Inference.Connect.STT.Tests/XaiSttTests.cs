@@ -83,6 +83,36 @@ public sealed class XaiSttTests
     }
 
     [Theory]
+    [InlineData("invalid mime", "actual.wav")]
+    [InlineData("text/", "actual.wav")]
+    [InlineData("audio/wav", "")]
+    public async Task InvalidMultipartMetadataRefusesBeforeSourceAndHttp(string contentType, string fileName)
+    {
+        var source = new Source(); using var access = new LlmConnectionAccess(source, []);
+        var handler = new Handler(_ => throw new InvalidOperationException("No HTTP.")); using var http = new HttpClient(handler);
+        await using var client = Provider(http).Bind(Connection, new(new("selected"), access));
+        Assert.NotNull(await Record.ExceptionAsync(() => client.TranscribeAsync(new BinarySpeechInput(contentType, new byte[] { 1 }, fileName), new())));
+        Assert.Equal(0, source.Calls); Assert.Equal(0, handler.Calls);
+    }
+
+    [Fact]
+    public async Task DeclaredContainerWithRawFormatRefusesBeforeResolutionWithoutSniffing()
+    {
+        var source = new Source(); using var access = new LlmConnectionAccess(source, []);
+        var handler = new Handler(_ => throw new InvalidOperationException("No HTTP.")); using var http = new HttpClient(handler);
+        await using var client = Provider(http).Bind(Connection, new(new("selected"), access));
+        Assert.NotNull(await Record.ExceptionAsync(() => client.TranscribeAsync(Input, new(RawAudioFormat: SpeechAudioEncoding.Pcm16LittleEndian, SampleRate: 16000))));
+        Assert.Equal(0, source.Calls); Assert.Equal(0, handler.Calls);
+    }
+
+    [Theory]
+    [InlineData("[]")]
+    [InlineData("null")]
+    [InlineData("1")]
+    [InlineData("{\"text\":\"x\",\"words\":[null]}")]
+    [InlineData("{\"text\":\"x\",\"words\":[[]]}")]
+    [InlineData("{\"text\":\"x\",\"channels\":[null]}")]
+    [InlineData("{\"text\":\"x\",\"channels\":[1]}")]
     [InlineData("{}")]
     [InlineData("{\"text\":null}")]
     [InlineData("{\"text\":\"x\",\"duration\":-1}")]
