@@ -12,24 +12,28 @@ internal sealed class ManagedCodexAgentClient(OpenAiCodexLlmClient client, LlmPr
         string connectionId, LlmConnection connection, LlmAgentSessionOptions options, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(options);
-        cancellationToken.ThrowIfCancellationRequested();
+        using var opening = providers.EnterManagedOpening(cancellationToken);
+        void Fence() => providers.FenceManagedOpening(opening.Token);
+        Fence();
         options = ClientTools.Snapshot(options);
-        ProviderControlPolicy.Validate(connection, new() { ModelId = options.ModelId });
-        if (options.Context is not null) { ManagedAgentContext.ValidateRuntimeResources(options.Context); }
-        HostedTools.Validate(options.HostedTools, options.MaxHostedTurns, client.GetCapabilities(connection, options.ModelId).HostedTools);
-        ClientTools.ValidateManagedOpening(options, client.GetCapabilities(connection, options.ModelId));
-        // The capability checks below and the session's per-model lookups read the Codex model catalog.
-        connection = await providers.AttachCatalogAsync(connectionId, connection, client, cancellationToken);
-        var capabilities = client.GetCapabilities(connection, options.ModelId);
-        if (!capabilities.SupportsAgentSessions || (options.Tools.Any(tool => tool is LlmAgentToolDefinition) && !capabilities.SupportsAgentToolUse))
+        Fence();
+        void Preflight(LlmConnection selected)
         {
-            throw new NotSupportedException("The selected model/connection disables the requested agent operation.");
+            ProviderControlPolicy.Validate(selected, new() { ModelId = options.ModelId });
+            if (options.Context is not null) { ManagedAgentContext.ValidateRuntimeResources(options.Context); }
+            var capabilities = client.GetCapabilities(selected, options.ModelId);
+            HostedTools.Validate(options.HostedTools, options.MaxHostedTurns, capabilities.HostedTools);
+            ClientTools.ValidateManagedOpening(options, capabilities);
+            if (!capabilities.SupportsAgentSessions || (options.Tools.Any(tool => tool is LlmAgentToolDefinition) && !capabilities.SupportsAgentToolUse))
+                throw new NotSupportedException("The selected model/connection disables the requested agent operation.");
         }
-        // Metadata is optional, never invented. Discovery and generation share the existing OAuth path.
-        var models = await providers.ListModelsAsync(connectionId, cancellationToken);
+        connection = await providers.PrepareManagedConnectionAsync(connectionId, connection, client, Preflight, opening.Token).ConfigureAwait(false);
+        Fence();
         string scope = ProviderContinuationStateCodec.Scope(connection);
-        return await ManagedAgentSession.CreateAsync(connection, options, models, client,
+        return await ManagedAgentSession.CreateAsync(connection, options, connection.Catalog ?? [], client,
             (request, token) => providers.StreamAgentAsync(connectionId, request, scope, token),
-            model => client.GetCapabilities(connection, model), cancellationToken: cancellationToken).ConfigureAwait(false);
+            model => client.GetCapabilities(connection, model), openingFence: Fence,
+            compactor: (request, token) => providers.CompactAgentAsync(connectionId, request, scope, token),
+            cancellationToken: opening.Token).ConfigureAwait(false);
     }
 }

@@ -31,7 +31,11 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
         {
             if (request.Messages[index].ContinuationState is { InputTokens: not null, OutputTokens: not null }) { reported = index; }
         }
-        if (request.Messages.Skip(reported + 1).Any(Uncountable))
+        // Retained protected messages can carry reports from before this replacement prefix.
+        if (Transport == LlmTransport.OpenAiCodex && ((JsonArray)payload["input"]!).OfType<JsonObject>()
+            .Any(item => item["type"]?.GetValue<string>() is "compaction" or "compaction_summary")) reported = -1;
+        bool approximateCipher = Transport == LlmTransport.OpenAiCodex && reported < 0;
+        if (request.Messages.Skip(reported + 1).Any(message => approximateCipher ? UncountableMedia(message) : Uncountable(message)))
         {
             return null;
         }
@@ -46,7 +50,21 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
                 ["tools"] = payload["tools"]?.DeepClone(),
                 ["text"] = payload["text"]?.DeepClone()
             };
-            return new ContextEstimate(LocalTokenCount.Count(input.ToJsonString()));
+            long cipherTokens = 0;
+            if (approximateCipher)
+            {
+                foreach (JsonObject item in ((JsonArray)input["input"]!).OfType<JsonObject>())
+                {
+                    if (item["type"]?.GetValue<string>() is not ("reasoning" or "compaction" or "compaction_summary")
+                        || item["encrypted_content"] is not { } cipher) continue;
+                    // Codex 0.159.3 estimates decoded bytes minus fixed framing, then four bytes per token.
+                    // A CLR string's int length keeps both multiplications below long overflow.
+                    long bytes = Math.Max(0, cipher.GetValue<string>().Length * 3L / 4 - 650);
+                    cipherTokens = checked(cipherTokens + (bytes + 3) / 4);
+                    item.Remove("encrypted_content");
+                }
+            }
+            return new ContextEstimate(checked(LocalTokenCount.Count(input.ToJsonString()) + cipherTokens));
         }
 
         // Input items are built message by message, so the prefix's own projection marks where the rest begins.
@@ -62,22 +80,28 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
     }
 
     /// <summary>Content the local tokenizer cannot count: bytes, and encrypted reasoning.</summary>
-    private static bool Uncountable(LlmChatMessage message) => message.Attachments.Count > 0
-        || message.ToolResults.Any(result => result is LlmToolResult function
-            && function.Output.Parts.Any(part => part is LlmToolOutputBinary or LlmToolOutputResource { Data: not null }))
+    private static bool Uncountable(LlmChatMessage message) => UncountableMedia(message)
         || message.ContinuationState?.Payload.Contains("encrypted_content", StringComparison.Ordinal) == true;
 
+    private static bool UncountableMedia(LlmChatMessage message) => message.Attachments.Count > 0
+        || message.ToolResults.Any(result => result is LlmToolResult function
+            && function.Output.Parts.Any(part => part is LlmToolOutputBinary or LlmToolOutputResource { Data: not null }));
+
     public override IAsyncEnumerable<LlmStreamEvent> StreamAsync(LlmConnection connection, LlmChatRequest request,
-        CancellationToken cancellationToken = default) => StreamCoreAsync(connection, request, null, null, cancellationToken);
+        CancellationToken cancellationToken = default) => StreamCoreAsync(connection, request, null, null, false, cancellationToken);
 
     internal IAsyncEnumerable<LlmStreamEvent> StreamWithResourcesAsync(LlmConnection connection, LlmChatRequest request,
-        XaiFileClient files, Action outerFence, CancellationToken token) => StreamCoreAsync(connection, request, files, outerFence, token);
+        XaiFileClient files, Action outerFence, CancellationToken token) => StreamCoreAsync(connection, request, files, outerFence, false, token);
+
+    protected IAsyncEnumerable<LlmStreamEvent> StreamCompactionCoreAsync(LlmConnection connection, LlmChatRequest request,
+        CancellationToken token) => StreamCoreAsync(connection, request, null, null, true, token);
 
     private async IAsyncEnumerable<LlmStreamEvent> StreamCoreAsync(
         LlmConnection connection,
         LlmChatRequest request,
         XaiFileClient? suppliedFiles,
         Action? outerFence,
+        bool compaction,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         using var consumption = SdkHttpConsumption.Enter(Http, cancellationToken);
@@ -85,7 +109,13 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
         void Fence() { cancellationToken.ThrowIfCancellationRequested(); consumption.Fence(); outerFence?.Invoke(); cancellationToken.ThrowIfCancellationRequested(); }
         Fence();
         request = ClientTools.Snapshot(request);
+        if (compaction)
+        {
+            if (Transport != LlmTransport.OpenAiCodex) throw new NotSupportedException("This route does not compact provider context.");
+            request = request with { StructuredOutput = null, AllowParallelToolCalls = true };
+        }
         LlmProviderCapabilities capabilities = GetCapabilities(connection, request.ModelId);
+        if (compaction && !capabilities.SupportsStreaming) throw new NotSupportedException("Codex compaction requires streaming support.");
         ValidateRequest(connection, request, capabilities);
         ValidateModelSampling(connection, request);
         LlmStructuredOutputEnforcement? enforcement = ResolveStructuredOutputEnforcement(connection, request, capabilities);
@@ -110,7 +140,12 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
                 }
                 JsonObject payload = BuildPayload(connection, request, enforcement, capabilities.SupportsStreaming, resources);
                 RequestJson.ApplyProviderOptions(payload, connection, request);
-                iterator = StreamResponseAsync(connection, request, payload, capabilities, enforcement, consumption, resources is not null, cancellationToken)
+                if (compaction)
+                {
+                    payload.Remove("text");
+                    ((JsonArray)payload["input"]!).Add(new JsonObject { ["type"] = "compaction_trigger" });
+                }
+                iterator = StreamResponseAsync(connection, request, payload, capabilities, enforcement, consumption, resources is not null, compaction, cancellationToken)
                     .GetAsyncEnumerator(cancellationToken);
             }
             catch (Exception error)
@@ -130,7 +165,7 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
                     throw;
                 }
                 if (!moved) break;
-                if (resources is not null && iterator.Current is LlmChatCompletionEvent completion) terminal = completion;
+                if ((resources is not null || compaction) && iterator.Current is LlmChatCompletionEvent completion) terminal = completion;
                 else yield return iterator.Current;
             }
         }
@@ -158,7 +193,7 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
 
     private async IAsyncEnumerable<LlmStreamEvent> StreamResponseAsync(LlmConnection connection, LlmChatRequest request,
         JsonObject payload, LlmProviderCapabilities capabilities, LlmStructuredOutputEnforcement? enforcement,
-        SdkHttpConsumption.Operation consumption, bool resourceAdmitted, [EnumeratorCancellation] CancellationToken cancellationToken)
+        SdkHttpConsumption.Operation consumption, bool resourceAdmitted, bool compaction, [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         HttpRequestMessage? httpRequest = null;
         HttpResponseMessage? response = null;
@@ -188,7 +223,7 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
                     await ProviderHttp.ThrowIfUnsuccessfulAsync(response, Transport, credential, "OpenAI Responses request", cancellationToken).ConfigureAwait(false);
                 if (capabilities.SupportsStreaming)
                     stream = await SdkHttpConsumption.ReadAsStreamAsync(response.Content, cancellationToken).ConfigureAwait(false);
-                body = ReadResponseBodyAsync(connection, request, response, stream, capabilities, enforcement, credential, consumption, cancellationToken)
+                body = ReadResponseBodyAsync(connection, request, response, stream, capabilities, enforcement, credential, consumption, compaction, cancellationToken)
                     .GetAsyncEnumerator(cancellationToken);
             }
             catch (Exception error) { failure = error; throw; }
@@ -231,7 +266,7 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
 
     private async IAsyncEnumerable<LlmStreamEvent> ReadResponseBodyAsync(LlmConnection connection, LlmChatRequest request,
         HttpResponseMessage response, Stream? stream, LlmProviderCapabilities capabilities, LlmStructuredOutputEnforcement? enforcement,
-        LlmCredential? credential, SdkHttpConsumption.Operation consumption, [EnumeratorCancellation] CancellationToken cancellationToken)
+        LlmCredential? credential, SdkHttpConsumption.Operation consumption, bool compaction, [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         if (!capabilities.SupportsStreaming)
         {
@@ -251,6 +286,8 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
         ResponsesHostedToolObserver? hosted = CreateHostedToolObserver(() =>
             ProtocolException($"{ResponseName} returned a malformed hosted-tool observation.", response, string.Empty, credential));
         var completedOutput = new SortedDictionary<int, JsonElement>();
+        int compactionCount = 0;
+        JsonElement? compactionItem = null;
         bool completed = false;
         string? observedModel = null;
 
@@ -279,7 +316,7 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
             using (document)
             {
                 JsonElement root = document.RootElement;
-                if (Transport == LlmTransport.XaiResponses && root.ValueKind != JsonValueKind.Object)
+                if ((Transport == LlmTransport.XaiResponses || compaction) && root.ValueKind != JsonValueKind.Object)
                 {
                     throw ProtocolException($"{ResponseName} returned a malformed stream event.", response, string.Empty, credential);
                 }
@@ -287,6 +324,8 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
                 if (LlmJson.GetObject(root, "response") is { } modelResponse)
                     observedModel = ObservedModel.Read(modelResponse, "model", Transport, connection,
                         credential, response.RequestMessage, observedModel);
+                if (compaction && type is not ("response.output_item.done" or "response.completed"
+                    or "response.incomplete" or "response.failed" or "response.cancelled" or "error")) continue;
                 switch (type)
                 {
                     case "response.text.delta":
@@ -345,6 +384,17 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
                         if (Transport == LlmTransport.XaiResponses) break;
                         if (root.TryGetProperty("item", out var outputItem))
                         {
+                            if (compaction)
+                            {
+                                if (outputItem.ValueKind != JsonValueKind.Object)
+                                    throw ProtocolException("Codex returned invalid compaction output.", response, string.Empty, credential);
+                                if (LlmJson.GetString(outputItem, "type") is "compaction" or "compaction_summary")
+                                {
+                                    compactionCount++;
+                                    compactionItem ??= outputItem.Clone();
+                                }
+                                break;
+                            }
                             int index = LlmJson.GetInt(root, "output_index") ?? completedOutput.Count;
                             completedOutput[index] = outputItem.Clone();
                         }
@@ -362,8 +412,18 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
                     case "error" when Transport == LlmTransport.XaiResponses
                         && LlmJson.GetString(LlmJson.GetObject(root, "error") ?? root, "code") == "context_length_exceeded":
                         {
+                            JsonElement terminalOutput = CompleteOutput(root, completedOutput, Transport);
+                            if (compaction)
+                            {
+                                if (type != "response.completed" || compactionCount != 1 || compactionItem is null)
+                                    throw ProtocolException("Codex compaction requires a completed response with exactly one compaction item.", response, string.Empty, credential);
+                                var terminal = JsonNode.Parse(root.GetRawText())!.AsObject();
+                                JsonObject terminalResponse = terminal["response"] as JsonObject ?? terminal;
+                                terminalResponse["output"] = new JsonArray(JsonNode.Parse(compactionItem.Value.GetRawText()));
+                                terminalOutput = JsonSerializer.SerializeToElement(terminal);
+                            }
                             LlmChatResult result = BuildResult(
-                                CompleteOutput(root, completedOutput, Transport),
+                                terminalOutput,
                                 response,
                                 data,
                                 text.ToString(),
@@ -373,7 +433,10 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
                                 credential,
                                 connection,
                                 request.ModelId,
-                                observedModel);
+                                observedModel,
+                                compaction);
+                            if (compaction && (result.Status != LlmCompletionStatus.Completed || result.ContinuationState is null))
+                                throw ProtocolException("Codex compaction did not complete successfully.", response, string.Empty, credential);
                             foreach (LlmStreamEvent toolEvent in toolCallStream.CompleteMissing(ClientTools.Functions(result.ToolCalls),
                                          emitMissingArguments: Transport == LlmTransport.XaiResponses))
                             {
@@ -674,7 +737,8 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
         LlmCredential? credential,
         LlmConnection connection,
         string modelId,
-        string? observedModel = null)
+        string? observedModel = null,
+        bool compaction = false)
     {
         JsonElement terminal = LlmJson.GetObject(eventRoot, "response") ?? eventRoot;
         if (LlmContextOverflow.Responses(terminal, Transport == LlmTransport.XaiResponses))
@@ -682,13 +746,14 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
         try
         {
             return BuildResultCore(eventRoot, response, rawEvent, streamedText, streamedRefusal,
-                structuredRequest, enforcement, credential, connection, modelId, observedModel);
+                structuredRequest, enforcement, credential, connection, modelId, observedModel, compaction);
         }
-        catch (Exception error) when (Transport == LlmTransport.XaiResponses
+        catch (Exception error) when ((Transport == LlmTransport.XaiResponses || compaction)
             && error is JsonException or ArgumentException or InvalidOperationException or NotSupportedException)
         {
             // Provider-owned output can contain ciphertext. Do not attach parser or shape exceptions.
-            throw ProtocolException("Grok Responses returned invalid terminal output.", response, rawEvent, credential);
+            throw ProtocolException(compaction ? "Codex returned invalid compaction output." : "Grok Responses returned invalid terminal output.",
+                response, compaction ? string.Empty : rawEvent, credential);
         }
     }
 
@@ -703,7 +768,8 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
         LlmCredential? credential,
         LlmConnection connection,
         string modelId,
-        string? observedModel)
+        string? observedModel,
+        bool compaction)
     {
         JsonElement responseRoot = eventRoot.TryGetProperty("response", out JsonElement nested)
             && nested.ValueKind == JsonValueKind.Object
@@ -782,7 +848,7 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
                 || connection.Transport == LlmTransport.XaiResponses && status == LlmCompletionStatus.Unknown
                 ? null
                 : OpenAiResponsesTools.EncodeContinuationState(responseRoot, connection, modelId) is { } state
-                    ? state with { InputTokens = usage?.InputTokens, OutputTokens = usage?.OutputTokens }
+                    ? compaction ? state : state with { InputTokens = usage?.InputTokens, OutputTokens = usage?.OutputTokens }
                     : null,
             StructuredOutput = validation,
             Diagnostics = new LlmProviderDiagnostics(

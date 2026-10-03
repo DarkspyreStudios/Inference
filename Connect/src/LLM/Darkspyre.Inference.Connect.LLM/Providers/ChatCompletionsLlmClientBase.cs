@@ -9,7 +9,7 @@ using Darkspyre.Inference.Connect.LLM.Internal;
 namespace Darkspyre.Inference.Connect.LLM.Providers;
 
 /// <summary>Shared Chat Completions projection, streaming and retained-output mapping.</summary>
-internal abstract class ChatCompletionsLlmClientBase(HttpClient http) : LlmClientBase(http), ILlmConnectionPreparation, ILlmAccountUsageClient
+internal abstract class ChatCompletionsLlmClientBase(HttpClient http) : LlmClientBase(http), ILlmConnectionPreparation, ILlmAccountUsageClient, ILlmContextEstimator
 {
     private static readonly OpenAiCompatibleChatContinuationCodec Codec = new();
 
@@ -96,6 +96,42 @@ internal abstract class ChatCompletionsLlmClientBase(HttpClient http) : LlmClien
         if (connection.ResolvedContinuationScope is { } pinned && pinned != scope)
         { throw new InvalidOperationException("The chat connection identity changed before dispatch."); }
         return connection with { ContinuationCodec = Codec, ResolvedContinuationScope = scope };
+    }
+
+    public string? EstimateDiagnostic =>
+        "Estimated from the Chat Completions plaintext projection with a general-purpose tokenizer; media and opaque provider state remain unknown.";
+
+    public ContextEstimate? EstimateInputTokens(LlmConnection connection, LlmChatRequest request)
+    {
+        LlmProviderCapabilities capabilities = GetCapabilities(connection, request.ModelId);
+        ValidateRequest(connection, request, capabilities);
+        ValidateModelSampling(connection, request);
+        connection = Prepare(connection);
+        request = ContinuationStateProjection.Project(request, connection).Request;
+        LlmStructuredOutputEnforcement? enforcement = request.StructuredOutput is null
+            ? null : StructuredOutput.ResolveEnforcement(request.StructuredOutput, capabilities);
+        JsonObject payload = BuildPayload(connection, request, enforcement, capabilities);
+        if (request.Resources is not null || payload["messages"] is not JsonArray messages
+            || messages.Any(message => message is not JsonObject item || !IsPlaintextMessage(item))) return null;
+        var input = new JsonObject
+        {
+            ["messages"] = messages.DeepClone(),
+            ["tools"] = payload["tools"]?.DeepClone(),
+            ["tool_choice"] = payload["tool_choice"]?.DeepClone(),
+            ["response_format"] = payload["response_format"]?.DeepClone()
+        };
+        return new ContextEstimate(LocalTokenCount.Count(input.ToJsonString()));
+    }
+
+    private static bool IsPlaintextMessage(JsonObject message)
+    {
+        bool text = message["content"] is null
+            || message["content"] is JsonValue value && value.TryGetValue<string>(out _)
+            || message["content"] is JsonArray parts && parts.All(part => part is JsonObject item
+                && (string?)item["type"] == "text" && item["text"] is JsonValue content && content.TryGetValue<string>(out _));
+        return text && (message["reasoning_details"] is null || message["reasoning_details"] is JsonArray details
+            && details.All(detail => detail is JsonObject item && (string?)item["type"] is "reasoning.text" or "reasoning.summary"
+                && item["signature"] is null));
     }
 
     public override async IAsyncEnumerable<LlmStreamEvent> StreamAsync(

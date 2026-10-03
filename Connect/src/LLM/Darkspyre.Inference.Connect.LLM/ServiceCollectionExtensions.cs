@@ -39,6 +39,26 @@ public static class ServiceCollectionExtensions
     }
 
     /// <summary>
+    /// Explicitly registers OAuth Grok Responses and its managed runtime after <see cref="AddLlmConnect(IServiceCollection)"/>.
+    /// Provider OAuth and model qualification remain the host's responsibility.
+    /// </summary>
+    public static IServiceCollection AddLlmConnectXai(this IServiceCollection services)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        services.AddSingleton(ProviderDefinitions.GrokSubscription);
+        services.AddInferenceHttpClient<XaiResponsesLlmClient>()
+            .ConfigureHttpClient(client => client.Timeout = ProviderHttp.GenerationTimeout)
+            .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
+        services.AddTransient<ILlmClient>(provider => provider.GetRequiredService<XaiResponsesLlmClient>());
+        services.AddInferenceHttpClient<XaiAuthenticator>()
+            .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
+        services.AddTransient<ILlmAuthenticator>(provider => provider.GetRequiredService<XaiAuthenticator>());
+        services.AddTransient<ManagedXaiAgentClient>();
+        services.AddTransient<ILlmAgentClient>(provider => provider.GetRequiredService<ManagedXaiAgentClient>());
+        return services;
+    }
+
+    /// <summary>
     /// Registers transport clients and the provider facade. The host must separately register an
     /// <see cref="ILlmConnectionSource"/> implementation.
     /// </summary>
@@ -84,8 +104,14 @@ public static class ServiceCollectionExtensions
             provider.GetRequiredService<ManagedOpenAiResponsesAgentClient>());
         services.AddTransient<ILlmClient>(provider =>
             provider.GetRequiredService<OpenAiCompatibleChatLlmClient>());
+        services.AddTransient<ManagedOpenAiCompatibleAgentClient>();
+        services.AddTransient<ILlmAgentClient>(provider =>
+            provider.GetRequiredService<ManagedOpenAiCompatibleAgentClient>());
         services.AddTransient<ILlmClient>(provider =>
             provider.GetRequiredService<AnthropicMessagesLlmClient>());
+        services.AddTransient<ManagedAnthropicAgentClient>();
+        services.AddTransient<ILlmAgentClient>(provider =>
+            provider.GetRequiredService<ManagedAnthropicAgentClient>());
         services.AddTransient<ILlmClient>(provider =>
             provider.GetRequiredService<ClaudeCliLlmClient>());
         services.AddInferenceHttpClient<OpenAiCodexLlmClient>();
