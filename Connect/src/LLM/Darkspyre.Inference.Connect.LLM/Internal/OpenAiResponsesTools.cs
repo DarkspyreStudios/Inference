@@ -49,7 +49,9 @@ internal static class OpenAiResponsesTools
                         }
                         var itemOutput = new JsonObject
                         {
-                            ["type"] = "shell_call_output", ["call_id"] = shell.ToolCallId, ["output"] = output
+                            ["type"] = "shell_call_output",
+                            ["call_id"] = shell.ToolCallId,
+                            ["output"] = output
                         };
                         if (shellCalls[shell.ToolCallId].MaxOutputLength is { } limit)
                             itemOutput["max_output_length"] = limit;
@@ -93,8 +95,10 @@ internal static class OpenAiResponsesTools
                 else if (call is LlmToolCall function)
                     input.Add(new JsonObject
                     {
-                        ["type"] = "function_call", ["call_id"] = function.Id,
-                        ["name"] = function.Name, ["arguments"] = function.ArgumentsJson
+                        ["type"] = "function_call",
+                        ["call_id"] = function.Id,
+                        ["name"] = function.Name,
+                        ["arguments"] = function.ArgumentsJson
                     });
                 else throw new NotSupportedException("Unknown client tool call.");
             }
@@ -208,7 +212,9 @@ internal static class OpenAiResponsesTools
                         ["type"] = "local",
                         ["skills"] = new JsonArray(shell.Skills.Select(skill => (JsonNode)new JsonObject
                         {
-                            ["name"] = skill.Name, ["description"] = skill.Description, ["path"] = skill.Path
+                            ["name"] = skill.Name,
+                            ["description"] = skill.Description,
+                            ["path"] = skill.Path
                         }).ToArray())
                     }
                 });
