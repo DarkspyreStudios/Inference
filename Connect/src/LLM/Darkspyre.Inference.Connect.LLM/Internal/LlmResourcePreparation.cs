@@ -203,7 +203,8 @@ internal sealed class LlmResourcePreparation : IAsyncDisposable
     }
 
     internal static async Task<LlmResourcePreparation> PrepareAsync(LlmConnection connection, LlmChatRequest request,
-        XaiFileClient files, Action fence, CancellationToken token)
+        XaiFileClient files, Action fence, CancellationToken token,
+        Action<InferenceResourceReference, LlmProviderFile?>? observeUpload = null)
     {
         ValidateArguments(request);
         var operation = new LlmResourcePreparation(request);
@@ -231,7 +232,9 @@ internal sealed class LlmResourcePreparation : IAsyncDisposable
                 InferenceResourceDescriptor descriptor = opened.Descriptor;
                 reading = opened.Content;
                 phase = InferenceResourceOperationPhase.Materialize;
-                LlmProviderFile uploaded = await files.UploadAsync(connection, reading, descriptor.FileName!, null, fence, token).ConfigureAwait(false);
+                LlmProviderFile uploaded = await files.UploadAsync(connection, reading, descriptor.FileName!, null, fence, token,
+                    onDispatched: observeUpload is null ? null : () => observeUpload(reference, null),
+                    onObserved: observeUpload is null ? null : observed => observeUpload(reference, observed)).ConfigureAwait(false);
                 operation.VerifyRead(access, descriptor, reading, fence, token);
                 operation._files.Add(reference, uploaded);
                 reading = null;

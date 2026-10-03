@@ -1,11 +1,16 @@
 using System.Text.Json;
 using Json.Pointer;
+using Darkspyre.Inference.Common.LLM;
 
 namespace Darkspyre.Inference.Connect.LLM.Internal;
 
 /// <summary>Checks published numeric guarantees without inspecting literal values or changing the schema.</summary>
 internal static class XaiSchemaLimits
 {
+    internal static LlmStructuredOutputEnforcement? ResolveEnforcement(LlmStructuredOutputRequest? output,
+        LlmProviderCapabilities capabilities) => output is null ? null : StructuredOutput.ResolveEnforcement(output,
+        Fits(output.Schema) ? capabilities : capabilities with { SupportsJsonSchema = false, SupportsJsonObject = false });
+
     internal static bool Fits(JsonElement root)
     {
         var pending = new Stack<(JsonElement Schema, bool Exit)>();

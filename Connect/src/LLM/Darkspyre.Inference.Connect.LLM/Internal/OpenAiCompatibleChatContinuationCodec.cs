@@ -11,7 +11,7 @@ internal sealed class OpenAiCompatibleChatContinuationCodec : ILlmContinuationCo
     private const int MaximumPayloadBytes = 16 * 1024 * 1024;
 
     public bool IsBound(LlmContinuationState state, LlmConnection connection, string modelId) =>
-        state.FormatVersion == 2 && state.ImplementationId == ProviderContinuationStateCodec.ImplementationId(connection.Transport) && state.ModelId == modelId
+        state.FormatVersion == 2 && state.ImplementationId == ImplementationId(connection.Transport) && state.ModelId == modelId
         && connection.ResolvedContinuationScope is { } scope && state.ScopeId == scope;
 
     public LlmContinuationState Encode(LlmConnection connection, string modelId, JsonArray content)
@@ -20,7 +20,7 @@ internal sealed class OpenAiCompatibleChatContinuationCodec : ILlmContinuationCo
         if (Encoding.UTF8.GetByteCount(payload) > MaximumPayloadBytes) { throw Invalid(); }
         return new()
         {
-            ImplementationId = ProviderContinuationStateCodec.ImplementationId(connection.Transport),
+            ImplementationId = ImplementationId(connection.Transport),
             ModelId = modelId,
             ScopeId = connection.ResolvedContinuationScope ?? throw new InvalidOperationException("Chat continuation identity is unresolved."),
             Payload = payload
@@ -84,6 +84,9 @@ internal sealed class OpenAiCompatibleChatContinuationCodec : ILlmContinuationCo
         catch (Exception error) when (error is ArgumentException or JsonException or InvalidOperationException or FormatException)
         { throw Invalid(); }
     }
+
+    private static string ImplementationId(LlmTransport transport) => ProviderContinuationStateCodec.ImplementationId(transport)
+        + (transport == LlmTransport.XaiResponses ? ".chat-completions" : "");
 
     private static ArgumentException Invalid() => new("Invalid OpenAI-compatible assistant continuation content.");
 }

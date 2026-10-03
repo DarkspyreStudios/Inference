@@ -21,6 +21,20 @@ public sealed partial class LlmProviderService
             throw new ArgumentException("The xAI binding and facade must borrow the same connection access.", nameof(access));
     }
 
+    internal void ValidateXaiSnapshotRequest(LlmConnection snapshot, Action<HttpClient> validate)
+    {
+        using var operation = _lifetime.Enter(CancellationToken.None);
+        ArgumentNullException.ThrowIfNull(snapshot);
+        ArgumentNullException.ThrowIfNull(validate);
+        ThrowIfOperationCanceled(operation.Token);
+        XaiRequestHeaders.ValidateEndpoint(snapshot);
+        if (ClientFor(snapshot.Transport) is not XaiResponsesLlmClient client)
+            throw new NotSupportedException("The selected facade has no cross-family xAI route.");
+        ThrowIfOperationCanceled(operation.Token);
+        validate(client.SharedHttp);
+        ThrowIfOperationCanceled(operation.Token);
+    }
+
     internal async Task<IReadOnlyList<LlmModel>> GetXaiCatalogSnapshotAsync(string connectionId,
         LlmConnection snapshot, ModelCatalogFamily family, Action callerFence, CancellationToken cancellationToken)
     {
