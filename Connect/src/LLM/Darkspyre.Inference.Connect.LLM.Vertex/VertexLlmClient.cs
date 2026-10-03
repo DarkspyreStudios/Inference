@@ -249,7 +249,7 @@ internal sealed partial class VertexLlmClient(HttpClient http, IVertexAuthentica
 
     internal static Task CheckStatusAsync(HttpResponseMessage response, CancellationToken cancellationToken) =>
         GoogleProviderFailure.ThrowIfUnsuccessfulAsync(response, LlmTransport.GoogleVertexAi,
-            "Vertex rejected the operation. Verify credentials, model access, request configuration and quota.", cancellationToken);
+            "Vertex rejected the operation. Verify credentials, model access, request configuration and quota.", null, cancellationToken);
 
     private static void ValidateVertexRequest(LlmConnection connection, LlmChatRequest request, VertexModelProfile profile, LlmProviderCapabilities capabilities)
     {

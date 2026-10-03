@@ -232,7 +232,8 @@ internal sealed partial class GeminiApiLlmClient(HttpClient http)
             HttpStatusCode.TooManyRequests => "The Gemini API rate limit or quota was reached.",
             _ => "The Gemini API failed to complete the operation."
         };
-        return GoogleProviderFailure.ThrowIfUnsuccessfulAsync(response, LlmTransport.GoogleGeminiApi, message, cancellationToken);
+        return GoogleProviderFailure.ThrowIfUnsuccessfulAsync(response, LlmTransport.GoogleGeminiApi, message,
+            response.Headers.RetryAfter?.Delta, cancellationToken);
     }
 
     /// <summary>Families whose reasoning and structured-output behaviour has been reviewed against the Gemini API.</summary>

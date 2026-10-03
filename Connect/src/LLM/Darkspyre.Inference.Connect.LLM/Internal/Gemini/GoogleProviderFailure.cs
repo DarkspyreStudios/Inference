@@ -6,7 +6,7 @@ namespace Darkspyre.Inference.Connect.LLM.Internal;
 internal static class GoogleProviderFailure
 {
     internal static async Task ThrowIfUnsuccessfulAsync(HttpResponseMessage response, LlmTransport transport,
-        string message, CancellationToken cancellationToken)
+        string message, TimeSpan? retryAfter, CancellationToken cancellationToken)
     {
         if (response.IsSuccessStatusCode) return;
 
@@ -24,6 +24,6 @@ internal static class GoogleProviderFailure
         }
 
         throw new LlmProviderException(message, transport, response.StatusCode,
-            retryAfter: response.Headers.RetryAfter?.Delta, isContextOverflow: overflow);
+            retryAfter: retryAfter, isContextOverflow: overflow);
     }
 }
