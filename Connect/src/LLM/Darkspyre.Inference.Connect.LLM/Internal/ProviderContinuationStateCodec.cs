@@ -189,7 +189,7 @@ internal static class ProviderContinuationStateCodec
 
             if (transport == LlmTransport.XaiResponses)
             {
-                if (type is not ("message" or "reasoning" or "function_call" or "compaction" or "compaction_summary" or "web_search_call"
+                if (type is not ("message" or "reasoning" or "function_call" or "compaction" or "web_search_call"
                     or "x_search_call" or "code_interpreter_call" or "code_execution_call" or "file_search_call"
                     or "mcp_call" or "image_generation_call" or "view_image_call" or "view_x_video_call"))
                 {
@@ -213,8 +213,6 @@ internal static class ProviderContinuationStateCodec
 
             if (transport == LlmTransport.OpenAiCodex && type is "compaction" or "compaction_summary")
             {
-                if (item.Any(field => field.Key is not ("type" or "id" or "encrypted_content" or "internal_chat_message_metadata_passthrough")))
-                    throw new ArgumentException("Codex compaction state contains unsupported fields.");
                 ValidateItem(item, transport, type);
                 projected.Add(item.DeepClone());
                 continue;
