@@ -16,12 +16,16 @@ internal sealed class LlmResourcePreparation : IAsyncDisposable
     private Task? _retirement;
     private Scope? _readScope;
 
-    private LlmResourcePreparation(LlmChatRequest request) => Request = request;
+    private LlmChatRequest? _request;
+    private LlmResourcePreparation(LlmChatRequest? request = null) => _request = request;
 
-    internal LlmChatRequest Request { get; private set; }
+    internal LlmChatRequest Request
+    {
+        get => _request ?? throw new InvalidOperationException("A named resource reader has no chat request.");
+        private set => _request = value;
+    }
 
-    internal static LlmResourcePreparation ForNamedReads(LlmChatRequest request)
-    { ValidateArguments(request); return new(request); }
+    internal static LlmResourcePreparation ForNamedReads() => new();
 
     internal static IEnumerable<InferenceResourceReference> NamedReferences(LlmChatRequest request) => References(request).Distinct();
 
@@ -353,7 +357,7 @@ internal sealed class LlmResourcePreparation : IAsyncDisposable
         _handles.Clear();
         _handles.AddRange(failedHandles);
         _files.Clear();
-        Request = Request with { Resources = null };
+        if (_request is not null) _request = _request with { Resources = null };
         if (failures.Count == 0) return;
         if (failures.Count == 1) ExceptionDispatchInfo.Capture(failures[0]).Throw();
         throw new AggregateException(failures);
