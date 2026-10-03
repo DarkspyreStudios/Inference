@@ -379,9 +379,12 @@ public sealed class ImageSettingsManager : InferenceSettingsManager<ImageSetting
         if (settings.Generation != generation) return new(SetupActionState.Cancelled);
         IImageInference inference = _service!.Bind(connection, workflow, binding);
         ImageGenerationResult result;
-        try { result = await inference.GenerateAsync(
-            new() { ModelId = workflow.Id, Prompt = "A small blue circle on a white background.", Seed = connection.Transport == ImageTransport.ComfyUi ? 42 : null },
-            cancellationToken: token).ConfigureAwait(false); }
+        try
+        {
+            result = await inference.GenerateAsync(
+                new() { ModelId = workflow.Id, Prompt = "A small blue circle on a white background.", Seed = connection.Transport == ImageTransport.ComfyUi ? 42 : null },
+                cancellationToken: token).ConfigureAwait(false);
+        }
         catch (Exception original)
         {
             try { await inference.DisposeAsync().ConfigureAwait(false); }
