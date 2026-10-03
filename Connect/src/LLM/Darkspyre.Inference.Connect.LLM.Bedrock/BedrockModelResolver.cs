@@ -7,6 +7,13 @@ namespace Darkspyre.Inference.Connect.LLM.Bedrock;
 
 internal sealed class BedrockModelResolver
 {
+    private static readonly Action<ILogger, string, int?, string?, string?, Exception?> DiscoveryFailed =
+        LoggerMessage.Define<string, int?, string?, string?>(LogLevel.Warning, new EventId(1, "DiscoveryFailed"),
+            "Bedrock {Operation} failed. StatusCode={StatusCode} ErrorCode={ErrorCode} RequestId={RequestId}");
+    private static readonly Action<ILogger, Exception?> ListingFailed =
+        LoggerMessage.Define(LogLevel.Error, new EventId(2, "ListingFailed"),
+            "Bedrock model listing failed after both catalog requests failed.");
+
     public static async Task<string> ResolveAsync(
         BedrockClientFactory.Lease<AmazonBedrockClient> control,
         string region,
@@ -119,7 +126,7 @@ internal sealed class BedrockModelResolver
         control.ThrowIfCanceled();
         if (!profilesSucceeded && !foundationsSucceeded)
         {
-            try { logger.LogError("Bedrock model listing failed after both catalog requests failed."); }
+            try { ListingFailed(logger, null); }
             catch (Exception error) { failures.Add(new LoggingEvidence(error)); }
             throw new AggregateException("Bedrock model listing failed.", failures);
         }
@@ -185,8 +192,7 @@ internal sealed class BedrockModelResolver
             LlmTransport.AwsBedrockConverse, status, code, requestId, innerException: new SdkEvidence(error));
         try
         {
-            logger.LogWarning("Bedrock {Operation} failed. StatusCode={StatusCode} ErrorCode={ErrorCode} RequestId={RequestId}",
-                operation, status is null ? null : (int?)status.Value, code, requestId);
+            DiscoveryFailed(logger, operation, status is null ? null : (int?)status.Value, code, requestId, null);
         }
         catch (Exception loggingFailure)
         {
