@@ -255,25 +255,32 @@ services stay first-class and callable independently of a wizard.
 | OpenAI-compatible | Endpoint, optional key, model, supported advanced options | Remains advanced; explicit discovery/manual-entry policy |
 | Anthropic Messages | Endpoint, secret API key, model | Preserve API-key-only credential policy; discover and explicit test |
 | Direct Codex | Device authorization, model | Start/poll/cancel device auth with expiry; draft-local credential completion. No endpoint field: the official endpoint is fixed (owner decision, 2026-09-23), and a saved former value is replaced on the next save |
+| Grok OAuth / Responses | Device authorization, fixed region choices, service tier, model and profile-backed agent count | OAuth-only draft sign-in and version-conditional saves; default registration performs no authentication or network requests; provider qualification remains incomplete |
 | Claude CLI | Executable, model; separate optional catalog authorization | Verify CLI/auth without copying CLI tokens; manual model entry without catalog OAuth |
 | Antigravity CLI | Executable, model | Verify installed/authenticated CLI; discover via current adapter; no token scraping |
 | Bedrock Converse | AWS profile and region choices, model | SDK-owned choices/checks in Bedrock assembly; standard credential chain remains owner |
 | AgentCore Harness | Profile, region, Harness ARN, optional model override | Validate ARN/region; default/manual override semantics; explicit session-based test |
 
-`XaiResponses` has an unregistered connection/setup contract tracked by DSA-127. Region and service-tier
+`XaiResponses` has a registered Grok connection/setup contract. Region and service-tier
 fields are bounded choices on `XaiConnectionOptions`. Setup derives the endpoint from the region
 and has no API-key field. A saved OAuth token or completed draft sign-in satisfies Save. Both setup
 continuation and facade interactive sign-in use the same expiry/interval/slow-down helper. The internal
 `XaiAuthenticator` implements the device grant, token refresh and one `/v1/me` check. The shared
 `XaiErrorClassifier` sanitizes errors; subscription-specific 403 matching remains unqualified and is
-not implemented. No xAI client or authenticator is registered by `AddLlmConnect`, so this contract
-does not add an enabled provider to the table above. The shared Responses pipeline retains ordered
-xAI output verbatim, binds replay to the account/endpoint/model, uses terminal output for function
-completion and maps context exhaustion to an incomplete result. Encrypted replay data remains opaque
+not implemented. `AddLlmConnect` registers the provider, authenticator, Responses client and managed
+agent through the existing finite SDK HTTP pipelines. `AddLlmConnectXai` shares that registration
+path and does not duplicate services. Registration and discovery perform no OAuth or model requests.
+The shared Responses pipeline retains ordered xAI output verbatim, binds replay to the account/endpoint/model
+and uses terminal output for function/shell completion. A recognized `context_length_exceeded` raises
+a provider failure with `IsContextOverflow`; other incomplete reasons keep their completion status.
+Managed shell execution uses a borrowed caller executor and preserves genuine results and an unfinished
+mixed tail on failure. Connect does not select a directory or run commands. Encrypted replay data remains opaque
 and is redacted from diagnostics. The internal `XaiResponsesLlmClient` sends OAuth-only Responses
 requests, applies model profiles and catalog modalities, and checks numeric schema guarantees.
-Its catalog reads the facade's published chat snapshot. Cross-family catalog ownership and multi-agent
-setup controls are not wired. The client remains unregistered and not live-qualified.
+Its catalog reads the facade's published snapshot. `LlmModelListCache` owns the generic listing and
+lazy chat, image, video and embedding views. Profile-backed setup offers supported multi-agent counts
+and the provider default. Full schema/regex checks and Skills remain incomplete. Registration does
+not qualify actual OAuth or provider behavior, or enable an unimplemented image/video adapter.
 
 ComfyUI setup edits endpoint, timeout, protected headers and workflow selection. An
 `IImageWorkflowChoiceSource` supplied by the host provides paged/searchable workflow identities and
