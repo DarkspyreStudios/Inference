@@ -1584,6 +1584,8 @@ existing Video and nested batch metadata. No requested model or job scope suppli
 `XaiVideoOptions` is the fixed Video-owned subtype for Files-owned storage controls, signed
 upload destinations and explicit user data. Common metadata refuses these provider options;
 `ConnectVideoJson` owns their complete generation/edit/extension and scoped receipt graph.
+The private Video codec validates all implemented request controls before resolving any media source.
+It preserves supplied aspect ratios without establishing their effective provider behavior.
 Serialized job/output scope is data, not proof of authority. Each implemented transport owns
 receipt validation and download-origin authorization before effects. Lookup and download receive
 the same borrowed binding for adapter-owned validation before acquisition or refresh.

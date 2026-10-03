@@ -16,67 +16,91 @@ internal static class XaiVideoProtocol
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(resolve);
         ArgumentNullException.ThrowIfNull(fence);
+        var controls = ValidateControls(request);
+        var body = new JsonObject { ["model"] = request.ModelId };
+        switch (request)
+        {
+            case VideoGenerationRequest generation:
+                AddGeneration(body, generation, controls.Duration, resolve, fence);
+                break;
+            case VideoEditRequest edit:
+                body["prompt"] = edit.Prompt;
+                body["video"] = Resolve(edit.SourceVideo, resolve, fence, allowFile: true);
+                break;
+            case VideoExtensionRequest extension:
+                body["prompt"] = extension.Prompt;
+                body["video"] = Resolve(extension.SourceVideo, resolve, fence, allowFile: true);
+                if (controls.Duration is { } duration) body["duration"] = duration;
+                break;
+        }
+        if (controls.Storage is { } storage) body["storage_options"] = storage;
+        if (controls.UploadUrl is { } uploadUrl) body["output"] = new JsonObject { ["upload_url"] = uploadUrl };
+        if (controls.User is { } user) body["user"] = user;
+        fence();
+        return (controls.Route, body);
+    }
+
+    private static (string Route, int? Duration, JsonObject? Storage, string? UploadUrl, string? User)
+        ValidateControls(VideoRequest request)
+    {
         ArgumentException.ThrowIfNullOrWhiteSpace(request.ModelId);
         if (request.ProviderOptions is not null and not XaiVideoOptions)
             throw new NotSupportedException("Unknown video provider controls.");
-        var body = new JsonObject { ["model"] = request.ModelId };
         string route;
+        int? duration = null;
         switch (request)
         {
             case VideoGenerationRequest generation:
                 route = "videos/generations";
-                AddGeneration(body, generation, resolve, fence);
+                duration = ValidateGeneration(generation);
                 break;
             case VideoEditRequest edit:
                 route = "videos/edits";
                 ArgumentException.ThrowIfNullOrWhiteSpace(edit.Prompt);
-                body["prompt"] = edit.Prompt;
-                body["video"] = Resolve(edit.SourceVideo, resolve, fence, allowFile: true);
+                ArgumentNullException.ThrowIfNull(edit.SourceVideo);
                 break;
             case VideoExtensionRequest extension:
                 route = "videos/extensions";
                 // The primary schema requires prompt although the neutral contract permits unknown/omitted prompt.
                 if (string.IsNullOrWhiteSpace(extension.Prompt))
                     throw new ArgumentException("This video extension route requires a prompt.", nameof(request));
-                body["prompt"] = extension.Prompt;
-                body["video"] = Resolve(extension.SourceVideo, resolve, fence, allowFile: true);
-                if (extension.ExtensionDuration is { } duration) body["duration"] = WholeSeconds(duration, 2, 10);
+                ArgumentNullException.ThrowIfNull(extension.SourceVideo);
+                if (extension.ExtensionDuration is { } value) duration = WholeSeconds(value, 2, 10);
                 break;
             default: throw new NotSupportedException("Unknown video operation.");
         }
+        JsonObject? storage = null;
+        string? uploadUrl = null;
+        string? user = null;
         if (request.ProviderOptions is XaiVideoOptions options)
         {
-            if (options.Storage is { } storage) body["storage_options"] = XaiMediaData.Storage(storage);
+            if (options.Storage is { } value) storage = XaiMediaData.Storage(value);
             if (options.Output is { } output)
             {
                 if (!output.UploadUrl.IsAbsoluteUri) throw new ArgumentException("A video upload destination must be absolute.", nameof(request));
                 XaiMediaData.RequireHttpUrl(output.UploadUrl.OriginalString);
-                body["output"] = new JsonObject { ["upload_url"] = output.UploadUrl.OriginalString };
+                uploadUrl = output.UploadUrl.OriginalString;
             }
-            if (options.User is { } user)
+            if (options.User is { } valueUser)
             {
                 if (request is VideoExtensionRequest) throw new NotSupportedException("Video extension has no user control mapping.");
-                body["user"] = user;
+                user = valueUser;
             }
         }
-        fence();
-        return (route, body);
+        return (route, duration, storage, uploadUrl, user);
     }
 
-    private static void AddGeneration(JsonObject body, VideoGenerationRequest request,
-        Func<InferenceMediaSource, JsonObject> resolve, Action fence)
+    private static int? ValidateGeneration(VideoGenerationRequest request)
     {
         bool references = request.ReferenceImages is { Count: > 0 } || request.ReferenceAudio is { Count: > 0 };
         if (string.IsNullOrWhiteSpace(request.Prompt) && request.FirstFrame is null && request.LastFrame is null
             && request.Keyframes is not { Count: > 0 } && !references)
             throw new ArgumentException("Text-only video generation requires a prompt.", nameof(request));
-        if (request.Prompt is { } prompt) body["prompt"] = prompt;
-        if (request.Duration is { } duration) body["duration"] = WholeSeconds(duration, 1, 15);
+        int? duration = request.Duration is { } value ? WholeSeconds(value, 1, 15) : null;
         if (request.AspectRatio is { } aspect)
         {
             if (aspect is not ("1:1" or "16:9" or "9:16" or "4:3" or "3:4" or "3:2" or "2:3"))
                 throw new ArgumentException("Unsupported video aspect ratio.", nameof(request));
-            body["aspect_ratio"] = aspect;
         }
         if (request.ResolutionHeight is { } resolution)
         {
@@ -84,24 +108,57 @@ internal static class XaiVideoProtocol
             if (resolution == 1080 && (references || request.Keyframes is { Count: > 0 }
                 || request.ModelId != "grok-imagine-video-1.5"))
                 throw new NotSupportedException("The selected video mode has no documented native 1080p mapping.");
-            body["resolution"] = $"{resolution}p";
         }
         if (request.ModelId == "grok-imagine-video" && (request.LastFrame is not null
             || request.Keyframes is { Count: > 0 } || request.FirstFrame is not null && references))
             throw new NotSupportedException("This video model does not support the supplied frame combination.");
+        if (request.Keyframes is { } keyframes)
+        {
+            if (keyframes.Count > 4) throw new ArgumentOutOfRangeException(nameof(request));
+            foreach (VideoKeyframe frame in keyframes)
+            {
+                double seconds = frame.Timestamp.TotalSeconds;
+                if (!double.IsFinite(seconds) || seconds <= 0 || request.Duration is { } total && frame.Timestamp >= total)
+                    throw new ArgumentException("Invalid video keyframe timestamps.", nameof(request));
+                ArgumentNullException.ThrowIfNull(frame.Image);
+            }
+        }
+        if (request.ReferenceImages is { } images)
+            foreach (InferenceMediaSource image in images) ArgumentNullException.ThrowIfNull(image);
+        if (request.ReferenceAudio is { } audio)
+        {
+            if (audio.Count > 3) throw new ArgumentOutOfRangeException(nameof(request));
+            foreach (VideoReferenceAudio source in audio)
+            {
+                switch (source)
+                {
+                    case VideoVoiceReference: break;
+                    case VideoAudioReference supplied:
+                        ArgumentNullException.ThrowIfNull(supplied.Source);
+                        break;
+                    default: throw new NotSupportedException("Unknown video reference audio.");
+                }
+            }
+        }
+        return duration;
+    }
+
+    private static void AddGeneration(JsonObject body, VideoGenerationRequest request, int? duration,
+        Func<InferenceMediaSource, JsonObject> resolve, Action fence)
+    {
+        if (request.Prompt is { } prompt) body["prompt"] = prompt;
+        if (duration is { } seconds) body["duration"] = seconds;
+        if (request.AspectRatio is { } aspect) body["aspect_ratio"] = aspect;
+        if (request.ResolutionHeight is { } resolution) body["resolution"] = $"{resolution}p";
         if (request.FirstFrame is { } first) body["image"] = Resolve(first, resolve, fence, allowFile: true);
         if (request.LastFrame is { } last) body["last_frame"] = Resolve(last, resolve, fence, allowFile: true);
         if (request.Keyframes is { } keyframes)
         {
-            if (keyframes.Count > 4) throw new ArgumentOutOfRangeException(nameof(request));
             var rows = new JsonArray();
             foreach (VideoKeyframe frame in keyframes)
             {
                 fence();
-                double seconds = frame.Timestamp.TotalSeconds;
-                if (!double.IsFinite(seconds) || seconds <= 0 || request.Duration is { } total && frame.Timestamp >= total)
-                    throw new ArgumentException("Invalid video keyframe timestamps.", nameof(request));
-                rows.Add(new JsonObject { ["image"] = Resolve(frame.Image, resolve, fence, allowFile: true), ["timestamp_s"] = seconds });
+                rows.Add(new JsonObject { ["image"] = Resolve(frame.Image, resolve, fence, allowFile: true), ["timestamp_s"] = frame.Timestamp.TotalSeconds });
             }
             body["keyframes"] = rows;
         }
@@ -113,17 +170,13 @@ internal static class XaiVideoProtocol
         }
         if (request.ReferenceAudio is { } audio)
         {
-            if (audio.Count > 3) throw new ArgumentOutOfRangeException(nameof(request));
             var rows = new JsonArray();
             foreach (VideoReferenceAudio source in audio)
             {
                 fence();
-                rows.Add(source switch
-                {
-                    VideoVoiceReference voice => new JsonObject { ["voice_id"] = voice.VoiceId },
-                    VideoAudioReference supplied => Resolve(supplied.Source, resolve, fence, allowFile: false),
-                    _ => throw new NotSupportedException("Unknown video reference audio.")
-                });
+                rows.Add(source is VideoVoiceReference voice
+                    ? new JsonObject { ["voice_id"] = voice.VoiceId }
+                    : Resolve(((VideoAudioReference)source).Source, resolve, fence, allowFile: false));
             }
             body["reference_audios"] = rows;
         }
