@@ -906,7 +906,7 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, ILlmFileClie
         using var operation = _lifetime.Enter(cancellationToken);
         LlmAccountUsageObservations.Reservation reservation = _observations.Reserve(connectionId);
         LlmConnection connection = await ResolveConnectionAsync(connectionId, operation.Token);
-        operation.Token.ThrowIfCancellationRequested();
+        ThrowIfOperationCanceled(operation.Token);
         return reservation.Get(connection);
     }
 
@@ -920,7 +920,9 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, ILlmFileClie
             connectionId,
             cancellationToken);
         ILlmClient client = ClientFor(connection.Transport);
-        if (!client.GetCapabilities(connection).SupportsAccountUsage
+        LlmProviderCapabilities capabilities = client.GetCapabilities(connection);
+        ThrowIfOperationCanceled(cancellationToken);
+        if (!capabilities.SupportsAccountUsage
             || !_accountUsageClients.TryGetValue(
                 connection.Transport,
                 out ILlmAccountUsageClient? usageClient))
@@ -933,7 +935,10 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, ILlmFileClie
         {
             connection = await RefreshConnectionAsync(connectionId, connection, client, cancellationToken);
         }
-        return await usageClient.GetAccountUsageAsync(connection, cancellationToken);
+        ThrowIfOperationCanceled(cancellationToken);
+        LlmAccountUsageSnapshot usage = await usageClient.GetAccountUsageAsync(connection, cancellationToken);
+        ThrowIfOperationCanceled(cancellationToken);
+        return usage;
     }
 
     public async Task<LlmProviderCapabilities> GetCapabilitiesAsync(

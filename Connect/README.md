@@ -2439,6 +2439,11 @@ usage. OpenRouter reads the authenticated key's `/key` report, not the managemen
 Other compatible endpoints reject account-usage overrides that claim this operation. A missing
 `IsUnlimited` value is null, distinct from an explicit false.
 
+Facade account-usage operations check caller cancellation and facade retirement after capability
+callbacks, before queried dispatch and before publishing completed results. Passive polling checks
+the same owner fence after connection resolution. Retiring the facade drains admitted operations
+without disposing borrowed clients or the borrowed observation store.
+
 `GetObservedAccountUsageAsync(connectionId)` reads passive provider evidence without a provider call.
 It returns null until that connection identity reports a quota. OpenAI Responses and compatible Chat
 Completions read rate-limit headers, Anthropic Messages reads its rate-limit headers, Codex reads quota
