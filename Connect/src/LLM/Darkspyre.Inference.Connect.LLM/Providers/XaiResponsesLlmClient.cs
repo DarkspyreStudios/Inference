@@ -130,19 +130,14 @@ internal sealed class XaiResponsesLlmClient(HttpClient http) : ResponsesLlmClien
         PreflightManagedOpeningRequest(connection, request);
     }
 
-    internal Task<ProviderCompactionResult> CompactAsync(LlmConnection connection, LlmChatRequest request,
-        CancellationToken cancellationToken) => CompactCoreAsync(connection, request, null, null, cancellationToken);
-
-    internal Task<ProviderCompactionResult> CompactWithResourcesAsync(LlmConnection connection, LlmChatRequest request,
-        XaiFileClient files, Action fence, CancellationToken cancellationToken) =>
-        CompactCoreAsync(connection, request, files, fence, cancellationToken);
-
     [SuppressMessage("Design", "CA1031", Justification = "Attempt all owned cleanup and retain independent safe failures and actual refused owners.")]
-    private async Task<ProviderCompactionResult> CompactCoreAsync(LlmConnection connection, LlmChatRequest request,
-        XaiFileClient? suppliedFiles, Action? outerFence, CancellationToken cancellationToken)
+    internal async Task<ProviderCompactionResult> CompactWithResourcesAsync(LlmConnection connection, LlmChatRequest request,
+        XaiFileClient files, Action outerFence, CancellationToken cancellationToken)
     {
         using var consumption = SdkHttpConsumption.Enter(Http, cancellationToken);
-        void Fence() { consumption.Token.ThrowIfCancellationRequested(); consumption.Fence(); outerFence?.Invoke(); }
+        ArgumentNullException.ThrowIfNull(files);
+        ArgumentNullException.ThrowIfNull(outerFence);
+        void Fence() { consumption.Token.ThrowIfCancellationRequested(); consumption.Fence(); outerFence(); }
         Fence();
         connection = EmbeddingRequestData.Snapshot(connection);
         request = ClientTools.Snapshot(request) with { HostedTools = HostedTools.Snapshot(request.HostedTools) };
@@ -154,7 +149,6 @@ internal sealed class XaiResponsesLlmClient(HttpClient http) : ResponsesLlmClien
         LlmStructuredOutputEnforcement? enforcement = ResolveStructuredOutputEnforcement(connection, request, capabilities);
         LlmCredential? credential = LlmCredential.Parse(connection.Credential);
         LlmResourcePreparation? resources = null;
-        XaiFileClient? ownedFiles = null;
         HttpRequestMessage? message = null;
         HttpResponseMessage? response = null;
         string[] secrets = [];
@@ -165,7 +159,6 @@ internal sealed class XaiResponsesLlmClient(HttpClient http) : ResponsesLlmClien
         {
             if (request.Resources is not null)
             {
-                XaiFileClient files = suppliedFiles ?? (ownedFiles = CreateFileClient());
                 resources = await LlmResourcePreparation.PrepareAsync(connection, request, files, Fence, consumption.Token).ConfigureAwait(false);
                 Fence();
                 request = resources.Request;
@@ -241,9 +234,6 @@ internal sealed class XaiResponsesLlmClient(HttpClient http) : ResponsesLlmClien
             if (resources is not null)
                 try { await resources.DisposeAsync().ConfigureAwait(false); }
                 catch (Exception error) { failures.Add(error); }
-            if (ownedFiles is not null)
-                try { await ownedFiles.DisposeAsync().ConfigureAwait(false); }
-                catch (Exception error) { failures.Add(CompactionCleanupFailure(error, ownedFiles)); }
         }
         if (failures.Count == 1) ExceptionDispatchInfo.Capture(failures[0]).Throw();
         if (failures.Count > 1) throw new AggregateException("Grok context compaction and owned cleanup failed.", failures);
