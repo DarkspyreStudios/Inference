@@ -51,7 +51,7 @@ internal sealed class OpenAiCodexLlmClient(HttpClient http)
         SupportsAgentSessions = true,
         SupportsAgentToolUse = true,
         SupportsAgentTurnInstructions = true,
-        Agent = ManagedAgentPolicy.Capabilities,
+        Agent = ManagedAgentPolicy.Capabilities with { SupportsProviderCompaction = true },
         SupportsPromptImages = true,
         SupportsPromptDocuments = true,
         RichContentSupported = RichContentRoutes.Responses

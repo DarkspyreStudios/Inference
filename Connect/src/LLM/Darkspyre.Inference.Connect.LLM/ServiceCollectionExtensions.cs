@@ -104,8 +104,14 @@ public static class ServiceCollectionExtensions
             provider.GetRequiredService<ManagedOpenAiResponsesAgentClient>());
         services.AddTransient<ILlmClient>(provider =>
             provider.GetRequiredService<OpenAiCompatibleChatLlmClient>());
+        services.AddTransient<ManagedOpenAiCompatibleAgentClient>();
+        services.AddTransient<ILlmAgentClient>(provider =>
+            provider.GetRequiredService<ManagedOpenAiCompatibleAgentClient>());
         services.AddTransient<ILlmClient>(provider =>
             provider.GetRequiredService<AnthropicMessagesLlmClient>());
+        services.AddTransient<ManagedAnthropicAgentClient>();
+        services.AddTransient<ILlmAgentClient>(provider =>
+            provider.GetRequiredService<ManagedAnthropicAgentClient>());
         services.AddTransient<ILlmClient>(provider =>
             provider.GetRequiredService<ClaudeCliLlmClient>());
         services.AddInferenceHttpClient<OpenAiCodexLlmClient>();
