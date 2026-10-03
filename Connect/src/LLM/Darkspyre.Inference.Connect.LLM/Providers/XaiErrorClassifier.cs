@@ -25,26 +25,23 @@ public static class XaiErrorClassifier
         CancellationToken cancellationToken,
         bool diagnosticBody = true) =>
         ThrowIfUnsuccessfulCoreAsync(response, credential, additionalSecrets,
-            diagnosticBody, "Provider rejected the Files request.", cancellationToken);
+            diagnosticBody, "Provider rejected the Files request.", null, null, cancellationToken);
 
     internal static Task ThrowIfUnsuccessfulSpeechAsync(HttpResponseMessage response, LlmCredential? credential,
         CancellationToken cancellationToken) =>
         ThrowIfUnsuccessfulCoreAsync(response, credential, [],
-            false, "Provider rejected the speech request.", cancellationToken);
+            false, "Provider rejected the speech request.", null, null, cancellationToken);
 
-    internal static async Task ThrowIfUnsuccessfulEmbeddingAsync(HttpResponseMessage response, CancellationToken cancellationToken)
+    internal static Task ThrowIfUnsuccessfulEmbeddingAsync(HttpResponseMessage response, CancellationToken cancellationToken)
     {
-        cancellationToken.ThrowIfCancellationRequested();
-        if (response.IsSuccessStatusCode) return;
-        string body = await SdkHttpConsumption.ReadAsStringAsync(response.Content, cancellationToken).ConfigureAwait(false);
-        cancellationToken.ThrowIfCancellationRequested();
-        (string? code, string? message) = ReadError(body);
-        throw Classify(response.StatusCode, code, message, "Provider rejected the embedding request.",
-            requestId: ProviderHttp.ReadRequestId(response), retryAfter: response.Headers.RetryAfter?.Delta);
+        ArgumentNullException.ThrowIfNull(response);
+        return ThrowIfUnsuccessfulCoreAsync(response, null, [], false, "Provider rejected the embedding request.",
+            ProviderHttp.ReadRequestId(response), response.Headers.RetryAfter?.Delta, cancellationToken);
     }
 
     private static async Task ThrowIfUnsuccessfulCoreAsync(HttpResponseMessage response, LlmCredential? credential,
-        IEnumerable<string> additionalSecrets, bool diagnosticBody, string diagnosticMessage, CancellationToken cancellationToken)
+        IEnumerable<string> additionalSecrets, bool diagnosticBody, string diagnosticMessage,
+        string? requestId, TimeSpan? retryAfter, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(response);
         cancellationToken.ThrowIfCancellationRequested();
@@ -55,7 +52,7 @@ public static class XaiErrorClassifier
         string safe = diagnosticBody ? SecretRedactor.Sanitize(body, credential, additionalSecrets)
             : diagnosticMessage;
         (string? code, string? message) = ReadError(body);
-        throw Classify(response.StatusCode, code, message, safe);
+        throw Classify(response.StatusCode, code, message, safe, requestId: requestId, retryAfter: retryAfter);
     }
 
     internal static Exception SpeechUpgradeFailure(HttpStatusCode status, Exception original)

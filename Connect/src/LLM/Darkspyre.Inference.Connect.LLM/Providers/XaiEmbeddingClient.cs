@@ -207,7 +207,7 @@ internal sealed class XaiEmbeddingClient(HttpClient http) : ILlmEmbeddingClient
             {
                 Vectors = Array.AsReadOnly(vectors),
                 Usage = usage,
-                Diagnostics = new((int)response.StatusCode, ProviderHttp.ReadRequestId(response), owned.ToJsonString())
+                Diagnostics = new((int)response.StatusCode, SafeRequestId(response, credential, secrets), owned.ToJsonString())
             };
         }
         catch (Exception error) when (error is JsonException or InvalidOperationException or FormatException or OverflowException)
@@ -242,9 +242,12 @@ internal sealed class XaiEmbeddingClient(HttpClient http) : ILlmEmbeddingClient
         if (error is NotSupportedException)
             return new NotSupportedException("The observed embedding model does not support this request.", new FailureEvidence(error));
         return new LlmProviderException("Grok embedding transport failed.", LlmTransport.XaiResponses,
-            response?.StatusCode, requestId: response is null ? null : ProviderHttp.ReadRequestId(response),
+            response?.StatusCode, requestId: response is null ? null : SafeRequestId(response, credential, secrets),
             innerException: new FailureEvidence(error));
     }
+
+    private static string? SafeRequestId(HttpResponseMessage response, LlmCredential? credential, string[] secrets) =>
+        ProviderHttp.ReadRequestId(response) is { } requestId ? SecretRedactor.Sanitize(requestId, credential, secrets) : null;
 
     private static LlmProviderException SafeProviderFailure(LlmProviderException error, Exception original,
         LlmCredential? credential, string[] secrets) => new(
