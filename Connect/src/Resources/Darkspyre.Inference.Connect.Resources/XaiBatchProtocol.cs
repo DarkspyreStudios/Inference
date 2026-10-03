@@ -4,6 +4,7 @@ using System.Runtime.ExceptionServices;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Darkspyre.Inference.Common;
+using Darkspyre.Inference.Common.Media;
 using Darkspyre.Inference.Common.Resources;
 using Darkspyre.Inference.Connect.LLM;
 using Darkspyre.Inference.Connect.LLM.Internal;
@@ -62,7 +63,7 @@ internal sealed class XaiBatchProtocol(HttpClient http, LlmConnection connection
                 fence();
                 items.Add(ReadBatch(item, null));
             }
-            return new(items, OptionalString(root, "pagination_token"));
+            return new LlmBatchPage(items, OptionalString(root, "pagination_token"));
         }, token);
 
     internal Task<LlmBatchRequestPage> ListRequestsAsync(string id, CancellationToken token) =>
@@ -73,11 +74,11 @@ internal sealed class XaiBatchProtocol(HttpClient http, LlmConnection connection
             {
                 fence();
                 string actualId = RequiredString(item, "batch_request_id");
-                Identity(actualId);
+                if (string.IsNullOrWhiteSpace(actualId)) throw new JsonException();
                 items.Add(new(actualId, OptionalString(item, "endpoint"), OptionalString(item, "model"),
                     OptionalString(item, "state"), Timestamp(item, "create_time"), Timestamp(item, "finish_time")));
             }
-            return new(items, OptionalString(root, "pagination_token"));
+            return new LlmBatchRequestPage(items, OptionalString(root, "pagination_token"));
         }, token);
 
     [SuppressMessage("Design", "CA1031", Justification = "Owned request and response cleanup preserves independent failures and actual refused owners.")]
@@ -97,6 +98,7 @@ internal sealed class XaiBatchProtocol(HttpClient http, LlmConnection connection
             if (payload is not null) request.Content = JsonContent.Create(payload);
             fence();
             if (mutation) observation.MutationDispatched = true;
+            observation.RequestDispatched = true;
             response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token).ConfigureAwait(false);
             observation.ResponseObserved = true;
             observation.StatusCode = (int)response.StatusCode;
@@ -128,7 +130,7 @@ internal sealed class XaiBatchProtocol(HttpClient http, LlmConnection connection
                 catch (Exception error) { errors.Add(CleanupFailure(error, request)); }
         }
         if (errors.Count == 1) ExceptionDispatchInfo.Throw(errors[0]);
-        if (errors.Count > 1) throw new AggregateException("The batch operation and owned cleanup failed.", errors);
+        if (errors.Count > 1) throw new ExchangeFailure(errors);
         fence();
         return result!;
     }
@@ -213,6 +215,10 @@ internal sealed class XaiBatchProtocol(HttpClient http, LlmConnection connection
 
     internal static Exception OperationFailure(Exception error, Observation observation)
     {
+        if (error is ExchangeFailure exchange)
+            return new AggregateException("The batch operation and owned cleanup failed.",
+                new[] { OperationFailure(exchange.InnerExceptions[0], observation) }.Concat(exchange.InnerExceptions.Skip(1)));
+        if (!observation.RequestDispatched) return error;
         Exception safe = SafeFailure(error, observation);
         return safe is OperationCanceledException canceled
             ? new LlmResourceOperationCanceledException(observation.Snapshot(), canceled)
@@ -222,7 +228,8 @@ internal sealed class XaiBatchProtocol(HttpClient http, LlmConnection connection
     private static Exception SafeFailure(Exception error, Observation observation)
     {
         if (error is InferenceResourceOperationException or InferenceResourceOperationCanceledException
-            or FailureEvidence) return error;
+            or FailureEvidence or ExchangeFailure) return error;
+        if (!observation.RequestDispatched) return error;
         if (error is AggregateException aggregate)
             return new AggregateException("The batch operation failed.", aggregate.InnerExceptions.Select(item => SafeFailure(item, observation)));
         if (error is OperationCanceledException canceled)
@@ -258,9 +265,14 @@ internal sealed class XaiBatchProtocol(HttpClient http, LlmConnection connection
         internal Exception Original { get; } = original;
     }
 
+    // Only this owner constructs the operation-first, response-cleanup, request-cleanup sequence.
+    private sealed class ExchangeFailure(IEnumerable<Exception> errors)
+        : AggregateException("The batch operation and owned cleanup failed.", errors);
+
     internal sealed class Observation(LlmResourceOperation operation, LlmBatch? selected)
     {
         internal bool MutationDispatched { get; set; }
+        internal bool RequestDispatched { get; set; }
         internal bool ResponseObserved { get; set; }
         internal int? StatusCode { get; set; }
         internal string? RequestId { get; set; }
@@ -269,6 +281,7 @@ internal sealed class XaiBatchProtocol(HttpClient http, LlmConnection connection
 
         internal void BeginStage()
         {
+            RequestDispatched = false;
             ResponseObserved = false;
             StatusCode = null;
             RequestId = null;
