@@ -6,6 +6,18 @@ namespace Darkspyre.Inference.Connect.LLM.Tests;
 
 public sealed class XaiSpeechDiagnosticTests
 {
+    [Fact]
+    public void ExistingClassifierSignaturesStayFixed()
+    {
+        Func<HttpResponseMessage, ProviderAuthorizationHeader?, CancellationToken, Task> publicEntry = XaiErrorClassifier.ThrowIfUnsuccessfulAsync;
+        Assert.Equal(3, publicEntry.Method.GetParameters().Length);
+        Assert.Single(typeof(XaiErrorClassifier).GetMethods(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static),
+            method => method.Name == nameof(XaiErrorClassifier.ThrowIfUnsuccessfulAsync));
+        Assert.NotNull(typeof(XaiErrorClassifier).GetMethod(nameof(XaiErrorClassifier.ThrowIfUnsuccessfulAsync),
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static,
+            [typeof(HttpResponseMessage), typeof(LlmCredential), typeof(IEnumerable<string>), typeof(CancellationToken), typeof(bool)]));
+    }
+
     [Theory]
     [InlineData(HttpStatusCode.Unauthorized, "unknown", InferenceFailureCode.AuthenticationRequired)]
     [InlineData(HttpStatusCode.BadRequest, "invalid_token", InferenceFailureCode.AuthenticationRequired)]
