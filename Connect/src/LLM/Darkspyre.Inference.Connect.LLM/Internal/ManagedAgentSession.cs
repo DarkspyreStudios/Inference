@@ -25,6 +25,8 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
     private readonly Dictionary<string, LlmAgentToolDefinition> _tools;
     private LlmAgentToolHandler? _toolHandler;
     private LlmAgentCallerServices? _callerServices;
+    private Func<LlmChatRequest, CancellationToken, Task<ProviderCompactionResult>>? _compactor;
+    private readonly bool _automaticProviderCompaction;
     private IReadOnlyList<LlmHostedTool> _hostedTools;
     private Task? _retirement;
     private LlmAgentContext _context;
@@ -43,6 +45,8 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
         IReadOnlyList<LlmModel> models, ILlmContextEstimator estimator,
         Func<LlmChatRequest, CancellationToken, IAsyncEnumerable<LlmStreamEvent>> stream,
         Func<string, LlmProviderCapabilities> capabilities, Action? openingFence = null,
+        Func<LlmChatRequest, CancellationToken, Task<ProviderCompactionResult>>? compactor = null,
+        bool automaticProviderCompaction = false,
         CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -55,7 +59,8 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
             && capabilities(options.ModelId).SupportsPromptDocuments;
         cancellationToken.ThrowIfCancellationRequested();
         openingFence?.Invoke();
-        var session = new ManagedAgentSession(connection, options, models, estimator, stream, capabilities, supportsResources);
+        var session = new ManagedAgentSession(connection, options, models, estimator, stream, capabilities,
+            supportsResources, compactor, automaticProviderCompaction);
         try
         {
             using var operation = session._resourceCallbacks.Enter(cancellationToken);
@@ -86,7 +91,9 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
     private ManagedAgentSession(LlmConnection connection, LlmAgentSessionOptions options,
         IReadOnlyList<LlmModel> models, ILlmContextEstimator estimator,
         Func<LlmChatRequest, CancellationToken, IAsyncEnumerable<LlmStreamEvent>> stream,
-        Func<string, LlmProviderCapabilities> capabilities, bool supportsResources)
+        Func<string, LlmProviderCapabilities> capabilities, bool supportsResources,
+        Func<LlmChatRequest, CancellationToken, Task<ProviderCompactionResult>>? compactor,
+        bool automaticProviderCompaction)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(options.ModelId);
         if (options.Runtime is not null)
@@ -96,6 +103,10 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
         }
         AgentResourceOptions.Validate(ManagedAgentPolicy.Capabilities, allowRuntimeBackgroundWork: false, options.ResourceOutputRetentionBytes);
         _supportsResources = supportsResources;
+        _compactor = compactor;
+        _automaticProviderCompaction = automaticProviderCompaction;
+        if (automaticProviderCompaction && compactor is null)
+            throw new ArgumentException("Automatic provider compaction requires a compactor.");
         _connection = connection;
         _execution = options.ExecutionOptions ?? new();
         _models = Array.AsReadOnly(models.ToArray());
@@ -220,12 +231,96 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
         }
     }
 
-    public Task<LlmAgentContext> CompactWithProviderAsync(LlmProviderCompactionRequest request,
+    public async Task<LlmAgentContext> CompactWithProviderAsync(LlmProviderCompactionRequest request,
         CancellationToken cancellationToken = default)
     {
         using var operation = _resourceCallbacks.Enter(cancellationToken);
-        lock (_sync) { ThrowIfDisposed(); }
-        throw new NotSupportedException("This session does not support provider-created compaction proposals.");
+        cancellationToken = operation.Token;
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentOutOfRangeException.ThrowIfNegative(request.ExpectedContextRevision);
+        ArgumentOutOfRangeException.ThrowIfNegative(request.RetainedUserTokens);
+        LlmAgentContext source;
+        LlmAgentTurnRequest turn;
+        LiveRun? run;
+        HashSet<string> protectedIds;
+        IInferenceResourceAccess? access;
+        Func<LlmChatRequest, CancellationToken, Task<ProviderCompactionResult>> compactor;
+        lock (_sync)
+        {
+            ThrowIfDisposed();
+            RequireCapability(Capabilities.SupportsProviderCompaction && !_automaticProviderCompaction);
+            compactor = _compactor ?? throw new NotSupportedException("This session has no provider compactor.");
+            run = RequireCompactionPosition(request);
+            source = ManagedAgentContext.Copy(_context, includeAttachmentData: true);
+            turn = run?.Turn ?? BaseTurn();
+            protectedIds = run is null ? new(StringComparer.Ordinal) : new(run.Protected, StringComparer.Ordinal);
+            access = _callerServices?.Resources;
+        }
+        await ValidateCompactionResourcesAsync(source, access, cancellationToken).ConfigureAwait(false);
+        FenceResourceCallback(cancellationToken);
+        lock (_sync)
+        {
+            if (!ReferenceEquals(run, RequireCompactionPosition(request)))
+                throw new InvalidOperationException("The run changed during compaction admission.");
+        }
+        ProviderCompactionResult result = await compactor(ClientTools.Snapshot(Request(source, turn)), cancellationToken).ConfigureAwait(false);
+        FenceResourceCallback(cancellationToken);
+        LlmAgentContext proposal = ProviderContext(source, turn, result);
+        var retained = new List<LlmAgentContextEntry>();
+        foreach (LlmAgentContextEntry entry in source.Entries.Reverse())
+        {
+            if (protectedIds.Contains(entry.Id) || entry.Message.Role != "user" || entry.Message.ToolResults.Count > 0) continue;
+            var candidate = source with { Entries = new[] { entry }.Concat(retained).ToArray() };
+            ContextEstimate? cost = EstimateInputTokens(candidate, turn);
+            if (cost is null || cost.Value.Tokens > request.RetainedUserTokens) break;
+            retained.Insert(0, entry);
+        }
+        proposal = ManagedAgentContext.Import(proposal with
+        {
+            Entries = [.. retained, .. proposal.Entries, .. source.Entries.Where(entry => protectedIds.Contains(entry.Id))]
+        }, _connection, turn.ModelId!, _supportsResources);
+        await ValidateCompactionResourcesAsync(proposal, access, cancellationToken).ConfigureAwait(false);
+        lock (_sync)
+        {
+            FenceResourceCallback(cancellationToken);
+            if (!ReferenceEquals(run, RequireCompactionPosition(request)))
+                throw new InvalidOperationException("The run changed during provider compaction.");
+            if (run is not null) AddUsage(run, result.Usage);
+            return proposal;
+        }
+    }
+
+    private LiveRun? RequireCompactionPosition(LlmProviderCompactionRequest request)
+    {
+        if (_segmentActive) throw new InvalidOperationException("Provider proposals require idle or paused execution.");
+        RequireRevision(request.ExpectedContextRevision);
+        if (_run is null)
+        {
+            if (request.TurnId is not null || request.PauseId is not null)
+                throw new InvalidOperationException("Idle compaction has no turn or pause identity.");
+        }
+        else if (_run.PauseId is null || request.TurnId != _run.Id || request.PauseId != _run.PauseId)
+            throw new InvalidOperationException("The run or pause is stale or consumed.");
+        return _run;
+    }
+
+    private async Task ValidateCompactionResourcesAsync(LlmAgentContext context, IInferenceResourceAccess? access,
+        CancellationToken token)
+    {
+        if (access is null) return;
+        InferenceResourceSelection selection = await ReadAdmittedSelectionAsync(access, token).ConfigureAwait(false);
+        await LlmResourcePreparation.ValidateContextAsync(context, selection, access,
+            () => FenceResourceCallback(token), token).ConfigureAwait(false);
+        FenceResourceCallback(token);
+    }
+
+    private LlmAgentContext ProviderContext(LlmAgentContext source, LlmAgentTurnRequest turn, ProviderCompactionResult result)
+    {
+        string id = NewId();
+        return ManagedAgentContext.Import(source with
+        {
+            Entries = [new(id, id, new("assistant", "") { ContinuationState = result.ContinuationState })]
+        }, _connection, turn.ModelId!, _supportsResources);
     }
 
     public async Task ReplaceContextAsync(LlmAgentContext context, long expectedRevision, CancellationToken cancellationToken = default)
@@ -285,8 +380,11 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
             _latestStatus = Measure(projected, turn);
             run = new(turn, turnId);
             _context = projected;
-            run.Protected.Add(user.Id);
-            run.UserEntryId = user.Id;
+            if (!_automaticProviderCompaction)
+            {
+                run.Protected.Add(user.Id);
+                run.UserEntryId = user.Id;
+            }
             _run = run;
             _segmentActive = true;
             segment = StartSegment(run, null, cancellationToken);
@@ -471,6 +569,7 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
                 _hostedTools = [];
                 _toolHandler = null;
                 _callerServices = null;
+                _compactor = null;
                 _run = null;
                 if (!_segmentActive) { run?.Dispose(); }
             }
@@ -565,10 +664,35 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
                     status = _latestStatus = Measure(_context, run.Turn);
                 }
                 await writer.WriteAsync(new LlmAgentContextStatusEvent(ThreadId, run.Id, status), token);
+                if (_automaticProviderCompaction && ExceedsHardWindow(status, run.Turn))
+                {
+                    await CompleteAsync(run, writer, LlmAgentCompletionReason.ProviderFailure, token,
+                        "Input exceeds the known model context window.");
+                    return;
+                }
                 if (status.NeedsCompaction is true)
                 {
-                    await PauseAsync(run, status, LlmAgentCompactionReason.Threshold, writer, token);
-                    return;
+                    if (!_automaticProviderCompaction)
+                    {
+                        await PauseAsync(run, status, LlmAgentCompactionReason.Threshold, writer, token);
+                        return;
+                    }
+                    (ProviderCompactionResult compacted, long revision) = await CompactAutomaticallyAsync(run, token).ConfigureAwait(false);
+                    await writer.WriteAsync(new LlmAgentCompactedEvent(ThreadId, run.Id, compacted.RequestId,
+                        revision, compacted.DroppedMessageCount, compacted.Usage), token);
+                    await writer.WriteAsync(new LlmAgentUsageEvent(ThreadId, run.Id, compacted.RequestId,
+                        compacted.Usage, run.Usage), token);
+                    lock (_sync)
+                    {
+                        request = Request(_context, run.Turn);
+                        status = _latestStatus = Measure(_context, run.Turn);
+                    }
+                    if (ExceedsHardWindow(status, run.Turn))
+                    {
+                        await CompleteAsync(run, writer, LlmAgentCompletionReason.ProviderFailure, token,
+                            "Input exceeds the known model context window.");
+                        return;
+                    }
                 }
                 string stepId = NewId();
                 LlmChatResult? result = null;
@@ -586,7 +710,7 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
                         {
                             case LlmUsageDeltaEvent usage:
                                 LlmUsage? runningTotal = run.UsageUnknown ? null
-                                    : UsageTotals.Add(run.Usage, usage.Cumulative, run.Iterations == 0);
+                                    : UsageTotals.Add(run.Usage, usage.Cumulative, run.UsageCalls == 0);
                                 await writer.WriteAsync(new LlmAgentUsageEvent(ThreadId, run.Id, stepId,
                                     usage.Cumulative, runningTotal), token);
                                 break;
@@ -628,6 +752,11 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
                 }
                 catch (LlmProviderException error) when (error.IsContextOverflow)
                 {
+                    if (_automaticProviderCompaction)
+                    {
+                        await CompleteAsync(run, writer, LlmAgentCompletionReason.ProviderFailure, token, error.Message);
+                        return;
+                    }
                     if (++run.ProviderOverflowCount > 2)
                     {
                         await CompleteAsync(run, writer, LlmAgentCompletionReason.ProviderFailure, token,
@@ -645,7 +774,7 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
                 if (result is null) { throw new InvalidOperationException("Model stream ended without completion."); }
                 run.ProviderOverflowCount = 0;
                 run.Iterations++;
-                run.Usage = run.UsageUnknown ? null : UsageTotals.Add(run.Usage, result.Usage, run.Iterations == 1);
+                AddUsage(run, result.Usage);
                 await writer.WriteAsync(new LlmAgentUsageEvent(ThreadId, run.Id, stepId, result.Usage, run.Usage), token);
                 if (result.Status is not (LlmCompletionStatus.Completed or LlmCompletionStatus.RequiresAction or LlmCompletionStatus.Unknown))
                 {
@@ -830,8 +959,11 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
         {
             var entry = new LlmAgentContextEntry(NewId(), run.Id, new("user", "") { ToolResults = results });
             _context = Append(_context, entry);
-            run.Protected.Clear();
-            run.Protected.UnionWith([run.UserEntryId, assistantId, entry.Id]);
+            if (!_automaticProviderCompaction)
+            {
+                run.Protected.Clear();
+                run.Protected.UnionWith([run.UserEntryId, assistantId, entry.Id]);
+            }
         }
     }
 
@@ -897,6 +1029,57 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
         ManagedAgentPolicy.Validate(_execution, Model(turn.ModelId!));
         ContextEstimate? used = EstimateInputTokens(context, turn);
         return ManagedAgentPolicy.Status(turn.ModelId!, context.Revision, used, _execution.ContextPolicy, Model(turn.ModelId!));
+    }
+
+    private bool ExceedsHardWindow(LlmAgentContextStatus status, LlmAgentTurnRequest turn) =>
+        status.UsedContextTokens is long used && Model(turn.ModelId!)?.MaxContextTokens is long hard && used > hard;
+
+    private async Task<(ProviderCompactionResult Result, long Revision)> CompactAutomaticallyAsync(LiveRun run, CancellationToken token)
+    {
+        using var operation = _resourceCallbacks.Enter(token);
+        token = operation.Token;
+        LlmAgentContext source;
+        IInferenceResourceAccess? access;
+        Func<LlmChatRequest, CancellationToken, Task<ProviderCompactionResult>> compactor;
+        lock (_sync)
+        {
+            FenceResourceCallback(token);
+            if (!ReferenceEquals(_run, run) || !_segmentActive || run.Terminal)
+                throw new InvalidOperationException("The model step changed before provider compaction.");
+            source = ManagedAgentContext.Copy(_context, includeAttachmentData: true);
+            access = _callerServices?.Resources;
+            compactor = _compactor ?? throw new NotSupportedException("This session has no provider compactor.");
+        }
+        await ValidateCompactionResourcesAsync(source, access, token).ConfigureAwait(false);
+        lock (_sync) { RequireAutomaticCompactionPosition(run, source.Revision, token); }
+        ProviderCompactionResult result = await compactor(ClientTools.Snapshot(Request(source, run.Turn)), token).ConfigureAwait(false);
+        FenceResourceCallback(token);
+        LlmAgentContext replacement = ProviderContext(source, run.Turn, result);
+        await ValidateCompactionResourcesAsync(replacement, access, token).ConfigureAwait(false);
+        lock (_sync)
+        {
+            RequireAutomaticCompactionPosition(run, source.Revision, token);
+            _context = WithQueuedSteering(replacement, run) with { Revision = checked(source.Revision + 1) };
+            run.Steering.Clear();
+            run.Protected.Clear();
+            run.UserEntryId = "";
+            AddUsage(run, result.Usage);
+            return (result, _context.Revision);
+        }
+    }
+
+    private void RequireAutomaticCompactionPosition(LiveRun run, long revision, CancellationToken token)
+    {
+        FenceResourceCallback(token);
+        RequireRevision(revision);
+        if (!ReferenceEquals(_run, run) || !_segmentActive || run.Terminal)
+            throw new InvalidOperationException("The model step changed during provider compaction.");
+    }
+
+    private static void AddUsage(LiveRun run, LlmUsage? usage)
+    {
+        run.Usage = run.UsageUnknown ? null : UsageTotals.Add(run.Usage, usage, run.UsageCalls == 0);
+        run.UsageCalls++;
     }
 
     private ContextEstimate? EstimateInputTokens(LlmAgentContext context, LlmAgentTurnRequest turn)
@@ -967,7 +1150,7 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
         {
             var entry = new LlmAgentContextEntry(NewId(), run.Id, new("user", text));
             _context = Append(_context, entry);
-            run.Protected.Add(entry.Id);
+            if (!_automaticProviderCompaction) run.Protected.Add(entry.Id);
         }
     }
     private static LlmAgentContext WithQueuedSteering(LlmAgentContext context, LiveRun run) => context with
@@ -1079,6 +1262,7 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
         public Queue<string> Steering { get; } = new();
         public string? PauseId { get; set; }
         public int Iterations { get; set; }
+        public int UsageCalls { get; set; }
         public int ProviderOverflowCount { get; set; }
         public LlmUsage? Usage { get; set; }
         public bool UsageUnknown { get; set; }
