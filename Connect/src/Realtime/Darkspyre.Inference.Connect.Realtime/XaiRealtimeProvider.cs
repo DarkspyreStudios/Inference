@@ -33,10 +33,19 @@ public sealed class XaiRealtimeProvider(HttpClient httpClient) : IRealtimeProvid
         Fence(operation.Token);
         return Task.FromResult(new RealtimeCapabilities
         {
-            InputEncodings = Enum.GetValues<RealtimeAudioEncoding>().ToHashSet(), OutputEncodings = Enum.GetValues<RealtimeAudioEncoding>().ToHashSet(),
-            SupportedHostedToolKinds = XaiRealtimeProtocol.HostedKinds.ToHashSet(), InputSampleRates = XaiRealtimeProtocol.Rates, OutputSampleRates = XaiRealtimeProtocol.Rates,
-            SupportsManualTurns = true, SupportsServerVad = true, SupportsClientTools = true, SupportsStructuredToolOutput = true,
-            SupportsResumption = true, SupportsBinaryTransport = true, SupportsPronunciationReplacement = true, SupportsForcedMessages = true
+            InputEncodings = Enum.GetValues<RealtimeAudioEncoding>().ToHashSet(),
+            OutputEncodings = Enum.GetValues<RealtimeAudioEncoding>().ToHashSet(),
+            SupportedHostedToolKinds = XaiRealtimeProtocol.HostedKinds.ToHashSet(),
+            InputSampleRates = XaiRealtimeProtocol.Rates,
+            OutputSampleRates = XaiRealtimeProtocol.Rates,
+            SupportsManualTurns = true,
+            SupportsServerVad = true,
+            SupportsClientTools = true,
+            SupportsStructuredToolOutput = true,
+            SupportsResumption = true,
+            SupportsBinaryTransport = true,
+            SupportsPronunciationReplacement = true,
+            SupportsForcedMessages = true
         });
     }
     public async Task<IRealtimeVoiceSession> OpenSessionAsync(RealtimeConnection connection, RealtimeSessionConfig config,
@@ -49,6 +58,7 @@ public sealed class XaiRealtimeProvider(HttpClient httpClient) : IRealtimeProvid
         RealtimeSessionConfig options = XaiRealtimeProtocol.Config(config);
         ArgumentNullException.ThrowIfNull(limits);
         if (limits.MaximumBufferedEvents <= 0 || limits.MaximumBufferedPayloadBytes <= 0 || limits.MaximumMessageBytes <= 0) throw XaiRealtimeProtocol.Invalid();
+        if (options.Resumption?.Conversation is { } imported && !_receipts.TryGetValue(imported, out _)) throw XaiRealtimeProtocol.Unsupported();
         Fence(operation.Token);
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(token);
         deadline.CancelAfter(admitted.RequestTimeout);
@@ -89,7 +99,7 @@ public sealed class XaiRealtimeProvider(HttpClient httpClient) : IRealtimeProvid
             OpeningFence();
             session = new(socket, limits, resources, scope, options,
                 (id, observedModel) => Issue(id, xai, selected, options.ModelId, observedModel), secrets,
-                ObserveReceipt, expectedModel);
+                ObserveReceipt, InvalidateReceipt, expectedModel);
             socket = null;
             await session.InitializeAsync(update, deadline.Token).ConfigureAwait(false);
             OpeningFence(); result = session;
@@ -119,14 +129,19 @@ public sealed class XaiRealtimeProvider(HttpClient httpClient) : IRealtimeProvid
 
     private RealtimeConversationReference Issue(string id, XaiFamilyBinding binding, LlmConnection selected, string? routingModel, string? observedModel)
     {
-        string? account = LlmCredential.Parse(selected.Credential)?.OAuth?.AccountId;
+        LlmCredential? credential = LlmCredential.Parse(selected.Credential);
+        string? account = credential?.OAuth?.AccountId;
+        if (account is not null && SecretRedactor.ContainsProtectedValue(account, credential, [])) throw XaiRealtimeProtocol.Malformed();
         byte[] bytes = XaiRealtimeProtocol.Message("xai-realtime-scope", writer =>
         {
             writer.WriteString("endpoint", selected.Endpoint); XaiRealtimeProtocol.WriteString(writer, "account", account);
             XaiRealtimeProtocol.WriteString(writer, "model", observedModel);
         });
         var reference = new RealtimeConversationReference(id, new("xai.realtime", Encoding.UTF8.GetString(bytes)));
-        _receipts.Add(reference, new(new(binding), selected.Version, selected.Endpoint, routingModel, observedModel));
+        LlmOperationLifetime.Lease admission;
+        try { admission = _lifetime.Enter(default); }
+        catch (ObjectDisposedException) { return reference; }
+        using (admission) _receipts.Add(reference, new(new(binding), selected.Version, selected.Endpoint, routingModel, observedModel));
         return reference;
     }
     private string? ValidateReceipt(RealtimeConversationReference? reference, XaiFamilyBinding binding, LlmConnection selected, string? routingModel)
@@ -146,6 +161,10 @@ public sealed class XaiRealtimeProvider(HttpClient httpClient) : IRealtimeProvid
     }
     private void ObserveReceipt(RealtimeConversationReference reference, string model)
     {
+        LlmOperationLifetime.Lease admission;
+        try { admission = _lifetime.Enter(default); }
+        catch (ObjectDisposedException) { return; }
+        using var admitted = admission;
         if (_receipts.TryGetValue(reference, out Issuance? proof))
         {
             lock (proof)
@@ -154,6 +173,14 @@ public sealed class XaiRealtimeProvider(HttpClient httpClient) : IRealtimeProvid
                 else proof.ObservedModel = model;
             }
         }
+    }
+    private void InvalidateReceipt(RealtimeConversationReference reference)
+    {
+        LlmOperationLifetime.Lease admission;
+        try { admission = _lifetime.Enter(default); }
+        catch (ObjectDisposedException) { return; }
+        using var admitted = admission;
+        if (_receipts.TryGetValue(reference, out Issuance? proof)) lock (proof) { proof.Contradicted = true; }
     }
     private sealed class Issuance(WeakReference<XaiFamilyBinding> binding, string version, string endpoint, string? routingModel, string? observedModel)
     {

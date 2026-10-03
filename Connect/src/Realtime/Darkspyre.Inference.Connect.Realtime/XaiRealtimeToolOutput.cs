@@ -11,8 +11,7 @@ namespace Darkspyre.Inference.Connect.Realtime;
 
 internal static class XaiRealtimeToolOutput
 {
-    internal static async Task<string> PrepareAsync(LlmToolOutput output, IInferenceResourceAccess? access,
-        long maximumBytes, Action fence, Action<Exception> recordCleanup, CancellationToken token)
+    internal static LlmToolOutput Snapshot(LlmToolOutput output)
     {
         ArgumentNullException.ThrowIfNull(output);
         LlmToolOutput snapshot = ManagedAgentContext.CopyOutput(output);
@@ -26,6 +25,11 @@ internal static class XaiRealtimeToolOutput
                 case LlmToolOutputSessionResource: break;
                 default: throw XaiRealtimeProtocol.Invalid();
             }
+        return snapshot;
+    }
+    internal static async Task<string> PrepareAsync(LlmToolOutput snapshot, IInferenceResourceAccess? access,
+        long maximumBytes, Action fence, Action<Exception> recordCleanup, CancellationToken token)
+    {
         var prepared = new List<LlmToolOutputPart>();
         var reader = LlmResourcePreparation.ForNamedReads();
         var documents = new Dictionary<InferenceResourceReference, LlmToolOutputResource>();
@@ -42,7 +46,7 @@ internal static class XaiRealtimeToolOutput
                     var opened = await reader.OpenNamedAsync(access, named.Resource, descriptor =>
                     {
                         if (descriptor.ContentType is null || !LlmToolOutputResource.IsTextMediaType(descriptor.ContentType)) throw XaiRealtimeProtocol.Unsupported();
-                        if (descriptor.Bytes > maximumBytes) throw XaiRealtimeProtocol.Capacity();
+                        if (descriptor.Bytes > Math.Min(maximumBytes, int.MaxValue)) throw XaiRealtimeProtocol.Capacity();
                     }, fence, token).ConfigureAwait(false);
                     fence();
                     using var bytes = new MemoryStream();
@@ -53,7 +57,7 @@ internal static class XaiRealtimeToolOutput
                         int requested = remaining >= buffer.Length ? buffer.Length : checked((int)remaining + 1);
                         int count = await opened.Content.ReadAsync(buffer.AsMemory(0, requested), token).ConfigureAwait(false);
                         fence(); if (count == 0) break;
-                        if (bytes.Length + count > maximumBytes) throw XaiRealtimeProtocol.Capacity();
+                        if (bytes.Length + count > maximumBytes || bytes.Length + count > int.MaxValue) throw XaiRealtimeProtocol.Capacity();
                         bytes.Write(buffer, 0, count);
                     }
                     reader.VerifyRead(access, opened.Descriptor, opened.Content, fence, token);

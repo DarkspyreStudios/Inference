@@ -29,6 +29,7 @@ internal sealed class XaiRealtimeSession : IRealtimeVoiceSession
     private IInferenceResourceAccess? _resources;
     private Func<string, string?, RealtimeConversationReference>? _issue;
     private Action<RealtimeConversationReference, string>? _observeReceipt;
+    private Action<RealtimeConversationReference>? _invalidateReceipt;
     private readonly string? _expectedConversation;
     private RealtimeConversationReference? _resumptionReceipt;
     private readonly string? _expectedModel;
@@ -37,6 +38,10 @@ internal sealed class XaiRealtimeSession : IRealtimeVoiceSession
     private RealtimeAudioConfig? _observedOutput;
     private RealtimeTurnDetection? _turn;
     private string? _observedModel;
+    private string? _routingModel;
+    private bool _routingChanged;
+    private readonly HashSet<string> _attemptedModels = new(StringComparer.Ordinal);
+    private long _attemptedModelBytes;
     private RealtimeConversationReference? _conversation;
     private Task _receiver = Task.CompletedTask;
     private Exception? _terminalResource;
@@ -49,11 +54,13 @@ internal sealed class XaiRealtimeSession : IRealtimeVoiceSession
     internal XaiRealtimeSession(WebSocket socket, InferenceStreamLimits limits, IInferenceResourceAccess? resources,
         InferenceResourceSelectionVersion? scope, RealtimeSessionConfig options,
         Func<string, string?, RealtimeConversationReference> issue, string[] secrets,
-        Action<RealtimeConversationReference, string> observeReceipt, string? expectedModel)
+        Action<RealtimeConversationReference, string> observeReceipt, Action<RealtimeConversationReference> invalidateReceipt, string? expectedModel)
     {
         _socket = socket; _limits = limits; _resources = resources; _scope = scope; _issue = issue; _secrets = secrets;
         _input = options.InputAudio; _turn = options.TurnDetection;
         _observeReceipt = observeReceipt;
+        _invalidateReceipt = invalidateReceipt;
+        _routingModel = options.ModelId;
         _expectedConversation = options.Resumption?.Conversation?.ConversationId;
         _resumptionReceipt = options.Resumption?.Conversation;
         _expectedModel = expectedModel;
@@ -67,34 +74,47 @@ internal sealed class XaiRealtimeSession : IRealtimeVoiceSession
         token.ThrowIfCancellationRequested();
         _receiver = ReceiveAsync();
     }
-    public Task UpdateSessionAsync(RealtimeSessionConfig config, CancellationToken cancellationToken = default) => CommandAsync(async token =>
+    public Task UpdateSessionAsync(RealtimeSessionConfig config, CancellationToken cancellationToken = default) => CommandAsync(() =>
     {
         var snapshot = XaiRealtimeProtocol.Config(config);
-        if (snapshot.Resumption?.Conversation is { } supplied && !ReferenceEquals(supplied, _conversation)) throw XaiRealtimeProtocol.Unsupported();
-        var protectedValues = new List<string>();
-        byte[] bytes = await XaiRealtimeProtocol.UpdateAsync(snapshot, () => Fence(token), token, protectedValues.Add).ConfigureAwait(false);
-        lock (_gate) { _secrets = _secrets!.Concat(protectedValues).Where(value => !string.IsNullOrWhiteSpace(value)).Distinct(StringComparer.Ordinal).ToArray(); }
-        return new([new(bytes)], () => { lock (_gate) { if (snapshot.InputAudio is not null) _input = snapshot.InputAudio; if (snapshot.TurnDetection is not null) _turn = snapshot.TurnDetection; } });
+        return async token =>
+        {
+            lock (_gate) { if (snapshot.Resumption?.Conversation is { } supplied && !ReferenceEquals(supplied, _conversation) && !ReferenceEquals(supplied, _resumptionReceipt)) throw XaiRealtimeProtocol.Unsupported(); }
+            var protectedValues = new List<string>();
+            byte[] bytes = await XaiRealtimeProtocol.UpdateAsync(snapshot, () => Fence(token), token, protectedValues.Add).ConfigureAwait(false);
+            lock (_gate) { _secrets = _secrets!.Concat(protectedValues).Where(value => !string.IsNullOrWhiteSpace(value)).Distinct(StringComparer.Ordinal).ToArray(); }
+            if (snapshot.ModelId is { } model) CheckModelCapacity(model);
+            return new([new(bytes)], () => { lock (_gate) { if (snapshot.InputAudio is not null) _input = snapshot.InputAudio; if (snapshot.TurnDetection is not null) _turn = snapshot.TurnDetection; } },
+                snapshot.ModelId is { } selected ? () => AttemptModel(selected) : null);
+        };
     }, cancellationToken);
-    public Task AppendAudioAsync(ReadOnlyMemory<byte> audio, CancellationToken cancellationToken = default) => CommandAsync(token =>
+    public Task AppendAudioAsync(ReadOnlyMemory<byte> audio, CancellationToken cancellationToken = default) => CommandAsync(() =>
     {
-        byte[] bytes = audio.ToArray(); Fence(token);
-        RealtimeAudioConfig? input; lock (_gate) { input = _input; }
-        return Task.FromResult(new Command([input?.Transport == RealtimeAudioTransport.Binary ? new(bytes, WebSocketMessageType.Binary)
+        byte[] bytes = audio.ToArray();
+        return token =>
+        {
+            Fence(token);
+            RealtimeAudioConfig? input; lock (_gate) { input = _input; }
+            return Task.FromResult(new Command([input?.Transport == RealtimeAudioTransport.Binary ? new(bytes, WebSocketMessageType.Binary)
             : new(XaiRealtimeProtocol.Message("input_audio_buffer.append", writer => writer.WriteBase64String("audio", bytes)))]));
+        };
     }, cancellationToken);
-    public Task CommitAudioAsync(CancellationToken cancellationToken = default) => CommandAsync(_ =>
+    public Task CommitAudioAsync(CancellationToken cancellationToken = default) => CommandAsync(() => _ =>
     {
         lock (_gate) { if (_turn is not RealtimeManualTurnDetection) throw XaiRealtimeProtocol.Unsupported(); }
         return Task.FromResult(new Command([new(XaiRealtimeProtocol.Message("input_audio_buffer.commit"))]));
     }, cancellationToken);
     public Task ClearAudioAsync(CancellationToken cancellationToken = default) => SimpleAsync("input_audio_buffer.clear", null, cancellationToken);
-    public Task AddItemAsync(RealtimeConversationItem item, string? previousItemId = null, CancellationToken cancellationToken = default) => CommandAsync(async token =>
+    public Task AddItemAsync(RealtimeConversationItem item, string? previousItemId = null, CancellationToken cancellationToken = default) => CommandAsync(() =>
     {
-        var snapshot = XaiRealtimeProtocol.Item(item); Fence(token);
-        string? output = snapshot is RealtimeFunctionOutputItem result
-            ? await XaiRealtimeToolOutput.PrepareAsync(result.Output, _resources, _limits.MaximumMessageBytes, () => Fence(token), _cleanup.Record, token).ConfigureAwait(false) : null;
-        return new([new(XaiRealtimeProtocol.ItemMessage(snapshot, previousItemId, output))]);
+        var snapshot = XaiRealtimeProtocol.Item(item);
+        return async token =>
+        {
+            Fence(token);
+            string? output = snapshot is RealtimeFunctionOutputItem result
+                ? await XaiRealtimeToolOutput.PrepareAsync(result.Output, _resources, _limits.MaximumMessageBytes, () => Fence(token), _cleanup.Record, token).ConfigureAwait(false) : null;
+            return new([new(XaiRealtimeProtocol.ItemMessage(snapshot, previousItemId, output))]);
+        };
     }, cancellationToken);
     public Task DeleteItemAsync(string itemId, CancellationToken cancellationToken = default) => SimpleAsync("conversation.item.delete", writer =>
     { ArgumentException.ThrowIfNullOrWhiteSpace(itemId); writer.WriteString("item_id", itemId); }, cancellationToken);
@@ -104,28 +124,42 @@ internal sealed class XaiRealtimeSession : IRealtimeVoiceSession
         if (contentIndex < 0 || audioEnd < TimeSpan.Zero || audioEnd.Ticks % TimeSpan.TicksPerMillisecond != 0) throw XaiRealtimeProtocol.Invalid();
         writer.WriteString("item_id", itemId); writer.WriteNumber("content_index", contentIndex); writer.WriteNumber("audio_end_ms", audioEnd.Ticks / TimeSpan.TicksPerMillisecond);
     }, cancellationToken);
-    public Task CreateResponseAsync(RealtimeResponseOptions? options = null, CancellationToken cancellationToken = default) => CommandAsync(_ =>
-        Task.FromResult(new Command([new(XaiRealtimeProtocol.Response(options))])), cancellationToken);
+    public Task CreateResponseAsync(RealtimeResponseOptions? options = null, CancellationToken cancellationToken = default) => CommandAsync(() =>
+    {
+        byte[] bytes = XaiRealtimeProtocol.Response(options);
+        return _ => Task.FromResult(new Command([new(bytes)]));
+    }, cancellationToken);
     public Task CancelResponseAsync(string? responseId = null, CancellationToken cancellationToken = default) => SimpleAsync("response.cancel", writer => XaiRealtimeProtocol.WriteString(writer, "response_id", responseId), cancellationToken);
-    public Task SubmitToolResultAsync(RealtimeToolResult result, CancellationToken cancellationToken = default) => CommandAsync(async token =>
+    public Task SubmitToolResultAsync(RealtimeToolResult result, CancellationToken cancellationToken = default) => CommandAsync(() =>
     {
         ArgumentNullException.ThrowIfNull(result);
         ArgumentException.ThrowIfNullOrWhiteSpace(result.CallId);
-        string output = await XaiRealtimeToolOutput.PrepareAsync(result.Output, _resources, _limits.MaximumMessageBytes, () => Fence(token), _cleanup.Record, token).ConfigureAwait(false);
-        return new([new(XaiRealtimeProtocol.ItemMessage(new RealtimeFunctionOutputItem(result.CallId, result.Output), null, output)), new(XaiRealtimeProtocol.Response(null))]);
+        LlmToolOutput snapshot = XaiRealtimeToolOutput.Snapshot(result.Output);
+        string callId = result.CallId;
+        return async token =>
+        {
+            string output = await XaiRealtimeToolOutput.PrepareAsync(snapshot, _resources, _limits.MaximumMessageBytes, () => Fence(token), _cleanup.Record, token).ConfigureAwait(false);
+            return new([new(XaiRealtimeProtocol.ItemMessage(new RealtimeFunctionOutputItem(callId, snapshot), null, output)), new(XaiRealtimeProtocol.Response(null))]);
+        };
     }, cancellationToken);
-    private Task SimpleAsync(string type, Action<Utf8JsonWriter>? fields, CancellationToken token) => CommandAsync(_ => Task.FromResult(new Command([new(XaiRealtimeProtocol.Message(type, fields))])), token);
+    private Task SimpleAsync(string type, Action<Utf8JsonWriter>? fields, CancellationToken token) => CommandAsync(() =>
+    {
+        byte[] bytes = XaiRealtimeProtocol.Message(type, fields);
+        return _ => Task.FromResult(new Command([new(bytes)]));
+    }, token);
     private sealed record Frame(byte[] Bytes, WebSocketMessageType Type = WebSocketMessageType.Text);
-    private sealed record Command(Frame[] Frames, Action? Sent = null);
-    private async Task CommandAsync(Func<CancellationToken, Task<Command>> prepare, CancellationToken caller)
+    private sealed record Command(Frame[] Frames, Action? Sent = null, Action? Dispatch = null);
+    private async Task CommandAsync(Func<Func<CancellationToken, Task<Command>>> snapshot, CancellationToken caller)
     {
         using var operation = _lifetime.Enter(caller); CancellationToken token = operation.Token;
+        Fence(token); var prepare = snapshot(); Fence(token);
         await _send.WaitAsync(token).ConfigureAwait(false);
         bool dispatched = false;
         try
         {
             Fence(token); Command command = await prepare(token).ConfigureAwait(false); Fence(token);
             if (command.Frames.Any(frame => frame.Bytes.LongLength > _limits.MaximumMessageBytes)) throw XaiRealtimeProtocol.Capacity();
+            Fence(token); command.Dispatch?.Invoke();
             foreach (Frame frame in command.Frames)
             {
                 Fence(token); dispatched = true;
@@ -180,18 +214,23 @@ internal sealed class XaiRealtimeSession : IRealtimeVoiceSession
                 {
                     JsonElement root = document.RootElement;
                     string[] secrets; lock (_gate) { secrets = _secrets!; }
-                    XaiRealtimeReader.ValidateMetadata(root, secrets);
                     if (XaiRealtimeReader.Required(root, "type") == "conversation.created")
                     {
+                        XaiRealtimeReader.ValidateMetadata(root, secrets);
                         var conversation = XaiRealtimeReader.Object(root, "conversation"); string id = XaiRealtimeReader.Required(conversation, "id");
                         if (_expectedConversation is not null && _expectedConversation != id) throw XaiRealtimeProtocol.Malformed();
-                        if (_conversation is null) _conversation = _issue!(id, _observedModel);
-                        else if (_conversation.ConversationId != id) throw XaiRealtimeProtocol.Malformed();
-                        observation = new RealtimeConversationCreatedEvent(XaiRealtimeReader.Identity(root), _conversation);
+                        RealtimeConversationReference? receipt; string? model;
+                        lock (_gate) { receipt = _conversation; model = _observedModel; }
+                        receipt ??= _issue!(id, model);
+                        if (receipt.ConversationId != id) throw XaiRealtimeProtocol.Malformed();
+                        bool changed;
+                        lock (_gate) { _conversation = receipt; changed = _routingChanged; }
+                        if (changed) _invalidateReceipt!(receipt);
+                        observation = new RealtimeConversationCreatedEvent(XaiRealtimeReader.Identity(root), receipt);
                     }
                     else
                     {
-                        try { observation = XaiRealtimeReader.Parse(root); }
+                        try { observation = XaiRealtimeReader.Parse(root); if (observation is not null) XaiRealtimeReader.ValidateMetadata(root, secrets); }
                         catch (Exception error) when (error is JsonException or ArgumentException or InvalidOperationException or OverflowException)
                         { throw XaiRealtimeProtocol.Malformed(); }
                     }
@@ -207,8 +246,14 @@ internal sealed class XaiRealtimeSession : IRealtimeVoiceSession
             foreach (var output in _outputs.Values)
                 if (output.Writer is { } writer)
                 {
+                    output.Writer = null;
                     try { await writer.DisposeAsync().ConfigureAwait(false); }
-                    catch (Exception cleanup) { _cleanup.Record(cleanup); failure = failure is null ? cleanup : new AggregateException(failure, cleanup); }
+                    catch (Exception cleanup)
+                    {
+                        _cleanup.Record(cleanup);
+                        if (failure is null) failure = cleanup;
+                        else if (!Contains(failure, cleanup)) failure = new AggregateException(failure, cleanup);
+                    }
                 }
             _outputs.Clear();
             if (failure is not null && LlmResourcePreparation.IsResourceFailure(failure)) _terminalResource = failure;
@@ -229,11 +274,31 @@ internal sealed class XaiRealtimeSession : IRealtimeVoiceSession
             if (config.ModelId is { } model)
             {
                 if (SecretRedactor.ContainsProtectedValue(model, null, _secrets!)) throw XaiRealtimeProtocol.Malformed();
-                if (_resumptionReceipt is { } resumed) _observeReceipt!(resumed, model);
-                if (_expectedModel is not null && _expectedModel != model) throw XaiRealtimeProtocol.Malformed();
-                if (_observedModel is not null && _observedModel != model) throw XaiRealtimeProtocol.Malformed();
-                _observedModel = model;
-                if (_conversation is { } conversation) _observeReceipt!(conversation, model);
+                bool requested; bool contradiction; bool routingChanged;
+                RealtimeConversationReference? resumed; RealtimeConversationReference? conversation;
+                lock (_gate)
+                {
+                    requested = _attemptedModels.Remove(model);
+                    if (requested) _attemptedModelBytes -= StringSize(model);
+                    routingChanged = _routingChanged;
+                    bool changed = _observedModel is not null && _observedModel != model;
+                    contradiction = !requested && (changed || !routingChanged && _expectedModel is not null && _expectedModel != model);
+                    resumed = _resumptionReceipt; conversation = _conversation;
+                    if (!contradiction) _observedModel = model;
+                }
+                if (contradiction)
+                {
+                    if (resumed is not null) _invalidateReceipt!(resumed);
+                    if (conversation is not null) _invalidateReceipt!(conversation);
+                    throw XaiRealtimeProtocol.Malformed();
+                }
+                // An attempted selector classifies this observation, not an acknowledgment.
+                // Routing-changing dispatch already invalidates the immutable opening proof.
+                if (!routingChanged)
+                {
+                    if (resumed is not null) _observeReceipt!(resumed, model);
+                    if (conversation is not null) _observeReceipt!(conversation, model);
+                }
             }
             lock (_gate) { if (config.InputAudio is not null) _input = config.InputAudio; if (config.TurnDetection is not null) _turn = config.TurnDetection; }
             if (config.OutputAudio is not null) _observedOutput = config.OutputAudio;
@@ -242,9 +307,12 @@ internal sealed class XaiRealtimeSession : IRealtimeVoiceSession
         {
             string id = created.Identity.ResponseId ?? throw XaiRealtimeProtocol.Malformed();
             long metadata = StringSize(id);
-            if (_responses.Count + _outputs.Count >= _limits.MaximumBufferedEvents || !FitsMetadata(metadata)
-                || !_responses.TryAdd(id, _observedOutput)) throw XaiRealtimeProtocol.Capacity();
-            _pendingMetadata += metadata;
+            lock (_gate)
+            {
+                if (_responses.Count + _outputs.Count >= _limits.MaximumBufferedEvents || !FitsMetadata(metadata)
+                    || !_responses.TryAdd(id, _observedOutput)) throw XaiRealtimeProtocol.Capacity();
+                _pendingMetadata += metadata;
+            }
         }
         if (observation is RealtimeContentPartEvent { Stage: "response.content_part.added", Part: RealtimeAudioContent } content)
             _ = RequireOutput(content.Identity);
@@ -259,6 +327,8 @@ internal sealed class XaiRealtimeSession : IRealtimeVoiceSession
             }
         }
         if (observation is RealtimeAudioDoneEvent audioDone) RequireOutput(audioDone.Identity).AudioDone = true;
+        if (observation is RealtimeContentPartEvent { Stage: "response.content_part.done", Part: RealtimeAudioContent } finishedPart)
+            RequireOutput(finishedPart.Identity).AudioDone = true;
         if (observation is RealtimeResponseEvent { Stage: "response.done" } completed)
         {
             string? responseId = completed.Identity.ResponseId;
@@ -272,19 +342,23 @@ internal sealed class XaiRealtimeSession : IRealtimeVoiceSession
                     InferenceResourceDescriptor descriptor = await writer.CommitAsync(token).ConfigureAwait(false);
                     var artifact = new RealtimeAudioArtifact(output.Identity, descriptor, output.Audio) { SelectionVersion = writer.SelectionVersion };
                     _committed.Add(artifact); artifacts.Add(artifact);
-                    _committedBytes = checked(_committedBytes + ArtifactSize(artifact));
-                    if (!FitsMetadata(0)) throw XaiRealtimeProtocol.Capacity();
-                    await writer.DisposeAsync().ConfigureAwait(false); output.Writer = null; writer.Fence(token);
+                    lock (_gate)
+                    {
+                        _committedBytes = checked(_committedBytes + ArtifactSize(artifact));
+                        if (!FitsMetadata(0)) throw XaiRealtimeProtocol.Capacity();
+                    }
+                    output.Writer = null;
+                    await writer.DisposeAsync().ConfigureAwait(false); writer.Fence(token);
                 }
-                _pendingMetadata -= output.Size; _outputs.Remove(pair.Key);
+                lock (_gate) { _pendingMetadata -= output.Size; _outputs.Remove(pair.Key); }
             }
-            if (_responses.Remove(responseId)) _pendingMetadata -= StringSize(responseId);
+            lock (_gate) { if (_responses.Remove(responseId)) _pendingMetadata -= StringSize(responseId); }
             observation = completed with { AudioArtifacts = _resources is null ? null : Array.AsReadOnly(artifacts.ToArray()) };
             size = checked(size + artifacts.Sum(ArtifactSize));
             // The terminal event owns the immutable receipts now; no unbounded committed history.
         }
         await PublishAsync(observation, size, token).ConfigureAwait(false);
-        if (observation is RealtimeResponseEvent { Stage: "response.done" }) { _committed.Clear(); _committedBytes = 0; }
+        if (observation is RealtimeResponseEvent { Stage: "response.done" }) { _committed.Clear(); lock (_gate) { _committedBytes = 0; } }
     }
     private sealed record OutputKey(string? ResponseId, string? ItemId, int? OutputIndex, int? ContentIndex);
     private sealed class Output(RealtimeEventIdentity identity, RealtimeAudioConfig? audio, long size)
@@ -301,19 +375,52 @@ internal sealed class XaiRealtimeSession : IRealtimeVoiceSession
         if (_outputs.TryGetValue(key, out Output? output)) return output;
         if (identity.ResponseId is null) throw XaiRealtimeProtocol.Malformed();
         long size = StringSize(identity.ResponseId) + StringSize(identity.ItemId) + 32;
-        if (_outputs.Count + _responses.Count >= _limits.MaximumBufferedEvents || !FitsMetadata(size)) throw XaiRealtimeProtocol.Capacity();
-        _responses.TryGetValue(identity.ResponseId, out RealtimeAudioConfig? audio);
+        lock (_gate)
+        {
+            if (_outputs.Count + _responses.Count >= _limits.MaximumBufferedEvents || !FitsMetadata(size)) throw XaiRealtimeProtocol.Capacity();
+            _responses.TryGetValue(identity.ResponseId, out RealtimeAudioConfig? audio);
             output = new(identity with { EventId = null }, audio, size); _outputs.Add(key, output); _pendingMetadata += size; return output;
+        }
     }
     private static long ArtifactSize(RealtimeAudioArtifact artifact) => StringSize(artifact.Resource.Reference.WorkspaceId) + StringSize(artifact.Resource.Reference.Id)
         + StringSize(artifact.Resource.SessionId) + StringSize(artifact.Resource.FileName) + StringSize(artifact.Resource.ContentType) + 64;
     private static int StringSize(string? value) => value is null ? 0 : Encoding.UTF8.GetByteCount(value);
+    private void CheckModelCapacity(string model)
+    {
+        lock (_gate)
+            if (!_attemptedModels.Contains(model) && model != _observedModel
+                && (_attemptedModels.Count >= _limits.MaximumBufferedEvents || !FitsMetadata(StringSize(model)))) throw XaiRealtimeProtocol.Capacity();
+    }
+    private void AttemptModel(string model)
+    {
+        bool invalidate; RealtimeConversationReference? resumed; RealtimeConversationReference? conversation;
+        lock (_gate)
+        {
+            CheckModelCapacity(model);
+            invalidate = model != _routingModel;
+            if (invalidate)
+            {
+                _routingModel = model; _routingChanged = true;
+                if (model != _observedModel && _attemptedModels.Add(model)) _attemptedModelBytes += StringSize(model);
+            }
+            resumed = _resumptionReceipt; conversation = _conversation;
+        }
+        if (invalidate)
+        {
+            if (resumed is not null) _invalidateReceipt!(resumed);
+            if (conversation is not null) _invalidateReceipt!(conversation);
+        }
+    }
     private bool FitsMetadata(long additional)
     {
-        lock (_gate) { return additional <= _limits.MaximumBufferedPayloadBytes
+        lock (_gate)
+        {
+            return additional <= _limits.MaximumBufferedPayloadBytes
             && _pendingMetadata <= _limits.MaximumBufferedPayloadBytes - additional
             && _committedBytes <= _limits.MaximumBufferedPayloadBytes - additional - _pendingMetadata
-            && _buffered <= _limits.MaximumBufferedPayloadBytes - additional - _pendingMetadata - _committedBytes; }
+            && _attemptedModelBytes <= _limits.MaximumBufferedPayloadBytes - additional - _pendingMetadata - _committedBytes
+            && _buffered <= _limits.MaximumBufferedPayloadBytes - additional - _pendingMetadata - _committedBytes - _attemptedModelBytes;
+        }
     }
     private async Task PublishAsync(RealtimeEvent observation, long size, CancellationToken token)
     {
@@ -321,8 +428,13 @@ internal sealed class XaiRealtimeSession : IRealtimeVoiceSession
         while (true)
         {
             Task wait;
-            lock (_gate) { if (_pendingMetadata <= _limits.MaximumBufferedPayloadBytes - size
-                && _buffered <= _limits.MaximumBufferedPayloadBytes - size - _pendingMetadata) { _buffered += size; break; } wait = _space.Task; }
+            lock (_gate)
+            {
+                if (_pendingMetadata > _limits.MaximumBufferedPayloadBytes - size
+                    || _attemptedModelBytes > _limits.MaximumBufferedPayloadBytes - size - _pendingMetadata) throw XaiRealtimeProtocol.Capacity();
+                if (_buffered <= _limits.MaximumBufferedPayloadBytes - size - _pendingMetadata - _attemptedModelBytes) { _buffered += size; break; }
+                wait = _space.Task;
+            }
             await wait.WaitAsync(token).ConfigureAwait(false); Fence(token);
         }
         try { await _events.Writer.WriteAsync((observation, size), token).ConfigureAwait(false); }
@@ -345,14 +457,15 @@ internal sealed class XaiRealtimeSession : IRealtimeVoiceSession
         return _lifetime.RetireAsync(async () =>
         {
             await _receiver.ConfigureAwait(false);
-            _resources = null; _issue = null; _observeReceipt = null; _resumptionReceipt = null; _secrets = null;
+            _resources = null; _issue = null; _observeReceipt = null; _invalidateReceipt = null; _resumptionReceipt = null; _secrets = null;
             WebSocket? socket = _socket; _socket = null;
             try { socket?.Dispose(); } catch (Exception error) { _cleanup.Record(XaiRealtimeProvider.Cleanup(error, socket!)); }
             _send.Dispose();
-            _responses.Clear(); _outputs.Clear(); _input = null; _turn = null; _observedOutput = null;
+            _responses.Clear(); _outputs.Clear(); _attemptedModels.Clear(); _input = null; _turn = null; _observedOutput = null;
             var failures = new List<Exception>();
             if (_terminalResource is { } terminal) failures.Add(terminal);
-            try { await _cleanup.ReleaseAsync().ConfigureAwait(false); } catch (Exception error)
+            try { await _cleanup.ReleaseAsync().ConfigureAwait(false); }
+            catch (Exception error)
             { AddUnseen(failures, error); }
             XaiRealtimeProvider.Throw(failures);
         });

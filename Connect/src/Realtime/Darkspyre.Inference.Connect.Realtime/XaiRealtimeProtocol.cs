@@ -83,7 +83,7 @@ internal static class XaiRealtimeProtocol
         if (audio is null) return;
         if (!Enum.IsDefined(audio.Encoding) || audio.Transport is { } transport && !Enum.IsDefined(transport)) throw Invalid();
         if (audio.SampleRate is { } rate && (audio.Encoding switch
-            { RealtimeAudioEncoding.Pcm16LittleEndian => !Rates.Contains(rate), RealtimeAudioEncoding.Opus => rate != 24000, _ => rate != 8000 })) throw Invalid();
+        { RealtimeAudioEncoding.Pcm16LittleEndian => !Rates.Contains(rate), RealtimeAudioEncoding.Opus => rate != 24000, _ => rate != 8000 })) throw Invalid();
     }
 
     internal static async Task<byte[]> UpdateAsync(RealtimeSessionConfig config, Action fence, CancellationToken token, Action<string>? protect = null)
@@ -206,7 +206,7 @@ internal static class XaiRealtimeProtocol
                 }).ToArray()
             },
             RealtimeFunctionCallItem call when !string.IsNullOrWhiteSpace(call.Name) && IsArguments(call.ArgumentsJson) => call,
-            RealtimeFunctionOutputItem output => output with { Output = ManagedAgentContext.CopyOutput(output.Output) },
+            RealtimeFunctionOutputItem output => output with { Output = XaiRealtimeToolOutput.Snapshot(output.Output) },
             XaiRealtimeForceMessageItem force when force.Id is null => force,
             _ => throw Invalid()
         };
@@ -214,7 +214,7 @@ internal static class XaiRealtimeProtocol
     private static bool IsArguments(string? arguments)
     {
         if (arguments is null) return false;
-        try { using var document = JsonDocument.Parse(arguments); return true; }
+        try { using var document = JsonDocument.Parse(arguments); return document.RootElement.ValueKind == JsonValueKind.Object; }
         catch (JsonException) { return false; }
     }
     internal static byte[] ItemMessage(RealtimeConversationItem item, string? previous, string? output = null) => Message("conversation.item.create", writer =>

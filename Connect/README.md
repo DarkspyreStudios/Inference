@@ -2395,7 +2395,7 @@ Required JSON member presence remains distinct from its nullable value. Audio co
 unknown versus empty bytes and an actual transcript; text also carries an optional actual
 transcript. Audio deltas still require non-null bytes. These observations do not authorize sending
 incomplete history: an implemented adapter must reject missing outgoing text/audio or function
-name/JSON arguments before effects. Transcript text does not substitute for missing audio bytes.
+name/JSON-object arguments before effects. Transcript text does not substitute for missing audio bytes.
 Session events preserve optional observed modalities, and item events preserve raw provider status.
 `RealtimeHostedObservationEvent` carries partial hosted observations without fabricating function
 call names, arguments, client execution or completion. Its argument-final flag is independent of
@@ -2417,15 +2417,47 @@ ConnectRealtimeJson getters, and Common owns the exact WebSearch location getter
 Response and error events carry nullable ordered `AudioArtifacts` and raw `ProviderStatus`.
 Each `RealtimeAudioArtifact` preserves the actual output identity, committed descriptor,
 optional observed audio configuration and actual selection version. Null differs from an
-observed empty list. These data contracts do not implement output staging or an xAI adapter;
+observed empty list. The data contracts alone do not stage audio;
 `RealtimeAudioDoneEvent` remains a separate native observation without a resource receipt.
+
+`XaiRealtimeProvider` implements the explicit xAI WebSocket command and observation route but is
+not registered by `AddRealtimeConnect()`. It borrows HTTP and the selected same-access binding.
+Opening acquires one immutable OAuth connection snapshot and validates controls, headers,
+resumption evidence and optional workspace scope before opening the socket. OAuth WebSocket
+acceptance and actual provider/model readiness remain unqualified. A returned session owns its
+socket, receive task and ordered command sends. Provider retirement does not dispose returned
+sessions or borrowed collaborators.
+
+Each command enters the session lifetime and freezes caller bytes and structured data before
+waiting for the send gate. Resource and authorization callbacks run in the serialized command
+stage. Command completion means local send completion, not provider acknowledgment. Commands
+do not wait for Events. The single Events consumer reads a bounded event/payload feed; retirement
+interrupts backpressure and drains admitted sends, receive work and resource callbacks.
+Dispatched send failure ends unsafe framing without reconnecting or replaying commands.
+
+Explicit `session.update` model selectors follow the published WebSocket schema. An attempted
+routing change invalidates the original opening receipt proof before acknowledgment, including
+receipts issued afterward. A bounded set of attempted selectors classifies subsequent actual
+model observations as caller-requested. It does not establish acknowledgment order or command
+success. Requested models never substitute for actual model observations. Original same-issuer
+receipt objects can reopen under matching binding/version/endpoint/routing proof with unknown
+model observation. Imported or cloned receipts refuse before effects when this owner lacks
+actual compatible model/account evidence.
+
+Named tool documents use the shared scoped reader and once-only borrowed-content handling.
+Audio outputs use the shared speech writer; terminal publication carries actual committed
+descriptors and selection versions. Truncate and delete do not mutate immutable workspace bytes.
+Committed artifacts remain retained when terminal publication fails. The current runtime failure
+contracts do not expose their complete ordered artifact graph if the event cannot be published;
+the adapter remains unregistered. Owned cleanup failures retain their actual refused owners and
+the same retirement outcome. Healthy borrowed references detach after drain.
 
 `CreateSettingsManager(target)` borrows the conditional commit target. Setup preserves every typed
 session default, separates protected header edits and removes live authorization from saved data.
 Capability inspection does not prove authentication or session readiness. Manager retirement
 fences new operations, drains admitted work and detaches borrowed collaborators. An admitted Save
-retains its actual committed or uncertain outcome. The real xAI socket protocol, native resumption
-and resource/tool materialization remain unimplemented under DSA-131.
+retains its actual committed or uncertain outcome. Capability inspection and source compilation
+do not qualify OAuth, remote resumption, model mutation or provider execution.
 
 ## Account usage
 

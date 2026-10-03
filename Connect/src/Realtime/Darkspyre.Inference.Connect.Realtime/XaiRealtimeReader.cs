@@ -40,55 +40,78 @@ internal static class XaiRealtimeReader
     }
     internal static RealtimeEvent? Parse(JsonElement root)
     {
-        string type = Required(root, "type"); RealtimeEventIdentity identity = Identity(root);
+        string type = Required(root, "type");
         switch (type)
         {
-            case "session.created": case "session.updated":
+            case "session.created":
+            case "session.updated":
                 JsonElement session = Object(root, "session");
-                return new RealtimeSessionEvent(identity, type, String(session, "id"), Config(session)) { Modalities = Modalities(session, "modalities") };
-            case "input_audio_buffer.speech_started": case "input_audio_buffer.speech_stopped":
-                return new RealtimeInputSpeechEvent(identity, type, Milliseconds(root, "audio_start_ms"), Milliseconds(root, "audio_end_ms"));
-            case "input_audio_buffer.committed": case "input_audio_buffer.cleared": case "input_audio_buffer.timeout_triggered":
-                return new RealtimeInputBufferEvent(identity, type, String(root, "previous_item_id"));
-            case "conversation.item.added": case "conversation.item.created": case "response.output_item.added": case "response.output_item.done":
+                return new RealtimeSessionEvent(Identity(root), type, String(session, "id"), Config(session)) { Modalities = Modalities(session, "modalities") };
+            case "input_audio_buffer.speech_started":
+            case "input_audio_buffer.speech_stopped":
+                return new RealtimeInputSpeechEvent(Identity(root), type, Milliseconds(root, "audio_start_ms"), Milliseconds(root, "audio_end_ms"));
+            case "input_audio_buffer.committed":
+            case "input_audio_buffer.cleared":
+            case "input_audio_buffer.timeout_triggered":
+                return new RealtimeInputBufferEvent(Identity(root), type, String(root, "previous_item_id"));
+            case "conversation.item.added":
+            case "conversation.item.created":
+            case "response.output_item.added":
+            case "response.output_item.done":
                 JsonElement item = Object(root, "item");
+                var identity = Identity(root);
                 return new RealtimeItemEvent(identity with { ItemId = identity.ItemId ?? String(item, "id") }, type, Item(item), String(root, "previous_item_id")) { ProviderStatus = String(item, "status") };
-            case "conversation.item.deleted": case "conversation.item.truncated":
-                return new RealtimeItemEvent(identity, type, null, null, Milliseconds(root, "audio_end_ms"), String(root, "transcript"));
-            case "conversation.item.input_audio_transcription.updated": case "conversation.item.input_audio_transcription.completed":
-                return new RealtimeTranscriptEvent(identity, Required(root, "transcript"), true, true, type.EndsWith("completed", StringComparison.Ordinal));
-            case "response.created": case "response.done":
+            case "conversation.item.deleted":
+            case "conversation.item.truncated":
+                return new RealtimeItemEvent(Identity(root), type, null, null, Milliseconds(root, "audio_end_ms"), String(root, "transcript"));
+            case "conversation.item.input_audio_transcription.updated":
+            case "conversation.item.input_audio_transcription.completed":
+                return new RealtimeTranscriptEvent(Identity(root), Required(root, "transcript"), true, true, type.EndsWith("completed", StringComparison.Ordinal));
+            case "response.created":
+            case "response.done":
                 JsonElement response = Object(root, "response"); string? status = String(response, "status");
                 LlmUsage? usage = null;
                 if (OptionalObject(response, "usage") is { } observed)
                     usage = new LlmUsage(Count(observed, "input_tokens"), Count(observed, "output_tokens"), Count(observed, "total_tokens"));
-                return new RealtimeResponseEvent(identity with { ResponseId = String(response, "id") ?? identity.ResponseId }, type,
+                var responseIdentity = Identity(root);
+                return new RealtimeResponseEvent(responseIdentity with { ResponseId = String(response, "id") ?? responseIdentity.ResponseId }, type,
                     status switch { "completed" => LlmCompletionStatus.Completed, "incomplete" => LlmCompletionStatus.Incomplete, "failed" => LlmCompletionStatus.Failed, _ => null },
-                    usage, Map(response, "metadata")) { ProviderStatus = status };
-            case "response.content_part.added": case "response.content_part.done":
-                return new RealtimeContentPartEvent(identity, type, Content(Object(root, "part")));
-            case "response.output_audio.delta": case "response.audio.delta":
-                return new RealtimeAudioDeltaEvent(identity, Audio(root, "delta"));
+                    usage, Map(response, "metadata"))
+                { ProviderStatus = status };
+            case "response.content_part.added":
+            case "response.content_part.done":
+                return new RealtimeContentPartEvent(Identity(root), type, Content(Object(root, "part")));
+            case "response.output_audio.delta":
+            case "response.audio.delta":
+                return new RealtimeAudioDeltaEvent(Identity(root), Audio(root, "delta"));
             case "response.output_audio.done":
-                return new RealtimeAudioDoneEvent(identity);
-            case "response.output_audio_transcript.delta": case "response.output_audio_transcript.done":
+                return new RealtimeAudioDoneEvent(Identity(root));
+            case "response.output_audio_transcript.delta":
+            case "response.output_audio_transcript.done":
                 bool done = type.EndsWith("done", StringComparison.Ordinal);
-                return new RealtimeTranscriptEvent(identity, Required(root, done ? "transcript" : "delta"), false, done, done);
-            case "response.text.delta": case "response.output_text.delta":
-                return new RealtimeTextDeltaEvent(identity, Required(root, "delta"));
-            case "response.function_call_arguments.delta": case "response.function_call_arguments.done":
+                return new RealtimeTranscriptEvent(Identity(root), Required(root, done ? "transcript" : "delta"), false, done, done);
+            case "response.text.delta":
+            case "response.output_text.delta":
+                return new RealtimeTextDeltaEvent(Identity(root), Required(root, "delta"));
+            case "response.function_call_arguments.delta":
+            case "response.function_call_arguments.done":
                 bool final = type.EndsWith("done", StringComparison.Ordinal);
-                return new RealtimeFunctionArgumentsEvent(identity, String(root, "call_id"), String(root, "name"), Required(root, final ? "arguments" : "delta"), final);
-            case "mcp_list_tools.in_progress": case "mcp_list_tools.completed": case "mcp_list_tools.failed":
-            case "response.mcp_call.in_progress": case "response.mcp_call.completed": case "response.mcp_call.failed":
-                return new RealtimeHostedObservationEvent(identity, type, LlmHostedToolKind.RemoteMcp, Error: Error(root, "error"));
-            case "response.mcp_call_arguments.delta": case "response.mcp_call_arguments.done":
+                return new RealtimeFunctionArgumentsEvent(Identity(root), String(root, "call_id"), String(root, "name"), Required(root, final ? "arguments" : "delta"), final);
+            case "mcp_list_tools.in_progress":
+            case "mcp_list_tools.completed":
+            case "mcp_list_tools.failed":
+            case "response.mcp_call.in_progress":
+            case "response.mcp_call.completed":
+            case "response.mcp_call.failed":
+                return new RealtimeHostedObservationEvent(Identity(root), type, LlmHostedToolKind.RemoteMcp, Error: Error(root, "error"));
+            case "response.mcp_call_arguments.delta":
+            case "response.mcp_call_arguments.done":
                 bool argumentsFinal = type.EndsWith("done", StringComparison.Ordinal);
-                return new RealtimeHostedObservationEvent(identity, type, LlmHostedToolKind.RemoteMcp, String(root, "call_id"), String(root, "name"),
+                return new RealtimeHostedObservationEvent(Identity(root), type, LlmHostedToolKind.RemoteMcp, String(root, "call_id"), String(root, "name"),
                     Required(root, argumentsFinal ? "arguments" : "delta"), argumentsFinal);
             case "error":
                 JsonElement error = Object(root, "error");
-                return new RealtimeErrorEvent(identity, new(InferenceFailureCode.ExecutionFailed, SafeCode(String(error, "code")), "xAI realtime reported a failure."),
+                return new RealtimeErrorEvent(Identity(root), new(InferenceFailureCode.ExecutionFailed, SafeCode(String(error, "code")), "xAI realtime reported a failure."),
                     SafeCode(String(error, "param")), String(error, "event_id"));
             default: return null;
         }
@@ -215,9 +238,13 @@ internal static class XaiRealtimeReader
             ? String(turn, "type") switch { null => new RealtimeManualTurnDetection(), "server_vad" => new RealtimeServerVad(IdleTimeout: Milliseconds(turn, "idle_timeout_ms")), _ => throw XaiRealtimeProtocol.Malformed() } : null;
         RealtimeSessionConfig result = new()
         {
-            ModelId = String(session, "model"), Instructions = String(session, "instructions"), Voice = String(session, "voice"),
+            ModelId = String(session, "model"),
+            Instructions = String(session, "instructions"),
+            Voice = String(session, "voice"),
             ReasoningEffort = OptionalObject(session, "reasoning") is { } reasoning ? String(reasoning, "effort") switch { null => null, "none" => LlmReasoningLevel.None, "high" => LlmReasoningLevel.High, _ => throw XaiRealtimeProtocol.Malformed() } : null,
-            TurnDetection = detection, Tools = hasTools ? functions.ToArray() : null, HostedTools = hasTools ? hosted.ToArray() : null,
+            TurnDetection = detection,
+            Tools = hasTools ? functions.ToArray() : null,
+            HostedTools = hasTools ? hosted.ToArray() : null,
             Resumption = OptionalObject(session, "resumption") is { } resumption && Boolean(resumption, "enabled") is { } enabled ? new(enabled) : null,
             ProviderOptions = Value(session, "replace", out _) ? new XaiRealtimeOptions(Map(session, "replace")) : null
         };
@@ -225,12 +252,16 @@ internal static class XaiRealtimeReader
         {
             var input = OptionalObject(audio, "input"); var transcription = input is { } value ? OptionalObject(value, "transcription") : null;
             string? transcriptionModel = transcription is { } model ? String(model, "model") : null;
-            result = result with { InputAudio = AudioConfig(audio, "input"), OutputAudio = AudioConfig(audio, "output"),
+            result = result with
+            {
+                InputAudio = AudioConfig(audio, "input"),
+                OutputAudio = AudioConfig(audio, "output"),
                 TranscriptionLanguage = transcription is { } t ? String(t, "language_hint") : null,
                 TranscriptionKeyTerms = transcription is { } terms ? Strings(terms, "keyterms") : null,
                 ProviderOptions = result.ProviderOptions is null && transcriptionModel is null ? null
                     : new XaiRealtimeOptions((result.ProviderOptions as XaiRealtimeOptions)?.Replace) { TranscriptionModel = transcriptionModel },
-                OutputSpeed = OptionalObject(audio, "output") is { } output && Value(output, "speed", out JsonElement speed) ? speed.GetDouble() : null };
+                OutputSpeed = OptionalObject(audio, "output") is { } output && Value(output, "speed", out JsonElement speed) ? speed.GetDouble() : null
+            };
         }
         return result;
     }
