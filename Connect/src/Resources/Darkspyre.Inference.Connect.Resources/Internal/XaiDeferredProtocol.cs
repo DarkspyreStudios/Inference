@@ -1,8 +1,10 @@
 using System.Diagnostics.CodeAnalysis;
+using System.Net;
 using System.Runtime.ExceptionServices;
 using System.Text.Json;
 using Darkspyre.Inference.Common.LLM;
 using Darkspyre.Inference.Common.Media;
+using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Common.Resources;
 using Darkspyre.Inference.Connect.LLM;
 using Darkspyre.Inference.Connect.LLM.Internal;
@@ -14,6 +16,71 @@ namespace Darkspyre.Inference.Connect.Resources.Internal;
 internal sealed class XaiDeferredProtocol(HttpClient http, LlmConnection connection, string connectionId,
     XaiResourceHttp.Observation observation, Action fence)
 {
+    internal static void ValidateCompletion(LlmDeferredCompletion completion)
+    {
+        ArgumentNullException.ThrowIfNull(completion);
+        XaiFileRequestData.Identity(completion.RequestId);
+        BatchData.Scope(completion.Scope);
+    }
+
+    internal static void ValidateConnection(LlmConnection selected, LlmDeferredCompletion completion)
+    {
+        XaiFileRequestData.Connection(selected);
+        if (completion.Scope.Owner != ProviderHttp.BuildUri(selected, "chat/deferred-completion").AbsoluteUri)
+            throw new ArgumentException("The deferred receipt contradicts the selected fixed route.", nameof(completion));
+        // Scope.Identity is descriptive. The selected token authorizes this single consume-once GET.
+    }
+
+    internal async Task<LlmDeferredResult> GetAsync(LlmDeferredCompletion completion, XaiFileClient files,
+        IInferenceResourceAccess? resources, CancellationToken token)
+    {
+        var codec = new XaiDeferredChatCodec(http);
+        var exchange = new XaiResourceHttp(http, connection, observation, fence);
+        ChatCompletionsLlmClientBase.ChatCompletionResponse? decoded = await exchange.ExchangeResponseAsync(
+            HttpMethod.Get, "chat/deferred-completion/" + Uri.EscapeDataString(completion.RequestId), null, false,
+            async (response, current) =>
+            {
+                if (response.StatusCode == HttpStatusCode.Accepted)
+                {
+                    observation.ObservedDeferredResult = new LlmDeferredPending();
+                    fence();
+                    return null;
+                }
+                if (response.StatusCode != HttpStatusCode.OK)
+                    throw new InferenceException(InferenceFailureCode.ProtocolFailure, "xAI returned an unexpected deferred response status.");
+                string body = await SdkHttpConsumption.ReadAsStringAsync(response.Content, current).ConfigureAwait(false);
+                fence();
+                var actual = codec.DecodeCompleteResponse(body, response, connection);
+                observation.ObservedDeferredResult = new LlmDeferredCompleted(actual.Result);
+                fence();
+                return actual;
+            }, token).ConfigureAwait(false);
+        fence();
+        if (decoded is null) return new LlmDeferredPending();
+        if (decoded.OutputFiles.Count == 0) return new LlmDeferredCompleted(decoded.Result);
+        if (resources is null)
+            throw new ArgumentException("Generated deferred artifacts require explicit resource access.", nameof(resources));
+        // Validate every known ID before the first resource callback or file transfer.
+        foreach (var file in decoded.OutputFiles) XaiFileRequestData.Identity(file.Id);
+        fence();
+        InferenceResourceSelectionVersion scope = await SpeechResourceWriter.ReadScopeAsync(resources, fence, token).ConfigureAwait(false);
+        fence();
+        var receipts = new List<InferenceResourceCommitResult>(decoded.OutputFiles.Count);
+        LlmChatResult result = decoded.Result;
+        foreach (var file in decoded.OutputFiles)
+        {
+            fence();
+            var writer = new XaiGeneratedFileWriter(resources, scope, file.Name, fence, observation);
+            InferenceResourceCommitResult receipt = await writer.MaterializeAsync(files, connection, file.Id, token).ConfigureAwait(false);
+            receipts.Add(receipt);
+            result = decoded.Result with { GeneratedResources = receipts };
+            observation.ObservedDeferredResult = new LlmDeferredCompleted(result);
+            fence();
+        }
+        fence();
+        return new LlmDeferredCompleted(result);
+    }
+
     [SuppressMessage("Design", "CA1031", Justification = "Admitted preparation attempts cleanup after operation failure and retains actual partial upload effects.")]
     internal async Task<LlmDeferredCompletion> SubmitAsync(LlmChatRequest request, XaiFileClient? files, CancellationToken token)
     {

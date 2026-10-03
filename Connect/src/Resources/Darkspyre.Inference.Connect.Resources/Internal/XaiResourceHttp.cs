@@ -14,12 +14,19 @@ namespace Darkspyre.Inference.Connect.Resources.Internal;
 /// <summary>The single admitted batch/deferred HTTP exchange; borrows the selected HTTP owner.</summary>
 internal sealed class XaiResourceHttp(HttpClient http, LlmConnection connection, XaiResourceHttp.Observation observation, Action fence)
 {
-    private readonly LlmCredential? _credential = LlmCredential.Parse(connection.Credential);
-    private readonly string[] _secrets = connection.AdditionalHeaders.Values.ToArray();
+    internal Task<T> ExchangeAsync<T>(HttpMethod method, string path, JsonObject? payload, bool mutation,
+        Func<string, HttpResponseMessage, T> parse, CancellationToken token)
+        => ExchangeResponseAsync(method, path, payload, mutation, async (response, current) =>
+        {
+            string body = await SdkHttpConsumption.ReadAsStringAsync(response.Content, current).ConfigureAwait(false);
+            fence();
+            try { return parse(body, response); }
+            catch (JsonException error) { throw new ProtocolFailure(error); }
+        }, token);
 
     [SuppressMessage("Design", "CA1031", Justification = "Owned request and response cleanup preserves independent failures and actual refused owners.")]
-    internal async Task<T> ExchangeAsync<T>(HttpMethod method, string path, JsonObject? payload, bool mutation,
-        Func<string, HttpResponseMessage, T> parse, CancellationToken token)
+    internal async Task<T> ExchangeResponseAsync<T>(HttpMethod method, string path, JsonObject? payload, bool mutation,
+        Func<HttpResponseMessage, CancellationToken, Task<T>> read, CancellationToken token)
     {
         observation.BeginStage();
         HttpRequestMessage? request = null;
@@ -39,19 +46,15 @@ internal sealed class XaiResourceHttp(HttpClient http, LlmConnection connection,
                 else observation.MutationDispatched = true;
             }
             observation.RequestDispatched = true;
+            if (observation.Operation == LlmResourceOperation.GetDeferred) observation.RetrievalDispatched = true;
             response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token).ConfigureAwait(false);
-            observation.ResponseObserved = true;
-            observation.StatusCode = (int)response.StatusCode;
-            observation.RequestId = ProviderHttp.ReadRequestId(response) is { } id
-                ? SecretRedactor.Sanitize(id, _credential, _secrets) : null;
+            observation.ObserveResponse(response, connection);
             fence();
-            await XaiErrorClassifier.ThrowIfUnsuccessfulAsync(response, _credential, _secrets, token,
+            await XaiErrorClassifier.ThrowIfUnsuccessfulAsync(response, LlmCredential.Parse(connection.Credential),
+                connection.AdditionalHeaders.Values.ToArray(), token,
                 diagnosticBody: false).ConfigureAwait(false);
             fence();
-            string body = await SdkHttpConsumption.ReadAsStringAsync(response.Content, token).ConfigureAwait(false);
-            fence();
-            try { result = parse(body, response); }
-            catch (JsonException error) { throw new ProtocolFailure(error); }
+            result = await read(response, token).ConfigureAwait(false);
             if (result is LlmBatch batch) observation.ObservedBatch = batch;
             if (result is LlmDeferredCompletion deferred) observation.ObservedDeferred = deferred;
             fence();
@@ -76,7 +79,8 @@ internal sealed class XaiResourceHttp(HttpClient http, LlmConnection connection,
     {
         if (error is ExchangeFailure exchange)
             return new AggregateException("The resource operation and owned cleanup failed.",
-                new[] { OperationFailure(exchange.InnerExceptions[0], observation) }.Concat(exchange.InnerExceptions.Skip(1)));
+                new[] { OperationFailure(exchange.InnerExceptions[0], observation) }
+                    .Concat(exchange.InnerExceptions.Skip(1).Select(cleanup => SafeFailure(cleanup, observation, forceSafe: true))));
         if (!observation.HasEffects) return error;
         Exception safe = SafeFailure(error, observation);
         return safe is OperationCanceledException canceled
@@ -156,9 +160,11 @@ internal sealed class XaiResourceHttp(HttpClient http, LlmConnection connection,
     internal sealed class Observation(LlmResourceOperation operation, LlmBatch? selected = null)
     {
         private readonly List<LlmResourceInputUploadObservation> _uploads = [];
+        private readonly List<InferenceResourceCommitResult> _commits = [];
         internal LlmResourceOperation Operation { get; } = operation;
         internal bool MutationDispatched { get; set; }
         internal bool SubmissionDispatched { get; set; }
+        internal bool RetrievalDispatched { get; set; }
         internal bool RequestDispatched { get; set; }
         internal bool ResponseObserved { get; set; }
         internal int? StatusCode { get; set; }
@@ -166,8 +172,21 @@ internal sealed class XaiResourceHttp(HttpClient http, LlmConnection connection,
         internal LlmBatch? SelectedBatch { get; set; } = selected;
         internal LlmBatch? ObservedBatch { get; set; }
         internal LlmDeferredCompletion? ObservedDeferred { get; set; }
+        internal LlmDeferredCompletion? SelectedDeferred { get; set; }
+        internal LlmDeferredResult? ObservedDeferredResult { get; set; }
         internal InferenceResourceOperationFailure? ResourceFailure { get; set; }
-        internal bool HasEffects => RequestDispatched || MutationDispatched || SubmissionDispatched || _uploads.Count != 0;
+        internal bool HasEffects => RequestDispatched || MutationDispatched || SubmissionDispatched || RetrievalDispatched || _uploads.Count != 0 || _commits.Count != 0;
+
+        internal void ObserveResponse(HttpResponseMessage response, LlmConnection selected)
+        {
+            ResponseObserved = true;
+            StatusCode = (int)response.StatusCode;
+            RequestId = ProviderHttp.ReadRequestId(response) is { } id
+                ? SecretRedactor.Sanitize(id, LlmCredential.Parse(selected.Credential), selected.AdditionalHeaders.Values) : null;
+        }
+
+        internal void ObserveCommit(InferenceResourceCommitResult receipt)
+            => _commits.Add(ResourceObservationData.CopyCommits([receipt])[0]);
 
         internal void ObserveUpload(InferenceResourceScope scope, InferenceResourceReference source, LlmProviderFile? file)
         {
@@ -190,11 +209,14 @@ internal sealed class XaiResourceHttp(HttpClient http, LlmConnection connection,
             ObservedBatch = null;
         }
 
-        internal LlmResourceOperationObservation Snapshot() => new(Operation, MutationDispatched, SubmissionDispatched, false, ResponseObserved)
+        internal LlmResourceOperationObservation Snapshot() => new(Operation, MutationDispatched, SubmissionDispatched, RetrievalDispatched, ResponseObserved)
         {
             SelectedBatch = SelectedBatch,
             ObservedBatch = ObservedBatch,
             ObservedDeferred = ObservedDeferred,
+            SelectedDeferred = SelectedDeferred,
+            ObservedDeferredResult = ObservedDeferredResult,
+            ObservedCommits = _commits,
             InputUploads = _uploads,
             ResourceFailure = ResourceFailure,
             HttpStatusCode = StatusCode,

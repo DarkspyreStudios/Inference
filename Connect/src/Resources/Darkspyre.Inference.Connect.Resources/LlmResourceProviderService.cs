@@ -128,9 +128,51 @@ public sealed class LlmResourceProviderService : ILlmBatchClient, IDisposable, I
         }
     }
 
-    public Task<LlmDeferredResult> GetDeferredAsync(string connectionId, LlmDeferredCompletion completion,
+    [SuppressMessage("Design", "CA1031", Justification = "Consume-once retrieval retains actual response, partial commit and independent cleanup facts without retry.")]
+    public async Task<LlmDeferredResult> GetDeferredAsync(string connectionId, LlmDeferredCompletion completion,
         IInferenceResourceAccess? resources = null, CancellationToken cancellationToken = default)
-        => Task.FromException<LlmDeferredResult>(Unavailable(cancellationToken));
+    {
+        using LlmOperationLifetime.Lease operation = _lifetime.Enter(cancellationToken);
+        CancellationToken token = operation.Token;
+        void Fence()
+        {
+            token.ThrowIfCancellationRequested();
+            try { _lifetime.ThrowIfStopping(); }
+            catch (ObjectDisposedException error)
+            { throw new OperationCanceledException("The resource facade is stopping.", error, token); }
+        }
+        ArgumentException.ThrowIfNullOrWhiteSpace(connectionId);
+        XaiDeferredProtocol.ValidateCompletion(completion);
+        LlmDeferredCompletion entered = completion with { Scope = completion.Scope with { } };
+        Fence();
+        LlmProviderService? core = _providerService;
+        if (core is null || !core.SupportsXaiSnapshot)
+            throw new NotSupportedException("The resource facade requires an implemented xAI LLM core route.");
+        Fence();
+        var observation = new XaiResourceHttp.Observation(LlmResourceOperation.GetDeferred) { SelectedDeferred = entered };
+        try
+        {
+            LlmConnection snapshot = await _connectionAccess!.AcquireAsync(connectionId, selected =>
+            {
+                Fence();
+                core.ValidateXaiSnapshotRequest(selected, _ => XaiDeferredProtocol.ValidateConnection(selected, entered));
+                Fence();
+            }, token).ConfigureAwait(false);
+            Fence();
+            LlmDeferredResult result = await core.RunXaiSnapshotAsync(snapshot, Fence,
+                (http, selected, ownerFence, innerToken) => core.RunXaiFilesSnapshotAsync(selected, ownerFence,
+                    (files, current, filesFence, filesToken) => new XaiDeferredProtocol(http, current, connectionId, observation, filesFence)
+                        .GetAsync(entered, files, resources, filesToken), innerToken), token).ConfigureAwait(false);
+            Fence();
+            return result;
+        }
+        catch (Exception error)
+        {
+            Exception reported = XaiResourceHttp.OperationFailure(error, observation);
+            _cleanup.Record(reported);
+            throw reported;
+        }
+    }
 
     public Task<LlmBatch> CreateFromRequestsAsync(string connectionId, string name,
         IReadOnlyList<LlmBatchRequest> requests, IInferenceResourceAccess? resources = null,
