@@ -50,6 +50,8 @@ creation, incremental requests, one-page queries/results, cancellation, JSONL cr
 submission/retrieval. Its closed operation union carries actual chat, image/workflow and video
 requests. Results retain caller `CustomId` correlation, native video snapshots and committed caller
 resource descriptors. Counts and timestamps remain nullable observations; absent counts are not zero.
+`GeneratedImage.Selection` and `MaterializedVideoResult.Selection` carry optional full post-commit
+membership receipts. An absent receipt remains unknown; neither result reads current membership.
 Media materialization budgets are explicit positive caller policy, not provider defaults. Page limits
 retain the caller's raw nullable integer; these data declarations impose no provider paging bounds.
 
@@ -1352,6 +1354,10 @@ resolve credentials, fetch files, group results or evaluate filters.
 The portable image result preserves them in Common provenance. Workflow IDs and versions remain
 workflow selection facts, not model provenance. ComfyUI history currently reports no execution-model
 identity or revision, so both remain null.
+
+Resource-bound generated images carry the validated resource descriptor and full selection receipt
+returned by each output's own commit. Each selection preserves the actual workspace, session, revision
+and ordered membership. The image path does not reread membership or manufacture a selection.
 
 Register the image capability and resolve its provider-neutral transport through
 `ImageProviderService`:

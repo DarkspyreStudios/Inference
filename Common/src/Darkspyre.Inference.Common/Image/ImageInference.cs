@@ -40,6 +40,7 @@ public sealed record GeneratedImage
     public ProviderFileReference? File { get; init; }
 
     public InferenceResourceDescriptor? Resource { get; init; }
+    public InferenceResourceSelection? Selection { get; init; }
 
     public int? Width { get; init; }
 

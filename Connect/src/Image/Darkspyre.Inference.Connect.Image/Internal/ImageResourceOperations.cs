@@ -7,7 +7,7 @@ namespace Darkspyre.Inference.Connect.Image.Internal;
 
 internal static class ImageResourceOperations
 {
-    internal static async Task<InferenceResourceDescriptor> CommitAsync(IInferenceResourceAccess resources,
+    internal static async Task<InferenceResourceCommitResult> CommitAsync(IInferenceResourceAccess resources,
         string? fileName, string? contentType, ReadOnlyMemory<byte> bytes, Action<CancellationToken>? fence = null, CancellationToken token = default)
     {
         string? workspaceId = null;
@@ -20,7 +20,7 @@ internal static class ImageResourceOperations
         long? written = 0;
         InferenceResourceCommitOutcome selectionOutcome = InferenceResourceCommitOutcome.NotAttempted;
         InferenceResourceSelectionVersion? selectionVersion = null;
-        InferenceResourceDescriptor? result = null;
+        InferenceResourceCommitResult? result = null;
         try
         {
             Fence(fence, token);
@@ -61,13 +61,14 @@ internal static class ImageResourceOperations
                 }
             }
             CheckScope();
-            result = committed?.Resource;
-            if (result is null || result.Reference != reference || result.SessionId != sessionId
-                || result.Bytes is { } size && size != written
-                || result.ContentType is { } type && type != contentType
+            InferenceResourceDescriptor? resource = committed?.Resource;
+            if (resource is null || resource.Reference != reference || resource.SessionId != sessionId
+                || resource.Bytes is { } size && size != written
+                || resource.ContentType is { } type && type != contentType
                 || selectionOutcome != InferenceResourceCommitOutcome.Committed) throw Invalid();
-            _ = new InferenceResourceSelection(workspaceId!, sessionId!, committed!.Selection!.Revision, committed.Selection.SelectedResources);
-            if (committed.Selection.SelectedResources.Any(item => string.IsNullOrEmpty(item.Id))) throw Invalid();
+            var selection = new InferenceResourceSelection(workspaceId!, sessionId!, committed!.Selection!.Revision, committed.Selection.SelectedResources);
+            if (selection.SelectedResources.Any(item => string.IsNullOrEmpty(item.Id))) throw Invalid();
+            result = new InferenceResourceCommitResult(resource, selection);
         }
         catch (Exception error)
         {

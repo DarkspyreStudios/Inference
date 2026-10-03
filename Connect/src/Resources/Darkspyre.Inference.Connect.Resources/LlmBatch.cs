@@ -208,6 +208,7 @@ public sealed record LlmMediaMaterializationOptions(long MaximumInlineImageBytes
 public sealed record MaterializedVideoResult(InferenceResourceDescriptor Resource,
     TimeSpan? Duration = null, InferenceProvenance? Provenance = null)
 {
+    public InferenceResourceSelection? Selection { get; init; }
     [JsonRequired]
     public InferenceResourceDescriptor Resource { get; init => field = BatchData.Required(value); } = BatchData.Required(Resource);
     public override string ToString() => "MaterializedVideoResult { <data> }";

@@ -155,11 +155,16 @@ internal sealed class ConnectImageInference : IImageInference, IDisposable, IAsy
                             byte[] bytes = download.Data.ToArray();
                             string? contentType = download.ContentType ?? output.ContentType;
                             InferenceResourceDescriptor? resource = output.Resource;
+                            InferenceResourceSelection? selection = null;
                             if (resources is not null)
-                                resource = await ImageResourceOperations.CommitAsync(resources, output.FileName, contentType, bytes, Fence, lease.Token).ConfigureAwait(false);
+                            {
+                                InferenceResourceCommitResult committed = await ImageResourceOperations.CommitAsync(resources, output.FileName, contentType, bytes, Fence, lease.Token).ConfigureAwait(false);
+                                resource = committed.Resource;
+                                selection = committed.Selection;
+                            }
                             Fence(lease.Token);
                             images.Add(new GeneratedImage
-                            { ContentType = contentType, Data = bytes, Seed = seed, File = output.File, Resource = resource });
+                            { ContentType = contentType, Data = bytes, Seed = seed, File = output.File, Resource = resource, Selection = selection });
                         }
                         Fence(lease.Token);
                         progress?.Report(new(ImageGenerationStage.Completed));
