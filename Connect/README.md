@@ -1946,6 +1946,9 @@ report matches the request. An omitted part never fails the request, the turn or
 changes `IsError`. Connect adds no notice for an omitted part. A host that wants one adds a text part
 and projects again.
 
+The facade checks caller cancellation and facade retirement after each route/model capability
+callback and before publishing the projection report.
+
 ### Continuation state
 
 `LlmChatResult.ContinuationState` is opaque, versioned adapter state. Preserve it unchanged on that

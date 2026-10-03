@@ -980,10 +980,14 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, ILlmFileClie
         ILlmClient client = ClientFor(connection.Transport);
         connection = await AttachCatalogAsync(connectionId, connection, client, cancellationToken);
         LlmProviderCapabilities route = client.GetCapabilities(connection);
+        ThrowIfOperationCanceled(cancellationToken);
         LlmProviderCapabilities model = client.GetCapabilities(connection, modelId);
-        return lane == LlmToolOutputLane.Chat
+        ThrowIfOperationCanceled(cancellationToken);
+        LlmToolOutputProjection projection = lane == LlmToolOutputLane.Chat
             ? ToolOutputProjector.Project(output, route.RichContentSupported, model.RichContentSupported).Report
             : ToolOutputProjector.Project(output, route.Agent.RichContentSupported, model.Agent.RichContentSupported).Report;
+        ThrowIfOperationCanceled(cancellationToken);
+        return projection;
     }
 
     public async Task<LlmProviderCapabilities> GetModelCapabilitiesAsync(
