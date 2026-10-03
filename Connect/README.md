@@ -1446,6 +1446,8 @@ cancellation-callback failures. Disposal releases the borrowed transport map wit
 Runtime authority, bindings, resource handles and binding factories refuse non-null serialization.
 Download bytes reuse Common's exact required-data property converter: explicit JSON null is refused,
 while empty bytes and unknown MIME remain valid observations. This is not a global byte-memory policy.
+Image reference receipts, prepared requests, output receipts and job snapshots use fixed `ToString()`
+labels that omit opaque provider data.
 Workflow selection stores both `ImageWorkflowOrigin` and the exact ID. Host and built-in origins
 remain separate; ComfyUI does not advertise a built-in workflow catalog.
 Owned workflow-origin and selection metadata preserve `Host=0` and `BuiltIn=1` and reject undefined
