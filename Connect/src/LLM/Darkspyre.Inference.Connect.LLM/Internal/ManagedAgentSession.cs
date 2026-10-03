@@ -617,7 +617,7 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
                         }
                     }
                 }
-                catch (LlmProviderException error) when (error.ProviderCode == "context_length_exceeded")
+                catch (LlmProviderException error) when (error.IsContextOverflow)
                 {
                     if (++run.ProviderOverflowCount > 2)
                     {

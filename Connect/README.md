@@ -2196,6 +2196,12 @@ and Vertex Gemini/Claude. SelfHost opens a managed session only after resolving 
 engine/model and checking its requested operation capabilities. Each managed client checks the
 selected model/connection before opening. Anthropic Messages, API-key OpenAI Responses,
 OpenAI-compatible chat and xAI Responses currently have no managed agent client.
+`LlmProviderException.IsContextOverflow` identifies recognized provider input-context failures.
+Adapters classify their own HTTP, stream or typed SDK errors and keep `ProviderCode` unchanged.
+Managed sessions pause on this flag. Responses/Codex, compatible chat, Anthropic Messages,
+Gemini/Vertex, Bedrock Converse and Apple recognize their supported overflow error patterns.
+xAI input overflow raises this failure instead of returning an incomplete completion; output-token
+truncation remains an incomplete completion.
 Each model step permits at most two provider-overflow pauses, including across continued segments.
 A third overflow ends the run with `ProviderFailure` and
 "The context could not be reduced enough for this step." A completed model step resets the count.
