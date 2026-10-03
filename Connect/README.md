@@ -520,9 +520,9 @@ are not provider limits. Session commands complete after ordered transport send,
 acknowledgment or event consumption. One event consumer drains the feed; disposal closes the
 feed before draining admitted work. No automatic replay/reconnect is part of these contracts.
 
-These streaming interfaces are inert declarations. PocketTTS implements neither interface,
-advertises all new capability flags false and leaves unknown rate lists null. `XaiTts` is a
-declared transport identity without a registered provider. `Bind(TtsConnection, XaiFamilyBinding?,
+PocketTTS implements neither streaming interface, advertises all new capability flags false and
+leaves unknown rate lists null. Explicitly composed `XaiTtsProvider` implements REST synthesis and
+reusable streaming sessions; automatic xAI registration remains held. `Bind(TtsConnection, XaiFamilyBinding?,
 IInferenceResourceAccess?)` borrows the entered owners without acquiring credentials or making
 requests. Connection headers are copied, and xAI selection/authorization must match the binding.
 PocketTTS refuses the new xAI authority fields before HTTP; existing static-header workflows
@@ -534,7 +534,37 @@ commits, then release borrowed collaborators without disposing them. Opening set
 owner fence after reading the borrowed setup definition. Late check/test/query results
 cannot verify an edited or retiring draft. Portable changes omit runtime authorization and retain
 protected-header patches separately. Typed xAI setup controls preserve explicit false, zero and
-empty values; these declarations do not register an xAI provider or activate capabilities.
+empty values; setup does not automatically register an xAI provider.
+
+The explicit xAI client acquires one OAuth snapshot per REST operation or stream opening. Voice
+listing requires the binding's optional borrowed LLM facade and uses its selected HTTP/admission
+owner without a second resolve or refresh. Voice observations remain ordered actual provider data,
+not a separate cached model catalog. Without that facade, voice-listing capability is false and the
+operation refuses before resolution or HTTP. REST timestamps preserve graph text and timeline
+pairs; raw responses preserve their observed media type. Speech with no reported model has required
+`Provenance.ModelId = null`, rather than a fabricated model identity.
+
+Streaming commands map `text.delta`, `text.done`, `text.clear` and `session.update`; observations
+preserve actual `audio.delta`, `audio.done`, `audio.clear`, `session.updated` and sanitized errors.
+Resources use one incremental handle per utterance and commit bytes plus selected membership before
+completion publication. Chunks remain transient; clear discards uncommitted staging. The handed-off
+session is independently caller-owned and survives client retirement. Client and session retirement
+fence, cancel, drain and detach borrowed references; genuine refused cleanup owners and failures remain
+retained without retry. The convenience iterator owns its temporary session and input enumerator;
+client retirement closes that session and drains input even while the public iterator is paused.
+The wrapper uses the same bounded event feed. It never disposes the borrowed input enumerable.
+Session retirement closes observations promptly without publishing late completion. Its cached
+retirement result preserves actual late artifact commit/selection facts, including unknown acknowledgment,
+and any independent cleanup refusal. Ordinary receive cancellation remains healthy.
+The convenience result preserves the original resource failures once, including typed cancellation
+from borrowed input; input-only operation failures do not poison client retirement.
+No automatic reconnect/replay occurs. OAuth endpoint acceptance and real
+voice/latency qualification remain open: the guide's latency value 2 is passed through unchanged despite
+the standalone schema's narrower 0/1 declaration. Controlled tests do not qualify live provider access.
+Failed BCL WebSocket upgrades use only collected actual HTTP status: 401/402 retain the shared
+authentication/entitlement status rules, while 400/403 cannot imply hidden body-dependent facts.
+Unobserved status remains a safe transport failure. Raw bodies, headers and transport diagnostics
+are not public errors; original transport evidence remains internal. Cancellation is not reclassified.
 
 `TtsProviderService` supports synchronous and asynchronous disposal. Retirement fences new facade
 calls, drains admitted synchronous setup/binding callbacks, then releases borrowed provider references.

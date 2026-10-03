@@ -18,12 +18,22 @@ public static class XaiErrorClassifier
         ThrowIfUnsuccessfulAsync(response, null,
             authorization is { } header ? [header.Value] : [], cancellationToken);
 
-    internal static async Task ThrowIfUnsuccessfulAsync(
+    internal static Task ThrowIfUnsuccessfulAsync(
         HttpResponseMessage response,
         LlmCredential? credential,
         IEnumerable<string> additionalSecrets,
         CancellationToken cancellationToken,
-        bool diagnosticBody = true)
+        bool diagnosticBody = true) =>
+        ThrowIfUnsuccessfulCoreAsync(response, credential, additionalSecrets,
+            diagnosticBody, "Provider rejected the Files request.", cancellationToken);
+
+    internal static Task ThrowIfUnsuccessfulSpeechAsync(HttpResponseMessage response, LlmCredential? credential,
+        CancellationToken cancellationToken) =>
+        ThrowIfUnsuccessfulCoreAsync(response, credential, [],
+            false, "Provider rejected the speech request.", cancellationToken);
+
+    private static async Task ThrowIfUnsuccessfulCoreAsync(HttpResponseMessage response, LlmCredential? credential,
+        IEnumerable<string> additionalSecrets, bool diagnosticBody, string diagnosticMessage, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(response);
         cancellationToken.ThrowIfCancellationRequested();
@@ -32,36 +42,56 @@ public static class XaiErrorClassifier
         string body = await SdkHttpConsumption.ReadAsStringAsync(response.Content, cancellationToken);
         cancellationToken.ThrowIfCancellationRequested();
         string safe = diagnosticBody ? SecretRedactor.Sanitize(body, credential, additionalSecrets)
-            : "Provider rejected the Files request.";
+            : diagnosticMessage;
         (string? code, string? message) = ReadError(body);
-        bool requiresSignIn = response.StatusCode == HttpStatusCode.Unauthorized
-            || (response.StatusCode == HttpStatusCode.Forbidden
+        throw Classify(response.StatusCode, code, message, safe);
+    }
+
+    internal static Exception SpeechUpgradeFailure(HttpStatusCode status, Exception original)
+    {
+        var evidence = new SpeechTransportEvidence(original);
+        // The BCL exposes status, not the failed upgrade's body. Do not infer body-dependent facts.
+        return status != 0 && status != HttpStatusCode.SwitchingProtocols
+            ? Classify(status, null, null, "Provider rejected the speech request.", evidence)
+            : new InferenceException(InferenceFailureCode.ExecutionFailed, "The speech connection could not be opened.", evidence);
+    }
+
+    private static Exception Classify(HttpStatusCode status, string? code, string? message, string safe,
+        Exception? evidence = null)
+    {
+        bool requiresSignIn = status == HttpStatusCode.Unauthorized
+            || (status == HttpStatusCode.Forbidden
                 && string.Equals(message?.Trim(), InvalidTokenMessage, StringComparison.Ordinal))
-            || (response.StatusCode == HttpStatusCode.BadRequest && code is "invalid_grant" or "invalid_token");
+            || (status == HttpStatusCode.BadRequest && code is "invalid_grant" or "invalid_token");
         if (requiresSignIn)
         {
-            throw new InferenceException(InferenceFailureCode.AuthenticationRequired,
+            return new InferenceException(InferenceFailureCode.AuthenticationRequired,
                 "Grok authorization is no longer valid; sign in again.",
-                Failure(response.StatusCode, "xai_authentication_required", safe));
+                Failure(status, "xai_authentication_required", safe, evidence));
         }
 
-        if (response.StatusCode == HttpStatusCode.PaymentRequired)
+        if (status == HttpStatusCode.PaymentRequired)
         {
-            throw EntitlementFailure(response.StatusCode, safe);
+            return EntitlementFailure(status, safe, evidence);
         }
 
         // Subscription-specific 403 matching requires a qualified provider response.
-        throw Failure(response.StatusCode, null, safe);
+        return Failure(status, null, safe, evidence);
     }
 
-    internal static InferenceException EntitlementFailure(HttpStatusCode status, string safe) =>
+    internal static InferenceException EntitlementFailure(HttpStatusCode status, string safe, Exception? evidence = null) =>
         new(InferenceFailureCode.AccessDenied,
             $"Grok requires an eligible subscription or available credits: {safe}",
-            Failure(status, "xai_entitlement_required", safe));
+            Failure(status, "xai_entitlement_required", safe, evidence));
 
-    private static LlmProviderException Failure(HttpStatusCode status, string? code, string safe) =>
+    private static LlmProviderException Failure(HttpStatusCode status, string? code, string safe, Exception? evidence = null) =>
         new($"Grok request failed ({(int)status}): {safe}", LlmTransport.XaiResponses,
-            status, code, sanitizedResponseBody: safe);
+            status, code, sanitizedResponseBody: safe, innerException: evidence);
+
+    private sealed class SpeechTransportEvidence(Exception original) : Exception("The speech transport reported an opening failure.")
+    {
+        internal Exception Original { get; } = original;
+    }
 
     private static (string? Code, string? Message) ReadError(string body)
     {

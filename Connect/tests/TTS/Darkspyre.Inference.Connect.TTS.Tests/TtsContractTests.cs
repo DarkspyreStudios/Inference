@@ -24,6 +24,7 @@ public sealed class TtsContractTests
         { "TtsVoice", "{\"Id\":\"voice\",\"DisplayName\":\"name\",\"Locale\":null}" },
         { "TtsCapabilities", "{\"SupportsVoiceListing\":false,\"SupportsSpeed\":false,\"Formats\":[0,1],\"SampleRates\":null,\"BitRates\":[]}" },
         { "TtsResult", "{\"ContentType\":\"audio/wav\",\"Audio\":\"AQI=\",\"Provenance\":" + Provenance + ",\"Duration\":null,\"Timestamps\":[{\"Text\":\" a \",\"Start\":\"00:00:01\",\"End\":\"00:00:02\"}]}" },
+        { "TtsResult", "{\"ContentType\":\"audio/mpeg\",\"Audio\":\"AQI=\",\"Provenance\":{\"ImplementationId\":\"actual-speech\",\"ModelId\":null}}" },
         { "TtsSetupConfiguration", "{\"Connection\":{\"Endpoint\":\"https://example.invalid/\",\"XaiDefaults\":{\"Replace\":{}}},\"Language\":\"en\",\"SampleRate\":24000,\"BitRate\":128000,\"IncludeTimestamps\":false}" },
         { "TtsSetupHeaderChanges", "{\"Set\":{},\"Remove\":[]}" },
         { "TtsSetupChanges", "{\"Identity\":{\"Id\":\"id\",\"Intent\":0},\"Configuration\":{\"Connection\":{\"Endpoint\":\"https://example.invalid/\"}},\"Headers\":{\"Set\":{},\"Remove\":[]}}" },
