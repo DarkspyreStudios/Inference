@@ -90,7 +90,9 @@ public sealed class RealtimeSettings : InferenceSettings<RealtimeSetupChanges>
         [
             Text("model", "Model", _draft.Session.ModelId, (current, value) => current with { ModelId = value }),
             Text("voice", "Voice", _draft.Session.Voice, (current, value) => current with { Voice = value }),
-            Text("instructions", "Instructions", _draft.Session.Instructions, (current, value) => current with { Instructions = value })
+            Text("instructions", "Instructions", _draft.Session.Instructions, (current, value) => current with { Instructions = value }),
+            Text("transcription-model", "Transcription model", (_draft.Session.ProviderOptions as XaiRealtimeOptions)?.TranscriptionModel,
+                (current, value) => current with { ProviderOptions = (current.ProviderOptions as XaiRealtimeOptions ?? new()) with { TranscriptionModel = value } })
         ]), new("buffers", "Caller buffering budgets",
         [
             new SetupIntegerField(new("buffered-events", "Buffered events"), _events, null, value => Edit(() => _events = value), 1, int.MaxValue),

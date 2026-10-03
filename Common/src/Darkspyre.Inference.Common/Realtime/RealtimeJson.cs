@@ -32,3 +32,16 @@ internal sealed class RealtimeProviderOptionsJsonConverter : JsonConverter<Realt
 }
 
 internal sealed class RealtimeSessionJsonConverter : RuntimeResourceJsonConverter<IRealtimeVoiceSession>;
+
+internal sealed class RealtimeNullableAudioJsonConverter(JsonConverter<ReadOnlyMemory<byte>> bytes) : JsonConverter<ReadOnlyMemory<byte>?>
+{
+    public override bool HandleNull => true;
+    public override ReadOnlyMemory<byte>? Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+        => reader.TokenType == JsonTokenType.Null ? null : bytes.Read(ref reader, typeof(ReadOnlyMemory<byte>), options);
+
+    public override void Write(Utf8JsonWriter writer, ReadOnlyMemory<byte>? value, JsonSerializerOptions options)
+    {
+        if (value is { } audio) bytes.Write(writer, audio, options);
+        else writer.WriteNullValue();
+    }
+}

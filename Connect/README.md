@@ -2379,12 +2379,34 @@ transcription, speed and explicit scoped resumption settings. Tool schemas and h
 are snapshotted before provider entry. `XaiRealtimeOptions.Replace` distinguishes omitted and
 explicit empty maps. `XaiRealtimeForceMessageItem` retains text and optional interruptibility;
 an inherited client ID refuses because that variant has no declared ID mapping.
+`XaiRealtimeOptions.TranscriptionModel` preserves an explicit input-transcription selector;
+null omits it. It does not identify the session model or observed model provenance. Setup saves
+and edits it through the same session provider-options value. Session snapshots preserve the
+actual conversation receipt object; copying configuration does not issue a new native receipt.
+
+Text/audio content and function-call items can represent unknown observed payloads as null.
+Required JSON member presence remains distinct from its nullable value. Audio content preserves
+unknown versus empty bytes and an actual transcript; text also carries an optional actual
+transcript. Audio deltas still require non-null bytes. These observations do not authorize sending
+incomplete history: an implemented adapter must reject missing outgoing text/audio or function
+name/JSON arguments before effects. Transcript text does not substitute for missing audio bytes.
+Session events preserve optional observed modalities, and item events preserve raw provider status.
+`RealtimeHostedObservationEvent` carries partial hosted observations without fabricating function
+call names, arguments, client execution or completion. Its argument-final flag is independent of
+tool completion; final snapshots are not appended to earlier deltas.
+
+`LlmWebSearchTool.Location` carries optional country, city, region and timezone without local
+normalization. Null differs from a supplied object with omitted members. The existing hosted-tool
+snapshot copies the location value. Current built-in chat and Tensor routes reject unsupported
+hosted tools before effects; these fields do not enable a realtime or hosted-tool implementation.
 
 `ConnectRealtimeJson` exposes exact data-type getters for connections, settings changes,
 configuration, content, conversation items and concrete events. Its complete graphs admit the
 fixed xAI options, force-message item and X search tool. Common's metadata does not admit these
 Connect-only extensions. Non-null runtime collaborators refuse portable JSON without invoking
-them. Required audio uses Common's targeted byte policy.
+them. Audio-content observations use Common's targeted nullable byte policy, while audio deltas
+retain the separate required-byte policy. The new hosted-observation event has exact Common and
+ConnectRealtimeJson getters, and Common owns the exact WebSearch location getter and nested graph.
 
 Response and error events carry nullable ordered `AudioArtifacts` and raw `ProviderStatus`.
 Each `RealtimeAudioArtifact` preserves the actual output identity, committed descriptor,

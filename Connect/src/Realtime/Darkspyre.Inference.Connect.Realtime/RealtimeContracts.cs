@@ -26,6 +26,7 @@ public sealed record RealtimeConnection
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
 public sealed record XaiRealtimeOptions(IReadOnlyDictionary<string, string>? Replace = null) : RealtimeProviderOptions
 {
+    public string? TranscriptionModel { get; init; }
     public IReadOnlyDictionary<string, string>? Replace { get; init => field = value is null ? null : RealtimeData.Map(value, StringComparer.Ordinal); }
         = Replace is null ? null : RealtimeData.Map(Replace, StringComparer.Ordinal);
     public override string ToString() => "XaiRealtimeOptions { <options> }";

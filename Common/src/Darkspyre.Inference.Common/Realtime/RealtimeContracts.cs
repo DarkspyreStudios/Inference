@@ -82,16 +82,19 @@ public abstract record RealtimeContent
 }
 
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
-public sealed record RealtimeTextContent(string Text) : RealtimeContent
+public sealed record RealtimeTextContent(string? Text) : RealtimeContent
 {
-    [JsonRequired] public string Text { get; init => field = RealtimeData.Required(value); } = RealtimeData.Required(Text);
+    [JsonRequired] public string? Text { get; init; } = Text;
+    public string? Transcript { get; init; }
     public override string ToString() => "RealtimeTextContent { <content> }";
 }
 
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
-public sealed record RealtimeAudioContent(ReadOnlyMemory<byte> Audio, string? Transcript = null) : RealtimeContent
+public sealed record RealtimeAudioContent(ReadOnlyMemory<byte>? Audio, string? Transcript = null) : RealtimeContent
 {
-    [JsonRequired] public ReadOnlyMemory<byte> Audio { get; init => field = value.ToArray(); } = Audio.ToArray();
+    [JsonRequired]
+    public ReadOnlyMemory<byte>? Audio { get; init => field = value is { } bytes ? bytes.ToArray() : null; }
+        = Audio is { } bytes ? bytes.ToArray() : null;
     public override string ToString() => "RealtimeAudioContent { <content> }";
 }
 
@@ -114,10 +117,10 @@ public sealed record RealtimeMessageItem(RealtimeMessageRole Role, IReadOnlyList
 }
 
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
-public sealed record RealtimeFunctionCallItem(string Name, string ArgumentsJson, string? CallId = null) : RealtimeConversationItem
+public sealed record RealtimeFunctionCallItem(string? Name, string? ArgumentsJson, string? CallId = null) : RealtimeConversationItem
 {
-    [JsonRequired] public string Name { get; init => field = RealtimeData.Required(value); } = RealtimeData.Required(Name);
-    [JsonRequired] public string ArgumentsJson { get; init => field = RealtimeData.Required(value); } = RealtimeData.Required(ArgumentsJson);
+    [JsonRequired] public string? Name { get; init; } = Name;
+    [JsonRequired] public string? ArgumentsJson { get; init; } = ArgumentsJson;
     public override string ToString() => "RealtimeFunctionCallItem { <item> }";
 }
 
