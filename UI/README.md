@@ -33,6 +33,8 @@ the dialog and refresh its own list. Closing without Save discards the object. T
 `SaveAsync()` for a host-owned Save control; set `ShowSaveButton="false"` when using that option.
 When the manager implements `IInferenceSettingsStatusSource`, the editor listens to `StatusChanged`
 while it is shown and renders the refreshed status.
+The **Authentication checked** label renders the actual authentication observation as Unknown,
+Stale, Yes or No; stored sign-in configuration or a successful Save does not establish a fresh check.
 `IntroContent` and `SupplementaryContent` accept optional host guidance without changing the
 provider-owned fields or actions.
 

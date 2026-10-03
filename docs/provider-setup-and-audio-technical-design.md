@@ -262,9 +262,11 @@ services stay first-class and callable independently of a wizard.
 | AgentCore Harness | Profile, region, Harness ARN, optional model override | Validate ARN/region; default/manual override semantics; explicit session-based test |
 
 `XaiResponses` has a registered Grok connection/setup contract. Region and service-tier
-fields are bounded choices on `XaiConnectionOptions`. Setup derives the endpoint from the region
-and has no API-key field. A saved OAuth token or completed draft sign-in satisfies Save. Both setup
-continuation and facade interactive sign-in use the same expiry/interval/slow-down helper. The internal
+fields are bounded choices on `XaiConnectionOptions`. Opening preserves the supplied endpoint/options;
+only an explicit region edit derives the endpoint, and missing/mismatched routing blocks local
+validation and model discovery. Setup has no API-key field. A saved OAuth token or completed draft
+sign-in satisfies Save; read-only saved/draft presence is separate from actual authentication checks.
+Both setup continuation and facade interactive sign-in use the same expiry/interval/slow-down helper. The internal
 `XaiAuthenticator` implements the device grant, token refresh and one `/v1/me` check. The shared
 `XaiErrorClassifier` sanitizes errors; subscription-specific 403 matching remains unqualified and is
 not implemented. `AddLlmConnect` registers the provider, authenticator, Responses client and managed

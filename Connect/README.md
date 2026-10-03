@@ -2446,6 +2446,12 @@ headers, provider options and overrides. A kept OAuth access token or a complete
 satisfies Save; an API key or static secret header does not. Region edits replace the endpoint;
 tier edits require retesting but do not request reauthentication.
 
+Opening Grok settings preserves the supplied endpoint and typed options. Missing typed options or
+a route/region mismatch is shown locally and blocks Save, Check and model discovery until an
+explicit region selection fixes the draft. Read-only **Saved sign-in** and **Draft sign-in** fields
+report credential configuration without exposing secret values or claiming a fresh authentication
+check. A draft sign-in remains unsaved until Save commits; an uncertain save remains unknown.
+
 `IXaiDeviceLogin` supplies the device grant to `StartXaiLoginAsync`, `CompleteXaiLoginAsync` and
 `SignInAsync`. Completion performs one token poll; interactive sign-in owns the polling loop.
 Setup continuation and interactive sign-in respect the device interval, provider-reported expiry,
