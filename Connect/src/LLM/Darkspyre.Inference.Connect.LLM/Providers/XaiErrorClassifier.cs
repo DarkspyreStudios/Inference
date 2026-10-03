@@ -24,16 +24,16 @@ public static class XaiErrorClassifier
         IEnumerable<string> additionalSecrets,
         CancellationToken cancellationToken,
         bool diagnosticBody = true) =>
-        ThrowIfUnsuccessfulCoreAsync(response, credential, additionalSecrets, cancellationToken,
-            diagnosticBody, "Provider rejected the Files request.");
+        ThrowIfUnsuccessfulCoreAsync(response, credential, additionalSecrets,
+            diagnosticBody, "Provider rejected the Files request.", cancellationToken);
 
     internal static Task ThrowIfUnsuccessfulSpeechAsync(HttpResponseMessage response, LlmCredential? credential,
         CancellationToken cancellationToken) =>
-        ThrowIfUnsuccessfulCoreAsync(response, credential, [], cancellationToken,
-            false, "Provider rejected the speech request.");
+        ThrowIfUnsuccessfulCoreAsync(response, credential, [],
+            false, "Provider rejected the speech request.", cancellationToken);
 
     private static async Task ThrowIfUnsuccessfulCoreAsync(HttpResponseMessage response, LlmCredential? credential,
-        IEnumerable<string> additionalSecrets, CancellationToken cancellationToken, bool diagnosticBody, string diagnosticMessage)
+        IEnumerable<string> additionalSecrets, bool diagnosticBody, string diagnosticMessage, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(response);
         cancellationToken.ThrowIfCancellationRequested();
