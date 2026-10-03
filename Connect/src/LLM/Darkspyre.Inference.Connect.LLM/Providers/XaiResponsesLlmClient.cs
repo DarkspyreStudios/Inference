@@ -22,7 +22,7 @@ internal sealed class XaiResponsesLlmClient(HttpClient http) : ResponsesLlmClien
         "model", "input", "stream", "store", "include", "previous_response_id", "service_tier", "instructions",
         "temperature", "top_p", "top_k", "seed", "presence_penalty", "frequency_penalty", "stop", "stop_sequences",
         "max_output_tokens", "reasoning", "reasoning_effort", "tools", "tool_choice", "parallel_tool_calls", "text",
-        "prompt_cache_key", "background", "deferred", "agent_count"
+        "prompt_cache_key", "background", "deferred", "agent_count", "max_turns"
     }.ToFrozenSet(StringComparer.Ordinal);
 
     public override LlmTransport Transport => LlmTransport.XaiResponses;
@@ -30,6 +30,7 @@ internal sealed class XaiResponsesLlmClient(HttpClient http) : ResponsesLlmClien
     protected override bool OffersNonStreamingRequests => true;
     protected override bool OffersUsageDeltas => false;
     protected override bool SupportsResourcePreparation => true;
+    protected override ResponsesHostedToolObserver CreateHostedToolObserver(Func<Exception> malformed) => new XaiDocumentSearchObserver(malformed);
 
     // xAI quota names and units require its own qualified evidence; OpenAI provenance is not interchangeable.
     protected override LlmAccountUsageSnapshot? ObserveAccountUsage(HttpResponseMessage response) => null;
@@ -107,6 +108,7 @@ internal sealed class XaiResponsesLlmClient(HttpClient http) : ResponsesLlmClien
         SupportsJsonSchema = true,
         SupportsJsonObject = true,
         SupportsToolUse = true,
+        HostedTools = new[] { LlmHostedToolKind.DocumentSearch }.ToFrozenSet(),
         Tools = new()
         {
             ChoiceModes = new[] { LlmToolChoiceMode.Auto, LlmToolChoiceMode.None, LlmToolChoiceMode.Required, LlmToolChoiceMode.Specific }.ToFrozenSet(),
@@ -171,6 +173,8 @@ internal sealed class XaiResponsesLlmClient(HttpClient http) : ResponsesLlmClien
             throw new ArgumentOutOfRangeException(nameof(request), "Grok temperature must be in [0, 2].");
         if (request.Tools.Count > 350)
             throw new NotSupportedException("Grok accepts at most 350 client tools.");
+        if (request.HostedTools.OfType<LlmDocumentSearchTool>().Any(tool => tool.CollectionIds.Count > 10))
+            throw new ArgumentException("Grok document search accepts at most 10 collection IDs per tool.", nameof(request));
         if (ClientTools.Functions(request.Tools).Any(tool => tool.Name == "web_search"))
             throw new ArgumentException("A Grok client function cannot be named web_search.", nameof(request));
         foreach (LlmFileReference file in request.Messages.SelectMany(message => message.Attachments).OfType<LlmFileReference>())
@@ -201,6 +205,24 @@ internal sealed class XaiResponsesLlmClient(HttpClient http) : ResponsesLlmClien
             && GetCapabilities(connection, request.ModelId).ReasoningLevels.Contains(defaultLevel))
             request = request with { ReasoningLevel = defaultLevel };
         JsonObject payload = base.BuildPayload(connection, request, enforcement, stream, resources);
+        if (request.HostedTools.Count > 0)
+        {
+            var tools = payload["tools"] as JsonArray ?? new JsonArray();
+            if (payload["tools"] is null) payload["tools"] = tools;
+            foreach (LlmDocumentSearchTool tool in request.HostedTools.Cast<LlmDocumentSearchTool>())
+            {
+                var search = new JsonObject
+                {
+                    ["type"] = "file_search",
+                    ["vector_store_ids"] = new JsonArray(tool.CollectionIds.Select(id => (JsonNode?)JsonValue.Create(id)).ToArray())
+                };
+                if (tool.MaxResults is { } maximum) search["max_num_results"] = maximum;
+                tools.Add(search);
+            }
+        }
+        if (request.MaxHostedTurns is { } turns) payload["max_turns"] = turns;
+        if (request.HostedTools.Count > 0 || HasFileInput(payload["input"]))
+            ((JsonArray)payload["include"]!).Add("file_search_call.results");
         if (request.ProviderControls is XaiMultiAgentControls { AgentCount: { } count })
             payload["reasoning"] = new JsonObject
             {
@@ -209,6 +231,14 @@ internal sealed class XaiResponsesLlmClient(HttpClient http) : ResponsesLlmClien
         payload["service_tier"] = (connection.Xai?.ServiceTier ?? XaiServiceTier.Default) == XaiServiceTier.Priority ? "priority" : "default";
         return payload;
     }
+
+    private static bool HasFileInput(JsonNode? node) => node switch
+    {
+        JsonObject item => item["type"] is JsonValue type && type.TryGetValue<string>(out string? name) && name == "input_file"
+            || item.Any(property => HasFileInput(property.Value)),
+        JsonArray items => items.Any(HasFileInput),
+        _ => false
+    };
 
     protected override bool ReasonsByDefault(LlmConnection connection, string modelId) =>
         XaiModelProfiles.Get(connection, modelId).DefaultReasoningLevel is not null;

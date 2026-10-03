@@ -270,10 +270,24 @@ authorization refusal converters; live authorization cannot be serialized or rec
 data, and serialization never invokes its callback. The separate credential codec keeps its
 existing Web names and null omission.
 
-Hosted request tools and turn limits are unavailable on the built-in adapters. Direct and facade
-generation, counting and estimation reject them before provider authentication, discovery, CLI
-startup or model materialization. Native start/resume also rejects these unmapped options. Existing
-Anthropic server-tool configuration is separate and does not advertise the new hosted API.
+The private xAI Responses adapter implements hosted `DocumentSearch` and positive typed hosted-turn
+limits. It sends explicit document descriptors as `file_search` with exact collection IDs and optional
+result limits. Each descriptor accepts at most ten collections. Actual built `input_file` content
+also enables the implicit document-search observations. Both paths request `file_search_call.results`.
+The other built-in adapters and hosted kinds reject unmapped hosted options before provider effects.
+Native start/resume also rejects these unmapped options. Existing Anthropic server-tool configuration
+is separate and does not advertise the new hosted API.
+
+The same Responses parser observes document calls in streamed and complete JSON responses. A generic
+added item produces Started only with a usable actual provider ID. The first terminal output supplies
+ordered Completed observations; it does not infer progress phases or successful execution. Every
+ID-less occurrence remains distinct. Repeated usable IDs identify one document call within that
+response. Unreported identity, status, result collections and scores remain null; actual empty
+collections, strings and numeric zero remain exact. The provider's documented omitted-score default
+does not replace the shared API's unreported-score observation. Full terminal output remains unchanged
+in opaque replay. Result-only `CompleteAsync` retains its terminal chat result; callers enumerate
+`StreamAsync` for hosted observations. Default Grok registration remains unavailable, and this mapping
+does not qualify live OAuth acceptance or provider-specific file-search phase events.
 Managed sessions snapshot hosted data, borrow authorization and preserve actual streamed hosted
 and citation observations under the invocation RequestId; they never route hosted observations to
 the host function handler. Terminal chat/portable results preserve ordered citation lists.
