@@ -619,6 +619,12 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
                 }
                 catch (LlmProviderException error) when (error.ProviderCode == "context_length_exceeded")
                 {
+                    if (++run.ProviderOverflowCount > 2)
+                    {
+                        await CompleteAsync(run, writer, LlmAgentCompletionReason.ProviderFailure, token,
+                            "The context could not be reduced enough for this step.");
+                        return;
+                    }
                     await PauseAsync(run, status with { NeedsCompaction = true }, LlmAgentCompactionReason.ProviderOverflow, writer, token);
                     return;
                 }
@@ -628,6 +634,7 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
                     catch (Exception error) { ExceptionDispatchInfo.Capture(LlmResourcePreparation.AsResourceFailure(error, token)).Throw(); throw; }
                 }
                 if (result is null) { throw new InvalidOperationException("Model stream ended without completion."); }
+                run.ProviderOverflowCount = 0;
                 run.Iterations++;
                 run.Usage = run.UsageUnknown ? null : UsageTotals.Add(run.Usage, result.Usage, run.Iterations == 1);
                 await writer.WriteAsync(new LlmAgentUsageEvent(ThreadId, run.Id, stepId, result.Usage, run.Usage), token);
@@ -835,11 +842,12 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
         await writer.WriteAsync(pause, token);
     }
 
-    private async Task CompleteAsync(LiveRun run, ChannelWriter<LlmAgentEvent> writer, LlmAgentCompletionReason reason, CancellationToken token)
+    private async Task CompleteAsync(LiveRun run, ChannelWriter<LlmAgentEvent> writer, LlmAgentCompletionReason reason,
+        CancellationToken token, string? error = null)
     {
         lock (_sync) { run.Terminal = true; }
         await writer.WriteAsync(new LlmAgentTurnCompletedEvent(ThreadId, run.Id, reason,
-            reason == LlmAgentCompletionReason.Completed ? null : reason.ToString()), token);
+            reason == LlmAgentCompletionReason.Completed ? null : error ?? reason.ToString()), token);
     }
 
     private LlmChatRequest Request(LlmAgentContext context, LlmAgentTurnRequest turn) => new()
@@ -1056,6 +1064,7 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
         public Queue<string> Steering { get; } = new();
         public string? PauseId { get; set; }
         public int Iterations { get; set; }
+        public int ProviderOverflowCount { get; set; }
         public LlmUsage? Usage { get; set; }
         public bool UsageUnknown { get; set; }
         public bool Terminal { get; set; }
