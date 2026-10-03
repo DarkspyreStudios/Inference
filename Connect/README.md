@@ -1136,6 +1136,11 @@ the adapter sends it and emits the complete response as events after it arrives.
 has no non-streaming request rejects every request while streaming is off. Common's
 `LlmCapabilities.SupportsStreaming` carries the same flag to `ILlmInference` hosts.
 
+Compatible Chat Completions reports `Unknown` for an unrecognized or missing stop reason when
+the response contains no refusal or tool handoff. It does not create reasoning continuation from
+that unknown outcome. Each HTTP event publication checks caller cancellation, including buffered
+non-streaming events and adapters using a borrowed HTTP client.
+
 `SupportsReasoningText` describes public reasoning separately from reasoning-level control. Common
 mirrors the flag. The **Reasoning text** override disables public reasoning events and provider
 summary requests without dropping opaque continuation state. Model overrides take precedence over

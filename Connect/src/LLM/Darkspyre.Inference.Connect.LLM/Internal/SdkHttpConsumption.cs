@@ -47,7 +47,7 @@ internal static class SdkHttpConsumption
     internal sealed class Operation(SdkHttpGenerationPool? owner, LlmOperationLifetime.Lease? lease, CancellationToken caller) : IDisposable
     {
         internal CancellationToken Token => lease?.Token ?? caller;
-        internal void Fence() { if (lease is not null) owner!.Fence(Token); }
+        internal void Fence() { Token.ThrowIfCancellationRequested(); if (lease is not null) owner!.Fence(Token); }
         internal T Publish<T>(T value) { Fence(); return value; }
         public void Dispose() => lease?.Dispose();
     }
