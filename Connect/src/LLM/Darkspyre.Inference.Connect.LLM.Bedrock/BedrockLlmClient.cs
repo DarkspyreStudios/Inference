@@ -9,13 +9,15 @@ using Amazon.Runtime.EventStreams;
 using Darkspyre.Inference.Common.LLM;
 using Darkspyre.Inference.Connect.LLM.Internal;
 using Darkspyre.Inference.Connect.LLM.Providers;
+using Microsoft.Extensions.Logging;
 
 namespace Darkspyre.Inference.Connect.LLM.Bedrock;
 
 internal sealed class BedrockLlmClient(
     BedrockClientFactory factory,
     BedrockLoggingGuard loggingGuard,
-    IBedrockConverseInvoker invoker) : ILlmClient, ILlmContextEstimator, ILlmCompactionValidator
+    IBedrockConverseInvoker invoker,
+    ILogger<BedrockLlmClient> logger) : ILlmClient, ILlmContextEstimator, ILlmCompactionValidator
 {
     internal const string RequestIdMetadataKey = "request-id";
 
@@ -140,6 +142,8 @@ internal sealed class BedrockLlmClient(
             control,
             aws.Region!,
             request.ModelId,
+            logger,
+            LlmCredential.Parse(connection.Credential)!,
             cancellationToken);
         await loggingGuard.EnsureLoggingDisabledAsync(
             control,
@@ -495,6 +499,8 @@ internal sealed class BedrockLlmClient(
         IReadOnlyList<LlmModel> models = await BedrockModelResolver.ListAsync(
             control,
             aws.Region!,
+            logger,
+            LlmCredential.Parse(connection.Credential)!,
             control.Token);
         control.ThrowIfCanceled();
         return models;
