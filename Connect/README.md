@@ -264,7 +264,11 @@ the host function handler. Terminal chat/portable results preserve ordered citat
 Facade generation, input counting and request measurement freeze hosted descriptors before the
 first connection-source await. Later caller mutations cannot change admitted filters or headers;
 authorization stays borrowed. Owned hosted-event metadata requires actual scope and observation
-facts, including explicitly reported compaction revisions. Nested hosted image output retains
+facts, including explicitly reported compaction revisions. Completed hosted calls preserve
+independently unreported identity/status as null and keep actual empty or whitespace strings;
+their portable members remain required. Started/progress observations still require actual
+nonblank call identities. Managed completed-event snapshots preserve these unknown facts without
+invoking a host function or inventing a successful status. Nested hosted image output retains
 Common's property-specific null-byte refusal and its new closed phase/action enum policies.
 Managed disposal shares its completion across callers, drains the producer even after cancellation
 callback failure, then releases borrowed hosted authorization without disposing it. Cleanup failures
