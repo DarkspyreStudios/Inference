@@ -175,6 +175,20 @@ internal sealed class XaiResponsesLlmClient(HttpClient http) : ResponsesLlmClien
             throw new NotSupportedException("Grok accepts at most 350 client tools.");
         if (request.HostedTools.OfType<LlmDocumentSearchTool>().Any(tool => tool.CollectionIds.Count > 10))
             throw new ArgumentException("Grok document search accepts at most 10 collection IDs per tool.", nameof(request));
+        foreach (LlmHostedTool tool in request.HostedTools)
+        {
+            if (tool is LlmWebSearchTool web)
+            {
+                if (web.AllowedDomains is not null && web.ExcludedDomains is not null)
+                    throw new ArgumentException("Grok web search cannot combine allowed and excluded domains.", nameof(request));
+                if (web.AllowedDomains?.Count > 5 || web.ExcludedDomains?.Count > 5)
+                    throw new ArgumentException("Grok web search accepts at most 5 domains per filter.", nameof(request));
+                if (web.Location is not null)
+                    throw new NotSupportedException("Grok web search does not accept a user location.");
+            }
+            else if (tool is XaiXSearchTool { AllowedHandles: not null, ExcludedHandles: not null })
+                throw new ArgumentException("Grok X search cannot combine allowed and excluded handles.", nameof(request));
+        }
         if (ClientTools.Functions(request.Tools).Any(tool => tool.Name == "web_search"))
             throw new ArgumentException("A Grok client function cannot be named web_search.", nameof(request));
         foreach (LlmFileReference file in request.Messages.SelectMany(message => message.Attachments).OfType<LlmFileReference>())
@@ -209,20 +223,13 @@ internal sealed class XaiResponsesLlmClient(HttpClient http) : ResponsesLlmClien
         {
             var tools = payload["tools"] as JsonArray ?? new JsonArray();
             if (payload["tools"] is null) payload["tools"] = tools;
-            foreach (LlmDocumentSearchTool tool in request.HostedTools.Cast<LlmDocumentSearchTool>())
-            {
-                var search = new JsonObject
-                {
-                    ["type"] = "file_search",
-                    ["vector_store_ids"] = new JsonArray(tool.CollectionIds.Select(id => (JsonNode?)JsonValue.Create(id)).ToArray())
-                };
-                if (tool.MaxResults is { } maximum) search["max_num_results"] = maximum;
-                tools.Add(search);
-            }
+            foreach (LlmHostedTool tool in request.HostedTools) tools.Add(BuildHostedTool(tool));
         }
         if (request.MaxHostedTurns is { } turns) payload["max_turns"] = turns;
-        if (request.HostedTools.Count > 0 || HasFileInput(payload["input"]))
+        if (request.HostedTools.OfType<LlmDocumentSearchTool>().Any() || HasFileInput(payload["input"]))
             ((JsonArray)payload["include"]!).Add("file_search_call.results");
+        if (request.HostedTools.OfType<LlmWebSearchTool>().Any())
+            ((JsonArray)payload["include"]!).Add("web_search_call.action.sources");
         if (request.ProviderControls is XaiMultiAgentControls { AgentCount: { } count })
             payload["reasoning"] = new JsonObject
             {
@@ -230,6 +237,57 @@ internal sealed class XaiResponsesLlmClient(HttpClient http) : ResponsesLlmClien
             };
         payload["service_tier"] = (connection.Xai?.ServiceTier ?? XaiServiceTier.Default) == XaiServiceTier.Priority ? "priority" : "default";
         return payload;
+    }
+
+    private static JsonObject BuildHostedTool(LlmHostedTool tool)
+    {
+        switch (tool)
+        {
+            case LlmDocumentSearchTool document:
+                {
+                    var search = new JsonObject
+                    {
+                        ["type"] = "file_search",
+                        ["vector_store_ids"] = new JsonArray(document.CollectionIds.Select(id => (JsonNode?)JsonValue.Create(id)).ToArray())
+                    };
+                    if (document.MaxResults is { } maximum) search["max_num_results"] = maximum;
+                    return search;
+                }
+            case LlmWebSearchTool web:
+                {
+                    var search = new JsonObject
+                    {
+                        ["type"] = "web_search",
+                        ["enable_image_understanding"] = web.IncludeImageUnderstanding,
+                        ["enable_image_search"] = web.IncludeImageSearch
+                    };
+                    AddSearchFilter(search, "allowed_domains", web.AllowedDomains);
+                    AddSearchFilter(search, "excluded_domains", web.ExcludedDomains);
+                    return search;
+                }
+            case XaiXSearchTool social:
+                {
+                    var search = new JsonObject
+                    {
+                        ["type"] = "x_search",
+                        ["enable_image_understanding"] = social.IncludeImageUnderstanding,
+                        ["enable_video_understanding"] = social.IncludeVideoUnderstanding
+                    };
+                    AddSearchFilter(search, "allowed_x_handles", social.AllowedHandles);
+                    AddSearchFilter(search, "excluded_x_handles", social.ExcludedHandles);
+                    if (social.FromDate is { } from) search["from_date"] = from.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+                    if (social.ToDate is { } to) search["to_date"] = to.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+                    return search;
+                }
+            default:
+                throw new NotSupportedException("Grok does not implement this hosted-tool descriptor.");
+        }
+    }
+
+    private static void AddSearchFilter(JsonObject search, string name, IReadOnlyList<string>? values)
+    {
+        if (values is not null)
+            search[name] = new JsonArray(values.Select(value => (JsonNode?)JsonValue.Create(value)).ToArray());
     }
 
     private static bool HasFileInput(JsonNode? node) => node switch

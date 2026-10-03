@@ -274,6 +274,10 @@ The private xAI Responses adapter implements hosted `DocumentSearch` and positiv
 limits. It sends explicit document descriptors as `file_search` with exact collection IDs and optional
 result limits. Each descriptor accepts at most ten collections. Actual built `input_file` content
 also enables the implicit document-search observations. Both paths request `file_search_call.results`.
+The private payload builder also projects WebSearch's flat domain/image controls and XSearch's
+handle/date/image/video controls. That plumbing is inert: capabilities and observations remain
+DocumentSearch-only, so the existing hosted-tool validator rejects WebSearch and SocialSearch before
+provider effects. It does not advertise those families or infer their lifecycle and terminal facts.
 The other built-in adapters and hosted kinds reject unmapped hosted options before provider effects.
 Native start/resume also rejects these unmapped options. Existing Anthropic server-tool configuration
 is separate and does not advertise the new hosted API.
