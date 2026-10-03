@@ -39,12 +39,14 @@ public static class ServiceCollectionExtensions
     }
 
     /// <summary>
-    /// Explicitly registers OAuth Grok Responses and its managed runtime after <see cref="AddLlmConnect(IServiceCollection)"/>.
+    /// Registers OAuth Grok Responses and its managed runtime. <see cref="AddLlmConnect(IServiceCollection)"/> includes this registration.
     /// Provider OAuth and model qualification remain the host's responsibility.
     /// </summary>
     public static IServiceCollection AddLlmConnectXai(this IServiceCollection services)
     {
         ArgumentNullException.ThrowIfNull(services);
+        if (services.Any(descriptor => descriptor.ServiceType == typeof(XaiResponsesLlmClient)))
+            return services;
         services.AddSingleton(ProviderDefinitions.GrokSubscription);
         services.AddInferenceHttpClient<XaiResponsesLlmClient>()
             .ConfigureHttpClient(client => client.Timeout = ProviderHttp.GenerationTimeout)
@@ -150,6 +152,6 @@ public static class ServiceCollectionExtensions
             provider.GetRequiredService<ILlmConnectionSource>(), provider.GetServices<ILlmEmbeddingClient>(),
             provider.GetServices<ILlmAuthenticator>(), provider.GetRequiredService<LlmConnectionAccess>(),
             provider.GetRequiredService<LlmProviderService>()));
-        return services;
+        return services.AddLlmConnectXai();
     }
 }

@@ -326,8 +326,8 @@ response. Unreported identity, status, result collections and scores remain null
 collections, strings and numeric zero remain exact. The provider's documented omitted-score default
 does not replace the shared API's unreported-score observation. Full terminal output remains unchanged
 in opaque replay. Result-only `CompleteAsync` retains its terminal chat result; callers enumerate
-`StreamAsync` for hosted observations. Default Grok registration remains unavailable, and this mapping
-does not qualify live OAuth acceptance or provider-specific file-search phase events.
+`StreamAsync` for hosted observations. This mapping does not qualify live OAuth acceptance or
+provider-specific file-search phase events.
 Managed sessions snapshot hosted data, borrow authorization and preserve actual streamed hosted
 and citation observations under the invocation RequestId; they never route hosted observations to
 the host function handler. Terminal chat/portable results preserve ordered citation lists.
@@ -953,11 +953,11 @@ The facade owns their admission and retirement; resolving an interface does not 
 connection source or credential owner. Skills methods use the `IXaiSkillClient` interface to
 distinguish skill IDs and results from file IDs and results.
 
-`LlmProviderCapabilities.Files` and `.Skills` report separate resource-operation facts. An explicitly
-composed builtin xAI Responses client exposes the seven implemented native Files operations through
+`LlmProviderCapabilities.Files` and `.Skills` report separate resource-operation facts. The
+builtin xAI Responses client exposes the seven implemented native Files operations through
 the facade. The facade resolves one selected connection, snapshots its configuration and validates
 arguments and headers before its existing credential owner refreshes that connection. The private
-transport borrows the same HTTP client as chat. The default registration does not activate Grok.
+transport borrows the same HTTP client as chat. `AddLlmConnect` includes the Grok adapter.
 Other Files routes and all Skills routes remain unavailable. When no builtin Files adapter is
 composed, refusal precedes source resolution and stream inspection. Caller cancellation and
 retired-facade admission retain the existing lifetime behavior.
@@ -991,7 +991,7 @@ and duplicates. Selected references absent from the supplied graph append to the
 The route reads authorized committed bytes through owned handles and uploads them through the same
 private Files transport. Unknown byte counts remain unknown; missing filenames refuse the file
 destination. Native receipts belong to the admitted request and do not replace logical captured history.
-Local accounting does not read or upload selected resources. Grok requires explicit `AddLlmConnectXai` registration.
+Local accounting does not read or upload selected resources. `AddLlmConnect` includes Grok registration.
 Managed sessions created through the shared internal factory validate resource-bound imported
 contexts against the caller's exact scoped selection snapshot. Only a new session without an imported
 context adopts the current selection; an unbound manual or upgraded legacy context must be explicitly
@@ -1008,8 +1008,8 @@ drain, while refused owned resources remain reachable through the actual retaine
 SSE parsing borrows its caller-owned stream. A refused async body-stream release skips dependent
 response/content cleanup rather than retrying that same stream synchronously; the failed stream and
 dependent response stay with the cleanup error until that error's references are released. This is
-not process-exit quarantine. Explicit `AddLlmConnectXai` composition activates the Grok agent opener;
-it does not qualify OAuth, provider behavior or other destinations.
+not process-exit quarantine. `AddLlmConnect` includes the Grok agent opener;
+registration does not qualify OAuth, provider behavior or other destinations.
 
 ### Embedding lifetime
 
@@ -1416,7 +1416,7 @@ credential refresh and search. Existing admission preserves caller cancellation 
 after retirement. Supplied sources, authenticators and the selected HTTP client remain borrowed.
 
 Connect supplies the data contract and owned `ConnectLlmJson` metadata. The facade route does not
-enable automatic Grok registration or establish OAuth or collection entitlement. Owned options
+establish OAuth or collection entitlement. Owned options
 reject non-null live `IDocumentSearchClient` values on read and write, including nested consumer-generated metadata;
 explicit null remains null. No runtime client is exported as portable data.
 
@@ -1639,7 +1639,7 @@ own authorization and side-effect policy.
 | OpenAI-compatible Chat Completions | Yes | Yes | Override | Override |
 | ChatGPT Codex subscription | Yes | Yes | Yes | Yes |
 | Anthropic Messages with API key | Yes | Yes | Yes | Yes |
-| Grok OAuth Responses (explicit opt-in) | Yes | Yes | Catalog | Yes |
+| Grok OAuth Responses | Yes | Yes | Catalog | Yes |
 | Claude subscription via official CLI | No | Yes | Yes | Yes |
 | AWS Bedrock Converse | Yes | Yes | Yes | Yes |
 | AWS Bedrock AgentCore Harness | No | Yes | No | No |
@@ -2211,8 +2211,8 @@ and output limits. Context occupancy includes cached input and differs from accu
 account quota. A `LlmAgentCompactionRequiredEvent` ends an execution segment, **not the logical run**.
 After host compaction, `ContinueTurnAsync` uses the same turn ID, pause ID and expected revision,
 without resubmitting the prompt or re-executing settled tools. Managed clients cover direct
-Codex, API-key OpenAI Responses, Anthropic Messages, OpenAI-compatible Chat, Gemini API and Apple Foundation Models.
-Explicit `AddLlmConnectXai` adds Grok OAuth Responses. Separate registration
+Codex, API-key OpenAI Responses, Anthropic Messages, OpenAI-compatible Chat, Gemini API, Apple Foundation Models
+and Grok OAuth Responses through `AddLlmConnect`. Separate registration
 extensions add Bedrock Converse and Vertex Gemini/Claude. SelfHost opens a managed session only after resolving the selected host
 engine/model and checking its requested operation capabilities. Each managed client checks the
 selected model/connection before opening. Each managed lane uses its actual request estimator,
@@ -2491,10 +2491,11 @@ refuse before refresh, catalog access or generation. Managed turns retain their 
 through tool iterations; Connect and batch Resources metadata preserve the fixed
 `xai-multi-agent` discriminator, while Common metadata refuses this Connect subtype.
 
-`AddLlmConnect` does not register a Grok provider, authenticator or runtime client. Explicit
-`AddLlmConnectXai` registers all three plus its managed agent through the same finite SDK HTTP pipelines.
-Opt-in composition is not live qualification; OAuth and provider qualification remain `NotRun`.
-cross-family catalog ownership remains separate. Agent counts are distinct from reasoning levels.
+`AddLlmConnect` registers the Grok provider, authenticator, Responses client and managed agent through
+the same finite SDK HTTP pipelines. Provider discovery performs no OAuth or model requests.
+`AddLlmConnectXai` uses the same registration path; calling it again does not duplicate Grok services.
+Registration is not live qualification; OAuth and provider qualification remain `NotRun`.
+Cross-family catalog ownership remains separate. Agent counts are distinct from reasoning levels.
 The region and tier premiums follow [xAI pricing](https://docs.x.ai/developers/pricing).
 
 `LlmProviderService` implements Connect's `ILlmTextTokenizer`. `TokenizeAsync` accepts a connection
@@ -2508,7 +2509,7 @@ without retaining raw bodies. `ConnectLlmJson.Tokenization` and `Token` own resu
 The facade drains active tokenization during retirement and rejects late results through its
 synchronous owner fence. Injected access and clients remain borrowed. Tokenization does not count
 instructions, tool schemas, media or protocol framing. It does not report request occupancy, generated
-usage or billing, and it does not implement `ILlmProviderTokenCounter`. Grok requires explicit opt-in.
+usage or billing, and it does not implement `ILlmProviderTokenCounter`.
 OAuth access to its tokenizer endpoint has not been live-qualified.
 
 `ImageProviderService.SetupDefinitions` and `CreateSettingsManager` provide the same editing surface for
