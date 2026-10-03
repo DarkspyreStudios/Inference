@@ -333,6 +333,26 @@ internal abstract class ChatCompletionsLlmClientBase(HttpClient http) : LlmClien
         int omitted,
         bool reasoningText)
     {
+        ChatCompletionResponse decoded = DecodeCompleteResponse(body, response, connection, request, enforcement, omitted);
+        return [.. CompleteResponseEvents.From(decoded.Result, reasoningText ? decoded.Reasoning : [])];
+    }
+
+    internal sealed record ChatCompletionOutputFile(string Id, string Name);
+
+    internal sealed record ChatCompletionResponse(
+        LlmChatResult Result,
+        IReadOnlyList<LlmReasoningText> Reasoning,
+        IReadOnlyList<ChatCompletionOutputFile> OutputFiles);
+
+    internal ChatCompletionResponse DecodeCompleteResponse(
+        string body,
+        HttpResponseMessage response,
+        LlmConnection connection,
+        LlmChatRequest? request = null,
+        LlmStructuredOutputEnforcement? enforcement = null,
+        int omitted = 0)
+    {
+        LlmCredential? credential = LlmCredential.Parse(connection.Credential);
         JsonDocument document;
         try
         {
@@ -403,13 +423,42 @@ internal abstract class ChatCompletionsLlmClientBase(HttpClient http) : LlmClien
                 connection,
                 reasoning,
                 omitted);
-            return [.. CompleteResponseEvents.From(result, observation is null || !reasoningText
-                ? [] : [new(observation.Delta, observation.IsSummary)])];
+            var outputFiles = new List<ChatCompletionOutputFile>();
+            if (Transport == LlmTransport.XaiResponses)
+            {
+                var citations = new List<LlmCitation>();
+                if (root.TryGetProperty("citations", out JsonElement sources) && sources.ValueKind != JsonValueKind.Null)
+                {
+                    if (sources.ValueKind != JsonValueKind.Array)
+                        throw ProtocolException("xAI chat returned invalid citations.", response, body, credential);
+                    foreach (JsonElement source in sources.EnumerateArray())
+                    {
+                        if (source.ValueKind != JsonValueKind.String)
+                            throw ProtocolException("xAI chat returned an invalid citation.", response, body, credential);
+                        citations.Add(new LlmCitation(source.GetString()!));
+                    }
+                }
+                result = result with { Citations = citations.ToArray() };
+                if (root.TryGetProperty("output_files", out JsonElement files) && files.ValueKind != JsonValueKind.Null)
+                {
+                    if (files.ValueKind != JsonValueKind.Array)
+                        throw ProtocolException("xAI chat returned invalid generated files.", response, body, credential);
+                    foreach (JsonElement file in files.EnumerateArray())
+                    {
+                        if (file.ValueKind != JsonValueKind.Object
+                            || !file.TryGetProperty("file_id", out JsonElement id) || id.ValueKind != JsonValueKind.String
+                            || !file.TryGetProperty("name", out JsonElement name) || name.ValueKind != JsonValueKind.String)
+                            throw ProtocolException("xAI chat returned an invalid generated file.", response, body, credential);
+                        outputFiles.Add(new(id.GetString()!, name.GetString()!));
+                    }
+                }
+            }
+            return new(result, observation is null ? [] : [new(observation.Delta, observation.IsSummary)], outputFiles.ToArray());
         }
     }
 
     private static LlmChatResult BuildResult(
-        LlmChatRequest request,
+        LlmChatRequest? request,
         LlmStructuredOutputEnforcement? enforcement,
         string finalText,
         string finalRefusal,
@@ -434,7 +483,7 @@ internal abstract class ChatCompletionsLlmClientBase(HttpClient http) : LlmClien
                     : LlmCompletionStatus.Completed;
 
         LlmStructuredOutputValidation? validation = null;
-        if (request.StructuredOutput is { } structured
+        if (request?.StructuredOutput is { } structured
             && enforcement is not null
             && status != LlmCompletionStatus.RequiresAction)
         {
@@ -458,7 +507,7 @@ internal abstract class ChatCompletionsLlmClientBase(HttpClient http) : LlmClien
             Usage = usage,
             ProviderResponseId = responseId,
             ToolCalls = completedToolCalls,
-            ContinuationState = EncodeReasoning(connection, request.ModelId, finalText, completedToolCalls, status, reasoning),
+            ContinuationState = EncodeReasoning(connection, request?.ModelId ?? observedModel, finalText, completedToolCalls, status, reasoning),
             OmittedContinuationStateCount = omitted,
             StructuredOutput = validation,
             Diagnostics = new LlmProviderDiagnostics(
@@ -468,12 +517,12 @@ internal abstract class ChatCompletionsLlmClientBase(HttpClient http) : LlmClien
         };
     }
 
-    private static LlmContinuationState? EncodeReasoning(LlmConnection connection, string modelId, string text,
+    private static LlmContinuationState? EncodeReasoning(LlmConnection connection, string? modelId, string text,
         IReadOnlyList<LlmToolCall> toolCalls, LlmCompletionStatus status, ChatReasoning reasoning)
     {
         string? content = reasoning.ReasoningContent;
         JsonArray? details = reasoning.ReasoningDetails;
-        if (status is not (LlmCompletionStatus.Completed or LlmCompletionStatus.RequiresAction) || content is null && details is null)
+        if (modelId is null || status is not (LlmCompletionStatus.Completed or LlmCompletionStatus.RequiresAction) || content is null && details is null)
         { return null; }
         var item = new JsonObject
         {
@@ -710,12 +759,33 @@ internal abstract class ChatCompletionsLlmClientBase(HttpClient http) : LlmClien
         Uri.TryCreate(connection.Endpoint, UriKind.Absolute, out Uri? endpoint)
         && endpoint.Host.Equals("api.openai.com", StringComparison.OrdinalIgnoreCase);
 
-    private static JsonArray BuildContentParts(LlmChatMessage message)
+    internal void ValidatePreparedRequest(LlmConnection connection, LlmChatRequest request,
+        LlmProviderCapabilities capabilities)
+    {
+        ValidateRequest(connection, request, capabilities);
+        ValidateModelSampling(connection, request);
+    }
+
+    internal JsonObject BuildPreparedPayload(LlmConnection connection, LlmChatRequest request,
+        LlmStructuredOutputEnforcement? enforcement, LlmProviderCapabilities capabilities) =>
+        BuildPayload(connection, request, enforcement, capabilities);
+
+    private JsonArray BuildContentParts(LlmChatMessage message)
     {
         var parts = new JsonArray();
         if (message.Content.Length > 0) parts.Add(new JsonObject { ["type"] = "text", ["text"] = message.Content });
-        foreach (LlmAttachment attachment in message.Attachments.Select(LlmAttachments.RequireBinary))
+        foreach (LlmMessageAttachment source in message.Attachments)
         {
+            if (Transport == LlmTransport.XaiResponses && source is LlmFileReference file)
+            {
+                parts.Add(new JsonObject
+                {
+                    ["type"] = "file",
+                    ["file"] = new JsonObject { ["file_id"] = XaiFileRequestData.Identity(file.File.FileId) }
+                });
+                continue;
+            }
+            LlmAttachment attachment = LlmAttachments.RequireBinary(source);
             parts.Add(attachment.Kind switch
             {
                 LlmBinaryKind.Image => new JsonObject

@@ -2251,6 +2251,11 @@ default/enabled/disabled capability overrides. Disabling the `Streaming` overrid
 non-streaming request, as [Streaming, reasoning text and usage](#streaming-reasoning-text-and-usage) describes.
 The Chat Completions and Responses adapters each share one protocol implementation. Adapter hooks
 select request routing, headers and model-specific sampling validation without replacing the wire model.
+The internal complete Chat decoder accepts an absent original request. It maps the actual reported
+model, usage and tool calls without inventing request-specific structured-output validation. The xAI
+projection retains citation strings and generated file IDs/names for resource materialization, and
+its shared body builder accepts Files-prepared native references. These internal mappings do not
+enable batch or deferred operations by themselves.
 Prompt-image overrides send `image_url` data-URL parts. Prompt-document overrides send PDFs as
 `file` parts and valid UTF-8 `text/*` documents as text parts. Other document formats fail before
 dispatch. Tool results remain text-only; prompt overrides do not enable binary tool results.
