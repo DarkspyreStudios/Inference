@@ -278,8 +278,7 @@ internal sealed class XaiRealtimeSession : IRealtimeVoiceSession
                 RealtimeConversationReference? resumed; RealtimeConversationReference? conversation;
                 lock (_gate)
                 {
-                    requested = _attemptedModels.Remove(model);
-                    if (requested) _attemptedModelBytes -= StringSize(model);
+                    requested = _attemptedModels.Contains(model);
                     routingChanged = _routingChanged;
                     bool changed = _observedModel is not null && _observedModel != model;
                     contradiction = !requested && (changed || !routingChanged && _expectedModel is not null && _expectedModel != model);
@@ -388,7 +387,7 @@ internal sealed class XaiRealtimeSession : IRealtimeVoiceSession
     private void CheckModelCapacity(string model)
     {
         lock (_gate)
-            if (!_attemptedModels.Contains(model) && model != _observedModel
+            if (!_attemptedModels.Contains(model) && model != _routingModel
                 && (_attemptedModels.Count >= _limits.MaximumBufferedEvents || !FitsMetadata(StringSize(model)))) throw XaiRealtimeProtocol.Capacity();
     }
     private void AttemptModel(string model)
@@ -401,7 +400,7 @@ internal sealed class XaiRealtimeSession : IRealtimeVoiceSession
             if (invalidate)
             {
                 _routingModel = model; _routingChanged = true;
-                if (model != _observedModel && _attemptedModels.Add(model)) _attemptedModelBytes += StringSize(model);
+                if (_attemptedModels.Add(model)) _attemptedModelBytes += StringSize(model);
             }
             resumed = _resumptionReceipt; conversation = _conversation;
         }
