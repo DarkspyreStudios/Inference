@@ -2789,7 +2789,7 @@ and never consumes credits. The upstream route is evidenced in
 | --- | --- |
 | App Server dynamic tools | Host-defined tools and the Darkspyre.Inference.Connect.LLM loop |
 | Provider resume/fork | Capture complete context; start with saved/new thread identity |
-| Native compaction | Agent DS compactor and same-run pause/continue |
+| Native compaction | Host compaction or a Codex provider-created proposal, committed through idle replacement or same-run pause/continue |
 | Immediate steering | Queued safe-boundary steering |
 | CLI commands, file edits, web/MCP/subagents | Only tools the host explicitly registers and authorizes |
 | Native approval/sandbox enforcement | Host handler policy; no built-in command executor or host sandbox |
