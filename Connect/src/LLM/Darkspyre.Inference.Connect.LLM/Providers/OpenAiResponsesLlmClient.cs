@@ -14,7 +14,13 @@ internal sealed class OpenAiResponsesLlmClient(HttpClient http) : ResponsesLlmCl
 
     protected override bool OffersNonStreamingRequests => true;
 
-    protected override LlmProviderCapabilities DefaultCapabilities => ProtocolCapabilities;
+    protected override LlmProviderCapabilities DefaultCapabilities { get; } = ProtocolCapabilities with
+    {
+        SupportsAgentSessions = true,
+        SupportsAgentToolUse = true,
+        SupportsAgentTurnInstructions = true,
+        Agent = ManagedAgentPolicy.Capabilities with { RichContentSupported = ProtocolCapabilities.RichContentSupported }
+    };
 
     internal static LlmProviderCapabilities ProtocolCapabilities { get; } = new()
     {
