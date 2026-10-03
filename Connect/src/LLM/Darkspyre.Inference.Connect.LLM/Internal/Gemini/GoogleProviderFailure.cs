@@ -10,7 +10,20 @@ internal static class GoogleProviderFailure
     {
         if (response.IsSuccessStatusCode) return;
 
-        string body = await SdkHttpConsumption.ReadAsStringAsync(response.Content, cancellationToken).ConfigureAwait(false);
+        string body;
+        try
+        {
+            body = await SdkHttpConsumption.ReadAsStringAsync(response.Content, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException canceled)
+        {
+            throw new OperationCanceledException(message, new ReadFailureEvidence(canceled), canceled.CancellationToken);
+        }
+        catch (Exception error)
+        {
+            throw new LlmProviderException(message, transport, response.StatusCode,
+                retryAfter: retryAfter, innerException: new ReadFailureEvidence(error));
+        }
         bool overflow = false;
         try
         {
@@ -25,5 +38,10 @@ internal static class GoogleProviderFailure
 
         throw new LlmProviderException(message, transport, response.StatusCode,
             retryAfter: retryAfter, isContextOverflow: overflow);
+    }
+
+    private sealed class ReadFailureEvidence(Exception original) : Exception("The Google error response could not be read.")
+    {
+        internal Exception Original { get; } = original;
     }
 }
