@@ -95,14 +95,12 @@ internal static class XaiVideoProtocol
         {
             if (keyframes.Count > 4) throw new ArgumentOutOfRangeException(nameof(request));
             var rows = new JsonArray();
-            double? previous = null;
             foreach (VideoKeyframe frame in keyframes)
             {
                 fence();
                 double seconds = frame.Timestamp.TotalSeconds;
-                if (!double.IsFinite(seconds) || seconds <= 0 || request.Duration is { } total && frame.Timestamp >= total
-                    || previous is { } earlier && seconds <= earlier) throw new ArgumentException("Invalid ordered video keyframe timestamps.", nameof(request));
-                previous = seconds;
+                if (!double.IsFinite(seconds) || seconds <= 0 || request.Duration is { } total && frame.Timestamp >= total)
+                    throw new ArgumentException("Invalid video keyframe timestamps.", nameof(request));
                 rows.Add(new JsonObject { ["image"] = Resolve(frame.Image, resolve, fence, allowFile: true), ["timestamp_s"] = seconds });
             }
             body["keyframes"] = rows;

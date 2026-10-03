@@ -34,7 +34,8 @@ internal static class XaiImageProtocol
             switch (property.Name)
             {
                 case "aspect_ratio":
-                    if (fileIds.Count == 1) throw new NotSupportedException("Single-image edits derive their aspect ratio from the reference.");
+                    if (fileIds.Count == 1 && property.Value.ValueKind != JsonValueKind.Null)
+                        throw new NotSupportedException("Single-image edits derive their aspect ratio from the reference.");
                     RequireChoice(property.Value, ["1:1", "3:4", "4:3", "9:16", "16:9", "2:3", "3:2", "9:19.5", "19.5:9", "9:20", "20:9", "1:2", "2:1", "21:9", "5:2", "auto"]);
                     break;
                 case "resolution": RequireChoice(property.Value, ["1k", "1.5k", "2k"]); break;
