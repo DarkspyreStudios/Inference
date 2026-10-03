@@ -1,3 +1,4 @@
+using System.Collections.ObjectModel;
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.ExceptionServices;
 using System.Text.Json;
@@ -48,9 +49,10 @@ internal static class ClaudeCliModelCatalog
                 using JsonDocument document = JsonDocument.Parse(line);
                 JsonElement root = document.RootElement;
                 if (root.ValueKind != JsonValueKind.Object) throw ProtocolFailure();
-                if (LlmJson.GetString(root, "type") != "control_response"
-                    || !ClaudeCliControlProtocol.TryReadResponse(root, out string observedId, out JsonElement response)
-                    || observedId != requestId) continue;
+                if (LlmJson.GetString(root, "type") != "control_response") continue;
+                if (!ClaudeCliControlProtocol.TryReadResponse(root, out string observedId, out JsonElement response))
+                    throw ProtocolFailure();
+                if (observedId != requestId) continue;
                 if (ClaudeCliControlProtocol.IsRejected(response)) throw ProtocolFailure();
                 models = Project(ClaudeCliControlProtocol.Payload(response));
             }
@@ -75,7 +77,7 @@ internal static class ClaudeCliModelCatalog
         return models!;
     }
 
-    private static IReadOnlyList<LlmModel> Project(JsonElement initialization)
+    private static ReadOnlyCollection<LlmModel> Project(JsonElement initialization)
     {
         if (initialization.ValueKind != JsonValueKind.Object
             || !initialization.TryGetProperty("models", out JsonElement models) || models.ValueKind != JsonValueKind.Array)
