@@ -115,7 +115,7 @@ internal static class GeminiStream
                             continue;
                         }
                         string? name = function["name"] is JsonValue nameValue && nameValue.TryGetValue<string>(out string? foundName) ? foundName : null;
-                        if (string.IsNullOrWhiteSpace(name) || function["args"] is not JsonObject arguments)
+                        if (string.IsNullOrWhiteSpace(name) || GeminiContinuation.EffectiveArguments(function) is not JsonObject arguments)
                         {
                             invalidCall = true;
                             continue;
