@@ -21,6 +21,30 @@ public sealed partial class LlmProviderService
             throw new ArgumentException("The xAI binding and facade must borrow the same connection access.", nameof(access));
     }
 
+    internal async Task<IReadOnlyList<LlmModel>> GetXaiCatalogSnapshotAsync(string connectionId,
+        LlmConnection snapshot, ModelCatalogFamily family, Action callerFence, CancellationToken cancellationToken)
+    {
+        using var operation = _lifetime.Enter(cancellationToken);
+        ArgumentException.ThrowIfNullOrWhiteSpace(connectionId);
+        ArgumentNullException.ThrowIfNull(snapshot);
+        ArgumentException.ThrowIfNullOrWhiteSpace(snapshot.Version);
+        ArgumentNullException.ThrowIfNull(callerFence);
+        Fence();
+        if (snapshot.Transport != LlmTransport.XaiResponses)
+            throw new ArgumentException("A family catalog requires the selected xAI transport.", nameof(snapshot));
+        ILlmClient client = ClientFor(snapshot.Transport);
+        if (client is not ILlmModelCatalogClient)
+            throw new NotSupportedException("The selected facade has no cross-family xAI catalog.");
+        Fence();
+        // Only the waiter belongs to this facade. The cache admits and owns shared producers.
+        IReadOnlyList<LlmModel> models = await _modelLists.GetAsync(connectionId,
+            new(snapshot.Version, snapshot.ResolvedContinuationScope), client, snapshot, family, operation.Token).ConfigureAwait(false);
+        Fence();
+        return models;
+
+        void Fence() { ThrowIfOperationCanceled(operation.Token); callerFence(); ThrowIfOperationCanceled(operation.Token); }
+    }
+
     internal async Task<T> RunXaiSnapshotAsync<T>(LlmConnection snapshot, Action outerFence,
         Func<HttpClient, LlmConnection, Action, CancellationToken, Task<T>> dispatch, CancellationToken token)
     {

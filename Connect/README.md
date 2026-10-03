@@ -735,6 +735,11 @@ values remain unknown. The adapter does not invent limits for OpenAI model-list 
 tuple of connection `Version` and nullable resolved continuation scope changes, or until
 `RefreshModelsAsync` lists again and replaces it. Every connection or credential edit changes
 `Version`. The tuple compares both components separately and distinguishes null from empty scope.
+For xAI, an epoch also compares an allowlisted immutable copy of the actual admitted credential,
+endpoint, region, service tier, agent count, headers, provider options and capability overrides.
+This catches a refreshed credential returned with its original source version; equality is local
+change detection, not account or principal proof. Unrelated runtime and authority graphs are not
+retained in this catalog projection.
 Concurrent requests for one connection share a single listing, request accounting and managed sessions
 read the same list, and a failed listing is not kept. Common's `ILlmInference` carries the same pair:
 `ListModelsAsync` may answer from a kept list, and `RefreshModelsAsync` lists again. A service built by
@@ -744,6 +749,14 @@ A tuple change or explicit refresh fences publication from the replaced in-fligh
 Its waiting callers receive cancellation if it returns after replacement. The current entry remains
 unchanged. Replacement does not cancel the provider's entered call. An already-cancelled request
 does not start or replace a listing.
+An xAI epoch shares one generic REST listing and lazily reads only requested chat, image, video or
+embedding family listings. Replacement fences each subsequent route and publication. Exact model
+IDs take precedence; ambiguous aliases do not enrich facts or choose a profile. Missing fields remain
+unknown, and manual model selection does not imply entitlement. This internal family catalog does not
+register or enable unfinished media adapters. Voice listing remains an uncached TTS projection.
+The optional same-access LLM facade on `XaiFamilyBinding` now supplies this internal cached family
+path using its explicit selection ID and already acquired snapshot. It does not resolve or refresh
+again, and its caller fence belongs only to the waiter, never to shared catalog production.
 Publication copies the ordered list, catalog JSON and mutable capability sets. Adapter-owned lists,
 sets and JSON documents do not remain authoritative after publication. Every caller reads the same
 read-only snapshot until replacement.
@@ -768,6 +781,14 @@ A single original error remains unchanged; multiple errors are retained in an `A
 Repeated disposal returns the same cached failure instance. Synchronous settings
 manager creation and Claude login participate in admission and drain. An admitted synchronous login
 keeps its existing result or exception; disposal waits for that call to leave.
+Shared catalog producers use the cache's admission, immutable snapshot and cancellation fence, not
+the originating facade's fence. An injected cache can finish and publish after that facade retires.
+Cache retirement drains producers and clears executable client references; borrowed clients and HTTP
+clients are never disposed. Refused owned catalog request/response cleanup retains its safe failure
+and actual owner, and repeated cache retirement reports the same failure without retrying cleanup.
+The exact cleanup cause is retained as private evidence without exposing its untrusted text through
+the public exception graph; canceled cleanup retains its actual cancellation token. Applied request
+header values join credential redaction for catalog error and malformed-body diagnostics.
 
 A disposed default-context facade or authorization object can remain retained without keeping a
 separately collectible source or adapter generation alive through those released references.
