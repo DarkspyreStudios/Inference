@@ -187,7 +187,7 @@ internal sealed class ConnectLlmInference(
             Common.InferenceFailureCode.UnsupportedFeature,
             exception.Message,
             exception),
-        LlmProviderException provider when provider.ProviderCode == "context_length_exceeded" =>
+        LlmProviderException provider when provider.IsContextOverflow =>
             new Common.InferenceException(Common.InferenceFailureCode.InvalidRequest, provider.Message, provider),
         ArgumentException => new Common.InferenceException(Common.InferenceFailureCode.InvalidRequest, exception.Message, exception),
         LlmProviderException provider when provider.StatusCode == HttpStatusCode.TooManyRequests =>

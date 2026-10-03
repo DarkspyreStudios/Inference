@@ -362,13 +362,6 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
                     case "error" when Transport == LlmTransport.XaiResponses
                         && LlmJson.GetString(LlmJson.GetObject(root, "error") ?? root, "code") == "context_length_exceeded":
                         {
-                            if (Transport != LlmTransport.XaiResponses
-                                && LlmJson.GetObject(root, "response") is { } failed
-                                && LlmJson.GetObject(failed, "error") is { } error
-                                && LlmJson.GetString(error, "code") == "context_length_exceeded")
-                            {
-                                throw StreamError(failed, response, data, credential);
-                            }
                             LlmChatResult result = BuildResult(
                                 CompleteOutput(root, completedOutput, Transport),
                                 response,
@@ -467,14 +460,6 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
             {
                 throw ProtocolException($"{ResponseName} returned a malformed response.", response,
                     Transport == LlmTransport.XaiResponses ? string.Empty : body, credential);
-            }
-
-            if (Transport != LlmTransport.XaiResponses
-                && LlmJson.GetString(root, "status") == "failed"
-                && LlmJson.GetObject(root, "error") is { } error
-                && LlmJson.GetString(error, "code") == "context_length_exceeded")
-            {
-                throw StreamError(root, response, body, credential);
             }
 
             LlmChatResult result = BuildResult(
@@ -691,6 +676,9 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
         string modelId,
         string? observedModel = null)
     {
+        JsonElement terminal = LlmJson.GetObject(eventRoot, "response") ?? eventRoot;
+        if (LlmContextOverflow.Responses(terminal, Transport == LlmTransport.XaiResponses))
+            throw StreamError(terminal, response, rawEvent, credential);
         try
         {
             return BuildResultCore(eventRoot, response, rawEvent, streamedText, streamedRefusal,
@@ -747,11 +735,7 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
 
         if (connection.Transport == LlmTransport.XaiResponses)
         {
-            bool contextExceeded = LlmJson.GetString(LlmJson.GetObject(responseRoot, "error") ?? responseRoot, "code")
-                == "context_length_exceeded";
-            if (contextExceeded) incompleteReason ??= "context_length_exceeded";
-            status = contextExceeded ? LlmCompletionStatus.Incomplete
-                : finalRefusal.Length > 0 ? LlmCompletionStatus.Refused
+            status = finalRefusal.Length > 0 ? LlmCompletionStatus.Refused
                 : providerStatus switch
                 {
                     "completed" => toolCalls.Length > 0 ? LlmCompletionStatus.RequiresAction : LlmCompletionStatus.Completed,
@@ -759,8 +743,7 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
                     "failed" => LlmCompletionStatus.Failed,
                     "incomplete" => incompleteReason switch
                     {
-                        null or "max_output_tokens" or "max_prompt_tokens" or "max_time_limit"
-                            or "context_length_exceeded" => LlmCompletionStatus.Incomplete,
+                        null or "max_output_tokens" or "max_prompt_tokens" or "max_time_limit" => LlmCompletionStatus.Incomplete,
                         _ => LlmCompletionStatus.Unknown
                     },
                     _ => LlmCompletionStatus.Unknown
@@ -889,7 +872,8 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
                 // Truncated diagnostics cannot supply a reliable provider error code.
             }
             return new LlmProviderException($"Grok Responses returned a stream error: {safe}",
-                Transport, response.StatusCode, code, ProviderHttp.ReadRequestId(response), sanitizedResponseBody: safe);
+                Transport, response.StatusCode, code, ProviderHttp.ReadRequestId(response), sanitizedResponseBody: safe,
+                isContextOverflow: LlmContextOverflow.Responses(root, includeIncompleteReason: true));
         }
         JsonElement error = LlmJson.GetObject(root, "error") ?? root;
         string providerMessage = SecretRedactor.Sanitize(
@@ -901,6 +885,7 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
             response.StatusCode,
             LlmJson.GetString(error, "code"),
             ProviderHttp.ReadRequestId(response),
-            sanitizedResponseBody: SecretRedactor.Sanitize(rawEvent, credential));
+            sanitizedResponseBody: SecretRedactor.Sanitize(rawEvent, credential),
+            isContextOverflow: LlmContextOverflow.Responses(root));
     }
 }

@@ -13,7 +13,8 @@ public sealed class LlmProviderException : Exception
         string? requestId = null,
         TimeSpan? retryAfter = null,
         string? sanitizedResponseBody = null,
-        Exception? innerException = null)
+        Exception? innerException = null,
+        bool isContextOverflow = false)
         : base(message, innerException)
     {
         Transport = transport;
@@ -22,6 +23,7 @@ public sealed class LlmProviderException : Exception
         RequestId = requestId;
         RetryAfter = retryAfter;
         SanitizedResponseBody = sanitizedResponseBody;
+        IsContextOverflow = isContextOverflow;
     }
 
     public LlmTransport Transport { get; }
@@ -35,4 +37,7 @@ public sealed class LlmProviderException : Exception
     public TimeSpan? RetryAfter { get; }
 
     public string? SanitizedResponseBody { get; }
+
+    /// <summary>The provider rejected input that exceeds the model's context window.</summary>
+    public bool IsContextOverflow { get; }
 }

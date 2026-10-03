@@ -577,7 +577,8 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
             response.StatusCode,
             LlmJson.GetString(error, "type"),
             ProviderHttp.ReadRequestId(response),
-            sanitizedResponseBody: SecretRedactor.Sanitize(raw, credential));
+            sanitizedResponseBody: SecretRedactor.Sanitize(raw, credential),
+            isContextOverflow: LlmContextOverflow.Anthropic(LlmJson.GetString(error, "type"), LlmJson.GetString(error, "message")));
     }
 
     public override async Task<IReadOnlyList<LlmModel>> ListModelsAsync(

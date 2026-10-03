@@ -72,7 +72,7 @@ internal static class AppleProtocol
         return code switch
         {
             "context_length_exceeded" => new LlmProviderException("The Apple model context window was exceeded.",
-                LlmTransport.AppleFoundationModels, providerCode: code),
+                LlmTransport.AppleFoundationModels, providerCode: code, isContextOverflow: true),
             "unsupported_feature" or "unsupported_language" => new NotSupportedException("Apple cannot support this generation request."),
             "model_unavailable" => new InferenceException(InferenceFailureCode.ModelUnavailable, "The Apple system model is unavailable."),
             "capacity_exhausted" => new InferenceException(InferenceFailureCode.CapacityExhausted, "Apple is temporarily unable to accept this request."),
