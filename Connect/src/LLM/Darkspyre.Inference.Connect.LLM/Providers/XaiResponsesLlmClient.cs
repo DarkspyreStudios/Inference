@@ -95,6 +95,7 @@ internal sealed class XaiResponsesLlmClient(HttpClient http) : ResponsesLlmClien
     }
 
     internal XaiFileClient CreateFileClient() => new(Http);
+    internal HttpClient SharedHttp => Http;
 
     protected override LlmProviderCapabilities DefaultCapabilities { get; } = new()
     {
