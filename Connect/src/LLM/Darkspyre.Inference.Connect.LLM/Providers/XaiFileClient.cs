@@ -92,7 +92,7 @@ internal sealed class XaiFileClient(HttpClient http) : IDisposable, IAsyncDispos
 
     internal Task<ResourceDownloadReceipt> DownloadToAsync(LlmConnection connection, string fileId,
         Func<string?, long?, CancellationToken, Task<Stream>> openDestination, Action fence,
-        CancellationToken cancellationToken, Action onDispatched, Action<HttpResponseMessage> onResponse)
+        Action onDispatched, Action<HttpResponseMessage> onResponse, CancellationToken cancellationToken)
         => DownloadCoreAsync(connection, () => XaiFileRequestData.DownloadPath(fileId, null),
             openDestination, fence, cancellationToken, onDispatched, onResponse);
 

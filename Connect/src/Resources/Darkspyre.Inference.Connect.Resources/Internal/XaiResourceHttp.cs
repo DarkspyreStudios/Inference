@@ -79,7 +79,8 @@ internal sealed class XaiResourceHttp(HttpClient http, LlmConnection connection,
     {
         if (error is ExchangeFailure exchange)
             return new AggregateException("The resource operation and owned cleanup failed.",
-                new[] { OperationFailure(exchange.InnerExceptions[0], observation) }.Concat(exchange.InnerExceptions.Skip(1)));
+                new[] { OperationFailure(exchange.InnerExceptions[0], observation) }
+                    .Concat(exchange.InnerExceptions.Skip(1).Select(cleanup => SafeFailure(cleanup, observation, forceSafe: true))));
         if (!observation.HasEffects) return error;
         Exception safe = SafeFailure(error, observation);
         return safe is OperationCanceledException canceled

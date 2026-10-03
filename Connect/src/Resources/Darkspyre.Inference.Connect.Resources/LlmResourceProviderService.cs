@@ -155,7 +155,7 @@ public sealed class LlmResourceProviderService : ILlmBatchClient, IDisposable, I
             LlmConnection snapshot = await _connectionAccess!.AcquireAsync(connectionId, selected =>
             {
                 Fence();
-                XaiDeferredProtocol.ValidateConnection(selected, entered);
+                core.ValidateXaiSnapshotRequest(selected, _ => XaiDeferredProtocol.ValidateConnection(selected, entered));
                 Fence();
             }, token).ConfigureAwait(false);
             Fence();

@@ -2,6 +2,7 @@ using System.Diagnostics.CodeAnalysis;
 using System.Runtime.ExceptionServices;
 using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Common.Resources;
+using Darkspyre.Inference.Connect.LLM;
 using Darkspyre.Inference.Connect.LLM.Internal;
 using Darkspyre.Inference.Connect.LLM.Providers;
 
@@ -35,9 +36,9 @@ internal sealed class XaiGeneratedFileWriter(IInferenceResourceAccess access, In
             ResourceDownloadReceipt downloaded;
             try
             {
-                downloaded = await files.DownloadToAsync(connection, fileId, OpenAsync, () => Check(token), token,
+                downloaded = await files.DownloadToAsync(connection, fileId, OpenAsync, () => Check(token),
                     () => observation.RequestDispatched = true,
-                    response => observation.ObserveResponse(response, connection)).ConfigureAwait(false);
+                    response => observation.ObserveResponse(response, connection), token).ConfigureAwait(false);
             }
             catch (XaiFileClient.ExchangeFailure error)
             {
@@ -52,7 +53,7 @@ internal sealed class XaiGeneratedFileWriter(IInferenceResourceAccess access, In
             {
                 result = await _handle.CommitAsync(downloaded.BytesWritten, new() { SelectForSession = true }, token).ConfigureAwait(false);
                 // An actual returned receipt precedes cancellation, validation and cleanup publication fences.
-                if (result?.Resource?.Reference == _reference)
+                if (result is { Resource: { } observedResource } && observedResource.Reference == _reference)
                 {
                     _commit = InferenceResourceCommitOutcome.Committed;
                     observation.ObserveCommit(result);
@@ -138,12 +139,16 @@ internal sealed class XaiGeneratedFileWriter(IInferenceResourceAccess access, In
     {
         IInferenceResourceWriteHandle? handle = _handle;
         _handle = null; _content = null; _access = null; _fence = null;
-        if (handle is null) return;
-        try { await handle.DisposeAsync().ConfigureAwait(false); }
-        catch (Exception error)
+        try
         {
-            throw LlmResourcePreparation.AsCleanupFailure(Failure(error, InferenceResourceOperationPhase.Cleanup), _reference, handle);
+            if (handle is null) return;
+            try { await handle.DisposeAsync().ConfigureAwait(false); }
+            catch (Exception error)
+            {
+                throw LlmResourcePreparation.AsCleanupFailure(Failure(error, InferenceResourceOperationPhase.Cleanup), _reference, handle);
+            }
         }
+        finally { await base.DisposeAsync().ConfigureAwait(false); }
         GC.SuppressFinalize(this);
     }
 
