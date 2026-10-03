@@ -260,6 +260,7 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
         FenceResourceCallback(cancellationToken);
         lock (_sync)
         {
+            FenceResourceCallback(cancellationToken);
             if (!ReferenceEquals(run, RequireCompactionPosition(request)))
                 throw new InvalidOperationException("The run changed during compaction admission.");
         }
