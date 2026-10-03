@@ -189,7 +189,7 @@ internal static class ProviderContinuationStateCodec
 
             if (transport == LlmTransport.XaiResponses)
             {
-                if (type is not ("message" or "reasoning" or "function_call" or "web_search_call"
+                if (type is not ("message" or "reasoning" or "function_call" or "compaction" or "compaction_summary" or "web_search_call"
                     or "x_search_call" or "code_interpreter_call" or "code_execution_call" or "file_search_call"
                     or "mcp_call" or "image_generation_call" or "view_image_call" or "view_x_video_call"))
                 {
@@ -207,6 +207,15 @@ internal static class ProviderContinuationStateCodec
                 ValidateItem(item, transport, type);
                 // xAI requires verbatim ordered output, including encrypted server-tool metadata.
                 // The cloned payload is opaque context. The library never executes or logs its fields.
+                projected.Add(item.DeepClone());
+                continue;
+            }
+
+            if (transport == LlmTransport.OpenAiCodex && type is "compaction" or "compaction_summary")
+            {
+                if (item.Any(field => field.Key is not ("type" or "id" or "encrypted_content" or "internal_chat_message_metadata_passthrough")))
+                    throw new ArgumentException("Codex compaction state contains unsupported fields.");
+                ValidateItem(item, transport, type);
                 projected.Add(item.DeepClone());
                 continue;
             }
@@ -296,6 +305,7 @@ internal static class ProviderContinuationStateCodec
                 or "text_editor_code_execution_tool_result" or "tool_search_tool_result" or "advisor_tool_result") => ["tool_use_id", "content"],
             (_, "thinking") => ["thinking", "signature"],
             (_, "redacted_thinking") => ["data"],
+            (_, "compaction" or "compaction_summary") => ["encrypted_content"],
             (_, "text") => ["text"],
             // Bedrock reasoning text may be empty: a signed block under an omitted display carries none.
             (LlmTransport.AwsBedrockConverse, "reasoning") => ["text"],
@@ -311,6 +321,13 @@ internal static class ProviderContinuationStateCodec
         }
         if (item["tool_use_id"] is { } toolUseId && string.IsNullOrWhiteSpace(toolUseId.GetValue<string>()))
         { throw new ArgumentException("Server-tool continuation state requires a tool-use identity."); }
+        if (type is "compaction" or "compaction_summary")
+        {
+            _ = item["encrypted_content"]!.GetValue<string>();
+            if (item["id"] is { } id) _ = id.GetValue<string>();
+            if (item["internal_chat_message_metadata_passthrough"] is { } metadata && metadata is not JsonObject)
+                throw new ArgumentException("Compaction metadata must be an object.");
+        }
         if (type == "function_call" && JsonNode.Parse(item["arguments"]!.GetValue<string>()) is not JsonObject)
         {
             throw new ArgumentException("Response-state tool arguments must be a JSON object.");
