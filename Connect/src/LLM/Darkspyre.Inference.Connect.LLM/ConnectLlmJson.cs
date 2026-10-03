@@ -148,6 +148,8 @@ public static class ConnectLlmJson
         options.Converters.Add(new DocumentRagPipelineJsonConverter());
         options.Converters.Add(new CallerEnumConverter<LlmAgentCallerServiceKind>());
         options.Converters.Add(new CallerEnumConverter<LlmAgentPermissionChoiceKind>());
+        options.Converters.Add(new CallerEnumConverter<LlmAgentContentObservationKind>());
+        options.Converters.Add(new CallerEnumConverter<LlmAgentContentObservationMode>());
         options.Converters.Add(new CallerEnumConverter<LlmAgentRuntimePolicyKind>());
         options.Converters.Add(new CallerEnumConverter<LlmContextCacheUnavailableReason>());
         options.Converters.Add(new CallerEnumConverter<LlmContextCacheMutation>());
@@ -218,6 +220,11 @@ public static class ConnectLlmJson
                 metadata.OnSerializing = ValidateScope;
                 metadata.OnDeserialized = ValidateScope;
             }
+            if (metadata is not null && (type == typeof(LlmAgentToolPresentationEvent) || type == typeof(LlmAgentContentObservationEvent)))
+            {
+                metadata.OnSerializing = AgentObservationData.Validate;
+                metadata.OnDeserialized = AgentObservationData.Validate;
+            }
             return metadata;
         }
     }
@@ -230,6 +237,10 @@ public static class ConnectLlmJson
     public static JsonTypeInfo<LlmAgentCitationEvent> LlmAgentCitationEvent => Metadata<LlmAgentCitationEvent>();
     public static JsonTypeInfo<LlmAgentCompactedEvent> LlmAgentCompactedEvent => Metadata<LlmAgentCompactedEvent>();
     public static JsonTypeInfo<LlmAgentResourceSelectionChangedEvent> LlmAgentResourceSelectionChangedEvent => Metadata<LlmAgentResourceSelectionChangedEvent>();
+    public static JsonTypeInfo<LlmAgentToolPresentationEvent> LlmAgentToolPresentationEvent => Metadata<LlmAgentToolPresentationEvent>();
+    public static JsonTypeInfo<LlmAgentContentObservationEvent> LlmAgentContentObservationEvent => Metadata<LlmAgentContentObservationEvent>();
+    public static JsonTypeInfo<LlmAgentContentObservationKind> LlmAgentContentObservationKind => Metadata<LlmAgentContentObservationKind>();
+    public static JsonTypeInfo<LlmAgentContentObservationMode> LlmAgentContentObservationMode => Metadata<LlmAgentContentObservationMode>();
     public static JsonTypeInfo<LlmCredential> Credential => LlmCredentialJsonContext.Default.LlmCredential;
     public static JsonTypeInfo<LlmAccountUsageSnapshot> AccountUsageSnapshot => Metadata<LlmAccountUsageSnapshot>();
     public static JsonTypeInfo<LlmConnection> Connection => Metadata<LlmConnection>();
@@ -402,6 +413,10 @@ public static class ConnectLlmJson
 [JsonSerializable(typeof(LlmAgentCitationEvent))]
 [JsonSerializable(typeof(LlmAgentCompactedEvent))]
 [JsonSerializable(typeof(LlmAgentResourceSelectionChangedEvent))]
+[JsonSerializable(typeof(LlmAgentToolPresentationEvent))]
+[JsonSerializable(typeof(LlmAgentContentObservationEvent))]
+[JsonSerializable(typeof(LlmAgentContentObservationKind))]
+[JsonSerializable(typeof(LlmAgentContentObservationMode))]
 [JsonSerializable(typeof(LlmChatResult))]
 [JsonSerializable(typeof(LlmChatMessage))]
 [JsonSerializable(typeof(LlmTokenization))]
