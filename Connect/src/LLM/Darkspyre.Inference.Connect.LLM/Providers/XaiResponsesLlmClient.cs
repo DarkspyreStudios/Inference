@@ -114,6 +114,15 @@ internal sealed class XaiResponsesLlmClient(HttpClient http) : ResponsesLlmClien
         _ = ResolveStructuredOutputEnforcement(connection, request, capabilities);
     }
 
+    internal void PreflightManagedOpeningRequest(LlmConnection connection, LlmChatRequest request)
+    {
+        ProviderHttp.ValidateAdditionalHeaders(connection.AdditionalHeaders);
+        ProviderControlPolicy.Validate(connection, request);
+        RequestJson.ValidateSamplingOptions(connection, request);
+        LlmAttachments.ValidateReferences(request, () => GetCapabilities(connection, request.ModelId).SupportsFileReferences, supportsResources: true);
+        ValidateAdditionalRequest(connection, request);
+    }
+
     internal void PreflightCompactionRequest(LlmConnection connection, LlmChatRequest request)
     {
         if (connection.Xai?.ServiceTier == XaiServiceTier.Priority)
