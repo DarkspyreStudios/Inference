@@ -1836,6 +1836,19 @@ freezes caller-selected policy roots and does not grant filesystem or resource a
 The exact `LlmAgentRuntimePolicyKind` root and nested capability data reject undefined numeric values
 and preserve both defined numeric values.
 
+`LlmAgentToolPresentationEvent` carries a copied complete tool presentation without requiring a
+tool name or turn ID. `LlmAgentContentObservationEvent` carries ordered typed user, assistant or
+reasoning content. Both preserve actual nullable turn/item identities and explicit replay facts;
+neither invents completion or invokes a tool. Append adds blocks. Replace requires an actual item
+ID and represents the complete known item content. Changing an Append observation to Replace
+through an initializer requires assigning its item ID first. Event payloads copy binary data,
+JSON and nested collections. Diagnostic strings redact presentation contents.
+`ConnectLlmJson` exports these two concrete events and their two closed enums through exact
+type-name getters. Existing streams carry the events through `LlmAgentEvent`; there is no base-event
+data codec. Resource links remain observations without fetching or artifact registration.
+These contracts do not register an ACP/Copilot adapter or implement protocol replay and tool-update
+merging.
+
 `LlmAgentClientToolDefinition` is a closed function/shell data union. The existing
 `LlmAgentToolDefinition` retains its schema, strictness, deferred-loading and sequential-execution
 fields. `LlmAgentShellTool` wraps the Common shell definition. `ConnectLlmJson` exports these three

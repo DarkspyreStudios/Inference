@@ -593,6 +593,12 @@ internal static class Program
                     ? $"[tool:{tool.Status}] {tool.Tool}"
                     : $"[tool:{tool.Status}] {tool.Tool} output parts={tool.Output.Parts.Count} error={tool.Output.IsError}");
                 break;
+            case LlmAgentToolPresentationEvent presentation:
+                Console.Error.WriteLine($"[tool presentation] replay={presentation.IsReplay} content parts={presentation.Tool.Content.Count} locations={presentation.Tool.Locations.Count}");
+                break;
+            case LlmAgentContentObservationEvent observation:
+                Console.Error.WriteLine($"[content observation] kind={observation.Kind} mode={observation.Mode} replay={observation.IsReplay} parts={observation.Content.Count}");
+                break;
             case LlmAgentActivityEvent activity:
                 Console.Error.WriteLine($"[activity] {activity.Activity}");
                 break;
