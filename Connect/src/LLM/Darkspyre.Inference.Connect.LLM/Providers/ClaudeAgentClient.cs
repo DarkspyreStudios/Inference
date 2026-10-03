@@ -836,7 +836,7 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             try
             {
                 await WriteJsonLineAsync(
-                    new JsonObject { ["type"] = "control_request", ["request_id"] = requestId, ["request"] = request },
+                    ClaudeCliControlProtocol.Request(requestId, request),
                     cancellationToken);
                 return await waiter.Task.WaitAsync(cancellationToken);
             }
@@ -851,12 +851,7 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             CancellationToken cancellationToken)
         {
             await WriteJsonLineAsync(
-                new JsonObject
-                {
-                    ["type"] = "control_request",
-                    ["request_id"] = Guid.NewGuid().ToString("N"),
-                    ["request"] = request
-                },
+                ClaudeCliControlProtocol.Request(Guid.NewGuid().ToString("N"), request),
                 cancellationToken);
         }
 
@@ -1436,8 +1431,7 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
 
         private void CompleteControlRequest(JsonElement root)
         {
-            if (!root.TryGetProperty("response", out JsonElement response)
-                || OptionalString(response, "request_id") is not { } requestId)
+            if (!ClaudeCliControlProtocol.TryReadResponse(root, out string requestId, out JsonElement response))
             {
                 return;
             }
@@ -1447,14 +1441,12 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             {
                 return;
             }
-            if (string.Equals(OptionalString(response, "subtype"), "error", StringComparison.Ordinal))
+            if (ClaudeCliControlProtocol.IsRejected(response))
             {
                 waiter.TrySetException(ProtocolFailure("Claude CLI rejected an agent control request."));
                 return;
             }
-            waiter.TrySetResult(response.TryGetProperty("response", out JsonElement payload)
-                ? payload.Clone()
-                : JsonElement.Parse("{}"));
+            waiter.TrySetResult(ClaudeCliControlProtocol.Payload(response));
         }
 
         private async Task StartHostTurnAsync(string? turnId)

@@ -256,7 +256,7 @@ services stay first-class and callable independently of a wizard.
 | Anthropic Messages | Endpoint, secret API key, model | Preserve API-key-only credential policy; discover and explicit test |
 | Direct Codex | Device authorization, model | Start/poll/cancel device auth with expiry; draft-local credential completion. No endpoint field: the official endpoint is fixed (owner decision, 2026-09-23), and a saved former value is replaced on the next save |
 | Grok OAuth / Responses | Device authorization, fixed region choices, service tier, model and profile-backed agent count | OAuth-only draft sign-in and version-conditional saves; default registration performs no authentication or network requests; provider qualification remains incomplete |
-| Claude CLI | Executable, model; separate optional catalog authorization | Verify CLI/auth without copying CLI tokens; manual model entry without catalog OAuth |
+| Claude CLI | Executable, model; separate optional catalog authorization | Verify CLI/auth without copying CLI tokens; discover actual signed-in initialize model options without a prompt, or use the explicitly configured HTTP catalog; manual model entry remains available |
 | Antigravity CLI | Executable, model | Verify installed/authenticated CLI; discover via current adapter; no token scraping |
 | Bedrock Converse | AWS profile and region choices, model | SDK-owned choices/checks in Bedrock assembly; standard credential chain remains owner |
 | AgentCore Harness | Profile, region, Harness ARN, optional model override | Validate ARN/region; default/manual override semantics; explicit session-based test |
