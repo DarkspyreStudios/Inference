@@ -14,7 +14,7 @@ namespace Darkspyre.Inference.Connect.LLM.Providers;
 /// It reads the first-party Models API catalog for per-model reasoning levels. Vertex Claude, which derives from it,
 /// has no Models API; the service never attaches a catalog to a Vertex connection.
 /// </remarks>
-internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabilities, ILlmProviderTokenCounter
+internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabilities, ILlmProviderTokenCounter, ILlmContextEstimator
 {
     private const string AnthropicVersion = "2023-06-01";
     private const int DefaultMaxOutputTokens = 8192;
@@ -45,6 +45,10 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
         SupportsJsonObject = false,
         SupportsTemperature = false,
         SupportsToolUse = true,
+        SupportsAgentSessions = true,
+        SupportsAgentToolUse = true,
+        SupportsAgentTurnInstructions = true,
+        Agent = ManagedAgentPolicy.Capabilities with { RichContentSupported = RichContentRoutes.Anthropic },
         Tools = new()
         {
             ChoiceModes = new[] { LlmToolChoiceMode.Auto, LlmToolChoiceMode.None, LlmToolChoiceMode.Required, LlmToolChoiceMode.Specific }.ToFrozenSet(),
@@ -86,8 +90,6 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
                 }
             },
             SupportsAccountUsage = false,
-            SupportsAgentSessions = false,
-            SupportsAgentToolUse = false,
             SupportsTemperature = profile.AllowsSampling
                 && (!LlmCapabilityOverrideLookup.Overrides(connection, modelId, overrides => overrides.SupportsTemperature) || capabilities.SupportsTemperature),
             SupportsTopP = profile.AllowsSampling
@@ -115,6 +117,35 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
             ReasoningModelId(request.ModelId), ILlmCatalogCapabilities.EntryFor(connection, request.ModelId)));
         LlmStructuredOutputEnforcement? enforcement = AnthropicSchemas.Enforcement(request, capabilities);
         return (capabilities, enforcement);
+    }
+
+    public string? EstimateDiagnostic =>
+        "Estimated from the Messages plaintext projection with a general-purpose tokenizer; media and opaque provider state remain unknown.";
+
+    public ContextEstimate? EstimateInputTokens(LlmConnection connection, LlmChatRequest request)
+    {
+        _ = ValidateMessagesRequest(connection, request);
+        JsonObject payload = BuildPayload(connection, request, output => ProjectToolOutput(connection, request.ModelId, output), false);
+        if (request.Resources is not null || payload["container"] is not null
+            || payload["messages"] is not JsonArray messages
+            || messages.Any(message => message is not JsonObject item || !IsPlaintextContent(item["content"]))
+            || payload["system"] is { } system && !IsPlaintextContent(system)) return null;
+        foreach (string name in CountExcludedFields) payload.Remove(name);
+        return new ContextEstimate(LocalTokenCount.Count(payload.ToJsonString()));
+    }
+
+    private static bool IsPlaintextContent(JsonNode? content)
+    {
+        if (content is JsonValue value && value.TryGetValue<string>(out _)) return true;
+        return content is JsonArray blocks && blocks.All(block => block is JsonObject item && ((string?)item["type"] switch
+        {
+            "text" => item["text"] is JsonValue text && text.TryGetValue<string>(out _),
+            "tool_use" => item["input"] is JsonObject,
+            "tool_result" => IsPlaintextContent(item["content"]),
+            "document" => item["source"] is JsonObject source && (string?)source["type"] == "text"
+                && source["data"] is JsonValue data && data.TryGetValue<string>(out _),
+            _ => false
+        }));
     }
 
     public async Task<LlmProviderInputTokenCount> CountInputTokensAsync(LlmConnection connection, LlmChatRequest request,
