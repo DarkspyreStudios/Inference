@@ -134,6 +134,8 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
         AddChatArguments(arguments, request, enforcement);
 
         ClaudeTerminalResult? terminal = null;
+        string? observedModel = null;
+        LlmCredential? credential = LlmCredential.Parse(connection.Credential);
         ClaudeCliProcessResult? processResult = null;
         LlmProviderException? parseException = null;
         bool emittedText = false;
@@ -163,6 +165,7 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
             try
             {
                 using JsonDocument document = JsonDocument.Parse(outputLine.Line);
+                observedModel = ReadObservedModel(document.RootElement, connection, credential) ?? observedModel;
                 accountObservation = LlmJson.GetString(document.RootElement, "type") == "rate_limit_event"
                     && document.RootElement.TryGetProperty("rate_limit_info", out JsonElement info)
                     ? ClaudeRateLimitEvent.Parse(info, DateTimeOffset.UtcNow) : null;
@@ -216,7 +219,7 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
         {
             throw parseException;
         }
-        LlmChatResult result = BuildResult(terminal, request, enforcement);
+        LlmChatResult result = BuildResult(terminal, request, enforcement, observedModel);
         if (!emittedText && terminal!.Text.Length > 0)
         {
             yield return result.Status == LlmCompletionStatus.Refused
@@ -271,7 +274,7 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
                 innerException: exception);
         }
 
-        return BuildResult(parsed.Terminal, request, enforcement);
+        return BuildResult(parsed.Terminal, request, enforcement, null);
     }
 
     /// <summary>The chat-lane arguments both output formats share.</summary>
@@ -303,7 +306,8 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
     private LlmChatResult BuildResult(
         ClaudeTerminalResult? terminal,
         LlmChatRequest request,
-        LlmStructuredOutputEnforcement? enforcement)
+        LlmStructuredOutputEnforcement? enforcement,
+        string? observedModel)
     {
         if (terminal is null)
         {
@@ -341,6 +345,7 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
         return new LlmChatResult
         {
             Text = refused ? string.Empty : terminal.Text,
+            ModelId = observedModel,
             Refusal = refused ? terminal.Text : null,
             Status = refused
                 ? LlmCompletionStatus.Refused
@@ -621,6 +626,19 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
             ["type"] = "user",
             ["message"] = new JsonObject { ["role"] = "user", ["content"] = content }
         }.ToJsonString() + "\n";
+    }
+
+    private string? ReadObservedModel(JsonElement root, LlmConnection connection, LlmCredential? credential)
+    {
+        if (root.TryGetProperty("parent_tool_use_id", out JsonElement parent) && parent.ValueKind != JsonValueKind.Null)
+            return null;
+        string? type = LlmJson.GetString(root, "type");
+        JsonElement? message = type == "assistant" ? LlmJson.GetObject(root, "message")
+            : type == "stream_event" && LlmJson.GetObject(root, "event") is { } streamEvent
+                && LlmJson.GetString(streamEvent, "type") == "message_start"
+                ? LlmJson.GetObject(streamEvent, "message") : null;
+        return message is { } observed
+            ? ObservedModel.Read(observed, "model", Transport, connection, credential, null) : null;
     }
 
     private static ParsedClaudeLine ParseClaudeLine(string line, bool preferStructuredOutput)
