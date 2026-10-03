@@ -1507,6 +1507,14 @@ Family acquisition rejects incompatible credentials before refresh and incompati
 before credential save; the Responses client uses the same OAuth-only authorization validator before HTTP.
 The chat facade applies that selected adapter policy before credential refresh, credential save and catalog callbacks.
 
+Private xAI media codecs now map native image generation/edit bodies and typed video
+generation/edit/extension bodies. They retain ordered references, explicit false controls, actual
+submission IDs and one-poll status/model/output observations without requested-model or MIME
+fallbacks. Storage and nullable usage facts use finite owned projections rather than raw response
+DTOs. These codecs alone perform no HTTP, upload, credential acquisition or receipt authorization.
+The complete transport/consumer integration and synchronous media usage handoff remain open;
+no xAI Image or Video transport is registered or OAuth-qualified by this checkpoint.
+
 ## Video contracts
 
 `Darkspyre.Inference.Connect.Video` supplies `VideoConnection`, `IVideoTransport`,
