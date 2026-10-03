@@ -392,7 +392,7 @@
         SetupStatus status = Settings.Status;
         return new[]
         {
-            ("Configured", status.Configured), ("Authenticated", status.Authenticated),
+            ("Configured", status.Configured), ("Authentication checked", status.Authenticated),
             ("Installed", status.Installed), ("Verified", status.Verified),
             ("Loaded", status.Loaded), ("Ready", status.Ready)
         }.Where(item => item.Item2.IsApplicable)

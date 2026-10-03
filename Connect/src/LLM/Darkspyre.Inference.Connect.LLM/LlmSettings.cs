@@ -78,13 +78,9 @@ public sealed partial class LlmSettings : InferenceSettings<LlmSetupChanges>
                 ProviderOptions = existing.ProviderOptions.ToDictionary(pair => pair.Key, pair => pair.Value.Clone(), StringComparer.Ordinal),
                 ModelCapabilityOverrides = new Dictionary<string, LlmCapabilityOverrides>(existing.ModelCapabilityOverrides, StringComparer.Ordinal)
             };
-        // Fixed endpoints replace a former value on Save. xAI derives its endpoint from the typed region.
-        _draft = UsesFixedEndpoint(transport) ? opened with { Endpoint = definition.DefaultEndpoint } : opened;
-        if (transport == LlmTransport.XaiResponses)
-        {
-            XaiConnectionOptions options = opened.Xai ?? new();
-            _draft = opened with { Xai = options, Endpoint = Enum.IsDefined(options.Region) ? options.GetEndpoint() : opened.Endpoint };
-        }
+        // Grok routing changes only through an explicit region edit; preserve supplied configuration on open.
+        _draft = UsesFixedEndpoint(transport) && transport != LlmTransport.XaiResponses
+            ? opened with { Endpoint = definition.DefaultEndpoint } : opened;
         _model = _originalModel = modelId ?? (UsesAzure ? existing?.Azure?.DeploymentId : null) ?? definition.DefaultModelId;
         if (UsesAzure && _draft.Azure is null) _draft = _draft with { Azure = new() { DeploymentId = _model } };
         if (UsesAzure) _azure = new(_draft.Azure!, LlmCredential.Parse(existing?.Credential) ?? new());
@@ -129,6 +125,33 @@ public sealed partial class LlmSettings : InferenceSettings<LlmSetupChanges>
         or LlmTransport.GoogleGeminiApi || UsesVertex && Vertex.AuthenticationMode == LlmGoogleAuthenticationMode.ApiKey
         || UsesAzure && _azure!.Authentication == LlmAzureAuthenticationMode.ApiKey;
     private LlmCredential Credential => LlmCredential.Parse(_draft.Credential) ?? new();
+
+    private static bool HasSignIn(LlmConnection? connection) =>
+        !string.IsNullOrWhiteSpace(LlmCredential.Parse(connection?.Credential)?.OAuth?.AccessToken);
+
+    private string SavedSignIn => SaveOutcomeUncertain ? "Save outcome unknown"
+        : HasSignIn(IsSaved ? _draft : _original) ? "Present" : "Not present";
+
+    private string DraftSignIn => SaveOutcomeUncertain
+        ? (HasSignIn(_draft) ? "Present" : "Not present") + " in draft; saved outcome unknown"
+        : IsSaved ? "Saved"
+        : _credentialChange != SetupSecretEditKind.Keep
+            ? (HasSignIn(_draft) ? "Present" : "Not present") + "; not saved"
+        : HasSignIn(_draft) ? "Using saved sign-in" : "Not present";
+
+    private SetupIssue? XaiRoutingIssue()
+    {
+        if (_draft.Xai is null)
+            return new("xai-configuration-missing", "Typed xAI settings are missing. Select an API region to configure this draft.", "xai-region");
+        if (!Enum.IsDefined(_draft.Xai.Region))
+            return new("xai-region-invalid", "Select an xAI region.", "xai-region");
+        if (!Enum.IsDefined(_draft.Xai.ServiceTier))
+            return new("xai-tier-invalid", "Select an xAI service tier.", "xai-service-tier");
+        try { XaiRequestHeaders.ValidateEndpoint(_draft); }
+        catch (Exception error) when (error is ArgumentException or NotSupportedException)
+        { return new("xai-routing-invalid", "The Grok endpoint or configuration does not match the typed region. Select an API region to update the route.", "xai-region"); }
+        return null;
+    }
 
     protected override bool IsDraftDirty =>
         _draft.Endpoint != _baseline.Endpoint || _draft.Vertex != _baseline.Vertex || (UsesAzure ? _azure!.IsDirty : _draft.Azure != _baseline.Azure) || _draft.ChatCompletions != _baseline.ChatCompletions || _draft.Xai != _baseline.Xai || _model != _originalModel
@@ -199,8 +222,18 @@ public sealed partial class LlmSettings : InferenceSettings<LlmSetupChanges>
         }
         if (UsesXai)
         {
+            fields.Add(new SetupTextField(new("saved-sign-in", "Saved sign-in")
+            {
+                IsReadOnly = true,
+                HelpText = "Saved credential configuration, not a current authentication check."
+            }, SavedSignIn, string.Empty, static _ => SetupEditResult.Applied));
+            fields.Add(new SetupTextField(new("draft-sign-in", "Draft sign-in")
+            {
+                IsReadOnly = true,
+                HelpText = "Sign-in changes remain in this draft until Save succeeds."
+            }, DraftSignIn, string.Empty, static _ => SetupEditResult.Applied));
             if (XaiModelProfiles.Get(_draft, _model).MultiAgent is { } multiAgent)
-                fields.Add(new SetupChoiceField(new("xai-agent-count", "Agent count"),
+                fields.Add(new SetupChoiceField(new("xai-agent-count", "Agent count") { IsEnabled = _draft.Xai is not null },
                     Xai.MultiAgent?.AgentCount?.ToString(CultureInfo.InvariantCulture) ?? "default", "default", value =>
                     {
                         if (value == "default") return Edit(() => _draft = _draft with { Xai = Xai with { MultiAgent = null } });
@@ -212,8 +245,9 @@ public sealed partial class LlmSettings : InferenceSettings<LlmSetupChanges>
             fields.Add(new SetupChoiceField(new("xai-region", "API region")
             {
                 IsRequired = true,
-                HelpText = "United States text token usage costs 1.1x the global rate."
-            }, Xai.Region.ToString(), XaiRegion.Global.ToString(), value =>
+                HelpText = (XaiRoutingIssue() is { } routing ? routing.Message + " " : string.Empty)
+                    + "United States text token usage costs 1.1x the global rate."
+            }, _draft.Xai?.Region.ToString() ?? string.Empty, XaiRegion.Global.ToString(), value =>
             {
                 if (value is not (nameof(XaiRegion.Global) or nameof(XaiRegion.UnitedStates)))
                     return new(SetupEditState.Invalid, [new("xai-region-invalid", "Select an xAI region.", "xai-region")]);
@@ -227,8 +261,9 @@ public sealed partial class LlmSettings : InferenceSettings<LlmSetupChanges>
             fields.Add(new SetupChoiceField(new("xai-service-tier", "Service tier")
             {
                 IsRequired = true,
+                IsEnabled = _draft.Xai is not null,
                 HelpText = "Applied priority text token usage costs 2x the default rate."
-            }, Xai.ServiceTier.ToString(), XaiServiceTier.Default.ToString(), value =>
+            }, _draft.Xai?.ServiceTier.ToString() ?? string.Empty, XaiServiceTier.Default.ToString(), value =>
             {
                 if (value is not (nameof(XaiServiceTier.Default) or nameof(XaiServiceTier.Priority)))
                     return new(SetupEditState.Invalid, [new("xai-tier-invalid", "Select an xAI service tier.", "xai-service-tier")]);
@@ -586,7 +621,7 @@ public sealed partial class LlmSettings : InferenceSettings<LlmSetupChanges>
         return new(issues.AsReadOnly());
     }
 
-    private SetupValidation ConnectionValidation()
+    internal SetupValidation ConnectionValidation()
     {
         var issues = new List<SetupIssue>();
         if (UsesVertex)
@@ -630,8 +665,7 @@ public sealed partial class LlmSettings : InferenceSettings<LlmSetupChanges>
         }
         if (UsesXai)
         {
-            if (!Enum.IsDefined(Xai.Region)) issues.Add(new("xai-region-invalid", "Select an xAI region.", "xai-region"));
-            if (!Enum.IsDefined(Xai.ServiceTier)) issues.Add(new("xai-tier-invalid", "Select an xAI service tier.", "xai-service-tier"));
+            if (XaiRoutingIssue() is { } routing) issues.Add(routing);
             if (!string.IsNullOrEmpty(Credential.ApiKey) || Credential.SecretHeaders.Count != 0)
                 issues.Add(new("xai-oauth-required", "Grok requires OAuth sign-in; API keys and static secret headers are not supported."));
         }
@@ -799,6 +833,11 @@ public sealed class LlmSettingsManager : InferenceSettingsManager<LlmSettings, L
                 return InferenceSettings.Page(query, regions);
             case "model":
                 {
+                    if (settings.Transport == LlmTransport.XaiResponses)
+                    {
+                        SetupValidation configuration = settings.ConnectionValidation();
+                        if (!configuration.IsValid) return new([], State: SetupChoiceState.Failed, Issues: configuration.Issues);
+                    }
                     await using LlmProviderService service = Service(settings, cancellationToken);
                     Fence(cancellationToken);
                     LlmProviderCapabilities capabilities = await service.GetCapabilitiesAsync(settings.Identity.Id, cancellationToken).ConfigureAwait(false);
