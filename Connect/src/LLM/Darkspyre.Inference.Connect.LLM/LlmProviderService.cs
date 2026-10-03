@@ -580,9 +580,26 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, ILlmFileClie
         string connectionId, LlmChatRequest request, string expectedScope, CancellationToken cancellationToken) =>
         StreamCoreAsync(connectionId, request, expectedScope, cancellationToken);
 
+    internal async Task<ProviderCompactionResult> CompactAgentAsync(
+        string connectionId, LlmChatRequest request, string expectedScope, CancellationToken cancellationToken)
+    {
+        ProviderCompactionResult? result = null;
+        try
+        {
+            await foreach (LlmStreamEvent _ in StreamCoreAsync(connectionId, request, expectedScope, cancellationToken,
+                compacted => result = compacted).ConfigureAwait(false))
+            {
+                throw new InvalidOperationException("Provider compaction cannot dispatch generation events.");
+            }
+            return result ?? throw new InvalidOperationException("Provider compaction returned no result.");
+        }
+        catch (Exception error) { _cleanupOutcomes.Record(error); throw; }
+    }
+
     private async IAsyncEnumerable<LlmStreamEvent> StreamCoreAsync(
         string connectionId, LlmChatRequest request, string? expectedScope,
-        [EnumeratorCancellation] CancellationToken cancellationToken)
+        [EnumeratorCancellation] CancellationToken cancellationToken,
+        Action<ProviderCompactionResult>? publishCompaction = null)
     {
         using var operation = _lifetime.Enter(cancellationToken);
         cancellationToken = operation.Token;
@@ -597,6 +614,8 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, ILlmFileClie
         RequestJson.ValidateSamplingOptions(connection, request);
         request = ProviderControlPolicy.Resolve(connection, request);
         ILlmClient client = ClientFor(connection.Transport);
+        if (publishCompaction is not null && client is not (OpenAiCodexLlmClient or XaiResponsesLlmClient))
+            throw new NotSupportedException("The selected route has no provider compactor.");
         string? resolvedCredential = connection.Credential;
         connection = WithContextCache(EmbeddingRequestData.Snapshot(connection), client);
         if (client is GeminiApiLlmClient) GeminiApiLlmClient.ValidateCachedSuffix(request);
@@ -607,7 +626,11 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, ILlmFileClie
         HostedTools.Validate(request, client.GetCapabilities(connection, request.ModelId));
         ClientTools.Validate(request, client.GetCapabilities(connection, request.ModelId).SupportsShellTools);
         if (client is Providers.XaiResponsesLlmClient resourceDestination)
-            resourceDestination.PreflightResourceRequest(connection, request);
+        {
+            if (publishCompaction is not null)
+                resourceDestination.PreflightCompactionRequest(connection, request);
+            else resourceDestination.PreflightResourceRequest(connection, request);
+        }
         ThrowIfOperationCanceled(cancellationToken);
         (connection, request) = await AdmitContextCacheAsync(connectionId, connection, client, request, cacheSequence, cancellationToken).ConfigureAwait(false);
         if (client is not IStreamingCredentialRefreshPolicy refreshPolicy
@@ -660,16 +683,40 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, ILlmFileClie
             }
         }
         (request, int omitted) = ContinuationStateProjection.Project(request, connection);
-        connection = await AttachCatalogAsync(connectionId, connection, client, cancellationToken);
-        IAsyncEnumerable<LlmStreamEvent> stream = client is Providers.XaiResponsesLlmClient xai
+        connection = await AttachCatalogCoreAsync(connectionId, connection, client, cancellationToken);
+        ThrowIfOperationCanceled(cancellationToken);
+        if (publishCompaction is not null && client is XaiResponsesLlmClient xaiCompactor)
+        {
+            ProviderCompactionResult compacted = await xaiCompactor.CompactWithResourcesAsync(connection, request,
+                _xaiFiles!, () => ThrowIfOperationCanceled(cancellationToken), cancellationToken).ConfigureAwait(false);
+            ThrowIfOperationCanceled(cancellationToken);
+            connection.CacheAdmission?.Check(connection, request.ExplicitCache);
+            publishCompaction(compacted);
+            yield break;
+        }
+        IAsyncEnumerable<LlmStreamEvent> stream = publishCompaction is not null && client is OpenAiCodexLlmClient codex
+            ? codex.StreamCompactionAsync(connection, request, cancellationToken)
+            : client is Providers.XaiResponsesLlmClient xai
             ? xai.StreamWithResourcesAsync(connection, request, _xaiFiles!, () => ThrowIfOperationCanceled(cancellationToken), cancellationToken)
             : client.StreamAsync(connection, request, cancellationToken);
+        ProviderCompactionResult? compactionResult = null;
         await foreach (LlmStreamEvent streamEvent in stream)
         {
             ThrowIfOperationCanceled(cancellationToken);
             connection.CacheAdmission?.Check(connection, request.ExplicitCache);
             if (streamEvent is AccountUsageObservedEvent observed)
             { observationBinding?.Record(observed.Snapshot); continue; }
+            if (publishCompaction is not null)
+            {
+                if (compactionResult is not null || streamEvent is not LlmChatCompletionEvent compacted)
+                    throw new InvalidOperationException("Provider compaction returned an unexpected event.");
+                LlmChatResult result = SanitizeDiagnostics(compacted.Result, connection);
+                if (result.Status != LlmCompletionStatus.Completed || result.ContinuationState is null
+                    || string.IsNullOrWhiteSpace(result.ProviderResponseId))
+                    throw new InvalidOperationException("Provider compaction returned no completed continuation.");
+                compactionResult = new(result.ContinuationState, result.ProviderResponseId, result.Usage);
+                continue;
+            }
             yield return streamEvent is LlmChatCompletionEvent completion
                 ? new LlmChatCompletionEvent(SanitizeDiagnostics(completion.Result, connection) with
                 {
@@ -679,6 +726,8 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, ILlmFileClie
         }
         ThrowIfOperationCanceled(cancellationToken);
         connection.CacheAdmission?.Check(connection, request.ExplicitCache);
+        if (publishCompaction is not null)
+            publishCompaction(compactionResult ?? throw new InvalidOperationException("Provider compaction returned no result."));
     }
 
     /// <summary>Tokenizes only the supplied plain text. No request projection, catalog, usage or estimate is substituted.</summary>
@@ -1051,7 +1100,13 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, ILlmFileClie
         CancellationToken cancellationToken)
     {
         using var operation = _lifetime.Enter(cancellationToken);
-        cancellationToken = operation.Token;
+        return await AttachCatalogCoreAsync(connectionId, connection, client, operation.Token).ConfigureAwait(false);
+    }
+
+    private async Task<LlmConnection> AttachCatalogCoreAsync(string connectionId, LlmConnection connection,
+        ILlmClient client, CancellationToken cancellationToken)
+    {
+        ThrowIfOperationCanceled(cancellationToken);
         if (client is not ILlmCatalogCapabilities)
         {
             return connection;
@@ -1074,6 +1129,31 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, ILlmFileClie
         {
             return connection;
         }
+    }
+
+    internal LlmOperationLifetime.Lease EnterManagedOpening(CancellationToken cancellationToken) =>
+        _lifetime.Enter(cancellationToken);
+
+    internal void FenceManagedOpening(CancellationToken cancellationToken) => ThrowIfOperationCanceled(cancellationToken);
+
+    // The opener holds EnterManagedOpening through preparation and session factory callbacks.
+    internal async Task<LlmConnection> PrepareManagedConnectionAsync(string connectionId, LlmConnection connection,
+        ILlmClient client, Action<LlmConnection> preflight, CancellationToken cancellationToken)
+    {
+        ThrowIfOperationCanceled(cancellationToken);
+        connection = EmbeddingRequestData.Snapshot(connection);
+        preflight(connection);
+        ThrowIfOperationCanceled(cancellationToken);
+        connection = await RefreshConnectionAsync(connectionId, connection, client, cancellationToken).ConfigureAwait(false);
+        ThrowIfOperationCanceled(cancellationToken);
+        if (client is ILlmConnectionPreparation preparation)
+            connection = await preparation.PrepareAsync(connection, cancellationToken).ConfigureAwait(false);
+        ThrowIfOperationCanceled(cancellationToken);
+        connection = await AttachCatalogCoreAsync(connectionId, connection, client, cancellationToken).ConfigureAwait(false);
+        ThrowIfOperationCanceled(cancellationToken);
+        preflight(connection);
+        ThrowIfOperationCanceled(cancellationToken);
+        return connection;
     }
 
     private async Task<LlmConnection> ResolveConnectionAsync(string connectionId, CancellationToken cancellationToken)

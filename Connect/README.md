@@ -977,7 +977,7 @@ and duplicates. Selected references absent from the supplied graph append to the
 The route reads authorized committed bytes through owned handles and uploads them through the same
 private Files transport. Unknown byte counts remain unknown; missing filenames refuse the file
 destination. Native receipts belong to the admitted request and do not replace logical captured history.
-Local accounting does not read or upload selected resources. Grok registration remains inactive.
+Local accounting does not read or upload selected resources. Grok requires explicit `AddLlmConnectXai` registration.
 Managed sessions created through the shared internal factory validate resource-bound imported
 contexts against the caller's exact scoped selection snapshot. Only a new session without an imported
 context adopts the current selection; an unbound manual or upgraded legacy context must be explicitly
@@ -994,8 +994,8 @@ drain, while refused owned resources remain reachable through the actual retaine
 SSE parsing borrows its caller-owned stream. A refused async body-stream release skips dependent
 response/content cleanup rather than retrying that same stream synchronously; the failed stream and
 dependent response stay with the cleanup error until that error's references are released. This is
-not process-exit quarantine. This controlled managed
-xAI composition does not activate a public Grok agent opener or qualify other destinations.
+not process-exit quarantine. Explicit `AddLlmConnectXai` composition activates the Grok agent opener;
+it does not qualify OAuth, provider behavior or other destinations.
 
 ### Embedding lifetime
 
@@ -1616,10 +1616,11 @@ own authorization and side-effect policy.
 
 | Transport | Chat tools | Agent tools | Prompt images | Prompt documents |
 |---|---:|---:|---:|---:|
-| OpenAI Responses | Yes | No | Yes | Yes |
-| OpenAI-compatible Chat Completions | Yes | No | Override | Override |
+| OpenAI Responses | Yes | Yes | Yes | Yes |
+| OpenAI-compatible Chat Completions | Yes | Yes | Override | Override |
 | ChatGPT Codex subscription | Yes | Yes | Yes | Yes |
-| Anthropic Messages with API key | Yes | No | Yes | Yes |
+| Anthropic Messages with API key | Yes | Yes | Yes | Yes |
+| Grok OAuth Responses (explicit opt-in) | Yes | Yes | Catalog | Yes |
 | Claude subscription via official CLI | No | Yes | Yes | Yes |
 | AWS Bedrock Converse | Yes | Yes | Yes | Yes |
 | AWS Bedrock AgentCore Harness | No | Yes | No | No |
@@ -2190,7 +2191,61 @@ its existing session store, restore/fork decisions and compactor; Darkspyre.Infe
 and output limits. Context occupancy includes cached input and differs from accumulated usage or
 account quota. A `LlmAgentCompactionRequiredEvent` ends an execution segment, **not the logical run**.
 After host compaction, `ContinueTurnAsync` uses the same turn ID, pause ID and expected revision,
-without resubmitting the prompt or re-executing settled tools. Only direct Codex currently enables this engine.
+without resubmitting the prompt or re-executing settled tools. Managed clients cover direct
+Codex, API-key OpenAI Responses, Anthropic Messages, OpenAI-compatible Chat, Gemini API and Apple Foundation Models.
+Explicit `AddLlmConnectXai` adds Grok OAuth Responses. Separate registration
+extensions add Bedrock Converse and Vertex Gemini/Claude. SelfHost opens a managed session only after resolving the selected host
+engine/model and checking its requested operation capabilities. Each managed client checks the
+selected model/connection before opening. Each managed lane uses its actual request estimator,
+continuation scope and facade stream as its chat route; it does not enable Azure agent sessions.
+`LlmProviderException.IsContextOverflow` identifies recognized provider input-context failures.
+Adapters classify their own HTTP, stream or typed SDK errors and keep `ProviderCode` unchanged.
+Host-compaction managed sessions pause on this flag. Grok's provider-owned automatic mode ends
+`ProviderFailure` without a host pause. Responses/Codex, compatible chat, Anthropic Messages,
+Gemini/Vertex, Bedrock Converse and Apple recognize their supported overflow error patterns.
+xAI input overflow raises this failure instead of returning an incomplete completion; output-token
+truncation remains an incomplete completion.
+Each model step permits at most two provider-overflow pauses, including across continued segments.
+A third overflow ends the run with `ProviderFailure` and
+"The context could not be reduced enough for this step." A completed model step resets the count.
+
+Paused continuation retains protected records exactly or reduces only their function tool-output
+parts. A reduction keeps the same ordered part count and replaces each part with text. Replacement
+text cannot exceed the original text part's length, including any recovery notice. Binary and
+resource parts can become caller-authored notices; Connect does not interpret notice grammar or
+host storage IDs. Entry identities, role, call order/count, error flags, structured content and all
+other fields remain unchanged. Shell results remain exact. The existing whole-context shrink/fit
+checks still apply, including the fallback that requires removal of unprotected history when
+occupancy is unknown. Idle `ReplaceContextAsync` retains its separate revision-checked replacement
+behavior; it has no live protected set.
+
+`CompactWithProviderAsync(LlmProviderCompactionRequest, ct)` declares a provider-created replacement
+proposal for a separate host commit. Managed Codex advertises `SupportsProviderCompaction`;
+other sessions reject this operation. The caller supplies the current revision and, when paused,
+the exact turn/pause IDs. The request has an exact `ConnectLlmJson.LlmProviderCompactionRequest`
+metadata getter. It uses the same fresh credential, model catalog, continuation scope and Responses
+stream as generation. Visible tools remain present, parallel calls are allowed, and the output schema
+is absent. Successful completion must contain exactly one encrypted compaction item; extra completed
+text/tool items are ignored and never dispatched. The complete compaction item remains unchanged in replay.
+The returned context keeps budgeted newest real user prompts in chronological order, then the opaque
+compaction entry, then the paused protected tail. Protected records stay outside `RetainedUserTokens`;
+unknown prompt cost stops optional retention. Actual resource selection/version remains separate.
+The proposal retains the current revision, installs nothing and consumes no pause. The host commits it
+through `ReplaceContextAsync` or `ContinueTurnAsync`, including their existing shrink/fit checks.
+
+Grok uses the separate provider-owned automatic mode, not this proposal API. A known threshold triggers
+one `/responses/compact` call before the model step. Known hard-window excess or provider overflow ends
+`ProviderFailure` without a host handoff or over-window retry. The complete returned opaque context
+replaces transcript state once after resource/revision admission; steering queued during compaction
+follows it. Compacted and usage events retain actual request ID, nullable dropped-message count and
+nullable usage. Compaction billing contributes to turn usage, not model iterations or context occupancy.
+Priority compaction is unsupported pending qualification and refuses before refresh, resource callbacks
+or HTTP. Ordinary Priority generation remains available and never silently downgrades its tier.
+
+`CanCompactHistory` is true when unprotected history exists or a protected function result contains
+a text part longer than 2,000 characters or a binary part. `ProtectedFits` is the nullable inverse of
+the protected context's measured `NeedsCompaction`. Null means unknown, and compaction availability
+does not prove that a particular replacement fits.
 
 Capture defaults to omitting attachment bytes and recording `OmittedAttachments` metadata. For a
 tool-output part, the entry's `Index` is the part's position in `Parts` and `ToolCallId` names the
@@ -2201,13 +2256,18 @@ See the [compiled host-context example](examples/Darkspyre.Inference.Connect.LLM
 
 Text-only occupancy is estimated from the actual projected request using the bundled o200k
 tokenizer, including instructions and schemas. It is not an exact current-model token count.
-Binary attachments and encrypted reasoning make occupancy unknown; these return null rather than
-a fabricated count, with one exception. Responses, direct Codex and Bedrock Converse record the provider's reported input
+Anthropic and compatible Chat use the same validated plaintext generation mapper without provider I/O.
+Actual media, selected resources and their opaque continuation make occupancy unknown.
+Responses, direct Codex and Bedrock Converse record the provider's reported input
 and output tokens on the continuation state (`LlmContinuationState.InputTokens` and `OutputTokens`), and
 the estimate counts the history up to the last such state as their sum, tokenizing only what follows.
-That estimate reports `Source = Mixed`. Hosts that keep continuation state keep the counts with it. Each
+That estimate reports `Source = Mixed`. Codex without an applicable report uses the pinned 0.159.3
+CLI's coarse encrypted-content length approximation plus actual plaintext and reports `Estimated`.
+Any retained Codex compaction suppresses historical count anchors, including protected pre-compaction
+reports. Compaction-request usage never becomes replacement occupancy. Other providers do not inherit
+this heuristic; actual media and resources remain unknown. Hosts that keep continuation state keep the counts with it. Each
 Bedrock model has its own tokenizer, so a Bedrock estimate of the unreported tail is approximate and its
-diagnostic says so. Provider context-overflow errors still trigger a host handoff. Catalog limits
+diagnostic says so. Provider context-overflow errors trigger a handoff only in host-compaction mode. Catalog limits
 are optional. Configure an explicit output reserve when the catalog provides none; without a
 known limit, reserve and occupancy, `NeedsCompaction` stays null.
 
@@ -2385,8 +2445,9 @@ refuse before refresh, catalog access or generation. Managed turns retain their 
 through tool iterations; Connect and batch Resources metadata preserve the fixed
 `xai-multi-agent` discriminator, while Common metadata refuses this Connect subtype.
 
-`AddLlmConnect` does not register a Grok provider, authenticator or runtime client. This internal client
-is not an enabled or live-qualified provider. Controlled local wire tests are not live qualification;
+`AddLlmConnect` does not register a Grok provider, authenticator or runtime client. Explicit
+`AddLlmConnectXai` registers all three plus its managed agent through the same finite SDK HTTP pipelines.
+Opt-in composition is not live qualification; OAuth and provider qualification remain `NotRun`.
 cross-family catalog ownership remains separate. Agent counts are distinct from reasoning levels.
 The region and tier premiums follow [xAI pricing](https://docs.x.ai/developers/pricing).
 
@@ -2401,7 +2462,7 @@ without retaining raw bodies. `ConnectLlmJson.Tokenization` and `Token` own resu
 The facade drains active tokenization during retirement and rejects late results through its
 synchronous owner fence. Injected access and clients remain borrowed. Tokenization does not count
 instructions, tool schemas, media or protocol framing. It does not report request occupancy, generated
-usage or billing, and it does not implement `ILlmProviderTokenCounter`. Grok is not registered.
+usage or billing, and it does not implement `ILlmProviderTokenCounter`. Grok requires explicit opt-in.
 OAuth access to its tokenizer endpoint has not been live-qualified.
 
 `ImageProviderService.SetupDefinitions` and `CreateSettingsManager` provide the same editing surface for
@@ -2728,7 +2789,7 @@ and never consumes credits. The upstream route is evidenced in
 | --- | --- |
 | App Server dynamic tools | Host-defined tools and the Darkspyre.Inference.Connect.LLM loop |
 | Provider resume/fork | Capture complete context; start with saved/new thread identity |
-| Native compaction | Agent DS compactor and same-run pause/continue |
+| Native compaction | Host compaction or a Codex provider-created proposal, committed through idle replacement or same-run pause/continue |
 | Immediate steering | Queued safe-boundary steering |
 | CLI commands, file edits, web/MCP/subagents | Only tools the host explicitly registers and authorizes |
 | Native approval/sandbox enforcement | Host handler policy; no built-in command executor or host sandbox |

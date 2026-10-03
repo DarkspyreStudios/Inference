@@ -8,7 +8,7 @@ namespace Darkspyre.Inference.Connect.LLM.Internal;
 
 /// <summary>The route-specific parts of a Gemini stream: naming, status checks and continuation ownership.</summary>
 internal sealed record GeminiRoute(LlmTransport Transport, string Name, string CallIdPrefix,
-    Action<HttpResponseMessage> CheckStatus, Func<LlmConnection, string, JsonArray, LlmContinuationState> Encode);
+    Func<HttpResponseMessage, CancellationToken, Task> CheckStatusAsync, Func<LlmConnection, string, JsonArray, LlmContinuationState> Encode);
 
 /// <summary>
 /// Reads a Gemini generateContent response or streamGenerateContent SSE stream. The caller supplies the URL and
@@ -23,7 +23,8 @@ internal static class GeminiStream
         using HttpRequestMessage owned = message;
         using var consumption = SdkHttpConsumption.Enter(http, cancellationToken); cancellationToken = consumption.Token;
         using HttpResponseMessage response = await http.SendAsync(owned, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
-        route.CheckStatus(response);
+        await route.CheckStatusAsync(response, cancellationToken).ConfigureAwait(false);
+        consumption.Fence();
         LlmProviderException Failure(string reason) => new(reason, route.Transport);
         var text = new StringBuilder();
         var parts = new JsonArray();
@@ -48,7 +49,11 @@ internal static class GeminiStream
         {
             using JsonDocument document = JsonDocument.Parse(data);
             JsonElement root = document.RootElement;
-            if (root.TryGetProperty("error", out _)) { throw Failure($"{route.Name} returned a stream error."); }
+            if (root.TryGetProperty("error", out _))
+            {
+                throw new LlmProviderException($"{route.Name} returned a stream error.", route.Transport,
+                    isContextOverflow: LlmContextOverflow.Google(root));
+            }
             responseId = LlmJson.GetString(root, "responseId") ?? responseId;
             observedModel = ObservedModel.Read(root, "modelVersion", route.Transport, connection, credential,
                 owned, observedModel);

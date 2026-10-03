@@ -277,6 +277,7 @@ public static class ConnectLlmJson
     public static JsonTypeInfo<DocumentSearchMatch> DocumentSearchMatch => Metadata<DocumentSearchMatch>();
     public static JsonTypeInfo<DocumentSearchResult> DocumentSearchResult => Metadata<DocumentSearchResult>();
     public static JsonTypeInfo<LlmAgentContext> AgentContext => Metadata<LlmAgentContext>();
+    public static JsonTypeInfo<LlmProviderCompactionRequest> LlmProviderCompactionRequest => Metadata<LlmProviderCompactionRequest>();
     public static JsonTypeInfo<LlmAgentContextEntry> AgentContextEntry => Metadata<LlmAgentContextEntry>();
     public static JsonTypeInfo<LlmAgentContextStatus> AgentContextStatus => Metadata<LlmAgentContextStatus>();
 }
@@ -449,6 +450,7 @@ public static class ConnectLlmJson
 [JsonSerializable(typeof(DocumentSearchMatch))]
 [JsonSerializable(typeof(DocumentSearchResult))]
 [JsonSerializable(typeof(LlmAgentContext))]
+[JsonSerializable(typeof(LlmProviderCompactionRequest))]
 [JsonSerializable(typeof(AgentContextFormat3))]
 [JsonSerializable(typeof(LegacyAgentContext))]
 [JsonSerializable(typeof(LlmAgentContextEntry))]

@@ -188,6 +188,9 @@ public sealed record LlmAgentCompactionRequiredEvent(
     bool CanCompactHistory,
     IReadOnlyList<string> ProtectedEntryIds) : LlmAgentEvent(ThreadId, HostedEventFacts.Identity(TurnId))
 {
+    /// <summary>Inverse of the protected context's measured NeedsCompaction; null when unknown.</summary>
+    public bool? ProtectedFits { get; init; }
+
     [AllowNull]
     public override string TurnId { get => base.TurnId!; init => base.TurnId = HostedEventFacts.Identity(value); }
 }

@@ -8,4 +8,12 @@ internal sealed class OpenAiCompatibleChatLlmClient(HttpClient http) : ChatCompl
     public override LlmTransport Transport => LlmTransport.OpenAiCompatibleChat;
 
     public override LlmProviderDefinition ProviderDefinition => ProviderDefinitions.OpenAiCompatible;
+
+    protected override LlmProviderCapabilities DefaultCapabilities => base.DefaultCapabilities with
+    {
+        SupportsAgentSessions = true,
+        SupportsAgentToolUse = true,
+        SupportsAgentTurnInstructions = true,
+        Agent = ManagedAgentPolicy.Capabilities with { RichContentSupported = base.DefaultCapabilities.RichContentSupported }
+    };
 }

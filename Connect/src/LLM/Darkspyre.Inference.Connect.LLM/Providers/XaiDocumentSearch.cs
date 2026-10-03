@@ -285,7 +285,7 @@ internal static class XaiDocumentSearch
         "Grok document-search request failed.", LlmTransport.XaiResponses, error.StatusCode,
         error.ProviderCode is "xai_authentication_required" or "xai_entitlement_required" ? error.ProviderCode : null,
         error.RequestId is null ? null : SecretRedactor.Sanitize(error.RequestId, credential, secrets), error.RetryAfter,
-        innerException: new FailureEvidence(original));
+        innerException: new FailureEvidence(original), isContextOverflow: error.IsContextOverflow);
 
     private static Exception CleanupFailure(Exception original, object owner)
     {
