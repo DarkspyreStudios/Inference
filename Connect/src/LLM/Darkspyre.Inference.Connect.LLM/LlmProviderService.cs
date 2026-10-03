@@ -788,6 +788,8 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, ILlmFileClie
         // Their nonmutating estimator reports unknown for opaque state instead of dropping it.
         if (client is not ILlmConnectionPreparation)
         { request = ContinuationStateProjection.Project(request, connection).Request; }
+        if (client is XaiResponsesLlmClient resourceDestination)
+            resourceDestination.PreflightResourceRequest(connection, request);
         connection = await AttachCatalogAsync(connectionId, connection, client, cancellationToken);
         var capabilities = client.GetCapabilities(connection, request.ModelId);
         LlmRequestAccounting Unsupported(string diagnostic) => new()
