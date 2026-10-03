@@ -1,6 +1,7 @@
 using System.Text.Json.Serialization;
 using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Common.Image;
+using Darkspyre.Inference.Common.LLM;
 using Darkspyre.Inference.Common.Media;
 using Darkspyre.Inference.Common.Resources;
 using Darkspyre.Inference.Common.Video;
@@ -139,16 +140,19 @@ public sealed record LlmBatchChatResult(string CustomId, LlmChatResult Result) :
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
 public sealed record LlmBatchImageResult(string CustomId, ImageGenerationResult Result) : LlmBatchResult(CustomId)
 {
+    public LlmUsage? Usage { get; init; }
     [JsonRequired]
     public ImageGenerationResult Result { get; init => field = BatchData.Required(value); } = BatchData.Required(Result);
     public override string ToString() => "LlmBatchImageResult { <data> }";
 }
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
-public sealed record LlmBatchVideoResult(string CustomId, VideoJobSnapshot Result,
+public sealed record LlmBatchVideoResult(string CustomId, VideoOutput Result,
     MaterializedVideoResult Materialization) : LlmBatchResult(CustomId)
 {
     [JsonRequired]
-    public VideoJobSnapshot Result { get; init => field = BatchData.Required(value); } = BatchData.Required(Result);
+    public VideoOutput Result { get; init => field = BatchData.Required(value); } = BatchData.Required(Result);
+    public VideoJobSnapshot? JobSnapshot { get; init; }
+    public LlmUsage? Usage { get; init; }
     [JsonRequired]
     public MaterializedVideoResult Materialization { get; init => field = BatchData.Required(value); } = BatchData.Required(Materialization);
     public override string ToString() => "LlmBatchVideoResult { <data> }";

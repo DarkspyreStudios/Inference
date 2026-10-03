@@ -9,11 +9,18 @@ namespace Darkspyre.Inference.Connect.Resources;
 public sealed class LlmResourceProviderService : ILlmBatchClient, IDisposable, IAsyncDisposable
 {
     private LlmConnectionAccess? _connectionAccess;
-    private readonly LlmOperationLifetime _lifetime = new();
+    private LlmProviderService? _providerService;
+    private readonly LlmOperationLifetime _lifetime;
 
     /// <summary>Borrows the existing connection access owner without acquiring credentials.</summary>
-    public LlmResourceProviderService(LlmConnectionAccess connectionAccess)
-        => _connectionAccess = connectionAccess ?? throw new ArgumentNullException(nameof(connectionAccess));
+    public LlmResourceProviderService(LlmConnectionAccess connectionAccess, LlmProviderService? providerService = null)
+    {
+        ArgumentNullException.ThrowIfNull(connectionAccess);
+        providerService?.ValidateXaiAccess(connectionAccess);
+        _connectionAccess = connectionAccess;
+        _providerService = providerService;
+        _lifetime = new();
+    }
 
     public Task<LlmBatch> CreateAsync(string connectionId, string name, CancellationToken cancellationToken = default)
         => Task.FromException<LlmBatch>(Unavailable(cancellationToken));
@@ -63,6 +70,7 @@ public sealed class LlmResourceProviderService : ILlmBatchClient, IDisposable, I
     public ValueTask DisposeAsync() => new(_lifetime.RetireAsync(() =>
     {
         Interlocked.Exchange(ref _connectionAccess, null);
+        Interlocked.Exchange(ref _providerService, null);
         return Task.CompletedTask;
     }));
 
@@ -77,7 +85,8 @@ public static class ServiceCollectionExtensions
     public static IServiceCollection AddLlmResources(this IServiceCollection services)
     {
         ArgumentNullException.ThrowIfNull(services);
-        services.AddScoped<LlmResourceProviderService>();
+        services.AddScoped(provider => new LlmResourceProviderService(
+            provider.GetRequiredService<LlmConnectionAccess>(), provider.GetService<LlmProviderService>()));
         services.AddScoped<ILlmBatchClient>(provider => provider.GetRequiredService<LlmResourceProviderService>());
         return services;
     }
