@@ -15,7 +15,7 @@ namespace Darkspyre.Inference.Connect.LLM.Bedrock;
 internal sealed class BedrockLlmClient(
     BedrockClientFactory factory,
     BedrockLoggingGuard loggingGuard,
-    IBedrockConverseInvoker invoker) : ILlmClient, ILlmContextEstimator
+    IBedrockConverseInvoker invoker) : ILlmClient, ILlmContextEstimator, ILlmCompactionValidator
 {
     internal const string RequestIdMetadataKey = "request-id";
 
@@ -500,25 +500,106 @@ internal sealed class BedrockLlmClient(
         return models;
     }
 
-    internal static ConverseRequest BuildRequest(
-        LlmConnection connection,
-        LlmChatRequest request,
-        string modelId)
+    public void ValidateCompaction(LlmConnection connection, LlmChatRequest before, LlmChatRequest after)
     {
-        var system = new List<SystemContentBlock>();
-        if (!string.IsNullOrWhiteSpace(request.Instructions))
+        int lastSigned = -1;
+        for (int index = 0; index < before.Messages.Count; index++)
         {
-            system.Add(new SystemContentBlock { Text = request.Instructions });
+            LlmChatMessage message = before.Messages[index];
+            if (message.ContinuationState is not null
+                && ProviderContinuationStateCodec.DecodeMessage(message, connection, before.ModelId)
+                    .OfType<JsonObject>().Any(item => item["type"]?.GetValue<string>() == "reasoning"
+                        && item["signature"] is JsonValue signature && signature.TryGetValue<string>(out _)))
+            {
+                lastSigned = index;
+            }
         }
+        if (lastSigned < 0) return;
 
+        var streams = new List<MemoryStream>();
+        try
+        {
+            LlmChatRequest prefix = before with { Messages = before.Messages.Take(lastSigned + 1).ToArray() };
+            List<Message> original = BuildMessages(connection, prefix, before.ModelId, [], streams);
+            List<Message> replacement = BuildMessages(connection, after, after.ModelId, [], streams, original.Count);
+            if (original.Count != replacement.Count
+                || original.Where((message, index) => !SameMessage(message, replacement[index])).Any())
+            {
+                throw new NotSupportedException("Compaction cannot change the prior messages of signed Bedrock history. Start a fresh context explicitly instead.");
+            }
+        }
+        finally
+        {
+            foreach (MemoryStream stream in streams) stream.Dispose();
+        }
+    }
+
+    private static bool SameMessage(Message left, Message right) =>
+        left.Role?.Value == right.Role?.Value && left.Content.Count == right.Content.Count
+        && left.Content.Where((part, index) => !SameContent(part, right.Content[index])).Any() == false;
+
+    private static bool SameContent(ContentBlock left, ContentBlock right) =>
+        left.Text == right.Text
+        && SameReasoning(left.ReasoningContent, right.ReasoningContent)
+        && SameToolUse(left.ToolUse, right.ToolUse)
+        && SameToolResult(left.ToolResult, right.ToolResult)
+        && SameImage(left.Image, right.Image)
+        && SameDocumentBlock(left.Document, right.Document);
+
+    private static bool SameReasoning(ReasoningContentBlock? left, ReasoningContentBlock? right) =>
+        left is null ? right is null : right is not null
+        && (left.ReasoningText is null ? right.ReasoningText is null : right.ReasoningText is not null
+            && left.ReasoningText.Text == right.ReasoningText.Text
+            && left.ReasoningText.Signature == right.ReasoningText.Signature)
+        && SameBytes(left.RedactedContent, right.RedactedContent);
+
+    private static bool SameToolUse(ToolUseBlock? left, ToolUseBlock? right) =>
+        left is null ? right is null : right is not null && left.ToolUseId == right.ToolUseId
+        && left.Name == right.Name && SameDocument(left.Input, right.Input);
+
+    private static bool SameToolResult(ToolResultBlock? left, ToolResultBlock? right) =>
+        left is null ? right is null : right is not null && left.ToolUseId == right.ToolUseId
+        && left.Status?.Value == right.Status?.Value && left.Content.Count == right.Content.Count
+        && left.Content.Where((part, index) => !SameToolResultContent(part, right.Content[index])).Any() == false;
+
+    private static bool SameToolResultContent(ToolResultContentBlock left, ToolResultContentBlock right) =>
+        left.Text == right.Text && SameImage(left.Image, right.Image)
+        && SameDocumentBlock(left.Document, right.Document) && SameDocument(left.Json, right.Json);
+
+    private static bool SameImage(ImageBlock? left, ImageBlock? right) =>
+        left is null ? right is null : right is not null && left.Format?.Value == right.Format?.Value
+        && SameBytes(left.Source?.Bytes, right.Source?.Bytes);
+
+    private static bool SameDocumentBlock(DocumentBlock? left, DocumentBlock? right) =>
+        left is null ? right is null : right is not null && left.Format?.Value == right.Format?.Value
+        && left.Name == right.Name && SameBytes(left.Source?.Bytes, right.Source?.Bytes);
+
+    private static bool SameDocument(Document? left, Document? right) =>
+        left.HasValue == right.HasValue && (!left.HasValue
+            || string.Equals(SerializeDocument(left), SerializeDocument(right), StringComparison.Ordinal));
+
+    private static bool SameBytes(MemoryStream? left, MemoryStream? right) =>
+        left is null ? right is null : right is not null && left.ToArray().AsSpan().SequenceEqual(right.ToArray());
+
+    private static MemoryStream ContentStream(byte[] bytes, List<MemoryStream>? temporaryStreams)
+    {
+        var stream = new MemoryStream(bytes, writable: false);
+        temporaryStreams?.Add(stream);
+        return stream;
+    }
+
+    private static List<Message> BuildMessages(LlmConnection connection, LlmChatRequest request, string modelId,
+        List<SystemContentBlock> system, List<MemoryStream>? temporaryStreams = null, int? messageLimit = null)
+    {
         var messages = new List<Message>();
         foreach (LlmChatMessage message in request.Messages)
         {
+            if (messageLimit is int limit && messages.Count >= limit) break;
             if (message.ContinuationState is not null
                 && ProviderContinuationStateCodec.DecodeMessage(message, connection, request.ModelId) is { Count: > 0 } retained)
             {
                 // The decoded state already matches the visible text and tool calls, so it replaces them.
-                messages.Add(new Message { Role = ConversationRole.Assistant, Content = ReplayContent(retained) });
+                messages.Add(new Message { Role = ConversationRole.Assistant, Content = ReplayContent(retained, temporaryStreams) });
                 continue;
             }
 
@@ -550,7 +631,7 @@ internal sealed class BedrockLlmClient(
                             Content = BuildToolResultContent(ToolOutputProjector.Project(
                                 toolResult.Output,
                                 RichContentRoutes.BedrockConverse.For(connection, null),
-                                RichContentRoutes.BedrockConverse.For(connection, modelId)))
+                                RichContentRoutes.BedrockConverse.For(connection, modelId)), temporaryStreams)
                         }
                     });
                 }
@@ -562,7 +643,7 @@ internal sealed class BedrockLlmClient(
 
                 foreach (LlmAttachment attachment in message.Attachments.Select(LlmAttachments.RequireBinary))
                 {
-                    content.Add(BuildPromptAttachment(attachment));
+                    content.Add(BuildPromptAttachment(attachment, temporaryStreams));
                 }
 
                 foreach (LlmToolCall call in ClientTools.Functions(message.ToolCalls))
@@ -587,7 +668,20 @@ internal sealed class BedrockLlmClient(
                 });
             }
         }
+        return messages;
+    }
 
+    internal static ConverseRequest BuildRequest(
+        LlmConnection connection,
+        LlmChatRequest request,
+        string modelId)
+    {
+        var system = new List<SystemContentBlock>();
+        if (!string.IsNullOrWhiteSpace(request.Instructions))
+        {
+            system.Add(new SystemContentBlock { Text = request.Instructions });
+        }
+        List<Message> messages = BuildMessages(connection, request, modelId, system);
         if (messages.Count == 0)
         {
             throw new InvalidOperationException(
@@ -750,7 +844,7 @@ internal sealed class BedrockLlmClient(
     };
 
     /// <summary>The assistant content blocks of a retained Converse reply, in reply order.</summary>
-    private static List<ContentBlock> ReplayContent(JsonArray retained)
+    private static List<ContentBlock> ReplayContent(JsonArray retained, List<MemoryStream>? temporaryStreams = null)
     {
         var content = new List<ContentBlock>();
         foreach (JsonObject item in retained.OfType<JsonObject>())
@@ -773,9 +867,7 @@ internal sealed class BedrockLlmClient(
                 {
                     ReasoningContent = new ReasoningContentBlock
                     {
-                        RedactedContent = new MemoryStream(
-                            Convert.FromBase64String(item["data"]!.GetValue<string>()),
-                            writable: false)
+                        RedactedContent = ContentStream(Convert.FromBase64String(item["data"]!.GetValue<string>()), temporaryStreams)
                     }
                 },
                 "tool_use" => new ContentBlock
@@ -793,7 +885,7 @@ internal sealed class BedrockLlmClient(
         return content;
     }
 
-    private static ContentBlock BuildPromptAttachment(LlmAttachment attachment)
+    private static ContentBlock BuildPromptAttachment(LlmAttachment attachment, List<MemoryStream>? temporaryStreams = null)
     {
         string mediaType = LlmAttachments.ResolveMediaType(attachment);
         return attachment.Kind switch
@@ -805,7 +897,7 @@ internal sealed class BedrockLlmClient(
                     Format = BedrockImageFormat(mediaType),
                     Source = new ImageSource
                     {
-                        Bytes = new MemoryStream(attachment.Data.ToArray(), writable: false)
+                        Bytes = ContentStream(attachment.Data.ToArray(), temporaryStreams)
                     }
                 }
             },
@@ -817,7 +909,7 @@ internal sealed class BedrockLlmClient(
                     Name = "prompt-document",
                     Source = new DocumentSource
                     {
-                        Bytes = new MemoryStream(attachment.Data.ToArray(), writable: false)
+                        Bytes = ContentStream(attachment.Data.ToArray(), temporaryStreams)
                     }
                 }
             },
@@ -826,7 +918,8 @@ internal sealed class BedrockLlmClient(
     }
 
     /// <summary>The ordered Converse blocks; an empty result still sends one empty text block.</summary>
-    private static List<ToolResultContentBlock> BuildToolResultContent(ProjectedToolOutput projected)
+    private static List<ToolResultContentBlock> BuildToolResultContent(ProjectedToolOutput projected,
+        List<MemoryStream>? temporaryStreams = null)
     {
         var content = new List<ToolResultContentBlock>();
         int documents = 0;
@@ -840,7 +933,7 @@ internal sealed class BedrockLlmClient(
                     Image = new ImageBlock
                     {
                         Format = BedrockImageFormat(image.MediaType),
-                        Source = new ImageSource { Bytes = new MemoryStream(image.Data.ToArray(), writable: false) }
+                        Source = new ImageSource { Bytes = ContentStream(image.Data.ToArray(), temporaryStreams) }
                     }
                 },
                 // Converse document names must be unique within a request and use a restricted character set.
@@ -850,7 +943,7 @@ internal sealed class BedrockLlmClient(
                     {
                         Format = ToolDocumentFormat(file.MediaType),
                         Name = $"tool-result-document-{++documents}",
-                        Source = new DocumentSource { Bytes = new MemoryStream(file.Data.ToArray(), writable: false) }
+                        Source = new DocumentSource { Bytes = ContentStream(file.Data.ToArray(), temporaryStreams) }
                     }
                 },
                 SentStructured structured => new ToolResultContentBlock { Json = DeserializeDocument(structured.Value.GetRawText()) },

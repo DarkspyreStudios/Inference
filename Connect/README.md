@@ -2994,6 +2994,12 @@ A `tool_use` reply with null, scalar or array tool input throws `LlmProviderExce
 Converse modes. Non-streaming mapping rejects it before publishing response events. Empty object
 input remains valid, and provider-reported malformed stop reasons keep their `Failed` result.
 
+Managed Converse compaction rejects a change to the provider-visible message prefix through the last
+signed assistant before resource callbacks or context replacement. It compares the shared Converse
+projection, not context entry IDs or count metadata. Unsigned and counts-only histories retain their
+existing compaction behavior. Tool-result reductions after that signed prefix remain permitted.
+An explicit idle `ReplaceContextAsync` can start a fresh context without the old provider state.
+
 Converse model listing returns the region's inference profiles and its foundation models. It omits a
 foundation model whose only inference type is `PROVISIONED`, such as `amazon.nova-lite-v1:0:300k`.
 Such a model runs only through purchased provisioned throughput, so a connection cannot invoke it by

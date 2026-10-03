@@ -401,7 +401,9 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
         using var operation = _resourceCallbacks.Enter(cancellationToken);
         cancellationToken = operation.Token;
         LiveRun run;
+        LiveRun admittedRun;
         Segment segment;
+        LlmAgentContext source;
         LlmAgentContext replacement;
         IInferenceResourceAccess? access;
         lock (_sync)
@@ -415,20 +417,28 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
                 throw new InvalidOperationException("The run or pause is stale, consumed, or active.");
             }
             RequireRevision(continuation.ExpectedContextRevision);
+            admittedRun = run;
+            source = _context;
             replacement = ManagedAgentContext.Import(continuation.ReplacementContext, _connection, run.Turn.ModelId!, _supportsResources);
             access = _callerServices?.Resources;
         }
+        var validator = _estimator as ILlmCompactionValidator;
+        validator?.ValidateCompaction(_connection, Request(source, admittedRun.Turn), Request(replacement, admittedRun.Turn));
+        FenceResourceCallback(cancellationToken);
         if (access is not null)
         {
             InferenceResourceSelection selection = await ReadAdmittedSelectionAsync(access, cancellationToken).ConfigureAwait(false);
             await LlmResourcePreparation.ValidateContextAsync(replacement, selection, access,
                 () => FenceResourceCallback(cancellationToken), cancellationToken).ConfigureAwait(false);
         }
+        validator?.ValidateCompaction(_connection, Request(source, admittedRun.Turn), Request(replacement, admittedRun.Turn));
+        FenceResourceCallback(cancellationToken);
         lock (_sync)
         {
             FenceResourceCallback(cancellationToken);
             run = _run ?? throw new InvalidOperationException("There is no paused run.");
-            if (_segmentActive || run.Id != continuation.TurnId || run.PauseId != continuation.PauseId)
+            if (_segmentActive || !ReferenceEquals(run, admittedRun) || !ReferenceEquals(_context, source)
+                || run.Id != continuation.TurnId || run.PauseId != continuation.PauseId)
                 throw new InvalidOperationException("The run or pause changed during context admission.");
             RequireRevision(continuation.ExpectedContextRevision);
             var oldProtected = _context.Entries.Where(entry => run.Protected.Contains(entry.Id)).ToArray();
