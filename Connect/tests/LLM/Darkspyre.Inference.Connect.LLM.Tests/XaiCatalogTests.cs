@@ -1,6 +1,7 @@
 using System.Collections;
 using System.Collections.Concurrent;
 using System.Net;
+using System.Reflection;
 using System.Text.Json;
 using Darkspyre.Inference.Common.LLM;
 using Darkspyre.Inference.Common.Resources;
@@ -324,6 +325,103 @@ public sealed class XaiCatalogTests
         finally { content.AllowCleanup = true; content.Dispose(); }
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CleanupRetainsTheActualSafePrivateCauseAndRepeatedRetirementCarrier(bool withPrimary)
+    {
+        var content = new RefusingContent();
+        using var handler = new Handler(_ => Task.FromResult(new HttpResponseMessage(withPrimary ? HttpStatusCode.BadRequest : HttpStatusCode.OK)
+        { Content = content }));
+        using var http = new HttpClient(handler);
+        var cache = new LlmModelListCache();
+        try
+        {
+            Exception operation;
+            if (withPrimary)
+            {
+                AggregateException aggregate = await Assert.ThrowsAsync<AggregateException>(() => Get(cache, new XaiResponsesLlmClient(http), ModelCatalogFamily.Chat));
+                Assert.Equal(2, aggregate.InnerExceptions.Count);
+                Assert.IsType<LlmProviderException>(aggregate.InnerExceptions[0]);
+                operation = aggregate.InnerExceptions[1];
+            }
+            else operation = await Assert.ThrowsAsync<InferenceResourceOperationException>(() => Get(cache, new XaiResponsesLlmClient(http), ModelCatalogFamily.Chat));
+            Assert.Same(content.Failure, OriginalCleanupCause(operation));
+            Assert.Same(operation, await Assert.ThrowsAsync<InferenceResourceOperationException>(() => cache.DisposeAsync().AsTask()));
+            Assert.Same(operation, await Assert.ThrowsAsync<InferenceResourceOperationException>(() => cache.DisposeAsync().AsTask()));
+            Assert.DoesNotContain("untrusted-cleanup-secret", operation.ToString(), StringComparison.Ordinal);
+            Assert.Equal(1, content.CleanupCalls);
+            Assert.Single(handler.Paths);
+        }
+        finally
+        {
+            try { await cache.DisposeAsync(); } catch (InferenceResourceOperationException) { }
+            content.AllowCleanup = true;
+            content.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task CanceledCleanupPreservesItsActualTokenAndSafePrivateOriginal()
+    {
+        using var source = new CancellationTokenSource();
+        source.Cancel();
+        var original = new OperationCanceledException("untrusted-cleanup-secret", source.Token);
+        var content = new RefusingContent { Failure = original };
+        using var handler = new Handler(_ => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = content }));
+        using var http = new HttpClient(handler);
+        var cache = new LlmModelListCache();
+        try
+        {
+            var failure = await Assert.ThrowsAsync<InferenceResourceOperationCanceledException>(() => Get(cache, new XaiResponsesLlmClient(http), ModelCatalogFamily.Chat));
+            Assert.Equal(source.Token, failure.CancellationToken);
+            Assert.Same(original, OriginalCleanupCause(failure));
+            Assert.Same(failure, await Assert.ThrowsAsync<InferenceResourceOperationCanceledException>(() => cache.DisposeAsync().AsTask()));
+            Assert.Same(failure, await Assert.ThrowsAsync<InferenceResourceOperationCanceledException>(() => cache.DisposeAsync().AsTask()));
+            Assert.DoesNotContain("untrusted-cleanup-secret", failure.ToString(), StringComparison.Ordinal);
+            Assert.Equal(1, content.CleanupCalls);
+        }
+        finally
+        {
+            try { await cache.DisposeAsync(); } catch (InferenceResourceOperationException) { } catch (InferenceResourceOperationCanceledException) { }
+            content.AllowCleanup = true;
+            content.Dispose();
+        }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ActualAppliedCustomHeaderValuesCannotEscapeCatalogDiagnostics(bool malformed)
+    {
+        const string secret = "catalog-header-private";
+        using var handler = new Handler(request =>
+        {
+            Assert.Equal(secret, Assert.Single(request.Headers.GetValues("X-Catalog")));
+            return Task.FromResult(new HttpResponseMessage(malformed ? HttpStatusCode.OK : HttpStatusCode.BadRequest)
+            { Content = new StringContent("{\"message\":\"" + secret + "\"}") });
+        });
+        using var http = new HttpClient(handler);
+        LlmProviderException failure = await Assert.ThrowsAsync<LlmProviderException>(() => new XaiResponsesLlmClient(http).ListModelsAsync(
+            Connection with { AdditionalHeaders = new Dictionary<string, string> { ["X-Catalog"] = secret } }));
+        Assert.DoesNotContain(secret, failure.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain(secret, failure.SanitizedResponseBody!, StringComparison.Ordinal);
+        Assert.Single(handler.Paths);
+    }
+
+    private static Exception OriginalCleanupCause(Exception failure)
+    {
+        for (Exception? current = failure; current is not null; current = current.InnerException)
+        {
+            PropertyInfo? property = current.GetType().GetProperty("Original", BindingFlags.Instance | BindingFlags.NonPublic);
+            if (property is null) continue;
+            Assert.Same(typeof(XaiCatalog).Assembly, current.GetType().Assembly);
+            return Assert.IsAssignableFrom<Exception>(property.GetValue(current));
+        }
+        Assert.Fail("The safe owned cleanup graph must retain its exact original cause privately.");
+        throw new InvalidOperationException("Unreachable assertion.");
+    }
+
     private static LlmConnection Connection => new()
     {
         Version = "v1",
@@ -376,9 +474,10 @@ public sealed class XaiCatalogTests
 
     private sealed class RefusingContent() : StringContent("{\"data\":[]}")
     {
+        internal Exception Failure { get; init; } = new InvalidOperationException("untrusted-cleanup-secret");
         internal int CleanupCalls { get; private set; }
         internal bool AllowCleanup { get; set; }
         protected override void Dispose(bool disposing)
-        { CleanupCalls++; if (!AllowCleanup) throw new InvalidOperationException("untrusted-cleanup-secret"); base.Dispose(disposing); }
+        { CleanupCalls++; if (!AllowCleanup) throw Failure; base.Dispose(disposing); }
     }
 }
