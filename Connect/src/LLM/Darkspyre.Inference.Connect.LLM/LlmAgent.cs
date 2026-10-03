@@ -449,6 +449,11 @@ public interface ILlmAgentSession : IAsyncDisposable
         long expectedRevision,
         CancellationToken cancellationToken = default);
 
+    /// <summary>Creates an idle or paused replacement proposal without installing it.</summary>
+    Task<LlmAgentContext> CompactWithProviderAsync(
+        LlmProviderCompactionRequest request,
+        CancellationToken cancellationToken = default);
+
     IAsyncEnumerable<LlmAgentEvent> ContinueTurnAsync(
         LlmAgentTurnContinuation continuation,
         CancellationToken cancellationToken = default);

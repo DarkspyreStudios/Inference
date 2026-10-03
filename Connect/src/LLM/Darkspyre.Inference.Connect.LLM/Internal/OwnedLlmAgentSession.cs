@@ -41,6 +41,10 @@ internal sealed class OwnedLlmAgentSession : ILlmAgentSession
         CancellationToken cancellationToken = default) =>
         InvokeAsync((session, token) => session.ReplaceContextAsync(context, expectedRevision, token), cancellationToken);
 
+    public Task<LlmAgentContext> CompactWithProviderAsync(LlmProviderCompactionRequest request,
+        CancellationToken cancellationToken = default) =>
+        InvokeAsync((session, token) => session.CompactWithProviderAsync(request, token), cancellationToken);
+
     public IAsyncEnumerable<LlmAgentEvent> ContinueTurnAsync(LlmAgentTurnContinuation continuation,
         CancellationToken cancellationToken = default) =>
         StreamAsync((session, token) => session.ContinueTurnAsync(continuation, token), cancellationToken);

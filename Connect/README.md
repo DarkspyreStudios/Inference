@@ -2217,6 +2217,11 @@ checks still apply, including the fallback that requires removal of unprotected 
 occupancy is unknown. Idle `ReplaceContextAsync` retains its separate revision-checked replacement
 behavior; it has no live protected set.
 
+`CompactWithProviderAsync(LlmProviderCompactionRequest, ct)` declares a provider-created replacement
+proposal for a separate host commit. `SupportsProviderCompaction` is false on current sessions,
+which reject the operation. The request has an exact `ConnectLlmJson.LlmProviderCompactionRequest`
+metadata getter. Automatic provider-owned compaction is a separate ownership mode, not this API.
+
 `CanCompactHistory` is true when unprotected history exists or a protected function result contains
 a text part longer than 2,000 characters or a binary part. `ProtectedFits` is the nullable inverse of
 the protected context's measured `NeedsCompaction`. Null means unknown, and compaction availability

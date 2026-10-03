@@ -148,6 +148,13 @@ internal sealed class AntigravityAgentSession : ILlmAgentSession
         throw NativeAgentContract.UnsupportedContext(operation.Token);
     }
 
+    public Task<LlmAgentContext> CompactWithProviderAsync(
+        LlmProviderCompactionRequest request, CancellationToken cancellationToken = default)
+    {
+        using LlmOperationLifetime.Lease operation = _retirement.Enter(cancellationToken);
+        throw NativeAgentContract.UnsupportedContext(operation.Token);
+    }
+
     public Task ReplaceContextAsync(
         LlmAgentContext context,
         long expectedRevision,

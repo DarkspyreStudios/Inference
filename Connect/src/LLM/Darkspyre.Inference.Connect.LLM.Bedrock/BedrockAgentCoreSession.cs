@@ -103,6 +103,10 @@ internal sealed class BedrockAgentCoreSession : ILlmAgentSession
         CancellationToken cancellationToken = default) =>
         throw NativeAgentContract.UnsupportedContext(cancellationToken);
 
+    public Task<LlmAgentContext> CompactWithProviderAsync(
+        LlmProviderCompactionRequest request, CancellationToken cancellationToken = default) =>
+        throw NativeAgentContract.UnsupportedContext(cancellationToken);
+
     public Task ReplaceContextAsync(
         LlmAgentContext context,
         long expectedRevision,

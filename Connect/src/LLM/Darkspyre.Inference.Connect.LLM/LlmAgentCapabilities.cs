@@ -78,6 +78,9 @@ public sealed record LlmAgentCapabilities
 
     public bool SupportsCompactionHandoff { get; init; }
 
+    /// <summary>Creates a provider compaction proposal; the host still commits the replacement.</summary>
+    public bool SupportsProviderCompaction { get; init; }
+
     public bool SupportsNativeResume { get; init; }
 
     public LlmAgentNativeFork NativeFork { get; init; }
@@ -128,6 +131,8 @@ public sealed record LlmAgentCapabilities
             || (SupportsCompactionHandoff && (ContextOwnership != LlmAgentOwnership.Host
                 || CompactionOwnership != LlmAgentOwnership.Host
                 || !SupportsContextCapture || !SupportsContextReplacement || !SupportsContextStatus))
+            || (SupportsProviderCompaction && (ContextOwnership != LlmAgentOwnership.Host
+                || !SupportsCompactionHandoff))
             || (NativeFork != LlmAgentNativeFork.None && !SupportsNativeResume)
             || (ContextImport == LlmAgentContextImport.Structured && ContextOwnership != LlmAgentOwnership.Host)
             || (ContextImport == LlmAgentContextImport.OpeningContext && ContextOwnership != LlmAgentOwnership.Provider)
