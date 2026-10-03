@@ -2191,11 +2191,12 @@ and output limits. Context occupancy includes cached input and differs from accu
 account quota. A `LlmAgentCompactionRequiredEvent` ends an execution segment, **not the logical run**.
 After host compaction, `ContinueTurnAsync` uses the same turn ID, pause ID and expected revision,
 without resubmitting the prompt or re-executing settled tools. Managed clients currently cover direct
-Codex, Gemini API and Apple Foundation Models. Separate registration extensions add Bedrock Converse
-and Vertex Gemini/Claude. SelfHost opens a managed session only after resolving the selected host
+Codex, API-key OpenAI Responses, Gemini API and Apple Foundation Models. Separate registration
+extensions add Bedrock Converse and Vertex Gemini/Claude. SelfHost opens a managed session only after resolving the selected host
 engine/model and checking its requested operation capabilities. Each managed client checks the
-selected model/connection before opening. Anthropic Messages, API-key OpenAI Responses,
-OpenAI-compatible chat and xAI Responses currently have no managed agent client.
+selected model/connection before opening. Anthropic Messages, OpenAI-compatible chat and xAI Responses
+currently have no managed agent client. The Responses managed lane uses the same request estimator,
+continuation scope and facade stream as its chat route; it does not enable Azure agent sessions.
 `LlmProviderException.IsContextOverflow` identifies recognized provider input-context failures.
 Adapters classify their own HTTP, stream or typed SDK errors and keep `ProviderCode` unchanged.
 Managed sessions pause on this flag. Responses/Codex, compatible chat, Anthropic Messages,

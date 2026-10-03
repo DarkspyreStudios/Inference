@@ -79,6 +79,9 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IClaudeCliSessionProcessFactory, ClaudeCliSessionProcessFactory>();
         services.AddTransient<ILlmClient>(provider =>
             provider.GetRequiredService<OpenAiResponsesLlmClient>());
+        services.AddTransient<ManagedOpenAiResponsesAgentClient>();
+        services.AddTransient<ILlmAgentClient>(provider =>
+            provider.GetRequiredService<ManagedOpenAiResponsesAgentClient>());
         services.AddTransient<ILlmClient>(provider =>
             provider.GetRequiredService<OpenAiCompatibleChatLlmClient>());
         services.AddTransient<ILlmClient>(provider =>
