@@ -822,7 +822,7 @@ internal abstract class ChatCompletionsLlmClientBase(HttpClient http) : LlmClien
         return value;
     }
 
-    private static LlmUsage? ReadUsage(JsonElement root)
+    protected virtual LlmUsage? ReadUsage(JsonElement root)
     {
         if (LlmJson.GetObject(root, "usage") is not { } usage)
         {
