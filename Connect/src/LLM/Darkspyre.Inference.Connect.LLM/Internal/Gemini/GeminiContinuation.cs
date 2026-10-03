@@ -8,6 +8,10 @@ internal static class GeminiContinuation
 {
     public const int MaxPayloadLength = 16 * 1024 * 1024;
 
+    /// <summary>Projects omitted arguments as an empty object without changing the retained native call.</summary>
+    internal static JsonObject? EffectiveArguments(JsonObject call) =>
+        call.TryGetPropertyValue("args", out JsonNode? arguments) ? arguments as JsonObject : new JsonObject();
+
     public static JsonArray WireParts(JsonArray parts)
     {
         var wire = (JsonArray)parts.DeepClone();
@@ -27,7 +31,7 @@ internal static class GeminiContinuation
             if (part["functionCall"] is JsonObject call)
             {
                 if (call.Any(field => field.Key is not ("id" or "name" or "args"))
-                    || string.IsNullOrWhiteSpace((string?)call["name"]) || call["args"] is not JsonObject
+                    || string.IsNullOrWhiteSpace((string?)call["name"]) || EffectiveArguments(call) is null
                     || string.IsNullOrWhiteSpace((string?)part["connectCallId"])) { throw new ArgumentException("Invalid Gemini function call."); }
                 _ = call["id"]?.GetValue<string>();
             }
@@ -46,10 +50,10 @@ internal static class GeminiContinuation
         if (calls.Length != message.ToolCalls.Count) { throw new ArgumentException("Continuation content does not match its visible message."); }
         for (int index = 0; index < calls.Length; index++)
         {
-            var call = calls[index]["functionCall"]!;
+            JsonObject call = calls[index]["functionCall"]!.AsObject();
             var expected = ClientTools.Functions(message.ToolCalls)[index];
             if ((string?)calls[index]["connectCallId"] != expected.Id || (string?)call["name"] != expected.Name
-                || !JsonNode.DeepEquals(call["args"], JsonNode.Parse(expected.ArgumentsJson))) { throw new ArgumentException("Continuation content does not match its visible message."); }
+                || !JsonNode.DeepEquals(EffectiveArguments(call), JsonNode.Parse(expected.ArgumentsJson))) { throw new ArgumentException("Continuation content does not match its visible message."); }
         }
         return parts;
     }

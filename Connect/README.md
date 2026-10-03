@@ -1997,7 +1997,9 @@ stays in host storage.
 
 Gemini API and Vertex Gemini accept visible foreign tool-call groups with explicit Omit. Gemini 3
 places the documented dummy thought signature on the first imported call; original bound native
-signatures remain unchanged. Tool results follow their original call order. Gemini 3 carries PNG,
+signatures remain unchanged. A function call with omitted arguments exposes typed `{}` arguments;
+its native continuation keeps the omission. Explicit null, array or scalar arguments are rejected.
+Tool results follow their original call order. Gemini 3 carries PNG,
 JPEG, WebP and PDF tool results as nested function-response media, bounded at 7 MiB per binary.
 Earlier Gemini models omit those unsupported binary results through the existing projection report.
 Vertex's supported Gemini 3 streaming profiles request preview path-based function arguments and
