@@ -2206,6 +2206,21 @@ Each model step permits at most two provider-overflow pauses, including across c
 A third overflow ends the run with `ProviderFailure` and
 "The context could not be reduced enough for this step." A completed model step resets the count.
 
+Paused continuation retains protected records exactly or reduces only their function tool-output
+parts. A reduction keeps the same ordered part count and replaces each part with text. Replacement
+text cannot exceed the original text part's length, including any recovery notice. Binary and
+resource parts can become caller-authored notices; Connect does not interpret notice grammar or
+host storage IDs. Entry identities, role, call order/count, error flags, structured content and all
+other fields remain unchanged. Shell results remain exact. The existing whole-context shrink/fit
+checks still apply, including the fallback that requires removal of unprotected history when
+occupancy is unknown. Idle `ReplaceContextAsync` retains its separate revision-checked replacement
+behavior; it has no live protected set.
+
+`CanCompactHistory` is true when unprotected history exists or a protected function result contains
+a text part longer than 2,000 characters or a binary part. `ProtectedFits` is the nullable inverse of
+the protected context's measured `NeedsCompaction`. Null means unknown, and compaction availability
+does not prove that a particular replacement fits.
+
 Capture defaults to omitting attachment bytes and recording `OmittedAttachments` metadata. For a
 tool-output part, the entry's `Index` is the part's position in `Parts` and `ToolCallId` names the
 result; the capture drops the binary part or the resource's byte body. Live
