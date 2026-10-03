@@ -88,7 +88,7 @@ public sealed record ImageCapabilities
     public int MaximumImageCount { get; init; } = 1;
 }
 
-public interface IImageInference
+public interface IImageInference : IAsyncDisposable
 {
     InferenceImplementationDescriptor Descriptor { get; }
 

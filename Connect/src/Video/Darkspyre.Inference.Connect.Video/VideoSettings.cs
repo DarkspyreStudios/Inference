@@ -198,11 +198,11 @@ public sealed class VideoSettingsManager : InferenceSettingsManager<VideoSetting
         try { capabilities = await inference.GetCapabilitiesAsync(model, cancellationToken).ConfigureAwait(false); }
         catch (Exception original)
         {
-            try { await ((IAsyncDisposable)inference).DisposeAsync().ConfigureAwait(false); }
+            try { await inference.DisposeAsync().ConfigureAwait(false); }
             catch (Exception cleanup) { throw new AggregateException(original, cleanup); }
             throw;
         }
-        await ((IAsyncDisposable)inference).DisposeAsync().ConfigureAwait(false);
+        await inference.DisposeAsync().ConfigureAwait(false);
         Fence(cancellationToken);
         if (generation != settings.Generation) return new(SetupActionState.Cancelled);
         settings.Status = settings.Status with { Verified = SetupObservation.Known(capabilities.Operations.Count > 0) };
