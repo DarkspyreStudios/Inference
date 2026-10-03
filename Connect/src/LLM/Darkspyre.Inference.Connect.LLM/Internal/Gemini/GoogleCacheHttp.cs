@@ -377,6 +377,7 @@ internal static class GoogleCacheHttp
             LlmProviderException provider => provider.StatusCode,
             _ => null
         };
-        return new LlmProviderException(category, transport, status, requestId: requestId, retryAfter: retryAfter);
+        return new LlmProviderException(category, transport, status, requestId: requestId, retryAfter: retryAfter,
+            isContextOverflow: error is LlmProviderException { IsContextOverflow: true });
     }
 }

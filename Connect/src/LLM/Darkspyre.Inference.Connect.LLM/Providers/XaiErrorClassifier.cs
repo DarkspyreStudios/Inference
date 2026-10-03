@@ -91,7 +91,7 @@ public static class XaiErrorClassifier
         }
 
         // Subscription-specific 403 matching requires a qualified provider response.
-        return Failure(status, null, safe, evidence, requestId, retryAfter);
+        return Failure(status, null, safe, evidence, requestId, retryAfter, LlmContextOverflow.Responses(code));
     }
 
     internal static InferenceException EntitlementFailure(HttpStatusCode status, string safe, Exception? evidence = null,
@@ -101,9 +101,10 @@ public static class XaiErrorClassifier
             Failure(status, "xai_entitlement_required", safe, evidence, requestId, retryAfter));
 
     private static LlmProviderException Failure(HttpStatusCode status, string? code, string safe, Exception? evidence = null,
-        string? requestId = null, TimeSpan? retryAfter = null) =>
+        string? requestId = null, TimeSpan? retryAfter = null, bool isContextOverflow = false) =>
         new($"Grok request failed ({(int)status}): {safe}", LlmTransport.XaiResponses,
-            status, code, requestId, retryAfter, sanitizedResponseBody: safe, innerException: evidence);
+            status, code, requestId, retryAfter, sanitizedResponseBody: safe, innerException: evidence,
+            isContextOverflow: isContextOverflow);
 
     private sealed class SpeechTransportEvidence(Exception original) : Exception("The speech transport reported an opening failure.")
     {
