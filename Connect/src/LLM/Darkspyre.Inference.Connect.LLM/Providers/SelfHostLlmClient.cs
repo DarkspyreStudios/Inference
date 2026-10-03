@@ -177,6 +177,7 @@ internal sealed class SelfHostLlmClient(ILlmSelfHost host) : ILlmClient, ILlmCon
         OmittedContinuationStateCount = result.OmittedContinuationStateCount,
         ToolCalls = result.ToolCalls,
         Citations = result.Citations,
+        GeneratedResources = result.GeneratedResources,
         StructuredOutput = result.StructuredOutput,
         // An in-process call has no HTTP exchange; 200 records that it completed.
         Diagnostics = new(200, null, null)

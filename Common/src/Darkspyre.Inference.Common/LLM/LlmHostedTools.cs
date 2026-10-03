@@ -78,10 +78,10 @@ public abstract record LlmHostedToolOutput
     public IReadOnlyList<InferenceResourceDescriptor>? Resources { get; init; }
 }
 
-public sealed record LlmHostedSearchSource(string Url, string? Title = null)
+public sealed record LlmHostedSearchSource(string? Url, string? Title = null)
 {
     [JsonRequired]
-    public string Url { get; init => field = HostedSnapshot.Required(value); } = HostedSnapshot.Required(Url);
+    public string? Url { get; init; } = Url;
 }
 public sealed record LlmHostedSearchOutput(IReadOnlyList<LlmHostedSearchSource>? Sources) : LlmHostedToolOutput
 {

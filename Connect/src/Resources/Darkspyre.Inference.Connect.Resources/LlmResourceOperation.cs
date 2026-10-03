@@ -297,6 +297,7 @@ internal static class ResourceObservationData
     {
         ToolCalls = Array.AsReadOnly(BatchData.Copy(result.ToolCalls).Select(ClientTools.Snapshot).ToArray()),
         Citations = BatchData.Copy(result.Citations),
+        GeneratedResources = result.GeneratedResources,
         StructuredOutput = result.StructuredOutput is { } structured ? structured with { Errors = BatchData.Copy(structured.Errors) } : null
     };
 }
