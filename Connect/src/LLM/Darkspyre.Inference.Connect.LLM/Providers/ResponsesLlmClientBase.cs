@@ -248,6 +248,8 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
         var text = new StringBuilder();
         var refusal = new StringBuilder();
         var toolCallStream = new OpenAiToolCallStream();
+        ResponsesHostedToolObserver? hosted = CreateHostedToolObserver(() =>
+            ProtocolException($"{ResponseName} returned a malformed hosted-tool observation.", response, string.Empty, credential));
         var completedOutput = new SortedDictionary<int, JsonElement>();
         bool completed = false;
         string? observedModel = null;
@@ -321,6 +323,9 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
                         }
 
                     case "response.output_item.added":
+                        if (hosted is not null)
+                            foreach (LlmStreamEvent toolEvent in hosted.ObserveAdded(root))
+                                yield return consumption.Publish(toolEvent);
                         foreach (LlmStreamEvent toolEvent in toolCallStream.ObserveAdded(root))
                         {
                             yield return consumption.Publish<LlmStreamEvent>(toolEvent);
@@ -382,6 +387,10 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
                                 yield return consumption.Publish<LlmStreamEvent>(toolEvent);
                             }
 
+                            if (hosted is not null)
+                                foreach (LlmStreamEvent toolEvent in hosted.Complete(root))
+                                    yield return consumption.Publish(toolEvent);
+
                             completed = true;
                             yield return consumption.Publish<LlmStreamEvent>(new LlmChatCompletionEvent(result));
                             break;
@@ -407,6 +416,8 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
 
     protected virtual LlmAccountUsageSnapshot? ObserveAccountUsage(HttpResponseMessage response) =>
         OpenAiRateLimitHeaders.Parse(response.Headers, DateTimeOffset.UtcNow);
+
+    protected virtual ResponsesHostedToolObserver? CreateHostedToolObserver(Func<Exception> malformed) => null;
 
     private string ResponseName => Transport == LlmTransport.XaiResponses ? "Grok Responses" : "OpenAI Responses";
 
@@ -477,7 +488,13 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
                 credential,
                 connection,
                 request.ModelId);
-            return CompleteResponseEvents.From(result, reasoningText ? ReadReasoning(root) : []);
+            IEnumerable<LlmStreamEvent> events = CompleteResponseEvents.From(result, reasoningText ? ReadReasoning(root) : []);
+            ResponsesHostedToolObserver? hosted = CreateHostedToolObserver(() =>
+                ProtocolException($"{ResponseName} returned a malformed hosted-tool observation.", response, string.Empty, credential));
+            if (hosted is null) return events;
+            var observed = events.ToList();
+            observed.InsertRange(observed.Count - 1, hosted.Complete(root));
+            return observed;
         }
     }
 
