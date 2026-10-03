@@ -556,6 +556,8 @@ The wrapper uses the same bounded event feed. It never disposes the borrowed inp
 Session retirement closes observations promptly without publishing late completion. Its cached
 retirement result preserves actual late artifact commit/selection facts, including unknown acknowledgment,
 and any independent cleanup refusal. Ordinary receive cancellation remains healthy.
+The convenience result preserves the original resource failures once, including typed cancellation
+from borrowed input; input-only operation failures do not poison client retirement.
 No automatic reconnect/replay occurs. OAuth endpoint acceptance and real
 voice/latency qualification remain open: the guide's latency value 2 is passed through unchanged despite
 the standalone schema's narrower 0/1 declaration. Controlled tests do not qualify live provider access.

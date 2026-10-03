@@ -104,13 +104,14 @@ public sealed class XaiTtsResourceRetirementTests
         socket.OnSend = value =>
         {
             if (!value.Contains("text.done", StringComparison.Ordinal)) return;
-            socket.Push("{\"type\":\"audio.delta\",\"delta\":\"AQ==\"}"); socket.Push("{\"type\":\"audio.done\"}");
+            socket.Push("{\"type\":\"audio.delta\",\"delta\":\"AQ==\"}");
         };
         ITtsClient client = XaiTtsStreamingTests.Provider(http, (_, _, _) => Task.FromResult<WebSocket>(socket)).Bind(XaiTtsTests.Connection, new(new("selected"), access), resources);
         var events = Assert.IsAssignableFrom<ITtsStreamingClient>(client).SpeakStreamAsync(Input(), new(Language: "en"), Limits).GetAsyncEnumerator();
         try
         {
             Assert.True(await events.MoveNextAsync().AsTask().WaitAsync(Bound)); Assert.IsType<TtsAudioChunk>(events.Current);
+            socket.Push("{\"type\":\"audio.done\"}");
             Exception? error = await Record.ExceptionAsync(() => events.MoveNextAsync().AsTask().WaitAsync(Bound));
             Assert.NotNull(error);
             Assert.Equal(1, Count(error, commit)); Assert.Equal(1, Count(error, handleCleanup)); Assert.Equal(1, Count(error, socketCleanup));
