@@ -66,18 +66,17 @@ internal sealed class XaiSttSession : ISpeechTranscriptionSession
         }
     }
     public Task AppendAudioAsync(ReadOnlyMemory<byte> audio, CancellationToken cancellationToken = default)
-        => SendAsync(audio.ToArray(), WebSocketMessageType.Binary, false, null, cancellationToken);
+        => SendAsync(audio, WebSocketMessageType.Binary, false, null, cancellationToken);
     public Task FinalizeAsync(int? channel = null, CancellationToken cancellationToken = default)
-    {
-        if (channel is { } index && (!_multichannel || index < 0 || index >= _channels)) throw XaiSttProtocol.Invalid();
-        return SendAsync(XaiSttProtocol.Command("finalize", channel), WebSocketMessageType.Text, false, channel, cancellationToken);
-    }
+        => SendAsync(XaiSttProtocol.Command("finalize", channel), WebSocketMessageType.Text, false, channel, cancellationToken);
     public Task CompleteAudioAsync(CancellationToken cancellationToken = default)
         => SendAsync(XaiSttProtocol.Command("audio.done"), WebSocketMessageType.Text, true, null, cancellationToken);
-    private async Task SendAsync(byte[] bytes, WebSocketMessageType type, bool complete, int? channel, CancellationToken caller)
+    private async Task SendAsync(ReadOnlyMemory<byte> payload, WebSocketMessageType type, bool complete, int? channel, CancellationToken caller)
     {
         using var operation = _lifetime.Enter(caller); CancellationToken token = operation.Token;
-        if (bytes.LongLength > _limits.MaximumMessageBytes) throw Capacity();
+        if (channel is { } index && (!_multichannel || index < 0 || index >= _channels)) throw XaiSttProtocol.Invalid();
+        if (payload.Length > _limits.MaximumMessageBytes) throw Capacity();
+        byte[] bytes = payload.ToArray();
         await _send.WaitAsync(token).ConfigureAwait(false); bool dispatched = false;
         try
         {
@@ -96,7 +95,10 @@ internal sealed class XaiSttSession : ISpeechTranscriptionSession
     public IAsyncEnumerable<SpeechTranscriptEvent> Events => ReadAsync();
     private async IAsyncEnumerable<SpeechTranscriptEvent> ReadAsync([EnumeratorCancellation] CancellationToken token = default)
     {
-        if (Interlocked.Exchange(ref _reader, 1) != 0) throw new InvalidOperationException("A transcription session has one Events consumer.");
+        using (_lifetime.Enter(token))
+        {
+            if (Interlocked.Exchange(ref _reader, 1) != 0) throw new InvalidOperationException("A transcription session has one Events consumer.");
+        }
         await foreach (var item in _events.Reader.ReadAllAsync(token).ConfigureAwait(false))
         { Release(item.Bytes); if (!IsStopping()) yield return item.Event; }
     }
@@ -123,7 +125,7 @@ internal sealed class XaiSttSession : ISpeechTranscriptionSession
                     if (assembled.Length + frame.Count > _limits.MaximumMessageBytes || assembled.Length + frame.Count > int.MaxValue) throw Capacity();
                     assembled.Write(buffer, 0, frame.Count);
                 } while (!frame.EndOfMessage);
-                using JsonDocument document = Parse(assembled.GetBuffer().AsMemory(0, checked((int)assembled.Length)));
+                using JsonDocument document = XaiSttProtocol.Parse(assembled.GetBuffer().AsMemory(0, checked((int)assembled.Length)));
                 JsonElement root = document.RootElement; string type = XaiSttProtocol.RequiredString(root, "type");
                 if (!_created && type is not ("transcript.created" or "error")) throw XaiSttProtocol.Protocol();
                 switch (type)
@@ -145,7 +147,7 @@ internal sealed class XaiSttSession : ISpeechTranscriptionSession
                         int? doneChannel = ReadChannel(root);
                         lock (_sync) { if (!_inputComplete || !_done.Add(doneChannel ?? 0)) throw XaiSttProtocol.Protocol(); }
                         await PublishAsync(new SpeechTranscriptDoneEvent(XaiSttProtocol.RequiredString(root, "text"),
-                            XaiSttProtocol.Seconds(root, "duration") ?? throw XaiSttProtocol.Protocol(), doneChannel,
+                            XaiSttProtocol.Seconds(root, "duration"), doneChannel,
                             XaiSttProtocol.Words(root) ?? throw XaiSttProtocol.Protocol()), token).ConfigureAwait(false);
                         break;
                     case "error":
@@ -163,8 +165,6 @@ internal sealed class XaiSttSession : ISpeechTranscriptionSession
         if (failure is not null) _ready.TrySetException(failure);
         _events.Writer.TryComplete(failure); if (failure is not null) _ = RetireAsync();
     }
-    private static JsonDocument Parse(ReadOnlyMemory<byte> data)
-    { try { return JsonDocument.Parse(data); } catch (JsonException) { throw XaiSttProtocol.Protocol(); } }
     private int? ReadChannel(JsonElement root)
     {
         int? channel = XaiSttProtocol.OptionalInteger(root, "channel_index");

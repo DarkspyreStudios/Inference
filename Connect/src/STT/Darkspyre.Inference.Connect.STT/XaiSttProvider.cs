@@ -113,7 +113,7 @@ public sealed class XaiSttProvider : ISttProvider
                 long started = Stopwatch.GetTimestamp(); unhanded = null;
                 result = await SendAsync(snapshot, body, async (response, current) =>
                 {
-                    using JsonDocument document = JsonDocument.Parse(await SdkHttpConsumption.ReadAsStringAsync(response.Content, current).ConfigureAwait(false));
+                    using JsonDocument document = XaiSttProtocol.Parse(await SdkHttpConsumption.ReadAsStringAsync(response.Content, current).ConfigureAwait(false));
                     Check(); return XaiSttProtocol.Result(document.RootElement, new()
                     { ImplementationId = _provider!.SetupDefinition.Implementation.Id, ModelId = null, Runtime = "HTTP", Elapsed = Stopwatch.GetElapsedTime(started) });
                 }, Check, token).ConfigureAwait(false);
@@ -152,7 +152,6 @@ public sealed class XaiSttProvider : ISttProvider
                 await XaiErrorClassifier.ThrowIfUnsuccessfulSpeechAsync(response, LlmCredential.Parse(snapshot.Credential), timeout.Token).ConfigureAwait(false); fence();
                 result = await read(response, timeout.Token).ConfigureAwait(false); fence();
             }
-            catch (JsonException) { errors.Add(XaiSttProtocol.Protocol()); }
             catch (Exception error) { errors.Add(error); }
             try { response?.Dispose(); } catch (Exception error) { var cleanup = LlmResourcePreparation.AsCleanupFailure(error, refusedOwner: response); RecordCleanup(cleanup); errors.Add(cleanup); }
             try { request.Dispose(); } catch (Exception error) { var cleanup = LlmResourcePreparation.AsCleanupFailure(error, refusedOwner: request); RecordCleanup(cleanup); errors.Add(cleanup); }
@@ -277,13 +276,43 @@ public sealed class XaiSttProvider : ISttProvider
     private sealed class ResourceContent(LlmResourcePreparation reading, IInferenceResourceAccess access, InferenceResourceDescriptor descriptor,
         LlmResourcePreparation.CountingReadStream content, Action fence, CancellationToken token) : HttpContent
     {
+        private readonly Lock _sync = new();
+        private LlmResourcePreparation? _reading = reading;
+        private IInferenceResourceAccess? _access = access;
+        private LlmResourcePreparation.CountingReadStream? _content = content;
+        private Action? _fence = fence;
         protected override bool TryComputeLength(out long length) { length = descriptor.Bytes ?? 0; return descriptor.Bytes is not null; }
         protected override Task SerializeToStreamAsync(Stream stream, TransportContext? context) => SerializeToStreamAsync(stream, context, token);
         protected override async Task SerializeToStreamAsync(Stream stream, TransportContext? context, CancellationToken cancellationToken)
         {
+            LlmResourcePreparation admittedReading;
+            IInferenceResourceAccess admittedAccess;
+            LlmResourcePreparation.CountingReadStream admittedContent;
+            Action admittedFence;
+            lock (_sync)
+            {
+                ObjectDisposedException.ThrowIf(_reading is null, this);
+                admittedReading = _reading;
+                admittedAccess = _access!;
+                admittedContent = _content!;
+                admittedFence = _fence!;
+            }
             try
-            { fence(); await content.CopyToAsync(stream, cancellationToken).ConfigureAwait(false); fence(); reading.VerifyRead(access, descriptor, content, fence, token); }
-            catch (Exception error) { ExceptionDispatchInfo.Capture(ResourceFailure(error, InferenceResourceOperationPhase.Read, descriptor.Reference, content.BytesRead, token)).Throw(); throw; }
+            {
+                admittedFence();
+                await admittedContent.CopyToAsync(stream, cancellationToken).ConfigureAwait(false);
+                admittedFence();
+                admittedReading.VerifyRead(admittedAccess, descriptor, admittedContent, admittedFence, token);
+            }
+            catch (Exception error) { ExceptionDispatchInfo.Capture(ResourceFailure(error, InferenceResourceOperationPhase.Read, descriptor.Reference, admittedContent.BytesRead, token)).Throw(); throw; }
+        }
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                lock (_sync) { _reading = null; _access = null; _content = null; _fence = null; }
+            }
+            base.Dispose(disposing);
         }
     }
 }

@@ -133,6 +133,10 @@ internal static class XaiSttProtocol
     };
     internal static SpeechTranscriptionResult Result(JsonElement root, InferenceProvenance provenance) => new(
         RequiredString(root, "text"), provenance, OptionalString(root, "language"), Seconds(root, "duration"), Words(root), Channels(root));
+    internal static JsonDocument Parse(string data)
+    { try { return JsonDocument.Parse(data); } catch (JsonException) { throw Protocol(); } }
+    internal static JsonDocument Parse(ReadOnlyMemory<byte> data)
+    { try { return JsonDocument.Parse(data); } catch (JsonException) { throw Protocol(); } }
     internal static IReadOnlyList<SpeechWord>? Words(JsonElement root)
     {
         Object(root);
