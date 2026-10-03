@@ -234,7 +234,12 @@ public sealed class XaiTtsProvider : ITtsProvider
                 try { await reader.DisposeAsync().ConfigureAwait(false); } catch (Exception error) { Add(error); }
                 if (failures.Count > 1) throw new AggregateException(failures);
                 if (failures.Count == 1 && !ReferenceEquals(failures[0], original)) ExceptionDispatchInfo.Capture(failures[0]).Throw();
-                void Add(Exception error) { if (!failures.Contains(error)) failures.Add(error); }
+                void Add(Exception error)
+                {
+                    if (failures.Any(existing => XaiTtsSession.Contains(existing, error))) return;
+                    failures.RemoveAll(existing => XaiTtsSession.Contains(error, existing));
+                    failures.Add(error);
+                }
             }
             async Task<bool> MoveNextAsync()
             {
@@ -256,7 +261,7 @@ public sealed class XaiTtsProvider : ITtsProvider
                     Exception? sessionFailure = await CaptureAsync(retirement, true).ConfigureAwait(false);
                     var failures = new List<Exception>();
                     try { await sender.ConfigureAwait(false); }
-                    catch (OperationCanceledException error) when (stop.IsCancellationRequested && !LlmResourcePreparation.IsCleanupFailure(error)) { }
+                    catch (OperationCanceledException error) when (stop.IsCancellationRequested && !LlmResourcePreparation.IsResourceFailure(error)) { }
                     catch (Exception error) { failures.Add(error); }
                     if (cancelFailure is not null) failures.Add(cancelFailure);
                     if (sessionFailure is not null && !failures.Contains(sessionFailure)) failures.Add(sessionFailure);
