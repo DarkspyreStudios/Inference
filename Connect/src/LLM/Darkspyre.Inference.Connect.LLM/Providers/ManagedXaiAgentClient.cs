@@ -24,7 +24,10 @@ internal sealed class ManagedXaiAgentClient(XaiResponsesLlmClient client, LlmPro
             Messages = options.Context?.Entries.Select(entry => entry.Message).ToArray() ?? [],
             Tools = ClientTools.Functions(options.Tools).Select(tool => (LlmClientToolDefinition)new LlmToolDefinition
             {
-                Name = tool.Name, Description = tool.Description, InputSchema = tool.InputSchema, Strict = tool.Strict
+                Name = tool.Name,
+                Description = tool.Description,
+                InputSchema = tool.InputSchema,
+                Strict = tool.Strict
             }).ToArray(),
             HostedTools = options.HostedTools,
             MaxHostedTurns = options.MaxHostedTurns,
