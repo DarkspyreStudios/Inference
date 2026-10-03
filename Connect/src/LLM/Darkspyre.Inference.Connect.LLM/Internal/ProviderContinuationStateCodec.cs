@@ -204,7 +204,8 @@ internal static class ProviderContinuationStateCodec
             {
                 if (type is not ("message" or "reasoning" or "function_call" or "shell_call" or "compaction" or "web_search_call"
                     or "x_search_call" or "code_interpreter_call" or "code_execution_call" or "file_search_call"
-                    or "mcp_call" or "image_generation_call" or "view_image_call" or "view_x_video_call"))
+                    or "mcp_call" or "image_generation_call" or "view_image_call" or "view_x_video_call"
+                    or "custom_tool_call" or "tool_search_call" or "tool_search_output"))
                 {
                     throw new NotSupportedException("The adapter cannot retain this assistant output type.");
                 }
@@ -347,6 +348,18 @@ internal static class ProviderContinuationStateCodec
         {
             using JsonDocument document = JsonDocument.Parse(item.ToJsonString());
             _ = OpenAiResponsesTools.TryReadToolCall(document.RootElement, transport == LlmTransport.XaiResponses, out _);
+        }
+        if (transport == LlmTransport.XaiResponses && type is "custom_tool_call" or "tool_search_call" or "tool_search_output")
+        {
+            if (item["id"] is not JsonValue identity || !identity.TryGetValue<string>(out _))
+                throw new ArgumentException("Hosted continuation requires its actual item identity.");
+            foreach (string field in new[] { "call_id", "status", "name", "input", "execution" })
+                if (item[field] is { } value && (value is not JsonValue text || !text.TryGetValue<string>(out _)))
+                    throw new ArgumentException("Hosted continuation contains an invalid string field.");
+            if (type == "custom_tool_call" && (item["call_id"] is null || item["name"] is null))
+                throw new ArgumentException("Custom continuation requires actual call identity and name.");
+            if (type == "tool_search_output" && item["tools"] is { } tools && tools is not JsonArray)
+                throw new ArgumentException("Tool-search output requires ordered definitions.");
         }
         if (transport == LlmTransport.AwsBedrockConverse && type == "redacted_reasoning")
         {

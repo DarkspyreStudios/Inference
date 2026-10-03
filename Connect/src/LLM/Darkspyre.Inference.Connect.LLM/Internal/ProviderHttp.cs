@@ -98,13 +98,15 @@ internal static class ProviderHttp
             isContextOverflow: overflow);
     }
 
-    public static string? ReadRequestId(HttpResponseMessage response)
+    public static string? ReadRequestId(HttpResponseMessage response, LlmCredential? credential = null,
+        IEnumerable<string>? extraSecrets = null)
     {
         foreach (string headerName in new[] { "x-request-id", "request-id", "x-trace-id", "apim-request-id" })
         {
             if (response.Headers.TryGetValues(headerName, out IEnumerable<string>? values))
             {
-                return values.FirstOrDefault();
+                string? id = values.FirstOrDefault();
+                return id is not null && extraSecrets is not null ? SecretRedactor.Sanitize(id, credential, extraSecrets) : id;
             }
         }
 

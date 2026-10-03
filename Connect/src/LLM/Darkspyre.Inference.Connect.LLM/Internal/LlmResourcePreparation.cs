@@ -15,6 +15,7 @@ internal sealed class LlmResourcePreparation : IAsyncDisposable
     private readonly object _gate = new();
     private Task? _retirement;
     private Scope? _readScope;
+    internal InferenceResourceSelectionVersion? SelectionVersion { get; private set; }
 
     private LlmChatRequest? _request;
     private LlmResourcePreparation(LlmChatRequest? request = null) => _request = request;
@@ -219,6 +220,7 @@ internal sealed class LlmResourcePreparation : IAsyncDisposable
             request = AppendSelection(request, selection);
             Scope scope = new(selection.WorkspaceId, selection.SessionId);
             operation._readScope = scope;
+            operation.SelectionVersion = new(selection.WorkspaceId, selection.SessionId, selection.Revision);
             CheckScope(access, scope, fence, token);
             foreach (InferenceResourceReference reference in References(request).Distinct())
             {

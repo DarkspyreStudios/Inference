@@ -31,7 +31,9 @@ internal sealed class XaiResponsesLlmClient(HttpClient http) : ResponsesLlmClien
     protected override bool OffersNonStreamingRequests => true;
     protected override bool OffersUsageDeltas => false;
     protected override bool SupportsResourcePreparation => true;
-    protected override ResponsesHostedToolObserver CreateHostedToolObserver(Func<Exception> malformed) => new XaiDocumentSearchObserver(malformed);
+    protected override ResponsesHostedToolObserver CreateHostedToolObserver(Func<Exception> malformed,
+        XaiHostedToolPreparation? preparation) => new XaiHostedToolObserver(malformed,
+            preparation ?? throw new InvalidOperationException("Grok hosted observations require the admitted request frame."));
 
     // xAI quota names and units require its own qualified evidence; OpenAI provenance is not interchangeable.
     protected override LlmAccountUsageSnapshot? ObserveAccountUsage(HttpResponseMessage response) => null;
@@ -63,7 +65,8 @@ internal sealed class XaiResponsesLlmClient(HttpClient http) : ResponsesLlmClien
             SupportedCallerServices = new[] { LlmAgentCallerServiceKind.ShellExecution }.ToFrozenSet(),
             RichContentSupported = RichContentRoutes.Responses
         },
-        HostedTools = new[] { LlmHostedToolKind.DocumentSearch }.ToFrozenSet(),
+        HostedTools = new[] { LlmHostedToolKind.DocumentSearch, LlmHostedToolKind.WebSearch, LlmHostedToolKind.SocialSearch,
+            LlmHostedToolKind.CodeExecution, LlmHostedToolKind.ImageGeneration, LlmHostedToolKind.RemoteMcp }.ToFrozenSet(),
         Tools = new()
         {
             ChoiceModes = new[] { LlmToolChoiceMode.Auto, LlmToolChoiceMode.None, LlmToolChoiceMode.Required, LlmToolChoiceMode.Specific }.ToFrozenSet(),
@@ -105,7 +108,8 @@ internal sealed class XaiResponsesLlmClient(HttpClient http) : ResponsesLlmClien
             SupportsPresencePenalty = false,
             SupportsFrequencyPenalty = false,
             // The Responses request schema publishes no string-stop field.
-            MaxStopSequences = 0
+            MaxStopSequences = 0,
+            HostedTools = capabilities.HostedTools.Intersect(DefaultCapabilities.HostedTools).ToFrozenSet()
         };
     }
 
@@ -285,8 +289,9 @@ internal sealed class XaiResponsesLlmClient(HttpClient http) : ResponsesLlmClien
             throw new ArgumentException("Grok protocol controls use typed request and connection properties, not provider options.", nameof(request));
         if (request.Temperature is < 0 or > 2)
             throw new ArgumentOutOfRangeException(nameof(request), "Grok temperature must be in [0, 2].");
-        if (request.Tools.Count > 350)
-            throw new NotSupportedException("Grok accepts at most 350 client tools.");
+        if ((long)request.Tools.Count + request.HostedTools.Count
+            + (request.HostedTools.OfType<LlmRemoteMcpTool>().Any(tool => tool.DeferLoading) ? 1 : 0) > 350)
+            throw new NotSupportedException("Grok accepts at most 350 wire tools.");
         if (request.HostedTools.OfType<LlmDocumentSearchTool>().Any(tool => tool.CollectionIds.Count > 10))
             throw new ArgumentException("Grok document search accepts at most 10 collection IDs per tool.", nameof(request));
         foreach (LlmHostedTool tool in request.HostedTools)
@@ -302,6 +307,20 @@ internal sealed class XaiResponsesLlmClient(HttpClient http) : ResponsesLlmClien
             }
             else if (tool is XaiXSearchTool { AllowedHandles: not null, ExcludedHandles: not null })
                 throw new ArgumentException("Grok X search cannot combine allowed and excluded handles.", nameof(request));
+            else if (tool is LlmRemoteMcpTool mcp)
+            {
+                if (!Uri.TryCreate(mcp.ServerUrl, UriKind.Absolute, out Uri? server)
+                    || server.Scheme != Uri.UriSchemeHttp && server.Scheme != Uri.UriSchemeHttps)
+                    throw new ArgumentException("MCP requires an absolute HTTP or HTTPS server URL.", nameof(request));
+                if (mcp.Headers is { } headers)
+                {
+                    using var message = new HttpRequestMessage { Content = new ByteArrayContent([]) };
+                    foreach ((string name, string value) in headers)
+                        if (name.Contains('\r') || name.Contains('\n') || value.Contains('\r') || value.Contains('\n')
+                            || !message.Headers.TryAddWithoutValidation(name, value) && !message.Content.Headers.TryAddWithoutValidation(name, value))
+                            throw new ArgumentException("MCP contains an invalid header.", nameof(request));
+                }
+            }
         }
         if (request.Tools.OfType<LlmToolDefinition>().Any(tool => tool.Name == "web_search"))
             throw new ArgumentException("A Grok client function cannot be named web_search.", nameof(request));
@@ -338,12 +357,17 @@ internal sealed class XaiResponsesLlmClient(HttpClient http) : ResponsesLlmClien
             var tools = payload["tools"] as JsonArray ?? new JsonArray();
             if (payload["tools"] is null) payload["tools"] = tools;
             foreach (LlmHostedTool tool in request.HostedTools) tools.Add(BuildHostedTool(tool));
+            if (request.HostedTools.OfType<LlmRemoteMcpTool>().Any(tool => tool.DeferLoading))
+                tools.Add(new JsonObject { ["type"] = "tool_search" });
         }
         if (request.MaxHostedTurns is { } turns) payload["max_turns"] = turns;
         if (request.HostedTools.OfType<LlmDocumentSearchTool>().Any() || HasFileInput(payload["input"]))
             ((JsonArray)payload["include"]!).Add("file_search_call.results");
         if (request.HostedTools.OfType<LlmWebSearchTool>().Any())
             ((JsonArray)payload["include"]!).Add("web_search_call.action.sources");
+        if (request.HostedTools.OfType<LlmCodeExecutionTool>().Any())
+            ((JsonArray)payload["include"]!).Add("code_interpreter_call.outputs");
+        payload["no_inline_citations"] = true;
         if (request.ProviderControls is XaiMultiAgentControls { AgentCount: { } count })
             payload["reasoning"] = new JsonObject
             {
@@ -357,6 +381,34 @@ internal sealed class XaiResponsesLlmClient(HttpClient http) : ResponsesLlmClien
     {
         switch (tool)
         {
+            case LlmCodeExecutionTool:
+                return new JsonObject { ["type"] = "code_interpreter" };
+            case LlmImageGenerationTool image:
+                return new JsonObject
+                {
+                    ["type"] = "image_generation",
+                    ["action"] = image.Action switch
+                    {
+                        LlmImageGenerationAction.Auto => "auto",
+                        LlmImageGenerationAction.Generate => "generate",
+                        LlmImageGenerationAction.Edit => "edit",
+                        _ => throw new NotSupportedException("Unknown image action.")
+                    }
+                };
+            case LlmRemoteMcpTool mcp:
+                var remote = new JsonObject
+                {
+                    ["type"] = "mcp",
+                    ["server_url"] = mcp.ServerUrl,
+                    ["server_label"] = mcp.ServerLabel,
+                    ["defer_loading"] = mcp.DeferLoading
+                };
+                if (mcp.ServerDescription is not null) remote["server_description"] = mcp.ServerDescription;
+                AddSearchFilter(remote, "allowed_tools", mcp.AllowedTools);
+                if (mcp.Headers is not null)
+                    remote["headers"] = new JsonObject(mcp.Headers.Select(pair =>
+                        KeyValuePair.Create<string, JsonNode?>(pair.Key, JsonValue.Create(pair.Value))));
+                return remote;
             case LlmDocumentSearchTool document:
                 {
                     var search = new JsonObject

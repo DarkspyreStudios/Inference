@@ -306,28 +306,42 @@ authorization refusal converters; live authorization cannot be serialized or rec
 data, and serialization never invokes its callback. The separate credential codec keeps its
 existing Web names and null omission.
 
-The private xAI Responses adapter implements hosted `DocumentSearch` and positive typed hosted-turn
-limits. It sends explicit document descriptors as `file_search` with exact collection IDs and optional
-result limits. Each descriptor accepts at most ten collections. Actual built `input_file` content
-also enables the implicit document-search observations. Both paths request `file_search_call.results`.
-The private payload builder also projects WebSearch's flat domain/image controls and XSearch's
-handle/date/image/video controls. That plumbing is inert: capabilities and observations remain
-DocumentSearch-only, so the existing hosted-tool validator rejects WebSearch and SocialSearch before
-provider effects. It does not advertise those families or infer their lifecycle and terminal facts.
-The other built-in adapters and hosted kinds reject unmapped hosted options before provider effects.
+The private xAI Responses adapter maps DocumentSearch, WebSearch, SocialSearch, CodeExecution,
+ImageGeneration and RemoteMcp with positive typed hosted-turn limits. Document search sends exact
+collection IDs and optional result limits; each descriptor accepts at most ten collections.
+Actual built `input_file` content also enables implicit document-search observations. Both paths
+request `file_search_call.results`. Web controls use flat domains and image controls. X controls
+preserve handles and dates without an invented handle cutoff or date interpretation. Deferred MCP
+adds the server-side `tool_search` descriptor and retains its ordered opaque call/output items.
+Pure preflight counts all wire tools before effects. Authorization resolves once per distinct
+borrowed authority during generation, never during estimation or serialization.
+Other built-in adapters and unmapped hosted kinds reject unsupported options before provider effects.
 Native start/resume also rejects these unmapped options. Existing Anthropic server-tool configuration
 is separate and does not advertise the new hosted API.
 
-The same Responses parser observes document calls in streamed and complete JSON responses. A generic
+The same Responses parser observes hosted calls in streamed and complete JSON responses. A generic
 added item produces Started only with a usable actual provider ID. The first terminal output supplies
 ordered Completed observations; it does not infer progress phases or successful execution. Every
-ID-less occurrence remains distinct. Repeated usable IDs identify one document call within that
+ID-less occurrence remains distinct. Repeated usable item IDs identify one call within that
 response. Unreported identity, status, result collections and scores remain null; actual empty
 collections, strings and numeric zero remain exact. The provider's documented omitted-score default
 does not replace the shared API's unreported-score observation. Full terminal output remains unchanged
 in opaque replay. Result-only `CompleteAsync` retains its terminal chat result; callers enumerate
 `StreamAsync` for hosted observations. This mapping does not qualify live OAuth acceptance or
-provider-specific file-search phase events.
+provider-specific file-search phase events. X custom calls are classified only by the published
+search names and retain actual call IDs separately from opaque item IDs. Image progress uses only
+documented lifecycle events. Unpublished understanding output/event shapes remain unmapped.
+
+Citations preserve first-observed annotation order and suppress terminal copies of the same
+occurrence. The adapter requests `no_inline_citations`. Offset units are unqualified, so positions
+remain absent. Code outputs preserve actual code, logs and image URLs without fetching remote
+artifacts. MCP arguments, output and error remain actual JSON values, including JSON strings.
+Generated images decode bare base64 and identify JPEG/PNG from bytes. Without Resources they carry
+copied bytes. With Resources they use the existing admitted scope and staged resource writer,
+atomically commit-and-select, and release the owned write handle before hosted completion. The
+final result carries actual ordered commit receipts. Cleanup errors preserve original failures and
+uncertain mutation facts. Operation-local MCP secrets reach existing HTTP, SSE, protocol, model and
+terminal diagnostic sanitization; retained opaque terminal output is not rewritten.
 Managed sessions snapshot hosted data, borrow authorization and preserve actual streamed hosted
 and citation observations under the invocation RequestId; they never route hosted observations to
 the host function handler. Terminal chat/portable results preserve ordered citation lists.
@@ -2459,15 +2473,18 @@ including an empty array. Function completions use terminal calls, and a call wi
 still emits its arguments once. Known terminal statuses map to completion, action, refusal, failure or
 incomplete results. The [xAI response schema](https://docs.x.ai/developers/rest-api-reference/inference/responses)
 names `max_output_tokens`, `max_prompt_tokens` and `max_time_limit`; each maps to `Incomplete`.
-Unknown statuses and incomplete reasons map to `Unknown`. Context exhaustion returns
-`Incomplete` without retrying. Encrypted context stays opaque; diagnostics redact its named values and
+Unknown statuses and incomplete reasons map to `Unknown`. Recognized `context_length_exceeded`
+codes or reasons raise `LlmProviderException.IsContextOverflow` before completion without retrying.
+The named incomplete limits remain `Incomplete` when no recognized overflow code is present.
+Encrypted context stays opaque; diagnostics redact its named values and
 reflections, and malformed JSON does not retain a parser exception containing provider text.
 
 The internal `XaiResponsesLlmClient` sends OAuth-only streaming or genuine non-streaming requests
 to the typed region's fixed endpoint. It rejects mixed static secret headers before dispatch and retains
 ordinary nonsecret additional headers. It sends the typed service tier and records the recognized applied
 tier in diagnostics. Typed protocol controls cannot be injected through raw provider options, even when
-the typed property is absent. Client functions are limited to 350; `web_search` is a reserved hosted name.
+the typed property is absent. The combined wire tools are limited to 350, including deferred MCP
+tool search; `web_search` is a reserved hosted name.
 The client joins the generic and language listings, offers only listed language models, and reads the
 facade's published catalog. Catalog reasoning levels and image modalities override family fallbacks.
 Unknown manually entered models still permit a request without fabricated discovery evidence.
@@ -2506,7 +2523,7 @@ through tool iterations; Connect and batch Resources metadata preserve the fixed
 the same finite SDK HTTP pipelines. Provider discovery performs no OAuth or model requests.
 `AddLlmConnectXai` uses the same registration path; calling it again does not duplicate Grok services.
 Registration is not live qualification; OAuth and provider qualification remain `NotRun`.
-Cross-family catalog ownership remains separate. Agent counts are distinct from reasoning levels.
+`LlmModelListCache` owns generic and lazy listings for all four model families. Agent counts are distinct from reasoning levels.
 The region and tier premiums follow [xAI pricing](https://docs.x.ai/developers/pricing).
 
 `LlmProviderService` implements Connect's `ILlmTextTokenizer`. `TokenizeAsync` accepts a connection

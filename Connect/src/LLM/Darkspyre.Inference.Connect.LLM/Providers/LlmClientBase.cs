@@ -374,12 +374,12 @@ internal abstract class LlmClientBase(HttpClient http) : ILlmClient
         HttpResponseMessage response,
         string rawBody,
         LlmCredential? credential,
-        Exception? innerException = null) => new(
+        Exception? innerException = null, IEnumerable<string>? extraSecrets = null) => new(
             message,
             Transport,
             response.StatusCode,
-            requestId: ProviderHttp.ReadRequestId(response),
-            sanitizedResponseBody: SecretRedactor.Sanitize(rawBody, credential),
+            requestId: ProviderHttp.ReadRequestId(response, credential, extraSecrets),
+            sanitizedResponseBody: SecretRedactor.Sanitize(rawBody, credential, extraSecrets ?? []),
             innerException: innerException);
 
     protected void EnsureTransport(LlmConnection connection)

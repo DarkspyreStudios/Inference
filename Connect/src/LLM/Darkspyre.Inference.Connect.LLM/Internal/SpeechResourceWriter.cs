@@ -117,7 +117,7 @@ internal static class SpeechResourceWriter
                     }
                 }
                 var descriptor = receipt?.Resource;
-                if (descriptor is null || descriptor.Reference != _reference || descriptor.SessionId != scope.SessionId
+                if (descriptor is null || descriptor.Reference != _reference || descriptor.SessionId is { } session && session != scope.SessionId
                     || descriptor.Bytes is { } size && size != _bytes || contentType is not null && descriptor.ContentType is { } type && type != contentType
                     || _selection != InferenceResourceCommitOutcome.Committed) throw Invalid();
                 var selection = new InferenceResourceSelection(receipt!.Selection!.WorkspaceId, receipt.Selection.SessionId,

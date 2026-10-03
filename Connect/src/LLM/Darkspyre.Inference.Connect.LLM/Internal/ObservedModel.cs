@@ -6,7 +6,7 @@ internal static class ObservedModel
 {
     internal static string? Read(JsonElement root, string fieldName, LlmTransport transport,
         LlmConnection connection, LlmCredential? credential, HttpRequestMessage? sentMessage,
-        string? previous = null)
+        string? previous = null, IEnumerable<string>? extraSecrets = null)
     {
         LlmProviderException Invalid() => new("The provider returned an invalid model observation.",
             transport, providerCode: "invalid_model_observation");
@@ -25,6 +25,7 @@ internal static class ObservedModel
         IEnumerable<string> protectedValues = connection.AdditionalHeaders.Values;
         if (sentMessage?.Headers.Authorization?.Parameter is { } token)
             protectedValues = protectedValues.Append(token);
+        if (extraSecrets is not null) protectedValues = protectedValues.Concat(extraSecrets);
         if (SecretRedactor.ContainsProtectedValue(model, credential, protectedValues)) throw Invalid();
         if (previous is not null && previous != model) throw Invalid();
         return model;
