@@ -20,7 +20,7 @@ internal static class AzureProviderDefinition
             new SetupStep
             {
                 Id = "configure-azure", Title = "Azure resource and API key",
-                Instructions = "Supply the HTTPS resource authority and protected resource API key.",
+                Instructions = "Configure the resource and selected authentication. Only OpenAI v1 with a protected resource API key is available; Entra and versioned routes cannot be saved or invoked.",
                 CompletionRequirement = "Supply an authority without an API path, query or fragment.",
                 Troubleshooting = "Verify the resource endpoint, API-key access policy and network permissions."
             },

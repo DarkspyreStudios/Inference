@@ -2333,12 +2333,25 @@ identity selectors and protected `LlmAzureSecret` variants. Unknown selections a
 Client secrets and PKCS12 bytes/passwords belong only in `LlmCredential.Azure`; their diagnostic
 strings are redacted. Metadata never opens a workload file or loads a certificate. These declarations
 do not enable Entra or versioned routes: the current Azure adapters reject them before dispatch.
-The API-key setter refuses Entra mode, and its settings do not expose an API-key field.
+The API-key setter refuses Entra mode. Settings expose an incompatible saved API key only for an
+explicit protected edit; it does not become an Entra credential.
 
 Unknown profiles advertise no media, structured-output, reasoning-level or sampling support.
 Implemented paths can be selected through supported explicit connection/model overrides; model
 overrides take precedence. Tool schema strictness remains Unknown without evidence. The Azure
 settings expose the deployment, optional profile and supported explicit capability corrections.
+Their local choices also expose API mode/version, authentication, cloud/audience, the five explicit
+identity families and all three user-managed identity selectors. Incomplete identity values stay
+in a private editor draft and cannot become an effective connection. Selecting V1 removes the
+draft API version; selecting API key removes the draft Entra configuration. These mode edits never
+delete protected credentials. Workload paths are explicit data; editing does not read a token file.
+Client-secret and PKCS12/password fields use independent Keep, Replace and Clear intentions.
+They compose into one protected credential transaction. Clearing a certificate removes its
+dependent password; password Clear means null and explicit empty Replace preserves an empty
+password. Incompatible protected payloads require an explicit edit, not an auth fallback.
+The generic settings editor enables empty Replace only for nonrequired secret fields.
+Entra and versioned drafts remain invalid for Save and unavailable for checks and inference tests.
+Choice enumeration performs no token acquisition, certificate loading, discovery or provider call.
 The settings keep credentials separate from configuration and save only through the host's
 version-conditional commit target. Checking key presence does not verify deployment invocation.
 

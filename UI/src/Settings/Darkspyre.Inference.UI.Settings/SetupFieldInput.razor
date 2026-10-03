@@ -125,7 +125,7 @@
                     </div>
                     <Input Type="password" Value="@_secret" ValueChanged="SetPendingSecretAsync"
                            Disabled="@Unavailable" Placeholder="New secret" />
-                    <Button Variant="Button.ButtonVariant.Outline" Disabled="@(Unavailable || string.IsNullOrEmpty(_secret))"
+                    <Button Variant="Button.ButtonVariant.Outline" Disabled="@(Unavailable || secret.Description.IsRequired && string.IsNullOrEmpty(_secret))"
                             OnClick="() => ReplaceSecretAsync(secret)">Replace secret</Button>
                     break;
             }

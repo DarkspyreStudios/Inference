@@ -12,7 +12,7 @@ internal sealed class AzureSetupEnvironment(LlmTransport transport) : ILlmSetupE
         try { _ = AzureEndpoints.Validate(connection); return new([]); }
         catch (Exception error) when (error is ArgumentException or NotSupportedException or System.Text.Json.JsonException)
         {
-            return new([new("azure-configuration-invalid", "Supply an HTTPS resource authority, exact deployment name and protected API key without conflicting authentication.")]);
+            return new([new("azure-configuration-invalid", "Only OpenAI v1 with an exclusive protected API key is available. Supply an HTTPS resource authority and exact deployment name; Entra and versioned routes are unavailable.")]);
         }
     }
 }

@@ -27,7 +27,7 @@ public interface ILlmSetupEnvironment
 /// Editable LLM connection settings. Plain data: edits change only this object. A sign-in's credential
 /// and its in-progress state are held here until Save.
 /// </summary>
-public sealed class LlmSettings : InferenceSettings<LlmSetupChanges>
+public sealed partial class LlmSettings : InferenceSettings<LlmSetupChanges>
 {
     /// <summary>The connection version the settings present to their own sign-in; a draft has no saved version.</summary>
     internal const string DraftVersion = "draft";
@@ -50,6 +50,7 @@ public sealed class LlmSettings : InferenceSettings<LlmSetupChanges>
     private string _callbackFieldId = string.Empty;
     private string _cacheBucket = string.Empty;
     private string _cachePrefix = string.Empty;
+    private readonly AzureEditorDraft? _azure;
 
     internal LlmSettings(LlmProviderDefinition definition, LlmTransport transport, SetupConfigurationIdentity identity,
         LlmConnection? existing, string? modelId, ILlmSetupEnvironment? environment)
@@ -86,6 +87,7 @@ public sealed class LlmSettings : InferenceSettings<LlmSetupChanges>
         }
         _model = _originalModel = modelId ?? (UsesAzure ? existing?.Azure?.DeploymentId : null) ?? definition.DefaultModelId;
         if (UsesAzure && _draft.Azure is null) _draft = _draft with { Azure = new() { DeploymentId = _model } };
+        if (UsesAzure) _azure = new(_draft.Azure!, LlmCredential.Parse(existing?.Credential) ?? new());
         _baseline = opened;
         _cacheBucket = opened.Vertex?.CacheStaging?.Bucket ?? string.Empty;
         _cachePrefix = opened.Vertex?.CacheStaging?.ObjectPrefix ?? string.Empty;
@@ -125,16 +127,16 @@ public sealed class LlmSettings : InferenceSettings<LlmSetupChanges>
     private bool UsesAws => _draft.Transport is LlmTransport.AwsBedrockConverse or LlmTransport.AwsBedrockAgentCore;
     private bool UsesApiKey => _draft.Transport is LlmTransport.OpenAiResponses or LlmTransport.OpenAiCompatibleChat or LlmTransport.AnthropicMessages
         or LlmTransport.GoogleGeminiApi || UsesVertex && Vertex.AuthenticationMode == LlmGoogleAuthenticationMode.ApiKey
-        || UsesAzure && (_draft.Azure?.AuthenticationMode ?? LlmAzureAuthenticationMode.ApiKey) == LlmAzureAuthenticationMode.ApiKey;
+        || UsesAzure && _azure!.Authentication == LlmAzureAuthenticationMode.ApiKey;
     private LlmCredential Credential => LlmCredential.Parse(_draft.Credential) ?? new();
 
     protected override bool IsDraftDirty =>
-        _draft.Endpoint != _baseline.Endpoint || _draft.Vertex != _baseline.Vertex || _draft.Azure != _baseline.Azure || _draft.ChatCompletions != _baseline.ChatCompletions || _draft.Xai != _baseline.Xai || _model != _originalModel
+        _draft.Endpoint != _baseline.Endpoint || _draft.Vertex != _baseline.Vertex || (UsesAzure ? _azure!.IsDirty : _draft.Azure != _baseline.Azure) || _draft.ChatCompletions != _baseline.ChatCompletions || _draft.Xai != _baseline.Xai || _model != _originalModel
             || (_draft.CapabilityOverrides ?? new()) != (_baseline.CapabilityOverrides ?? new()) || _callback.Length != 0
             || UsesVertex && (_cacheBucket != (_baseline.Vertex?.CacheStaging?.Bucket ?? string.Empty)
                 || _cachePrefix != (_baseline.Vertex?.CacheStaging?.ObjectPrefix ?? string.Empty))
             || (UsesAws ? NormalizeAws(Credential.Aws) != NormalizeAws(LlmCredential.Parse(_baseline.Credential)?.Aws)
-                : _credentialChange != SetupSecretEditKind.Keep);
+                : UsesAzure ? _azure!.HasCredentialEdits : _credentialChange != SetupSecretEditKind.Keep);
 
     /// <summary>Subscription API connections require sign-in or a retained saved credential.</summary>
     protected override bool IsSignInSatisfied => UsesXai
@@ -175,7 +177,8 @@ public sealed class LlmSettings : InferenceSettings<LlmSetupChanges>
                 Uri.TryCreate(_definition.DefaultEndpoint, UriKind.Absolute, out Uri? defaultUri) ? defaultUri : null,
                 value => Edit(() => _draft = _draft with { Endpoint = value?.ToString() ?? string.Empty })));
         }
-        if (UsesApiKey)
+        if (UsesAzure) AddAzureFields(fields);
+        if (UsesApiKey && !UsesAzure)
         {
             fields.Add(new SetupSecretField(new("api-key", "API key")
             {
@@ -302,8 +305,8 @@ public sealed class LlmSettings : InferenceSettings<LlmSetupChanges>
         if (UsesAzure)
         {
             fields.Add(new SetupTextField(new("azure-model-profile", "Underlying model profile"),
-                _draft.Azure?.ModelProfileId ?? string.Empty, string.Empty,
-                value => Edit(() => _draft = _draft with { Azure = (_draft.Azure ?? new()) with { ModelProfileId = string.IsNullOrWhiteSpace(value) ? null : value } })));
+                _azure!.Profile, string.Empty,
+                value => Edit(() => _azure.Profile = value)));
         }
         return
         [
@@ -432,12 +435,13 @@ public sealed class LlmSettings : InferenceSettings<LlmSetupChanges>
     private void SetModel(string value)
     {
         _model = value;
-        if (UsesAzure) _draft = _draft with { Azure = (_draft.Azure ?? new()) with { DeploymentId = value } };
+        if (UsesAzure) _azure!.DeploymentEdited = true;
     }
 
     protected internal override SetupChoicePage? GetLocalChoices(string fieldId, SetupChoiceQuery query)
     {
         _ = CreateSteps(); // Registers the override field IDs for the current transport.
+        if (UsesAzure && AzureEditorDraft.Choices(fieldId) is { } azureChoices) return Page(query, azureChoices);
         if (UsesXai && fieldId == "xai-region")
             return Page(query, [new(XaiRegion.Global.ToString(), "Global"), new(XaiRegion.UnitedStates.ToString(), "United States", "1.1x global rate")]);
         if (UsesXai && fieldId == "xai-service-tier")
@@ -615,11 +619,15 @@ public sealed class LlmSettings : InferenceSettings<LlmSetupChanges>
             && (!Uri.TryCreate(_draft.Endpoint, UriKind.Absolute, out Uri? endpoint) || endpoint.Scheme is not ("http" or "https")
                 || endpoint.UserInfo.Length > 0 || endpoint.Query.Length > 0 || endpoint.Fragment.Length > 0))
         { issues.Add(new("endpoint-invalid", "Use an HTTP(S) base URL without credentials, query or fragment.", "endpoint")); }
-        if (UsesApiKey && _draft.Transport != LlmTransport.OpenAiCompatibleChat
+        if (UsesApiKey && !UsesAzure && _draft.Transport != LlmTransport.OpenAiCompatibleChat
             && string.IsNullOrWhiteSpace(Credential.ApiKey) && Credential.SecretHeaders.Count == 0)
         { issues.Add(new("key-required", "An API credential is required.", "api-key")); }
-        if (UsesAzure && _draft.Azure?.DeploymentId != _model)
-            issues.Add(new("azure-deployment-conflict", "The selected model must match the configured Azure deployment.", "model"));
+        if (UsesAzure)
+        {
+            SetupIssue[] azureIssues = _azure!.Validate(_model);
+            issues.AddRange(azureIssues);
+            if (azureIssues.Length > 0) return new(issues.AsReadOnly());
+        }
         if (UsesXai)
         {
             if (!Enum.IsDefined(Xai.Region)) issues.Add(new("xai-region-invalid", "Select an xAI region.", "xai-region"));
@@ -643,8 +651,13 @@ public sealed class LlmSettings : InferenceSettings<LlmSetupChanges>
     }
 
     /// <summary>The connection these settings describe, as their own sign-in and tests use it.</summary>
-    internal LlmConnection CurrentConnection() => _draft with
-    { Version = DraftVersion, Vertex = UsesVertex ? Vertex with { CacheStaging = CacheStaging() } : _draft.Vertex };
+    internal LlmConnection CurrentConnection()
+    {
+        LlmConnection current = _draft with
+        { Version = DraftVersion, Vertex = UsesVertex ? Vertex with { CacheStaging = CacheStaging() } : _draft.Vertex };
+        return !UsesAzure ? current : current with
+        { Azure = _azure!.Configuration(_model), Credential = _azure.ComposeCredential().Serialize() };
+    }
 
     private LlmVertexCacheStaging? CacheStaging()
     {
@@ -658,11 +671,13 @@ public sealed class LlmSettings : InferenceSettings<LlmSetupChanges>
         LlmConnection draft = CurrentConnection();
         return new(Identity,
         new(draft with { Credential = null, Version = Identity.ExpectedVersion ?? string.Empty }, _model),
-        _credentialChange == SetupSecretEditKind.Keep ? SetupSecretEdit.Keep
+        UsesAzure ? _azure!.CredentialChange() : _credentialChange == SetupSecretEditKind.Keep ? SetupSecretEdit.Keep
             : _draft.Credential is null ? SetupSecretEdit.Clear : SetupSecretEdit.Replace(_draft.Credential),
-        _original is not null && (_original.Endpoint != _draft.Endpoint || _original.Vertex != draft.Vertex || _original.Azure != _draft.Azure),
-        _original is null || _original.Endpoint != _draft.Endpoint || _original.Vertex != draft.Vertex || _original.Azure != _draft.Azure || _original.Xai != _draft.Xai || _originalModel != _model
-            || _original.ChatCompletions != _draft.ChatCompletions || _original.CapabilityOverrides != _draft.CapabilityOverrides || _credentialChange != SetupSecretEditKind.Keep);
+        _original is not null && (_original.Endpoint != _draft.Endpoint || _original.Vertex != draft.Vertex || _original.Azure != draft.Azure)
+            || UsesAzure && _azure!.HasCredentialEdits,
+        _original is null || _original.Endpoint != _draft.Endpoint || _original.Vertex != draft.Vertex || _original.Azure != draft.Azure || _original.Xai != _draft.Xai || _originalModel != _model
+            || _original.ChatCompletions != _draft.ChatCompletions || _original.CapabilityOverrides != _draft.CapabilityOverrides
+            || (UsesAzure ? _azure!.HasCredentialEdits : _credentialChange != SetupSecretEditKind.Keep));
     }
 }
 
