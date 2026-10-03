@@ -109,7 +109,7 @@ public sealed class TangoFluxHttpProvider(HttpClient httpClient) : IAudioProvide
                     result = new AudioGenerationResult("audio/wav", bytes, null, new()
                     {
                         ImplementationId = Descriptor.Id,
-                        ModelId = "tangoflux",
+                        ModelId = null,
                         Runtime = "HTTP",
                         Elapsed = Stopwatch.GetElapsedTime(started)
                     });

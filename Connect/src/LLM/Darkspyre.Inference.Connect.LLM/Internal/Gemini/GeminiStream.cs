@@ -36,6 +36,8 @@ internal static class GeminiStream
         string? finish = null;
         string? blocked = null;
         string? responseId = null;
+        string? observedModel = null;
+        LlmCredential? credential = LlmCredential.Parse(connection.Credential);
         int? prompt = null, toolPrompt = null, visibleOutput = null, thoughts = null, cached = null, total = null;
         var deltas = new UsageDeltas(stream && usageDeltas);
         // A generateContent response is one GenerateContentResponse, the same type as each streamed chunk.
@@ -48,6 +50,8 @@ internal static class GeminiStream
             JsonElement root = document.RootElement;
             if (root.TryGetProperty("error", out _)) { throw Failure($"{route.Name} returned a stream error."); }
             responseId = LlmJson.GetString(root, "responseId") ?? responseId;
+            observedModel = ObservedModel.Read(root, "modelVersion", route.Transport, connection, credential,
+                owned, observedModel);
             if (LlmJson.GetObject(root, "usageMetadata") is { } usage)
             {
                 prompt = LlmJson.GetInt(usage, "promptTokenCount") ?? prompt;
@@ -148,6 +152,7 @@ internal static class GeminiStream
         yield return consumption.Publish<LlmStreamEvent>(new LlmChatCompletionEvent(new()
         {
             Text = text.ToString(),
+            ModelId = observedModel,
             Status = status,
             ToolCalls = completeCalls,
             ContinuationState = state,

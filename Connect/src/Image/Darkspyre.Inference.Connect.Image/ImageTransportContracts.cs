@@ -88,6 +88,12 @@ public sealed record ImageTransportJobSnapshot(
     InferenceResourceFailure? Error = null,
     JsonElement? Diagnostics = null)
 {
+    /// <summary>The actual model identity reported by the adapter; null when unknown.</summary>
+    public string? ModelId { get; init; }
+
+    /// <summary>A separately observed model revision; null when unknown.</summary>
+    public string? ModelRevision { get; init; }
+
     public IReadOnlyList<ImageTransportOutput>? Outputs { get; init => field = value is null ? null : Array.AsReadOnly(value.ToArray()); }
         = Outputs is null ? null : Array.AsReadOnly(Outputs.ToArray());
     public JsonElement? Diagnostics { get; init => field = value?.Clone(); } = Diagnostics?.Clone();
