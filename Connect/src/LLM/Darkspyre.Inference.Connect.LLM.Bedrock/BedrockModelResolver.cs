@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using Amazon.Bedrock;
 using Amazon.Bedrock.Model;
 using Darkspyre.Inference.Connect.LLM.Internal;
@@ -13,6 +14,7 @@ internal sealed class BedrockModelResolver
     private static readonly Action<ILogger, Exception?> ListingFailed =
         LoggerMessage.Define(LogLevel.Error, new EventId(2, "ListingFailed"),
             "Bedrock model listing failed after both catalog requests failed.");
+    private const int AvailabilityConcurrency = 8;
 
     public static async Task<string> ResolveAsync(
         BedrockClientFactory.Lease<AmazonBedrockClient> control,
@@ -64,6 +66,14 @@ internal sealed class BedrockModelResolver
         }
     }
 
+    /// <summary>
+    /// Lists the models the account can call, each under an identifier it can invoke. A foundation model is
+    /// listed by its model ID only when it supports on-demand inference; a model that runs only through an
+    /// inference profile appears through the system inference profiles that include it. Models whose
+    /// availability check reports no agreement or no authorization are omitted, and so are profiles whose
+    /// models are all such models. When an availability check fails, the listing keeps every profile and
+    /// every foundation model that is not provisioned-only.
+    /// </summary>
     public static async Task<IReadOnlyList<LlmModel>> ListAsync(
         BedrockClientFactory.Lease<AmazonBedrockClient> control,
         string region,
@@ -72,26 +82,12 @@ internal sealed class BedrockModelResolver
         CancellationToken cancellationToken)
     {
         control.ThrowIfCanceled();
-        var byId = new Dictionary<string, LlmModel>(StringComparer.Ordinal);
         var failures = new List<Exception>();
-        bool profilesSucceeded = false;
-        bool foundationsSucceeded = false;
+        List<InferenceProfileSummary>? profiles = null;
+        List<FoundationModelSummary>? foundations = null;
         try
         {
-            List<InferenceProfileSummary> profiles = await ListInferenceProfilesAsync(control, cancellationToken);
-            profilesSucceeded = true;
-            foreach (InferenceProfileSummary profile in profiles)
-            {
-                if (!string.IsNullOrEmpty(profile.InferenceProfileId))
-                {
-                    byId.TryAdd(
-                        profile.InferenceProfileId,
-                        new LlmModel(
-                            profile.InferenceProfileId,
-                            profile.InferenceProfileName ?? profile.InferenceProfileId,
-                            region));
-                }
-            }
+            profiles = await ListInferenceProfilesAsync(control, cancellationToken);
         }
         catch (AmazonBedrockException error)
         {
@@ -106,16 +102,8 @@ internal sealed class BedrockModelResolver
                 new ListFoundationModelsRequest(),
                 cancellationToken);
             control.ThrowIfCanceled();
-            foundationsSucceeded = true;
-            foreach (FoundationModelSummary model in models.ModelSummaries ?? [])
-            {
-                if (!string.IsNullOrEmpty(model.ModelId) && !IsProvisionedOnly(model.InferenceTypesSupported))
-                {
-                    byId.TryAdd(
-                        model.ModelId,
-                        new LlmModel(model.ModelId, model.ModelName ?? model.ModelId, region));
-                }
-            }
+            foundations = [.. (models.ModelSummaries ?? []).Where(model =>
+                !string.IsNullOrEmpty(model.ModelId) && !IsProvisionedOnly(model.InferenceTypesSupported))];
         }
         catch (AmazonBedrockException error)
         {
@@ -124,14 +112,115 @@ internal sealed class BedrockModelResolver
         }
 
         control.ThrowIfCanceled();
-        if (!profilesSucceeded && !foundationsSucceeded)
+        if (profiles is null && foundations is null)
         {
             try { ListingFailed(logger, null); }
             catch (Exception error) { failures.Add(new LoggingEvidence(error)); }
             throw new AggregateException("Bedrock model listing failed.", failures);
         }
 
+        Dictionary<string, bool>? callable = foundations is null
+            ? null
+            : await CheckAvailabilityAsync(control, foundations, logger, credential, cancellationToken);
+        var byId = new Dictionary<string, LlmModel>(StringComparer.Ordinal);
+        foreach (InferenceProfileSummary profile in profiles ?? [])
+        {
+            if (!string.IsNullOrEmpty(profile.InferenceProfileId)
+                && (callable is null || !AllModelsUncallable(profile, callable)))
+            {
+                byId.TryAdd(
+                    profile.InferenceProfileId,
+                    new LlmModel(
+                        profile.InferenceProfileId,
+                        profile.InferenceProfileName ?? profile.InferenceProfileId,
+                        region));
+            }
+        }
+
+        foreach (FoundationModelSummary model in foundations ?? [])
+        {
+            if (callable is null
+                || (callable[model.ModelId] && !IsProfileOnly(model.InferenceTypesSupported)))
+            {
+                byId.TryAdd(
+                    model.ModelId,
+                    new LlmModel(model.ModelId, model.ModelName ?? model.ModelId, region));
+            }
+        }
+
         return [.. byId.Values.OrderBy(model => model.Id, StringComparer.OrdinalIgnoreCase)];
+    }
+
+    /// <summary>
+    /// Returns, per foundation model ID, whether the account holds an available agreement and authorization
+    /// for it, or <see langword="null"/> when any availability request fails. The failure is logged once.
+    /// </summary>
+    private static async Task<Dictionary<string, bool>?> CheckAvailabilityAsync(
+        BedrockClientFactory.Lease<AmazonBedrockClient> control,
+        List<FoundationModelSummary> foundations,
+        ILogger<BedrockLlmClient> logger,
+        LlmCredential credential,
+        CancellationToken cancellationToken)
+    {
+        var callable = new ConcurrentDictionary<string, bool>(StringComparer.Ordinal);
+        AmazonBedrockException? failure = null;
+        await Parallel.ForEachAsync(
+            foundations.Select(model => model.ModelId).Distinct(StringComparer.Ordinal),
+            new ParallelOptions { MaxDegreeOfParallelism = AvailabilityConcurrency, CancellationToken = cancellationToken },
+            async (modelId, token) =>
+            {
+                if (Volatile.Read(ref failure) is not null)
+                {
+                    return;
+                }
+
+                try
+                {
+                    GetFoundationModelAvailabilityResponse availability =
+                        await control.Client.GetFoundationModelAvailabilityAsync(
+                            new GetFoundationModelAvailabilityRequest { ModelId = modelId },
+                            token);
+                    control.ThrowIfCanceled();
+                    callable[modelId] = availability.AgreementAvailability?.Status == AgreementStatus.AVAILABLE
+                        && availability.AuthorizationStatus == AuthorizationStatus.AUTHORIZED;
+                }
+                catch (AmazonBedrockException error)
+                {
+                    Interlocked.CompareExchange(ref failure, error, null);
+                }
+            });
+        control.ThrowIfCanceled();
+        if (failure is not null)
+        {
+            _ = Warn(logger, credential, "GetFoundationModelAvailability", failure);
+            return null;
+        }
+
+        return new Dictionary<string, bool>(callable, StringComparer.Ordinal);
+    }
+
+    /// <summary>
+    /// A profile is uncallable when it names at least one model and every named model was checked and is
+    /// not callable. A model that was not checked keeps the profile.
+    /// </summary>
+    private static bool AllModelsUncallable(InferenceProfileSummary profile, Dictionary<string, bool> callable)
+    {
+        List<InferenceProfileModel> models = profile.Models ?? [];
+        return models.Count > 0 && models.All(model =>
+            callable.TryGetValue(ModelIdFromArn(model.ModelArn), out bool available) && !available);
+    }
+
+    private static bool IsProfileOnly(IEnumerable<string>? inferenceTypes)
+    {
+        string[] types = [.. inferenceTypes ?? []];
+        return types.Contains("INFERENCE_PROFILE", StringComparer.Ordinal)
+            && !types.Contains("ON_DEMAND", StringComparer.Ordinal);
+    }
+
+    private static string ModelIdFromArn(string? arn)
+    {
+        string value = arn ?? string.Empty;
+        return value.Contains('/', StringComparison.Ordinal) ? value[(value.LastIndexOf('/') + 1)..] : value;
     }
 
     private static async Task<string?> FindProfileForModelAsync(
@@ -152,11 +241,7 @@ internal sealed class BedrockModelResolver
 
             foreach (InferenceProfileModel model in profile.Models ?? [])
             {
-                string arn = model.ModelArn ?? string.Empty;
-                string modelId = arn.Contains('/', StringComparison.Ordinal)
-                    ? arn[(arn.LastIndexOf('/') + 1)..]
-                    : arn;
-                if (string.Equals(modelId, requestedModelId, StringComparison.Ordinal))
+                if (string.Equals(ModelIdFromArn(model.ModelArn), requestedModelId, StringComparison.Ordinal))
                 {
                     matches.Add(profile.InferenceProfileId);
                     break;

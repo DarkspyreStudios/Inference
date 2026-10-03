@@ -1003,3 +1003,13 @@ input, and the fresh-feed cache lived under `artifacts/deploy/`. Authenticated r
 builds and tests, formatting, vulnerability audits, archive boundaries and local/fresh-feed consumer
 checks passed. Downloaded archives match the verified local archives; feed readback confirms private
 visibility. Source is tagged `v11.14.0-rc.1`. No model weights or paid inference were used as verification gates.
+
+## Bedrock model list shows only callable models (unreleased)
+
+`BedrockModelResolver.ListAsync` checks `GetFoundationModelAvailability` for each foundation model and
+omits a model unless its agreement is `AVAILABLE` and its authorization is `AUTHORIZED`. A model that
+supports only `INFERENCE_PROFILE` is listed through its system inference profiles and never by its bare
+model ID. A profile whose models are all uncallable is omitted. Reason: an authorized model without a
+Marketplace agreement, and a bare profile-only model ID, both appeared in the list and failed every
+turn with `AccessDeniedException` or a validation error. A failed availability request keeps the
+previous listing and logs one warning, so missing IAM permission for the check does not empty the list.
