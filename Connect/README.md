@@ -1539,8 +1539,10 @@ The chat facade applies that selected adapter policy before credential refresh, 
 Private xAI media codecs now map native image generation/edit bodies and typed video
 generation/edit/extension bodies. They retain ordered references, explicit false controls, actual
 submission IDs and one-poll status/model/output observations without requested-model or MIME
-fallbacks. Storage and nullable usage facts use finite owned projections rather than raw response
-DTOs. These codecs alone perform no HTTP, upload, credential acquisition or receipt authorization.
+fallbacks. The image codec copies ordered native `url` or `file_id` objects without inferred IDs or
+metadata. It validates HTTP(S) provider-fetch URL data without fetching content and preserves
+single-image edit `aspect_ratio: null`. Storage and nullable usage facts use finite owned projections
+rather than raw response DTOs. These codecs alone perform no HTTP, upload, credential acquisition or receipt authorization.
 The complete transport/consumer integration and synchronous media usage handoff remain open;
 no xAI Image or Video transport is registered or OAuth-qualified by this checkpoint.
 
