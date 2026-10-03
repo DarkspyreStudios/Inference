@@ -45,12 +45,37 @@ logs, local databases, and secrets are ignored.
 A unit is complete only when its implementation, affected canonical documentation, and verification
 are complete and committed together using whole-file pathspecs.
 
-## L7 — Maintain a deterministic, cost-bounded test suite
+## L7 — Test the behaviour that changed with the smallest test that would catch a likely defect
 
-Paid or metered model calls are not development or commit gates. Normal tests use controlled doubles
-around remote models, filesystems, credential vaults, clocks, and network boundaries. A conditional
-live experiment reports that it was skipped or unavailable when its external service or credential
-is absent; it never silently returns and appears to pass.
+- A change needs a new test only when it alters observable behaviour and no existing test would fail
+  on a plausible defect in it.
+- Write one test per behaviour. Add an edge or empty case only when the code really receives that
+  input, or when a failure was observed there.
+- Use a real collaborator when it is cheap, such as a task-owned scratch directory or the real SQLite
+  store. A cheap stand-in at an expensive seam (native code, another process, the network) is allowed.
+  A mock is allowed when the test proves the logic under it works. A test that only asserts a mock
+  was called is not coverage.
+- A new fixture project or probe needs the owner's approval.
+- A test for the changed area must fit the focused run, under one minute. A test that cannot is a load
+  test and follows the load-test exception.
+- A review finding of "missing test" must name the defect the test would catch.
+
+Paid or metered model calls are not development or commit gates. A conditional live experiment
+reports that it was skipped or unavailable when its external service or credential is absent; it
+never silently returns and appears to pass.
+
+The current unit-test hold in [project.md](./project.md#testing) overrides routine test creation and
+execution until the test-suite replacement is complete. Adopting this law alone does not lift it.
+
+**Check.** Tests added per change, and the time of a focused run.
+
+**Why it is a law.** A test exists to catch a likely defect cheaply. Every test is code someone
+maintains and runs, so a test that catches nothing likely is a cost with no return.
+
+**What it cost.** The source project's previous L7 required edge-case matrices, integration tests for
+every multi-component change and real collaborators without stand-ins. It grew about 2,190 tests,
+104k lines of test code, 15 fixture and probe projects and a 962-line Testing section. That rule
+contradicted the one-minute focused-test limit.
 
 ## L8 — Consult and maintain canonical documents
 
@@ -135,6 +160,71 @@ linked files, or an umbrella assembly to blur ownership.
 No donor project or directory is copied wholesale merely because it compiles. Every extracted area
 is classified by the active technical design as retain, convert, rewrite, or exclude. Donor comments,
 tests, and documents that encode application-specific authority are not current requirements.
+
+## L19 — Complexity carries the burden of proof
+
+Added complexity must name a concrete, likely harm it prevents. Complexity means a new guard, option,
+layer, piece of state, abstraction or fallback. Without a named harm, the simpler option wins. "This
+could happen" is not a likely harm.
+
+This law never trims the L3 security findings, L11 to L15, credential handling or the sandbox.
+
+**Why it is a law.** Agents add just-in-case code because they can. Every piece is code someone reads,
+tests and keeps.
+
+**What it cost.** Hardening nobody asked for, and the test suite the source project's old L7 grew.
+
+**Check.** Diff size and new options or guards per change, compared with what was asked.
+
+## L20 — Only real requirements bind
+
+A requirement is an explicit ask for this piece of work, a law or recorded rule, or an observed
+failure. Everything else must be offered as a proposal and not built. That includes a preference, an
+earlier general remark such as "keep it safe", and nice-to-have hardening.
+
+**Why it is a law.** Old remarks harden into permanent requirements, and higher effort levels spiral
+into security work nobody asked for.
+
+**What it cost.** The same hardening and test growth as L19, justified by remarks that were never
+requirements.
+
+**Check.** Diff size and new options or guards per change, compared with what was asked.
+
+## L21 — Review findings name the harm and the smallest fix
+
+Every review finding must name the concrete harm it prevents and the smallest change that fixes it. A
+finding that names neither is taste, and it is dropped. A review asks for nothing beyond the change
+under review, except a real defect the change exposes.
+
+**Why it is a law.** Reviewers that try to please create work from taste.
+
+**What it cost.** Review rounds spent on preference findings.
+
+**Check.** The share of review findings that name a harm.
+
+## L22 — Count the ongoing cost
+
+A design or change must weigh maintenance, operational load and the reading cost for future
+developers, not only the cost of building it. When two options both meet the requirements, the one
+that is cheaper to keep wins.
+
+**Why it is a law.** Build cost is paid once. Keep cost is paid on every later change.
+
+**What it cost.** The source project's 104k lines of tests and 962-line testing section required
+maintenance on every later change.
+
+**Check.** Lines added against lines removed per change.
+
+## L23 — A law must change behaviour
+
+A new or changed law must state how its effect is checked. After it lands, it is checked against real
+agent work: a rerun task, a review, or git history. A law that changes nothing is deleted.
+
+**Why it is a law.** A sentence in a long rule file does nothing by being written down.
+
+**What it cost.** Testing limits with no check lost to the source project's stronger L7 for weeks.
+
+**Check.** Whether each law states a check.
 
 ## M-a — Provider model
 
