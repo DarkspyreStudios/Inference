@@ -25,15 +25,23 @@ public static class XaiErrorClassifier
         CancellationToken cancellationToken,
         bool diagnosticBody = true) =>
         ThrowIfUnsuccessfulCoreAsync(response, credential, additionalSecrets,
-            diagnosticBody, "Provider rejected the Files request.", cancellationToken);
+            diagnosticBody, "Provider rejected the Files request.", null, null, cancellationToken);
 
     internal static Task ThrowIfUnsuccessfulSpeechAsync(HttpResponseMessage response, LlmCredential? credential,
         CancellationToken cancellationToken) =>
         ThrowIfUnsuccessfulCoreAsync(response, credential, [],
-            false, "Provider rejected the speech request.", cancellationToken);
+            false, "Provider rejected the speech request.", null, null, cancellationToken);
+
+    internal static Task ThrowIfUnsuccessfulEmbeddingAsync(HttpResponseMessage response, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(response);
+        return ThrowIfUnsuccessfulCoreAsync(response, null, [], false, "Provider rejected the embedding request.",
+            ProviderHttp.ReadRequestId(response), response.Headers.RetryAfter?.Delta, cancellationToken);
+    }
 
     private static async Task ThrowIfUnsuccessfulCoreAsync(HttpResponseMessage response, LlmCredential? credential,
-        IEnumerable<string> additionalSecrets, bool diagnosticBody, string diagnosticMessage, CancellationToken cancellationToken)
+        IEnumerable<string> additionalSecrets, bool diagnosticBody, string diagnosticMessage,
+        string? requestId, TimeSpan? retryAfter, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(response);
         cancellationToken.ThrowIfCancellationRequested();
@@ -44,7 +52,7 @@ public static class XaiErrorClassifier
         string safe = diagnosticBody ? SecretRedactor.Sanitize(body, credential, additionalSecrets)
             : diagnosticMessage;
         (string? code, string? message) = ReadError(body);
-        throw Classify(response.StatusCode, code, message, safe);
+        throw Classify(response.StatusCode, code, message, safe, requestId: requestId, retryAfter: retryAfter);
     }
 
     internal static Exception SpeechUpgradeFailure(HttpStatusCode status, Exception original)
@@ -57,7 +65,7 @@ public static class XaiErrorClassifier
     }
 
     private static Exception Classify(HttpStatusCode status, string? code, string? message, string safe,
-        Exception? evidence = null)
+        Exception? evidence = null, string? requestId = null, TimeSpan? retryAfter = null)
     {
         bool requiresSignIn = status == HttpStatusCode.Unauthorized
             || (status == HttpStatusCode.Forbidden
@@ -67,26 +75,28 @@ public static class XaiErrorClassifier
         {
             return new InferenceException(InferenceFailureCode.AuthenticationRequired,
                 "Grok authorization is no longer valid; sign in again.",
-                Failure(status, "xai_authentication_required", safe, evidence));
+                Failure(status, "xai_authentication_required", safe, evidence, requestId, retryAfter));
         }
 
         if (status == HttpStatusCode.PaymentRequired)
         {
-            return EntitlementFailure(status, safe, evidence);
+            return EntitlementFailure(status, safe, evidence, requestId, retryAfter);
         }
 
         // Subscription-specific 403 matching requires a qualified provider response.
-        return Failure(status, null, safe, evidence);
+        return Failure(status, null, safe, evidence, requestId, retryAfter);
     }
 
-    internal static InferenceException EntitlementFailure(HttpStatusCode status, string safe, Exception? evidence = null) =>
+    internal static InferenceException EntitlementFailure(HttpStatusCode status, string safe, Exception? evidence = null,
+        string? requestId = null, TimeSpan? retryAfter = null) =>
         new(InferenceFailureCode.AccessDenied,
             $"Grok requires an eligible subscription or available credits: {safe}",
-            Failure(status, "xai_entitlement_required", safe, evidence));
+            Failure(status, "xai_entitlement_required", safe, evidence, requestId, retryAfter));
 
-    private static LlmProviderException Failure(HttpStatusCode status, string? code, string safe, Exception? evidence = null) =>
+    private static LlmProviderException Failure(HttpStatusCode status, string? code, string safe, Exception? evidence = null,
+        string? requestId = null, TimeSpan? retryAfter = null) =>
         new($"Grok request failed ({(int)status}): {safe}", LlmTransport.XaiResponses,
-            status, code, sanitizedResponseBody: safe, innerException: evidence);
+            status, code, requestId, retryAfter, sanitizedResponseBody: safe, innerException: evidence);
 
     private sealed class SpeechTransportEvidence(Exception original) : Exception("The speech transport reported an opening failure.")
     {

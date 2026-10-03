@@ -909,6 +909,22 @@ and headers before refresh. OpenAI-compatible responses require one unique in-ra
 finite nonempty vectors and the requested dimensions. The three embedding data types expose owned
 metadata through their exact type-name getters on `ConnectLlmJson`.
 
+The internal xAI embedding adapter implements ordered text inputs, float vectors and typed dimensions.
+It accepts at most 128 non-empty inputs and preserves supplied `user` and boolean/null `preview`
+options, including explicit nulls. Its direct path consumes the supplied OAuth connection and the
+stateless embedding catalog reader; it does not refresh credentials or own another model cache.
+It refuses non-default typed service tiers and raw `service_tier` options before HTTP because it
+does not implement an embedding tier mapping. Raw `encoding_format` accepts only `float`.
+Responses require complete unique input indexes, finite consistent vectors, actual model provenance
+and nonnegative observed usage. Successful diagnostics serialize only validated model and numeric
+facts. A model string containing a known credential or protected header value causes a local
+confidentiality refusal after the response; it is not provider rejection or remote rollback proof.
+Input text is not a secret-replacement authority, and numeric JSON is not text-redacted.
+HTTP request/response cleanup preserves independent failures and
+retains actual refused owners behind safe diagnostics. The adapter is not registered. Subscription
+OAuth, model entitlement, preview format and the published input-schema/example disagreement remain
+unqualified; no default embedding model or working xAI availability is advertised.
+
 Retirement fences new requests, cancels
 connection lookup and provider calls, and awaits all active requests before releasing its adapter references. Supplied adapters and the
 connection source remain borrowed and are not disposed by the facade. Caller cancellation affects
