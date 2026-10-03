@@ -428,6 +428,8 @@ LlmInferenceResult result = await llm.CompleteAsync(new LlmInferenceRequest
 Image workflows expose the same boundary through `ImageProviderService.Bind(connection, workflow)`.
 Binding is explicit and retains exactly one backend. Neither adapter retries through a different
 provider nor falls back from Connect to Tensor.
+The returned `IImageInference` exposes asynchronous disposal directly. Callers own its retirement;
+the bound instance still borrows its collaborators and does not dispose them.
 
 `LlmChatResult.ModelId` and `ModelRevision` carry actual adapter observations. Both are nullable.
 The portable result preserves them in Common provenance; it does not substitute the requested
@@ -1482,7 +1484,8 @@ actual nullable MIME, duration and expiry instead of inferring them from request
 Returned download streams hold their operation lease until closure. Facade disposal closes
 owned downloads, fences new operations and drains admitted work before detaching borrowed
 transports, bindings and resource access. Callers can dispose the bound facade through
-`IDisposable` or `IAsyncDisposable`. Returned-stream operations check the synchronous owner
+`IDisposable` or directly through `IVideoInference.DisposeAsync`. Returned-stream operations check
+the synchronous owner
 fence before effects and before returning, even when linked cancellation propagation is delayed.
 Cancellation during successful materialization cleanup retains the observed committed reference,
 session-selection outcome and revision in `InferenceResourceOperationCanceledException`.
@@ -1491,6 +1494,8 @@ Owned download and writer cleanup each runs once, including independent refusals
 use the typed Cleanup phase and retain the actual unsafe owner. Bound retirement preserves those
 failures even when a returned stream is disposed before the facade. Repeated disposal shares the
 same outcome after drain and borrowed detachment; ordinary operations do not poison retirement.
+`VideoJobSnapshot.ModelId` preserves an actual nullable provider model observation through the
+existing Video and nested batch metadata. No requested model or job scope supplies a fallback.
 
 `XaiVideoOptions` is the fixed Video-owned subtype for Files-owned storage controls, signed
 upload destinations and explicit user data. Common metadata refuses these provider options;

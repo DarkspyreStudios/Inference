@@ -47,7 +47,9 @@ LlmInferenceResult result = await inference.CompleteAsync(new LlmInferenceReques
 ```
 
 The same `ILlmInference` and `IImageInference` contracts are implemented by the corresponding Tensor
-packages. `IDecisionInference` adds a typed decision lane with distinct choice, ordinal-score, and
+packages. Callers retire owned image instances through `IImageInference.DisposeAsync`; borrowing
+an existing instance does not transfer its ownership. `IDecisionInference` adds a typed decision lane
+with distinct choice, ordinal-score, and
 boolean question and answer records; its polymorphic JSON discriminators can be projected by a host
 service without falling back to untyped dictionaries. An implementation that can also measure a
 request without deciding it implements `IDecisionInputMeasurement`: `MeasureAsync` returns the
@@ -84,8 +86,11 @@ do not authorize native conversation reuse, reconnect, replay, tool execution or
 
 `Darkspyre.Inference.Common.Video` declares generation, edit and extension requests, typed
 keyframe/audio references, scoped native job/output receipts and capability observations.
-`IVideoInference` declares capability lookup, submit, one-poll lookup, caller-owned download streams
-and caller-resource materialization. These are inert contracts; Common provides no Video adapter.
+`IVideoInference` declares capability lookup, submit, one-poll lookup, caller-owned download streams,
+caller-resource materialization and asynchronous retirement. These are inert contracts; Common
+provides no Video adapter.
+`VideoJobSnapshot.ModelId` is the actual optional provider observation, not the requested model;
+an unavailable observation remains null. Its positional constructor and native job identity are unchanged.
 `VideoGeneration = 6` maps to `InferenceCapability.Video = 4`; earlier numeric identities are unchanged.
 
 Every Video data root has an exact type-name getter on `InferenceJson`. Request discriminators are

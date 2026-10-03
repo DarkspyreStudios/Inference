@@ -384,11 +384,11 @@ public sealed class ImageSettingsManager : InferenceSettingsManager<ImageSetting
             cancellationToken: token).ConfigureAwait(false); }
         catch (Exception original)
         {
-            try { await ((IAsyncDisposable)inference).DisposeAsync().ConfigureAwait(false); }
+            try { await inference.DisposeAsync().ConfigureAwait(false); }
             catch (Exception cleanup) { throw new AggregateException(original, cleanup); }
             throw;
         }
-        await ((IAsyncDisposable)inference).DisposeAsync().ConfigureAwait(false);
+        await inference.DisposeAsync().ConfigureAwait(false);
         Fence(token);
         if (settings.Generation != generation) return new(SetupActionState.Cancelled);
         bool ready = result.Images.Count > 0 && result.Images.All(image => !image.Data.IsEmpty);

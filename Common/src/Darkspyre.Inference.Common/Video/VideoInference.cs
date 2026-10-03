@@ -115,6 +115,8 @@ public sealed record VideoJobSnapshot(VideoJob Job, VideoJobState State,
     [JsonRequired] public VideoJob Job { get; init => field = VideoData.Required(value); } = VideoData.Required(Job);
     [JsonRequired] public VideoJobState State { get; init => field = VideoData.Defined(value); } = VideoData.Defined(State);
     public double? ProgressPercent { get; init => field = VideoData.Finite(value); } = VideoData.Finite(ProgressPercent);
+    /// <summary>The actual model reported by the provider; null when unknown.</summary>
+    public string? ModelId { get; init; }
     public override string ToString() => "VideoJobSnapshot { <observation> }";
 }
 
@@ -138,7 +140,7 @@ public sealed record VideoCapabilities
 }
 
 /// <summary>Explicit native video operations and caller-resource materialization.</summary>
-public interface IVideoInference
+public interface IVideoInference : IAsyncDisposable
 {
     Task<VideoCapabilities> GetCapabilitiesAsync(string? modelId = null, CancellationToken cancellationToken = default);
     Task<VideoJob> SubmitAsync(VideoRequest request, CancellationToken cancellationToken = default);
