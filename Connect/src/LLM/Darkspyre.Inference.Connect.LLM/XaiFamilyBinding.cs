@@ -14,14 +14,14 @@ public sealed class XaiFamilyBinding
     private readonly LlmConnection? _snapshot;
 
     public XaiFamilyBinding(XaiConnectionSelection selection, LlmConnectionAccess access,
-        LlmProviderService? service = null)
+        LlmProviderService? providerService = null)
     {
         ArgumentNullException.ThrowIfNull(selection);
         ArgumentException.ThrowIfNullOrWhiteSpace(selection.ConnectionId);
         Selection = selection;
         _access = access ?? throw new ArgumentNullException(nameof(access));
-        service?.ValidateXaiAccess(access);
-        _service = service;
+        providerService?.ValidateXaiAccess(access);
+        _service = providerService;
         Authorization = new BindingAuthorization(this);
     }
 

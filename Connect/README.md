@@ -550,7 +550,10 @@ Resources use one incremental handle per utterance and commit bytes plus selecte
 completion publication. Chunks remain transient; clear discards uncommitted staging. The handed-off
 session is independently caller-owned and survives client retirement. Client and session retirement
 fence, cancel, drain and detach borrowed references; genuine refused cleanup owners and failures remain
-retained without retry. No automatic reconnect/replay occurs. OAuth endpoint acceptance and real
+retained without retry. The convenience iterator owns its temporary session and input enumerator;
+client retirement closes that session and drains input even while the public iterator is paused.
+The wrapper uses the same bounded event feed. It never disposes the borrowed input enumerable.
+No automatic reconnect/replay occurs. OAuth endpoint acceptance and real
 voice/latency qualification remain open: the guide's latency value 2 is passed through unchanged despite
 the standalone schema's narrower 0/1 declaration. Controlled tests do not qualify live provider access.
 Failed BCL WebSocket upgrades use only collected actual HTTP status: 401/402 retain the shared

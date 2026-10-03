@@ -26,6 +26,7 @@ public sealed class XaiTtsProvider : ITtsProvider
     public ITtsClient Bind(TtsConnection connection, XaiFamilyBinding? xai = null, IInferenceResourceAccess? resources = null)
     {
         ArgumentNullException.ThrowIfNull(connection); TtsProviderService.ValidateBinding(connection, xai);
+        if (connection.Transport != Transport) throw new ArgumentException("The speech connection must select xAI TTS.", nameof(connection));
         return new Client(this, connection, xai!, resources);
     }
     private async Task<WebSocket> ConnectAsync(Uri uri, HttpRequestMessage headers, Action<Exception> recordCleanup, CancellationToken token)
@@ -165,10 +166,15 @@ public sealed class XaiTtsProvider : ITtsProvider
         }
         public async Task<ITtsStreamingSession> OpenStreamAsync(TtsStreamOptions options, InferenceStreamLimits limits, CancellationToken cancellationToken = default)
         {
-            using var lease = _lifetime.Enter(cancellationToken); ArgumentNullException.ThrowIfNull(limits);
+            using var lease = _lifetime.Enter(cancellationToken);
+            return await OpenStreamCoreAsync(options, limits, lease.Token).ConfigureAwait(false);
+        }
+        private async Task<ITtsStreamingSession> OpenStreamCoreAsync(TtsStreamOptions options, InferenceStreamLimits limits, CancellationToken token)
+        {
+            ArgumentNullException.ThrowIfNull(limits);
             if (limits.MaximumBufferedEvents <= 0 || limits.MaximumBufferedPayloadBytes <= 0 || limits.MaximumMessageBytes <= 0) throw XaiTtsProtocol.Invalid();
             var admitted = XaiTtsProtocol.Snapshot(_connection!, options);
-            using var consumption = SdkHttpConsumption.Enter(_provider!._http, lease.Token);
+            using var consumption = SdkHttpConsumption.Enter(_provider!._http, token);
             LlmConnection snapshot = await AcquireAsync(consumption.Token).ConfigureAwait(false);
             var session = await XaiTtsSession.OpenAsync(_provider!._connect, snapshot, _connection!, admitted, limits, _resources, () => { Fence(consumption.Token); consumption.Fence(); }, RecordCleanup, consumption.Token).ConfigureAwait(false);
             try { Fence(consumption.Token); return consumption.Publish<ITtsStreamingSession>(session); }
@@ -188,9 +194,16 @@ public sealed class XaiTtsProvider : ITtsProvider
             [EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
             ArgumentNullException.ThrowIfNull(text);
-            ITtsStreamingSession session = await OpenStreamAsync(options, limits, cancellationToken).ConfigureAwait(false);
-            using var stop = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            LlmOperationLifetime.Lease lease = _lifetime.Enter(cancellationToken);
+            ITtsStreamingSession session;
+            try { session = await OpenStreamCoreAsync(options, limits, lease.Token).ConfigureAwait(false); }
+            catch { lease.Dispose(); throw; }
+            CancellationToken token = lease.Token;
+            var stop = CancellationTokenSource.CreateLinkedTokenSource(token);
+            var finished = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            CancellationTokenRegistration signal = stop.Token.Register(() => finished.TrySetResult());
             Task sender = SendInputAsync();
+            Task<Exception?> completion = CompleteAsync();
             IAsyncEnumerator<TtsStreamEvent> reader = session.Events.GetAsyncEnumerator(cancellationToken);
             Exception? original = null;
             try
@@ -198,10 +211,14 @@ public sealed class XaiTtsProvider : ITtsProvider
                 while (await MoveNextAsync().ConfigureAwait(false))
                 {
                     TtsStreamEvent observation = reader.Current;
+                    PublicationFence();
                     yield return observation;
-                    if (observation is TtsUtteranceCompleted) { await AwaitSenderAsync().ConfigureAwait(false); break; }
+                    if (observation is TtsUtteranceCompleted) break;
                 }
-                await AwaitSenderAsync().ConfigureAwait(false);
+                finished.TrySetResult();
+                Exception? failure = await completion.ConfigureAwait(false);
+                if (failure is not null) { original = failure; ExceptionDispatchInfo.Capture(failure).Throw(); }
+                PublicationFence();
             }
             finally
             {
@@ -209,17 +226,13 @@ public sealed class XaiTtsProvider : ITtsProvider
             }
             async Task DrainAsync()
             {
-                Task cancel = stop.CancelAsync(); Task retirement = session.DisposeAsync().AsTask();
+                finished.TrySetResult();
                 var failures = new List<Exception>();
                 if (original is not null) failures.Add(original);
-                await CaptureAsync(cancel).ConfigureAwait(false); await CaptureAsync(retirement).ConfigureAwait(false);
-                try { await sender.ConfigureAwait(false); }
-                catch (OperationCanceledException) when (stop.IsCancellationRequested) { }
-                catch (Exception error) { Add(error); }
+                if (await completion.ConfigureAwait(false) is { } completedFailure) Add(completedFailure);
                 try { await reader.DisposeAsync().ConfigureAwait(false); } catch (Exception error) { Add(error); }
                 if (failures.Count > 1) throw new AggregateException(failures);
                 if (failures.Count == 1 && !ReferenceEquals(failures[0], original)) ExceptionDispatchInfo.Capture(failures[0]).Throw();
-                async Task CaptureAsync(Task task) { try { await task.ConfigureAwait(false); } catch (Exception error) { Add(error); } }
                 void Add(Exception error) { if (!failures.Contains(error)) failures.Add(error); }
             }
             async Task<bool> MoveNextAsync()
@@ -227,24 +240,63 @@ public sealed class XaiTtsProvider : ITtsProvider
                 try { return await reader.MoveNextAsync().ConfigureAwait(false); }
                 catch (Exception error) { original = error; throw; }
             }
-            async Task AwaitSenderAsync()
+            void PublicationFence()
             {
-                try { await sender.ConfigureAwait(false); }
+                try { Fence(token); }
                 catch (Exception error) { original = error; throw; }
+            }
+            async Task<Exception?> CompleteAsync()
+            {
+                await finished.Task.ConfigureAwait(false);
+                try
+                {
+                    Task cancel = stop.CancelAsync(); Task retirement = session.DisposeAsync().AsTask();
+                    Exception? cancelFailure = await CaptureAsync(cancel).ConfigureAwait(false);
+                    Exception? sessionFailure = await CaptureAsync(retirement).ConfigureAwait(false);
+                    var failures = new List<Exception>();
+                    try { await sender.ConfigureAwait(false); }
+                    catch (OperationCanceledException error) when (stop.IsCancellationRequested && !LlmResourcePreparation.IsCleanupFailure(error)) { }
+                    catch (Exception error) { failures.Add(error); }
+                    if (cancelFailure is not null) failures.Add(cancelFailure);
+                    if (sessionFailure is not null && !failures.Contains(sessionFailure)) failures.Add(sessionFailure);
+                    return failures.Count switch { 0 => null, 1 => failures[0], _ => new AggregateException(failures) };
+                }
+                finally { text = null!; signal.Dispose(); stop.Dispose(); lease.Dispose(); }
+                async Task<Exception?> CaptureAsync(Task task)
+                {
+                    try { await task.ConfigureAwait(false); return null; }
+                    catch (Exception error) { RecordCleanup(error); return error; }
+                }
             }
             async Task SendInputAsync()
             {
+                IAsyncEnumerator<string>? input = null; Exception? failure = null;
                 try
                 {
-                    await foreach (string chunk in text.WithCancellation(stop.Token).ConfigureAwait(false)) await session.AppendTextAsync(chunk, stop.Token).ConfigureAwait(false);
+                    input = text.GetAsyncEnumerator(stop.Token);
+                    Fence(token);
+                    while (await input.MoveNextAsync().ConfigureAwait(false))
+                    {
+                        Fence(token); string chunk = input.Current; Fence(token);
+                        await session.AppendTextAsync(chunk, stop.Token).ConfigureAwait(false); Fence(token);
+                    }
+                    Fence(token);
                     await session.CompleteUtteranceAsync(stop.Token).ConfigureAwait(false);
+                    Fence(token);
                 }
-                catch (Exception error)
+                catch (Exception error) { failure = error; }
+                if (input is not null)
                 {
-                    try { await session.DisposeAsync().ConfigureAwait(false); }
-                    catch (Exception cleanup) { throw new AggregateException(error, cleanup); }
-                    throw;
+                    try { await input.DisposeAsync().ConfigureAwait(false); }
+                    catch (Exception error)
+                    {
+                        Exception cleanup = LlmResourcePreparation.AsCleanupFailure(error, refusedOwner: input); RecordCleanup(cleanup);
+                        failure = failure is null ? cleanup : new AggregateException(failure, cleanup);
+                    }
+                    input = null;
                 }
+                if (failure is null) return;
+                finished.TrySetResult(); ExceptionDispatchInfo.Capture(failure).Throw();
             }
         }
         private void Fence(CancellationToken token) { token.ThrowIfCancellationRequested(); try { _lifetime.ThrowIfStopping(); } catch (ObjectDisposedException) { throw new OperationCanceledException(token); } }

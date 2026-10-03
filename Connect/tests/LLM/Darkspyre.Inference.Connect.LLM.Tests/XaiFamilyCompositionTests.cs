@@ -26,6 +26,7 @@ public sealed class XaiFamilyCompositionTests
         using var first = new LlmConnectionAccess(source, []);
         using var second = new LlmConnectionAccess(source, []);
         using var facade = new LlmProviderService(source, [], [], connectionAccess: first);
+        Assert.Equal("selected", new XaiFamilyBinding(new("selected"), first, providerService: facade).Selection.ConnectionId);
         var error = Assert.Throws<TargetInvocationException>(() => constructor.Invoke([new XaiConnectionSelection("selected"), second, facade]));
         Assert.IsType<ArgumentException>(error.InnerException);
         Assert.IsType<XaiFamilyBinding>(constructor.Invoke([new XaiConnectionSelection("selected"), first, facade]));
