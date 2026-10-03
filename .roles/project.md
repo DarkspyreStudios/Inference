@@ -167,13 +167,34 @@ project discovered by the subset solution.
 |---|---|
 | Restore | `dotnet restore Darkspyre.Inference.Connect.slnx` |
 | Build | `dotnet build Darkspyre.Inference.Connect.slnx --no-restore` |
-| Test | `dotnet test Darkspyre.Inference.Connect.slnx --no-build --no-restore` |
+| Focused test | `dotnet test <owning-test-project.csproj> --no-restore --filter <changed-behaviour>` |
 | Format | `dotnet format Darkspyre.Inference.Connect.slnx --verify-no-changes --no-restore` |
 | Pack | `dotnet pack Darkspyre.Inference.Connect.slnx --no-build --no-restore` |
 | Dependency audit | `dotnet list Darkspyre.Inference.Connect.slnx package --vulnerable --include-transitive` |
 
 The Pack command is reserved for the explicitly authorized publish phase. Do not run it during the
 ongoing refactor or create package artifacts merely as a routine verification step.
+
+## Testing
+
+[L7](./laws.md#l7--test-the-behaviour-that-changed-with-the-smallest-test-that-would-catch-a-likely-defect)
+defines when a change needs a test. Unit-test creation and execution remain on hold until the
+test-suite replacement is complete. Adopting the revised L7 alone does not lift the hold. The
+replacement suite covers actual bugs found by the old tests and the requirements of L7. Test-suite
+replacement is separately scoped work; this rule does not authorize deleting or rebuilding tests.
+
+After the hold lifts, run the owning test project explicitly, filtered to the changed behaviour.
+The focused run takes under one minute. Use `--no-build` only when that test project already has a
+current build. Read the run's failures without rerunning merely to obtain the same output.
+
+The full suite runs only on the epic branch immediately before the owner confirms its merge to
+`master`. Finishing a subtask, committing, pushing, merging a task into the epic and ending a session
+do not authorize a full-suite run. A load-testing ticket may run the long tests its agreed design
+requires. A new fixture project or probe requires the owner's approval under L7.
+
+Production builds, source-format checks and static package-input audits prove only their stated
+properties. They do not establish provider, native-runtime or ownership behaviour. Record an
+unexecuted qualification as unverified; do not substitute compilation for it.
 
 Several capability-scoped packages were initially published at `10.0.0` and remain immutable
 historical artifacts. The first release of the three-package product surface uses `10.1.0`; those
