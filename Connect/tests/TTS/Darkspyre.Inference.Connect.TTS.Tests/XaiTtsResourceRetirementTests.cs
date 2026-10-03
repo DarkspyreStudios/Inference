@@ -90,6 +90,46 @@ public sealed class XaiTtsResourceRetirementTests
         static async IAsyncEnumerable<string> Input() { yield return "actual"; await Task.CompletedTask; }
     }
 
+    [Fact]
+    public async Task ActiveResourceFailureAndIndependentCleanupCausesAppearOnce()
+    {
+        using var access = new LlmConnectionAccess(new XaiTtsTests.Source(), []);
+        using var http = new HttpClient(new XaiTtsTests.Handler(_ => throw new InvalidOperationException()));
+        var commit = new InferenceResourceOperationException(Darkspyre.Inference.Common.InferenceFailureCode.ExecutionFailed, "actual commit refusal",
+            new(InferenceResourceOperationPhase.Commit, new("workspace", "audio"), InferenceResourceCommitOutcome.Unknown, 1) { SelectionOutcome = InferenceResourceCommitOutcome.Unknown });
+        var handleCleanup = new InvalidOperationException("actual handle cleanup refusal");
+        var socketCleanup = new InvalidOperationException("actual socket cleanup refusal");
+        var resources = new VoiceResourceFixture { CommitFailure = commit, CleanupFailure = handleCleanup };
+        var socket = new XaiTtsStreamingTests.Socket { CleanupFailure = socketCleanup };
+        socket.OnSend = value =>
+        {
+            if (!value.Contains("text.done", StringComparison.Ordinal)) return;
+            socket.Push("{\"type\":\"audio.delta\",\"delta\":\"AQ==\"}"); socket.Push("{\"type\":\"audio.done\"}");
+        };
+        ITtsClient client = XaiTtsStreamingTests.Provider(http, (_, _, _) => Task.FromResult<WebSocket>(socket)).Bind(XaiTtsTests.Connection, new(new("selected"), access), resources);
+        var events = Assert.IsAssignableFrom<ITtsStreamingClient>(client).SpeakStreamAsync(Input(), new(Language: "en"), Limits).GetAsyncEnumerator();
+        try
+        {
+            Assert.True(await events.MoveNextAsync().AsTask().WaitAsync(Bound)); Assert.IsType<TtsAudioChunk>(events.Current);
+            Exception? error = await Record.ExceptionAsync(() => events.MoveNextAsync().AsTask().WaitAsync(Bound));
+            Assert.NotNull(error);
+            Assert.Equal(1, Count(error, commit)); Assert.Equal(1, Count(error, handleCleanup)); Assert.Equal(1, Count(error, socketCleanup));
+            var aggregate = Assert.IsType<AggregateException>(error); Assert.Equal(2, aggregate.InnerExceptions.Count);
+            var original = Assert.IsType<AggregateException>(aggregate.InnerExceptions[0]); Assert.Same(commit, original.InnerExceptions[0]);
+            Assert.Same(error, await Record.ExceptionAsync(() => client.DisposeAsync().AsTask()));
+            Assert.Equal(1, resources.CommitCalls); Assert.Equal(1, resources.HandleDisposals); Assert.Equal(1, socket.Disposals); Assert.Equal(0, resources.BorrowedDisposals);
+        }
+        finally
+        {
+            try { _ = await Record.ExceptionAsync(() => events.DisposeAsync().AsTask()); }
+            finally { _ = await Record.ExceptionAsync(() => client.DisposeAsync().AsTask()); }
+        }
+        static async IAsyncEnumerable<string> Input() { yield return "actual"; await Task.CompletedTask; }
+        static int Count(Exception tree, Exception target) => (ReferenceEquals(tree, target) ? 1 : 0)
+            + (tree is AggregateException aggregate ? aggregate.InnerExceptions.Sum(error => Count(error, target))
+                : tree.InnerException is { } inner ? Count(inner, target) : 0);
+    }
+
     private sealed class HeldResources(bool losesAcknowledgment, Exception? cleanup) : IInferenceResourceAccess
     {
         internal VoiceResourceFixture Inner { get; } = new() { CleanupFailure = cleanup };

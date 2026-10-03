@@ -155,6 +155,33 @@ public sealed class XaiTtsConvenienceLifetimeTests
         }
     }
 
+    [Fact]
+    public async Task BorrowedInputResourceCancellationKeepsFactsWithoutPoisoningClient()
+    {
+        using var access = new LlmConnectionAccess(new XaiTtsTests.Source(), []);
+        using var http = new HttpClient(new XaiTtsTests.Handler(_ => throw new InvalidOperationException()));
+        var token = new CancellationToken(true);
+        var original = new InferenceResourceOperationCanceledException(
+            new(InferenceResourceOperationPhase.Read, new("workspace", "input"), InferenceResourceCommitOutcome.Unknown, 3), token);
+        var input = new FailingInput(original, null);
+        var socket = new XaiTtsStreamingTests.Socket();
+        ITtsClient client = XaiTtsStreamingTests.Provider(http, (_, _, _) => Task.FromResult<WebSocket>(socket)).Bind(XaiTtsTests.Connection, new(new("selected"), access));
+        var events = Assert.IsAssignableFrom<ITtsStreamingClient>(client).SpeakStreamAsync(input, new(Language: "en"), Limits).GetAsyncEnumerator();
+        try
+        {
+            var error = Assert.IsType<InferenceResourceOperationCanceledException>(await Record.ExceptionAsync(() => events.MoveNextAsync().AsTask().WaitAsync(Bound)));
+            Assert.Same(original, error); Assert.Equal(token, error.CancellationToken);
+            Assert.Equal(InferenceResourceOperationPhase.Read, error.Failure.Phase); Assert.Equal(3, error.Failure.BytesTransferred);
+            await client.DisposeAsync(); await client.DisposeAsync();
+            Assert.Equal(1, input.Reader!.Disposals); Assert.Equal(0, input.BorrowedDisposals); Assert.Equal(1, socket.Disposals);
+        }
+        finally
+        {
+            try { _ = await Record.ExceptionAsync(() => events.DisposeAsync().AsTask().WaitAsync(Bound)); }
+            finally { _ = await Record.ExceptionAsync(() => client.DisposeAsync().AsTask().WaitAsync(Bound)); }
+        }
+    }
+
     private sealed class FailingInput(Exception? operation, Exception? cleanup) : IAsyncEnumerable<string>, IDisposable
     {
         internal Enumerator? Reader;
