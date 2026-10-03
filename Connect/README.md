@@ -731,6 +731,9 @@ embedding family listings. Replacement fences each subsequent route and publicat
 IDs take precedence; ambiguous aliases do not enrich facts or choose a profile. Missing fields remain
 unknown, and manual model selection does not imply entitlement. This internal family catalog does not
 register or enable unfinished media adapters. Voice listing remains an uncached TTS projection.
+The optional same-access LLM facade on `XaiFamilyBinding` now supplies this internal cached family
+path using its explicit selection ID and already acquired snapshot. It does not resolve or refresh
+again, and its caller fence belongs only to the waiter, never to shared catalog production.
 Publication copies the ordered list, catalog JSON and mutable capability sets. Adapter-owned lists,
 sets and JSON documents do not remain authoritative after publication. Every caller reads the same
 read-only snapshot until replacement.
@@ -760,6 +763,9 @@ the originating facade's fence. An injected cache can finish and publish after t
 Cache retirement drains producers and clears executable client references; borrowed clients and HTTP
 clients are never disposed. Refused owned catalog request/response cleanup retains its safe failure
 and actual owner, and repeated cache retirement reports the same failure without retrying cleanup.
+The exact cleanup cause is retained as private evidence without exposing its untrusted text through
+the public exception graph; canceled cleanup retains its actual cancellation token. Applied request
+header values join credential redaction for catalog error and malformed-body diagnostics.
 
 A disposed default-context facade or authorization object can remain retained without keeping a
 separately collectible source or adapter generation alive through those released references.

@@ -33,10 +33,11 @@ internal static class XaiCatalog
             Fence();
             request = new(HttpMethod.Get, ProviderHttp.BuildUri(connection, path));
             XaiRequestHeaders.Apply(request, connection, false);
+            string[] appliedHeaderValues = request.Headers.SelectMany(header => header.Value).ToArray();
             Fence();
             response = await http.SendAsync(request, consumption.Token).ConfigureAwait(false);
             Fence();
-            await XaiErrorClassifier.ThrowIfUnsuccessfulAsync(response, LlmCredential.Parse(connection.Credential), [], consumption.Token).ConfigureAwait(false);
+            await XaiErrorClassifier.ThrowIfUnsuccessfulAsync(response, LlmCredential.Parse(connection.Credential), appliedHeaderValues, consumption.Token).ConfigureAwait(false);
             Fence();
             string body = await SdkHttpConsumption.ReadAsStringAsync(response.Content, consumption.Token).ConfigureAwait(false);
             Fence();
@@ -51,7 +52,7 @@ internal static class XaiCatalog
             catch (JsonException) { }
             if (result is null) throw new LlmProviderException("Grok model discovery returned an invalid catalog.",
                 LlmTransport.XaiResponses, response.StatusCode, requestId: ProviderHttp.ReadRequestId(response),
-                sanitizedResponseBody: SecretRedactor.Sanitize(body, LlmCredential.Parse(connection.Credential)));
+                sanitizedResponseBody: SecretRedactor.Sanitize(body, LlmCredential.Parse(connection.Credential), appliedHeaderValues));
             Fence();
         }
         catch (Exception error) { failures.Add(error); }
@@ -59,23 +60,30 @@ internal static class XaiCatalog
         {
             if (response is not null)
                 try { response.Dispose(); }
-                catch (Exception)
-                {
-                    failures.Add(LlmResourcePreparation.AsCleanupFailure(new LlmProviderException(
-                        "Grok catalog response cleanup failed.", LlmTransport.XaiResponses), refusedOwner: response));
-                }
+                catch (Exception error) { failures.Add(CleanupFailure(error, response)); }
             if (request is not null)
                 try { request.Dispose(); }
-                catch (Exception)
-                {
-                    failures.Add(LlmResourcePreparation.AsCleanupFailure(new LlmProviderException(
-                        "Grok catalog request cleanup failed.", LlmTransport.XaiResponses), refusedOwner: request));
-                }
+                catch (Exception error) { failures.Add(CleanupFailure(error, request)); }
         }
         if (failures.Count == 1) ExceptionDispatchInfo.Capture(failures[0]).Throw();
         if (failures.Count > 1) throw new AggregateException(failures);
         Fence();
         return consumption.Publish(result!);
+    }
+
+    private static Exception CleanupFailure(Exception original, object refusedOwner)
+    {
+        var evidence = new CleanupEvidence(original);
+        Exception safe = original is OperationCanceledException canceled
+            ? new OperationCanceledException("Grok catalog cleanup was interrupted.", evidence, canceled.CancellationToken)
+            : evidence;
+        return LlmResourcePreparation.AsCleanupFailure(safe, refusedOwner: refusedOwner);
+    }
+
+    // Preserve the actual failure without exporting untrusted diagnostics through InnerException.
+    private sealed class CleanupEvidence(Exception original) : Exception("Grok catalog owned HTTP cleanup failed.")
+    {
+        internal Exception Original { get; } = original;
     }
 
     internal static IReadOnlyList<LlmModel> Project(IReadOnlyList<JsonElement> generic, IReadOnlyList<JsonElement> specific)

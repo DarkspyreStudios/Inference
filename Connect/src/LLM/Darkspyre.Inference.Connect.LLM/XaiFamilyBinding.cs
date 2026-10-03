@@ -52,6 +52,16 @@ public sealed class XaiFamilyBinding
         return _service!.RunXaiSnapshotAsync(snapshot, fence, operation, token);
     }
 
+    internal Task<IReadOnlyList<LlmModel>> GetModelsAsync(LlmConnection snapshot, Internal.ModelCatalogFamily family,
+        Action callerFence, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(snapshot);
+        ArgumentNullException.ThrowIfNull(callerFence);
+        cancellationToken.ThrowIfCancellationRequested();
+        RequireCatalogService();
+        return _service!.GetXaiCatalogSnapshotAsync(Selection.ConnectionId, snapshot, family, callerFence, cancellationToken);
+    }
+
     internal Task<T> RunFilesAsync<T>(LlmConnection snapshot, Action fence,
         Func<Providers.XaiFileClient, LlmConnection, Action, CancellationToken, Task<T>> operation, CancellationToken token)
     {
