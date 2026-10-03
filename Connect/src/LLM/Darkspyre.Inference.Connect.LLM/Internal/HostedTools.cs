@@ -64,9 +64,7 @@ internal static class HostedTools
 
     internal static LlmHostedToolCall Snapshot(LlmHostedToolCall call)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(call.CallId);
         ArgumentException.ThrowIfNullOrWhiteSpace(call.Name);
-        ArgumentNullException.ThrowIfNull(call.Status);
         if (!Enum.IsDefined(call.Kind)) { throw new ArgumentOutOfRangeException(nameof(call), "The hosted kind is undefined."); }
         LlmHostedToolOutput? output = call.Output switch
         {
