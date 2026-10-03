@@ -26,8 +26,8 @@ public sealed class XaiSpeechDiagnosticTests
     {
         const string secret = "controlled-secret-value";
         using var response = new HttpResponseMessage(status) { Content = new StringContent($"{{\"error\":{{\"code\":\"{code}\",\"message\":\"{secret}\",\"url\":\"https://example.test/?secret={secret}\"}}}}") };
-        InferenceException error = await Assert.ThrowsAsync<InferenceException>(() => XaiErrorClassifier.ThrowIfUnsuccessfulAsync(
-            response, null, [], CancellationToken.None, diagnosticBody: false, diagnosticMessage: "Provider rejected the speech request."));
+        InferenceException error = await Assert.ThrowsAsync<InferenceException>(() => XaiErrorClassifier.ThrowIfUnsuccessfulSpeechAsync(
+            response, null, CancellationToken.None));
         Assert.Equal(expected, error.Code);
         var provider = Assert.IsType<LlmProviderException>(error.InnerException); Assert.Equal(status, provider.StatusCode);
         Assert.Equal("Provider rejected the speech request.", provider.SanitizedResponseBody);
@@ -38,8 +38,8 @@ public sealed class XaiSpeechDiagnosticTests
     public async Task OrdinaryFailureKeepsStatusAndFilesDefaultDiagnostic()
     {
         using var speech = new HttpResponseMessage(HttpStatusCode.InternalServerError) { Content = new StringContent("raw secret payload") };
-        var error = await Assert.ThrowsAsync<LlmProviderException>(() => XaiErrorClassifier.ThrowIfUnsuccessfulAsync(
-            speech, null, [], CancellationToken.None, diagnosticBody: false, diagnosticMessage: "Provider rejected the speech request."));
+        var error = await Assert.ThrowsAsync<LlmProviderException>(() => XaiErrorClassifier.ThrowIfUnsuccessfulSpeechAsync(
+            speech, null, CancellationToken.None));
         Assert.Equal(HttpStatusCode.InternalServerError, error.StatusCode); Assert.Null(error.ProviderCode);
         Assert.DoesNotContain("raw secret payload", error.ToString(), StringComparison.Ordinal);
         using var files = new HttpResponseMessage(HttpStatusCode.InternalServerError) { Content = new StringContent("raw secret payload") };

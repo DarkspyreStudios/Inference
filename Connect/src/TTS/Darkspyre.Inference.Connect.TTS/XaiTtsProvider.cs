@@ -154,7 +154,7 @@ public sealed class XaiTtsProvider : ITtsProvider
                 XaiRequestHeaders.Apply(request, snapshot, false); foreach (var header in _connection!.Headers) if (!request.Headers.TryAddWithoutValidation(header.Key, header.Value)) throw XaiTtsProtocol.Invalid();
                 timeout.CancelAfter(_connection.RequestTimeout);
                 response = await (http ?? _provider!._http).SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timeout.Token).ConfigureAwait(false); CombinedFence();
-                await XaiErrorClassifier.ThrowIfUnsuccessfulAsync(response, LlmCredential.Parse(snapshot.Credential), [], timeout.Token, diagnosticBody: false, diagnosticMessage: "Provider rejected the speech request.").ConfigureAwait(false); CombinedFence();
+                await XaiErrorClassifier.ThrowIfUnsuccessfulSpeechAsync(response, LlmCredential.Parse(snapshot.Credential), timeout.Token).ConfigureAwait(false); CombinedFence();
                 result = await read(response, timeout.Token).ConfigureAwait(false); CombinedFence();
             }
             catch (JsonException) { errors.Add(XaiTtsProtocol.Protocol()); }
