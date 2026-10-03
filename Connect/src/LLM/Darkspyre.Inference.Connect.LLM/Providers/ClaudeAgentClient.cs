@@ -501,6 +501,13 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             throw NativeAgentContract.UnsupportedContext(operation.Token);
         }
 
+        public Task<LlmAgentContext> CompactWithProviderAsync(
+            LlmProviderCompactionRequest request, CancellationToken cancellationToken = default)
+        {
+            using LlmOperationLifetime.Lease operation = _lifetime.Enter(cancellationToken);
+            throw NativeAgentContract.UnsupportedContext(operation.Token);
+        }
+
         public Task ReplaceContextAsync(
             LlmAgentContext context,
             long expectedRevision,
