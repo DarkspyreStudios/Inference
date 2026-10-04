@@ -1308,6 +1308,11 @@ outcome. Each HTTP event publication checks caller cancellation, including buffe
 non-streaming events and adapters using a borrowed HTTP client.
 Claude CLI and Antigravity also check caller cancellation before each buffered non-streaming event.
 
+Gemini API and Vertex Gemini retain complete decoded tool calls when the actual terminal reason
+is unrecognized. The result remains `Unknown` and carries no continuation state. Open streamed
+arguments do not become complete calls. Existing known refusal, truncation and malformed-call
+outcomes keep their classifications.
+
 Responses reports `Unknown` for an unrecognized native status and does not publish continuation
 state from that outcome. Tool calls alone do not establish successful completion. Direct Codex
 also accepts the actual terminal SSE event type when its response omits `status`, matching the

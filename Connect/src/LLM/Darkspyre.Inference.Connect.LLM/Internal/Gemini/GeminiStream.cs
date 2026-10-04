@@ -148,7 +148,7 @@ internal static class GeminiStream
             : LlmCompletionStatus.Unknown;
         if (argumentStream.IsOpen && status is LlmCompletionStatus.Completed or LlmCompletionStatus.RequiresAction)
         { throw Failure($"{route.Name} returned incomplete function arguments."); }
-        LlmToolCall[] completeCalls = status == LlmCompletionStatus.RequiresAction ? calls.ToArray() : [];
+        LlmToolCall[] completeCalls = status is LlmCompletionStatus.RequiresAction or LlmCompletionStatus.Unknown ? calls.ToArray() : [];
         foreach (LlmToolCall call in completeCalls) { yield return consumption.Publish<LlmStreamEvent>(new LlmToolCallCompletedEvent(call)); }
         int? input = Input();
         LlmUsage? counts = Usage(input, visibleOutput, thoughts, cached, total);
