@@ -110,7 +110,7 @@ internal sealed class XaiDeferredProtocol(HttpClient http, LlmConnection connect
                         int attempt = -1;
                         return (() => attempt = observation.BeginUpload(fileScope, null, source, false),
                             observed => observation.ObserveUpload(attempt, observed));
-                    }).ConfigureAwait(false);
+                    }, onUploadResponse: response => observation.ObserveResponse(response, connection)).ConfigureAwait(false);
                 fence();
                 request = preparation.Request;
             }

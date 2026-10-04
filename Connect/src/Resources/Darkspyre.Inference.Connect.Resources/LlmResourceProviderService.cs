@@ -258,7 +258,8 @@ public sealed class LlmResourceProviderService : ILlmBatchClient, IDisposable, I
                                 ProviderHttp.BuildUri(current, "files").AbsoluteUri, connectionId);
                             var observer = preparation.UploadObserver(scope, null, null, true);
                             LlmProviderFile uploaded = await files.UploadAsync(current, jsonl, "batch.jsonl", null,
-                                filesFence, filesToken, observer.OnDispatched, observer.OnObserved, preparation.Secrets).ConfigureAwait(false);
+                                filesFence, filesToken, observer.OnDispatched, observer.OnObserved, preparation.Secrets,
+                                response => observation.ObserveResponse(response, current)).ConfigureAwait(false);
                             filesFence();
                             created = await protocol.CreateFromFileAsync(name!, uploaded.Id, filesToken).ConfigureAwait(false);
                         }

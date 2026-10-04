@@ -18,7 +18,7 @@ internal sealed class XaiFileClient(HttpClient http) : IDisposable, IAsyncDispos
     internal async Task<LlmProviderFile> UploadAsync(LlmConnection connection, Stream source, string fileName,
         LlmFileUploadOptions? options, Action fence, CancellationToken cancellationToken,
         Action? onDispatched = null, Action<LlmProviderFile>? onObserved = null,
-        IReadOnlyList<string>? secretContext = null)
+        IReadOnlyList<string>? secretContext = null, Action<HttpResponseMessage>? onResponse = null)
     {
         using LlmOperationLifetime.Lease operation = _lifetime.Enter(cancellationToken);
         cancellationToken = operation.Token;
@@ -44,7 +44,7 @@ internal sealed class XaiFileClient(HttpClient http) : IDisposable, IAsyncDispos
                 LlmProviderFile observed = ReadFile(root);
                 onObserved?.Invoke(observed);
                 return observed;
-            }, fence, cancellationToken, secretContext), fence, cancellationToken, onDispatched).ConfigureAwait(false);
+            }, fence, cancellationToken, secretContext), fence, cancellationToken, onDispatched, onResponse).ConfigureAwait(false);
             return consumption.Publish(result);
         }
         finally { upload?.DetachBorrowed(); }

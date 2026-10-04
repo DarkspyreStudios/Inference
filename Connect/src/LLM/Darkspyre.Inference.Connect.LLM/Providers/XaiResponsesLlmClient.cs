@@ -23,7 +23,7 @@ internal sealed class XaiResponsesLlmClient(HttpClient http) : ResponsesLlmClien
         "model", "input", "stream", "store", "include", "previous_response_id", "service_tier", "instructions",
         "temperature", "top_p", "top_k", "seed", "presence_penalty", "frequency_penalty", "stop", "stop_sequences",
         "max_output_tokens", "reasoning", "reasoning_effort", "tools", "tool_choice", "parallel_tool_calls", "text",
-        "prompt_cache_key", "background", "deferred", "agent_count", "max_turns"
+        "prompt_cache_key", "background", "deferred", "agent_count", "max_turns", "no_inline_citations"
     }.ToFrozenSet(StringComparer.Ordinal);
 
     public override LlmTransport Transport => LlmTransport.XaiResponses;

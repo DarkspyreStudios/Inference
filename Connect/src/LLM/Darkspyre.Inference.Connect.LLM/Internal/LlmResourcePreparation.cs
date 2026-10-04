@@ -215,7 +215,7 @@ internal sealed class LlmResourcePreparation : IAsyncDisposable
     internal static async Task<LlmResourcePreparation> PrepareAsync(LlmConnection connection, LlmChatRequest request,
         XaiFileClient files, Action fence, CancellationToken token,
         Func<InferenceResourceReference, (Action OnDispatched, Action<LlmProviderFile> OnObserved)>? observeUpload = null,
-        IReadOnlyList<string>? secretContext = null)
+        IReadOnlyList<string>? secretContext = null, Action<HttpResponseMessage>? onUploadResponse = null)
     {
         ValidateArguments(request);
         var operation = new LlmResourcePreparation(request);
@@ -247,7 +247,7 @@ internal sealed class LlmResourcePreparation : IAsyncDisposable
                 var observer = observeUpload?.Invoke(reference);
                 LlmProviderFile uploaded = await files.UploadAsync(connection, reading, descriptor.FileName!, null, fence, token,
                     onDispatched: observer?.OnDispatched, onObserved: observer?.OnObserved,
-                    secretContext: secretContext).ConfigureAwait(false);
+                    secretContext: secretContext, onResponse: onUploadResponse).ConfigureAwait(false);
                 operation.VerifyRead(access, descriptor, reading, fence, token);
                 operation._files.Add(reference, uploaded);
                 reading = null;
@@ -267,17 +267,38 @@ internal sealed class LlmResourcePreparation : IAsyncDisposable
         }
         catch (Exception original)
         {
-            var facts = new InferenceResourceOperationFailure(phase, current,
-                InferenceResourceCommitOutcome.NotAttempted, reading?.BytesRead);
-            Exception error = original is OperationCanceledException
-                ? new InferenceResourceOperationCanceledException(facts, token, original)
-                : new InferenceResourceOperationException(InferenceFailureCode.ExecutionFailed,
-                    "The resource could not be supplied to the selected destination.", facts, original);
+            Exception error = AsInputFailure(original, phase, current, reading?.BytesRead, token);
             try { await operation.DisposeAsync().ConfigureAwait(false); }
-            catch (Exception cleanup) { throw new AggregateException(error, cleanup); }
+            catch (Exception cleanup)
+            {
+                if (error is PreparationFailure sequence)
+                    throw new PreparationFailure(sequence.InnerExceptions.Concat([cleanup]), sequence);
+                throw new PreparationFailure([error, cleanup], error);
+            }
             ExceptionDispatchInfo.Capture(error).Throw();
             throw;
         }
+    }
+
+    internal static Exception AsInputFailure(Exception error, InferenceResourceOperationPhase phase,
+        InferenceResourceReference? reference, long? bytesRead, CancellationToken token)
+    {
+        if (error is XaiFileClient.ExchangeFailure files)
+            return new PreparationFailure(new[] { AsInputFailure(files.InnerExceptions[0], phase, reference, bytesRead, token) }
+                .Concat(files.InnerExceptions.Skip(1)), files);
+        if (IsResourceFailure(error)) return error;
+        var facts = new InferenceResourceOperationFailure(phase, reference,
+            InferenceResourceCommitOutcome.NotAttempted, bytesRead);
+        return error is OperationCanceledException canceled
+            ? new InferenceResourceOperationCanceledException(facts, canceled.CancellationToken, error)
+            : new InferenceResourceOperationException(InferenceFailureCode.ExecutionFailed,
+                "The resource could not be supplied to the selected destination.", facts, error);
+    }
+
+    internal sealed class PreparationFailure(IEnumerable<Exception> errors, Exception? original = null)
+        : AggregateException("The resource input operation and owned cleanup failed.", errors)
+    {
+        internal Exception? Original { get; } = original;
     }
 
     internal SentToolPart Project(InferenceResourceReference reference) => _files.TryGetValue(reference, out var file)

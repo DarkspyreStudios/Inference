@@ -65,17 +65,20 @@ internal sealed class XaiBatchRequestPreparation : IAsyncDisposable
             ArgumentNullException.ThrowIfNull(row);
             BatchData.Identity(row.CustomId);
             if (!ids.Add(row.CustomId)) throw new ArgumentException("Batch request CustomIds must be unique.", nameof(requests));
-            rows.Add(row with { Operation = row.Operation switch
+            rows.Add(row with
             {
-                LlmBatchChatOperation chat => new LlmBatchChatOperation(ChatSnapshot(chat.Request, resources)),
-                LlmBatchImageOperation image => new LlmBatchImageOperation(image.Request with
-                { References = Array.AsReadOnly(image.Request.References.Select(CopySource).ToArray()) },
-                    image.Workflow with { TransportConfiguration = image.Workflow.TransportConfiguration }),
-                LlmBatchVideoGenerationOperation video => new LlmBatchVideoGenerationOperation((VideoGenerationRequest)CopyVideo(video.Request)),
-                LlmBatchVideoEditOperation video => new LlmBatchVideoEditOperation((VideoEditRequest)CopyVideo(video.Request)),
-                LlmBatchVideoExtensionOperation video => new LlmBatchVideoExtensionOperation((VideoExtensionRequest)CopyVideo(video.Request)),
-                _ => throw new NotSupportedException("Unknown batch operation.")
-            } });
+                Operation = row.Operation switch
+                {
+                    LlmBatchChatOperation chat => new LlmBatchChatOperation(ChatSnapshot(chat.Request, resources)),
+                    LlmBatchImageOperation image => new LlmBatchImageOperation(image.Request with
+                    { References = Array.AsReadOnly(image.Request.References.Select(CopySource).ToArray()) },
+                        image.Workflow with { TransportConfiguration = image.Workflow.TransportConfiguration }),
+                    LlmBatchVideoGenerationOperation video => new LlmBatchVideoGenerationOperation((VideoGenerationRequest)CopyVideo(video.Request)),
+                    LlmBatchVideoEditOperation video => new LlmBatchVideoEditOperation((VideoEditRequest)CopyVideo(video.Request)),
+                    LlmBatchVideoExtensionOperation video => new LlmBatchVideoExtensionOperation((VideoExtensionRequest)CopyVideo(video.Request)),
+                    _ => throw new NotSupportedException("Unknown batch operation.")
+                }
+            });
         }
         return rows.AsReadOnly();
     }
@@ -92,19 +95,20 @@ internal sealed class XaiBatchRequestPreparation : IAsyncDisposable
             else if (operation is LlmBatchImageOperation image)
             {
                 XaiImageProtocol.Validate(image.Request, image.Workflow);
-                ValidateResources(image.Request.References, resources);
+                ValidateResources(image.Request.References.Select(source => (Source: source, Audio: false)), resources);
             }
             else
             {
                 VideoRequest video = Video(operation);
                 XaiVideoProtocol.Validate(video);
-                ValidateResources(Sources(video).Select(item => item.Source), resources);
+                ValidateResources(Sources(video), resources);
             }
             rows.Add(row with { Operation = operation });
         }
         return rows.AsReadOnly();
     }
 
+    [SuppressMessage("Design", "CA1031", Justification = "A named media read retains its actual source, input phase and byte observations before the outer boundary handles failure.")]
     internal async Task PrepareAsync(LlmConnection connection, string connectionId, IReadOnlyList<LlmBatchRequest> requests, XaiFileClient files,
         Action<Action<XaiResponsesLlmClient>> withSelectedClient, Action<Exception> recordCleanup)
     {
@@ -122,7 +126,8 @@ internal sealed class XaiBatchRequestPreparation : IAsyncDisposable
                 if (access is not null)
                 {
                     reading = await LlmResourcePreparation.PrepareAsync(connection, request, files, _fence, _token,
-                        source => UploadObserver(scope, row.CustomId, source, false), Secrets).ConfigureAwait(false);
+                        source => UploadObserver(scope, row.CustomId, source, false), Secrets,
+                        response => _observation.ObserveResponse(response, connection)).ConfigureAwait(false);
                     _reads.Add(reading);
                     request = reading.Request;
                     Check();
@@ -155,44 +160,57 @@ internal sealed class XaiBatchRequestPreparation : IAsyncDisposable
                         string? contentType;
                         string? fileName;
                         InferenceResourceDescriptor? descriptor = null;
-                        if (source is ResourceMediaSource resource)
+                        LlmResourcePreparation.CountingReadStream? namedContent = null;
+                        InferenceResourceOperationPhase phase = InferenceResourceOperationPhase.OpenRead;
+                        try
                         {
-                            var opened = await reading.OpenNamedAsync(_resources!, resource.Resource, observed =>
+                            if (source is ResourceMediaSource resource)
                             {
-                                if (!audio && string.IsNullOrWhiteSpace(observed.FileName))
-                                    throw new NotSupportedException("The file destination requires an observed resource filename.");
-                            }, _fence, _token).ConfigureAwait(false);
-                            descriptor = opened.Descriptor;
-                            content = opened.Content;
-                            contentType = descriptor.ContentType;
-                            fileName = descriptor.FileName;
+                                var opened = await reading.OpenNamedAsync(_resources!, resource.Resource,
+                                    observed =>
+                                    {
+                                        if (!audio && observed.FileName is { } suppliedName) XaiFileRequestData.FileName(suppliedName);
+                                    }, _fence, _token).ConfigureAwait(false);
+                                descriptor = opened.Descriptor;
+                                content = opened.Content;
+                                namedContent = opened.Content;
+                                contentType = descriptor.ContentType;
+                                fileName = descriptor.FileName;
+                            }
+                            else if (source is BinaryMediaSource binary)
+                            {
+                                _streams.EnsureCapacity(checked(_streams.Count + 1));
+                                content = new MemoryStream(binary.Data.ToArray(), writable: false);
+                                _streams.Add(content);
+                                contentType = binary.ContentType;
+                                fileName = binary.FileName;
+                            }
+                            else throw new NotSupportedException("Unknown batch media source.");
+                            phase = InferenceResourceOperationPhase.Materialize;
+                            Check();
+                            if (audio)
+                            {
+                                string urlValue = await XaiMediaData.AudioDataUrlAsync(content, contentType, remainingAudio,
+                                    _fence, _token).ConfigureAwait(false);
+                                remainingAudio = checked(remainingAudio - Encoding.UTF8.GetByteCount(urlValue));
+                                value = new() { ["url"] = urlValue };
+                            }
+                            else
+                            {
+                                var observer = UploadObserver(scope, row.CustomId, (source as ResourceMediaSource)?.Resource, false);
+                                LlmProviderFile uploaded = await files.UploadAsync(connection, content, fileName ?? "batch-input.bin",
+                                null, _fence, _token, observer.OnDispatched, observer.OnObserved, Secrets,
+                                response => _observation.ObserveResponse(response, connection)).ConfigureAwait(false);
+                                value = new() { ["file_id"] = uploaded.Id };
+                            }
+                            if (descriptor is not null)
+                                reading.VerifyRead(_resources!, descriptor, (LlmResourcePreparation.CountingReadStream)content, _fence, _token);
                         }
-                        else if (source is BinaryMediaSource binary)
+                        catch (Exception error) when (source is ResourceMediaSource)
                         {
-                            _streams.EnsureCapacity(checked(_streams.Count + 1));
-                            content = new MemoryStream(binary.Data.ToArray(), writable: false);
-                            _streams.Add(content);
-                            contentType = binary.ContentType;
-                            fileName = binary.FileName;
+                            throw LlmResourcePreparation.AsInputFailure(error, phase,
+                                ((ResourceMediaSource)source).Resource, namedContent?.BytesRead, _token);
                         }
-                        else throw new NotSupportedException("Unknown batch media source.");
-                        Check();
-                        if (audio)
-                        {
-                            string urlValue = await XaiMediaData.AudioDataUrlAsync(content, contentType, remainingAudio,
-                                _fence, _token).ConfigureAwait(false);
-                            remainingAudio = checked(remainingAudio - Encoding.UTF8.GetByteCount(urlValue));
-                            value = new() { ["url"] = urlValue };
-                        }
-                        else
-                        {
-                            var observer = UploadObserver(scope, row.CustomId, (source as ResourceMediaSource)?.Resource, false);
-                            LlmProviderFile uploaded = await files.UploadAsync(connection, content, fileName ?? "batch-input.bin",
-                                null, _fence, _token, observer.OnDispatched, observer.OnObserved, Secrets).ConfigureAwait(false);
-                            value = new() { ["file_id"] = uploaded.Id };
-                        }
-                        if (descriptor is not null)
-                            reading.VerifyRead(_resources!, descriptor, (LlmResourcePreparation.CountingReadStream)content, _fence, _token);
                     }
                     Check();
                     media.Add((source, audio), value);
@@ -276,8 +294,11 @@ internal sealed class XaiBatchRequestPreparation : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(request);
         if (resources is not null && request.Resources is not null && !ReferenceEquals(resources, request.Resources))
             throw new ArgumentException("The chat row and batch must borrow the same resource access.", nameof(resources));
-        return ClientTools.Snapshot(request) with { Resources = resources ?? request.Resources,
-            HostedTools = HostedTools.Snapshot(request.HostedTools) };
+        return ClientTools.Snapshot(request) with
+        {
+            Resources = resources ?? request.Resources,
+            HostedTools = HostedTools.Snapshot(request.HostedTools)
+        };
     }
 
     private static InferenceMediaSource CopySource(InferenceMediaSource source) => source switch
@@ -292,13 +313,19 @@ internal sealed class XaiBatchRequestPreparation : IAsyncDisposable
     private static VideoRequest CopyVideo(VideoRequest request)
     {
         VideoRequest copied = MapVideo(request, (source, _) => CopySource(source));
-        return copied with { ProviderOptions = request.ProviderOptions switch
+        return copied with
         {
-            null => null,
-            XaiVideoOptions options => options with { Storage = options.Storage is { } storage ? storage with { } : null,
-                Output = options.Output is { } output ? output with { } : null },
-            _ => throw new NotSupportedException("Unknown batch video controls.")
-        } };
+            ProviderOptions = request.ProviderOptions switch
+            {
+                null => null,
+                XaiVideoOptions options => options with
+                {
+                    Storage = options.Storage is { } storage ? storage with { } : null,
+                    Output = options.Output is { } output ? output with { } : null
+                },
+                _ => throw new NotSupportedException("Unknown batch video controls.")
+            }
+        };
     }
 
     private static VideoRequest MapVideo(VideoRequest request, Func<InferenceMediaSource, bool, InferenceMediaSource> copy) => request switch
@@ -343,10 +370,16 @@ internal sealed class XaiBatchRequestPreparation : IAsyncDisposable
         else if (request is VideoExtensionRequest extension) yield return (extension.SourceVideo, false);
     }
 
-    private static void ValidateResources(IEnumerable<InferenceMediaSource> sources, IInferenceResourceAccess? resources)
+    private static void ValidateResources(IEnumerable<(InferenceMediaSource Source, bool Audio)> sources, IInferenceResourceAccess? resources)
     {
-        foreach (ResourceMediaSource source in sources.OfType<ResourceMediaSource>())
-            LlmResourcePreparation.ValidateNamedReference(source.Resource, resources);
+        foreach (var source in sources)
+        {
+            if (source.Source is ResourceMediaSource resource)
+                LlmResourcePreparation.ValidateNamedReference(resource.Resource, resources);
+            else if (source.Source is FileMediaSource file) XaiFileRequestData.Identity(file.File.FileId);
+            else if (!source.Audio && source.Source is BinaryMediaSource { FileName: { } fileName })
+                XaiFileRequestData.FileName(fileName);
+        }
     }
 
     private static JsonObject InlineRow(Row row) => new()
@@ -376,12 +409,18 @@ internal sealed class XaiBatchRequestPreparation : IAsyncDisposable
             catch (Exception error) { failures.Add(XaiResourceHttp.SafeFailure(error, _observation, forceSafe: true)); }
         foreach (Stream stream in _streams)
             try { await stream.DisposeAsync().ConfigureAwait(false); }
-            catch (Exception error) { failures.Add(LlmResourcePreparation.AsCleanupFailure(
-                XaiResourceHttp.SafeFailure(error, _observation, forceSafe: true), refusedOwner: stream)); }
+            catch (Exception error)
+            {
+                failures.Add(LlmResourcePreparation.AsCleanupFailure(
+                XaiResourceHttp.SafeFailure(error, _observation, forceSafe: true), refusedOwner: stream));
+            }
         foreach (XaiHostedToolPreparation frame in _hosted)
             try { frame.Dispose(); }
-            catch (Exception error) { failures.Add(LlmResourcePreparation.AsCleanupFailure(
-                XaiResourceHttp.SafeFailure(error, _observation, forceSafe: true), refusedOwner: frame)); }
+            catch (Exception error)
+            {
+                failures.Add(LlmResourcePreparation.AsCleanupFailure(
+                XaiResourceHttp.SafeFailure(error, _observation, forceSafe: true), refusedOwner: frame));
+            }
         _resources = null;
         _rows.Clear();
         _reads.Clear();

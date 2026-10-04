@@ -79,9 +79,9 @@ internal sealed class XaiResourceHttp(HttpClient http, LlmConnection connection,
     internal static Exception OperationFailure(Exception error, Observation observation)
     {
         if (error is ExchangeFailure exchange)
-            return new AggregateException("The resource operation and owned cleanup failed.",
+            return new OperationCleanupFailure(
                 new[] { OperationFailure(exchange.InnerExceptions[0], observation) }
-                    .Concat(exchange.InnerExceptions.Skip(1).Select(cleanup => SafeFailure(cleanup, observation, forceSafe: true))));
+                    .Concat(exchange.InnerExceptions.Skip(1).Select(cleanup => SafeFailure(cleanup, observation, forceSafe: true))), exchange);
         if (!observation.HasEffects) return error;
         Exception safe = SafeFailure(error, observation);
         return safe is OperationCanceledException canceled
@@ -94,6 +94,10 @@ internal sealed class XaiResourceHttp(HttpClient http, LlmConnection connection,
     internal static Exception SafeFailure(Exception error, Observation observation, bool forceSafe = false)
     {
         if (error is FailureEvidence or ExchangeFailure) return error;
+        if (error is XaiFileClient.ExchangeFailure files)
+            return new ExchangeFailure(files.InnerExceptions.Select(item => SafeFailure(item, observation, forceSafe: true)), files);
+        if (error is LlmResourcePreparation.PreparationFailure preparation)
+            return new ExchangeFailure(preparation.InnerExceptions.Select(item => SafeFailure(item, observation, forceSafe: true)), preparation);
         if (error is InferenceResourceOperationException resource)
         {
             observation.ResourceFailure = resource.Failure;
@@ -157,8 +161,17 @@ internal sealed class XaiResourceHttp(HttpClient http, LlmConnection connection,
     }
 
     // Only this owner constructs the operation-first, response-cleanup, request-cleanup sequence.
-    private sealed class ExchangeFailure(IEnumerable<Exception> errors)
-        : AggregateException("The resource operation and owned cleanup failed.", errors);
+    private sealed class ExchangeFailure(IEnumerable<Exception> errors, Exception? original = null)
+        : AggregateException("The resource operation and owned cleanup failed.", errors)
+    {
+        internal Exception? Original { get; } = original;
+    }
+
+    private sealed class OperationCleanupFailure(IEnumerable<Exception> errors, Exception original)
+        : AggregateException("The resource operation and owned cleanup failed.", errors)
+    {
+        internal Exception Original { get; } = original;
+    }
 
     internal sealed class Observation(LlmResourceOperation operation, LlmBatch? selected = null)
     {
@@ -211,6 +224,8 @@ internal sealed class XaiResourceHttp(HttpClient http, LlmConnection connection,
             reserved.Source = source;
             reserved.IsJsonl = isJsonl;
             _uploads.Add(reserved);
+            BeginStage("POST files");
+            RequestDispatched = true;
             return attempt;
         }
 
