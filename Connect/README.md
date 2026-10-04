@@ -3336,6 +3336,7 @@ including a final `tool_result` without a subsequent completed message, remain `
 Malformed, interrupted, partial and hook-stopped chat outcomes report `Failed`. Native sessions
 preserve their interruption/refusal/failure reasons; a hook-stopped invocation reports provider
 failure. Missing message-stop events retain their explicit protocol-failure path.
+Native unknown-completion diagnostics retain the actual stop reason.
 Chat emits changed known counts before its completion; its final usage can be null. Its running event
 cannot represent wholly unavailable usage. A later known observation after unavailable metadata is
 emitted again. Native observations share one request ID per invocation and can report unknown usage.

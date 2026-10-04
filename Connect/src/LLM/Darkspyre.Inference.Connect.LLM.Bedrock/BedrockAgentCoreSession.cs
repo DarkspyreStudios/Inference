@@ -632,7 +632,7 @@ internal sealed class BedrockAgentCoreSession : ILlmAgentSession
                 or "hook_stopped"
                 or "timeout_exceeded" =>
                 (LlmAgentCompletionReason.ProviderFailure, $"AgentCore stopped with '{stopReason}'."),
-            _ => (LlmAgentCompletionReason.Unknown, null)
+            _ => (LlmAgentCompletionReason.Unknown, $"AgentCore stopped with '{stopReason}'.")
         };
 
     private sealed record PendingToolUse(
