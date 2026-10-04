@@ -128,6 +128,7 @@ internal sealed class BedrockLlmClient(
     }
 
     [SuppressMessage("Design", "CA1031", Justification = "The adapter preserves the operation and each independent owned cleanup failure.")]
+    [SuppressMessage("Usage", "CA2219", Justification = "Iterator retirement executes finally; recorded operation and cleanup failures must also surface on early reader disposal.")]
     public async IAsyncEnumerable<LlmStreamEvent> StreamAsync(
         LlmConnection connection,
         LlmChatRequest request,
@@ -248,7 +249,7 @@ internal sealed class BedrockLlmClient(
             innerException: new ConverseFailureEvidence(aws));
     }
 
-    private static Exception ClassifyConverseOperationAndCleanup(AggregateException error, LlmConnection connection)
+    private static AggregateException ClassifyConverseOperationAndCleanup(AggregateException error, LlmConnection connection)
     {
         if (error.InnerExceptions.Count < 2) return error;
         return new AggregateException("Bedrock Converse and owned cleanup failed.",

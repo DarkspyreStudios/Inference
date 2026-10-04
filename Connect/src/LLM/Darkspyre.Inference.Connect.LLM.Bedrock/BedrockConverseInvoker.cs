@@ -116,6 +116,7 @@ internal sealed class BedrockConverseInvoker(BedrockClientFactory factory) : IBe
         public string? RequestId { get; } = response.ResponseMetadata?.RequestId;
 
         [SuppressMessage("Design", "CA1031", Justification = "The reader preserves the original operation and independently refused enumerator cleanup.")]
+        [SuppressMessage("Usage", "CA2219", Justification = "Iterator retirement executes finally; original read and cleanup failures must also surface on early reader disposal.")]
         public async IAsyncEnumerable<IEventStreamEvent> ReadAsync(
             [EnumeratorCancellation] CancellationToken cancellationToken)
         {
