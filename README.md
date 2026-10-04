@@ -349,6 +349,23 @@ All four versions come from [Directory.Build.props](Directory.Build.props):
 `<net>.<release>.<minor>` means .NET generation, breaking-contract release, and compatible tweak/fix.
 The current `-rc.1` suffix reflects .NET 11 RC dependencies. Releases are coordinated and immutable.
 
+### Release-candidate mode and source mode
+
+Without source properties a build is in release-candidate mode: TensorSharp comes from the published packages
+pinned in `Directory.Packages.props`. No `NuGet.Config` names a local feed.
+
+Interim builds use source mode. `-p:TensorSharpSourceRoot=/absolute/TensorSharp` names a TensorSharp checkout,
+normally a detached worktree of its `origin/dev`. `Directory.Build.targets` then imports that checkout's
+`eng/SourceReferences.targets`, which turns each `Darkspyre.TensorSharp.*` PackageReference into a ProjectReference
+to the checkout.
+
+Consumers of these packages use [eng/SourceReferences.targets](eng/SourceReferences.targets) the same way. A consumer
+that sets `InferenceSourceRoot` imports it, and each `Darkspyre.Inference.*` PackageReference becomes ProjectReferences
+to the projects that package carries: Common and UI.Settings map to their one project, and Connect and Tensor to every
+project under `Connect/src` or `Tensor/src` except the packaging project, whose references hide the bundled projects.
+ExcludeAssets and PrivateAssets carry over. Connect.LLM references `Microsoft.Bcl.Memory` directly, because the central
+transitive pin that patches it does not reach a project-reference consumer.
+
 To deploy from a clean `master` checkout:
 
 ```bash
