@@ -26,12 +26,13 @@ internal sealed partial class ClaudeCliExits(ILogger<ClaudeCliExits> logger) : I
     internal void Track(Task exit)
     {
         ArgumentNullException.ThrowIfNull(exit);
-        Task<Exception?> observed = ObserveAsync(exit);
+        var observed = new TaskCompletionSource<Exception?>(TaskCreationOptions.RunContinuationsAsynchronously);
         lock (_gate)
         {
             _pending.RemoveWhere(static task => task.IsCompletedSuccessfully && task.Result is null);
-            _pending.Add(observed);
+            _pending.Add(observed.Task);
         }
+        _ = ObserveAsync(exit, observed);
     }
 
     /// <summary>Waits at most <see cref="Limit"/> for the process to exit on its own, then kills its process group.</summary>
@@ -85,15 +86,17 @@ internal sealed partial class ClaudeCliExits(ILogger<ClaudeCliExits> logger) : I
     }
 
     [SuppressMessage("Design", "CA1031", Justification = "Background exits log and retain their actual failure; a refused log does not hide the original failure.")]
-    private async Task<Exception?> ObserveAsync(Task exit)
+    private async Task ObserveAsync(Task exit, TaskCompletionSource<Exception?> observed)
     {
-        try { await exit.ConfigureAwait(false); return null; }
+        Exception? failure = null;
+        try { await exit.ConfigureAwait(false); }
         catch (Exception error)
         {
+            failure = error;
             try { LogExitFailure(logger, error); }
-            catch (Exception logging) { return new AggregateException(error, logging); }
-            return error;
+            catch (Exception logging) { failure = new AggregateException(error, logging); }
         }
+        observed.TrySetResult(failure);
     }
 
     [LoggerMessage(Level = LogLevel.Warning,

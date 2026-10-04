@@ -152,9 +152,9 @@ internal static partial class CliProcessTermination
     private static partial int kill(int pid, int signal);
 }
 
-/// <summary>A wrapped process that was killed but not reported as exited within the bound.</summary>
+/// <summary>A wrapped process whose exit is not reported within the termination bound.</summary>
 internal sealed class CliProcessTerminationException(int processId)
-    : Exception($"The CLI process {processId} did not exit within {CliProcessTermination.ExitBound.TotalSeconds:0} seconds after it was killed.")
+    : Exception($"The CLI process {processId} did not exit within {CliProcessTermination.ExitBound.TotalSeconds:0} seconds after termination was requested.")
 {
     public int ProcessId { get; } = processId;
 }
