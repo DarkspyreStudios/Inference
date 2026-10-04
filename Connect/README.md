@@ -1058,6 +1058,12 @@ ignores its token to return, then rejects its late result. Facade retirement als
 before releasing borrowed collaborators. The returned client borrows the facade. Later operations
 perform explicit cache mutations or validate receipt scope through that same owner; binding itself
 does not create a paid resource.
+Receipt admission checks the facade's cancellation and retirement fence after acquiring the
+binding gate, before installing receipt evidence. Publication checks again after gated work.
+A late create, expiry update or delete keeps its actual observed receipt in the existing
+possible-mutation failure; it does not publish a successful result into a replaced binding.
+Failure-side uncertainty recording remains available after cancellation and performs no
+provider mutation or automatic retry.
 
 Exact provider-token counting rejects explicitly cached Vertex requests before credential refresh,
 authentication, connection preparation, model discovery or HTTP dispatch. This restriction is

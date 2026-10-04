@@ -41,7 +41,7 @@ public sealed partial class LlmProviderService
     }
 
     private void CheckContextCache(GeminiCacheBindings.Admission admission, CancellationToken token)
-    { ThrowIfOperationCanceled(token); _cacheBindings.Check(admission); }
+    { ThrowIfOperationCanceled(token); _cacheBindings.Check(admission); ThrowIfOperationCanceled(token); }
 
     private async Task<T> CaptureCacheCleanupAsync<T>(Func<Task<T>> action)
     {
@@ -61,7 +61,8 @@ public sealed partial class LlmProviderService
             try
             {
                 CheckContextCache(selected.Admission, token);
-                _ = _cacheBindings.Admit(selected.Admission, receipt);
+                _ = _cacheBindings.Admit(selected.Admission, receipt, () => ThrowIfOperationCanceled(token));
+                CheckContextCache(selected.Admission, token);
                 return receipt;
             }
             catch (OperationCanceledException error)
@@ -81,7 +82,8 @@ public sealed partial class LlmProviderService
             LlmContextCache receipt = await selected.Client.GetAsync(reference, selected.Admission,
                 current => CheckContextCache(selected.Admission, current), token).ConfigureAwait(false);
             CheckContextCache(selected.Admission, token);
-            _ = _cacheBindings.Admit(selected.Admission, receipt);
+            _ = _cacheBindings.Admit(selected.Admission, receipt, () => ThrowIfOperationCanceled(token));
+            CheckContextCache(selected.Admission, token);
             return receipt;
         }).ConfigureAwait(false);
     }
@@ -112,7 +114,7 @@ public sealed partial class LlmProviderService
             LlmContextCache checkedReceipt = await CaptureCacheCleanupAsync(() => client.GetAsync(reference, admission,
                 current => CheckContextCache(admission, current), token)).ConfigureAwait(false);
             CheckContextCache(admission, token);
-            admission = _cacheBindings.Admit(admission, checkedReceipt);
+            admission = _cacheBindings.Admit(admission, checkedReceipt, () => ThrowIfOperationCanceled(token));
         }
         else admission = admission with { Reference = known.Receipt.Reference, Proof = known, AllowDeleted = allowDeleted };
         CheckContextCache(admission, token);
@@ -136,15 +138,16 @@ public sealed partial class LlmProviderService
                     current => CheckContextCache(admission, current), token).ConfigureAwait(false);
                 observed = receipt;
                 CheckContextCache(admission, token);
-                admission = _cacheBindings.ChangedResource(admission, deleted: false, uncertain: true);
-                _ = _cacheBindings.Admit(admission, receipt, afterMutation: true);
+                admission = _cacheBindings.ChangedResource(admission, deleted: false, uncertain: true, () => ThrowIfOperationCanceled(token));
+                admission = _cacheBindings.Admit(admission, receipt, () => ThrowIfOperationCanceled(token), afterMutation: true);
+                CheckContextCache(admission, token);
                 return receipt;
             }
             catch (Exception error) when (error is LlmContextCacheMutationCancelledException or LlmContextCacheMutationUncertainException)
-            { _ = _cacheBindings.ChangedResource(admission, deleted: false, uncertain: true); throw; }
+            { _ = _cacheBindings.ChangedResource(admission, deleted: false, uncertain: true, () => ThrowIfOperationCanceled(token)); throw; }
             catch (Exception error) when (observed is not null)
             {
-                _ = _cacheBindings.ChangedResource(admission, deleted: false, uncertain: true);
+                _ = _cacheBindings.ChangedResource(admission, deleted: false, uncertain: true, () => ThrowIfOperationCanceled(token));
                 if (error is OperationCanceledException)
                     throw new LlmContextCacheMutationCancelledException(LlmContextCacheMutation.UpdateExpiry, admission.Reference!, token,
                         error, observedUpdate: observed);
@@ -171,14 +174,15 @@ public sealed partial class LlmProviderService
                     admission, current => CheckContextCache(admission, current), token).ConfigureAwait(false);
                 observed = receipt;
                 CheckContextCache(admission, token);
-                _ = _cacheBindings.ChangedResource(admission, deleted: true, uncertain: false);
+                _ = _cacheBindings.ChangedResource(admission, deleted: true, uncertain: false, () => ThrowIfOperationCanceled(token));
+                ThrowIfOperationCanceled(token);
                 return receipt;
             }
             catch (Exception error) when (error is LlmContextCacheMutationCancelledException or LlmContextCacheMutationUncertainException)
-            { _ = _cacheBindings.ChangedResource(admission, deleted: false, uncertain: true); throw; }
+            { _ = _cacheBindings.ChangedResource(admission, deleted: false, uncertain: true, () => ThrowIfOperationCanceled(token)); throw; }
             catch (Exception error) when (observed is not null)
             {
-                _ = _cacheBindings.ChangedResource(admission, deleted: false, uncertain: true);
+                _ = _cacheBindings.ChangedResource(admission, deleted: false, uncertain: true, () => ThrowIfOperationCanceled(token));
                 if (error is OperationCanceledException)
                     throw new LlmContextCacheMutationCancelledException(LlmContextCacheMutation.Delete, admission.Reference!, token,
                         error, observedDelete: observed);

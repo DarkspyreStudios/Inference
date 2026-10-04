@@ -98,7 +98,7 @@ internal sealed class GeminiCacheBindings
         }
     }
 
-    internal Admission Admit(Admission operation, LlmContextCache receipt, bool afterMutation = false)
+    internal Admission Admit(Admission operation, LlmContextCache receipt, Action ownerFence, bool afterMutation = false)
     {
         lock (_gate)
         {
@@ -111,20 +111,25 @@ internal sealed class GeminiCacheBindings
                 && observed.MutationSequence > operation.Sequence)) throw Changed();
             if (operation.Binding.Observed.TryGetValue(receipt.Reference, out Observation? previous)
                 && previous.Epoch == operation.Epoch && !previous.Deleted && !previous.Uncertain)
+            {
+                ownerFence();
                 return operation with { Reference = receipt.Reference, Proof = previous };
+            }
+            // This is the owning facade's intrinsic fence, not a borrowed caller callback.
+            ownerFence();
             var observed = new Observation(receipt, operation.Epoch);
             operation.Binding.Observed[receipt.Reference] = observed;
             return operation with { Reference = receipt.Reference, Proof = observed };
         }
     }
 
-    internal Admission ChangedResource(Admission operation, bool deleted, bool uncertain)
+    internal Admission ChangedResource(Admission operation, bool deleted, bool uncertain, Action ownerFence)
     {
         lock (_gate)
         {
+            if (!uncertain) { Check(operation); ownerFence(); }
             if (operation.Epoch != operation.Binding.Epoch || !SameSelection(operation.Binding.Connection, operation.Connection))
                 return operation;
-            if (!uncertain) Check(operation);
             long mutationSequence = Interlocked.Increment(ref _sequence);
             foreach (Observation observed in operation.Binding.Observed.Values.Where(observed =>
                 observed.Receipt.Reference.ResourceName == operation.Reference!.ResourceName
