@@ -15,6 +15,9 @@
     <PackageReference Include="Darkspyre.ML.Tokenizers" />
     <PackageReference Include="Microsoft.ML.Tokenizers" ExcludeAssets="all" PrivateAssets="all" />
     <PackageReference Include="Microsoft.ML.Tokenizers.Data.O200kBase" />
+    <!-- O200kBase depends on a vulnerable Microsoft.Bcl.Memory. The central transitive pin does not reach a project that
+         references this one, so the direct reference carries the patched version to source-mode consumers. -->
+    <PackageReference Include="Microsoft.Bcl.Memory" />
   </ItemGroup>
 
   <ItemGroup>

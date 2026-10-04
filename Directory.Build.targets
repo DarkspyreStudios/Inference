@@ -1,4 +1,8 @@
 <Project>
+  <!-- Source mode: TensorSharpSourceRoot names a TensorSharp checkout, and its eng/SourceReferences.targets turns each
+       Darkspyre.TensorSharp.* PackageReference into a ProjectReference to that checkout. Without it, builds use the
+       published packages pinned in Directory.Packages.props. -->
+  <Import Project="$(TensorSharpSourceRoot)/eng/SourceReferences.targets" Condition="'$(TensorSharpSourceRoot)' != ''" />
   <!-- Source builds use project references; package consumers use the exact synchronized Common NuGet. -->
   <Target Name="PinInferenceCommonPackageDependency" AfterTargets="_GetProjectReferenceVersions"
           Condition="'$(IsPackable)' == 'true'">

@@ -1,0 +1,54 @@
+<Project>
+  <!--
+    Source mode for consumers of the Inference packages. A consuming repository imports this file from its
+    Directory.Build.targets when InferenceSourceRoot names an Inference checkout. Each Darkspyre.Inference.*
+    PackageReference then becomes ProjectReferences to the projects that package carries:
+
+      Darkspyre.Inference.Common       Common/src/Darkspyre.Inference.Common
+      Darkspyre.Inference.Connect      every project under Connect/src except the packaging project
+      Darkspyre.Inference.Tensor       every project under Tensor/src except the packaging project
+      Darkspyre.Inference.UI.Settings  UI/src/Settings/Darkspyre.Inference.UI.Settings
+
+    The packaging projects reference their bundled projects with PrivateAssets="all", so a reference to a packaging
+    project would hide the bundled assemblies from the consumer. The consumer references the bundled projects instead.
+    Each ProjectReference keeps the PackageReference's ExcludeAssets and PrivateAssets. ExcludeAssets "runtime" also sets
+    Private="false", so the output is not copied, and "all" also sets ReferenceOutputAssembly="false".
+  -->
+  <PropertyGroup>
+    <_InferenceSourceRoot>$([MSBuild]::EnsureTrailingSlash('$([System.IO.Path]::GetFullPath('$(InferenceSourceRoot)'))'))</_InferenceSourceRoot>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'@(PackageReference->WithMetadataValue('Identity', 'Darkspyre.Inference.Common'))' != ''">
+    <_InferenceSourceProject Include="$(_InferenceSourceRoot)Common/src/Darkspyre.Inference.Common/Darkspyre.Inference.Common.csproj"
+        ExcludeAssets="@(PackageReference->WithMetadataValue('Identity', 'Darkspyre.Inference.Common')->'%(ExcludeAssets)')"
+        PrivateAssets="@(PackageReference->WithMetadataValue('Identity', 'Darkspyre.Inference.Common')->'%(PrivateAssets)')" />
+    <PackageReference Remove="Darkspyre.Inference.Common" />
+  </ItemGroup>
+  <ItemGroup Condition="'@(PackageReference->WithMetadataValue('Identity', 'Darkspyre.Inference.Connect'))' != ''">
+    <_InferenceSourceProject Include="$(_InferenceSourceRoot)Connect/src/**/*.csproj"
+        Exclude="$(_InferenceSourceRoot)Connect/src/Darkspyre.Inference.Connect/**"
+        ExcludeAssets="@(PackageReference->WithMetadataValue('Identity', 'Darkspyre.Inference.Connect')->'%(ExcludeAssets)')"
+        PrivateAssets="@(PackageReference->WithMetadataValue('Identity', 'Darkspyre.Inference.Connect')->'%(PrivateAssets)')" />
+    <PackageReference Remove="Darkspyre.Inference.Connect" />
+  </ItemGroup>
+  <ItemGroup Condition="'@(PackageReference->WithMetadataValue('Identity', 'Darkspyre.Inference.Tensor'))' != ''">
+    <_InferenceSourceProject Include="$(_InferenceSourceRoot)Tensor/src/**/*.csproj"
+        Exclude="$(_InferenceSourceRoot)Tensor/src/Darkspyre.Inference.Tensor/**"
+        ExcludeAssets="@(PackageReference->WithMetadataValue('Identity', 'Darkspyre.Inference.Tensor')->'%(ExcludeAssets)')"
+        PrivateAssets="@(PackageReference->WithMetadataValue('Identity', 'Darkspyre.Inference.Tensor')->'%(PrivateAssets)')" />
+    <PackageReference Remove="Darkspyre.Inference.Tensor" />
+  </ItemGroup>
+  <ItemGroup Condition="'@(PackageReference->WithMetadataValue('Identity', 'Darkspyre.Inference.UI.Settings'))' != ''">
+    <_InferenceSourceProject Include="$(_InferenceSourceRoot)UI/src/Settings/Darkspyre.Inference.UI.Settings/Darkspyre.Inference.UI.Settings.csproj"
+        ExcludeAssets="@(PackageReference->WithMetadataValue('Identity', 'Darkspyre.Inference.UI.Settings')->'%(ExcludeAssets)')"
+        PrivateAssets="@(PackageReference->WithMetadataValue('Identity', 'Darkspyre.Inference.UI.Settings')->'%(PrivateAssets)')" />
+    <PackageReference Remove="Darkspyre.Inference.UI.Settings" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="@(_InferenceSourceProject)">
+      <Private Condition="'%(ExcludeAssets)' == 'runtime' or '%(ExcludeAssets)' == 'all'">false</Private>
+      <ReferenceOutputAssembly Condition="'%(ExcludeAssets)' == 'all'">false</ReferenceOutputAssembly>
+    </ProjectReference>
+  </ItemGroup>
+</Project>
