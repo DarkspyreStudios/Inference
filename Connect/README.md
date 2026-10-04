@@ -564,6 +564,13 @@ provider's model catalog, which `LlmModelListCache` keeps. The first capability 
 new connection version therefore lists the connection's models once. When that listing fails, the adapter
 uses its own model-family table and the operation proceeds.
 
+Codex also reads `supports_reasoning_summary_parameter` and `input_modalities` from the selected
+model's catalog entry. A false summary flag disables public reasoning and summary requests without
+changing effort or retained state. An explicit modality array without `image` disables prompt images
+and image tool results in chat and managed-agent sessions. Missing fields retain the adapter defaults.
+Connection and model overrides keep their existing precedence over these catalog facts. Other tool
+content and prompt documents keep their existing support.
+
 OpenAI Responses levels are per model, from a table of verified model pages, because the OpenAI Models
 API reports no capabilities. `None` sends `reasoning.effort: "none"` and `Maximum` sends `"max"`. A
 verified reasoning model accepts `temperature` only with `ReasoningLevel = None`; a request without a

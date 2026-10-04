@@ -62,6 +62,10 @@ internal sealed class OpenAiCodexLlmClient(HttpClient http)
     {
         ValidateConnection(connection);
         LlmProviderCapabilities capabilities = base.GetCapabilities(connection, modelId);
+        JsonElement? entry = ILlmCatalogCapabilities.EntryFor(connection, modelId);
+        bool? supportsImages = CatalogSupportsImages(entry);
+        bool? toolImages = LlmCapabilityOverrideLookup.Overrides(connection, modelId,
+            overrides => overrides.SupportsToolResultImages) ? null : supportsImages;
         return capabilities with
         {
             SupportsTemperature = false,
@@ -72,12 +76,40 @@ internal sealed class OpenAiCodexLlmClient(HttpClient http)
             SupportsFrequencyPenalty = false,
             MaxStopSequences = 0,
             SupportsJsonObject = false,
+            SupportsReasoningText = !LlmCapabilityOverrideLookup.Overrides(connection, modelId,
+                overrides => overrides.SupportsReasoningText)
+                    ? CatalogSupportsReasoningText(entry) ?? capabilities.SupportsReasoningText
+                    : capabilities.SupportsReasoningText,
+            SupportsPromptImages = !LlmCapabilityOverrideLookup.Overrides(connection, modelId,
+                overrides => overrides.SupportsPromptImages)
+                    ? supportsImages ?? capabilities.SupportsPromptImages
+                    : capabilities.SupportsPromptImages,
+            RichContentSupported = capabilities.RichContentSupported.Restrict(toolImages, null),
+            Agent = capabilities.Agent with
+            {
+                RichContentSupported = capabilities.Agent.RichContentSupported.Restrict(toolImages, null)
+            },
             ReasoningLevels = !LlmCapabilityOverrideLookup.Overrides(connection, modelId, overrides => overrides.ReasoningLevels)
-                && CatalogLevels(ILlmCatalogCapabilities.EntryFor(connection, modelId)) is { } catalog
+                && CatalogLevels(entry) is { } catalog
                     ? catalog
                     : capabilities.ReasoningLevels
         };
     }
+
+    private static bool? CatalogSupportsReasoningText(JsonElement? entry) =>
+        entry is { ValueKind: JsonValueKind.Object } model
+        && model.TryGetProperty("supports_reasoning_summary_parameter", out JsonElement supported)
+        && supported.ValueKind is JsonValueKind.True or JsonValueKind.False
+            ? supported.GetBoolean()
+            : null;
+
+    private static bool? CatalogSupportsImages(JsonElement? entry) =>
+        entry is { ValueKind: JsonValueKind.Object } model
+        && model.TryGetProperty("input_modalities", out JsonElement modalities)
+        && modalities.ValueKind == JsonValueKind.Array
+        && modalities.EnumerateArray().All(modality => modality.ValueKind == JsonValueKind.String)
+            ? modalities.EnumerateArray().Any(modality => modality.GetString() == "image")
+            : null;
 
     /// <summary>
     /// The levels a Codex catalog entry lists in <c>supported_reasoning_levels</c>, or null when the entry is absent
