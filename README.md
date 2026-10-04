@@ -2,6 +2,8 @@
 
 # Darkspyre Inference
 
+`Darkspyre.ML.Tokenizers` is the explicit NuGet exception. It remains a package in source mode; changes to that stable fork are consumed through a NuGet version update.
+
 `DarkspyreDependencyMode` defaults to `Source`. Builds resolve TensorSharp and host-tool storage
 references from sibling TensorSharp, SecureStore and PersistenceStore worktrees automatically.
 Release commands select `-p:DarkspyreDependencyMode=Packages` explicitly. `eng/deploy.sh` selects
