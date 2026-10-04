@@ -212,6 +212,6 @@ internal sealed class SelfHostLlmClient(ILlmSelfHost host) : ILlmClient, ILlmCon
         Agent = Agent,
         SupportsPromptImages = capabilities.SupportsPromptImages,
         SupportsPromptDocuments = capabilities.SupportsPromptDocuments,
-        SupportsFileReferences = capabilities.SupportsFileReferences
+        SupportsFileReferences = false
     };
 }

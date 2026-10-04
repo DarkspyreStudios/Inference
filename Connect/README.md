@@ -3748,10 +3748,12 @@ services.AddSingleton<ILlmSelfHost, MyEngineHost>(); // the host's engine map
 A SelfHost connection's `Endpoint` is an engine ID from `ILlmSelfHost.ListEnginesAsync`, and it has no
 credential. Several connections can name one engine. Streaming, model listing and agent sessions go to
 the engine returned by `GetInferenceAsync`, which is Common's `ILlmInference`; an engine that is unknown
-or not loaded fails with `InferenceException` and `ModelUnavailable`. `GetCapabilities` returns what the
-engine declared when the host loaded it, and does no I/O, because Connect reads a transport's
-capabilities synchronously. Streaming, final streamed usage and running usage flags come from the
-engine. An engine that is not loaded declares no usage or tool support.
+or not loaded fails with `InferenceException` and `ModelUnavailable`. `GetCapabilities` projects the
+loaded engine's capabilities for operations the adapter accepts, and does no I/O, because Connect reads
+a transport's capabilities synchronously. Streaming, final streamed usage and running usage flags come
+from the engine. Native file and caller-owned resource references remain unsupported; SelfHost reports
+`SupportsFileReferences = false` even when the engine declares support. Binary prompt attachments
+retain the engine's image/document capability gates. An unloaded engine declares no usage or tool support.
 
 Generation and request accounting reject nonempty connection or request `ProviderOptions`, connection
 `AdditionalHeaders`, and connection or model capability overrides. SelfHost passes only typed Common
