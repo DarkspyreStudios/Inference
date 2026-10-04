@@ -2,6 +2,7 @@ using System.Diagnostics;
 using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Common.Embedding;
 using Darkspyre.Inference.Tensor.Common;
+using Darkspyre.Inference.Tensor.Ggml;
 using TensorSharp.Models.Embeddings;
 
 namespace Darkspyre.Inference.Tensor.Embedding;
@@ -12,19 +13,31 @@ public sealed class TensorEmbeddingInference : ITensorEmbeddingInference
     private readonly ITensorModelPackManager _packs;
     private readonly IEmbeddingModelLoader _loader;
     private readonly TensorModelLifetime _lifetime;
+    private readonly GgmlRuntimeOwner? _runtimeOwner;
     private IEmbeddingModel? _model;
+    private GgmlRuntimeOwner.ModelLease? _runtimeLease;
+    private TensorBackendKind _backend;
     private TensorModelPackLease? _lease;
     private TensorModelPackDefinition? _definition;
     private TensorEmbeddingArchitecture? _architecture;
 
-    public TensorEmbeddingInference(ITensorModelPackManager packs, TensorBackendKind backend = TensorBackendKind.Auto)
-        : this(packs, new EmbeddingModelLoader(), backend) { }
+    /// <summary>
+    /// An engine on <paramref name="backend"/>. <see cref="TensorBackendKind.Cpu"/> runs the managed encoder; Auto and
+    /// the GGML backends borrow <paramref name="runtimeOwner"/>, or the generation's owner when it is null.
+    /// </summary>
+    public TensorEmbeddingInference(ITensorModelPackManager packs, TensorBackendKind backend = TensorBackendKind.Auto,
+        GgmlRuntimeOwner? runtimeOwner = null)
+        : this(packs, new EmbeddingModelLoader(), backend, runtimeOwner) { }
 
-    internal TensorEmbeddingInference(ITensorModelPackManager packs, IEmbeddingModelLoader loader, TensorBackendKind backend = TensorBackendKind.Auto)
+    internal TensorEmbeddingInference(ITensorModelPackManager packs, IEmbeddingModelLoader loader,
+        TensorBackendKind backend = TensorBackendKind.Auto, GgmlRuntimeOwner? runtimeOwner = null)
     {
         ArgumentNullException.ThrowIfNull(packs);
         ArgumentNullException.ThrowIfNull(loader);
+        if (backend != TensorBackendKind.Cpu && !GgmlRuntimeOwner.IsGgml(backend))
+            throw new ArgumentOutOfRangeException(nameof(backend), "Embeddings run on managed CPU or a GGML backend.");
         _packs = packs; _loader = loader; RequestedBackend = backend;
+        _runtimeOwner = backend == TensorBackendKind.Cpu ? null : runtimeOwner ?? GgmlRuntimeOwner.GetOrCreate();
         _lifetime = new(this);
     }
 
@@ -84,12 +97,12 @@ public sealed class TensorEmbeddingInference : ITensorEmbeddingInference
         catch (KeyNotFoundException) { throw new InferenceException(InferenceFailureCode.ModelUnavailable, "The embedding pack is not registered."); }
         if (definition.Key != model) throw new InferenceException(InferenceFailureCode.ModelUnavailable, "The pack manager returned another model.");
         TensorEmbeddingArchitecture architecture = Architecture(definition);
-        if (RequestedBackend is not (TensorBackendKind.Auto or TensorBackendKind.Cpu))
-            throw new InferenceException(InferenceFailureCode.BackendUnavailable, "Embeddings run on the managed CPU backend only.");
+        if (RequestedBackend != TensorBackendKind.Auto && !definition.SupportedBackends.Contains(RequestedBackend))
+            throw new InferenceException(InferenceFailureCode.BackendUnavailable, "The embedding pack does not support the requested backend.");
         TensorModelPackStatus installed = await _packs.GetStatusAsync(model, cancellationToken).ConfigureAwait(false);
         if (installed.State != TensorModelPackState.Installed)
             throw new InferenceException(InferenceFailureCode.ModelUnavailable, "The embedding pack must be installed and verified before Load.");
-        await _lifetime.AcceptAsync(TensorEngineState.Loading, model, TensorBackendKind.Cpu,
+        await _lifetime.AcceptAsync(TensorEngineState.Loading, model, RequestedBackend == TensorBackendKind.Auto ? null : RequestedBackend,
             token => LoadCoreAsync(definition, architecture, token), cancellationToken).ConfigureAwait(false);
     }
 
@@ -101,20 +114,32 @@ public sealed class TensorEmbeddingInference : ITensorEmbeddingInference
         try { lease = await _packs.AcquireAsync(definition.Key, cancellationToken).ConfigureAwait(false); }
         catch (TensorModelPackException) { throw new InferenceException(InferenceFailureCode.ModelUnavailable, "The embedding pack must be installed and verified before Load."); }
         IEmbeddingModel? loaded = null;
+        GgmlRuntimeOwner.ModelLease? runtimeLease = null;
         try
         {
             if (lease.Key != definition.Key) throw new InvalidDataException("The acquired embedding pack identifies another model.");
-            loaded = await _loader.LoadAsync(definition, architecture, lease, cancellationToken).ConfigureAwait(false);
+            TensorBackendKind backend = RequestedBackend;
+            if (_runtimeOwner is not null)
+            {
+                // The owner chooses the actual GGML backend for Auto; the pack must support what it chose.
+                runtimeLease = await _runtimeOwner.AcquireModelAsync(RequestedBackend, cancellationToken).ConfigureAwait(false);
+                backend = runtimeLease.Backend;
+                if (!definition.SupportedBackends.Contains(backend))
+                    throw new InferenceException(InferenceFailureCode.BackendUnavailable, "The initialized backend is incompatible with this embedding pack.");
+            }
+            loaded = await _loader.LoadAsync(definition, architecture, lease, backend, cancellationToken).ConfigureAwait(false);
             cancellationToken.ThrowIfCancellationRequested();
             _model = loaded; _lease = lease; _definition = definition; _architecture = architecture;
-            _lifetime.MarkLoaded(definition.Key, TensorBackendKind.Cpu);
-            return new TensorEngineStatus(definition.Key, TensorBackendKind.Cpu, TensorEngineState.Loaded, DateTimeOffset.UtcNow);
+            _runtimeLease = runtimeLease; _backend = backend;
+            _lifetime.MarkLoaded(definition.Key, backend);
+            return new TensorEngineStatus(definition.Key, backend, TensorEngineState.Loaded, DateTimeOffset.UtcNow);
         }
         catch (Exception exception)
         {
             loaded?.Dispose();
+            runtimeLease?.Dispose();
             await lease.DisposeAsync().ConfigureAwait(false);
-            _model = null; _lease = null; _definition = null; _architecture = null;
+            _model = null; _lease = null; _definition = null; _architecture = null; _runtimeLease = null;
             if (exception is OperationCanceledException or InferenceException or ObjectDisposedException) throw;
             throw new InferenceException(exception switch
             {
@@ -133,6 +158,7 @@ public sealed class TensorEmbeddingInference : ITensorEmbeddingInference
         if (request.ModelId != definition.Key.ModelId)
             throw new InferenceException(InferenceFailureCode.ModelUnavailable, "The request does not identify the resident embedding model.");
         long started = Stopwatch.GetTimestamp();
+        using IDisposable? runtimeUse = _runtimeLease is not null ? _runtimeOwner!.EnterExecution() : null;
         EmbeddingRun run;
         try { run = await EmbeddingModelRuntime.EmbedAsync(_model!, _architecture!, request, execution.CancellationToken).ConfigureAwait(false); }
         catch (Exception exception) when (exception is not OperationCanceledException and not InferenceException and not EmbeddingInputTooLongException)
@@ -154,7 +180,7 @@ public sealed class TensorEmbeddingInference : ITensorEmbeddingInference
                 ModelRevision = definition.Key.Revision,
                 Runtime = "TensorSharp",
                 RuntimeVersion = typeof(EmbeddingModel).Assembly.GetName().Version?.ToString(),
-                Backend = TensorBackendKind.Cpu.ToString(),
+                Backend = _backend.ToString(),
                 Elapsed = Stopwatch.GetElapsedTime(started)
             }
         };
@@ -177,6 +203,8 @@ public sealed class TensorEmbeddingInference : ITensorEmbeddingInference
         using IDisposable unloading = await _lifetime.EnterUnloadAsync(token).ConfigureAwait(false);
         _model?.Dispose();
         _model = null; _definition = null; _architecture = null;
+        _runtimeLease?.Dispose();
+        _runtimeLease = null;
         if (_lease is not null) await _lease.DisposeAsync().ConfigureAwait(false);
         _lease = null;
         _lifetime.MarkUnloaded();

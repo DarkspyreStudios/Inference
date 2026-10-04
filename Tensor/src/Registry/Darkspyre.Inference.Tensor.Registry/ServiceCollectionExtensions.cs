@@ -39,7 +39,8 @@ public static class ServiceCollectionExtensions
         services.TryAddEnumerable(ServiceDescriptor.Singleton<ITensorEngineProvider, SupraEngineProvider>());
         services.TryAddEnumerable(ServiceDescriptor.Singleton<ITensorEngineProvider, LayaEngineProvider>());
         services.TryAddEnumerable(ServiceDescriptor.Singleton<ITensorEngineProvider, WhisperEngineProvider>());
-        services.TryAddEnumerable(ServiceDescriptor.Singleton<ITensorEngineProvider, EmbeddingEngineProvider>());
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<ITensorEngineProvider, EmbeddingEngineProvider>(
+            provider => new(provider.GetRequiredService<GgmlRuntimeOwner>())));
         services.TryAddSingleton<TensorEngineRegistry>();
         return services;
     }

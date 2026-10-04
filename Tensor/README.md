@@ -18,7 +18,7 @@ leaves behind; a newer file may belong to another process's download. Each engin
 installed files as plain paths: Qwen and
 Supra pass them to TensorSharp, Laya creates its ONNX Runtime session from the model path,
 Whisper loads through `WhisperFactory.FromPath`, and the embedding engine loads through
-TensorSharp's `EmbeddingModel.Load`.
+TensorSharp's `EmbeddingModelFactory.Load`.
 
 Assemblies included by the Tensor package:
 
@@ -44,17 +44,21 @@ Assemblies included by the Tensor package:
 - `Darkspyre.Inference.Tensor.STT.Whisper` — resident CPU Whisper inference through the public
   Whisper.net runtime. Whisper.net, Whisper.net.Runtime and NAudio.Core remain declared NuGet
   dependencies, not third-party DLLs embedded by the Darkspyre package.
-- `Darkspyre.Inference.Tensor.Embedding` — resident text embeddings through TensorSharp's managed
-  CPU GGUF sentence encoder. Its built-in pack is Snowflake Arctic Embed L v2.0 (Q8_0, 1024
-  dimensions, 8,192 tokens). The runtime formats queries itself: callers state whether inputs are
-  queries or documents, and documents are embedded as given. It counts every input before embedding
-  any; an input over the limit fails the request with `EmbeddingInputTooLongException`, which names
-  each over-limit input, unless the request permits truncation, in which case the result lists the
-  inputs that were cut. A smaller requested size is taken from the vector's leading values and
-  scaled back to unit length; Arctic supports 256 and 1,024. Each result carries the model
-  fingerprint, a SHA-256 over the weights, architecture and query format; vectors with different
-  fingerprints are not comparable. The native GGML path and Qwen3-Embedding wait for a TensorSharp
-  release that loads them.
+- `Darkspyre.Inference.Tensor.Embedding` — resident text embeddings through TensorSharp's GGUF
+  embedding models. Its built-in packs are Qwen3-Embedding-0.6B (Q8_0, the default; managed CPU, GGML
+  CPU and Metal) and Snowflake Arctic Embed L v2.0 (Q8_0; managed CPU and GGML CPU, because
+  TensorSharp's Metal encoder cannot run it). Both have 1,024 dimensions and an 8,192-token limit.
+  On Auto and the GGML backends the engine borrows the shared `GgmlRuntimeOwner`, so it runs on the
+  backend the process's other GGML engines use; a pack that does not support that backend fails to
+  load. The runtime formats queries itself: callers state whether inputs are queries or documents,
+  and documents are embedded as given. Qwen3 queries carry an instruction, by default the codebase
+  retrieval task; Arctic queries take the `query: ` prefix. The runtime counts every input before
+  embedding any; an input over the limit fails the request with `EmbeddingInputTooLongException`,
+  which names each over-limit input, unless the request permits truncation, in which case the
+  result lists the inputs that were cut. A smaller requested size is taken from the vector's leading
+  values and scaled back to unit length (Qwen3: 32 to 1,024; Arctic: 256 and 1,024). Each result
+  carries the model fingerprint, a SHA-256 over the weights, architecture and query format; vectors
+  with different fingerprints are not comparable.
 - `Darkspyre.Inference.Tensor.Registry` — `TensorEngineRegistry` and the `AddTensorEngines`
   composition of the five shipped engines. It references the engine assemblies; neither
   `.Tensor.Common` nor an engine assembly references it.
@@ -178,8 +182,8 @@ A provider exposes four operations:
   `Whisper` or `Embedding`. Reading a definition constructs no engine, loads no native library, opens no store,
   reads no credential and makes no network call.
 - `GetOfferedModelsAsync(packs)` returns the engine's built-in packs followed by the packs of its
-  own family registered in `packs`. Qwen, Supra and the embedding engine have one built-in pack,
-  Whisper has its twelve published variants, and Laya has none. The engine's compatibility validator checks every offered
+  own family registered in `packs`. Qwen and Supra have one built-in pack, the embedding engine
+  has two, Whisper has its twelve published variants, and Laya has none. The engine's compatibility validator checks every offered
   pack. A registered manifest that differs from a built-in at the same key fails; it never replaces
   the built-in.
 - `CreateInstance(packs, backend)` constructs the engine with its own execution coordinator. The

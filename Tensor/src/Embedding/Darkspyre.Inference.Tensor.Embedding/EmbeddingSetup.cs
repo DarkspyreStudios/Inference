@@ -1,6 +1,7 @@
 using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Common.Setup;
 using Darkspyre.Inference.Tensor.Common;
+using Darkspyre.Inference.Tensor.Ggml;
 
 namespace Darkspyre.Inference.Tensor.Embedding;
 
@@ -37,8 +38,8 @@ public sealed class EmbeddingModelResolver : TensorModelResolver
         ArgumentNullException.ThrowIfNull(candidate); cancellationToken.ThrowIfCancellationRequested();
         static Task<TensorModelResolution> Failure(TensorCompatibilityState state, string code, string message) =>
             Task.FromResult(new TensorModelResolution(new(state, [new(code, message)], [])));
-        if (backend is not (TensorBackendKind.Auto or TensorBackendKind.Cpu))
-            return Failure(TensorCompatibilityState.Unsupported, "backend-unsupported", "Embeddings run on the managed CPU backend only.");
+        if (backend != TensorBackendKind.Auto && !TensorEmbeddingModels.Backends.Contains(backend))
+            return Failure(TensorCompatibilityState.Unsupported, "backend-unsupported", "Embeddings run on managed CPU or a GGML backend.");
         TensorSourceArtifact[] selected = candidate.Artifacts.Where(item => item.Path == candidate.Selection.Variant).ToArray();
         if (selected.Length != 1)
             return Failure(TensorCompatibilityState.Unverified, "candidate-unavailable", "The selected source artifact is missing or ambiguous.");
@@ -55,24 +56,31 @@ public sealed class EmbeddingModelResolver : TensorModelResolver
     }
 }
 
-/// <summary>The managed CPU embedding runtime needs no native library, so the CPU backend is always available.</summary>
-internal sealed class EmbeddingBackendProbe : ITensorBackendProbe
+/// <summary>
+/// The managed CPU encoder needs no native library, so CPU is always available. Auto and the GGML backends are answered
+/// by the shared GGML runtime owner, the same one the engine borrows.
+/// </summary>
+internal sealed class EmbeddingBackendProbe(GgmlRuntimeOwner? runtimeOwner = null) : ITensorBackendProbe
 {
     public Task<TensorBackendAvailability> CheckAsync(TensorBackendProbeRequest request, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
         if (TensorBackendProbes.ValidateLocalRequest(request, EmbeddingSetup.Definition.Implementation.Id) is { } invalid) return Task.FromResult(invalid);
-        return Task.FromResult(request.RequestedBackend is TensorBackendKind.Cpu or TensorBackendKind.Auto
-            ? TensorBackendAvailability.Observe(request, TensorBackendAvailabilityState.Available, "The managed CPU embedding runtime needs no native library.")
-            : TensorBackendAvailability.Observe(request, TensorBackendAvailabilityState.Unsupported, "Embeddings run on the managed CPU backend only."));
+        if (request.RequestedBackend == TensorBackendKind.Cpu)
+            return Task.FromResult(TensorBackendAvailability.Observe(request, TensorBackendAvailabilityState.Available,
+                "The managed CPU embedding encoder needs no native library."));
+        if (request.RequestedBackend != TensorBackendKind.Auto && !TensorEmbeddingModels.Backends.Contains(request.RequestedBackend))
+            return Task.FromResult(TensorBackendAvailability.Observe(request, TensorBackendAvailabilityState.Unsupported,
+                "Embeddings run on managed CPU or a GGML backend."));
+        return (runtimeOwner ?? GgmlRuntimeOwner.GetOrCreate()).CheckAsync(request, cancellationToken);
     }
 }
 
 /// <summary>
-/// Registers text embeddings. Its packs live under the <c>Embedding</c> store key. Arctic Embed L v2.0 is its
-/// built-in pack.
+/// Registers text embeddings. Its packs live under the <c>Embedding</c> store key. Its built-in packs are
+/// Qwen3-Embedding-0.6B, the default, and Arctic Embed L v2.0. Its engines borrow <paramref name="runtimeOwner"/>.
 /// </summary>
-public sealed class EmbeddingEngineProvider : ITensorEngineProvider
+public sealed class EmbeddingEngineProvider(GgmlRuntimeOwner runtimeOwner) : ITensorEngineProvider
 {
     public TensorEngineDefinition Definition { get; } = new(EmbeddingSetup.Definition, "Embedding");
 
@@ -89,7 +97,7 @@ public sealed class EmbeddingEngineProvider : ITensorEngineProvider
     }
 
     public ITensorModelInstance CreateInstance(ITensorModelPackManager packs, TensorBackendKind backend) =>
-        new TensorEmbeddingInference(packs, backend);
+        new TensorEmbeddingInference(packs, backend, runtimeOwner);
 
     public TensorSettingsManager CreateSettingsManager(ISetupCommitTarget<TensorSetupChanges> target, ITensorModelPackManager packs,
         IReadOnlyList<TensorModelPackDefinition> offeredModels, ITensorModelInstance? instance = null,
@@ -102,6 +110,7 @@ public sealed class EmbeddingEngineProvider : ITensorEngineProvider
             ITensorEmbeddingInference embedding when embedding.Descriptor.Id == Definition.Setup.Implementation.Id => embedding,
             _ => throw new ArgumentException("The instance does not belong to the embedding implementation.", nameof(instance))
         };
-        return EmbeddingSetup.CreateSettingsManager(target, packs, live, offeredModels, source, reader, backendProbe);
+        return EmbeddingSetup.CreateSettingsManager(target, packs, live, offeredModels, source, reader,
+            backendProbe ?? new EmbeddingBackendProbe(runtimeOwner));
     }
 }
