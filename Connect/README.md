@@ -3624,6 +3624,11 @@ Darkspyre.Inference.Connect.LLM cannot surface the call for host authorization a
 terminates on any other content-block type, so `SupportsPromptImages` and
 `SupportsPromptDocuments` are also false. Darkspyre.Inference.Connect.LLM does not rely on undocumented `@path` behavior.
 
+Antigravity chat reports `Unknown` for an unrecognized or missing terminal status and retains the
+actual response text, usage, conversation ID and observed status. It does not validate that result
+as successful structured output. Recognized success and error/interruption handling remain distinct.
+Native Unknown diagnostics retain the observed status.
+
 ### Antigravity native agent sessions
 
 `LlmAgentProviderService` starts and resumes native AGY conversations. AGY owns the conversation, its

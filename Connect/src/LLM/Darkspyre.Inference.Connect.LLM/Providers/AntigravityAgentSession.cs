@@ -930,7 +930,7 @@ internal sealed class AntigravityAgentSession : ILlmAgentSession
                 "SUCCESS" => (LlmAgentCompletionReason.Completed, (string?)null),
                 "ERROR" or "INVALID" => (LlmAgentCompletionReason.ProviderFailure, "Antigravity CLI reported a provider error."),
                 "CANCELED" or "INTERRUPTED" => (LlmAgentCompletionReason.Interruption, "Antigravity CLI reported the turn as interrupted."),
-                _ => (LlmAgentCompletionReason.Unknown, "Antigravity CLI ended the turn without a terminal classification.")
+                _ => (LlmAgentCompletionReason.Unknown, $"Antigravity CLI returned terminal status '{result.Status}'.")
             };
 
             if (reason == LlmAgentCompletionReason.Completed && schema is not null)

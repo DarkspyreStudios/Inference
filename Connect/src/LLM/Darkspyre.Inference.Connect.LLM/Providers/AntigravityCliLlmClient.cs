@@ -284,7 +284,11 @@ internal sealed class AntigravityCliLlmClient(IAntigravityCliRunner runner)
         LlmChatRequest request,
         LlmStructuredOutputEnforcement? enforcement)
     {
-        if (!string.Equals(response.Status, "SUCCESS", StringComparison.OrdinalIgnoreCase))
+        bool completed = string.Equals(response.Status, "SUCCESS", StringComparison.OrdinalIgnoreCase);
+        if (string.Equals(response.Status, "ERROR", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(response.Status, "INVALID", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(response.Status, "CANCELED", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(response.Status, "INTERRUPTED", StringComparison.OrdinalIgnoreCase))
         {
             throw new LlmProviderException(
                 "Antigravity CLI reported a provider error.",
@@ -295,11 +299,11 @@ internal sealed class AntigravityCliLlmClient(IAntigravityCliRunner runner)
         return new LlmChatResult
         {
             Text = response.Text,
-            Status = LlmCompletionStatus.Completed,
-            FinishReason = "completed",
+            Status = completed ? LlmCompletionStatus.Completed : LlmCompletionStatus.Unknown,
+            FinishReason = completed ? "completed" : response.Status.Length == 0 ? null : response.Status,
             Usage = response.Usage,
             ProviderResponseId = response.ConversationId,
-            StructuredOutput = request.StructuredOutput is null
+            StructuredOutput = !completed || request.StructuredOutput is null
                 ? null
                 : StructuredOutput.Validate(response.Text, request.StructuredOutput, enforcement!.Value),
             Diagnostics = new LlmProviderDiagnostics(200, null, null)
