@@ -154,7 +154,11 @@ internal sealed class BedrockAgentCoreLlmClient(IBedrockAgentCoreInvoker invoker
                 ? LlmCompletionStatus.Refused
                 : incomplete
                     ? LlmCompletionStatus.Incomplete
-                    : LlmCompletionStatus.Completed,
+                    : stopReason is "end_turn" or "stop_sequence"
+                        ? LlmCompletionStatus.Completed
+                        : stopReason is "malformed_model_output" or "malformed_tool_use" or "interrupted" or "partial_turn" or "hook_stopped"
+                            ? LlmCompletionStatus.Failed
+                            : LlmCompletionStatus.Unknown,
             FinishReason = MapFinishReason(stopReason),
             IncompleteReason = incomplete ? stopReason : null,
             Usage = usage.Settle(),

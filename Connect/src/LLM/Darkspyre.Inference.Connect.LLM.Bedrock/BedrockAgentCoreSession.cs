@@ -618,6 +618,7 @@ internal sealed class BedrockAgentCoreSession : ILlmAgentSession
     private static (LlmAgentCompletionReason Reason, string? Error) Completion(string? stopReason) =>
         stopReason switch
         {
+            "end_turn" or "stop_sequence" => (LlmAgentCompletionReason.Completed, null),
             "interrupted" => (LlmAgentCompletionReason.Interruption, "AgentCore interrupted the turn."),
             "refusal" or "guardrail_intervened" => (LlmAgentCompletionReason.Refusal, null),
             "content_filtered" => (LlmAgentCompletionReason.Refusal, $"AgentCore stopped with '{stopReason}'."),
@@ -628,9 +629,10 @@ internal sealed class BedrockAgentCoreSession : ILlmAgentSession
                 or "max_tokens"
                 or "model_context_window_exceeded"
                 or "partial_turn"
+                or "hook_stopped"
                 or "timeout_exceeded" =>
                 (LlmAgentCompletionReason.ProviderFailure, $"AgentCore stopped with '{stopReason}'."),
-            _ => (LlmAgentCompletionReason.Completed, null)
+            _ => (LlmAgentCompletionReason.Unknown, null)
         };
 
     private sealed record PendingToolUse(

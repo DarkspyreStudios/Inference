@@ -3331,6 +3331,11 @@ lease across yields. Late provider and tool results are not delivered. The injec
 borrowed. Local retirement does not claim a remote Harness interrupt or shutdown.
 
 AgentCore chat and native sessions replace usage observations within each actual Harness invocation.
+Only `end_turn` and `stop_sequence` report normal completion. Unknown terminal stop reasons,
+including a final `tool_result` without a subsequent completed message, remain `Unknown`.
+Malformed, interrupted, partial and hook-stopped chat outcomes report `Failed`. Native sessions
+preserve their interruption/refusal/failure reasons; a hook-stopped invocation reports provider
+failure. Missing message-stop events retain their explicit protocol-failure path.
 Chat emits changed known counts before its completion; its final usage can be null. Its running event
 cannot represent wholly unavailable usage. A later known observation after unavailable metadata is
 emitted again. Native observations share one request ID per invocation and can report unknown usage.
