@@ -1284,7 +1284,7 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
                         turnId,
                         itemId,
                         value,
-                        IsSummary: false);
+                        IsSummary: true);
                 }
             }
         }
