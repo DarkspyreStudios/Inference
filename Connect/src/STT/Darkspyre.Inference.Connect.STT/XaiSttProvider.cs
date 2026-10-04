@@ -76,7 +76,7 @@ public sealed class XaiSttProvider : ISttProvider
             XaiFamilyBinding acquired = await _binding!.AcquireBoundAsync(selected =>
             {
                 if (!string.Equals(_connection!.Endpoint.AbsoluteUri.TrimEnd('/'), selected.Endpoint.TrimEnd('/'), StringComparison.Ordinal)) throw XaiSttProtocol.Invalid();
-            }, token).ConfigureAwait(false);
+            }, cancellationToken: token).ConfigureAwait(false);
             Fence(token); LlmConnection snapshot = await acquired.AcquireAsync(token).ConfigureAwait(false); Fence(token); return snapshot;
         }
         public async Task<SpeechTranscriptionResult> TranscribeAsync(SpeechTranscriptionInput input, SpeechTranscriptionOptions options, CancellationToken cancellationToken = default)

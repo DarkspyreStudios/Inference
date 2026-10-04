@@ -8,7 +8,8 @@ namespace Darkspyre.Inference.Connect.Image.Internal;
 internal static class ImageResourceOperations
 {
     internal static async Task<InferenceResourceCommitResult> CommitAsync(IInferenceResourceAccess resources,
-        string? fileName, string? contentType, ReadOnlyMemory<byte> bytes, Action<CancellationToken>? fence = null, CancellationToken token = default)
+        string? fileName, string? contentType, ReadOnlyMemory<byte> bytes, Action<CancellationToken>? fence = null,
+        Action<InferenceResourceCommitResult>? onCommitted = null, CancellationToken token = default)
     {
         string? workspaceId = null;
         string? sessionId = null;
@@ -21,6 +22,7 @@ internal static class ImageResourceOperations
         InferenceResourceCommitOutcome selectionOutcome = InferenceResourceCommitOutcome.NotAttempted;
         InferenceResourceSelectionVersion? selectionVersion = null;
         InferenceResourceCommitResult? result = null;
+        IReadOnlyList<InferenceResourceCommitResult> retained = [];
         try
         {
             Fence(fence, token);
@@ -60,15 +62,16 @@ internal static class ImageResourceOperations
                     selectionVersion = new(observed.WorkspaceId, observed.SessionId, observed.Revision);
                 }
             }
-            CheckScope();
             InferenceResourceDescriptor? resource = committed?.Resource;
             if (resource is null || resource.Reference != reference || resource.SessionId is { } reportedSession && reportedSession != sessionId
                 || resource.Bytes is { } size && size != written
-                || resource.ContentType is { } type && contentType is not null && type != contentType
+                || XaiMediaData.ContentTypesConflict(resource.ContentType, contentType)
                 || selectionOutcome != InferenceResourceCommitOutcome.Committed) throw Invalid();
             var selection = new InferenceResourceSelection(workspaceId!, sessionId!, committed!.Selection!.Revision, committed.Selection.SelectedResources);
             if (selection.SelectedResources.Any(item => string.IsNullOrEmpty(item.Id))) throw Invalid();
             result = new InferenceResourceCommitResult(resource, selection);
+            onCommitted?.Invoke(result);
+            CheckScope();
         }
         catch (Exception error)
         {
@@ -83,6 +86,7 @@ internal static class ImageResourceOperations
             {
                 outcome = observed.CommitOutcome; selectionOutcome = observed.SelectionOutcome;
                 selectionVersion = observed.SelectionVersion; written = observed.BytesTransferred;
+                retained = observed.GeneratedResources;
             }
         }
         if (writer is not null)
@@ -114,13 +118,78 @@ internal static class ImageResourceOperations
         Exception Wrap(Exception error, InferenceResourceOperationPhase actualPhase)
         {
             var facts = new InferenceResourceOperationFailure(actualPhase, reference, outcome, written)
-            { SelectionOutcome = selectionOutcome, SelectionVersion = selectionVersion };
+            {
+                SelectionOutcome = selectionOutcome,
+                SelectionVersion = selectionVersion,
+                GeneratedResources = result is null ? retained : [result]
+            };
             return error is OperationCanceledException canceled
-                ? new InferenceResourceOperationCanceledException(facts, canceled.CancellationToken, error)
+                ? new InferenceResourceOperationCanceledException(facts, canceled.CancellationToken, new FailureEvidence(error))
                 : new InferenceResourceOperationException(error is InferenceException provider ? provider.Code : InferenceFailureCode.ExecutionFailed,
-                    "The image resource operation failed.", facts, error);
+                    "The image resource operation failed.", facts, new FailureEvidence(error));
         }
     }
+
+    internal static Exception WithGeneratedResources(Exception error, IReadOnlyList<InferenceResourceCommitResult> previous)
+    {
+        if (previous.Count == 0) return error;
+        if (error is AggregateException aggregate)
+            return new AggregateException("The image operation and cleanup failed.", aggregate.InnerExceptions.Select((cause, index) =>
+                index == 0 ? WithGeneratedResources(cause, previous) : cause));
+        InferenceResourceOperationFailure? observed = error switch
+        {
+            InferenceResourceOperationException resource => resource.Failure,
+            InferenceResourceOperationCanceledException canceled => canceled.Failure,
+            _ => null
+        };
+        IReadOnlyList<InferenceResourceCommitResult> current = observed?.GeneratedResources ?? [];
+        IEnumerable<InferenceResourceCommitResult> retained = current.Count >= previous.Count
+            && SameReceipts(current.Take(previous.Count), previous) ? current
+            : previous.Count >= current.Count && SameReceipts(previous.Skip(previous.Count - current.Count), current) ? previous
+            : previous.Concat(current);
+        // Previous commits do not identify a new allocation that failed before it existed.
+        var facts = (observed ?? new(InferenceResourceOperationPhase.Materialize, null,
+            InferenceResourceCommitOutcome.NotAttempted)) with
+        { GeneratedResources = retained.ToArray() };
+        Exception? safeCause = error.InnerException is FailureEvidence or Providers.XaiImagineImageTransport.ImageEvidence ? error : null;
+        Exception failure = error is OperationCanceledException canceledOperation
+            ? new InferenceResourceOperationCanceledException(facts, canceledOperation.CancellationToken,
+                new FailureEvidence(error, safeCause))
+            : new InferenceResourceOperationException(error is InferenceResourceOperationException resourceOperation ? resourceOperation.Code
+                : error is InferenceException inference ? inference.Code : InferenceFailureCode.ExecutionFailed,
+                "The image operation failed after committing resources.", facts,
+                new FailureEvidence(error, safeCause));
+        return facts.Phase == InferenceResourceOperationPhase.Cleanup
+            ? LlmResourcePreparation.AsCleanupFailure(failure, refusedOwner: error) : failure;
+    }
+
+    private static bool SameReceipts(IEnumerable<InferenceResourceCommitResult> left, IEnumerable<InferenceResourceCommitResult> right) =>
+        left.Zip(right).All(pair => pair.First.Resource == pair.Second.Resource
+            && pair.First.Selection!.WorkspaceId == pair.Second.Selection!.WorkspaceId
+            && pair.First.Selection.SessionId == pair.Second.Selection.SessionId
+            && pair.First.Selection.Revision == pair.Second.Selection.Revision
+            && pair.First.Selection.SelectedResources.SequenceEqual(pair.Second.Selection.SelectedResources));
+
+    internal static Exception ActualCleanup(Exception error)
+    {
+        while (true)
+        {
+            Exception? original = error.InnerException switch
+            {
+                FailureEvidence evidence => evidence.Original,
+                Providers.XaiImagineImageTransport.ImageEvidence evidence => evidence.Original,
+                _ => null
+            };
+            if (original is InferenceResourceOperationException resource && resource.Failure.Phase == InferenceResourceOperationPhase.Cleanup
+                || original is InferenceResourceOperationCanceledException canceled && canceled.Failure.Phase == InferenceResourceOperationPhase.Cleanup)
+                error = original;
+            else return error;
+        }
+    }
+
+    internal sealed class FailureEvidence(Exception original, Exception? safeCause = null)
+        : Exception("The image resource boundary reported a failure.", safeCause)
+    { internal Exception Original { get; } = original; }
 
     private static void Fence(Action<CancellationToken>? fence, CancellationToken token)
     { token.ThrowIfCancellationRequested(); fence?.Invoke(token); }

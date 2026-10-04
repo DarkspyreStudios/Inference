@@ -65,7 +65,7 @@ public sealed class XaiRealtimeProvider(HttpClient httpClient) : IRealtimeProvid
         XaiFamilyBinding acquired = await xai!.AcquireBoundAsync(selected =>
         {
             if (!string.Equals(admitted.Endpoint.AbsoluteUri.TrimEnd('/'), selected.Endpoint.TrimEnd('/'), StringComparison.Ordinal)) throw XaiRealtimeProtocol.Invalid();
-        }, deadline.Token).ConfigureAwait(false);
+        }, cancellationToken: deadline.Token).ConfigureAwait(false);
         OpeningFence();
         LlmConnection selected = await acquired.AcquireAsync(deadline.Token).ConfigureAwait(false);
         OpeningFence();

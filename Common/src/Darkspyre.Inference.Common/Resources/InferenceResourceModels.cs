@@ -122,7 +122,7 @@ public enum InferenceResourceCommitOutcome
     Unknown = 3
 }
 
-/// <summary>Primitive observed effects, not an exception or live storage graph.</summary>
+/// <summary>Portable observed effects, not an exception or live storage graph.</summary>
 public sealed record InferenceResourceOperationFailure(
     [property: JsonRequired] InferenceResourceOperationPhase Phase,
     InferenceResourceReference? Reference,
@@ -134,6 +134,13 @@ public sealed record InferenceResourceOperationFailure(
     public InferenceResourceCommitOutcome SelectionOutcome { get; init; } = InferenceResourceCommitOutcome.NotAttempted;
 
     public InferenceResourceSelectionVersion? SelectionVersion { get; init; }
+
+    /// <summary>Ordered actual commit-and-selection receipts retained after a later failure.</summary>
+    public IReadOnlyList<InferenceResourceCommitResult> GeneratedResources
+    {
+        get;
+        init => field = ResourceContract.CopyGeneratedResources(value);
+    } = [];
 }
 
 internal static class ResourceContract

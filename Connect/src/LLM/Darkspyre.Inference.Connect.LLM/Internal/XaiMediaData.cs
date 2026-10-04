@@ -7,6 +7,16 @@ namespace Darkspyre.Inference.Connect.LLM.Internal;
 /// <summary>Finite media wire facts; no route, account, upload or receipt authority is established here.</summary>
 internal static class XaiMediaData
 {
+    internal static bool ContentTypesConflict(string? first, string? second)
+    {
+        if (first is null || second is null) return false;
+        if (!System.Net.Http.Headers.MediaTypeHeaderValue.TryParse(first, out var left)
+            || !System.Net.Http.Headers.MediaTypeHeaderValue.TryParse(second, out var right)) return true;
+        if (!string.Equals(left.MediaType, right.MediaType, StringComparison.OrdinalIgnoreCase)) return true;
+        return left.Parameters.Any(parameter => right.Parameters.Any(other =>
+            string.Equals(parameter.Name, other.Name, StringComparison.OrdinalIgnoreCase) && !parameter.Equals(other)));
+    }
+
     internal static async Task<string> AudioDataUrlAsync(Stream source, string? contentType, long maximumEncodedBytes,
         Action fence, CancellationToken token)
     {

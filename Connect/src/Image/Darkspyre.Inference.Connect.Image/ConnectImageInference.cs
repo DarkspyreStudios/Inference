@@ -20,7 +20,7 @@ internal sealed class ConnectImageInference : IImageInference, IDisposable, IAsy
     private ImageWorkflow? _workflow;
     private XaiFamilyBinding? _xai;
     private IInferenceResourceAccess? _resources;
-    private readonly List<Exception> _cleanupFailures = [];
+    private readonly List<(Exception Original, Exception Safe)> _cleanupFailures = [];
 
     internal ConnectImageInference(IImageTransport transport, ImageConnection connection,
         ImageWorkflow workflow, XaiFamilyBinding? xai, IInferenceResourceAccess? resources,
@@ -71,147 +71,165 @@ internal sealed class ConnectImageInference : IImageInference, IDisposable, IAsy
         ImageConnection connection = CaptureConnection(_connection!);
         XaiFamilyBinding? xai = _xai;
         XaiFamilyBinding? entered = null;
+        var generatedResources = new List<InferenceResourceCommitResult>();
         try
         {
-        IInferenceResourceAccess? resources = _resources;
-        InferenceMediaSource[] references = request.References.Select(source => source is BinaryMediaSource binary
-            ? binary with { Data = binary.Data.ToArray() } : source).ToArray();
-        ValidateBinding(connection, xai);
-        if (!string.Equals(request.ModelId, workflow.Id, StringComparison.Ordinal))
-            throw new InferenceException(InferenceFailureCode.ModelUnavailable, "The requested workflow is not bound.");
-        if (request.Count < 1)
-            throw new ArgumentOutOfRangeException(nameof(request), "Image count must be positive.");
-        if (references.Any(source => source is not (BinaryMediaSource or UrlMediaSource or FileMediaSource or ResourceMediaSource)))
-            throw new InferenceException(InferenceFailureCode.UnsupportedFeature, "The image source variant is unsupported.");
-        if (connection.Transport == ImageTransport.ComfyUi
-            && (request.Count != 1 || request.Steps is not null || request.GuidanceScale is not null
-                || references.Length > 1 || references.Any(source => source is not (BinaryMediaSource or ResourceMediaSource))))
-            throw new InferenceException(InferenceFailureCode.UnsupportedFeature, "ComfyUI does not support the requested controls or source kinds.");
-        if (references.Any(source => source is ResourceMediaSource) && resources is null)
-            throw new InferenceException(InferenceFailureCode.UnsupportedFeature, "Logical image references require caller-owned resource access.");
-        if (workflow.RequiresReferenceImage && references.Length == 0)
-            throw new InferenceException(InferenceFailureCode.UnsupportedFeature, "The workflow requires a reference image.");
-        if (xai is not null)
-        {
-            XaiImagineImageTransport.ValidateConnection(connection, xai);
-            XaiImageProtocol.Validate(request with { References = references }, workflow);
-            foreach (InferenceMediaSource source in references) XaiImagineImageTransport.ValidateSource(source, resources);
-            xai = await xai.AcquireBoundAsync(snapshot =>
+            IInferenceResourceAccess? resources = _resources;
+            InferenceMediaSource[] references = request.References.Select(source => source is BinaryMediaSource binary
+                ? binary with { Data = binary.Data.ToArray() } : source).ToArray();
+            ValidateBinding(connection, xai);
+            if (!string.Equals(request.ModelId, workflow.Id, StringComparison.Ordinal))
+                throw new InferenceException(InferenceFailureCode.ModelUnavailable, "The requested workflow is not bound.");
+            if (request.Count < 1)
+                throw new ArgumentOutOfRangeException(nameof(request), "Image count must be positive.");
+            if (references.Any(source => source is not (BinaryMediaSource or UrlMediaSource or FileMediaSource or ResourceMediaSource)))
+                throw new InferenceException(InferenceFailureCode.UnsupportedFeature, "The image source variant is unsupported.");
+            if (connection.Transport == ImageTransport.ComfyUi
+                && (request.Count != 1 || request.Steps is not null || request.GuidanceScale is not null
+                    || references.Length > 1 || references.Any(source => source is not (BinaryMediaSource or ResourceMediaSource))))
+                throw new InferenceException(InferenceFailureCode.UnsupportedFeature, "ComfyUI does not support the requested controls or source kinds.");
+            if (references.Any(source => source is ResourceMediaSource) && resources is null)
+                throw new InferenceException(InferenceFailureCode.UnsupportedFeature, "Logical image references require caller-owned resource access.");
+            if (workflow.RequiresReferenceImage && references.Length == 0)
+                throw new InferenceException(InferenceFailureCode.UnsupportedFeature, "The workflow requires a reference image.");
+            if (xai is not null)
             {
-                if (!string.Equals(connection.Endpoint.TrimEnd('/'), snapshot.Endpoint.TrimEnd('/'), StringComparison.Ordinal))
-                    throw new ArgumentException("The image endpoint does not match the selected xAI region.");
-            }, lease.Token, () => Fence(lease.Token)).ConfigureAwait(false);
-            entered = xai;
-            Fence(lease.Token);
-            connection = connection with { Authorization = xai.Authorization };
-        }
-        ImageCapabilities capabilities = await transport.GetCapabilitiesAsync(connection, workflow, request.ModelId, xai, lease.Token).ConfigureAwait(false);
-        Fence(lease.Token);
-        ValidateCapabilities(request, references, capabilities);
-        var receipts = new List<ImagePreparedReference>();
-        foreach (InferenceMediaSource source in references)
-        {
-            Fence(lease.Token);
-            receipts.Add(await transport.ResolveReferenceAsync(connection, source, xai, resources, lease.Token).ConfigureAwait(false));
-            Fence(lease.Token);
-        }
-        long? seed = request.Seed ?? (connection.Transport == ImageTransport.ComfyUi ? Random.Shared.NextInt64() : null);
-        PreparedImageTransportRequest prepared = transport.Prepare(new ImageTransportPreparationRequest
-        {
-            Workflow = workflow,
-            PositivePrompt = request.Prompt,
-            NegativePrompt = request.NegativePrompt,
-            Width = request.Width,
-            Height = request.Height,
-            Seed = seed,
-            Steps = request.Steps,
-            GuidanceScale = request.GuidanceScale,
-            Count = request.Count,
-            CacheKey = Guid.NewGuid().ToString("N"),
-            Label = workflow.Label,
-            References = receipts.AsReadOnly()
-        });
-        Fence(lease.Token);
-        progress?.Report(new(ImageGenerationStage.Queued));
-        string? jobId = null;
-        long started = Stopwatch.GetTimestamp();
-        try
-        {
-            jobId = await transport.SubmitAsync(connection, prepared, xai, lease.Token).ConfigureAwait(false);
-            Fence(lease.Token);
-            while (true)
-            {
-                ImageTransportJobSnapshot snapshot = await transport.GetJobAsync(connection, jobId, workflow, xai, lease.Token).ConfigureAwait(false);
-                Fence(lease.Token);
-                switch (snapshot.State)
+                XaiImagineImageTransport.ValidateConnection(connection, xai);
+                xai.RequireCatalogService();
+                XaiImageProtocol.Validate(request with { References = references }, workflow);
+                foreach (InferenceMediaSource source in references) XaiImagineImageTransport.ValidateSource(source, resources);
+                xai = await xai.AcquireBoundAsync(snapshot =>
                 {
-                    case ImageTransportJobState.Queued:
-                        progress?.Report(new(ImageGenerationStage.Queued));
-                        break;
-                    case ImageTransportJobState.Generating:
-                        progress?.Report(new(ImageGenerationStage.Generating));
-                        break;
-                    case ImageTransportJobState.Completed:
-                        if (snapshot.Outputs is not { Count: > 0 })
-                            throw new InferenceException(InferenceFailureCode.ProtocolFailure, "The image provider completed without output artifacts.");
-                        var images = new List<GeneratedImage>();
-                        foreach (ImageTransportOutput output in snapshot.Outputs.ToArray())
-                        {
-                            ArgumentNullException.ThrowIfNull(output);
-                            ImageTransportDownload download = await transport.DownloadAsync(connection, output, xai, lease.Token).ConfigureAwait(false);
-                            Fence(lease.Token);
-                            byte[] bytes = download.Data.ToArray();
-                            string? contentType = download.ContentType ?? output.ContentType;
-                            InferenceResourceDescriptor? resource = output.Resource;
-                            InferenceResourceSelection? selection = null;
-                            if (resources is not null)
-                            {
-                                InferenceResourceCommitResult committed = await ImageResourceOperations.CommitAsync(resources, output.FileName, contentType, bytes, Fence, lease.Token).ConfigureAwait(false);
-                                resource = committed.Resource;
-                                selection = committed.Selection;
-                            }
-                            Fence(lease.Token);
-                            images.Add(new GeneratedImage
-                            {
-                                ContentType = contentType, Data = bytes, Seed = seed, File = output.File, Resource = resource, Selection = selection,
-                                Width = connection.Transport == ImageTransport.XaiImagine ? OutputDimension(output, "width") : null,
-                                Height = connection.Transport == ImageTransport.XaiImagine ? OutputDimension(output, "height") : null
-                            });
-                        }
-                        Fence(lease.Token);
-                        progress?.Report(new(ImageGenerationStage.Completed));
-                        return new ImageGenerationResult
-                        {
-                            Images = images.AsReadOnly(),
-                            Provenance = new InferenceProvenance
-                            {
-                                ImplementationId = Descriptor.Id,
-                                ModelId = snapshot.ModelId,
-                                ModelRevision = snapshot.ModelRevision,
-                                Runtime = transport.Descriptor.DisplayName,
-                                Backend = "connect",
-                                Elapsed = Stopwatch.GetElapsedTime(started)
-                            }
-                        };
-                    case ImageTransportJobState.Failed:
-                        if (snapshot.Error?.Resource is { } resourceFailure)
-                            throw new InferenceResourceOperationException(snapshot.Error.Code,
-                                "The image provider reported a resource operation failure.", resourceFailure);
-                        throw new InferenceException(snapshot.Error?.Code ?? InferenceFailureCode.ExecutionFailed,
-                            snapshot.Error?.Message ?? "The image provider failed the generation job.");
-                    default:
-                        throw new InferenceException(InferenceFailureCode.ProtocolFailure, "The image provider returned an unknown job state.");
-                }
-                await Task.Delay(_pollInterval, lease.Token).ConfigureAwait(false);
+                    XaiImagineImageTransport.ValidateSelected(connection, snapshot);
+                }, () => Fence(lease.Token), lease.Token).ConfigureAwait(false);
+                entered = xai;
+                Fence(lease.Token);
+                connection = connection with { Authorization = xai.Authorization };
+            }
+            ImageCapabilities capabilities = await transport.GetCapabilitiesAsync(connection, workflow, request.ModelId, xai, lease.Token).ConfigureAwait(false);
+            Fence(lease.Token);
+            ValidateCapabilities(request, references, capabilities);
+            var receipts = new List<ImagePreparedReference>();
+            foreach (InferenceMediaSource source in references)
+            {
+                Fence(lease.Token);
+                ImagePreparedReference receipt = await transport.ResolveReferenceAsync(connection, source, xai, resources, lease.Token).ConfigureAwait(false);
+                receipts.Add(receipt);
+                if (connection.Transport == ImageTransport.XaiImagine)
+                    generatedResources.AddRange(XaiImagineImageTransport.PreparedResources(receipt));
                 Fence(lease.Token);
             }
+            long? seed = request.Seed ?? (connection.Transport == ImageTransport.ComfyUi ? Random.Shared.NextInt64() : null);
+            PreparedImageTransportRequest prepared = transport.Prepare(new ImageTransportPreparationRequest
+            {
+                Workflow = workflow,
+                PositivePrompt = request.Prompt,
+                NegativePrompt = request.NegativePrompt,
+                Width = request.Width,
+                Height = request.Height,
+                Seed = seed,
+                Steps = request.Steps,
+                GuidanceScale = request.GuidanceScale,
+                Count = request.Count,
+                CacheKey = Guid.NewGuid().ToString("N"),
+                Label = workflow.Label,
+                References = receipts.AsReadOnly()
+            });
+            Fence(lease.Token);
+            progress?.Report(new(ImageGenerationStage.Queued));
+            string? jobId = null;
+            long started = Stopwatch.GetTimestamp();
+            try
+            {
+                jobId = await transport.SubmitAsync(connection, prepared, xai, lease.Token).ConfigureAwait(false);
+                Fence(lease.Token);
+                while (true)
+                {
+                    ImageTransportJobSnapshot snapshot = await transport.GetJobAsync(connection, jobId, workflow, xai, lease.Token).ConfigureAwait(false);
+                    Fence(lease.Token);
+                    switch (snapshot.State)
+                    {
+                        case ImageTransportJobState.Queued:
+                            progress?.Report(new(ImageGenerationStage.Queued));
+                            break;
+                        case ImageTransportJobState.Generating:
+                            progress?.Report(new(ImageGenerationStage.Generating));
+                            break;
+                        case ImageTransportJobState.Completed:
+                            if (snapshot.Outputs is not { Count: > 0 })
+                                throw new InferenceException(InferenceFailureCode.ProtocolFailure, "The image provider completed without output artifacts.");
+                            var images = new List<GeneratedImage>();
+                            generatedResources.EnsureCapacity(checked(generatedResources.Count + snapshot.Outputs.Count));
+                            foreach (ImageTransportOutput output in snapshot.Outputs.ToArray())
+                            {
+                                ArgumentNullException.ThrowIfNull(output);
+                                ImageTransportDownload download = await transport.DownloadAsync(connection, output, xai, lease.Token).ConfigureAwait(false);
+                                Fence(lease.Token);
+                                byte[] bytes = download.Data.ToArray();
+                                string? contentType = download.ContentType ?? output.ContentType;
+                                InferenceResourceDescriptor? resource = output.Resource;
+                                InferenceResourceSelection? selection = null;
+                                if (resources is not null)
+                                {
+                                    InferenceResourceCommitResult committed = await ImageResourceOperations.CommitAsync(resources, output.FileName, contentType, bytes,
+                                        Fence, generatedResources.Add, lease.Token).ConfigureAwait(false);
+                                    resource = committed.Resource;
+                                    selection = committed.Selection;
+                                    contentType ??= committed.Resource.ContentType;
+                                }
+                                Fence(lease.Token);
+                                images.Add(new GeneratedImage
+                                {
+                                    ContentType = contentType,
+                                    Data = bytes,
+                                    Seed = seed,
+                                    File = output.File,
+                                    Resource = resource,
+                                    Selection = selection,
+                                    Width = connection.Transport == ImageTransport.XaiImagine ? OutputDimension(output, "width") : null,
+                                    Height = connection.Transport == ImageTransport.XaiImagine ? OutputDimension(output, "height") : null
+                                });
+                            }
+                            Fence(lease.Token);
+                            progress?.Report(new(ImageGenerationStage.Completed));
+                            return new ImageGenerationResult
+                            {
+                                Images = images.AsReadOnly(),
+                                Provenance = new InferenceProvenance
+                                {
+                                    ImplementationId = Descriptor.Id,
+                                    ModelId = snapshot.ModelId,
+                                    ModelRevision = snapshot.ModelRevision,
+                                    Runtime = transport.Descriptor.DisplayName,
+                                    Backend = "connect",
+                                    Elapsed = Stopwatch.GetElapsedTime(started)
+                                }
+                            };
+                        case ImageTransportJobState.Failed:
+                            if (snapshot.Error?.Resource is { } resourceFailure)
+                                throw new InferenceResourceOperationException(snapshot.Error.Code,
+                                    "The image provider reported a resource operation failure.", resourceFailure);
+                            throw new InferenceException(snapshot.Error?.Code ?? InferenceFailureCode.ExecutionFailed,
+                                snapshot.Error?.Message ?? "The image provider failed the generation job.");
+                        default:
+                            throw new InferenceException(InferenceFailureCode.ProtocolFailure, "The image provider returned an unknown job state.");
+                    }
+                    await Task.Delay(_pollInterval, lease.Token).ConfigureAwait(false);
+                    Fence(lease.Token);
+                }
+            }
+            catch (OperationCanceledException error) when (jobId is not null)
+            {
+                try { await transport.TryCancelAsync(connection, jobId, interruptRunning: true, xai, CancellationToken.None).ConfigureAwait(false); }
+                catch (Exception cleanup) when (cleanup is not OutOfMemoryException) { throw new AggregateException(error, cleanup); }
+                throw;
+            }
         }
-        catch (OperationCanceledException error) when (jobId is not null)
+        catch (Exception error)
         {
-            try { await transport.TryCancelAsync(connection, jobId, interruptRunning: true, xai, CancellationToken.None).ConfigureAwait(false); }
-            catch (Exception cleanup) when (cleanup is not OutOfMemoryException) { throw new AggregateException(error, cleanup); }
+            if (connection.Transport == ImageTransport.XaiImagine) error = XaiImagineImageTransport.SafeFailure(error);
+            System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(ImageResourceOperations.WithGeneratedResources(error, generatedResources));
             throw;
-        }
         }
         finally { entered?.DetachOperationFence(); }
     }
@@ -223,7 +241,7 @@ internal sealed class ConnectImageInference : IImageInference, IDisposable, IAsy
     private static void ValidateCapabilities(ImageGenerationRequest request, InferenceMediaSource[] references, ImageCapabilities capabilities)
     {
         if (request.Count > capabilities.MaximumImageCount
-            || (request.NegativePrompt is not null && !capabilities.SupportsNegativePrompt)
+            || (!string.IsNullOrEmpty(request.NegativePrompt) && !capabilities.SupportsNegativePrompt)
             || (request.Seed is not null && !capabilities.SupportsSeed)
             || (request.Steps is not null && !capabilities.SupportsSteps)
             || (request.GuidanceScale is not null && !capabilities.SupportsGuidanceScale)
@@ -268,8 +286,8 @@ internal sealed class ConnectImageInference : IImageInference, IDisposable, IAsy
     private Task RetireAsync() => _lifetime.RetireAsync(() =>
     {
         _transport = null; _connection = null; _workflow = null; _xai = null; _resources = null;
-        if (_cleanupFailures.Count == 1) return Task.FromException(_cleanupFailures[0]);
-        if (_cleanupFailures.Count > 1) return Task.FromException(new AggregateException(_cleanupFailures));
+        if (_cleanupFailures.Count == 1) return Task.FromException(_cleanupFailures[0].Safe);
+        if (_cleanupFailures.Count > 1) return Task.FromException(new AggregateException(_cleanupFailures.Select(item => item.Safe)));
         return Task.CompletedTask;
     });
 
@@ -285,9 +303,15 @@ internal sealed class ConnectImageInference : IImageInference, IDisposable, IAsy
                 if (!visited.Add(current)) continue;
                 if (current is InferenceResourceOperationException resource && resource.Failure.Phase == InferenceResourceOperationPhase.Cleanup
                     || current is InferenceResourceOperationCanceledException canceled && canceled.Failure.Phase == InferenceResourceOperationPhase.Cleanup)
-                    if (!_cleanupFailures.Any(existing => ReferenceEquals(existing, current))) _cleanupFailures.Add(current);
+                {
+                    Exception actual = ImageResourceOperations.ActualCleanup(current);
+                    if (!_cleanupFailures.Any(existing => ReferenceEquals(existing.Original, actual))) _cleanupFailures.Add((actual, current));
+                    continue;
+                }
                 if (current is AggregateException aggregate)
                     for (int index = aggregate.InnerExceptions.Count - 1; index >= 0; index--) pending.Push(aggregate.InnerExceptions[index]);
+                else if (current is ImageResourceOperations.FailureEvidence evidence) pending.Push(evidence.Original);
+                else if (current is XaiImagineImageTransport.ImageEvidence imageEvidence) pending.Push(imageEvidence.Original);
                 else if (current.InnerException is { } inner) pending.Push(inner);
             }
         }

@@ -21,7 +21,7 @@ public sealed class XaiImagineImageTransport : IImageTransport, IDisposable, IAs
     private readonly LlmOperationLifetime _lifetime = new();
     private readonly string _issuer = Guid.NewGuid().ToString("N");
     private readonly Dictionary<string, Completed> _completed = new(StringComparer.Ordinal);
-    private readonly List<Exception> _cleanupFailures = [];
+    private readonly List<(Exception Original, Exception Safe)> _cleanupFailures = [];
 
     public ImageTransportDescriptor Descriptor { get; } = new(ImageTransport.XaiImagine, "Grok Imagine",
         "xAI image generation and editing", new(false, true, false) { SupportsBuiltInWorkflows = true });
@@ -32,6 +32,8 @@ public sealed class XaiImagineImageTransport : IImageTransport, IDisposable, IAs
         {
             IReadOnlyList<LlmModel> models = await bound.GetModelsAsync(snapshot, ModelCatalogFamily.Image, fence, token).ConfigureAwait(false);
             fence();
+            foreach (LlmModel model in models)
+                if (Protected(model.Id, captured, snapshot) || Protected(model.DisplayName, captured, snapshot)) throw XaiMediaData.Malformed();
             return Array.AsReadOnly(models.Select(model => new ImageWorkflow
             {
                 Id = model.Id,
@@ -68,7 +70,9 @@ public sealed class XaiImagineImageTransport : IImageTransport, IDisposable, IAs
         {
             ArgumentNullException.ThrowIfNull(reference);
             if (reference.Scope.Identity != _issuer) throw new ArgumentException("The image reference belongs to another transport.", nameof(request));
-            return JsonNode.Parse(reference.ProviderState.GetRawText()) as JsonObject ?? throw InvalidPreparation();
+            JsonObject state = JsonNode.Parse(reference.ProviderState.GetRawText()) as JsonObject ?? throw InvalidPreparation();
+            state.Remove("generated_resources");
+            return state;
         }).ToArray();
         (string route, JsonObject body) = XaiImageProtocol.Build(request, references);
         var scopes = new JsonArray(request.References.Select(reference => (JsonNode)new JsonObject
@@ -77,11 +81,14 @@ public sealed class XaiImagineImageTransport : IImageTransport, IDisposable, IAs
         {
             ["workflow"] = new JsonObject
             {
-                ["id"] = request.Workflow.Id, ["version"] = request.Workflow.Version,
+                ["id"] = request.Workflow.Id,
+                ["version"] = request.Workflow.Version,
                 ["requires_reference"] = request.Workflow.RequiresReferenceImage,
                 ["configuration"] = JsonNode.Parse(request.Workflow.TransportConfiguration.GetRawText())
             },
-            ["route"] = route, ["body"] = body, ["scopes"] = scopes
+            ["route"] = route,
+            ["body"] = body,
+            ["scopes"] = scopes
         };
         Fence(operation.Token);
         return new(envelope.ToJsonString());
@@ -90,8 +97,10 @@ public sealed class XaiImagineImageTransport : IImageTransport, IDisposable, IAs
     public async Task<ImageProviderHealth> TestAsync(ImageConnection connection, ImageWorkflow? workflow = null,
         XaiFamilyBinding? xai = null, CancellationToken cancellationToken = default)
     {
+        using var operation = _lifetime.Enter(cancellationToken);
         if (workflow is not null) ValidateWorkflow(workflow);
-        await GetWorkflowsAsync(connection, xai, cancellationToken).ConfigureAwait(false);
+        await GetWorkflowsAsync(connection, xai, operation.Token).ConfigureAwait(false);
+        Fence(operation.Token, xai);
         return new(true, "The selected connection can read the image catalog.");
     }
 
@@ -104,17 +113,18 @@ public sealed class XaiImagineImageTransport : IImageTransport, IDisposable, IAs
         return Task.FromResult<IImageTransportProgressConnection?>(null);
     }
 
-    public Task<ImagePreparedReference> UploadReferenceAsync(ImageConnection connection, ImageReference reference,
+    public async Task<ImagePreparedReference> UploadReferenceAsync(ImageConnection connection, ImageReference reference,
         Stream content, XaiFamilyBinding? xai = null, CancellationToken cancellationToken = default)
     {
+        using var operation = _lifetime.Enter(cancellationToken);
         ArgumentNullException.ThrowIfNull(reference);
         ValidateMetadata(reference.FileName, reference.ContentType);
         XaiFileRequestData.Upload(content, UploadLabel(reference.FileName), null);
-        return RunAsync(connection, xai, async (captured, bound, snapshot, fence, token) =>
+        return await RunAsync(connection, xai, async (captured, bound, snapshot, fence, token) =>
         {
             LlmProviderFile file = await UploadAsync(captured, bound, snapshot, reference, content, fence, token).ConfigureAwait(false);
             return Receipt(captured, reference, new JsonObject { ["file_id"] = file.Id });
-        }, cancellationToken);
+        }, operation.Token).ConfigureAwait(false);
     }
 
     public Task<ImagePreparedReference> ResolveReferenceAsync(ImageConnection connection, InferenceMediaSource source,
@@ -142,13 +152,13 @@ public sealed class XaiImagineImageTransport : IImageTransport, IDisposable, IAs
             InferenceResourceCommitResult? committed = null;
             if (resources is not null)
                 committed = await ImageResourceOperations.CommitAsync(resources, binary.FileName, binary.ContentType,
-                    binary.Data, _ => fence(), token).ConfigureAwait(false);
+                    binary.Data, _ => fence(), token: token).ConfigureAwait(false);
             var metadata = new ImageReference { Id = Guid.NewGuid(), FileName = binary.FileName, ContentType = binary.ContentType };
             using var content = new MemoryStream(binary.Data.ToArray(), writable: false);
             try
             {
                 LlmProviderFile uploaded = await UploadAsync(connection, bound, snapshot, metadata, content, fence, token).ConfigureAwait(false);
-                return Receipt(connection, metadata, new JsonObject { ["file_id"] = uploaded.Id }, committed?.Resource.Reference);
+                return Receipt(connection, metadata, new JsonObject { ["file_id"] = uploaded.Id }, committed?.Resource.Reference, committed);
             }
             catch (Exception error) when (committed is not null)
             {
@@ -214,12 +224,14 @@ public sealed class XaiImagineImageTransport : IImageTransport, IDisposable, IAs
         Fence(operation.Token, xai);
         ImageTransportOutput[] outputs = completed.Result.Images.Select((image, index) =>
         {
-            var state = new JsonObject { ["handle"] = providerJobId, ["index"] = index, ["width"] = image.Width, ["height"] = image.Height };
+            JsonObject state = JsonNode.Parse(image.ProviderState.GetRawText()) as JsonObject ?? throw XaiMediaData.Malformed();
+            state["handle"] = providerJobId; state["index"] = index; state["width"] = image.Width; state["height"] = image.Height;
             return new ImageTransportOutput(image.FileName, Scope(connection), XaiMediaData.Element(state), image.ContentType,
                 image.FileId is { } file ? new(file) : null);
         }).ToArray();
         var snapshot = new ImageTransportJobSnapshot(ImageTransportJobState.Completed, outputs,
-            Diagnostics: completed.Result.Usage) { ModelId = completed.Result.ModelId };
+            Diagnostics: completed.Result.Usage)
+        { ModelId = completed.Result.ModelId };
         Fence(operation.Token, xai);
         return Task.FromResult(snapshot);
     }
@@ -250,7 +262,7 @@ public sealed class XaiImagineImageTransport : IImageTransport, IDisposable, IAs
             Task<Stream> Open(string? type, long? length, CancellationToken current)
             {
                 current.ThrowIfCancellationRequested(); fence();
-                if (type is not null && image.ContentType is not null && type != image.ContentType) throw XaiMediaData.Malformed();
+                if (XaiMediaData.ContentTypesConflict(type, image.ContentType)) throw XaiMediaData.Malformed();
                 receivedType = type;
                 return Task.FromResult<Stream>(buffer);
             }
@@ -264,7 +276,7 @@ public sealed class XaiImagineImageTransport : IImageTransport, IDisposable, IAs
             else throw XaiMediaData.Malformed();
             fence();
             if (buffer.Length == 0) throw XaiMediaData.Malformed();
-            return new ImageTransportDownload(image.ContentType ?? receivedType, buffer.ToArray());
+            return new ImageTransportDownload(receivedType ?? image.ContentType, buffer.ToArray());
         }, cancellationToken);
     }
 
@@ -279,11 +291,16 @@ public sealed class XaiImagineImageTransport : IImageTransport, IDisposable, IAs
         return Task.FromResult(false);
     }
 
-    private Task<LlmProviderFile> UploadAsync(ImageConnection connection, XaiFamilyBinding bound, LlmConnection snapshot,
-        ImageReference metadata, Stream content, Action fence, CancellationToken token) =>
-        bound.RunFilesAsync(snapshot, fence, (files, selected, ownerFence, current) =>
+    private static async Task<LlmProviderFile> UploadAsync(ImageConnection connection, XaiFamilyBinding bound, LlmConnection snapshot,
+        ImageReference metadata, Stream content, Action fence, CancellationToken token)
+    {
+        LlmProviderFile uploaded = await bound.RunFilesAsync(snapshot, fence, (files, selected, ownerFence, current) =>
             files.UploadAsync(selected, content, UploadLabel(metadata.FileName), null, ownerFence, current,
-                secretContext: connection.AdditionalHeaders.Values.ToArray(), requestTimeout: connection.RequestTimeout), token);
+                secretContext: connection.AdditionalHeaders.Values.ToArray(), requestTimeout: connection.RequestTimeout), token).ConfigureAwait(false);
+        fence();
+        if (Protected(uploaded.Id, connection, snapshot) || Protected(uploaded.FileName, connection, snapshot)) throw XaiMediaData.Malformed();
+        return uploaded;
+    }
 
     private static async Task<LlmProviderFile> AuthorizeFileAsync(ImageConnection connection, XaiFamilyBinding bound,
         LlmConnection snapshot, string id, Action fence, CancellationToken token)
@@ -293,8 +310,13 @@ public sealed class XaiImagineImageTransport : IImageTransport, IDisposable, IAs
             files.GetAsync(selected, id, ownerFence, current, connection.RequestTimeout), token).ConfigureAwait(false);
         fence();
         if (file.Id != id) throw XaiMediaData.Malformed();
+        if (Protected(file.Id, connection, snapshot) || Protected(file.FileName, connection, snapshot)) throw XaiMediaData.Malformed();
         return file;
     }
+
+    private static bool Protected(string value, ImageConnection connection, LlmConnection snapshot) =>
+        value != SecretRedactor.Sanitize(value, LlmCredential.Parse(snapshot.Credential),
+            snapshot.AdditionalHeaders.Values.Concat(connection.AdditionalHeaders.Values));
 
     [SuppressMessage("Design", "CA1031", Justification = "The image boundary retains actual failures privately and records only real cleanup refusal.")]
     private async Task<T> RunAsync<T>(ImageConnection connection, XaiFamilyBinding? xai,
@@ -306,21 +328,24 @@ public sealed class XaiImagineImageTransport : IImageTransport, IDisposable, IAs
         ImageConnection captured = connection with
         { AdditionalHeaders = new ReadOnlyDictionary<string, string>(connection.AdditionalHeaders.ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.OrdinalIgnoreCase)) };
         XaiFamilyBinding? bound = null;
+        T? result = default;
         try
         {
-            bound = await xai!.AcquireBoundAsync(selected => ValidateSelected(captured, selected), operation.Token,
-                () => Fence(operation.Token)).ConfigureAwait(false);
+            bound = await xai!.AcquireBoundAsync(selected => ValidateSelected(captured, selected),
+                () => Fence(operation.Token), operation.Token).ConfigureAwait(false);
             void Check() => Fence(operation.Token, bound);
             LlmConnection snapshot = await bound.AcquireAsync(operation.Token).ConfigureAwait(false);
             Check();
-            T result = await action(captured, bound, snapshot, Check, operation.Token).ConfigureAwait(false);
+            result = await action(captured, bound, snapshot, Check, operation.Token).ConfigureAwait(false);
             Check();
             return result;
         }
         catch (Exception error)
         {
+            if (result is ImagePreparedReference reference)
+                error = ImageResourceOperations.WithGeneratedResources(error, PreparedResources(reference).ToArray());
+            RecordCleanup(error);
             Exception safe = SafeFailure(error);
-            RecordCleanup(safe);
             ExceptionDispatchInfo.Throw(safe);
             throw;
         }
@@ -328,7 +353,7 @@ public sealed class XaiImagineImageTransport : IImageTransport, IDisposable, IAs
     }
 
     [SuppressMessage("Design", "CA1031", Justification = "The exchange attempts each actual request/response cleanup and preserves independent failures.")]
-    private async Task<XaiImageResult> SendAsync(HttpClient http, ImageConnection connection, LlmConnection snapshot,
+    private static async Task<XaiImageResult> SendAsync(HttpClient http, ImageConnection connection, LlmConnection snapshot,
         string route, JsonObject body, Action fence, CancellationToken token)
     {
         HttpRequestMessage? request = null;
@@ -396,7 +421,7 @@ public sealed class XaiImagineImageTransport : IImageTransport, IDisposable, IAs
         ProviderHttp.ValidateAdditionalHeaders(connection.AdditionalHeaders);
     }
 
-    private static void ValidateSelected(ImageConnection connection, LlmConnection snapshot)
+    internal static void ValidateSelected(ImageConnection connection, LlmConnection snapshot)
     {
         if (connection.Endpoint.TrimEnd('/') != snapshot.Endpoint.TrimEnd('/'))
             throw new ArgumentException("The image endpoint does not match the selected xAI region.");
@@ -439,7 +464,20 @@ public sealed class XaiImagineImageTransport : IImageTransport, IDisposable, IAs
         if (scope != Scope(connection)) throw new ArgumentException("The image receipt belongs to another transport or endpoint.");
     }
     private ImagePreparedReference Receipt(ImageConnection connection, ImageReference metadata, JsonObject state,
-        InferenceResourceReference? resource = null) => new(metadata, Scope(connection), XaiMediaData.Element(state), resource);
+        InferenceResourceReference? resource = null, InferenceResourceCommitResult? committed = null)
+    {
+        if (committed is not null)
+            state["generated_resources"] = new JsonArray(JsonSerializer.SerializeToNode(committed, InferenceJson.InferenceResourceCommitResult));
+        return new(metadata, Scope(connection), XaiMediaData.Element(state), resource);
+    }
+
+    internal static IEnumerable<InferenceResourceCommitResult> PreparedResources(ImagePreparedReference reference)
+    {
+        if (!reference.ProviderState.TryGetProperty("generated_resources", out JsonElement receipts)) yield break;
+        if (receipts.ValueKind != JsonValueKind.Array) throw InvalidPreparation();
+        foreach (JsonElement receipt in receipts.EnumerateArray())
+            yield return JsonSerializer.Deserialize(receipt, InferenceJson.InferenceResourceCommitResult) ?? throw InvalidPreparation();
+    }
 
     private Completed Find(ImageConnection connection, XaiFamilyBinding xai, string handle)
     {
@@ -461,8 +499,10 @@ public sealed class XaiImagineImageTransport : IImageTransport, IDisposable, IAs
             JsonObject body = root["body"] as JsonObject ?? throw InvalidPreparation();
             var workflow = new ImageWorkflow
             {
-                Id = metadata["id"]!.GetValue<string>(), Label = string.Empty,
-                Version = metadata["version"]!.GetValue<string>(), Transport = ImageTransport.XaiImagine,
+                Id = metadata["id"]!.GetValue<string>(),
+                Label = string.Empty,
+                Version = metadata["version"]!.GetValue<string>(),
+                Transport = ImageTransport.XaiImagine,
                 RequiresReferenceImage = metadata["requires_reference"]!.GetValue<bool>(),
                 TransportConfiguration = XaiMediaData.Element(metadata["configuration"]!)
             };
@@ -475,7 +515,10 @@ public sealed class XaiImagineImageTransport : IImageTransport, IDisposable, IAs
             if (receiptScopes.Any(scope => scope.Identity != _issuer)) throw InvalidPreparation();
             var ingress = new ImageTransportPreparationRequest
             {
-                Workflow = workflow, PositivePrompt = body["prompt"]!.GetValue<string>(), Count = body["n"]!.GetValue<int>(), CacheKey = string.Empty,
+                Workflow = workflow,
+                PositivePrompt = body["prompt"]!.GetValue<string>(),
+                Count = body["n"]!.GetValue<int>(),
+                CacheKey = string.Empty,
                 References = references.Select((reference, index) => new ImagePreparedReference(new() { Id = Guid.Empty },
                     receiptScopes[index], XaiMediaData.Element(reference))).ToArray()
             };
@@ -503,32 +546,36 @@ public sealed class XaiImagineImageTransport : IImageTransport, IDisposable, IAs
     private static Exception ResourceFailure(Exception error, InferenceResourceReference reference, long? bytes,
         InferenceResourceCommitResult? committed = null)
     {
-        if (LlmResourcePreparation.IsResourceFailure(error)) return error;
+        if (committed is null && LlmResourcePreparation.IsResourceFailure(error)) return error;
         var facts = new InferenceResourceOperationFailure(InferenceResourceOperationPhase.Materialize, reference,
             committed is null ? InferenceResourceCommitOutcome.NotAttempted : InferenceResourceCommitOutcome.Committed, bytes)
         {
             SelectionOutcome = committed?.Selection is null ? InferenceResourceCommitOutcome.NotAttempted : InferenceResourceCommitOutcome.Committed,
-            SelectionVersion = committed?.Selection is { } selection ? new(selection.WorkspaceId, selection.SessionId, selection.Revision) : null
+            SelectionVersion = committed?.Selection is { } selection ? new(selection.WorkspaceId, selection.SessionId, selection.Revision) : null,
+            GeneratedResources = committed is null ? [] : [committed]
         };
         return error is OperationCanceledException canceled
-            ? new InferenceResourceOperationCanceledException(facts, canceled.CancellationToken, error)
-            : new InferenceResourceOperationException(InferenceFailureCode.ExecutionFailed, "The image resource materialization failed.", facts, error);
+                ? new InferenceResourceOperationCanceledException(facts, canceled.CancellationToken, error)
+            : new InferenceResourceOperationException(error is InferenceException inference ? inference.Code : InferenceFailureCode.ExecutionFailed,
+                "The image resource materialization failed.", facts, error);
     }
 
-    private static Exception SafeFailure(Exception error) => error switch
+    internal static Exception SafeFailure(Exception error) => error switch
     {
         ImageEvidence => error,
         AggregateException aggregate => new AggregateException("The image operation failed.", aggregate.InnerExceptions.Select(SafeFailure)),
         InferenceResourceOperationException resource => RetainResource(resource, new InferenceResourceOperationException(resource.Code,
-            "The image resource operation failed.", resource.Failure, new ImageEvidence(resource))),
+            "The image resource operation failed.", resource.Failure,
+            new ImageEvidence(resource, resource.InnerException is { } cause ? SafeFailure(cause) : null))),
         InferenceResourceOperationCanceledException resource => RetainResource(resource, new InferenceResourceOperationCanceledException(resource.Failure,
-            resource.CancellationToken, new ImageEvidence(resource))),
+            resource.CancellationToken, new ImageEvidence(resource, resource.InnerException is { } cause ? SafeFailure(cause) : null))),
         OperationCanceledException canceled => new OperationCanceledException("The image operation was interrupted.", new ImageEvidence(canceled), canceled.CancellationToken),
         InferenceException { InnerException: LlmProviderException provider } inference => new InferenceException(inference.Code,
             "Image authorization or access failed.", SafeFailure(provider)),
         LlmProviderException provider => new LlmProviderException("The image provider request failed.", LlmTransport.XaiResponses,
             provider.StatusCode, provider.ProviderCode is "xai_authentication_required" or "xai_entitlement_required" ? provider.ProviderCode : null,
             retryAfter: provider.RetryAfter, innerException: new ImageEvidence(provider), isContextOverflow: provider.IsContextOverflow),
+        InferenceException inference => new InferenceException(inference.Code, "The image operation failed.", new ImageEvidence(inference)),
         _ => new InferenceException(error is JsonException ? InferenceFailureCode.ProtocolFailure : InferenceFailureCode.ExecutionFailed,
             "The image operation failed.", new ImageEvidence(error))
     };
@@ -544,9 +591,28 @@ public sealed class XaiImagineImageTransport : IImageTransport, IDisposable, IAs
 
     private void RecordCleanup(Exception error)
     {
-        if (error is AggregateException aggregate) { foreach (Exception item in aggregate.InnerExceptions) RecordCleanup(item); return; }
-        if (!LlmResourcePreparation.IsCleanupFailure(error)) return;
-        lock (_cleanupFailures) if (!_cleanupFailures.Contains(error, ReferenceEqualityComparer.Instance)) _cleanupFailures.Add(error);
+        var pending = new Stack<Exception>();
+        var visited = new HashSet<Exception>(ReferenceEqualityComparer.Instance);
+        pending.Push(error);
+        lock (_cleanupFailures)
+        {
+            while (pending.TryPop(out Exception? current))
+            {
+                if (!visited.Add(current)) continue;
+                if (current is InferenceResourceOperationException resource && resource.Failure.Phase == InferenceResourceOperationPhase.Cleanup
+                    || current is InferenceResourceOperationCanceledException canceled && canceled.Failure.Phase == InferenceResourceOperationPhase.Cleanup)
+                {
+                    Exception actual = ImageResourceOperations.ActualCleanup(current);
+                    if (!_cleanupFailures.Any(item => ReferenceEquals(item.Original, actual))) _cleanupFailures.Add((actual, SafeFailure(current)));
+                    continue;
+                }
+                if (current is AggregateException aggregate)
+                    foreach (Exception cause in aggregate.InnerExceptions) pending.Push(cause);
+                else if (current is ImageEvidence evidence) pending.Push(evidence.Original);
+                else if (current is ImageResourceOperations.FailureEvidence resourceEvidence) pending.Push(resourceEvidence.Original);
+                else if (current.InnerException is { } inner) pending.Push(inner);
+            }
+        }
     }
 
     public void Dispose() => RetireAsync().GetAwaiter().GetResult();
@@ -556,8 +622,8 @@ public sealed class XaiImagineImageTransport : IImageTransport, IDisposable, IAs
         lock (_completed) _completed.Clear();
         lock (_cleanupFailures)
         {
-            if (_cleanupFailures.Count == 1) return Task.FromException(_cleanupFailures[0]);
-            if (_cleanupFailures.Count > 1) return Task.FromException(new AggregateException(_cleanupFailures));
+            if (_cleanupFailures.Count == 1) return Task.FromException(_cleanupFailures[0].Safe);
+            if (_cleanupFailures.Count > 1) return Task.FromException(new AggregateException(_cleanupFailures.Select(item => item.Safe)));
         }
         return Task.CompletedTask;
     });
@@ -566,6 +632,7 @@ public sealed class XaiImagineImageTransport : IImageTransport, IDisposable, IAs
     private sealed record Preparation(ImageWorkflow Workflow, string Route, JsonObject Body,
         IReadOnlyList<InferenceResourceScope> Scopes, IReadOnlyList<JsonObject> References);
     private sealed record Completed(string Endpoint, string ConnectionId, ImageWorkflow Workflow, XaiImageResult Result);
-    private sealed class ImageEvidence(Exception original) : Exception("The image boundary reported a failure.")
+    internal sealed class ImageEvidence(Exception original, Exception? safeCause = null)
+        : Exception("The image boundary reported a failure.", safeCause)
     { internal Exception Original { get; } = original; }
 }

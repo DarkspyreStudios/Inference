@@ -404,7 +404,7 @@ internal sealed class ComfyUiImageTransport(
                 return consumption.Publish(result);
             }
             InferenceResourceCommitResult committed = await ImageResourceOperations.CommitAsync(resources,
-                binary.FileName, binary.ContentType, binary.Data, _ => consumption.Fence(), cancellationToken).ConfigureAwait(false);
+                binary.FileName, binary.ContentType, binary.Data, _ => consumption.Fence(), token: cancellationToken).ConfigureAwait(false);
             cancellationToken.ThrowIfCancellationRequested();
             consumption.Fence();
             source = new ResourceMediaSource(committed.Resource.Reference);

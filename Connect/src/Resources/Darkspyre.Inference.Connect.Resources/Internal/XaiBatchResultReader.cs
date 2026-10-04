@@ -176,7 +176,7 @@ internal sealed class XaiBatchResultReader(HttpClient http, LlmConnection connec
             bodyToken.ThrowIfCancellationRequested();
             fence();
             if (length > maximum) throw TooLarge();
-            if (mime is not null && image.ContentType is not null && mime != image.ContentType) throw XaiMediaData.Malformed();
+            if (XaiMediaData.ContentTypesConflict(mime, image.ContentType)) throw XaiMediaData.Malformed();
             receivedType = mime;
             return Task.FromResult<Stream>(buffer);
         }
@@ -203,7 +203,7 @@ internal sealed class XaiBatchResultReader(HttpClient http, LlmConnection connec
         if (buffer.Length == 0) throw XaiMediaData.Malformed();
         byte[] bytes = buffer.ToArray();
         _inlineImageBytes = checked(_inlineImageBytes + bytes.LongLength);
-        return (bytes, image.ContentType ?? receivedType);
+        return (bytes, receivedType ?? image.ContentType);
     }
 
     private async Task<LlmBatchResult> ReadVideoAsync(string id, JsonElement body, CancellationToken token)

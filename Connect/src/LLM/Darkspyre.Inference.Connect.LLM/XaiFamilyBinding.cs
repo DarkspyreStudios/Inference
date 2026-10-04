@@ -89,14 +89,16 @@ public sealed class XaiFamilyBinding
         => AcquireAsync(null, cancellationToken);
 
     internal async Task<XaiFamilyBinding> AcquireBoundAsync(Action<LlmConnection> validate,
-        CancellationToken cancellationToken = default, Action? operationFence = null)
+        Action? operationFence = null, CancellationToken cancellationToken = default)
     {
         operationFence?.Invoke();
         LlmConnection snapshot = await AcquireAsync(connection =>
         {
+            FenceOperation();
             operationFence?.Invoke();
             validate(connection);
             operationFence?.Invoke();
+            FenceOperation();
         }, cancellationToken).ConfigureAwait(false);
         FenceOperation();
         operationFence?.Invoke();

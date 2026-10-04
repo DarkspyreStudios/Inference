@@ -100,7 +100,7 @@ public sealed class XaiTtsProvider : ITtsProvider
             XaiFamilyBinding acquired = await _binding!.AcquireBoundAsync(selected =>
             {
                 if (!string.Equals(_connection!.Endpoint.AbsoluteUri.TrimEnd('/'), selected.Endpoint.TrimEnd('/'), StringComparison.Ordinal)) throw new ArgumentException("The speech endpoint must match its selected xAI region.");
-            }, token).ConfigureAwait(false);
+            }, cancellationToken: token).ConfigureAwait(false);
             Fence(token);
             LlmConnection snapshot = await acquired.AcquireAsync(token).ConfigureAwait(false);
             Fence(token); return snapshot;

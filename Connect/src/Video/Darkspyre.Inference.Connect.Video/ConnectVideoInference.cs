@@ -241,7 +241,7 @@ internal sealed class ConnectVideoInference : IVideoInference, IDisposable, IAsy
                 throw new ArgumentException("The video endpoint does not match the selected xAI region.");
             using var headers = new HttpRequestMessage();
             ProviderHttp.ApplyHeaders(headers, snapshot, applyApiKeyAsBearer: false);
-        }, token).ConfigureAwait(false);
+        }, cancellationToken: token).ConfigureAwait(false);
         Fence(token);
         return (connection with { Authorization = entered.Authorization }, entered);
     }
