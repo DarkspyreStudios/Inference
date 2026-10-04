@@ -957,9 +957,11 @@ and failure paths. Cancelled discovery waits for its provider listing to drain; 
 keeps the operation pending until it returns. Injected clients and authenticators remain borrowed.
 Another settings operation creates a fresh facade and can reuse those clients.
 
-Use asynchronous disposal while provider work is active. Consume or dispose active stream
-enumerators so their owned operations can leave. Disposal does not report completion while an
-operation remains active. A registration owner disposes its shared cache; sharing a cache across
+Use asynchronous disposal while provider work is active. Chat streams use an ordered, non-dropping
+32-event buffer. Their producers own active operations through provider enumeration cleanup.
+Disposal cancels blocked writes and drains producers without waiting for a paused event reader.
+An operation that ignores cancellation still keeps disposal pending. A registration owner disposes
+its shared cache; sharing a cache across
 containers does not transfer that responsibility to a scoped facade.
 
 ### Explicit cache binding
@@ -1118,13 +1120,18 @@ finish. A session that finishes opening after cancellation is disposed before it
 ends. Supplied clients and the connection source remain borrowed.
 
 Each returned session fences its methods on retirement, cancels and drains active calls and stream
-enumerations, then disposes its adapter session. Concurrent callers share one retirement completion.
+producers, then disposes its adapter session. Turn and observation streams use ordered, non-dropping
+32-event buffers. The producer retains its operation lease through adapter enumeration cleanup;
+the public reader holds no lease while paused. Concurrent callers share one retirement completion.
 Disposing one session leaves its siblings and the facade usable. Caller cancellation affects only
 the named operation. Late results and events from cancelled work are rejected. A failed session
 retirement remains visible when its owning facade retires; another session is not skipped.
 
-Use asynchronous scope disposal while sessions are active. Consume or dispose active enumerators
-so their owned calls can leave; an enumerator suspended at a yielded event still owns a call.
+Use asynchronous scope disposal while sessions are active. Retirement cancels full-buffer writes
+and drains producers independently of paused readers. Disposing an enumeration cancels and drains
+its producer. Consuming readers receive provider failures. Abandoned enumerations still report
+cleanup and cancellation-callback failures. Independent read and producer failures are preserved;
+actual enumeration cleanup failures remain visible to repeated retirement callers.
 An adapter that ignores cancellation keeps retirement pending until its work leaves. Direct
 `ILlmAgentClient` callers own the sessions they create outside the facade.
 
@@ -1441,8 +1448,9 @@ Direct Claude native sessions fence operational calls when retirement starts. Re
 and drains active turns, observation enumerations, control requests and host tool callbacks before
 disposing their process, reader, resource poller and gates. A host tool remains owned through result
 projection and the response write. An ignoring callback or write keeps retirement pending until it
-returns; a cancelled late callback result is not emitted. Consumers must dispose enumerators paused
-at a yielded event. Concurrent disposers share the completion and its cleanup failures. A failed
+returns; a cancelled late callback result is not emitted. Bounded turn and observation producers
+drain without requiring a paused public reader to resume. Concurrent disposers share the completion
+and its cleanup failures. A failed
 process disposal does not skip the reader or resource poller. Cancellation and cleanup failures are
 retained together. Tool cancellation matches the typed JSON-RPC ID; numeric and string IDs remain
 distinct, and repeating an active ID fails the session without abandoning its first callback.
@@ -3155,9 +3163,9 @@ methods fail explicitly. Canceling `RunTurnAsync` cancels the local streaming re
 Direct AgentCore session disposal fences new operational calls and cancels its active SDK request
 and host tool callback. Concurrent disposal callers share the same retirement result and failures.
 Retirement closes the observation feed and waits for active operations before releasing the turn gate.
-An ignoring SDK reader or callback keeps retirement pending until it returns. A paused turn iterator
-must resume or be disposed before retirement completes; it cannot resume host or SDK effects after
-retirement starts. Late provider and tool results are not delivered. The injected invoker remains
+An ignoring SDK reader or callback keeps retirement pending until it returns. A bounded turn producer
+drains independently of a paused public iterator. Closed resource observations hold no operation
+lease across yields. Late provider and tool results are not delivered. The injected invoker remains
 borrowed. Local retirement does not claim a remote Harness interrupt or shutdown.
 
 AgentCore chat and native sessions replace usage observations within each actual Harness invocation.
@@ -3473,8 +3481,9 @@ per open session, with an open standard input and one output reader.
   arrives while no turn is running also faults it. Resume opens a fresh session. Connect does not stop
   work AGY may keep running on its side.
 - Disposal closes observation immediately, cancels admitted turns and reopens, and waits for their
-  writes and iterators to stop using the session before releasing the process. A paused iterator must
-  advance or be disposed before retirement completes. Late output cannot publish events or update
+  writes and producers to stop using the session before releasing the process. A bounded turn producer
+  drains independently of a paused public iterator. Closed resource observations hold no operation
+  lease across yields. Late output cannot publish events or update
   usage. All disposal callers share one completion and its cleanup failure. Cancelled turns retain
   cancellation; a failed local termination also faults the session with its PID and remains visible
   to disposal. Failed opening preserves both the opening and cleanup errors when both occur.

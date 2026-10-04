@@ -596,13 +596,16 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, ILlmFileClie
         catch (Exception error) { _cleanupOutcomes.Record(error); throw; }
     }
 
-    private async IAsyncEnumerable<LlmStreamEvent> StreamCoreAsync(
+    private IAsyncEnumerable<LlmStreamEvent> StreamCoreAsync(
+        string connectionId, LlmChatRequest request, string? expectedScope,
+        CancellationToken cancellationToken, Action<ProviderCompactionResult>? publishCompaction = null) =>
+        _lifetime.StreamAsync(token => ProduceStreamAsync(connectionId, request, expectedScope, token, publishCompaction), cancellationToken);
+
+    private async IAsyncEnumerable<LlmStreamEvent> ProduceStreamAsync(
         string connectionId, LlmChatRequest request, string? expectedScope,
         [EnumeratorCancellation] CancellationToken cancellationToken,
         Action<ProviderCompactionResult>? publishCompaction = null)
     {
-        using var operation = _lifetime.Enter(cancellationToken);
-        cancellationToken = operation.Token;
         ArgumentNullException.ThrowIfNull(request);
         request = ClientTools.Snapshot(request with { HostedTools = HostedTools.Snapshot(request.HostedTools) });
         LlmAccountUsageObservations.Reservation observationReservation = _observations.Reserve(connectionId);

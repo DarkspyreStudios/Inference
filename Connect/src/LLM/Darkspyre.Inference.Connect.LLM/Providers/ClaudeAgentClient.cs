@@ -569,12 +569,14 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             cancellationToken.ThrowIfCancellationRequested();
         }
 
-        public async IAsyncEnumerable<LlmAgentEvent> RunTurnAsync(
+        public IAsyncEnumerable<LlmAgentEvent> RunTurnAsync(
+            LlmAgentTurnRequest request, CancellationToken cancellationToken = default) =>
+            _lifetime.StreamAsync(token => ProduceTurnAsync(request, token), cancellationToken);
+
+        private async IAsyncEnumerable<LlmAgentEvent> ProduceTurnAsync(
             LlmAgentTurnRequest request,
             [EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
-            using LlmOperationLifetime.Lease operation = _lifetime.Enter(cancellationToken);
-            cancellationToken = operation.Token;
             ArgumentNullException.ThrowIfNull(request);
             request = ClientTools.Snapshot(request);
             NativeAgentContract.ValidateTurn(request);
@@ -721,11 +723,12 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             cancellationToken.ThrowIfCancellationRequested();
         }
 
-        public async IAsyncEnumerable<LlmAgentEvent> ObserveAsync(
+        public IAsyncEnumerable<LlmAgentEvent> ObserveAsync(CancellationToken cancellationToken = default) =>
+            _lifetime.StreamAsync(ProduceObservationsAsync, cancellationToken);
+
+        private async IAsyncEnumerable<LlmAgentEvent> ProduceObservationsAsync(
             [EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
-            using LlmOperationLifetime.Lease operation = _lifetime.Enter(cancellationToken);
-            cancellationToken = operation.Token;
             if (Interlocked.Exchange(ref _observing, 1) == 1)
             {
                 throw new InvalidOperationException("The session feed has one reader at a time.");

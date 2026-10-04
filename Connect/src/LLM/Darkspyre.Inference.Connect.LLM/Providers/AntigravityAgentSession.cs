@@ -173,12 +173,14 @@ internal sealed class AntigravityAgentSession : ILlmAgentSession
         yield break;
     }
 
-    public async IAsyncEnumerable<LlmAgentEvent> RunTurnAsync(
+    public IAsyncEnumerable<LlmAgentEvent> RunTurnAsync(
+        LlmAgentTurnRequest request, CancellationToken cancellationToken = default) =>
+        _retirement.StreamAsync(token => ProduceTurnAsync(request, token), cancellationToken);
+
+    private async IAsyncEnumerable<LlmAgentEvent> ProduceTurnAsync(
         LlmAgentTurnRequest request,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        using LlmOperationLifetime.Lease operation = _retirement.Enter(cancellationToken);
-        cancellationToken = operation.Token;
         ArgumentNullException.ThrowIfNull(request);
         (AntigravityLaunch launch, string prompt, JsonElement? schema) = Admit(request);
         bool usageDeltas = AntigravityCliLlmClient.ResolveCapabilities(_connection, launch.ModelId).SupportsUsageDeltas;
@@ -313,7 +315,7 @@ internal sealed class AntigravityAgentSession : ILlmAgentSession
     public async IAsyncEnumerable<LlmAgentEvent> ObserveAsync(
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        using LlmOperationLifetime.Lease operation = _retirement.Enter(cancellationToken);
+        _retirement.ThrowIfStopping();
         ThrowIfDisposed();
         await foreach (LlmAgentEvent item in _resources.ObserveAsync(cancellationToken).ConfigureAwait(false))
         {
