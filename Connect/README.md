@@ -509,6 +509,9 @@ Responses output joins through structured JSON nodes and elements. Vertex argume
 uses ordered string/index JSON segments and the BCL parser for escaped names. These wire paths
 do not call the unconfigured serializer or depend on its reflection defaults. Portable contracts
 continue to use their existing owned metadata; protocol projection adds no public metadata roots.
+Retained JSON-object HTTP requests use the same `RequestJson` owner with the BCL's public DOM
+converter and generation-owned options. Request bodies remain streamed by `JsonContent`; the
+helper does not copy them into an extra full-body string or byte buffer or use reflection defaults.
 
 Apple helper generation and cancellation commands use their own internal generated metadata,
 including the recursive typed schema plan. The helper protocol retains its camel-case Web names,

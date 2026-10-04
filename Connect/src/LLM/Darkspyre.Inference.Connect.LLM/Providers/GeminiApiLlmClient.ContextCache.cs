@@ -178,7 +178,7 @@ internal sealed partial class GeminiApiLlmClient
         GoogleCacheData.AddExpiration(prefix, request);
         var message = GeminiCacheReads.Request(string.Empty, Key(connection));
         message.Method = HttpMethod.Post;
-        message.Content = JsonContent.Create(prefix);
+        message.Content = RequestJson.Content(prefix);
         return await GoogleCacheHttp.CreateAsync(Http, message, Transport, request.Correlation,
             root => GeminiCacheReads.ParseReceipt(root, scope, null, request.ModelId), fence, token).ConfigureAwait(false);
     }
@@ -192,7 +192,7 @@ internal sealed partial class GeminiApiLlmClient
         Validate(connection);
         var message = GeminiCacheReads.Request("/" + Uri.EscapeDataString(id) + "?updateMask=expireTime", Key(connection));
         message.Method = HttpMethod.Patch;
-        message.Content = JsonContent.Create(new JsonObject { ["expireTime"] = GoogleCacheData.Timestamp(expiresAt) });
+        message.Content = RequestJson.Content(new JsonObject { ["expireTime"] = GoogleCacheData.Timestamp(expiresAt) });
         return await GoogleCacheHttp.UpdateExpiryAsync(Http, message, Transport, reference,
             root => GeminiCacheReads.ParseReceipt(root, scope, reference.ResourceName, reference.ModelId), fence, token).ConfigureAwait(false);
     }

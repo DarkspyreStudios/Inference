@@ -219,7 +219,7 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
             LlmStreamEvent? observation;
             try
             {
-                httpRequest = new(HttpMethod.Post, BuildRequestUri(connection, request)) { Content = JsonContent.Create(payload) };
+                httpRequest = new(HttpMethod.Post, BuildRequestUri(connection, request)) { Content = RequestJson.Content(payload) };
                 ApplyRequestHeaders(httpRequest, connection, request);
                 credential = LlmCredential.Parse(connection.Credential);
                 preparation?.Fence();

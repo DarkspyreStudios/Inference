@@ -76,7 +76,7 @@ internal sealed class XaiEmbeddingClient(HttpClient http) : ILlmEmbeddingClient
             Fence();
             message = new(HttpMethod.Post, ProviderHttp.BuildUri(connection, "embeddings"));
             XaiRequestHeaders.Apply(message, connection, false);
-            message.Content = JsonContent.Create(payload);
+            message.Content = RequestJson.Content(payload);
             secrets = message.Headers.Where(header => header.Key == "Authorization" || connection.AdditionalHeaders.ContainsKey(header.Key))
                 .SelectMany(header => header.Value).ToArray();
             Fence();

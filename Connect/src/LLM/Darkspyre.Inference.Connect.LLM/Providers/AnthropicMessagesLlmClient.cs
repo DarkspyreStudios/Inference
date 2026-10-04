@@ -699,7 +699,7 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
 
     protected virtual HttpRequestMessage CreateHttpRequest(LlmConnection connection, LlmChatRequest request, JsonObject payload, bool stream)
     {
-        var result = new HttpRequestMessage(HttpMethod.Post, BuildApiUri(connection, "messages")) { Content = JsonContent.Create(payload) };
+        var result = new HttpRequestMessage(HttpMethod.Post, BuildApiUri(connection, "messages")) { Content = RequestJson.Content(payload) };
         ApplyAnthropicHeaders(result, connection, LlmCredential.Parse(connection.Credential));
         return result;
     }
@@ -707,7 +707,7 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
     protected virtual HttpRequestMessage CreateTokenCountRequest(LlmConnection connection, LlmChatRequest request, JsonObject payload)
     {
         var result = new HttpRequestMessage(HttpMethod.Post, BuildApiUri(connection, "messages/count_tokens"))
-        { Content = JsonContent.Create(payload) };
+        { Content = RequestJson.Content(payload) };
         ApplyAnthropicHeaders(result, connection, LlmCredential.Parse(connection.Credential));
         return result;
     }

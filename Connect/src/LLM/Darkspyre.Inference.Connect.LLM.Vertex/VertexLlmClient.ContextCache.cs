@@ -175,7 +175,7 @@ internal sealed partial class VertexLlmClient
             GeminiCacheBindings.Admission admission, Action<CancellationToken> fence, CancellationToken token)
         {
             var message = Message(HttpMethod.Patch, "/" + SelectId(reference) + "?updateMask=expireTime");
-            message.Content = JsonContent.Create(new JsonObject { ["expireTime"] = GoogleCacheData.Timestamp(expiry) });
+            message.Content = RequestJson.Content(new JsonObject { ["expireTime"] = GoogleCacheData.Timestamp(expiry) });
             return await GoogleCacheHttp.UpdateExpiryAsync(Owner.Http, message, Owner.Transport, reference,
                 root => Parse(root, admission, reference.ResourceName, reference.ModelId, fence, token), fence, token).ConfigureAwait(false);
         }

@@ -367,7 +367,7 @@ internal sealed class XaiImagineVideoTransport : IVideoTransport, IDisposable, I
             fence();
             request = new(method, ProviderHttp.BuildUri(snapshot, route));
             ConnectVideoInference.ApplyHeaders(request, connection, snapshot);
-            if (body is not null) request.Content = JsonContent.Create(body);
+            if (body is not null) request.Content = RequestJson.Content(body);
             fence();
             using (var headers = CancellationTokenSource.CreateLinkedTokenSource(token))
             {

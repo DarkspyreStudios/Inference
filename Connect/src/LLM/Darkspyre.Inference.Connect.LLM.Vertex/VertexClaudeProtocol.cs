@@ -18,7 +18,7 @@ internal sealed class VertexClaudeProtocol(HttpClient http, VertexAccess access)
     protected override HttpRequestMessage CreateHttpRequest(LlmConnection connection, LlmChatRequest request, JsonObject payload, bool stream)
     {
         var result = new HttpRequestMessage(HttpMethod.Post, VertexEndpoints.Generation(connection, request.ModelId, stream))
-        { Content = JsonContent.Create(payload) };
+        { Content = RequestJson.Content(payload) };
         access.Authorize(result);
         return result;
     }
@@ -27,7 +27,7 @@ internal sealed class VertexClaudeProtocol(HttpClient http, VertexAccess access)
     {
         payload["model"] = VertexEndpoints.ParseModel(request.ModelId).Model;
         var result = new HttpRequestMessage(HttpMethod.Post, VertexEndpoints.CountTokens(connection, request.ModelId))
-        { Content = JsonContent.Create(payload) };
+        { Content = RequestJson.Content(payload) };
         access.Authorize(result);
         return result;
     }

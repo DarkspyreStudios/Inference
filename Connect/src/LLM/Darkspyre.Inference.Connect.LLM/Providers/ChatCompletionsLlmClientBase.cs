@@ -157,7 +157,7 @@ internal abstract class ChatCompletionsLlmClientBase(HttpClient http) : LlmClien
             HttpMethod.Post,
             BuildRequestUri(connection, request))
         {
-            Content = JsonContent.Create(payload)
+            Content = RequestJson.Content(payload)
         };
         ApplyRequestHeaders(httpRequest, connection, request);
 

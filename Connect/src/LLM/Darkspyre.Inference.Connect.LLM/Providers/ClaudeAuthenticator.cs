@@ -67,7 +67,7 @@ internal sealed class ClaudeAuthenticator(HttpClient http)
         {
             using var request = new HttpRequestMessage(HttpMethod.Post, TokenEndpoint)
             {
-                Content = JsonContent.Create(new JsonObject
+                Content = RequestJson.Content(new JsonObject
                 {
                     ["grant_type"] = "authorization_code",
                     ["code"] = code,
@@ -88,7 +88,7 @@ internal sealed class ClaudeAuthenticator(HttpClient http)
     protected override HttpRequestMessage BuildRefreshRequest(LlmOAuthTokens tokens) =>
         new(HttpMethod.Post, TokenEndpoint)
         {
-            Content = JsonContent.Create(new JsonObject
+            Content = RequestJson.Content(new JsonObject
             {
                 ["grant_type"] = "refresh_token",
                 ["refresh_token"] = tokens.RefreshToken,

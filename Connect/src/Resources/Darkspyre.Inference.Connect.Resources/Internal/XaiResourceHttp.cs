@@ -39,7 +39,7 @@ internal sealed class XaiResourceHttp(HttpClient http, LlmConnection connection,
             fence();
             request = new(method, ProviderHttp.BuildUri(connection, path));
             XaiRequestHeaders.Apply(request, connection, false);
-            if (payload is not null) request.Content = JsonContent.Create(payload);
+            if (payload is not null) request.Content = RequestJson.Content(payload);
             fence();
             if (mutation)
             {

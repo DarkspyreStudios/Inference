@@ -101,7 +101,7 @@ internal sealed partial class GeminiApiLlmClient(HttpClient http)
         LlmProviderInputTokenCount result;
         {
             using var message = new HttpRequestMessage(HttpMethod.Post, $"{DefaultEndpoint}/v1beta/models/{request.ModelId}:countTokens")
-            { Content = JsonContent.Create(new JsonObject { ["generateContentRequest"] = built.Payload }) };
+            { Content = RequestJson.Content(new JsonObject { ["generateContentRequest"] = built.Payload }) };
             message.Headers.TryAddWithoutValidation(KeyHeader, Key(built.Connection));
             result = await ProviderTokenCounting.SendAsync(Http, message, Transport, request.ModelId, false,
                 cancellationToken).ConfigureAwait(false);
@@ -123,7 +123,7 @@ internal sealed partial class GeminiApiLlmClient(HttpClient http)
         string model = request.ModelId;
         string operation = capabilities.SupportsStreaming ? "streamGenerateContent?alt=sse" : "generateContent";
         var message = new HttpRequestMessage(HttpMethod.Post, $"{DefaultEndpoint}/v1beta/models/{model}:{operation}")
-        { Content = JsonContent.Create(built.Payload) };
+        { Content = RequestJson.Content(built.Payload) };
         message.Headers.TryAddWithoutValidation(KeyHeader, Key(connection));
         IAsyncEnumerable<LlmStreamEvent> source = GeminiStream.ReadAsync(Http, message, Route, connection, request, enforcement,
             capabilities.SupportsStreaming, capabilities.SupportsUsageDeltas, capabilities.SupportsReasoningText, cancellationToken);

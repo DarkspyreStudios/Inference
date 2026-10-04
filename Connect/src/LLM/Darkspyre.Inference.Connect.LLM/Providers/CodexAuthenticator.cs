@@ -26,7 +26,7 @@ internal sealed class CodexAuthenticator(HttpClient http)
                 HttpMethod.Post,
                 $"{AuthBaseUrl}/api/accounts/deviceauth/usercode")
             {
-                Content = JsonContent.Create(new JsonObject { ["client_id"] = ClientId })
+                Content = RequestJson.Content(new JsonObject { ["client_id"] = ClientId })
             };
             using HttpResponseMessage response = await Http.SendAsync(request, cancellationToken);
             await ThrowIfUnsuccessfulAsync(response, "ChatGPT login code request", cancellationToken);
@@ -62,7 +62,7 @@ internal sealed class CodexAuthenticator(HttpClient http)
                 HttpMethod.Post,
                 $"{AuthBaseUrl}/api/accounts/deviceauth/token")
             {
-                Content = JsonContent.Create(new JsonObject
+                Content = RequestJson.Content(new JsonObject
                 {
                     ["device_auth_id"] = deviceAuthId,
                     ["user_code"] = userCode
@@ -94,7 +94,7 @@ internal sealed class CodexAuthenticator(HttpClient http)
     protected override HttpRequestMessage BuildRefreshRequest(LlmOAuthTokens tokens) =>
         new(HttpMethod.Post, TokenEndpoint)
         {
-            Content = JsonContent.Create(new JsonObject
+            Content = RequestJson.Content(new JsonObject
             {
                 ["client_id"] = ClientId,
                 ["grant_type"] = "refresh_token",

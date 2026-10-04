@@ -365,7 +365,7 @@ public sealed class XaiImagineImageTransport : IImageTransport, IDisposable, IAs
             fence();
             request = new(HttpMethod.Post, ProviderHttp.BuildUri(snapshot, route));
             ApplyHeaders(request, connection, snapshot);
-            request.Content = JsonContent.Create(body);
+            request.Content = RequestJson.Content(body);
             fence();
             using (var headers = CancellationTokenSource.CreateLinkedTokenSource(token))
             {

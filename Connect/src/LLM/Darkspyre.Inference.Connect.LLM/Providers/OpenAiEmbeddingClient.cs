@@ -53,7 +53,7 @@ internal sealed class OpenAiEmbeddingClient(HttpClient http) : ILlmEmbeddingClie
                 HttpMethod.Post,
                 ProviderHttp.BuildUri(connection, "embeddings"))
             {
-                Content = JsonContent.Create(payload)
+                Content = RequestJson.Content(payload)
             };
             ProviderHttp.ApplyHeaders(httpRequest, connection);
             LlmCredential? credential = LlmCredential.Parse(connection.Credential);

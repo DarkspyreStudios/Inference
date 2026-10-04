@@ -37,7 +37,7 @@ internal static class GeminiCacheFiles
         var metadata = new JsonObject();
         if (descriptor.FileName is { Length: > 0 } name) metadata["displayName"] = name;
         var body = new MultipartContent("related");
-        body.Add(JsonContent.Create(new JsonObject { ["file"] = metadata }));
+        body.Add(RequestJson.Content(new JsonObject { ["file"] = metadata }));
         var media = new GoogleCacheMediaContent(source, descriptor.ContentType!, descriptor.Bytes,
             descriptor.ContentType == "application/pdf" ? 50L * 1024 * 1024 : MaximumBytes, fence);
         body.Add(media);

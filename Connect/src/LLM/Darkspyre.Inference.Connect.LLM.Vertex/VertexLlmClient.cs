@@ -106,7 +106,7 @@ internal sealed partial class VertexLlmClient(HttpClient http, IVertexAuthentica
                 output => ProjectToolOutput(built.Connection, request.ModelId, output),
                 GeminiModelProfiles.Get(VertexEndpoints.ParseModel(request.ModelId).Model, catalogThinking: null), built.Capabilities.SupportsReasoningText);
             payload.Remove("toolConfig");
-            using var message = new HttpRequestMessage(HttpMethod.Post, endpoint) { Content = JsonContent.Create(payload) };
+            using var message = new HttpRequestMessage(HttpMethod.Post, endpoint) { Content = RequestJson.Content(payload) };
             built.Access.Authorize(message);
             result = await ProviderTokenCounting.SendAsync(Http, message, Transport, request.ModelId, false, cancellationToken).ConfigureAwait(false);
         }
@@ -242,7 +242,7 @@ internal sealed partial class VertexLlmClient(HttpClient http, IVertexAuthentica
         bool stream)
     {
         var message = new HttpRequestMessage(HttpMethod.Post, VertexEndpoints.Generation(connection, request.ModelId, stream))
-        { Content = JsonContent.Create(payload) };
+        { Content = RequestJson.Content(payload) };
         access.Authorize(message);
         return message;
     }
