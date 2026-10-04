@@ -37,6 +37,11 @@ public static class XaiErrorClassifier
         ThrowIfUnsuccessfulCoreAsync(response, credential, additionalSecrets,
             false, "Provider rejected the image request.", null, null, cancellationToken);
 
+    internal static Task ThrowIfUnsuccessfulVideoAsync(HttpResponseMessage response, LlmCredential? credential,
+        IEnumerable<string> additionalSecrets, CancellationToken cancellationToken) =>
+        ThrowIfUnsuccessfulCoreAsync(response, credential, additionalSecrets,
+            true, "Provider rejected the video request.", ProviderHttp.ReadRequestId(response), response.Headers.RetryAfter?.Delta, cancellationToken);
+
     internal static Task ThrowIfUnsuccessfulEmbeddingAsync(HttpResponseMessage response, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(response);

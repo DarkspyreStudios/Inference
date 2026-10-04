@@ -26,7 +26,7 @@ public sealed class XaiFamilyBinding
         Authorization = new BindingAuthorization(this);
     }
 
-    private XaiFamilyBinding(XaiFamilyBinding source, LlmConnection snapshot, Action? operationFence)
+    private XaiFamilyBinding(XaiFamilyBinding source, LlmConnection? snapshot, Action? operationFence)
     {
         Selection = source.Selection;
         _access = source._access;
@@ -81,10 +81,10 @@ public sealed class XaiFamilyBinding
     }
 
     internal Task<Internal.XaiHttpDownload> OpenFileDownloadAsync(LlmConnection snapshot, string fileId,
-        TimeSpan timeout, Action fence, CancellationToken token)
+        TimeSpan timeout, Action fence, CancellationToken token, Action<HttpRequestMessage>? configureHeaders = null)
     {
         RequireCatalogService();
-        return _service!.OpenXaiFileDownloadSnapshotAsync(snapshot, fileId, timeout, CombineFence(fence), token);
+        return _service!.OpenXaiFileDownloadSnapshotAsync(snapshot, fileId, timeout, CombineFence(fence), token, configureHeaders);
     }
 
     internal Task<Internal.XaiHttpDownload> OpenMediaDownloadAsync(LlmConnection snapshot, string url,
@@ -96,6 +96,7 @@ public sealed class XaiFamilyBinding
 
     internal void FenceOperation() => _operationFence?.Invoke();
     internal void DetachOperationFence() => _operationFence = null;
+    internal XaiFamilyBinding EnterOperation(Action operationFence) => new(this, _snapshot, operationFence);
 
     private Action CombineFence(Action fence) => () => { FenceOperation(); fence(); FenceOperation(); };
 

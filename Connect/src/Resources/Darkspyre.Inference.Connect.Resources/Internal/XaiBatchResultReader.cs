@@ -211,8 +211,7 @@ internal sealed class XaiBatchResultReader(HttpClient http, LlmConnection connec
         XaiVideoPoll decoded = XaiVideoProtocol.ParsePoll(HttpStatusCode.OK, body.GetRawText(), Protected, fence);
         if (decoded.State is VideoJobState.Failed or VideoJobState.Expired)
         {
-            JsonElement error = Property(body, "error");
-            string? message = Present(error) == 1 ? XaiMediaData.OptionalString(error, "message", static _ => false) : null;
+            string? message = decoded.ErrorMessage;
             var failure = new LlmBatchFailure(id, new(InferenceFailureCode.ExecutionFailed, decoded.ErrorCode,
                 message is null ? $"The provider video state is {decoded.State}."
                     : SecretRedactor.Sanitize(message, LlmCredential.Parse(connection.Credential), connection.AdditionalHeaders.Values)));

@@ -190,8 +190,9 @@ upload, polling, materialization, cache creation or tool execution.
 ## Video bindings
 
 `VideoProviderService` binds the existing Common Video API to explicitly registered transports.
-`AddVideoConnect` registers the family service, not an xAI adapter. The concrete Grok Video adapter
-is not registered. An unregistered transport refuses before credential or resource effects.
+`AddVideoConnect` registers the family service and the Grok Video transport. The adapter uses the
+selected xAI core and Files owner for generation, editing, extension, lookup and streaming download.
+Registration does not establish provider entitlement or live compatibility.
 
 The bound facade validates the complete native request, source metadata and known workspace
 incompatibility before credential acquisition. Entered capability and submission bindings carry
@@ -1731,8 +1732,9 @@ fallbacks. The image codec copies ordered native `url` or `file_id` objects with
 metadata. It validates HTTP(S) provider-fetch URL data without fetching content and preserves
 single-image edit `aspect_ratio: null`. Storage and nullable usage facts use finite owned projections
 rather than raw response DTOs. These codecs alone perform no HTTP, upload, credential acquisition or receipt authorization.
-The complete transport/consumer integration and synchronous media usage handoff remain open;
-no xAI Image or Video transport is registered or OAuth-qualified by this checkpoint.
+The Image and Video transports consume these codecs through the selected core and Files owner.
+Their registration does not establish OAuth entitlement or runtime qualification. Synchronous media
+usage handoff remains unavailable.
 
 ## Video contracts
 
@@ -1761,9 +1763,9 @@ existing Video and nested batch metadata. No requested model or job scope suppli
 `VideoConnection.MaximumEncodedReferenceAudioBytes` is a nullable caller-selected limit with no
 default. A supplied value must be positive. Submit preflight requires it for binary or workspace
 reference audio before opening content or acquiring credentials. Preset voices and ordinary
-reference URLs do not require it. Video settings preserve the value through load, edit and save;
-the existing connection JSON metadata includes it. This contract does not enable the unfinished
-standalone xAI Video transport or establish enforcement during native data-URL encoding.
+reference URLs do not require it. The encoder bounds combined data-URL bytes, including MIME prefixes,
+base64 and repeated reference occurrences. It reads incrementally and refuses excess input. Video
+settings preserve the value through load, edit and save; the existing connection JSON metadata includes it.
 
 `XaiVideoOptions` is the fixed Video-owned subtype for Files-owned storage controls, signed
 upload destinations and explicit user data. Common metadata refuses these provider options;
@@ -1771,8 +1773,8 @@ upload destinations and explicit user data. Common metadata refuses these provid
 The private Video codec validates all implemented request controls before resolving any media source.
 It preserves supplied aspect ratios without establishing their effective provider behavior.
 Serialized job/output scope is data, not proof of authority. Each implemented transport owns
-receipt validation and download-origin authorization before effects. Lookup and download receive
-the same borrowed binding for adapter-owned validation before acquisition or refresh.
+receipt validation and download-origin authorization before effects. Lookup and download carry a
+private view of the same borrowed binding, with the facade's retirement fence, before acquisition or refresh.
 Materialization performs one download, not a second credential acquisition. Extension requests
 refuse an explicit `User` instead of dropping it. New settings carry an explicit xAI connection selection;
 rendering, opening and saving do not acquire credentials. Only the explicit capability action
@@ -1781,9 +1783,13 @@ The existing LLM header parser rejects reserved or malformed explicit and acquir
 headers before credential refresh. The bound facade copies source bytes at operation admission;
 the shared `BinaryMediaSource` data constructor still borrows its input.
 
-`AddVideoConnect` registers the family service only. No xAI Video transport is registered, so
-binding or opening settings for that unimplemented transport fails as unsupported. The data and
-SDK contracts do not establish provider availability, wire compatibility or download-origin safety.
+`AddVideoConnect` registers the internal xAI transport. Capability lookup reads the selected connection's
+Video model catalog. Submission retains the actual native request ID. Lookup performs one poll and
+retains actual nullable progress, model, output and sanitized provider failure facts. Native downloads
+authorize a Files receipt or freshly retrieve the output through its authenticated native job before
+opening the same unsigned media pipeline. An imported arbitrary URL is not authority. Terminal batch
+outputs with a committed logical resource use its named reader, without inventing a native job ID or
+falling back to a provider URL. These implementations remain unqualified against a live provider.
 
 Files and unsigned media transfers share one internal HTTP download owner. It exposes response
 metadata before body opening, streams incremental copies, and caches one response/request cleanup
@@ -1791,8 +1797,9 @@ outcome. The response alone disposes content. A refused cleanup retains the actu
 request and remains visible to the owning Files/core retirement. Borrowed destinations remain open.
 The send-through-headers timer disarms before body processing; borrowed HTTP timeouts do not change.
 Core-owned download opening retains the selected core, Files and HTTP generation operations until
-its caller releases them after closure and read drain. This internal opening path is a forward seam
-for DSA-130's standalone Video adapter, not a registered Video transport or runtime qualification.
+its caller releases them after closure and read drain. Video uses this opening path for returned live
+streams. Response closure starts before read drain; leases and creator fences release only after both
+settle. Actual cleanup failures remain visible to the transport and facade as well as the core owner.
 
 ## Host-executed tools
 

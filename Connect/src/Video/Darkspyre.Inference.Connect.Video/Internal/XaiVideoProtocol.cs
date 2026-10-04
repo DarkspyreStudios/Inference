@@ -248,7 +248,7 @@ internal static class XaiVideoProtocol
         Func<string, bool> protectedValue, Action fence)
     {
         if (status == HttpStatusCode.Accepted && string.IsNullOrWhiteSpace(body))
-            return new(VideoJobState.Pending, null, null, null, null, null);
+            return new(VideoJobState.Pending, null, null, null, null, null, null);
         if (status is not (HttpStatusCode.OK or HttpStatusCode.Accepted)) throw XaiMediaData.Malformed();
         using JsonDocument document = JsonDocument.Parse(body ?? string.Empty);
         JsonElement root = document.RootElement;
@@ -271,11 +271,13 @@ internal static class XaiVideoProtocol
         }
         JsonElement? usage = XaiMediaData.Usage(root);
         string? errorCode = null;
+        string? errorMessage = null;
         if (root.TryGetProperty("error", out JsonElement error) && error.ValueKind != JsonValueKind.Null)
         {
             if (error.ValueKind != JsonValueKind.Object) throw XaiMediaData.Malformed();
             errorCode = XaiMediaData.RequiredString(error, "code", protectedValue);
-            _ = XaiMediaData.RequiredString(error, "message", protectedValue);
+            // The adapter sanitizes diagnostic prose with its selected credential context.
+            errorMessage = XaiMediaData.RequiredString(error, "message", static _ => false);
         }
         JsonElement? output = null;
         if (root.TryGetProperty("video", out JsonElement video) && video.ValueKind != JsonValueKind.Null)
@@ -299,12 +301,12 @@ internal static class XaiVideoProtocol
         }
         if (state == VideoJobState.Completed && output is null) throw XaiMediaData.Malformed();
         fence();
-        return new(state, progress, model, output, usage, errorCode);
+        return new(state, progress, model, output, usage, errorCode, errorMessage);
     }
 }
 
 internal sealed record XaiVideoPoll(VideoJobState State, int? ProgressPercent, string? ModelId,
-    JsonElement? Output, JsonElement? Usage, string? ErrorCode)
+    JsonElement? Output, JsonElement? Usage, string? ErrorCode, string? ErrorMessage)
 {
     public override string ToString() => "XaiVideoPoll { <observation> }";
 }

@@ -45,7 +45,7 @@ internal sealed class ConnectVideoInference : IVideoInference, IDisposable, IAsy
     {
         using LlmOperationLifetime.Lease lease = _lifetime.Enter(cancellationToken);
         request = CaptureRequest(request);
-        ValidateRequest(request, _resources, lease.Token);
+        ValidateRequest(_connection!, request, _resources, () => Fence(lease.Token), lease.Token);
         (VideoConnection connection, XaiFamilyBinding binding) = await EnterBindingAsync(lease.Token).ConfigureAwait(false);
         try
         {
@@ -60,24 +60,30 @@ internal sealed class ConnectVideoInference : IVideoInference, IDisposable, IAsy
     {
         using LlmOperationLifetime.Lease lease = _lifetime.Enter(cancellationToken);
         ArgumentNullException.ThrowIfNull(job);
-        (VideoConnection connection, XaiFamilyBinding binding) = ReceiptBinding();
-        VideoJobSnapshot result = await _transport!.GetAsync(connection, job, binding, lease.Token).ConfigureAwait(false);
-        Fence(lease.Token);
-        if (result is null || result.Job != job) throw ProtocolFailure();
-        return result;
+        (VideoConnection connection, XaiFamilyBinding binding) = ReceiptBinding(lease.Token);
+        try
+        {
+            VideoJobSnapshot result = await _transport!.GetAsync(connection, job, binding, lease.Token).ConfigureAwait(false);
+            Fence(lease.Token);
+            if (result is null || result.Job != job) throw ProtocolFailure();
+            return result;
+        }
+        finally { binding.DetachOperationFence(); }
     }
 
     public async Task<Stream> DownloadAsync(VideoOutput output, CancellationToken cancellationToken = default)
     {
         LlmOperationLifetime.Lease lease = _lifetime.Enter(cancellationToken);
         Stream? stream = null;
+        XaiFamilyBinding? binding = null;
         try
         {
             ArgumentNullException.ThrowIfNull(output);
-            (VideoConnection connection, XaiFamilyBinding binding) = ReceiptBinding();
-            stream = await _transport!.DownloadAsync(connection, output, binding, lease.Token).ConfigureAwait(false) ?? throw ProtocolFailure();
+            VideoConnection connection;
+            (connection, binding) = ReceiptBinding(lease.Token);
+            stream = await OpenDownloadAsync(connection, output, binding, lease.Token).ConfigureAwait(false);
             Fence(lease.Token);
-            var owned = new VideoDownloadStream(stream, lease, _lifetime, error => RecordFailure(error, ownedRetirement: true));
+            var owned = new VideoDownloadStream(stream, lease, _lifetime, error => RecordFailure(error, ownedRetirement: true), binding.DetachOperationFence);
             stream = owned;
             owned.ObserveRetirement();
             Fence(lease.Token);
@@ -94,7 +100,7 @@ internal sealed class ConnectVideoInference : IVideoInference, IDisposable, IAsy
                 RecordFailure(refused);
                 throw new AggregateException(original, refused);
             }
-            finally { lease.Dispose(); }
+            finally { binding?.DetachOperationFence(); lease.Dispose(); }
             throw;
         }
     }
@@ -102,16 +108,18 @@ internal sealed class ConnectVideoInference : IVideoInference, IDisposable, IAsy
     public async Task<InferenceResourceDescriptor> MaterializeAsync(VideoOutput output, CancellationToken cancellationToken = default)
     {
         using LlmOperationLifetime.Lease lease = _lifetime.Enter(cancellationToken);
-        try { return await MaterializeAdmittedAsync(output, lease).ConfigureAwait(false); }
+        (VideoConnection connection, XaiFamilyBinding binding) = ReceiptBinding(lease.Token);
+        try { return await MaterializeAdmittedAsync(output, connection, binding, lease).ConfigureAwait(false); }
         catch (Exception error) { RecordFailure(error); throw; }
+        finally { binding.DetachOperationFence(); }
     }
 
-    private async Task<InferenceResourceDescriptor> MaterializeAdmittedAsync(VideoOutput output, LlmOperationLifetime.Lease lease)
+    private async Task<InferenceResourceDescriptor> MaterializeAdmittedAsync(VideoOutput output, VideoConnection connection,
+        XaiFamilyBinding binding, LlmOperationLifetime.Lease lease)
     {
         ArgumentNullException.ThrowIfNull(output);
         IInferenceResourceAccess resources = _resources ?? throw new InferenceException(InferenceFailureCode.UnsupportedFeature,
             "Video materialization requires caller-owned resource access.");
-        (VideoConnection connection, XaiFamilyBinding binding) = ReceiptBinding();
         string? workspace = null;
         string? session = null;
         Stream? download = null;
@@ -133,12 +141,14 @@ internal sealed class ConnectVideoInference : IVideoInference, IDisposable, IAsy
             Fence(lease.Token);
             session = resources.SessionId;
             CheckScope();
-            download = await _transport!.DownloadAsync(connection, output, binding, lease.Token).ConfigureAwait(false) ?? throw ProtocolFailure();
+            download = await OpenDownloadAsync(connection, output, binding, lease.Token).ConfigureAwait(false);
             CheckScope();
             if (!download.CanRead) throw ProtocolFailure();
             CheckScope();
+            string? contentType = output.ContentType ?? (download as VideoDownloadStream)?.ObservedContentType;
+            string? fileName = output.FileName ?? (download as VideoDownloadStream)?.ObservedFileName;
             phase = InferenceResourceOperationPhase.OpenWrite;
-            writer = await resources.OpenWriteAsync(new(session, output.FileName, output.ContentType), lease.Token).ConfigureAwait(false);
+            writer = await resources.OpenWriteAsync(new(session, fileName, contentType), lease.Token).ConfigureAwait(false);
             CheckScope();
             if (writer is null) throw ProtocolFailure();
             allocation = writer.Reference ?? throw ProtocolFailure();
@@ -165,6 +175,8 @@ internal sealed class ConnectVideoInference : IVideoInference, IDisposable, IAsy
                 CheckScope();
             }
             phase = InferenceResourceOperationPhase.Commit;
+            if ((download as VideoDownloadStream)?.ObservedLength is { } sourceLength && sourceLength != completed)
+                throw ProtocolFailure();
             outcome = selectionOutcome = InferenceResourceCommitOutcome.Unknown;
             InferenceResourceCommitResult committed = await writer.CommitAsync(completed,
                 new InferenceResourceCommitOptions { SelectForSession = true }, lease.Token).ConfigureAwait(false);
@@ -182,7 +194,7 @@ internal sealed class ConnectVideoInference : IVideoInference, IDisposable, IAsy
             result = committed?.Resource;
             if (result is null || result.Reference != allocation || result.SessionId is { } reportedSession && reportedSession != session
                 || result.Bytes is { } bytes && bytes != completed
-                || XaiMediaData.ContentTypesConflict(result.ContentType, output.ContentType)
+                || XaiMediaData.ContentTypesConflict(result.ContentType, contentType)
                 || selectionOutcome != InferenceResourceCommitOutcome.Committed) throw ProtocolFailure();
             var selectedReceipt = new InferenceResourceSelection(workspace!, session!, committed!.Selection!.Revision, committed.Selection.SelectedResources);
             if (committed.Selection.SelectedResources.Any(reference => string.IsNullOrEmpty(reference.Id))) throw ProtocolFailure();
@@ -278,6 +290,11 @@ internal sealed class ConnectVideoInference : IVideoInference, IDisposable, IAsy
     internal static void ApplyHeaders(HttpRequestMessage request, VideoConnection connection, LlmConnection snapshot)
     {
         XaiRequestHeaders.Apply(request, snapshot, false);
+        ApplyAdditionalHeaders(request, connection, snapshot);
+    }
+
+    internal static void ApplyAdditionalHeaders(HttpRequestMessage request, VideoConnection connection, LlmConnection snapshot)
+    {
         LlmCredential? credential = LlmCredential.Parse(snapshot.Credential);
         foreach ((string name, string value) in connection.AdditionalHeaders)
         {
@@ -287,12 +304,13 @@ internal sealed class ConnectVideoInference : IVideoInference, IDisposable, IAsy
         }
     }
 
-    private (VideoConnection, XaiFamilyBinding) ReceiptBinding()
+    private (VideoConnection, XaiFamilyBinding) ReceiptBinding(CancellationToken token)
     {
         VideoConnection connection = _connection! with { AdditionalHeaders = _connection!.AdditionalHeaders };
         XaiFamilyBinding? xai = _xai;
         ValidateBinding(connection, xai);
-        return (connection with { Authorization = xai!.Authorization }, xai);
+        XaiFamilyBinding entered = xai!.EnterOperation(() => Fence(token));
+        return (connection with { Authorization = entered.Authorization }, entered);
     }
 
     internal static void ValidateBinding(VideoConnection connection, XaiFamilyBinding? xai)
@@ -311,7 +329,7 @@ internal sealed class ConnectVideoInference : IVideoInference, IDisposable, IAsy
         ProviderHttp.ValidateAdditionalHeaders(connection.AdditionalHeaders);
     }
 
-    private static VideoRequest CaptureRequest(VideoRequest request)
+    internal static VideoRequest CaptureRequest(VideoRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
         static InferenceMediaSource Copy(InferenceMediaSource source) => source is BinaryMediaSource binary ? binary with { Data = binary.Data.ToArray() } : source;
@@ -331,7 +349,8 @@ internal sealed class ConnectVideoInference : IVideoInference, IDisposable, IAsy
         };
     }
 
-    private void ValidateRequest(VideoRequest request, IInferenceResourceAccess? resources, CancellationToken token)
+    internal static void ValidateRequest(VideoConnection connection, VideoRequest request,
+        IInferenceResourceAccess? resources, Action fence, CancellationToken token)
     {
         try { XaiVideoProtocol.Validate(request); }
         catch (NotSupportedException error)
@@ -340,7 +359,7 @@ internal sealed class ConnectVideoInference : IVideoInference, IDisposable, IAsy
         }
         if (request is VideoGenerationRequest { ReferenceAudio: { } audio }
             && audio.OfType<VideoAudioReference>().Any(reference => reference.Source is BinaryMediaSource or ResourceMediaSource)
-            && _connection!.MaximumEncodedReferenceAudioBytes is not > 0)
+            && connection.MaximumEncodedReferenceAudioBytes is not > 0)
             throw new ArgumentException("Supplied binary or workspace reference audio requires a positive encoded byte limit on the video connection.", nameof(request));
         IEnumerable<InferenceMediaSource?> sources = request switch
         {
@@ -354,7 +373,7 @@ internal sealed class ConnectVideoInference : IVideoInference, IDisposable, IAsy
         };
         foreach (InferenceMediaSource? source in sources)
         {
-            Fence(token);
+            Check();
             if (source is null) continue;
             if (source is BinaryMediaSource binary)
             {
@@ -369,12 +388,44 @@ internal sealed class ConnectVideoInference : IVideoInference, IDisposable, IAsy
                     throw new InferenceException(InferenceFailureCode.UnsupportedFeature, "Logical video sources require matching caller-owned resource access.");
                 LlmResourcePreparation.ValidateNamedReference(logical.Resource, resources);
                 string workspace = resources.WorkspaceId;
-                Fence(token);
+                Check();
                 if (logical.Resource.WorkspaceId != workspace)
                     throw new InferenceException(InferenceFailureCode.UnsupportedFeature, "Logical video sources require matching caller-owned resource access.");
             }
         }
-        Fence(token);
+        Check();
+        void Check() { token.ThrowIfCancellationRequested(); fence(); token.ThrowIfCancellationRequested(); }
+    }
+
+    private Task<Stream> OpenDownloadAsync(VideoConnection connection, VideoOutput output, XaiFamilyBinding binding, CancellationToken token)
+        => output.Resource is null ? _transport!.DownloadAsync(connection, output, binding, token)
+            : OpenResourceDownloadAsync(output, token);
+
+    private async Task<Stream> OpenResourceDownloadAsync(VideoOutput output, CancellationToken token)
+    {
+        IInferenceResourceAccess access = _resources ?? throw new InferenceException(InferenceFailureCode.UnsupportedFeature,
+            "Portable video output requires caller-owned resource access.");
+        var reads = LlmResourcePreparation.ForNamedReads();
+        try
+        {
+            var opened = await reads.OpenNamedAsync(access, output.Resource!.Reference, descriptor =>
+            {
+                if (XaiMediaData.ContentTypesConflict(descriptor.ContentType, output.ContentType)
+                    || XaiMediaData.ContentTypesConflict(descriptor.ContentType, output.Resource.ContentType)
+                    || output.Resource.SessionId is { } session && descriptor.SessionId is { } actualSession && session != actualSession
+                    || output.Resource.Bytes is { } bytes && descriptor.Bytes is { } actualBytes && bytes != actualBytes)
+                    throw ProtocolFailure();
+            }, () => Fence(token), token).ConfigureAwait(false);
+            Fence(token);
+            return new VideoDownloadStream(opened.Content, reads, () => Fence(token), token,
+                opened.Descriptor.ContentType, opened.Descriptor.FileName, opened.Descriptor.Bytes);
+        }
+        catch (Exception original)
+        {
+            try { await reads.DisposeAsync().ConfigureAwait(false); }
+            catch (Exception cleanup) { throw new AggregateException(original, cleanup); }
+            throw;
+        }
     }
 
     private static InferenceException ProtocolFailure() => new(InferenceFailureCode.ProtocolFailure, "The video provider returned mismatched or missing facts.");
@@ -424,26 +475,64 @@ internal sealed class VideoDownloadStream : Stream
 {
     private readonly Lock _gate = new();
     private readonly LlmOperationLifetime _reads = new();
-    private readonly LlmOperationLifetime.Lease _lease;
-    private readonly LlmOperationLifetime _owner;
-    private readonly Action<Exception> _recordFailure;
+    private readonly LlmOperationLifetime.Lease? _lease;
+    private readonly LlmOperationLifetime? _owner;
+    private readonly CancellationToken _token;
+    private Action<Exception>? _recordFailure;
+    private Action? _onDrained;
+    private Action? _externalFence;
+    private XaiHttpDownload? _httpDownload;
+    private LlmResourcePreparation? _namedReads;
     private Stream? _stream;
     private Task? _disposal;
     private CancellationTokenRegistration _registration;
 
-    internal VideoDownloadStream(Stream stream, LlmOperationLifetime.Lease lease, LlmOperationLifetime owner, Action<Exception> recordFailure)
+    internal VideoDownloadStream(Stream stream, LlmOperationLifetime.Lease lease, LlmOperationLifetime owner,
+        Action<Exception> recordFailure, Action onDrained)
     {
-        _stream = stream; _lease = lease; _owner = owner; _recordFailure = recordFailure;
+        _stream = stream; _lease = lease; _owner = owner; _token = lease.Token;
+        _recordFailure = recordFailure; _onDrained = onDrained;
+        if (stream is VideoDownloadStream owned)
+        { ObservedContentType = owned.ObservedContentType; ObservedFileName = owned.ObservedFileName; ObservedLength = owned.ObservedLength; }
     }
-    internal void ObserveRetirement() => _registration = _lease.Token.UnsafeRegister(static owner => _ = ((VideoDownloadStream)owner!).RetireFromOwnerAsync(), this);
+    internal VideoDownloadStream(Stream stream, LlmResourcePreparation namedReads, Action fence, CancellationToken token,
+        string? contentType, string? fileName, long? length = null)
+    {
+        _stream = stream; _namedReads = namedReads; _externalFence = fence; _token = token;
+        ObservedContentType = contentType; ObservedFileName = fileName; ObservedLength = length;
+        ObserveRetirement();
+    }
+    internal VideoDownloadStream(Stream stream, XaiHttpDownload download, Action<Exception> recordFailure,
+        Action onDrained, string? fileName)
+    {
+        _stream = stream; _httpDownload = download; _token = download.Token;
+        _recordFailure = recordFailure; _onDrained = onDrained;
+        ObservedContentType = download.ContentType; ObservedLength = download.DeclaredLength; ObservedFileName = fileName;
+        ObserveRetirement();
+    }
+    internal string? ObservedContentType { get; }
+    internal string? ObservedFileName { get; }
+    internal long? ObservedLength { get; }
+    internal void ObserveRetirement()
+    {
+        CancellationTokenRegistration registration = _token.UnsafeRegister(static owner => _ = ((VideoDownloadStream)owner!).RetireFromOwnerAsync(), this);
+        lock (_gate)
+        {
+            if (_disposal is null) _registration = registration;
+            else registration.Unregister();
+        }
+    }
     // The facade records the owned retirement outcome before this stream releases its lease.
     private async Task RetireFromOwnerAsync() => await Retire().ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
     private Stream Inner { get { Fence(default); return _stream ?? throw new ObjectDisposedException(nameof(VideoDownloadStream)); } }
     private void Fence(CancellationToken token)
     {
-        token.ThrowIfCancellationRequested(); _lease.Token.ThrowIfCancellationRequested();
-        try { _owner.ThrowIfStopping(); _reads.ThrowIfStopping(); }
-        catch (ObjectDisposedException error) { throw new OperationCanceledException("The video download owner is retiring.", error, _lease.Token); }
+        token.ThrowIfCancellationRequested(); _token.ThrowIfCancellationRequested();
+        try { _owner?.ThrowIfStopping(); _reads.ThrowIfStopping(); }
+        catch (ObjectDisposedException error) { throw new OperationCanceledException("The video download owner is retiring.", error, _token); }
+        _externalFence?.Invoke();
+        _httpDownload?.Fence();
+        token.ThrowIfCancellationRequested(); _token.ThrowIfCancellationRequested();
     }
     public override bool CanRead
     {
@@ -491,7 +580,7 @@ internal sealed class VideoDownloadStream : Stream
     public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
     {
         using LlmOperationLifetime.Lease read = _reads.Enter(cancellationToken);
-        using var linked = CancellationTokenSource.CreateLinkedTokenSource(_lease.Token, read.Token);
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(_token, read.Token);
         int count = await Inner.ReadAsync(buffer, linked.Token).ConfigureAwait(false);
         Fence(linked.Token);
         return count;
@@ -532,20 +621,42 @@ internal sealed class VideoDownloadStream : Stream
         Stream? stream = Interlocked.Exchange(ref _stream, null);
         _registration.Unregister();
         Task close;
-        close = stream is null ? Task.CompletedTask : CloseAsync(stream);
+        close = _httpDownload is { } http ? http.CloseAsync()
+            : _namedReads is { } named ? named.DisposeAsync().AsTask()
+            : stream is null ? Task.CompletedTask : CloseAsync(stream);
         Task both = Task.WhenAll(close, drained);
         try
         {
             await both.ConfigureAwait(false);
-            _lease.Dispose();
+            ReleaseOwners();
             completion.TrySetResult();
         }
         catch (Exception failure)
         {
-            Exception actual = both.Exception is { InnerExceptions.Count: > 1 } errors ? errors : failure;
-            _recordFailure(actual);
-            _lease.Dispose();
+            var errors = new List<Exception>();
+            if (close.Exception is { } closing) errors.AddRange(closing.InnerExceptions);
+            if (drained.Exception is { } stopping)
+                foreach (Exception error in stopping.InnerExceptions)
+                    errors.Add(_httpDownload is { } download ? download.RecordReadCleanup(error, _reads)
+                        : LlmResourcePreparation.AsCleanupFailure(error, refusedOwner: _reads));
+            Exception actual = errors.Count > 1 ? new AggregateException(errors) : errors.Count == 1 ? errors[0] : failure;
+            _recordFailure?.Invoke(actual);
+            ReleaseOwners();
             completion.TrySetException(actual);
+        }
+    }
+
+    private void ReleaseOwners()
+    {
+        Action? onDrained = _onDrained;
+        _onDrained = null; _externalFence = null; _recordFailure = null; _namedReads = null;
+        XaiHttpDownload? download = _httpDownload;
+        _httpDownload = null;
+        try { download?.ReleaseAfterDrain(); }
+        finally
+        {
+            try { onDrained?.Invoke(); }
+            finally { _lease?.Dispose(); }
         }
     }
 

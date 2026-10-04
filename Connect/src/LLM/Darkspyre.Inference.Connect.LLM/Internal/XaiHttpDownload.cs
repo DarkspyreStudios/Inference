@@ -1,4 +1,5 @@
 using System.Diagnostics.CodeAnalysis;
+using Darkspyre.Inference.Common.Resources;
 
 namespace Darkspyre.Inference.Connect.LLM.Internal;
 
@@ -110,6 +111,13 @@ internal sealed class XaiHttpDownload
         _recordCleanup += recordCleanup;
     }
 
+    internal Exception RecordReadCleanup(Exception error, object owner)
+    {
+        Exception failure = CleanupFailure(error, owner);
+        _recordCleanup?.Invoke(failure);
+        return failure;
+    }
+
     internal Task CloseAsync()
     {
         TaskCompletionSource completion;
@@ -141,11 +149,29 @@ internal sealed class XaiHttpDownload
 
         void Record(Exception cleanup, object owner)
         {
-            Exception failure = LlmResourcePreparation.AsCleanupFailure(cleanup, refusedOwner: owner);
+            Exception failure = CleanupFailure(cleanup, owner);
             failures.Add(failure);
             _recordCleanup?.Invoke(failure);
         }
     }
+
+    private static Exception CleanupFailure(Exception error, object owner)
+    {
+        Exception safe = error switch
+        {
+            InferenceResourceOperationException resource => new InferenceResourceOperationException(resource.Code,
+                "The owned download could not be released.", resource.Failure, new CleanupEvidence(error)),
+            InferenceResourceOperationCanceledException resource => new InferenceResourceOperationCanceledException(
+                resource.Failure, resource.CancellationToken, new CleanupEvidence(error)),
+            OperationCanceledException canceled => new OperationCanceledException(
+                "The owned download cleanup was interrupted.", new CleanupEvidence(error), canceled.CancellationToken),
+            _ => new CleanupEvidence(error)
+        };
+        return LlmResourcePreparation.AsCleanupFailure(safe, refusedOwner: (owner, error));
+    }
+
+    private sealed class CleanupEvidence(Exception original) : Exception("The download owner reported a cleanup failure.")
+    { internal Exception Original { get; } = original; }
 
     // Escaped-stream owners call this only after closure and all admitted reads settle.
     internal void ReleaseAfterDrain()

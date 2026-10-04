@@ -105,11 +105,11 @@ public sealed partial class LlmProviderService
         }, token);
 
     internal Task<XaiHttpDownload> OpenXaiFileDownloadSnapshotAsync(LlmConnection snapshot, string fileId,
-        TimeSpan timeout, Action outerFence, CancellationToken token)
+        TimeSpan timeout, Action outerFence, CancellationToken token, Action<HttpRequestMessage>? configureHeaders = null)
         => OpenXaiDownloadSnapshotAsync(snapshot, outerFence, (_, fence, current) =>
         {
             XaiFileClient files = _xaiFiles ?? throw new NotSupportedException("The selected facade has no Files resource route.");
-            return files.OpenDownloadAsync(snapshot, fileId, timeout, fence, current);
+            return files.OpenDownloadAsync(snapshot, fileId, timeout, fence, current, configureHeaders);
         }, token);
 
     internal Task<XaiHttpDownload> OpenXaiMediaDownloadSnapshotAsync(LlmConnection snapshot, string url,

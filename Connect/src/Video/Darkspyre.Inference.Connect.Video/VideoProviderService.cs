@@ -4,7 +4,9 @@ using Darkspyre.Inference.Common.Setup;
 using Darkspyre.Inference.Common.Video;
 using Darkspyre.Inference.Connect.LLM;
 using Darkspyre.Inference.Connect.LLM.Internal;
+using Darkspyre.Inference.Connect.Video.Providers;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace Darkspyre.Inference.Connect.Video;
 
@@ -72,10 +74,11 @@ public sealed class VideoProviderService : IDisposable, IAsyncDisposable
 
 public static class ServiceCollectionExtensions
 {
-    /// <summary>Registers the family service. No unimplemented video transport is activated.</summary>
+    /// <summary>Registers the family service and the selected-connection xAI video transport.</summary>
     public static IServiceCollection AddVideoConnect(this IServiceCollection services)
     {
         ArgumentNullException.ThrowIfNull(services);
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IVideoTransport, XaiImagineVideoTransport>());
         services.AddTransient<VideoProviderService>();
         return services;
     }
