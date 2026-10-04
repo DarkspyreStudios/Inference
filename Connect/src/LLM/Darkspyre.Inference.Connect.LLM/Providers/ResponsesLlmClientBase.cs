@@ -817,6 +817,18 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
             connection.Transport == LlmTransport.XaiResponses);
 
         string? providerStatus = LlmJson.GetString(responseRoot, "status");
+        if (providerStatus is null && connection.Transport == LlmTransport.OpenAiCodex)
+        {
+            // Codex determines terminal state from the SSE type without requiring response.status.
+            providerStatus = LlmJson.GetString(eventRoot, "type") switch
+            {
+                "response.completed" => "completed",
+                "response.incomplete" => "incomplete",
+                "response.failed" => "failed",
+                "response.cancelled" => "cancelled",
+                _ => null
+            };
+        }
         string? incompleteReason = LlmJson.GetObject(responseRoot, "incomplete_details") is { } details
             ? LlmJson.GetString(details, "reason")
             : null;
@@ -826,8 +838,8 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
             {
                 "incomplete" or "cancelled" => LlmCompletionStatus.Incomplete,
                 "failed" => LlmCompletionStatus.Failed,
-                _ when toolCalls.Length > 0 => LlmCompletionStatus.RequiresAction,
-                _ => LlmCompletionStatus.Completed
+                "completed" => toolCalls.Length > 0 ? LlmCompletionStatus.RequiresAction : LlmCompletionStatus.Completed,
+                _ => LlmCompletionStatus.Unknown
             };
 
         if (connection.Transport == LlmTransport.XaiResponses)
@@ -875,8 +887,7 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
             ProviderResponseId = LlmJson.GetString(responseRoot, "id"),
             ToolCalls = toolCalls,
             // The reported counts travel with the state, so later accounting can use them for this history.
-            ContinuationState = status is LlmCompletionStatus.Failed or LlmCompletionStatus.Incomplete
-                || connection.Transport == LlmTransport.XaiResponses && status == LlmCompletionStatus.Unknown
+            ContinuationState = status is LlmCompletionStatus.Failed or LlmCompletionStatus.Incomplete or LlmCompletionStatus.Unknown
                 ? null
                 : OpenAiResponsesTools.EncodeContinuationState(responseRoot, connection, modelId) is { } state
                     ? compaction ? state : state with { InputTokens = usage?.InputTokens, OutputTokens = usage?.OutputTokens }

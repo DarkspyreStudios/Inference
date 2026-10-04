@@ -1297,6 +1297,12 @@ that unknown outcome. Each HTTP event publication checks caller cancellation, in
 non-streaming events and adapters using a borrowed HTTP client.
 Claude CLI and Antigravity also check caller cancellation before each buffered non-streaming event.
 
+Responses reports `Unknown` for an unrecognized native status and does not publish continuation
+state from that outcome. Tool calls alone do not establish successful completion. Direct Codex
+also accepts the actual terminal SSE event type when its response omits `status`, matching the
+selected CLI protocol. An explicit unknown status is not replaced by the event type. Other
+Responses routes require their native status; a missing status remains unknown.
+
 `SupportsReasoningText` describes public reasoning separately from reasoning-level control. Common
 mirrors the flag. The **Reasoning text** override disables public reasoning events and provider
 summary requests without dropping opaque continuation state. Model overrides take precedence over
