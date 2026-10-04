@@ -23,23 +23,23 @@ internal static class SpeechResourceWriter
         }
     }
 
-    internal static async Task<InferenceResourceDescriptor> CommitAsync(IInferenceResourceAccess access,
+    internal static async Task<InferenceResourceCommitResult> CommitAsync(IInferenceResourceAccess access,
         InferenceResourceSelectionVersion scope, ReadOnlyMemory<byte> audio, string contentType,
         Action fence, Action<Exception> recordCleanup, CancellationToken token)
     {
         Writer writer = await OpenAsync(access, scope, contentType, audio.Length, fence, recordCleanup, token).ConfigureAwait(false);
-        Exception? failure = null; InferenceResourceDescriptor? result = null;
+        Exception? failure = null;
         try
         {
             await writer.WriteAsync(audio, token).ConfigureAwait(false);
-            result = await writer.CommitAsync(token).ConfigureAwait(false);
+            await writer.CommitAsync(token).ConfigureAwait(false);
         }
         catch (Exception error) { failure = error; }
         try { await writer.DisposeAsync().ConfigureAwait(false); }
         catch (Exception cleanup) { failure = failure is null ? cleanup : new AggregateException(failure, cleanup); }
         if (failure is not null) ExceptionDispatchInfo.Capture(failure).Throw();
         writer.Fence(token);
-        return result!;
+        return writer.ObservedCommit!;
     }
 
     internal static async Task<Writer> OpenAsync(IInferenceResourceAccess access, InferenceResourceSelectionVersion scope,
@@ -146,7 +146,7 @@ internal static class SpeechResourceWriter
             {
                 _commit = observed.CommitOutcome; _selection = observed.SelectionOutcome;
                 _version = observed.SelectionVersion; _bytes = observed.BytesTransferred;
-                return error;
+                return LlmResourcePreparation.WithGeneratedResources(error, ObservedCommit is null ? [] : [ObservedCommit]);
             }
             return Wrap(error, _phase);
         }
@@ -168,7 +168,11 @@ internal static class SpeechResourceWriter
         private Exception Wrap(Exception error, InferenceResourceOperationPhase actualPhase)
         {
             var facts = new InferenceResourceOperationFailure(actualPhase, _reference, _commit, _bytes)
-            { SelectionOutcome = _selection, SelectionVersion = _version };
+            {
+                SelectionOutcome = _selection,
+                SelectionVersion = _version,
+                GeneratedResources = ObservedCommit is null ? [] : [ObservedCommit]
+            };
             return error is OperationCanceledException canceled
                 ? new InferenceResourceOperationCanceledException(facts, canceled.CancellationToken, error)
                 : new InferenceResourceOperationException(InferenceFailureCode.ExecutionFailed, "The speech artifact could not be published.", facts, error);

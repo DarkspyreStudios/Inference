@@ -148,14 +148,24 @@ public sealed class PocketTtsHttpProvider(HttpClient httpClient) : ITtsProvider
                 });
             }
             Fence(cancellationToken);
-            if (_resources is not null)
-                result = result with
+            InferenceResourceCommitResult? receipt = null;
+            try
+            {
+                if (_resources is not null)
                 {
-                    Resource = await SpeechResourceWriter.CommitAsync(_resources, scope!, result.Audio,
-                    result.ContentType, () => Fence(cancellationToken), RecordCleanup, cancellationToken).ConfigureAwait(false)
-                };
-            Fence(cancellationToken);
-            return consumption.Publish(result);
+                    receipt = await SpeechResourceWriter.CommitAsync(_resources, scope!, result.Audio,
+                        result.ContentType, () => Fence(cancellationToken), RecordCleanup, cancellationToken).ConfigureAwait(false);
+                    result = result with { Resource = receipt.Resource };
+                }
+                Fence(cancellationToken);
+                return consumption.Publish(result);
+            }
+            catch (Exception error)
+            {
+                ExceptionDispatchInfo.Capture(LlmResourcePreparation.WithGeneratedResources(error,
+                    receipt is null ? [] : [receipt])).Throw();
+                throw;
+            }
         }
 
         private HttpContent CreateContent(TtsRequest request)

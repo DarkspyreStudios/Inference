@@ -146,8 +146,22 @@ public sealed class XaiTtsProvider : ITtsProvider
                 return new TtsResult(contentType, audio, new() { ImplementationId = _provider!.SetupDefinition.Implementation.Id, ModelId = null, Runtime = "HTTP", Elapsed = Stopwatch.GetElapsedTime(started) }) { Duration = duration, Timestamps = timestamps };
             }, token).ConfigureAwait(false);
             Fence(token);
-            if (_resources is not null) result = result with { Resource = await SpeechResourceWriter.CommitAsync(_resources, scope!, result.Audio, result.ContentType, () => Fence(token), RecordCleanup, token).ConfigureAwait(false) };
-            Fence(token); return consumption.Publish(result);
+            InferenceResourceCommitResult? receipt = null;
+            try
+            {
+                if (_resources is not null)
+                {
+                    receipt = await SpeechResourceWriter.CommitAsync(_resources, scope!, result.Audio, result.ContentType, () => Fence(token), RecordCleanup, token).ConfigureAwait(false);
+                    result = result with { Resource = receipt.Resource };
+                }
+                Fence(token); return consumption.Publish(result);
+            }
+            catch (Exception error)
+            {
+                ExceptionDispatchInfo.Capture(LlmResourcePreparation.WithGeneratedResources(error,
+                    receipt is null ? [] : [receipt])).Throw();
+                throw;
+            }
         }
         private async Task<T> SendAsync<T>(LlmConnection snapshot, string path, HttpContent? body,
             Func<HttpResponseMessage, CancellationToken, Task<T>> read, CancellationToken token,

@@ -787,6 +787,9 @@ Resources use one incremental handle per utterance and commit bytes plus selecte
 completion publication. Pocket and xAI speech use the same internal `SpeechResourceWriter` in the
 LLM assembly for scope validation, commit/select receipts and owned-handle cleanup. Its selection
 version exposes only the actual observed commit receipt; it does not query the store again.
+REST synthesis retains the complete validated commit-and-selection receipt in failure
+`GeneratedResources` if writer cleanup, cancellation or final result publication fails.
+The receipt contains the actual selected membership snapshot, not a later store read.
 Chunks remain transient; clear discards uncommitted staging. The handed-off
 session is independently caller-owned and survives client retirement. Client and session retirement
 fence, cancel, drain and detach borrowed references; genuine refused cleanup owners and failures remain
