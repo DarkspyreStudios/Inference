@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
 using Darkspyre.Inference.Common;
@@ -290,6 +291,7 @@ public static class ConnectLlmJson
         typeof(CallerAuthorityConverter<ILlmAgentRuntimeAuthentication>),
         typeof(CallerAuthorityConverter<LlmAgentRuntimeLoginTerminalRequest>),
         typeof(CallerAuthorityConverter<ILlmAuthPrompt>)])]
+[JsonSerializable(typeof(JsonObject))]
 [JsonSerializable(typeof(LlmVertexCacheStaging))]
 [JsonSerializable(typeof(LlmAzureConfiguration))]
 [JsonSerializable(typeof(LlmAzureApiMode))]

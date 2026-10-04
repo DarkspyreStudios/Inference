@@ -1,16 +1,12 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
-using System.Text.Json.Serialization.Metadata;
 
 namespace Darkspyre.Inference.Connect.LLM.Internal;
 
 internal static class RequestJson
 {
-    private static readonly JsonTypeInfo<JsonObject> ProtocolObject = JsonMetadataServices.CreateValueInfo<JsonObject>(
-        ConnectLlmJson.ChatRequest.Options, JsonMetadataServices.JsonObjectConverter);
-
     internal static System.Net.Http.Json.JsonContent Content(JsonObject payload) =>
-        System.Net.Http.Json.JsonContent.Create(payload, ProtocolObject);
+        System.Net.Http.Json.JsonContent.Create(payload, ConnectLlmJsonContext.Default.JsonObject);
 
     internal static void ValidateSamplingOptions(LlmConnection connection, LlmChatRequest request)
     {
