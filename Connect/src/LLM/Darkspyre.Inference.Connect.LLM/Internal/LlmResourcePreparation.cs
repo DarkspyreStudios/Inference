@@ -30,6 +30,12 @@ internal sealed class LlmResourcePreparation : IAsyncDisposable
 
     internal static IEnumerable<InferenceResourceReference> NamedReferences(LlmChatRequest request) => References(request).Distinct();
 
+    internal static void ValidateNamedReference(InferenceResourceReference reference, IInferenceResourceAccess? access)
+    {
+        ValidateReference(reference);
+        if (access is null) throw new ArgumentException("Logical media requires explicit caller-owned resource access.", nameof(access));
+    }
+
     internal async Task<(InferenceResourceDescriptor Descriptor, CountingReadStream Content)> OpenNamedAsync(
         IInferenceResourceAccess access, InferenceResourceReference reference, Action<InferenceResourceDescriptor> preflight,
         Action fence, CancellationToken token)
@@ -208,7 +214,8 @@ internal sealed class LlmResourcePreparation : IAsyncDisposable
 
     internal static async Task<LlmResourcePreparation> PrepareAsync(LlmConnection connection, LlmChatRequest request,
         XaiFileClient files, Action fence, CancellationToken token,
-        Action<InferenceResourceReference, LlmProviderFile?>? observeUpload = null)
+        Func<InferenceResourceReference, (Action OnDispatched, Action<LlmProviderFile> OnObserved)>? observeUpload = null,
+        IReadOnlyList<string>? secretContext = null)
     {
         ValidateArguments(request);
         var operation = new LlmResourcePreparation(request);
@@ -237,9 +244,10 @@ internal sealed class LlmResourcePreparation : IAsyncDisposable
                 InferenceResourceDescriptor descriptor = opened.Descriptor;
                 reading = opened.Content;
                 phase = InferenceResourceOperationPhase.Materialize;
+                var observer = observeUpload?.Invoke(reference);
                 LlmProviderFile uploaded = await files.UploadAsync(connection, reading, descriptor.FileName!, null, fence, token,
-                    onDispatched: observeUpload is null ? null : () => observeUpload(reference, null),
-                    onObserved: observeUpload is null ? null : observed => observeUpload(reference, observed)).ConfigureAwait(false);
+                    onDispatched: observer?.OnDispatched, onObserved: observer?.OnObserved,
+                    secretContext: secretContext).ConfigureAwait(false);
                 operation.VerifyRead(access, descriptor, reading, fence, token);
                 operation._files.Add(reference, uploaded);
                 reading = null;

@@ -12,7 +12,8 @@ using Darkspyre.Inference.Connect.LLM.Providers;
 namespace Darkspyre.Inference.Connect.Resources.Internal;
 
 /// <summary>The single admitted batch/deferred HTTP exchange; borrows the selected HTTP owner.</summary>
-internal sealed class XaiResourceHttp(HttpClient http, LlmConnection connection, XaiResourceHttp.Observation observation, Action fence)
+internal sealed class XaiResourceHttp(HttpClient http, LlmConnection connection, XaiResourceHttp.Observation observation,
+    Action fence, IReadOnlyList<string>? secretContext = null)
 {
     internal Task<T> ExchangeAsync<T>(HttpMethod method, string path, JsonObject? payload, bool mutation,
         Func<string, HttpResponseMessage, T> parse, CancellationToken token)
@@ -28,7 +29,7 @@ internal sealed class XaiResourceHttp(HttpClient http, LlmConnection connection,
     internal async Task<T> ExchangeResponseAsync<T>(HttpMethod method, string path, JsonObject? payload, bool mutation,
         Func<HttpResponseMessage, CancellationToken, Task<T>> read, CancellationToken token)
     {
-        observation.BeginStage();
+        observation.BeginStage(method.Method + " " + path);
         HttpRequestMessage? request = null;
         HttpResponseMessage? response = null;
         T? result = default;
@@ -51,7 +52,7 @@ internal sealed class XaiResourceHttp(HttpClient http, LlmConnection connection,
             observation.ObserveResponse(response, connection);
             fence();
             await XaiErrorClassifier.ThrowIfUnsuccessfulAsync(response, LlmCredential.Parse(connection.Credential),
-                connection.AdditionalHeaders.Values.ToArray(), token,
+                connection.AdditionalHeaders.Values.Concat(secretContext ?? []).ToArray(), token,
                 diagnosticBody: false).ConfigureAwait(false);
             fence();
             result = await read(response, token).ConfigureAwait(false);
@@ -113,23 +114,23 @@ internal sealed class XaiResourceHttp(HttpClient http, LlmConnection connection,
             return canceledResource.Failure.Phase == InferenceResourceOperationPhase.Cleanup
                 ? LlmResourcePreparation.AsCleanupFailure(safe, refusedOwner: canceledResource) : safe;
         }
-        if (!forceSafe && !observation.HasEffects) return error;
+        if (!forceSafe && !observation.HasEffects && observation.SecretContext.Count == 0) return error;
         if (error is AggregateException aggregate)
             return new AggregateException("The resource operation failed.", aggregate.InnerExceptions.Select(item => SafeFailure(item, observation, forceSafe)));
         if (error is OperationCanceledException canceled)
-            return new OperationCanceledException("The resource operation was interrupted.", new FailureEvidence(canceled), canceled.CancellationToken);
+            return new OperationCanceledException("The resource operation was interrupted.", new FailureEvidence(canceled, observation: observation), canceled.CancellationToken);
         if (error is InferenceException inference && inference.InnerException is LlmProviderException provider)
-            return new InferenceException(inference.Code, "Resource authorization or access failed.", SafeProvider(provider, inference));
-        if (error is LlmProviderException failure) return SafeProvider(failure, failure);
+            return new InferenceException(inference.Code, "Resource authorization or access failed.", SafeProvider(provider, inference, observation));
+        if (error is LlmProviderException failure) return SafeProvider(failure, failure, observation);
         return new LlmProviderException(error is ProtocolFailure ? "xAI returned invalid resource protocol data." : "The resource transport failed.",
             LlmTransport.XaiResponses, observation.StatusCode is { } status ? (System.Net.HttpStatusCode)status : null,
-            requestId: observation.RequestId, innerException: new FailureEvidence(error));
+            requestId: observation.RequestId, innerException: new FailureEvidence(error, observation: observation));
     }
 
-    private static LlmProviderException SafeProvider(LlmProviderException provider, Exception original) => new(
+    private static LlmProviderException SafeProvider(LlmProviderException provider, Exception original, Observation observation) => new(
         "The resource request failed.", LlmTransport.XaiResponses, provider.StatusCode,
         provider.ProviderCode is "xai_authentication_required" or "xai_entitlement_required" ? provider.ProviderCode : null,
-        retryAfter: provider.RetryAfter, innerException: new FailureEvidence(original), isContextOverflow: provider.IsContextOverflow);
+        retryAfter: provider.RetryAfter, innerException: new FailureEvidence(original, observation: observation), isContextOverflow: provider.IsContextOverflow);
 
     private static bool IsOwnedSafe(Exception? error) => error is FailureEvidence
         || error is OperationCanceledException { InnerException: FailureEvidence };
@@ -142,10 +143,12 @@ internal sealed class XaiResourceHttp(HttpClient http, LlmConnection connection,
         return LlmResourcePreparation.AsCleanupFailure(safe, refusedOwner: owner);
     }
 
-    private sealed class FailureEvidence(Exception original, Exception? safeCause = null)
+    private sealed class FailureEvidence(Exception original, Exception? safeCause = null, Observation? observation = null)
         : Exception("The resource HTTP boundary reported a failure.", safeCause)
     {
         internal Exception Original { get; } = original;
+        internal string? Stage { get; } = observation?.Stage;
+        internal bool RequestDispatched { get; } = observation?.RequestDispatched ?? false;
     }
 
     private sealed class ProtocolFailure(Exception original) : Exception("Invalid resource protocol data.")
@@ -159,7 +162,8 @@ internal sealed class XaiResourceHttp(HttpClient http, LlmConnection connection,
 
     internal sealed class Observation(LlmResourceOperation operation, LlmBatch? selected = null)
     {
-        private readonly List<LlmResourceInputUploadObservation> _uploads = [];
+        private readonly List<UploadAttempt> _uploads = [];
+        private UploadAttempt? _reservedUpload;
         private readonly List<InferenceResourceCommitResult> _commits = [];
         internal LlmResourceOperation Operation { get; } = operation;
         internal bool MutationDispatched { get; set; }
@@ -169,6 +173,8 @@ internal sealed class XaiResourceHttp(HttpClient http, LlmConnection connection,
         internal bool ResponseObserved { get; set; }
         internal int? StatusCode { get; set; }
         internal string? RequestId { get; set; }
+        internal string? Stage { get; private set; }
+        internal IReadOnlyList<string> SecretContext { get; set; } = [];
         internal LlmBatch? SelectedBatch { get; set; } = selected;
         internal LlmBatch? ObservedBatch { get; set; }
         internal LlmDeferredCompletion? ObservedDeferred { get; set; }
@@ -182,31 +188,47 @@ internal sealed class XaiResourceHttp(HttpClient http, LlmConnection connection,
             ResponseObserved = true;
             StatusCode = (int)response.StatusCode;
             RequestId = ProviderHttp.ReadRequestId(response) is { } id
-                ? SecretRedactor.Sanitize(id, LlmCredential.Parse(selected.Credential), selected.AdditionalHeaders.Values) : null;
+                ? SecretRedactor.Sanitize(id, LlmCredential.Parse(selected.Credential),
+                    selected.AdditionalHeaders.Values.Concat(SecretContext)) : null;
         }
 
         internal void ObserveCommit(InferenceResourceCommitResult receipt)
             => _commits.Add(ResourceObservationData.CopyCommits([receipt])[0]);
 
-        internal void ObserveUpload(InferenceResourceScope scope, InferenceResourceReference source, LlmProviderFile? file)
+        internal void ReserveUploadCapacity()
         {
-            if (file is null)
-            {
-                _uploads.Add(new(scope, true, false) { Source = source });
-                return;
-            }
-            int index = _uploads.FindLastIndex(item => item.Source == source && item.ObservedFile is null);
-            if (index < 0) throw new InvalidOperationException("No dispatched upload exists for the observed receipt.");
-            _uploads[index] = _uploads[index] with { ObservedFile = file };
+            _uploads.EnsureCapacity(checked(_uploads.Count + 1));
+            _reservedUpload = new();
         }
 
-        internal void BeginStage()
+        internal int BeginUpload(InferenceResourceScope scope, string? customId, InferenceResourceReference? source, bool isJsonl)
         {
+            int attempt = _uploads.Count;
+            UploadAttempt reserved = _reservedUpload ?? throw new InvalidOperationException("Upload capacity was not reserved.");
+            _reservedUpload = null;
+            reserved.Scope = scope;
+            reserved.CustomId = customId;
+            reserved.Source = source;
+            reserved.IsJsonl = isJsonl;
+            _uploads.Add(reserved);
+            return attempt;
+        }
+
+        internal void ObserveUpload(int attempt, LlmProviderFile file)
+        {
+            if ((uint)attempt >= (uint)_uploads.Count || _uploads[attempt].File is not null)
+                throw new InvalidOperationException("No dispatched upload exists for the observed receipt.");
+            _uploads[attempt].File = file;
+        }
+
+        internal void BeginStage(string? stage = null)
+        {
+            Stage = stage;
             RequestDispatched = false;
             ResponseObserved = false;
             StatusCode = null;
             RequestId = null;
-            ObservedBatch = null;
+            if (Operation != LlmResourceOperation.CreateBatchFromRequests) ObservedBatch = null;
         }
 
         internal LlmResourceOperationObservation Snapshot() => new(Operation, MutationDispatched, SubmissionDispatched, RetrievalDispatched, ResponseObserved)
@@ -217,10 +239,20 @@ internal sealed class XaiResourceHttp(HttpClient http, LlmConnection connection,
             SelectedDeferred = SelectedDeferred,
             ObservedDeferredResult = ObservedDeferredResult,
             ObservedCommits = _commits,
-            InputUploads = _uploads,
+            InputUploads = _uploads.Select(attempt => new LlmResourceInputUploadObservation(attempt.Scope, true, attempt.IsJsonl)
+            { CustomId = attempt.CustomId, Source = attempt.Source, ObservedFile = attempt.File }).ToArray(),
             ResourceFailure = ResourceFailure,
             HttpStatusCode = StatusCode,
             RequestId = RequestId
         };
+
+        private sealed class UploadAttempt
+        {
+            internal InferenceResourceScope Scope { get; set; } = null!;
+            internal string? CustomId { get; set; }
+            internal InferenceResourceReference? Source { get; set; }
+            internal bool IsJsonl { get; set; }
+            internal LlmProviderFile? File { get; set; }
+        }
     }
 }

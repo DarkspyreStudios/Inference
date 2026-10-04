@@ -17,7 +17,8 @@ internal sealed class XaiFileClient(HttpClient http) : IDisposable, IAsyncDispos
 
     internal async Task<LlmProviderFile> UploadAsync(LlmConnection connection, Stream source, string fileName,
         LlmFileUploadOptions? options, Action fence, CancellationToken cancellationToken,
-        Action? onDispatched = null, Action<LlmProviderFile>? onObserved = null)
+        Action? onDispatched = null, Action<LlmProviderFile>? onObserved = null,
+        IReadOnlyList<string>? secretContext = null)
     {
         using LlmOperationLifetime.Lease operation = _lifetime.Enter(cancellationToken);
         cancellationToken = operation.Token;
@@ -43,7 +44,7 @@ internal sealed class XaiFileClient(HttpClient http) : IDisposable, IAsyncDispos
                 LlmProviderFile observed = ReadFile(root);
                 onObserved?.Invoke(observed);
                 return observed;
-            }, fence, cancellationToken), fence, cancellationToken, onDispatched).ConfigureAwait(false);
+            }, fence, cancellationToken, secretContext), fence, cancellationToken, onDispatched).ConfigureAwait(false);
             return consumption.Publish(result);
         }
         finally { upload?.DetachBorrowed(); }
@@ -191,9 +192,10 @@ internal sealed class XaiFileClient(HttpClient http) : IDisposable, IAsyncDispos
         : AggregateException("Grok Files operation and cleanup failed.", failures);
 
     private async Task<T> ReadAsync<T>(LlmConnection connection, HttpResponseMessage response,
-        Func<JsonElement, T> parse, Action fence, CancellationToken token)
+        Func<JsonElement, T> parse, Action fence, CancellationToken token, IReadOnlyList<string>? secretContext = null)
     {
-        await XaiErrorClassifier.ThrowIfUnsuccessfulAsync(response, LlmCredential.Parse(connection.Credential), [], token, diagnosticBody: false).ConfigureAwait(false);
+        await XaiErrorClassifier.ThrowIfUnsuccessfulAsync(response, LlmCredential.Parse(connection.Credential),
+            connection.AdditionalHeaders.Values.Concat(secretContext ?? []).ToArray(), token, diagnosticBody: false).ConfigureAwait(false);
         Check(fence, token);
         string body = await SdkHttpConsumption.ReadAsStringAsync(response.Content, token).ConfigureAwait(false);
         Check(fence, token);

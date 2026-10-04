@@ -1,4 +1,5 @@
 using System.Diagnostics.CodeAnalysis;
+using System.Runtime.ExceptionServices;
 using Darkspyre.Inference.Common.Resources;
 using Darkspyre.Inference.Connect.LLM;
 using Darkspyre.Inference.Connect.LLM.Internal;
@@ -31,7 +32,7 @@ public sealed class LlmResourceProviderService : ILlmBatchClient, IDisposable, I
 
     public Task AddRequestsAsync(string connectionId, LlmBatch batch, IReadOnlyList<LlmBatchRequest> requests,
         IInferenceResourceAccess? resources = null, CancellationToken cancellationToken = default)
-        => Task.FromException(Unavailable(cancellationToken));
+        => StageAsync(connectionId, LlmResourceOperation.AddBatchRequests, batch, null, requests, resources, cancellationToken);
 
     public Task<LlmBatch> GetAsync(string connectionId, LlmBatch batch, CancellationToken cancellationToken = default)
         => RunAsync(connectionId, LlmResourceOperation.GetBatch, batch, null, null,
@@ -97,9 +98,9 @@ public sealed class LlmResourceProviderService : ILlmBatchClient, IDisposable, I
             LlmConnection snapshot = await _connectionAccess!.AcquireAsync(connectionId, selected =>
             {
                 Fence();
-                core.ValidateXaiSnapshotRequest(selected, http =>
+                core.ValidateXaiSnapshotRequest(selected, client =>
                 {
-                    var codec = new XaiDeferredChatCodec(http);
+                    var codec = new XaiDeferredChatCodec(client.SharedHttp);
                     codec.ValidateSubmissionRequest(selected, entered, codec.GetCapabilities(selected, entered.ModelId), entered.Resources);
                     Fence();
                     // This sealed private codec prepares immediately without I/O. Validate native history before refresh/upload.
@@ -174,10 +175,116 @@ public sealed class LlmResourceProviderService : ILlmBatchClient, IDisposable, I
         }
     }
 
-    public Task<LlmBatch> CreateFromRequestsAsync(string connectionId, string name,
+    public async Task<LlmBatch> CreateFromRequestsAsync(string connectionId, string name,
         IReadOnlyList<LlmBatchRequest> requests, IInferenceResourceAccess? resources = null,
         CancellationToken cancellationToken = default)
-        => Task.FromException<LlmBatch>(Unavailable(cancellationToken));
+        => await StageAsync(connectionId, LlmResourceOperation.CreateBatchFromRequests, null, name,
+            requests, resources, cancellationToken).ConfigureAwait(false)
+            ?? throw new InvalidOperationException("Batch creation returned no receipt.");
+
+    [SuppressMessage("Design", "CA1031", Justification = "The admitted staging boundary retains actual uploads, batch mutations and each independent cleanup failure.")]
+    private async Task<LlmBatch?> StageAsync(string connectionId, LlmResourceOperation kind, LlmBatch? batch,
+        string? name, IReadOnlyList<LlmBatchRequest> requests, IInferenceResourceAccess? resources,
+        CancellationToken cancellationToken)
+    {
+        using LlmOperationLifetime.Lease operation = _lifetime.Enter(cancellationToken);
+        CancellationToken token = operation.Token;
+        void Fence()
+        {
+            token.ThrowIfCancellationRequested();
+            try { _lifetime.ThrowIfStopping(); }
+            catch (ObjectDisposedException error)
+            { throw new OperationCanceledException("The resource facade is stopping.", error, token); }
+        }
+        ArgumentException.ThrowIfNullOrWhiteSpace(connectionId);
+        if (kind == LlmResourceOperation.AddBatchRequests)
+        {
+            ArgumentNullException.ThrowIfNull(batch);
+            XaiBatchProtocol.ValidateBatch(batch);
+            batch = batch with { Scope = batch.Scope with { }, Counts = batch.Counts with { } };
+        }
+        else ArgumentNullException.ThrowIfNull(name);
+        Fence();
+        IReadOnlyList<LlmBatchRequest> entered = XaiBatchRequestPreparation.Snapshot(requests, resources);
+        Fence();
+        LlmProviderService? core = _providerService;
+        if (core is null || !core.SupportsXaiSnapshot)
+            throw new NotSupportedException("The resource facade requires an implemented xAI LLM core route.");
+        var observation = new XaiResourceHttp.Observation(kind, batch);
+        try
+        {
+            LlmConnection snapshot = await _connectionAccess!.AcquireAsync(connectionId, selected =>
+            {
+                Fence();
+                XaiBatchProtocol.ValidateConnection(selected, batch);
+                core.ValidateXaiSnapshotRequest(selected, client =>
+                    _ = XaiBatchRequestPreparation.Project(selected, entered, client, resources));
+                Fence();
+            }, token).ConfigureAwait(false);
+            Fence();
+            LlmBatch? result = await core.RunXaiSnapshotAsync(snapshot, Fence, (http, selected, ownerFence, innerToken) =>
+                core.RunXaiFilesSnapshotAsync(selected, ownerFence, async (files, current, filesFence, filesToken) =>
+                {
+                    var preparation = new XaiBatchRequestPreparation(entered, resources, observation, filesFence, filesToken);
+                    var errors = new List<Exception>();
+                    LlmBatch? created = null;
+                    try
+                    {
+                        filesFence();
+                        IReadOnlyList<LlmBatchRequest>? projected = null;
+                        core.ValidateXaiSnapshotRequest(current, client =>
+                            projected = XaiBatchRequestPreparation.Project(current, entered, client, resources));
+                        filesFence();
+                        var protocol = new XaiBatchProtocol(http, current, connectionId, null, observation, filesFence, preparation.Secrets);
+                        if (batch is not null) await protocol.AuthorizeAsync(batch.Id, filesToken).ConfigureAwait(false);
+                        filesFence();
+                        await preparation.PrepareAsync(current, connectionId, projected!, files,
+                            callback => core.ValidateXaiSnapshotRequest(current, callback), _cleanup.Record).ConfigureAwait(false);
+                        filesFence();
+                        if (batch is not null)
+                            await protocol.AddRequestsAsync(batch.Id, preparation.BuildInlineBody(), filesToken).ConfigureAwait(false);
+                        else if (preparation.InlineUtf8Bytes <= XaiBatchRequestPreparation.MaximumRequestBytes)
+                        {
+                            var body = preparation.BuildInlineBody();
+                            filesFence();
+                            created = await protocol.CreateAsync(name!, filesToken).ConfigureAwait(false);
+                            filesFence();
+                            await protocol.AddRequestsAsync(created.Id, body, filesToken).ConfigureAwait(false);
+                        }
+                        else
+                        {
+                            Stream jsonl = preparation.CreateJsonl();
+                            var scope = new Darkspyre.Inference.Common.Media.InferenceResourceScope(
+                                ProviderHttp.BuildUri(current, "files").AbsoluteUri, connectionId);
+                            var observer = preparation.UploadObserver(scope, null, null, true);
+                            LlmProviderFile uploaded = await files.UploadAsync(current, jsonl, "batch.jsonl", null,
+                                filesFence, filesToken, observer.OnDispatched, observer.OnObserved, preparation.Secrets).ConfigureAwait(false);
+                            filesFence();
+                            created = await protocol.CreateFromFileAsync(name!, uploaded.Id, filesToken).ConfigureAwait(false);
+                        }
+                        filesFence();
+                    }
+                    catch (Exception error) { errors.Add(XaiResourceHttp.SafeFailure(error, observation, forceSafe: true)); }
+                    finally
+                    {
+                        try { await preparation.DisposeAsync().ConfigureAwait(false); }
+                        catch (Exception error) { errors.Add(XaiResourceHttp.SafeFailure(error, observation, forceSafe: true)); }
+                    }
+                    if (errors.Count == 1) ExceptionDispatchInfo.Throw(errors[0]);
+                    if (errors.Count > 1) throw XaiResourceHttp.CombineFailures(errors);
+                    filesFence();
+                    return created;
+                }, innerToken), token).ConfigureAwait(false);
+            Fence();
+            return result;
+        }
+        catch (Exception error)
+        {
+            Exception reported = XaiResourceHttp.OperationFailure(error, observation);
+            _cleanup.Record(reported);
+            throw reported;
+        }
+    }
 
     [SuppressMessage("Design", "CA1031", Justification = "The admitted boundary records actual cleanup and preserves separately observed effects in safe resource failure carriers.")]
     private async Task<T> RunAsync<T>(string connectionId, LlmResourceOperation kind, LlmBatch? batch,

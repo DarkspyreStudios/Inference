@@ -104,7 +104,13 @@ internal sealed class XaiDeferredProtocol(HttpClient http, LlmConnection connect
                 if (files is null) throw new NotSupportedException("The selected facade has no Files preparation route.");
                 var fileScope = new InferenceResourceScope(ProviderHttp.BuildUri(connection, "files").AbsoluteUri, connectionId);
                 preparation = await LlmResourcePreparation.PrepareAsync(preparedConnection, request, files, fence, token,
-                    (source, file) => observation.ObserveUpload(fileScope, source, file)).ConfigureAwait(false);
+                    source =>
+                    {
+                        observation.ReserveUploadCapacity();
+                        int attempt = -1;
+                        return (() => attempt = observation.BeginUpload(fileScope, null, source, false),
+                            observed => observation.ObserveUpload(attempt, observed));
+                    }).ConfigureAwait(false);
                 fence();
                 request = preparation.Request;
             }
