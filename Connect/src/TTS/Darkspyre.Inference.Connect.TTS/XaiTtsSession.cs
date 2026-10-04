@@ -149,14 +149,24 @@ internal sealed class XaiTtsSession : ITtsStreamingSession
                     case "audio.done":
                         var completed = new TtsUtteranceCompleted(XaiTtsProtocol.OptionalString(root, "trace_id"));
                         lock (_sync) { if (_utterance == 0) throw XaiTtsProtocol.Protocol(); }
-                        if (_artifact is not null)
+                        var artifact = _artifact;
+                        try
                         {
-                            var artifact = _artifact;
-                            completed = completed with { Resource = await artifact.CommitAsync(token).ConfigureAwait(false) };
-                            await DisposeArtifactAsync().ConfigureAwait(false); artifact.Fence(token);
+                            if (artifact is not null)
+                            {
+                                completed = completed with { Resource = await artifact.CommitAsync(token).ConfigureAwait(false) };
+                                await DisposeArtifactAsync().ConfigureAwait(false); artifact.Fence(token);
+                            }
+                            Fence(token); lock (_sync) _utterance = 0;
+                            await PublishAsync(completed, token).ConfigureAwait(false);
                         }
-                        Fence(token); lock (_sync) _utterance = 0;
-                        await PublishAsync(completed, token).ConfigureAwait(false); break;
+                        catch (Exception error)
+                        {
+                            ExceptionDispatchInfo.Capture(LlmResourcePreparation.WithGeneratedResources(error,
+                                artifact?.ObservedCommit is { } receipt ? [receipt] : [])).Throw();
+                            throw;
+                        }
+                        break;
                     case "audio.clear":
                         lock (_sync) { if (_utterance != 3) throw XaiTtsProtocol.Protocol(); }
                         await DisposeArtifactAsync().ConfigureAwait(false); Fence(token);
