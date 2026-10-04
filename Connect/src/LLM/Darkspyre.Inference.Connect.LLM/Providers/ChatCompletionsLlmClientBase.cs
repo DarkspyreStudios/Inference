@@ -582,7 +582,8 @@ internal abstract class ChatCompletionsLlmClientBase(HttpClient http) : LlmClien
         LlmConnection connection,
         LlmChatRequest request,
         LlmStructuredOutputEnforcement? enforcement,
-        LlmProviderCapabilities capabilities)
+        LlmProviderCapabilities capabilities,
+        LlmResourcePreparation? resources = null)
     {
         var messages = new JsonArray();
         if (!string.IsNullOrWhiteSpace(request.Instructions))
@@ -602,13 +603,14 @@ internal abstract class ChatCompletionsLlmClientBase(HttpClient http) : LlmClien
             {
                 foreach (LlmToolResult result in ClientTools.Functions(message.ToolResults))
                 {
+                    ProjectedToolOutput output = ToolOutputProjector.Project(
+                        result.Output, capabilities.RichContentSupported, capabilities.RichContentSupported,
+                        resources is null ? null : resources.Project);
                     messages.Add(new JsonObject
                     {
                         ["role"] = "tool",
                         ["tool_call_id"] = result.ToolCallId,
-                        // The protocol carries a string: every carried part is rendered as text.
-                        ["content"] = ToolOutputProjector.Project(
-                            result.Output, capabilities.RichContentSupported, capabilities.RichContentSupported).Text
+                        ["content"] = BuildToolContent(output)
                     });
                 }
 
@@ -810,8 +812,34 @@ internal abstract class ChatCompletionsLlmClientBase(HttpClient http) : LlmClien
     }
 
     internal JsonObject BuildPreparedPayload(LlmConnection connection, LlmChatRequest request,
-        LlmStructuredOutputEnforcement? enforcement, LlmProviderCapabilities capabilities) =>
-        BuildPayload(connection, request, enforcement, capabilities);
+        LlmStructuredOutputEnforcement? enforcement, LlmProviderCapabilities capabilities,
+        LlmResourcePreparation? resources = null) =>
+        BuildPayload(connection, request, enforcement, capabilities, resources);
+
+    private static JsonNode BuildToolContent(ProjectedToolOutput output)
+    {
+        if (!output.Parts.Any(part => part is SentNativeFile)) return JsonValue.Create(output.Text)!;
+        var parts = new JsonArray();
+        foreach (SentToolPart part in output.Parts)
+        {
+            switch (part)
+            {
+                case SentText text:
+                    parts.Add(new JsonObject { ["type"] = "text", ["text"] = text.Text });
+                    break;
+                case SentNativeFile file:
+                    parts.Add(BuildNativeFile(file.FileId));
+                    break;
+            }
+        }
+        return parts;
+    }
+
+    private static JsonObject BuildNativeFile(string fileId) => new()
+    {
+        ["type"] = "file",
+        ["file"] = new JsonObject { ["file_id"] = XaiFileRequestData.Identity(fileId) }
+    };
 
     private JsonArray BuildContentParts(LlmChatMessage message)
     {
@@ -821,11 +849,7 @@ internal abstract class ChatCompletionsLlmClientBase(HttpClient http) : LlmClien
         {
             if (Transport == LlmTransport.XaiResponses && source is LlmFileReference file)
             {
-                parts.Add(new JsonObject
-                {
-                    ["type"] = "file",
-                    ["file"] = new JsonObject { ["file_id"] = XaiFileRequestData.Identity(file.File.FileId) }
-                });
+                parts.Add(BuildNativeFile(file.File.FileId));
                 continue;
             }
             LlmAttachment attachment = LlmAttachments.RequireBinary(source);

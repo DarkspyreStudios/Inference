@@ -2,6 +2,7 @@ using System.Collections.Frozen;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Darkspyre.Inference.Common.LLM;
+using Darkspyre.Inference.Common.Resources;
 using Darkspyre.Inference.Connect.LLM;
 using Darkspyre.Inference.Connect.LLM.Internal;
 using Darkspyre.Inference.Connect.LLM.Providers;
@@ -64,12 +65,18 @@ internal sealed class XaiDeferredChatCodec(HttpClient http) : ChatCompletionsLlm
         };
     }
 
+    internal void ValidateSubmissionRequest(LlmConnection connection, LlmChatRequest request,
+        LlmProviderCapabilities capabilities, IInferenceResourceAccess? admittedResources)
+    {
+        LlmResourcePreparation.ValidateArguments(request, admittedResources);
+        ValidatePreparedRequest(connection, request, capabilities);
+    }
+
     protected override void ValidateAdditionalRequest(LlmConnection connection, LlmChatRequest request)
     {
         request = ProviderControlPolicy.Resolve(connection, request);
         _ = XaiRequestHeaders.Require(connection);
         ProviderHttp.ValidateAdditionalHeaders(connection.AdditionalHeaders);
-        LlmResourcePreparation.ValidateArguments(request);
         if (connection.ProviderOptions.Keys.Concat(request.ProviderOptions.Keys).Any(OwnedFields.Contains))
             throw new ArgumentException("Deferred chat controls use typed request and connection properties.", nameof(request));
         if (request.Temperature is < 0 or > 2)
@@ -89,17 +96,15 @@ internal sealed class XaiDeferredChatCodec(HttpClient http) : ChatCompletionsLlm
         foreach (LlmAttachment binary in request.Messages.SelectMany(message => message.Attachments).OfType<LlmAttachment>())
             if (binary.Kind == LlmBinaryKind.Image && binary.Data.Length > 20 * 1024 * 1024)
                 throw new ArgumentException("Grok input images must not exceed 20 MiB.", nameof(request));
-        if (request.Messages.SelectMany(message => ClientTools.Functions(message.ToolResults))
-            .SelectMany(result => result.Output.Parts).Any(part => part is LlmToolOutputSessionResource))
-            throw new NotSupportedException("Deferred Chat tool messages have no native logical-resource output mapping.");
         _ = XaiSchemaLimits.ResolveEnforcement(request.StructuredOutput, GetCapabilities(connection, request.ModelId));
     }
 
     protected override JsonObject BuildPayload(LlmConnection connection, LlmChatRequest request,
-        LlmStructuredOutputEnforcement? enforcement, LlmProviderCapabilities capabilities)
+        LlmStructuredOutputEnforcement? enforcement, LlmProviderCapabilities capabilities,
+        LlmResourcePreparation? resources = null)
     {
         request = ProviderControlPolicy.Resolve(connection, request);
-        JsonObject body = base.BuildPayload(connection, request, enforcement, capabilities);
+        JsonObject body = base.BuildPayload(connection, request, enforcement, capabilities, resources);
         body["deferred"] = true;
         if (connection.Xai?.ServiceTier == XaiServiceTier.Priority) body["service_tier"] = "priority";
         if (request.ProviderControls is XaiMultiAgentControls { AgentCount: { } count })

@@ -100,7 +100,7 @@ public sealed class LlmResourceProviderService : ILlmBatchClient, IDisposable, I
                 core.ValidateXaiSnapshotRequest(selected, http =>
                 {
                     var codec = new XaiDeferredChatCodec(http);
-                    codec.ValidatePreparedRequest(selected, entered, codec.GetCapabilities(selected, entered.ModelId));
+                    codec.ValidateSubmissionRequest(selected, entered, codec.GetCapabilities(selected, entered.ModelId), entered.Resources);
                     Fence();
                     // This sealed private codec prepares immediately without I/O. Validate native history before refresh/upload.
                     LlmConnection prepared = codec.PrepareAsync(selected, token).GetAwaiter().GetResult();
