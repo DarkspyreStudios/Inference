@@ -13,4 +13,6 @@
       </_ProjectReferencesWithVersions>
     </ItemGroup>
   </Target>
+  <Import Project="$(MSBuildThisFileDirectory)../SecureStore/eng/SourceReferences.targets" Condition="'$(TensorSharpSourceRoot)' != ''" />
+  <Import Project="$(MSBuildThisFileDirectory)../PersistenceStore/eng/SourceReferences.targets" Condition="'$(TensorSharpSourceRoot)' != ''" />
 </Project>

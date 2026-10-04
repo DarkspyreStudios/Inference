@@ -2,6 +2,10 @@
 
 # Darkspyre Inference
 
+Source mode (`TensorSharpSourceRoot` set) also resolves host-tool storage references from sibling
+SecureStore and PersistenceStore worktrees through their `eng/SourceReferences.targets` files.
+Shipping capability libraries remain independent of application credential storage and persistence.
+
 Typed .NET inference libraries for applications that need external AI providers, resident local
 models, or both. Darkspyre Inference separates **what an application asks a model to do** from
 **how a particular provider or engine performs it**.
