@@ -304,7 +304,7 @@ internal sealed class ConnectVideoInference : IVideoInference, IDisposable, IAsy
             || connection.RequestTimeout <= TimeSpan.Zero || connection.RequestTimeout.TotalMilliseconds > uint.MaxValue - 1)
             throw new ArgumentException("Video requires an explicit HTTPS endpoint and positive request timeout.");
         if (connection.MaximumEncodedReferenceAudioBytes is <= 0)
-            throw new ArgumentOutOfRangeException(nameof(connection.MaximumEncodedReferenceAudioBytes), "The encoded reference audio limit must be positive when supplied.");
+            throw new ArgumentOutOfRangeException(nameof(connection), "The encoded reference audio limit must be positive when supplied.");
         if (connection.Xai is null || xai is null || connection.Xai != xai.Selection
             || connection.Authorization is not null && !ReferenceEquals(connection.Authorization, xai.Authorization))
             throw new ArgumentException("The selected video connection requires its matching borrowed xAI binding.");
