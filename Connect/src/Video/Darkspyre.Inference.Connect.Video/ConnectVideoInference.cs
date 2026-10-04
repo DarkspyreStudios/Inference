@@ -331,12 +331,11 @@ internal sealed class ConnectVideoInference : IVideoInference, IDisposable, IAsy
 
     private void ValidateRequest(VideoRequest request, IInferenceResourceAccess? resources, CancellationToken token)
     {
-        XaiVideoProtocol.Validate(request);
-        if (request.ProviderOptions is not (null or XaiVideoOptions)) throw new InferenceException(InferenceFailureCode.UnsupportedFeature, "The video options variant is unsupported.");
-        if (request is VideoExtensionRequest && request.ProviderOptions is XaiVideoOptions { User: not null })
-            throw new InferenceException(InferenceFailureCode.UnsupportedFeature, "Video extension does not map User.");
-        if (request is VideoGenerationRequest { ReferenceAudio: { } audio } && audio.Any(reference => reference is not (VideoVoiceReference or VideoAudioReference)))
-            throw new InferenceException(InferenceFailureCode.UnsupportedFeature, "The video audio-reference variant is unsupported.");
+        try { XaiVideoProtocol.Validate(request); }
+        catch (NotSupportedException error)
+        {
+            throw new InferenceException(InferenceFailureCode.UnsupportedFeature, "The video request uses an unsupported native control or source.", error);
+        }
         IEnumerable<InferenceMediaSource?> sources = request switch
         {
             VideoGenerationRequest generation => new[] { generation.FirstFrame, generation.LastFrame }
@@ -351,8 +350,6 @@ internal sealed class ConnectVideoInference : IVideoInference, IDisposable, IAsy
         {
             Fence(token);
             if (source is null) continue;
-            if (source is not (BinaryMediaSource or UrlMediaSource or FileMediaSource or ResourceMediaSource))
-                throw new InferenceException(InferenceFailureCode.UnsupportedFeature, "The video source variant is unsupported.");
             if (source is BinaryMediaSource binary)
             {
                 if (binary.FileName is { } name) XaiFileRequestData.FileName(name);
@@ -362,8 +359,10 @@ internal sealed class ConnectVideoInference : IVideoInference, IDisposable, IAsy
             if (source is FileMediaSource file) XaiFileRequestData.Identity(file.File.FileId);
             if (source is ResourceMediaSource logical)
             {
+                if (resources is null)
+                    throw new InferenceException(InferenceFailureCode.UnsupportedFeature, "Logical video sources require matching caller-owned resource access.");
                 LlmResourcePreparation.ValidateNamedReference(logical.Resource, resources);
-                string workspace = resources!.WorkspaceId;
+                string workspace = resources.WorkspaceId;
                 Fence(token);
                 if (logical.Resource.WorkspaceId != workspace)
                     throw new InferenceException(InferenceFailureCode.UnsupportedFeature, "Logical video sources require matching caller-owned resource access.");
