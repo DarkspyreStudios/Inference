@@ -87,10 +87,13 @@ public sealed class SttProviderService : IDisposable, IAsyncDisposable
 
 public static class ServiceCollectionExtensions
 {
-    /// <summary>Registers the hosted-STT facade only. No xAI adapter is registered.</summary>
+    /// <summary>Registers hosted-STT connections and the xAI file and streaming adapter.</summary>
     public static IServiceCollection AddSttConnect(this IServiceCollection services)
     {
         ArgumentNullException.ThrowIfNull(services);
+        services.AddInferenceHttpClient<XaiSttProvider>(client => client.Timeout = Timeout.InfiniteTimeSpan)
+            .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
+        services.AddTransient<ISttProvider>(provider => provider.GetRequiredService<XaiSttProvider>());
         services.AddTransient<SttProviderService>();
         return services;
     }

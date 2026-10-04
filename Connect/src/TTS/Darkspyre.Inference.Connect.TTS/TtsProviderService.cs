@@ -99,6 +99,9 @@ public static class ServiceCollectionExtensions
         services.AddInferenceHttpClient<PocketTtsHttpProvider>(client => client.Timeout = Timeout.InfiniteTimeSpan)
             .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
         services.AddTransient<ITtsProvider>(provider => provider.GetRequiredService<PocketTtsHttpProvider>());
+        services.AddInferenceHttpClient<XaiTtsProvider>(client => client.Timeout = Timeout.InfiniteTimeSpan)
+            .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
+        services.AddTransient<ITtsProvider>(provider => provider.GetRequiredService<XaiTtsProvider>());
         services.AddTransient<TtsProviderService>();
         return services;
     }

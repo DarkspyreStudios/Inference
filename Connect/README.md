@@ -2,15 +2,18 @@
 
 ## SDK HTTP composition
 
-SDK HTTP registrations use one generation-owned pool for the sixteen existing named pipelines,
+SDK HTTP registrations use one generation-owned pool for the finite SDK named pipelines,
 including ComfyUI's empty default name. Named `AddHttpClient` actions, public handler-builder filters,
 handler scopes and selected meter factories configure the owned chains. Direct client and factory
 constructors remain borrowed. The SDK never replaces the application's `IHttpClientFactory`.
 
 `AddLlmConnect(configureHttp)` and `ConfigureInferenceHttpPipelines(configureHttp)` select
 `SdkGenerationOwned` or explicit `BorrowHostFactory`. The latter delegates creation to the registered
-host factory and does not dispose it. Configuration accepts only the sixteen SDK names and freezes
+host factory and does not dispose it. Configuration accepts only the SDK names and freezes
 before client construction. Conflicting creation modes are rejected.
+The speech pipelines are `XaiTtsProvider`, `XaiSttProvider` and `XaiRealtimeProvider`.
+Their registrations disable redirects and set an infinite HTTP-client timeout; each operation
+retains its explicit connection timeout. The same generation owns their HTTP handlers and leases.
 
 Custom logger registrations in owned mode use `ConfigureLogging(name, logging => ...)` and its
 `AddLogger` methods. Legacy framework `AddLogger` actions are not inspected or automatically migrated.
@@ -213,9 +216,11 @@ remain unknown. These source paths do not establish Grok Video entitlement or ru
 
 `Darkspyre.Inference.Connect.STT` binds a host-selected `SttConnection` to the Common hosted
 `ISpeechTranscriptionClient`. `SttProviderService` resolves registered `ISttProvider` adapters.
-`AddSttConnect()` registers the facade only. It registers no xAI adapter, advertises no setup
-definitions without an adapter, and refuses an unregistered transport before credential or resource
-effects. Hosted STT does not replace Tensor's model-instance transcription API.
+`AddSttConnect()` registers the facade and `XaiSttProvider` for file and streaming transcription.
+Its setup catalog contains the registered adapter's definition. Registration performs no OAuth,
+resource or provider request and does not prove provider entitlement. An unregistered transport
+refuses before credential or resource effects. Hosted STT does not replace Tensor's model-instance
+transcription API.
 
 The connection carries a durable `XaiConnectionSelection`, optional borrowed authorization and copied
 case-insensitive protected headers. `Bind(connection, xai, resources)` passes the matching borrowed
@@ -241,7 +246,7 @@ propagates. Admitted saves preserve the host's actual committed or uncertain out
 Checks retain matching borrowed authorization. Portable setup changes omit that runtime authority;
 the selected connection ID remains data, and only explicit named header edits reach the commit target.
 
-`XaiSttProvider` supports explicit adapter composition without automatic registration. REST
+`XaiSttProvider` also supports explicit composition with a borrowed `HttpClient`. REST
 transcription sends one multipart request with the file field last, or asks the provider to fetch the
 supplied URL. Named workspace inputs use the existing resource reader without reading or changing
 selected-resource membership. The adapter borrows input streams through their owned read handles.
@@ -758,8 +763,9 @@ acknowledgment or event consumption. One event consumer drains the feed; disposa
 feed before draining admitted work. No automatic replay/reconnect is part of these contracts.
 
 PocketTTS implements neither streaming interface, advertises all new capability flags false and
-leaves unknown rate lists null. Explicitly composed `XaiTtsProvider` implements REST synthesis and
-reusable streaming sessions; automatic xAI registration remains held. `Bind(TtsConnection, XaiFamilyBinding?,
+leaves unknown rate lists null. `AddTtsConnect()` registers PocketTTS and `XaiTtsProvider`.
+The xAI adapter implements REST synthesis and reusable streaming sessions; OAuth and actual
+provider readiness remain unqualified. `Bind(TtsConnection, XaiFamilyBinding?,
 IInferenceResourceAccess?)` borrows the entered owners without acquiring credentials or making
 requests. Connection headers are copied, and xAI selection/authorization must match the binding.
 PocketTTS refuses the new xAI authority fields before HTTP; existing static-header workflows
@@ -2805,9 +2811,10 @@ constructor accepting an arbitrary borrowed `HttpClient`.
 
 ## Realtime Voice Contracts
 
-`AddRealtimeConnect()` registers `RealtimeProviderService`, not an xAI adapter. Its setup catalog
-contains only supplied `IRealtimeProvider` implementations. An unregistered transport refuses;
-the registration does not advertise usable realtime sessions.
+`AddRealtimeConnect()` registers `RealtimeProviderService` and `XaiRealtimeProvider`.
+Its setup catalog contains registered `IRealtimeProvider` definitions. Registration performs no
+OAuth or socket request and does not prove provider entitlement or session readiness.
+An unregistered transport refuses.
 
 The facade exposes `GetCapabilitiesAsync(connection, modelId?, cancellationToken)` and
 `OpenSessionAsync(connection, config, limits, xai?, resources?, cancellationToken)`.
@@ -2870,11 +2877,10 @@ error observations with actual causes. The xAI session uses one cached completio
 every disposer. It settles resource handles, socket cleanup and lifetime cancellation callbacks
 before reporting the final failure. A failure with pending committed audio carries its ordered
 actual artifacts and terminal provider status. A lone operation cancellation preserves its token;
-independent cleanup or publication failures remain faults. The adapter remains unregistered and
-provider execution remains unqualified.
+independent cleanup or publication failures remain faults. Provider execution remains unqualified.
 
-`XaiRealtimeProvider` implements the explicit xAI WebSocket command and observation route but is
-not registered by `AddRealtimeConnect()`. It borrows HTTP and the selected same-access binding.
+`XaiRealtimeProvider` implements the xAI WebSocket command and observation route registered by
+`AddRealtimeConnect()`. It also accepts explicitly borrowed HTTP and the selected same-access binding.
 Opening acquires one immutable OAuth connection snapshot and validates controls, headers,
 resumption evidence and optional workspace scope before opening the socket. OAuth WebSocket
 acceptance and actual provider/model readiness remain unqualified. A returned session owns its

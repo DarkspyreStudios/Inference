@@ -112,6 +112,9 @@ public static class ServiceCollectionExtensions
     public static IServiceCollection AddRealtimeConnect(this IServiceCollection services)
     {
         ArgumentNullException.ThrowIfNull(services);
+        services.AddInferenceHttpClient<XaiRealtimeProvider>(client => client.Timeout = Timeout.InfiniteTimeSpan)
+            .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
+        services.AddTransient<IRealtimeProvider>(provider => provider.GetRequiredService<XaiRealtimeProvider>());
         services.AddTransient<RealtimeProviderService>();
         return services;
     }
