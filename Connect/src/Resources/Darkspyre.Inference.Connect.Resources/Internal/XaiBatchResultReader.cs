@@ -114,31 +114,71 @@ internal sealed class XaiBatchResultReader(HttpClient http, LlmConnection connec
             limits.MaximumInlineImageBytes, limits.MaximumInlineResultBytes - _inlineImageBytes);
         foreach (XaiImageArtifact image in decoded.Images) _inlineImageBytes = checked(_inlineImageBytes + image.Data.Length);
         var provenance = Provenance(decoded.ModelId);
-        var generated = new List<GeneratedImage>(decoded.Images.Count);
-        var result = new LlmBatchImageResult(id, new() { Provenance = provenance }) { Usage = XaiUsage.Media(decoded.Usage) };
+        GeneratedImage[] generated = decoded.Images.Select(image =>
+        {
+            JsonElement file = Property(image.ProviderState, "file_output");
+            return new GeneratedImage
+            {
+                ContentType = image.ContentType,
+                Data = image.Data,
+                File = Present(file) == 1 ? new(RequiredString(file, "file_id")) : null,
+                Width = image.Width,
+                Height = image.Height
+            };
+        }).ToArray();
+        var result = new LlmBatchImageResult(id, new() { Provenance = provenance, Images = generated.ToArray() }) { Usage = XaiUsage.Media(decoded.Usage) };
         int index = observation.ObserveResult(result);
         InferenceResourceSelectionVersion scope = await ScopeAsync(token).ConfigureAwait(false);
-        foreach (XaiImageArtifact image in decoded.Images)
+        for (int outputIndex = 0; outputIndex < decoded.Images.Count; outputIndex++)
         {
+            XaiImageArtifact image = decoded.Images[outputIndex];
             fence();
+            (ReadOnlyMemory<byte> bytes, string? contentType) = await ImageDataAsync(image, token).ConfigureAwait(false);
             JsonElement file = Property(image.ProviderState, "file_output");
             string? name = Present(file) == 1 ? RequiredString(file, "filename") : null;
             var writer = new XaiGeneratedFileWriter(resources!, scope, name, fence, observation, receipt =>
             {
-                generated.Add(new()
+                generated[outputIndex] = generated[outputIndex] with
                 {
-                    ContentType = image.ContentType, Data = image.Data,
-                    File = Present(file) == 1 ? new(RequiredString(file, "file_id")) : null,
-                    Resource = receipt.Resource, Selection = receipt.Selection,
-                    Width = image.Width, Height = image.Height
-                });
+                    ContentType = contentType,
+                    Data = bytes,
+                    Resource = receipt.Resource,
+                    Selection = receipt.Selection
+                };
                 result = result with { Result = new() { Provenance = provenance, Images = generated.ToArray() } };
                 observation.UpdateResult(index, result);
             });
-            await writer.MaterializeAsync(image.Data, image.ContentType, token).ConfigureAwait(false);
+            await writer.MaterializeAsync(bytes, contentType, token).ConfigureAwait(false);
             fence();
         }
         return result;
+    }
+
+    private async Task<(ReadOnlyMemory<byte> Bytes, string? ContentType)> ImageDataAsync(XaiImageArtifact image, CancellationToken token)
+    {
+        if (!image.Data.IsEmpty) return (image.Data, image.ContentType);
+        if (image.Url is null) throw XaiMediaData.Malformed();
+        long maximum = Math.Min(limits.MaximumInlineImageBytes, limits.MaximumInlineResultBytes - _inlineImageBytes);
+        if (maximum <= 0) throw TooLarge();
+        using var buffer = new BoundedPageBuffer(maximum);
+        string? receivedType = null;
+        observation.BeginStage("GET unsigned image");
+        await core.RunXaiMediaSnapshotAsync(connection, fence, (media, ownerFence, current) =>
+            media.DownloadToAsync(image.Url, ProviderHttp.GenerationTimeout, (mime, length, bodyToken) =>
+            {
+                bodyToken.ThrowIfCancellationRequested();
+                ownerFence();
+                if (length > maximum) throw TooLarge();
+                if (mime is not null && image.ContentType is not null && mime != image.ContentType) throw XaiMediaData.Malformed();
+                receivedType = mime;
+                return Task.FromResult<Stream>(buffer);
+            }, ownerFence, () => observation.RequestDispatched = true,
+                response => observation.ObserveResponse(response, connection), current), token).ConfigureAwait(false);
+        fence();
+        if (buffer.Length == 0) throw XaiMediaData.Malformed();
+        byte[] bytes = buffer.ToArray();
+        _inlineImageBytes = checked(_inlineImageBytes + bytes.LongLength);
+        return (bytes, image.ContentType ?? receivedType);
     }
 
     private async Task<LlmBatchResult> ReadVideoAsync(string id, JsonElement body, CancellationToken token)
@@ -220,7 +260,7 @@ internal sealed class XaiBatchResultReader(HttpClient http, LlmConnection connec
         return result;
     }
 
-    private static ArgumentException TooLarge() => new("The batch result page exceeds the admitted retention limit.");
+    private static ArgumentException TooLarge() => new("The batch output exceeds the admitted retention limit.");
     private sealed class BoundedPageBuffer(long maximum) : MemoryStream
     {
         public override void Write(byte[] buffer, int offset, int count) { Check(count); base.Write(buffer, offset, count); }

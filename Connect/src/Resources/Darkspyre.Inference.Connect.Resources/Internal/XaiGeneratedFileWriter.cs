@@ -15,6 +15,7 @@ internal sealed class XaiGeneratedFileWriter(IInferenceResourceAccess access, In
 {
     private IInferenceResourceAccess? _access = access;
     private Action? _fence = fence;
+    private Action<InferenceResourceCommitResult>? _onCommit = onCommit;
     private IInferenceResourceWriteHandle? _handle;
     private Stream? _content;
     private InferenceResourceReference? _reference;
@@ -100,7 +101,7 @@ internal sealed class XaiGeneratedFileWriter(IInferenceResourceAccess access, In
                     || fileName is not null && resource.FileName is { } name && name != fileName
                     || _contentType is not null && resource.ContentType is { } type && type != _contentType
                     || _selection != InferenceResourceCommitOutcome.Committed) throw Invalid();
-                onCommit?.Invoke(result);
+                _onCommit?.Invoke(result);
                 Check(token);
             }
             catch (Exception error) { throw Failure(error, InferenceResourceOperationPhase.Commit); }
@@ -169,7 +170,7 @@ internal sealed class XaiGeneratedFileWriter(IInferenceResourceAccess access, In
     public override async ValueTask DisposeAsync()
     {
         IInferenceResourceWriteHandle? handle = _handle;
-        _handle = null; _content = null; _access = null; _fence = null;
+        _handle = null; _content = null; _access = null; _fence = null; _onCommit = null;
         try
         {
             if (handle is null) return;

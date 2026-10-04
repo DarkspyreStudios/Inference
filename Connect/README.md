@@ -134,7 +134,8 @@ audio is unsupported; no signed-URL or library-side URL-fetch fallback is used.
 Batch result retrieval returns one provider page in its actual order with the provider's pagination
 token. Each result uses its actual custom row ID. Chat results use the canonical complete Chat decoder,
 including tools, reasoning, citations, continuation and named generated files. Images use the canonical
-image codec and commit/select every output into the borrowed Session/Workspace. Terminal video results
+image codec and commit/select every output into the borrowed Session/Workspace. Imported URL image
+outputs use the same unsigned download path and retain their actual bounded bytes. Terminal video results
 stream into the same named writer through Files or the core's unsigned media download pipeline. No
 custom row ID becomes a native video job ID. That unsigned pipeline sends no provider headers or
 cookies, follows no redirects and has no SDK loggers; caller-supplied HTTP factory behavior remains

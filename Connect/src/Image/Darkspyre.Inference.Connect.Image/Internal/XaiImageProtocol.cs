@@ -177,35 +177,48 @@ internal static class XaiImageProtocol
         {
             fence();
             if (row.ValueKind != JsonValueKind.Object) throw XaiMediaData.Malformed();
-            string encoded = XaiMediaData.RequiredString(row, "b64_json", static _ => false);
-            long encodedCharacters = encoded.Count(character => !char.IsWhiteSpace(character));
-            int padding = 0;
-            for (int index = encoded.Length - 1; index >= 0 && padding < 2; index--)
+            string? url = XaiMediaData.OptionalString(row, "url", protectedValue);
+            if (url is not null) XaiMediaData.RequireHttpUrl(url);
+            string? encoded = XaiMediaData.OptionalString(row, "b64_json", static _ => false);
+            byte[] bytes = [];
+            if (encoded is not null)
             {
-                if (char.IsWhiteSpace(encoded[index])) continue;
-                if (encoded[index] != '=') break;
-                padding++;
+                bytes = DecodeBase64(encoded, maximumImageBytes, maximumTotalBytes - totalBytes);
+                totalBytes += bytes.LongLength;
             }
-            long expectedBytes = encodedCharacters / 4 * 3 - padding;
-            if (encodedCharacters % 4 != 0 || expectedBytes <= 0) throw XaiMediaData.Malformed();
-            if (expectedBytes > maximumImageBytes || expectedBytes > maximumTotalBytes - totalBytes)
-                throw new ArgumentException("Inline images exceed the admitted retention limit.");
-            byte[] bytes;
-            try { bytes = Convert.FromBase64String(encoded); }
-            catch (FormatException) { throw XaiMediaData.Malformed(); }
-            if (bytes.LongLength != expectedBytes) throw XaiMediaData.Malformed();
-            totalBytes += expectedBytes;
+            else if (url is null) throw XaiMediaData.Malformed();
             string? contentType = XaiMediaData.OptionalString(row, "mime_type", protectedValue);
             JsonObject? file = XaiMediaData.FileOutput(row, protectedValue);
             var state = new JsonObject();
             if (file is not null) state["file_output"] = file;
             if (XaiMediaData.OptionalString(row, "storage_error", protectedValue) is not null) state["storage_failed"] = true;
-            images.Add(new(bytes, contentType, XaiMediaData.Element(state), Dimension(row, "width"), Dimension(row, "height")));
+            images.Add(new(bytes, contentType, XaiMediaData.Element(state), Dimension(row, "width"), Dimension(row, "height"), url));
         }
         string? model = XaiMediaData.OptionalString(root, "model", protectedValue);
         JsonElement? usage = XaiMediaData.Usage(root);
         fence();
         return new(images.AsReadOnly(), model, usage);
+    }
+
+    private static byte[] DecodeBase64(string encoded, long maximumImageBytes, long maximumTotalBytes)
+    {
+        long encodedCharacters = encoded.Count(character => !char.IsWhiteSpace(character));
+        int padding = 0;
+        for (int index = encoded.Length - 1; index >= 0 && padding < 2; index--)
+        {
+            if (char.IsWhiteSpace(encoded[index])) continue;
+            if (encoded[index] != '=') break;
+            padding++;
+        }
+        long expectedBytes = encodedCharacters / 4 * 3 - padding;
+        if (encodedCharacters % 4 != 0 || expectedBytes <= 0) throw XaiMediaData.Malformed();
+        if (expectedBytes > maximumImageBytes || expectedBytes > maximumTotalBytes)
+            throw new ArgumentException("Inline images exceed the admitted retention limit.");
+        byte[] bytes;
+        try { bytes = Convert.FromBase64String(encoded); }
+        catch (FormatException) { throw XaiMediaData.Malformed(); }
+        if (bytes.LongLength != expectedBytes) throw XaiMediaData.Malformed();
+        return bytes;
     }
 
     private static ArgumentException InvalidControl() => new("An image workflow control has an invalid value.");
@@ -217,7 +230,7 @@ internal static class XaiImageProtocol
 }
 
 internal sealed record XaiImageArtifact(ReadOnlyMemory<byte> Data, string? ContentType, JsonElement ProviderState,
-    int? Width = null, int? Height = null)
+    int? Width = null, int? Height = null, string? Url = null)
 {
     public override string ToString() => "XaiImageArtifact { <artifact> }";
 }
