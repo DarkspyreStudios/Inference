@@ -543,8 +543,8 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
             throw new LlmProviderException("Anthropic returned pause_turn with pending client tools; a mixed client/server-tool reply must end with tool_use.",
                 connection.Transport, response.StatusCode);
         bool incomplete = paused || stopReason is "max_tokens" or "model_context_window_exceeded";
-        bool requiresAction = toolCalls.Length > 0
-            || string.Equals(stopReason, "tool_use", StringComparison.Ordinal);
+        bool requiresAction = string.Equals(stopReason, "tool_use", StringComparison.Ordinal)
+            || stopReason is "end_turn" or "stop_sequence" && toolCalls.Length > 0;
         LlmCompletionStatus completionStatus = refused
             ? LlmCompletionStatus.Refused
             : incomplete
@@ -575,7 +575,7 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
             IncompleteReason = incomplete ? stopReason : null,
             Usage = usage,
             ProviderResponseId = responseId,
-            ToolCalls = completionStatus == LlmCompletionStatus.RequiresAction ? toolCalls : [],
+            ToolCalls = completionStatus is LlmCompletionStatus.RequiresAction or LlmCompletionStatus.Unknown ? toolCalls : [],
             ContinuationState = (paused || completionStatus is LlmCompletionStatus.Completed or LlmCompletionStatus.RequiresAction)
                 && content is not null
                     ? AnthropicContinuation.WithContainer(ProviderContinuationStateCodec.Encode(connection, request.ModelId, content), containerId) : null,

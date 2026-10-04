@@ -518,7 +518,7 @@ internal abstract class ChatCompletionsLlmClientBase(HttpClient http) : LlmClien
             ? LlmCompletionStatus.Refused
             : finishReason == "length"
                 ? LlmCompletionStatus.Incomplete
-                : completedToolCalls.Length > 0 || finishReason == "tool_calls"
+                : finishReason == "tool_calls" || finishReason == "stop" && completedToolCalls.Length > 0
                     ? LlmCompletionStatus.RequiresAction
                     : finishReason == "stop"
                         ? LlmCompletionStatus.Completed
