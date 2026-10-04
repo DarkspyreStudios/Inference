@@ -26,10 +26,15 @@ internal static class XaiFileRequestData
     internal static long? Upload(Stream source, string fileName, LlmFileUploadOptions? options)
     {
         ArgumentNullException.ThrowIfNull(source);
-        ArgumentException.ThrowIfNullOrWhiteSpace(fileName);
-        if (fileName.Any(char.IsControl)) throw new ArgumentException("The filename contains control characters.", nameof(fileName));
+        FileName(fileName);
         if (!source.CanRead) throw new ArgumentException("Upload source must be readable.", nameof(source));
         return Expiry(options?.ExpiresAfter);
+    }
+
+    internal static void FileName(string fileName)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(fileName);
+        if (fileName.Any(char.IsControl)) throw new ArgumentException("The filename contains control characters.", nameof(fileName));
     }
 
     internal static string Download(string fileId, Stream destination, LlmFileDownloadOptions? options)

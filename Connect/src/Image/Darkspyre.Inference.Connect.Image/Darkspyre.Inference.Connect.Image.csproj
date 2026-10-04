@@ -18,6 +18,7 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="Darkspyre.Inference.Connect.Image.Tests" />
+    <InternalsVisibleTo Include="Darkspyre.Inference.Connect.Resources" />
   </ItemGroup>
 
 </Project>

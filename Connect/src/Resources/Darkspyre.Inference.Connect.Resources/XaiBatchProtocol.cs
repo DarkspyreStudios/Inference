@@ -12,10 +12,11 @@ namespace Darkspyre.Inference.Connect.Resources;
 
 /// <summary>One admitted batch operation over the existing selected HTTP owner; no retry or polling.</summary>
 internal sealed class XaiBatchProtocol(HttpClient http, LlmConnection connection, string connectionId,
-    LlmResourcePageRequest? page, XaiResourceHttp.Observation observation, Action fence)
+    LlmResourcePageRequest? page, XaiResourceHttp.Observation observation, Action fence,
+    IReadOnlyList<string>? secretContext = null)
 {
     private readonly InferenceResourceScope _scope = new(ProviderHttp.BuildUri(connection, "batches").AbsoluteUri, connectionId);
-    private readonly XaiResourceHttp _exchange = new(http, connection, observation, fence);
+    private readonly XaiResourceHttp _exchange = new(http, connection, observation, fence, secretContext);
 
     internal static void ValidateBatch(LlmBatch batch)
     {
@@ -40,6 +41,14 @@ internal sealed class XaiBatchProtocol(HttpClient http, LlmConnection connection
 
     internal Task<LlmBatch> GetAsync(string id, CancellationToken token) =>
         ExchangeAsync(HttpMethod.Get, Path(id), null, false, root => ReadBatch(root, id), token);
+
+    internal Task AddRequestsAsync(string id, JsonObject payload, CancellationToken token) =>
+        _exchange.ExchangeResponseAsync(HttpMethod.Post, Path(id) + "/requests", payload, true,
+            (_, _) => Task.FromResult(true), token);
+
+    internal Task<LlmBatch> CreateFromFileAsync(string name, string fileId, CancellationToken token) =>
+        ExchangeAsync(HttpMethod.Post, "batches", new JsonObject { ["name"] = name, ["input_file_id"] = fileId },
+            true, root => ReadBatch(root, null), token);
 
     internal async Task AuthorizeAsync(string id, CancellationToken token)
     {

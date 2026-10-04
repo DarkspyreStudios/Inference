@@ -1,3 +1,4 @@
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 
@@ -6,6 +7,48 @@ namespace Darkspyre.Inference.Connect.LLM.Internal;
 /// <summary>Finite media wire facts; no route, account, upload or receipt authority is established here.</summary>
 internal static class XaiMediaData
 {
+    internal static async Task<string> AudioDataUrlAsync(Stream source, string? contentType, long maximumEncodedBytes,
+        Action fence, CancellationToken token)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        ArgumentNullException.ThrowIfNull(fence);
+        ArgumentOutOfRangeException.ThrowIfNegative(maximumEncodedBytes);
+        Fence();
+        string prefix = $"data:{contentType ?? "application/octet-stream"};base64,";
+        long prefixBytes = Encoding.UTF8.GetByteCount(prefix);
+        if (prefixBytes > maximumEncodedBytes) throw TooLarge();
+        long maximumRawBytes = (maximumEncodedBytes - prefixBytes) / 4 * 3;
+        var encoded = new StringBuilder(prefix);
+        var buffer = new byte[12 * 1024];
+        long total = 0;
+        int retained = 0;
+        while (true)
+        {
+            Fence();
+            int requested = (int)Math.Min(buffer.Length - retained, maximumRawBytes - total + 1);
+            int read = await source.ReadAsync(buffer.AsMemory(retained, requested), token).ConfigureAwait(false);
+            Fence();
+            if (read == 0)
+            {
+                if (retained > 0) encoded.Append(Convert.ToBase64String(buffer, 0, retained));
+                break;
+            }
+            total = checked(total + read);
+            if (total > maximumRawBytes) throw TooLarge();
+            int available = retained + read;
+            int complete = available - available % 3;
+            if (complete > 0) encoded.Append(Convert.ToBase64String(buffer, 0, complete));
+            retained = available - complete;
+            // Preserve only the final incomplete base64 group between borrowed reads.
+            if (retained > 0) Buffer.BlockCopy(buffer, complete, buffer, 0, retained);
+        }
+        Fence();
+        return encoded.ToString();
+
+        void Fence() { token.ThrowIfCancellationRequested(); fence(); token.ThrowIfCancellationRequested(); }
+        ArgumentException TooLarge() => new("Supplied audio exceeds the remaining encoded request budget.", nameof(maximumEncodedBytes));
+    }
+
     internal static JsonObject Storage(XaiFileStorageOptions value)
     {
         var result = new JsonObject { ["filename"] = value.FileName };

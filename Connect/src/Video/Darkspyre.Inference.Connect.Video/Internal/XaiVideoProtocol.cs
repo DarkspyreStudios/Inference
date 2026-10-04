@@ -10,6 +10,12 @@ namespace Darkspyre.Inference.Connect.Video.Internal;
 /// <summary>Stateless native mapping; media resolution and receipt authority remain with the admitted transport.</summary>
 internal static class XaiVideoProtocol
 {
+    internal static void Validate(VideoRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        _ = ValidateControls(request);
+    }
+
     internal static (string Route, JsonObject Body) Build(VideoRequest request,
         Func<InferenceMediaSource, JsonObject> resolve, Action fence)
     {
@@ -57,14 +63,14 @@ internal static class XaiVideoProtocol
             case VideoEditRequest edit:
                 route = "videos/edits";
                 ArgumentException.ThrowIfNullOrWhiteSpace(edit.Prompt);
-                ArgumentNullException.ThrowIfNull(edit.SourceVideo);
+                ValidateSource(edit.SourceVideo, allowFile: true);
                 break;
             case VideoExtensionRequest extension:
                 route = "videos/extensions";
                 // The primary schema requires prompt although the neutral contract permits unknown/omitted prompt.
                 if (string.IsNullOrWhiteSpace(extension.Prompt))
                     throw new ArgumentException("This video extension route requires a prompt.", nameof(request));
-                ArgumentNullException.ThrowIfNull(extension.SourceVideo);
+                ValidateSource(extension.SourceVideo, allowFile: true);
                 if (extension.ExtensionDuration is { } value) duration = WholeSeconds(value, 2, 10);
                 break;
             default: throw new NotSupportedException("Unknown video operation.");
@@ -92,6 +98,8 @@ internal static class XaiVideoProtocol
 
     private static int? ValidateGeneration(VideoGenerationRequest request)
     {
+        if (request.FirstFrame is { } first) ValidateSource(first, allowFile: true);
+        if (request.LastFrame is { } last) ValidateSource(last, allowFile: true);
         bool references = request.ReferenceImages is { Count: > 0 } || request.ReferenceAudio is { Count: > 0 };
         if (string.IsNullOrWhiteSpace(request.Prompt) && request.FirstFrame is null && request.LastFrame is null
             && request.Keyframes is not { Count: > 0 } && !references)
@@ -120,11 +128,11 @@ internal static class XaiVideoProtocol
                 double seconds = frame.Timestamp.TotalSeconds;
                 if (!double.IsFinite(seconds) || seconds <= 0 || request.Duration is { } total && frame.Timestamp >= total)
                     throw new ArgumentException("Invalid video keyframe timestamps.", nameof(request));
-                ArgumentNullException.ThrowIfNull(frame.Image);
+                ValidateSource(frame.Image, allowFile: true);
             }
         }
         if (request.ReferenceImages is { } images)
-            foreach (InferenceMediaSource image in images) ArgumentNullException.ThrowIfNull(image);
+            foreach (InferenceMediaSource image in images) ValidateSource(image, allowFile: true);
         if (request.ReferenceAudio is { } audio)
         {
             if (audio.Count > 3) throw new ArgumentOutOfRangeException(nameof(request));
@@ -132,15 +140,39 @@ internal static class XaiVideoProtocol
             {
                 switch (source)
                 {
-                    case VideoVoiceReference: break;
+                    case VideoVoiceReference voice:
+                        ArgumentException.ThrowIfNullOrWhiteSpace(voice.VoiceId);
+                        break;
                     case VideoAudioReference supplied:
-                        ArgumentNullException.ThrowIfNull(supplied.Source);
+                        ValidateSource(supplied.Source, allowFile: false);
                         break;
                     default: throw new NotSupportedException("Unknown video reference audio.");
                 }
             }
         }
         return duration;
+    }
+
+    private static void ValidateSource(InferenceMediaSource source, bool allowFile)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        switch (source)
+        {
+            case BinaryMediaSource: break;
+            case UrlMediaSource url:
+                ArgumentNullException.ThrowIfNull(url.Url);
+                XaiMediaData.RequireHttpUrl(url.Url.OriginalString);
+                break;
+            case FileMediaSource file:
+                if (!allowFile) throw new NotSupportedException("Supplied video audio has no native file source mapping.");
+                ArgumentNullException.ThrowIfNull(file.File);
+                ArgumentException.ThrowIfNullOrWhiteSpace(file.File.FileId);
+                break;
+            case ResourceMediaSource resource:
+                ArgumentNullException.ThrowIfNull(resource.Resource);
+                break;
+            default: throw new NotSupportedException("Unknown video reference source.");
+        }
     }
 
     private static void AddGeneration(JsonObject body, VideoGenerationRequest request, int? duration,
