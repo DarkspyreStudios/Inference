@@ -173,7 +173,8 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             writableRoots,
             sandbox,
             networkAllowed,
-            allowRuntimeBackgroundWork);
+            allowRuntimeBackgroundWork,
+            ClaudeCliLlmClient.ResolveCapabilities(connection, modelId).SupportsReasoningText);
         IClaudeCliSessionProcess process;
         try
         {
@@ -225,7 +226,8 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
         IReadOnlyList<string> writableRoots,
         LlmAgentSandboxMode sandbox,
         bool networkAllowed,
-        bool allowRuntimeBackgroundWork)
+        bool allowRuntimeBackgroundWork,
+        bool requestReasoningText)
     {
         string[] background = allowRuntimeBackgroundWork ? BackgroundTools(sandbox) : [];
         string builtIn = ClaudeTools(sandbox, networkAllowed);
@@ -241,7 +243,8 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             "--disable-slash-commands",
             "--tools", builtIn == "default" || background.Length == 0 ? builtIn : string.Join(',', [builtIn, .. background]),
             "--permission-mode", PermissionMode(sandbox),
-            "--permission-prompts", "none"
+            "--permission-prompts", "none",
+            "--settings", new JsonObject { ["showThinkingSummaries"] = requestReasoningText }.ToJsonString()
         };
         if (sandbox is not LlmAgentSandboxMode.DangerFullAccess)
         {
@@ -400,7 +403,8 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
     private sealed class ClaudeAgentSession : ILlmAgentSession
     {
         private readonly IClaudeCliSessionProcess _process;
-        private readonly string? _initialModelId;
+        // The last model acknowledged by the CLI; _route guards reads and changes.
+        private string? _selectedModelId;
         private readonly LlmConnection _connection;
         private readonly HashSet<string> _accountedCalls = new(StringComparer.Ordinal);
         private readonly HashSet<string> _completedResults = new(StringComparer.Ordinal);
@@ -456,7 +460,7 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             _opening = opening;
             ThreadId = threadId;
             SessionId = sessionId;
-            _initialModelId = initialModelId;
+            _selectedModelId = initialModelId;
             _connection = connection;
             _tools = tools;
             _toolsByName = tools.ToDictionary(tool => tool.Name, StringComparer.Ordinal);
@@ -586,35 +590,37 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
                 supportsDocuments: true,
                 parameterName: nameof(request));
 
-            LlmProviderCapabilities capabilities = ClaudeCliLlmClient.ResolveCapabilities(
-                _connection, request.ModelId ?? _initialModelId);
             if (!_turnGate.Wait(0, cancellationToken))
             {
                 throw new InvalidOperationException("The session is running or paused.");
             }
-            string turnId = Guid.NewGuid().ToString();
-            var turn = new HostTurn(turnId, new ClaudeStreamUsage(capabilities.SupportsUsageDeltas, _accountedCalls), capabilities.SupportsReasoningText);
+            HostTurn? turn = null;
             bool completed = false;
             try
             {
+                string? selectedModelId;
+                lock (_route) { selectedModelId = _selectedModelId; }
+                LlmProviderCapabilities capabilities = ClaudeCliLlmClient.ResolveCapabilities(
+                    _connection, request.ModelId ?? selectedModelId);
+                string turnId = Guid.NewGuid().ToString();
+                turn = new HostTurn(turnId, new ClaudeStreamUsage(capabilities.SupportsUsageDeltas, _accountedCalls), capabilities.SupportsReasoningText);
                 if (!string.IsNullOrWhiteSpace(request.ModelId)
-                    && !string.Equals(request.ModelId, _initialModelId, StringComparison.Ordinal))
+                    && !string.Equals(request.ModelId, selectedModelId, StringComparison.Ordinal))
                 {
                     await SendControlRequestAsync(
                         new JsonObject { ["subtype"] = "set_model", ["model"] = request.ModelId },
                         cancellationToken);
+                    lock (_route) { _selectedModelId = request.ModelId; }
                 }
+                var settings = new JsonObject { ["showThinkingSummaries"] = capabilities.SupportsReasoningText };
                 if (request.ReasoningLevel is { } level)
                 {
                     LlmReasoningEffort.Validate(level, ClaudeCliLlmClient.ReasoningLevels);
-                    await SendControlRequestAsync(
-                        new JsonObject
-                        {
-                            ["subtype"] = "apply_flag_settings",
-                            ["settings"] = new JsonObject { ["effortLevel"] = LlmReasoningEffort.Word(level) }
-                        },
-                        cancellationToken);
+                    settings["effortLevel"] = LlmReasoningEffort.Word(level);
                 }
+                await SendControlRequestAsync(
+                    new JsonObject { ["subtype"] = "apply_flag_settings", ["settings"] = settings },
+                    cancellationToken);
 
                 cancellationToken.ThrowIfCancellationRequested();
                 yield return new LlmAgentTurnStartedEvent(ThreadId, turnId);
@@ -666,7 +672,7 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             }
             finally
             {
-                if (!completed && !_disposed)
+                if (turn is not null && !completed && !_disposed)
                 {
                     await AbandonAsync(turn);
                 }
@@ -1507,7 +1513,7 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
                 {
                     return running;
                 }
-                LlmProviderCapabilities capabilities = ClaudeCliLlmClient.ResolveCapabilities(_connection, _initialModelId);
+                LlmProviderCapabilities capabilities = ClaudeCliLlmClient.ResolveCapabilities(_connection, _selectedModelId);
                 _provider = new ProviderTurn(Guid.NewGuid().ToString(), new ClaudeStreamUsage(
                     capabilities.SupportsUsageDeltas, _accountedCalls), capabilities.SupportsReasoningText);
                 _activeTurnId = _provider.Id;

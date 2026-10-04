@@ -1212,6 +1212,12 @@ Claude and AgentCore sessions honor the same display override. Streaming Claude 
 when display is enabled. The file is removed with the call's working directory on completion,
 cancellation, failure or reader disposal. Authentication probes and non-streaming calls receive no
 summary settings file. The setting requests summaries; it does not guarantee that the CLI returns them.
+Native Claude sessions pass the resolved initial `showThinkingSummaries` boolean as inline
+`--settings`. Before each host turn, the existing `apply_flag_settings` control carries that turn's
+resolved display choice and any explicitly supplied effort. An omitted effort does not reset the
+CLI's existing effort. The session keeps the last model acknowledged by `set_model`; later omitted
+model choices and provider-originated turns use that model's capability overrides. An explicit
+return to the startup model sends a model switch when the CLI has selected another model.
 
 Anthropic Messages and Vertex Claude share model profiles. Positive adaptive reasoning requests
 `thinking.display = summarized` on families whose default display is omitted. A null level requests
