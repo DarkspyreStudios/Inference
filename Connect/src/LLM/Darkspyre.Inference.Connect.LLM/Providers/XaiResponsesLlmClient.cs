@@ -121,6 +121,27 @@ internal sealed class XaiResponsesLlmClient(HttpClient http) : ResponsesLlmClien
         _ = ResolveStructuredOutputEnforcement(connection, request, capabilities);
     }
 
+    internal LlmChatRequest ProjectBatchRequest(LlmConnection connection, LlmChatRequest request)
+    {
+        PreflightResourceRequest(connection, request);
+        (LlmChatRequest projected, _) = ContinuationStateProjection.Project(request, connection);
+        foreach (LlmChatMessage message in projected.Messages)
+            if (message.ContinuationState is not null)
+                _ = ProviderContinuationStateCodec.DecodeMessage(message, connection, projected.ModelId);
+        return projected;
+    }
+
+    internal JsonObject BuildBatchPayload(LlmConnection connection, LlmChatRequest request,
+        LlmResourcePreparation? resources)
+    {
+        request = resources?.Request ?? request;
+        LlmStructuredOutputEnforcement? enforcement = ResolveStructuredOutputEnforcement(connection, request,
+            GetCapabilities(connection, request.ModelId));
+        JsonObject payload = BuildPayload(connection, request, enforcement, stream: false, resources);
+        RequestJson.ApplyProviderOptions(payload, connection, request);
+        return payload;
+    }
+
     internal void PreflightManagedOpeningRequest(LlmConnection connection, LlmChatRequest request)
     {
         ProviderHttp.ValidateAdditionalHeaders(connection.AdditionalHeaders);
