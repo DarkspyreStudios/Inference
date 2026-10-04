@@ -17,12 +17,21 @@ specifications.
 | Distribution | Private DarkspyreStudios NuGet feed |
 | Version line | `<net>.<release>.<minor>`: .NET generation, breaking-contract release, compatible tweak/fix |
 | Release model | `Common`, `Connect`, `Tensor`, and `UI.Settings` publish together at the one version declared in `/Directory.Build.props` |
-| Primary branch | `master` |
+| Primary branch | `master`; finished work merges into the interim branch `dev` first |
 | Lifecycle stage | Four-package `11.15.1-rc.1` early contract release published privately |
-| Jira project and parent | TBD |
+| Jira project | `DSA` |
 | Jira subject label | TBD |
 
 The technical assembly and namespace prefix is `Darkspyre.Inference`.
+
+## Workflow and builds
+
+Two shared documents hold the rules every Darkspyre repository follows. Read both before the first command:
+
+- `~/.agent-ds/workflow.md`: cutting a worktree off `origin/dev`, committing and pushing your own branch, merging into `dev`, and the Jira and ticket rules.
+- `~/.agent-ds/build-instructions.md`: interim builds from `origin/dev` source, release-candidate builds from NuGet, and test copies with agent-ds `scripts/test-copy.sh`.
+
+They apply to agent-ds, AgentDSPlugins, Inference, TensorSharp and RightSize. Rules in this repository's own documents add to them.
 
 ## Current Private Release
 
