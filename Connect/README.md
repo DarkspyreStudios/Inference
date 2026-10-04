@@ -1314,7 +1314,8 @@ also accepts the actual terminal SSE event type when its response omits `status`
 selected CLI protocol. An explicit unknown status is not replaced by the event type. Other
 Responses routes require their native status; a missing status remains unknown. Managed sessions
 retain tool calls from an unknown outcome in their context but end with `Unknown` without executing
-the calls or starting another model step.
+the calls or starting another model step. Structured-output validation does not discard those
+unknown tool observations or replace their terminal reason.
 
 `SupportsReasoningText` describes public reasoning separately from reasoning-level control. Common
 mirrors the flag. The **Reasoning text** override disables public reasoning events and provider

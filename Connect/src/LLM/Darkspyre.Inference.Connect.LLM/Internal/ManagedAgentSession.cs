@@ -804,6 +804,13 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
                     }, token);
                     return;
                 }
+                if (result.Status == LlmCompletionStatus.Unknown && result.ToolCalls.Count > 0)
+                {
+                    AppendAssistant(stepId, run, result);
+                    await writer.WriteAsync(new LlmAgentMessageCompletedEvent(ThreadId, run.Id, stepId, result.Text), token);
+                    await CompleteAsync(run, writer, LlmAgentCompletionReason.Unknown, token);
+                    return;
+                }
                 if (result.StructuredOutput is { WasEvaluated: true, IsValid: false })
                 {
                     await CompleteAsync(run, writer, LlmAgentCompletionReason.ProviderFailure, token);
@@ -813,12 +820,6 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
                 // Mixed calls retain actual completed results; interruption leaves the remaining tail unresolved.
                 if (result.ToolCalls.Count > 0)
                 {
-                    if (result.Status == LlmCompletionStatus.Unknown)
-                    {
-                        await writer.WriteAsync(new LlmAgentMessageCompletedEvent(ThreadId, run.Id, stepId, result.Text), token);
-                        await CompleteAsync(run, writer, LlmAgentCompletionReason.Unknown, token);
-                        return;
-                    }
                     executingMixedTools = result.ToolCalls.Any(call => call is LlmShellCall);
                     try { await writer.WriteAsync(new LlmAgentMessageCompletedEvent(ThreadId, run.Id, stepId, result.Text), token); }
                     finally { await ExecuteToolsAsync(run, result.ToolCalls, assistant.Id, writer, token); }
