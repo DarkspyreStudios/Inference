@@ -1109,7 +1109,7 @@ internal sealed class BedrockLlmClient(
     };
 
     private static Document DeserializeDocument(string json) =>
-        JsonSerializer.Deserialize<Document>(json);
+        BedrockDocumentJson.Read(json);
 
     private static string SerializeDocument(Document? document) => BedrockDocumentJson.Write(document);
 

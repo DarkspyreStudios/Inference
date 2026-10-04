@@ -525,8 +525,11 @@ authorization-code exchange remains form encoded. This does not change either au
 
 Bedrock serializes AWS `Document` values through the SDK's public `DocumentMarshaller`, without
 reflection metadata. Recursive and numeric JSON retains the SDK's representation. An absent nullable
-document writes `{}`; an explicit JSON `null` remains distinct. The existing document readers use the
-SDK's attributed converter. That internal converter cannot be named in source-generated metadata.
+document writes `{}`; an explicit JSON `null` remains distinct. Bedrock and AgentCore read documents
+through the SDK's public `DocumentUnmarshaller` after strict BCL JSON validation. A private envelope
+supports primitive roots through the SDK's container-oriented context and is removed before use.
+The complete captured input supplies the reader buffer size; EOF returns its rented buffer even
+when mapping fails. These paths do not use attributed reflection deserialization or copy a parser.
 
 Claude CLI input envelopes and Antigravity chat/agent stdin envelopes use DOM writers with the same
 field order, escaping, explicit null fields and final newline. Claude input keeps text before ordered
