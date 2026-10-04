@@ -373,6 +373,9 @@ public sealed class AttachmentAdmissionSnapshotTests
         public LlmCapabilities? GetCapabilities(string engineId, string? modelId) => new() { SupportsStreaming = true };
         public Task<IReadOnlyList<LlmSelfHostEngine>> ListEnginesAsync(CancellationToken cancellationToken = default) =>
             Task.FromResult<IReadOnlyList<LlmSelfHostEngine>>([]);
+        public Task<Darkspyre.Inference.Common.Embedding.IEmbeddingInference> GetEmbeddingInferenceAsync(string engineId,
+            CancellationToken cancellationToken = default) => throw new NotSupportedException("This host runs no embedding engine.");
+
         public async Task<ILlmInference> GetInferenceAsync(string engineId, CancellationToken cancellationToken = default)
         { if (!holdCapabilities) await WaitAsync(cancellationToken); return this; }
         public async Task<LlmCapabilities> GetCapabilitiesAsync(string? modelId = null, CancellationToken cancellationToken = default)

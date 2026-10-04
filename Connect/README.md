@@ -1049,6 +1049,14 @@ Non-xAI embedding calls retain their existing construction without a catalog fac
 facades are runtime composition, not portable data: owned options preserve null and refuse non-null
 values without serializing their collaborators. No runtime facade getter is exported.
 
+`AddLlmConnectSelfHost` registers the SelfHost embedding client. It embeds through the host's
+`ILlmSelfHost.GetEmbeddingInferenceAsync(engineId)`, where the connection's endpoint names the
+engine, and refuses provider options. The engine formats queries: `LlmEmbeddingRequest.Kind` states
+whether inputs are queries or documents, `Instruction` states a query's task, and `Truncate` decides
+whether an over-limit input is cut or fails the request with `EmbeddingInputTooLongException`. The
+result reports `ModelId`, `ModelFingerprint` and `TruncatedInputs`. Remote adapters send inputs as
+given; they ignore `Kind`, `Instruction` and `Truncate` and report no fingerprint.
+
 The internal xAI embedding adapter implements ordered text inputs, float vectors and typed dimensions.
 It accepts at most 128 non-empty inputs and preserves supplied `user` and boolean/null `preview`
 options, including explicit nulls. Its direct path consumes the supplied OAuth connection and the

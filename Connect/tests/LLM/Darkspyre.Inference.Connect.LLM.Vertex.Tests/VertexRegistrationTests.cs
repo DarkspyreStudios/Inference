@@ -145,6 +145,9 @@ public sealed class VertexRegistrationTests
     private sealed class UnloadedHost : ILlmSelfHost
     {
         public Task<IReadOnlyList<LlmSelfHostEngine>> ListEnginesAsync(CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<LlmSelfHostEngine>>([]);
+        public Task<Darkspyre.Inference.Common.Embedding.IEmbeddingInference> GetEmbeddingInferenceAsync(string engineId,
+            CancellationToken cancellationToken = default) => throw new NotSupportedException("This host runs no embedding engine.");
+
         public Task<ILlmInference> GetInferenceAsync(string engineId, CancellationToken cancellationToken = default) => throw new InvalidOperationException("No engine I/O expected.");
         public LlmCapabilities? GetCapabilities(string engineId, string? modelId) => null;
     }

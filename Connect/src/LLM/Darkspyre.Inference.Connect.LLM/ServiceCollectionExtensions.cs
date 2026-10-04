@@ -35,6 +35,7 @@ public static class ServiceCollectionExtensions
         services.AddTransient<ILlmClient>(provider => provider.GetRequiredService<SelfHostLlmClient>());
         services.AddTransient<ManagedSelfHostAgentClient>();
         services.AddTransient<ILlmAgentClient>(provider => provider.GetRequiredService<ManagedSelfHostAgentClient>());
+        services.AddTransient<ILlmEmbeddingClient, SelfHostEmbeddingClient>();
         return services;
     }
 

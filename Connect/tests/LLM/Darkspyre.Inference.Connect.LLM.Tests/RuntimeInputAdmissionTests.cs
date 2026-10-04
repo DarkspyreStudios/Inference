@@ -412,6 +412,9 @@ public sealed class RuntimeInputAdmissionTests
         public int Calls;
         public Task<IReadOnlyList<LlmSelfHostEngine>> ListEnginesAsync(CancellationToken cancellationToken = default)
         { Calls++; throw new EffectException(); }
+        public Task<Darkspyre.Inference.Common.Embedding.IEmbeddingInference> GetEmbeddingInferenceAsync(string engineId,
+            CancellationToken cancellationToken = default) => throw new NotSupportedException("This host runs no embedding engine.");
+
         public Task<ILlmInference> GetInferenceAsync(string engineId, CancellationToken cancellationToken = default)
         { Calls++; throw new EffectException(); }
         public LlmCapabilities? GetCapabilities(string engineId, string? modelId)

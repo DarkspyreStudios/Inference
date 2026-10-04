@@ -68,6 +68,9 @@ internal static class SelfHostSuite
         public Task<IReadOnlyList<LlmSelfHostEngine>> ListEnginesAsync(CancellationToken cancellationToken = default) =>
             Task.FromResult<IReadOnlyList<LlmSelfHostEngine>>([new(EngineId, "Tester engine")]);
 
+        public Task<Darkspyre.Inference.Common.Embedding.IEmbeddingInference> GetEmbeddingInferenceAsync(string engineId,
+            CancellationToken cancellationToken = default) => throw new NotSupportedException("This host runs no embedding engine.");
+
         public Task<ILlmInference> GetInferenceAsync(string engineId, CancellationToken cancellationToken = default) =>
             engineId == EngineId ? Task.FromResult(engine)
                 : throw new InferenceException(InferenceFailureCode.ModelUnavailable, $"Engine '{engineId}' is not loaded.");

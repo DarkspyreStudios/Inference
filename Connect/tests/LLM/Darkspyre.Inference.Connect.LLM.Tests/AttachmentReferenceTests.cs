@@ -256,6 +256,9 @@ public sealed class AttachmentReferenceTests
         public int Calls { get; private set; }
         public Task<IReadOnlyList<LlmSelfHostEngine>> ListEnginesAsync(CancellationToken cancellationToken = default)
             => Forbidden<Task<IReadOnlyList<LlmSelfHostEngine>>>();
+        public Task<Darkspyre.Inference.Common.Embedding.IEmbeddingInference> GetEmbeddingInferenceAsync(string engineId,
+            CancellationToken cancellationToken = default) => throw new NotSupportedException("This host runs no embedding engine.");
+
         public Task<ILlmInference> GetInferenceAsync(string engineId, CancellationToken cancellationToken = default)
             => Forbidden<Task<ILlmInference>>();
         public LlmCapabilities? GetCapabilities(string engineId, string? modelId) => Forbidden<LlmCapabilities>();

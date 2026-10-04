@@ -21,6 +21,13 @@ public interface ILlmSelfHost
     Task<ILlmInference> GetInferenceAsync(string engineId, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Returns the loaded embedding engine. Throws <see cref="Common.InferenceException"/> with
+    /// <see cref="Common.InferenceFailureCode.ModelUnavailable"/> when the engine is unknown, not loaded or not an
+    /// embedding engine.
+    /// </summary>
+    Task<Common.Embedding.IEmbeddingInference> GetEmbeddingInferenceAsync(string engineId, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// The capabilities the loaded engine declared for <paramref name="modelId"/>, which the host captures at
     /// load; null when the engine is not loaded. This reads the host's own records and does no I/O.
     /// </summary>

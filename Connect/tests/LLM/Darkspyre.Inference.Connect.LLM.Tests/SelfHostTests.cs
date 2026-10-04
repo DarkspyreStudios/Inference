@@ -435,6 +435,9 @@ public sealed class SelfHostTests
         public int ResolutionCount { get; private set; }
         public Task<IReadOnlyList<LlmSelfHostEngine>> ListEnginesAsync(CancellationToken cancellationToken = default) =>
             Task.FromResult<IReadOnlyList<LlmSelfHostEngine>>([new("engine-1", "Swift 27B")]);
+        public Task<Darkspyre.Inference.Common.Embedding.IEmbeddingInference> GetEmbeddingInferenceAsync(string engineId,
+            CancellationToken cancellationToken = default) => throw new NotSupportedException("This host runs no embedding engine.");
+
         public Task<ILlmInference> GetInferenceAsync(string engineId, CancellationToken cancellationToken = default)
         {
             ResolutionCount++;

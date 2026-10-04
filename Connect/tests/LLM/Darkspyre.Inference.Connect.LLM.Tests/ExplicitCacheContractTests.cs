@@ -398,6 +398,9 @@ public sealed class ExplicitCacheContractTests
     {
         internal int Entries { get; private set; }
         public LlmCapabilities? GetCapabilities(string engineId, string? modelId) => new() { SupportsStreaming = true, SupportsExplicitCache = true };
+        public Task<Darkspyre.Inference.Common.Embedding.IEmbeddingInference> GetEmbeddingInferenceAsync(string engineId,
+            CancellationToken cancellationToken = default) => throw new NotSupportedException("This host runs no embedding engine.");
+
         public Task<ILlmInference> GetInferenceAsync(string engineId, CancellationToken cancellationToken = default)
         { Entries++; throw new InvalidOperationException("Native provider cache receipts do not transfer to an engine."); }
         public Task<IReadOnlyList<LlmSelfHostEngine>> ListEnginesAsync(CancellationToken cancellationToken = default)
