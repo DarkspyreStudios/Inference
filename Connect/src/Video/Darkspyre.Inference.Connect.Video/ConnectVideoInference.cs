@@ -361,6 +361,17 @@ internal sealed class ConnectVideoInference : IVideoInference, IDisposable, IAsy
             && audio.OfType<VideoAudioReference>().Any(reference => reference.Source is BinaryMediaSource or ResourceMediaSource)
             && connection.MaximumEncodedReferenceAudioBytes is not > 0)
             throw new ArgumentException("Supplied binary or workspace reference audio requires a positive encoded byte limit on the video connection.", nameof(request));
+        if (request is VideoGenerationRequest { ReferenceAudio: { } references }
+            && connection.MaximumEncodedReferenceAudioBytes is { } maximum)
+        {
+            long encoded = 0;
+            foreach (BinaryMediaSource binary in references.OfType<VideoAudioReference>().Select(reference => reference.Source).OfType<BinaryMediaSource>())
+            {
+                encoded = checked(encoded + System.Text.Encoding.UTF8.GetByteCount($"data:{binary.ContentType ?? "application/octet-stream"};base64,")
+                    + ((long)binary.Data.Length + 2) / 3 * 4);
+                if (encoded > maximum) throw new ArgumentException("Supplied audio exceeds its encoded reference byte limit.", nameof(request));
+            }
+        }
         IEnumerable<InferenceMediaSource?> sources = request switch
         {
             VideoGenerationRequest generation => new[] { generation.FirstFrame, generation.LastFrame }
@@ -417,8 +428,8 @@ internal sealed class ConnectVideoInference : IVideoInference, IDisposable, IAsy
                     throw ProtocolFailure();
             }, () => Fence(token), token).ConfigureAwait(false);
             Fence(token);
-            return new VideoDownloadStream(opened.Content, reads, () => Fence(token), token,
-                opened.Descriptor.ContentType, opened.Descriptor.FileName, opened.Descriptor.Bytes);
+            return new VideoDownloadStream(opened.Content, reads, () => Fence(token),
+                opened.Descriptor.ContentType, opened.Descriptor.FileName, opened.Descriptor.Bytes, token);
         }
         catch (Exception original)
         {
@@ -495,8 +506,8 @@ internal sealed class VideoDownloadStream : Stream
         if (stream is VideoDownloadStream owned)
         { ObservedContentType = owned.ObservedContentType; ObservedFileName = owned.ObservedFileName; ObservedLength = owned.ObservedLength; }
     }
-    internal VideoDownloadStream(Stream stream, LlmResourcePreparation namedReads, Action fence, CancellationToken token,
-        string? contentType, string? fileName, long? length = null)
+    internal VideoDownloadStream(Stream stream, LlmResourcePreparation namedReads, Action fence,
+        string? contentType, string? fileName, long? length, CancellationToken token)
     {
         _stream = stream; _namedReads = namedReads; _externalFence = fence; _token = token;
         ObservedContentType = contentType; ObservedFileName = fileName; ObservedLength = length;

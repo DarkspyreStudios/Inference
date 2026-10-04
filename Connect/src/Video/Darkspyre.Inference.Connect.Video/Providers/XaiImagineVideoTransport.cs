@@ -44,12 +44,17 @@ internal sealed class XaiImagineVideoTransport : IVideoTransport, IDisposable, I
                 Operations = new[] { VideoOperation.Generation, VideoOperation.Edit, VideoOperation.Extension }.ToFrozenSet(),
                 SourceKinds = new[] { InferenceMediaSourceKind.Binary, InferenceMediaSourceKind.Url,
                     InferenceMediaSourceKind.ProviderFile, InferenceMediaSourceKind.Resource }.ToFrozenSet(),
-                MinimumGenerationDuration = TimeSpan.FromSeconds(1), MaximumGenerationDuration = TimeSpan.FromSeconds(15),
-                MinimumExtensionDuration = TimeSpan.FromSeconds(2), MaximumExtensionDuration = TimeSpan.FromSeconds(10),
+                MinimumGenerationDuration = TimeSpan.FromSeconds(1),
+                MaximumGenerationDuration = TimeSpan.FromSeconds(15),
+                MinimumExtensionDuration = TimeSpan.FromSeconds(2),
+                MaximumExtensionDuration = TimeSpan.FromSeconds(10),
                 ResolutionHeights = modern ? [480, 720, 1080] : classic ? [480, 720] : null,
                 MaximumKeyframes = modern ? 4 : classic ? 0 : null,
-                MaximumReferenceAudio = 3, SupportsLastFrame = modern,
-                SupportsAudioControl = true, SupportsPresetVoiceReferences = true, SupportsSuppliedAudioReferences = true,
+                MaximumReferenceAudio = 3,
+                SupportsLastFrame = modern,
+                SupportsAudioControl = true,
+                SupportsPresetVoiceReferences = true,
+                SupportsSuppliedAudioReferences = true,
                 SupportsProgress = true
             };
         }, cancellationToken);
