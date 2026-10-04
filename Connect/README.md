@@ -1176,6 +1176,7 @@ Compatible Chat Completions reports `Unknown` for an unrecognized or missing sto
 the response contains no refusal or tool handoff. It does not create reasoning continuation from
 that unknown outcome. Each HTTP event publication checks caller cancellation, including buffered
 non-streaming events and adapters using a borrowed HTTP client.
+Claude CLI and Antigravity also check caller cancellation before each buffered non-streaming event.
 
 `SupportsReasoningText` describes public reasoning separately from reasoning-level control. Common
 mirrors the flag. The **Reasoning text** override disables public reasoning events and provider

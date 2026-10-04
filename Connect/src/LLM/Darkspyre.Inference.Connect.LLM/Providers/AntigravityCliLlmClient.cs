@@ -96,6 +96,7 @@ internal sealed class AntigravityCliLlmClient(IAntigravityCliRunner runner)
                 executable, prompt, request, enforcement, providerSchema, cancellationToken);
             foreach (LlmStreamEvent completeEvent in CompleteResponseEvents.From(completeResult, []))
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 yield return completeEvent;
             }
 

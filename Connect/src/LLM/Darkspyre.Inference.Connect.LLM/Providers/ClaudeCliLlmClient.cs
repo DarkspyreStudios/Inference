@@ -117,6 +117,7 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
             LlmChatResult completeResult = await CompleteAsync(executable, prompt, request, enforcement, cancellationToken);
             foreach (LlmStreamEvent completeEvent in CompleteResponseEvents.From(completeResult, []))
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 yield return completeEvent;
             }
 
