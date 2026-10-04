@@ -2053,6 +2053,11 @@ validation or controlled transport fixtures.
 Upload requests own their content and receive one cleanup attempt after response cleanup. Media
 content detaches its borrowed source and fence after admitted upload work drains, including when an
 outer request-content wrapper refuses cleanup. The source stream remains borrowed.
+Gemini and Vertex cache-prefix preparation use the shared named-resource failure boundary.
+Existing typed failures keep their actual resource, phase, commit/selection receipts and cancellation
+token. Untyped failures carry the current phase and known read bytes. Independent read-handle
+cleanup failures remain alongside the original failure; prefix preparation does not manufacture
+a dispatched cache-create outcome.
 Cache CRUD exchanges also own their authorized requests. They attempt response then request cleanup
 before result publication or typed uncertainty, preserving validated late receipt evidence. Admission
 failures still clean requests once and do not imply a dispatched mutation.

@@ -3,7 +3,6 @@ using System.Net.Http.Json;
 using System.Text.Json.Nodes;
 using System.Runtime.ExceptionServices;
 using System.Text;
-using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Common.LLM;
 using Darkspyre.Inference.Common.Resources;
 using Darkspyre.Inference.Connect.LLM.Internal;
@@ -162,10 +161,8 @@ internal sealed partial class GeminiApiLlmClient
         }
         catch (Exception error)
         {
-            var facts = new InferenceResourceOperationFailure(phase, currentReference,
-                InferenceResourceCommitOutcome.NotAttempted, content?.BytesRead);
-            failure = error is OperationCanceledException ? new InferenceResourceOperationCanceledException(facts, token, error)
-                : new InferenceResourceOperationException(InferenceFailureCode.ExecutionFailed, "The cache prefix could not be materialized.", facts, error);
+            failure = LlmResourcePreparation.AsInputFailure(error, phase, currentReference,
+                content?.BytesRead ?? transferredBytes, token);
         }
         try { await reading.DisposeAsync().ConfigureAwait(false); }
         catch (Exception cleanup) { failure = failure is null ? cleanup : new AggregateException(failure, cleanup); }
@@ -173,8 +170,8 @@ internal sealed partial class GeminiApiLlmClient
         try { token.ThrowIfCancellationRequested(); fence(token); }
         catch (OperationCanceledException error) when (currentReference is not null)
         {
-            throw new InferenceResourceOperationCanceledException(new(phase, currentReference,
-                InferenceResourceCommitOutcome.NotAttempted, transferredBytes), token, error);
+            ExceptionDispatchInfo.Throw(LlmResourcePreparation.AsInputFailure(error, phase, currentReference,
+                transferredBytes, token));
         }
         prefix!["model"] = "models/" + request.ModelId;
         prefix["displayName"] = request.Correlation.ReconciliationDisplayName;

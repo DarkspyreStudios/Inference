@@ -3,7 +3,6 @@ using System.Runtime.ExceptionServices;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json.Nodes;
-using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Common.LLM;
 using Darkspyre.Inference.Common.Resources;
 using Darkspyre.Inference.Connect.LLM.Internal;
@@ -192,12 +191,8 @@ internal sealed partial class VertexLlmClient
             }
             catch (Exception error)
             {
-                var facts = new InferenceResourceOperationFailure(phase, current,
-                    InferenceResourceCommitOutcome.NotAttempted, content?.BytesRead ?? transferred);
-                failure = error is InferenceResourceOperationException or InferenceResourceOperationCanceledException ? error
-                    : error is OperationCanceledException ? new InferenceResourceOperationCanceledException(facts, token, error)
-                    : new InferenceResourceOperationException(InferenceFailureCode.ExecutionFailed,
-                        "The Vertex cache prefix could not be materialized.", facts, error);
+                failure = LlmResourcePreparation.AsInputFailure(error, phase, current,
+                    content?.BytesRead ?? transferred, token);
             }
             try { await reading.DisposeAsync().ConfigureAwait(false); }
             catch (Exception cleanup) { failure = failure is null ? cleanup : new AggregateException(failure, cleanup); }
@@ -205,8 +200,8 @@ internal sealed partial class VertexLlmClient
             try { token.ThrowIfCancellationRequested(); fence(token); }
             catch (OperationCanceledException error)
             {
-                throw new InferenceResourceOperationCanceledException(new(InferenceResourceOperationPhase.Materialize, current,
-                    InferenceResourceCommitOutcome.NotAttempted, content?.BytesRead ?? transferred), token, error);
+                ExceptionDispatchInfo.Throw(LlmResourcePreparation.AsInputFailure(error, InferenceResourceOperationPhase.Materialize,
+                    current, content?.BytesRead ?? transferred, token));
             }
             prefix!["model"] = $"projects/{Connection.Vertex!.ProjectId}/locations/{Connection.Vertex.Location}/publishers/google/models/{VertexEndpoints.ParseModel(request.ModelId).Model}";
             prefix["displayName"] = request.Correlation.ReconciliationDisplayName;
