@@ -1,5 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Darkspyre.Inference.Common.Image;
+using Darkspyre.Inference.Common.Media;
 using Darkspyre.Inference.Connect.LLM.Internal;
 
 namespace Darkspyre.Inference.Connect.Image.Internal;
@@ -7,26 +9,88 @@ namespace Darkspyre.Inference.Connect.Image.Internal;
 /// <summary>Pure native body/result mapping. Resolved references must be admitted by the owning transport.</summary>
 internal static class XaiImageProtocol
 {
+    internal static void Validate(ImageGenerationRequest request, ImageWorkflow workflow) =>
+        _ = BuildControls(Controls(request, workflow));
+
+    internal static (string Route, JsonObject Body) Build(ImageGenerationRequest request,
+        ImageWorkflow workflow, IReadOnlyList<JsonObject> references) =>
+        Build(Controls(request, workflow), references);
+
     internal static (string Route, JsonObject Body) Build(ImageTransportPreparationRequest request,
         IReadOnlyList<JsonObject> references)
     {
         ArgumentNullException.ThrowIfNull(request);
+        return Build(new ImageControls(request.Workflow, request.PositivePrompt, request.NegativePrompt,
+            request.Width, request.Height, request.Seed, request.Steps, request.GuidanceScale,
+            request.Count, request.References.Count), references);
+    }
+
+    private static ImageControls Controls(ImageGenerationRequest request, ImageWorkflow workflow)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(workflow);
+        ArgumentException.ThrowIfNullOrWhiteSpace(request.ModelId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(workflow.Id);
+        if (!string.Equals(request.ModelId, workflow.Id, StringComparison.Ordinal))
+            throw new ArgumentException("The image request does not match its workflow.", nameof(request));
+        ArgumentNullException.ThrowIfNull(request.References);
+        foreach (InferenceMediaSource source in request.References)
+        {
+            switch (source)
+            {
+                case BinaryMediaSource: break;
+                case UrlMediaSource url:
+                    ArgumentNullException.ThrowIfNull(url.Url);
+                    XaiMediaData.RequireHttpUrl(url.Url.OriginalString);
+                    break;
+                case FileMediaSource file:
+                    ArgumentNullException.ThrowIfNull(file.File);
+                    ArgumentException.ThrowIfNullOrWhiteSpace(file.File.FileId);
+                    break;
+                case ResourceMediaSource resource:
+                    ArgumentNullException.ThrowIfNull(resource.Resource);
+                    break;
+                case null: throw new ArgumentException("An image reference cannot be null.", nameof(request));
+                default: throw new NotSupportedException("Unknown image reference source.");
+            }
+        }
+        return new(workflow, request.Prompt, request.NegativePrompt, request.Width, request.Height,
+            request.Seed, request.Steps, request.GuidanceScale, request.Count, request.References.Count);
+    }
+
+    private static (string Route, JsonObject Body) Build(ImageControls controls,
+        IReadOnlyList<JsonObject> references)
+    {
         ArgumentNullException.ThrowIfNull(references);
-        ArgumentException.ThrowIfNullOrWhiteSpace(request.PositivePrompt);
-        if (request.Count is < 1 or > 10) throw new ArgumentOutOfRangeException(nameof(request));
-        if (references.Count > 5 || references.Count != request.References.Count)
+        JsonObject body = BuildControls(controls);
+        if (references.Count != controls.ReferenceCount)
             throw new ArgumentException("Invalid ordered image references.", nameof(references));
         JsonObject[] nativeReferences = references.Select(CopyReference).ToArray();
-        if (!string.IsNullOrEmpty(request.NegativePrompt) || request.Width is not null || request.Height is not null
-            || request.Seed is not null || request.Steps is not null || request.GuidanceScale is not null)
+        if (nativeReferences.Length == 1) body["image"] = nativeReferences[0];
+        else if (nativeReferences.Length > 1) body["images"] = new JsonArray(nativeReferences.Cast<JsonNode>().ToArray());
+        return (nativeReferences.Length == 0 ? "images/generations" : "images/edits", body);
+    }
+
+    private static JsonObject BuildControls(ImageControls controls)
+    {
+        ArgumentNullException.ThrowIfNull(controls.Workflow);
+        if (controls.Workflow.Transport != ImageTransport.XaiImagine)
+            throw new NotSupportedException("The image workflow is not an xAI workflow.");
+        ArgumentException.ThrowIfNullOrWhiteSpace(controls.Workflow.Id);
+        ArgumentException.ThrowIfNullOrWhiteSpace(controls.Prompt);
+        if (controls.Count is < 1 or > 10) throw new ArgumentOutOfRangeException(nameof(controls));
+        if (controls.ReferenceCount > 5 || controls.Workflow.RequiresReferenceImage && controls.ReferenceCount == 0)
+            throw new ArgumentException("Invalid image reference count.", nameof(controls));
+        if (!string.IsNullOrEmpty(controls.NegativePrompt) || controls.Width is not null || controls.Height is not null
+            || controls.Seed is not null || controls.Steps is not null || controls.GuidanceScale is not null)
             throw new NotSupportedException("The supplied image sampling control has no xAI mapping.");
-        JsonElement configuration = request.Workflow.TransportConfiguration;
-        if (configuration.ValueKind != JsonValueKind.Object) throw new ArgumentException("An xAI image workflow requires native model controls.", nameof(request));
+        JsonElement configuration = controls.Workflow.TransportConfiguration;
+        if (configuration.ValueKind != JsonValueKind.Object) throw new ArgumentException("An xAI image workflow requires native model controls.", nameof(controls));
         var body = new JsonObject
         {
             ["model"] = XaiMediaData.RequiredString(configuration, "model", static _ => false),
-            ["prompt"] = request.PositivePrompt,
-            ["n"] = request.Count,
+            ["prompt"] = controls.Prompt,
+            ["n"] = controls.Count,
             ["response_format"] = "b64_json"
         };
         foreach (JsonProperty property in configuration.EnumerateObject())
@@ -35,7 +99,7 @@ internal static class XaiImageProtocol
             switch (property.Name)
             {
                 case "aspect_ratio":
-                    if (nativeReferences.Length == 1 && property.Value.ValueKind != JsonValueKind.Null)
+                    if (controls.ReferenceCount == 1 && property.Value.ValueKind != JsonValueKind.Null)
                         throw new NotSupportedException("Single-image edits derive their aspect ratio from the reference.");
                     RequireChoice(property.Value, ["1:1", "3:4", "4:3", "9:16", "16:9", "2:3", "3:2", "9:19.5", "19.5:9", "9:20", "20:9", "1:2", "2:1", "21:9", "5:2", "auto"]);
                     break;
@@ -49,10 +113,11 @@ internal static class XaiImageProtocol
             }
             body[property.Name] = JsonNode.Parse(property.Value.GetRawText());
         }
-        if (nativeReferences.Length == 1) body["image"] = nativeReferences[0];
-        else if (nativeReferences.Length > 1) body["images"] = new JsonArray(nativeReferences.Cast<JsonNode>().ToArray());
-        return (nativeReferences.Length == 0 ? "images/generations" : "images/edits", body);
+        return body;
     }
+
+    private sealed record ImageControls(ImageWorkflow Workflow, string Prompt, string? NegativePrompt,
+        int? Width, int? Height, long? Seed, int? Steps, double? GuidanceScale, int Count, int ReferenceCount);
 
     private static JsonObject CopyReference(JsonObject reference)
     {
