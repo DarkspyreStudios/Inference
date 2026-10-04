@@ -1225,6 +1225,7 @@ the operation before the prompt is written. The session keeps the last model ack
 `set_model`; later omitted model choices and provider-originated turns use that model's capability
 overrides. An explicit return to the startup model sends a model switch when the CLI has selected
 another model.
+Native effort validation reads the same resolved model profile before any CLI control is sent.
 Chat and native-session thinking deltas carry `IsSummary = true`; neither path exposes signature
 or encrypted state as reasoning text.
 

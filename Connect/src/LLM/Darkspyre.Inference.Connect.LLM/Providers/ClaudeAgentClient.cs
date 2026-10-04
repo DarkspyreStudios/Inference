@@ -592,11 +592,6 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
                 supportsImages: true,
                 supportsDocuments: true,
                 parameterName: nameof(request));
-            if (request.ReasoningLevel is { } reasoningLevel)
-            {
-                LlmReasoningEffort.Validate(reasoningLevel, ClaudeCliLlmClient.ReasoningLevels);
-            }
-
             if (!_turnGate.Wait(0, cancellationToken))
             {
                 throw new InvalidOperationException("The session is running or paused.");
@@ -609,6 +604,7 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
                 lock (_route) { selectedModelId = _selectedModelId; }
                 LlmProviderCapabilities capabilities = ClaudeCliLlmClient.ResolveCapabilities(
                     _connection, request.ModelId ?? selectedModelId);
+                LlmReasoningEffort.Validate(request.ReasoningLevel, capabilities);
                 string turnId = Guid.NewGuid().ToString();
                 turn = new HostTurn(turnId, new ClaudeStreamUsage(capabilities.SupportsUsageDeltas, _accountedCalls), capabilities.SupportsReasoningText);
                 if (!string.IsNullOrWhiteSpace(request.ModelId)
