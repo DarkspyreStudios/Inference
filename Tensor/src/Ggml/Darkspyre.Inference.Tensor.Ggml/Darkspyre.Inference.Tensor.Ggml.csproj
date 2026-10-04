@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <AssemblyName>Darkspyre.Inference.Tensor.Ggml</AssemblyName>
+    <Description>The one GGML native runtime owner that every Tensor engine running on GGML borrows.</Description>
+    <PackageTags>ai;inference;tensor;ggml;metal</PackageTags>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\Common\Darkspyre.Inference.Tensor.Common\Darkspyre.Inference.Tensor.Common.csproj" />
+    <PackageReference Include="Darkspyre.TensorSharp.Backends.GGML" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Darkspyre.Inference.Tensor.LLM.Qwen" />
+    <InternalsVisibleTo Include="Darkspyre.Inference.Tensor.Embedding" />
+    <InternalsVisibleTo Include="Darkspyre.Inference.Tensor.Registry" />
+    <InternalsVisibleTo Include="Darkspyre.Inference.Tensor.LLM.Qwen.Tests" />
+  </ItemGroup>
+</Project>

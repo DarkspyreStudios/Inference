@@ -12,6 +12,7 @@
     <ProjectReference Include="..\Decision\Darkspyre.Inference.Tensor.Decision\Darkspyre.Inference.Tensor.Decision.csproj" PrivateAssets="all" />
     <ProjectReference Include="..\Decision\Darkspyre.Inference.Tensor.Decision.Laya\Darkspyre.Inference.Tensor.Decision.Laya.csproj" PrivateAssets="all" />
     <ProjectReference Include="..\Embedding\Darkspyre.Inference.Tensor.Embedding\Darkspyre.Inference.Tensor.Embedding.csproj" PrivateAssets="all" />
+    <ProjectReference Include="..\Ggml\Darkspyre.Inference.Tensor.Ggml\Darkspyre.Inference.Tensor.Ggml.csproj" PrivateAssets="all" />
     <ProjectReference Include="..\Image\Darkspyre.Inference.Tensor.Image\Darkspyre.Inference.Tensor.Image.csproj" PrivateAssets="all" />
     <ProjectReference Include="..\Image\Darkspyre.Inference.Tensor.Image.Supra\Darkspyre.Inference.Tensor.Image.Supra.csproj" PrivateAssets="all" />
     <ProjectReference Include="..\LLM\Darkspyre.Inference.Tensor.LLM\Darkspyre.Inference.Tensor.LLM.csproj" PrivateAssets="all" />
@@ -44,6 +45,8 @@
     <None Include="..\Decision\Darkspyre.Inference.Tensor.Decision.Laya\bin\$(Configuration)\$(TargetFramework)\Darkspyre.Inference.Tensor.Decision.Laya.xml" Pack="true" PackagePath="lib\$(TargetFramework)" />
     <None Include="..\Embedding\Darkspyre.Inference.Tensor.Embedding\bin\$(Configuration)\$(TargetFramework)\Darkspyre.Inference.Tensor.Embedding.dll" Pack="true" PackagePath="lib\$(TargetFramework)" />
     <None Include="..\Embedding\Darkspyre.Inference.Tensor.Embedding\bin\$(Configuration)\$(TargetFramework)\Darkspyre.Inference.Tensor.Embedding.xml" Pack="true" PackagePath="lib\$(TargetFramework)" />
+    <None Include="..\Ggml\Darkspyre.Inference.Tensor.Ggml\bin\$(Configuration)\$(TargetFramework)\Darkspyre.Inference.Tensor.Ggml.dll" Pack="true" PackagePath="lib\$(TargetFramework)" />
+    <None Include="..\Ggml\Darkspyre.Inference.Tensor.Ggml\bin\$(Configuration)\$(TargetFramework)\Darkspyre.Inference.Tensor.Ggml.xml" Pack="true" PackagePath="lib\$(TargetFramework)" />
     <None Include="..\Image\Darkspyre.Inference.Tensor.Image\bin\$(Configuration)\$(TargetFramework)\Darkspyre.Inference.Tensor.Image.dll" Pack="true" PackagePath="lib\$(TargetFramework)" />
     <None Include="..\Image\Darkspyre.Inference.Tensor.Image\bin\$(Configuration)\$(TargetFramework)\Darkspyre.Inference.Tensor.Image.xml" Pack="true" PackagePath="lib\$(TargetFramework)" />
     <None Include="..\Image\Darkspyre.Inference.Tensor.Image.Supra\bin\$(Configuration)\$(TargetFramework)\Darkspyre.Inference.Tensor.Image.Supra.dll" Pack="true" PackagePath="lib\$(TargetFramework)" />

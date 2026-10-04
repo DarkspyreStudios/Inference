@@ -2,15 +2,18 @@ using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Tensor.Common;
 using TensorSharp.GGML;
 
-namespace Darkspyre.Inference.Tensor.LLM.Qwen;
+namespace Darkspyre.Inference.Tensor.Ggml;
 
-/// <summary>One generation-owned GGML selection and terminal lifetime. Model instances borrow this control.</summary>
-public sealed class QwenRuntimeOwner : ITensorRuntimeOwner
+/// <summary>
+/// One generation-owned GGML selection and terminal lifetime. Every Tensor engine that runs on GGML borrows it: a model
+/// holds a lease while it is loaded and enters the owner for each call, so one native runtime serves them all.
+/// </summary>
+public sealed class GgmlRuntimeOwner : ITensorRuntimeOwner
 {
     private static readonly object GenerationGate = new();
-    private static QwenRuntimeOwner? _generation;
+    private static GgmlRuntimeOwner? _generation;
     private readonly object _gate = new();
-    private IQwenGgmlRuntime? _supplier;
+    private IGgmlRuntime? _supplier;
     private readonly string _supplierRid;
     private IReadOnlyList<TensorRuntimeCandidate>? _candidates;
     private Task<IReadOnlyList<GgmlNativeCandidate>>? _catalogResolution;
@@ -25,7 +28,7 @@ public sealed class QwenRuntimeOwner : ITensorRuntimeOwner
     private bool _fenced;
     private bool _nativeMayRemain;
 
-    public static QwenRuntimeOwner GetOrCreate(TensorRuntimePlan? plan = null)
+    public static GgmlRuntimeOwner GetOrCreate(TensorRuntimePlan? plan = null)
     {
         lock (GenerationGate)
         {
@@ -35,12 +38,12 @@ public sealed class QwenRuntimeOwner : ITensorRuntimeOwner
                     throw new ArgumentException("The generation already owns a different GGML runtime plan.", nameof(plan));
                 return _generation;
             }
-            var supplier = new QwenGgmlRuntime();
+            var supplier = new GgmlRuntime();
             return _generation = new(plan ?? new(supplier.Build, supplier.Rid), supplier);
         }
     }
 
-    internal QwenRuntimeOwner(TensorRuntimePlan plan, IQwenGgmlRuntime supplier)
+    internal GgmlRuntimeOwner(TensorRuntimePlan plan, IGgmlRuntime supplier)
     {
         ArgumentNullException.ThrowIfNull(plan);
         ArgumentNullException.ThrowIfNull(supplier);
@@ -95,7 +98,8 @@ public sealed class QwenRuntimeOwner : ITensorRuntimeOwner
         ArgumentNullException.ThrowIfNull(request);
         cancellationToken.ThrowIfCancellationRequested();
         using IDisposable operation = Enter();
-        if (request.ImplementationId != QwenSetup.Definition.Implementation.Id || request.TargetRid != Plan.TargetRid
+        // Each engine's probe checks its own implementation before it delegates here.
+        if (request.TargetRid != Plan.TargetRid
             || request.TargetRid != _supplierRid || !IsGgml(request.RequestedBackend)
             || CompatibleBackends(request.RequestedBackend, Plan.TargetRid).Count == 0)
             return TensorBackendAvailability.Observe(request, TensorBackendAvailabilityState.Unsupported,
@@ -234,7 +238,7 @@ public sealed class QwenRuntimeOwner : ITensorRuntimeOwner
 
     private async Task<Initialization> SelectCoreAsync(TensorBackendKind requested)
     {
-        IQwenGgmlRuntime supplier = _supplier!;
+        IGgmlRuntime supplier = _supplier!;
         if (Plan.Build != supplier.Build || Plan.TargetRid != supplier.Rid)
             return Initialization.Unsupported("The runtime plan differs from the executing supplier build or target.");
         IReadOnlyList<TensorBackendKind> backends = CompatibleBackends(requested, Plan.TargetRid);
@@ -397,7 +401,7 @@ public sealed class QwenRuntimeOwner : ITensorRuntimeOwner
         bool safeBusy = false;
         try
         {
-            IQwenGgmlRuntime supplier = _supplier!;
+            IGgmlRuntime supplier = _supplier!;
             bool readyBefore = _current is not null && supplier.State == GgmlRuntimeState.Ready;
             released = supplier.Shutdown().Released;
             // The real guard leaves Ready unchanged only when it refused teardown over live external resources.
@@ -452,9 +456,9 @@ public sealed class QwenRuntimeOwner : ITensorRuntimeOwner
                 "The GGML runtime did not retire safely. Drain instances and retry terminal shutdown explicitly.");
     }
 
-    private sealed class OperationLease(QwenRuntimeOwner owner) : IDisposable
+    private sealed class OperationLease(GgmlRuntimeOwner owner) : IDisposable
     {
-        private QwenRuntimeOwner? _owner = owner;
+        private GgmlRuntimeOwner? _owner = owner;
         public void Dispose() => Interlocked.Exchange(ref _owner, null)?.Release();
     }
 
@@ -489,7 +493,7 @@ public sealed class QwenRuntimeOwner : ITensorRuntimeOwner
     }
 }
 
-internal interface IQwenGgmlRuntime
+internal interface IGgmlRuntime
 {
     TensorSharpBuildIdentity Build { get; }
     string Rid { get; }
@@ -503,7 +507,7 @@ internal interface IQwenGgmlRuntime
     GgmlNativeShutdownResult Shutdown();
 }
 
-internal sealed class QwenGgmlRuntime : IQwenGgmlRuntime
+internal sealed class GgmlRuntime : IGgmlRuntime
 {
     public TensorSharpBuildIdentity Build => new(GgmlNativeLoader.TensorSharpBuild, GgmlNativeLoader.NativeAbi, GgmlNativeLoader.GgmlCommit);
     public string Rid => GgmlNativeLoader.RuntimeIdentifier;

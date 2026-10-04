@@ -1,10 +1,11 @@
 using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Tensor.Common;
 using TensorSharp.GGML;
+using Darkspyre.Inference.Tensor.Ggml;
 
 namespace Darkspyre.Inference.Tensor.LLM.Qwen.Tests;
 
-public sealed class QwenRuntimeOwnerTests
+public sealed class GgmlRuntimeOwnerTests
 {
     private static readonly string[] RefusedCandidateCodes = ["candidate-entry-invalid", "native-refused"];
     private static TensorSharpBuildIdentity Build => new("2.8.6.8", new('a', 64), new('b', 40));
@@ -15,7 +16,7 @@ public sealed class QwenRuntimeOwnerTests
     private static TensorBackendProbeRequest Request(TensorBackendKind backend = TensorBackendKind.Auto) =>
         new(Guid.NewGuid(), QwenSetup.Definition.Implementation.Id, backend, Rid);
 
-    internal static QwenRuntimeOwner CreateControlledCpuOwner(out Supplier supplier)
+    internal static GgmlRuntimeOwner CreateControlledCpuOwner(out Supplier supplier)
     {
         supplier = new();
         return new(new(Build, Rid, [Candidate("cpu", TensorBackendKind.GgmlCpu)]), supplier);
@@ -27,14 +28,14 @@ public sealed class QwenRuntimeOwnerTests
         var supplier = new Supplier();
         var input = new[] { Candidate("cpu", TensorBackendKind.GgmlCpu) };
         var plan = new TensorRuntimePlan(Build, Rid, input);
-        var owner = new QwenRuntimeOwner(plan, supplier);
+        var owner = new GgmlRuntimeOwner(plan, supplier);
         input[0] = Candidate("other", TensorBackendKind.GgmlCpu);
         Assert.Equal("cpu", owner.Plan.Candidates![0].Identity.Id);
         Assert.Equal(TensorRuntimeState.Uninitialized, owner.State);
         Assert.Null(owner.Current);
-        Assert.True(QwenRuntimeOwner.SamePlan(plan, owner.Plan));
-        Assert.False(QwenRuntimeOwner.SamePlan(plan, new(Build, Rid, [])));
-        Assert.False(QwenRuntimeOwner.SamePlan(plan, new(Build, Rid)));
+        Assert.True(GgmlRuntimeOwner.SamePlan(plan, owner.Plan));
+        Assert.False(GgmlRuntimeOwner.SamePlan(plan, new(Build, Rid, [])));
+        Assert.False(GgmlRuntimeOwner.SamePlan(plan, new(Build, Rid)));
         Assert.Equal(0, supplier.Effects);
     }
 
@@ -42,7 +43,7 @@ public sealed class QwenRuntimeOwnerTests
     public async Task ExplicitEmptyNeverResolvesCatalogOrEntersNativeSelection()
     {
         var supplier = new Supplier();
-        var owner = new QwenRuntimeOwner(new(Build, Rid, []), supplier);
+        var owner = new GgmlRuntimeOwner(new(Build, Rid, []), supplier);
         TensorBackendAvailability result = await owner.CheckAsync(Request());
         Assert.Equal(TensorBackendAvailabilityState.Unavailable, result.State);
         Assert.Null(result.ActualBackend);
@@ -56,7 +57,7 @@ public sealed class QwenRuntimeOwnerTests
     public async Task AutomaticSelectionFallsBackOnlyAfterProvenNoRetainedState()
     {
         var supplier = new Supplier { RefusedBackends = [GgmlBackendType.Cuda, GgmlBackendType.Vulkan] };
-        var owner = new QwenRuntimeOwner(new(Build, Rid,
+        var owner = new GgmlRuntimeOwner(new(Build, Rid,
             [Candidate("cuda13", TensorBackendKind.GgmlCuda), Candidate("vulkan", TensorBackendKind.GgmlVulkan), Candidate("cpu", TensorBackendKind.GgmlCpu)]), supplier);
         TensorBackendAvailability result = await owner.CheckAsync(Request());
         Assert.Equal(new[] { GgmlBackendType.Cuda, GgmlBackendType.Vulkan, GgmlBackendType.Cpu }, supplier.Configured);
@@ -73,7 +74,7 @@ public sealed class QwenRuntimeOwnerTests
     public async Task ExplicitBackendNeverFallsBackAndCannotSwitchReadyBackend()
     {
         var supplier = new Supplier { RefusedBackends = [GgmlBackendType.Cuda] };
-        var owner = new QwenRuntimeOwner(new(Build, Rid,
+        var owner = new GgmlRuntimeOwner(new(Build, Rid,
             [Candidate("cuda13", TensorBackendKind.GgmlCuda), Candidate("cpu", TensorBackendKind.GgmlCpu)]), supplier);
         Assert.False((await owner.CheckAsync(Request(TensorBackendKind.GgmlCuda))).IsAvailable);
         Assert.Equal(new[] { GgmlBackendType.Cuda }, supplier.Configured);
@@ -88,7 +89,7 @@ public sealed class QwenRuntimeOwnerTests
     public async Task PartialInitializationStopsAllFallbackAndSanitizesDiagnostics()
     {
         var supplier = new Supplier { Poison = true };
-        var owner = new QwenRuntimeOwner(new(Build, Rid,
+        var owner = new GgmlRuntimeOwner(new(Build, Rid,
             [Candidate("cuda13", TensorBackendKind.GgmlCuda), Candidate("cpu", TensorBackendKind.GgmlCpu)]), supplier);
         TensorBackendAvailability result = await owner.CheckAsync(Request());
         Assert.Equal(TensorBackendAvailabilityState.RequiresProcessRestart, result.State);
@@ -106,7 +107,7 @@ public sealed class QwenRuntimeOwnerTests
     public async Task TerminalShutdownFailureKeepsItsStateAndSharedOutcomeOnRepeatedCalls()
     {
         var supplier = new Supplier { Poison = true };
-        var owner = new QwenRuntimeOwner(new(Build, Rid, [Candidate("cpu", TensorBackendKind.GgmlCpu)]), supplier);
+        var owner = new GgmlRuntimeOwner(new(Build, Rid, [Candidate("cpu", TensorBackendKind.GgmlCpu)]), supplier);
         await owner.CheckAsync(Request());
         TensorRuntimeShutdownResult failure = await owner.ShutdownAsync();
         Assert.Equal(TensorRuntimeShutdownState.FailedRequiresProcessExit, failure.State);
@@ -130,7 +131,7 @@ public sealed class QwenRuntimeOwnerTests
     public async Task DefaultCatalogFreezesOnlyAtFirstAdmittedCheck()
     {
         var supplier = new Supplier { PackageCandidates = [Native(Candidate("cpu", TensorBackendKind.GgmlCpu))] };
-        var owner = new QwenRuntimeOwner(new(Build, Rid), supplier);
+        var owner = new GgmlRuntimeOwner(new(Build, Rid), supplier);
         Assert.Equal(0, supplier.Catalogs);
         Assert.True((await owner.CheckAsync(Request())).IsAvailable);
         Assert.Equal(1, supplier.Catalogs);
@@ -147,7 +148,7 @@ public sealed class QwenRuntimeOwnerTests
         var invalid = new TensorRuntimeCandidate(valid.Identity with { Id = "invalid", AbsoluteBridgePath = "relative/libGgmlOps.so" },
             valid.Backend, valid.Files);
         var supplier = new Supplier { RefuseValidation = true };
-        var owner = new QwenRuntimeOwner(new(Build, Rid, [invalid, valid]), supplier);
+        var owner = new GgmlRuntimeOwner(new(Build, Rid, [invalid, valid]), supplier);
         try
         {
             TensorBackendAvailability result = await owner.CheckAsync(Request());
@@ -165,7 +166,7 @@ public sealed class QwenRuntimeOwnerTests
     public async Task CancelledShutdownWaitDoesNotCancelSharedCleanupOrReopenAdmission()
     {
         var supplier = new Supplier { HoldShutdown = true };
-        var owner = new QwenRuntimeOwner(new(Build, Rid, []), supplier);
+        var owner = new GgmlRuntimeOwner(new(Build, Rid, []), supplier);
         using var cancellation = new CancellationTokenSource();
         Task<TensorRuntimeShutdownResult> first = owner.ShutdownAsync(cancellation.Token);
         Task<TensorRuntimeShutdownResult>? second = null;
@@ -202,7 +203,7 @@ public sealed class QwenRuntimeOwnerTests
     {
         using var cancellation = new CancellationTokenSource();
         var supplier = new Supplier { OnAcquire = cancellation.Cancel, CleanupFailuresRemaining = 2 };
-        var owner = new QwenRuntimeOwner(new(Build, Rid, [Candidate("cpu", TensorBackendKind.GgmlCpu)]), supplier);
+        var owner = new GgmlRuntimeOwner(new(Build, Rid, [Candidate("cpu", TensorBackendKind.GgmlCpu)]), supplier);
         try
         {
             AggregateException failure = await Assert.ThrowsAsync<AggregateException>(() =>
@@ -239,7 +240,7 @@ public sealed class QwenRuntimeOwnerTests
     public async Task ProvenReadyGuardRefusalKeepsTheFenceAndAllowsExplicitRetryAfterExternalDrain()
     {
         var supplier = new Supplier { ExternalResourcesActive = true };
-        var owner = new QwenRuntimeOwner(new(Build, Rid, [Candidate("cpu", TensorBackendKind.GgmlCpu)]), supplier);
+        var owner = new GgmlRuntimeOwner(new(Build, Rid, [Candidate("cpu", TensorBackendKind.GgmlCpu)]), supplier);
         Task? disposal = null;
         try
         {
@@ -274,8 +275,8 @@ public sealed class QwenRuntimeOwnerTests
     public async Task ModelAndExecutionLeasesPreventTeardownAndDisposalFencesSynchronously()
     {
         var supplier = new Supplier();
-        var owner = new QwenRuntimeOwner(new(Build, Rid, [Candidate("cpu", TensorBackendKind.GgmlCpu)]), supplier);
-        QwenRuntimeOwner.ModelLease model = await owner.AcquireModelAsync(TensorBackendKind.GgmlCpu, default);
+        var owner = new GgmlRuntimeOwner(new(Build, Rid, [Candidate("cpu", TensorBackendKind.GgmlCpu)]), supplier);
+        GgmlRuntimeOwner.ModelLease model = await owner.AcquireModelAsync(TensorBackendKind.GgmlCpu, default);
         IDisposable execution = owner.EnterExecution();
         try
         {
@@ -300,7 +301,7 @@ public sealed class QwenRuntimeOwnerTests
     public async Task WaiterCancellationDoesNotCancelSharedInitializationAndRetirementRefusesLateResults()
     {
         var supplier = new Supplier { HoldInitialization = true };
-        var owner = new QwenRuntimeOwner(new(Build, Rid, [Candidate("cpu", TensorBackendKind.GgmlCpu)]), supplier);
+        var owner = new GgmlRuntimeOwner(new(Build, Rid, [Candidate("cpu", TensorBackendKind.GgmlCpu)]), supplier);
         using var cancelled = new CancellationTokenSource();
         Task<TensorBackendAvailability> first = owner.CheckAsync(Request(), cancelled.Token);
         Task<TensorBackendAvailability>? second = null;
@@ -337,27 +338,27 @@ public sealed class QwenRuntimeOwnerTests
     [InlineData("linux-arm64", TensorBackendKind.GgmlCuda, TensorBackendKind.GgmlVulkan, TensorBackendKind.GgmlCpu)]
     [InlineData("win-x64", TensorBackendKind.GgmlCuda, TensorBackendKind.GgmlVulkan, TensorBackendKind.GgmlCpu)]
     public void NonMacAutomaticPolicyIsAnOrderedCompatibleSet(string rid, TensorBackendKind first, TensorBackendKind second, TensorBackendKind third)
-        => Assert.Equal(new[] { first, second, third }, QwenRuntimeOwner.CompatibleBackends(TensorBackendKind.Auto, rid));
+        => Assert.Equal(new[] { first, second, third }, GgmlRuntimeOwner.CompatibleBackends(TensorBackendKind.Auto, rid));
 
     [Fact]
     public void MacAndWindowsArmPolicyPreserveTheirActualAdmittedBackends()
     {
-        Assert.Equal(new[] { TensorBackendKind.GgmlMetal, TensorBackendKind.GgmlCpu }, QwenRuntimeOwner.CompatibleBackends(TensorBackendKind.Auto, "osx-arm64"));
-        Assert.Equal(new[] { TensorBackendKind.GgmlVulkan, TensorBackendKind.GgmlCpu }, QwenRuntimeOwner.CompatibleBackends(TensorBackendKind.Auto, "win-arm64"));
-        Assert.Empty(QwenRuntimeOwner.CompatibleBackends(TensorBackendKind.GgmlCuda, "win-arm64"));
-        Assert.Empty(QwenRuntimeOwner.CompatibleBackends(TensorBackendKind.Auto, "unknown"));
+        Assert.Equal(new[] { TensorBackendKind.GgmlMetal, TensorBackendKind.GgmlCpu }, GgmlRuntimeOwner.CompatibleBackends(TensorBackendKind.Auto, "osx-arm64"));
+        Assert.Equal(new[] { TensorBackendKind.GgmlVulkan, TensorBackendKind.GgmlCpu }, GgmlRuntimeOwner.CompatibleBackends(TensorBackendKind.Auto, "win-arm64"));
+        Assert.Empty(GgmlRuntimeOwner.CompatibleBackends(TensorBackendKind.GgmlCuda, "win-arm64"));
+        Assert.Empty(GgmlRuntimeOwner.CompatibleBackends(TensorBackendKind.Auto, "unknown"));
     }
 
     private static GgmlNativeCandidate Native(TensorRuntimeCandidate candidate) => new(
         Path.GetDirectoryName(candidate.Identity.AbsoluteBridgePath)!, candidate.Identity.Build.Version, candidate.Identity.TargetRid,
-        candidate.Identity.Variant, QwenRuntimeOwner.ToSupplier(candidate.Backend),
+        candidate.Identity.Variant, GgmlRuntimeOwner.ToSupplier(candidate.Backend),
         candidate.Files.Select(file => new GgmlNativeFile(file.RelativePath, file.Size, file.Sha256)).ToArray())
     { NativeAbi = Build.NativeAbi };
 
-    internal sealed class Supplier : IQwenGgmlRuntime
+    internal sealed class Supplier : IGgmlRuntime
     {
-        public TensorSharpBuildIdentity Build => QwenRuntimeOwnerTests.Build;
-        public string Rid => QwenRuntimeOwnerTests.Rid;
+        public TensorSharpBuildIdentity Build => GgmlRuntimeOwnerTests.Build;
+        public string Rid => GgmlRuntimeOwnerTests.Rid;
         public string EntryLibraryName => "libGgmlOps.so";
         public GgmlRuntimeState State { get; private set; }
         public int Effects => Catalogs + Configured.Count + Initializations + Shutdowns + ModelReleases;

@@ -16,6 +16,7 @@
     <InternalsVisibleTo Include="Darkspyre.Inference.Tensor.LLM.Qwen.Tests" />
     <InternalsVisibleTo Include="Darkspyre.Inference.Tensor.Registry" />
     <ProjectReference Include="..\Darkspyre.Inference.Tensor.LLM\Darkspyre.Inference.Tensor.LLM.csproj" />
+    <ProjectReference Include="..\..\Ggml\Darkspyre.Inference.Tensor.Ggml\Darkspyre.Inference.Tensor.Ggml.csproj" />
   </ItemGroup>
 
   <ItemGroup>

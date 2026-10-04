@@ -1,12 +1,13 @@
 using Darkspyre.Inference.Common.Setup;
 using Darkspyre.Inference.Tensor.Common;
+using Darkspyre.Inference.Tensor.Ggml;
 
 namespace Darkspyre.Inference.Tensor.LLM.Qwen;
 
 /// <summary>Registers Qwen text generation. Its packs live under the <c>Qwen</c> store key.</summary>
-public sealed class QwenEngineProvider(QwenRuntimeOwner? runtimeOwner = null) : ITensorEngineProvider
+public sealed class QwenEngineProvider(GgmlRuntimeOwner? runtimeOwner = null) : ITensorEngineProvider
 {
-    private readonly QwenRuntimeOwner _runtimeOwner = runtimeOwner ?? QwenRuntimeOwner.GetOrCreate();
+    private readonly GgmlRuntimeOwner _runtimeOwner = runtimeOwner ?? GgmlRuntimeOwner.GetOrCreate();
     public TensorEngineDefinition Definition { get; } = new(QwenSetup.Definition, "Qwen");
 
     public async Task<IReadOnlyList<TensorModelPackDefinition>> GetOfferedModelsAsync(ITensorModelPackManager packs,

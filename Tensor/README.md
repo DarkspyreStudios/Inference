@@ -26,6 +26,8 @@ Assemblies included by the Tensor package:
   verification, the local pack directory, and execution coordination.
 - `Darkspyre.Inference.Tensor.LLM`, `.Image`, and `.Decision` — interchangeable capability
   interfaces using the typed requests and results from `Darkspyre.Inference.Common`.
+- `Darkspyre.Inference.Tensor.Ggml` — `GgmlRuntimeOwner`, the one owner of the GGML native runtime
+  that every engine running on GGML borrows.
 - `Darkspyre.Inference.Tensor.LLM.Qwen` — Qwen-compatible GGUF text inference.
 - `Darkspyre.Inference.Tensor.Image.Supra` — Supra2-IMG text-to-image inference. It runs the pinned
   Supra DiT, Flan-T5-Base encoder, and Stable Diffusion VAE decoder directly through TensorSharp on
@@ -330,17 +332,20 @@ This test does not initialize a native runtime or qualify an active model/sessio
 
 `ITensorRuntimeOwner` declares generation runtime control alongside `ITensorBackendProbe`. It exposes
 the immutable `TensorRuntimePlan`, the runtime state, the nullable actual backend identity and a
-structured shutdown observation. `QwenRuntimeOwner.GetOrCreate(plan)` binds one assembly-generation
-owner. Equal plans join it; conflicting plans refuse, including after terminal shutdown. Qwen engines,
-model resolvers and settings borrow that same owner. Constructing or serializing a plan never resolves a
+structured shutdown observation. `GgmlRuntimeOwner.GetOrCreate(plan)`, in
+`Darkspyre.Inference.Tensor.Ggml`, binds one assembly-generation owner of the GGML native runtime.
+Equal plans join it; conflicting plans refuse, including after terminal shutdown. Every engine that runs
+on GGML borrows that same owner: Qwen engines, model resolvers and settings, and the embedding engine.
+A loaded model holds one lease and enters the owner for each call. Each engine's probe checks its own
+implementation before it asks the owner about a backend. Constructing or serializing a plan never resolves a
 package catalog, inspects files, initializes a backend or establishes availability.
 
 `AddTensorEngines(services, ggmlRuntimePlan)` carries the optional immutable logical plan into its
-lazy Qwen owner factory. A factory-created owner is container-owned; an explicitly registered owner
+lazy GGML owner factory. A factory-created owner is container-owned; an explicitly registered owner
 instance remains borrowed. Model instances release their own leases and never shut down the shared
 runtime. Stop/dispose instances before terminal runtime shutdown.
 Dispose a service provider that resolves these registrations asynchronously with `await using` or
-`DisposeAsync`. Its factory-created Qwen runtime owner has an asynchronous terminal lifetime.
+`DisposeAsync`. Its factory-created GGML runtime owner has an asynchronous terminal lifetime.
 
 Qwen consumes the TensorSharp 2.8.6.9 managed loader APIs through ordinary PackageReferences.
 GGML is a direct Qwen and Tensor package dependency. Source restore and compilation do not substitute

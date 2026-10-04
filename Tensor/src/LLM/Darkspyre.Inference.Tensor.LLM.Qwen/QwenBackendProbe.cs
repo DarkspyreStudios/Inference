@@ -1,10 +1,11 @@
 using Darkspyre.Inference.Tensor.Common;
 using TensorSharp.Cuda;
 using TensorSharp.MLX;
+using Darkspyre.Inference.Tensor.Ggml;
 
 namespace Darkspyre.Inference.Tensor.LLM.Qwen;
 
-internal sealed class QwenBackendProbe(QwenRuntimeOwner? runtimeOwner = null) : ITensorBackendProbe
+internal sealed class QwenBackendProbe(GgmlRuntimeOwner? runtimeOwner = null) : ITensorBackendProbe
 {
     // Loading a native library or runtime to answer is synchronous work.
     public Task<TensorBackendAvailability> CheckAsync(TensorBackendProbeRequest request, CancellationToken cancellationToken = default)
@@ -13,8 +14,8 @@ internal sealed class QwenBackendProbe(QwenRuntimeOwner? runtimeOwner = null) : 
         cancellationToken.ThrowIfCancellationRequested();
         if (TensorBackendProbes.ValidateLocalRequest(request, QwenSetup.Definition.Implementation.Id) is { } invalid)
             return Task.FromResult(invalid);
-        if (QwenRuntimeOwner.IsGgml(request.RequestedBackend))
-            return (runtimeOwner ?? QwenRuntimeOwner.GetOrCreate()).CheckAsync(request, cancellationToken);
+        if (GgmlRuntimeOwner.IsGgml(request.RequestedBackend))
+            return (runtimeOwner ?? GgmlRuntimeOwner.GetOrCreate()).CheckAsync(request, cancellationToken);
         return Task.Run(() => Check(request, cancellationToken), cancellationToken);
     }
 

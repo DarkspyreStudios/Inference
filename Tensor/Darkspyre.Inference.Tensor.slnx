@@ -22,6 +22,9 @@
   <Folder Name="/src/Embedding/">
     <Project Path="src/Embedding/Darkspyre.Inference.Tensor.Embedding/Darkspyre.Inference.Tensor.Embedding.csproj" />
   </Folder>
+  <Folder Name="/src/Ggml/">
+    <Project Path="src/Ggml/Darkspyre.Inference.Tensor.Ggml/Darkspyre.Inference.Tensor.Ggml.csproj" />
+  </Folder>
   <Folder Name="/src/Image/">
     <Project Path="src/Image/Darkspyre.Inference.Tensor.Image/Darkspyre.Inference.Tensor.Image.csproj" />
     <Project Path="src/Image/Darkspyre.Inference.Tensor.Image.Supra/Darkspyre.Inference.Tensor.Image.Supra.csproj" />

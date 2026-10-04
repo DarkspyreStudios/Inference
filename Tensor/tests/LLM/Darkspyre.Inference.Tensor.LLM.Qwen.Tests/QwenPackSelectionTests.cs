@@ -8,6 +8,7 @@ using Darkspyre.Inference.Common.Setup;
 using Darkspyre.Inference.Tensor.Common;
 using TensorSharp.Runtime;
 using TensorSharp.Server;
+using Darkspyre.Inference.Tensor.Ggml;
 
 namespace Darkspyre.Inference.Tensor.LLM.Qwen.Tests;
 
@@ -234,7 +235,7 @@ public sealed class QwenPackSelectionTests : IDisposable
             OnLoad = () => throw original,
             OnUnload = () => { if (failCleanup) throw cleanup; }
         };
-        QwenRuntimeOwner owner = QwenRuntimeOwnerTests.CreateControlledCpuOwner(out var supplier);
+        GgmlRuntimeOwner owner = GgmlRuntimeOwnerTests.CreateControlledCpuOwner(out var supplier);
         var engine = new QwenLlmInference(packs, runtime, backend, runtimeOwner: owner);
         try
         {
@@ -278,7 +279,7 @@ public sealed class QwenPackSelectionTests : IDisposable
         var cleanup = new InvalidOperationException("controlled retirement failure");
         bool failCleanup = true;
         var runtime = new Runtime { OnUnload = () => { if (failCleanup) throw cleanup; } };
-        QwenRuntimeOwner owner = QwenRuntimeOwnerTests.CreateControlledCpuOwner(out var supplier);
+        GgmlRuntimeOwner owner = GgmlRuntimeOwnerTests.CreateControlledCpuOwner(out var supplier);
         var engine = new QwenLlmInference(packs, runtime, backend, runtimeOwner: owner);
         Task? disposal = null;
         try

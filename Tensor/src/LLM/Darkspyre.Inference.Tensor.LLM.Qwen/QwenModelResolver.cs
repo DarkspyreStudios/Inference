@@ -2,15 +2,16 @@ using System.Globalization;
 using System.Text.RegularExpressions;
 using Darkspyre.Inference.Tensor.Common;
 using TensorSharp.Runtime;
+using Darkspyre.Inference.Tensor.Ggml;
 
 namespace Darkspyre.Inference.Tensor.LLM.Qwen;
 
 /// <summary>Resolves complete Qwen 3 and Qwen 3.5 family GGUF packs through bounded metadata inspection, never weight loading.</summary>
 public sealed partial class QwenModelResolver : TensorModelResolver
 {
-    private readonly QwenRuntimeOwner _runtimeOwner;
+    private readonly GgmlRuntimeOwner _runtimeOwner;
     public QwenModelResolver(ITensorModelSource? source = null, ITensorArtifactReader? reader = null,
-        QwenRuntimeOwner? runtimeOwner = null) : base(source, reader) => _runtimeOwner = runtimeOwner ?? QwenRuntimeOwner.GetOrCreate();
+        GgmlRuntimeOwner? runtimeOwner = null) : base(source, reader) => _runtimeOwner = runtimeOwner ?? GgmlRuntimeOwner.GetOrCreate();
     public override IReadOnlyList<TensorArtifactRequirement> Requirements => [new("model", "*.gguf")];
     public override string? AdditionalArtifactRolePrefix => "model-shard-";
     protected override string CompanionPath(string role, string path, string primary) =>
@@ -26,7 +27,7 @@ public sealed partial class QwenModelResolver : TensorModelResolver
         var evidence = new List<TensorCompatibilityEvidence>();
         TensorModelResolution Failure(TensorCompatibilityState state, string code, string message, TensorSourceState sourceState = TensorSourceState.Available) =>
             new(new(state, [new(code, message)], evidence.ToArray(), sourceState));
-        IReadOnlyList<TensorBackendKind> compatible = QwenRuntimeOwner.CompatibleBackends(backend, _runtimeOwner.Plan.TargetRid);
+        IReadOnlyList<TensorBackendKind> compatible = GgmlRuntimeOwner.CompatibleBackends(backend, _runtimeOwner.Plan.TargetRid);
         if (!compatible.Any(TensorLlmModels.Qwen3FourBillionQ4Km.SupportedBackends.Contains))
         { return Failure(TensorCompatibilityState.Unsupported, "backend-unsupported", "This Qwen adapter does not support the selected backend."); }
         TensorSourceArtifact[] matches = candidate.Artifacts.Where(artifact => artifact.Path == candidate.Selection.Variant).ToArray();

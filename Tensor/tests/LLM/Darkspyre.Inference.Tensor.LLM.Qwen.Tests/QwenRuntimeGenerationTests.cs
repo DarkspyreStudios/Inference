@@ -7,6 +7,7 @@ using Darkspyre.Inference.Common.Setup;
 using Darkspyre.Inference.Tensor.Common;
 using TensorSharp.GGML;
 using Xunit.Abstractions;
+using Darkspyre.Inference.Tensor.Ggml;
 
 namespace Darkspyre.Inference.Tensor.LLM.Qwen.Tests;
 
@@ -58,7 +59,7 @@ public sealed class QwenRuntimeGenerationTests(ITestOutputHelper output)
         Assert.Null(GgmlNativeLoader.Current);
         var build = new TensorSharpBuildIdentity(GgmlNativeLoader.TensorSharpBuild, GgmlNativeLoader.NativeAbi, GgmlNativeLoader.GgmlCommit);
         var plan = new TensorRuntimePlan(build, GgmlNativeLoader.RuntimeIdentifier, []);
-        QwenRuntimeOwner owner = QwenRuntimeOwner.GetOrCreate(plan);
+        GgmlRuntimeOwner owner = GgmlRuntimeOwner.GetOrCreate(plan);
         var packs = new UnenteredPacks();
         QwenEngineProvider provider;
         ITensorModelInstance? instance = null;
@@ -67,7 +68,7 @@ public sealed class QwenRuntimeGenerationTests(ITestOutputHelper output)
         TensorRuntimeShutdownResult shutdown;
         try
         {
-            Assert.Same(owner, QwenRuntimeOwner.GetOrCreate(new(build, plan.TargetRid, [])));
+            Assert.Same(owner, GgmlRuntimeOwner.GetOrCreate(new(build, plan.TargetRid, [])));
             provider = new(owner);
             instance = provider.CreateInstance(packs, TensorBackendKind.Auto);
             manager = provider.CreateSettingsManager(new UnenteredTarget(), packs, [], instance);
@@ -107,7 +108,7 @@ public sealed class QwenRuntimeGenerationTests(ITestOutputHelper output)
         string shutdownJson = JsonSerializer.Serialize(shutdown, TensorJson.TensorRuntimeShutdownResult);
         Assert.Equal(shutdownJson, JsonSerializer.Serialize(Assert.IsType<TensorRuntimeShutdownResult>(JsonSerializer.Deserialize(shutdownJson, TensorJson.TensorRuntimeShutdownResult)), TensorJson.TensorRuntimeShutdownResult));
 
-        Assembly[] assemblies = [typeof(QwenRuntimeOwner).Assembly, typeof(TensorJson).Assembly, typeof(TensorSharp.Server.ModelService).Assembly,
+        Assembly[] assemblies = [typeof(GgmlRuntimeOwner).Assembly, typeof(TensorJson).Assembly, typeof(TensorSharp.Server.ModelService).Assembly,
             typeof(TensorSharp.Models.ModelBase).Assembly, typeof(GgmlNativeLoader).Assembly, typeof(TensorSharp.Tensor).Assembly,
             typeof(TensorSharp.Runtime.BackendType).Assembly];
         foreach (Assembly assembly in assemblies)

@@ -10,6 +10,7 @@ using Darkspyre.Inference.Tensor.LLM;
 using TensorSharp.Runtime;
 using TensorSharp.Runtime.Grammar;
 using TensorSharp.Server;
+using Darkspyre.Inference.Tensor.Ggml;
 
 namespace Darkspyre.Inference.Tensor.LLM.Qwen;
 
@@ -26,8 +27,8 @@ public sealed class QwenLlmInference : ITensorLlmInference
     private readonly bool _ownsCoordinator;
     private readonly TensorModelLifetime _lifetime;
     private readonly IQwenModelRuntime _runtime;
-    private readonly QwenRuntimeOwner _runtimeOwner;
-    private QwenRuntimeOwner.ModelLease? _runtimeModelLease;
+    private readonly GgmlRuntimeOwner _runtimeOwner;
+    private GgmlRuntimeOwner.ModelLease? _runtimeModelLease;
     private TensorModelPackLease? _modelLease;
     private TensorBackendKind? _loadedBackend;
     private readonly object _stopGate = new();
@@ -40,18 +41,18 @@ public sealed class QwenLlmInference : ITensorLlmInference
     public QwenLlmInference(
         ITensorModelPackManager packs,
         TensorBackendKind backend = TensorBackendKind.Auto,
-        TensorExecutionCoordinator? coordinator = null, QwenRuntimeOwner? runtimeOwner = null)
+        TensorExecutionCoordinator? coordinator = null, GgmlRuntimeOwner? runtimeOwner = null)
         : this(packs, new QwenModelRuntime(), backend, coordinator, runtimeOwner) { }
 
     internal QwenLlmInference(ITensorModelPackManager packs, IQwenModelRuntime runtime,
         TensorBackendKind backend = TensorBackendKind.Auto, TensorExecutionCoordinator? coordinator = null,
-        QwenRuntimeOwner? runtimeOwner = null)
+        GgmlRuntimeOwner? runtimeOwner = null)
     {
         ArgumentNullException.ThrowIfNull(packs);
         ArgumentNullException.ThrowIfNull(runtime);
         _packs = packs;
         _runtime = runtime;
-        _runtimeOwner = runtimeOwner ?? QwenRuntimeOwner.GetOrCreate();
+        _runtimeOwner = runtimeOwner ?? GgmlRuntimeOwner.GetOrCreate();
         _lifetime = new(this);
 
         _requestedBackend = backend;
@@ -315,7 +316,7 @@ public sealed class QwenLlmInference : ITensorLlmInference
         }
         ThrowIfReleaseRequired();
 
-        IDisposable? admission = QwenRuntimeOwner.IsGgml(_requestedBackend) ? _runtimeOwner.EnterExecution() : null;
+        IDisposable? admission = GgmlRuntimeOwner.IsGgml(_requestedBackend) ? _runtimeOwner.EnterExecution() : null;
         try
         {
             lock (_stopGate)
@@ -342,7 +343,7 @@ public sealed class QwenLlmInference : ITensorLlmInference
         ThrowIfReleaseRequired();
         ArgumentNullException.ThrowIfNull(model);
         cancellationToken.ThrowIfCancellationRequested();
-        IDisposable? admission = QwenRuntimeOwner.IsGgml(_requestedBackend) ? _runtimeOwner.EnterExecution() : null;
+        IDisposable? admission = GgmlRuntimeOwner.IsGgml(_requestedBackend) ? _runtimeOwner.EnterExecution() : null;
         try
         {
             await AdmitLoadAsync(model, admission, cancellationToken).ConfigureAwait(false);
@@ -368,7 +369,7 @@ public sealed class QwenLlmInference : ITensorLlmInference
         catch (ArgumentException exception)
         { throw new InferenceException(InferenceFailureCode.UnsupportedFeature, "The model pack is not supported by Qwen.", exception); }
 
-        if (!QwenRuntimeOwner.CompatibleBackends(_requestedBackend, _runtimeOwner.Plan.TargetRid).Any(definition.SupportedBackends.Contains))
+        if (!GgmlRuntimeOwner.CompatibleBackends(_requestedBackend, _runtimeOwner.Plan.TargetRid).Any(definition.SupportedBackends.Contains))
         {
             throw new InferenceException(
                 InferenceFailureCode.BackendUnavailable,
@@ -405,7 +406,7 @@ public sealed class QwenLlmInference : ITensorLlmInference
         ThrowIfReleaseRequired();
         if (_modelLease is not null || _runtimeModelLease is not null)
             throw new InferenceException(InferenceFailureCode.BackendUnavailable, "The previous model ownership must be released before loading another model.");
-        if (QwenRuntimeOwner.IsGgml(backend)) _runtimeOwner.ThrowIfOperationCanceled(cancellationToken);
+        if (GgmlRuntimeOwner.IsGgml(backend)) _runtimeOwner.ThrowIfOperationCanceled(cancellationToken);
         TensorModelPackLease lease;
         try
         {
@@ -416,11 +417,11 @@ public sealed class QwenLlmInference : ITensorLlmInference
             throw new InferenceException(InferenceFailureCode.ModelUnavailable, exception.Message, exception);
         }
 
-        QwenRuntimeOwner.ModelLease? runtimeLease = null;
+        GgmlRuntimeOwner.ModelLease? runtimeLease = null;
         try
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (QwenRuntimeOwner.IsGgml(backend))
+            if (GgmlRuntimeOwner.IsGgml(backend))
             {
                 runtimeLease = await _runtimeOwner.AcquireModelAsync(backend, cancellationToken).ConfigureAwait(false);
                 backend = runtimeLease.Backend;
@@ -459,7 +460,7 @@ public sealed class QwenLlmInference : ITensorLlmInference
         }
     }
 
-    private async Task CleanupFailedLoadAsync(TensorModelPackLease lease, QwenRuntimeOwner.ModelLease? runtimeLease, Exception original)
+    private async Task CleanupFailedLoadAsync(TensorModelPackLease lease, GgmlRuntimeOwner.ModelLease? runtimeLease, Exception original)
     {
         // Retain actual ownership when cleanup fails; Stop/Unload can retry release-only work.
         _modelLease = lease;

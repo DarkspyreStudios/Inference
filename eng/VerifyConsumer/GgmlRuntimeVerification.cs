@@ -1,6 +1,7 @@
 using Darkspyre.Inference.Tensor.Common;
 using Darkspyre.Inference.Tensor.LLM.Qwen;
 using TensorSharp.GGML;
+using Darkspyre.Inference.Tensor.Ggml;
 
 internal static class GgmlRuntimeVerification
 {
@@ -30,7 +31,7 @@ internal static class GgmlRuntimeVerification
             "metal" => TensorBackendKind.GgmlMetal,
             _ => TensorBackendKind.Auto
         };
-        await using QwenRuntimeOwner owner = QwenRuntimeOwner.GetOrCreate();
+        await using GgmlRuntimeOwner owner = GgmlRuntimeOwner.GetOrCreate();
         TensorBackendAvailability observation = await owner.CheckAsync(new(Guid.NewGuid(),
             QwenSetup.Definition.Implementation.Id, requested, "osx-arm64", owner.Plan.Build));
         if (mode == "absent")

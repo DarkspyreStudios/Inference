@@ -1,4 +1,5 @@
 using Darkspyre.Inference.Tensor.Common;
+using Darkspyre.Inference.Tensor.Ggml;
 
 namespace Darkspyre.Inference.Tensor.LLM.Qwen.Tests;
 
@@ -64,8 +65,8 @@ public sealed class QwenBackendProbeTests
             _ => []
         };
         Assert.Equal(expected,
-            QwenRuntimeOwner.CompatibleBackends(TensorBackendKind.Auto, System.Runtime.InteropServices.RuntimeInformation.RuntimeIdentifier));
+            GgmlRuntimeOwner.CompatibleBackends(TensorBackendKind.Auto, System.Runtime.InteropServices.RuntimeInformation.RuntimeIdentifier));
         Assert.Equal(new[] { TensorBackendKind.Cpu },
-            QwenRuntimeOwner.CompatibleBackends(TensorBackendKind.Cpu, System.Runtime.InteropServices.RuntimeInformation.RuntimeIdentifier));
+            GgmlRuntimeOwner.CompatibleBackends(TensorBackendKind.Cpu, System.Runtime.InteropServices.RuntimeInformation.RuntimeIdentifier));
     }
 }

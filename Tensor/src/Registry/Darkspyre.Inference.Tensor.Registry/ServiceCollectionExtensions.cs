@@ -6,6 +6,7 @@ using Darkspyre.Inference.Tensor.LLM.Qwen;
 using Darkspyre.Inference.Tensor.STT.Whisper;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Darkspyre.Inference.Tensor.Ggml;
 
 namespace Darkspyre.Inference.Tensor.Registry;
 
@@ -24,17 +25,17 @@ public static class ServiceCollectionExtensions
         {
             var snapshot = new TensorRuntimePlan(ggmlRuntimePlan.Build, ggmlRuntimePlan.TargetRid, ggmlRuntimePlan.Candidates);
             TensorRuntimePlan? registered = services.LastOrDefault(descriptor => descriptor.ServiceType == typeof(TensorRuntimePlan))?.ImplementationInstance as TensorRuntimePlan;
-            if (registered is not null && !QwenRuntimeOwner.SamePlan(registered, snapshot))
+            if (registered is not null && !GgmlRuntimeOwner.SamePlan(registered, snapshot))
                 throw new ArgumentException("The registry already declares a different runtime plan.", nameof(ggmlRuntimePlan));
-            QwenRuntimeOwner.ValidateGenerationPlan(snapshot);
-            if (services.LastOrDefault(descriptor => descriptor.ServiceType == typeof(QwenRuntimeOwner))?.ImplementationInstance is QwenRuntimeOwner borrowed
-                && !QwenRuntimeOwner.SamePlan(borrowed.Plan, snapshot))
+            GgmlRuntimeOwner.ValidateGenerationPlan(snapshot);
+            if (services.LastOrDefault(descriptor => descriptor.ServiceType == typeof(GgmlRuntimeOwner))?.ImplementationInstance is GgmlRuntimeOwner borrowed
+                && !GgmlRuntimeOwner.SamePlan(borrowed.Plan, snapshot))
                 throw new ArgumentException("The caller-supplied runtime owner has a different plan.", nameof(ggmlRuntimePlan));
             services.TryAddSingleton(snapshot);
         }
-        services.TryAddSingleton(provider => QwenRuntimeOwner.GetOrCreate(provider.GetService<TensorRuntimePlan>()));
+        services.TryAddSingleton(provider => GgmlRuntimeOwner.GetOrCreate(provider.GetService<TensorRuntimePlan>()));
         services.TryAddEnumerable(ServiceDescriptor.Singleton<ITensorEngineProvider, QwenEngineProvider>(
-            provider => new(provider.GetRequiredService<QwenRuntimeOwner>())));
+            provider => new(provider.GetRequiredService<GgmlRuntimeOwner>())));
         services.TryAddEnumerable(ServiceDescriptor.Singleton<ITensorEngineProvider, SupraEngineProvider>());
         services.TryAddEnumerable(ServiceDescriptor.Singleton<ITensorEngineProvider, LayaEngineProvider>());
         services.TryAddEnumerable(ServiceDescriptor.Singleton<ITensorEngineProvider, WhisperEngineProvider>());
