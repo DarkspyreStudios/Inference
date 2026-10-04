@@ -162,7 +162,7 @@ internal sealed class XaiTtsSession : ITtsStreamingSession
                         }
                         catch (Exception error)
                         {
-                            ExceptionDispatchInfo.Capture(LlmResourcePreparation.WithGeneratedResources(error,
+                            System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(LlmResourcePreparation.WithGeneratedResources(error,
                                 artifact?.ObservedCommit is { } receipt ? [receipt] : [])).Throw();
                             throw;
                         }
