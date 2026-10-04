@@ -1785,6 +1785,15 @@ the shared `BinaryMediaSource` data constructor still borrows its input.
 binding or opening settings for that unimplemented transport fails as unsupported. The data and
 SDK contracts do not establish provider availability, wire compatibility or download-origin safety.
 
+Files and unsigned media transfers share one internal HTTP download owner. It exposes response
+metadata before body opening, streams incremental copies, and caches one response/request cleanup
+outcome. The response alone disposes content. A refused cleanup retains the actual response/body or
+request and remains visible to the owning Files/core retirement. Borrowed destinations remain open.
+The send-through-headers timer disarms before body processing; borrowed HTTP timeouts do not change.
+Core-owned download opening retains the selected core, Files and HTTP generation operations until
+its caller releases them after closure and read drain. This internal opening path is a forward seam
+for DSA-130's standalone Video adapter, not a registered Video transport or runtime qualification.
+
 ## Host-executed tools
 
 For complete, compile-checked implementations for every supported provider, including connection

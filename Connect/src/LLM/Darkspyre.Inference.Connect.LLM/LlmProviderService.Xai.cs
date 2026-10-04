@@ -74,7 +74,9 @@ public sealed partial class LlmProviderService
         using var consumption = SdkHttpConsumption.Enter(client.SharedHttp, operation.Token);
         void CombinedFence() { Fence(); consumption.Fence(); }
         CombinedFence();
-        T result = await dispatch(client.SharedHttp, snapshot, CombinedFence, consumption.Token).ConfigureAwait(false);
+        T result;
+        try { result = await dispatch(client.SharedHttp, snapshot, CombinedFence, consumption.Token).ConfigureAwait(false); }
+        catch (Exception error) { _cleanupOutcomes.Record(error); throw; }
         CombinedFence();
         return consumption.Publish(result);
 
@@ -102,4 +104,57 @@ public sealed partial class LlmProviderService
             return dispatch(client.MediaDownloads, fence, current);
         }, token);
 
+    internal Task<XaiHttpDownload> OpenXaiFileDownloadSnapshotAsync(LlmConnection snapshot, string fileId,
+        TimeSpan timeout, Action outerFence, CancellationToken token)
+        => OpenXaiDownloadSnapshotAsync(snapshot, outerFence, (_, fence, current) =>
+        {
+            XaiFileClient files = _xaiFiles ?? throw new NotSupportedException("The selected facade has no Files resource route.");
+            return files.OpenDownloadAsync(snapshot, fileId, fence, current, timeout);
+        }, token);
+
+    internal Task<XaiHttpDownload> OpenXaiMediaDownloadSnapshotAsync(LlmConnection snapshot, string url,
+        TimeSpan timeout, Action outerFence, CancellationToken token)
+        => OpenXaiDownloadSnapshotAsync(snapshot, outerFence, (client, fence, current) =>
+            client.MediaDownloads.OpenAsync(url, timeout, fence, current), token);
+
+    private async Task<XaiHttpDownload> OpenXaiDownloadSnapshotAsync(LlmConnection snapshot, Action outerFence,
+        Func<XaiResponsesLlmClient, Action, CancellationToken, Task<XaiHttpDownload>> open, CancellationToken token)
+    {
+        LlmOperationLifetime.Lease operation = _lifetime.Enter(token);
+        SdkHttpConsumption.Operation? consumption = null;
+        XaiHttpDownload? download = null;
+        bool retained = false;
+        try
+        {
+            Fence();
+            XaiFileRequestData.Connection(snapshot);
+            Fence();
+            if (ClientFor(snapshot.Transport) is not XaiResponsesLlmClient client)
+                throw new NotSupportedException("The selected facade has no cross-family xAI route.");
+            consumption = SdkHttpConsumption.Enter(client.SharedHttp, operation.Token);
+            void CombinedFence() { Fence(); consumption.Fence(); }
+            CombinedFence();
+            download = await open(client, CombinedFence, consumption.Token).ConfigureAwait(false);
+            download.RetainOwner(() => { consumption.Dispose(); operation.Dispose(); }, _cleanupOutcomes.Record);
+            retained = true;
+            CombinedFence();
+            return download;
+        }
+        catch (Exception original)
+        {
+            _cleanupOutcomes.Record(original);
+            if (download is not null)
+                try { await download.CloseAsync().ConfigureAwait(false); }
+                catch (XaiHttpDownload.CloseFailure cleanup) { throw new AggregateException([original, .. cleanup.InnerExceptions]); }
+                catch (Exception cleanup) { throw new AggregateException(original, cleanup); }
+                finally { download.ReleaseAfterDrain(); }
+            throw;
+        }
+        finally
+        {
+            if (!retained) { consumption?.Dispose(); operation.Dispose(); }
+        }
+
+        void Fence() { ThrowIfOperationCanceled(operation.Token); outerFence(); ThrowIfOperationCanceled(operation.Token); }
+    }
 }

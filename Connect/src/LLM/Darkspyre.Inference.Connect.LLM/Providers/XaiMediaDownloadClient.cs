@@ -12,61 +12,43 @@ internal sealed class XaiMediaDownloadClient(HttpClient http)
         Func<string?, long?, CancellationToken, Task<Stream>> open, Action fence,
         Action dispatched, Action<HttpResponseMessage> observed, CancellationToken token)
     {
-        XaiMediaData.RequireHttpUrl(url);
-        using var consumption = SdkHttpConsumption.Enter(http, token);
-        token = consumption.Token;
-        HttpRequestMessage? request = null;
-        HttpResponseMessage? response = null;
+        XaiHttpDownload download = await OpenAsync(url, timeout, fence, token, dispatched, observed).ConfigureAwait(false);
         long bytes = 0;
         var errors = new List<Exception>();
-        void Fence() { token.ThrowIfCancellationRequested(); fence(); consumption.Fence(); }
         try
         {
-            Fence();
-            request = new(HttpMethod.Get, new Uri(url));
-            // No selected connection headers, authorization or cookies enter this pipeline.
-            using (var headers = CancellationTokenSource.CreateLinkedTokenSource(token))
-            {
-                headers.CancelAfter(timeout);
-                dispatched();
-                response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, headers.Token).ConfigureAwait(false);
-                observed(response);
-            }
-            Fence();
-            if (!response.IsSuccessStatusCode)
-                throw new HttpRequestException("The unsigned media transfer failed.", null, response.StatusCode);
-            Stream destination = await open(response.Content.Headers.ContentType?.MediaType,
-                response.Content.Headers.ContentLength, token).ConfigureAwait(false);
-            Fence();
-            // The response owns its content stream; only the response is disposed below.
-            Stream source = await SdkHttpConsumption.ReadAsStreamAsync(response.Content, token).ConfigureAwait(false);
-            var buffer = new byte[64 * 1024];
-            while (true)
-            {
-                Fence();
-                int read = await source.ReadAsync(buffer, token).ConfigureAwait(false);
-                Fence();
-                if (read == 0) break;
-                await destination.WriteAsync(buffer.AsMemory(0, read), token).ConfigureAwait(false);
-                bytes = checked(bytes + read);
-                Fence();
-            }
-            if (response.Content.Headers.ContentLength is { } expected && bytes != expected)
+            string? contentType = download.ContentType is { } type
+                ? System.Net.Http.Headers.MediaTypeHeaderValue.Parse(type).MediaType : null;
+            Stream destination = await open(contentType, download.DeclaredLength, download.Token).ConfigureAwait(false);
+            download.Fence();
+            bytes = await download.CopyToAsync(destination).ConfigureAwait(false);
+            if (download.DeclaredLength is { } expected && bytes != expected)
                 throw new HttpRequestException("The unsigned media transfer ended before its declared length.");
         }
         catch (Exception error) { errors.Add(error); }
-        finally
+        try { await download.CloseAsync().ConfigureAwait(false); }
+        catch (XaiHttpDownload.CloseFailure cleanup) { errors.AddRange(cleanup.InnerExceptions); }
+        catch (Exception cleanup) { errors.Add(cleanup); }
+        try
         {
-            if (response is not null)
-                try { response.Dispose(); }
-                catch (Exception cleanup) { errors.Add(LlmResourcePreparation.AsCleanupFailure(cleanup, refusedOwner: response)); }
-            if (request is not null)
-                try { request.Dispose(); }
-                catch (Exception cleanup) { errors.Add(LlmResourcePreparation.AsCleanupFailure(cleanup, refusedOwner: request)); }
+            if (errors.Count == 1) ExceptionDispatchInfo.Throw(errors[0]);
+            if (errors.Count > 1) throw new AggregateException(errors);
+            download.Fence();
+            return bytes;
         }
-        if (errors.Count == 1) ExceptionDispatchInfo.Throw(errors[0]);
-        if (errors.Count > 1) throw new AggregateException(errors);
-        Fence();
-        return bytes;
+        finally { download.ReleaseAfterDrain(); }
+    }
+
+    internal Task<XaiHttpDownload> OpenAsync(string url, TimeSpan timeout, Action fence, CancellationToken token,
+        Action? dispatched = null, Action<HttpResponseMessage>? observed = null)
+    {
+        XaiMediaData.RequireHttpUrl(url);
+        // No selected connection headers, authorization or cookies enter this pipeline.
+        return XaiHttpDownload.OpenAsync(http, new Uri(url), null, timeout, fence, (response, _) =>
+        {
+            if (!response.IsSuccessStatusCode)
+                throw new HttpRequestException("The unsigned media transfer failed.", null, response.StatusCode);
+            return Task.CompletedTask;
+        }, token, dispatched, observed);
     }
 }

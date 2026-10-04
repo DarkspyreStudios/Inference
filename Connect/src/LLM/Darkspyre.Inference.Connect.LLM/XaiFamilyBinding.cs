@@ -80,6 +80,20 @@ public sealed class XaiFamilyBinding
         return _service!.RunXaiMediaSnapshotAsync(snapshot, CombineFence(fence), operation, token);
     }
 
+    internal Task<Internal.XaiHttpDownload> OpenFileDownloadAsync(LlmConnection snapshot, string fileId,
+        TimeSpan timeout, Action fence, CancellationToken token)
+    {
+        RequireCatalogService();
+        return _service!.OpenXaiFileDownloadSnapshotAsync(snapshot, fileId, timeout, CombineFence(fence), token);
+    }
+
+    internal Task<Internal.XaiHttpDownload> OpenMediaDownloadAsync(LlmConnection snapshot, string url,
+        TimeSpan timeout, Action fence, CancellationToken token)
+    {
+        RequireCatalogService();
+        return _service!.OpenXaiMediaDownloadSnapshotAsync(snapshot, url, timeout, CombineFence(fence), token);
+    }
+
     internal void FenceOperation() => _operationFence?.Invoke();
     internal void DetachOperationFence() => _operationFence = null;
 

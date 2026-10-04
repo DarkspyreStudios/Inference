@@ -105,38 +105,69 @@ internal sealed class XaiFileClient(HttpClient http) : IDisposable, IAsyncDispos
         CancellationToken cancellationToken, Action? onDispatched = null, Action<HttpResponseMessage>? onResponse = null,
         TimeSpan? requestTimeout = null)
     {
-        using LlmOperationLifetime.Lease operation = _lifetime.Enter(cancellationToken);
-        cancellationToken = operation.Token;
-        Check(fence, cancellationToken);
         ArgumentNullException.ThrowIfNull(openDestination);
-        string path = pathFactory();
-        Check(fence, cancellationToken);
-        connection = EmbeddingRequestData.Snapshot(connection);
-        XaiFileRequestData.Connection(connection);
-        using var consumption = SdkHttpConsumption.Enter(_http!, cancellationToken);
-        cancellationToken = consumption.Token;
-        ResourceDownloadReceipt result = await ExchangeAsync(connection, HttpMethod.Get, path, request =>
+        XaiHttpDownload download = await OpenDownloadCoreAsync(connection, pathFactory, fence, cancellationToken,
+            onDispatched, onResponse, requestTimeout).ConfigureAwait(false);
+        ResourceDownloadReceipt result = default!;
+        var failures = new List<Exception>();
+        try
         {
-            request.Headers.Accept.Clear();
-            request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/octet-stream"));
-        }, async response =>
-        {
-            await XaiErrorClassifier.ThrowIfUnsuccessfulAsync(response, LlmCredential.Parse(connection.Credential), [], cancellationToken, diagnosticBody: false).ConfigureAwait(false);
-            Check(fence, cancellationToken);
-            string? contentType = response.Content.Headers.ContentType?.ToString();
-            long? declaredLength = response.Content.Headers.ContentLength;
-            Stream destination = await openDestination(contentType, declaredLength, cancellationToken).ConfigureAwait(false);
-            Check(fence, cancellationToken);
+            Stream destination = await openDestination(download.ContentType, download.DeclaredLength, download.Token).ConfigureAwait(false);
+            download.Fence();
             if (destination is null || !destination.CanWrite) throw new ArgumentException("Download destination must be writable.", nameof(openDestination));
-            Check(fence, cancellationToken);
-            Stream content = await SdkHttpConsumption.ReadAsStreamAsync(response.Content, cancellationToken).ConfigureAwait(false);
-            Check(fence, cancellationToken);
-            long written = await TransferAsync(content, destination, () => Check(fence, cancellationToken), cancellationToken).ConfigureAwait(false);
-            Check(fence, cancellationToken);
-            if (declaredLength is { } declared && written < declared) throw Invalid();
-            return new ResourceDownloadReceipt(written, contentType, declaredLength);
-        }, fence, cancellationToken, onDispatched, onResponse, requestTimeout).ConfigureAwait(false);
-        return consumption.Publish(result);
+            download.Fence();
+            long written = await download.CopyToAsync(destination).ConfigureAwait(false);
+            if (download.DeclaredLength is { } declared && written < declared) throw Invalid();
+            result = new ResourceDownloadReceipt(written, download.ContentType, download.DeclaredLength);
+        }
+        catch (Exception error) { failures.Add(error); }
+        try { await download.CloseAsync().ConfigureAwait(false); }
+        catch (XaiHttpDownload.CloseFailure cleanup) { failures.AddRange(cleanup.InnerExceptions); }
+        catch (Exception cleanup) { failures.Add(cleanup); }
+        try
+        {
+            if (failures.Count == 1) ExceptionDispatchInfo.Throw(failures[0]);
+            if (failures.Count > 1) throw new ExchangeFailure(failures);
+            download.Fence();
+            return result;
+        }
+        finally { download.ReleaseAfterDrain(); }
+    }
+
+    internal Task<XaiHttpDownload> OpenDownloadAsync(LlmConnection connection, string fileId,
+        Action fence, CancellationToken token, TimeSpan timeout)
+        => OpenDownloadCoreAsync(connection, () => XaiFileRequestData.DownloadPath(fileId, null), fence, token,
+            requestTimeout: timeout);
+
+    private async Task<XaiHttpDownload> OpenDownloadCoreAsync(LlmConnection connection, Func<string> pathFactory,
+        Action fence, CancellationToken token, Action? dispatched = null, Action<HttpResponseMessage>? observed = null,
+        TimeSpan? requestTimeout = null)
+    {
+        LlmOperationLifetime.Lease operation = _lifetime.Enter(token);
+        try
+        {
+            Check(fence, operation.Token);
+            string path = pathFactory();
+            Check(fence, operation.Token);
+            connection = EmbeddingRequestData.Snapshot(connection);
+            XaiFileRequestData.Connection(connection);
+            void CombinedFence() => Check(fence, operation.Token);
+            return await XaiHttpDownload.OpenAsync(_http!, ProviderHttp.BuildUri(connection, path), request =>
+            {
+                XaiRequestHeaders.Apply(request, connection, false);
+                request.Headers.Accept.Clear();
+                request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/octet-stream"));
+            }, requestTimeout ?? Timeout.InfiniteTimeSpan, CombinedFence,
+                (response, current) => XaiErrorClassifier.ThrowIfUnsuccessfulAsync(response,
+                    LlmCredential.Parse(connection.Credential), [], current, diagnosticBody: false),
+                operation.Token, dispatched, observed, RetainCleanup, operation.Dispose).ConfigureAwait(false);
+        }
+        catch (XaiHttpDownload.OpenFailure error)
+        {
+            operation.Dispose();
+            throw new ExchangeFailure(error.InnerExceptions);
+        }
+        catch { operation.Dispose(); throw; }
     }
 
     private async Task<T> JsonAsync<T>(LlmConnection connection, HttpMethod method, string path, string? body,
@@ -311,8 +342,13 @@ internal sealed class XaiFileClient(HttpClient http) : IDisposable, IAsyncDispos
     private Exception RecordCleanup(Exception cause, object refusedOwner)
     {
         Exception failure = LlmResourcePreparation.AsCleanupFailure(cause, refusedOwner: refusedOwner);
-        lock (_cleanupFailures) { _cleanupFailures.Add(failure); }
+        RetainCleanup(failure);
         return failure;
+    }
+
+    private void RetainCleanup(Exception failure)
+    {
+        lock (_cleanupFailures) { _cleanupFailures.Add(failure); }
     }
 
     private Task ReleaseAsync()
