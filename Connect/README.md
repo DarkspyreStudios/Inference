@@ -1077,7 +1077,14 @@ builtin xAI Responses client exposes the seven implemented native Files operatio
 the facade. The facade resolves one selected connection, snapshots its configuration and validates
 arguments and headers before its existing credential owner refreshes that connection. The private
 transport borrows the same HTTP client as chat. `AddLlmConnect` includes the Grok adapter.
-Other Files routes and all Skills routes remain unavailable. When no builtin Files adapter is
+Skills list, metadata retrieval, raw ZIP download and deletion use the same selected resource
+transport and facade lifetime. Skills pages preserve the actual `has_more`, `first_id` and `last_id`
+facts; caller-directed next pages send `after`, not the Files `pagination_token`. Version strings
+and Unix creation times remain actual receipt values. ZIP downloads copy bytes to the borrowed
+destination without extraction, rewinding or implicit flushing. Skills upload and generation
+attachment remain unavailable. `Skills.ResourceOperations` stays false because the complete
+operation set is not implemented.
+Other Files routes remain unavailable. When no builtin Files adapter is
 composed, refusal precedes source resolution and stream inspection. Caller cancellation and
 retired-facade admission retain the existing lifetime behavior.
 Facade capability queries suppress Files flags for clients without an implemented facade route.

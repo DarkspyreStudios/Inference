@@ -9,7 +9,7 @@ using Darkspyre.Inference.Connect.LLM.Internal;
 
 namespace Darkspyre.Inference.Connect.LLM.Providers;
 
-internal sealed class XaiFileClient(HttpClient http) : IDisposable, IAsyncDisposable
+internal sealed partial class XaiFileClient(HttpClient http) : IDisposable, IAsyncDisposable
 {
     private readonly LlmOperationLifetime _lifetime = new();
     private readonly List<Exception> _cleanupFailures = [];
@@ -104,11 +104,11 @@ internal sealed class XaiFileClient(HttpClient http) : IDisposable, IAsyncDispos
     private async Task<ResourceDownloadReceipt> DownloadCoreAsync(LlmConnection connection, Func<string> pathFactory,
         Func<string?, long?, CancellationToken, Task<Stream>> openDestination, Action fence,
         CancellationToken cancellationToken, Action? onDispatched = null, Action<HttpResponseMessage>? onResponse = null,
-        TimeSpan? requestTimeout = null)
+        TimeSpan? requestTimeout = null, string accept = "application/octet-stream")
     {
         ArgumentNullException.ThrowIfNull(openDestination);
         XaiHttpDownload download = await OpenDownloadCoreAsync(connection, pathFactory, fence, cancellationToken,
-            onDispatched, onResponse, requestTimeout).ConfigureAwait(false);
+            onDispatched, onResponse, requestTimeout, accept: accept).ConfigureAwait(false);
         ResourceDownloadReceipt result = default!;
         var failures = new List<Exception>();
         try
@@ -142,7 +142,8 @@ internal sealed class XaiFileClient(HttpClient http) : IDisposable, IAsyncDispos
 
     private async Task<XaiHttpDownload> OpenDownloadCoreAsync(LlmConnection connection, Func<string> pathFactory,
         Action fence, CancellationToken token, Action? dispatched = null, Action<HttpResponseMessage>? observed = null,
-        TimeSpan? requestTimeout = null, Action<HttpRequestMessage>? configureHeaders = null)
+        TimeSpan? requestTimeout = null, Action<HttpRequestMessage>? configureHeaders = null,
+        string accept = "application/octet-stream")
     {
         LlmOperationLifetime.Lease operation = _lifetime.Enter(token);
         try
@@ -158,7 +159,7 @@ internal sealed class XaiFileClient(HttpClient http) : IDisposable, IAsyncDispos
                 XaiRequestHeaders.Apply(request, connection, false);
                 configureHeaders?.Invoke(request);
                 request.Headers.Accept.Clear();
-                request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/octet-stream"));
+                request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue(accept));
             }, requestTimeout ?? Timeout.InfiniteTimeSpan, CombinedFence,
                 (response, current) => XaiErrorClassifier.ThrowIfUnsuccessfulAsync(response,
                     LlmCredential.Parse(connection.Credential), [], current, diagnosticBody: false),
@@ -233,7 +234,7 @@ internal sealed class XaiFileClient(HttpClient http) : IDisposable, IAsyncDispos
     }
 
     internal sealed class ExchangeFailure(IEnumerable<Exception> failures)
-        : AggregateException("Grok Files operation and cleanup failed.", failures);
+        : AggregateException("Grok resource operation and cleanup failed.", failures);
 
     private async Task<T> ReadAsync<T>(LlmConnection connection, HttpResponseMessage response,
         Func<JsonElement, T> parse, Action fence, CancellationToken token, IReadOnlyList<string>? secretContext = null)
@@ -259,12 +260,12 @@ internal sealed class XaiFileClient(HttpClient http) : IDisposable, IAsyncDispos
         ArgumentNullException.ThrowIfNull(fence);
         token.ThrowIfCancellationRequested();
         try { _lifetime.ThrowIfStopping(); }
-        catch (ObjectDisposedException error) { throw new OperationCanceledException("Files operation retired.", error, token); }
+        catch (ObjectDisposedException error) { throw new OperationCanceledException("Resource operation retired.", error, token); }
         fence();
         token.ThrowIfCancellationRequested();
     }
 
-    private static LlmProviderException Invalid() => new("Grok Files returned invalid protocol data.", LlmTransport.XaiResponses);
+    private static LlmProviderException Invalid() => new("Grok resource returned invalid protocol data.", LlmTransport.XaiResponses);
 
     private static JsonElement Required(JsonElement root, string name)
     {
@@ -359,7 +360,7 @@ internal sealed class XaiFileClient(HttpClient http) : IDisposable, IAsyncDispos
     {
         _http = null;
         if (_cleanupFailures.Count == 1) return Task.FromException(_cleanupFailures[0]);
-        if (_cleanupFailures.Count > 1) return Task.FromException(new AggregateException("Grok Files cleanup failed.", _cleanupFailures));
+        if (_cleanupFailures.Count > 1) return Task.FromException(new AggregateException("Grok resource cleanup failed.", _cleanupFailures));
         return Task.CompletedTask;
     }
 }

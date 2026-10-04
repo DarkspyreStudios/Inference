@@ -237,16 +237,24 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, ILlmFileClie
         CancellationToken cancellationToken) => UnavailableResourceAsync<XaiSkill>(cancellationToken);
 
     Task<XaiSkillPage> IXaiSkillClient.ListAsync(string connectionId, XaiSkillListRequest request,
-        CancellationToken cancellationToken) => UnavailableResourceAsync<XaiSkillPage>(cancellationToken);
+        CancellationToken cancellationToken) => FileOperationAsync(connectionId,
+            () => { _ = XaiFileClient.SkillListPath(request); },
+            (client, connection, fence, token) => client.ListSkillsAsync(connection, request, fence, token), cancellationToken);
 
     Task<XaiSkill> IXaiSkillClient.GetAsync(string connectionId, string skillId,
-        CancellationToken cancellationToken) => UnavailableResourceAsync<XaiSkill>(cancellationToken);
+        CancellationToken cancellationToken) => FileOperationAsync(connectionId,
+            () => { _ = XaiFileClient.SkillPath(skillId); },
+            (client, connection, fence, token) => client.GetSkillAsync(connection, skillId, fence, token), cancellationToken);
 
     Task<ResourceDownloadReceipt> IXaiSkillClient.DownloadAsync(string connectionId, string skillId, Stream destination,
-        CancellationToken cancellationToken) => UnavailableResourceAsync<ResourceDownloadReceipt>(cancellationToken);
+        CancellationToken cancellationToken) => FileOperationAsync(connectionId,
+            () => { _ = XaiFileClient.SkillDownloadPath(skillId, destination); },
+            (client, connection, fence, token) => client.DownloadSkillAsync(connection, skillId, destination, fence, token), cancellationToken);
 
     Task<XaiSkillDeletion> IXaiSkillClient.DeleteAsync(string connectionId, string skillId,
-        CancellationToken cancellationToken) => UnavailableResourceAsync<XaiSkillDeletion>(cancellationToken);
+        CancellationToken cancellationToken) => FileOperationAsync(connectionId,
+            () => { _ = XaiFileClient.SkillPath(skillId); },
+            (client, connection, fence, token) => client.DeleteSkillAsync(connection, skillId, fence, token), cancellationToken);
 
     /// <summary>Searches existing collections through the selected implemented document-search route.</summary>
     public async Task<DocumentSearchResult> SearchAsync(string connectionId, DocumentSearchRequest request,
