@@ -16,8 +16,9 @@ never passes through the system temporary folder or another volume, and never ne
 An install or import removes staging files untouched for more than an hour, which a stopped process
 leaves behind; a newer file may belong to another process's download. Each engine receives the
 installed files as plain paths: Qwen and
-Supra pass them to TensorSharp, Laya creates its ONNX Runtime session from the model path, and
-Whisper loads through `WhisperFactory.FromPath`.
+Supra pass them to TensorSharp, Laya creates its ONNX Runtime session from the model path,
+Whisper loads through `WhisperFactory.FromPath`, and the embedding engine loads through
+TensorSharp's `EmbeddingModel.Load`.
 
 Assemblies included by the Tensor package:
 
@@ -41,8 +42,19 @@ Assemblies included by the Tensor package:
 - `Darkspyre.Inference.Tensor.STT.Whisper` — resident CPU Whisper inference through the public
   Whisper.net runtime. Whisper.net, Whisper.net.Runtime and NAudio.Core remain declared NuGet
   dependencies, not third-party DLLs embedded by the Darkspyre package.
+- `Darkspyre.Inference.Tensor.Embedding` — resident text embeddings through TensorSharp's managed
+  CPU GGUF sentence encoder. Its built-in pack is Snowflake Arctic Embed L v2.0 (Q8_0, 1024
+  dimensions, 8,192 tokens). The runtime formats queries itself: callers state whether inputs are
+  queries or documents, and documents are embedded as given. It counts every input before embedding
+  any; an input over the limit fails the request with `EmbeddingInputTooLongException`, which names
+  each over-limit input, unless the request permits truncation, in which case the result lists the
+  inputs that were cut. A smaller requested size is taken from the vector's leading values and
+  scaled back to unit length; Arctic supports 256 and 1,024. Each result carries the model
+  fingerprint, a SHA-256 over the weights, architecture and query format; vectors with different
+  fingerprints are not comparable. The native GGML path and Qwen3-Embedding wait for a TensorSharp
+  release that loads them.
 - `Darkspyre.Inference.Tensor.Registry` — `TensorEngineRegistry` and the `AddTensorEngines`
-  composition of the four shipped engines. It references the engine assemblies; neither
+  composition of the five shipped engines. It references the engine assemblies; neither
   `.Tensor.Common` nor an engine assembly references it.
 
 Implementation names identify the model family they support, not a particular checkpoint or training
@@ -154,17 +166,18 @@ in use by native execution.
 ## Engine registry
 
 Each engine assembly publishes an `ITensorEngineProvider` (`Darkspyre.Inference.Tensor.Common`):
-`QwenEngineProvider`, `SupraEngineProvider`, `LayaEngineProvider` and `WhisperEngineProvider`.
+`QwenEngineProvider`, `SupraEngineProvider`, `LayaEngineProvider`, `WhisperEngineProvider` and
+`EmbeddingEngineProvider`.
 A provider exposes four operations:
 
 - `Definition` is a `TensorEngineDefinition`. Its `Setup` is the engine's existing setup definition
   (`QwenSetup.Definition` and so on), the only source of implementation ID, display name, tasks and
-  prerequisites. Its `ModelStoreKey` names the engine's pack namespace: `Qwen`, `Supra`, `Laya` or
-  `Whisper`. Reading a definition constructs no engine, loads no native library, opens no store,
+  prerequisites. Its `ModelStoreKey` names the engine's pack namespace: `Qwen`, `Supra`, `Laya`,
+  `Whisper` or `Embedding`. Reading a definition constructs no engine, loads no native library, opens no store,
   reads no credential and makes no network call.
 - `GetOfferedModelsAsync(packs)` returns the engine's built-in packs followed by the packs of its
-  own family registered in `packs`. Qwen and Supra have one built-in pack, Whisper has its twelve
-  published variants, and Laya has none. The engine's compatibility validator checks every offered
+  own family registered in `packs`. Qwen, Supra and the embedding engine have one built-in pack,
+  Whisper has its twelve published variants, and Laya has none. The engine's compatibility validator checks every offered
   pack. A registered manifest that differs from a built-in at the same key fails; it never replaces
   the built-in.
 - `CreateInstance(packs, backend)` constructs the engine with its own execution coordinator. The

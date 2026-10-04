@@ -11,5 +11,6 @@
     <ProjectReference Include="..\..\Image\Darkspyre.Inference.Tensor.Image.Supra\Darkspyre.Inference.Tensor.Image.Supra.csproj" />
     <ProjectReference Include="..\..\Decision\Darkspyre.Inference.Tensor.Decision.Laya\Darkspyre.Inference.Tensor.Decision.Laya.csproj" />
     <ProjectReference Include="..\..\STT\Darkspyre.Inference.Tensor.STT.Whisper\Darkspyre.Inference.Tensor.STT.Whisper.csproj" />
+    <ProjectReference Include="..\..\Embedding\Darkspyre.Inference.Tensor.Embedding\Darkspyre.Inference.Tensor.Embedding.csproj" />
   </ItemGroup>
 </Project>

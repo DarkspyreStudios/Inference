@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
 using Darkspyre.Inference.Common.Decision;
+using Darkspyre.Inference.Common.Embedding;
 using Darkspyre.Inference.Common.Image;
 using Darkspyre.Inference.Common.LLM;
 using Darkspyre.Inference.Common.Media;
@@ -219,6 +220,10 @@ public static class InferenceJson
     public static JsonTypeInfo<DecisionInferenceResult> DecisionResult => Metadata<DecisionInferenceResult>();
     public static JsonTypeInfo<DecisionCapabilities> DecisionCapabilities => Metadata<DecisionCapabilities>();
     public static JsonTypeInfo<DecisionInputMeasurement> DecisionMeasurement => Metadata<DecisionInputMeasurement>();
+    public static JsonTypeInfo<EmbeddingRequest> EmbeddingRequest => Metadata<EmbeddingRequest>();
+    public static JsonTypeInfo<EmbeddingResult> EmbeddingResult => Metadata<EmbeddingResult>();
+    public static JsonTypeInfo<EmbeddingCapabilities> EmbeddingCapabilities => Metadata<EmbeddingCapabilities>();
+    public static JsonTypeInfo<EmbeddingOverLimitInput[]> EmbeddingOverLimitInputs => Metadata<EmbeddingOverLimitInput[]>();
     public static JsonTypeInfo<ImageGenerationRequest> ImageRequest => Metadata<ImageGenerationRequest>();
     public static JsonTypeInfo<ImageGenerationResult> ImageResult => Metadata<ImageGenerationResult>();
     public static JsonTypeInfo<ImageGenerationProgress> ImageProgress => Metadata<ImageGenerationProgress>();
@@ -402,6 +407,10 @@ public static class InferenceJson
 [JsonSerializable(typeof(DecisionInferenceResult))]
 [JsonSerializable(typeof(DecisionCapabilities))]
 [JsonSerializable(typeof(DecisionInputMeasurement))]
+[JsonSerializable(typeof(EmbeddingRequest))]
+[JsonSerializable(typeof(EmbeddingResult))]
+[JsonSerializable(typeof(EmbeddingCapabilities))]
+[JsonSerializable(typeof(EmbeddingOverLimitInput[]))]
 [JsonSerializable(typeof(ImageGenerationRequest))]
 [JsonSerializable(typeof(ImageGenerationResult))]
 [JsonSerializable(typeof(ImageGenerationProgress))]

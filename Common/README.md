@@ -54,7 +54,13 @@ boolean question and answer records; its polymorphic JSON discriminators can be 
 service without falling back to untyped dictionaries. An implementation that can also measure a
 request without deciding it implements `IDecisionInputMeasurement`: `MeasureAsync` returns the
 tokens the request's state encodes to and, per question, the most state tokens that question's input
-keeps. A question truncates the state when the first exceeds the second. Rich provider-specific
+keeps. A question truncates the state when the first exceeds the second. `IEmbeddingInference`
+turns text into unit-length vectors. A request states whether its inputs are queries or documents;
+the model's runtime formats queries, and a document request takes no instruction. `Truncate`
+decides an over-limit input: false fails the whole request with `EmbeddingInputTooLongException`
+before any input is embedded, true cuts the input and lists it in the result. `Dimensions` asks for
+one of the model's `SupportedDimensions`. `ModelFingerprint` identifies the weights, architecture
+and query format behind a vector; vectors with different fingerprints are not comparable. Rich provider-specific
 operations remain on their owning packages; Common is the portable inference lane, not a
 least-common-denominator replacement for implementation management.
 
@@ -339,7 +345,7 @@ Check validation separately and leave unreported finish reasons and usage unknow
 a settings manager that runs actions, lists choices and saves, validation, safe status observations and a
 version-checked host commit boundary. It does not store
 settings/secrets, execute an application loop, or wrap inference requests in a generic payload.
-Text, Image, Audio, Decision and Video grouping comes from the implementation's declared `InferenceTask`
+Text, Image, Audio, Decision, Video and Embedding grouping comes from the implementation's declared `InferenceTask`
 values; the three Audio tasks remain distinct.
 
 The [compile-checked generic editor example](examples/Darkspyre.Inference.Setup.Examples/README.md)

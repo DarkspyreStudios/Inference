@@ -19,6 +19,9 @@
     <Project Path="src/Decision/Darkspyre.Inference.Tensor.Decision/Darkspyre.Inference.Tensor.Decision.csproj" />
     <Project Path="src/Decision/Darkspyre.Inference.Tensor.Decision.Laya/Darkspyre.Inference.Tensor.Decision.Laya.csproj" />
   </Folder>
+  <Folder Name="/src/Embedding/">
+    <Project Path="src/Embedding/Darkspyre.Inference.Tensor.Embedding/Darkspyre.Inference.Tensor.Embedding.csproj" />
+  </Folder>
   <Folder Name="/src/Image/">
     <Project Path="src/Image/Darkspyre.Inference.Tensor.Image/Darkspyre.Inference.Tensor.Image.csproj" />
     <Project Path="src/Image/Darkspyre.Inference.Tensor.Image.Supra/Darkspyre.Inference.Tensor.Image.Supra.csproj" />

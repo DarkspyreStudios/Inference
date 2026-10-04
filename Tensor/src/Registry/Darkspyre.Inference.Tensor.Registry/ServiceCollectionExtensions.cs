@@ -1,5 +1,6 @@
 using Darkspyre.Inference.Tensor.Common;
 using Darkspyre.Inference.Tensor.Decision.Laya;
+using Darkspyre.Inference.Tensor.Embedding;
 using Darkspyre.Inference.Tensor.Image.Supra;
 using Darkspyre.Inference.Tensor.LLM.Qwen;
 using Darkspyre.Inference.Tensor.STT.Whisper;
@@ -37,6 +38,7 @@ public static class ServiceCollectionExtensions
         services.TryAddEnumerable(ServiceDescriptor.Singleton<ITensorEngineProvider, SupraEngineProvider>());
         services.TryAddEnumerable(ServiceDescriptor.Singleton<ITensorEngineProvider, LayaEngineProvider>());
         services.TryAddEnumerable(ServiceDescriptor.Singleton<ITensorEngineProvider, WhisperEngineProvider>());
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<ITensorEngineProvider, EmbeddingEngineProvider>());
         services.TryAddSingleton<TensorEngineRegistry>();
         return services;
     }
