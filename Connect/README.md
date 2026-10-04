@@ -466,9 +466,10 @@ Claude and Codex's private OAuth JSON requests are written as DOM data, not refl
 library types. Their field names/order, escaping and explicit null fields remain unchanged; Codex's
 authorization-code exchange remains form encoded. This does not change either authentication flow.
 
-Bedrock's AWS `Document` conversion uses the SDK's existing `DocumentJsonConverter` through internal
-owned typed metadata. Recursive and numeric JSON retains the SDK's representation. An absent nullable
-document writes `{}`; an explicit JSON `null` remains distinct. Provider payloads stay inside the adapter.
+Bedrock serializes AWS `Document` values through the SDK's public `DocumentMarshaller`, without
+reflection metadata. Recursive and numeric JSON retains the SDK's representation. An absent nullable
+document writes `{}`; an explicit JSON `null` remains distinct. The existing document readers use the
+SDK's attributed converter. That internal converter cannot be named in source-generated metadata.
 
 Claude CLI input envelopes and Antigravity chat/agent stdin envelopes use DOM writers with the same
 field order, escaping, explicit null fields and final newline. Claude input keeps text before ordered
