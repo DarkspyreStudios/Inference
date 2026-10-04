@@ -605,6 +605,11 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
                 LlmProviderCapabilities capabilities = ClaudeCliLlmClient.ResolveCapabilities(
                     _connection, request.ModelId ?? selectedModelId);
                 LlmReasoningEffort.Validate(request.ReasoningLevel, capabilities);
+                var settings = new JsonObject { ["showThinkingSummaries"] = capabilities.SupportsReasoningText };
+                if (request.ReasoningLevel is { } level)
+                {
+                    settings["effortLevel"] = LlmReasoningEffort.Word(level);
+                }
                 string turnId = Guid.NewGuid().ToString();
                 turn = new HostTurn(turnId, new ClaudeStreamUsage(capabilities.SupportsUsageDeltas, _accountedCalls), capabilities.SupportsReasoningText);
                 if (!string.IsNullOrWhiteSpace(request.ModelId)
@@ -614,11 +619,6 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
                         new JsonObject { ["subtype"] = "set_model", ["model"] = request.ModelId },
                         cancellationToken);
                     lock (_route) { _selectedModelId = request.ModelId; }
-                }
-                var settings = new JsonObject { ["showThinkingSummaries"] = capabilities.SupportsReasoningText };
-                if (request.ReasoningLevel is { } level)
-                {
-                    settings["effortLevel"] = LlmReasoningEffort.Word(level);
                 }
                 await SendControlRequestAsync(
                     new JsonObject { ["subtype"] = "apply_flag_settings", ["settings"] = settings },
