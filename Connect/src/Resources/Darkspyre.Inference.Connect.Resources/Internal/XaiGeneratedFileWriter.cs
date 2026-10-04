@@ -10,7 +10,8 @@ namespace Darkspyre.Inference.Connect.Resources.Internal;
 
 /// <summary>One output transfer owns its staging handle, not the borrowed access or Files client.</summary>
 internal sealed class XaiGeneratedFileWriter(IInferenceResourceAccess access, InferenceResourceSelectionVersion scope,
-    string fileName, Action fence, XaiResourceHttp.Observation observation) : Stream
+    string? fileName, Action fence, XaiResourceHttp.Observation observation,
+    Action<InferenceResourceCommitResult>? onCommit = null) : Stream
 {
     private IInferenceResourceAccess? _access = access;
     private Action? _fence = fence;
@@ -23,35 +24,64 @@ internal sealed class XaiGeneratedFileWriter(IInferenceResourceAccess access, In
     private InferenceResourceCommitOutcome _selection = InferenceResourceCommitOutcome.NotAttempted;
     private InferenceResourceSelectionVersion? _version;
 
+    internal Task<InferenceResourceCommitResult> MaterializeAsync(XaiFileClient files, LlmConnection connection,
+        string fileId, CancellationToken token) => MaterializeAsync(async current =>
+        {
+            observation.BeginStage("GET files/content");
+            ResourceDownloadReceipt downloaded = await files.DownloadToAsync(connection, fileId, OpenAsync, () => Check(current),
+                () => observation.RequestDispatched = true,
+                response => observation.ObserveResponse(response, connection), current).ConfigureAwait(false);
+            return downloaded.BytesWritten;
+        }, token);
+
+    internal Task<InferenceResourceCommitResult> MaterializeAsync(ReadOnlyMemory<byte> bytes, string? contentType,
+        CancellationToken token) => MaterializeAsync(async current =>
+        {
+            await OpenAsync(contentType, bytes.Length, current).ConfigureAwait(false);
+            await WriteAsync(bytes, current).ConfigureAwait(false);
+            return bytes.Length;
+        }, token);
+
+    internal Task<InferenceResourceCommitResult> MaterializeAsync(XaiMediaDownloadClient media, LlmConnection connection,
+        string url, CancellationToken token) => MaterializeAsync(current =>
+        {
+            observation.BeginStage("GET unsigned media");
+            return media.DownloadToAsync(url, ProviderHttp.GenerationTimeout, OpenAsync, () => Check(current),
+                () => observation.RequestDispatched = true,
+                response => observation.ObserveResponse(response, connection), current);
+        }, token);
+
     [SuppressMessage("Design", "CA1031", Justification = "The transfer preserves operation failure followed by actual owned handle cleanup failure.")]
-    internal async Task<InferenceResourceCommitResult> MaterializeAsync(XaiFileClient files, LlmConnection connection,
-        string fileId, CancellationToken token)
+    private async Task<InferenceResourceCommitResult> MaterializeAsync(Func<CancellationToken, Task<long>> transfer,
+        CancellationToken token)
     {
         Action operationFence = _fence!;
         InferenceResourceCommitResult? result = null;
         var errors = new List<Exception>();
         try
         {
-            observation.BeginStage();
-            ResourceDownloadReceipt downloaded;
+            long downloaded;
             try
             {
-                downloaded = await files.DownloadToAsync(connection, fileId, OpenAsync, () => Check(token),
-                    () => observation.RequestDispatched = true,
-                    response => observation.ObserveResponse(response, connection), token).ConfigureAwait(false);
+                downloaded = await transfer(token).ConfigureAwait(false);
             }
             catch (XaiFileClient.ExchangeFailure error)
             {
                 throw XaiResourceHttp.CombineFailures(new[] { DownloadFailure(error.InnerExceptions[0]) }
                     .Concat(error.InnerExceptions.Skip(1)));
             }
+            catch (AggregateException error)
+            {
+                throw XaiResourceHttp.CombineFailures(new[] { DownloadFailure(error.InnerExceptions[0]) }
+                    .Concat(error.InnerExceptions.Skip(1)));
+            }
             catch (Exception error) { throw DownloadFailure(error); }
             Check(token);
-            if (_handle is null || _bytes != downloaded.BytesWritten) throw Invalid();
+            if (_handle is null || _bytes != downloaded) throw Invalid();
             _commit = _selection = InferenceResourceCommitOutcome.Unknown;
             try
             {
-                result = await _handle.CommitAsync(downloaded.BytesWritten, new() { SelectForSession = true }, token).ConfigureAwait(false);
+                result = await _handle.CommitAsync(downloaded, new() { SelectForSession = true }, token).ConfigureAwait(false);
                 // An actual returned receipt precedes cancellation, validation and cleanup publication fences.
                 if (result is { Resource: { } observedResource } && observedResource.Reference == _reference)
                 {
@@ -67,9 +97,10 @@ internal sealed class XaiGeneratedFileWriter(IInferenceResourceAccess access, In
                 if (result?.Resource is not { } resource || resource.Reference != _reference
                     || resource.SessionId is { } session && session != scope.SessionId
                     || resource.Bytes is { } size && size != _bytes
-                    || resource.FileName is { } name && name != fileName
+                    || fileName is not null && resource.FileName is { } name && name != fileName
                     || _contentType is not null && resource.ContentType is { } type && type != _contentType
                     || _selection != InferenceResourceCommitOutcome.Committed) throw Invalid();
+                onCommit?.Invoke(result);
                 Check(token);
             }
             catch (Exception error) { throw Failure(error, InferenceResourceOperationPhase.Commit); }

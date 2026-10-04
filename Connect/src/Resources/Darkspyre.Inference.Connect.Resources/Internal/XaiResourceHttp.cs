@@ -178,11 +178,17 @@ internal sealed class XaiResourceHttp(HttpClient http, LlmConnection connection,
         private readonly List<UploadAttempt> _uploads = [];
         private UploadAttempt? _reservedUpload;
         private readonly List<InferenceResourceCommitResult> _commits = [];
+        private readonly List<LlmBatchResult> _results = [];
+        private bool _hadRequest;
         internal LlmResourceOperation Operation { get; } = operation;
         internal bool MutationDispatched { get; set; }
         internal bool SubmissionDispatched { get; set; }
         internal bool RetrievalDispatched { get; set; }
-        internal bool RequestDispatched { get; set; }
+        internal bool RequestDispatched
+        {
+            get;
+            set { field = value; _hadRequest |= value; }
+        }
         internal bool ResponseObserved { get; set; }
         internal int? StatusCode { get; set; }
         internal string? RequestId { get; set; }
@@ -194,7 +200,7 @@ internal sealed class XaiResourceHttp(HttpClient http, LlmConnection connection,
         internal LlmDeferredCompletion? SelectedDeferred { get; set; }
         internal LlmDeferredResult? ObservedDeferredResult { get; set; }
         internal InferenceResourceOperationFailure? ResourceFailure { get; set; }
-        internal bool HasEffects => RequestDispatched || MutationDispatched || SubmissionDispatched || RetrievalDispatched || _uploads.Count != 0 || _commits.Count != 0;
+        internal bool HasEffects => _hadRequest || MutationDispatched || SubmissionDispatched || RetrievalDispatched || _uploads.Count != 0 || _commits.Count != 0 || _results.Count != 0;
 
         internal void ObserveResponse(HttpResponseMessage response, LlmConnection selected)
         {
@@ -207,6 +213,15 @@ internal sealed class XaiResourceHttp(HttpClient http, LlmConnection connection,
 
         internal void ObserveCommit(InferenceResourceCommitResult receipt)
             => _commits.Add(ResourceObservationData.CopyCommits([receipt])[0]);
+
+        internal void ReserveResultCapacity(int count) => _results.EnsureCapacity(checked(_results.Count + count));
+        internal int ObserveResult(LlmBatchResult result)
+        {
+            int index = _results.Count;
+            _results.Add(result);
+            return index;
+        }
+        internal void UpdateResult(int index, LlmBatchResult result) => _results[index] = result;
 
         internal void ReserveUploadCapacity()
         {
@@ -253,6 +268,7 @@ internal sealed class XaiResourceHttp(HttpClient http, LlmConnection connection,
             ObservedDeferred = ObservedDeferred,
             SelectedDeferred = SelectedDeferred,
             ObservedDeferredResult = ObservedDeferredResult,
+            ObservedResults = _results,
             ObservedCommits = _commits,
             InputUploads = _uploads.Select(attempt => new LlmResourceInputUploadObservation(attempt.Scope, true, attempt.IsJsonl)
             { CustomId = attempt.CustomId, Source = attempt.Source, ObservedFile = attempt.File }).ToArray(),

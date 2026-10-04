@@ -164,28 +164,43 @@ internal static class XaiImageProtocol
             }
     }
 
-    internal static XaiImageResult Parse(string body, Func<string, bool> protectedValue, Action fence)
+    internal static XaiImageResult Parse(string body, Func<string, bool> protectedValue, Action fence,
+        long maximumImageBytes = long.MaxValue, long maximumTotalBytes = long.MaxValue)
     {
         using JsonDocument document = JsonDocument.Parse(body);
         JsonElement root = document.RootElement;
         if (root.ValueKind != JsonValueKind.Object || !root.TryGetProperty("data", out JsonElement data)
             || data.ValueKind != JsonValueKind.Array || data.GetArrayLength() is < 1 or > 10) throw XaiMediaData.Malformed();
         var images = new List<XaiImageArtifact>();
+        long totalBytes = 0;
         foreach (JsonElement row in data.EnumerateArray())
         {
             fence();
             if (row.ValueKind != JsonValueKind.Object) throw XaiMediaData.Malformed();
             string encoded = XaiMediaData.RequiredString(row, "b64_json", static _ => false);
+            long encodedCharacters = encoded.Count(character => !char.IsWhiteSpace(character));
+            int padding = 0;
+            for (int index = encoded.Length - 1; index >= 0 && padding < 2; index--)
+            {
+                if (char.IsWhiteSpace(encoded[index])) continue;
+                if (encoded[index] != '=') break;
+                padding++;
+            }
+            long expectedBytes = encodedCharacters / 4 * 3 - padding;
+            if (encodedCharacters % 4 != 0 || expectedBytes <= 0) throw XaiMediaData.Malformed();
+            if (expectedBytes > maximumImageBytes || expectedBytes > maximumTotalBytes - totalBytes)
+                throw new ArgumentException("Inline images exceed the admitted retention limit.");
             byte[] bytes;
             try { bytes = Convert.FromBase64String(encoded); }
             catch (FormatException) { throw XaiMediaData.Malformed(); }
-            if (bytes.Length == 0) throw XaiMediaData.Malformed();
+            if (bytes.LongLength != expectedBytes) throw XaiMediaData.Malformed();
+            totalBytes += expectedBytes;
             string? contentType = XaiMediaData.OptionalString(row, "mime_type", protectedValue);
             JsonObject? file = XaiMediaData.FileOutput(row, protectedValue);
             var state = new JsonObject();
             if (file is not null) state["file_output"] = file;
             if (XaiMediaData.OptionalString(row, "storage_error", protectedValue) is not null) state["storage_failed"] = true;
-            images.Add(new(bytes, contentType, XaiMediaData.Element(state)));
+            images.Add(new(bytes, contentType, XaiMediaData.Element(state), Dimension(row, "width"), Dimension(row, "height")));
         }
         string? model = XaiMediaData.OptionalString(root, "model", protectedValue);
         JsonElement? usage = XaiMediaData.Usage(root);
@@ -194,9 +209,15 @@ internal static class XaiImageProtocol
     }
 
     private static ArgumentException InvalidControl() => new("An image workflow control has an invalid value.");
+    private static int? Dimension(JsonElement row, string name)
+    {
+        if (!row.TryGetProperty(name, out JsonElement value) || value.ValueKind == JsonValueKind.Null) return null;
+        return value.TryGetInt32(out int dimension) && dimension > 0 ? dimension : throw XaiMediaData.Malformed();
+    }
 }
 
-internal sealed record XaiImageArtifact(ReadOnlyMemory<byte> Data, string? ContentType, JsonElement ProviderState)
+internal sealed record XaiImageArtifact(ReadOnlyMemory<byte> Data, string? ContentType, JsonElement ProviderState,
+    int? Width = null, int? Height = null)
 {
     public override string ToString() => "XaiImageArtifact { <artifact> }";
 }

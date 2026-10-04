@@ -51,10 +51,62 @@ public sealed class LlmResourceProviderService : ILlmBatchClient, IDisposable, I
                 return await protocol.ListRequestsAsync(batch.Id, token).ConfigureAwait(false);
             }, cancellationToken);
 
-    public Task<LlmBatchResultPage> GetResultsAsync(string connectionId, LlmBatch batch,
+    [SuppressMessage("Design", "CA1031", Justification = "One result page preserves earlier outputs, actual resource effects and independent owned cleanup failures.")]
+    public async Task<LlmBatchResultPage> GetResultsAsync(string connectionId, LlmBatch batch,
         LlmResourcePageRequest page, LlmMediaMaterializationOptions materialization,
         IInferenceResourceAccess? resources = null, CancellationToken cancellationToken = default)
-        => Task.FromException<LlmBatchResultPage>(Unavailable(cancellationToken));
+    {
+        using LlmOperationLifetime.Lease operation = _lifetime.Enter(cancellationToken);
+        CancellationToken token = operation.Token;
+        void Fence()
+        {
+            token.ThrowIfCancellationRequested();
+            try { _lifetime.ThrowIfStopping(); }
+            catch (ObjectDisposedException error)
+            { throw new OperationCanceledException("The resource facade is stopping.", error, token); }
+        }
+        ArgumentException.ThrowIfNullOrWhiteSpace(connectionId);
+        ArgumentNullException.ThrowIfNull(batch);
+        XaiBatchProtocol.ValidateBatch(batch);
+        ArgumentNullException.ThrowIfNull(page);
+        ArgumentNullException.ThrowIfNull(materialization);
+        LlmBatch entered = batch with { Scope = batch.Scope with { }, Counts = batch.Counts with { } };
+        var enteredPage = new LlmResourcePageRequest(page.Limit, page.PaginationToken);
+        var limits = new LlmMediaMaterializationOptions(materialization.MaximumInlineImageBytes, materialization.MaximumInlineResultBytes);
+        Fence();
+        LlmProviderService? core = _providerService;
+        if (core is null || !core.SupportsXaiSnapshot)
+            throw new NotSupportedException("The resource facade requires an implemented xAI LLM core route.");
+        var observation = new XaiResourceHttp.Observation(LlmResourceOperation.GetBatchResults, entered);
+        try
+        {
+            LlmConnection snapshot = await _connectionAccess!.AcquireAsync(connectionId, selected =>
+            {
+                Fence();
+                XaiBatchProtocol.ValidateConnection(selected, entered);
+                Fence();
+            }, token).ConfigureAwait(false);
+            Fence();
+            LlmBatchResultPage result = await core.RunXaiSnapshotAsync(snapshot, Fence,
+                (http, selected, ownerFence, innerToken) => core.RunXaiFilesSnapshotAsync(selected, ownerFence,
+                    async (files, current, filesFence, filesToken) =>
+                    {
+                        var protocol = new XaiBatchProtocol(http, current, connectionId, enteredPage, observation, filesFence);
+                        await protocol.AuthorizeAsync(entered.Id, filesToken).ConfigureAwait(false);
+                        filesFence();
+                        var reader = new XaiBatchResultReader(http, current, connectionId, limits, resources, files, core, observation, filesFence);
+                        return await protocol.GetResultsAsync(entered.Id, reader, filesToken).ConfigureAwait(false);
+                    }, innerToken), token).ConfigureAwait(false);
+            Fence();
+            return result;
+        }
+        catch (Exception error)
+        {
+            Exception reported = XaiResourceHttp.OperationFailure(error, observation);
+            _cleanup.Record(reported);
+            throw reported;
+        }
+    }
 
     public Task<LlmBatch> CancelAsync(string connectionId, LlmBatch batch, CancellationToken cancellationToken = default)
         => RunAsync(connectionId, LlmResourceOperation.CancelBatch, batch, null, null,
@@ -336,12 +388,6 @@ public sealed class LlmResourceProviderService : ILlmBatchClient, IDisposable, I
             _cleanup.Record(error);
             throw XaiResourceHttp.OperationFailure(error, observation);
         }
-    }
-
-    private NotSupportedException Unavailable(CancellationToken cancellationToken)
-    {
-        using LlmOperationLifetime.Lease operation = _lifetime.Enter(cancellationToken);
-        return new NotSupportedException("This batch or deferred operation is not implemented.");
     }
 
     /// <summary>Fences new work, drains admitted work and releases the borrowed access reference.</summary>

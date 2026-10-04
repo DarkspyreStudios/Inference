@@ -131,8 +131,21 @@ later Add, cancellation and cleanup failure with its original observed counts, n
 Supplied video audio uses its actual public URL or a bounded data URL from actual bytes. Unknown
 MIME uses application/octet-stream as a wire label without changing content metadata. Native file
 audio is unsupported; no signed-URL or library-side URL-fetch fallback is used.
-Batch result retrieval/materialization remains explicitly unavailable before connection resolution,
-credential refresh or resource effects.
+Batch result retrieval returns one provider page in its actual order with the provider's pagination
+token. Each result uses its actual custom row ID. Chat results use the canonical complete Chat decoder,
+including tools, reasoning, citations, continuation and named generated files. Images use the canonical
+image codec and commit/select every output into the borrowed Session/Workspace. Terminal video results
+stream into the same named writer through Files or the core's unsigned media download pipeline. No
+custom row ID becomes a native video job ID. That unsigned pipeline sends no provider headers or
+cookies, follows no redirects and has no SDK loggers; caller-supplied HTTP factory behavior remains
+the caller's obligation. Batch transfers keep the LLM route's existing caller-cancellation timeout
+policy and do not change a borrowed client's Timeout.
+The raw UTF-8 page and aggregate decoded inline image bytes each have the caller's independent
+MaximumInlineResultBytes budget. Each image also has MaximumInlineImageBytes. Known lengths are
+checked before allocation or writing. Nullable usage and media metadata remain unknown when absent.
+ObservedResults and ObservedCommits preserve earlier output and exact commit/selection receipts after
+a later transfer, cancellation, commit, publication or cleanup failure. Missing resource access refuses
+artifact materialization without hiding the preceding result-page dispatch and response.
 Disposal fences entry, drains admitted operations, shares retirement completion and releases borrowed
 references without disposing them. Actual HTTP and preparation cleanup refusal retains the failed owner and is reported
 by retirement; ordinary operation failures do not poison retirement. No operation retries or rolls back.

@@ -10,7 +10,7 @@ internal static class SdkHttpRegistration
     internal static readonly string[] Names = ["AppleFoundationModelsClient", "GeminiApiLlmClient", "OpenAiResponsesLlmClient",
         "OpenAiCompatibleChatLlmClient", "AnthropicMessagesLlmClient", "ClaudeCliLlmClient", "OpenAiEmbeddingClient", "OpenAiCodexLlmClient",
         "CodexAuthenticator", "ClaudeAuthenticator", "AzureResponsesLlmClient", "AzureChatLlmClient", "VertexLlmClient", "", "PocketTtsHttpProvider", "TangoFluxHttpProvider",
-        "XaiResponsesLlmClient", "XaiAuthenticator"];
+        "XaiResponsesLlmClient", "XaiAuthenticator", "XaiMediaDownloadClient"];
     internal static void ValidateName(string name)
     {
         ArgumentNullException.ThrowIfNull(name);
@@ -71,6 +71,6 @@ internal sealed class SdkHttpConfiguration
         foreach ((string name, List<SdkHttpLoggerDefinition> loggers) in _loggers) snapshot._loggers.Add(name, [.. loggers]);
         return snapshot;
     }
-    internal SdkHttpLoggerDefinition[] GetLoggers(string name) => _loggers[name].ToArray();
+    internal SdkHttpLoggerDefinition[] GetLoggers(string name) => name == "XaiMediaDownloadClient" ? [] : _loggers[name].ToArray();
     internal void Detach() => _loggers.Clear();
 }

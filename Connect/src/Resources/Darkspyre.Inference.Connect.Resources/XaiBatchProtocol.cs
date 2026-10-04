@@ -60,6 +60,10 @@ internal sealed class XaiBatchProtocol(HttpClient http, LlmConnection connection
     internal Task<LlmBatch> CancelAsync(string id, CancellationToken token) =>
         ExchangeAsync(HttpMethod.Post, Path(id) + ":cancel", null, true, root => ReadBatch(root, id), token);
 
+    internal Task<LlmBatchResultPage> GetResultsAsync(string id, XaiBatchResultReader reader, CancellationToken token)
+        => _exchange.ExchangeResponseAsync(HttpMethod.Get, Path(id) + "/results" + Query(), null, false,
+            reader.ReadAsync, token);
+
     internal Task<LlmBatchPage> ListAsync(CancellationToken token) =>
         ExchangeAsync(HttpMethod.Get, "batches" + Query(), null, false, root =>
         {

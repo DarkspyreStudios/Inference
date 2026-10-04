@@ -12,7 +12,7 @@ using Darkspyre.Inference.Connect.LLM.Internal;
 namespace Darkspyre.Inference.Connect.LLM.Providers;
 
 /// <summary>OAuth-only Grok Responses adapter. The facade owns its published chat catalog.</summary>
-internal sealed class XaiResponsesLlmClient(HttpClient http) : ResponsesLlmClientBase(http), ILlmCatalogCapabilities,
+internal sealed class XaiResponsesLlmClient(HttpClient http, XaiMediaDownloadClient? mediaDownloads = null) : ResponsesLlmClientBase(http), ILlmCatalogCapabilities,
     ILlmTextTokenizerClient, ILlmCredentialAdmissionPolicy, ILlmModelCatalogClient
 {
     void ILlmCredentialAdmissionPolicy.ValidateCredential(LlmConnection connection) => _ = XaiRequestHeaders.Require(connection);
@@ -42,6 +42,8 @@ internal sealed class XaiResponsesLlmClient(HttpClient http) : ResponsesLlmClien
 
     internal XaiFileClient CreateFileClient() => new(Http);
     internal HttpClient SharedHttp => Http;
+    internal XaiMediaDownloadClient MediaDownloads => mediaDownloads
+        ?? throw new NotSupportedException("The selected xAI core has no unsigned media download route.");
 
     protected override LlmProviderCapabilities DefaultCapabilities { get; } = new()
     {

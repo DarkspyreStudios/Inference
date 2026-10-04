@@ -49,6 +49,10 @@ public static class ServiceCollectionExtensions
         if (services.Any(descriptor => descriptor.ServiceType == typeof(XaiResponsesLlmClient)))
             return services;
         services.AddSingleton(ProviderDefinitions.GrokSubscription);
+        services.AddInferenceHttpClient<XaiMediaDownloadClient>()
+            .ConfigureHttpClient(client => client.Timeout = ProviderHttp.GenerationTimeout)
+            .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false, UseCookies = false })
+            .RemoveAllLoggers();
         services.AddInferenceHttpClient<XaiResponsesLlmClient>()
             .ConfigureHttpClient(client => client.Timeout = ProviderHttp.GenerationTimeout)
             .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });

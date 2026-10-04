@@ -93,4 +93,13 @@ public sealed partial class LlmProviderService
         }, token);
     }
 
+    internal Task<T> RunXaiMediaSnapshotAsync<T>(LlmConnection snapshot, Action outerFence,
+        Func<XaiMediaDownloadClient, Action, CancellationToken, Task<T>> dispatch, CancellationToken token)
+        => RunXaiSnapshotAsync(snapshot, outerFence, (_, selected, fence, current) =>
+        {
+            var client = (XaiResponsesLlmClient)ClientFor(selected.Transport);
+            fence();
+            return dispatch(client.MediaDownloads, fence, current);
+        }, token);
+
 }
