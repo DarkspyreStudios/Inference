@@ -98,6 +98,9 @@ public static class ServiceCollectionExtensions
         services.AddInferenceHttpClient<OpenAiEmbeddingClient>();
         services.AddSingleton<IAntigravityCliSessionProcessFactory, AntigravityCliSessionProcessFactory>();
         services.AddSingleton<IAntigravityCliRunner, AntigravityCliProcessRunner>();
+        services.AddLogging();
+        // The container's disposal waits for every Claude CLI still finishing in the background.
+        services.AddSingleton<ClaudeCliExits>();
         services.AddSingleton<IClaudeCliRunner, ClaudeCliProcessRunner>();
         services.AddSingleton<IClaudeCliSessionProcessFactory, ClaudeCliSessionProcessFactory>();
         services.AddTransient<ILlmClient>(provider =>

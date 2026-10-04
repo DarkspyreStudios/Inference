@@ -22,12 +22,20 @@ internal sealed class CliSessionProcess : IAsyncDisposable
     private readonly SemaphoreSlim _writeLock = new(1, 1);
     private readonly SemaphoreSlim _readLock = new(1, 1);
     private readonly Task<string> _standardError;
+    private readonly Func<Process, Task>? _awaitExit;
     private bool _inputClosed;
 
-    internal CliSessionProcess(Process process, string name, int maximumErrorCharacters, bool truncateError)
+    /// <summary>
+    /// Takes ownership of a started process. <paramref name="awaitExit"/> ends a process that is still running after
+    /// retirement closes its input; it is never killed early, even after a standard-error failure. Without it,
+    /// retirement waits 2 seconds and then kills the process group.
+    /// </summary>
+    internal CliSessionProcess(Process process, string name, int maximumErrorCharacters, bool truncateError,
+        Func<Process, Task>? awaitExit = null)
     {
         _process = process;
         _name = name;
+        _awaitExit = awaitExit;
         _standardOutput = new(process.StandardOutput, MaximumLineCharacters,
             $"{name} output exceeded the {MaximumLineCharacters}-character line limit.");
         _maximumErrorCharacters = maximumErrorCharacters;
@@ -144,13 +152,20 @@ internal sealed class CliSessionProcess : IAsyncDisposable
     private async Task RetireProcessAsync()
     {
         var failures = new List<Exception>();
+        Task output = Task.CompletedTask;
         try
         {
             // A cancelled write can leave StreamWriter's buffer full. Close the native pipe first
             // so retirement never flushes that abandoned request into a child that stopped reading.
             try { CloseInputCore(); }
             catch (Exception error) { failures.Add(error); }
-            if (!_process.HasExited)
+            if (!_process.HasExited && _awaitExit is not null)
+            {
+                // Output the process writes while it finishes must not fill the pipe and block its exit.
+                output = DrainOutputAsync();
+                await _awaitExit(_process).ConfigureAwait(false);
+            }
+            else if (!_process.HasExited)
             {
                 using var grace = new CancellationTokenSource(GracefulExit);
                 try
@@ -180,6 +195,7 @@ internal sealed class CliSessionProcess : IAsyncDisposable
                 _ = _standardError.ContinueWith(static task => _ = task.Exception, CancellationToken.None,
                     TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
             }
+            await output.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
             _writeLock.Dispose();
             _readLock.Dispose();
             _standardOutput.ReleaseBufferedText();
@@ -190,6 +206,14 @@ internal sealed class CliSessionProcess : IAsyncDisposable
         }
         if (failures.Count == 1) ExceptionDispatchInfo.Throw(failures[0]);
         if (failures.Count > 1) throw new AggregateException("The CLI session did not retire cleanly.", failures);
+    }
+
+    /// <summary>Reads and discards standard output until EOF or the end of retirement.</summary>
+    private async Task DrainOutputAsync()
+    {
+        var buffer = new byte[4096];
+        Stream stream = _process.StandardOutput.BaseStream;
+        while (await stream.ReadAsync(buffer, _errorRead.Token).ConfigureAwait(false) != 0) { }
     }
 
     private void CloseInputCore()

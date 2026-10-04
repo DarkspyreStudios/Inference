@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text.Json;
 using Darkspyre.Inference.Connect.LLM.Providers;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Darkspyre.Inference.Connect.LLM.Tests;
 
@@ -221,7 +222,7 @@ public sealed class CliProcessLauncherTests
             }
             else
             {
-                await foreach (ClaudeCliProcessEvent value in new ClaudeCliProcessRunner().StreamAsync(
+                await foreach (ClaudeCliProcessEvent value in new ClaudeCliProcessRunner(new ClaudeCliExits(NullLogger<ClaudeCliExits>.Instance)).StreamAsync(
                     new ClaudeCliInvocation(command, ["--wait"], StandardInput: null, fixture.Root), cancellation.Token))
                 {
                     child = CliProcessTerminationTests.ParseProcessId(Assert.IsType<ClaudeCliOutputLine>(value).Line);
@@ -259,7 +260,7 @@ public sealed class CliProcessLauncherTests
         }
         else
         {
-            ClaudeCliProcessResult result = await new ClaudeCliProcessRunner().RunAsync(
+            ClaudeCliProcessResult result = await new ClaudeCliProcessRunner(new ClaudeCliExits(NullLogger<ClaudeCliExits>.Instance)).RunAsync(
                 new ClaudeCliInvocation(executable, arguments, StandardInput: null, workingDirectory));
             Assert.Equal(0, result.ExitCode);
             return result.StandardOutput;

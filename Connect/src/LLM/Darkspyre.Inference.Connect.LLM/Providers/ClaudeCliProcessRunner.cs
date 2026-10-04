@@ -5,7 +5,8 @@ using System.Text;
 
 namespace Darkspyre.Inference.Connect.LLM.Providers;
 
-internal sealed class ClaudeCliProcessRunner : IClaudeCliRunner
+/// <summary>Runs one Claude CLI invocation. A process still running when the caller stops is ended by <see cref="ClaudeCliExits"/>.</summary>
+internal sealed class ClaudeCliProcessRunner(ClaudeCliExits exits) : IClaudeCliRunner
 {
     private const int MaximumCapturedCharacters = 16 * 1024 * 1024;
 
@@ -31,9 +32,12 @@ internal sealed class ClaudeCliProcessRunner : IClaudeCliRunner
     {
         ArgumentNullException.ThrowIfNull(invocation);
 
-        using Process process = StartProcess(invocation);
+        Process process = StartProcess(invocation);
         using var reads = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        Task<string> standardError = ReadStandardErrorAsync(process.StandardError, reads);
+        // The error reader outlives a cancelled caller, because a process that is still finishing must not block
+        // on a full standard-error pipe.
+        var errorStop = new CancellationTokenSource();
+        Task<string> standardError = ReadStandardErrorAsync(process.StandardError, reads, errorStop.Token);
         string? standardInputError = null;
         var output = new StringBuilder();
         var lines = new CliLineReader(process.StandardOutput, MaximumCapturedCharacters,
@@ -44,9 +48,8 @@ internal sealed class ClaudeCliProcessRunner : IClaudeCliRunner
             {
                 if (invocation.StandardInput is not null)
                 {
-                    await process.StandardInput.WriteAsync(
-                        invocation.StandardInput.AsMemory(),
-                        reads.Token);
+                    await Observe(process.StandardInput.WriteAsync(invocation.StandardInput.AsMemory(), reads.Token),
+                        standardError, reads, cancellationToken);
                 }
                 process.StandardInput.Close();
             }
@@ -54,16 +57,16 @@ internal sealed class ClaudeCliProcessRunner : IClaudeCliRunner
             {
                 standardInputError =
                     "The Claude CLI closed standard input before the request was completely sent.";
-                TryCloseStandardInput(process);
+                CloseStandardInput(process);
             }
 
-            while (await lines.ReadLineAsync(reads.Token) is { } line)
+            while (await Observe(lines.ReadLineAsync(reads.Token).AsTask(), standardError, reads, cancellationToken) is { } line)
             {
                 EnsureCaptureLimit(output.Length + line.Length + Environment.NewLine.Length, nameof(process.StandardOutput));
                 output.AppendLine(line);
                 yield return new ClaudeCliOutputLine(line);
             }
-            await process.WaitForExitAsync(reads.Token);
+            await Observe(process.WaitForExitAsync(reads.Token), standardError, reads, cancellationToken);
             string error = await standardError.WaitAsync(CliProcessTermination.ExitBound, reads.Token);
             yield return new ClaudeCliProcessCompleted(new ClaudeCliProcessResult(
                 process.ExitCode,
@@ -74,38 +77,115 @@ internal sealed class ClaudeCliProcessRunner : IClaudeCliRunner
         finally
         {
             lines.ReleaseBufferedText();
-            try
+            if (process.HasExited)
             {
-                if (!process.HasExited)
-                {
-                    await CliProcessTermination.KillAsync(process);
-                }
+                await ReleaseAsync(process, standardError, errorStop);
             }
-            finally
+            else
             {
-                await reads.CancelAsync();
-                try
-                {
-                    await standardError.WaitAsync(CliProcessTermination.ExitBound, CancellationToken.None);
-                }
-                catch (OperationCanceledException) when (reads.IsCancellationRequested)
-                {
-                    // Retirement cancels a pipe reader after the owned process is terminated.
-                }
+                exits.Track(EndAsync(process, standardError, errorStop));
             }
         }
     }
 
+    /// <summary>
+    /// Ends a process the caller no longer waits for: standard-input EOF and SIGTERM, then at most
+    /// <see cref="ClaudeCliExits.Limit"/> before SIGKILL. Output is drained so a full pipe cannot block the exit.
+    /// </summary>
+    private async Task EndAsync(Process process, Task<string> standardError, CancellationTokenSource errorStop)
+    {
+        Task output = Task.CompletedTask;
+        try
+        {
+            CloseStandardInput(process);
+            CliProcessTermination.Terminate(process);
+            output = DrainAsync(process.StandardOutput.BaseStream, errorStop.Token);
+            await exits.AwaitExitAsync(process).ConfigureAwait(false);
+            using var bound = new CancellationTokenSource(CliProcessTermination.ExitBound);
+            try
+            {
+                await standardError.WaitAsync(bound.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (bound.IsCancellationRequested)
+            {
+                throw new CliProcessDrainException(process.Id);
+            }
+        }
+        finally
+        {
+            await errorStop.CancelAsync().ConfigureAwait(false);
+            await output.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+            await ReleaseAsync(process, standardError, errorStop).ConfigureAwait(false);
+        }
+    }
+
+    private static async Task ReleaseAsync(Process process, Task<string> standardError, CancellationTokenSource errorStop)
+    {
+        try
+        {
+            await errorStop.CancelAsync().ConfigureAwait(false);
+            try
+            {
+                await standardError.WaitAsync(CliProcessTermination.ExitBound, CancellationToken.None).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (errorStop.IsCancellationRequested)
+            {
+                // Retirement cancels a pipe reader after the owned process exits.
+            }
+        }
+        finally
+        {
+            process.Dispose();
+            errorStop.Dispose();
+        }
+    }
+
+    /// <summary>Reports a standard-error failure in place of the cancellation it caused.</summary>
+    private static async Task<T> Observe<T>(Task<T> operation, Task standardError, CancellationTokenSource reads, CancellationToken caller)
+    {
+        try { return await operation; }
+        catch (OperationCanceledException) when (!caller.IsCancellationRequested && reads.IsCancellationRequested)
+        {
+            await standardError;
+            throw;
+        }
+    }
+
+    private static async Task Observe(ValueTask operation, Task standardError, CancellationTokenSource reads, CancellationToken caller) =>
+        await Observe(Completed(operation), standardError, reads, caller);
+
+    private static async Task Observe(Task operation, Task standardError, CancellationTokenSource reads, CancellationToken caller) =>
+        await Observe(Completed(operation), standardError, reads, caller);
+
+    private static async Task<bool> Completed(ValueTask operation)
+    {
+        await operation;
+        return true;
+    }
+
+    private static async Task<bool> Completed(Task operation)
+    {
+        await operation;
+        return true;
+    }
+
+    private static async Task DrainAsync(Stream stream, CancellationToken cancellationToken)
+    {
+        var buffer = new byte[4096];
+        while (await stream.ReadAsync(buffer, cancellationToken).ConfigureAwait(false) != 0) { }
+    }
+
     private static async Task<string> ReadStandardErrorAsync(
         StreamReader reader,
-        CancellationTokenSource reads)
+        CancellationTokenSource reads,
+        CancellationToken cancellationToken)
     {
         var output = new StringBuilder();
         var buffer = new char[4096];
         try
         {
             int count;
-            while ((count = await reader.ReadAsync(buffer.AsMemory(), reads.Token)) != 0)
+            while ((count = await reader.ReadAsync(buffer.AsMemory(), cancellationToken)) != 0)
             {
                 EnsureCaptureLimit(output.Length + count, "StandardError");
                 output.Append(buffer, 0, count);
@@ -151,10 +231,12 @@ internal sealed class ClaudeCliProcessRunner : IClaudeCliRunner
         }
     }
 
-    private static void TryCloseStandardInput(Process process)
+    /// <summary>Closes standard input without flushing a request that a cancelled write left in the buffer.</summary>
+    private static void CloseStandardInput(Process process)
     {
         try
         {
+            process.StandardInput.BaseStream.Dispose();
             process.StandardInput.Close();
         }
         catch (IOException)
@@ -163,7 +245,7 @@ internal sealed class ClaudeCliProcessRunner : IClaudeCliRunner
         }
         catch (InvalidOperationException)
         {
-            // The process has already exited and disposed the redirected stream.
+            // The process has already exited and disposed the redirected stream, or input is already closed.
         }
     }
 }

@@ -115,11 +115,14 @@ These changes are unreleased.
   `LlmReasoningDeltaEvent`, not `LlmActivityEvent`.
 - On macOS and Linux the Claude CLI, the Antigravity CLI and the Apple helper lead their own sessions
   and process groups, with no controlling terminal. A Ctrl+C typed in a console host's terminal no
-  longer reaches them; the host's cancellation and disposal still end them. Cancellation and disposal
-  send `SIGKILL` to the whole group, so descendants that stay in the group end too, and a descendant
-  that calls `setsid` or `setpgid` escapes. A process that is not reported as exited within 5 seconds
-  of the kill fails the operation instead of hanging it: Claude CLI chat raises `claude_cli_exit_timeout`,
-  Antigravity CLI chat raises `antigravity_cli_exit_timeout`, an Antigravity agent session faults with a
+  longer reaches them; the host's cancellation and disposal still end them. For the Antigravity CLI
+  and the Apple helper, cancellation and disposal send `SIGKILL` to the whole group, so descendants
+  that stay in the group end too, and a descendant that calls `setsid` or `setpgid` escapes. A Claude
+  CLI ends by standard-input EOF (and `SIGTERM` for a one-shot run) and exits on its own in the
+  background; its group receives `SIGKILL` only after 30 seconds, so a token refresh in progress is
+  saved. Cancellation returns at once, and disposing the service provider waits for pending Claude CLI
+  exits. A killed process that is not reported as exited within 5 seconds fails the operation instead
+  of hanging it: Antigravity CLI chat raises `antigravity_cli_exit_timeout`, an Antigravity agent session faults with a
   reason that names the process ID, and the Apple helper fails with `InferenceFailureCode.ExecutionFailed`.
   Windows behaviour is unchanged. See [Wrapped CLI processes](../README.md#wrapped-cli-processes).
 - Bedrock Converse streams through ConverseStream. Its continuation state can carry the ordered reply with

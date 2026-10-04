@@ -45,10 +45,4 @@ internal static class ClaudeCliConfiguration
         LlmTransport.AnthropicClaudeCli,
         providerCode: "claude_cli_not_found",
         innerException: exception);
-
-    public static LlmProviderException ExitTimeout(CliProcessTerminationException exception) => new(
-        $"The Claude CLI did not exit after it was stopped. {exception.Message}",
-        LlmTransport.AnthropicClaudeCli,
-        providerCode: "claude_cli_exit_timeout",
-        innerException: exception);
 }

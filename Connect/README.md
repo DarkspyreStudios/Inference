@@ -1391,23 +1391,35 @@ On macOS and Linux each process leads its own session and process group and has 
 terminal. A Ctrl+C typed in the terminal of a console host does not reach it. The host's cancellation
 and disposal paths end it.
 
-Cancellation and disposal send `SIGKILL` to the process group. Every descendant that stays in the group
-ends with the process. A descendant that calls `setsid` or `setpgid` leaves the group, and the kill does
-not reach it. On Windows, cancellation and disposal kill the process tree.
+The Antigravity CLI and the Apple helper end by `SIGKILL` to the process group on cancellation and
+disposal. Every descendant that stays in the group ends with the process. A descendant that calls
+`setsid` or `setpgid` leaves the group, and the kill does not reach it. On Windows, cancellation and
+disposal kill the process tree.
 
-After the kill, Connect waits at most 5 seconds for the runtime to report the exit. When the bound
+A Claude CLI is never killed early. The CLI refreshes its OAuth tokens and saves the rotated pair to the
+keychain; a CLI killed between the refresh and the save leaves a spent refresh token behind, and the next
+refresh signs the user out. Every Claude CLI process (chat, `auth status`, `/usage`, model listing and
+agent sessions) therefore ends by standard-input EOF. A one-shot run whose input is already closed also
+receives `SIGTERM`, then `SIGCONT`, on its process group. The process exits on its own; its process group
+receives `SIGKILL` only after 30 seconds, and a Warning log entry records that kill. A caller that cancels,
+stops a stream early or disposes a session returns at once. The exit continues in the background, which
+drains the process's output and reaps it, and logs any failure. The `ClaudeCliExits` singleton owns these
+background exits; disposing the service provider waits for all of them, so host shutdown takes up to
+30 seconds plus the 5-second kill bound for a Claude CLI that ignores EOF and `SIGTERM`. On Windows a
+Claude CLI receives no `SIGTERM`, so a one-shot run ends on its own or at the limit.
+
+After a kill, Connect waits at most 5 seconds for the runtime to report the exit. When the bound
 expires, the operation fails with a message that names the process ID:
 
 | Lane | Failure |
 | --- | --- |
-| Claude CLI chat | `LlmProviderException` with `ProviderCode` `claude_cli_exit_timeout` |
 | Antigravity CLI chat | `LlmProviderException` with `ProviderCode` `antigravity_cli_exit_timeout` |
 | Antigravity native agent session | The cancelled operation keeps its own outcome, and the session faults. Later calls throw `InvalidOperationException` with the reason. |
 | Apple helper | `InferenceException` with `InferenceFailureCode.ExecutionFailed` |
 
 Claude CLI chat owns the process during stdin writes as well as output reads. Cancellation during a
-blocked stdin write and early disposal of its output stream both terminate the owned process.
-Its stderr reader enforces a 16 MiB character limit while reading. A stderr read failure interrupts
+blocked stdin write and early disposal of its output stream both close standard input and hand the
+process to the background exit. Its stderr reader enforces a 16 MiB character limit while reading. A stderr read failure interrupts
 blocked stdin/stdout operations. Retirement cancels and observes that reader with a 5-second bound.
 Its stdout reader rejects a decoded line above 16 MiB characters before receiving a newline.
 Total captured stdout is checked before a line and its normalized newline are appended.

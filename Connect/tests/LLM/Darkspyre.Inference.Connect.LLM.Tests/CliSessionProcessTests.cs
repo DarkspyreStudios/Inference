@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using Darkspyre.Inference.Common.LLM;
 using Darkspyre.Inference.Connect.LLM.Providers;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Darkspyre.Inference.Connect.LLM.Tests;
 
@@ -94,17 +95,15 @@ public sealed class CliSessionProcessTests
     });
 
     [UnixFact]
-    public Task ClaudeStderrOverflowInterruptsQuietStdoutAndRemainsVisibleToEveryDisposer() => Bounded(async () =>
+    public Task ClaudeStderrOverflowInterruptsQuietStdoutAndRetiresTheProcess() => Bounded(async () =>
     {
         await using var fixture = new SessionFixture(true,
             "head -c 16777217 /dev/zero | tr '\\000' x >&2; exec sleep 300");
 
         InvalidOperationException failure = await Assert.ThrowsAsync<InvalidOperationException>(() => fixture.ReadAsync());
         Assert.Contains("StandardError", failure.Message, StringComparison.Ordinal);
-        Task retirement = fixture.RetireAsync();
-        Assert.Same(retirement, fixture.RetireAsync());
-        Assert.Same(failure, await Assert.ThrowsAsync<InvalidOperationException>(() => retirement));
-        Assert.Same(failure, await Assert.ThrowsAsync<InvalidOperationException>(() => fixture.RetireAsync()));
+        // Claude retirement runs in the background and logs its failures.
+        await fixture.RetireAsync();
         await CliProcessTerminationTests.AssertGoneAsync(fixture.ProcessId);
     });
 
@@ -190,7 +189,7 @@ public sealed class CliSessionProcessTests
 
             InvalidOperationException failure = await Assert.ThrowsAsync<InvalidOperationException>(() => write);
             Assert.Contains("StandardError", failure.Message, StringComparison.Ordinal);
-            Assert.Same(failure, await Assert.ThrowsAsync<InvalidOperationException>(() => fixture.RetireAsync()));
+            await fixture.RetireAsync();
             await CliProcessTerminationTests.AssertGoneAsync(fixture.ProcessId);
         }
         finally { Directory.Delete(directory, recursive: true); }
@@ -242,12 +241,10 @@ public sealed class CliSessionProcessTests
         await CliProcessTerminationTests.AssertGoneAsync(fixture.ProcessId);
     });
 
-    [UnixTheory]
-    [InlineData(true)]
-    [InlineData(false)]
-    public Task ParentExitDoesNotReportSuccessfulRetirementWhileDescendantHoldsStderr(bool claude) => Bounded(async () =>
+    [UnixFact]
+    public Task ParentExitDoesNotReportSuccessfulRetirementWhileDescendantHoldsStderr() => Bounded(async () =>
     {
-        await using var fixture = new SessionFixture(claude, "sleep 30 >/dev/null & echo $!; exit 0");
+        await using var fixture = new SessionFixture(false, "sleep 30 >/dev/null & echo $!; exit 0");
         int child = CliProcessTerminationTests.ParseProcessId(await fixture.ReadAsync());
         try
         {
@@ -271,15 +268,18 @@ public sealed class CliSessionProcessTests
 
     private sealed class SessionFixture : IAsyncDisposable, IAntigravityCliSessionProcessFactory
     {
+        // A short limit ends stand-in scripts that ignore EOF, such as exec sleep 300.
+        private readonly ClaudeCliExits _exits = new(NullLogger<ClaudeCliExits>.Instance) { Limit = TimeSpan.FromSeconds(1) };
         private readonly ClaudeCliSessionProcess? _claude;
         private readonly AntigravityCliSessionProcess? _antigravity;
+        private Task? _claudeRetirement;
 
         internal SessionFixture(bool claude, string script, string argument = "")
         {
             ProcessStartInfo start = CliProcessLauncher.CreateStartInfo("/bin/sh", ["-c", script, "fixture", argument], Environment.CurrentDirectory);
             Process process = Process.Start(start) ?? throw new InvalidOperationException("The fixture did not start.");
             ProcessId = process.Id;
-            if (claude) _claude = new ClaudeCliSessionProcess(process);
+            if (claude) _claude = new ClaudeCliSessionProcess(process, _exits);
             else _antigravity = new AntigravityCliSessionProcess(process);
         }
 
@@ -290,7 +290,13 @@ public sealed class CliSessionProcessTests
         internal Task WriteAsync(string text, CancellationToken cancellationToken = default) =>
             _claude?.WriteLineAsync(text, cancellationToken).AsTask() ?? _antigravity!.WriteAsync(text + "\n", cancellationToken).AsTask();
         internal void CloseInput() => _antigravity!.CloseInput();
-        internal Task RetireAsync() => _claude?.DisposeAsync().AsTask() ?? _antigravity!.DisposeAsync().AsTask();
+        internal Task RetireAsync() => _claude is null ? _antigravity!.DisposeAsync().AsTask() : _claudeRetirement ??= RetireClaudeAsync();
+
+        private async Task RetireClaudeAsync()
+        {
+            await _claude!.DisposeAsync();
+            await _exits.DisposeAsync();
+        }
 
         internal async Task<(int ExitCode, string StandardError)> WaitAsync(CancellationToken cancellationToken = default)
         {

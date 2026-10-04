@@ -718,10 +718,6 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
                 new ClaudeCliInvocation(executable, arguments, standardInput, workingDirectory),
                 cancellationToken);
         }
-        catch (CliProcessTerminationException exception)
-        {
-            throw ClaudeCliConfiguration.ExitTimeout(exception);
-        }
         finally
         {
             CliInfrastructure.DeleteWorkingDirectory(workingDirectory);
@@ -767,35 +763,19 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
                     {
                         throw ClaudeCliConfiguration.Unavailable(exception);
                     }
-                    catch (CliProcessTerminationException exception)
-                    {
-                        throw ClaudeCliConfiguration.ExitTimeout(exception);
-                    }
 
                     yield return processEvent;
                 }
             }
             finally
             {
-                await DisposeRunnerAsync(enumerator);
+                // A process that is still running continues to its exit in the background.
+                await enumerator.DisposeAsync();
             }
         }
         finally
         {
             CliInfrastructure.DeleteWorkingDirectory(workingDirectory);
-        }
-    }
-
-    /// <summary>Disposes the runner's enumerator, which ends the process when the enumeration stops early.</summary>
-    private static async ValueTask DisposeRunnerAsync(IAsyncEnumerator<ClaudeCliProcessEvent> enumerator)
-    {
-        try
-        {
-            await enumerator.DisposeAsync();
-        }
-        catch (CliProcessTerminationException exception)
-        {
-            throw ClaudeCliConfiguration.ExitTimeout(exception);
         }
     }
 

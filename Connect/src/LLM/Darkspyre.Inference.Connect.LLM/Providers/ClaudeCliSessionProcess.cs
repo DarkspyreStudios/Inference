@@ -3,7 +3,7 @@ using System.Diagnostics;
 
 namespace Darkspyre.Inference.Connect.LLM.Providers;
 
-internal sealed class ClaudeCliSessionProcessFactory : IClaudeCliSessionProcessFactory
+internal sealed class ClaudeCliSessionProcessFactory(ClaudeCliExits exits) : IClaudeCliSessionProcessFactory
 {
     public Task<IClaudeCliSessionProcess> StartAsync(
         ClaudeCliSessionInvocation invocation,
@@ -28,7 +28,7 @@ internal sealed class ClaudeCliSessionProcessFactory : IClaudeCliSessionProcessF
                 throw new InvalidOperationException("The Claude CLI process did not start.");
             }
 
-            return Task.FromResult<IClaudeCliSessionProcess>(new ClaudeCliSessionProcess(process));
+            return Task.FromResult<IClaudeCliSessionProcess>(new ClaudeCliSessionProcess(process, exits));
         }
         catch (Win32Exception exception)
         {
@@ -38,13 +38,17 @@ internal sealed class ClaudeCliSessionProcessFactory : IClaudeCliSessionProcessF
     }
 }
 
+/// <summary>A Claude CLI session process. Disposal closes its input and leaves the exit to <see cref="ClaudeCliExits"/>.</summary>
 internal sealed class ClaudeCliSessionProcess : IClaudeCliSessionProcess
 {
     private readonly CliSessionProcess _process;
+    private readonly ClaudeCliExits _exits;
+    private int _disposed;
 
-    public ClaudeCliSessionProcess(Process process)
+    public ClaudeCliSessionProcess(Process process, ClaudeCliExits exits)
     {
-        _process = new(process, "Claude CLI", 16 * 1024 * 1024, truncateError: false);
+        _exits = exits;
+        _process = new(process, "Claude CLI", 16 * 1024 * 1024, truncateError: false, exits.AwaitExitAsync);
     }
 
     public async ValueTask WriteLineAsync(
@@ -72,5 +76,13 @@ internal sealed class ClaudeCliSessionProcess : IClaudeCliSessionProcess
         return new ClaudeCliProcessResult(exitCode, string.Empty, error);
     }
 
-    public ValueTask DisposeAsync() => _process.DisposeAsync();
+    /// <summary>
+    /// Cancels active operations and returns. The process receives standard-input EOF and exits in the background;
+    /// a retirement failure is logged rather than thrown.
+    /// </summary>
+    public ValueTask DisposeAsync()
+    {
+        if (Interlocked.Exchange(ref _disposed, 1) == 0) _exits.Track(_process.DisposeAsync().AsTask());
+        return ValueTask.CompletedTask;
+    }
 }

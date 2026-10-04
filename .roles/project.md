@@ -1023,3 +1023,18 @@ the context window from the listing could not compact long Bedrock sessions. The
 models whose limits Anthropic publishes for Bedrock, each citing its source. Any other model reports
 null limits (unknown); there is no default size. No other Connect source held static Claude limits: the
 Anthropic direct provider reads them from its Models API.
+
+## Claude CLI exits without an early SIGKILL (unreleased)
+
+Every Claude CLI process ends by standard-input EOF and exits on its own. A one-shot run (chat,
+`auth status`, `/usage`) has already closed its input, so a caller that stops early also sends `SIGTERM`
+and `SIGCONT` to its process group. `ClaudeCliExits` sends `SIGKILL` to the group only after 30 seconds
+and logs a Warning when it does. Cancellation, early stream disposal and session disposal (model listing,
+agent sessions) return at once; the exit, output drain and reaping continue in `ClaudeCliExits`, which logs
+their failures. `ClaudeCliExits` is a DI singleton, and its disposal waits for every pending exit. The
+`claude_cli_exit_timeout` provider code is gone because no caller waits for a Claude CLI kill.
+
+Reason: the Claude CLI rotates its OAuth refresh token and then saves the new pair to the keychain. A CLI
+killed between those steps (Connect previously sent `SIGKILL` 2 seconds after EOF, or at once on
+cancellation) left a spent refresh token in the keychain, and the next refresh signed the user out. The
+Antigravity CLI and the Apple helper keep the immediate group kill.

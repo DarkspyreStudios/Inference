@@ -7,7 +7,8 @@ namespace Darkspyre.Inference.Connect.LLM.Providers;
 
 /// <summary>
 /// Contains wrapped CLI processes and ends them without the runtime's tree kill. On macOS and Linux a wrapped
-/// process leads its own session and process group, and termination sends SIGKILL to that group.
+/// process leads its own session and process group. Termination sends SIGKILL to that group, or SIGTERM where a
+/// CLI must be allowed to finish on its own (see <see cref="ClaudeCliExits"/>).
 /// </summary>
 /// <remarks>
 /// Every wrapped process in Connect starts through <see cref="Isolate"/> and ends through this type.
@@ -20,6 +21,8 @@ internal static partial class CliProcessTermination
     /// <summary>How long a killed process may take before the runtime reports it as exited.</summary>
     internal static readonly TimeSpan ExitBound = TimeSpan.FromSeconds(5);
 
+    private const int SigTerm = 15;
+    private static readonly int SigCont = OperatingSystem.IsLinux() ? 18 : 19;
     private const int SigKill = 9;
     private const int NoSuchProcess = 3;
 
@@ -74,6 +77,48 @@ internal static partial class CliProcessTermination
         catch (Win32Exception)
         {
             // The operating system has already torn down the process.
+        }
+    }
+
+    /// <summary>Sends SIGTERM, then SIGCONT, to the process group (Unix). Does not wait.</summary>
+    /// <remarks>
+    /// SIGCONT lets a stopped member act on its pending SIGTERM. An exited process is not signalled. When the group
+    /// cannot be signalled for a reason other than its absence, only the root process is signalled. Windows has no
+    /// SIGTERM, so this does nothing there.
+    /// </remarks>
+    public static void Terminate(Process process)
+    {
+        ArgumentNullException.ThrowIfNull(process);
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        try
+        {
+            if (process.HasExited)
+            {
+                return;
+            }
+
+            int target = -process.Id;
+            if (kill(target, SigTerm) != 0)
+            {
+                if (Marshal.GetLastPInvokeError() == NoSuchProcess)
+                {
+                    return;
+                }
+
+                // A member that changed user returns EPERM. The root still receives the signals alone.
+                target = process.Id;
+                _ = kill(target, SigTerm);
+            }
+
+            _ = kill(target, SigCont);
+        }
+        catch (InvalidOperationException)
+        {
+            // The process exited between the state check and the signal.
         }
     }
 
