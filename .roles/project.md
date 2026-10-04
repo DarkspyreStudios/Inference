@@ -1011,5 +1011,5 @@ omits a model unless its agreement is `AVAILABLE` and its authorization is `AUTH
 supports only `INFERENCE_PROFILE` is listed through its system inference profiles and never by its bare
 model ID. A profile whose models are all uncallable is omitted. Reason: an authorized model without a
 Marketplace agreement, and a bare profile-only model ID, both appeared in the list and failed every
-turn with `AccessDeniedException` or a validation error. A failed availability request keeps the
-previous listing and logs one warning, so missing IAM permission for the check does not empty the list.
+turn with `AccessDeniedException` or a validation error. A failed availability request logs one warning
+and fails the listing with that error. There is no fallback to an unfiltered list (no live users).

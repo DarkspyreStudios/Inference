@@ -71,8 +71,7 @@ internal sealed class BedrockModelResolver
     /// listed by its model ID only when it supports on-demand inference; a model that runs only through an
     /// inference profile appears through the system inference profiles that include it. Models whose
     /// availability check reports no agreement or no authorization are omitted, and so are profiles whose
-    /// models are all such models. When an availability check fails, the listing keeps every profile and
-    /// every foundation model that is not provisioned-only.
+    /// models are all such models. A failed availability check fails the listing with that request's error.
     /// </summary>
     public static async Task<IReadOnlyList<LlmModel>> ListAsync(
         BedrockClientFactory.Lease<AmazonBedrockClient> control,
@@ -153,9 +152,9 @@ internal sealed class BedrockModelResolver
 
     /// <summary>
     /// Returns, per foundation model ID, whether the account holds an available agreement and authorization
-    /// for it, or <see langword="null"/> when any availability request fails. The failure is logged once.
+    /// for it. A failed availability request is logged once and thrown.
     /// </summary>
-    private static async Task<Dictionary<string, bool>?> CheckAvailabilityAsync(
+    private static async Task<Dictionary<string, bool>> CheckAvailabilityAsync(
         BedrockClientFactory.Lease<AmazonBedrockClient> control,
         List<FoundationModelSummary> foundations,
         ILogger<BedrockLlmClient> logger,
@@ -192,8 +191,7 @@ internal sealed class BedrockModelResolver
         control.ThrowIfCanceled();
         if (failure is not null)
         {
-            _ = Warn(logger, credential, "GetFoundationModelAvailability", failure);
-            return null;
+            throw Warn(logger, credential, "GetFoundationModelAvailability", failure);
         }
 
         return new Dictionary<string, bool>(callable, StringComparer.Ordinal);

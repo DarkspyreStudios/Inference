@@ -36,7 +36,7 @@ public sealed class BedrockModelListingTests
     }
 
     [Fact]
-    public async Task DeniedAvailabilityKeepsTheUnfilteredListing()
+    public async Task DeniedAvailabilityFailsTheListing()
     {
         var control = new Control(
             [Model(Nova, "ON_DEMAND"), Model(Opus, "INFERENCE_PROFILE")],
@@ -45,7 +45,8 @@ public sealed class BedrockModelListingTests
 
         var logger = new Logger();
 
-        Assert.Equal(new[] { Nova, Opus, "us." + Opus }, await ListAsync(control, logger));
+        var failure = await Assert.ThrowsAsync<LlmProviderException>(() => ListAsync(control, logger));
+        Assert.Equal(HttpStatusCode.Forbidden, failure.StatusCode);
         Assert.Equal([LogLevel.Warning], logger.Levels);
     }
 

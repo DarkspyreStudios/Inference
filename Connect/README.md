@@ -3054,8 +3054,8 @@ models are all not callable. A callable model that supports `ON_DEMAND` is liste
 callable model that supports only `INFERENCE_PROFILE` is not listed by its model ID; it appears
 through the region's system inference profiles that include it, such as `us.` and `global.` profiles.
 The connection's credentials need `bedrock:GetFoundationModelAvailability`. When any availability
-request fails, for example with `AccessDenied`, listing logs one warning and returns every inference
-profile and every foundation model that is not provisioned-only.
+request fails, for example with `AccessDenied`, listing logs one warning and fails with that request's
+error.
 
 Converse also runs on the host-owned managed agent runtime. `AddLlmConnectBedrock()` registers an
 `ILlmAgentClient` for `AwsBedrockConverse`; each model step is one Converse request, and the host runs
