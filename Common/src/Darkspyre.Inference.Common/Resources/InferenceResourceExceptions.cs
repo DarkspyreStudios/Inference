@@ -1,6 +1,6 @@
 namespace Darkspyre.Inference.Common.Resources;
 
-/// <summary>A runtime operation failure with separately portable primitive effect facts.</summary>
+/// <summary>A runtime operation failure with separately portable effect facts.</summary>
 public sealed class InferenceResourceOperationException : Exception
 {
     private object? _cleanupOwner;

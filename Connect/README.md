@@ -187,6 +187,27 @@ This assembly activates no global provider registration and makes no OAuth or en
 Caller workspace storage remains caller-owned. Constructing or serializing a receipt performs no
 upload, polling, materialization, cache creation or tool execution.
 
+## Video bindings
+
+`VideoProviderService` binds the existing Common Video API to explicitly registered transports.
+`AddVideoConnect` registers the family service, not an xAI adapter. The concrete Grok Video adapter
+is not registered. An unregistered transport refuses before credential or resource effects.
+
+The bound facade validates the complete native request, source metadata and known workspace
+incompatibility before credential acquisition. Entered capability and submission bindings carry
+the facade's synchronous retirement fence. The creator detaches that fence after the awaited
+operation and cleanup settle. Selected authorization is composed before Video additional headers;
+a collision with a selected secret header refuses before credential refresh.
+Request timeout validation follows the .NET send-through-headers timer's range; it is not a
+provider limit. Settings and direct binding enforce the same range.
+
+Materialization streams actual downloaded bytes into one caller-owned write handle and commits
+with session selection. It returns the existing resource descriptor. Actual full commit-and-selection
+receipts remain in failure `GeneratedResources` if a later fence or independent download/writer
+cleanup refuses. Image and Video attach those observations through one shared resource helper.
+Only known conflicting session or MIME facts refuse; null metadata and missing MIME parameters
+remain unknown. These source paths do not establish Grok Video entitlement or runtime qualification.
+
 ## Hosted STT bindings
 
 `Darkspyre.Inference.Connect.STT` binds a host-selected `SttConnection` to the Common hosted

@@ -228,7 +228,7 @@ internal sealed class ConnectImageInference : IImageInference, IDisposable, IAsy
         catch (Exception error)
         {
             if (connection.Transport == ImageTransport.XaiImagine) error = XaiImagineImageTransport.SafeFailure(error);
-            System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(ImageResourceOperations.WithGeneratedResources(error, generatedResources));
+            System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(LlmResourcePreparation.WithGeneratedResources(error, generatedResources));
             throw;
         }
         finally { entered?.DetachOperationFence(); }

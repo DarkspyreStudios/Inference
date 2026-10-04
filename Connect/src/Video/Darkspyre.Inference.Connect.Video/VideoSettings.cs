@@ -106,8 +106,8 @@ public sealed class VideoSettings : InferenceSettings<VideoSetupChanges>
         var issues = new List<SetupIssue>();
         if (_endpoint is null || _endpoint.Scheme != Uri.UriSchemeHttps || _endpoint.UserInfo.Length > 0 || _endpoint.Query.Length > 0 || _endpoint.Fragment.Length > 0)
             issues.Add(new("endpoint-invalid", "Use an explicit HTTPS endpoint without user information, query or fragment.", "endpoint"));
-        if (_timeout is null or < 1 || _timeout > TimeSpan.MaxValue.Ticks / TimeSpan.TicksPerSecond)
-            issues.Add(new("timeout-invalid", "Use a positive representable timeout in seconds.", "timeout"));
+        if (_timeout is null or < 1 || _timeout > (uint.MaxValue - 1) / 1000)
+            issues.Add(new("timeout-invalid", "Use a positive request timeout of at most 4294967 seconds.", "timeout"));
         if (string.IsNullOrWhiteSpace(_selection)) issues.Add(new("selection-required", "Select the protected xAI connection.", "xai-connection"));
         if (_headers.Any(header => string.IsNullOrWhiteSpace(header.Name)) || _headers.Select(header => header.Name).Distinct(StringComparer.OrdinalIgnoreCase).Count() != _headers.Count)
             issues.Add(new("headers-invalid", "HTTP header names must be nonempty and distinct.", "headers"));

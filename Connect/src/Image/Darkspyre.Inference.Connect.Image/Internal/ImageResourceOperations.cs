@@ -84,18 +84,22 @@ internal static class ImageResourceOperations
             };
             if (observed is not null)
             {
-                outcome = observed.CommitOutcome; selectionOutcome = observed.SelectionOutcome;
-                selectionVersion = observed.SelectionVersion; written = observed.BytesTransferred;
                 retained = observed.GeneratedResources;
+                if (result is null)
+                {
+                    outcome = observed.CommitOutcome; selectionOutcome = observed.SelectionOutcome;
+                    selectionVersion = observed.SelectionVersion; written = observed.BytesTransferred;
+                }
             }
         }
+        if (failure is not null) failure = WithReceipts(failure);
         if (writer is not null)
         {
             try { await writer.DisposeAsync().ConfigureAwait(false); }
             catch (Exception cleanup)
             {
-                Exception refused = LlmResourcePreparation.AsCleanupFailure(LlmResourcePreparation.IsCleanupFailure(cleanup)
-                    ? cleanup : Wrap(cleanup, InferenceResourceOperationPhase.Cleanup), reference, writer);
+                Exception refused = WithReceipts(LlmResourcePreparation.AsCleanupFailure(LlmResourcePreparation.IsCleanupFailure(cleanup)
+                    ? cleanup : Wrap(cleanup, InferenceResourceOperationPhase.Cleanup), reference, writer));
                 failure = failure is null ? refused : new AggregateException(failure, refused);
             }
         }
@@ -128,57 +132,20 @@ internal static class ImageResourceOperations
                 : new InferenceResourceOperationException(error is InferenceException provider ? provider.Code : InferenceFailureCode.ExecutionFailed,
                     "The image resource operation failed.", facts, new FailureEvidence(error));
         }
+        Exception WithReceipts(Exception error) => LlmResourcePreparation.WithGeneratedResources(error,
+            result is null ? retained : [result]);
     }
-
-    internal static Exception WithGeneratedResources(Exception error, IReadOnlyList<InferenceResourceCommitResult> previous)
-    {
-        if (previous.Count == 0) return error;
-        if (error is AggregateException aggregate)
-            return new AggregateException("The image operation and cleanup failed.", aggregate.InnerExceptions.Select((cause, index) =>
-                index == 0 ? WithGeneratedResources(cause, previous) : cause));
-        InferenceResourceOperationFailure? observed = error switch
-        {
-            InferenceResourceOperationException resource => resource.Failure,
-            InferenceResourceOperationCanceledException canceled => canceled.Failure,
-            _ => null
-        };
-        IReadOnlyList<InferenceResourceCommitResult> current = observed?.GeneratedResources ?? [];
-        IEnumerable<InferenceResourceCommitResult> retained = current.Count >= previous.Count
-            && SameReceipts(current.Take(previous.Count), previous) ? current
-            : previous.Count >= current.Count && SameReceipts(previous.Skip(previous.Count - current.Count), current) ? previous
-            : previous.Concat(current);
-        // Previous commits do not identify a new allocation that failed before it existed.
-        var facts = (observed ?? new(InferenceResourceOperationPhase.Materialize, null,
-            InferenceResourceCommitOutcome.NotAttempted)) with
-        { GeneratedResources = retained.ToArray() };
-        Exception? safeCause = error.InnerException is FailureEvidence or Providers.XaiImagineImageTransport.ImageEvidence ? error : null;
-        Exception failure = error is OperationCanceledException canceledOperation
-            ? new InferenceResourceOperationCanceledException(facts, canceledOperation.CancellationToken,
-                new FailureEvidence(error, safeCause))
-            : new InferenceResourceOperationException(error is InferenceResourceOperationException resourceOperation ? resourceOperation.Code
-                : error is InferenceException inference ? inference.Code : InferenceFailureCode.ExecutionFailed,
-                "The image operation failed after committing resources.", facts,
-                new FailureEvidence(error, safeCause));
-        return facts.Phase == InferenceResourceOperationPhase.Cleanup
-            ? LlmResourcePreparation.AsCleanupFailure(failure, refusedOwner: error) : failure;
-    }
-
-    private static bool SameReceipts(IEnumerable<InferenceResourceCommitResult> left, IEnumerable<InferenceResourceCommitResult> right) =>
-        left.Zip(right).All(pair => pair.First.Resource == pair.Second.Resource
-            && pair.First.Selection!.WorkspaceId == pair.Second.Selection!.WorkspaceId
-            && pair.First.Selection.SessionId == pair.Second.Selection.SessionId
-            && pair.First.Selection.Revision == pair.Second.Selection.Revision
-            && pair.First.Selection.SelectedResources.SequenceEqual(pair.Second.Selection.SelectedResources));
 
     internal static Exception ActualCleanup(Exception error)
     {
         while (true)
         {
+            error = LlmResourcePreparation.CleanupCause(error);
             Exception? original = error.InnerException switch
             {
                 FailureEvidence evidence => evidence.Original,
                 Providers.XaiImagineImageTransport.ImageEvidence evidence => evidence.Original,
-                _ => null
+                _ => error.InnerException
             };
             if (original is InferenceResourceOperationException resource && resource.Failure.Phase == InferenceResourceOperationPhase.Cleanup
                 || original is InferenceResourceOperationCanceledException canceled && canceled.Failure.Phase == InferenceResourceOperationPhase.Cleanup)

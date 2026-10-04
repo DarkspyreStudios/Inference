@@ -343,7 +343,7 @@ public sealed class XaiImagineImageTransport : IImageTransport, IDisposable, IAs
         catch (Exception error)
         {
             if (result is ImagePreparedReference reference)
-                error = ImageResourceOperations.WithGeneratedResources(error, PreparedResources(reference).ToArray());
+                error = LlmResourcePreparation.WithGeneratedResources(error, PreparedResources(reference).ToArray());
             RecordCleanup(error);
             Exception safe = SafeFailure(error);
             ExceptionDispatchInfo.Throw(safe);

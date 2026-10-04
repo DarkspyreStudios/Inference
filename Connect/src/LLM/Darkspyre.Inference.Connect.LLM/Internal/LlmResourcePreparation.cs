@@ -28,6 +28,43 @@ internal sealed class LlmResourcePreparation : IAsyncDisposable
 
     internal static LlmResourcePreparation ForNamedReads() => new();
 
+    internal static Exception WithGeneratedResources(Exception error, IReadOnlyList<InferenceResourceCommitResult> previous)
+    {
+        if (previous.Count == 0) return error;
+        if (error is AggregateException aggregate)
+            return new AggregateException("The operation and cleanup failed.", aggregate.InnerExceptions.Select((cause, index) =>
+                index == 0 ? WithGeneratedResources(cause, previous) : cause));
+        InferenceResourceOperationFailure? observed = error switch
+        {
+            InferenceResourceOperationException resource => resource.Failure,
+            InferenceResourceOperationCanceledException canceled => canceled.Failure,
+            _ => null
+        };
+        IReadOnlyList<InferenceResourceCommitResult> current = observed?.GeneratedResources ?? [];
+        if (current.Count >= previous.Count && SameReceipts(current.Take(previous.Count), previous)) return error;
+        IEnumerable<InferenceResourceCommitResult> retained = previous.Count >= current.Count
+            && SameReceipts(previous.Skip(previous.Count - current.Count), current) ? previous
+            : previous.Concat(current);
+        // Previous commits do not identify a new allocation that failed before it existed.
+        var facts = (observed ?? new(InferenceResourceOperationPhase.Materialize, null,
+            InferenceResourceCommitOutcome.NotAttempted)) with
+        { GeneratedResources = retained.ToArray() };
+        Exception failure = error is OperationCanceledException canceledOperation
+            ? new InferenceResourceOperationCanceledException(facts, canceledOperation.CancellationToken, error)
+            : new InferenceResourceOperationException(error is InferenceResourceOperationException resourceOperation ? resourceOperation.Code
+                : error is InferenceException inference ? inference.Code : InferenceFailureCode.ExecutionFailed,
+                "The operation failed after committing resources.", facts, error);
+        return facts.Phase == InferenceResourceOperationPhase.Cleanup
+            ? AsCleanupFailure(failure, refusedOwner: error) : failure;
+    }
+
+    private static bool SameReceipts(IEnumerable<InferenceResourceCommitResult> left, IEnumerable<InferenceResourceCommitResult> right) =>
+        left.Zip(right).All(pair => pair.First.Resource == pair.Second.Resource
+            && pair.First.Selection!.WorkspaceId == pair.Second.Selection!.WorkspaceId
+            && pair.First.Selection.SessionId == pair.Second.Selection.SessionId
+            && pair.First.Selection.Revision == pair.Second.Selection.Revision
+            && pair.First.Selection.SelectedResources.SequenceEqual(pair.Second.Selection.SelectedResources));
+
     internal static IEnumerable<InferenceResourceReference> NamedReferences(LlmChatRequest request) => References(request).Distinct();
 
     internal static void ValidateNamedReference(InferenceResourceReference reference, IInferenceResourceAccess? access)
@@ -167,6 +204,14 @@ internal sealed class LlmResourcePreparation : IAsyncDisposable
         AggregateException aggregate => aggregate.InnerExceptions.Any(IsCleanupFailure),
         _ => false
     };
+
+    internal static Exception CleanupCause(Exception error)
+    {
+        while (error.InnerException is InferenceResourceOperationException { Failure.Phase: InferenceResourceOperationPhase.Cleanup }
+            or InferenceResourceOperationCanceledException { Failure.Phase: InferenceResourceOperationPhase.Cleanup })
+            error = error.InnerException;
+        return error;
+    }
 
     internal static Exception AsCleanupFailure(Exception cleanup, InferenceResourceReference? reference = null, object? refusedOwner = null)
     {
