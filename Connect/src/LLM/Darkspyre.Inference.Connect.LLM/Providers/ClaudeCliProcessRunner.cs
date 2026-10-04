@@ -1,6 +1,8 @@
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
+using System.Runtime.ExceptionServices;
 using System.Text;
 
 namespace Darkspyre.Inference.Connect.LLM.Providers;
@@ -92,13 +94,16 @@ internal sealed class ClaudeCliProcessRunner(ClaudeCliExits exits) : IClaudeCliR
     /// Ends a process the caller no longer waits for: standard-input EOF and SIGTERM, then at most
     /// <see cref="ClaudeCliExits.Limit"/> before SIGKILL. Output is drained so a full pipe cannot block the exit.
     /// </summary>
+    [SuppressMessage("Design", "CA1031", Justification = "Retirement settles each actual signal, exit, drain and release stage before reporting their failures.")]
     private async Task EndAsync(Process process, Task<string> standardError, CancellationTokenSource errorStop)
     {
+        var failures = new List<Exception>();
         Task output = Task.CompletedTask;
         try
         {
             CloseStandardInput(process);
-            CliProcessTermination.Terminate(process);
+            try { CliProcessTermination.Terminate(process); }
+            catch (Exception error) { failures.Add(error); }
             output = DrainAsync(process.StandardOutput.BaseStream, errorStop.Token);
             await exits.AwaitExitAsync(process).ConfigureAwait(false);
             using var bound = new CancellationTokenSource(CliProcessTermination.ExitBound);
@@ -111,19 +116,28 @@ internal sealed class ClaudeCliProcessRunner(ClaudeCliExits exits) : IClaudeCliR
                 throw new CliProcessDrainException(process.Id);
             }
         }
+        catch (Exception error) { failures.Add(error); }
         finally
         {
-            await errorStop.CancelAsync().ConfigureAwait(false);
-            await output.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
-            await ReleaseAsync(process, standardError, errorStop).ConfigureAwait(false);
+            try { await errorStop.CancelAsync().ConfigureAwait(false); }
+            catch (Exception error) { failures.Add(error); }
+            try { await output.ConfigureAwait(false); }
+            catch (OperationCanceledException) when (errorStop.IsCancellationRequested) { }
+            catch (Exception error) { failures.Add(error); }
+            try { await ReleaseAsync(process, standardError, errorStop).ConfigureAwait(false); }
+            catch (Exception error) { failures.Add(error); }
         }
+        ThrowFailures(failures);
     }
 
+    [SuppressMessage("Design", "CA1031", Justification = "Pipe and process release failures remain visible without skipping independent cleanup.")]
     private static async Task ReleaseAsync(Process process, Task<string> standardError, CancellationTokenSource errorStop)
     {
+        var failures = new List<Exception>();
         try
         {
-            await errorStop.CancelAsync().ConfigureAwait(false);
+            try { await errorStop.CancelAsync().ConfigureAwait(false); }
+            catch (Exception error) { failures.Add(error); }
             try
             {
                 await standardError.WaitAsync(CliProcessTermination.ExitBound, CancellationToken.None).ConfigureAwait(false);
@@ -133,11 +147,22 @@ internal sealed class ClaudeCliProcessRunner(ClaudeCliExits exits) : IClaudeCliR
                 // Retirement cancels a pipe reader after the owned process exits.
             }
         }
+        catch (Exception error) { failures.Add(error); }
         finally
         {
-            process.Dispose();
+            try { process.Dispose(); }
+            catch (Exception error) { failures.Add(error); }
             errorStop.Dispose();
         }
+        ThrowFailures(failures);
+    }
+
+    private static void ThrowFailures(List<Exception> failures)
+    {
+        Exception[] unique = new AggregateException(failures).Flatten().InnerExceptions
+            .Distinct<Exception>(ReferenceEqualityComparer.Instance).ToArray();
+        if (unique.Length == 1) ExceptionDispatchInfo.Throw(unique[0]);
+        if (unique.Length > 1) throw new AggregateException(unique);
     }
 
     /// <summary>Reports a standard-error failure in place of the cancellation it caused.</summary>

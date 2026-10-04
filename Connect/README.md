@@ -1508,6 +1508,11 @@ drains the process's output and reaps it, and logs any failure. The `ClaudeCliEx
 background exits; disposing the service provider waits for all of them, so host shutdown takes up to
 30 seconds plus the 5-second kill bound for a Claude CLI that ignores EOF and `SIGTERM`. On Windows a
 Claude CLI receives no `SIGTERM`, so a one-shot run ends on its own or at the limit.
+The exit owner retains actual background failures after logging them and reports them on disposal,
+including repeated disposal. Successful exits leave no retained outcome. A refused warning does not
+skip forced termination. Failed group signals remain failures even if killing the root succeeds;
+the existing bounded exit wait still runs. Independent signal, exit, pipe-drain and release failures
+remain visible together. Cancelling an owned pipe drain during retirement is not a failed drain.
 
 After a kill, Connect waits at most 5 seconds for the runtime to report the exit. When the bound
 expires, the operation fails with a message that names the process ID:

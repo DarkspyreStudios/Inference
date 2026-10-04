@@ -1,5 +1,7 @@
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
+using System.Runtime.ExceptionServices;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 
@@ -43,48 +45,44 @@ internal static partial class CliProcessTermination
     /// <summary>Sends SIGKILL to the process group (Unix) or kills the process tree (Windows). Does not wait.</summary>
     /// <remarks>
     /// An exited process is not signalled, because its reaped process ID may later name another process group.
-    /// When the group cannot be signalled for a reason other than its absence, only the root process is killed.
+    /// When the group cannot be signalled for a reason other than its absence, the root is killed and the group
+    /// failure remains visible. An operating-system error is not proof that the process has exited.
     /// </remarks>
     public static void Signal(Process process)
     {
         ArgumentNullException.ThrowIfNull(process);
-        try
+        if (process.HasExited) return;
+        if (OperatingSystem.IsWindows())
         {
-            if (process.HasExited)
+            try { process.Kill(entireProcessTree: true); }
+            catch (InvalidOperationException) when (process.HasExited)
             {
-                return;
+                // The process exited between the state check and the kill.
             }
-
-            if (OperatingSystem.IsWindows())
-            {
-                // Windows kills trees through job objects and has no SIGCHLD reaper.
-                process.Kill(entireProcessTree: true);
-                return;
-            }
-
-            if (kill(-process.Id, SigKill) == 0 || Marshal.GetLastPInvokeError() == NoSuchProcess)
-            {
-                return;
-            }
-
-            // A member that changed user returns EPERM. The root still receives SIGKILL alone.
-            process.Kill();
+            return;
         }
-        catch (InvalidOperationException)
+
+        if (kill(-process.Id, SigKill) == 0) return;
+        int nativeError = Marshal.GetLastPInvokeError();
+        if (nativeError == NoSuchProcess) return;
+        var groupFailure = new Win32Exception(nativeError);
+
+        // Preserve a failed group signal even when killing the root succeeds.
+        try { process.Kill(); }
+        catch (InvalidOperationException) when (process.HasExited)
         {
             // The process exited between the state check and the kill.
         }
-        catch (Win32Exception)
-        {
-            // The operating system has already torn down the process.
-        }
+        catch (Exception error) when (error is InvalidOperationException or Win32Exception)
+        { throw new AggregateException(groupFailure, error); }
+        throw groupFailure;
     }
 
     /// <summary>Sends SIGTERM, then SIGCONT, to the process group (Unix). Does not wait.</summary>
     /// <remarks>
     /// SIGCONT lets a stopped member act on its pending SIGTERM. An exited process is not signalled. When the group
-    /// cannot be signalled for a reason other than its absence, only the root process is signalled. Windows has no
-    /// SIGTERM, so this does nothing there.
+    /// cannot be signalled for a reason other than its absence, the root is signalled and the group failure remains
+    /// visible. Windows has no SIGTERM, so this does nothing there.
     /// </remarks>
     public static void Terminate(Process process)
     {
@@ -94,40 +92,43 @@ internal static partial class CliProcessTermination
             return;
         }
 
-        try
-        {
-            if (process.HasExited)
-            {
-                return;
-            }
+        if (process.HasExited) return;
 
-            int target = -process.Id;
+        var failures = new List<Exception>();
+        int target = -process.Id;
+        if (kill(target, SigTerm) != 0)
+        {
+            int nativeError = Marshal.GetLastPInvokeError();
+            if (nativeError == NoSuchProcess) return;
+            failures.Add(new Win32Exception(nativeError));
+            target = process.Id;
             if (kill(target, SigTerm) != 0)
             {
-                if (Marshal.GetLastPInvokeError() == NoSuchProcess)
-                {
-                    return;
-                }
-
-                // A member that changed user returns EPERM. The root still receives the signals alone.
-                target = process.Id;
-                _ = kill(target, SigTerm);
+                nativeError = Marshal.GetLastPInvokeError();
+                if (nativeError != NoSuchProcess) failures.Add(new Win32Exception(nativeError));
             }
-
-            _ = kill(target, SigCont);
         }
-        catch (InvalidOperationException)
+        if (kill(target, SigCont) != 0)
         {
-            // The process exited between the state check and the signal.
+            int nativeError = Marshal.GetLastPInvokeError();
+            if (nativeError != NoSuchProcess) failures.Add(new Win32Exception(nativeError));
         }
+        if (failures.Count == 1) ExceptionDispatchInfo.Throw(failures[0]);
+        if (failures.Count > 1) throw new AggregateException(failures);
     }
 
     /// <summary>Signals the process, then waits at most <see cref="ExitBound"/> for its exit.</summary>
     /// <exception cref="CliProcessTerminationException">The process was not reported as exited in time.</exception>
-    public static Task KillAsync(Process process)
+    [SuppressMessage("Design", "CA1031", Justification = "A failed signal does not skip the bounded exit wait; both actual failures remain visible.")]
+    public static async Task KillAsync(Process process)
     {
-        Signal(process);
-        return WaitForExitAsync(process);
+        Exception? signalFailure = null;
+        try { Signal(process); }
+        catch (Exception error) { signalFailure = error; }
+        try { await WaitForExitAsync(process).ConfigureAwait(false); }
+        catch (Exception error) when (signalFailure is not null)
+        { throw new AggregateException(signalFailure, error); }
+        if (signalFailure is not null) ExceptionDispatchInfo.Throw(signalFailure);
     }
 
     /// <summary>Waits at most <see cref="ExitBound"/> for a process that was already signalled.</summary>

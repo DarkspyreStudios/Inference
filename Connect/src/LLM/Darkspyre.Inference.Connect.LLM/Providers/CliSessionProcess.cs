@@ -170,10 +170,18 @@ internal sealed class CliSessionProcess : IAsyncDisposable
                 using var grace = new CancellationTokenSource(GracefulExit);
                 try
                 {
-                    if (_standardError.IsFaulted) CliProcessTermination.Signal(_process);
+                    if (_standardError.IsFaulted)
+                    {
+                        try { CliProcessTermination.Signal(_process); }
+                        catch (Exception error) { failures.Add(error); }
+                    }
                     else await _process.WaitForExitAsync(grace.Token).ConfigureAwait(false);
                 }
-                catch (OperationCanceledException) when (grace.IsCancellationRequested) { CliProcessTermination.Signal(_process); }
+                catch (OperationCanceledException) when (grace.IsCancellationRequested)
+                {
+                    try { CliProcessTermination.Signal(_process); }
+                    catch (Exception error) { failures.Add(error); }
+                }
             }
             // Both exit and pipe EOF must settle in the same post-signal bound.
             using var bound = new CancellationTokenSource(CliProcessTermination.ExitBound);
@@ -195,7 +203,9 @@ internal sealed class CliSessionProcess : IAsyncDisposable
                 _ = _standardError.ContinueWith(static task => _ = task.Exception, CancellationToken.None,
                     TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
             }
-            await output.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+            try { await output.ConfigureAwait(false); }
+            catch (OperationCanceledException) when (_errorRead.IsCancellationRequested) { }
+            catch (Exception error) { failures.Add(error); }
             _writeLock.Dispose();
             _readLock.Dispose();
             _standardOutput.ReleaseBufferedText();
