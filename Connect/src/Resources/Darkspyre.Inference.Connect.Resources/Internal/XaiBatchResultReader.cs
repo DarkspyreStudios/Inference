@@ -110,18 +110,23 @@ internal sealed class XaiBatchResultReader(HttpClient http, LlmConnection connec
 
     private async Task<LlmBatchImageResult> ReadImageAsync(string id, JsonElement body, CancellationToken token)
     {
-        XaiImageResult decoded = XaiImageProtocol.Parse(body.GetRawText(), Protected, fence,
-            limits.MaximumInlineImageBytes, limits.MaximumInlineResultBytes - _inlineImageBytes);
-        foreach (XaiImageArtifact image in decoded.Images) _inlineImageBytes = checked(_inlineImageBytes + image.Data.Length);
+        XaiImageResult decoded = XaiImageProtocol.Parse(body.GetRawText(), Protected, fence);
+        long measured = _inlineImageBytes;
+        foreach (XaiImageSource image in decoded.Images)
+            if (image.Base64 is { } encoded)
+            {
+                int bytes = XaiImageProtocol.MeasureBase64(encoded);
+                if (bytes > limits.MaximumInlineImageBytes || bytes > limits.MaximumInlineResultBytes - measured) throw TooLarge();
+                measured = checked(measured + bytes);
+            }
         var provenance = Provenance(decoded.ModelId);
         GeneratedImage[] generated = decoded.Images.Select(image =>
         {
-            JsonElement file = Property(image.ProviderState, "file_output");
             return new GeneratedImage
             {
                 ContentType = image.ContentType,
-                Data = image.Data,
-                File = Present(file) == 1 ? new(RequiredString(file, "file_id")) : null,
+                Data = ReadOnlyMemory<byte>.Empty,
+                File = image.FileId is { } fileId ? new(fileId) : null,
                 Width = image.Width,
                 Height = image.Height
             };
@@ -131,12 +136,10 @@ internal sealed class XaiBatchResultReader(HttpClient http, LlmConnection connec
         InferenceResourceSelectionVersion scope = await ScopeAsync(token).ConfigureAwait(false);
         for (int outputIndex = 0; outputIndex < decoded.Images.Count; outputIndex++)
         {
-            XaiImageArtifact image = decoded.Images[outputIndex];
+            XaiImageSource image = decoded.Images[outputIndex];
             fence();
             (ReadOnlyMemory<byte> bytes, string? contentType) = await ImageDataAsync(image, token).ConfigureAwait(false);
-            JsonElement file = Property(image.ProviderState, "file_output");
-            string? name = Present(file) == 1 ? RequiredString(file, "filename") : null;
-            var writer = new XaiGeneratedFileWriter(resources!, scope, name, fence, observation, receipt =>
+            var writer = new XaiGeneratedFileWriter(resources!, scope, image.FileName, fence, observation, receipt =>
             {
                 generated[outputIndex] = generated[outputIndex] with
                 {
@@ -154,26 +157,48 @@ internal sealed class XaiBatchResultReader(HttpClient http, LlmConnection connec
         return result;
     }
 
-    private async Task<(ReadOnlyMemory<byte> Bytes, string? ContentType)> ImageDataAsync(XaiImageArtifact image, CancellationToken token)
+    private async Task<(ReadOnlyMemory<byte> Bytes, string? ContentType)> ImageDataAsync(XaiImageSource image, CancellationToken token)
     {
-        if (!image.Data.IsEmpty) return (image.Data, image.ContentType);
-        if (image.Url is null) throw XaiMediaData.Malformed();
         long maximum = Math.Min(limits.MaximumInlineImageBytes, limits.MaximumInlineResultBytes - _inlineImageBytes);
         if (maximum <= 0) throw TooLarge();
+        if (image.Base64 is { } encoded)
+        {
+            int length = XaiImageProtocol.MeasureBase64(encoded);
+            if (length > maximum) throw TooLarge();
+            byte[] inline = XaiImageProtocol.DecodeBase64(encoded, length);
+            _inlineImageBytes = checked(_inlineImageBytes + length);
+            return (inline, image.ContentType);
+        }
         using var buffer = new BoundedPageBuffer(maximum);
         string? receivedType = null;
-        observation.BeginStage("GET unsigned image");
-        await core.RunXaiMediaSnapshotAsync(connection, fence, (media, ownerFence, current) =>
-            media.DownloadToAsync(image.Url, ProviderHttp.GenerationTimeout, (mime, length, bodyToken) =>
+        Task<Stream> Open(string? mime, long? length, CancellationToken bodyToken)
+        {
+            bodyToken.ThrowIfCancellationRequested();
+            fence();
+            if (length > maximum) throw TooLarge();
+            if (mime is not null && image.ContentType is not null && mime != image.ContentType) throw XaiMediaData.Malformed();
+            receivedType = mime;
+            return Task.FromResult<Stream>(buffer);
+        }
+        if (image.FileId is { } fileId)
+        {
+            observation.BeginStage("GET generated image file");
+            await files.DownloadToAsync(connection, fileId, Open, fence,
+                () => observation.RequestDispatched = true,
+                response => observation.ObserveResponse(response, connection), token).ConfigureAwait(false);
+        }
+        else if (image.Url is { } url)
+        {
+            observation.BeginStage("GET unsigned image");
+            await core.RunXaiMediaSnapshotAsync(connection, fence, (media, ownerFence, current) =>
+                media.DownloadToAsync(url, ProviderHttp.GenerationTimeout, (mime, length, bodyToken) =>
             {
-                bodyToken.ThrowIfCancellationRequested();
                 ownerFence();
-                if (length > maximum) throw TooLarge();
-                if (mime is not null && image.ContentType is not null && mime != image.ContentType) throw XaiMediaData.Malformed();
-                receivedType = mime;
-                return Task.FromResult<Stream>(buffer);
+                return Open(mime, length, bodyToken);
             }, ownerFence, () => observation.RequestDispatched = true,
                 response => observation.ObserveResponse(response, connection), current), token).ConfigureAwait(false);
+        }
+        else throw XaiMediaData.Malformed();
         fence();
         if (buffer.Length == 0) throw XaiMediaData.Malformed();
         byte[] bytes = buffer.ToArray();

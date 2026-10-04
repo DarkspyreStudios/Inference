@@ -1,3 +1,4 @@
+using System.Buffers.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Darkspyre.Inference.Common.Image;
@@ -164,15 +165,13 @@ internal static class XaiImageProtocol
             }
     }
 
-    internal static XaiImageResult Parse(string body, Func<string, bool> protectedValue, Action fence,
-        long maximumImageBytes = long.MaxValue, long maximumTotalBytes = long.MaxValue)
+    internal static XaiImageResult Parse(string body, Func<string, bool> protectedValue, Action fence)
     {
         using JsonDocument document = JsonDocument.Parse(body);
         JsonElement root = document.RootElement;
         if (root.ValueKind != JsonValueKind.Object || !root.TryGetProperty("data", out JsonElement data)
             || data.ValueKind != JsonValueKind.Array || data.GetArrayLength() is < 1 or > 10) throw XaiMediaData.Malformed();
-        var images = new List<XaiImageArtifact>();
-        long totalBytes = 0;
+        var images = new List<XaiImageSource>();
         foreach (JsonElement row in data.EnumerateArray())
         {
             fence();
@@ -180,19 +179,17 @@ internal static class XaiImageProtocol
             string? url = XaiMediaData.OptionalString(row, "url", protectedValue);
             if (url is not null) XaiMediaData.RequireHttpUrl(url);
             string? encoded = XaiMediaData.OptionalString(row, "b64_json", static _ => false);
-            byte[] bytes = [];
-            if (encoded is not null)
-            {
-                bytes = DecodeBase64(encoded, maximumImageBytes, maximumTotalBytes - totalBytes);
-                totalBytes += bytes.LongLength;
-            }
-            else if (url is null) throw XaiMediaData.Malformed();
             string? contentType = XaiMediaData.OptionalString(row, "mime_type", protectedValue);
             JsonObject? file = XaiMediaData.FileOutput(row, protectedValue);
+            string? fileId = file?["file_id"]?.GetValue<string>();
+            string? fileName = file?["filename"]?.GetValue<string>();
+            if (fileId is not null) XaiFileRequestData.Identity(fileId);
+            if (encoded is null && url is null && fileId is null) throw XaiMediaData.Malformed();
             var state = new JsonObject();
             if (file is not null) state["file_output"] = file;
             if (XaiMediaData.OptionalString(row, "storage_error", protectedValue) is not null) state["storage_failed"] = true;
-            images.Add(new(bytes, contentType, XaiMediaData.Element(state), Dimension(row, "width"), Dimension(row, "height"), url));
+            images.Add(new(encoded, url, fileId, fileName, contentType,
+                XaiMediaData.Element(state), Dimension(row, "width"), Dimension(row, "height")));
         }
         string? model = XaiMediaData.OptionalString(root, "model", protectedValue);
         JsonElement? usage = XaiMediaData.Usage(root);
@@ -200,24 +197,18 @@ internal static class XaiImageProtocol
         return new(images.AsReadOnly(), model, usage);
     }
 
-    private static byte[] DecodeBase64(string encoded, long maximumImageBytes, long maximumTotalBytes)
+    internal static int MeasureBase64(string encoded)
     {
-        long encodedCharacters = encoded.Count(character => !char.IsWhiteSpace(character));
-        int padding = 0;
-        for (int index = encoded.Length - 1; index >= 0 && padding < 2; index--)
-        {
-            if (char.IsWhiteSpace(encoded[index])) continue;
-            if (encoded[index] != '=') break;
-            padding++;
-        }
-        long expectedBytes = encodedCharacters / 4 * 3 - padding;
-        if (encodedCharacters % 4 != 0 || expectedBytes <= 0) throw XaiMediaData.Malformed();
-        if (expectedBytes > maximumImageBytes || expectedBytes > maximumTotalBytes)
-            throw new ArgumentException("Inline images exceed the admitted retention limit.");
-        byte[] bytes;
-        try { bytes = Convert.FromBase64String(encoded); }
-        catch (FormatException) { throw XaiMediaData.Malformed(); }
-        if (bytes.LongLength != expectedBytes) throw XaiMediaData.Malformed();
+        if (!Base64.IsValid(encoded.AsSpan(), out int length) || length == 0) throw XaiMediaData.Malformed();
+        return length;
+    }
+
+    internal static byte[] DecodeBase64(string encoded, int measuredLength)
+    {
+        if (MeasureBase64(encoded) != measuredLength) throw XaiMediaData.Malformed();
+        var bytes = new byte[measuredLength];
+        if (!Convert.TryFromBase64Chars(encoded.AsSpan(), bytes, out int written) || written != measuredLength)
+            throw XaiMediaData.Malformed();
         return bytes;
     }
 
@@ -229,13 +220,13 @@ internal static class XaiImageProtocol
     }
 }
 
-internal sealed record XaiImageArtifact(ReadOnlyMemory<byte> Data, string? ContentType, JsonElement ProviderState,
-    int? Width = null, int? Height = null, string? Url = null)
+internal sealed record XaiImageSource(string? Base64, string? Url, string? FileId, string? FileName,
+    string? ContentType, JsonElement ProviderState, int? Width = null, int? Height = null)
 {
-    public override string ToString() => "XaiImageArtifact { <artifact> }";
+    public override string ToString() => "XaiImageSource { <source> }";
 }
 
-internal sealed record XaiImageResult(IReadOnlyList<XaiImageArtifact> Images, string? ModelId, JsonElement? Usage)
+internal sealed record XaiImageResult(IReadOnlyList<XaiImageSource> Images, string? ModelId, JsonElement? Usage)
 {
     public override string ToString() => "XaiImageResult { <observation> }";
 }

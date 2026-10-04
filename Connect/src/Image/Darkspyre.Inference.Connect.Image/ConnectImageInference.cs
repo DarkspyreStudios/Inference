@@ -7,6 +7,7 @@ using Darkspyre.Inference.Common.Resources;
 using Darkspyre.Inference.Connect.LLM;
 using Darkspyre.Inference.Connect.LLM.Internal;
 using Darkspyre.Inference.Connect.Image.Internal;
+using Darkspyre.Inference.Connect.Image.Providers;
 
 namespace Darkspyre.Inference.Connect.Image;
 
@@ -69,6 +70,9 @@ internal sealed class ConnectImageInference : IImageInference, IDisposable, IAsy
         ImageWorkflow workflow = _workflow!;
         ImageConnection connection = CaptureConnection(_connection!);
         XaiFamilyBinding? xai = _xai;
+        XaiFamilyBinding? entered = null;
+        try
+        {
         IInferenceResourceAccess? resources = _resources;
         InferenceMediaSource[] references = request.References.Select(source => source is BinaryMediaSource binary
             ? binary with { Data = binary.Data.ToArray() } : source).ToArray();
@@ -89,11 +93,15 @@ internal sealed class ConnectImageInference : IImageInference, IDisposable, IAsy
             throw new InferenceException(InferenceFailureCode.UnsupportedFeature, "The workflow requires a reference image.");
         if (xai is not null)
         {
+            XaiImagineImageTransport.ValidateConnection(connection, xai);
+            XaiImageProtocol.Validate(request with { References = references }, workflow);
+            foreach (InferenceMediaSource source in references) XaiImagineImageTransport.ValidateSource(source, resources);
             xai = await xai.AcquireBoundAsync(snapshot =>
             {
                 if (!string.Equals(connection.Endpoint.TrimEnd('/'), snapshot.Endpoint.TrimEnd('/'), StringComparison.Ordinal))
                     throw new ArgumentException("The image endpoint does not match the selected xAI region.");
-            }, lease.Token).ConfigureAwait(false);
+            }, lease.Token, () => Fence(lease.Token)).ConfigureAwait(false);
+            entered = xai;
             Fence(lease.Token);
             connection = connection with { Authorization = xai.Authorization };
         }
@@ -164,7 +172,11 @@ internal sealed class ConnectImageInference : IImageInference, IDisposable, IAsy
                             }
                             Fence(lease.Token);
                             images.Add(new GeneratedImage
-                            { ContentType = contentType, Data = bytes, Seed = seed, File = output.File, Resource = resource, Selection = selection });
+                            {
+                                ContentType = contentType, Data = bytes, Seed = seed, File = output.File, Resource = resource, Selection = selection,
+                                Width = connection.Transport == ImageTransport.XaiImagine ? OutputDimension(output, "width") : null,
+                                Height = connection.Transport == ImageTransport.XaiImagine ? OutputDimension(output, "height") : null
+                            });
                         }
                         Fence(lease.Token);
                         progress?.Report(new(ImageGenerationStage.Completed));
@@ -200,7 +212,13 @@ internal sealed class ConnectImageInference : IImageInference, IDisposable, IAsy
             catch (Exception cleanup) when (cleanup is not OutOfMemoryException) { throw new AggregateException(error, cleanup); }
             throw;
         }
+        }
+        finally { entered?.DetachOperationFence(); }
     }
+
+    private static int? OutputDimension(ImageTransportOutput output, string name) =>
+        output.ProviderState.TryGetProperty(name, out System.Text.Json.JsonElement value)
+            && value.ValueKind == System.Text.Json.JsonValueKind.Number && value.TryGetInt32(out int observed) ? observed : null;
 
     private static void ValidateCapabilities(ImageGenerationRequest request, InferenceMediaSource[] references, ImageCapabilities capabilities)
     {

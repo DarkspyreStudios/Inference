@@ -18,7 +18,8 @@ internal sealed class XaiFileClient(HttpClient http) : IDisposable, IAsyncDispos
     internal async Task<LlmProviderFile> UploadAsync(LlmConnection connection, Stream source, string fileName,
         LlmFileUploadOptions? options, Action fence, CancellationToken cancellationToken,
         Action? onDispatched = null, Action<LlmProviderFile>? onObserved = null,
-        IReadOnlyList<string>? secretContext = null, Action<HttpResponseMessage>? onResponse = null)
+        IReadOnlyList<string>? secretContext = null, Action<HttpResponseMessage>? onResponse = null,
+        TimeSpan? requestTimeout = null)
     {
         using LlmOperationLifetime.Lease operation = _lifetime.Enter(cancellationToken);
         cancellationToken = operation.Token;
@@ -44,7 +45,7 @@ internal sealed class XaiFileClient(HttpClient http) : IDisposable, IAsyncDispos
                 LlmProviderFile observed = ReadFile(root);
                 onObserved?.Invoke(observed);
                 return observed;
-            }, fence, cancellationToken, secretContext), fence, cancellationToken, onDispatched, onResponse).ConfigureAwait(false);
+            }, fence, cancellationToken, secretContext), fence, cancellationToken, onDispatched, onResponse, requestTimeout).ConfigureAwait(false);
             return consumption.Publish(result);
         }
         finally { upload?.DetachBorrowed(); }
@@ -63,8 +64,9 @@ internal sealed class XaiFileClient(HttpClient http) : IDisposable, IAsyncDispos
         }, fence, cancellationToken);
     }
 
-    internal Task<LlmProviderFile> GetAsync(LlmConnection connection, string fileId, Action fence, CancellationToken cancellationToken) =>
-        JsonAsync(connection, HttpMethod.Get, XaiFileRequestData.Path(fileId), null, ReadFile, fence, cancellationToken);
+    internal Task<LlmProviderFile> GetAsync(LlmConnection connection, string fileId, Action fence, CancellationToken cancellationToken,
+        TimeSpan? requestTimeout = null) =>
+        JsonAsync(connection, HttpMethod.Get, XaiFileRequestData.Path(fileId), null, ReadFile, fence, cancellationToken, requestTimeout);
 
     internal Task<LlmFileDeletion> DeleteAsync(LlmConnection connection, string fileId, Action fence, CancellationToken cancellationToken) =>
         JsonAsync(connection, HttpMethod.Delete, XaiFileRequestData.Path(fileId), null, root =>
@@ -93,13 +95,15 @@ internal sealed class XaiFileClient(HttpClient http) : IDisposable, IAsyncDispos
 
     internal Task<ResourceDownloadReceipt> DownloadToAsync(LlmConnection connection, string fileId,
         Func<string?, long?, CancellationToken, Task<Stream>> openDestination, Action fence,
-        Action onDispatched, Action<HttpResponseMessage> onResponse, CancellationToken cancellationToken)
+        Action onDispatched, Action<HttpResponseMessage> onResponse, CancellationToken cancellationToken,
+        TimeSpan? requestTimeout = null)
         => DownloadCoreAsync(connection, () => XaiFileRequestData.DownloadPath(fileId, null),
-            openDestination, fence, cancellationToken, onDispatched, onResponse);
+            openDestination, fence, cancellationToken, onDispatched, onResponse, requestTimeout);
 
     private async Task<ResourceDownloadReceipt> DownloadCoreAsync(LlmConnection connection, Func<string> pathFactory,
         Func<string?, long?, CancellationToken, Task<Stream>> openDestination, Action fence,
-        CancellationToken cancellationToken, Action? onDispatched = null, Action<HttpResponseMessage>? onResponse = null)
+        CancellationToken cancellationToken, Action? onDispatched = null, Action<HttpResponseMessage>? onResponse = null,
+        TimeSpan? requestTimeout = null)
     {
         using LlmOperationLifetime.Lease operation = _lifetime.Enter(cancellationToken);
         cancellationToken = operation.Token;
@@ -131,12 +135,12 @@ internal sealed class XaiFileClient(HttpClient http) : IDisposable, IAsyncDispos
             Check(fence, cancellationToken);
             if (declaredLength is { } declared && written < declared) throw Invalid();
             return new ResourceDownloadReceipt(written, contentType, declaredLength);
-        }, fence, cancellationToken, onDispatched, onResponse).ConfigureAwait(false);
+        }, fence, cancellationToken, onDispatched, onResponse, requestTimeout).ConfigureAwait(false);
         return consumption.Publish(result);
     }
 
     private async Task<T> JsonAsync<T>(LlmConnection connection, HttpMethod method, string path, string? body,
-        Func<JsonElement, T> parse, Action fence, CancellationToken cancellationToken)
+        Func<JsonElement, T> parse, Action fence, CancellationToken cancellationToken, TimeSpan? requestTimeout = null)
     {
         using LlmOperationLifetime.Lease operation = _lifetime.Enter(cancellationToken);
         cancellationToken = operation.Token;
@@ -148,13 +152,14 @@ internal sealed class XaiFileClient(HttpClient http) : IDisposable, IAsyncDispos
         T result = await ExchangeAsync(connection, method, path, request =>
         {
             if (body is not null) request.Content = new StringContent(body, Encoding.UTF8, "application/json");
-        }, response => ReadAsync(connection, response, parse, fence, cancellationToken), fence, cancellationToken).ConfigureAwait(false);
+        }, response => ReadAsync(connection, response, parse, fence, cancellationToken), fence, cancellationToken,
+            requestTimeout: requestTimeout).ConfigureAwait(false);
         return consumption.Publish(result);
     }
 
     private async Task<T> ExchangeAsync<T>(LlmConnection connection, HttpMethod method, string path,
         Action<HttpRequestMessage> configure, Func<HttpResponseMessage, Task<T>> read, Action fence, CancellationToken token,
-        Action? onDispatched = null, Action<HttpResponseMessage>? onResponse = null)
+        Action? onDispatched = null, Action<HttpResponseMessage>? onResponse = null, TimeSpan? requestTimeout = null)
     {
         HttpRequestMessage? request = null;
         HttpResponseMessage? response = null;
@@ -168,7 +173,11 @@ internal sealed class XaiFileClient(HttpClient http) : IDisposable, IAsyncDispos
             Check(fence, token);
             // The internal sink records possible effects at the same boundary as SendAsync.
             onDispatched?.Invoke();
-            response = await _http!.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token).ConfigureAwait(false);
+            using (var headers = CancellationTokenSource.CreateLinkedTokenSource(token))
+            {
+                headers.CancelAfter(requestTimeout ?? Timeout.InfiniteTimeSpan);
+                response = await _http!.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, headers.Token).ConfigureAwait(false);
+            }
             onResponse?.Invoke(response);
             Check(fence, token);
             result = await read(response).ConfigureAwait(false);

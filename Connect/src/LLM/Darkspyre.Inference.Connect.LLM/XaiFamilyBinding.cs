@@ -12,6 +12,7 @@ public sealed class XaiFamilyBinding
     private readonly LlmConnectionAccess _access;
     private readonly LlmProviderService? _service;
     private readonly LlmConnection? _snapshot;
+    private Action? _operationFence;
 
     public XaiFamilyBinding(XaiConnectionSelection selection, LlmConnectionAccess access,
         LlmProviderService? providerService = null)
@@ -25,12 +26,15 @@ public sealed class XaiFamilyBinding
         Authorization = new BindingAuthorization(this);
     }
 
-    private XaiFamilyBinding(XaiFamilyBinding source, LlmConnection snapshot)
+    private XaiFamilyBinding(XaiFamilyBinding source, LlmConnection snapshot, Action? operationFence)
     {
         Selection = source.Selection;
         _access = source._access;
         _service = source._service;
         _snapshot = snapshot;
+        Action? inherited = source._operationFence;
+        _operationFence = inherited is null ? operationFence : operationFence is null ? inherited
+            : () => { inherited(); operationFence(); };
         Authorization = new BindingAuthorization(this);
     }
 
@@ -49,7 +53,7 @@ public sealed class XaiFamilyBinding
         Func<HttpClient, LlmConnection, Action, CancellationToken, Task<T>> operation, CancellationToken token)
     {
         RequireCatalogService();
-        return _service!.RunXaiSnapshotAsync(snapshot, fence, operation, token);
+        return _service!.RunXaiSnapshotAsync(snapshot, CombineFence(fence), operation, token);
     }
 
     internal Task<IReadOnlyList<LlmModel>> GetModelsAsync(LlmConnection snapshot, Internal.ModelCatalogFamily family,
@@ -59,29 +63,50 @@ public sealed class XaiFamilyBinding
         ArgumentNullException.ThrowIfNull(callerFence);
         cancellationToken.ThrowIfCancellationRequested();
         RequireCatalogService();
-        return _service!.GetXaiCatalogSnapshotAsync(Selection.ConnectionId, snapshot, family, callerFence, cancellationToken);
+        return _service!.GetXaiCatalogSnapshotAsync(Selection.ConnectionId, snapshot, family, CombineFence(callerFence), cancellationToken);
     }
 
     internal Task<T> RunFilesAsync<T>(LlmConnection snapshot, Action fence,
         Func<Providers.XaiFileClient, LlmConnection, Action, CancellationToken, Task<T>> operation, CancellationToken token)
     {
         RequireCatalogService();
-        return _service!.RunXaiFilesSnapshotAsync(snapshot, fence, operation, token);
+        return _service!.RunXaiFilesSnapshotAsync(snapshot, CombineFence(fence), operation, token);
     }
+
+    internal Task<T> RunMediaAsync<T>(LlmConnection snapshot, Action fence,
+        Func<Providers.XaiMediaDownloadClient, Action, CancellationToken, Task<T>> operation, CancellationToken token)
+    {
+        RequireCatalogService();
+        return _service!.RunXaiMediaSnapshotAsync(snapshot, CombineFence(fence), operation, token);
+    }
+
+    internal void FenceOperation() => _operationFence?.Invoke();
+    internal void DetachOperationFence() => _operationFence = null;
+
+    private Action CombineFence(Action fence) => () => { FenceOperation(); fence(); FenceOperation(); };
 
     public Task<LlmConnection> AcquireAsync(CancellationToken cancellationToken = default)
         => AcquireAsync(null, cancellationToken);
 
     internal async Task<XaiFamilyBinding> AcquireBoundAsync(Action<LlmConnection> validate,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default, Action? operationFence = null)
     {
-        LlmConnection snapshot = await AcquireAsync(validate, cancellationToken).ConfigureAwait(false);
-        return new(this, snapshot);
+        operationFence?.Invoke();
+        LlmConnection snapshot = await AcquireAsync(connection =>
+        {
+            operationFence?.Invoke();
+            validate(connection);
+            operationFence?.Invoke();
+        }, cancellationToken).ConfigureAwait(false);
+        FenceOperation();
+        operationFence?.Invoke();
+        return new(this, snapshot, operationFence);
     }
 
     private Task<LlmConnection> AcquireAsync(Action<LlmConnection>? validate, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        FenceOperation();
         if (_snapshot is not null)
         {
             ValidateConnection(_snapshot);

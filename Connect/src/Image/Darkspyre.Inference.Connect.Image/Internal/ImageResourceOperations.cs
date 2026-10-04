@@ -62,9 +62,9 @@ internal static class ImageResourceOperations
             }
             CheckScope();
             InferenceResourceDescriptor? resource = committed?.Resource;
-            if (resource is null || resource.Reference != reference || resource.SessionId != sessionId
+            if (resource is null || resource.Reference != reference || resource.SessionId is { } reportedSession && reportedSession != sessionId
                 || resource.Bytes is { } size && size != written
-                || resource.ContentType is { } type && type != contentType
+                || resource.ContentType is { } type && contentType is not null && type != contentType
                 || selectionOutcome != InferenceResourceCommitOutcome.Committed) throw Invalid();
             var selection = new InferenceResourceSelection(workspaceId!, sessionId!, committed!.Selection!.Revision, committed.Selection.SelectedResources);
             if (selection.SelectedResources.Any(item => string.IsNullOrEmpty(item.Id))) throw Invalid();
