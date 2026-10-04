@@ -1013,3 +1013,13 @@ model ID. A profile whose models are all uncallable is omitted. Reason: an autho
 Marketplace agreement, and a bare profile-only model ID, both appeared in the list and failed every
 turn with `AccessDeniedException` or a validation error. A failed availability request logs one warning
 and fails the listing with that error. There is no fallback to an unfiltered list (no live users).
+
+## Bedrock model list carries published limits (unreleased)
+
+`BedrockModelResolver.ListAsync` sets `MaxContextTokens` and `MaxOutputTokens` on each listed model from
+`BedrockModelLimits`, keyed by the Anthropic model id of the base model, so a foundation model and its
+inference profiles share one entry. Reason: Bedrock's catalog requests return no sizes, so hosts that read
+the context window from the listing could not compact long Bedrock sessions. The table holds only Claude
+models whose limits Anthropic publishes for Bedrock, each citing its source. Any other model reports
+null limits (unknown); there is no default size. No other Connect source held static Claude limits: the
+Anthropic direct provider reads them from its Models API.

@@ -50,7 +50,40 @@ public sealed class BedrockModelListingTests
         Assert.Equal([LogLevel.Warning], logger.Levels);
     }
 
-    private static async Task<string[]> ListAsync(Control control, Logger? logger = null)
+    [Fact]
+    public async Task ProfileCarriesItsBaseModelLimits()
+    {
+        const string Base = "anthropic.claude-sonnet-4-5-20250929-v1:0";
+        var control = new Control(
+            [Model(Base, "INFERENCE_PROFILE")], [Profile("us." + Base, Base)], availability: _ => Subscribed());
+
+        LlmModel model = Assert.Single(await ListModelsAsync(control));
+        Assert.Equal(("us." + Base, 200_000L, 64_000L), (model.Id, model.MaxContextTokens, model.MaxOutputTokens));
+    }
+
+    [Fact]
+    public async Task FoundationModelCarriesItsLimits()
+    {
+        var control = new Control([Model("anthropic.claude-opus-4-6-v1", "ON_DEMAND")], [], availability: _ => Subscribed());
+
+        LlmModel model = Assert.Single(await ListModelsAsync(control));
+        Assert.Equal((1_000_000L, 128_000L), (model.MaxContextTokens, model.MaxOutputTokens));
+    }
+
+    [Fact]
+    public async Task UnknownModelReportsNoSize()
+    {
+        var control = new Control([Model(Nova, "ON_DEMAND")], [], availability: _ => Subscribed());
+
+        LlmModel model = Assert.Single(await ListModelsAsync(control));
+        Assert.Null(model.MaxContextTokens);
+        Assert.Null(model.MaxOutputTokens);
+    }
+
+    private static async Task<string[]> ListAsync(Control control, Logger? logger = null) =>
+        [.. (await ListModelsAsync(control, logger)).Select(model => model.Id)];
+
+    private static async Task<IReadOnlyList<LlmModel>> ListModelsAsync(Control control, Logger? logger = null)
     {
         await using var factory = new BedrockClientFactory(
             _ => throw new NotSupportedException(),
@@ -68,7 +101,7 @@ public sealed class BedrockModelListingTests
                 Aws = new() { Region = "us-east-1", AccessKeyId = "fixture-key", SecretAccessKey = "fixture-secret" }
             }.Serialize()
         });
-        return [.. models.Select(model => model.Id)];
+        return models;
     }
 
     private static FoundationModelSummary Model(string id, params string[] inferenceTypes) =>

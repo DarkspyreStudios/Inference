@@ -72,6 +72,7 @@ internal sealed class BedrockModelResolver
     /// inference profile appears through the system inference profiles that include it. Models whose
     /// availability check reports no agreement or no authorization are omitted, and so are profiles whose
     /// models are all such models. A failed availability check fails the listing with that request's error.
+    /// Each model carries the context and output limits of its base model from <see cref="BedrockModelLimits"/>.
     /// </summary>
     public static async Task<IReadOnlyList<LlmModel>> ListAsync(
         BedrockClientFactory.Lease<AmazonBedrockClient> control,
@@ -129,10 +130,7 @@ internal sealed class BedrockModelResolver
             {
                 byId.TryAdd(
                     profile.InferenceProfileId,
-                    new LlmModel(
-                        profile.InferenceProfileId,
-                        profile.InferenceProfileName ?? profile.InferenceProfileId,
-                        region));
+                    Listed(profile.InferenceProfileId, profile.InferenceProfileName, region));
             }
         }
 
@@ -143,11 +141,22 @@ internal sealed class BedrockModelResolver
             {
                 byId.TryAdd(
                     model.ModelId,
-                    new LlmModel(model.ModelId, model.ModelName ?? model.ModelId, region));
+                    Listed(model.ModelId, model.ModelName, region));
             }
         }
 
         return [.. byId.Values.OrderBy(model => model.Id, StringComparer.OrdinalIgnoreCase)];
+    }
+
+    /// <summary>A listed model carries its base model's published limits, or none when they are unknown.</summary>
+    private static LlmModel Listed(string id, string? name, string region)
+    {
+        BedrockModelLimit limit = BedrockModelLimits.Get(id);
+        return new LlmModel(id, name ?? id, region)
+        {
+            MaxContextTokens = limit.ContextTokens,
+            MaxOutputTokens = limit.OutputTokens
+        };
     }
 
     /// <summary>

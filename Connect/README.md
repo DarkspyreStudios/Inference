@@ -3060,6 +3060,12 @@ The connection's credentials need `bedrock:GetFoundationModelAvailability`. When
 request fails, for example with `AccessDenied`, listing logs one warning and fails with that request's
 error.
 
+Bedrock's catalog requests report no model sizes. Each listed model carries the context window and
+maximum output of its base model from `BedrockModelLimits`, a table of the limits Anthropic publishes for
+Claude on Bedrock. An inference profile such as `us.anthropic.claude-sonnet-4-5-20250929-v1:0` takes its
+base model's entry. A model that is not in the table, including every non-Claude model and an ARN,
+reports null limits, which mean unknown.
+
 Converse also runs on the host-owned managed agent runtime. `AddLlmConnectBedrock()` registers an
 `ILlmAgentClient` for `AwsBedrockConverse`; each model step is one Converse request, and the host runs
 every tool. Managed Converse sessions take the same options, context and tool output as managed Codex,
