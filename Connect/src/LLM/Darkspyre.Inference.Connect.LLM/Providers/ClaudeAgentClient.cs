@@ -1573,10 +1573,18 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             }
             bool isError = OptionalBoolean(root, "is_error") == true;
             string subtype = OptionalString(root, "subtype") ?? string.Empty;
+            string? stopReason = OptionalString(root, "stop_reason") ?? OptionalString(root, "terminal_reason");
             LlmAgentCompletionReason reason = subtype.Contains("interrupt", StringComparison.OrdinalIgnoreCase)
                 ? LlmAgentCompletionReason.Interruption
-                : isError ? LlmAgentCompletionReason.ProviderFailure : LlmAgentCompletionReason.Completed;
-            Emit(new LlmAgentTurnCompletedEvent(ThreadId, target.Id, reason, isError ? "Claude CLI reported a turn error." : null));
+                : isError ? LlmAgentCompletionReason.ProviderFailure
+                : stopReason == "refusal" ? LlmAgentCompletionReason.Refusal
+                : stopReason is "max_tokens" or "model_context_window_exceeded" ? LlmAgentCompletionReason.Truncation
+                : subtype == "success" && stopReason is null or "end_turn" or "stop_sequence"
+                    ? LlmAgentCompletionReason.Completed : LlmAgentCompletionReason.Unknown;
+            string? error = isError ? "Claude CLI reported a turn error."
+                : reason == LlmAgentCompletionReason.Unknown
+                    ? $"Claude CLI returned result subtype '{subtype}' with stop reason '{stopReason}'." : null;
+            Emit(new LlmAgentTurnCompletedEvent(ThreadId, target.Id, reason, error));
             lock (_route)
             {
                 if (target is HostTurn host)

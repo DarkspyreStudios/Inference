@@ -3523,6 +3523,14 @@ A direct Messages API classifier refusal is an HTTP 200 response with `stop_reas
 
 A refusal can also arrive after partial output. `Text` keeps the streamed partial so the host can log it. That partial is not an answer; hosts branch on `Status`. For subscription prompts, only the CLI's terminal result determines whether the completed request was refused; intermediate fallback attempts do not produce a premature refusal result.
 
+Claude CLI chat and native sessions require a terminal `success` subtype for normal completion.
+A successful result with no model stop reason remains completed without inventing that reason.
+An explicit unknown stop reason, or a missing/unknown result subtype without another classified
+termination, reports `Unknown`. Refusal and token/context-window truncation keep their real terminal
+classification. Native unknown diagnostics retain the observed subtype and stop reason. Existing
+process errors and interruptions retain their precedence; intermediate fallback attempts do not
+classify the completed operation.
+
 ### Structured output
 
 Direct API-key connections use the Models API's `structured_outputs` evidence for native schema and

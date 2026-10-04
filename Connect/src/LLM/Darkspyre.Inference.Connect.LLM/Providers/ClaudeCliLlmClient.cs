@@ -330,7 +330,14 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
             || string.Equals(terminal.TerminalReason, "refusal", StringComparison.OrdinalIgnoreCase)
             || string.Equals(terminal.Subtype, "refusal", StringComparison.OrdinalIgnoreCase);
         bool incomplete = string.Equals(terminal.StopReason, "max_tokens", StringComparison.OrdinalIgnoreCase)
-            || string.Equals(terminal.TerminalReason, "max_tokens", StringComparison.OrdinalIgnoreCase);
+            || string.Equals(terminal.TerminalReason, "max_tokens", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(terminal.StopReason, "model_context_window_exceeded", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(terminal.TerminalReason, "model_context_window_exceeded", StringComparison.OrdinalIgnoreCase);
+        string? finishReason = terminal.StopReason ?? terminal.TerminalReason;
+        bool completed = string.Equals(terminal.Subtype, "success", StringComparison.Ordinal)
+            && (finishReason is null
+                || string.Equals(finishReason, "end_turn", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(finishReason, "stop_sequence", StringComparison.OrdinalIgnoreCase));
         LlmStructuredOutputValidation? validation = request.StructuredOutput is null
             ? null
             : refused
@@ -353,9 +360,9 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
                 ? LlmCompletionStatus.Refused
                 : incomplete
                     ? LlmCompletionStatus.Incomplete
-                    : LlmCompletionStatus.Completed,
-            FinishReason = terminal.StopReason ?? terminal.TerminalReason,
-            IncompleteReason = incomplete ? terminal.StopReason ?? terminal.TerminalReason : null,
+                    : completed ? LlmCompletionStatus.Completed : LlmCompletionStatus.Unknown,
+            FinishReason = finishReason,
+            IncompleteReason = incomplete ? finishReason : null,
             Usage = terminal.Usage,
             ProviderResponseId = terminal.SessionId,
             StructuredOutput = validation,
