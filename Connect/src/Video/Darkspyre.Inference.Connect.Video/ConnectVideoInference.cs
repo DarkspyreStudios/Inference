@@ -408,9 +408,9 @@ internal sealed class ConnectVideoInference : IVideoInference, IDisposable, IAsy
         void Check() { token.ThrowIfCancellationRequested(); fence(); token.ThrowIfCancellationRequested(); }
     }
 
-    private Task<Stream> OpenDownloadAsync(VideoConnection connection, VideoOutput output, XaiFamilyBinding binding, CancellationToken token)
-        => output.Resource is null ? _transport!.DownloadAsync(connection, output, binding, token)
-            : OpenResourceDownloadAsync(output, token);
+    private async Task<Stream> OpenDownloadAsync(VideoConnection connection, VideoOutput output, XaiFamilyBinding binding, CancellationToken token)
+        => await (output.Resource is null ? _transport!.DownloadAsync(connection, output, binding, token)
+            : OpenResourceDownloadAsync(output, token)).ConfigureAwait(false) ?? throw ProtocolFailure();
 
     private async Task<Stream> OpenResourceDownloadAsync(VideoOutput output, CancellationToken token)
     {
