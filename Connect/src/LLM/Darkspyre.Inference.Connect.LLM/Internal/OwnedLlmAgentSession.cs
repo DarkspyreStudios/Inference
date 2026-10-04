@@ -1,5 +1,4 @@
 using System.Diagnostics.CodeAnalysis;
-using System.Runtime.CompilerServices;
 
 namespace Darkspyre.Inference.Connect.LLM.Internal;
 
@@ -89,18 +88,10 @@ internal sealed class OwnedLlmAgentSession : ILlmAgentSession
         operation.Token.ThrowIfCancellationRequested();
     }
 
-    private async IAsyncEnumerable<LlmAgentEvent> StreamAsync(
+    private IAsyncEnumerable<LlmAgentEvent> StreamAsync(
         Func<ILlmAgentSession, CancellationToken, IAsyncEnumerable<LlmAgentEvent>> stream,
-        [EnumeratorCancellation] CancellationToken caller)
-    {
-        using LlmOperationLifetime.Lease operation = Enter(caller);
-        await foreach (LlmAgentEvent item in stream(_session!, operation.Token).WithCancellation(operation.Token).ConfigureAwait(false))
-        {
-            operation.Token.ThrowIfCancellationRequested();
-            yield return item;
-        }
-        operation.Token.ThrowIfCancellationRequested();
-    }
+        CancellationToken caller) =>
+        _lifetime.StreamAsync(token => stream(_session!, token), caller, Enter);
 
     private LlmOperationLifetime.Lease Enter(CancellationToken caller)
     {

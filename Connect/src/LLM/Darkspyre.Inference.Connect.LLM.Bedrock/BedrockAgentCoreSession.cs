@@ -119,12 +119,15 @@ internal sealed class BedrockAgentCoreSession : ILlmAgentSession
         NativeAgentContract.UnsupportedContinuation(cancellationToken);
 
 
-    public async IAsyncEnumerable<LlmAgentEvent> RunTurnAsync(
+    public IAsyncEnumerable<LlmAgentEvent> RunTurnAsync(
+        LlmAgentTurnRequest request, CancellationToken cancellationToken = default) =>
+        _lifetime.StreamAsync(token => ProduceTurnAsync(request, token), cancellationToken);
+
+    private async IAsyncEnumerable<LlmAgentEvent> ProduceTurnAsync(
         LlmAgentTurnRequest request,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        using LlmOperationLifetime.Lease operation = _lifetime.Enter(cancellationToken);
-        CancellationToken token = operation.Token;
+        CancellationToken token = cancellationToken;
         ArgumentNullException.ThrowIfNull(request);
         NativeAgentContract.ValidateTurn(request);
         ValidateTurn(request);
@@ -375,7 +378,7 @@ internal sealed class BedrockAgentCoreSession : ILlmAgentSession
     public async IAsyncEnumerable<LlmAgentEvent> ObserveAsync(
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        using LlmOperationLifetime.Lease operation = _lifetime.Enter(cancellationToken);
+        _lifetime.ThrowIfStopping();
         // Owner retirement closes the feed normally; caller cancellation still cancels its read.
         await foreach (LlmAgentEvent item in _resources.ObserveAsync(cancellationToken))
         {
