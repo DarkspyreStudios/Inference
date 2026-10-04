@@ -16,6 +16,8 @@ public sealed record VideoConnection
     public required VideoTransport Transport { get; init => field = VideoContractData.Defined(value); }
     public required string Endpoint { get; init => field = VideoContractData.Identity(value); }
     public TimeSpan RequestTimeout { get; init; } = TimeSpan.FromMinutes(10);
+    /// <summary>Caller-selected byte limit for encoded supplied reference audio. Binary and workspace audio require a positive value; null supplies no default.</summary>
+    public long? MaximumEncodedReferenceAudioBytes { get; init; }
     public IReadOnlyDictionary<string, string> AdditionalHeaders { get; init => field = VideoContractData.Headers(value); }
         = new ReadOnlyDictionary<string, string>(new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase));
     public IProviderAuthorization? Authorization { get; init; }

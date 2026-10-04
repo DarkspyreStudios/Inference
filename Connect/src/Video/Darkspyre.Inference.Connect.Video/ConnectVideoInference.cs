@@ -303,6 +303,8 @@ internal sealed class ConnectVideoInference : IVideoInference, IDisposable, IAsy
             || !string.IsNullOrEmpty(endpoint.Query) || !string.IsNullOrEmpty(endpoint.Fragment)
             || connection.RequestTimeout <= TimeSpan.Zero || connection.RequestTimeout.TotalMilliseconds > uint.MaxValue - 1)
             throw new ArgumentException("Video requires an explicit HTTPS endpoint and positive request timeout.");
+        if (connection.MaximumEncodedReferenceAudioBytes is <= 0)
+            throw new ArgumentOutOfRangeException(nameof(connection.MaximumEncodedReferenceAudioBytes), "The encoded reference audio limit must be positive when supplied.");
         if (connection.Xai is null || xai is null || connection.Xai != xai.Selection
             || connection.Authorization is not null && !ReferenceEquals(connection.Authorization, xai.Authorization))
             throw new ArgumentException("The selected video connection requires its matching borrowed xAI binding.");
@@ -336,6 +338,10 @@ internal sealed class ConnectVideoInference : IVideoInference, IDisposable, IAsy
         {
             throw new InferenceException(InferenceFailureCode.UnsupportedFeature, "The video request uses an unsupported native control or source.", error);
         }
+        if (request is VideoGenerationRequest { ReferenceAudio: { } audio }
+            && audio.OfType<VideoAudioReference>().Any(reference => reference.Source is BinaryMediaSource or ResourceMediaSource)
+            && _connection!.MaximumEncodedReferenceAudioBytes is not > 0)
+            throw new ArgumentException("Supplied binary or workspace reference audio requires a positive encoded byte limit on the video connection.", nameof(request));
         IEnumerable<InferenceMediaSource?> sources = request switch
         {
             VideoGenerationRequest generation => new[] { generation.FirstFrame, generation.LastFrame }

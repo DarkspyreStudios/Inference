@@ -1758,6 +1758,13 @@ same outcome after drain and borrowed detachment; ordinary operations do not poi
 `VideoJobSnapshot.ModelId` preserves an actual nullable provider model observation through the
 existing Video and nested batch metadata. No requested model or job scope supplies a fallback.
 
+`VideoConnection.MaximumEncodedReferenceAudioBytes` is a nullable caller-selected limit with no
+default. A supplied value must be positive. Submit preflight requires it for binary or workspace
+reference audio before opening content or acquiring credentials. Preset voices and ordinary
+reference URLs do not require it. Video settings preserve the value through load, edit and save;
+the existing connection JSON metadata includes it. This contract does not enable the unfinished
+standalone xAI Video transport or establish enforcement during native data-URL encoding.
+
 `XaiVideoOptions` is the fixed Video-owned subtype for Files-owned storage controls, signed
 upload destinations and explicit user data. Common metadata refuses these provider options;
 `ConnectVideoJson` owns their complete generation/edit/extension and scoped receipt graph.

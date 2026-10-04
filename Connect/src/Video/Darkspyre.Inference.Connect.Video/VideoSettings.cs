@@ -40,6 +40,7 @@ public sealed class VideoSettings : InferenceSettings<VideoSetupChanges>
     private readonly VideoSetupConfiguration _baseline;
     private Uri? _endpoint;
     private long? _timeout;
+    private long? _maximumEncodedReferenceAudioBytes;
     private string _model;
     private string _selection;
     private readonly List<Header> _headers = [];
@@ -57,6 +58,7 @@ public sealed class VideoSettings : InferenceSettings<VideoSetupChanges>
         _baseline = existing ?? new(new() { Transport = transport, Endpoint = "https://api.x.ai/v1" });
         _endpoint = Uri.TryCreate(_baseline.Connection.Endpoint, UriKind.Absolute, out Uri? parsed) ? parsed : null;
         _timeout = (long)_baseline.Connection.RequestTimeout.TotalSeconds;
+        _maximumEncodedReferenceAudioBytes = _baseline.Connection.MaximumEncodedReferenceAudioBytes;
         _model = _baseline.ModelId ?? string.Empty;
         _selection = _baseline.Connection.Xai?.ConnectionId ?? string.Empty;
         foreach ((string name, string value) in _baseline.Connection.AdditionalHeaders) _headers.Add(new(name, value));
@@ -70,6 +72,7 @@ public sealed class VideoSettings : InferenceSettings<VideoSetupChanges>
         Transport = Transport,
         Endpoint = _endpoint!.AbsoluteUri.TrimEnd('/'),
         RequestTimeout = TimeSpan.FromSeconds(_timeout ?? 0),
+        MaximumEncodedReferenceAudioBytes = _maximumEncodedReferenceAudioBytes,
         Xai = new(_selection),
         AdditionalHeaders = _headers.Where(header => header.Value is not null).ToDictionary(header => header.Name, header => header.Value!, StringComparer.OrdinalIgnoreCase)
     };
@@ -82,6 +85,7 @@ public sealed class VideoSettings : InferenceSettings<VideoSetupChanges>
         [
             new SetupUriField(new("endpoint", "Endpoint") { IsRequired = true }, _endpoint, new("https://api.x.ai/v1"), value => Edit(() => _endpoint = value)),
             new SetupIntegerField(new("timeout", "Timeout (seconds)") { IsRequired = true }, _timeout, 600, value => Edit(() => _timeout = value), 1),
+            new SetupIntegerField(new("reference-audio-limit", "Encoded reference audio limit (bytes)"), _maximumEncodedReferenceAudioBytes, null, value => Edit(() => _maximumEncodedReferenceAudioBytes = value), 1),
             new SetupTextField(new("xai-connection", "Protected xAI connection") { IsRequired = true }, _selection, string.Empty, value => Edit(() => _selection = value)),
             new SetupTextField(new("model", "Model ID"), _model, string.Empty, value => Edit(() => _model = value)),
             new SetupRepeatableGroupField(new("headers", "Protected HTTP headers"), _headers.Select(header => new SetupFieldRow(header.Id,
@@ -108,6 +112,8 @@ public sealed class VideoSettings : InferenceSettings<VideoSetupChanges>
             issues.Add(new("endpoint-invalid", "Use an explicit HTTPS endpoint without user information, query or fragment.", "endpoint"));
         if (_timeout is null or < 1 || _timeout > (uint.MaxValue - 1) / 1000)
             issues.Add(new("timeout-invalid", "Use a positive request timeout of at most 4294967 seconds.", "timeout"));
+        if (_maximumEncodedReferenceAudioBytes is <= 0)
+            issues.Add(new("reference-audio-limit-invalid", "Use a positive encoded reference audio byte limit or leave it unset.", "reference-audio-limit"));
         if (string.IsNullOrWhiteSpace(_selection)) issues.Add(new("selection-required", "Select the protected xAI connection.", "xai-connection"));
         if (_headers.Any(header => string.IsNullOrWhiteSpace(header.Name)) || _headers.Select(header => header.Name).Distinct(StringComparer.OrdinalIgnoreCase).Count() != _headers.Count)
             issues.Add(new("headers-invalid", "HTTP header names must be nonempty and distinct.", "headers"));
@@ -120,6 +126,7 @@ public sealed class VideoSettings : InferenceSettings<VideoSetupChanges>
     }
     protected override bool IsDraftDirty => _endpoint?.AbsoluteUri.TrimEnd('/') != _baseline.Connection.Endpoint.TrimEnd('/')
         || _timeout != (long)_baseline.Connection.RequestTimeout.TotalSeconds || ModelId != _baseline.ModelId
+        || _maximumEncodedReferenceAudioBytes != _baseline.Connection.MaximumEncodedReferenceAudioBytes
         || _selection != (_baseline.Connection.Xai?.ConnectionId ?? string.Empty) || _removed.Count > 0
         || _headers.Any(header => header.Name != header.OriginalName || header.Edit.Kind != SetupSecretEditKind.Keep);
 
