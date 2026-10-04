@@ -135,7 +135,7 @@ internal sealed class XaiFileClient(HttpClient http) : IDisposable, IAsyncDispos
     }
 
     internal Task<XaiHttpDownload> OpenDownloadAsync(LlmConnection connection, string fileId,
-        Action fence, CancellationToken token, TimeSpan timeout)
+        TimeSpan timeout, Action fence, CancellationToken token)
         => OpenDownloadCoreAsync(connection, () => XaiFileRequestData.DownloadPath(fileId, null), fence, token,
             requestTimeout: timeout);
 

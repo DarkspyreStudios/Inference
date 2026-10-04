@@ -3,6 +3,7 @@ using System.Diagnostics.CodeAnalysis;
 namespace Darkspyre.Inference.Connect.LLM.Internal;
 
 /// <summary>Owns one download response and its admitted HTTP generation. Its caller owns read admission and drain.</summary>
+[SuppressMessage("Design", "CA1001", Justification = "Response closure and generation release are separate phases; the read owner releases leases only after actual read drain.")]
 internal sealed class XaiHttpDownload
 {
     private readonly Lock _gate = new();
@@ -146,7 +147,7 @@ internal sealed class XaiHttpDownload
         }
     }
 
-    // Escaped-stream owners call this only after closure and every admitted read have settled.
+    // Escaped-stream owners call this only after closure and all admitted reads settle.
     internal void ReleaseAfterDrain()
     {
         if (Interlocked.Exchange(ref _released, 1) != 0) return;
