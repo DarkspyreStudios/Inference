@@ -9,5 +9,6 @@
     <ProjectReference Include="../../../../Common/src/Darkspyre.Inference.Common/Darkspyre.Inference.Common.csproj" />
     <ProjectReference Include="../../LLM/Darkspyre.Inference.Connect.LLM/Darkspyre.Inference.Connect.LLM.csproj" />
     <InternalsVisibleTo Include="Darkspyre.Inference.Connect.Video.Tests" />
+    <InternalsVisibleTo Include="Darkspyre.Inference.Connect.Resources" />
   </ItemGroup>
 </Project>
