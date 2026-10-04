@@ -1102,6 +1102,13 @@ and Unix creation times remain actual receipt values. ZIP downloads copy bytes t
 destination without extraction, rewinding or implicit flushing. Skills upload and generation
 attachment remain unavailable. `Skills.ResourceOperations` stays false because the complete
 operation set is not implemented.
+Both borrowed Skills upload variants require positive caller-selected `MaximumUploadBytes`,
+`MaximumEntries` and `MaximumExpandedBytes`. Input bytes exclude multipart framing. ZIP entry counts
+include directories; expanded bytes count uncompressed file content. For explicit directory uploads,
+entries count supplied files and both byte limits apply to their total content. The library supplies
+no defaults or numeric provider limits. These contracts carry policy for the unavailable upload path;
+they do not perform stream reads, archive inspection or provider calls. Directory multipart path
+encoding and the accepted ZIP layout remain unresolved provider-protocol gates.
 Other Files routes remain unavailable. When no builtin Files adapter is
 composed, refusal precedes source resolution and stream inspection. Caller cancellation and
 retired-facade admission retain the existing lifetime behavior.
@@ -1996,7 +2003,10 @@ filename, and bytes; adapters own MIME detection, encoding, and wire representat
 `ILlmFileClient`, `IXaiFilePublicUrlClient` and `IXaiSkillClient` declare explicit native resource
 operations. Their metadata, options, pages, deletion results, transfer receipts and capability data
 have exact type-name getters on `ConnectLlmJson`. The provider facade implements these interfaces,
-but its resource routes remain unavailable. All new capability flags default to false.
+with the selected routes described in [Files and Skills facade](#files-and-skills-facade).
+Borrowed Skills upload inputs carry explicit caller limits and remain runtime-only, not data-codec
+roots. Their nonnull serialization refuses without reading their streams or exposing their policy.
+Unimplemented operations retain false capability flags.
 
 Files pages preserve their returned token and an explicit `IsKnownLastPage` fact. Skills pages
 preserve their distinct first/last-ID and `HasMore` observations. Required response values do not

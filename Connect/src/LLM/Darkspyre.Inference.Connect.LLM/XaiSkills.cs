@@ -44,6 +44,19 @@ public sealed record XaiSkillCapabilities
 public abstract record XaiSkillUpload
 {
     private protected XaiSkillUpload() { }
+
+    /// <summary>Caller limit on ZIP bytes or the total bytes of explicit directory files, excluding multipart framing.</summary>
+    public required long MaximumUploadBytes { get; init => field = Positive(value, nameof(MaximumUploadBytes)); }
+
+    /// <summary>Caller limit on all ZIP entries, including directories, or the number of explicit directory files.</summary>
+    public required int MaximumEntries { get; init => field = Positive(value, nameof(MaximumEntries)); }
+
+    /// <summary>Caller limit on total uncompressed file bytes. Explicit directory files are already uncompressed.</summary>
+    public required long MaximumExpandedBytes { get; init => field = Positive(value, nameof(MaximumExpandedBytes)); }
+
+    private static long Positive(long value, string name) => value > 0 ? value : throw new ArgumentOutOfRangeException(name);
+    private static int Positive(int value, string name) => value > 0 ? value : throw new ArgumentOutOfRangeException(name);
+
     public override string ToString() => "XaiSkillUpload { <borrowed> }";
 }
 
