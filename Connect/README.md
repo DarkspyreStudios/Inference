@@ -116,8 +116,23 @@ successful publication. `GeneratedResources` contains the exact ordered commit r
 access is legal for artifact-free results; observed artifacts require access before any download or
 write, while failure still reports the preceding consume-once dispatch and response. Earlier committed
 outputs survive a later transfer, commit, cleanup or publication failure without deletion or retry.
-Incremental requests, batch result retrieval/materialization and JSONL creation remain explicitly
-unavailable before connection resolution, credential refresh or resource effects.
+Incremental batch requests and creation from requests share one ordered snapshot and the canonical
+Responses, image and video body builders. Every row is validated before credential refresh or input
+transfers. Chat selections are frozen once per prompt; media reads only its named sources. One batch
+resolves each borrowed MCP authorization once. Upload attempts retain their actual row/source and
+Files receipt without merging distinct transfers of the same resource.
+Each native request is limited to 25,000,000 UTF-8 bytes. Add sends one inline POST to the authorized
+existing batch; it does not impose that limit on the aggregate body, split requests or retry.
+Creation from requests uses create then one add when the measured aggregate inline body is at most
+25,000,000 bytes. Larger input uses one JSONL upload and file-based creation, limited to 200,000,000
+UTF-8 bytes and 50,000 rows. Both representations use the same prepared bodies. Inline-created batches
+remain open; file-created batches are sealed by the provider. An observed Create receipt survives
+later Add, cancellation and cleanup failure with its original observed counts, not synthetic totals.
+Supplied video audio uses its actual public URL or a bounded data URL from actual bytes. Unknown
+MIME uses application/octet-stream as a wire label without changing content metadata. Native file
+audio is unsupported; no signed-URL or library-side URL-fetch fallback is used.
+Batch result retrieval/materialization remains explicitly unavailable before connection resolution,
+credential refresh or resource effects.
 Disposal fences entry, drains admitted operations, shares retirement completion and releases borrowed
 references without disposing them. Actual HTTP and preparation cleanup refusal retains the failed owner and is reported
 by retirement; ordinary operation failures do not poison retirement. No operation retries or rolls back.
