@@ -2254,6 +2254,9 @@ Adapters classify their own HTTP, stream or typed SDK errors and keep `ProviderC
 Host-compaction managed sessions pause on this flag. Grok's provider-owned automatic mode ends
 `ProviderFailure` without a host pause. Responses/Codex, compatible chat, Anthropic Messages,
 Gemini/Vertex, Bedrock Converse and Apple recognize their supported overflow error patterns.
+Bedrock Converse SDK failures surface the actual error kind and credential-redacted message,
+with observed status and request identity. Unrelated host failures retain the managed generic
+diagnostic; cancellation and independently failed owned cleanup remain distinct.
 xAI input overflow raises this failure instead of returning an incomplete completion; output-token
 truncation remains an incomplete completion.
 Each model step permits at most two provider-overflow pauses, including across continued segments.

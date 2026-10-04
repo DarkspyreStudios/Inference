@@ -1,5 +1,7 @@
 using System.Collections.Frozen;
+using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
+using System.Runtime.ExceptionServices;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Amazon.BedrockRuntime;
@@ -125,10 +127,53 @@ internal sealed class BedrockLlmClient(
         };
     }
 
+    [SuppressMessage("Design", "CA1031", Justification = "The adapter preserves the operation and each independent owned cleanup failure.")]
+    [SuppressMessage("Usage", "CA2219", Justification = "Iterator retirement executes finally; recorded operation and cleanup failures must also surface on early reader disposal.")]
     public async IAsyncEnumerable<LlmStreamEvent> StreamAsync(
         LlmConnection connection,
         LlmChatRequest request,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        var owned = new ConverseOperation();
+        var failures = new List<Exception>();
+        IAsyncEnumerator<LlmStreamEvent> events = StreamCoreAsync(connection, request, owned, cancellationToken)
+            .GetAsyncEnumerator(cancellationToken);
+        try
+        {
+            while (true)
+            {
+                bool moved;
+                try { moved = await events.MoveNextAsync().ConfigureAwait(false); }
+                catch (Exception error)
+                {
+                    failures.Add(ClassifyConverseFailure(error, connection));
+                    break;
+                }
+                if (!moved) break;
+                yield return events.Current;
+            }
+        }
+        finally
+        {
+            try { await events.DisposeAsync().ConfigureAwait(false); }
+            catch (Exception error) { failures.Add(CleanupFailure(error, events)); }
+            if (owned.Events is { } reader)
+                try { await reader.DisposeAsync().ConfigureAwait(false); }
+                catch (Exception error) { failures.Add(CleanupFailure(error, reader)); }
+            if (owned.Stream is { } stream)
+                try { await stream.DisposeAsync().ConfigureAwait(false); }
+                catch (Exception error) { failures.Add(CleanupFailure(error, stream)); }
+            if (owned.Control is { } control)
+                try { control.Dispose(); }
+                catch (Exception error) { failures.Add(CleanupFailure(error, control)); }
+            if (failures.Count == 1) ExceptionDispatchInfo.Throw(failures[0]);
+            if (failures.Count > 1) throw new AggregateException("Bedrock Converse and owned cleanup failed.", failures);
+        }
+    }
+
+    private async IAsyncEnumerable<LlmStreamEvent> StreamCoreAsync(
+        LlmConnection connection, LlmChatRequest request, ConverseOperation owned,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         LlmProviderCapabilities capabilities = ValidateRequest(connection, request);
         request = ClientTools.Snapshot(request);
@@ -136,7 +181,8 @@ internal sealed class BedrockLlmClient(
             ? null
             : StructuredOutput.ResolveEnforcement(request.StructuredOutput, capabilities);
         LlmAwsCredentials aws = RequireAws(connection);
-        using BedrockClientFactory.Lease<Amazon.Bedrock.AmazonBedrockClient> control = factory.Control(aws, cancellationToken);
+        BedrockClientFactory.Lease<Amazon.Bedrock.AmazonBedrockClient> control = factory.Control(aws, cancellationToken);
+        owned.Control = control;
         cancellationToken = control.Token;
         string modelId = await BedrockModelResolver.ResolveAsync(
             control,
@@ -163,15 +209,21 @@ internal sealed class BedrockLlmClient(
             yield break;
         }
 
-        await using IBedrockEventStream stream = await invoker.ConverseStreamAsync(
-            aws,
-            ToStreamRequest(built),
-            cancellationToken);
+        IBedrockEventStream stream;
+        try { stream = await invoker.ConverseStreamAsync(aws, ToStreamRequest(built), cancellationToken).ConfigureAwait(false); }
+        catch (AggregateException error) { throw ClassifyConverseOperationAndCleanup(error, connection); }
+        owned.Stream = stream;
+        IAsyncEnumerator<IEventStreamEvent> events = stream.ReadAsync(cancellationToken).GetAsyncEnumerator(cancellationToken);
+        owned.Events = events;
         var accumulator = new BedrockStreamAccumulator();
-        await foreach (IEventStreamEvent streamEvent in stream.ReadAsync(cancellationToken))
+        while (true)
         {
+            bool moved;
+            try { moved = await events.MoveNextAsync().ConfigureAwait(false); }
+            catch (AggregateException error) { throw ClassifyConverseOperationAndCleanup(error, connection); }
+            if (!moved) break;
             control.ThrowIfCanceled();
-            foreach (LlmStreamEvent item in accumulator.Observe(streamEvent))
+            foreach (LlmStreamEvent item in accumulator.Observe(events.Current))
             {
                 if (item is LlmReasoningDeltaEvent && !capabilities.SupportsReasoningText) { continue; }
                 control.ThrowIfCanceled();
@@ -184,6 +236,47 @@ internal sealed class BedrockLlmClient(
         BedrockReply reply = accumulator.Complete(stream.RequestId);
         control.ThrowIfCanceled();
         yield return new LlmChatCompletionEvent(BuildResult(connection, request, enforcement, reply));
+    }
+
+    private static Exception ClassifyConverseFailure(Exception error, LlmConnection connection)
+    {
+        if (error is not AmazonBedrockRuntimeException aws) return error;
+        LlmCredential? credential = LlmCredential.Parse(connection.Credential);
+        string Safe(string value) => SecretRedactor.Sanitize(value, credential, connection.AdditionalHeaders.Values);
+        return new LlmProviderException($"Bedrock {Safe(aws.GetType().Name)}: {Safe(aws.Message)}",
+            LlmTransport.AwsBedrockConverse, (int)aws.StatusCode == 0 ? null : aws.StatusCode,
+            aws.ErrorCode is { } code ? Safe(code) : null, aws.RequestId is { } id ? Safe(id) : null,
+            innerException: new ConverseFailureEvidence(aws));
+    }
+
+    private static AggregateException ClassifyConverseOperationAndCleanup(AggregateException error, LlmConnection connection)
+    {
+        if (error.InnerExceptions.Count < 2) return error;
+        return new AggregateException("Bedrock Converse and owned cleanup failed.",
+            new[] { ClassifyConverseFailure(error.InnerExceptions[0], connection) }
+                .Concat(error.InnerExceptions.Skip(1).Select(cleanup => CleanupFailure(cleanup, error))));
+    }
+
+    internal static Exception CleanupFailure(Exception error, object owner)
+    {
+        if (LlmResourcePreparation.IsCleanupFailure(error))
+            return LlmResourcePreparation.AsCleanupFailure(error, refusedOwner: owner);
+        Exception safe = error is OperationCanceledException canceled
+            ? new OperationCanceledException("Bedrock owned cleanup was interrupted.", new ConverseFailureEvidence(error), canceled.CancellationToken)
+            : new ConverseFailureEvidence(error);
+        return LlmResourcePreparation.AsCleanupFailure(safe, refusedOwner: owner);
+    }
+
+    private sealed class ConverseFailureEvidence(Exception original) : Exception("Bedrock reported an operation or cleanup failure.")
+    {
+        internal Exception Original { get; } = original;
+    }
+
+    private sealed class ConverseOperation
+    {
+        internal BedrockClientFactory.Lease<Amazon.Bedrock.AmazonBedrockClient>? Control { get; set; }
+        internal IBedrockEventStream? Stream { get; set; }
+        internal IAsyncEnumerator<IEventStreamEvent>? Events { get; set; }
     }
 
     /// <summary>
