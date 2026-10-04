@@ -99,10 +99,12 @@ converted to invented instants. Mutation dispatch and validated prior/returned r
 cancellation and failure, with response facts belonging only to the current HTTP stage.
 Deferred submission also uses that same selected snapshot, borrowed HTTP/Files owners and canonical
 Chat Completions body. Typed controls, schema numeric guarantees, function-only tools and supplied
-native history are checked before credential refresh or resource effects. Logical prompt resources
-use the existing chat preparation boundary; distinct uploads are observed at actual dispatch and
-receipt parsing before cleanup. The returned deferred receipt preserves the actual `request_id`;
-its scope describes the fixed deferred route and selected connection, not account authority.
+native history are checked before credential refresh or resource effects. Logical prompt and tool
+resources use the existing chat preparation boundary. Tool messages carry ordered text and file
+blocks with actual uploaded file IDs; text-only messages retain their string form. Distinct uploads
+are observed at actual dispatch and receipt parsing before cleanup. The returned deferred receipt
+preserves the actual `request_id`; its scope describes the fixed deferred route and selected
+connection, not account authority.
 Submission timestamps and expiry remain unknown when absent from the response. Chat continuation
 state has a distinct xAI Chat-lane identity and is never replayed as Responses state.
 Deferred retrieval performs one selected-token GET on the receipt's fixed route, including imported
@@ -115,9 +117,7 @@ access is legal for artifact-free results; observed artifacts require access bef
 write, while failure still reports the preceding consume-once dispatch and response. Earlier committed
 outputs survive a later transfer, commit, cleanup or publication failure without deletion or retry.
 Incremental requests, batch result retrieval/materialization and JSONL creation remain explicitly
-unavailable before connection resolution, credential refresh or resource effects. Logical rich
-tool-output carriage in deferred Chat is likewise not implemented; it is refused before upload rather
-than omitted.
+unavailable before connection resolution, credential refresh or resource effects.
 Disposal fences entry, drains admitted operations, shares retirement completion and releases borrowed
 references without disposing them. Actual HTTP and preparation cleanup refusal retains the failed owner and is reported
 by retirement; ordinary operation failures do not poison retirement. No operation retries or rolls back.

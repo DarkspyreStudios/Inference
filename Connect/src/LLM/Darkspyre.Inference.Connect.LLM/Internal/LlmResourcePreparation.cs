@@ -70,11 +70,14 @@ internal sealed class LlmResourcePreparation : IAsyncDisposable
             throw new InvalidOperationException("The resource content does not match its observed byte count.");
     }
 
-    internal static void ValidateArguments(LlmChatRequest request)
+    internal static void ValidateArguments(LlmChatRequest request, IInferenceResourceAccess? admittedResources = null)
     {
         ArgumentNullException.ThrowIfNull(request);
+        if (request.Resources is not null && admittedResources is not null
+            && !ReferenceEquals(request.Resources, admittedResources))
+            throw new ArgumentException("The request and operation must borrow the same resource access.", nameof(request));
         foreach (InferenceResourceReference reference in References(request)) ValidateReference(reference);
-        if (References(request).Any() && request.Resources is null)
+        if (References(request).Any() && request.Resources is null && admittedResources is null)
             throw new ArgumentException("Logical resources require explicit caller-owned access.", nameof(request));
     }
 

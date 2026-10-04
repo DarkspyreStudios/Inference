@@ -86,13 +86,14 @@ internal sealed class XaiDeferredProtocol(HttpClient http, LlmConnection connect
     {
         var codec = new XaiDeferredChatCodec(http);
         var errors = new List<Exception>();
+        IInferenceResourceAccess? admittedResources = request.Resources;
         LlmResourcePreparation? preparation = null;
         LlmDeferredCompletion? result = null;
         try
         {
             fence();
             LlmProviderCapabilities capabilities = codec.GetCapabilities(connection, request.ModelId);
-            codec.ValidatePreparedRequest(connection, request, capabilities);
+            codec.ValidateSubmissionRequest(connection, request, capabilities, admittedResources);
             fence();
             LlmConnection preparedConnection = await codec.PrepareAsync(connection, token).ConfigureAwait(false);
             fence();
@@ -107,10 +108,10 @@ internal sealed class XaiDeferredProtocol(HttpClient http, LlmConnection connect
                 fence();
                 request = preparation.Request;
             }
-            codec.ValidatePreparedRequest(preparedConnection, request, capabilities);
+            codec.ValidateSubmissionRequest(preparedConnection, request, capabilities, admittedResources);
             fence();
             LlmStructuredOutputEnforcement? enforcement = XaiSchemaLimits.ResolveEnforcement(request.StructuredOutput, capabilities);
-            var body = codec.BuildPreparedPayload(preparedConnection, request, enforcement, capabilities);
+            var body = codec.BuildPreparedPayload(preparedConnection, request, enforcement, capabilities, preparation);
             fence();
             var exchange = new XaiResourceHttp(http, preparedConnection, observation, fence);
             result = await exchange.ExchangeAsync(HttpMethod.Post, "chat/completions", body, true,
