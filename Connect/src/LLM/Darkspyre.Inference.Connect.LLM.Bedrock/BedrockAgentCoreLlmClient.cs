@@ -353,7 +353,7 @@ internal sealed class BedrockAgentCoreLlmClient(IBedrockAgentCoreInvoker invoker
             }).ToList();
 
     internal static Document DeserializeDocument(string json) =>
-        JsonSerializer.Deserialize<Document>(json);
+        BedrockDocumentJson.Read(json);
 
     internal static string MapFinishReason(string? reason) => reason switch
     {
