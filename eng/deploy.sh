@@ -4,6 +4,8 @@
 set +x
 set -eEuo pipefail
 
+export DarkspyreDependencyMode=Packages
+
 next_version() {
     local current="$1" mode="$2" net release minor suffix
     if [[ ! "$current" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)(-[0-9A-Za-z.-]+)?$ ]]; then

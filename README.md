@@ -2,8 +2,10 @@
 
 # Darkspyre Inference
 
-Source mode (`TensorSharpSourceRoot` set) also resolves host-tool storage references from sibling
-SecureStore and PersistenceStore worktrees through their `eng/SourceReferences.targets` files.
+`DarkspyreDependencyMode` defaults to `Source`. Builds resolve TensorSharp and host-tool storage
+references from sibling TensorSharp, SecureStore and PersistenceStore worktrees automatically.
+Release commands select `-p:DarkspyreDependencyMode=Packages` explicitly. `eng/deploy.sh` selects
+that mode for its nested processes. A missing source target fails without a package fallback.
 Shipping capability libraries remain independent of application credential storage and persistence.
 
 Typed .NET inference libraries for applications that need external AI providers, resident local

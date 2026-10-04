@@ -1,4 +1,12 @@
 <Project>
+  <!-- Development uses sibling worktrees. Release commands select Packages explicitly. -->
+  <PropertyGroup>
+    <DarkspyreDependencyMode Condition="'$(DarkspyreDependencyMode)' == ''">Source</DarkspyreDependencyMode>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(DarkspyreDependencyMode)' == 'Source'">
+    <TensorSharpSourceRoot>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)../TensorSharp'))</TensorSharpSourceRoot>
+  </PropertyGroup>
+
   <PropertyGroup>
     <TargetFramework>net11.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
