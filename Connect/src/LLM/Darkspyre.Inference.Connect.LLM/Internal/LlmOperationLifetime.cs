@@ -91,8 +91,12 @@ internal sealed class LlmOperationLifetime : IDisposable, IAsyncDisposable
         }
     }
 
+    private Task<(Exception? Failure, bool CleanupFailed)> ProduceStreamAsync<T>(
+        Func<CancellationToken, IAsyncEnumerable<T>> source, ChannelWriter<T> events, Lease operation) =>
+        Task.Run(() => ProduceStreamCoreAsync(source, events, operation), CancellationToken.None);
+
     [SuppressMessage("Design", "CA1031", Justification = "The producer owns its lease through enumeration cleanup and preserves independent operation and cleanup failures.")]
-    private async Task<(Exception? Failure, bool CleanupFailed)> ProduceStreamAsync<T>(
+    private async Task<(Exception? Failure, bool CleanupFailed)> ProduceStreamCoreAsync<T>(
         Func<CancellationToken, IAsyncEnumerable<T>> source, ChannelWriter<T> events, Lease operation)
     {
         using (operation)
@@ -103,6 +107,8 @@ internal sealed class LlmOperationLifetime : IDisposable, IAsyncDisposable
             bool cleanupFailed = false;
             try
             {
+                operation.Token.ThrowIfCancellationRequested();
+                ThrowIfStopping();
                 enumerator = source(operation.Token).GetAsyncEnumerator(operation.Token);
                 source = null!;
                 while (await enumerator.MoveNextAsync().ConfigureAwait(false))
