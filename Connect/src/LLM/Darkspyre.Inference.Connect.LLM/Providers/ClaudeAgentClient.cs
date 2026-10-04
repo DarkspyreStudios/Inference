@@ -162,6 +162,7 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
         CancellationToken cancellationToken)
     {
         string normalizedDirectory = CliInfrastructure.NormalizeWorkingDirectory(workingDirectory);
+        LlmProviderCapabilities capabilities = ClaudeCliLlmClient.ResolveCapabilities(connection, modelId);
         IReadOnlyList<string> arguments = BuildArguments(
             threadId,
             resumeThreadId,
@@ -174,7 +175,7 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             sandbox,
             networkAllowed,
             allowRuntimeBackgroundWork,
-            ClaudeCliLlmClient.ResolveCapabilities(connection, modelId).SupportsReasoningText);
+            capabilities.SupportsReasoningText);
         IClaudeCliSessionProcess process;
         try
         {
@@ -205,7 +206,7 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
         try
         {
             session.Start();
-            await session.InitializeAsync(instructions, cancellationToken);
+            await session.InitializeAsync(instructions, capabilities.SupportsReasoningText, cancellationToken);
             return session;
         }
         catch
@@ -535,6 +536,7 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
 
         public async Task InitializeAsync(
             string? instructions,
+            bool requestReasoningText,
             CancellationToken cancellationToken)
         {
             using LlmOperationLifetime.Lease operation = _lifetime.Enter(cancellationToken);
@@ -561,6 +563,7 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             }
 
             await SendControlRequestAsync(request, cancellationToken);
+            await SetThinkingDisplayAsync(requestReasoningText, cancellationToken);
             cancellationToken.ThrowIfCancellationRequested();
         }
 
@@ -589,6 +592,10 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
                 supportsImages: true,
                 supportsDocuments: true,
                 parameterName: nameof(request));
+            if (request.ReasoningLevel is { } reasoningLevel)
+            {
+                LlmReasoningEffort.Validate(reasoningLevel, ClaudeCliLlmClient.ReasoningLevels);
+            }
 
             if (!_turnGate.Wait(0, cancellationToken))
             {
@@ -615,12 +622,12 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
                 var settings = new JsonObject { ["showThinkingSummaries"] = capabilities.SupportsReasoningText };
                 if (request.ReasoningLevel is { } level)
                 {
-                    LlmReasoningEffort.Validate(level, ClaudeCliLlmClient.ReasoningLevels);
                     settings["effortLevel"] = LlmReasoningEffort.Word(level);
                 }
                 await SendControlRequestAsync(
                     new JsonObject { ["subtype"] = "apply_flag_settings", ["settings"] = settings },
                     cancellationToken);
+                await SetThinkingDisplayAsync(capabilities.SupportsReasoningText, cancellationToken);
 
                 cancellationToken.ThrowIfCancellationRequested();
                 yield return new LlmAgentTurnStartedEvent(ThreadId, turnId);
@@ -827,6 +834,14 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             if (failures.Count == 1) ExceptionDispatchInfo.Throw(failures[0]);
             if (failures.Count > 1) throw new AggregateException("The Claude CLI session did not retire cleanly.", failures);
         }
+
+        private Task<JsonElement> SetThinkingDisplayAsync(bool requestReasoningText, CancellationToken cancellationToken) =>
+            SendControlRequestAsync(new JsonObject
+            {
+                ["subtype"] = "set_max_thinking_tokens",
+                // Omitting the budget preserves the headless session's current thinking configuration.
+                ["thinking_display"] = requestReasoningText ? "summarized" : "omitted"
+            }, cancellationToken);
 
         private async Task<JsonElement> SendControlRequestAsync(
             JsonNode request,

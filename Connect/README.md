@@ -1209,15 +1209,22 @@ thinking levels and budgets unchanged. Claude CLI chat maps `thinking_delta` to 
 and ignores signature deltas. AgentCore chat emits reasoning events, not activity text. Native
 Claude and AgentCore sessions honor the same display override. Streaming Claude CLI chat writes
 `showThinkingSummaries: true` to a per-call settings file and passes its path through `--settings`
-when display is enabled. The file is removed with the call's working directory on completion,
-cancellation, failure or reader disposal. Authentication probes and non-streaming calls receive no
-summary settings file. The setting requests summaries; it does not guarantee that the CLI returns them.
+when display is enabled. Streaming chat also supplies the official SDK's `--thinking-display`
+argument: `summarized` when display is enabled and `omitted` otherwise. The file is removed with
+the call's working directory on completion, cancellation, failure or reader disposal.
+Authentication probes and non-streaming calls receive no summary settings file or display argument.
+The request does not guarantee that the CLI returns a summary.
 Native Claude sessions pass the resolved initial `showThinkingSummaries` boolean as inline
 `--settings`. Before each host turn, the existing `apply_flag_settings` control carries that turn's
-resolved display choice and any explicitly supplied effort. An omitted effort does not reset the
-CLI's existing effort. The session keeps the last model acknowledged by `set_model`; later omitted
-model choices and provider-originated turns use that model's capability overrides. An explicit
-return to the startup model sends a model switch when the CLI has selected another model.
+resolved display choice and any explicitly supplied effort. Session initialization and each host
+turn also await the headless `set_max_thinking_tokens` control with only `thinking_display`.
+The budget field is absent. This requires the current official headless protocol's display-only
+update semantics, present in Claude 2.1.288. An omitted effort does not reset the CLI's existing
+effort, and a display-only update preserves its thinking configuration. A rejected control fails
+the operation before the prompt is written. The session keeps the last model acknowledged by
+`set_model`; later omitted model choices and provider-originated turns use that model's capability
+overrides. An explicit return to the startup model sends a model switch when the CLI has selected
+another model.
 
 Anthropic Messages and Vertex Claude share model profiles. Positive adaptive reasoning requests
 `thinking.display = summarized` on families whose default display is omitted. A null level requests

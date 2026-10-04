@@ -738,6 +738,7 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
         string workingDirectory = CliInfrastructure.CreateWorkingDirectory("claude");
         try
         {
+            arguments = [.. arguments, "--thinking-display", requestReasoningText ? "summarized" : "omitted"];
             if (requestReasoningText)
             {
                 string settingsPath = Path.Combine(workingDirectory, "claude-settings.json");
