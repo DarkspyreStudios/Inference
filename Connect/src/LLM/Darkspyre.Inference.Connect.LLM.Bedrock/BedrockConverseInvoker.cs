@@ -1,5 +1,6 @@
 using System.Runtime.CompilerServices;
 using System.Runtime.ExceptionServices;
+using System.Diagnostics.CodeAnalysis;
 using Amazon.BedrockRuntime;
 using Amazon.BedrockRuntime.Model;
 using Amazon.Runtime.EventStreams;
@@ -114,6 +115,7 @@ internal sealed class BedrockConverseInvoker(BedrockClientFactory factory) : IBe
         private BedrockClientFactory.Lease<AmazonBedrockRuntimeClient>? _lease = lease;
         public string? RequestId { get; } = response.ResponseMetadata?.RequestId;
 
+        [SuppressMessage("Design", "CA1031", Justification = "The reader preserves the original operation and independently refused enumerator cleanup.")]
         public async IAsyncEnumerable<IEventStreamEvent> ReadAsync(
             [EnumeratorCancellation] CancellationToken cancellationToken)
         {
@@ -122,35 +124,53 @@ internal sealed class BedrockConverseInvoker(BedrockClientFactory factory) : IBe
             cancellationToken = linked.Token;
             ThrowIfReadCanceled(cancellationToken);
             // C# forbids yield inside try/catch, so each MoveNextAsync is guarded on its own.
-            IAsyncEnumerator<IEventStreamEvent> events = _response!.Stream.GetAsyncEnumerator(cancellationToken);
-            await using (events)
+            IAsyncEnumerator<IEventStreamEvent>? events = null;
+            Exception? failure = null;
+            try
             {
+                events = _response!.Stream.GetAsyncEnumerator(cancellationToken);
                 while (true)
                 {
-                    ThrowIfReadCanceled(cancellationToken);
                     bool moved;
+                    IEventStreamEvent? current = null;
                     try
                     {
+                        ThrowIfReadCanceled(cancellationToken);
                         moved = await events.MoveNextAsync();
+                        ThrowIfReadCanceled(cancellationToken);
+                        if (moved) current = events.Current;
                     }
                     catch (BedrockRuntimeEventStreamException exception)
                     {
-                        throw Unwrap(exception, cancellationToken);
+                        failure = Unwrap(exception, cancellationToken);
+                        break;
                     }
                     catch (ValidationException error) when (LlmContextOverflow.BedrockValidation(error.Message))
                     {
-                        throw ContextOverflow(error);
+                        failure = ContextOverflow(error);
+                        break;
                     }
-
-                    if (!moved)
+                    catch (Exception error)
                     {
-                        ThrowIfReadCanceled(cancellationToken);
-                        yield break;
+                        failure = error;
+                        break;
                     }
-
-                    ThrowIfReadCanceled(cancellationToken);
-                    yield return events.Current;
+                    if (!moved) break;
+                    yield return current!;
                 }
+            }
+            finally
+            {
+                if (events is not null)
+                    try { await events.DisposeAsync().ConfigureAwait(false); }
+                    catch (Exception cleanup)
+                    {
+                        Exception safe = BedrockLlmClient.CleanupFailure(cleanup, events);
+                        if (failure is not null)
+                            throw new AggregateException("Bedrock stream reading and enumerator cleanup failed.", failure, safe);
+                        throw safe;
+                    }
+                if (failure is not null) ExceptionDispatchInfo.Throw(failure);
             }
         }
 
