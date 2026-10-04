@@ -17,8 +17,8 @@ internal sealed class XaiHostedToolPreparation : IDisposable
     private readonly CancellationToken _token;
 
     private XaiHostedToolPreparation(IInferenceResourceAccess? resources, InferenceResourceSelectionVersion? selection,
-        Action fence, Action<Exception>? recordCleanup, CancellationToken token, AuthorizationMemo authorization,
-        bool ownsAuthorization)
+        Action fence, Action<Exception>? recordCleanup, AuthorizationMemo authorization,
+        bool ownsAuthorization, CancellationToken token)
     {
         _resources = resources;
         Selection = selection;
@@ -47,8 +47,8 @@ internal sealed class XaiHostedToolPreparation : IDisposable
         Action<Exception>? recordCleanup, CancellationToken token, AuthorizationMemo? authorization = null)
     {
         AuthorizationMemo memo = authorization ?? new AuthorizationMemo(fence, token);
-        var frame = new XaiHostedToolPreparation(resources, selection, fence, recordCleanup, token, memo,
-            ownsAuthorization: authorization is null);
+        var frame = new XaiHostedToolPreparation(resources, selection, fence, recordCleanup, memo,
+            ownsAuthorization: authorization is null, token);
         try
         {
             memo.AddStatic(request);
