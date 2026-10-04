@@ -2943,7 +2943,8 @@ Other compatible endpoints reject account-usage overrides that claim this operat
 
 Facade account-usage operations check caller cancellation and facade retirement after capability
 callbacks, before queried dispatch and before publishing completed results. Passive polling checks
-the same owner fence after connection resolution. Retiring the facade drains admitted operations
+the same owner fence after connection resolution and after reading the observation store,
+before returning the snapshot. Retiring the facade drains admitted operations
 without disposing borrowed clients or the borrowed observation store.
 
 `GetObservedAccountUsageAsync(connectionId)` reads passive provider evidence without a provider call.

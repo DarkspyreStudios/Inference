@@ -993,7 +993,9 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, ILlmFileClie
         LlmAccountUsageObservations.Reservation reservation = _observations.Reserve(connectionId);
         LlmConnection connection = await ResolveConnectionAsync(connectionId, operation.Token);
         ThrowIfOperationCanceled(operation.Token);
-        return reservation.Get(connection);
+        LlmAccountUsageSnapshot? snapshot = reservation.Get(connection);
+        ThrowIfOperationCanceled(operation.Token);
+        return snapshot;
     }
 
     public async Task<LlmAccountUsageSnapshot> GetAccountUsageAsync(
