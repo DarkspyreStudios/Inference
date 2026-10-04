@@ -139,6 +139,7 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             cancellationToken);
     }
 
+    [SuppressMessage("Design", "CA1031", Justification = "Failed opening preserves both the original failure and a genuine retirement failure.")]
     private async Task<ILlmAgentSession> CreateSessionAsync(
         string threadId,
         string sessionId,
@@ -209,9 +210,10 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             await session.InitializeAsync(instructions, capabilities.SupportsReasoningText, cancellationToken);
             return session;
         }
-        catch
+        catch (Exception original)
         {
-            await session.DisposeAsync();
+            try { await session.DisposeAsync(); }
+            catch (Exception cleanup) { throw new AggregateException(original, cleanup); }
             throw;
         }
     }

@@ -3023,6 +3023,9 @@ Claude uses restricted mode and `--add-dir` for read-only/workspace sessions. A 
 with `NetworkAllowed = false` is rejected because the CLI cannot independently constrain Bash
 network access. AgentCore permits remote Harness-managed tools only with `DangerFullAccess`;
 local workspace restrictions cannot constrain remote tools.
+Claude start, resume and fork retire an unsuccessfully initialized session before returning.
+Successful cleanup preserves the original opening error. Failed cleanup returns an aggregate
+containing the original opening error followed by the cleanup error, without retrying cleanup.
 
 ### Headless attachment lifetime
 
