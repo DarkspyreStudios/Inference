@@ -28,6 +28,7 @@ internal sealed class ClaudeCliProcessRunner(ClaudeCliExits exits) : IClaudeCliR
             "The Claude CLI process ended without a completion event.");
     }
 
+    [SuppressMessage("Design", "CA1031", Justification = "The iterator preserves the actual operation failure when independent release also fails.")]
     public async IAsyncEnumerable<ClaudeCliProcessEvent> StreamAsync(
         ClaudeCliInvocation invocation,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
@@ -41,6 +42,7 @@ internal sealed class ClaudeCliProcessRunner(ClaudeCliExits exits) : IClaudeCliR
         var errorStop = new CancellationTokenSource();
         Task<string> standardError = ReadStandardErrorAsync(process.StandardError, reads, errorStop.Token);
         string? standardInputError = null;
+        Exception? operationFailure = null;
         var output = new StringBuilder();
         var lines = new CliLineReader(process.StandardOutput, MaximumCapturedCharacters,
             $"Claude CLI StandardOutput exceeded the {MaximumCapturedCharacters}-character safety limit.");
@@ -61,27 +63,39 @@ internal sealed class ClaudeCliProcessRunner(ClaudeCliExits exits) : IClaudeCliR
                     "The Claude CLI closed standard input before the request was completely sent.";
                 CloseStandardInput(process);
             }
+            catch (Exception error) { operationFailure = error; throw; }
 
-            while (await Observe(lines.ReadLineAsync(reads.Token).AsTask(), standardError, reads, cancellationToken) is { } line)
+            while (true)
             {
-                EnsureCaptureLimit(output.Length + line.Length + Environment.NewLine.Length, nameof(process.StandardOutput));
-                output.AppendLine(line);
+                string? line;
+                try
+                {
+                    line = await Observe(lines.ReadLineAsync(reads.Token).AsTask(), standardError, reads, cancellationToken);
+                    if (line is null) break;
+                    EnsureCaptureLimit(output.Length + line.Length + Environment.NewLine.Length, nameof(process.StandardOutput));
+                    output.AppendLine(line);
+                }
+                catch (Exception error) { operationFailure = error; throw; }
                 yield return new ClaudeCliOutputLine(line);
             }
-            await Observe(process.WaitForExitAsync(reads.Token), standardError, reads, cancellationToken);
-            string error = await standardError.WaitAsync(CliProcessTermination.ExitBound, reads.Token);
-            yield return new ClaudeCliProcessCompleted(new ClaudeCliProcessResult(
-                process.ExitCode,
-                output.ToString(),
-                error,
-                standardInputError));
+            ClaudeCliProcessResult result;
+            try
+            {
+                await Observe(process.WaitForExitAsync(reads.Token), standardError, reads, cancellationToken);
+                string error = await standardError.WaitAsync(CliProcessTermination.ExitBound, reads.Token);
+                result = new(process.ExitCode, output.ToString(), error, standardInputError);
+            }
+            catch (Exception error) { operationFailure = error; throw; }
+            yield return new ClaudeCliProcessCompleted(result);
         }
         finally
         {
             lines.ReleaseBufferedText();
             if (process.HasExited)
             {
-                await ReleaseAsync(process, standardError, errorStop);
+                try { await ReleaseAsync(process, standardError, errorStop); }
+                catch (Exception cleanup) when (operationFailure is not null)
+                { ThrowFailures([operationFailure, cleanup]); }
             }
             else
             {
