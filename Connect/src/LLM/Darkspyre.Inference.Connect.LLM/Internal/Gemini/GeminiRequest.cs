@@ -172,7 +172,7 @@ internal static class GeminiRequest
         if (request.Seed is int seed) { generation["seed"] = seed; }
         if (request.PresencePenalty is double presence) { generation["presencePenalty"] = presence; }
         if (request.FrequencyPenalty is double frequency) { generation["frequencyPenalty"] = frequency; }
-        if (request.StopSequences.Count > 0) { generation["stopSequences"] = System.Text.Json.JsonSerializer.SerializeToNode(request.StopSequences); }
+        if (request.StopSequences.Count > 0) { generation["stopSequences"] = new JsonArray([.. request.StopSequences.Select(stop => JsonValue.Create(stop))]); }
         if (GeminiModelProfiles.ThinkingConfig(reasoning, request.ReasoningLevel, reasoningText) is { } thinking)
         {
             generation["thinkingConfig"] = thinking;

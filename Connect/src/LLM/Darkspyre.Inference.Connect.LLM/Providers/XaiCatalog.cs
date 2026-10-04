@@ -112,9 +112,9 @@ internal static class XaiCatalog
                     foreach ((string key, JsonNode? value) in genericCapabilities)
                         if (!capabilities.ContainsKey(key)) capabilities[key] = value?.DeepClone();
                 string[] aliases = [.. Aliases(row).Concat(Aliases(observed)).Distinct(StringComparer.Ordinal)];
-                if (aliases.Length > 0) metadata["aliases"] = JsonSerializer.SerializeToNode(aliases);
+                if (aliases.Length > 0) metadata["aliases"] = new JsonArray([.. aliases.Select(alias => JsonValue.Create(alias))]);
             }
-            JsonElement entry = JsonSerializer.SerializeToElement(metadata);
+            JsonElement entry = JsonElement.Parse(metadata.ToJsonString());
             results.Add(new(id, String(row, "name") ?? id, String(row, "owned_by"))
             {
                 CatalogEntry = entry,

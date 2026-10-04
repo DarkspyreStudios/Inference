@@ -437,7 +437,7 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
                                 var terminal = JsonNode.Parse(root.GetRawText())!.AsObject();
                                 JsonObject terminalResponse = terminal["response"] as JsonObject ?? terminal;
                                 terminalResponse["output"] = new JsonArray(JsonNode.Parse(compactionItem.Value.GetRawText()));
-                                terminalOutput = JsonSerializer.SerializeToElement(terminal);
+                                terminalOutput = JsonElement.Parse(terminal.ToJsonString());
                             }
                             LlmChatResult result = BuildResult(
                                 terminalOutput,
@@ -718,7 +718,7 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
         var node = JsonNode.Parse(root.GetRawText())!.AsObject();
         var target = node["response"] as JsonObject ?? node;
         target["output"] = new JsonArray([.. completedOutput.Values.Select(item => JsonNode.Parse(item.GetRawText()))]);
-        return JsonSerializer.SerializeToElement(node);
+        return JsonElement.Parse(node.ToJsonString());
     }
 
     protected virtual void ApplyRequestHeaders(

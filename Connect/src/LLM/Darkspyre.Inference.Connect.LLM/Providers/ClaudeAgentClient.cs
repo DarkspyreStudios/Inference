@@ -905,7 +905,7 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             {
                 JsonElement callId = message.TryGetProperty("id", out JsonElement suppliedId)
                     ? suppliedId.Clone()
-                    : JsonSerializer.SerializeToElement(0);
+                    : JsonElement.Parse("0");
                 if (PrepareToolCall(message, callId, requestId, out LlmAgentToolCall? call) is { } refusal)
                 {
                     await WriteMcpResponseAsync(requestId, refusal.Message, cancellationToken);
@@ -942,7 +942,7 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
         {
             JsonElement id = message.TryGetProperty("id", out JsonElement messageId)
                 ? messageId.Clone()
-                : JsonSerializer.SerializeToElement(0);
+                : JsonElement.Parse("0");
             string method = OptionalString(message, "method") ?? string.Empty;
             switch (method)
             {
@@ -1010,7 +1010,8 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
         {
             TurnTarget? origin = CurrentTarget();
             LlmOperationLifetime.Lease operation = _lifetime.Enter(cancellationToken);
-            JsonElement identity = id.ValueKind is JsonValueKind.Number or JsonValueKind.String ? id.Clone() : JsonSerializer.SerializeToElement(requestId);
+            JsonElement identity = id.ValueKind is JsonValueKind.Number or JsonValueKind.String ? id.Clone()
+                : JsonElement.Parse(JsonValue.Create(requestId)!.ToJsonString());
             var running = new RunningToolCall(identity, CancellationTokenSource.CreateLinkedTokenSource(operation.Token));
             try
             {

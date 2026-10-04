@@ -684,7 +684,7 @@ internal abstract class ChatCompletionsLlmClientBase(HttpClient http) : LlmClien
         if (request.Seed is { } seed) { payload["seed"] = seed; }
         if (request.PresencePenalty is { } presence) { payload["presence_penalty"] = presence; }
         if (request.FrequencyPenalty is { } frequency) { payload["frequency_penalty"] = frequency; }
-        if (request.StopSequences.Count > 0) { payload["stop"] = JsonSerializer.SerializeToNode(request.StopSequences); }
+        if (request.StopSequences.Count > 0) { payload["stop"] = new JsonArray([.. request.StopSequences.Select(stop => JsonValue.Create(stop))]); }
         if (request.PresencePenalty is < -2 or > 2 || request.FrequencyPenalty is < -2 or > 2)
         { throw new ArgumentOutOfRangeException(nameof(request), "Chat Completions penalties must be between -2 and 2."); }
 

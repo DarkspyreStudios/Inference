@@ -854,7 +854,7 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
         }
         if (request.TopP is { } topP) { payload["top_p"] = topP; }
         if (request.TopK is { } topK) { payload["top_k"] = topK; }
-        if (request.StopSequences.Count > 0) { payload["stop_sequences"] = JsonSerializer.SerializeToNode(request.StopSequences); }
+        if (request.StopSequences.Count > 0) { payload["stop_sequences"] = new JsonArray([.. request.StopSequences.Select(stop => JsonValue.Create(stop))]); }
 
         JsonArray tools = AnthropicTools.Resolve(connection, request).Build(ClientTools.Functions(request.Tools));
         if (tools.Count > 0) payload["tools"] = tools;

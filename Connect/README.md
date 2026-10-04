@@ -504,6 +504,12 @@ families. Runtime settings, one-way secret edits, executable handlers and undisc
 bases are not persisted snapshots. Provider CLI/HTTP protocol writers remain separate owners;
 metadata for these closed families does not establish retirement of an active provider session.
 
+Retained chat protocol builders write stop arrays, model aliases, numeric/string control IDs and
+Responses output joins through structured JSON nodes and elements. Vertex argument-path identity
+uses ordered string/index JSON segments and the BCL parser for escaped names. These wire paths
+do not call the unconfigured serializer or depend on its reflection defaults. Portable contracts
+continue to use their existing owned metadata; protocol projection adds no public metadata roots.
+
 Apple helper generation and cancellation commands use their own internal generated metadata,
 including the recursive typed schema plan. The helper protocol retains its camel-case Web names,
 null omission, escaping, sampling fields and maximum JSON depth of 128. No helper/session lifetime

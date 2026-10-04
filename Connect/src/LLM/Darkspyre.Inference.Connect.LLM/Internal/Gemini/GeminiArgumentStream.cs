@@ -62,7 +62,8 @@ internal sealed class GeminiArgumentStream
         if (fragment.Any(field => field.Key is not ("jsonPath" or "stringValue" or "numberValue" or "boolValue" or "nullValue" or "willContinue"))) { throw Failure(); }
         string path = (string?)fragment["jsonPath"] ?? throw Failure();
         List<object> segments = ParsePath(path);
-        string key = JsonSerializer.Serialize(segments);
+        string key = new JsonArray([.. segments.Select(segment => segment is string name
+            ? JsonValue.Create(name) : JsonValue.Create((int)segment))]).ToJsonString();
         string[] values = fragment.Select(field => field.Key).Where(name => name.EndsWith("Value", StringComparison.Ordinal)).ToArray();
         bool continues = (bool?)fragment["willContinue"] == true;
         if (values.Length == 0)
@@ -163,7 +164,7 @@ internal sealed class GeminiArgumentStream
                     }
                     if (!closed) { throw PathFailure(); }
                     json.Append('"');
-                    try { segments.Add(JsonSerializer.Deserialize<string>(json.ToString())!); }
+                    try { segments.Add(JsonElement.Parse(json.ToString()).GetString()!); }
                     catch (JsonException) { throw PathFailure(); }
                 }
                 else
