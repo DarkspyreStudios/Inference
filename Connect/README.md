@@ -1301,7 +1301,9 @@ Responses reports `Unknown` for an unrecognized native status and does not publi
 state from that outcome. Tool calls alone do not establish successful completion. Direct Codex
 also accepts the actual terminal SSE event type when its response omits `status`, matching the
 selected CLI protocol. An explicit unknown status is not replaced by the event type. Other
-Responses routes require their native status; a missing status remains unknown.
+Responses routes require their native status; a missing status remains unknown. Managed sessions
+retain tool calls from an unknown outcome in their context but end with `Unknown` without executing
+the calls or starting another model step.
 
 `SupportsReasoningText` describes public reasoning separately from reasoning-level control. Common
 mirrors the flag. The **Reasoning text** override disables public reasoning events and provider

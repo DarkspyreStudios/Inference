@@ -813,6 +813,12 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
                 // Mixed calls retain actual completed results; interruption leaves the remaining tail unresolved.
                 if (result.ToolCalls.Count > 0)
                 {
+                    if (result.Status == LlmCompletionStatus.Unknown)
+                    {
+                        await writer.WriteAsync(new LlmAgentMessageCompletedEvent(ThreadId, run.Id, stepId, result.Text), token);
+                        await CompleteAsync(run, writer, LlmAgentCompletionReason.Unknown, token);
+                        return;
+                    }
                     executingMixedTools = result.ToolCalls.Any(call => call is LlmShellCall);
                     try { await writer.WriteAsync(new LlmAgentMessageCompletedEvent(ThreadId, run.Id, stepId, result.Text), token); }
                     finally { await ExecuteToolsAsync(run, result.ToolCalls, assistant.Id, writer, token); }
