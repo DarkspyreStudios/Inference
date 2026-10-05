@@ -132,7 +132,7 @@ internal sealed class OwnedLlmAgentSession : ILlmAgentSession
 
     private async Task ReleaseAsync()
     {
-        try { await _session!.DisposeAsync().ConfigureAwait(false); }
-        finally { _session = null; }
+        await _session!.DisposeAsync().ConfigureAwait(false);
+        _session = null;
     }
 }

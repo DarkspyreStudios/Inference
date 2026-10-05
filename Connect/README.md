@@ -1024,6 +1024,9 @@ Concurrent disposal callers share the same completion and retained failure. Chat
 failures from its operation, credential and privately owned catalog retirement. Embedding disposal
 preserves admitted cleanup outcomes and owned credential-retirement failures. Agent disposal preserves opening and
 every owned session-retirement failure. Each waits for all owned cleanup before reporting failure.
+Agent retirement includes sessions returned after its initial snapshot. Failed session cleanup keeps
+the actual session owner; shared disposal reports that failure without retrying its release.
+Cancelled opening retains its cleanup failure as the cancellation cause.
 A single original error remains unchanged; multiple errors are retained in an `AggregateException`.
 Repeated disposal returns the same cached failure instance. Synchronous settings
 manager creation and Claude login participate in admission and drain. An admitted synchronous login

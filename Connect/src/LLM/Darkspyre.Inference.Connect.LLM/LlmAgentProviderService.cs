@@ -1,4 +1,5 @@
 using System.Diagnostics.CodeAnalysis;
+using System.Runtime.ExceptionServices;
 using Darkspyre.Inference.Common.Setup;
 using Darkspyre.Inference.Connect.LLM.Internal;
 
@@ -170,18 +171,21 @@ public sealed class LlmAgentProviderService : IDisposable, IAsyncDisposable
         }
     }
 
+    [SuppressMessage("Design", "CA1031", Justification = "Canceled session opening preserves its actual cleanup failure and cancellation token.")]
     private async Task<ILlmAgentSession> OwnAsync(ILlmAgentSession session, CancellationToken cancellationToken)
     {
         var owned = new OwnedLlmAgentSession(session, Forget);
         lock (_gate)
         {
+            _sessions.Add(owned);
             if (!_retiring && !cancellationToken.IsCancellationRequested)
             {
-                _sessions.Add(owned);
                 return owned;
             }
         }
-        await owned.DisposeAsync().ConfigureAwait(false);
+        try { await owned.DisposeAsync().ConfigureAwait(false); }
+        catch (Exception error)
+        { throw new OperationCanceledException("Agent opening was canceled during session cleanup.", error, cancellationToken); }
         cancellationToken.ThrowIfCancellationRequested();
         throw new ObjectDisposedException(nameof(LlmAgentProviderService));
     }
@@ -214,16 +218,25 @@ public sealed class LlmAgentProviderService : IDisposable, IAsyncDisposable
         {
             Task openings = _lifetime.RetireAsync();
             Task retiredSessions = Task.WhenAll(sessions.Select(session => session.DisposeAsync().AsTask()));
-            Task retirement = Task.WhenAll(openings, retiredSessions);
+            Task initial = Task.WhenAll(openings, retiredSessions);
+            await initial.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+            // Openings can return a refused cleanup owner after the initial snapshot.
+            lock (_gate) { sessions = [.. _sessions]; }
+            Task retirement = Task.WhenAll(initial, Task.WhenAll(sessions.Select(session => session.DisposeAsync().AsTask())));
             try { await retirement.ConfigureAwait(false); }
             catch
             {
-                if (retirement.Exception is { InnerExceptions.Count: > 1 } failures) throw failures;
+                if (retirement.Exception is { InnerExceptions.Count: > 1 } failures)
+                {
+                    Exception[] distinct = failures.Flatten().InnerExceptions
+                        .Distinct<Exception>(ReferenceEqualityComparer.Instance).ToArray();
+                    if (distinct.Length == 1) ExceptionDispatchInfo.Throw(distinct[0]);
+                    throw new AggregateException(distinct);
+                }
                 throw;
             }
             finally
             {
-                lock (_gate) { _sessions.Clear(); }
                 _clients.Clear();
                 _connections = null;
                 if (_ownsObservations) { _observations.Dispose(); }
