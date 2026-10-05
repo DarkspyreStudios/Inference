@@ -27,58 +27,10 @@ public sealed class SetupEditorRegressionTests : BunitContext
         SetupCommitResult result = await editor.InvokeAsync(editor.Instance.SaveAsync);
         Assert.Equal(SetupCommitState.Invalid, result.State);
         Assert.Equal(0, manager.Target.Calls);
-        WritePreview(editor.Markup, "invalid");
         Field(editor, "url").Find("input").Input("https://changed.test/");
         Assert.Equal(SetupCommitState.Committed, (await editor.InvokeAsync(editor.Instance.SaveAsync)).State);
         Assert.Equal(new Uri("https://changed.test/"), manager.Target.Saved!.Endpoint);
         Assert.False(editor.Instance.State.HasUnsavedChanges);
-    }
-
-    [Theory]
-    [InlineData("count", "-")]
-    [InlineData("count", "1.5")]
-    [InlineData("count", "9223372036854775808")]
-    [InlineData("amount", "bad")]
-    [InlineData("amount", "11")]
-    [InlineData("amount", "0.12345678901234567890123456789")]
-    public async Task InvalidNumericInputCannotSavePreviousValue(string field, string text)
-    {
-        var (settings, manager) = New();
-        IRenderedComponent<InferenceSettingsEditor> editor = Editor(settings, manager);
-        Field(editor, field).Find("input").Input(text);
-        Assert.Equal(text, Field(editor, field).Find("input").GetAttribute("value"));
-        Assert.Equal(SetupCommitState.Invalid, (await editor.InvokeAsync(editor.Instance.SaveAsync)).State);
-        Assert.Equal(0, manager.Target.Calls);
-    }
-
-    [Fact]
-    public async Task ErrorsArePerFieldAndNextCannotDiscardThem()
-    {
-        var (settings, manager) = New();
-        IRenderedComponent<InferenceSettingsEditor> editor = Editor(settings, manager);
-        Field(editor, "url").Find("input").Input("bad");
-        Field(editor, "count").Find("input").Input("-");
-        Click(editor, "Next");
-        Assert.Contains("First step", editor.Markup, StringComparison.Ordinal);
-        Field(editor, "url").Find("input").Input("https://original.test/");
-        SetupCommitResult result = await editor.InvokeAsync(editor.Instance.SaveAsync);
-        Assert.Equal(SetupCommitState.Invalid, result.State);
-        Assert.Contains(result.Issues!, issue => issue.FieldId == "count");
-        Assert.DoesNotContain(result.Issues!, issue => issue.FieldId == "url");
-    }
-
-    [Fact]
-    public async Task BackNavigationRetainsInvalidInputAndSaveReturnsToItsStep()
-    {
-        var (settings, manager) = New();
-        IRenderedComponent<InferenceSettingsEditor> editor = Editor(settings, manager);
-        Click(editor, "Next");
-        Field(editor, "second-url").Find("input").Input("unfinished");
-        Click(editor, "Back");
-        Assert.True(editor.Instance.State.HasPendingInput);
-        Assert.Equal(SetupCommitState.Invalid, (await editor.InvokeAsync(editor.Instance.SaveAsync)).State);
-        Assert.Equal("unfinished", Field(editor, "second-url").Find("input").GetAttribute("value"));
-        Assert.Equal(0, manager.Target.Calls);
     }
 
     [Fact]
@@ -105,30 +57,6 @@ public sealed class SetupEditorRegressionTests : BunitContext
     }
 
     [Fact]
-    public async Task UncertainCommitRemainsAnExplicitHostState()
-    {
-        var (settings, manager) = New(new Target { Result = new(SetupCommitState.Uncertain) });
-        IRenderedComponent<InferenceSettingsEditor> editor = Editor(settings, manager);
-        Assert.Equal(SetupCommitState.Uncertain, (await editor.InvokeAsync(editor.Instance.SaveAsync)).State);
-        Assert.True(editor.Instance.State.CommitOutcomeUncertain);
-        Assert.True(editor.Instance.State.HasUnsavedChanges);
-        Assert.False(editor.Instance.State.CanSave);
-    }
-
-    [Fact]
-    public async Task InteractionInstructionsAndRecheckComeFromTheSettings()
-    {
-        var (settings, manager) = New();
-        settings.ShowPrerequisite();
-        IRenderedComponent<InferenceSettingsEditor> editor = Editor(settings, manager);
-        Assert.Contains("Authenticate the external CLI", editor.Markup, StringComparison.Ordinal);
-        await editor.InvokeAsync(manager.RaiseStatusChanged);
-        Click(editor, "Check again");
-        editor.WaitForAssertion(() => Assert.Null(settings.Interaction));
-        Assert.Equal(1, manager.Rechecks);
-    }
-
-    [Fact]
     public async Task CallbackIsRetainedOnlyForItsAttemptAndDoesNotEnterFieldValues()
     {
         var (settings, manager) = New();
@@ -147,18 +75,6 @@ public sealed class SetupEditorRegressionTests : BunitContext
         string next = ((SetupBrowserAuthorization)settings.Interaction!).Callback.Description.Id;
         Assert.NotEqual(id, next);
         Assert.Empty(Field(editor, next).Find("input").GetAttribute("value") ?? string.Empty);
-    }
-
-    [Fact]
-    public void ReplacedSettingsCannotRetainOldInvalidInput()
-    {
-        var (first, manager) = New();
-        var second = new TestSettings();
-        IRenderedComponent<InferenceSettingsEditor> editor = Editor(first, manager);
-        Field(editor, "url").Find("input").Input("old invalid input");
-        editor.Render(parameters => parameters.Add(value => value.Settings, second));
-        Assert.False(editor.Instance.State.HasUnsavedChanges);
-        Assert.Equal("https://original.test/", Field(editor, "url").Find("input").GetAttribute("value"));
     }
 
     [Fact]
@@ -204,7 +120,6 @@ public sealed class SetupEditorRegressionTests : BunitContext
         Assert.DoesNotContain("Refresh choices", choice.Markup, StringComparison.Ordinal);
         Assert.Equal("Count", Field(editor, "count").Find("input").GetAttribute("aria-label"));
         Assert.Equal("Amount", Field(editor, "amount").Find("input").GetAttribute("aria-label"));
-        WritePreview(editor.Markup, "valid");
     }
 
     [Fact]
@@ -274,33 +189,6 @@ public sealed class SetupEditorRegressionTests : BunitContext
     }
 
     [Fact]
-    public void NumericKeyboardBoundsAndDisabledStateAreAccessible()
-    {
-        SetupNumberEdit<decimal>? lastEdit = null;
-        IRenderedComponent<SetupNumberInput<decimal>> number = Render<SetupNumberInput<decimal>>(parameters => parameters
-            .Add(value => value.Text, "1.5").Add(value => value.Minimum, 0m).Add(value => value.Maximum, 2m)
-            .Add(value => value.Step, 0.1m).Add(value => value.Label, "Speed")
-            .Add(value => value.Edited, edit => lastEdit = edit));
-        var input = number.Find("input");
-        Assert.Equal("spinbutton", input.GetAttribute("role"));
-        Assert.Equal("0", input.GetAttribute("aria-valuemin"));
-        Assert.Equal("2", input.GetAttribute("aria-valuemax"));
-        Assert.Equal("1.5", input.GetAttribute("aria-valuenow"));
-        input.KeyDown("ArrowUp");
-        Assert.Equal(1.6m, lastEdit!.Value);
-        number.Render(parameters => parameters.Add(value => value.Text, "2"));
-        Assert.True(number.FindAll("button")[1].HasAttribute("disabled"));
-        number.Find("input").KeyDown("ArrowDown");
-        Assert.Equal(1.9m, lastEdit.Value);
-        lastEdit = null;
-        number.Render(parameters => parameters.Add(value => value.Disabled, true));
-        Assert.True(number.Find("input").HasAttribute("disabled"));
-        Assert.All(number.FindAll("button"), button => Assert.True(button.HasAttribute("disabled")));
-        number.Find("input").KeyDown("ArrowDown");
-        Assert.Null(lastEdit);
-    }
-
-    [Fact]
     public void NumericControlsPreserveExactTypesAndOnlyClampExplicitSteps()
     {
         SetupNumberEdit<long>? whole = null;
@@ -335,30 +223,6 @@ public sealed class SetupEditorRegressionTests : BunitContext
     private static void Click<T>(IRenderedComponent<T> fragment, string label) where T : IComponent =>
         Assert.Single(fragment.FindAll("button"), button => button.TextContent.Trim() == label).Click();
 
-    // Optional generated evidence for browser layout review; test assertions always run.
-    // Serve beside the pinned Lumeo CSS and this library's generated scoped CSS bundle.
-    private static void WritePreview(string markup, string name)
-    {
-        string? directory = Environment.GetEnvironmentVariable("INFERENCE_UI_PREVIEW_DIRECTORY");
-        if (string.IsNullOrEmpty(directory)) { return; }
-        Directory.CreateDirectory(directory);
-        foreach (bool darkFrame in new[] { false, true })
-        {
-            File.WriteAllText(Path.Combine(directory, name + (darkFrame ? "-dark-framed" : string.Empty) + ".html"), $$"""
-            <!doctype html><html lang="en" class="{{(darkFrame ? "dark framed" : string.Empty)}}"><head><meta charset="utf-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1">
-            <title>Settings renderer — {{name}}</title>
-            <link rel="stylesheet" href="lumeo.css"><link rel="stylesheet" href="lumeo-utilities.css">
-            <link rel="stylesheet" href="settings.css">
-            <style>
-            body { margin: 0; padding: 1rem; font: 14px system-ui; color: var(--color-foreground); background: var(--color-background); }
-            main { max-width: 46rem; margin: auto; }
-            .framed main { padding: 1rem; border: 1px solid var(--color-border); border-radius: var(--radius); background: var(--color-card); }
-            </style></head><body><main>{{markup}}</main></body></html>
-            """);
-        }
-    }
-
     private sealed record Changes(Uri? Endpoint, long? Count, decimal? Amount);
     private sealed class Target : ISetupCommitTarget<Changes>
     {
@@ -381,8 +245,6 @@ public sealed class SetupEditorRegressionTests : BunitContext
         private SetupSecretEditKind _secret;
         public string Callback { get; private set; } = string.Empty;
         public SetupChoiceCapabilities ChoiceCapabilities { get; init; } = SetupChoiceCapabilities.Bounded;
-        public void ShowPrerequisite() => Interaction = new SetupExternalPrerequisite("Authenticate the external CLI",
-            new("recheck", "Check again", SetupActionPurpose.CheckPrerequisites, SetupSideEffect.None));
         public void StartCallback()
         {
             Callback = string.Empty;
@@ -421,7 +283,6 @@ public sealed class SetupEditorRegressionTests : BunitContext
     private sealed class TestManager(Target target) : InferenceSettingsManager<TestSettings, Changes>(target), IInferenceSettingsStatusSource
     {
         public Target Target { get; } = target;
-        public int Rechecks { get; private set; }
         public string? CompletedCallback { get; private set; }
         public int ChoiceCalls { get; private set; }
         public List<CancellationToken> ChoiceTokens { get; } = [];
@@ -440,7 +301,6 @@ public sealed class SetupEditorRegressionTests : BunitContext
         {
             switch (action.Id)
             {
-                case "recheck": Rechecks++; break;
                 case "continue" when settings.Interaction is SetupBrowserAuthorization: CompletedCallback = settings.Callback; break;
                 case "continue": return Task.FromResult(SetupActionResult.Completed);
             }

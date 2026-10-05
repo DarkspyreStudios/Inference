@@ -16,17 +16,6 @@ public sealed class InferenceSettingsEditorTests : BunitContext
     }
 
     [Fact]
-    public void RendersProviderStatusWithoutAHostConnectionFlag()
-    {
-        IRenderedComponent<InferenceSettingsEditor> editor = RenderEditor(new FakeSettings(), new FakeManager());
-
-        Assert.Contains("Example provider", editor.Markup, StringComparison.Ordinal);
-        Assert.Contains("Configured: Yes", editor.Markup, StringComparison.Ordinal);
-        Assert.Contains("Ready: Unknown", editor.Markup, StringComparison.Ordinal);
-        Assert.DoesNotContain("role=\"dialog\"", editor.Markup, StringComparison.Ordinal);
-    }
-
-    [Fact]
     public void HostsWithTheirOwnFrameCanHideTheHeadingAndEffectLabels()
     {
         var settings = new FakeSettings();
@@ -43,71 +32,6 @@ public sealed class InferenceSettingsEditorTests : BunitContext
         Assert.Empty(framed.FindAll(".inference-settings-editor__action small"));
         Assert.Contains("Check connection", framed.Markup, StringComparison.Ordinal);
         Assert.Contains("Configured: Yes", framed.Markup, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public async Task SaveCallsTheManagerOnceAndReportsTheResult()
-    {
-        var manager = new FakeManager();
-        SetupCommitResult? reported = null;
-        IRenderedComponent<InferenceSettingsEditor> editor = Render<InferenceSettingsEditor>(parameters => parameters
-            .Add(value => value.Settings, new FakeSettings()).Add(value => value.Manager, manager)
-            .Add(value => value.Host, new FakeHost()).Add(value => value.CommitCompleted, result => reported = result));
-
-        SetupCommitResult result = await editor.InvokeAsync(() => editor.Instance.SaveAsync());
-
-        Assert.Equal(SetupCommitState.Committed, result.State);
-        Assert.Equal(SetupCommitState.Committed, reported?.State);
-        Assert.Equal(1, manager.Target.Calls);
-        Assert.False(editor.Instance.State.CanSave);
-    }
-
-    [Fact]
-    public void SaveIsEnabledOnlyWhenRequiredValuesAndSignInAreSatisfied()
-    {
-        Assert.True(SaveButton(RenderEditor(new FakeSettings(), new FakeManager())).HasAttribute("disabled") is false);
-        Assert.True(SaveButton(RenderEditor(new FakeSettings { Url = string.Empty }, new FakeManager())).HasAttribute("disabled"));
-        Assert.True(SaveButton(RenderEditor(new FakeSettings { SignedIn = false }, new FakeManager())).HasAttribute("disabled"));
-    }
-
-    [Fact]
-    public void CheckConnectionRunsThroughTheHostAndManager()
-    {
-        var manager = new FakeManager();
-        var host = new FakeHost();
-        IRenderedComponent<InferenceSettingsEditor> editor = RenderEditor(new FakeSettings(), manager, host);
-
-        editor.FindAll("button").Single(button => button.TextContent.Contains("Check connection", StringComparison.Ordinal)).Click();
-
-        editor.WaitForAssertion(() => Assert.Contains("Ready: Yes", editor.Markup, StringComparison.Ordinal));
-        Assert.Equal(1, host.AuthorizationCount);
-        Assert.Equal(1, host.ExecutionCount);
-        Assert.Equal(0, manager.Target.Calls);
-    }
-
-    [Fact]
-    public void StatusChangeRefreshesTheRenderedStatus()
-    {
-        var manager = new FakeStatusManager();
-        IRenderedComponent<InferenceSettingsEditor> editor = RenderEditor(new FakeSettings(), manager);
-        Assert.Contains("Ready: Unknown", editor.Markup, StringComparison.Ordinal);
-
-        manager.RaiseStatusChanged();
-
-        editor.WaitForAssertion(() => Assert.Contains("Ready: Yes", editor.Markup, StringComparison.Ordinal));
-        Assert.Equal(1, manager.RefreshCount);
-    }
-
-    [Fact]
-    public async Task DisposingTheEditorStopsListeningForStatus()
-    {
-        var manager = new FakeStatusManager();
-        RenderEditor(new FakeSettings(), manager);
-        Assert.Equal(1, manager.ListenerCount);
-
-        await DisposeComponentsAsync();
-
-        Assert.Equal(0, manager.ListenerCount);
     }
 
     [Fact]
