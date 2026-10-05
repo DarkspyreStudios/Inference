@@ -12,8 +12,7 @@ namespace Darkspyre.Inference.Connect.Video;
 /// <summary>Finite Video-owned metadata. Serialized native receipts do not confer authority.</summary>
 public static class ConnectVideoJson
 {
-    private static readonly JsonSerializerOptions OwnedOptions = CreateOptions();
-    private static JsonTypeInfo<T> Metadata<T>() => OwnedOptions.GetTypeInfo<T>();
+    private static JsonTypeInfo<T> Metadata<T>() => CreateOptions().GetTypeInfo<T>();
     public static JsonTypeInfo<VideoTransport> VideoTransport => Metadata<VideoTransport>();
     public static JsonTypeInfo<VideoConnection> VideoConnection => Metadata<VideoConnection>();
     public static JsonTypeInfo<XaiVideoOptions> XaiVideoOptions => Metadata<XaiVideoOptions>();

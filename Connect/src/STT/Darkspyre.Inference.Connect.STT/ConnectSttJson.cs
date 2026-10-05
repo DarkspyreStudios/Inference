@@ -11,8 +11,7 @@ namespace Darkspyre.Inference.Connect.STT;
 /// <summary>STT-owned closed data metadata. Borrowed runtime authorities are never portable data.</summary>
 public static class ConnectSttJson
 {
-    private static readonly JsonSerializerOptions OwnedOptions = CreateOptions();
-    private static JsonTypeInfo<T> Metadata<T>() => OwnedOptions.GetTypeInfo<T>();
+    private static JsonTypeInfo<T> Metadata<T>() => CreateOptions().GetTypeInfo<T>();
     public static JsonTypeInfo<SttTransport> SttTransport => Metadata<SttTransport>();
     public static JsonTypeInfo<SttConnection> SttConnection => Metadata<SttConnection>();
     public static JsonTypeInfo<SttSetupConfiguration> SttSetupConfiguration => Metadata<SttSetupConfiguration>();

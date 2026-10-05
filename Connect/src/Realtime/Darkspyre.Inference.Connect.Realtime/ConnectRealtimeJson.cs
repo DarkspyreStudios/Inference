@@ -60,8 +60,7 @@ public static class ConnectRealtimeJson
     public static JsonTypeInfo<RealtimeSetupConfiguration> RealtimeSetupConfiguration => Metadata<RealtimeSetupConfiguration>();
     public static JsonTypeInfo<RealtimeSetupHeaderChanges> RealtimeSetupHeaderChanges => Metadata<RealtimeSetupHeaderChanges>();
     public static JsonTypeInfo<RealtimeSetupChanges> RealtimeSetupChanges => Metadata<RealtimeSetupChanges>();
-    private static readonly JsonSerializerOptions OwnedOptions = CreateOptions();
-    private static JsonTypeInfo<T> Metadata<T>() => OwnedOptions.GetTypeInfo<T>();
+    private static JsonTypeInfo<T> Metadata<T>() => CreateOptions().GetTypeInfo<T>();
     private static JsonSerializerOptions CreateOptions()
     {
         var options = new JsonSerializerOptions(ConnectRealtimeJsonContext.Default.Options) { TypeInfoResolver = new RealtimeTypeInfoResolver() };

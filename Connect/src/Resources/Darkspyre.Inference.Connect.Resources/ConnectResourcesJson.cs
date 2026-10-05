@@ -15,8 +15,7 @@ namespace Darkspyre.Inference.Connect.Resources;
 /// <summary>Resources-owned closed metadata. Native receipts grant no runtime authority.</summary>
 public static class ConnectResourcesJson
 {
-    private static readonly JsonSerializerOptions OwnedOptions = CreateOptions();
-    private static JsonTypeInfo<T> Metadata<T>() => OwnedOptions.GetTypeInfo<T>();
+    private static JsonTypeInfo<T> Metadata<T>() => CreateOptions().GetTypeInfo<T>();
     public static JsonTypeInfo<LlmResourcePageRequest> LlmResourcePageRequest => Metadata<LlmResourcePageRequest>();
     public static JsonTypeInfo<LlmBatchCounts> LlmBatchCounts => Metadata<LlmBatchCounts>();
     public static JsonTypeInfo<LlmBatch> LlmBatch => Metadata<LlmBatch>();

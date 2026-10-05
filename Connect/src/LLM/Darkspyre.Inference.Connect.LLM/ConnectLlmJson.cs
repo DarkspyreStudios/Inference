@@ -31,9 +31,9 @@ public static class ConnectLlmJson
     public static JsonTypeInfo<LlmAzureManagedIdentityId.ClientId> ClientId => Metadata<LlmAzureManagedIdentityId.ClientId>();
     public static JsonTypeInfo<LlmAzureManagedIdentityId.ResourceId> ResourceId => Metadata<LlmAzureManagedIdentityId.ResourceId>();
     public static JsonTypeInfo<LlmAzureManagedIdentityId.ObjectId> ObjectId => Metadata<LlmAzureManagedIdentityId.ObjectId>();
-    public static JsonTypeInfo<LlmAzureSecret> LlmAzureSecret => LlmCredentialJsonContext.Default.LlmAzureSecret;
-    public static JsonTypeInfo<LlmAzureSecret.ClientSecret> ClientSecret => LlmCredentialJsonContext.Default.ClientSecret;
-    public static JsonTypeInfo<LlmAzureSecret.CertificatePkcs12> CertificatePkcs12 => LlmCredentialJsonContext.Default.CertificatePkcs12;
+    public static JsonTypeInfo<LlmAzureSecret> LlmAzureSecret => new LlmCredentialJsonContext().LlmAzureSecret;
+    public static JsonTypeInfo<LlmAzureSecret.ClientSecret> ClientSecret => new LlmCredentialJsonContext().ClientSecret;
+    public static JsonTypeInfo<LlmAzureSecret.CertificatePkcs12> CertificatePkcs12 => new LlmCredentialJsonContext().CertificatePkcs12;
     public static JsonTypeInfo<LlmAgentRuntimeProfile> LlmAgentRuntimeProfile => Metadata<LlmAgentRuntimeProfile>();
     public static JsonTypeInfo<LlmAgentRuntimeStateConfiguration> LlmAgentRuntimeStateConfiguration => Metadata<LlmAgentRuntimeStateConfiguration>();
     public static JsonTypeInfo<LlmAgentIsolatedRuntimeState> LlmAgentIsolatedRuntimeState => Metadata<LlmAgentIsolatedRuntimeState>();
@@ -59,8 +59,8 @@ public static class ConnectLlmJson
     public static JsonTypeInfo<LlmAgentStagedStateDisposition> LlmAgentStagedStateDisposition => Metadata<LlmAgentStagedStateDisposition>();
     public static JsonTypeInfo<LlmAgentStagedStateSnapshot> LlmAgentStagedStateSnapshot => Metadata<LlmAgentStagedStateSnapshot>();
     public static JsonTypeInfo<LlmAgentStagedStateCommitResult> LlmAgentStagedStateCommitResult => Metadata<LlmAgentStagedStateCommitResult>();
-    public static JsonTypeInfo<LlmCopilotCredentials> LlmCopilotCredentials => LlmCredentialJsonContext.Default.LlmCopilotCredentials;
-    public static JsonTypeInfo<LlmCopilotRuntimeConnectionCredential> LlmCopilotRuntimeConnectionCredential => LlmCredentialJsonContext.Default.LlmCopilotRuntimeConnectionCredential;
+    public static JsonTypeInfo<LlmCopilotCredentials> LlmCopilotCredentials => new LlmCredentialJsonContext().LlmCopilotCredentials;
+    public static JsonTypeInfo<LlmCopilotRuntimeConnectionCredential> LlmCopilotRuntimeConnectionCredential => new LlmCredentialJsonContext().LlmCopilotRuntimeConnectionCredential;
     public static JsonTypeInfo<XaiStoragePublicUrlRequest> XaiStoragePublicUrlRequest => Metadata<XaiStoragePublicUrlRequest>();
     public static JsonTypeInfo<XaiStoragePublicUrlFlag> XaiStoragePublicUrlFlag => Metadata<XaiStoragePublicUrlFlag>();
     public static JsonTypeInfo<XaiStoragePublicUrlConfiguration> XaiStoragePublicUrlConfiguration => Metadata<XaiStoragePublicUrlConfiguration>();
@@ -133,9 +133,7 @@ public static class ConnectLlmJson
     public static JsonTypeInfo<LlmAgentClientToolDefinition> LlmAgentClientToolDefinition => Metadata<LlmAgentClientToolDefinition>();
     public static JsonTypeInfo<LlmAgentToolDefinition> LlmAgentToolDefinition => Metadata<LlmAgentToolDefinition>();
     public static JsonTypeInfo<LlmAgentShellTool> LlmAgentShellTool => Metadata<LlmAgentShellTool>();
-    private static readonly JsonSerializerOptions OwnedOptions = CreateOptions();
-
-    private static JsonTypeInfo<T> Metadata<T>() => OwnedOptions.GetTypeInfo<T>();
+    private static JsonTypeInfo<T> Metadata<T>() => CreateOptions().GetTypeInfo<T>();
 
     private static JsonSerializerOptions CreateOptions()
     {
@@ -248,7 +246,7 @@ public static class ConnectLlmJson
     public static JsonTypeInfo<LlmAgentContentObservationEvent> LlmAgentContentObservationEvent => Metadata<LlmAgentContentObservationEvent>();
     public static JsonTypeInfo<LlmAgentContentObservationKind> LlmAgentContentObservationKind => Metadata<LlmAgentContentObservationKind>();
     public static JsonTypeInfo<LlmAgentContentObservationMode> LlmAgentContentObservationMode => Metadata<LlmAgentContentObservationMode>();
-    public static JsonTypeInfo<LlmCredential> Credential => LlmCredentialJsonContext.Default.LlmCredential;
+    public static JsonTypeInfo<LlmCredential> Credential => new LlmCredentialJsonContext().LlmCredential;
     public static JsonTypeInfo<LlmAccountUsageSnapshot> AccountUsageSnapshot => Metadata<LlmAccountUsageSnapshot>();
     public static JsonTypeInfo<LlmConnection> Connection => Metadata<LlmConnection>();
     public static JsonTypeInfo<LlmSetupConfiguration> SetupConfiguration => Metadata<LlmSetupConfiguration>();

@@ -32,8 +32,7 @@ public static class ConnectTtsJson
     public static JsonTypeInfo<TtsReplacementsUpdated> TtsReplacementsUpdated => Metadata<TtsReplacementsUpdated>();
     public static JsonTypeInfo<TtsUtteranceCleared> TtsUtteranceCleared => Metadata<TtsUtteranceCleared>();
 
-    private static readonly JsonSerializerOptions OwnedOptions = CreateOptions();
-    private static JsonTypeInfo<T> Metadata<T>() => OwnedOptions.GetTypeInfo<T>();
+    private static JsonTypeInfo<T> Metadata<T>() => CreateOptions().GetTypeInfo<T>();
 
     private static JsonSerializerOptions CreateOptions()
     {

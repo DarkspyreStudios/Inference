@@ -291,8 +291,9 @@ provider-owned dirty state and explicit choice capabilities for the shared Setti
 `TensorJson` exports assembly-owned `JsonTypeInfo<T>` for `SetupConfiguration`, `SetupChanges`,
 `ModelPack`, `PackStatus`, `ModelObservation`, `BackendProbeRequest` and `BackendAvailability`. Consumers pass these typed metadata properties to
 `JsonSerializer` when reading or writing Tensor-owned data. The metadata belongs to the Tensor
-assembly generation; consumers release their references when that generation retires. The pack
-manager uses the same source-generated context for installed manifests. Manifest fingerprinting
+assembly generation; consumers release their references when that generation retires.
+Each getter returns metadata with its own options and type cache, released with the caller's metadata.
+The pack manager uses the same source-generated context for installed manifests. Manifest fingerprinting
 also uses generated metadata and retains the established canonical bytes. These formats retain
 their property names, numeric enum values and null/empty distinctions. Unknown properties are
 ignored; model validation remains separate from JSON parsing. Serializer tests load the real Tensor

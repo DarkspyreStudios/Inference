@@ -12,8 +12,7 @@ namespace Darkspyre.Inference.Connect.Image;
 /// <summary>Image-owned metadata for portable contracts. Native receipt data grants no authority.</summary>
 public static class ConnectImageJson
 {
-    private static readonly JsonSerializerOptions OwnedOptions = CreateOptions();
-    private static JsonTypeInfo<T> Metadata<T>() => OwnedOptions.GetTypeInfo<T>();
+    private static JsonTypeInfo<T> Metadata<T>() => CreateOptions().GetTypeInfo<T>();
 
     private static JsonSerializerOptions CreateOptions()
     {

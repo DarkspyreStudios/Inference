@@ -385,6 +385,9 @@ reported by `OmittedContinuationStateCount`; default handling rejects unbound st
 
 ### JSON metadata
 
+Each metadata getter owns its options and type cache. Callers can retain the returned metadata for
+their generation and release it at retirement. Rejected foreign types have no static metadata cache.
+
 `ConnectLlmJson.PortableRequest` closes the Common request graph with the fixed `XaiXSearchTool`
 variant, also supported by `ChatRequest` metadata. It adds no arbitrary CLR subtype registry and
 does not change Common's metadata. Owned options compose Common's exact runtime-resource and

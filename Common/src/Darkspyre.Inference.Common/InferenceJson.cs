@@ -106,9 +106,7 @@ public static class InferenceJson
     public static JsonTypeInfo<LlmShellExitedOutcome> LlmShellExitedOutcome => Metadata<LlmShellExitedOutcome>();
     public static JsonTypeInfo<LlmShellTimedOutOutcome> LlmShellTimedOutOutcome => Metadata<LlmShellTimedOutOutcome>();
     public static JsonTypeInfo<LlmShellCallEvent> LlmShellCallEvent => Metadata<LlmShellCallEvent>();
-    private static readonly JsonSerializerOptions OwnedOptions = CreateOptions();
-
-    private static JsonTypeInfo<T> Metadata<T>() => OwnedOptions.GetTypeInfo<T>();
+    private static JsonTypeInfo<T> Metadata<T>() => CreateOptions().GetTypeInfo<T>();
 
     private static JsonSerializerOptions CreateOptions()
     {

@@ -145,6 +145,8 @@ data-only setup observations, choices and outcomes. Pass its typed metadata to `
 The metadata preserves the existing property names, numeric enum values, binary encodings,
 required members, unknown-member rules and decision/tool-output discriminators. It installs no
 reflection resolver. Caller-defined types require caller-owned metadata.
+Each getter returns metadata with its own options and type cache. Callers can retain metadata for
+their operation or generation. Releasing it also releases rejected foreign types from that cache.
 
 The stream-event base has no JSON discriminator. Serialize each concrete event with its matching
 metadata; this package does not invent a stream envelope. Callback-backed setup fields and abstract

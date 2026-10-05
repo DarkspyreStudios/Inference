@@ -20,8 +20,7 @@ public static class ConnectAudioJson
     public static JsonTypeInfo<AudioSetupHeaderChanges> AudioSetupHeaderChanges => Metadata<AudioSetupHeaderChanges>();
     public static JsonTypeInfo<AudioSetupChanges> AudioSetupChanges => Metadata<AudioSetupChanges>();
 
-    private static readonly JsonSerializerOptions OwnedOptions = CreateOptions();
-    private static JsonTypeInfo<T> Metadata<T>() => OwnedOptions.GetTypeInfo<T>();
+    private static JsonTypeInfo<T> Metadata<T>() => CreateOptions().GetTypeInfo<T>();
 
     private static JsonSerializerOptions CreateOptions()
     {

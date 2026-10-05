@@ -7,8 +7,6 @@ namespace Darkspyre.Inference.Tensor.Common;
 /// <summary>Assembly-owned metadata for Tensor settings, model manifests and runtime observations.</summary>
 public static class TensorJson
 {
-    private static readonly JsonSerializerOptions Options = CreateOptions();
-
     public static JsonTypeInfo<TensorSetupConfiguration> SetupConfiguration => Metadata<TensorSetupConfiguration>();
     public static JsonTypeInfo<TensorSetupChanges> SetupChanges => Metadata<TensorSetupChanges>();
     public static JsonTypeInfo<TensorModelPackDefinition> ModelPack => Metadata<TensorModelPackDefinition>();
@@ -25,7 +23,7 @@ public static class TensorJson
     public static JsonTypeInfo<TensorRuntimeDiagnostic> TensorRuntimeDiagnostic => Metadata<TensorRuntimeDiagnostic>();
     public static JsonTypeInfo<TensorRuntimeShutdownResult> TensorRuntimeShutdownResult => Metadata<TensorRuntimeShutdownResult>();
 
-    private static JsonTypeInfo<T> Metadata<T>() => Options.GetTypeInfo<T>();
+    private static JsonTypeInfo<T> Metadata<T>() => CreateOptions().GetTypeInfo<T>();
 
     private static JsonSerializerOptions CreateOptions()
     {
