@@ -805,8 +805,8 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, ILlmFileClie
         connection = await AttachCatalogAsync(connectionId, connection, client, cancellationToken);
         LlmProviderInputTokenCount result;
         try { result = await counter.CountInputTokensAsync(connection, request, cancellationToken).ConfigureAwait(false); }
-        catch (Exception) when (cancellationToken.IsCancellationRequested)
-        { throw new OperationCanceledException(cancellationToken); }
+        catch (Exception error) when (cancellationToken.IsCancellationRequested)
+        { throw new OperationCanceledException("The operation was canceled.", error, cancellationToken); }
         ThrowIfOperationCanceled(cancellationToken);
         connection.CacheAdmission?.Check(connection, request.ExplicitCache);
         return result with { OmittedContinuationStateCount = checked(omitted + result.OmittedContinuationStateCount) };

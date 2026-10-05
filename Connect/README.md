@@ -2420,6 +2420,7 @@ generation usage, billing records or guaranteed admission. No output-token usage
 
 Each count HTTP operation has a 100-second deadline through response parsing. Caller cancellation
 remains cancellation. Service disposal cancels and drains active counts and rejects late results.
+The facade retains the adapter's failure as the cancellation cause when both occur together.
 Failures expose safe status/retry information without response bodies or nested transport diagnostics.
 Vertex Claude uses `count-tokens:rawPredict` with the bare model ID. Its count regions differ from
 generation regions; an unsupported selected location fails without rerouting or changing the model.
