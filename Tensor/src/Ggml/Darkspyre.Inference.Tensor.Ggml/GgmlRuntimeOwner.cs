@@ -502,7 +502,8 @@ public sealed class GgmlRuntimeOwner : ITensorRuntimeOwner
         internal static Initialization Ready(TensorRuntimeBackendIdentity identity) => new(TensorBackendAvailabilityState.Available,
             "The GGML backend initialized. Model allocation is not guaranteed.", identity, [], []);
         internal static Initialization Refused(string reason, bool retained = false, Exception? error = null) => new(retained
-            ? TensorBackendAvailabilityState.RequiresProcessRestart : TensorBackendAvailabilityState.Unavailable, reason, null, [], []) { Error = error };
+            ? TensorBackendAvailabilityState.RequiresProcessRestart : TensorBackendAvailabilityState.Unavailable, reason, null, [], [])
+        { Error = error };
         internal static Initialization Unsupported(string reason) => new(TensorBackendAvailabilityState.Unsupported, reason, null, [], []);
     }
 }
