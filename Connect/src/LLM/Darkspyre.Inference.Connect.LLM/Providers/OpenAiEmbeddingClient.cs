@@ -57,6 +57,7 @@ internal sealed class OpenAiEmbeddingClient(HttpClient http) : ILlmEmbeddingClie
             };
             ProviderHttp.ApplyHeaders(httpRequest, connection);
             LlmCredential? credential = LlmCredential.Parse(connection.Credential);
+            string[] secrets = connection.AdditionalHeaders.Values.ToArray();
             using HttpResponseMessage response = await http.SendAsync(httpRequest, cancellationToken);
             await ProviderHttp.ThrowIfUnsuccessfulAsync(
                 response,
@@ -74,6 +75,11 @@ internal sealed class OpenAiEmbeddingClient(HttpClient http) : ILlmEmbeddingClie
                 {
                     throw new JsonException("Embedding response did not contain a data array.");
                 }
+
+                string? modelId = root.TryGetProperty("model", out JsonElement model) && model.ValueKind == JsonValueKind.String
+                    ? model.GetString() : null;
+                if (modelId is not null && SecretRedactor.ContainsProtectedValue(modelId, credential, secrets))
+                    throw new JsonException("Embedding model metadata cannot be published safely.");
 
                 List<(int Index, float[] Vector)> indexed = [];
                 var indexes = new HashSet<int>();
@@ -122,12 +128,13 @@ internal sealed class OpenAiEmbeddingClient(HttpClient http) : ILlmEmbeddingClie
 
                 result = new LlmEmbeddingResult
                 {
+                    ModelId = modelId,
                     Vectors = vectors,
                     Usage = new LlmEmbeddingUsage(inputTokens, totalTokens),
                     Diagnostics = new LlmProviderDiagnostics(
                         (int)response.StatusCode,
                         ProviderHttp.ReadRequestId(response),
-                        SecretRedactor.Sanitize(raw, credential))
+                        SecretRedactor.Sanitize(raw, credential, secrets))
                 };
             }
             catch (JsonException exception)
@@ -139,7 +146,7 @@ internal sealed class OpenAiEmbeddingClient(HttpClient http) : ILlmEmbeddingClie
                     "invalid_embedding_response",
                     ProviderHttp.ReadRequestId(response),
                     null,
-                    SecretRedactor.Sanitize(raw, credential),
+                    SecretRedactor.Sanitize(raw, credential, secrets),
                     exception);
             }
         }

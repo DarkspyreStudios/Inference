@@ -1184,8 +1184,11 @@ nullable and positive when supplied. Raw `dimensions`, `model` and `input` are r
 connection and request options. Unknown model-specific limits remain provider decisions. Requests
 snapshot inputs and JSON options before asynchronous work; connections snapshot embedding options
 and headers before refresh. OpenAI-compatible responses require one unique in-range index per input,
-finite nonempty vectors and the requested dimensions. The three embedding data types expose owned
-metadata through their exact type-name getters on `ConnectLlmJson`.
+finite nonempty vectors and the requested dimensions. Results retain the reported model ID when
+present; an absent ID stays null and is not replaced by the requested alias. Protected values in
+model metadata refuse publication. Diagnostics redact credentials and additional header values.
+The three embedding data types expose owned metadata through their exact type-name getters on
+`ConnectLlmJson`.
 
 `LlmEmbeddingProviderService.ListModelsAsync(connectionId)` lists observed xAI embedding-family
 models through the explicitly borrowed LLM facade and its sole model cache. Other transports and
