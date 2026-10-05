@@ -116,6 +116,11 @@ no-ops. `DisposeAsync` performs Stop and completes after native work has release
 The shared lifecycle idle task preserves the latest accepted work's failure after publishing
 Failed. Disposal observes that actual cleanup failure; repeated waits do not turn it into success.
 
+Laya owns an acquired pack lease and each returned model before checking load cancellation.
+Failed load cleanup preserves the load error and the cleanup error. The engine retains resources
+whose release fails and refuses replacement loads until explicit Unload releases them. The pack
+remains protected from removal until its dependent model has released successfully.
+
 The following example assumes the user has already installed the Supra model pack through the
 explicit `TensorModelPackManager.InstallAsync` action:
 

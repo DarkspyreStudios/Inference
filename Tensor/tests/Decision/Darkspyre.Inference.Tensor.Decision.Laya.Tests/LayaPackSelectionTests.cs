@@ -31,6 +31,43 @@ public sealed class LayaPackSelectionTests : IDisposable
         Assert.Empty(loader.Loaded);
     }
 
+    [Fact]
+    public async Task FailedLoadCleanupRetainsModelAndPackUntilExplicitUnload()
+    {
+        TensorModelPackDefinition pack = Pack("host/custom", "1");
+        using var http = new HttpClient(new ArtifactHandler());
+        using var packs = Manager(http, pack);
+        await packs.InstallAsync(pack.Key);
+        using var cancellation = new CancellationTokenSource();
+        var cleanupFailure = new InvalidOperationException("Model release failed.");
+        var loader = new Loader { AfterLoad = cancellation.Cancel, DisposeFailure = cleanupFailure };
+        var engine = new LayaDecisionInference(packs, loader, TensorBackendKind.Cpu);
+        try
+        {
+            AggregateException failure = await Assert.ThrowsAsync<AggregateException>(
+                () => engine.LoadAndWaitAsync(pack.Key, cancellation.Token));
+            OperationCanceledException original = Assert.IsType<OperationCanceledException>(failure.InnerExceptions[0]);
+            Assert.Equal(cancellation.Token, original.CancellationToken);
+            Assert.Same(cleanupFailure, failure.InnerExceptions[1]);
+            Model model = Assert.Single(loader.Models);
+            Assert.False(model.Disposed);
+            await Assert.ThrowsAsync<TensorModelPackException>(() => packs.RemoveAsync(pack.Key));
+            await Assert.ThrowsAsync<InvalidOperationException>(() => engine.LoadAndWaitAsync(pack.Key));
+            Assert.Same(model, Assert.Single(loader.Models));
+
+            model.DisposeFailure = null;
+            await engine.UnloadAndWaitAsync();
+            Assert.True(model.Disposed);
+            await packs.RemoveAsync(pack.Key);
+            Assert.Equal(TensorModelPackState.NotInstalled, (await packs.GetStatusAsync(pack.Key)).State);
+        }
+        finally
+        {
+            foreach (Model model in loader.Models) { model.DisposeFailure = null; }
+            await engine.DisposeAsync();
+        }
+    }
+
     private TensorModelPackManager Manager(HttpClient http, params TensorModelPackDefinition[] definitions) =>
         new(new TensorModelCatalog(definitions), _root, http);
     private static SetupActionDescriptor Action(TensorSettings setup, SetupActionPurpose purpose) =>
@@ -72,6 +109,7 @@ public sealed class LayaPackSelectionTests : IDisposable
         public List<TensorModelKey> Loaded { get; } = [];
         public List<Model> Models { get; } = [];
         public Exception? Failure { get; set; }
+        public Exception? DisposeFailure { get; init; }
         public Action? AfterLoad { get; init; }
         public Action? Forward { get; init; }
         public async Task<LayaModelResources> LoadAsync(TensorModelPackLease lease, TensorBackendKind backend,
@@ -82,7 +120,7 @@ public sealed class LayaPackSelectionTests : IDisposable
             Assert.Equal($"/{lease.Key.ModelId}/{lease.Key.Revision}/model",
                 await File.ReadAllTextAsync(lease.GetRequiredArtifact("model"), cancellationToken));
             if (Failure is not null) { throw Failure; }
-            var model = new Model(Forward);
+            var model = new Model(Forward) { DisposeFailure = DisposeFailure };
             Models.Add(model);
             AfterLoad?.Invoke();
             return new(new Tokenizer(), model);
@@ -91,11 +129,16 @@ public sealed class LayaPackSelectionTests : IDisposable
     private sealed class Model(Action? forward) : ILayaDecisionModel
     {
         public bool Disposed { get; private set; }
+        public Exception? DisposeFailure { get; set; }
         public List<LayaSequence> Sequences { get; } = [];
         public int MaximumOptions => 32;
         public LayaModelOutput Forward(LayaSequence sequence, CancellationToken cancellationToken)
         { Assert.False(Disposed); Sequences.Add(sequence); forward?.Invoke(); Assert.False(Disposed); return new([0, 2], .75f); }
-        public void Dispose() => Disposed = true;
+        public void Dispose()
+        {
+            if (DisposeFailure is not null) { throw DisposeFailure; }
+            Disposed = true;
+        }
     }
     private sealed class Tokenizer : ILayaTokenizer
     {

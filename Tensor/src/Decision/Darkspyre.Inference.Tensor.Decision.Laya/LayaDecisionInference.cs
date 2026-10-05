@@ -249,6 +249,11 @@ public sealed class LayaDecisionInference : ITensorDecisionInference, IDecisionI
         TensorModelKey model, TensorBackendKind backend, CancellationToken cancellationToken)
     {
         using IDisposable loading = await _lifetime.EnterLoadAsync(cancellationToken).ConfigureAwait(false);
+        if (_resources is not null || _modelLease is not null)
+        {
+            throw new InvalidOperationException("Unload the retained Laya resources before loading another model.");
+        }
+
         TensorModelPackLease lease;
         try
         {
@@ -259,28 +264,32 @@ public sealed class LayaDecisionInference : ITensorDecisionInference, IDecisionI
             throw new InferenceException(InferenceFailureCode.ModelUnavailable, exception.Message, exception);
         }
 
-        LayaModelResources? loadedResources = null;
+        _modelLease = lease;
         try
         {
             if (lease.Key != model)
             { throw new InferenceException(InferenceFailureCode.ModelUnavailable, "The pack lease identifies a different model."); }
             LayaAgentConfiguration configuration = await LayaAgentConfiguration.LoadAsync(
                 lease.GetRequiredArtifact("agent-config"), cancellationToken).ConfigureAwait(false);
-            loadedResources = await _loader.LoadAsync(lease, backend, configuration, cancellationToken).ConfigureAwait(false);
+            _resources = await _loader.LoadAsync(lease, backend, configuration, cancellationToken).ConfigureAwait(false);
             cancellationToken.ThrowIfCancellationRequested();
-            _lifetime.MarkLoaded(model, backend);
-            _resources = loadedResources;
             _configuration = configuration;
-            _meter = new LayaInputMeter(loadedResources.Tokenizer, configuration);
-            _modelLease = lease;
+            _meter = new LayaInputMeter(_resources.Tokenizer, configuration);
             _loadedBackend = backend;
-            loadedResources = null;
+            _lifetime.MarkLoaded(model, backend);
             return new TensorEngineStatus(model, backend, TensorEngineState.Loaded, DateTimeOffset.UtcNow);
         }
         catch (Exception exception)
         {
-            loadedResources?.Dispose();
-            await lease.DisposeAsync().ConfigureAwait(false);
+            try
+            {
+                await ReleaseOwnedModelAsync().ConfigureAwait(false);
+            }
+            catch (Exception cleanupFailure)
+            {
+                throw new AggregateException("Laya loading and model cleanup failed.", exception, cleanupFailure);
+            }
+
             if (exception is OperationCanceledException or InferenceException) { throw; }
             throw new InferenceException(
                 exception switch
@@ -338,6 +347,11 @@ public sealed class LayaDecisionInference : ITensorDecisionInference, IDecisionI
     private async Task ReleaseModelAsync(CancellationToken urgency)
     {
         using IDisposable unloading = await _lifetime.EnterUnloadAsync(urgency).ConfigureAwait(false);
+        await ReleaseOwnedModelAsync().ConfigureAwait(false);
+    }
+
+    private async Task ReleaseOwnedModelAsync()
+    {
         _resources?.Dispose();
         _resources = null;
         _configuration = null;
