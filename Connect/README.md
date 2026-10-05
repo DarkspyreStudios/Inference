@@ -2398,6 +2398,8 @@ Earlier Gemini models omit those unsupported binary results through the existing
 Vertex's supported Gemini 3 streaming profiles request preview path-based function arguments and
 emit the tool name early. They retain complete reconstructed calls for replay; the route does not
 advertise JSON-text argument streaming. Gemini API and non-streaming requests do not send that flag.
+Array indexes and boolean argument values retain their JSON types through portable results and
+native continuation replay.
 
 Claude CLI chat and Antigravity CLI chat report `LlmProviderCapabilities.ToolHistory = Text`. Tool
 calls and results already in the history reach their prompt as `[TOOL CALL id=… name=…]` and
