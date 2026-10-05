@@ -8,6 +8,30 @@ namespace Darkspyre.Inference.Connect.LLM.Tests;
 public sealed class ProviderStreamFailureTests
 {
     [Fact]
+    public async Task CleanupFailureFromFinalProviderPullIsAlsoReportedByRetirement()
+    {
+        var providerFailure = new LlmProviderException("The provider rejected generation.", LlmTransport.OpenAiResponses);
+        Exception cleanupFailure = LlmResourcePreparation.AsCleanupFailure(new InvalidOperationException("The response could not be released."));
+        var stream = new FailingStream(providerFailure, cleanupFailure, cleanupDuringPull: true);
+        var service = new LlmProviderService(new Source(), [new FailingClient(stream)]);
+
+        Exception? operation = await Record.ExceptionAsync(async () =>
+        {
+            await foreach (LlmStreamEvent unused in service.StreamAsync("connection", new() { ModelId = "model" }))
+                throw new InvalidOperationException("The failed provider must not emit an event.");
+        }).WaitAsync(TimeSpan.FromSeconds(5));
+        Exception? retirement = await Record.ExceptionAsync(async () => await service.DisposeAsync())
+            .WaitAsync(TimeSpan.FromSeconds(5));
+
+        Exception[] causes = Assert.IsType<AggregateException>(operation).Flatten().InnerExceptions.ToArray();
+        Assert.Equal(2, causes.Length);
+        Assert.Same(providerFailure, causes[0]);
+        Assert.Same(cleanupFailure, causes[1]);
+        Assert.Same(cleanupFailure, retirement);
+        Assert.Same(retirement, await Record.ExceptionAsync(async () => await service.DisposeAsync()));
+    }
+
+    [Fact]
     public async Task ProviderFailureSurvivesFailedEnumerationCleanupAndRetirementReportsThatCleanup()
     {
         var providerFailure = new LlmProviderException("The provider rejected generation.", LlmTransport.OpenAiResponses);
@@ -105,12 +129,13 @@ public sealed class ProviderStreamFailureTests
         public ValueTask DisposeAsync() => ValueTask.FromException(cleanupFailure);
     }
 
-    private sealed class FailingStream(Exception providerFailure, Exception cleanupFailure)
+    private sealed class FailingStream(Exception providerFailure, Exception cleanupFailure, bool cleanupDuringPull = false)
         : IAsyncEnumerable<LlmStreamEvent>, IAsyncEnumerator<LlmStreamEvent>
     {
         public LlmStreamEvent Current => throw new InvalidOperationException("No event is available.");
         public IAsyncEnumerator<LlmStreamEvent> GetAsyncEnumerator(CancellationToken cancellationToken = default) => this;
-        public ValueTask<bool> MoveNextAsync() => ValueTask.FromException<bool>(providerFailure);
-        public ValueTask DisposeAsync() => ValueTask.FromException(cleanupFailure);
+        public ValueTask<bool> MoveNextAsync() => ValueTask.FromException<bool>(cleanupDuringPull
+            ? new AggregateException(providerFailure, cleanupFailure) : providerFailure);
+        public ValueTask DisposeAsync() => cleanupDuringPull ? ValueTask.CompletedTask : ValueTask.FromException(cleanupFailure);
     }
 }

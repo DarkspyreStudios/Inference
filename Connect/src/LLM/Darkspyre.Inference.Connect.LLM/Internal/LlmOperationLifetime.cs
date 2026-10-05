@@ -124,6 +124,12 @@ internal sealed class LlmOperationLifetime : IDisposable, IAsyncDisposable
             {
                 failure = error;
                 cleanupFailed = LlmResourcePreparation.IsCleanupFailure(error);
+                if (cleanupFailed)
+                {
+                    IEnumerable<Exception> causes = error is AggregateException aggregate
+                        ? aggregate.Flatten().InnerExceptions : [error];
+                    lock (_gate) { _streamCleanupFailures.AddRange(causes.Where(LlmResourcePreparation.IsCleanupFailure)); }
+                }
                 expectedCancellation = !cleanupFailed && error is OperationCanceledException && operation.Token.IsCancellationRequested;
             }
             if (enumerator is not null)
