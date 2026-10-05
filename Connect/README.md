@@ -1491,6 +1491,8 @@ replaces the current request's observation. These shared fields do not enable a 
 or claim a provider mapping that has not been implemented.
 Anthropic and Vertex Claude report observations from `message_start` and `message_delta`. Gemini
 and Vertex Gemini report normalized `usageMetadata`, including reasoning output tokens.
+Anthropic's initial output count is retained when reported. Later output counts replace it;
+cache-read and cache-creation counts join uncached input in the normalized input total.
 Claude CLI chat and native sessions share a ledger keyed by API message ID. It sums distinct calls
 and ignores replayed calls and subagent events. Its observations and final `result.usage` cover the
 main loop for the current turn, as described in the [Claude usage contract](https://code.claude.com/docs/en/agent-sdk/cost-tracking).

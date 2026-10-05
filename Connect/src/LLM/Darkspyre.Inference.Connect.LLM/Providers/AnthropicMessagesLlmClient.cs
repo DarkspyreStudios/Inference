@@ -266,6 +266,7 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
                                 credential, response.RequestMessage, observedModel);
                             if (message.TryGetProperty("container", out _)) containerId = ReadContainer(message, connection.Transport);
                             inputTokens = ReadToken(message, "usage", "input_tokens") ?? inputTokens;
+                            outputTokens = ReadToken(message, "usage", "output_tokens") ?? outputTokens;
                             cachedTokens = ReadToken(message, "usage", "cache_read_input_tokens") ?? cachedTokens;
                             cacheWriteTokens = ReadToken(message, "usage", "cache_creation_input_tokens") ?? cacheWriteTokens;
                         }
