@@ -4,16 +4,53 @@ using Amazon;
 using Darkspyre.Inference.Common.LLM;
 using Amazon.Bedrock;
 using Amazon.Bedrock.Model;
+using Amazon.BedrockAgentCore;
 using Amazon.BedrockRuntime;
 using Amazon.BedrockRuntime.Model;
 using Amazon.Runtime;
+using Amazon.Runtime.EventStreams;
 using Darkspyre.Inference.Connect.LLM.Bedrock;
 using Microsoft.Extensions.Logging.Abstractions;
+using AgentCore = Amazon.BedrockAgentCore.Model;
 
 namespace Darkspyre.Inference.Connect.LLM.Bedrock.Tests;
 
 public sealed class BedrockSafetyTests
 {
+    [Fact]
+    public async Task PausedAgentCoreReaderDoesNotBlockFactoryRetirement()
+    {
+        var messageType = new EventStreamHeader(":message-type");
+        messageType.SetString("event");
+        var eventType = new EventStreamHeader(":event-type");
+        eventType.SetString("contentBlockDelta");
+        var contentType = new EventStreamHeader(":content-type");
+        contentType.SetString("application/json");
+        var message = new EventStreamMessage([messageType, eventType, contentType],
+            """{"contentBlockIndex":0,"delta":{"text":"partial"}}"""u8.ToArray());
+        using var responseStream = new MemoryStream(message.ToByteArray());
+        var sdkClient = new AgentCoreStreamClient(responseStream);
+        await using var factory = new BedrockClientFactory(_ => throw new NotSupportedException(),
+            _ => throw new NotSupportedException(), _ => sdkClient);
+        var invoker = new BedrockAgentCoreInvoker(factory);
+        var aws = new LlmAwsCredentials
+        {
+            Region = "us-east-1",
+            AccessKeyId = "fixture-key",
+            SecretAccessKey = "fixture-secret"
+        };
+        await using IAsyncEnumerator<IEventStreamEvent> events = invoker.InvokeAsync(
+            aws, new AgentCore.InvokeHarnessRequest(), CancellationToken.None).GetAsyncEnumerator();
+
+        Assert.True(await events.MoveNextAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5)));
+        Assert.Equal("partial", Assert.IsType<AgentCore.HarnessContentBlockDeltaEvent>(events.Current).Delta.Text);
+        await factory.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.True(sdkClient.Disposed);
+        Assert.False(responseStream.CanRead);
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => events.MoveNextAsync().AsTask());
+    }
+
     [Fact]
     public async Task PausedConverseReaderDoesNotBlockFactoryRetirement()
     {
@@ -168,6 +205,25 @@ public sealed class BedrockSafetyTests
         public override Task<GetModelInvocationLoggingConfigurationResponse> GetModelInvocationLoggingConfigurationAsync(
             GetModelInvocationLoggingConfigurationRequest request, CancellationToken cancellationToken = default) =>
             Task.FromResult(new GetModelInvocationLoggingConfigurationResponse());
+
+        protected override void Dispose(bool disposing)
+        {
+            Disposed = true;
+            base.Dispose(disposing);
+        }
+    }
+
+    private sealed class AgentCoreStreamClient(Stream responseStream)
+        : AmazonBedrockAgentCoreClient(new BasicAWSCredentials("fixture-key", "fixture-secret"), RegionEndpoint.USEast1)
+    {
+        internal bool Disposed { get; private set; }
+
+        public override Task<AgentCore.InvokeHarnessResponse> InvokeHarnessAsync(
+            AgentCore.InvokeHarnessRequest request, CancellationToken cancellationToken = default) =>
+            Task.FromResult(new AgentCore.InvokeHarnessResponse
+            {
+                Stream = new AgentCore.InvokeHarnessStreamOutput(responseStream)
+            });
 
         protected override void Dispose(bool disposing)
         {

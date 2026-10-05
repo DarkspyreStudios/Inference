@@ -16,7 +16,13 @@ internal interface IBedrockAgentCoreInvoker
 internal sealed class BedrockAgentCoreInvoker(BedrockClientFactory factory)
     : IBedrockAgentCoreInvoker
 {
-    public async IAsyncEnumerable<IEventStreamEvent> InvokeAsync(
+    public IAsyncEnumerable<IEventStreamEvent> InvokeAsync(
+        LlmAwsCredentials aws,
+        InvokeHarnessRequest request,
+        CancellationToken cancellationToken) =>
+        factory.StreamAsync(token => InvokeOwnedAsync(aws, request, token), cancellationToken);
+
+    private async IAsyncEnumerable<IEventStreamEvent> InvokeOwnedAsync(
         LlmAwsCredentials aws,
         InvokeHarnessRequest request,
         [EnumeratorCancellation] CancellationToken cancellationToken)

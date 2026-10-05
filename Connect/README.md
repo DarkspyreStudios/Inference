@@ -3379,6 +3379,10 @@ runtime session ID, and `ResumeSessionAsync` continues an existing ID. AgentCore
 portable fork, steer, remote interrupt, compaction, or non-persistent session operations, so those
 methods fail explicitly. Canceling `RunTurnAsync` cancels the local streaming request.
 
+The factory-owned AgentCore invocation uses the same bounded producer as Converse. Factory retirement
+cancels and drains the SDK invocation and closes its owned response independently of a paused chat
+reader. Resuming that reader after retirement reports cancellation.
+
 Direct AgentCore session disposal fences new operational calls and cancels its active SDK request
 and host tool callback. Concurrent disposal callers share the same retirement result and failures.
 Retirement closes the observation feed and waits for active operations before releasing the turn gate.
