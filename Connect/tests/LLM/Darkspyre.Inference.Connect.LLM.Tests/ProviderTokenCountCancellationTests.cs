@@ -1,21 +1,25 @@
 using System.Net;
 using Darkspyre.Inference.Common.LLM;
+using Darkspyre.Inference.Connect.LLM.Internal;
 using Darkspyre.Inference.Connect.LLM.Providers;
 
 namespace Darkspyre.Inference.Connect.LLM.Tests;
 
 public sealed class ProviderTokenCountCancellationTests
 {
-    [Fact]
-    public async Task CancellationRetainsTheActualProviderCountFailure()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CancellationRetainsTheActualProviderAccountingFailure(bool tokenize)
     {
         using var cancellation = new CancellationTokenSource();
-        var failure = new LlmProviderException("The provider rejected token counting.",
+        var failure = new LlmProviderException("The provider rejected accounting.",
             LlmTransport.OpenAiResponses, HttpStatusCode.TooManyRequests, retryAfter: TimeSpan.FromSeconds(3));
-        await using var service = new LlmProviderService(new Source(), [new FailingCounter(cancellation, failure)]);
+        await using var service = new LlmProviderService(new Source(), [new FailingAccountingClient(cancellation, failure)]);
 
         OperationCanceledException canceled = await Assert.ThrowsAsync<OperationCanceledException>(() =>
-            service.CountInputTokensAsync("connection", new() { ModelId = "model" }, cancellation.Token));
+            tokenize ? service.TokenizeAsync("connection", "model", "text", cancellation.Token)
+                : service.CountInputTokensAsync("connection", new() { ModelId = "model" }, cancellation.Token));
 
         Assert.Same(failure, canceled.InnerException);
         Assert.True(canceled.CancellationToken.IsCancellationRequested);
@@ -36,7 +40,8 @@ public sealed class ProviderTokenCountCancellationTests
             CancellationToken cancellationToken = default) => throw new NotSupportedException();
     }
 
-    private sealed class FailingCounter(CancellationTokenSource cancellation, Exception failure) : ILlmClient, ILlmProviderTokenCounter
+    private sealed class FailingAccountingClient(CancellationTokenSource cancellation, Exception failure)
+        : ILlmClient, ILlmProviderTokenCounter, ILlmTextTokenizerClient
     {
         public LlmTransport Transport => LlmTransport.OpenAiResponses;
         public LlmProviderDefinition ProviderDefinition => ProviderDefinitions.OpenAiApiKey;
@@ -47,6 +52,13 @@ public sealed class ProviderTokenCountCancellationTests
         {
             cancellation.Cancel();
             return Task.FromException<LlmProviderInputTokenCount>(failure);
+        }
+
+        public Task<LlmTokenization> TokenizeAsync(LlmConnection connection, string modelId, string text,
+            CancellationToken cancellationToken = default)
+        {
+            cancellation.Cancel();
+            return Task.FromException<LlmTokenization>(failure);
         }
 
         public IAsyncEnumerable<LlmStreamEvent> StreamAsync(LlmConnection connection, LlmChatRequest request,

@@ -2789,8 +2789,9 @@ bytes. A token's bytes need not decode independently as UTF-8 and are never reco
 display text. Missing fields and invalid integer/byte representations fail with fixed protocol errors
 without retaining raw bodies. `ConnectLlmJson.Tokenization` and `Token` own result serialization.
 The facade drains active tokenization during retirement and rejects late results through its
-synchronous owner fence. Injected access and clients remain borrowed. Tokenization does not count
-instructions, tool schemas, media or protocol framing. It does not report request occupancy, generated
+synchronous owner fence. Injected access and clients remain borrowed. Cancellation that races a
+provider failure retains the actual error as its cause. Tokenization does not count instructions,
+tool schemas, media or protocol framing. It does not report request occupancy, generated
 usage or billing, and it does not implement `ILlmProviderTokenCounter`.
 OAuth access to its tokenizer endpoint has not been live-qualified.
 

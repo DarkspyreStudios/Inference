@@ -760,11 +760,8 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, ILlmFileClie
         ThrowIfOperationCanceled(cancellationToken);
         LlmTokenization result;
         try { result = await tokenizer.TokenizeAsync(connection, modelId, text, cancellationToken).ConfigureAwait(false); }
-        catch
-        {
-            ThrowIfOperationCanceled(cancellationToken);
-            throw;
-        }
+        catch (Exception error) when (cancellationToken.IsCancellationRequested)
+        { throw new OperationCanceledException("The operation was canceled.", error, cancellationToken); }
         ThrowIfOperationCanceled(cancellationToken);
         return result;
     }
