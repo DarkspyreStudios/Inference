@@ -1155,6 +1155,8 @@ and duplicates. Selected references absent from the supplied graph append to the
 The route reads authorized committed bytes through owned handles and uploads them through the same
 private Files transport. Unknown byte counts remain unknown; missing filenames refuse the file
 destination. Native receipts belong to the admitted request and do not replace logical captured history.
+After a connection change, the caller reattaches its resource authority to the portable context.
+The destination uploads the named committed content again; it does not reuse another connection's file IDs.
 Local accounting does not read or upload selected resources. `AddLlmConnect` includes Grok registration.
 Managed sessions created through the shared internal factory validate resource-bound imported
 contexts against the caller's exact scoped selection snapshot. Only a new session without an imported
