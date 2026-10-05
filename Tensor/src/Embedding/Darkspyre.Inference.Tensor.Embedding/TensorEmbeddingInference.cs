@@ -20,6 +20,12 @@ public sealed class TensorEmbeddingInference : ITensorEmbeddingInference
     private TensorModelPackLease? _lease;
     private TensorModelPackDefinition? _definition;
     private TensorEmbeddingArchitecture? _architecture;
+    private readonly object _stopGate = new();
+    private volatile bool _stopRequested;
+    private volatile bool _disposed;
+    private volatile bool _releaseRequired;
+    private Task? _stopAttempt;
+    private Task? _disposal;
 
     /// <summary>
     /// An engine on <paramref name="backend"/>. <see cref="TensorBackendKind.Cpu"/> runs the managed encoder; Auto and
@@ -61,10 +67,14 @@ public sealed class TensorEmbeddingInference : ITensorEmbeddingInference
     public Task StartAsync(CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        if (_lifetime.StopAccepted) return Task.CompletedTask;
-        return _lifetime.AcceptAsync(TensorEngineState.Starting, null, null,
-            _ => Task.FromResult(new TensorEngineStatus(null, null, TensorEngineState.Started, DateTimeOffset.UtcNow)),
-            cancellationToken);
+        lock (_stopGate)
+        {
+            if (_stopRequested) return Task.CompletedTask;
+            ThrowIfReleaseRequired();
+            return _lifetime.AcceptAsync(TensorEngineState.Starting, null, null,
+                _ => Task.FromResult(new TensorEngineStatus(null, null, TensorEngineState.Started, DateTimeOffset.UtcNow)),
+                cancellationToken);
+        }
     }
 
     /// <summary>
@@ -102,19 +112,28 @@ public sealed class TensorEmbeddingInference : ITensorEmbeddingInference
         TensorModelPackStatus installed = await _packs.GetStatusAsync(model, cancellationToken).ConfigureAwait(false);
         if (installed.State != TensorModelPackState.Installed)
             throw new InferenceException(InferenceFailureCode.ModelUnavailable, "The embedding pack must be installed and verified before Load.");
-        await _lifetime.AcceptAsync(TensorEngineState.Loading, model, RequestedBackend == TensorBackendKind.Auto ? null : RequestedBackend,
-            token => LoadCoreAsync(definition, architecture, token), cancellationToken).ConfigureAwait(false);
+        Task accepted;
+        lock (_stopGate)
+        {
+            ThrowIfStopped();
+            ThrowIfReleaseRequired();
+            accepted = _lifetime.AcceptAsync(TensorEngineState.Loading, model, RequestedBackend == TensorBackendKind.Auto ? null : RequestedBackend,
+                token => LoadCoreAsync(definition, architecture, token), cancellationToken);
+        }
+        await accepted.ConfigureAwait(false);
     }
 
     private async Task<TensorEngineStatus> LoadCoreAsync(TensorModelPackDefinition definition, TensorEmbeddingArchitecture architecture,
         CancellationToken cancellationToken)
     {
         using IDisposable loading = await _lifetime.EnterLoadAsync(cancellationToken).ConfigureAwait(false);
+        ThrowIfReleaseRequired();
+        if (_model is not null || _lease is not null || _runtimeLease is not null)
+            throw new InferenceException(InferenceFailureCode.BackendUnavailable, "The previous embedding model ownership must be released before loading another model.");
         TensorModelPackLease lease;
         try { lease = await _packs.AcquireAsync(definition.Key, cancellationToken).ConfigureAwait(false); }
         catch (TensorModelPackException) { throw new InferenceException(InferenceFailureCode.ModelUnavailable, "The embedding pack must be installed and verified before Load."); }
-        IEmbeddingModel? loaded = null;
-        GgmlRuntimeOwner.ModelLease? runtimeLease = null;
+        _lease = lease;
         try
         {
             if (lease.Key != definition.Key) throw new InvalidDataException("The acquired embedding pack identifies another model.");
@@ -122,24 +141,23 @@ public sealed class TensorEmbeddingInference : ITensorEmbeddingInference
             if (_runtimeOwner is not null)
             {
                 // The owner chooses the actual GGML backend for Auto; the pack must support what it chose.
-                runtimeLease = await _runtimeOwner.AcquireModelAsync(RequestedBackend, cancellationToken).ConfigureAwait(false);
-                backend = runtimeLease.Backend;
+                _runtimeLease = await _runtimeOwner.AcquireModelAsync(RequestedBackend, cancellationToken).ConfigureAwait(false);
+                backend = _runtimeLease.Backend;
                 if (!definition.SupportedBackends.Contains(backend))
                     throw new InferenceException(InferenceFailureCode.BackendUnavailable, "The initialized backend is incompatible with this embedding pack.");
             }
-            loaded = await _loader.LoadAsync(definition, architecture, lease, backend, cancellationToken).ConfigureAwait(false);
+            _model = await _loader.LoadAsync(definition, architecture, lease, backend, cancellationToken).ConfigureAwait(false);
             cancellationToken.ThrowIfCancellationRequested();
-            _model = loaded; _lease = lease; _definition = definition; _architecture = architecture;
-            _runtimeLease = runtimeLease; _backend = backend;
+            if (_model.Architecture != architecture.GgufArchitecture || _model.Dimensions != architecture.NativeDimensions)
+                throw new InvalidDataException("The embedding model's architecture or vector size does not match its pack.");
+            _definition = definition; _architecture = architecture; _backend = backend;
             _lifetime.MarkLoaded(definition.Key, backend);
             return new TensorEngineStatus(definition.Key, backend, TensorEngineState.Loaded, DateTimeOffset.UtcNow);
         }
         catch (Exception exception)
         {
-            loaded?.Dispose();
-            runtimeLease?.Dispose();
-            await lease.DisposeAsync().ConfigureAwait(false);
-            _model = null; _lease = null; _definition = null; _architecture = null; _runtimeLease = null;
+            try { await ReleaseOwnedModelAsync().ConfigureAwait(false); }
+            catch (Exception cleanup) { throw new AggregateException(exception, cleanup); }
             if (exception is OperationCanceledException or InferenceException or ObjectDisposedException) throw;
             throw new InferenceException(exception switch
             {
@@ -154,6 +172,8 @@ public sealed class TensorEmbeddingInference : ITensorEmbeddingInference
     {
         ThrowIfStopped(); ArgumentNullException.ThrowIfNull(request);
         await using TensorModelLifetime.ExecutionLease execution = await _lifetime.EnterExecutionAsync(cancellationToken).ConfigureAwait(false);
+        ThrowIfStopped();
+        ThrowIfReleaseRequired();
         TensorModelPackDefinition definition = _definition!;
         if (request.ModelId != definition.Key.ModelId)
             throw new InferenceException(InferenceFailureCode.ModelUnavailable, "The request does not identify the resident embedding model.");
@@ -188,45 +208,116 @@ public sealed class TensorEmbeddingInference : ITensorEmbeddingInference
 
     public Task UnloadAsync(CancellationToken cancellationToken = default)
     {
-        ThrowIfStopped();
-        TensorModelObservation current = _lifetime.Observation;
-        return _lifetime.AcceptAsync(TensorEngineState.Unloading, current.Model, current.Backend, async token =>
+        lock (_stopGate)
         {
-            await ReleaseModelAsync(token).ConfigureAwait(false);
-            return new TensorEngineStatus(null, null, TensorEngineState.Unloaded, DateTimeOffset.UtcNow);
-        }, cancellationToken, teardown: true);
+            ThrowIfStopped();
+            TensorModelObservation current = _lifetime.Observation;
+            return _lifetime.AcceptAsync(TensorEngineState.Unloading, current.Model, current.Backend, async token =>
+            {
+                await ReleaseModelAsync(token).ConfigureAwait(false);
+                return new TensorEngineStatus(null, null, TensorEngineState.Unloaded, DateTimeOffset.UtcNow);
+            }, cancellationToken, teardown: true);
+        }
     }
 
     /// <summary>Waits for active requests, or cancels them when the token is cancelled, then releases the model.</summary>
     private async Task ReleaseModelAsync(CancellationToken token)
     {
         using IDisposable unloading = await _lifetime.EnterUnloadAsync(token).ConfigureAwait(false);
-        _model?.Dispose();
-        _model = null; _definition = null; _architecture = null;
-        _runtimeLease?.Dispose();
-        _runtimeLease = null;
-        if (_lease is not null) await _lease.DisposeAsync().ConfigureAwait(false);
-        _lease = null;
+        await ReleaseOwnedModelAsync().ConfigureAwait(false);
         _lifetime.MarkUnloaded();
+    }
+
+    private async Task ReleaseOwnedModelAsync()
+    {
+        try
+        {
+            // A live model keeps its dependent runtime and artifact leases when release fails.
+            _model?.Dispose();
+            _model = null;
+        }
+        catch
+        {
+            _releaseRequired = true;
+            throw;
+        }
+
+        List<Exception> failures = [];
+        try
+        {
+            if (_lease is not null) await _lease.DisposeAsync().ConfigureAwait(false);
+            _lease = null;
+        }
+        catch (Exception error) { failures.Add(error); }
+        try
+        {
+            _runtimeLease?.Dispose();
+            _runtimeLease = null;
+        }
+        catch (Exception error) { failures.Add(error); }
+        _releaseRequired = failures.Count != 0;
+        if (failures.Count == 1) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(failures[0]).Throw();
+        if (failures.Count > 1) throw new AggregateException(failures);
+        _definition = null; _architecture = null;
     }
 
     public Task StopAsync(CancellationToken cancellationToken = default)
     {
-        if (_lifetime.StopAccepted) return Task.CompletedTask;
-        TensorModelObservation current = _lifetime.Observation;
-        return _lifetime.AcceptAsync(TensorEngineState.Stopping, current.Model, current.Backend, async token =>
+        lock (_stopGate)
+        {
+            if (_disposed || _stopAttempt is { IsCompleted: false }) return Task.CompletedTask;
+            _stopRequested = true;
+            var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            _stopAttempt = completion.Task;
+            TensorModelObservation current = _lifetime.Observation;
+            try
+            {
+                return _lifetime.AcceptAsync(TensorEngineState.Stopping, current.Model, current.Backend,
+                    token => StopCoreAsync(completion, token), cancellationToken, teardown: true);
+            }
+            catch (Exception error)
+            {
+                completion.TrySetException(error);
+                throw;
+            }
+        }
+    }
+
+    private async Task<TensorEngineStatus> StopCoreAsync(TaskCompletionSource completion, CancellationToken token)
+    {
+        try
         {
             await ReleaseModelAsync(token).ConfigureAwait(false);
             _lifetime.Dispose();
+            _disposed = true;
+            completion.TrySetResult();
             return new TensorEngineStatus(null, null, TensorEngineState.Stopped, DateTimeOffset.UtcNow);
-        }, cancellationToken, teardown: true, stops: true);
+        }
+        catch (Exception error)
+        {
+            completion.TrySetException(error);
+            throw;
+        }
     }
 
     /// <summary>Performs Stop and completes after native work has released model memory.</summary>
-    public async ValueTask DisposeAsync()
+    public ValueTask DisposeAsync()
     {
-        await StopAsync().ConfigureAwait(false);
+        lock (_stopGate) return new(_disposal ??= DisposeCoreAsync());
+    }
+
+    private async Task DisposeCoreAsync()
+    {
+        Task admission;
+        Task cleanup;
+        lock (_stopGate)
+        {
+            admission = _stopAttempt is null ? StopAsync() : Task.CompletedTask;
+            cleanup = _stopAttempt!;
+        }
+        await admission.ConfigureAwait(false);
         await _lifetime.WhenIdleAsync().ConfigureAwait(false);
+        await cleanup.ConfigureAwait(false);
     }
 
     private static TensorEmbeddingArchitecture Architecture(TensorModelPackDefinition definition)
@@ -235,5 +326,11 @@ public sealed class TensorEmbeddingInference : ITensorEmbeddingInference
         catch (ArgumentException) { throw new InferenceException(InferenceFailureCode.UnsupportedFeature, "This is not a compatible embedding pack."); }
     }
 
-    private void ThrowIfStopped() => ObjectDisposedException.ThrowIf(_lifetime.StopAccepted, this);
+    private void ThrowIfStopped() => ObjectDisposedException.ThrowIf(_stopRequested || _disposed, this);
+
+    private void ThrowIfReleaseRequired()
+    {
+        if (_releaseRequired)
+            throw new InferenceException(InferenceFailureCode.BackendUnavailable, "The embedding model still owns resources after failed cleanup.");
+    }
 }

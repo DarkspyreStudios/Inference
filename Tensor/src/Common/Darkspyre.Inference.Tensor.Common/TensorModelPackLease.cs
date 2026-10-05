@@ -2,7 +2,9 @@ namespace Darkspyre.Inference.Tensor.Common;
 
 public sealed class TensorModelPackLease : IAsyncDisposable
 {
+    private readonly object _gate = new();
     private Func<ValueTask>? _release;
+    private Task? _releaseTask;
 
     internal TensorModelPackLease(
         TensorModelKey key,
@@ -25,9 +27,18 @@ public sealed class TensorModelPackLease : IAsyncDisposable
             ? artifact
             : throw new KeyNotFoundException($"Model pack '{Key}' has no artifact role '{role}'.");
 
+    /// <summary>Releases the artifact lease once. Concurrent and later callers observe the same completion or failure.</summary>
     public ValueTask DisposeAsync()
     {
-        Func<ValueTask>? release = Interlocked.Exchange(ref _release, null);
-        return release is null ? ValueTask.CompletedTask : release();
+        lock (_gate)
+        {
+            return new(_releaseTask ??= ReleaseAsync(_release!));
+        }
+    }
+
+    private async Task ReleaseAsync(Func<ValueTask> release)
+    {
+        await release().ConfigureAwait(false);
+        _release = null;
     }
 }

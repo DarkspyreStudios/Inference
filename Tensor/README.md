@@ -390,6 +390,13 @@ returns admission and publishes Stopped/Failed through the existing lifecycle; a
 can be explicitly retried for release only. Dispose waits for actual cleanup and preserves its shared
 failure for repeated callers, even if a later explicit Stop successfully releases the resources.
 
+The embedding engine receives a loaded model before checking cancellation or pack metadata. Failed
+model release retains that model and its dependent runtime/artifact leases. After model release,
+runtime and artifact lease cleanup proceeds independently and preserves each failure. Failed cleanup
+refuses another load or execution. Explicit Stop retries only release work; Dispose shares the actual
+terminal cleanup outcome, including failure. A pack lease invokes its release callback once and shares
+that outcome with later disposal calls; a failed callback does not become a successful no-op.
+
 Plans deep-snapshot ordered GGML candidates and their file declarations. Each candidate has a
 distinct ID, exact build/RID and concrete GGML backend. Null candidates retain the standard-package
 policy; an empty list admits no candidates. File declarations require nonempty portable relative
