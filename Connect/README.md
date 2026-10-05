@@ -1200,7 +1200,9 @@ values without serializing their collaborators. No runtime facade getter is expo
 
 `AddLlmConnectSelfHost` registers the SelfHost embedding client. It embeds through the host's
 `ILlmSelfHost.GetEmbeddingInferenceAsync(engineId)`, where the connection's endpoint names the
-engine, and refuses provider options. The engine formats queries: `LlmEmbeddingRequest.Kind` states
+engine. It shares chat's connection refusal policy for provider options, HTTP headers and capability
+overrides, and refuses request provider options before acquiring the engine.
+The engine formats queries: `LlmEmbeddingRequest.Kind` states
 whether inputs are queries or documents, `Instruction` states a query's task, and `Truncate` decides
 whether an over-limit input is cut or fails the request with `EmbeddingInputTooLongException`. The
 result reports `ModelId`, `ModelFingerprint` and `TruncatedInputs`. Remote adapters send inputs as

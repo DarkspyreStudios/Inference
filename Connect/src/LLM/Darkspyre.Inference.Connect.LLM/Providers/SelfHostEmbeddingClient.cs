@@ -1,5 +1,4 @@
 using Darkspyre.Inference.Common.Embedding;
-using Darkspyre.Inference.Connect.LLM.Internal;
 
 namespace Darkspyre.Inference.Connect.LLM.Providers;
 
@@ -15,10 +14,11 @@ internal sealed class SelfHostEmbeddingClient(ILlmSelfHost host) : ILlmEmbedding
     {
         ArgumentNullException.ThrowIfNull(connection);
         ArgumentNullException.ThrowIfNull(request);
-        RuntimeInputAdmission.Validate(connection);
+        if (SelfHostLlmClient.UnsupportedOptions(connection) is { } issue)
+            throw new NotSupportedException(issue.Message);
         if (string.IsNullOrWhiteSpace(connection.Endpoint))
             throw new ArgumentException("A SelfHost connection names its engine in its endpoint.", nameof(connection));
-        if (connection.ProviderOptions.Count > 0 || request.ProviderOptions.Count > 0)
+        if (request.ProviderOptions.Count > 0)
             throw new ArgumentException("A SelfHost engine accepts no provider request options.", nameof(request));
         if (request.Dimensions is <= 0)
             throw new ArgumentException("A requested vector size must be positive.", nameof(request));
