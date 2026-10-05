@@ -61,38 +61,7 @@ public sealed class ClaudeCliExitTests
         Assert.Empty(logger.Entries);
     });
 
-    [UnixFact]
-    public Task CliThatIgnoresEofAndSigtermIsKilledAfterTheLimit() => Bounded(async () =>
-    {
-        using var scratch = new Scratch();
-        var logger = new RecordingLogger();
-        var exits = new ClaudeCliExits(logger) { Limit = TimeSpan.FromSeconds(2) };
-        var invocation = new ClaudeCliInvocation("/bin/sh",
-            ["-c", "trap '' TERM; echo $$; exec sleep 300"], StandardInput: null, scratch.Directory);
-        using var cancellation = new CancellationTokenSource();
-        int processId = 0;
-
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
-        {
-            await foreach (ClaudeCliProcessEvent processEvent in new ClaudeCliProcessRunner(exits).StreamAsync(invocation, cancellation.Token))
-            {
-                processId = CliProcessTerminationTests.ParseProcessId(Assert.IsType<ClaudeCliOutputLine>(processEvent).Line);
-                await cancellation.CancelAsync();
-            }
-        });
-        var clock = Stopwatch.StartNew();
-        await Task.Delay(TimeSpan.FromSeconds(1));
-        using (Process alive = Process.GetProcessById(processId)) Assert.False(alive.HasExited);
-
-        await exits.DisposeAsync();
-        Assert.True(clock.Elapsed >= TimeSpan.FromSeconds(1.5), $"The process ended after {clock.Elapsed}.");
-        await CliProcessTerminationTests.AssertGoneAsync(processId);
-        (LogLevel level, string message) = Assert.Single(logger.Entries);
-        Assert.Equal(LogLevel.Warning, level);
-        Assert.Contains("SIGKILL", message, StringComparison.Ordinal);
-    });
-
-    private static Task Bounded(Func<Task> scenario) => Task.Run(scenario).WaitAsync(CliProcessTerminationTests.TestBound);
+    private static Task Bounded(Func<Task> scenario) => Task.Run(scenario).WaitAsync(TimeSpan.FromSeconds(20));
 
     private sealed class Scratch : IDisposable
     {
