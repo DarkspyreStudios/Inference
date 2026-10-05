@@ -44,6 +44,15 @@ public sealed class BedrockModelListingTests
         Assert.Equal((1_000_000L, 128_000L), (model.MaxContextTokens, model.MaxOutputTokens));
     }
 
+    [Fact]
+    public async Task ProfilesFromEveryPageAreListed()
+    {
+        var control = new Control([], [Profile("us." + Sonnet, Sonnet)], _ => Subscribed(),
+            secondProfilePage: [Profile("global." + Sonnet, Sonnet)]);
+
+        Assert.Equal(new[] { "global." + Sonnet, "us." + Sonnet }, await ListAsync(control));
+    }
+
     private static async Task<string[]> ListAsync(Control control, Logger? logger = null) =>
         [.. (await ListModelsAsync(control, logger)).Select(model => model.Id)];
 
@@ -93,7 +102,8 @@ public sealed class BedrockModelListingTests
     private sealed class Control(
         List<FoundationModelSummary> models,
         List<InferenceProfileSummary> profiles,
-        Func<string, GetFoundationModelAvailabilityResponse> availability)
+        Func<string, GetFoundationModelAvailabilityResponse> availability,
+        List<InferenceProfileSummary>? secondProfilePage = null)
         : AmazonBedrockClient(new BasicAWSCredentials("fixture-key", "fixture-secret"), RegionEndpoint.USEast1)
     {
         public override Task<ListFoundationModelsResponse> ListFoundationModelsAsync(
@@ -101,8 +111,18 @@ public sealed class BedrockModelListingTests
             Task.FromResult(new ListFoundationModelsResponse { ModelSummaries = models });
 
         public override Task<ListInferenceProfilesResponse> ListInferenceProfilesAsync(
-            ListInferenceProfilesRequest request, CancellationToken cancellationToken = default) =>
-            Task.FromResult(new ListInferenceProfilesResponse { InferenceProfileSummaries = profiles });
+            ListInferenceProfilesRequest request, CancellationToken cancellationToken = default)
+        {
+            if (request.NextToken is null)
+                return Task.FromResult(new ListInferenceProfilesResponse
+                {
+                    InferenceProfileSummaries = profiles,
+                    NextToken = secondProfilePage is null ? null : "page-two"
+                });
+
+            Assert.Equal("page-two", request.NextToken);
+            return Task.FromResult(new ListInferenceProfilesResponse { InferenceProfileSummaries = secondProfilePage });
+        }
 
         public override Task<GetFoundationModelAvailabilityResponse> GetFoundationModelAvailabilityAsync(
             GetFoundationModelAvailabilityRequest request, CancellationToken cancellationToken = default) =>

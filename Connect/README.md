@@ -3319,6 +3319,9 @@ invoke. It omits a foundation model whose only inference type is `PROVISIONED`, 
 `amazon.nova-lite-v1:0:300k`. Such a model runs only through purchased provisioned throughput, so a
 connection cannot invoke it by model ID.
 
+Inference-profile discovery follows every returned pagination token. Model listing and
+foundation-model profile resolution use the complete catalog from the same helper.
+
 For every other foundation model, listing calls `GetFoundationModelAvailability`, at most eight at a
 time. A model is callable when its agreement status is `AVAILABLE` and its authorization status is
 `AUTHORIZED`. A model that is not callable is omitted, and so is a system inference profile whose

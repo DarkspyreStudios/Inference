@@ -266,12 +266,21 @@ internal sealed class BedrockModelResolver
         BedrockClientFactory.Lease<AmazonBedrockClient> control,
         CancellationToken cancellationToken)
     {
-        control.ThrowIfCanceled();
-        ListInferenceProfilesResponse response = await control.Client.ListInferenceProfilesAsync(
-            new ListInferenceProfilesRequest(),
-            cancellationToken);
-        control.ThrowIfCanceled();
-        return response.InferenceProfileSummaries ?? [];
+        var profiles = new List<InferenceProfileSummary>();
+        string? nextToken = null;
+        do
+        {
+            control.ThrowIfCanceled();
+            ListInferenceProfilesResponse response = await control.Client.ListInferenceProfilesAsync(
+                new ListInferenceProfilesRequest { NextToken = nextToken },
+                cancellationToken);
+            control.ThrowIfCanceled();
+            profiles.AddRange(response.InferenceProfileSummaries ?? []);
+            nextToken = response.NextToken;
+        }
+        while (!string.IsNullOrEmpty(nextToken));
+
+        return profiles;
     }
 
     private static LlmProviderException Warn(ILogger<BedrockLlmClient> logger, LlmCredential credential,
