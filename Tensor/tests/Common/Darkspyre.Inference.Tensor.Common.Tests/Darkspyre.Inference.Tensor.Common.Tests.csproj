@@ -15,7 +15,6 @@
 
   <ItemGroup>
     <Using Include="Xunit" />
-    <Using Include="Darkspyre.Inference.Tensor.Testing" />
   </ItemGroup>
 
   <ItemGroup>
