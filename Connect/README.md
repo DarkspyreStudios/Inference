@@ -399,7 +399,8 @@ The private xAI Responses adapter maps DocumentSearch, WebSearch, SocialSearch, 
 ImageGeneration and RemoteMcp with positive typed hosted-turn limits. Document search sends exact
 collection IDs and optional result limits; each descriptor accepts at most ten collections.
 Actual built `input_file` content also enables implicit document-search observations. Both paths
-request `file_search_call.results`. Web controls use flat domains and image controls. X controls
+request `file_search_call.results`. Hosted-tool include strings use primitive JSON nodes without
+default reflection metadata. Web controls use flat domains and image controls. X controls
 preserve handles and dates without an invented handle cutoff or date interpretation. Deferred MCP
 adds the server-side `tool_search` descriptor and retains its ordered opaque call/output items.
 Pure preflight counts all wire tools before effects. Authorization resolves once per distinct
@@ -1679,6 +1680,8 @@ The typed xAI ranking and RAG options stay in Connect, not Common.
 
 The records copy supplied lists and metadata dictionaries, including assignments through `with`.
 They preserve order, duplicate collection IDs, raw strings and case-sensitive metadata keys.
+The native builder preserves collection, grouping and aggregate keys as string arrays without
+default reflection metadata.
 Grouping requires at least one key; aggregate keys may be empty. Aggregate K is positive,
 search multipliers are 1 through 100, and weights are finite values from 0 through 1.
 Weights are not normalized, and RRF K has no local lower bound.

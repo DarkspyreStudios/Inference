@@ -148,7 +148,8 @@ internal static class XaiDocumentSearch
     private static JsonArray Strings(IReadOnlyList<string> values, Action fence)
     {
         var result = new JsonArray();
-        foreach (string value in values) { fence(); result.Add(value); }
+        // Generic Add<T> needs default serializer metadata; primitive JsonNode conversion does not.
+        foreach (string value in values) { fence(); result.Add((JsonNode?)value); }
         return result;
     }
 

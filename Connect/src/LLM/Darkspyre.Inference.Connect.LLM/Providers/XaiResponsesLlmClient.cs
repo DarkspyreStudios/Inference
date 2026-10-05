@@ -384,12 +384,13 @@ internal sealed class XaiResponsesLlmClient(HttpClient http, XaiMediaDownloadCli
                 tools.Add(new JsonObject { ["type"] = "tool_search" });
         }
         if (request.MaxHostedTurns is { } turns) payload["max_turns"] = turns;
+        // Primitive nodes avoid Add<T>'s dependency on default serializer metadata.
         if (request.HostedTools.OfType<LlmDocumentSearchTool>().Any() || HasFileInput(payload["input"]))
-            ((JsonArray)payload["include"]!).Add("file_search_call.results");
+            ((JsonArray)payload["include"]!).Add((JsonNode?)"file_search_call.results");
         if (request.HostedTools.OfType<LlmWebSearchTool>().Any())
-            ((JsonArray)payload["include"]!).Add("web_search_call.action.sources");
+            ((JsonArray)payload["include"]!).Add((JsonNode?)"web_search_call.action.sources");
         if (request.HostedTools.OfType<LlmCodeExecutionTool>().Any())
-            ((JsonArray)payload["include"]!).Add("code_interpreter_call.outputs");
+            ((JsonArray)payload["include"]!).Add((JsonNode?)"code_interpreter_call.outputs");
         payload["no_inline_citations"] = true;
         if (request.ProviderControls is XaiMultiAgentControls { AgentCount: { } count })
             payload["reasoning"] = new JsonObject
