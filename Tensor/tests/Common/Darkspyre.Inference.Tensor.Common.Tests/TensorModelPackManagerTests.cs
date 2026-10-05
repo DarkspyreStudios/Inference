@@ -1,5 +1,7 @@
 using System.Net;
 using System.Security.Cryptography;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace Darkspyre.Inference.Tensor.Common.Tests;
 
@@ -54,6 +56,55 @@ public sealed class TensorModelPackManagerTests : IDisposable
         Assert.Single(observed);
         Assert.Empty(Directory.GetFiles(staging));
         Assert.Equal(TensorModelPackState.Installed, (await manager.VerifyAsync(definition.Key)).State);
+    }
+
+    [Fact]
+    public async Task LocalImportReopensAfterSettingsAndEngineWireSerialization()
+    {
+        string sourceDirectory = Path.Combine(_packDirectory, "source");
+        Directory.CreateDirectory(sourceDirectory);
+        string sourcePath = Path.Combine(sourceDirectory, "local embedding.gguf");
+        byte[] weights = "local weights"u8.ToArray();
+        await File.WriteAllBytesAsync(sourcePath, weights);
+        string managedDirectory = Path.Combine(_packDirectory, "managed");
+        TensorModelPackDefinition definition;
+        using (var manager = new TensorModelPackManager(new([]), managedDirectory))
+        {
+            TensorModelImportResult imported = await manager.ImportAsync(new(
+                new(new TensorModelLocation.LocalFile(sourcePath), TensorBackendKind.Cpu, "test-only"), new LocalResolver()));
+            definition = Assert.IsType<TensorModelPackDefinition>(imported.Resolution.Definition);
+            Assert.Equal(TensorModelPackState.Installed, (await manager.VerifyAsync(definition.Key)).State);
+        }
+
+        // The host stores string enums; engine initialization uses Tensor's generated metadata.
+        var settingsJson = new JsonSerializerOptions { Converters = { new JsonStringEnumConverter() } };
+        JsonElement saved = JsonSerializer.SerializeToElement(definition, settingsJson);
+        TensorModelPackDefinition restored = saved.Deserialize<TensorModelPackDefinition>(settingsJson)!;
+        TensorModelPackDefinition registered = new TensorModelCatalog([restored]).GetRequired(definition.Key);
+        byte[] wire = JsonSerializer.SerializeToUtf8Bytes(registered, TensorJson.ModelPack);
+        TensorModelPackDefinition remote = JsonSerializer.Deserialize(wire, TensorJson.ModelPack)!;
+        var catalog = new TensorModelCatalog([remote]);
+        Uri source = Assert.Single(Assert.Single(catalog.GetRequired(definition.Key).Artifacts).Sources);
+        Assert.True(source.IsAbsoluteUri);
+        Assert.True(source.IsFile);
+        Assert.Equal(sourcePath, source.LocalPath);
+
+        File.Delete(sourcePath);
+        using var reopened = new TensorModelPackManager(catalog, managedDirectory);
+        Assert.Equal(TensorModelPackState.Installed, (await reopened.VerifyAsync(definition.Key)).State);
+        await using TensorModelPackLease lease = await reopened.AcquireAsync(definition.Key);
+        Assert.Equal(weights, await File.ReadAllBytesAsync(lease.GetRequiredArtifact("model")));
+    }
+
+    private sealed class LocalResolver : TensorModelResolver
+    {
+        public override IReadOnlyList<TensorArtifactRequirement> Requirements { get; } = [new("model", "*.gguf")];
+
+        public override Task<TensorModelResolution> ResolveCandidateAsync(TensorModelCandidate candidate,
+            TensorBackendKind backend, ITensorArtifactReader reader, CancellationToken cancellationToken = default) =>
+            Task.FromResult(new TensorModelResolution(new(TensorCompatibilityState.Supported, [], []),
+                TensorResolvedPack.Create(candidate, TensorCapability.Embedding, "test", new HashSet<TensorBackendKind> { TensorBackendKind.Cpu },
+                    candidate.Artifacts.Select(artifact => TensorResolvedPack.Artifact(artifact, "model", artifact.Path)).ToArray())));
     }
 
     // Calls back when the body is first read, which is while the download writes its staging file.

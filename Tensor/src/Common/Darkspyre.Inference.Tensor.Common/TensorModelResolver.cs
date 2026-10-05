@@ -204,6 +204,8 @@ public abstract class TensorModelResolver : ITensorModelResolver
     private static TensorSourceArtifact LocalArtifact(string path, string? license)
     {
         var file = new FileInfo(path);
-        return new(file.Name, file.Length, null, new(new Uri("file:///"), null, null, file.Name, license), new Uri(file.FullName));
+        // URI serialization preserves OriginalString, which needs an explicit file scheme.
+        Uri source = new(new Uri(file.FullName).AbsoluteUri, UriKind.Absolute);
+        return new(file.Name, file.Length, null, new(new Uri("file:///"), null, null, file.Name, license), source);
     }
 }

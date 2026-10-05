@@ -545,6 +545,8 @@ TensorModelImportResult imported = await packs.ImportAsync(
 // and decides when to call its engine's LoadAsync with the installed definition's key.
 ```
 
+Local artifact sources use explicit absolute file URIs across settings and engine-wire serialization.
+An installed pack reopens from its managed artifacts without requiring the original source file.
 Local/URL artifact provenance has no fictitious repository/revision. Pack identity is deterministic
 over the complete manifest; local paths are not model IDs. Supra's companions remain constrained to
 the supported content, but their origin may be a local mirror or an independent URL. Whisper retains
