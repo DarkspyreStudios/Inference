@@ -1,15 +1,53 @@
 using System.Text.Json;
 using System.Globalization;
+using Amazon;
 using Darkspyre.Inference.Common.LLM;
+using Amazon.Bedrock;
 using Amazon.Bedrock.Model;
 using Amazon.BedrockRuntime;
 using Amazon.BedrockRuntime.Model;
+using Amazon.Runtime;
 using Darkspyre.Inference.Connect.LLM.Bedrock;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Darkspyre.Inference.Connect.LLM.Bedrock.Tests;
 
 public sealed class BedrockSafetyTests
 {
+    [Fact]
+    public async Task PausedConverseReaderDoesNotBlockFactoryRetirement()
+    {
+        var control = new StreamControl();
+        await using var factory = new BedrockClientFactory(_ => throw new NotSupportedException(),
+            _ => control, _ => throw new NotSupportedException());
+        await using var guard = new BedrockLoggingGuard();
+        var invoker = new StubConverseInvoker
+        {
+            Events =
+            [
+                new ContentBlockDeltaEvent { ContentBlockIndex = 0, Delta = new() { Text = "partial" } },
+                new MessageStopEvent { StopReason = new("end_turn") }
+            ]
+        };
+        var client = new BedrockLlmClient(factory, guard, invoker, NullLogger<BedrockLlmClient>.Instance);
+        LlmConnection connection = Connection() with
+        {
+            Credential = new LlmCredential
+            {
+                Aws = new() { Region = "us-east-1", AccessKeyId = "fixture-key", SecretAccessKey = "fixture-secret" }
+            }.Serialize()
+        };
+        await using IAsyncEnumerator<LlmStreamEvent> events = client.StreamAsync(connection, Request()).GetAsyncEnumerator();
+
+        Assert.True(await events.MoveNextAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5)));
+        Assert.Equal("partial", Assert.IsType<LlmTextDeltaEvent>(events.Current).Delta);
+        await factory.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.True(control.Disposed);
+        Assert.True(invoker.Disposed);
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => events.MoveNextAsync().AsTask());
+    }
+
     [Fact]
     public void BuildRequestMapsToolDefinitionsCallsAndResults()
     {
@@ -117,6 +155,26 @@ public sealed class BedrockSafetyTests
         Transport = LlmTransport.AwsBedrockConverse,
         Endpoint = "aws://bedrock"
     };
+
+    private sealed class StreamControl()
+        : AmazonBedrockClient(new BasicAWSCredentials("fixture-key", "fixture-secret"), RegionEndpoint.USEast1)
+    {
+        internal bool Disposed { get; private set; }
+
+        public override Task<GetFoundationModelResponse> GetFoundationModelAsync(
+            GetFoundationModelRequest request, CancellationToken cancellationToken = default) =>
+            Task.FromResult(new GetFoundationModelResponse { ModelDetails = new() { InferenceTypesSupported = ["ON_DEMAND"] } });
+
+        public override Task<GetModelInvocationLoggingConfigurationResponse> GetModelInvocationLoggingConfigurationAsync(
+            GetModelInvocationLoggingConfigurationRequest request, CancellationToken cancellationToken = default) =>
+            Task.FromResult(new GetModelInvocationLoggingConfigurationResponse());
+
+        protected override void Dispose(bool disposing)
+        {
+            Disposed = true;
+            base.Dispose(disposing);
+        }
+    }
 
     private static LlmChatRequest Request(
         string? instructions = null,

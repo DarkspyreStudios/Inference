@@ -59,6 +59,9 @@ internal sealed class BedrockClientFactory : IDisposable, IAsyncDisposable
     public Lease<AmazonBedrockAgentCoreClient> AgentCore(LlmAwsCredentials aws, CancellationToken cancellationToken = default) =>
         Acquire(_agentCore, aws, _createAgentCore!, cancellationToken);
 
+    internal IAsyncEnumerable<T> StreamAsync<T>(Func<CancellationToken, IAsyncEnumerable<T>> source,
+        CancellationToken cancellationToken) => _lifetime.StreamAsync(source, cancellationToken);
+
     private Lease<T> Acquire<T>(Dictionary<string, Lazy<T>> clients, LlmAwsCredentials aws,
         Func<LlmAwsCredentials, T> create, CancellationToken caller) where T : class, IDisposable
     {

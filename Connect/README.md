@@ -3339,6 +3339,10 @@ Claude on Bedrock. An inference profile such as `us.anthropic.claude-sonnet-4-5-
 base model's entry. A model that is not in the table, including every non-Claude model and an ARN,
 reports null limits, which mean unknown.
 
+Converse streams use the factory's existing bounded producer. Factory retirement cancels and drains
+the producer, closes owned streams and releases clients without waiting for paused callers to resume.
+Actual cleanup failures remain visible to retirement callers.
+
 Converse also runs on the host-owned managed agent runtime. `AddLlmConnectBedrock()` registers an
 `ILlmAgentClient` for `AwsBedrockConverse`; each model step is one Converse request, and the host runs
 every tool. Managed Converse sessions take the same options, context and tool output as managed Codex,

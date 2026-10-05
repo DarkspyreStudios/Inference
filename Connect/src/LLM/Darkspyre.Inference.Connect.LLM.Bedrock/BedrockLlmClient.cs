@@ -127,12 +127,16 @@ internal sealed class BedrockLlmClient(
         };
     }
 
+    public IAsyncEnumerable<LlmStreamEvent> StreamAsync(LlmConnection connection, LlmChatRequest request,
+        CancellationToken cancellationToken = default) =>
+        factory.StreamAsync(token => StreamOwnedAsync(connection, request, token), cancellationToken);
+
     [SuppressMessage("Design", "CA1031", Justification = "The adapter preserves the operation and each independent owned cleanup failure.")]
     [SuppressMessage("Usage", "CA2219", Justification = "Iterator retirement executes finally; recorded operation and cleanup failures must also surface on early reader disposal.")]
-    public async IAsyncEnumerable<LlmStreamEvent> StreamAsync(
+    private async IAsyncEnumerable<LlmStreamEvent> StreamOwnedAsync(
         LlmConnection connection,
         LlmChatRequest request,
-        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         var owned = new ConverseOperation();
         var failures = new List<Exception>();
