@@ -64,9 +64,6 @@ Paid or metered model calls are not development or commit gates. A conditional l
 reports that it was skipped or unavailable when its external service or credential is absent; it
 never silently returns and appears to pass.
 
-The current unit-test hold in [project.md](./project.md#testing) overrides routine test creation and
-execution until the test-suite replacement is complete. Adopting this law alone does not lift it.
-
 **Check.** Tests added per change, and the time of a focused run.
 
 **Why it is a law.** A test exists to catch a likely defect cheaply. Every test is code someone

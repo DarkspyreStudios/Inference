@@ -187,12 +187,9 @@ ongoing refactor or create package artifacts merely as a routine verification st
 ## Testing
 
 [L7](./laws.md#l7--test-the-behaviour-that-changed-with-the-smallest-test-that-would-catch-a-likely-defect)
-defines when a change needs a test. Unit-test creation and execution remain on hold until the
-test-suite replacement is complete. Adopting the revised L7 alone does not lift the hold. The
-replacement suite covers actual bugs found by the old tests and the requirements of L7. Test-suite
-replacement is separately scoped work; this rule does not authorize deleting or rebuilding tests.
+defines when a change needs a test. Each existing test guards a failure that actually happened.
 
-After the hold lifts, run the owning test project explicitly, filtered to the changed behaviour.
+Run the owning test project explicitly, filtered to the changed behaviour.
 The focused run takes under one minute. Use `--no-build` only when that test project already has a
 current build. Read the run's failures without rerunning merely to obtain the same output.
 
