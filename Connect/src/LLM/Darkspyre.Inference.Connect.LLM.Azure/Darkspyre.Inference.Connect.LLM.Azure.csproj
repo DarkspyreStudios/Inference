@@ -5,6 +5,5 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../Darkspyre.Inference.Connect.LLM/Darkspyre.Inference.Connect.LLM.csproj" />
-    <InternalsVisibleTo Include="Darkspyre.Inference.Connect.LLM.Azure.Tests" />
   </ItemGroup>
 </Project>

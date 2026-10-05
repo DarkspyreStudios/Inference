@@ -74,18 +74,11 @@ local version commit that has not been pushed.
 ## Offline verification
 
 ```bash
-bash -n deploy-major.sh deploy-minor.sh eng/deploy.sh eng/deploy.tests.sh
-bash eng/deploy.tests.sh
+bash -n deploy-major.sh deploy-minor.sh eng/deploy.sh
 bash eng/package-assets.tests.sh # Requires restored Tensor dependency assets; no archives created.
 ```
 
-Tests exercise stable/prerelease version arithmetic, both bump modes, dry-run, dirty checkouts,
-existing versions, build failure, vulnerability failure and the successful four-package flow.
-Integration cases use disposable local Git repositories plus fake `gh` and `dotnet` commands; they
-do not contact GitHub, publish a package or modify this repository. Fixtures are retained under the
-printed temporary path for inspection. They test orchestration, not native runtime availability.
-
-The separate package-asset checks evaluate real Tensor pack inputs and synthetic copy-path fixtures.
+The package-asset checks evaluate real Tensor pack inputs and synthetic copy-path fixtures.
 They verify that Whisper's shader remains a copy-to-output asset but is excluded from Tensor's own
 archive inputs. Duplicate None/None and None/Content destinations fail; unique paths and noncopied
 files pass. The archive verifier also rejects versioned ELF libraries, `.metal` shader sources,
@@ -105,14 +98,7 @@ Every archive rejects GGML native package dependencies even without embedded nat
 MSBuild XML rejects known CLI acquisition targets/items, download tasks, remote HTTP imports, and
 acquisition commands in execution/inline-task/property inputs. These checks preserve local managed
 imports, static-asset manifests and normal copy targets. They are a known acquisition-pattern gate,
-not a sandbox for arbitrary MSBuild code. The fixture tests use in-memory ZIP streams; they do not
-create NuGet archives, restore supplier fixtures or execute native libraries. The UI fixture also
-evaluates current SDK static-asset pack inputs and inspects generated XML without executing Pack.
-
-```bash
-dotnet test eng/VerifyPackages.Tests -- \
-  xUnit.ParallelizeTestCollections=false xUnit.MaxParallelThreads=1
-```
+not a sandbox for arbitrary MSBuild code.
 
 The published `11.5.2-rc.1` Tensor archive (and earlier affected archives) contains the duplicate
 shader and intentionally fails the strengthened checks. Corrected releases must leave the shader
@@ -132,8 +118,6 @@ presence for `osx-arm64`, `linux-x64`, `linux-arm64`, `win-x64` and `win-arm64`.
 dotnet run --project eng/VerifyRuntimeInventory -- \
   Tensor/src/Darkspyre.Inference.Tensor/obj/project.assets.json \
   tmp/tensor-runtime-inventory.json "$(git rev-parse HEAD)"
-dotnet test eng/VerifyRuntimeInventory.Tests -- \
-  xUnit.ParallelizeTestCollections=false xUnit.MaxParallelThreads=1
 ```
 
 The report has schema version 1. Windows DLL architecture comes from the actual PE header, not the

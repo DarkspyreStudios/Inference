@@ -4,9 +4,7 @@ using System.Text.RegularExpressions;
 using System.Xml.Linq;
 using NuGet.Versioning;
 
-[assembly: InternalsVisibleTo("VerifyPackages.Tests")]
 [assembly: InternalsVisibleTo("VerifyRuntimeInventory")]
-[assembly: InternalsVisibleTo("VerifyRuntimeInventory.Tests")]
 
 internal sealed class DependencyPolicy
 {

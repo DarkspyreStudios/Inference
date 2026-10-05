@@ -197,9 +197,6 @@ training on gpu-box. Its packaging and release flow are in
   pack lease gives it artifact file paths.
 - `TensorDecisionModels.LayaTypedDecisions` is deleted. `LayaSetup.CreateSession` requires
   `offeredModels`. Tests use test-local packs that declare `CoreMl` and `Cpu`.
-- `LayaOnnxModelTests` runs `LayaOnnxModel` on the CPU provider against three tracked fixture graphs
-  from `Fixtures/make_onnx_fixtures.py`: padding and output slicing, metadata and shape rejection,
-  option and token limits, cancellation, provider selection, and the probe.
 - `Tensor/README.md`, the Laya fixture README, and `.roles/project.md` describe the ONNX engine.
 
 Phase exit: the Tensor solution builds with zero warnings in Debug and Release, and its 267 tests

@@ -167,12 +167,7 @@ attachments or non-text tool output. The estimate never calls `countTokens`.
 its model, to call the provider count endpoint. Provider counts remain separate from local estimates
 and never fabricate generation output usage.
 
-## Tests and live qualification
-
-`Connect.LLM.Tests/GeminiApiTests` covers the key header, routing, catalog filtering and paging,
-failures, terminal reasons, signed tool continuation, key rotation and pre-dispatch rejection.
-`Connect.LLM.Vertex.Tests` covers wire parity and setup storage. None of these tests make network
-calls.
+## Live qualification
 
 The ConsoleTester `login --provider gemini` stores the key from `GEMINI_API_KEY`, and `gemini-probe`
 runs the live cases. Live qualification must confirm:

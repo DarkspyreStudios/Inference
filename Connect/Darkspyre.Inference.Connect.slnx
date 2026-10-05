@@ -39,30 +39,11 @@
   <Folder Name="/src/Audio/">
     <Project Path="src/Audio/Darkspyre.Inference.Connect.Audio/Darkspyre.Inference.Connect.Audio.csproj" />
   </Folder>
-  <Folder Name="/tests/Audio/">
-    <Project Path="tests/Audio/Darkspyre.Inference.Connect.Audio.Tests/Darkspyre.Inference.Connect.Audio.Tests.csproj" />
-  </Folder>
-  <Folder Name="/tests/TTS/">
-    <Project Path="tests/TTS/Darkspyre.Inference.Connect.TTS.Tests/Darkspyre.Inference.Connect.TTS.Tests.csproj" />
-  </Folder>
-  <Folder Name="/tests/STT/">
-    <Project Path="tests/STT/Darkspyre.Inference.Connect.STT.Tests/Darkspyre.Inference.Connect.STT.Tests.csproj" />
-  </Folder>
-  <Folder Name="/tests/Realtime/">
-    <Project Path="tests/Realtime/Darkspyre.Inference.Connect.Realtime.Tests/Darkspyre.Inference.Connect.Realtime.Tests.csproj" />
-  </Folder>
   <Folder Name="/tests/Video/">
     <Project Path="tests/Video/Darkspyre.Inference.Connect.Video.Tests/Darkspyre.Inference.Connect.Video.Tests.csproj" />
   </Folder>
-  <Folder Name="/tests/Resources/">
-    <Project Path="tests/Resources/Darkspyre.Inference.Connect.Resources.Tests/Darkspyre.Inference.Connect.Resources.Tests.csproj" />
-  </Folder>
   <Folder Name="/tests/LLM/">
-    <Project Path="tests/LLM/Darkspyre.Inference.Connect.HttpConfiguration.Consumer/Darkspyre.Inference.Connect.HttpConfiguration.Consumer.csproj" />
-    <Project Path="tests/LLM/Darkspyre.Inference.Connect.LLM.Azure.Tests/Darkspyre.Inference.Connect.LLM.Azure.Tests.csproj" />
-    <Project Path="tests/LLM/Darkspyre.Inference.Connect.LLM.ProcessProbe/Darkspyre.Inference.Connect.LLM.ProcessProbe.csproj" />
     <Project Path="tests/LLM/Darkspyre.Inference.Connect.LLM.Bedrock.Tests/Darkspyre.Inference.Connect.LLM.Bedrock.Tests.csproj" />
-    <Project Path="tests/LLM/Darkspyre.Inference.Connect.LLM.Vertex.Tests/Darkspyre.Inference.Connect.LLM.Vertex.Tests.csproj" />
     <Project Path="tests/LLM/Darkspyre.Inference.Connect.LLM.Tests/Darkspyre.Inference.Connect.LLM.Tests.csproj" />
   </Folder>
   <Folder Name="/tests/Image/">

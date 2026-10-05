@@ -8,6 +8,5 @@
     <PackageReference Include="Microsoft.Extensions.Http" />
     <ProjectReference Include="../../../../Common/src/Darkspyre.Inference.Common/Darkspyre.Inference.Common.csproj" />
     <ProjectReference Include="../../LLM/Darkspyre.Inference.Connect.LLM/Darkspyre.Inference.Connect.LLM.csproj" />
-    <InternalsVisibleTo Include="Darkspyre.Inference.Connect.STT.Tests" />
   </ItemGroup>
 </Project>

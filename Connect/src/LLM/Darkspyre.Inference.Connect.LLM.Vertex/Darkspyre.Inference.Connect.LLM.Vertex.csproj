@@ -6,6 +6,5 @@
   <ItemGroup>
     <ProjectReference Include="../Darkspyre.Inference.Connect.LLM/Darkspyre.Inference.Connect.LLM.csproj" />
     <PackageReference Include="Google.Apis.Auth" />
-    <InternalsVisibleTo Include="Darkspyre.Inference.Connect.LLM.Vertex.Tests" />
   </ItemGroup>
 </Project>

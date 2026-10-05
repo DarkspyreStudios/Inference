@@ -8,6 +8,5 @@
     <PackageReference Include="Whisper.net" />
     <PackageReference Include="Whisper.net.Runtime" />
     <PackageReference Include="NAudio.Core" />
-    <InternalsVisibleTo Include="Darkspyre.Inference.Tensor.STT.Whisper.Tests" />
   </ItemGroup>
 </Project>
