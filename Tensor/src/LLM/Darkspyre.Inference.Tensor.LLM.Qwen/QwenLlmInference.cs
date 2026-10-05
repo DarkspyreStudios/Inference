@@ -190,61 +190,93 @@ public sealed class QwenLlmInference : ITensorLlmInference
             thinking,
             abandonment.Token).GetAsyncEnumerator(abandonment.Token);
         bool completed = false;
+        Exception? operationFailure = null;
+        bool firstMove = true;
         try
         {
-            // TensorSharp renders the chat template and tokenizes synchronously in its first move.
-            bool more = await Task.Run(() => updates.MoveNextAsync().AsTask(), abandonment.Token).ConfigureAwait(false);
-            while (more)
+            while (true)
             {
-                if (runtimeUse is not null) _runtimeOwner.ThrowIfOperationCanceled(executionToken);
-                ChatStreamUpdate update = updates.Current;
-                if (!update.Done)
+                bool more;
+                ParsedOutput? part = null;
+                try
                 {
-                    if (update.RawGenerationSuffix is not null)
-                    {
-                        parser.SetGenerationPromptSuffix(update.RawGenerationSuffix);
-                    }
-
-                    ParsedOutput? part = update.IsParsed
-                        ? new ParsedOutput { Content = update.Piece ?? "", Thinking = update.ThinkingPiece ?? "", ToolCalls = update.ParsedToolCalls?.ToList() }
-                        : string.IsNullOrEmpty(update.Piece) ? null : parser.Add(update.Piece, false);
-                    foreach (LlmStreamEvent streamEvent in Events(part, output, toolCalls))
+                    if (runtimeUse is not null) _runtimeOwner.ThrowIfOperationCanceled(executionToken);
+                    // TensorSharp renders the chat template and tokenizes synchronously in its first move.
+                    more = firstMove
+                        ? await Task.Run(() => updates.MoveNextAsync().AsTask(), abandonment.Token).ConfigureAwait(false)
+                        : await updates.MoveNextAsync().ConfigureAwait(false);
+                    firstMove = false;
+                    if (more)
                     {
                         if (runtimeUse is not null) _runtimeOwner.ThrowIfOperationCanceled(executionToken);
-                        yield return streamEvent;
+                        ChatStreamUpdate update = updates.Current;
+                        if (update.Done)
+                        {
+                            promptTokens = update.PromptTokens;
+                            outputTokens = update.EvalTokens;
+                            finishReason = update.FinishReason;
+                        }
+                        else
+                        {
+                            if (update.RawGenerationSuffix is not null)
+                                parser.SetGenerationPromptSuffix(update.RawGenerationSuffix);
+                            part = update.IsParsed
+                                ? new ParsedOutput { Content = update.Piece ?? "", Thinking = update.ThinkingPiece ?? "", ToolCalls = update.ParsedToolCalls?.ToList() }
+                                : string.IsNullOrEmpty(update.Piece) ? null : parser.Add(update.Piece, false);
+                        }
+                    }
+                    else
+                    {
+                        executionToken.ThrowIfCancellationRequested();
+                        if (runtimeUse is not null) _runtimeOwner.ThrowIfOperationCanceled(executionToken);
+                        if (promptTokens is null)
+                            throw new InferenceException(InferenceFailureCode.ExecutionFailed, "The Qwen runtime ended without a terminal update.");
+                        part = parser.Add(string.Empty, true);
                     }
                 }
-                else
+                catch (Exception error) { operationFailure = error; throw; }
+
+                using IEnumerator<LlmStreamEvent> parsed = Events(part, output, toolCalls).GetEnumerator();
+                while (true)
                 {
-                    promptTokens = update.PromptTokens;
-                    outputTokens = update.EvalTokens;
-                    finishReason = update.FinishReason;
+                    bool hasEvent;
+                    try
+                    {
+                        hasEvent = parsed.MoveNext();
+                        if (runtimeUse is not null) _runtimeOwner.ThrowIfOperationCanceled(executionToken);
+                    }
+                    catch (Exception error) { operationFailure = error; throw; }
+                    if (!hasEvent) break;
+                    yield return parsed.Current;
                 }
 
-                if (runtimeUse is not null) _runtimeOwner.ThrowIfOperationCanceled(executionToken);
-                more = await updates.MoveNextAsync().ConfigureAwait(false);
+                if (!more)
+                {
+                    completed = true;
+                    break;
+                }
             }
-
-            executionToken.ThrowIfCancellationRequested();
-            if (runtimeUse is not null) _runtimeOwner.ThrowIfOperationCanceled(executionToken);
-            if (promptTokens is null)
-                throw new InferenceException(InferenceFailureCode.ExecutionFailed, "The Qwen runtime ended without a terminal update.");
-            foreach (LlmStreamEvent streamEvent in Events(parser.Add(string.Empty, true), output, toolCalls))
-            {
-                if (runtimeUse is not null) _runtimeOwner.ThrowIfOperationCanceled(executionToken);
-                yield return streamEvent;
-            }
-
-            completed = true;
         }
         finally
         {
+            List<Exception> cleanupFailures = [];
             if (!completed)
             {
-                await abandonment.CancelAsync().ConfigureAwait(false);
+                try { await abandonment.CancelAsync().ConfigureAwait(false); }
+                catch (Exception error) { cleanupFailures.Add(error); }
             }
 
-            await updates.DisposeAsync().ConfigureAwait(false);
+            try { await updates.DisposeAsync().ConfigureAwait(false); }
+            catch (Exception error) { cleanupFailures.Add(error); }
+            if (cleanupFailures.Count != 0)
+            {
+                if (operationFailure is not null) cleanupFailures.Insert(0, operationFailure);
+                if (cleanupFailures.Count == 1)
+                    System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(cleanupFailures[0]).Throw();
+#pragma warning disable CA2219 // Iterator disposal must report cleanup failure; the aggregate retains the original operation.
+                throw new AggregateException(cleanupFailures);
+#pragma warning restore CA2219
+            }
         }
 
         string text = output.ToString();

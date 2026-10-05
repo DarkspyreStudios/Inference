@@ -488,6 +488,10 @@ Natural `eos`, `stop` and `stop_sequence` stops complete. Output/thinking budget
 protection and engine abort/cancel stops report `Incomplete` with the actual reason; `max_tokens`
 retains the normalized `max_output_tokens` incomplete reason. Runtime `error` stops report `Failed`.
 Unrecognized terminal reasons report `Unknown`, not `Completed`.
+An unfinished stream attempts request cancellation and runtime-iterator disposal independently.
+A failed cancellation callback does not skip iterator disposal. If cleanup also fails after a
+stream operation fails, the thrown aggregate retains the original operation and actual cleanup
+exceptions. A single cleanup failure is rethrown directly when no operation failed.
 Qwen reports no automatic prompt caching, cache-hint acceptance or supported cache retentions in
 `LlmCapabilities.PromptCache`. It ignores the advisory `LlmInferenceRequest.PromptCache` hint.
 Qwen reports `SupportsExplicitCache=false` and rejects a supplied `ExplicitCache` selection
