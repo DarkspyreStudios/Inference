@@ -41,7 +41,7 @@ internal sealed class SelfHostLlmClient(ILlmSelfHost host) : ILlmClient, ILlmCon
         ArgumentNullException.ThrowIfNull(connection);
         RuntimeInputAdmission.Validate(connection);
         CommonLlm.ILlmInference engine = await host.GetInferenceAsync(connection.Endpoint, cancellationToken).ConfigureAwait(false);
-        IReadOnlyList<CommonLlm.LlmModelInfo> models = await engine.ListModelsAsync(cancellationToken).ConfigureAwait(false);
+        IReadOnlyList<CommonLlm.LlmModelInfo> models = await engine.RefreshModelsAsync(cancellationToken).ConfigureAwait(false);
         return models.Select(model => new LlmModel(model.Id, model.DisplayName, model.OwnedBy,
             model.Capabilities is null ? null : ToConnect(model.Capabilities))
         {

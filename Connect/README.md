@@ -3777,6 +3777,9 @@ from the engine. Native file and caller-owned resource references remain unsuppo
 `SupportsFileReferences = false` even when the engine declares support. Binary prompt attachments
 retain the engine's image/document capability gates. An unloaded engine declares no usage or tool support.
 
+Connect keeps the connection's catalog in its shared model cache. A provider listing refreshes the
+selected engine's catalog, so explicit Connect refresh also replaces any list the engine keeps.
+
 Generation and request accounting reject nonempty connection or request `ProviderOptions`, connection
 `AdditionalHeaders`, and connection or model capability overrides. SelfHost passes only typed Common
 request controls to the engine. An engine owns its capabilities; connection overrides do not change
