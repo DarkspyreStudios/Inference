@@ -175,8 +175,8 @@ public sealed class QwenLlmInference : ITensorLlmInference
         parser.Init(thinking, tools);
         var output = new StringBuilder();
         var toolCalls = new List<LlmToolCall>();
-        int promptTokens = 0;
-        int outputTokens = 0;
+        int? promptTokens = null;
+        int? outputTokens = null;
         string? finishReason = null;
         long started = Stopwatch.GetTimestamp();
         // Cancelling this token aborts the engine request; a stream disposed before it completes cancels it.
@@ -225,7 +225,10 @@ public sealed class QwenLlmInference : ITensorLlmInference
                 more = await updates.MoveNextAsync().ConfigureAwait(false);
             }
 
+            executionToken.ThrowIfCancellationRequested();
             if (runtimeUse is not null) _runtimeOwner.ThrowIfOperationCanceled(executionToken);
+            if (promptTokens is null)
+                throw new InferenceException(InferenceFailureCode.ExecutionFailed, "The Qwen runtime ended without a terminal update.");
             foreach (LlmStreamEvent streamEvent in Events(parser.Add(string.Empty, true), output, toolCalls))
             {
                 if (runtimeUse is not null) _runtimeOwner.ThrowIfOperationCanceled(executionToken);
@@ -264,17 +267,23 @@ public sealed class QwenLlmInference : ITensorLlmInference
             text = normalized.NormalizedContent;
         }
 
+        executionToken.ThrowIfCancellationRequested();
         if (runtimeUse is not null) _runtimeOwner.ThrowIfOperationCanceled(executionToken);
+        LlmCompletionStatus status = finishReason switch
+        {
+            "eos" or "stop" or "stop_sequence" => LlmCompletionStatus.Completed,
+            "max_tokens" or "thinking_budget" or "repetition" or "aborted" or "cancelled" => LlmCompletionStatus.Incomplete,
+            "error" => LlmCompletionStatus.Failed,
+            _ => LlmCompletionStatus.Unknown
+        };
         yield return new LlmCompletionEvent(new LlmInferenceResult
         {
             Text = text,
             OmittedContinuationStateCount = omitted,
-            Status = string.Equals(finishReason, "max_tokens", StringComparison.Ordinal)
-                ? LlmCompletionStatus.Incomplete
-                : LlmCompletionStatus.Completed,
+            Status = status,
             FinishReason = finishReason,
-            IncompleteReason = string.Equals(finishReason, "max_tokens", StringComparison.Ordinal)
-                ? "max_output_tokens"
+            IncompleteReason = status == LlmCompletionStatus.Incomplete
+                ? finishReason == "max_tokens" ? "max_output_tokens" : finishReason
                 : null,
             Usage = new LlmUsage(promptTokens, outputTokens, promptTokens + outputTokens),
             ToolCalls = toolCalls,

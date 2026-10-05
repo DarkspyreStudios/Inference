@@ -480,6 +480,14 @@ authority before model access or native execution. It does not materialize those
 `SupportsFileReferences = false`.
 
 Qwen reports `SupportsStreamingUsage = true` because streamed completions report final usage.
+Qwen requires the runtime's terminal update before publishing a completion. A stream that ends
+without that update fails as `ExecutionFailed`; it does not invent successful completion or zero
+usage. Cancellation is checked before final parsing and completion publication on every backend,
+including managed CPU. A cancelled terminal update does not become a successful result.
+Natural `eos`, `stop` and `stop_sequence` stops complete. Output/thinking budgets, repetition
+protection and engine abort/cancel stops report `Incomplete` with the actual reason; `max_tokens`
+retains the normalized `max_output_tokens` incomplete reason. Runtime `error` stops report `Failed`.
+Unrecognized terminal reasons report `Unknown`, not `Completed`.
 Qwen reports no automatic prompt caching, cache-hint acceptance or supported cache retentions in
 `LlmCapabilities.PromptCache`. It ignores the advisory `LlmInferenceRequest.PromptCache` hint.
 Qwen reports `SupportsExplicitCache=false` and rejects a supplied `ExplicitCache` selection
