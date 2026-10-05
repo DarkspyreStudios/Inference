@@ -20,8 +20,4 @@
   <ItemGroup>
     <ProjectReference Include="..\..\..\src\LLM\Darkspyre.Inference.Connect.LLM\Darkspyre.Inference.Connect.LLM.csproj" />
   </ItemGroup>
-
-  <ItemGroup>
-    <InternalsVisibleTo Include="Darkspyre.Inference.Connect.LLM.Bedrock.Tests" />
-  </ItemGroup>
 </Project>

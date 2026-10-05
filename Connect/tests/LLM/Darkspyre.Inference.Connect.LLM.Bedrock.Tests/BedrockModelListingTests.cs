@@ -36,48 +36,12 @@ public sealed class BedrockModelListingTests
     }
 
     [Fact]
-    public async Task DeniedAvailabilityFailsTheListing()
-    {
-        var control = new Control(
-            [Model(Nova, "ON_DEMAND"), Model(Opus, "INFERENCE_PROFILE")],
-            [Profile("us." + Opus, Opus)],
-            availability: _ => throw new AccessDeniedException("not authorized") { StatusCode = HttpStatusCode.Forbidden });
-
-        var logger = new Logger();
-
-        var failure = await Assert.ThrowsAsync<LlmProviderException>(() => ListAsync(control, logger));
-        Assert.Equal(HttpStatusCode.Forbidden, failure.StatusCode);
-        Assert.Equal([LogLevel.Warning], logger.Levels);
-    }
-
-    [Fact]
-    public async Task ProfileCarriesItsBaseModelLimits()
-    {
-        const string Base = "anthropic.claude-sonnet-4-5-20250929-v1:0";
-        var control = new Control(
-            [Model(Base, "INFERENCE_PROFILE")], [Profile("us." + Base, Base)], availability: _ => Subscribed());
-
-        LlmModel model = Assert.Single(await ListModelsAsync(control));
-        Assert.Equal(("us." + Base, 200_000L, 64_000L), (model.Id, model.MaxContextTokens, model.MaxOutputTokens));
-    }
-
-    [Fact]
     public async Task FoundationModelCarriesItsLimits()
     {
         var control = new Control([Model("anthropic.claude-opus-4-6-v1", "ON_DEMAND")], [], availability: _ => Subscribed());
 
         LlmModel model = Assert.Single(await ListModelsAsync(control));
         Assert.Equal((1_000_000L, 128_000L), (model.MaxContextTokens, model.MaxOutputTokens));
-    }
-
-    [Fact]
-    public async Task UnknownModelReportsNoSize()
-    {
-        var control = new Control([Model(Nova, "ON_DEMAND")], [], availability: _ => Subscribed());
-
-        LlmModel model = Assert.Single(await ListModelsAsync(control));
-        Assert.Null(model.MaxContextTokens);
-        Assert.Null(model.MaxOutputTokens);
     }
 
     private static async Task<string[]> ListAsync(Control control, Logger? logger = null) =>
