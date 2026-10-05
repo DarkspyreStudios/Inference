@@ -18,6 +18,8 @@ public sealed class GgmlRuntimeOwner : ITensorRuntimeOwner
     private IReadOnlyList<TensorRuntimeCandidate>? _candidates;
     private Task<IReadOnlyList<GgmlNativeCandidate>>? _catalogResolution;
     private Task<Initialization>? _initialization;
+    // Publish the cause with state before the shared initialization task finishes.
+    private Exception? _initializationError;
     private TensorBackendKind _initializationBackend;
     private Task<TensorRuntimeShutdownResult>? _shutdown;
     private Task? _disposal;
@@ -128,7 +130,11 @@ public sealed class GgmlRuntimeOwner : ITensorRuntimeOwner
             Initialization result = await InitializeAsync(requested, cancellationToken).ConfigureAwait(false);
             ThrowIfOperationCanceled(cancellationToken);
             if (result.Identity is null)
+            {
+                if (result.Error is { } error)
+                    throw new InferenceException(InferenceFailureCode.BackendUnavailable, result.Reason, error);
                 throw new InferenceException(InferenceFailureCode.BackendUnavailable, result.Reason);
+            }
             native = _supplier!.AcquireModelLease();
             ThrowIfOperationCanceled(cancellationToken);
             return new(result.Identity.Backend, operation, native);
@@ -163,7 +169,11 @@ public sealed class GgmlRuntimeOwner : ITensorRuntimeOwner
         {
             ObjectDisposedException.ThrowIf(_fenced, this);
             if (_state == TensorRuntimeState.RequiresProcessRestart)
+            {
+                if (_initializationError is { } error)
+                    throw new InferenceException(InferenceFailureCode.BackendUnavailable, "The GGML runtime requires a fresh process.", error);
                 throw new InferenceException(InferenceFailureCode.BackendUnavailable, "The GGML runtime requires a fresh process.");
+            }
             _leases++;
             return new OperationLease(this);
         }
@@ -216,7 +226,7 @@ public sealed class GgmlRuntimeOwner : ITensorRuntimeOwner
         catch (Exception error) when (error is not OutOfMemoryException)
         {
             bool retained = _supplier!.State is GgmlRuntimeState.Poisoned or GgmlRuntimeState.Ready or GgmlRuntimeState.Stopping or GgmlRuntimeState.Stopped;
-            result = Initialization.Refused(retained ? "GGML initialization requires a fresh process." : "The GGML runtime could not be initialized.", retained);
+            result = Initialization.Refused(retained ? "GGML initialization requires a fresh process." : "The GGML runtime could not be initialized.", retained, error);
         }
         finally
         {
@@ -226,6 +236,7 @@ public sealed class GgmlRuntimeOwner : ITensorRuntimeOwner
                 _nativeMayRemain |= result.Identity is not null || result.State == TensorBackendAvailabilityState.RequiresProcessRestart;
                 if (!_fenced)
                 {
+                    _initializationError = result.Error;
                     _current = result.Identity;
                     _state = result.Identity is not null ? TensorRuntimeState.Ready
                         : result.State == TensorBackendAvailabilityState.RequiresProcessRestart ? TensorRuntimeState.RequiresProcessRestart
@@ -423,6 +434,7 @@ public sealed class GgmlRuntimeOwner : ITensorRuntimeOwner
             _supplier = null;
             _catalogResolution = null;
             _initialization = null;
+            _initializationError = null;
             _candidates = Plan.Candidates;
             return ShutdownResult(released ? TensorRuntimeShutdownState.Completed : TensorRuntimeShutdownState.FailedRequiresProcessExit,
                 0, !released);
@@ -485,10 +497,12 @@ public sealed class GgmlRuntimeOwner : ITensorRuntimeOwner
         TensorRuntimeBackendIdentity? Identity, IReadOnlyList<TensorNativeCandidatePresence> Presence,
         IReadOnlyList<TensorBackendCandidateDiagnostic> Diagnostics)
     {
+        internal Exception? Error { get; init; }
+
         internal static Initialization Ready(TensorRuntimeBackendIdentity identity) => new(TensorBackendAvailabilityState.Available,
             "The GGML backend initialized. Model allocation is not guaranteed.", identity, [], []);
-        internal static Initialization Refused(string reason, bool retained = false) => new(retained
-            ? TensorBackendAvailabilityState.RequiresProcessRestart : TensorBackendAvailabilityState.Unavailable, reason, null, [], []);
+        internal static Initialization Refused(string reason, bool retained = false, Exception? error = null) => new(retained
+            ? TensorBackendAvailabilityState.RequiresProcessRestart : TensorBackendAvailabilityState.Unavailable, reason, null, [], []) { Error = error };
         internal static Initialization Unsupported(string reason) => new(TensorBackendAvailabilityState.Unsupported, reason, null, [], []);
     }
 }

@@ -362,6 +362,8 @@ GGML check/load. Empty candidates admit nothing and never resolve or load ambien
 considers compatible concrete backend groups in priority order. It stops fallback after any possibly
 retained native state. Actual backend, variant, build, ABI and native source commit come from successful
 supplier initialization, not the requested backend or current managed source checkout.
+Initialization exceptions remain private to the owner. Model admission/load failures retain the
+original exception as an inner cause; public probe reasons and diagnostics remain sanitized.
 
 Initialization, queued model loading, resident models and execution retain owner leases until their
 actual work/cleanup settles. Ordinary shutdown with active leases reports Busy without teardown.
