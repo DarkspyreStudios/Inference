@@ -1337,6 +1337,10 @@ outcome. Each HTTP event publication checks caller cancellation, including buffe
 non-streaming events and adapters using a borrowed HTTP client.
 Claude CLI and Antigravity also check caller cancellation before each buffered non-streaming event.
 
+Compatible Chat Completions skips structured-output validation for a refused result, including
+`content_filter` without refusal text. Its partial text, reported model, usage and finish reason
+remain available. Filtered partial JSON is not published as an evaluated or valid structured answer.
+
 Gemini API and Vertex Gemini retain complete decoded tool calls when the actual terminal reason
 is unrecognized. The result remains `Unknown` and carries no continuation state. Open streamed
 arguments do not become complete calls. Existing known refusal, truncation and malformed-call

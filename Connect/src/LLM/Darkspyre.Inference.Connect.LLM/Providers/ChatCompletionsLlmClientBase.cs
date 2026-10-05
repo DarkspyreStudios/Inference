@@ -529,7 +529,7 @@ internal abstract class ChatCompletionsLlmClientBase(HttpClient http) : LlmClien
             && enforcement is not null
             && status != LlmCompletionStatus.RequiresAction)
         {
-            validation = finalRefusal.Length > 0
+            validation = status == LlmCompletionStatus.Refused
                 ? new LlmStructuredOutputValidation(
                     enforcement.Value,
                     false,
