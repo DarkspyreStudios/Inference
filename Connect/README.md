@@ -1218,8 +1218,10 @@ stateless embedding catalog reader; it does not refresh credentials or own anoth
 It refuses non-default typed service tiers and raw `service_tier` options before HTTP because it
 does not implement an embedding tier mapping. Raw `encoding_format` accepts only `float`.
 Responses require complete unique input indexes, finite consistent vectors, actual model provenance
-and nonnegative observed usage. Successful diagnostics serialize only validated model and numeric
-facts. A model string containing a known credential or protected header value causes a local
+and nonnegative observed usage. The validated response model populates `LlmEmbeddingResult.ModelId`;
+the requested alias never substitutes for that observation. Validated float values use primitive
+JSON nodes without default reflection metadata. Successful diagnostics serialize only validated
+model and numeric facts. A model string containing a known credential or protected header value causes a local
 confidentiality refusal after the response; it is not provider rejection or remote rollback proof.
 Input text is not a secret-replacement authority, and numeric JSON is not text-redacted.
 HTTP request/response cleanup preserves independent failures and

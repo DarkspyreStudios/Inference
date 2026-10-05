@@ -7,6 +7,39 @@ namespace Darkspyre.Inference.Connect.LLM.Tests;
 
 public sealed class EmbeddingModelIdentityTests
 {
+    [Fact]
+    public async Task GrokEmbeddingResultsRetainTheValidatedReportedModel()
+    {
+        using var http = new HttpClient(new Handler("actual-model"));
+        var client = new XaiEmbeddingClient(http);
+        var connection = new LlmConnection
+        {
+            Version = "1",
+            Transport = LlmTransport.XaiResponses,
+            Xai = new(),
+            Endpoint = "https://api.x.ai/v1",
+            Credential = new LlmCredential { OAuth = new() { AccessToken = "test-token" } }.Serialize(),
+            Catalog = []
+        };
+
+        LlmEmbeddingResult result = await client.EmbedAsync(connection, new()
+        {
+            ModelId = "requested-alias",
+            Inputs = ["reference"],
+            Dimensions = 2
+        });
+        byte[] json = JsonSerializer.SerializeToUtf8Bytes(result, ConnectLlmJson.LlmEmbeddingResult);
+        LlmEmbeddingResult restored = JsonSerializer.Deserialize(json, ConnectLlmJson.LlmEmbeddingResult)!;
+
+        Assert.Equal("actual-model", result.ModelId);
+        Assert.Equal("actual-model", restored.ModelId);
+        float[] vector = Assert.Single(restored.Vectors);
+        Assert.Equal(2, vector.Length);
+        Assert.Equal(0.25f, vector[0]);
+        Assert.Equal(0.75f, vector[1]);
+        Assert.Equal(new LlmEmbeddingUsage(3, 3), restored.Usage);
+    }
+
     [Theory]
     [InlineData("actual-model")]
     [InlineData(null)]
@@ -67,7 +100,8 @@ public sealed class EmbeddingModelIdentityTests
         {
             var body = new JsonObject
             {
-                ["data"] = new JsonArray(new JsonObject { ["index"] = 0, ["embedding"] = new JsonArray(0.25, 0.75) }),
+                ["object"] = "list",
+                ["data"] = new JsonArray(new JsonObject { ["object"] = "embedding", ["index"] = 0, ["embedding"] = new JsonArray(0.25, 0.75) }),
                 ["usage"] = new JsonObject { ["prompt_tokens"] = 3, ["total_tokens"] = 3 }
             };
             if (model is not null) body["model"] = model;

@@ -187,7 +187,8 @@ internal sealed class XaiEmbeddingClient(HttpClient http) : ILlmEmbeddingClient
                     if (value.ValueKind != JsonValueKind.Number || !value.TryGetSingle(out float number) || !float.IsFinite(number))
                         throw new JsonException();
                     vector[offset++] = number;
-                    ownedVector.Add(number);
+                    // Generic Add<float> requests default reflection metadata; the primitive node conversion does not.
+                    ownedVector.Add((JsonNode?)number);
                 }
                 vectors[index] = vector;
                 observed[index] = true;
@@ -209,6 +210,7 @@ internal sealed class XaiEmbeddingClient(HttpClient http) : ILlmEmbeddingClient
             fence();
             return new LlmEmbeddingResult
             {
+                ModelId = actualModel,
                 Vectors = Array.AsReadOnly(vectors),
                 Usage = usage,
                 Diagnostics = new((int)response.StatusCode, SafeRequestId(response, credential, secrets), owned.ToJsonString())
