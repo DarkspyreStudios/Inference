@@ -3382,6 +3382,9 @@ methods fail explicitly. Canceling `RunTurnAsync` cancels the local streaming re
 The factory-owned AgentCore invocation uses the same bounded producer as Converse. Factory retirement
 cancels and drains the SDK invocation and closes its owned response independently of a paused chat
 reader. Resuming that reader after retirement reports cancellation.
+An invocation failure survives a later iterator or response cleanup failure. Cleanup failures carry
+the typed cleanup phase and remain observable through factory retirement without duplicating the
+same actual failure.
 
 Direct AgentCore session disposal fences new operational calls and cancels its active SDK request
 and host tool callback. Concurrent disposal callers share the same retirement result and failures.

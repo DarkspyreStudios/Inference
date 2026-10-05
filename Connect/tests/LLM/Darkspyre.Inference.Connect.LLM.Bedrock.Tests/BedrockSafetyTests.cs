@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Globalization;
 using Amazon;
 using Darkspyre.Inference.Common.LLM;
+using Darkspyre.Inference.Common.Resources;
 using Amazon.Bedrock;
 using Amazon.Bedrock.Model;
 using Amazon.BedrockAgentCore;
@@ -18,6 +19,41 @@ namespace Darkspyre.Inference.Connect.LLM.Bedrock.Tests;
 public sealed class BedrockSafetyTests
 {
     [Fact]
+    public async Task AgentCoreStreamFailureSurvivesFailedResponseCleanup()
+    {
+        var readFailure = new IOException("The fixture stream failed.");
+        var cleanupFailure = new IOException("The fixture response could not be released.");
+        using var responseStream = new FailingReadStream(readFailure);
+        var sdkClient = new AgentCoreStreamClient(new FailingAgentCoreResponse(cleanupFailure)
+        {
+            Stream = new AgentCore.InvokeHarnessStreamOutput(responseStream)
+        });
+        var factory = new BedrockClientFactory(_ => throw new NotSupportedException(),
+            _ => throw new NotSupportedException(), _ => sdkClient);
+        var invoker = new BedrockAgentCoreInvoker(factory);
+        var aws = new LlmAwsCredentials { Region = "us-east-1" };
+
+        Exception? operation = await Record.ExceptionAsync(async () =>
+        {
+            await foreach (IEventStreamEvent unused in invoker.InvokeAsync(
+                aws, new AgentCore.InvokeHarnessRequest(), CancellationToken.None))
+                throw new InvalidOperationException("The failed invocation must not emit an event.");
+        }).WaitAsync(TimeSpan.FromSeconds(5));
+        Exception? retirement = await Record.ExceptionAsync(async () => await factory.DisposeAsync())
+            .WaitAsync(TimeSpan.FromSeconds(5));
+
+        Exception[] causes = Assert.IsType<AggregateException>(operation).Flatten().InnerExceptions.ToArray();
+        Assert.Equal(2, causes.Length);
+        Assert.Same(readFailure, Assert.IsType<BedrockAgentCoreEventStreamException>(causes[0]).InnerException);
+        var cleanup = Assert.IsType<InferenceResourceOperationException>(causes[1]);
+        Assert.Equal(InferenceResourceOperationPhase.Cleanup, cleanup.Failure.Phase);
+        Assert.Same(cleanup, retirement);
+        Assert.Same(retirement, await Record.ExceptionAsync(async () => await factory.DisposeAsync()));
+        Assert.True(sdkClient.Disposed);
+        Assert.False(responseStream.CanRead);
+    }
+
+    [Fact]
     public async Task PausedAgentCoreReaderDoesNotBlockFactoryRetirement()
     {
         var messageType = new EventStreamHeader(":message-type");
@@ -29,7 +65,10 @@ public sealed class BedrockSafetyTests
         var message = new EventStreamMessage([messageType, eventType, contentType],
             """{"contentBlockIndex":0,"delta":{"text":"partial"}}"""u8.ToArray());
         using var responseStream = new MemoryStream(message.ToByteArray());
-        var sdkClient = new AgentCoreStreamClient(responseStream);
+        var sdkClient = new AgentCoreStreamClient(new AgentCore.InvokeHarnessResponse
+        {
+            Stream = new AgentCore.InvokeHarnessStreamOutput(responseStream)
+        });
         await using var factory = new BedrockClientFactory(_ => throw new NotSupportedException(),
             _ => throw new NotSupportedException(), _ => sdkClient);
         var invoker = new BedrockAgentCoreInvoker(factory);
@@ -213,17 +252,29 @@ public sealed class BedrockSafetyTests
         }
     }
 
-    private sealed class AgentCoreStreamClient(Stream responseStream)
+    private sealed class FailingReadStream(Exception readFailure) : MemoryStream
+    {
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default) =>
+            ValueTask.FromException<int>(readFailure);
+    }
+
+    private sealed class FailingAgentCoreResponse(Exception cleanupFailure) : AgentCore.InvokeHarnessResponse
+    {
+        protected override void Dispose(bool disposing)
+        {
+            base.Dispose(disposing);
+            throw cleanupFailure;
+        }
+    }
+
+    private sealed class AgentCoreStreamClient(AgentCore.InvokeHarnessResponse response)
         : AmazonBedrockAgentCoreClient(new BasicAWSCredentials("fixture-key", "fixture-secret"), RegionEndpoint.USEast1)
     {
         internal bool Disposed { get; private set; }
 
         public override Task<AgentCore.InvokeHarnessResponse> InvokeHarnessAsync(
             AgentCore.InvokeHarnessRequest request, CancellationToken cancellationToken = default) =>
-            Task.FromResult(new AgentCore.InvokeHarnessResponse
-            {
-                Stream = new AgentCore.InvokeHarnessStreamOutput(responseStream)
-            });
+            Task.FromResult(response);
 
         protected override void Dispose(bool disposing)
         {

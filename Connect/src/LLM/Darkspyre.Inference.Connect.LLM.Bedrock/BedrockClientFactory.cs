@@ -1,5 +1,6 @@
 using System.Buffers;
 using System.Diagnostics.CodeAnalysis;
+using System.Runtime.ExceptionServices;
 using System.Security.Cryptography;
 using System.Text.Json;
 using Amazon;
@@ -209,8 +210,9 @@ internal sealed class BedrockClientFactory : IDisposable, IAsyncDisposable
             try { response.Dispose(); }
             catch (Exception error)
             {
-                _recordFailure?.Invoke(response, error);
-                throw;
+                Exception cleanup = BedrockLlmClient.CleanupFailure(error, response);
+                _recordFailure?.Invoke(response, cleanup);
+                ExceptionDispatchInfo.Throw(cleanup);
             }
         }
 
