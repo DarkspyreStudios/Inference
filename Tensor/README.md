@@ -113,6 +113,8 @@ before model memory is released, and the engine reports Unloaded or Stopped only
 `StopAsync` unloads any remaining model and releases the engine's other resources. Stop is terminal
 for that instance: create a new instance to run again. A second Stop and a Start after Stop are
 no-ops. `DisposeAsync` performs Stop and completes after native work has released model memory.
+The shared lifecycle idle task preserves the latest accepted work's failure after publishing
+Failed. Disposal observes that actual cleanup failure; repeated waits do not turn it into success.
 
 The following example assumes the user has already installed the Supra model pack through the
 explicit `TensorModelPackManager.InstallAsync` action:

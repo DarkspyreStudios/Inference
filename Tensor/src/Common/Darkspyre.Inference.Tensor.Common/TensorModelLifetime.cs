@@ -65,7 +65,7 @@ public sealed class TensorModelLifetime : IDisposable
         return Task.CompletedTask;
     }
 
-    /// <summary>Completes when every accepted lifecycle operation has finished.</summary>
+    /// <summary>Waits for accepted lifecycle work and preserves the latest work's failure.</summary>
     public Task WhenIdleAsync()
     {
         lock (_chain)
@@ -196,7 +196,8 @@ public sealed class TensorModelLifetime : IDisposable
         }
         catch (Exception exception)
         {
-            outcome = new(model, backend, TensorEngineState.Failed, DateTimeOffset.UtcNow, exception);
+            Publish(new(model, backend, TensorEngineState.Failed, DateTimeOffset.UtcNow, exception));
+            throw;
         }
 
         Publish(outcome);
