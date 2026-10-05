@@ -123,7 +123,8 @@ internal sealed class LlmOperationLifetime : IDisposable, IAsyncDisposable
             catch (Exception error)
             {
                 failure = error;
-                expectedCancellation = error is OperationCanceledException && operation.Token.IsCancellationRequested;
+                cleanupFailed = LlmResourcePreparation.IsCleanupFailure(error);
+                expectedCancellation = !cleanupFailed && error is OperationCanceledException && operation.Token.IsCancellationRequested;
             }
             if (enumerator is not null)
             {

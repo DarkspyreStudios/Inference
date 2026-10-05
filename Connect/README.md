@@ -1020,6 +1020,8 @@ and the connection source remain borrowed and are not disposed by the facade.
 The chat producer owns its provider enumeration through cleanup. Independent provider or projection
 and enumeration-cleanup failures remain together. Failed cleanup retains the actual enumerator through
 the cleanup failure, which remains visible to repeated facade retirement callers without retry.
+Abandoning a chat stream reports typed cleanup failures even when provider cleanup fails during
+the final pull, before outer enumeration disposal.
 
 Credential access and the chat, embedding and agent facades release their borrowed source references
 after admitted work drains. Chat and embedding facades also release credential-access references;
