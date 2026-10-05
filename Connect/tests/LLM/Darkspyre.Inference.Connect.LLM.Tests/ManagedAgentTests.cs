@@ -3,6 +3,7 @@ using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Common.LLM;
 using Darkspyre.Inference.Connect.LLM.Internal;
 using LlmReasoningLevel = Darkspyre.Inference.Common.LLM.LlmReasoningLevel;
@@ -29,6 +30,70 @@ public sealed class ManagedAgentTests
         LlmToolDefinition[] sent = [.. harness.Requests.Single().Tools.Select(tool => Assert.IsType<LlmToolDefinition>(tool))];
         Assert.Equal([("bash", false), ("echo", true)], sent.Select(tool => (tool.Name, tool.Strict)));
         Assert.Equal(loose.GetRawText(), sent[0].InputSchema.GetRawText()); // The schema itself is sent unchanged.
+    }
+
+    [Fact]
+    public async Task TerminalUsageReplacesCumulativeObservationsAcrossToolContinuation()
+    {
+        var harness = new Harness();
+        harness.UsageObservations.Enqueue([new(8, 1, 9), new(8, 2, 10)]);
+        harness.UsageObservations.Enqueue([new(10, 4, 14)]);
+        harness.Results.Enqueue(new()
+        {
+            Diagnostics = new(200, null, null),
+            Text = string.Empty,
+            Status = LlmCompletionStatus.RequiresAction,
+            Usage = new(8, 3, 11) { CachedInputTokens = 6 },
+            ToolCalls = [new LlmToolCall("call-1", "echo", "{}")]
+        });
+        harness.Results.Enqueue(new()
+        {
+            Diagnostics = new(200, null, null),
+            Text = "done",
+            Status = LlmCompletionStatus.Completed,
+            Usage = new(10, 2, 12)
+        });
+        await using var session = harness.Create(Options() with
+        {
+            Tools = [new LlmAgentToolDefinition
+            {
+                Name = "echo", InputSchema = JsonElement.Parse("{\"type\":\"object\"}")
+            }],
+            ToolHandler = (call, _) => Task.FromResult(LlmToolOutput.FromText("echoed " + call.CallId))
+        });
+
+        List<LlmAgentEvent> events = await Read(session.RunTurnAsync(Turn("hello")));
+        LlmAgentUsageEvent[] observations = [.. events.OfType<LlmAgentUsageEvent>()];
+        Assert.Equal(5, observations.Length);
+        Assert.Equal([9, 10, 11, 14, 12], observations.Select(item => item.Usage!.TotalTokens));
+        Assert.Equal([9, 10, 11, 25, 23], observations.Select(item => item.RunTotals!.TotalTokens));
+        Assert.Equal([observations[0].RequestId, observations[0].RequestId, observations[0].RequestId,
+            observations[3].RequestId, observations[3].RequestId], observations.Select(item => item.RequestId));
+        Assert.NotEqual(observations[0].RequestId, observations[3].RequestId);
+        Assert.All(observations, item =>
+        {
+            Assert.Equal(session.ThreadId, item.ThreadId);
+            Assert.Equal(observations[0].TurnId, item.TurnId);
+        });
+        Assert.Equal(LlmAgentCompletionReason.Completed, Assert.Single(events.OfType<LlmAgentTurnCompletedEvent>()).Reason);
+
+        LlmUsage total = JsonSerializer.Deserialize(
+            JsonSerializer.Serialize(observations[^1].RunTotals!, InferenceJson.LlmUsage), InferenceJson.LlmUsage)!;
+        Assert.Equal(new LlmUsage(18, 5, 23), total);
+        Assert.Null(total.CachedInputTokens);
+        Assert.Null(total.ProviderReportedCostUsd);
+
+        LlmAgentContext capture = await session.CaptureContextAsync(new() { IncludeAttachmentData = true });
+        LlmAgentContext restored = JsonSerializer.Deserialize(
+            JsonSerializer.Serialize(capture, ConnectLlmJson.AgentContext), ConnectLlmJson.AgentContext)!;
+        Assert.Equal(["user", "assistant", "user", "assistant"], restored.Entries.Select(entry => entry.Message.Role));
+        LlmToolCall call = Assert.IsType<LlmToolCall>(Assert.Single(restored.Entries[1].Message.ToolCalls));
+        Assert.Equal("call-1", call.Id);
+        LlmToolResult toolResult = Assert.IsType<LlmToolResult>(Assert.Single(restored.Entries[2].Message.ToolResults));
+        Assert.Equal("call-1", toolResult.ToolCallId);
+        Assert.Equal("echoed call-1", Assert.IsType<LlmToolOutputText>(Assert.Single(toolResult.Output.Parts)).Text);
+        Assert.Equal("done", restored.Entries[^1].Message.Content);
+        Assert.Equal(2, harness.Requests.Count);
     }
 
     private static LlmAgentTurnRequest Turn(string text) => new() { Input = [new LlmAgentTextContent(text)] };
