@@ -24,10 +24,3 @@ The two agent configuration fixtures are `rl_agent_config.json` from:
 Both upstream repositories declare Apache-2.0. JSON values are unchanged; only a final newline
 is added for repository formatting. These fixtures prevent substituting either checkpoint's
 serving defaults for another's.
-
-The three `laya-fixture*.onnx` graphs come from `make_onnx_fixtures.py`. They share the exported
-Laya model's input and output signature and contain no weights. The graph echoes its inputs:
-`logits` is the marker positions as floats, and `act_logits` is the count of real tokens followed by
-the question type. `laya-fixture.onnx` accepts 16 tokens and 4 option slots and carries the full
-metadata. `laya-fixture-no-metadata.onnx` has no metadata, and `laya-fixture-dynamic.onnx` has a
-symbolic sequence dimension. Regenerate them with `python make_onnx_fixtures.py` from this directory.
