@@ -28,9 +28,13 @@ public sealed class CollectibleSerializationTests
         }, InferenceJson.LlmResult);
         WeakReference[] generation = RoundTripInCollectibleGeneration(json);
 
-        GC.Collect();
-        GC.WaitForPendingFinalizers();
-        GC.Collect();
+        // The runtime's unload guidance bounds collection at ten finalizer passes.
+        for (int attempt = 0; attempt < 10 && generation.Any(item => item.IsAlive); attempt++)
+        {
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+            GC.Collect();
+        }
 
         Assert.All(generation, item => Assert.False(item.IsAlive));
     }
@@ -56,6 +60,19 @@ public sealed class CollectibleSerializationTests
             Assembly assembly = context.LoadFromAssemblyPath(typeof(InferenceJson).Assembly.Location);
             Assert.Same(context, AssemblyLoadContext.GetLoadContext(assembly));
             Type metadataOwner = assembly.GetType(typeof(InferenceJson).FullName!, throwOnError: true)!;
+            var references = new List<WeakReference> { new(context), new(assembly) };
+            PropertyInfo[] roots = metadataOwner.GetProperties(BindingFlags.Public | BindingFlags.Static)
+                .Where(property => typeof(JsonTypeInfo).IsAssignableFrom(property.PropertyType)).ToArray();
+            Assert.NotEmpty(roots);
+            foreach (PropertyInfo root in roots)
+            {
+                var typeInfo = (JsonTypeInfo)root.GetValue(null)!;
+                typeInfo.MakeReadOnly();
+                _ = typeInfo.Properties.Count;
+                Assert.Same(typeInfo, typeInfo.Options.GetTypeInfo(typeInfo.Type));
+                references.Add(new(typeInfo));
+                references.Add(new(typeInfo.Options));
+            }
             var metadata = (JsonTypeInfo)metadataOwner.GetProperty(nameof(InferenceJson.LlmResult))!.GetValue(null)!;
             Assert.Same(assembly, metadata.Type.Assembly);
 
@@ -63,7 +80,9 @@ public sealed class CollectibleSerializationTests
             Assert.Same(assembly, value.GetType().Assembly);
             Assert.Equal(json, JsonSerializer.Serialize(value, metadata));
 
-            return [new(context), new(assembly), new(metadata), new(value)];
+            references.Add(new(metadata));
+            references.Add(new(value));
+            return references.ToArray();
         }
         finally
         {
