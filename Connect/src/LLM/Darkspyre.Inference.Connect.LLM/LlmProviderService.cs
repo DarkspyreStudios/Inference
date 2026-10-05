@@ -1,4 +1,6 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
+using System.Runtime.ExceptionServices;
 using Darkspyre.Inference.Common.LLM;
 using Darkspyre.Inference.Connect.LLM.Internal;
 using Darkspyre.Inference.Connect.LLM.Providers;
@@ -609,6 +611,7 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, ILlmFileClie
         CancellationToken cancellationToken, Action<ProviderCompactionResult>? publishCompaction = null) =>
         _lifetime.StreamAsync(token => ProduceStreamAsync(connectionId, request, expectedScope, token, publishCompaction), cancellationToken);
 
+    [SuppressMessage("Usage", "CA2219", Justification = "Iterator disposal executes finally; provider or projection failure must survive independently refused enumeration cleanup.")]
     private async IAsyncEnumerable<LlmStreamEvent> ProduceStreamAsync(
         string connectionId, LlmChatRequest request, string? expectedScope,
         [EnumeratorCancellation] CancellationToken cancellationToken,
@@ -712,34 +715,63 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, ILlmFileClie
                 _cleanupOutcomes.Record, cancellationToken)
             : client.StreamAsync(connection, request, cancellationToken);
         ProviderCompactionResult? compactionResult = null;
-        await foreach (LlmStreamEvent streamEvent in stream)
+        IAsyncEnumerator<LlmStreamEvent> enumerator = stream.GetAsyncEnumerator(cancellationToken);
+        Exception? operationFailure = null;
+        try
         {
-            ThrowIfOperationCanceled(cancellationToken);
-            connection.CacheAdmission?.Check(connection, request.ExplicitCache);
-            if (streamEvent is AccountUsageObservedEvent observed)
-            { observationBinding?.Record(observed.Snapshot); continue; }
-            if (publishCompaction is not null)
+            while (true)
             {
-                if (compactionResult is not null || streamEvent is not LlmChatCompletionEvent compacted)
-                    throw new InvalidOperationException("Provider compaction returned an unexpected event.");
-                LlmChatResult result = SanitizeDiagnostics(compacted.Result, connection);
-                if (result.Status != LlmCompletionStatus.Completed || result.ContinuationState is null
-                    || string.IsNullOrWhiteSpace(result.ProviderResponseId))
-                    throw new InvalidOperationException("Provider compaction returned no completed continuation.");
-                compactionResult = new(result.ContinuationState, result.ProviderResponseId, result.Usage);
-                continue;
-            }
-            yield return streamEvent is LlmChatCompletionEvent completion
-                ? new LlmChatCompletionEvent(SanitizeDiagnostics(completion.Result, connection) with
+                LlmStreamEvent projected;
+                try
                 {
-                    OmittedContinuationStateCount = checked(omitted + completion.Result.OmittedContinuationStateCount)
-                })
-                : streamEvent;
+                    if (!await enumerator.MoveNextAsync().ConfigureAwait(false)) break;
+                    LlmStreamEvent streamEvent = enumerator.Current;
+                    ThrowIfOperationCanceled(cancellationToken);
+                    connection.CacheAdmission?.Check(connection, request.ExplicitCache);
+                    if (streamEvent is AccountUsageObservedEvent observed)
+                    { observationBinding?.Record(observed.Snapshot); continue; }
+                    if (publishCompaction is not null)
+                    {
+                        if (compactionResult is not null || streamEvent is not LlmChatCompletionEvent compacted)
+                            throw new InvalidOperationException("Provider compaction returned an unexpected event.");
+                        LlmChatResult result = SanitizeDiagnostics(compacted.Result, connection);
+                        if (result.Status != LlmCompletionStatus.Completed || result.ContinuationState is null
+                            || string.IsNullOrWhiteSpace(result.ProviderResponseId))
+                            throw new InvalidOperationException("Provider compaction returned no completed continuation.");
+                        compactionResult = new(result.ContinuationState, result.ProviderResponseId, result.Usage);
+                        continue;
+                    }
+                    projected = streamEvent is LlmChatCompletionEvent completion
+                        ? new LlmChatCompletionEvent(SanitizeDiagnostics(completion.Result, connection) with
+                        {
+                            OmittedContinuationStateCount = checked(omitted + completion.Result.OmittedContinuationStateCount)
+                        })
+                        : streamEvent;
+                }
+                catch (Exception error) { operationFailure = error; throw; }
+                yield return projected;
+            }
+            try
+            {
+                ThrowIfOperationCanceled(cancellationToken);
+                connection.CacheAdmission?.Check(connection, request.ExplicitCache);
+                if (publishCompaction is not null)
+                    publishCompaction(compactionResult ?? throw new InvalidOperationException("Provider compaction returned no result."));
+            }
+            catch (Exception error) { operationFailure = error; throw; }
         }
-        ThrowIfOperationCanceled(cancellationToken);
-        connection.CacheAdmission?.Check(connection, request.ExplicitCache);
-        if (publishCompaction is not null)
-            publishCompaction(compactionResult ?? throw new InvalidOperationException("Provider compaction returned no result."));
+        finally
+        {
+            try { await enumerator.DisposeAsync().ConfigureAwait(false); }
+            catch (Exception cleanup)
+            {
+                Exception refused = LlmResourcePreparation.AsCleanupFailure(cleanup, refusedOwner: enumerator);
+                _cleanupOutcomes.Record(refused);
+                if (operationFailure is not null && !ReferenceEquals(operationFailure, cleanup))
+                    throw new AggregateException(operationFailure, refused);
+                ExceptionDispatchInfo.Throw(refused);
+            }
+        }
     }
 
     /// <summary>Tokenizes only the supplied plain text. No request projection, catalog, usage or estimate is substituted.</summary>

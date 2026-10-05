@@ -1017,6 +1017,10 @@ retirement fences new calls, cancels active calls and waits for them to leave. I
 created cache and credential-access owner, but not injected shared owners. Clients, authenticators
 and the connection source remain borrowed and are not disposed by the facade.
 
+The chat producer owns its provider enumeration through cleanup. Independent provider or projection
+and enumeration-cleanup failures remain together. Failed cleanup retains the actual enumerator through
+the cleanup failure, which remains visible to repeated facade retirement callers without retry.
+
 Credential access and the chat, embedding and agent facades release their borrowed source references
 after admitted work drains. Chat and embedding facades also release credential-access references;
 chat releases setup environments and adapter collections. Cleanup failures do not skip this release.
