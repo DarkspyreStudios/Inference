@@ -52,7 +52,7 @@ public sealed class CollectibleSerializationTests
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static WeakReference[] RoundTripInCollectibleGeneration(string json)
     {
-        var context = new AssemblyLoadContext("ConnectJsonGeneration", isCollectible: true);
+        var context = new SerializationGeneration(Path.GetDirectoryName(typeof(ConnectLlmJson).Assembly.Location)!);
         try
         {
             Assembly assembly = context.LoadFromAssemblyPath(typeof(ConnectLlmJson).Assembly.Location);
@@ -65,6 +65,8 @@ public sealed class CollectibleSerializationTests
             foreach (PropertyInfo root in roots)
             {
                 var typeInfo = (JsonTypeInfo)root.GetValue(null)!;
+                if (typeInfo.Type.Assembly.GetName().Name is "Darkspyre.Inference.Common" or "Darkspyre.Inference.Connect.LLM")
+                    Assert.Same(context, AssemblyLoadContext.GetLoadContext(typeInfo.Type.Assembly));
                 typeInfo.MakeReadOnly();
                 _ = typeInfo.Properties.Count;
                 Assert.Same(typeInfo, typeInfo.Options.GetTypeInfo(typeInfo.Type));
@@ -77,14 +79,33 @@ public sealed class CollectibleSerializationTests
             object value = JsonSerializer.Deserialize(json, metadata)!;
             Assert.Same(assembly, value.GetType().Assembly);
             Assert.Equal(json, JsonSerializer.Serialize(value, metadata));
+            object usage = value.GetType().GetProperty(nameof(LlmChatResult.Usage))!.GetValue(value)!;
+            Assembly common = usage.GetType().Assembly;
+            Assert.Same(context, AssemblyLoadContext.GetLoadContext(common));
+            Assert.Equal("Darkspyre.Inference.Common", common.GetName().Name);
+            var tools = (System.Collections.IEnumerable)value.GetType().GetProperty(nameof(LlmChatResult.ToolCalls))!.GetValue(value)!;
+            object tool = Assert.Single(tools.Cast<object>());
+            Assert.Same(common, tool.GetType().Assembly);
 
             references.Add(new(metadata));
             references.Add(new(value));
+            references.Add(new(common));
+            references.Add(new(usage));
+            references.Add(new(tool));
             return references.ToArray();
         }
         finally
         {
             context.Unload();
+        }
+    }
+
+    private sealed class SerializationGeneration(string directory) : AssemblyLoadContext("ConnectJsonGeneration", isCollectible: true)
+    {
+        protected override Assembly? Load(AssemblyName name)
+        {
+            if (name.Name is not ("Darkspyre.Inference.Common" or "Darkspyre.Inference.Connect.LLM")) return null;
+            return LoadFromAssemblyPath(Path.Combine(directory, name.Name + ".dll"));
         }
     }
 

@@ -507,6 +507,10 @@ Contexts and scope helpers remain internal. The package installs no reflection f
 families. Runtime settings, one-way secret edits, executable handlers and undiscriminated agent/event
 bases are not persisted snapshots. Provider CLI/HTTP protocol writers remain separate owners;
 metadata for these closed families does not establish retirement of an active provider session.
+The LLM serializer retirement check loads Common and Connect LLM privately into one collectible
+context. It exercises the owned LLM metadata roots and a result with nested Common usage and tool
+data. Its weak-reference checks cover both assemblies, metadata, options and result data after
+unload. This check does not execute or retire a provider or native engine.
 
 Retained chat protocol builders write stop arrays, model aliases, numeric/string control IDs and
 Responses output joins through structured JSON nodes and elements. Vertex argument-path identity
