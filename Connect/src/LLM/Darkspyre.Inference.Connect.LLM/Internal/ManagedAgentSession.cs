@@ -973,7 +973,16 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
             finally { if (entered) { concurrency.Release(); } }
         }
         LlmToolResult[] results;
-        if (parallel) { results = await Task.WhenAll(calls.Select(InvokeAsync)); }
+        if (parallel)
+        {
+            Task<LlmToolResult[]> completion = Task.WhenAll(calls.Select(InvokeAsync));
+            try { results = await completion; }
+            catch
+            {
+                if (completion.Exception is { InnerExceptions.Count: > 1 } failures) throw failures;
+                throw;
+            }
+        }
         else
         {
             var ordered = new List<LlmToolResult>();

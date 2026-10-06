@@ -2593,6 +2593,9 @@ known limit, reserve and occupancy, `NeedsCompaction` stays null.
 Tools execute sequentially by default. Parallel mode is opt-in and bounded; a tool marked
 `RequiresSequentialExecution` serializes its whole batch. Schemas are validated before callbacks.
 Interrupted or failed handlers produce error results, and all issued calls settle before capture.
+Typed resource-operation failures remain operation failures. Parallel settlement preserves every
+independent cause, and cleanup failures remain visible to the turn reader and repeated session
+disposal callers. Retirement drains ignoring callbacks without waiting for a paused event reader.
 A cancelled handler's external effect may be unknown: Darkspyre.Inference.Connect.LLM never automatically replays it.
 Model retries are limited to three total attempts before any output, respect retry delays up to
 30 seconds, and leave aggregate usage unknown if an attempt's usage was unreported. Streams with

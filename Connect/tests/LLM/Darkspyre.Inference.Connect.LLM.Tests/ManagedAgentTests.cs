@@ -15,6 +15,113 @@ public sealed class ManagedAgentTests
     private static readonly string[] CommandOnly = ["command"];
 
     [Fact]
+    public async Task RetirementPreservesEveryParallelToolCleanupFailure()
+    {
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        int running = 0;
+        Exception[] failures =
+        [
+            LlmResourcePreparation.AsCleanupFailure(new IOException("The first tool resource could not be released.")),
+            LlmResourcePreparation.AsCleanupFailure(new IOException("The second tool resource could not be released."))
+        ];
+        var harness = new Harness();
+        harness.Results.Enqueue(new()
+        {
+            Diagnostics = new(200, null, null), Text = string.Empty,
+            Status = LlmCompletionStatus.RequiresAction,
+            ToolCalls = [new LlmToolCall("call-1", "echo", "{}"), new LlmToolCall("call-2", "echo", "{}")]
+        });
+        var session = harness.Create(Options() with
+        {
+            Tools = [new LlmAgentToolDefinition { Name = "echo", InputSchema = JsonElement.Parse("{\"type\":\"object\"}") }],
+            ExecutionOptions = new() { ToolExecutionMode = LlmAgentToolExecutionMode.Parallel, MaxConcurrentTools = 2 },
+            ToolHandler = async (call, _) =>
+            {
+                if (Interlocked.Increment(ref running) == 2) entered.TrySetResult();
+                await release.Task;
+                throw failures[call.CallId == "call-1" ? 0 : 1];
+            }
+        });
+        IAsyncEnumerator<LlmAgentEvent> events = session.RunTurnAsync(Turn("hello")).GetAsyncEnumerator();
+        try
+        {
+            Assert.True(await events.MoveNextAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5)));
+            await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            Task retirement = session.DisposeAsync().AsTask();
+            Assert.False(retirement.IsCompleted);
+            release.SetResult();
+
+            Exception? outcome = await Record.ExceptionAsync(() => retirement).WaitAsync(TimeSpan.FromSeconds(5));
+            Exception[] causes = Assert.IsType<AggregateException>(outcome).Flatten().InnerExceptions.ToArray();
+            Assert.Equal(2, causes.Length);
+            Assert.Same(failures[0], causes[0]);
+            Assert.Same(failures[1], causes[1]);
+            Assert.Same(outcome, await Record.ExceptionAsync(async () => await session.DisposeAsync())
+                .WaitAsync(TimeSpan.FromSeconds(5)));
+            Exception? readerCleanup = await Record.ExceptionAsync(async () => await events.DisposeAsync())
+                .WaitAsync(TimeSpan.FromSeconds(5));
+            Exception[] readerCauses = Assert.IsType<AggregateException>(readerCleanup).Flatten().InnerExceptions.ToArray();
+            Assert.Equal(2, readerCauses.Length);
+            Assert.Same(failures[0], readerCauses[0]);
+            Assert.Same(failures[1], readerCauses[1]);
+        }
+        finally
+        {
+            release.TrySetResult();
+            _ = await Record.ExceptionAsync(async () => await events.DisposeAsync()).WaitAsync(TimeSpan.FromSeconds(5));
+            _ = await Record.ExceptionAsync(async () => await session.DisposeAsync()).WaitAsync(TimeSpan.FromSeconds(5));
+        }
+    }
+
+    [Fact]
+    public async Task RetirementDrainsAnIgnoringToolCallbackWithoutWaitingForThePausedEventReader()
+    {
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var canceled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource<LlmToolOutput>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var harness = new Harness();
+        harness.Results.Enqueue(new()
+        {
+            Diagnostics = new(200, null, null),
+            Text = string.Empty,
+            Status = LlmCompletionStatus.RequiresAction,
+            ToolCalls = [new LlmToolCall("call-1", "echo", "{}")]
+        });
+        await using var session = harness.Create(Options() with
+        {
+            Tools = [new LlmAgentToolDefinition { Name = "echo", InputSchema = JsonElement.Parse("{\"type\":\"object\"}") }],
+            ToolHandler = async (_, token) =>
+            {
+                using var registration = token.Register(() => canceled.TrySetResult());
+                entered.TrySetResult();
+                return await release.Task;
+            }
+        });
+        await using IAsyncEnumerator<LlmAgentEvent> events = session.RunTurnAsync(Turn("hello")).GetAsyncEnumerator();
+        try
+        {
+            Assert.True(await events.MoveNextAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5)));
+            Assert.IsType<LlmAgentTurnStartedEvent>(events.Current);
+            await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+            Task retirement = session.DisposeAsync().AsTask();
+            await canceled.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.False(retirement.IsCompleted);
+            await Assert.ThrowsAsync<ObjectDisposedException>(() => session.CaptureContextAsync());
+
+            release.SetResult(LlmToolOutput.FromText("settled"));
+            await retirement.WaitAsync(TimeSpan.FromSeconds(5));
+            await session.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.Single(harness.Requests);
+        }
+        finally
+        {
+            release.TrySetResult(LlmToolOutput.FromText("settled"));
+        }
+    }
+
+    [Fact]
     public async Task HostToolsAreSentNonStrictUnlessTheHostRequestsStrictness()
     {
         // An optional property without additionalProperties is a valid host schema but not a strict one.
