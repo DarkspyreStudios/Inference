@@ -1,4 +1,5 @@
 using Darkspyre.Inference.Tensor.Common;
+using TensorSharp;
 using TensorSharp.Cuda;
 using TensorSharp.MLX;
 using Darkspyre.Inference.Tensor.Ggml;
@@ -16,10 +17,12 @@ internal sealed class QwenBackendProbe(GgmlRuntimeOwner? runtimeOwner = null) : 
             return Task.FromResult(invalid);
         if (GgmlRuntimeOwner.IsGgml(request.RequestedBackend))
             return (runtimeOwner ?? GgmlRuntimeOwner.GetOrCreate()).CheckAsync(request, cancellationToken);
-        return Task.Run(() => Check(request, cancellationToken), cancellationToken);
+        return Task.Run(() => Check(request, IsBackendAvailable,
+            static error => NativeRuntimeQuarantine.TryGetFailure(error, out _), cancellationToken), cancellationToken);
     }
 
-    private static TensorBackendAvailability Check(TensorBackendProbeRequest request, CancellationToken cancellationToken)
+    internal static TensorBackendAvailability Check(TensorBackendProbeRequest request,
+        Func<TensorBackendKind, bool> isBackendAvailable, Func<Exception, bool> isRecordedFailure, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
         if (TensorBackendProbes.ValidateLocalRequest(request, QwenSetup.Definition.Implementation.Id) is { } invalid) return invalid;
@@ -32,17 +35,20 @@ internal sealed class QwenBackendProbe(GgmlRuntimeOwner? runtimeOwner = null) : 
         bool? available;
         try
         {
-            available = actual switch
-            {
-                TensorBackendKind.Cpu => true,
-                TensorBackendKind.Cuda => CudaBackend.IsAvailable(),
-                TensorBackendKind.Mlx => CheckMlx(),
-                _ => false
-            };
+            available = isBackendAvailable(actual);
         }
-        catch (Exception exception) when (exception is DllNotFoundException or EntryPointNotFoundException or BadImageFormatException or PlatformNotSupportedException or InvalidOperationException)
+        catch (Exception exception) when (exception is not OutOfMemoryException && isRecordedFailure(exception))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            const string reason = "Native resource cleanup failed. Restart the application process before using this runtime.";
+            return TensorBackendAvailability.Observe(request, TensorBackendAvailabilityState.RequiresProcessRestart, reason,
+                candidateDiagnostics: [new(null, TensorBackendProbePhase.Initialization, "runtime-requires-process-exit", reason,
+                    NativeStateMayRemain: true)]);
+        }
+        catch (Exception exception) when (exception is DllNotFoundException or EntryPointNotFoundException or BadImageFormatException or PlatformNotSupportedException)
         { available = false; }
-        catch (IOException) { available = null; }
+        catch (Exception exception) when (exception is InvalidOperationException or IOException)
+        { available = null; }
         cancellationToken.ThrowIfCancellationRequested();
         return TensorBackendAvailability.Observe(request, available switch
         {
@@ -55,6 +61,11 @@ internal sealed class QwenBackendProbe(GgmlRuntimeOwner? runtimeOwner = null) : 
             actual is TensorBackendKind.Cpu or TensorBackendKind.Cuda ? [new(actual, available)] : []);
     }
 
-    // Reports whether the MLX native library is present without opening the GPU device.
-    private static bool CheckMlx() => MlxBackend.IsAvailable();
+    private static bool IsBackendAvailable(TensorBackendKind backend) => backend switch
+    {
+        TensorBackendKind.Cpu => true,
+        TensorBackendKind.Cuda => CudaBackend.IsAvailable(),
+        TensorBackendKind.Mlx => MlxBackend.IsAvailable(),
+        _ => false
+    };
 }

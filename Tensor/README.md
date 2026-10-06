@@ -338,7 +338,10 @@ RequiresProcessRestart. `IsAvailable` derives from State. Detected device capabi
 presence and successful initialization are separate observations. `ActualBackend` identifies a
 successfully initialized runtime, not a suggested selection. Prerequisite checks leave actual
 backend, initialization and loaded-candidate identity unknown. Diagnostics preserve candidate
-order and report phase, safe code/message and possible surviving native state. The settings manager
+order and report phase, safe code/message and possible surviving native state.
+Qwen's direct-native probe reports Unknown when a runtime query fails. A TensorSharp-recorded
+unsafe cleanup failure reports RequiresProcessRestart with a possible-surviving-state diagnostic.
+Neither result becomes missing-driver evidence or triggers another backend attempt. The settings manager
 rejects a result for another operation, implementation, requested backend or target RID. RID matching
 is exact and ordinal. Each settings draft reserves its own backend checks. Only the latest check
 can publish evidence, and every accepted draft edit invalidates outstanding checks, including an
