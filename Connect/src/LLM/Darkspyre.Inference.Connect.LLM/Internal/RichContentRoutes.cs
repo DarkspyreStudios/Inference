@@ -67,6 +67,16 @@ internal static class RichContentRoutes
         AllowsEmpty = true
     };
 
+    /// <summary>Claude CLI stream-json prompt blocks appended to its flattened tool-history transcript.</summary>
+    public static LlmRichContentSupported ClaudePrompt { get; } = TextOnly with
+    {
+        Images = LlmRichContentCarriage.Native,
+        ImageMediaTypes = CommonImageTypes,
+        PdfDocuments = LlmRichContentCarriage.Native,
+        TextDocuments = LlmRichContentCarriage.Native,
+        PreservesOrder = false
+    };
+
     /// <summary>The AgentCore Harness tool result, which is text with a status.</summary>
     public static LlmRichContentSupported AgentCore { get; } = TextOnly with
     {

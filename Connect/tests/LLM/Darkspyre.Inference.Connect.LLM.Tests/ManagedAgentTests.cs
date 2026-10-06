@@ -12,8 +12,6 @@ namespace Darkspyre.Inference.Connect.LLM.Tests;
 
 public sealed class ManagedAgentTests
 {
-    private static readonly string[] CommandOnly = ["command"];
-
     [Fact]
     public async Task UnknownToolTailSurvivesInvalidStructuredOutputWithoutExecutingToolsOrAnotherStep()
     {
@@ -171,8 +169,8 @@ public sealed class ManagedAgentTests
     public async Task HostToolsAreSentNonStrictUnlessTheHostRequestsStrictness()
     {
         // An optional property without additionalProperties is a valid host schema but not a strict one.
-        JsonElement loose = JsonSerializer.SerializeToElement(new
-        { type = "object", properties = new { command = new { type = "string" }, timeout = new { type = "integer" } }, required = CommandOnly });
+        JsonElement loose = JsonElement.Parse(
+            """{"type":"object","properties":{"command":{"type":"string"},"timeout":{"type":"integer"}},"required":["command"]}""");
         var harness = new Harness();
         harness.Results.Enqueue(new() { Diagnostics = new(200, null, null), Text = "done", Status = LlmCompletionStatus.Completed });
         await using var session = harness.Create(ToolsOptions(_ => new()) with
@@ -253,8 +251,8 @@ public sealed class ManagedAgentTests
     private static LlmAgentSessionOptions Options() => new() { ModelId = "test" };
     private static LlmAgentSessionOptions ToolsOptions(Func<LlmAgentToolCall, LlmToolOutput> handler) => Options() with
     {
-        Tools = [new LlmAgentToolDefinition() { Name = "echo", InputSchema = JsonSerializer.SerializeToElement(new
-        { type = "object", properties = new { }, additionalProperties = false }) }],
+        Tools = [new LlmAgentToolDefinition() { Name = "echo", InputSchema = JsonElement.Parse(
+            """{"type":"object","properties":{},"additionalProperties":false}""") }],
         ToolHandler = (call, _) => Task.FromResult(handler(call))
     };
     private static async Task<List<LlmAgentEvent>> Read(IAsyncEnumerable<LlmAgentEvent> source)

@@ -1159,7 +1159,7 @@ private Files transport. Unknown byte counts remain unknown; missing filenames r
 destination. Native receipts belong to the admitted request and do not replace logical captured history.
 After a connection change, the caller reattaches its resource authority to the portable context.
 The Grok destination uploads the named committed content again; it does not reuse another connection's file IDs.
-OpenAI Responses, Anthropic Messages, Gemini API, Vertex Claude, Vertex Gemini and Bedrock Converse read the same logical resources through this shared owner
+OpenAI Responses, Anthropic Messages, Gemini API, Vertex Claude, Vertex Gemini, Bedrock Converse and streaming Claude CLI chat read the same logical resources through this shared owner
 and send their committed content through the existing native inline attachment lane. Materialization
 retains actual filenames and text bytes; PDF and declared image content use the existing binary
 attachment projection. Native attachment validation still rejects unsupported formats. Committed
@@ -1182,6 +1182,12 @@ bytes as native `txt` documents without changing stored MIME types. Converse use
 names because its name field excludes filename punctuation
 ([native document contract](https://docs.aws.amazon.com/bedrock/latest/APIReference/API_runtime_DocumentBlock.html)).
 Reader cleanup precedes terminal publication, and its actual failure remains visible at factory retirement.
+Claude CLI streaming chat sends materialized prompt and tool files through its existing Anthropic
+stream-json content blocks. Its shared tool-output projection supplies text to the labelled history
+and appends native image/document blocks after the transcript and prompt attachments. Capability
+restrictions apply to that projection. The plain-text nonstreaming lane refuses resource-bound
+requests before resource callbacks. Native Claude sessions still refuse logical resource bindings;
+the chat preparation lane does not enable native session import or capture.
 Gemini API and Vertex use the shared inline materializer before their existing native request builders. Preflight
 validates the selected route and cache binding before resource reads. The materialized request retains
 native format and size validation. Claude uses the shared Anthropic document builder. Gemini sends
@@ -1194,7 +1200,7 @@ Local estimates remain unknown for resource-bound requests and never open their 
 Anthropic, Gemini API and Vertex counting refuse these unprepared requests before effects; they never count only the text
 while silently omitting selected files. Explicit binary attachments retain the existing count route.
 Local accounting does not read or upload selected resources. `AddLlmConnect` includes Grok registration.
-OpenAI Responses and Bedrock have no implemented provider-count adapter; exact input counting remains unavailable.
+OpenAI Responses, Bedrock and Claude CLI have no implemented provider-count adapter; exact input counting remains unavailable.
 Managed sessions created through the shared internal factory validate resource-bound imported
 contexts against the caller's exact scoped selection snapshot. Only a new session without an imported
 context adopts the current selection; an unbound manual or upgraded legacy context must be explicitly
@@ -2399,10 +2405,13 @@ An override never raises a carriage.
 | Anthropic Messages | Native | Native | Native | Unsupported | Text | Text | Text | Native |
 | Bedrock Converse | Native | Native | Native | Unsupported | Text | Text | Native | Native |
 | Claude CLI agent | Native | Unsupported | Text | Unsupported | Native | Native | Text | Native |
+| Claude CLI streaming chat | Native | Native | Native | Unsupported | Text | Text | Text | Text |
 | AgentCore Harness | Unsupported | Unsupported | Text | Unsupported | Text | Text | Text | Native |
-| OpenAI-compatible, Claude CLI chat, Antigravity CLI | Unsupported | Unsupported | Text | Unsupported | Text | Text | Text | Text |
+| OpenAI-compatible, Claude CLI nonstreaming chat, Antigravity CLI | Unsupported | Unsupported | Text | Unsupported | Text | Text | Text | Text |
 
-Every route omits other binary content and keeps the supplied order. Direct Codex and the Claude CLI
+Every route omits other binary content. `PreservesOrder` reports each route's ordering. Claude CLI
+streaming chat appends native tool files after the flattened text history, so it reports false.
+Direct Codex and the Claude CLI
 agent rows are measured; the other rows follow each provider's protocol and are not live-verified.
 
 The text renderings are fixed. A resource link becomes `[Resource link: name] uri`. An embedded text

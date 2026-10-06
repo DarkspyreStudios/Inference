@@ -34,6 +34,8 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
 
     protected override bool OffersNonStreamingRequests => true;
 
+    protected override bool SupportsResourcePreparation => true;
+
     /// <summary>The effort levels the Claude CLI accepts, for its chat and agent lanes.</summary>
     internal static readonly IReadOnlySet<LlmReasoningLevel> ReasoningLevels = LlmReasoningEffort.Levels(
         LlmReasoningLevel.Low, LlmReasoningLevel.Medium, LlmReasoningLevel.High,
@@ -62,7 +64,7 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
         SupportsAgentToolUse = true,
         SupportsPromptImages = true,
         SupportsPromptDocuments = true,
-        RichContentSupported = RichContentRoutes.TextOnly
+        RichContentSupported = RichContentRoutes.ClaudePrompt
     };
 
     public override LlmProviderCapabilities GetCapabilities(
@@ -90,27 +92,54 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
             SupportsToolUse = false,
             // Attachments travel only as stream-json content blocks; the non-streaming request reads plain text.
             SupportsPromptImages = capabilities.SupportsStreaming,
-            SupportsPromptDocuments = capabilities.SupportsStreaming
+            SupportsPromptDocuments = capabilities.SupportsStreaming,
+            RichContentSupported = capabilities.SupportsStreaming ? capabilities.RichContentSupported
+                : capabilities.RichContentSupported with
+                {
+                    Images = LlmRichContentCarriage.Unsupported,
+                    PdfDocuments = LlmRichContentCarriage.Unsupported,
+                    TextDocuments = capabilities.RichContentSupported.TextDocuments == LlmRichContentCarriage.Unsupported
+                        ? LlmRichContentCarriage.Unsupported : LlmRichContentCarriage.Text,
+                    PreservesOrder = true
+                }
         };
     }
 
-    public override async IAsyncEnumerable<LlmStreamEvent> StreamAsync(
+    public override IAsyncEnumerable<LlmStreamEvent> StreamAsync(
         LlmConnection connection,
         LlmChatRequest request,
-        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        return request.Resources is null
+            ? StreamPreparedAsync(connection, request, cancellationToken)
+            : LlmResourcePreparation.StreamInlineAsync(request, input => _ = ValidateChatRequest(connection, input),
+                (input, token) => StreamPreparedAsync(connection, input, token), cancellationToken);
+    }
+
+    private (LlmProviderCapabilities Capabilities, LlmStructuredOutputEnforcement? Enforcement) ValidateChatRequest(
+        LlmConnection connection, LlmChatRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
         LlmProviderCapabilities capabilities = GetCapabilities(connection, request.ModelId);
         ValidateRequest(connection, request, capabilities);
+        if (request.Resources is not null && !capabilities.SupportsPromptDocuments)
+            throw new NotSupportedException("Claude CLI requires stream-json input to materialize caller-owned resources.");
         if (request.Messages.Any(message => message.ContinuationState is not null))
-        {
             throw new NotSupportedException("Claude CLI chat cannot import adapter continuation state.");
-        }
         ValidateClaudeCliRequest(connection, request);
         LlmStructuredOutputEnforcement? enforcement = request.StructuredOutput is null
-            ? null
-            : StructuredOutput.ResolveEnforcement(request.StructuredOutput, capabilities);
-        string prompt = BuildClaudePrompt(request);
+            ? null : StructuredOutput.ResolveEnforcement(request.StructuredOutput, capabilities);
+        return (capabilities, enforcement);
+    }
+
+    private async IAsyncEnumerable<LlmStreamEvent> StreamPreparedAsync(
+        LlmConnection connection,
+        LlmChatRequest request,
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        (LlmProviderCapabilities capabilities, LlmStructuredOutputEnforcement? enforcement) = ValidateChatRequest(connection, request);
+        string prompt = BuildClaudePrompt(connection, request);
         string executable = ClaudeCliConfiguration.ResolveExecutable(connection.Endpoint);
         if (!capabilities.SupportsStreaming)
         {
@@ -124,7 +153,7 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
             yield break;
         }
 
-        string standardInput = BuildClaudeStandardInput(request, prompt);
+        string standardInput = BuildClaudeStandardInput(connection, request, prompt);
         var arguments = new List<string>
         {
             "-p",
@@ -577,18 +606,15 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
     /// <summary>Counts the prompt this client would send. Attachment content is not countable here.</summary>
     public ContextEstimate? EstimateInputTokens(LlmConnection connection, LlmChatRequest request)
     {
-        ArgumentNullException.ThrowIfNull(request);
-        ValidateRequest(connection, request, GetCapabilities(connection, request.ModelId));
-        if (request.Messages.Any(message => message.ContinuationState is not null))
-        {
-            throw new NotSupportedException("Claude CLI chat cannot import adapter continuation state.");
-        }
-        return request.Messages.Any(message => message.Attachments.Count > 0)
+        _ = ValidateChatRequest(connection, request);
+        return request.Resources is not null || request.Messages.Any(message => message.Attachments.Count > 0
+            || ClientTools.Functions(message.ToolResults).Any(result =>
+                ProjectToolOutput(connection, request.ModelId, result.Output).Parts.Any(part => part is SentImage or SentFile)))
             ? null
-            : new ContextEstimate(LocalTokenCount.Count(BuildClaudePrompt(request)));
+            : new ContextEstimate(LocalTokenCount.Count(BuildClaudePrompt(connection, request)));
     }
 
-    private static string BuildClaudePrompt(LlmChatRequest request)
+    private string BuildClaudePrompt(LlmConnection connection, LlmChatRequest request)
     {
         if (string.IsNullOrWhiteSpace(request.Instructions) && request.Messages.Count == 0)
         {
@@ -607,7 +633,7 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
         if (request.Messages.Count > 0)
         {
             prompt.AppendLine("CONVERSATION");
-            TranscriptText.Append(prompt, request.Messages);
+            TranscriptText.Append(prompt, request.Messages, output => ProjectToolOutput(connection, request.ModelId, output));
         }
         if (request.StructuredOutput is { } structured)
         {
@@ -625,13 +651,16 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
         return prompt.ToString();
     }
 
-    private static string BuildClaudeStandardInput(LlmChatRequest request, string prompt)
+    private string BuildClaudeStandardInput(LlmConnection connection, LlmChatRequest request, string prompt)
     {
         var content = new JsonArray { new JsonObject { ["type"] = "text", ["text"] = prompt } };
         foreach (LlmAttachment attachment in request.Messages.SelectMany(item => item.Attachments).Select(LlmAttachments.RequireBinary))
         {
             content.Add(AnthropicAttachments.BuildContentBlock(attachment));
         }
+        foreach (LlmToolResult result in request.Messages.SelectMany(message => ClientTools.Functions(message.ToolResults)))
+            foreach (SentToolPart part in ProjectToolOutput(connection, request.ModelId, result.Output).Parts)
+                if (part is SentImage or SentFile) content.Add(AnthropicAttachments.BuildToolPart(part));
 
         return new JsonObject
         {

@@ -38,7 +38,7 @@ public sealed class ToolOutputProjectorTests
                 new LlmToolOutputResource("https://example.test/spec") { Name = "spec", MediaType = "text/html" },
                 new LlmToolOutputResource("file:///a.md") { MediaType = "text/markdown", Text = "# A" }
             ],
-            StructuredContent = JsonSerializer.SerializeToElement(new { a = 1 }),
+            StructuredContent = JsonElement.Parse("{\"a\":1}"),
             IsError = true
         };
 

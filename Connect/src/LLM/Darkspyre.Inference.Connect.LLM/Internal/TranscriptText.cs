@@ -13,7 +13,8 @@ internal static class TranscriptText
     private static readonly LlmRichContentSupported Support =
         RichContentRoutes.TextOnly with { ErrorFlag = LlmRichContentCarriage.Native };
 
-    public static void Append(StringBuilder text, IEnumerable<LlmChatMessage> messages)
+    public static void Append(StringBuilder text, IEnumerable<LlmChatMessage> messages,
+        Func<LlmToolOutput, ProjectedToolOutput>? project = null)
     {
         foreach (LlmChatMessage message in messages)
         {
@@ -27,7 +28,8 @@ internal static class TranscriptText
             var omittedNames = new List<string>();
             foreach (LlmToolResult result in ClientTools.Functions(message.ToolResults))
             {
-                ProjectedToolOutput projected = ToolOutputProjector.Project(result.Output, Support, Support);
+                ProjectedToolOutput projected = project is null
+                    ? ToolOutputProjector.Project(result.Output, Support, Support) : project(result.Output);
                 text.Append("[TOOL RESULT id=").Append(result.ToolCallId)
                     .Append(" status=").Append(result.Output.IsError ? "error" : "ok").AppendLine("]");
                 text.AppendLine(projected.Text);

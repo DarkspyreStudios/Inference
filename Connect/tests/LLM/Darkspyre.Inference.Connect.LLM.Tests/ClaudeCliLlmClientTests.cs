@@ -35,6 +35,53 @@ public sealed class ClaudeCliLlmClientTests
         Assert.Equal(LlmToolHistory.Text, client.GetCapabilities(CliConnection()).ToolHistory);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ToolBinaryPromptBlocksMatchTheSelectedCarriageAndDoNotProduceATextOnlyEstimate(bool restricted)
+    {
+        var runner = new RecordingRunner(new(0,
+            """
+            {"type":"result","subtype":"success","is_error":false,"result":"answer","session_id":"session-1","stop_reason":"end_turn"}
+            """, string.Empty));
+        using var http = new HttpClient(new UnexpectedHttpHandler());
+        var client = new ClaudeCliLlmClient(http, runner, new NoSessionProcesses());
+        LlmConnection connection = CliConnection() with
+        { CapabilityOverrides = restricted ? new() { SupportsToolResultImages = false, SupportsToolResultDocuments = false } : null };
+        byte[] image = [0xff, 0xd8, 0xff];
+        byte[] pdf = "%PDF-1.7\nactual tool content"u8.ToArray();
+        var output = new LlmToolOutput
+        {
+            Parts = [new LlmToolOutputText("tool text"),
+                new LlmToolOutputBinary(LlmBinaryKind.Image, "image/jpeg", image, "tool.jpg"),
+                new LlmToolOutputBinary(LlmBinaryKind.Document, "application/pdf", pdf, "tool.pdf")]
+        };
+        var request = new LlmChatRequest
+        {
+            ModelId = "claude-test",
+            Messages = [new("assistant", string.Empty) { ToolCalls = [new LlmToolCall("c1", "lookup", "{}")] },
+                new("user", string.Empty) { ToolResults = [new LlmToolResult("c1", output)] }, new("user", "Compare the files")]
+        };
+        ProjectedToolOutput projected = client.ProjectToolOutput(connection, request.ModelId, output);
+        Assert.Equal(restricted ? LlmToolPartDelivery.Omitted : LlmToolPartDelivery.Delivered, projected.Report.Parts[1].Delivery);
+        Assert.Equal(restricted ? LlmToolPartDelivery.Omitted : LlmToolPartDelivery.Delivered, projected.Report.Parts[2].Delivery);
+        if (!restricted) Assert.Null(client.EstimateInputTokens(connection, request));
+        IReadOnlyList<LlmStreamEvent> events = await ReadAllAsync(client.StreamAsync(connection, request));
+        Assert.Equal("answer", Assert.Single(events.OfType<LlmChatCompletionEvent>()).Result.Text);
+        using JsonDocument input = JsonDocument.Parse(Assert.Single(runner.Invocations).StandardInput!);
+        JsonElement[] content = input.RootElement.GetProperty("message").GetProperty("content").EnumerateArray().ToArray();
+        Assert.Contains("tool text", content[0].GetProperty("text").GetString(), StringComparison.Ordinal);
+        Assert.Equal(restricted ? ["text"] : ["text", "image", "document"], content.Select(part => part.GetProperty("type").GetString()));
+        if (!restricted)
+        {
+            Assert.Equal(image, Convert.FromBase64String(content[1].GetProperty("source").GetProperty("data").GetString()!));
+            Assert.Equal("image/jpeg", content[1].GetProperty("source").GetProperty("media_type").GetString());
+            Assert.Equal(pdf, Convert.FromBase64String(content[2].GetProperty("source").GetProperty("data").GetString()!));
+            Assert.Equal("tool.pdf", content[2].GetProperty("title").GetString());
+        }
+        Assert.False(client.GetCapabilities(connection, request.ModelId).RichContentSupported.PreservesOrder);
+    }
+
     private static LlmChatMessage[] ToolHistory() =>
     [
         new LlmChatMessage("user", "Population of Lyon?"),

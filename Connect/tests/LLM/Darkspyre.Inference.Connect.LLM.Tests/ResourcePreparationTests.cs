@@ -256,10 +256,95 @@ public sealed class ResourcePreparationTests
     }
 
     [Theory]
+    [InlineData("result.json", false)]
+    [InlineData("result.json", true)]
+    [InlineData("result.pdf", true)]
+    public async Task ClaudeCliChatCarriesSelectedLogicalDocumentsInItsActualInput(string fileName, bool generatedByTool)
+    {
+        var reference = new InferenceResourceReference("workspace", "reference");
+        var generated = new InferenceResourceReference("workspace", "generated");
+        byte[] bytes = fileName.EndsWith(".pdf", StringComparison.Ordinal)
+            ? "%PDF-1.7\nactual generated content"u8.ToArray() : "{\"answer\":42}"u8.ToArray();
+        var access = new Resources(new("workspace", "session", 4, [generated, reference]),
+            [(reference, "reference.txt", "reference text"u8.ToArray()), (generated, fileName, bytes)]);
+        LlmChatMessage[] messages =
+        [
+            new("user", "Read the reference")
+            { Attachments = [new LlmResourceAttachment(reference), new LlmResourceAttachment(reference)] },
+            new("assistant", "Created " + fileName)
+        ];
+        if (generatedByTool)
+            messages = [messages[0], messages[1] with { ToolCalls = [new LlmToolCall("create-1", "create_file", "{}")] },
+                new("user", string.Empty)
+                { ToolResults = [new LlmToolResult("create-1", new() { Parts = [new LlmToolOutputSessionResource(generated)] })] }];
+        var logical = new LlmChatRequest { ModelId = InlineModel("claude-cli"), Messages = [.. messages, new("user", "Compare the files")] };
+        LlmChatRequest request = JsonSerializer.Deserialize(JsonSerializer.SerializeToUtf8Bytes(logical, ConnectLlmJson.ChatRequest),
+            ConnectLlmJson.ChatRequest)!;
+        var handler = new Documents();
+        using var http = new HttpClient(handler);
+        var runner = new CliDocuments();
+        var client = new ClaudeCliLlmClient(http, runner, new NoSessionProcesses());
+        await using var providers = new LlmProviderService(new Source(InlineConnection("claude-cli")), [client]);
+        var events = new List<LlmStreamEvent>();
+        await foreach (LlmStreamEvent item in providers.StreamAsync("connection", request with { Resources = access })) events.Add(item);
+
+        Assert.Equal("answer", Assert.Single(events.OfType<LlmChatCompletionEvent>()).Result.Text);
+        ClaudeCliInvocation invocation = Assert.Single(runner.Invocations);
+        Assert.Contains("stream-json", invocation.Arguments);
+        using JsonDocument input = JsonDocument.Parse(invocation.StandardInput!);
+        JsonElement[] content = input.RootElement.GetProperty("message").GetProperty("content").EnumerateArray().ToArray();
+        Assert.Equal("user", input.RootElement.GetProperty("message").GetProperty("role").GetString());
+        JsonElement[] documents = content.Where(part => part.GetProperty("type").GetString() == "document").ToArray();
+        Assert.Equal(["reference.txt", "reference.txt", fileName], documents.Select(part => part.GetProperty("title").GetString()));
+        Assert.All(documents.Take(2), part => Assert.Equal("reference text", part.GetProperty("source").GetProperty("data").GetString()));
+        JsonElement source = documents[^1].GetProperty("source");
+        Assert.Equal(fileName.EndsWith(".pdf", StringComparison.Ordinal) ? "base64" : "text", source.GetProperty("type").GetString());
+        Assert.Equal(bytes, source.GetProperty("type").GetString() == "base64"
+            ? Convert.FromBase64String(source.GetProperty("data").GetString()!)
+            : System.Text.Encoding.UTF8.GetBytes(source.GetProperty("data").GetString()!));
+        Assert.DoesNotContain("file_id", invocation.StandardInput!, StringComparison.Ordinal);
+        if (generatedByTool)
+            Assert.Contains("[TOOL RESULT id=create-1 status=ok]", content[0].GetProperty("text").GetString(), StringComparison.Ordinal);
+        Assert.IsType<LlmResourceAttachment>(request.Messages[0].Attachments[0]);
+        if (generatedByTool)
+            Assert.IsType<LlmToolOutputSessionResource>(Assert.IsType<LlmToolResult>(Assert.Single(request.Messages[2].ToolResults)).Output.Parts[0]);
+        Assert.Equal([generated, reference], access.Selection.SelectedResources);
+        Assert.Equal(4, access.Selection.Revision);
+        Assert.Equal(2, access.Reads.Count);
+        Assert.All(access.Reads, stream => Assert.False(stream.CanRead));
+        Assert.Equal(2, access.ReleaseAttempts);
+        Assert.Equal(0, handler.Requests);
+    }
+
+    [Fact]
+    public async Task ClaudeCliPlainTextLaneRefusesResourcesBeforeOpeningThemOrInvokingTheCli()
+    {
+        var reference = new InferenceResourceReference("workspace", "reference");
+        var access = new Resources(new("workspace", "session", 1, [reference]),
+            [(reference, "reference.txt", "reference text"u8.ToArray())]);
+        LlmConnection connection = InlineConnection("claude-cli") with { CapabilityOverrides = new() { SupportsStreaming = false } };
+        var handler = new Documents();
+        using var http = new HttpClient(handler);
+        var runner = new CliDocuments();
+        var client = new ClaudeCliLlmClient(http, runner, new NoSessionProcesses());
+        await Assert.ThrowsAsync<NotSupportedException>(async () =>
+        {
+            await foreach (LlmStreamEvent _ in client.StreamAsync(connection,
+                new() { ModelId = InlineModel("claude-cli"), Resources = access, Messages = [new("user", "Read the file")] })) { }
+        });
+        Assert.Empty(access.Reads);
+        Assert.Empty(runner.Invocations);
+        Assert.Equal(0, access.ReleaseAttempts);
+        Assert.Equal(0, handler.Requests);
+    }
+
+    [Theory]
     [InlineData("anthropic", false)]
     [InlineData("anthropic", true)]
     [InlineData("openai-responses", false)]
     [InlineData("openai-responses", true)]
+    [InlineData("claude-cli", false)]
+    [InlineData("claude-cli", true)]
     public async Task InlineReaderCleanupRefusalPreventsSuccessAndPreservesAnIndependentOperationFailure(string destination, bool generationFails)
     {
         var reference = new InferenceResourceReference("workspace", "reference");
@@ -269,12 +354,12 @@ public sealed class ResourcePreparationTests
             [(reference, "reference.txt", "reference text"u8.ToArray())], cleanup);
         LlmConnection connection = InlineConnection(destination);
         using var http = new HttpClient(new Documents(generationFails ? operation : null, destination));
-        LlmClientBase client = InlineClient(destination, http);
+        LlmClientBase client = InlineClient(destination, http, generationFails ? operation : null);
         var events = new List<LlmStreamEvent>();
         Exception failure = (await Record.ExceptionAsync(async () =>
         {
             await foreach (LlmStreamEvent item in client.StreamAsync(connection,
-                new() { ModelId = InlineModel(destination), MaxOutputTokens = 16, Resources = access, Messages = [new("user", "Read the file")] }))
+                new() { ModelId = InlineModel(destination), MaxOutputTokens = destination == "claude-cli" ? null : 16, Resources = access, Messages = [new("user", "Read the file")] }))
                 events.Add(item);
         }))!;
         Exception release;
@@ -302,6 +387,7 @@ public sealed class ResourcePreparationTests
     [InlineData("vertex-gemini")]
     [InlineData("gemini-api")]
     [InlineData("openai-responses")]
+    [InlineData("claude-cli")]
     public async Task ResourceBoundAccountingDoesNotIgnoreSelectedFilesOrOpenThem(string destination)
     {
         var reference = new InferenceResourceReference("workspace", "reference");
@@ -315,7 +401,7 @@ public sealed class ResourcePreparationTests
         var request = new LlmChatRequest
         {
             ModelId = InlineModel(destination),
-            MaxOutputTokens = 16,
+            MaxOutputTokens = destination == "claude-cli" ? null : 16,
             Resources = access,
             Messages = [new("user", "Read the file")]
         };
@@ -343,11 +429,12 @@ public sealed class ResourcePreparationTests
         _ => "claude-sonnet-4-6"
     };
 
-    private static LlmClientBase InlineClient(string destination, HttpClient http) => destination switch
+    private static LlmClientBase InlineClient(string destination, HttpClient http, Exception? failure = null) => destination switch
     {
         "anthropic" => new AnthropicMessagesLlmClient(http),
         "gemini-api" => new GeminiApiLlmClient(http),
         "openai-responses" => new OpenAiResponsesLlmClient(http),
+        "claude-cli" => new ClaudeCliLlmClient(http, new CliDocuments(failure), new NoSessionProcesses()),
         _ => new VertexLlmClient(http, new VertexAuthenticationBoundary())
     };
 
@@ -355,25 +442,35 @@ public sealed class ResourcePreparationTests
     {
         "anthropic" => new()
         {
-            Version = destination, Transport = LlmTransport.AnthropicMessages,
+            Version = destination,
+            Transport = LlmTransport.AnthropicMessages,
             Endpoint = "https://anthropic.example.test/v1",
             Credential = new LlmCredential { ApiKey = "test-key" }.Serialize()
         },
         "gemini-api" => new()
         {
-            Version = destination, Transport = LlmTransport.GoogleGeminiApi,
+            Version = destination,
+            Transport = LlmTransport.GoogleGeminiApi,
             Endpoint = GeminiApiLlmClient.DefaultEndpoint,
             Credential = new LlmCredential { ApiKey = "test-key" }.Serialize()
         },
         "openai-responses" => new()
         {
-            Version = destination, Transport = LlmTransport.OpenAiResponses,
+            Version = destination,
+            Transport = LlmTransport.OpenAiResponses,
             Endpoint = "https://api.openai.com/v1",
             Credential = new LlmCredential { ApiKey = "test-key" }.Serialize()
         },
+        "claude-cli" => new()
+        {
+            Version = destination,
+            Transport = LlmTransport.AnthropicClaudeCli,
+            Endpoint = "claude"
+        },
         _ => new()
         {
-            Version = destination, Transport = LlmTransport.GoogleVertexAi,
+            Version = destination,
+            Transport = LlmTransport.GoogleVertexAi,
             Endpoint = "https://aiplatform.googleapis.com",
             Vertex = new() { ProjectId = "project", Location = "global", AuthenticationMode = LlmGoogleAuthenticationMode.ApplicationDefault }
         }
@@ -383,6 +480,27 @@ public sealed class ResourcePreparationTests
     {
         public Task<VertexAccess> ResolveAsync(LlmConnection connection, CancellationToken cancellationToken) =>
             Task.FromResult(new VertexAccess("test-token", "test-scope"));
+    }
+
+    private sealed class CliDocuments(Exception? failure = null) : IClaudeCliRunner
+    {
+        public List<ClaudeCliInvocation> Invocations { get; } = [];
+
+        public Task<ClaudeCliProcessResult> RunAsync(ClaudeCliInvocation invocation, CancellationToken cancellationToken = default)
+        {
+            Invocations.Add(invocation);
+            if (failure is not null) throw failure;
+            return Task.FromResult(new ClaudeCliProcessResult(0,
+                """
+                {"type":"result","subtype":"success","is_error":false,"result":"answer","session_id":"session-1","stop_reason":"end_turn","terminal_reason":"completed","usage":{"input_tokens":5,"output_tokens":2}}
+                """, string.Empty));
+        }
+    }
+
+    private sealed class NoSessionProcesses : IClaudeCliSessionProcessFactory
+    {
+        public Task<IClaudeCliSessionProcess> StartAsync(ClaudeCliSessionInvocation invocation, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
     }
 
     private sealed class Documents(Exception? failure = null, string destination = "anthropic", bool streaming = true) : HttpMessageHandler
@@ -501,11 +619,11 @@ public sealed class ResourcePreparationTests
                 foreach (JsonElement block in message.GetProperty("content").EnumerateArray())
                     foreach (JsonElement part in block.GetProperty("type").GetString() == "tool_result"
                         ? block.GetProperty("content").EnumerateArray() : new[] { block }.AsEnumerable())
-                    if (part.GetProperty("type").GetString() == "document")
-                    {
-                        Assert.Equal("text", part.GetProperty("source").GetProperty("type").GetString());
-                        Items.Add((part.GetProperty("title").GetString()!, part.GetProperty("source").GetProperty("data").GetString()!));
-                    }
+                        if (part.GetProperty("type").GetString() == "document")
+                        {
+                            Assert.Equal("text", part.GetProperty("source").GetProperty("type").GetString());
+                            Items.Add((part.GetProperty("title").GetString()!, part.GetProperty("source").GetProperty("data").GetString()!));
+                        }
             if (failure is not null) throw failure;
             return new(HttpStatusCode.OK)
             {
