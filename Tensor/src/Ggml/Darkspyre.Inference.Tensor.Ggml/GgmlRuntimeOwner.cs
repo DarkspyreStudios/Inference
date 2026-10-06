@@ -22,6 +22,7 @@ public sealed class GgmlRuntimeOwner : ITensorRuntimeOwner
     private Exception? _initializationError;
     private TensorBackendKind _initializationBackend;
     private Task<TensorRuntimeShutdownResult>? _shutdown;
+    private Exception? _shutdownError;
     private Task? _disposal;
     private TensorRuntimeState _state;
     private TensorRuntimeBackendIdentity? _current;
@@ -410,6 +411,7 @@ public sealed class GgmlRuntimeOwner : ITensorRuntimeOwner
         }
         bool released;
         bool safeBusy = false;
+        Exception? shutdownError = null;
         try
         {
             IGgmlRuntime supplier = _supplier!;
@@ -418,7 +420,7 @@ public sealed class GgmlRuntimeOwner : ITensorRuntimeOwner
             // The real guard leaves Ready unchanged only when it refused teardown over live external resources.
             safeBusy = !released && readyBefore && supplier.State == GgmlRuntimeState.Ready;
         }
-        catch (Exception error) when (error is not OutOfMemoryException) { released = false; }
+        catch (Exception error) when (error is not OutOfMemoryException) { released = false; shutdownError = error; }
         lock (_gate)
         {
             if (safeBusy)
@@ -428,6 +430,7 @@ public sealed class GgmlRuntimeOwner : ITensorRuntimeOwner
                 return new(TensorRuntimeShutdownState.Busy, Guid.NewGuid(), DateTimeOffset.UtcNow, 0, true,
                     [new("native-resources-active", "The guarded supplier refused teardown while its external native resources remain active.")]);
             }
+            _shutdownError = shutdownError;
             _state = released ? TensorRuntimeState.Stopped : TensorRuntimeState.RequiresProcessRestart;
             if (released) { _current = null; _nativeMayRemain = false; }
             // No admitted work remains. Drop drained supplier/catalog task roots, not borrowed dependencies.
@@ -464,8 +467,14 @@ public sealed class GgmlRuntimeOwner : ITensorRuntimeOwner
     {
         TensorRuntimeShutdownResult result = await ShutdownAsync().ConfigureAwait(false);
         if (result.State is not (TensorRuntimeShutdownState.Completed or TensorRuntimeShutdownState.AlreadyStopped))
-            throw new InferenceException(InferenceFailureCode.BackendUnavailable,
-                "The GGML runtime did not retire safely. Drain instances and retry terminal shutdown explicitly.");
+        {
+            const string message = "The GGML runtime did not retire safely. Drain instances and retry terminal shutdown explicitly.";
+            Exception? cause;
+            lock (_gate) cause = _shutdownError;
+            throw cause is null
+                ? new InferenceException(InferenceFailureCode.BackendUnavailable, message)
+                : new InferenceException(InferenceFailureCode.BackendUnavailable, message, cause);
+        }
     }
 
     private sealed class OperationLease(GgmlRuntimeOwner owner) : IDisposable
