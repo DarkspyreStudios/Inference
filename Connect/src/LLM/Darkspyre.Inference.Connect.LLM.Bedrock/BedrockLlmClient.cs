@@ -36,6 +36,11 @@ internal sealed class BedrockLlmClient(
         LlmReasoningLevel.None, LlmReasoningLevel.Low, LlmReasoningLevel.Medium, LlmReasoningLevel.High
     }.ToFrozenSet();
 
+    private static readonly IReadOnlySet<LlmReasoningLevel> GptOssLevels = new[]
+    {
+        LlmReasoningLevel.Low, LlmReasoningLevel.Medium, LlmReasoningLevel.High
+    }.ToFrozenSet();
+
     private static long _requestCounter;
 
     private static readonly LlmProviderCapabilities Defaults = new()
@@ -114,8 +119,8 @@ internal sealed class BedrockLlmClient(
     }
 
     /// <summary>
-    /// The levels a model family takes through additional model request fields. gpt-oss, DeepSeek-R1 and unknown
-    /// models take none.
+    /// The levels a model takes through additional model request fields. Only the qualified gpt-oss identities
+    /// offer effort controls; DeepSeek-R1 and unknown models take none.
     /// </summary>
     internal static IReadOnlySet<LlmReasoningLevel> ReasoningLevels(string modelId)
     {
@@ -125,6 +130,7 @@ internal sealed class BedrockLlmClient(
             BedrockModelFamily.AnthropicClaude => AnthropicModelProfiles.Resolve(
                 BedrockModelFamilies.AnthropicModelId(baseModelId), catalogEntry: null).ReasoningLevels,
             BedrockModelFamily.AmazonNova2 => Nova2Levels,
+            BedrockModelFamily.OpenAiGptOss when baseModelId is "openai.gpt-oss-20b-1:0" or "openai.gpt-oss-120b-1:0" => GptOssLevels,
             _ => FrozenSet<LlmReasoningLevel>.Empty
         };
     }
@@ -960,6 +966,9 @@ internal sealed class BedrockLlmClient(
                 fields["reasoningConfig"] = level == LlmReasoningLevel.None
                     ? new JsonObject { ["type"] = "disabled" }
                     : new JsonObject { ["type"] = "enabled", ["maxReasoningEffort"] = LlmReasoningEffort.Word(level) };
+                return (fields, null);
+            case BedrockModelFamily.OpenAiGptOss:
+                fields["reasoning_effort"] = LlmReasoningEffort.Word(level);
                 return (fields, null);
             default:
                 return (fields, null);

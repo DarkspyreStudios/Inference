@@ -3402,16 +3402,18 @@ Converse sends a tool's `strict` flag only when `LlmToolDefinition.Strict` is tr
 strict schemas, such as Amazon Nova, reject the field even when it is false; a strict tool on such a
 model fails with Bedrock's own error.
 
-Converse sends a reasoning level through `additionalModelRequestFields` for Claude and Nova 2 models,
-classified from the model or inference-profile id:
+Converse sends a reasoning level through `additionalModelRequestFields` for Claude, Nova 2 and the
+qualified gpt-oss models, classified from the model or inference-profile id:
 
 | Family | Levels | Fields |
 | --- | --- | --- |
 | Claude (`anthropic.claude-*`) | The Anthropic Messages set for the same model | `thinking` and `output_config.effort`, or a thinking budget added to `inferenceConfig.maxTokens` (8,192 when the request sets none) |
 | Nova 2 (`amazon.nova-2-*`) | `None`, `Low`, `Medium`, `High` | `reasoningConfig` with `type: "disabled"`, or `type: "enabled"` and `maxReasoningEffort` |
+| gpt-oss (`openai.gpt-oss-20b-1:0`, `openai.gpt-oss-120b-1:0`) | `Low`, `Medium`, `High` | `reasoning_effort` with `low`, `medium` or `high` |
 
-gpt-oss, DeepSeek-R1, other models and ARNs offer no level. A capability override can narrow a family's
-set but cannot widen it. A Claude request with a level above `None` rejects temperature and forced tool
+The gpt-oss controls apply to those exact base IDs after geographic-prefix removal. Safeguard and
+unqualified gpt-oss versions, DeepSeek-R1, other models and ARNs offer no level. A capability override
+can narrow a family's set but cannot widen it. A Claude request with a level above `None` rejects temperature and forced tool
 choice, and a Nova 2 request at `High` rejects temperature and `MaxOutputTokens`, before the call.
 
 Converse streams through ConverseStream. A connection with `SupportsStreaming = false` sends Converse

@@ -20,6 +20,38 @@ namespace Darkspyre.Inference.Connect.LLM.Bedrock.Tests;
 public sealed class BedrockSafetyTests
 {
     [Theory]
+    [InlineData("openai.gpt-oss-20b-1:0", LlmReasoningLevel.Low, "low")]
+    [InlineData("openai.gpt-oss-20b-1:0", LlmReasoningLevel.Medium, "medium")]
+    [InlineData("openai.gpt-oss-20b-1:0", LlmReasoningLevel.High, "high")]
+    [InlineData("openai.gpt-oss-120b-1:0", LlmReasoningLevel.Low, "low")]
+    [InlineData("openai.gpt-oss-120b-1:0", LlmReasoningLevel.Medium, "medium")]
+    [InlineData("us.openai.gpt-oss-120b-1:0", LlmReasoningLevel.High, "high")]
+    public async Task GptOssReasoningLevelsReachBothConverseRequestModes(
+        string modelId, LlmReasoningLevel level, string expectedEffort)
+    {
+        await using var factory = new BedrockClientFactory(_ => throw new NotSupportedException(),
+            _ => throw new NotSupportedException(), _ => throw new NotSupportedException());
+        await using var guard = new BedrockLoggingGuard();
+        var client = new BedrockLlmClient(factory, guard, new StubConverseInvoker(), NullLogger<BedrockLlmClient>.Instance);
+        LlmConnection connection = Connection();
+        Assert.Equal([LlmReasoningLevel.Low, LlmReasoningLevel.Medium, LlmReasoningLevel.High],
+            client.GetCapabilities(connection, modelId).ReasoningLevels.Order());
+        ConverseRequest request = BedrockLlmClient.BuildRequest(connection,
+            Request(maxTokens: 128) with { ModelId = modelId, ReasoningLevel = level }, modelId);
+        Assert.Equal(expectedEffort, Assert.Single(request.AdditionalModelRequestFields.AsDictionary()).Value.AsString());
+        Assert.True(request.AdditionalModelRequestFields.AsDictionary().ContainsKey("reasoning_effort"));
+        Assert.Equal(128, request.InferenceConfig.MaxTokens);
+        ConverseStreamRequest stream = BedrockLlmClient.ToStreamRequest(request);
+        Assert.Equal(expectedEffort, stream.AdditionalModelRequestFields.AsDictionary()["reasoning_effort"].AsString());
+    }
+
+    [Theory]
+    [InlineData("openai.gpt-oss-safeguard-20b")]
+    [InlineData("openai.gpt-oss-20b-2:0")]
+    public void UnqualifiedGptOssIdsDoNotAcquireReasoningLevelsFromTheirPrefix(string modelId) =>
+        Assert.Empty(BedrockLlmClient.ReasoningLevels(modelId));
+
+    [Theory]
     [InlineData(false)]
     [InlineData(true)]
     public async Task PortableDocumentsReachConverseThroughManagedSessionOpening(bool generatedByTool)
