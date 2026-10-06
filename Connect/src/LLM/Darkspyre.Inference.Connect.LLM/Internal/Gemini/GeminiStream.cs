@@ -59,12 +59,12 @@ internal static class GeminiStream
                 owned, observedModel);
             if (LlmJson.GetObject(root, "usageMetadata") is { } usage)
             {
-                prompt = LlmJson.GetInt(usage, "promptTokenCount") ?? prompt;
-                toolPrompt = LlmJson.GetInt(usage, "toolUsePromptTokenCount") ?? toolPrompt;
-                visibleOutput = LlmJson.GetInt(usage, "candidatesTokenCount") ?? visibleOutput;
-                thoughts = LlmJson.GetInt(usage, "thoughtsTokenCount") ?? thoughts;
-                cached = LlmJson.GetInt(usage, "cachedContentTokenCount") ?? cached;
-                total = LlmJson.GetInt(usage, "totalTokenCount") ?? total;
+                prompt = LlmJson.GetInt(usage, "promptTokenCount");
+                toolPrompt = LlmJson.GetInt(usage, "toolUsePromptTokenCount");
+                visibleOutput = LlmJson.GetInt(usage, "candidatesTokenCount");
+                thoughts = LlmJson.GetInt(usage, "thoughtsTokenCount");
+                cached = LlmJson.GetInt(usage, "cachedContentTokenCount");
+                total = LlmJson.GetInt(usage, "totalTokenCount");
                 if (deltas.Next(Usage(Input(), visibleOutput, thoughts, cached, total)) is { } observation)
                 {
                     yield return consumption.Publish<LlmStreamEvent>(observation);

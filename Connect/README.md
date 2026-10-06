@@ -1572,6 +1572,9 @@ replaces the current request's observation. These shared fields do not enable a 
 or claim a provider mapping that has not been implemented.
 Anthropic and Vertex Claude report observations from `message_start` and `message_delta`. Gemini
 and Vertex Gemini report normalized `usageMetadata`, including reasoning output tokens.
+Each Gemini `usageMetadata` object replaces the complete observation. Unreported fields stay
+unknown and never inherit earlier tool-use, reasoning or cache counts. A chunk without
+`usageMetadata` leaves the latest observation unchanged.
 Anthropic's initial output count is retained when reported. Later output counts replace it;
 cache-read and cache-creation counts join uncached input in the normalized input total.
 Claude CLI chat and native sessions share a ledger keyed by API message ID. It sums distinct calls

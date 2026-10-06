@@ -10,6 +10,49 @@ namespace Darkspyre.Inference.Connect.LLM.Tests;
 public sealed class ProviderTerminalEvidenceTests
 {
     [Theory]
+    [InlineData(LlmTransport.GoogleGeminiApi)]
+    [InlineData(LlmTransport.GoogleVertexAi)]
+    public async Task GeminiTerminalUsageReplacesEarlierCountsWithoutCarryingStaleSubsets(LlmTransport transport)
+    {
+        const string body = """
+            data: {"candidates":[{"content":{"parts":[{"text":"hel"}]}}],"usageMetadata":{"promptTokenCount":5,"toolUsePromptTokenCount":3,"candidatesTokenCount":2,"thoughtsTokenCount":4,"cachedContentTokenCount":1,"totalTokenCount":14}}
+
+            data: {"candidates":[{"content":{"parts":[{"text":"lo"}]}}]}
+
+            data: {"candidates":[{"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":6,"candidatesTokenCount":3,"totalTokenCount":9}}
+            """;
+        using var http = new HttpClient(new Handler(transport, streaming: true, body + "\n\n"));
+        var connection = new LlmConnection
+        {
+            Version = "1",
+            Transport = transport,
+            Endpoint = "https://provider.example.test/v1",
+            ResolvedContinuationScope = "test-scope"
+        };
+        var request = new LlmChatRequest { ModelId = "gemini-2.5-flash", Messages = [new("user", "hello")] };
+        var codec = new GeminiContinuationCodec("test-gemini", "Gemini");
+        var route = new GeminiRoute(transport, "Gemini", "gemini_",
+            (response, token) => ProviderHttp.ThrowIfUnsuccessfulAsync(response, transport, null, "generation", token), codec.Encode);
+        var events = new List<LlmStreamEvent>();
+        await foreach (LlmStreamEvent item in GeminiStream.ReadAsync(http, new(HttpMethod.Post, connection.Endpoint), route,
+            connection, request, null, stream: true, usageDeltas: true, reasoningText: false, CancellationToken.None))
+            events.Add(item);
+
+        LlmUsage[] observations = events.OfType<LlmUsageDeltaEvent>().Select(item => item.Cumulative).ToArray();
+        Assert.Equal(2, observations.Length);
+        Assert.Equal(new LlmUsage(8, 6, 14) { CachedInputTokens = 1, ReasoningOutputTokens = 4 }, observations[0]);
+        var corrected = new LlmUsage(6, 3, 9);
+        Assert.Equal(corrected, observations[1]);
+        LlmChatResult terminal = Assert.IsType<LlmChatCompletionEvent>(events[^1]).Result;
+        LlmChatResult restored = JsonSerializer.Deserialize(
+            JsonSerializer.Serialize(terminal, ConnectLlmJson.ChatResult), ConnectLlmJson.ChatResult)!;
+        Assert.Equal(LlmCompletionStatus.Completed, restored.Status);
+        Assert.Equal("hello", restored.Text);
+        Assert.Equal(corrected, restored.Usage);
+        Assert.NotNull(restored.ContinuationState);
+    }
+
+    [Theory]
     [InlineData(LlmTransport.OpenAiResponses, true)]
     [InlineData(LlmTransport.OpenAiResponses, false)]
     [InlineData(LlmTransport.OpenAiCompatibleChat, true)]
@@ -86,12 +129,12 @@ public sealed class ProviderTerminalEvidenceTests
         Assert.Equal(call.Id, Assert.Single(events.OfType<LlmToolCallCompletedEvent>()).ToolCall.Id);
     }
 
-    private sealed class Handler(LlmTransport transport, bool streaming) : HttpMessageHandler
+    private sealed class Handler(LlmTransport transport, bool streaming, string? scriptedBody = null) : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             Assert.Equal(HttpMethod.Post, request.Method);
-            string body = Body(transport, streaming);
+            string body = scriptedBody ?? Body(transport, streaming);
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = new StringContent(body, Encoding.UTF8, streaming ? "text/event-stream" : "application/json")
