@@ -1121,8 +1121,9 @@ Both borrowed Skills upload variants require positive caller-selected `MaximumUp
 include directories; expanded bytes count uncompressed file content. For explicit directory uploads,
 entries count supplied files and both byte limits apply to their total content. The library supplies
 no defaults or numeric provider limits. These contracts carry policy for the unavailable upload path;
-they do not perform stream reads, archive inspection or provider calls. Directory multipart path
-encoding and the accepted ZIP layout remain unresolved provider-protocol gates.
+they do not perform stream reads, archive inspection or provider calls. Grok's directory multipart
+path encoding, accepted ZIP layout and uploaded-skill generation-attachment mapping are unknown.
+Upload and generation attachment remain unavailable; the library does not guess those protocols.
 Other Files routes remain unavailable. When no builtin Files adapter is
 composed, refusal precedes source resolution and stream inspection. Caller cancellation and
 retired-facade admission retain the existing lifetime behavior.

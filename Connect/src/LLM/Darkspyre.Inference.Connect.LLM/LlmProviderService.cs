@@ -235,6 +235,7 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, ILlmFileClie
     private LlmProviderCapabilities FileCapabilities(ILlmClient client, LlmProviderCapabilities capabilities) =>
         HasFileRoute(client) ? capabilities : capabilities with { Files = new() };
 
+    // The provider's remote Skill bundle-upload protocol is unknown. No upload is attempted.
     Task<XaiSkill> IXaiSkillClient.UploadAsync(string connectionId, XaiSkillUpload upload,
         CancellationToken cancellationToken) => UnavailableResourceAsync<XaiSkill>(cancellationToken);
 
