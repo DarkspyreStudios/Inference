@@ -340,7 +340,6 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
 
                         break;
                     case "content_block_stop":
-                        streamedContent.ObserveStop(root);
                         if (LlmJson.GetInt(root, "index") is int completedIndex
                             && toolCalls.TryGetValue(completedIndex, out AnthropicToolCallBuilder? completedBuilder)
                             && !completedBuilder.Completed)
@@ -399,7 +398,7 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
                             AnthropicUsage.Create(inputTokens, outputTokens, cachedTokens, cacheWriteTokens),
                             responseId,
                             observedModel,
-                            streamedContent.BuildContent(),
+                            streamedContent.BuildContent,
                             containerId,
                             response,
                             lastEvent,
@@ -511,7 +510,7 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
                     ReadToken(root, "usage", "cache_creation_input_tokens")),
                 LlmJson.GetString(root, "id"),
                 ObservedModel.Read(root, "model", Transport, connection, credential, response.RequestMessage),
-                content.GetArrayLength() == 0 ? null : JsonNode.Parse(content.GetRawText())!.AsArray(),
+                () => content.GetArrayLength() == 0 ? null : JsonNode.Parse(content.GetRawText())!.AsArray(),
                 ReadContainer(root, connection.Transport),
                 response,
                 body,
@@ -532,7 +531,7 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
         LlmUsage? usage,
         string? responseId,
         string? observedModel,
-        JsonArray? content,
+        Func<JsonArray?> buildContent,
         string? containerId,
         HttpResponseMessage response,
         string? rawFinal,
@@ -578,7 +577,7 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
             ProviderResponseId = responseId,
             ToolCalls = completionStatus is LlmCompletionStatus.RequiresAction or LlmCompletionStatus.Unknown ? toolCalls : [],
             ContinuationState = (paused || completionStatus is LlmCompletionStatus.Completed or LlmCompletionStatus.RequiresAction)
-                && content is not null
+                && buildContent() is { } content
                     ? AnthropicContinuation.WithContainer(ProviderContinuationStateCodec.Encode(connection, request.ModelId, content), containerId) : null,
             StructuredOutput = validation,
             Diagnostics = new LlmProviderDiagnostics(

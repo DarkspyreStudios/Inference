@@ -1427,6 +1427,10 @@ their `caller` metadata, including client calls that still require a tool result
 paused assistant message with its unchanged text and continuation state. Vertex accepts that opaque replay without
 allowing ordinary assistant prefilling. Unknown stop reasons stay Unknown;
 `model_context_window_exceeded` and `max_tokens` are Incomplete without paused-turn state.
+Native continuation content is materialized only for replay-eligible terminal outcomes. Truncated
+streamed tool arguments do not hide an Incomplete or Unknown result behind a JSON parse failure.
+Raw argument events remain unchanged; Unknown results retain actual calls without successful
+continuation. An Incomplete result exposes no actionable terminal calls.
 
 The private Anthropic continuation payload contains ordered content and an optional opaque
 code-execution container ID. The ID shares the content's account/model binding and survives context

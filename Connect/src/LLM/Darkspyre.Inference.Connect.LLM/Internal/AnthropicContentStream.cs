@@ -65,14 +65,6 @@ internal sealed class AnthropicContentStream
         }
     }
 
-    public void ObserveStop(JsonElement root)
-    {
-        if (LlmJson.GetInt(root, "index") is int index)
-        {
-            FinalizeToolInput(index);
-        }
-    }
-
     /// <summary>The streamed content blocks in index order, or null when the stream carried none.</summary>
     internal JsonArray? BuildContent()
     {
