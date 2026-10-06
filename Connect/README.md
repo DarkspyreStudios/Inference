@@ -1675,6 +1675,10 @@ skip forced termination. Failed group signals remain failures even if killing th
 the existing bounded exit wait still runs. Independent signal, exit, pipe-drain and release failures
 remain visible together. Cancelling an owned pipe drain during retirement is not a failed drain.
 
+`ClaudeCliExitTests` uses real shell stand-ins to check SIGTERM and EOF grace paths
+and forced termination of a same-group child that ignores SIGTERM. These cases do
+not exercise an installed provider CLI, its OAuth refresh or Windows containment.
+
 After a kill, Connect waits at most 5 seconds for the runtime to report the exit. When the bound
 expires, the operation fails with a message that names the process ID:
 

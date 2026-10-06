@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Globalization;
 using Darkspyre.Inference.Connect.LLM.Providers;
 using Microsoft.Extensions.Logging;
 
@@ -59,6 +60,49 @@ public sealed class ClaudeCliExitTests
         await exits.DisposeAsync();
         Assert.Equal(["eof", "finished"], await File.ReadAllLinesAsync(scratch.Log));
         Assert.Empty(logger.Entries);
+    });
+
+    [UnixFact]
+    public Task ForcedExitEndsTheOwnedChildThatIgnoresSigterm() => Bounded(async () =>
+    {
+        using var scratch = new Scratch();
+        var logger = new RecordingLogger();
+        // A short fixture grace period reaches the real SIGKILL path without a 30-second test.
+        var exits = new ClaudeCliExits(logger) { Limit = TimeSpan.FromMilliseconds(250) };
+        var invocation = new ClaudeCliInvocation("/bin/sh",
+            ["-c", "trap '' TERM; /bin/sh -c 'trap \"\" TERM; echo \"$$\"; while :; do sleep 1; done' & wait"],
+            StandardInput: null, scratch.Directory);
+        using var cancellation = new CancellationTokenSource();
+        Process? child = null;
+        try
+        {
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
+            {
+                await foreach (ClaudeCliProcessEvent processEvent in new ClaudeCliProcessRunner(exits).StreamAsync(invocation, cancellation.Token))
+                {
+                    string line = Assert.IsType<ClaudeCliOutputLine>(processEvent).Line;
+                    child = Process.GetProcessById(int.Parse(line, CultureInfo.InvariantCulture));
+                    Assert.False(child.HasExited);
+                    await cancellation.CancelAsync();
+                }
+            });
+            await exits.DisposeAsync();
+            Assert.NotNull(child);
+            await child.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.True(child.HasExited);
+            Assert.Single(logger.Entries, entry => entry.Level == LogLevel.Warning);
+            Assert.DoesNotContain(logger.Entries, entry => entry.Level == LogLevel.Error);
+        }
+        finally
+        {
+            // The handle identifies only this fixture's child, including on assertion failure.
+            if (child is not null)
+            {
+                if (!child.HasExited) child.Kill();
+                child.Dispose();
+            }
+            await exits.DisposeAsync();
+        }
     });
 
     private static Task Bounded(Func<Task> scenario) => Task.Run(scenario).WaitAsync(TimeSpan.FromSeconds(20));
