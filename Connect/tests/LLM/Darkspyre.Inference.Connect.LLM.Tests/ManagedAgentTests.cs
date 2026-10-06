@@ -28,7 +28,8 @@ public sealed class ManagedAgentTests
         var harness = new Harness();
         harness.Results.Enqueue(new()
         {
-            Diagnostics = new(200, null, null), Text = string.Empty,
+            Diagnostics = new(200, null, null),
+            Text = string.Empty,
             Status = LlmCompletionStatus.RequiresAction,
             ToolCalls = [new LlmToolCall("call-1", "echo", "{}"), new LlmToolCall("call-2", "echo", "{}")]
         });
