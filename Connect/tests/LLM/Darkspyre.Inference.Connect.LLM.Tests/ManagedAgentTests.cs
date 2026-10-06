@@ -15,6 +15,51 @@ public sealed class ManagedAgentTests
     private static readonly string[] CommandOnly = ["command"];
 
     [Fact]
+    public async Task UnknownToolTailSurvivesInvalidStructuredOutputWithoutExecutingToolsOrAnotherStep()
+    {
+        var harness = new Harness();
+        harness.Results.Enqueue(new()
+        {
+            Diagnostics = new(200, null, null),
+            Text = "partial",
+            Status = LlmCompletionStatus.Unknown,
+            FinishReason = "UNKNOWN_STOP",
+            Usage = new(5, 2, 7),
+            ToolCalls = [new LlmToolCall("call-1", "echo", "{}")],
+            StructuredOutput = new(LlmStructuredOutputEnforcement.ProviderJsonSchema, true, false, ["Incomplete JSON."])
+        });
+        int toolsRun = 0;
+        await using var session = harness.Create(Options() with
+        {
+            Tools = [new LlmAgentToolDefinition { Name = "echo", InputSchema = JsonElement.Parse("{\"type\":\"object\"}") }],
+            ToolHandler = (_, _) =>
+            {
+                toolsRun++;
+                return Task.FromResult(LlmToolOutput.FromText("unexpected"));
+            }
+        });
+
+        List<LlmAgentEvent> events = await Read(session.RunTurnAsync(Turn("hello")));
+
+        Assert.Equal(LlmAgentCompletionReason.Unknown, Assert.Single(events.OfType<LlmAgentTurnCompletedEvent>()).Reason);
+        Assert.Equal("partial", Assert.Single(events.OfType<LlmAgentMessageCompletedEvent>()).Text);
+        Assert.Equal(new LlmUsage(5, 2, 7), Assert.Single(events.OfType<LlmAgentUsageEvent>()).Usage);
+        Assert.Equal(0, toolsRun);
+        Assert.Single(harness.Requests);
+        LlmAgentContext captured = await session.CaptureContextAsync();
+        LlmAgentContext restored = JsonSerializer.Deserialize(
+            JsonSerializer.Serialize(captured, ConnectLlmJson.AgentContext), ConnectLlmJson.AgentContext)!;
+        Assert.Equal(["user", "assistant"], restored.Entries.Select(entry => entry.Message.Role));
+        Assert.Equal("partial", restored.Entries[1].Message.Content);
+        LlmToolCall call = Assert.IsType<LlmToolCall>(Assert.Single(restored.Entries[1].Message.ToolCalls));
+        Assert.Equal("call-1", call.Id);
+        Assert.Equal("echo", call.Name);
+        Assert.Equal("{}", call.ArgumentsJson);
+        Assert.Null(restored.Entries[1].Message.ContinuationState);
+        Assert.All(restored.Entries, entry => Assert.Empty(entry.Message.ToolResults));
+    }
+
+    [Fact]
     public async Task RetirementPreservesEveryParallelToolCleanupFailure()
     {
         var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
