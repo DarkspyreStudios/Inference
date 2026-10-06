@@ -108,13 +108,7 @@ public sealed class CollectibleSerializationTests
                 foreach (PropertyInfo root in roots)
                 {
                     var typeInfo = (JsonTypeInfo)root.GetValue(null)!;
-                    typeInfo.MakeReadOnly();
-                    _ = typeInfo.Properties.Count;
-                    Assert.Same(typeInfo, typeInfo.Options.GetTypeInfo(typeInfo.Type));
-                    if (assemblies.TryGetValue(typeInfo.Type.Assembly.GetName().Name!, out Assembly? expected))
-                        Assert.Same(expected, typeInfo.Type.Assembly);
-                    references.Add(new(typeInfo));
-                    references.Add(new(typeInfo.Options));
+                    CollectContractGraph(typeInfo, assemblies, references);
                 }
                 if (owner == typeof(InferenceJson))
                 {
@@ -134,6 +128,39 @@ public sealed class CollectibleSerializationTests
         finally
         {
             context.Unload();
+        }
+    }
+
+    private static void CollectContractGraph(JsonTypeInfo root, Dictionary<string, Assembly> assemblies,
+        List<WeakReference> references)
+    {
+        var pending = new Queue<JsonTypeInfo>();
+        var visited = new HashSet<JsonTypeInfo>(ReferenceEqualityComparer.Instance);
+        pending.Enqueue(root);
+        while (pending.TryDequeue(out JsonTypeInfo? metadata))
+        {
+            if (!visited.Add(metadata)) continue;
+            metadata.MakeReadOnly();
+            Assert.Same(root.Options, metadata.Options);
+            Assert.Same(metadata, root.Options.GetTypeInfo(metadata.Type));
+            if (assemblies.TryGetValue(metadata.Type.Assembly.GetName().Name!, out Assembly? expected))
+                Assert.Same(expected, metadata.Type.Assembly);
+            references.Add(new(metadata));
+            references.Add(new(metadata.Options));
+
+            foreach (JsonPropertyInfo property in metadata.Properties)
+            {
+                // An explicit property converter owns its wire representation, not the default type graph.
+                if (property.CustomConverter is null && (property.Get is not null || property.Set is not null))
+                    pending.Enqueue(root.Options.GetTypeInfo(property.PropertyType));
+            }
+            if (metadata.ElementType is { } element)
+                pending.Enqueue(root.Options.GetTypeInfo(element));
+            if (metadata.KeyType is { } key)
+                pending.Enqueue(root.Options.GetTypeInfo(key));
+            if (metadata.PolymorphismOptions is { } polymorphism)
+                foreach (JsonDerivedType derived in polymorphism.DerivedTypes)
+                    pending.Enqueue(root.Options.GetTypeInfo(derived.DerivedType));
         }
     }
 
