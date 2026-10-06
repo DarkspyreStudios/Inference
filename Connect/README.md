@@ -1167,6 +1167,11 @@ tool resources use the existing typed binary-output projection. Portable history
 references, selection and transcript revisions. Terminal completion follows owned-reader cleanup;
 operation and independent cleanup failures remain visible together. This lane does not implement
 provider Files CRUD or create a paid cache.
+Anthropic managed-session opening admits resource-bearing portable contexts only with explicit
+caller-owned access and a document-capable model. The shared managed session validates the exact
+Workspace/Session selection snapshot before import. Capture keeps logical references after generation.
+The chat facade admits logical references only for clients with implemented resource preparation.
+Provider file-reference capability remains a separate fact.
 Local estimates remain unknown for resource-bound requests and never open their contents. Exact
 Anthropic counting refuses these unprepared requests before effects; it never counts only the text
 while silently omitting selected files. Explicit binary attachments retain the existing count route.

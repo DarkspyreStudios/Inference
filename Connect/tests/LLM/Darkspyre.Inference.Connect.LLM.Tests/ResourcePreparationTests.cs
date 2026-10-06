@@ -204,19 +204,23 @@ public sealed class ResourcePreparationTests
         using var targetHttp = new HttpClient(handler);
         var client = new AnthropicMessagesLlmClient(targetHttp);
         LlmAgentContext restored = JsonSerializer.Deserialize(portable, ConnectLlmJson.AgentContext)!;
-        LlmAgentContext imported = ManagedAgentContext.Import(restored, connection, "claude-sonnet-4-6",
-            supportsResources: client.CanPrepareResources);
-        await LlmResourcePreparation.ValidateContextAsync(imported, access.Selection, access, () => { }, CancellationToken.None);
-        var request = new LlmChatRequest
+        var source = new Source(connection);
+        await using var providers = new LlmProviderService(source, [client]);
+        var agent = new ManagedAnthropicAgentClient(client, providers);
+        await using var agents = new LlmAgentProviderService(source, [agent]);
+        await using ILlmAgentSession session = await agents.StartSessionAsync("connection", new()
         {
             ModelId = "claude-sonnet-4-6",
-            MaxOutputTokens = 16,
-            Resources = access,
-            Messages = [.. imported.Entries.Select(entry => entry.Message), new("user", "Compare the files")]
-        };
-        var events = new List<LlmStreamEvent>();
-        await foreach (LlmStreamEvent item in client.StreamAsync(connection, request)) events.Add(item);
-        Assert.Equal(LlmCompletionStatus.Completed, Assert.Single(events.OfType<LlmChatCompletionEvent>()).Result.Status);
+            SessionId = "session",
+            Context = restored,
+            CallerServices = new() { Resources = access }
+        });
+        LlmAgentContext imported = await session.CaptureContextAsync();
+        var events = new List<LlmAgentEvent>();
+        await foreach (LlmAgentEvent item in session.RunTurnAsync(new() { Input = [new LlmAgentTextContent("Compare the files")] }))
+            events.Add(item);
+        Assert.Equal("session", session.SessionId);
+        Assert.Equal(LlmAgentCompletionReason.Completed, Assert.Single(events.OfType<LlmAgentTurnCompletedEvent>()).Reason);
         Assert.Equal([("reference.txt", "reference text"), ("reference.txt", "reference text"), ("result.json", "{\"answer\":42}")], handler.Items);
         Assert.Equal(4, access.Reads.Count);
         Assert.All(access.Reads, stream => Assert.False(stream.CanRead));
@@ -224,7 +228,10 @@ public sealed class ResourcePreparationTests
         Assert.Equal(context.ResourceSelectionVersion, imported.ResourceSelectionVersion);
         Assert.Equal([generated, reference], imported.SelectedResources);
         Assert.IsType<LlmResourceAttachment>(imported.Entries[0].Message.Attachments[0]);
-        Assert.Same(access, request.Resources);
+        LlmAgentContext captured = await session.CaptureContextAsync();
+        Assert.Equal(context.ResourceSelectionVersion, captured.ResourceSelectionVersion);
+        Assert.Equal([generated, reference], captured.SelectedResources);
+        Assert.IsType<LlmResourceAttachment>(captured.Entries[0].Message.Attachments[0]);
         if (generatedByTool)
             Assert.IsType<LlmToolOutputSessionResource>(Assert.IsType<LlmToolResult>(Assert.Single(imported.Entries[2].Message.ToolResults)).Output.Parts[0]);
     }
@@ -314,6 +321,15 @@ public sealed class ResourcePreparationTests
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             Requests++;
+            if (request.Method == HttpMethod.Get)
+            {
+                Assert.Equal(new Uri("https://anthropic.example.test/v1/models?limit=1000"), request.RequestUri);
+                return new(HttpStatusCode.OK)
+                {
+                    Content = new StringContent("{\"data\":[{\"id\":\"claude-sonnet-4-6\",\"display_name\":\"Claude Sonnet\"}],\"has_more\":false}",
+                        System.Text.Encoding.UTF8, "application/json")
+                };
+            }
             Assert.Equal(HttpMethod.Post, request.Method);
             Assert.Equal(new Uri("https://anthropic.example.test/v1/messages"), request.RequestUri);
             Assert.Equal("test-key", Assert.Single(request.Headers.GetValues("x-api-key")));
@@ -335,6 +351,14 @@ public sealed class ResourcePreparationTests
                     System.Text.Encoding.UTF8, "text/event-stream")
             };
         }
+    }
+
+    private sealed class Source(LlmConnection connection) : ILlmConnectionSource
+    {
+        public Task<LlmConnection?> GetConnectionAsync(string connectionId, CancellationToken cancellationToken = default) =>
+            Task.FromResult<LlmConnection?>(connection);
+        public Task SaveCredentialAsync(string connectionId, string credentialJson, string expectedVersion,
+            CancellationToken cancellationToken = default) => throw new NotSupportedException();
     }
 
     private sealed class Uploads(string destination) : HttpMessageHandler

@@ -637,7 +637,7 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, ILlmFileClie
         if (request.ExplicitCache is not null)
             ExplicitCaches.Validate(request, client.GetCapabilities(connection, request.ModelId).SupportsExplicitCache);
         LlmAttachments.ValidateReferences(request, () => client.GetCapabilities(connection, request.ModelId).SupportsFileReferences,
-            client is Providers.XaiResponsesLlmClient);
+            client is LlmClientBase { CanPrepareResources: true });
         HostedTools.Validate(request, client.GetCapabilities(connection, request.ModelId));
         ClientTools.Validate(request, client.GetCapabilities(connection, request.ModelId).SupportsShellTools);
         if (client is Providers.XaiResponsesLlmClient resourceDestination)
