@@ -40,26 +40,64 @@ public sealed class CollectibleSerializationTests
     [Theory]
     [MemberData(nameof(MetadataCases))]
     public void OwnedMetadataDoesNotKeepItsCollectibleGenerationAlive(Type owner, int expectedRoots)
-        => AssertGenerationCollected(RoundTripInCollectibleGeneration([(owner, expectedRoots)], SerializeResultGraph()));
+        => AssertGenerationCollected(RoundTripInCollectibleGeneration([(owner, expectedRoots)], SerializeResultGraph(), SerializeContextGraph()));
 
     [Fact]
     public void CombinedSdkMetadataDoesNotKeepItsCollectibleGenerationAlive()
-        => AssertGenerationCollected(RoundTripInCollectibleGeneration(MetadataOwners, SerializeResultGraph()));
+        => AssertGenerationCollected(RoundTripInCollectibleGeneration(MetadataOwners, SerializeResultGraph(), SerializeContextGraph()));
 
     private static string SerializeResultGraph()
     {
         var reference = new InferenceResourceReference("workspace-1", "resource-1");
-        return JsonSerializer.Serialize(new LlmInferenceResult
+        string json = JsonSerializer.Serialize(new LlmInferenceResult
         {
             Text = "done",
             Status = LlmCompletionStatus.Completed,
-            Usage = new(7, 3, 10),
+            Usage = new(7, 3, 10)
+            {
+                HostedToolCalls = new Dictionary<LlmHostedToolKind, int> { [LlmHostedToolKind.WebSearch] = 2 },
+                HostedToolCallCount = 2,
+                HostedSourcesUsed = 3
+            },
             ToolCalls = [new LlmShellCall("call-1", ["pwd"], null, null)],
             GeneratedResources = [new(
                 new(reference, "session-1", "result.json", "application/json", 2),
                 new("workspace-1", "session-1", 1, [reference]))],
             Provenance = new() { ImplementationId = "test-provider", ModelId = "reported-model" }
         }, InferenceJson.LlmResult);
+        using JsonDocument document = JsonDocument.Parse(json);
+        JsonElement usage = document.RootElement.GetProperty("Usage");
+        Assert.Equal(2, usage.GetProperty("HostedToolCalls").GetProperty(nameof(LlmHostedToolKind.WebSearch)).GetInt32());
+        Assert.Equal(2, usage.GetProperty("HostedToolCallCount").GetInt32());
+        Assert.Equal(3, usage.GetProperty("HostedSourcesUsed").GetInt32());
+        return json;
+    }
+
+    private static string SerializeContextGraph()
+    {
+        var reference = new InferenceResourceReference("workspace-1", "resource-1");
+        string json = JsonSerializer.Serialize(new LlmAgentContext
+        {
+            Revision = 7,
+            Entries = [new("entry-1", "turn-1", new("user", "Read the reference")
+            {
+                Attachments = [new LlmResourceAttachment(reference)]
+            })],
+            SelectedResources = [reference],
+            ResourceSelectionVersion = new("workspace-1", "session-1", 2)
+        }, ConnectLlmJson.AgentContext);
+        using JsonDocument document = JsonDocument.Parse(json);
+        JsonElement context = document.RootElement;
+        Assert.Equal(3, context.GetProperty("FormatVersion").GetInt32());
+        Assert.Equal(7, context.GetProperty("Revision").GetInt64());
+        JsonElement selected = Assert.Single(context.GetProperty("SelectedResources").EnumerateArray());
+        Assert.Equal(reference.WorkspaceId, selected.GetProperty("WorkspaceId").GetString());
+        Assert.Equal(reference.Id, selected.GetProperty("Id").GetString());
+        JsonElement version = context.GetProperty("ResourceSelectionVersion");
+        Assert.Equal("workspace-1", version.GetProperty("WorkspaceId").GetString());
+        Assert.Equal("session-1", version.GetProperty("SessionId").GetString());
+        Assert.Equal(2, version.GetProperty("Revision").GetInt64());
+        return json;
     }
 
     private static void AssertGenerationCollected(WeakReference[] generation)
@@ -88,7 +126,7 @@ public sealed class CollectibleSerializationTests
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private static WeakReference[] RoundTripInCollectibleGeneration((Type Owner, int Roots)[] owners, string json)
+    private static WeakReference[] RoundTripInCollectibleGeneration((Type Owner, int Roots)[] owners, string resultJson, string contextJson)
     {
         var context = new AssemblyLoadContext("SdkMetadataGeneration", isCollectible: true);
         try
@@ -110,9 +148,11 @@ public sealed class CollectibleSerializationTests
                     var typeInfo = (JsonTypeInfo)root.GetValue(null)!;
                     CollectContractGraph(typeInfo, assemblies, references);
                 }
-                if (owner == typeof(InferenceJson))
+                if (owner == typeof(InferenceJson) || owner == typeof(ConnectLlmJson))
                 {
-                    var metadata = (JsonTypeInfo)metadataOwner.GetProperty(nameof(InferenceJson.LlmResult))!.GetValue(null)!;
+                    string root = owner == typeof(InferenceJson) ? nameof(InferenceJson.LlmResult) : nameof(ConnectLlmJson.AgentContext);
+                    string json = owner == typeof(InferenceJson) ? resultJson : contextJson;
+                    var metadata = (JsonTypeInfo)metadataOwner.GetProperty(root)!.GetValue(null)!;
                     Assert.Same(assembly, metadata.Type.Assembly);
 
                     object value = JsonSerializer.Deserialize(json, metadata)!;
