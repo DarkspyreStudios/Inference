@@ -48,6 +48,9 @@
   <Folder Name="/tests/Decision/">
     <Project Path="tests/Decision/Darkspyre.Inference.Tensor.Decision.Laya.Tests/Darkspyre.Inference.Tensor.Decision.Laya.Tests.csproj" />
   </Folder>
+  <Folder Name="/tests/Embedding/">
+    <Project Path="tests/Embedding/Darkspyre.Inference.Tensor.Embedding.Tests/Darkspyre.Inference.Tensor.Embedding.Tests.csproj" />
+  </Folder>
   <Folder Name="/tests/LLM/">
     <Project Path="tests/LLM/Darkspyre.Inference.Tensor.LLM.Qwen.Tests/Darkspyre.Inference.Tensor.LLM.Qwen.Tests.csproj" />
   </Folder>

@@ -59,6 +59,10 @@ Assemblies included by the Tensor package:
   values and scaled back to unit length (Qwen3: 32 to 1,024; Arctic: 256 and 1,024). Each result
   carries the model fingerprint, a SHA-256 over the weights, architecture and query format; vectors
   with different fingerprints are not comparable.
+  A failed model release retains the model and its artifact/runtime leases. An explicit unload or
+  stop can retry release. Concurrent and repeated disposal calls share the original cleanup outcome.
+  The owning Embedding tests use verified local packs and a stand-in model loader; they cover load
+  cancellation, metadata failure, retained cleanup failure and teardown drain without native execution.
 - `Darkspyre.Inference.Tensor.Registry` — `TensorEngineRegistry` and the `AddTensorEngines`
   composition of the five shipped engines. It references the engine assemblies; neither
   `.Tensor.Common` nor an engine assembly references it.
