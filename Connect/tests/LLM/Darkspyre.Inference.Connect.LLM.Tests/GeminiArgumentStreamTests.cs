@@ -9,10 +9,13 @@ namespace Darkspyre.Inference.Connect.LLM.Tests;
 
 public sealed class GeminiArgumentStreamTests
 {
-    [Fact]
-    public async Task IndexedBooleanArgumentsBecomePortableCompletedToolCalls()
+    [Theory]
+    [InlineData("$.flags[0]")]
+    [InlineData("$['flags'][0]")]
+    [InlineData("$[\"flags\"][0]")]
+    public async Task IndexedBooleanArgumentsBecomePortableCompletedToolCalls(string argumentPath)
     {
-        using var http = new HttpClient(new Handler());
+        using var http = new HttpClient(new Handler(argumentPath));
         var codec = new GeminiContinuationCodec("test-vertex", "Vertex");
         var route = new GeminiRoute(LlmTransport.GoogleVertexAi, "Vertex", "vertex_",
             (response, token) => ProviderHttp.ThrowIfUnsuccessfulAsync(response, LlmTransport.GoogleVertexAi,
@@ -68,12 +71,12 @@ public sealed class GeminiArgumentStreamTests
         Assert.True(part["functionCall"]!["args"]!["flags"]![0]!.GetValue<bool>());
     }
 
-    private sealed class Handler : HttpMessageHandler
+    private sealed class Handler(string argumentPath) : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
-            const string body = """
-                data: {"candidates":[{"content":{"parts":[{"thoughtSignature":"opaque-signature","functionCall":{"id":"call-1","name":"set_flags","partialArgs":[{"jsonPath":"$.flags[0]","boolValue":true}],"willContinue":true}}]}}]}
+            string body = $$$"""
+                data: {"candidates":[{"content":{"parts":[{"thoughtSignature":"opaque-signature","functionCall":{"id":"call-1","name":"set_flags","partialArgs":[{"jsonPath":{{{JsonValue.Create(argumentPath)!.ToJsonString()}}},"boolValue":true}],"willContinue":true}}]}}]}
 
                 data: {"modelVersion":"gemini-3-pro-reported","candidates":[{"finishReason":"STOP","content":{"parts":[{"functionCall":{"willContinue":false}}]}}]}
                 """;

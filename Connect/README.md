@@ -1348,6 +1348,11 @@ is unrecognized. The result remains `Unknown` and carries no continuation state.
 arguments do not become complete calls. Existing known refusal, truncation and malformed-call
 outcomes keep their classifications.
 
+Vertex typed function-argument streams accept dot names and single- or double-quoted bracket
+names in their JSONPath property selectors. Both quoted forms preserve the exact decoded property
+name and share indexed-array reconstruction. Returned calls, portable results and retained
+thought-signature continuations carry the same reconstructed arguments.
+
 Responses reports `Unknown` for an unrecognized native status and does not publish continuation
 state from that outcome. Tool calls alone do not establish successful completion. Direct Codex
 also accepts the actual terminal SSE event type when its response omits `status`, matching the

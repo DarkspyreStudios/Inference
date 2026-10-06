@@ -144,20 +144,20 @@ internal sealed class GeminiArgumentStream
             else if (path[position] == '[')
             {
                 position++;
-                if (position < path.Length && path[position] == '\'')
+                if (position < path.Length && path[position] is '\'' or '"')
                 {
-                    position++;
+                    char quote = path[position++];
                     var json = new StringBuilder("\"");
                     bool closed = false;
                     while (position < path.Length)
                     {
                         char character = path[position++];
-                        if (character == '\'') { closed = true; break; }
+                        if (character == quote) { closed = true; break; }
                         if (character == '\\')
                         {
                             if (position == path.Length) { throw PathFailure(); }
                             char escaped = path[position++];
-                            if (escaped == '\'') { json.Append('\''); } else { json.Append('\\').Append(escaped); }
+                            if (escaped == '\'' && quote == '\'') { json.Append('\''); } else { json.Append('\\').Append(escaped); }
                         }
                         else if (character == '"') { json.Append("\\\""); }
                         else { json.Append(character); }
