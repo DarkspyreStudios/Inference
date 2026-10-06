@@ -413,6 +413,8 @@ completion. They verify explicit safe-Busy retry through the injected supplier w
 Supplier shutdown exceptions remain private to the owner. Disposal preserves the actual exception
 as its inner cause, and repeated disposal shares that failure without repeating terminal cleanup.
 Structured shutdown observations retain their safe diagnostics and do not serialize that exception.
+Cleanup allocation failures use that same terminal outcome. They do not skip the other admitted
+terminal action or erase an earlier failure. Disposal preserves each actual cause without replay.
 An initialized supplier that remains Ready after its guard refuses teardown reports Busy with zero
 owner leases and possible external native resources. Its control is retained for explicit retry after
 those resources drain; the admission fence stays closed. Unknown or poisoned refusals remain terminal.
@@ -425,6 +427,8 @@ permits guarded terminal shutdown. Disposal preserves a failed held release as i
 independent held-release failures remain together in an aggregate. The structured shutdown result
 does not serialize those exceptions. Each private shutdown completion binds its result to its cause,
 so a later explicit release retry does not replace the cause awaited by disposal.
+An allocation failure from a held lease's release retains the lease and reports the same failed
+shutdown observation. It does not enter supplier teardown while the lease remains outstanding.
 Drained terminal owners drop supplier/catalog task references
 without disposing borrowed collaborators.
 

@@ -77,11 +77,18 @@ public sealed class GgmlRuntimeShutdownTests
         }
     }
 
-    [Fact]
-    public async Task IndependentGgmlAndMlxShutdownFailuresRemainSharedWithoutReplay()
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    public async Task IndependentGgmlAndMlxShutdownFailuresRemainSharedWithoutReplay(bool ggmlOutOfMemory, bool mlxOutOfMemory)
     {
-        var ggmlFailure = new IOException("private GGML terminal cause");
-        var mlxFailure = new IOException("private MLX terminal cause");
+#pragma warning disable CA2201 // Inject native cleanup allocation failures without exhausting the test process.
+        Exception ggmlFailure = ggmlOutOfMemory
+            ? new OutOfMemoryException("private GGML terminal cause") : new IOException("private GGML terminal cause");
+        Exception mlxFailure = mlxOutOfMemory
+            ? new OutOfMemoryException("private MLX terminal cause") : new IOException("private MLX terminal cause");
+#pragma warning restore CA2201
         int retirements = 0;
         var supplier = new Supplier(ggmlFailure);
         var owner = new GgmlRuntimeOwner(new(supplier.Build, supplier.Rid, []), supplier);
@@ -89,10 +96,12 @@ public sealed class GgmlRuntimeShutdownTests
 
         TensorRuntimeShutdownResult failed = await owner.ShutdownAsync();
         Assert.Equal(TensorRuntimeShutdownState.FailedRequiresProcessExit, failed.State);
+        Assert.Equal(TensorRuntimeState.RequiresProcessRestart, owner.State);
         Assert.True(failed.NativeStateMayRemain);
         Assert.Same(failed, await owner.ShutdownAsync());
         InferenceException disposal = await Assert.ThrowsAsync<InferenceException>(() => owner.DisposeAsync().AsTask());
         AggregateException errors = Assert.IsType<AggregateException>(disposal.InnerException);
+        Assert.Equal(2, errors.InnerExceptions.Count);
         Assert.Same(ggmlFailure, errors.InnerExceptions[0]);
         Assert.Same(mlxFailure, errors.InnerExceptions[1]);
         Assert.Same(disposal, await Record.ExceptionAsync(() => owner.DisposeAsync().AsTask()));
@@ -274,11 +283,17 @@ public sealed class GgmlRuntimeShutdownTests
         Assert.Equal(1, supplier.Shutdowns);
     }
 
-    [Fact]
-    public async Task FailedAcquisitionLeaseReleasePreservesItsActualCauseAndExplicitRecovery()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task FailedAcquisitionLeaseReleasePreservesItsActualCauseAndExplicitRecovery(bool outOfMemory)
     {
         using var cancellation = new CancellationTokenSource();
-        var lease = new FailedLease(new InvalidOperationException("private lease cleanup cause"));
+#pragma warning disable CA2201 // Inject a cleanup allocation failure without exhausting the test process.
+        Exception failure = outOfMemory
+            ? new OutOfMemoryException("private lease cleanup cause") : new InvalidOperationException("private lease cleanup cause");
+#pragma warning restore CA2201
+        var lease = new FailedLease(failure);
         var supplier = new Supplier(null, () =>
         {
             cancellation.Cancel();

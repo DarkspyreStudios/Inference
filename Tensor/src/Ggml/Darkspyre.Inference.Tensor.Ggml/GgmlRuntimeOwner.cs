@@ -424,7 +424,7 @@ public sealed class GgmlRuntimeOwner : ITensorRuntimeOwner
                 rollback.Dispose();
                 lock (_gate) _failedRollbackLeases.Remove(rollback);
             }
-            catch (Exception error) when (error is not OutOfMemoryException) { rollbackErrors.Add(error); }
+            catch (Exception error) { rollbackErrors.Add(error); }
         }
         lock (_gate)
         {
@@ -448,11 +448,11 @@ public sealed class GgmlRuntimeOwner : ITensorRuntimeOwner
             // The real guard leaves Ready unchanged only when it refused teardown over live external resources.
             safeBusy = !released && readyBefore && supplier.State == GgmlRuntimeState.Ready;
         }
-        catch (Exception error) when (error is not OutOfMemoryException) { released = false; shutdownError = error; }
+        catch (Exception error) { released = false; shutdownError = error; }
         if (!safeBusy && _mlxShutdown is { } mlxShutdown)
         {
             try { mlxShutdown(); }
-            catch (Exception error) when (error is not OutOfMemoryException)
+            catch (Exception error)
             {
                 released = false;
                 shutdownError = shutdownError is null ? error : new AggregateException(shutdownError, error);
