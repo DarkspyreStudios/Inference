@@ -126,8 +126,9 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
     public ContextEstimate? EstimateInputTokens(LlmConnection connection, LlmChatRequest request)
     {
         _ = ValidateMessagesRequest(connection, request);
+        if (request.Resources is not null) return null;
         JsonObject payload = BuildPayload(connection, request, output => ProjectToolOutput(connection, request.ModelId, output), false);
-        if (request.Resources is not null || payload["container"] is not null
+        if (payload["container"] is not null
             || payload["messages"] is not JsonArray messages
             || messages.Any(message => message is not JsonObject item || !IsPlaintextContent(item["content"]))
             || payload["system"] is { } system && !IsPlaintextContent(system)) return null;
@@ -155,6 +156,8 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
         cancellationToken.ThrowIfCancellationRequested();
         ValidateTokenCountOptions(connection, request);
         _ = ValidateMessagesRequest(connection, request);
+        if (request.Resources is not null)
+            throw new NotSupportedException("The Anthropic count route does not materialize caller-owned resources.");
         JsonObject payload = BuildPayload(connection, request, output => ProjectToolOutput(connection, request.ModelId, output), false);
         // Count APIs exclude generation-only controls; every prompt-bearing field remains unchanged.
         foreach (string name in CountExcludedFields)
@@ -182,7 +185,15 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
     private static bool IsTokenCountField(string name) => name is
         "model" or "messages" or "system" or "tools" or "tool_choice" or "thinking" or "output_config" or "cache_control";
 
-    public override async IAsyncEnumerable<LlmStreamEvent> StreamAsync(
+    protected override bool SupportsResourcePreparation => true;
+
+    public override IAsyncEnumerable<LlmStreamEvent> StreamAsync(
+        LlmConnection connection, LlmChatRequest request, CancellationToken cancellationToken = default) =>
+        request.Resources is null ? StreamPreparedAsync(connection, request, cancellationToken)
+            : LlmResourcePreparation.StreamInlineAsync(request, input => { _ = ValidateMessagesRequest(connection, input); },
+                (input, token) => StreamPreparedAsync(connection, input, token), cancellationToken);
+
+    private async IAsyncEnumerable<LlmStreamEvent> StreamPreparedAsync(
         LlmConnection connection,
         LlmChatRequest request,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)

@@ -1158,7 +1158,18 @@ The route reads authorized committed bytes through owned handles and uploads the
 private Files transport. Unknown byte counts remain unknown; missing filenames refuse the file
 destination. Native receipts belong to the admitted request and do not replace logical captured history.
 After a connection change, the caller reattaches its resource authority to the portable context.
-The destination uploads the named committed content again; it does not reuse another connection's file IDs.
+The Grok destination uploads the named committed content again; it does not reuse another connection's file IDs.
+Anthropic Messages reads the same logical resources through this shared owner
+and send their committed content through the existing native inline attachment lane. Text and JSON
+retain their actual filenames and text bytes; PDF and declared image content use the existing binary
+attachment projection. Native attachment validation still rejects unsupported formats. Committed
+tool resources use the existing typed binary-output projection. Portable history keeps its logical
+references, selection and transcript revisions. Terminal completion follows owned-reader cleanup;
+operation and independent cleanup failures remain visible together. This lane does not implement
+provider Files CRUD or create a paid cache.
+Local estimates remain unknown for resource-bound requests and never open their contents. Exact
+Anthropic counting refuses these unprepared requests before effects; it never counts only the text
+while silently omitting selected files. Explicit binary attachments retain the existing count route.
 Local accounting does not read or upload selected resources. `AddLlmConnect` includes Grok registration.
 Managed sessions created through the shared internal factory validate resource-bound imported
 contexts against the caller's exact scoped selection snapshot. Only a new session without an imported

@@ -145,6 +145,198 @@ public sealed class ResourcePreparationTests
         Assert.IsType<LlmResourceAttachment>(context.Entries[0].Message.Attachments[0]);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task LogicalDocumentContextCanMoveFromGrokToAnthropicWithoutChangingItsResources(bool generatedByTool)
+    {
+        var reference = new InferenceResourceReference("workspace", "reference");
+        var generated = new InferenceResourceReference("workspace", "generated-json");
+        var access = new Resources(new("workspace", "session", 4, [generated, reference]),
+            [(reference, "reference.txt", "reference text"u8.ToArray()), (generated, "result.json", "{\"answer\":42}"u8.ToArray())]);
+        var context = new LlmAgentContext
+        {
+            Revision = 9,
+            ResourceSelectionVersion = new(access.WorkspaceId, access.SessionId, 4),
+            SelectedResources = [generated, reference],
+            Entries = [new("prompt", "turn-1", new("user", "Read the reference")
+                { Attachments = [new LlmResourceAttachment(reference), new LlmResourceAttachment(reference)] }),
+                new("reply", "turn-1", new("assistant", "Created result.json"))]
+        };
+        if (generatedByTool)
+        {
+            context = context with
+            {
+                Entries = [context.Entries[0], context.Entries[1] with
+                { Message = context.Entries[1].Message with { ToolCalls = [new LlmToolCall("create-1", "create_json", "{}")] } },
+                    new("tool", "turn-1", new("user", string.Empty)
+                    {
+                        ToolResults = [new LlmToolResult("create-1", new() { Parts = [new LlmToolOutputSessionResource(generated)] })]
+                    })]
+            };
+        }
+        byte[] portable = JsonSerializer.SerializeToUtf8Bytes(context, ConnectLlmJson.AgentContext);
+        var grok = new LlmConnection
+        {
+            Version = "grok",
+            Transport = LlmTransport.XaiResponses,
+            Xai = new(),
+            Endpoint = "https://api.x.ai/v1",
+            Credential = new LlmCredential { OAuth = new() { AccessToken = "token-grok" } }.Serialize()
+        };
+        using (var http = new HttpClient(new Uploads("grok")))
+        await using (var files = new XaiFileClient(http))
+        await using (LlmResourcePreparation prepared = await LlmResourcePreparation.PrepareAsync(grok,
+            new() { ModelId = "grok-model", Resources = access, Messages = [.. context.Entries.Select(entry => entry.Message), new("user", "Compare the files")] },
+            files, () => { }, CancellationToken.None))
+        {
+            Assert.IsType<LlmFileReference>(prepared.Request.Messages[0].Attachments[0]);
+        }
+
+        var connection = new LlmConnection
+        {
+            Version = "anthropic",
+            Transport = LlmTransport.AnthropicMessages,
+            Endpoint = "https://anthropic.example.test/v1",
+            Credential = new LlmCredential { ApiKey = "test-key" }.Serialize()
+        };
+        var handler = new Documents();
+        using var targetHttp = new HttpClient(handler);
+        var client = new AnthropicMessagesLlmClient(targetHttp);
+        LlmAgentContext restored = JsonSerializer.Deserialize(portable, ConnectLlmJson.AgentContext)!;
+        LlmAgentContext imported = ManagedAgentContext.Import(restored, connection, "claude-sonnet-4-6",
+            supportsResources: client.CanPrepareResources);
+        await LlmResourcePreparation.ValidateContextAsync(imported, access.Selection, access, () => { }, CancellationToken.None);
+        var request = new LlmChatRequest
+        {
+            ModelId = "claude-sonnet-4-6",
+            MaxOutputTokens = 16,
+            Resources = access,
+            Messages = [.. imported.Entries.Select(entry => entry.Message), new("user", "Compare the files")]
+        };
+        var events = new List<LlmStreamEvent>();
+        await foreach (LlmStreamEvent item in client.StreamAsync(connection, request)) events.Add(item);
+        Assert.Equal(LlmCompletionStatus.Completed, Assert.Single(events.OfType<LlmChatCompletionEvent>()).Result.Status);
+        Assert.Equal([("reference.txt", "reference text"), ("reference.txt", "reference text"), ("result.json", "{\"answer\":42}")], handler.Items);
+        Assert.Equal(4, access.Reads.Count);
+        Assert.All(access.Reads, stream => Assert.False(stream.CanRead));
+        Assert.Equal(9, imported.Revision);
+        Assert.Equal(context.ResourceSelectionVersion, imported.ResourceSelectionVersion);
+        Assert.Equal([generated, reference], imported.SelectedResources);
+        Assert.IsType<LlmResourceAttachment>(imported.Entries[0].Message.Attachments[0]);
+        Assert.Same(access, request.Resources);
+        if (generatedByTool)
+            Assert.IsType<LlmToolOutputSessionResource>(Assert.IsType<LlmToolResult>(Assert.Single(imported.Entries[2].Message.ToolResults)).Output.Parts[0]);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task InlineReaderCleanupRefusalPreventsSuccessAndPreservesAnIndependentOperationFailure(bool generationFails)
+    {
+        var reference = new InferenceResourceReference("workspace", "reference");
+        var cleanup = new IOException("The reader could not be released.");
+        var operation = new IOException("The provider request failed.");
+        var access = new Resources(new("workspace", "session", 1, [reference]),
+            [(reference, "reference.txt", "reference text"u8.ToArray())], cleanup);
+        var connection = new LlmConnection
+        {
+            Version = "anthropic",
+            Transport = LlmTransport.AnthropicMessages,
+            Endpoint = "https://anthropic.example.test/v1",
+            Credential = new LlmCredential { ApiKey = "test-key" }.Serialize()
+        };
+        using var http = new HttpClient(new Documents(generationFails ? operation : null));
+        var client = new AnthropicMessagesLlmClient(http);
+        var events = new List<LlmStreamEvent>();
+        Exception failure = (await Record.ExceptionAsync(async () =>
+        {
+            await foreach (LlmStreamEvent item in client.StreamAsync(connection,
+                new() { ModelId = "claude-sonnet-4-6", MaxOutputTokens = 16, Resources = access, Messages = [new("user", "Read the file")] }))
+                events.Add(item);
+        }))!;
+        Exception release;
+        if (generationFails)
+        {
+            Exception[] causes = Assert.IsType<AggregateException>(failure).InnerExceptions.ToArray();
+            Assert.Equal(2, causes.Length);
+            Assert.Same(operation, Assert.IsType<InferenceResourceOperationException>(causes[0]).InnerException);
+            release = causes[1];
+        }
+        else release = failure;
+        InferenceResourceOperationException refused = Assert.IsType<InferenceResourceOperationException>(release);
+        Assert.Equal(InferenceResourceOperationPhase.Cleanup, refused.Failure.Phase);
+        Assert.Equal(reference, refused.Failure.Reference);
+        Assert.Same(cleanup, refused.InnerException);
+        Assert.DoesNotContain(events, item => item is LlmChatCompletionEvent);
+        Assert.Equal(1, access.ReleaseAttempts);
+        using MemoryStream retained = Assert.Single(access.Reads);
+        Assert.True(retained.CanRead);
+    }
+
+    [Fact]
+    public async Task ResourceBoundAccountingDoesNotIgnoreSelectedFilesOrOpenThem()
+    {
+        var reference = new InferenceResourceReference("workspace", "reference");
+        var access = new Resources(new("workspace", "session", 1, [reference]),
+            [(reference, "reference.txt", "reference text"u8.ToArray())]);
+        var connection = new LlmConnection
+        {
+            Version = "anthropic",
+            Transport = LlmTransport.AnthropicMessages,
+            Endpoint = "https://anthropic.example.test/v1",
+            Credential = new LlmCredential { ApiKey = "test-key" }.Serialize()
+        };
+        var handler = new Documents();
+        using var http = new HttpClient(handler);
+        var client = new AnthropicMessagesLlmClient(http);
+        var request = new LlmChatRequest
+        {
+            ModelId = "claude-sonnet-4-6",
+            MaxOutputTokens = 16,
+            Resources = access,
+            Messages = [new("user", "Read the file")]
+        };
+        Assert.Null(client.EstimateInputTokens(connection, request));
+        Assert.Null(client.EstimateInputTokens(connection, request with
+        { Messages = [new("user", "Read the file") { Attachments = [new LlmResourceAttachment(reference)] }] }));
+        await Assert.ThrowsAsync<NotSupportedException>(() => client.CountInputTokensAsync(connection, request));
+        Assert.Equal(0, handler.Requests);
+        Assert.Empty(access.Reads);
+        Assert.Equal(0, access.ReleaseAttempts);
+    }
+
+    private sealed class Documents(Exception? failure = null) : HttpMessageHandler
+    {
+        public List<(string Name, string Text)> Items { get; } = [];
+        public int Requests { get; private set; }
+
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            Requests++;
+            Assert.Equal(HttpMethod.Post, request.Method);
+            Assert.Equal(new Uri("https://anthropic.example.test/v1/messages"), request.RequestUri);
+            Assert.Equal("test-key", Assert.Single(request.Headers.GetValues("x-api-key")));
+            using JsonDocument payload = JsonDocument.Parse(await request.Content!.ReadAsStringAsync(cancellationToken));
+            foreach (JsonElement message in payload.RootElement.GetProperty("messages").EnumerateArray())
+                foreach (JsonElement block in message.GetProperty("content").EnumerateArray())
+                    foreach (JsonElement part in block.GetProperty("type").GetString() == "tool_result"
+                        ? block.GetProperty("content").EnumerateArray() : new[] { block }.AsEnumerable())
+                    if (part.GetProperty("type").GetString() == "document")
+                    {
+                        Assert.Equal("text", part.GetProperty("source").GetProperty("type").GetString());
+                        Items.Add((part.GetProperty("title").GetString()!, part.GetProperty("source").GetProperty("data").GetString()!));
+                    }
+            if (failure is not null) throw failure;
+            return new(HttpStatusCode.OK)
+            {
+                Content = new StringContent("data: {\"type\":\"message_start\",\"message\":{\"id\":\"message-1\",\"model\":\"claude-sonnet-4-6\",\"usage\":{\"input_tokens\":5,\"output_tokens\":0}}}\n\n"
+                    + "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":0}}\n\ndata: {\"type\":\"message_stop\"}\n\n",
+                    System.Text.Encoding.UTF8, "text/event-stream")
+            };
+        }
+    }
+
     private sealed class Uploads(string destination) : HttpMessageHandler
     {
         public List<(string Name, byte[] Bytes)> Items { get; } = [];
@@ -173,12 +365,13 @@ public sealed class ResourcePreparationTests
     }
 
     private sealed class Resources(InferenceResourceSelection selection,
-        IReadOnlyList<(InferenceResourceReference Reference, string Name, byte[] Bytes)> content) : IInferenceResourceAccess
+        IReadOnlyList<(InferenceResourceReference Reference, string Name, byte[] Bytes)> content, Exception? releaseFailure = null) : IInferenceResourceAccess
     {
         public string WorkspaceId => selection.WorkspaceId;
         public string SessionId => selection.SessionId;
         public InferenceResourceSelection Selection => selection;
         public List<MemoryStream> Reads { get; } = [];
+        public int ReleaseAttempts { get; private set; }
 
         public Task<InferenceResourceDescriptor?> GetAsync(InferenceResourceReference reference, CancellationToken cancellationToken = default)
         {
@@ -190,7 +383,7 @@ public sealed class ResourcePreparationTests
         {
             var stream = new MemoryStream(content.Single(item => item.Reference == reference).Bytes, writable: false);
             Reads.Add(stream);
-            return new Read((await GetAsync(reference, cancellationToken))!, stream);
+            return new Read((await GetAsync(reference, cancellationToken))!, stream, this);
         }
 
         public Task<InferenceResourceSelection> GetSelectionAsync(CancellationToken cancellationToken = default) => Task.FromResult(selection);
@@ -198,11 +391,16 @@ public sealed class ResourcePreparationTests
         public Task<InferenceResourceSelection> SelectAsync(IReadOnlyList<InferenceResourceReference> references, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<InferenceResourceSelection> ReplaceSelectionAsync(IReadOnlyList<InferenceResourceReference> references, long expectedRevision, CancellationToken cancellationToken = default) => throw new NotSupportedException();
 
-        private sealed class Read(InferenceResourceDescriptor resource, MemoryStream stream) : IInferenceResourceReadHandle
+        private sealed class Read(InferenceResourceDescriptor resource, MemoryStream stream, Resources owner) : IInferenceResourceReadHandle
         {
             public InferenceResourceDescriptor Resource => resource;
             public Stream Content => stream;
-            public ValueTask DisposeAsync() => stream.DisposeAsync();
+            public ValueTask DisposeAsync()
+            {
+                owner.ReleaseAttempts++;
+                return owner.ReleaseFailure is { } failure ? ValueTask.FromException(failure) : stream.DisposeAsync();
+            }
         }
+        private Exception? ReleaseFailure => releaseFailure;
     }
 }

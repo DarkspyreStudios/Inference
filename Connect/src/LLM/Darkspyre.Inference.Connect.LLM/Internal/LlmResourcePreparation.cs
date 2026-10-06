@@ -1,4 +1,5 @@
 using System.Runtime.ExceptionServices;
+using System.Runtime.CompilerServices;
 using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Common.LLM;
 using Darkspyre.Inference.Common.Media;
@@ -324,6 +325,137 @@ internal sealed class LlmResourcePreparation : IAsyncDisposable
             throw;
         }
     }
+
+    internal static async IAsyncEnumerable<LlmStreamEvent> StreamInlineAsync(LlmChatRequest request,
+        Action<LlmChatRequest> validate, Func<LlmChatRequest, CancellationToken, IAsyncEnumerable<LlmStreamEvent>> stream,
+        [EnumeratorCancellation] CancellationToken token)
+    {
+        request = ClientTools.Snapshot(request);
+        validate(request);
+        LlmResourcePreparation? resources = null;
+        IAsyncEnumerator<LlmStreamEvent>? iterator = null;
+        Exception? failure = null;
+        LlmChatCompletionEvent? terminal = null;
+        try
+        {
+            try
+            {
+                resources = await PrepareInlineAsync(request, token).ConfigureAwait(false);
+                iterator = stream(resources.Request, token).GetAsyncEnumerator(token);
+            }
+            catch (Exception error)
+            {
+                failure = AsResourceFailure(error, token);
+                ExceptionDispatchInfo.Capture(failure).Throw();
+                throw;
+            }
+            while (true)
+            {
+                bool moved;
+                try { moved = await iterator.MoveNextAsync().ConfigureAwait(false); }
+                catch (Exception error)
+                {
+                    failure = AsResourceFailure(error, token);
+                    ExceptionDispatchInfo.Capture(failure).Throw();
+                    throw;
+                }
+                if (!moved) break;
+                if (iterator.Current is LlmChatCompletionEvent completion) terminal = completion;
+                else yield return iterator.Current;
+            }
+        }
+        finally
+        {
+            var cleanup = new List<Exception>();
+            try { if (iterator is not null) await iterator.DisposeAsync().ConfigureAwait(false); }
+            catch (Exception error) { cleanup.Add(AsCleanupFailure(error, refusedOwner: iterator)); }
+            try { if (resources is not null) await resources.DisposeAsync().ConfigureAwait(false); }
+            catch (Exception error) { cleanup.Add(error); }
+            if (cleanup.Count > 0)
+            {
+                if (failure is not null) cleanup.Insert(0, failure);
+                if (cleanup.Count == 1) ExceptionDispatchInfo.Capture(cleanup[0]).Throw();
+                ExceptionDispatchInfo.Capture(new AggregateException(cleanup)).Throw();
+            }
+        }
+        try { token.ThrowIfCancellationRequested(); }
+        catch (OperationCanceledException error)
+        { ExceptionDispatchInfo.Capture(AsResourceFailure(error, token)).Throw(); throw; }
+        if (terminal is not null) yield return terminal;
+    }
+
+    private static async Task<LlmResourcePreparation> PrepareInlineAsync(LlmChatRequest request, CancellationToken token)
+    {
+        ValidateArguments(request);
+        var operation = new LlmResourcePreparation(request);
+        InferenceResourceOperationPhase phase = InferenceResourceOperationPhase.ReadSelection;
+        InferenceResourceReference? current = null;
+        CountingReadStream? reading = null;
+        void Fence() => token.ThrowIfCancellationRequested();
+        try
+        {
+            var access = request.Resources ?? throw new ArgumentException("Inline resources require caller-owned access.", nameof(request));
+            InferenceResourceSelection selection = await ReadSelectionAsync(access, Fence, token).ConfigureAwait(false);
+            request = AppendSelection(request, selection);
+            operation._readScope = new(selection.WorkspaceId, selection.SessionId);
+            operation.SelectionVersion = new(selection.WorkspaceId, selection.SessionId, selection.Revision);
+            var attachments = new Dictionary<InferenceResourceReference, LlmAttachment>();
+            foreach (InferenceResourceReference reference in NamedReferences(request))
+            {
+                current = reference;
+                phase = InferenceResourceOperationPhase.OpenRead;
+                var opened = await operation.OpenNamedAsync(access, reference, descriptor =>
+                {
+                    if (string.IsNullOrWhiteSpace(descriptor.FileName))
+                        throw new NotSupportedException("The attachment destination requires an observed resource filename.");
+                }, Fence, token).ConfigureAwait(false);
+                reading = opened.Content;
+                phase = InferenceResourceOperationPhase.Materialize;
+                using var buffer = new MemoryStream();
+                await reading.CopyToAsync(buffer, token).ConfigureAwait(false);
+                operation.VerifyRead(access, opened.Descriptor, reading, Fence, token);
+                attachments.Add(reference, new LlmAttachment
+                {
+                    Kind = opened.Descriptor.ContentType?.StartsWith("image/", StringComparison.OrdinalIgnoreCase) == true
+                        ? LlmBinaryKind.Image : LlmBinaryKind.Document,
+                    FileName = opened.Descriptor.FileName!,
+                    MediaType = opened.Descriptor.ContentType,
+                    Data = buffer.ToArray()
+                });
+                reading = null;
+            }
+            operation.Request = request with
+            {
+                Resources = null,
+                Messages = request.Messages.Select(message => message.ContinuationState is not null ? message : message with
+                {
+                    Attachments = message.Attachments.Select(attachment => attachment is LlmResourceAttachment logical
+                        ? attachments[logical.Resource] : attachment).ToArray(),
+                    ToolResults = message.ToolResults.Select(result => result is LlmToolResult function ? function with
+                    {
+                        Output = function.Output with
+                        {
+                            Parts = function.Output.Parts.Select(part => part is LlmToolOutputSessionResource logical
+                                ? ToToolPart(attachments[logical.Resource]) : part).ToArray()
+                        }
+                    } : result).ToArray()
+                }).ToArray()
+            };
+            Fence();
+            return operation;
+        }
+        catch (Exception original)
+        {
+            Exception error = AsInputFailure(original, phase, current, reading?.BytesRead, token);
+            try { await operation.DisposeAsync().ConfigureAwait(false); }
+            catch (Exception cleanup) { throw new PreparationFailure([error, cleanup], error); }
+            ExceptionDispatchInfo.Capture(error).Throw();
+            throw;
+        }
+    }
+
+    private static LlmToolOutputBinary ToToolPart(LlmAttachment attachment) =>
+        new(attachment.Kind, LlmAttachments.ResolveMediaType(attachment), attachment.Data, attachment.FileName);
 
     internal static Exception AsInputFailure(Exception error, InferenceResourceOperationPhase phase,
         InferenceResourceReference? reference, long? bytesRead, CancellationToken token)
