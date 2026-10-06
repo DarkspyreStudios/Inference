@@ -8,6 +8,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\LLM\Darkspyre.Inference.Tensor.LLM.Qwen\Darkspyre.Inference.Tensor.LLM.Qwen.csproj" />
     <ProjectReference Include="..\..\src\Registry\Darkspyre.Inference.Tensor.Registry\Darkspyre.Inference.Tensor.Registry.csproj" />
+    <ProjectReference Include="..\..\src\Ggml\Darkspyre.Inference.Tensor.Ggml\Darkspyre.Inference.Tensor.Ggml.csproj" />
     <!-- Runs the loaded engine through Connect's SelfHost transport and managed agent lane. -->
     <ProjectReference Include="..\..\..\Connect\src\LLM\Darkspyre.Inference.Connect.LLM\Darkspyre.Inference.Connect.LLM.csproj" />
   </ItemGroup>

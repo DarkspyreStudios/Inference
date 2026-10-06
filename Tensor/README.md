@@ -74,6 +74,12 @@ contract in `docs/laya-onnx-runtime.tech-design.md`. Its sequence
 limits and fitted calibration come from the selected pack's agent configuration. Selecting a
 fine-tuned checkpoint does not independently establish calibration accuracy for a new distribution.
 
+Source composition callers reference `Darkspyre.Inference.Tensor.Ggml` directly
+when a constructor exposes `GgmlRuntimeOwner`, including optional parameters.
+Setup Examples and Tensor ConsoleTester declare that reference alongside their
+engine and registry references. A transitive implementation reference does not
+supply the constructor's compile-time type in this source build.
+
 Supra's publisher supplies the DiT as a PyTorch ZIP state dictionary rather than safetensors. The
 Darkspyre TensorSharp fork reads that file as data through a whitelist-only checkpoint reader. It
 accepts only the tensor rebuild, storage, and container forms required by the pinned checkpoint and
