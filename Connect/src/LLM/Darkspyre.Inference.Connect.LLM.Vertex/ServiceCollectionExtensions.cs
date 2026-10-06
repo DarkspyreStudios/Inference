@@ -31,9 +31,15 @@ internal sealed class ManagedVertexAgentClient(VertexLlmClient client, LlmProvid
         cancellationToken.ThrowIfCancellationRequested();
         options = ClientTools.Snapshot(options);
         ProviderControlPolicy.Validate(connection, new() { ModelId = options.ModelId });
-        if (options.Context is not null) { ManagedAgentContext.ValidateRuntimeResources(options.Context); }
-        HostedTools.Validate(options.HostedTools, options.MaxHostedTurns, client.GetCapabilities(connection, options.ModelId).HostedTools);
-        ClientTools.ValidateManagedOpening(options, client.GetCapabilities(connection, options.ModelId));
+        if (options.Context is { } context)
+        {
+            _ = ManagedAgentContext.ValidatePortable(context);
+            if (options.CallerServices?.Resources is null) ManagedAgentContext.ValidateRuntimeResources(context);
+        }
+        var openingCapabilities = client.GetCapabilities(connection, options.ModelId);
+        HostedTools.Validate(options.HostedTools, options.MaxHostedTurns, openingCapabilities.HostedTools);
+        ClientTools.ValidateManagedOpening(options, openingCapabilities,
+            supportsResources: client.CanPrepareResources && openingCapabilities.SupportsPromptDocuments);
         var capabilities = client.GetCapabilities(connection, options.ModelId);
         if (!capabilities.SupportsAgentSessions || options.Tools.Any(tool => tool is LlmAgentToolDefinition) && !capabilities.SupportsAgentToolUse)
         { throw new NotSupportedException("The selected Vertex model disables the requested agent operation."); }

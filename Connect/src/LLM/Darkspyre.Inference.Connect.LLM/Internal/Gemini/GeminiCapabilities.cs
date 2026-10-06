@@ -53,7 +53,7 @@ internal static class GeminiCapabilities
         string mime = LlmAttachments.ResolveMediaType(attachment);
         bool supported = attachment.Kind == LlmBinaryKind.Image
             ? mime is "image/png" or "image/jpeg" or "image/webp"
-            : mime is "application/pdf" or "text/plain";
+            : mime == "application/pdf" || LlmAttachments.IsTextMediaType(mime);
         int max = mime == "application/pdf" ? 50 * 1024 * 1024 : 7 * 1024 * 1024;
         return supported && attachment.Data.Length <= max;
     }

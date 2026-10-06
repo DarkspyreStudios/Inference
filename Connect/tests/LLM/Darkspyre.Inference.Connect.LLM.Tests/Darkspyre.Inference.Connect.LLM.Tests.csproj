@@ -19,5 +19,6 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\..\src\LLM\Darkspyre.Inference.Connect.LLM\Darkspyre.Inference.Connect.LLM.csproj" />
+    <ProjectReference Include="..\..\..\src\LLM\Darkspyre.Inference.Connect.LLM.Vertex\Darkspyre.Inference.Connect.LLM.Vertex.csproj" />
   </ItemGroup>
 </Project>

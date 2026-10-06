@@ -71,10 +71,15 @@ internal static class GeminiRequest
                     if (attachmentProjection is not null) { parts.Add(attachmentProjection(source)); continue; }
                     LlmAttachment attachment = LlmAttachments.RequireBinary(source);
                     string mime = LlmAttachments.ResolveMediaType(attachment);
+                    if (attachment.Kind == LlmBinaryKind.Document && LlmAttachments.IsTextMediaType(mime))
+                    {
+                        _ = LlmAttachments.ReadText(attachment);
+                        mime = "text/plain";
+                    }
                     parts.Add(new JsonObject
                     {
                         ["inlineData"] = new JsonObject
-                        { ["mimeType"] = mime, ["data"] = LlmAttachments.ToBase64(attachment) }
+                        { ["mimeType"] = mime, ["data"] = LlmAttachments.ToBase64(attachment), ["displayName"] = attachment.FileName }
                     });
                 }
                 bool first = true;

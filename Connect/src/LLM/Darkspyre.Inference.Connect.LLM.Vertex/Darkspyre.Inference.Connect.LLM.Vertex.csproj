@@ -4,6 +4,7 @@
     <Description>Google Vertex AI Gemini and Claude protocol adapters.</Description>
   </PropertyGroup>
   <ItemGroup>
+    <InternalsVisibleTo Include="Darkspyre.Inference.Connect.LLM.Tests" />
     <ProjectReference Include="../Darkspyre.Inference.Connect.LLM/Darkspyre.Inference.Connect.LLM.csproj" />
     <PackageReference Include="Google.Apis.Auth" />
   </ItemGroup>

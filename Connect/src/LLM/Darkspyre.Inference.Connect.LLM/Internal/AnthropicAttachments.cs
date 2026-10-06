@@ -38,9 +38,7 @@ internal static class AnthropicAttachments
                 ["data"] = LlmAttachments.ToBase64(attachment)
             };
         }
-        else if (mediaType.StartsWith("text/", StringComparison.OrdinalIgnoreCase)
-            || string.Equals(mediaType, "application/json", StringComparison.OrdinalIgnoreCase)
-            || string.Equals(mediaType, "application/xml", StringComparison.OrdinalIgnoreCase))
+        else if (LlmAttachments.IsTextMediaType(mediaType))
         {
             source = new JsonObject
             {

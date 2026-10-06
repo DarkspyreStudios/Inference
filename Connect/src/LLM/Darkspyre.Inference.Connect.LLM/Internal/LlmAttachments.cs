@@ -143,6 +143,11 @@ internal static class LlmAttachments
         _ => throw new ArgumentOutOfRangeException(nameof(attachment))
     };
 
+    public static bool IsTextMediaType(string mediaType) =>
+        mediaType.StartsWith("text/", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(mediaType, "application/json", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(mediaType, "application/xml", StringComparison.OrdinalIgnoreCase);
+
     public static string ReadText(LlmAttachment attachment)
     {
         try

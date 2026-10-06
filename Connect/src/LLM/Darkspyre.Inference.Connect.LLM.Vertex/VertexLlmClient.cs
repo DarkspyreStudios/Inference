@@ -15,6 +15,7 @@ internal sealed partial class VertexLlmClient(HttpClient http, IVertexAuthentica
     public override LlmProviderDefinition ProviderDefinition => VertexProviderDefinition.Value;
     protected override LlmProviderCapabilities DefaultCapabilities => new() { SupportsModelListing = true };
     protected override bool OffersNonStreamingRequests => true;
+    protected override bool SupportsResourcePreparation => true;
     public override LlmProviderCapabilities GetCapabilities(LlmConnection connection, string? modelId = null) => Capabilities(connection, modelId);
 
     internal static LlmProviderCapabilities Capabilities(LlmConnection connection, string? modelId)
@@ -58,16 +59,21 @@ internal sealed partial class VertexLlmClient(HttpClient http, IVertexAuthentica
         return connection with { ContinuationCodec = new VertexContinuationCodec(), ResolvedContinuationScope = access.Scope };
     }
 
-    private async Task<(VertexModelProfile Profile, LlmProviderCapabilities Capabilities, VertexAccess Access,
-        LlmConnection Connection, LlmChatRequest Request, LlmStructuredOutputEnforcement? Enforcement, int Omitted)> PrepareRequestAsync(
-        LlmConnection connection, LlmChatRequest request, CancellationToken cancellationToken)
+    private (VertexModelProfile Profile, LlmProviderCapabilities Capabilities) ValidateSelectedRequest(
+        LlmConnection connection, LlmChatRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
-        request = ClientTools.Snapshot(request);
         VertexModelProfile profile = VertexModelProfiles.Get(request.ModelId);
         LlmProviderCapabilities capabilities = GetCapabilities(connection, request.ModelId);
         ValidateRequest(connection, request, capabilities, profile.IsClaude ? AnthropicTools.Resolve(connection, request).NativeNames : null);
         ValidateVertexRequest(connection, request, profile, capabilities);
+        return (profile, capabilities);
+    }
+
+    private (VertexModelProfile Profile, LlmProviderCapabilities Capabilities) PreflightRequest(
+        LlmConnection connection, LlmChatRequest request)
+    {
+        var selected = ValidateSelectedRequest(connection, request);
         if (request.ExplicitCache is { } cache)
         {
             ValidateCachedSuffix(request);
@@ -75,6 +81,15 @@ internal sealed partial class VertexLlmClient(HttpClient http, IVertexAuthentica
                 throw new ArgumentException("The selected cache requires admission through its binding owner.", nameof(request));
             admission.Check(connection, cache);
         }
+        return selected;
+    }
+
+    private async Task<(VertexModelProfile Profile, LlmProviderCapabilities Capabilities, VertexAccess Access,
+        LlmConnection Connection, LlmChatRequest Request, LlmStructuredOutputEnforcement? Enforcement, int Omitted)> PrepareRequestAsync(
+        LlmConnection connection, LlmChatRequest request, CancellationToken cancellationToken)
+    {
+        request = ClientTools.Snapshot(request);
+        var (profile, capabilities) = PreflightRequest(connection, request);
         VertexAccess access = await ResolveAccessAsync(connection, cancellationToken).ConfigureAwait(false);
         if (connection.ResolvedContinuationScope is { } pinned && pinned != access.Scope)
         { throw new InvalidOperationException("The Google credential identity changed before dispatch."); }
@@ -93,6 +108,8 @@ internal sealed partial class VertexLlmClient(HttpClient http, IVertexAuthentica
         ArgumentNullException.ThrowIfNull(request);
         Uri endpoint = VertexEndpoints.CountTokens(connection, request.ModelId);
         ExplicitCaches.ValidateProviderTokenCount(connection, request);
+        if (request.Resources is not null)
+            throw new NotSupportedException("The Vertex count route does not materialize caller-owned resources.");
         if (VertexModelProfiles.Get(request.ModelId).IsClaude) AnthropicMessagesLlmClient.ValidateTokenCountOptions(connection, request);
         using var consumption = SdkHttpConsumption.Enter(Http, cancellationToken); cancellationToken = consumption.Token;
         var built = await PrepareRequestAsync(connection, request, cancellationToken).ConfigureAwait(false);
@@ -113,7 +130,13 @@ internal sealed partial class VertexLlmClient(HttpClient http, IVertexAuthentica
         return consumption.Publish(result with { OmittedContinuationStateCount = checked(result.OmittedContinuationStateCount + built.Omitted) });
     }
 
-    public override async IAsyncEnumerable<LlmStreamEvent> StreamAsync(LlmConnection connection, LlmChatRequest request,
+    public override IAsyncEnumerable<LlmStreamEvent> StreamAsync(LlmConnection connection, LlmChatRequest request,
+        CancellationToken cancellationToken = default) => request.Resources is null
+            ? StreamPreparedAsync(connection, request, cancellationToken)
+            : LlmResourcePreparation.StreamInlineAsync(request, input => { _ = PreflightRequest(connection, input); },
+                (input, token) => StreamPreparedAsync(connection, input, token), cancellationToken);
+
+    private async IAsyncEnumerable<LlmStreamEvent> StreamPreparedAsync(LlmConnection connection, LlmChatRequest request,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         using var consumption = SdkHttpConsumption.Enter(Http, cancellationToken); cancellationToken = consumption.Token;
@@ -224,10 +247,8 @@ internal sealed partial class VertexLlmClient(HttpClient http, IVertexAuthentica
     public string? EstimateDiagnostic => "Local text estimate; opaque reasoning and media occupancy are unknown. This is not a provider admission check.";
     public ContextEstimate? EstimateInputTokens(LlmConnection connection, LlmChatRequest request)
     {
-        LlmProviderCapabilities capabilities = GetCapabilities(connection, request.ModelId);
-        VertexModelProfile profile = VertexModelProfiles.Get(request.ModelId);
-        ValidateRequest(connection, request, capabilities, profile.IsClaude ? AnthropicTools.Resolve(connection, request).NativeNames : null);
-        ValidateVertexRequest(connection, request, profile, capabilities);
+        _ = ValidateSelectedRequest(connection, request);
+        if (request.Resources is not null) return null;
         if (request.ExplicitCache is not null) { ValidateCachedSuffix(request); return null; }
         if (request.Messages.Any(message => message.ContinuationState is not null || message.Attachments.Count != 0
             || ClientTools.Functions(message.ToolResults).Any(result => result.Output.Parts.Any(part => part is not LlmToolOutputText)))) { return null; }
@@ -270,18 +291,16 @@ internal sealed partial class VertexLlmClient(HttpClient http, IVertexAuthentica
         { throw new NotSupportedException("This model does not offer strict tool-schema enforcement. Ordinary non-strict tools are supported."); }
         if (request.AllowParallelToolCalls is not null && !capabilities.Tools.SupportsParallelCallControl)
         { throw new NotSupportedException("This route cannot enforce parallel tool-call control."); }
-        foreach (LlmAttachment attachment in request.Messages.SelectMany(message => message.Attachments).Select(LlmAttachments.RequireBinary))
+        foreach (LlmAttachment attachment in request.Messages.SelectMany(message => message.Attachments)
+            .Where(attachment => attachment is not LlmResourceAttachment).Select(LlmAttachments.RequireBinary))
         {
             if (!profile.IsClaude)
             {
                 if (!GeminiCapabilities.AcceptsAttachment(attachment)) { throw new NotSupportedException("Unsupported Vertex attachment media type or size."); }
                 continue;
             }
-            string mime = LlmAttachments.ResolveMediaType(attachment);
-            bool supported = attachment.Kind == LlmBinaryKind.Image
-                ? mime is "image/png" or "image/jpeg" or "image/webp" or "image/gif"
-                : mime is "application/pdf" or "text/plain";
-            if (!supported || attachment.Data.Length > 5 * 1024 * 1024) { throw new NotSupportedException("Unsupported Vertex attachment media type or size."); }
+            if (attachment.Data.Length > 5 * 1024 * 1024) { throw new NotSupportedException("Unsupported Vertex attachment media type or size."); }
+            _ = AnthropicAttachments.BuildContentBlock(attachment);
         }
     }
 }

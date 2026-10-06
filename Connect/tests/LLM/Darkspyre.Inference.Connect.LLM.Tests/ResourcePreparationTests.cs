@@ -6,6 +6,7 @@ using Darkspyre.Inference.Common.LLM;
 using Darkspyre.Inference.Common.Resources;
 using Darkspyre.Inference.Connect.LLM.Internal;
 using Darkspyre.Inference.Connect.LLM.Providers;
+using Darkspyre.Inference.Connect.LLM.Vertex;
 
 namespace Darkspyre.Inference.Connect.LLM.Tests;
 
@@ -146,9 +147,13 @@ public sealed class ResourcePreparationTests
     }
 
     [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task LogicalDocumentContextCanMoveFromGrokToAnthropicWithoutChangingItsResources(bool generatedByTool)
+    [InlineData("anthropic", false)]
+    [InlineData("anthropic", true)]
+    [InlineData("vertex-claude", false)]
+    [InlineData("vertex-claude", true)]
+    [InlineData("vertex-gemini", false)]
+    [InlineData("vertex-gemini", true)]
+    public async Task LogicalDocumentContextCanMoveFromGrokToAnInlineProviderWithoutChangingItsResources(string destination, bool generatedByTool)
     {
         var reference = new InferenceResourceReference("workspace", "reference");
         var generated = new InferenceResourceReference("workspace", "generated-json");
@@ -193,26 +198,25 @@ public sealed class ResourcePreparationTests
             Assert.IsType<LlmFileReference>(prepared.Request.Messages[0].Attachments[0]);
         }
 
-        var connection = new LlmConnection
-        {
-            Version = "anthropic",
-            Transport = LlmTransport.AnthropicMessages,
-            Endpoint = "https://anthropic.example.test/v1",
-            Credential = new LlmCredential { ApiKey = "test-key" }.Serialize()
-        };
-        var handler = new Documents();
+        LlmConnection connection = InlineConnection(destination);
+        string model = destination == "vertex-gemini" ? "google/gemini-3-flash-preview"
+            : destination == "vertex-claude" ? "anthropic/claude-sonnet-4-6" : "claude-sonnet-4-6";
+        var handler = new Documents(destination: destination);
         using var targetHttp = new HttpClient(handler);
-        var client = new AnthropicMessagesLlmClient(targetHttp);
+        LlmClientBase client = destination == "anthropic" ? new AnthropicMessagesLlmClient(targetHttp)
+            : new VertexLlmClient(targetHttp, new VertexAuthenticationBoundary());
         LlmAgentContext restored = JsonSerializer.Deserialize(portable, ConnectLlmJson.AgentContext)!;
         var source = new Source(connection);
         await using var providers = new LlmProviderService(source, [client]);
-        var agent = new ManagedAnthropicAgentClient(client, providers);
+        ILlmAgentClient agent = client is VertexLlmClient vertex ? new ManagedVertexAgentClient(vertex, providers)
+            : new ManagedAnthropicAgentClient((AnthropicMessagesLlmClient)client, providers);
         await using var agents = new LlmAgentProviderService(source, [agent]);
         await using ILlmAgentSession session = await agents.StartSessionAsync("connection", new()
         {
-            ModelId = "claude-sonnet-4-6",
+            ModelId = model,
             SessionId = "session",
             Context = restored,
+            UnboundContinuationState = LlmUnboundContinuationState.Omit,
             CallerServices = new() { Resources = access }
         });
         LlmAgentContext imported = await session.CaptureContextAsync();
@@ -221,7 +225,13 @@ public sealed class ResourcePreparationTests
             events.Add(item);
         Assert.Equal("session", session.SessionId);
         Assert.Equal(LlmAgentCompletionReason.Completed, Assert.Single(events.OfType<LlmAgentTurnCompletedEvent>()).Reason);
-        Assert.Equal([("reference.txt", "reference text"), ("reference.txt", "reference text"), ("result.json", "{\"answer\":42}")], handler.Items);
+        if (destination == "vertex-gemini" && generatedByTool)
+        {
+            Assert.Equal([("reference.txt", "reference text"), ("reference.txt", "reference text")], handler.Items);
+            Assert.Contains("result.json", handler.ToolText, StringComparison.Ordinal);
+            Assert.Contains("{\"answer\":42}", handler.ToolText, StringComparison.Ordinal);
+        }
+        else Assert.Equal([("reference.txt", "reference text"), ("reference.txt", "reference text"), ("result.json", "{\"answer\":42}")], handler.Items);
         Assert.Equal(4, access.Reads.Count);
         Assert.All(access.Reads, stream => Assert.False(stream.CanRead));
         Assert.Equal(9, imported.Revision);
@@ -281,48 +291,78 @@ public sealed class ResourcePreparationTests
         Assert.True(retained.CanRead);
     }
 
-    [Fact]
-    public async Task ResourceBoundAccountingDoesNotIgnoreSelectedFilesOrOpenThem()
+    [Theory]
+    [InlineData("anthropic")]
+    [InlineData("vertex-claude")]
+    [InlineData("vertex-gemini")]
+    public async Task ResourceBoundAccountingDoesNotIgnoreSelectedFilesOrOpenThem(string destination)
     {
         var reference = new InferenceResourceReference("workspace", "reference");
         var access = new Resources(new("workspace", "session", 1, [reference]),
             [(reference, "reference.txt", "reference text"u8.ToArray())]);
-        var connection = new LlmConnection
-        {
-            Version = "anthropic",
-            Transport = LlmTransport.AnthropicMessages,
-            Endpoint = "https://anthropic.example.test/v1",
-            Credential = new LlmCredential { ApiKey = "test-key" }.Serialize()
-        };
-        var handler = new Documents();
+        LlmConnection connection = InlineConnection(destination);
+        var handler = new Documents(destination: destination);
         using var http = new HttpClient(handler);
-        var client = new AnthropicMessagesLlmClient(http);
+        LlmClientBase client = destination == "anthropic" ? new AnthropicMessagesLlmClient(http)
+            : new VertexLlmClient(http, new VertexAuthenticationBoundary());
+        var estimator = (ILlmContextEstimator)client;
         var request = new LlmChatRequest
         {
-            ModelId = "claude-sonnet-4-6",
+            ModelId = destination == "vertex-gemini" ? "google/gemini-3-flash-preview"
+                : destination == "vertex-claude" ? "anthropic/claude-sonnet-4-6" : "claude-sonnet-4-6",
             MaxOutputTokens = 16,
             Resources = access,
             Messages = [new("user", "Read the file")]
         };
-        Assert.Null(client.EstimateInputTokens(connection, request));
-        Assert.Null(client.EstimateInputTokens(connection, request with
+        Assert.Null(estimator.EstimateInputTokens(connection, request));
+        Assert.Null(estimator.EstimateInputTokens(connection, request with
         { Messages = [new("user", "Read the file") { Attachments = [new LlmResourceAttachment(reference)] }] }));
-        await Assert.ThrowsAsync<NotSupportedException>(() => client.CountInputTokensAsync(connection, request));
+        await Assert.ThrowsAsync<NotSupportedException>(() => ((ILlmProviderTokenCounter)client).CountInputTokensAsync(connection, request));
         Assert.Equal(0, handler.Requests);
         Assert.Empty(access.Reads);
         Assert.Equal(0, access.ReleaseAttempts);
     }
 
-    private sealed class Documents(Exception? failure = null) : HttpMessageHandler
+    private static LlmConnection InlineConnection(string destination) => destination == "anthropic" ? new()
+    {
+        Version = destination, Transport = LlmTransport.AnthropicMessages,
+        Endpoint = "https://anthropic.example.test/v1",
+        Credential = new LlmCredential { ApiKey = "test-key" }.Serialize()
+    } : new()
+    {
+        Version = destination, Transport = LlmTransport.GoogleVertexAi,
+        Endpoint = "https://aiplatform.googleapis.com",
+        Vertex = new() { ProjectId = "project", Location = "global", AuthenticationMode = LlmGoogleAuthenticationMode.ApplicationDefault }
+    };
+
+    private sealed class VertexAuthenticationBoundary : IVertexAuthentication
+    {
+        public Task<VertexAccess> ResolveAsync(LlmConnection connection, CancellationToken cancellationToken) =>
+            Task.FromResult(new VertexAccess("test-token", "test-scope"));
+    }
+
+    private sealed class Documents(Exception? failure = null, string destination = "anthropic") : HttpMessageHandler
     {
         public List<(string Name, string Text)> Items { get; } = [];
         public int Requests { get; private set; }
+        public string ToolText { get; private set; } = string.Empty;
 
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             Requests++;
             if (request.Method == HttpMethod.Get)
             {
+                if (destination != "anthropic")
+                {
+                    string publisher = request.RequestUri!.AbsolutePath.Contains("/google/", StringComparison.Ordinal) ? "google" : "anthropic";
+                    Assert.Equal(new Uri($"https://aiplatform.googleapis.com/v1beta1/publishers/{publisher}/models?pageSize=100"), request.RequestUri);
+                    string model = publisher == "google" ? "gemini-3-flash-preview" : "claude-sonnet-4-6";
+                    return new(HttpStatusCode.OK)
+                    {
+                        Content = new StringContent($"{{\"publisherModels\":[{{\"name\":\"publishers/{publisher}/models/{model}\"}}]}}",
+                            System.Text.Encoding.UTF8, "application/json")
+                    };
+                }
                 Assert.Equal(new Uri("https://anthropic.example.test/v1/models?limit=1000"), request.RequestUri);
                 return new(HttpStatusCode.OK)
                 {
@@ -331,9 +371,34 @@ public sealed class ResourcePreparationTests
                 };
             }
             Assert.Equal(HttpMethod.Post, request.Method);
-            Assert.Equal(new Uri("https://anthropic.example.test/v1/messages"), request.RequestUri);
-            Assert.Equal("test-key", Assert.Single(request.Headers.GetValues("x-api-key")));
+            if (destination == "anthropic")
+            {
+                Assert.Equal(new Uri("https://anthropic.example.test/v1/messages"), request.RequestUri);
+                Assert.Equal("test-key", Assert.Single(request.Headers.GetValues("x-api-key")));
+            }
+            else Assert.Equal("test-token", request.Headers.Authorization!.Parameter);
             using JsonDocument payload = JsonDocument.Parse(await request.Content!.ReadAsStringAsync(cancellationToken));
+            if (destination == "vertex-gemini")
+            {
+                Assert.Equal(new Uri("https://aiplatform.googleapis.com/v1/projects/project/locations/global/publishers/google/models/gemini-3-flash-preview:streamGenerateContent?alt=sse"), request.RequestUri);
+                foreach (JsonElement content in payload.RootElement.GetProperty("contents").EnumerateArray())
+                    foreach (JsonElement part in content.GetProperty("parts").EnumerateArray())
+                        if (part.TryGetProperty("inlineData", out JsonElement inline))
+                        {
+                            Assert.Equal("text/plain", inline.GetProperty("mimeType").GetString());
+                            Items.Add((inline.GetProperty("displayName").GetString()!,
+                                System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(inline.GetProperty("data").GetString()!))));
+                        }
+                        else if (part.TryGetProperty("functionResponse", out JsonElement function))
+                            ToolText += function.GetProperty("response").GetProperty("output").GetString();
+                return new(HttpStatusCode.OK)
+                {
+                    Content = new StringContent("data: {\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":[{\"text\":\"done\"}]},\"finishReason\":\"STOP\"}],\"modelVersion\":\"gemini-3-flash-preview\",\"usageMetadata\":{\"promptTokenCount\":5,\"candidatesTokenCount\":1,\"totalTokenCount\":6}}\n\n",
+                        System.Text.Encoding.UTF8, "text/event-stream")
+                };
+            }
+            if (destination == "vertex-claude")
+                Assert.Equal(new Uri("https://aiplatform.googleapis.com/v1/projects/project/locations/global/publishers/anthropic/models/claude-sonnet-4-6:streamRawPredict"), request.RequestUri);
             foreach (JsonElement message in payload.RootElement.GetProperty("messages").EnumerateArray())
                 foreach (JsonElement block in message.GetProperty("content").EnumerateArray())
                     foreach (JsonElement part in block.GetProperty("type").GetString() == "tool_result"

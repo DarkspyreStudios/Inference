@@ -1105,6 +1105,7 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
     private LlmChatRequest Request(LlmAgentContext context, LlmAgentTurnRequest turn) => new()
     {
         ModelId = turn.ModelId!,
+        UnboundContinuationState = _options.UnboundContinuationState,
         Instructions = turn.Instructions ?? _options.Instructions,
         Messages = context.Entries.Select(entry => entry.Message with { OmittedAttachments = [] }).ToArray(),
         ConversationKey = ThreadId,
