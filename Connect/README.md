@@ -1159,7 +1159,7 @@ private Files transport. Unknown byte counts remain unknown; missing filenames r
 destination. Native receipts belong to the admitted request and do not replace logical captured history.
 After a connection change, the caller reattaches its resource authority to the portable context.
 The Grok destination uploads the named committed content again; it does not reuse another connection's file IDs.
-Anthropic Messages, Vertex Claude and Vertex Gemini read the same logical resources through this shared owner
+Anthropic Messages, Gemini API, Vertex Claude and Vertex Gemini read the same logical resources through this shared owner
 and send their committed content through the existing native inline attachment lane. Text and JSON
 retain their actual filenames and text bytes; PDF and declared image content use the existing binary
 attachment projection. Native attachment validation still rejects unsupported formats. Committed
@@ -1167,10 +1167,10 @@ tool resources use the existing typed binary-output projection. Portable history
 references, selection and transcript revisions. Terminal completion follows owned-reader cleanup;
 operation and independent cleanup failures remain visible together. This lane does not implement
 provider Files CRUD or create a paid cache.
-Anthropic and Vertex managed-session opening admits resource-bearing portable contexts only with explicit
+Anthropic, Gemini API and Vertex managed-session opening admits resource-bearing portable contexts only with explicit
 caller-owned access and a document-capable model. The shared managed session validates the exact
 Workspace/Session selection snapshot before import. Capture keeps logical references after generation.
-Vertex uses the shared inline materializer before its existing native request builders. Preflight
+Gemini API and Vertex use the shared inline materializer before their existing native request builders. Preflight
 validates the selected route and cache binding before resource reads. The materialized request retains
 native format and size validation. Claude uses the shared Anthropic document builder. Gemini sends
 UTF-8 text, JSON and XML bytes with its native `text/plain` inline label and the actual filename.
@@ -1179,7 +1179,7 @@ Managed turn requests retain the caller's explicit unbound-continuation policy f
 The chat facade admits logical references only for clients with implemented resource preparation.
 Provider file-reference capability remains a separate fact.
 Local estimates remain unknown for resource-bound requests and never open their contents. Exact
-Anthropic and Vertex counting refuse these unprepared requests before effects; they never count only the text
+Anthropic, Gemini API and Vertex counting refuse these unprepared requests before effects; they never count only the text
 while silently omitting selected files. Explicit binary attachments retain the existing count route.
 Local accounting does not read or upload selected resources. `AddLlmConnect` includes Grok registration.
 Managed sessions created through the shared internal factory validate resource-bound imported

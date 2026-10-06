@@ -27,6 +27,7 @@ internal sealed partial class GeminiApiLlmClient(HttpClient http)
     public override LlmProviderDefinition ProviderDefinition => ProviderDefinitions.GeminiApi;
     protected override LlmProviderCapabilities DefaultCapabilities => new() { SupportsModelListing = true };
     protected override bool OffersNonStreamingRequests => true;
+    protected override bool SupportsResourcePreparation => true;
 
     public override LlmProviderCapabilities GetCapabilities(LlmConnection connection, string? modelId = null)
     {
@@ -62,8 +63,7 @@ internal sealed partial class GeminiApiLlmClient(HttpClient http)
         return Task.FromResult(connection with { ContinuationCodec = Codec, ResolvedContinuationScope = KeyScope(connection) });
     }
 
-    private (LlmConnection Connection, LlmChatRequest Request, LlmProviderCapabilities Capabilities,
-        LlmStructuredOutputEnforcement? Enforcement, JsonObject Payload, int Omitted) BuildRequest(
+    private LlmProviderCapabilities ValidateSelectedRequest(
         LlmConnection connection, LlmChatRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -72,12 +72,26 @@ internal sealed partial class GeminiApiLlmClient(HttpClient http)
         ValidateRequest(connection, request, capabilities);
         ValidateGeminiRequest(request, capabilities);
         ValidateCachedSuffix(request);
+        return capabilities;
+    }
+
+    private LlmProviderCapabilities PreflightRequest(LlmConnection connection, LlmChatRequest request)
+    {
+        LlmProviderCapabilities capabilities = ValidateSelectedRequest(connection, request);
         if (request.ExplicitCache is { } cache)
         {
             if (connection.CacheAdmission is not { } admission || admission.Owner != connection.CacheBindings)
                 throw new ArgumentException("The selected cache requires admission through its binding owner.", nameof(request));
             admission.Check(connection, cache);
         }
+        return capabilities;
+    }
+
+    private (LlmConnection Connection, LlmChatRequest Request, LlmProviderCapabilities Capabilities,
+        LlmStructuredOutputEnforcement? Enforcement, JsonObject Payload, int Omitted) BuildRequest(
+        LlmConnection connection, LlmChatRequest request)
+    {
+        LlmProviderCapabilities capabilities = PreflightRequest(connection, request);
         string scope = KeyScope(connection);
         if (connection.ResolvedContinuationScope is { } pinned && pinned != scope)
         { throw new InvalidOperationException("The Gemini API key changed before dispatch."); }
@@ -95,6 +109,9 @@ internal sealed partial class GeminiApiLlmClient(HttpClient http)
         CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        ArgumentNullException.ThrowIfNull(request);
+        if (request.Resources is not null)
+            throw new NotSupportedException("The Gemini API count route does not materialize caller-owned resources.");
         var built = BuildRequest(connection, request);
         using var consumption = SdkHttpConsumption.Enter(Http, cancellationToken); cancellationToken = consumption.Token;
         built.Payload["model"] = "models/" + request.ModelId;
@@ -110,7 +127,16 @@ internal sealed partial class GeminiApiLlmClient(HttpClient http)
         return consumption.Publish(result with { OmittedContinuationStateCount = built.Omitted });
     }
 
-    public override async IAsyncEnumerable<LlmStreamEvent> StreamAsync(LlmConnection connection, LlmChatRequest request,
+    public override IAsyncEnumerable<LlmStreamEvent> StreamAsync(LlmConnection connection, LlmChatRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        return request.Resources is null ? StreamPreparedAsync(connection, request, cancellationToken)
+            : LlmResourcePreparation.StreamInlineAsync(request, input => { _ = PreflightRequest(connection, input); },
+                (input, token) => StreamPreparedAsync(connection, input, token), cancellationToken);
+    }
+
+    private async IAsyncEnumerable<LlmStreamEvent> StreamPreparedAsync(LlmConnection connection, LlmChatRequest request,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         var built = BuildRequest(connection, request);
@@ -191,9 +217,8 @@ internal sealed partial class GeminiApiLlmClient(HttpClient http)
 
     public ContextEstimate? EstimateInputTokens(LlmConnection connection, LlmChatRequest request)
     {
-        ValidateRequest(connection, request, GetCapabilities(connection, request.ModelId));
-        ValidateCachedSuffix(request);
-        if (request.ExplicitCache is not null) { return null; }
+        _ = ValidateSelectedRequest(connection, request);
+        if (request.Resources is not null || request.ExplicitCache is not null) { return null; }
         if (request.Messages.Any(message => message.ContinuationState is not null || message.Attachments.Count != 0
             || message.ToolResults.Any(result => result is not LlmToolResult function
                 || function.Output.Parts.Any(part => part is not LlmToolOutputText)))) { return null; }
@@ -282,7 +307,8 @@ internal sealed partial class GeminiApiLlmClient(HttpClient http)
         { throw new NotSupportedException("This model does not offer strict tool-schema enforcement. Ordinary non-strict tools are supported."); }
         if (request.AllowParallelToolCalls is not null && !capabilities.Tools.SupportsParallelCallControl)
         { throw new NotSupportedException("This route cannot enforce parallel tool-call control."); }
-        if (request.Messages.SelectMany(message => message.Attachments).Select(LlmAttachments.RequireBinary).Any(attachment => !GeminiCapabilities.AcceptsAttachment(attachment)))
+        if (request.Messages.SelectMany(message => message.Attachments).Where(attachment => attachment is not LlmResourceAttachment)
+            .Select(LlmAttachments.RequireBinary).Any(attachment => !GeminiCapabilities.AcceptsAttachment(attachment)))
         { throw new NotSupportedException("Unsupported Gemini API attachment media type or size."); }
     }
 

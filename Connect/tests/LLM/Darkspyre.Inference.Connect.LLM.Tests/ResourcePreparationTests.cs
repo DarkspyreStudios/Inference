@@ -153,6 +153,8 @@ public sealed class ResourcePreparationTests
     [InlineData("vertex-claude", true)]
     [InlineData("vertex-gemini", false)]
     [InlineData("vertex-gemini", true)]
+    [InlineData("gemini-api", false)]
+    [InlineData("gemini-api", true)]
     public async Task LogicalDocumentContextCanMoveFromGrokToAnInlineProviderWithoutChangingItsResources(string destination, bool generatedByTool)
     {
         var reference = new InferenceResourceReference("workspace", "reference");
@@ -199,17 +201,19 @@ public sealed class ResourcePreparationTests
         }
 
         LlmConnection connection = InlineConnection(destination);
-        string model = destination == "vertex-gemini" ? "google/gemini-3-flash-preview"
-            : destination == "vertex-claude" ? "anthropic/claude-sonnet-4-6" : "claude-sonnet-4-6";
+        string model = InlineModel(destination);
         var handler = new Documents(destination: destination);
         using var targetHttp = new HttpClient(handler);
-        LlmClientBase client = destination == "anthropic" ? new AnthropicMessagesLlmClient(targetHttp)
-            : new VertexLlmClient(targetHttp, new VertexAuthenticationBoundary());
+        LlmClientBase client = InlineClient(destination, targetHttp);
         LlmAgentContext restored = JsonSerializer.Deserialize(portable, ConnectLlmJson.AgentContext)!;
         var source = new Source(connection);
         await using var providers = new LlmProviderService(source, [client]);
-        ILlmAgentClient agent = client is VertexLlmClient vertex ? new ManagedVertexAgentClient(vertex, providers)
-            : new ManagedAnthropicAgentClient((AnthropicMessagesLlmClient)client, providers);
+        ILlmAgentClient agent = client switch
+        {
+            VertexLlmClient vertex => new ManagedVertexAgentClient(vertex, providers),
+            GeminiApiLlmClient gemini => new ManagedGeminiApiAgentClient(gemini, providers),
+            _ => new ManagedAnthropicAgentClient((AnthropicMessagesLlmClient)client, providers)
+        };
         await using var agents = new LlmAgentProviderService(source, [agent]);
         await using ILlmAgentSession session = await agents.StartSessionAsync("connection", new()
         {
@@ -225,7 +229,7 @@ public sealed class ResourcePreparationTests
             events.Add(item);
         Assert.Equal("session", session.SessionId);
         Assert.Equal(LlmAgentCompletionReason.Completed, Assert.Single(events.OfType<LlmAgentTurnCompletedEvent>()).Reason);
-        if (destination == "vertex-gemini" && generatedByTool)
+        if (destination is "vertex-gemini" or "gemini-api" && generatedByTool)
         {
             Assert.Equal([("reference.txt", "reference text"), ("reference.txt", "reference text")], handler.Items);
             Assert.Contains("result.json", handler.ToolText, StringComparison.Ordinal);
@@ -295,6 +299,7 @@ public sealed class ResourcePreparationTests
     [InlineData("anthropic")]
     [InlineData("vertex-claude")]
     [InlineData("vertex-gemini")]
+    [InlineData("gemini-api")]
     public async Task ResourceBoundAccountingDoesNotIgnoreSelectedFilesOrOpenThem(string destination)
     {
         var reference = new InferenceResourceReference("workspace", "reference");
@@ -303,13 +308,11 @@ public sealed class ResourcePreparationTests
         LlmConnection connection = InlineConnection(destination);
         var handler = new Documents(destination: destination);
         using var http = new HttpClient(handler);
-        LlmClientBase client = destination == "anthropic" ? new AnthropicMessagesLlmClient(http)
-            : new VertexLlmClient(http, new VertexAuthenticationBoundary());
+        LlmClientBase client = InlineClient(destination, http);
         var estimator = (ILlmContextEstimator)client;
         var request = new LlmChatRequest
         {
-            ModelId = destination == "vertex-gemini" ? "google/gemini-3-flash-preview"
-                : destination == "vertex-claude" ? "anthropic/claude-sonnet-4-6" : "claude-sonnet-4-6",
+            ModelId = InlineModel(destination),
             MaxOutputTokens = 16,
             Resources = access,
             Messages = [new("user", "Read the file")]
@@ -323,16 +326,41 @@ public sealed class ResourcePreparationTests
         Assert.Equal(0, access.ReleaseAttempts);
     }
 
-    private static LlmConnection InlineConnection(string destination) => destination == "anthropic" ? new()
+    private static string InlineModel(string destination) => destination switch
     {
-        Version = destination, Transport = LlmTransport.AnthropicMessages,
-        Endpoint = "https://anthropic.example.test/v1",
-        Credential = new LlmCredential { ApiKey = "test-key" }.Serialize()
-    } : new()
+        "vertex-gemini" => "google/gemini-3-flash-preview",
+        "gemini-api" => "gemini-3-flash-preview",
+        "vertex-claude" => "anthropic/claude-sonnet-4-6",
+        _ => "claude-sonnet-4-6"
+    };
+
+    private static LlmClientBase InlineClient(string destination, HttpClient http) => destination switch
     {
-        Version = destination, Transport = LlmTransport.GoogleVertexAi,
-        Endpoint = "https://aiplatform.googleapis.com",
-        Vertex = new() { ProjectId = "project", Location = "global", AuthenticationMode = LlmGoogleAuthenticationMode.ApplicationDefault }
+        "anthropic" => new AnthropicMessagesLlmClient(http),
+        "gemini-api" => new GeminiApiLlmClient(http),
+        _ => new VertexLlmClient(http, new VertexAuthenticationBoundary())
+    };
+
+    private static LlmConnection InlineConnection(string destination) => destination switch
+    {
+        "anthropic" => new()
+        {
+            Version = destination, Transport = LlmTransport.AnthropicMessages,
+            Endpoint = "https://anthropic.example.test/v1",
+            Credential = new LlmCredential { ApiKey = "test-key" }.Serialize()
+        },
+        "gemini-api" => new()
+        {
+            Version = destination, Transport = LlmTransport.GoogleGeminiApi,
+            Endpoint = GeminiApiLlmClient.DefaultEndpoint,
+            Credential = new LlmCredential { ApiKey = "test-key" }.Serialize()
+        },
+        _ => new()
+        {
+            Version = destination, Transport = LlmTransport.GoogleVertexAi,
+            Endpoint = "https://aiplatform.googleapis.com",
+            Vertex = new() { ProjectId = "project", Location = "global", AuthenticationMode = LlmGoogleAuthenticationMode.ApplicationDefault }
+        }
     };
 
     private sealed class VertexAuthenticationBoundary : IVertexAuthentication
@@ -352,6 +380,16 @@ public sealed class ResourcePreparationTests
             Requests++;
             if (request.Method == HttpMethod.Get)
             {
+                if (destination == "gemini-api")
+                {
+                    Assert.Equal(new Uri("https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000"), request.RequestUri);
+                    Assert.Equal("test-key", Assert.Single(request.Headers.GetValues("x-goog-api-key")));
+                    return new(HttpStatusCode.OK)
+                    {
+                        Content = new StringContent("{\"models\":[{\"name\":\"models/gemini-3-flash-preview\",\"supportedGenerationMethods\":[\"generateContent\"]}]}",
+                            System.Text.Encoding.UTF8, "application/json")
+                    };
+                }
                 if (destination != "anthropic")
                 {
                     string publisher = request.RequestUri!.AbsolutePath.Contains("/google/", StringComparison.Ordinal) ? "google" : "anthropic";
@@ -376,11 +414,15 @@ public sealed class ResourcePreparationTests
                 Assert.Equal(new Uri("https://anthropic.example.test/v1/messages"), request.RequestUri);
                 Assert.Equal("test-key", Assert.Single(request.Headers.GetValues("x-api-key")));
             }
+            else if (destination == "gemini-api")
+                Assert.Equal("test-key", Assert.Single(request.Headers.GetValues("x-goog-api-key")));
             else Assert.Equal("test-token", request.Headers.Authorization!.Parameter);
             using JsonDocument payload = JsonDocument.Parse(await request.Content!.ReadAsStringAsync(cancellationToken));
-            if (destination == "vertex-gemini")
+            if (destination is "vertex-gemini" or "gemini-api")
             {
-                Assert.Equal(new Uri("https://aiplatform.googleapis.com/v1/projects/project/locations/global/publishers/google/models/gemini-3-flash-preview:streamGenerateContent?alt=sse"), request.RequestUri);
+                Assert.Equal(new Uri(destination == "gemini-api"
+                    ? "https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:streamGenerateContent?alt=sse"
+                    : "https://aiplatform.googleapis.com/v1/projects/project/locations/global/publishers/google/models/gemini-3-flash-preview:streamGenerateContent?alt=sse"), request.RequestUri);
                 foreach (JsonElement content in payload.RootElement.GetProperty("contents").EnumerateArray())
                     foreach (JsonElement part in content.GetProperty("parts").EnumerateArray())
                         if (part.TryGetProperty("inlineData", out JsonElement inline))
