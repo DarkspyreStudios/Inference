@@ -1343,6 +1343,10 @@ Bedrock Converse and ConverseStream also retain decoded tool calls for an unknow
 Their terminal result preserves partial text, reported usage and the observed stop reason without
 continuation state or structured-answer evaluation. Observed calls do not authorize tool execution.
 
+AgentCore chat classifies both `content_filtered` and `guardrail_intervened` as `Refused`.
+It preserves returned text and reported usage without evaluating that text as a structured answer.
+Both stop reasons map to `content_filter`, matching the Converse refusal mapping.
+
 Compatible Chat Completions skips structured-output validation for a refused result, including
 `content_filter` without refusal text. Its partial text, reported model, usage and finish reason
 remain available. Filtered partial JSON is not published as an evaluated or valid structured answer.

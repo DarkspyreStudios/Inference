@@ -130,7 +130,7 @@ internal sealed class BedrockAgentCoreLlmClient(IBedrockAgentCoreInvoker invoker
         }
 
         string finalText = text.ToString();
-        bool refused = string.Equals(stopReason, "content_filtered", StringComparison.Ordinal);
+        bool refused = stopReason is "content_filtered" or "guardrail_intervened";
         bool incomplete = stopReason is "max_tokens"
             or "max_output_tokens_exceeded"
             or "max_iterations_exceeded"
@@ -363,7 +363,7 @@ internal sealed class BedrockAgentCoreLlmClient(IBedrockAgentCoreInvoker invoker
     {
         "end_turn" or "stop_sequence" => "stop",
         "max_tokens" or "max_output_tokens_exceeded" => "length",
-        "content_filtered" => "content_filter",
+        "content_filtered" or "guardrail_intervened" => "content_filter",
         "tool_use" => "tool_calls",
         _ => reason ?? "stop"
     };

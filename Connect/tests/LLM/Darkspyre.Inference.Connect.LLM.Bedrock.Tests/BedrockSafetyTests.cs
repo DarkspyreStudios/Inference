@@ -19,6 +19,74 @@ namespace Darkspyre.Inference.Connect.LLM.Bedrock.Tests;
 public sealed class BedrockSafetyTests
 {
     [Theory]
+    [InlineData("guardrail_intervened", true)]
+    [InlineData("content_filtered", true)]
+    [InlineData("end_turn", false)]
+    public async Task AgentCoreGuardrailStopIsARefusalWithoutStructuredAnswerEvaluation(string stopReason, bool refused)
+    {
+        using var responseStream = new MemoryStream();
+        (string Type, string Json)[] payloads =
+        [
+            ("contentBlockDelta", """{"contentBlockIndex":0,"delta":{"text":"{\"answer\":42}"}}"""),
+            ("messageStop", $$"""{"stopReason":"{{stopReason}}"}"""),
+            ("metadata", """{"usage":{"inputTokens":4,"outputTokens":6,"totalTokens":10}}""")
+        ];
+        foreach ((string type, string json) in payloads)
+        {
+            var messageType = new EventStreamHeader(":message-type");
+            messageType.SetString("event");
+            var eventType = new EventStreamHeader(":event-type");
+            eventType.SetString(type);
+            var contentType = new EventStreamHeader(":content-type");
+            contentType.SetString("application/json");
+            var message = new EventStreamMessage([messageType, eventType, contentType], System.Text.Encoding.UTF8.GetBytes(json));
+            responseStream.Write(message.ToByteArray());
+        }
+        responseStream.Position = 0;
+        var sdkClient = new AgentCoreStreamClient(new AgentCore.InvokeHarnessResponse
+        {
+            Stream = new AgentCore.InvokeHarnessStreamOutput(responseStream)
+        });
+        await using var factory = new BedrockClientFactory(_ => throw new NotSupportedException(),
+            _ => throw new NotSupportedException(), _ => sdkClient);
+        var client = new BedrockAgentCoreLlmClient(new BedrockAgentCoreInvoker(factory));
+        LlmConnection connection = Connection() with
+        {
+            Transport = LlmTransport.AwsBedrockAgentCore,
+            Endpoint = "arn:aws:bedrock-agentcore:us-east-1:123456789012:harness/fixture",
+            Credential = new LlmCredential
+            {
+                Aws = new() { Region = "us-east-1", AccessKeyId = "fixture-key", SecretAccessKey = "fixture-secret" }
+            }.Serialize()
+        };
+        LlmChatRequest request = Request() with
+        {
+            ModelId = BedrockAgentCoreLlmClient.DefaultModelId,
+            StructuredOutput = new()
+            {
+                Name = "answer",
+                Schema = JsonElement.Parse("""{"type":"object","required":["answer"],"properties":{"answer":{"type":"integer"}}}"""),
+                Fallback = LlmStructuredOutputFallback.LocalValidation
+            }
+        };
+        var events = new List<LlmStreamEvent>();
+        await foreach (LlmStreamEvent item in client.StreamAsync(connection, request)) events.Add(item);
+        LlmChatResult result = Assert.IsType<LlmChatCompletionEvent>(events[^1]).Result;
+        byte[] jsonResult = JsonSerializer.SerializeToUtf8Bytes(result, ConnectLlmJson.ChatResult);
+        LlmChatResult restored = JsonSerializer.Deserialize(jsonResult, ConnectLlmJson.ChatResult)!;
+
+        Assert.Equal(refused ? LlmCompletionStatus.Refused : LlmCompletionStatus.Completed, restored.Status);
+        Assert.Equal("{\"answer\":42}", restored.Text);
+        Assert.Equal(refused ? restored.Text : null, restored.Refusal);
+        Assert.Equal(refused ? "content_filter" : "stop", restored.FinishReason);
+        Assert.Equal(!refused, restored.StructuredOutput!.WasEvaluated);
+        Assert.Equal(!refused, restored.StructuredOutput.IsValid);
+        Assert.Equal((4, 6, 10), (restored.Usage!.InputTokens, restored.Usage.OutputTokens, restored.Usage.TotalTokens));
+        Assert.Null(restored.ContinuationState);
+        Assert.Empty(restored.ToolCalls);
+    }
+
+    [Theory]
     [InlineData(false, "future_stop", LlmCompletionStatus.Unknown)]
     [InlineData(true, "future_stop", LlmCompletionStatus.Unknown)]
     [InlineData(false, "tool_use", LlmCompletionStatus.RequiresAction)]
