@@ -43,6 +43,30 @@ public sealed class GgmlRuntimeShutdownTests
     }
 
     [Fact]
+    public async Task InitializationOutOfMemoryEscapesAndRemainsTheCauseOfLaterRefusal()
+    {
+#pragma warning disable CA2201 // Inject the runtime failure without exhausting the test process.
+        var original = new OutOfMemoryException("private supplier allocation cause");
+#pragma warning restore CA2201
+        var supplier = new Supplier(null) { InitializationFailure = original };
+        var candidate = new TensorRuntimeCandidate(
+            new("managed-test", Path.GetFullPath(supplier.EntryLibraryName), "cpu", supplier.Build, supplier.Rid), TensorBackendKind.GgmlCpu,
+            [new(supplier.EntryLibraryName, 1, new string('a', 64))]);
+        await using var owner = new GgmlRuntimeOwner(new(supplier.Build, supplier.Rid, [candidate]), supplier);
+
+        OutOfMemoryException initial = await Assert.ThrowsAsync<OutOfMemoryException>(async () =>
+            await owner.AcquireModelAsync(TensorBackendKind.GgmlCpu, CancellationToken.None)).WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Same(original, initial);
+        Assert.Equal(TensorRuntimeState.RequiresProcessRestart, owner.State);
+        Assert.Null(owner.Current);
+        InferenceException admission = await Assert.ThrowsAsync<InferenceException>(async () =>
+            await owner.AcquireModelAsync(TensorBackendKind.GgmlCpu, CancellationToken.None)).WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Same(original, admission.InnerException);
+        InferenceException execution = Assert.Throws<InferenceException>(() => owner.EnterExecution());
+        Assert.Same(original, execution.InnerException);
+    }
+
+    [Fact]
     public async Task CancelledShutdownWaitDoesNotCancelSharedCleanupOrReopenAdmission()
     {
         var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);

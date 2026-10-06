@@ -219,12 +219,15 @@ public sealed class GgmlRuntimeOwner : ITensorRuntimeOwner
     private async Task<Initialization> InitializeCoreAsync(TensorBackendKind requested)
     {
         Initialization result = Initialization.Refused("The GGML runtime could not be initialized.", retained: true);
+        Exception? initializationError = null;
         try
         {
             result = await SelectCoreAsync(requested).ConfigureAwait(false);
         }
-        catch (Exception error) when (error is not OutOfMemoryException)
+        catch (Exception error)
         {
+            initializationError = error;
+            if (error is OutOfMemoryException) throw;
             bool retained = _supplier!.State is GgmlRuntimeState.Poisoned or GgmlRuntimeState.Ready or GgmlRuntimeState.Stopping or GgmlRuntimeState.Stopped;
             result = Initialization.Refused(retained ? "GGML initialization requires a fresh process." : "The GGML runtime could not be initialized.", retained, error);
         }
@@ -236,7 +239,7 @@ public sealed class GgmlRuntimeOwner : ITensorRuntimeOwner
                 _nativeMayRemain |= result.Identity is not null || result.State == TensorBackendAvailabilityState.RequiresProcessRestart;
                 if (!_fenced)
                 {
-                    _initializationError = result.Error;
+                    _initializationError = initializationError ?? result.Error;
                     _current = result.Identity;
                     _state = result.Identity is not null ? TensorRuntimeState.Ready
                         : result.State == TensorBackendAvailabilityState.RequiresProcessRestart ? TensorRuntimeState.RequiresProcessRestart

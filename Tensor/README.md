@@ -384,6 +384,8 @@ Initialization exceptions remain private to the owner. Model admission/load fail
 original exception as an inner cause; public probe reasons and diagnostics remain sanitized.
 Managed owner tests verify that later restart-required refusals retain the same initialization
 cause without serializing it into the probe observation.
+An initialization `OutOfMemoryException` escapes unchanged. The owner retains that same cause
+for later restart-required admission and execution refusals without retrying initialization.
 
 Initialization, queued model loading, resident models and execution retain owner leases until their
 actual work/cleanup settles. Ordinary shutdown with active leases reports Busy without teardown.
