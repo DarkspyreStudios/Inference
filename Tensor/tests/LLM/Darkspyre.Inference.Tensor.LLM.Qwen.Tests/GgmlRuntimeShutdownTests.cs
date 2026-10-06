@@ -8,6 +8,40 @@ namespace Darkspyre.Inference.Tensor.LLM.Qwen.Tests;
 
 public sealed class GgmlRuntimeShutdownTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task FailedInitializationPreservesItsCauseAcrossLaterRefusalWithoutPublishingIt(bool probeFirst)
+    {
+        var original = new InvalidOperationException("private supplier initialization cause");
+        var supplier = new Supplier(null) { InitializationFailure = original };
+        var candidate = new TensorRuntimeCandidate(
+            new("managed-test", Path.GetFullPath(supplier.EntryLibraryName), "cpu", supplier.Build, supplier.Rid), TensorBackendKind.GgmlCpu,
+            [new(supplier.EntryLibraryName, 1, new string('a', 64))]);
+        await using var owner = new GgmlRuntimeOwner(new(supplier.Build, supplier.Rid, [candidate]), supplier);
+        if (probeFirst)
+        {
+            var request = new TensorBackendProbeRequest(Guid.NewGuid(), "managed-test", TensorBackendKind.GgmlCpu, supplier.Rid);
+            TensorBackendAvailability observation = await owner.CheckAsync(request).WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.Equal(TensorBackendAvailabilityState.RequiresProcessRestart, observation.State);
+            string json = JsonSerializer.Serialize(observation, TensorJson.BackendAvailability);
+            Assert.DoesNotContain(original.Message, json, StringComparison.Ordinal);
+        }
+        else
+        {
+            InferenceException initialAdmission = await Assert.ThrowsAsync<InferenceException>(async () =>
+                await owner.AcquireModelAsync(TensorBackendKind.GgmlCpu, CancellationToken.None)).WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.Same(original, initialAdmission.InnerException);
+        }
+        Assert.Equal(TensorRuntimeState.RequiresProcessRestart, owner.State);
+        Assert.Null(owner.Current);
+        InferenceException admission = await Assert.ThrowsAsync<InferenceException>(async () =>
+            await owner.AcquireModelAsync(TensorBackendKind.GgmlCpu, CancellationToken.None)).WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Same(original, admission.InnerException);
+        InferenceException execution = Assert.Throws<InferenceException>(() => owner.EnterExecution());
+        Assert.Same(original, execution.InnerException);
+    }
+
     [Fact]
     public async Task CancelledShutdownWaitDoesNotCancelSharedCleanupOrReopenAdmission()
     {
@@ -188,11 +222,17 @@ public sealed class GgmlRuntimeShutdownTests
         public GgmlRuntimeState State { get; private set; } = GgmlRuntimeState.Unconfigured;
         public int Shutdowns { get; private set; }
         public Func<GgmlNativeShutdownResult>? OnShutdown { get; init; }
+        public Exception? InitializationFailure { get; init; }
         public Task<IReadOnlyList<GgmlNativeCandidate>> ResolvePackageCandidatesAsync() => throw new NotSupportedException();
         public GgmlNativeRefusal? Check(GgmlNativeCandidate candidate) => null;
         public void Configure(GgmlRuntimePlan plan) => _plan = plan;
         public Task<GgmlInitializationResult> InitializeAsync()
         {
+            if (InitializationFailure is { } initializationFailure)
+            {
+                State = GgmlRuntimeState.Poisoned;
+                return Task.FromException<GgmlInitializationResult>(initializationFailure);
+            }
             State = GgmlRuntimeState.Ready;
             GgmlNativeCandidate candidate = Assert.Single(_plan!.Candidates!);
             return Task.FromResult(new GgmlInitializationResult(_plan, GgmlInitializationState.Ready,

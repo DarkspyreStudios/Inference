@@ -382,6 +382,8 @@ retained native state. Actual backend, variant, build, ABI and native source com
 supplier initialization, not the requested backend or current managed source checkout.
 Initialization exceptions remain private to the owner. Model admission/load failures retain the
 original exception as an inner cause; public probe reasons and diagnostics remain sanitized.
+Managed owner tests verify that later restart-required refusals retain the same initialization
+cause without serializing it into the probe observation.
 
 Initialization, queued model loading, resident models and execution retain owner leases until their
 actual work/cleanup settles. Ordinary shutdown with active leases reports Busy without teardown.
