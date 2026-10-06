@@ -11,6 +11,67 @@ namespace Darkspyre.Inference.Connect.LLM.Tests;
 
 public sealed class ResourcePreparationTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void LaterFailureRetainsOrderedGeneratedReceiptsWithoutDuplicatingThem(bool canceled)
+    {
+        var first = new InferenceResourceReference("workspace", "first-output");
+        var second = new InferenceResourceReference("workspace", "second-output");
+        InferenceResourceCommitResult[] receipts =
+        [
+            new(new(first, "session", "first.json", "application/json", 10),
+                new("workspace", "session", 5, [first])),
+            new(new(second, "session", "second.json", "application/json", 20),
+                new("workspace", "session", 6, [second, first]))
+        ];
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+        Exception original = canceled ? new OperationCanceledException(cancellation.Token)
+            : new IOException("The next output could not be downloaded.");
+        Exception current = LlmResourcePreparation.WithGeneratedResources(original, [receipts[1]]);
+        var cleanup = new IOException("The output reader could not be released.");
+
+        Exception failure = LlmResourcePreparation.WithGeneratedResources(new AggregateException(current, cleanup), receipts);
+        Exception[] causes = Assert.IsType<AggregateException>(failure).InnerExceptions.ToArray();
+        Assert.Equal(2, causes.Length);
+        Assert.Same(cleanup, causes[1]);
+        InferenceResourceOperationFailure observed;
+        if (canceled)
+        {
+            var operation = Assert.IsType<InferenceResourceOperationCanceledException>(causes[0]);
+            Assert.Equal(cancellation.Token, operation.CancellationToken);
+            Assert.Same(current, operation.InnerException);
+            Assert.Same(original, operation.InnerException!.InnerException);
+            observed = operation.Failure;
+        }
+        else
+        {
+            var operation = Assert.IsType<InferenceResourceOperationException>(causes[0]);
+            Assert.Same(current, operation.InnerException);
+            Assert.Same(original, operation.InnerException!.InnerException);
+            observed = operation.Failure;
+        }
+        Assert.Equal(InferenceResourceOperationPhase.Materialize, observed.Phase);
+        Assert.Equal(InferenceResourceCommitOutcome.NotAttempted, observed.CommitOutcome);
+        Assert.Null(observed.Reference);
+
+        InferenceResourceOperationFailure restored = JsonSerializer.Deserialize(
+            JsonSerializer.SerializeToUtf8Bytes(observed, InferenceJson.InferenceResourceOperationFailure),
+            InferenceJson.InferenceResourceOperationFailure)!;
+        Assert.Equal(receipts.Select(receipt => receipt.Resource), restored.GeneratedResources.Select(receipt => receipt.Resource));
+        Assert.Equal([5L, 6L], restored.GeneratedResources.Select(receipt => receipt.Selection!.Revision));
+        Assert.Equal([first], restored.GeneratedResources[0].Selection!.SelectedResources);
+        Assert.Equal([second, first], restored.GeneratedResources[1].Selection!.SelectedResources);
+        Assert.All(restored.GeneratedResources, receipt =>
+            Assert.Equal(("workspace", "session"), (receipt.Selection!.WorkspaceId, receipt.Selection.SessionId)));
+
+        Exception[] repeated = Assert.IsType<AggregateException>(
+            LlmResourcePreparation.WithGeneratedResources(failure, receipts)).InnerExceptions.ToArray();
+        Assert.Same(causes[0], repeated[0]);
+        Assert.Same(cleanup, repeated[1]);
+    }
+
     [Fact]
     public async Task PortableSessionResourcesUploadAgainForTheSelectedDestination()
     {
