@@ -21,8 +21,7 @@ public sealed class GgmlRuntimeOwner : ITensorRuntimeOwner
     // Publish the cause with state before the shared initialization task finishes.
     private Exception? _initializationError;
     private TensorBackendKind _initializationBackend;
-    private Task<TensorRuntimeShutdownResult>? _shutdown;
-    private Exception? _shutdownError;
+    private Task<ShutdownOutcome>? _shutdown;
     private Task? _disposal;
     private TensorRuntimeState _state;
     private TensorRuntimeBackendIdentity? _current;
@@ -367,18 +366,24 @@ public sealed class GgmlRuntimeOwner : ITensorRuntimeOwner
         _ => throw new ArgumentOutOfRangeException(nameof(backend))
     };
 
-    public Task<TensorRuntimeShutdownResult> ShutdownAsync(CancellationToken cancellationToken = default)
+    public Task<TensorRuntimeShutdownResult> ShutdownAsync(CancellationToken cancellationToken = default) =>
+        ReadShutdownResultAsync(ShutdownWithCauseAsync(cancellationToken));
+
+    private static async Task<TensorRuntimeShutdownResult> ReadShutdownResultAsync(Task<ShutdownOutcome> pending) =>
+        (await pending.ConfigureAwait(false)).Result;
+
+    private Task<ShutdownOutcome> ShutdownWithCauseAsync(CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        Task<TensorRuntimeShutdownResult> pending;
+        Task<ShutdownOutcome> pending;
         lock (_gate)
         {
             if (_state == TensorRuntimeState.Stopped)
-                return Task.FromResult(ShutdownResult(TensorRuntimeShutdownState.AlreadyStopped, 0, false));
+                return Task.FromResult(new ShutdownOutcome(ShutdownResult(TensorRuntimeShutdownState.AlreadyStopped, 0, false)));
             if (_shutdown is { IsCompleted: true })
                 return _shutdown.WaitAsync(cancellationToken);
             if (_leases != 0 && _leases != _failedRollbackLeases.Count)
-                return Task.FromResult(ShutdownResult(TensorRuntimeShutdownState.Busy, _leases, _nativeMayRemain));
+                return Task.FromResult(new ShutdownOutcome(ShutdownResult(TensorRuntimeShutdownState.Busy, _leases, _nativeMayRemain)));
             _fenced = true;
             _state = TensorRuntimeState.Stopping;
             pending = _shutdown ??= Task.Run(ShutdownCore);
@@ -386,10 +391,11 @@ public sealed class GgmlRuntimeOwner : ITensorRuntimeOwner
         return pending.WaitAsync(cancellationToken);
     }
 
-    private TensorRuntimeShutdownResult ShutdownCore()
+    private ShutdownOutcome ShutdownCore()
     {
         ModelLease[] rollbacks;
         lock (_gate) rollbacks = _failedRollbackLeases.ToArray();
+        var rollbackErrors = new List<Exception>();
         foreach (ModelLease rollback in rollbacks)
         {
             try
@@ -397,16 +403,17 @@ public sealed class GgmlRuntimeOwner : ITensorRuntimeOwner
                 rollback.Dispose();
                 lock (_gate) _failedRollbackLeases.Remove(rollback);
             }
-            catch (Exception error) when (error is not OutOfMemoryException) { }
+            catch (Exception error) when (error is not OutOfMemoryException) { rollbackErrors.Add(error); }
         }
         lock (_gate)
         {
             if (_failedRollbackLeases.Count != 0)
             {
+                Exception error = rollbackErrors.Count == 1 ? rollbackErrors[0] : new AggregateException(rollbackErrors);
                 _state = TensorRuntimeState.RequiresProcessRestart;
                 // Only this exact release failed; actual guarded native teardown has not begun.
                 _shutdown = null;
-                return ShutdownResult(TensorRuntimeShutdownState.FailedRequiresProcessExit, _leases, true);
+                return new(ShutdownResult(TensorRuntimeShutdownState.FailedRequiresProcessExit, _leases, true), error);
             }
         }
         bool released;
@@ -427,10 +434,9 @@ public sealed class GgmlRuntimeOwner : ITensorRuntimeOwner
             {
                 _state = TensorRuntimeState.Stopping;
                 _shutdown = null;
-                return new(TensorRuntimeShutdownState.Busy, Guid.NewGuid(), DateTimeOffset.UtcNow, 0, true,
-                    [new("native-resources-active", "The guarded supplier refused teardown while its external native resources remain active.")]);
+                return new(new(TensorRuntimeShutdownState.Busy, Guid.NewGuid(), DateTimeOffset.UtcNow, 0, true,
+                    [new("native-resources-active", "The guarded supplier refused teardown while its external native resources remain active.")]));
             }
-            _shutdownError = shutdownError;
             _state = released ? TensorRuntimeState.Stopped : TensorRuntimeState.RequiresProcessRestart;
             if (released) { _current = null; _nativeMayRemain = false; }
             // No admitted work remains. Drop drained supplier/catalog task roots, not borrowed dependencies.
@@ -439,8 +445,8 @@ public sealed class GgmlRuntimeOwner : ITensorRuntimeOwner
             _initialization = null;
             _initializationError = null;
             _candidates = Plan.Candidates;
-            return ShutdownResult(released ? TensorRuntimeShutdownState.Completed : TensorRuntimeShutdownState.FailedRequiresProcessExit,
-                0, !released);
+            return new(ShutdownResult(released ? TensorRuntimeShutdownState.Completed : TensorRuntimeShutdownState.FailedRequiresProcessExit,
+                0, !released), shutdownError);
         }
     }
 
@@ -465,17 +471,17 @@ public sealed class GgmlRuntimeOwner : ITensorRuntimeOwner
 
     private async Task DisposeCoreAsync()
     {
-        TensorRuntimeShutdownResult result = await ShutdownAsync().ConfigureAwait(false);
-        if (result.State is not (TensorRuntimeShutdownState.Completed or TensorRuntimeShutdownState.AlreadyStopped))
+        ShutdownOutcome outcome = await ShutdownWithCauseAsync().ConfigureAwait(false);
+        if (outcome.Result.State is not (TensorRuntimeShutdownState.Completed or TensorRuntimeShutdownState.AlreadyStopped))
         {
             const string message = "The GGML runtime did not retire safely. Drain instances and retry terminal shutdown explicitly.";
-            Exception? cause;
-            lock (_gate) cause = _shutdownError;
-            throw cause is null
+            throw outcome.Error is null
                 ? new InferenceException(InferenceFailureCode.BackendUnavailable, message)
-                : new InferenceException(InferenceFailureCode.BackendUnavailable, message, cause);
+                : new InferenceException(InferenceFailureCode.BackendUnavailable, message, outcome.Error);
         }
     }
+
+    private sealed record ShutdownOutcome(TensorRuntimeShutdownResult Result, Exception? Error = null);
 
     private sealed class OperationLease(GgmlRuntimeOwner owner) : IDisposable
     {

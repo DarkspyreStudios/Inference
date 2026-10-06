@@ -401,7 +401,11 @@ If acquisition cancellation is followed by model-lease cleanup failure, the runt
 that exact cleanup handle and both failures remain visible. It does not count failed cleanup as
 release or invoke native shutdown over it. Explicit shutdown may retry only that held release;
 failure reports FailedRequiresProcessExit with the outstanding ownership, while successful release
-permits guarded terminal shutdown. Drained terminal owners drop supplier/catalog task references
+permits guarded terminal shutdown. Disposal preserves a failed held release as its inner cause;
+independent held-release failures remain together in an aggregate. The structured shutdown result
+does not serialize those exceptions. Each private shutdown completion binds its result to its cause,
+so a later explicit release retry does not replace the cause awaited by disposal.
+Drained terminal owners drop supplier/catalog task references
 without disposing borrowed collaborators.
 
 A failed model load/unload that cannot complete cleanup keeps its pack/runtime ownership. New loading
