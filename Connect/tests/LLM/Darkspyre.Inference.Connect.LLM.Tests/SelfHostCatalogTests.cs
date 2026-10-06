@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Common.Embedding;
 using Darkspyre.Inference.Common.LLM;
@@ -25,6 +26,41 @@ public sealed class SelfHostCatalogTests
         Assert.Equal(["second", "unknown"], (await inference.ListModelsAsync()).Select(model => model.Id));
     }
 
+    [Theory]
+    [InlineData("image")]
+    [InlineData("tool-binary")]
+    [InlineData("tool-json")]
+    public async Task AccountingDoesNotReportTextOnlyUsageForUnmeasuredContent(string content)
+    {
+        var engine = new Engine { Models = [new("model", "Model") { MaxContextTokens = 4096 }] };
+        await using var service = new LlmProviderService(new Source(), [new SelfHostLlmClient(new Host(engine))]);
+        var message = new LlmChatMessage("user", "Read this content");
+        message = content != "image" ? message with
+        {
+            ToolResults = [new LlmToolResult("call", content == "tool-json"
+                ? new() { StructuredContent = JsonElement.Parse("{\"answer\":42}") }
+                : new() { Parts = [new LlmToolOutputBinary(LlmBinaryKind.Image, "image/png", new byte[] { 1, 2, 3 }, "image.png")] })]
+        } : message with
+        {
+            Attachments = [new LlmAttachment { Kind = LlmBinaryKind.Image, FileName = "image.png", MediaType = "image/png", Data = new byte[] { 1, 2, 3 } }]
+        };
+        LlmRequestAccounting result = await service.MeasureRequestAsync("connection", new()
+        {
+            ModelId = "model",
+            Messages = content == "image" ? [message]
+                : [new("assistant", string.Empty) { ToolCalls = [new LlmToolCall("call", "create", "{}")] }, message]
+        });
+        Assert.True(result.IsSupported);
+        Assert.Null(result.UsedContextTokens);
+        Assert.Null(result.AvailableInputTokens);
+        Assert.Null(result.NeedsCompaction);
+        Assert.Equal(4096, result.ModelMaxContextTokens);
+
+        LlmRequestAccounting text = await service.MeasureRequestAsync("connection", new()
+        { ModelId = "model", Messages = [new("user", "Only text")] });
+        Assert.True(text.UsedContextTokens > 0);
+    }
+
     private sealed class Source : ILlmConnectionSource
     {
         public Task<LlmConnection?> GetConnectionAsync(string connectionId, CancellationToken cancellationToken = default) =>
@@ -42,7 +78,7 @@ public sealed class SelfHostCatalogTests
             Task.FromResult(engine);
         public Task<IEmbeddingInference> GetEmbeddingInferenceAsync(string engineId, CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
-        public LlmCapabilities? GetCapabilities(string engineId, string? modelId) => new() { SupportsModelListing = true };
+        public LlmCapabilities? GetCapabilities(string engineId, string? modelId) => new() { SupportsModelListing = true, SupportsPromptImages = true };
     }
 
     private sealed class Engine : ILlmInference
@@ -52,7 +88,7 @@ public sealed class SelfHostCatalogTests
         public InferenceImplementationDescriptor Descriptor { get; } = new("engine", "Engine",
             InferenceImplementationKind.Tensor, InferenceTask.TextGeneration);
         public Task<LlmCapabilities> GetCapabilitiesAsync(string? modelId = null, CancellationToken cancellationToken = default) =>
-            Task.FromResult(new LlmCapabilities { SupportsModelListing = true });
+            Task.FromResult(new LlmCapabilities { SupportsModelListing = true, SupportsPromptImages = true });
         public Task<IReadOnlyList<LlmModelInfo>> ListModelsAsync(CancellationToken cancellationToken = default) =>
             Task.FromResult(_kept ??= Models);
         public Task<IReadOnlyList<LlmModelInfo>> RefreshModelsAsync(CancellationToken cancellationToken = default) =>

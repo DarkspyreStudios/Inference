@@ -83,6 +83,10 @@ internal sealed class SelfHostLlmClient(ILlmSelfHost host) : ILlmClient, ILlmCon
         HostedTools.Validate(request, GetCapabilities(connection, request.ModelId));
         ClientTools.Validate(request, GetCapabilities(connection, request.ModelId).SupportsShellTools);
         LlmClientBase.ValidateSampling(request, GetCapabilities(connection, request.ModelId));
+        if (request.Messages.Any(message => message.Attachments.Count > 0
+            || ClientTools.Functions(message.ToolResults).Any(result => result.Output.StructuredContent is not null
+                || result.Output.Parts.Any(part => part is not CommonLlm.LlmToolOutputText))))
+            return null;
         var text = new StringBuilder(request.Instructions);
         foreach (LlmChatMessage message in request.Messages)
         {

@@ -3907,7 +3907,10 @@ them. Settings cannot save these unsupported options. Model and capability disco
 so an invalid saved connection can be inspected and repaired.
 
 Agent sessions run on the managed agent lane, which executes host tools; context estimates count the
-request text with Connect's local tokenizer. Connect references Common only, never the engine library.
+request text with Connect's local tokenizer. Binary prompt attachments, structured tool content and
+non-text tool parts make the local measurement unknown. Known model limits remain available;
+accounting neither runs the engine nor reports a text-only number as complete input usage.
+Connect references Common only, never the engine library.
 The settings offer an **Engine** choice listed from the host's engines and a **Model** choice listed
 from that engine; both are required to save. Checking and testing are local verification.
 
