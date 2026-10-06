@@ -13,6 +13,7 @@ internal sealed class OpenAiResponsesLlmClient(HttpClient http) : ResponsesLlmCl
     public override LlmProviderDefinition ProviderDefinition => ProviderDefinitions.OpenAiApiKey;
 
     protected override bool OffersNonStreamingRequests => true;
+    protected override bool SupportsResourcePreparation => true;
 
     protected override LlmProviderCapabilities DefaultCapabilities { get; } = ProtocolCapabilities with
     {

@@ -155,6 +155,8 @@ public sealed class ResourcePreparationTests
     [InlineData("vertex-gemini", true)]
     [InlineData("gemini-api", false)]
     [InlineData("gemini-api", true)]
+    [InlineData("openai-responses", false)]
+    [InlineData("openai-responses", true)]
     public async Task LogicalDocumentContextCanMoveFromGrokToAnInlineProviderWithoutChangingItsResources(string destination, bool generatedByTool)
     {
         var reference = new InferenceResourceReference("workspace", "reference");
@@ -201,8 +203,10 @@ public sealed class ResourcePreparationTests
         }
 
         LlmConnection connection = InlineConnection(destination);
+        bool streaming = destination != "openai-responses" || generatedByTool;
+        if (!streaming) connection = connection with { CapabilityOverrides = new() { SupportsStreaming = false } };
         string model = InlineModel(destination);
-        var handler = new Documents(destination: destination);
+        var handler = new Documents(destination: destination, streaming: streaming);
         using var targetHttp = new HttpClient(handler);
         LlmClientBase client = InlineClient(destination, targetHttp);
         LlmAgentContext restored = JsonSerializer.Deserialize(portable, ConnectLlmJson.AgentContext)!;
@@ -212,6 +216,7 @@ public sealed class ResourcePreparationTests
         {
             VertexLlmClient vertex => new ManagedVertexAgentClient(vertex, providers),
             GeminiApiLlmClient gemini => new ManagedGeminiApiAgentClient(gemini, providers),
+            OpenAiResponsesLlmClient openai => new ManagedOpenAiResponsesAgentClient(openai, providers),
             _ => new ManagedAnthropicAgentClient((AnthropicMessagesLlmClient)client, providers)
         };
         await using var agents = new LlmAgentProviderService(source, [agent]);
@@ -251,29 +256,25 @@ public sealed class ResourcePreparationTests
     }
 
     [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task InlineReaderCleanupRefusalPreventsSuccessAndPreservesAnIndependentOperationFailure(bool generationFails)
+    [InlineData("anthropic", false)]
+    [InlineData("anthropic", true)]
+    [InlineData("openai-responses", false)]
+    [InlineData("openai-responses", true)]
+    public async Task InlineReaderCleanupRefusalPreventsSuccessAndPreservesAnIndependentOperationFailure(string destination, bool generationFails)
     {
         var reference = new InferenceResourceReference("workspace", "reference");
         var cleanup = new IOException("The reader could not be released.");
         var operation = new IOException("The provider request failed.");
         var access = new Resources(new("workspace", "session", 1, [reference]),
             [(reference, "reference.txt", "reference text"u8.ToArray())], cleanup);
-        var connection = new LlmConnection
-        {
-            Version = "anthropic",
-            Transport = LlmTransport.AnthropicMessages,
-            Endpoint = "https://anthropic.example.test/v1",
-            Credential = new LlmCredential { ApiKey = "test-key" }.Serialize()
-        };
-        using var http = new HttpClient(new Documents(generationFails ? operation : null));
-        var client = new AnthropicMessagesLlmClient(http);
+        LlmConnection connection = InlineConnection(destination);
+        using var http = new HttpClient(new Documents(generationFails ? operation : null, destination));
+        LlmClientBase client = InlineClient(destination, http);
         var events = new List<LlmStreamEvent>();
         Exception failure = (await Record.ExceptionAsync(async () =>
         {
             await foreach (LlmStreamEvent item in client.StreamAsync(connection,
-                new() { ModelId = "claude-sonnet-4-6", MaxOutputTokens = 16, Resources = access, Messages = [new("user", "Read the file")] }))
+                new() { ModelId = InlineModel(destination), MaxOutputTokens = 16, Resources = access, Messages = [new("user", "Read the file")] }))
                 events.Add(item);
         }))!;
         Exception release;
@@ -300,6 +301,7 @@ public sealed class ResourcePreparationTests
     [InlineData("vertex-claude")]
     [InlineData("vertex-gemini")]
     [InlineData("gemini-api")]
+    [InlineData("openai-responses")]
     public async Task ResourceBoundAccountingDoesNotIgnoreSelectedFilesOrOpenThem(string destination)
     {
         var reference = new InferenceResourceReference("workspace", "reference");
@@ -320,7 +322,13 @@ public sealed class ResourcePreparationTests
         Assert.Null(estimator.EstimateInputTokens(connection, request));
         Assert.Null(estimator.EstimateInputTokens(connection, request with
         { Messages = [new("user", "Read the file") { Attachments = [new LlmResourceAttachment(reference)] }] }));
-        await Assert.ThrowsAsync<NotSupportedException>(() => ((ILlmProviderTokenCounter)client).CountInputTokensAsync(connection, request));
+        if (client is ILlmProviderTokenCounter counter)
+            await Assert.ThrowsAsync<NotSupportedException>(() => counter.CountInputTokensAsync(connection, request));
+        else
+        {
+            await using var providers = new LlmProviderService(new Source(connection), [client]);
+            await Assert.ThrowsAsync<NotSupportedException>(() => providers.CountInputTokensAsync("connection", request));
+        }
         Assert.Equal(0, handler.Requests);
         Assert.Empty(access.Reads);
         Assert.Equal(0, access.ReleaseAttempts);
@@ -330,6 +338,7 @@ public sealed class ResourcePreparationTests
     {
         "vertex-gemini" => "google/gemini-3-flash-preview",
         "gemini-api" => "gemini-3-flash-preview",
+        "openai-responses" => "gpt-4.1",
         "vertex-claude" => "anthropic/claude-sonnet-4-6",
         _ => "claude-sonnet-4-6"
     };
@@ -338,6 +347,7 @@ public sealed class ResourcePreparationTests
     {
         "anthropic" => new AnthropicMessagesLlmClient(http),
         "gemini-api" => new GeminiApiLlmClient(http),
+        "openai-responses" => new OpenAiResponsesLlmClient(http),
         _ => new VertexLlmClient(http, new VertexAuthenticationBoundary())
     };
 
@@ -355,6 +365,12 @@ public sealed class ResourcePreparationTests
             Endpoint = GeminiApiLlmClient.DefaultEndpoint,
             Credential = new LlmCredential { ApiKey = "test-key" }.Serialize()
         },
+        "openai-responses" => new()
+        {
+            Version = destination, Transport = LlmTransport.OpenAiResponses,
+            Endpoint = "https://api.openai.com/v1",
+            Credential = new LlmCredential { ApiKey = "test-key" }.Serialize()
+        },
         _ => new()
         {
             Version = destination, Transport = LlmTransport.GoogleVertexAi,
@@ -369,7 +385,7 @@ public sealed class ResourcePreparationTests
             Task.FromResult(new VertexAccess("test-token", "test-scope"));
     }
 
-    private sealed class Documents(Exception? failure = null, string destination = "anthropic") : HttpMessageHandler
+    private sealed class Documents(Exception? failure = null, string destination = "anthropic", bool streaming = true) : HttpMessageHandler
     {
         public List<(string Name, string Text)> Items { get; } = [];
         public int Requests { get; private set; }
@@ -380,6 +396,15 @@ public sealed class ResourcePreparationTests
             Requests++;
             if (request.Method == HttpMethod.Get)
             {
+                if (destination == "openai-responses")
+                {
+                    Assert.Equal(new Uri("https://api.openai.com/v1/models"), request.RequestUri);
+                    Assert.Equal("test-key", request.Headers.Authorization!.Parameter);
+                    return new(HttpStatusCode.OK)
+                    {
+                        Content = new StringContent("{\"data\":[{\"id\":\"gpt-4.1\"}]}", System.Text.Encoding.UTF8, "application/json")
+                    };
+                }
                 if (destination == "gemini-api")
                 {
                     Assert.Equal(new Uri("https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000"), request.RequestUri);
@@ -416,8 +441,39 @@ public sealed class ResourcePreparationTests
             }
             else if (destination == "gemini-api")
                 Assert.Equal("test-key", Assert.Single(request.Headers.GetValues("x-goog-api-key")));
+            else if (destination == "openai-responses")
+                Assert.Equal("test-key", request.Headers.Authorization!.Parameter);
             else Assert.Equal("test-token", request.Headers.Authorization!.Parameter);
             using JsonDocument payload = JsonDocument.Parse(await request.Content!.ReadAsStringAsync(cancellationToken));
+            if (destination == "openai-responses")
+            {
+                Assert.Equal(new Uri("https://api.openai.com/v1/responses"), request.RequestUri);
+                Assert.Equal(streaming, payload.RootElement.GetProperty("stream").GetBoolean());
+                foreach (JsonElement input in payload.RootElement.GetProperty("input").EnumerateArray())
+                {
+                    JsonElement parts;
+                    if (input.TryGetProperty("type", out JsonElement type) && type.GetString() == "function_call_output")
+                        parts = input.GetProperty("output");
+                    else if (!input.TryGetProperty("content", out parts)) continue;
+                    if (parts.ValueKind != JsonValueKind.Array) continue;
+                    foreach (JsonElement part in parts.EnumerateArray())
+                        if (part.GetProperty("type").GetString() == "input_file")
+                        {
+                            string data = part.GetProperty("file_data").GetString()!;
+                            Assert.StartsWith("data:", data, StringComparison.Ordinal);
+                            Assert.DoesNotContain("file_id", part.EnumerateObject().Select(property => property.Name));
+                            Items.Add((part.GetProperty("filename").GetString()!, System.Text.Encoding.UTF8.GetString(
+                                Convert.FromBase64String(data[(data.IndexOf(";base64,", StringComparison.Ordinal) + 8)..]))));
+                        }
+                }
+                if (failure is not null) throw failure;
+                const string response = "{\"id\":\"response-1\",\"model\":\"gpt-4.1\",\"status\":\"completed\",\"output\":[{\"type\":\"message\",\"id\":\"message-1\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"done\"}]}],\"usage\":{\"input_tokens\":5,\"output_tokens\":1,\"total_tokens\":6}}";
+                return new(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(streaming ? "data: {\"type\":\"response.completed\",\"response\":" + response + "}\n\n" : response,
+                        System.Text.Encoding.UTF8, streaming ? "text/event-stream" : "application/json")
+                };
+            }
             if (destination is "vertex-gemini" or "gemini-api")
             {
                 Assert.Equal(new Uri(destination == "gemini-api"

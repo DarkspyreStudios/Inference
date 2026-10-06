@@ -340,7 +340,7 @@ internal sealed class LlmResourcePreparation : IAsyncDisposable
         {
             try
             {
-                resources = await PrepareInlineAsync(request, token).ConfigureAwait(false);
+                resources = await PrepareInlineAsync(request, static () => { }, token).ConfigureAwait(false);
                 iterator = stream(resources.Request, token).GetAsyncEnumerator(token);
             }
             catch (Exception error)
@@ -384,14 +384,14 @@ internal sealed class LlmResourcePreparation : IAsyncDisposable
         if (terminal is not null) yield return terminal;
     }
 
-    private static async Task<LlmResourcePreparation> PrepareInlineAsync(LlmChatRequest request, CancellationToken token)
+    internal static async Task<LlmResourcePreparation> PrepareInlineAsync(LlmChatRequest request, Action fence, CancellationToken token)
     {
         ValidateArguments(request);
         var operation = new LlmResourcePreparation(request);
         InferenceResourceOperationPhase phase = InferenceResourceOperationPhase.ReadSelection;
         InferenceResourceReference? current = null;
         CountingReadStream? reading = null;
-        void Fence() => token.ThrowIfCancellationRequested();
+        void Fence() => Check(fence, token);
         try
         {
             var access = request.Resources ?? throw new ArgumentException("Inline resources require caller-owned access.", nameof(request));

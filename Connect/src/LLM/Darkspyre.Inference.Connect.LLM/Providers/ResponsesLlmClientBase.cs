@@ -139,9 +139,16 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
             {
                 if (request.Resources is not null)
                 {
-                    if (this is not XaiResponsesLlmClient xai) throw new NotSupportedException("This route does not materialize resources.");
-                    XaiFileClient files = suppliedFiles ?? (ownedFiles = xai.CreateFileClient());
-                    resources = await LlmResourcePreparation.PrepareAsync(connection, request, files, Fence, cancellationToken).ConfigureAwait(false);
+                    if (this is XaiResponsesLlmClient xai)
+                    {
+                        XaiFileClient files = suppliedFiles ?? (ownedFiles = xai.CreateFileClient());
+                        resources = await LlmResourcePreparation.PrepareAsync(connection, request, files, Fence, cancellationToken).ConfigureAwait(false);
+                    }
+                    else
+                    {
+                        resources = await LlmResourcePreparation.PrepareInlineAsync(request, Fence, cancellationToken).ConfigureAwait(false);
+                        ValidateRequest(connection, resources.Request, capabilities);
+                    }
                     Fence();
                     request = resources.Request;
                 }
