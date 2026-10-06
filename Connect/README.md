@@ -1099,6 +1099,12 @@ possible-mutation failure; it does not publish a successful result into a replac
 Failure-side uncertainty recording remains available after cancellation and performs no
 provider mutation or automatic retry.
 
+Focused managed regressions exercise this boundary through the real Gemini cache adapter and
+scripted HTTP. Retirement drains an ignoring read and fences all five retained bound operations
+without disposing the borrowed source or HTTP client. A create receipt parsed before response
+cleanup triggers retirement remains on the cancellation observation with its actual request ID.
+These checks do not qualify live cache creation, credential rotation or provider eligibility.
+
 Exact provider-token counting rejects explicitly cached Vertex requests before credential refresh,
 authentication, connection preparation, model discovery or HTTP dispatch. This restriction is
 independent of generation-cache capability. Uncached counting and local estimated accounting
