@@ -1,3 +1,5 @@
+using System.Net;
+using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Common.LLM;
 using Darkspyre.Inference.Common.Resources;
 using Darkspyre.Inference.Connect.LLM.Internal;
@@ -7,6 +9,24 @@ namespace Darkspyre.Inference.Connect.LLM.Tests;
 
 public sealed class ProviderStreamFailureTests
 {
+    [Theory]
+    [InlineData(HttpStatusCode.Unauthorized, InferenceFailureCode.AuthenticationRequired)]
+    [InlineData(HttpStatusCode.Forbidden, InferenceFailureCode.AccessDenied)]
+    public async Task CommonFacadePreservesAuthenticationAndAccessFailureKinds(HttpStatusCode status, InferenceFailureCode expected)
+    {
+        var providerFailure = new LlmProviderException("The provider requires authentication or access.", LlmTransport.OpenAiResponses,
+            statusCode: status, providerCode: "provider-auth-code", requestId: "request-1");
+        await using var service = new LlmProviderService(new Source(), [new FailingClient(new FailingStream(providerFailure))]);
+        InferenceException failure = await Assert.ThrowsAsync<InferenceException>(async () =>
+        {
+            await foreach (LlmStreamEvent unused in service.Bind("connection").StreamAsync(new() { ModelId = "model" }))
+                throw new InvalidOperationException("The rejected request must not emit an event.");
+        });
+        Assert.Equal(expected, failure.Code);
+        Assert.Equal(providerFailure.Message, failure.Message);
+        Assert.Same(providerFailure, failure.InnerException);
+    }
+
     [Fact]
     public async Task CleanupFailureFromFinalProviderPullIsAlsoReportedByRetirement()
     {
@@ -129,13 +149,13 @@ public sealed class ProviderStreamFailureTests
         public ValueTask DisposeAsync() => ValueTask.FromException(cleanupFailure);
     }
 
-    private sealed class FailingStream(Exception providerFailure, Exception cleanupFailure, bool cleanupDuringPull = false)
+    private sealed class FailingStream(Exception providerFailure, Exception? cleanupFailure = null, bool cleanupDuringPull = false)
         : IAsyncEnumerable<LlmStreamEvent>, IAsyncEnumerator<LlmStreamEvent>
     {
         public LlmStreamEvent Current => throw new InvalidOperationException("No event is available.");
         public IAsyncEnumerator<LlmStreamEvent> GetAsyncEnumerator(CancellationToken cancellationToken = default) => this;
-        public ValueTask<bool> MoveNextAsync() => ValueTask.FromException<bool>(cleanupDuringPull
+        public ValueTask<bool> MoveNextAsync() => ValueTask.FromException<bool>(cleanupDuringPull && cleanupFailure is not null
             ? new AggregateException(providerFailure, cleanupFailure) : providerFailure);
-        public ValueTask DisposeAsync() => cleanupDuringPull ? ValueTask.CompletedTask : ValueTask.FromException(cleanupFailure);
+        public ValueTask DisposeAsync() => cleanupDuringPull || cleanupFailure is null ? ValueTask.CompletedTask : ValueTask.FromException(cleanupFailure);
     }
 }

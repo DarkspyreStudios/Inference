@@ -188,6 +188,10 @@ internal sealed class ConnectLlmInference(
             Common.InferenceFailureCode.UnsupportedFeature,
             exception.Message,
             exception),
+        LlmProviderException provider when provider.StatusCode == HttpStatusCode.Unauthorized =>
+            new Common.InferenceException(Common.InferenceFailureCode.AuthenticationRequired, provider.Message, provider),
+        LlmProviderException provider when provider.StatusCode == HttpStatusCode.Forbidden =>
+            new Common.InferenceException(Common.InferenceFailureCode.AccessDenied, provider.Message, provider),
         LlmProviderException provider when provider.IsContextOverflow =>
             new Common.InferenceException(Common.InferenceFailureCode.InvalidRequest, provider.Message, provider),
         ArgumentException => new Common.InferenceException(Common.InferenceFailureCode.InvalidRequest, exception.Message, exception),

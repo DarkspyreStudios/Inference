@@ -637,6 +637,10 @@ LlmInferenceResult result = await llm.CompleteAsync(new LlmInferenceRequest
 Image workflows expose the same boundary through `ImageProviderService.Bind(connection, workflow)`.
 Binding is explicit and retains exactly one backend. Neither adapter retries through a different
 provider nor falls back from Connect to Tensor.
+The bound Common LLM facade maps provider HTTP 401 to `AuthenticationRequired` and HTTP 403 to
+`AccessDenied`. It preserves the original provider exception, safe message and diagnostics as the
+inner exception. These outcomes remain distinct from execution failure; the facade neither logs in
+nor retries automatically.
 The returned `IImageInference` exposes asynchronous disposal directly. Callers own its retirement;
 the bound instance still borrows its collaborators and does not dispose them.
 
