@@ -14,7 +14,7 @@ using Darkspyre.Inference.Tensor.Ggml;
 
 namespace Darkspyre.Inference.Tensor.LLM.Qwen;
 
-public sealed class QwenLlmInference : ITensorLlmInference
+public sealed partial class QwenLlmInference : ITensorLlmInference
 {
     /// <summary>Qwen's thinking is on or off: <see cref="LlmReasoningLevel.None"/> turns it off, <see cref="LlmReasoningLevel.High"/> on.</summary>
     private static readonly System.Collections.Frozen.FrozenSet<LlmReasoningLevel> ReasoningLevels =
@@ -112,8 +112,13 @@ public sealed class QwenLlmInference : ITensorLlmInference
             }).ToArray();
     }
 
-    public async IAsyncEnumerable<LlmStreamEvent> StreamAsync(
+    public IAsyncEnumerable<LlmStreamEvent> StreamAsync(
+        LlmInferenceRequest request, CancellationToken cancellationToken = default) =>
+        ReadStreamAsync(this, request, cancellationToken);
+
+    private async IAsyncEnumerable<LlmStreamEvent> StreamCoreAsync(
         LlmInferenceRequest request,
+        StreamOperation operation,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         ThrowIfDisposed();
@@ -191,7 +196,6 @@ public sealed class QwenLlmInference : ITensorLlmInference
             abandonment.Token).GetAsyncEnumerator(abandonment.Token);
         bool completed = false;
         Exception? operationFailure = null;
-        bool firstMove = true;
         try
         {
             while (true)
@@ -201,11 +205,8 @@ public sealed class QwenLlmInference : ITensorLlmInference
                 try
                 {
                     if (runtimeUse is not null) _runtimeOwner.ThrowIfOperationCanceled(executionToken);
-                    // TensorSharp renders the chat template and tokenizes synchronously in its first move.
-                    more = firstMove
-                        ? await Task.Run(() => updates.MoveNextAsync().AsTask(), abandonment.Token).ConfigureAwait(false)
-                        : await updates.MoveNextAsync().ConfigureAwait(false);
-                    firstMove = false;
+                    executionToken.ThrowIfCancellationRequested();
+                    more = await updates.MoveNextAsync().ConfigureAwait(false);
                     if (more)
                     {
                         if (runtimeUse is not null) _runtimeOwner.ThrowIfOperationCanceled(executionToken);
@@ -263,11 +264,13 @@ public sealed class QwenLlmInference : ITensorLlmInference
             if (!completed)
             {
                 try { await abandonment.CancelAsync().ConfigureAwait(false); }
-                catch (Exception error) { cleanupFailures.Add(error); }
+                catch (Exception error) { cleanupFailures.Add(error); operation.RecordCleanup(error, abandonment); }
             }
 
+            try { await operation.WaitForAbortAsync().ConfigureAwait(false); }
+            catch (Exception error) { cleanupFailures.Add(error); operation.RecordCleanup(error, operation); }
             try { await updates.DisposeAsync().ConfigureAwait(false); }
-            catch (Exception error) { cleanupFailures.Add(error); }
+            catch (Exception error) { cleanupFailures.Add(error); operation.RecordCleanup(error, updates); }
             if (cleanupFailures.Count != 0)
             {
                 if (operationFailure is not null) cleanupFailures.Insert(0, operationFailure);
@@ -605,6 +608,7 @@ public sealed class QwenLlmInference : ITensorLlmInference
     /// <summary>Waits for active requests, or cancels them when the token is cancelled, then releases the model.</summary>
     private async Task ReleaseModelAsync(CancellationToken urgency)
     {
+        await DrainStreamsAsync().ConfigureAwait(false);
         using IDisposable unloading = await _lifetime.EnterUnloadAsync(urgency).ConfigureAwait(false);
         if (_modelLease is null)
         {

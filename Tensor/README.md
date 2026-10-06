@@ -116,6 +116,16 @@ no-ops. `DisposeAsync` performs Stop and completes after native work has release
 The shared lifecycle idle task preserves the latest accepted work's failure after publishing
 Failed. Disposal observes that actual cleanup failure; repeated waits do not turn it into success.
 
+Qwen owns stream production on a background task. Its reader receives at most 32 queued events,
+matching Connect's managed stream delivery bound. Accepted unload or stop retires delivery and
+drains actual generation and enumeration cleanup independently of a paused reader. Graceful
+teardown does not cancel generation; urgency cancellation still uses the model lifetime's token.
+Reader abandonment cancels its own generation and joins cancellation callbacks before disposing
+the runtime enumerator. Cancellation observations do not duplicate the producer's actual failure.
+Failed enumeration cleanup fences further inference and retains the refused iterator and model/pack
+ownership. Teardown reports the original operation and each independent cleanup error once.
+Repeated disposal preserves that outcome without replaying failed stream cleanup.
+
 Laya owns an acquired pack lease and each returned model before checking load cancellation.
 Failed load cleanup preserves the load error and the cleanup error. The engine retains resources
 whose release fails and refuses replacement loads until explicit Unload releases them. The pack
