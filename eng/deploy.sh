@@ -141,25 +141,8 @@ main() {
         [[ "$existing" == "$version" ]] || fail "Published version missing for $package."
         [[ "$(gh api "/orgs/DarkspyreStudios/packages/nuget/Darkspyre.Inference.$package" --jq .visibility)" == private ]] || fail "Published $package is not private."
     done
-    stage='publication record, tag and source push'
+    stage='tag and source push'
     [[ -z "$(git status --porcelain --untracked-files=normal)" && "$(git rev-parse HEAD)" == "$source_commit" ]] || fail 'Source changed during publication; inspect before tagging/pushing.'
-    cd "$root"
-    awk -v version="$version" '
-        /^\| Lifecycle stage \|/ { print "| Lifecycle stage | Four-package `" version "` published privately |"; next }
-        { print }
-    ' .roles/project.md > .roles/project.md.deploy-tmp
-    mv -- .roles/project.md.deploy-tmp .roles/project.md
-    {
-        printf '\n## Automated private release %s\n\n' "$version"
-        printf 'Published all four packages from `%s` using `deploy-%s.sh`.\n' "$source_commit" "$mode"
-        printf 'Authenticated restores, Debug/Release builds and tests, formatting, vulnerability audits,\n'
-        printf 'archive boundaries and local/fresh-feed consumer checks passed. Downloaded archives match\n'
-        printf 'the verified local archives; feed readback confirms private visibility. Source is tagged\n'
-        printf '`v%s`. No model weights or paid inference were used as verification gates.\n' "$version"
-    } >> .roles/project.md
-    git add -- .roles/project.md
-    git diff --cached --check
-    git commit -m "Record verified private $version publication" -- .roles/project.md
     git tag -a "v$version" "$source_commit" -m "Verified private four-package $version release"
     git -c credential.helper= -c 'credential.helper=!gh auth git-credential' push origin HEAD:refs/heads/master "refs/tags/v$version"
     printf 'Published all four packages at %s; source %s. Verification cache retained at %s.\n' "$version" "$source_commit" "$cache"

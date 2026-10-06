@@ -54,12 +54,39 @@ a GGML native package. A native check uses the supplier version required by the 
 6. Push all four packages without overwrite/skip-duplicate switches.
 7. Use a new empty package cache and no HTTP cache to restore/run the consumer from normal feeds.
    Compare all four downloaded archives byte-for-byte and check feed versions/private visibility.
-8. Record publication in `.roles/project.md`, commit that record, tag the release-source commit,
-   and push master plus that one release tag to origin. No other tag or branch is pushed.
+8. Tag the release-source commit and push master plus that one release tag to origin. The annotated
+   `v<version>` tag is the publication record. No other tag or branch is pushed.
 
 No live provider calls, model downloads or consumer-application migrations run. Audit reports and
 packages are ignored outputs under `artifacts/`; the fresh verification cache is retained in the
 system temporary directory and its exact path is printed on success.
+
+## Package contents
+
+Every package includes a readable package README and the repository license. Pack verification
+confirms that the Common assembly appears only in the Common package, that Connect, Tensor and
+UI.Settings declare an exact synchronized dependency on Common, and that each product package
+contains every owned assembly plus its XML documentation. UI.Settings also includes its static web
+assets and `THIRD-PARTY-NOTICES.md` for its owned numeric control's Lumeo-derived
+layout/accessibility. Lumeo is an unmodified package dependency, not a fork.
+
+Source builds use project references. `Directory.Build.targets` pins the package dependency on
+Common to `[$(Version)]` when generating each consumer product's NuGet manifest. `eng/VerifyPackages`
+rejects foreign DLLs, native binaries and shader sources, local-only dependencies, missing owned
+assemblies or documentation, and mismatched Common versions.
+
+Whisper runtime build assets flow through its public NuGet dependency (`PrivateAssets="none"`).
+Tensor marks assets imported from both `Whisper.net.Runtime` and `Whisper.net.Runtime.Metal`
+non-packable without disabling consumer output copying. `ggml-metal.metal` must come only from the
+public runtime dependency, never from Tensor's `content` or `contentFiles`.
+
+`eng/VerifyConsumer` is a non-packable release smoke test with four PackageReferences and no source
+project references. It checks loaded assembly source identities, the Settings contracts and Whisper's
+public native runtime. Before publication it restores against `eng/VerifyConsumer/NuGet.Preflight.Config`
+(local Inference archives plus normal dependency feeds). After publication it restores against the
+root `NuGet.Config` with a new empty package cache and `--no-http-cache`. It does not load weights or
+call providers. `eng/package-assets.tests.sh` verifies pack inputs and collision checks without
+creating archives.
 
 ## Failure behavior
 
