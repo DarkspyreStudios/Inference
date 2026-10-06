@@ -48,10 +48,11 @@ internal sealed class XaiHostedToolObserver(Func<Exception> malformed, XaiHosted
         if (response.TryGetProperty("output", out JsonElement output))
         {
             if (output.ValueKind != JsonValueKind.Array) throw malformed();
+            _citations.Clear();
             int index = 0;
             foreach (JsonElement item in output.EnumerateArray())
             {
-                events.AddRange(ObserveCitations(item, index++));
+                events.AddRange(ObserveCitations(item, index++, authoritative: true));
                 if (Identify(item) is not { } tool) continue;
                 string? id = OptionalString(item, "id");
                 string? callId = CallIdentity(item);
@@ -133,7 +134,7 @@ internal sealed class XaiHostedToolObserver(Func<Exception> malformed, XaiHosted
         };
     }
 
-    private IEnumerable<LlmStreamEvent> ObserveCitations(JsonElement item, int? index)
+    private IEnumerable<LlmStreamEvent> ObserveCitations(JsonElement item, int? index, bool authoritative = false)
     {
         if (item.ValueKind != JsonValueKind.Object || LlmJson.GetString(item, "type") != "message") yield break;
         if (!item.TryGetProperty("content", out JsonElement content) || content.ValueKind != JsonValueKind.Array) throw malformed();
@@ -154,11 +155,12 @@ internal sealed class XaiHostedToolObserver(Func<Exception> malformed, XaiHosted
                 int currentAnnotation = annotationIndex++;
                 if (LlmJson.GetString(annotation, "type") != "url_citation") continue;
                 string key = $"{identity}:{currentPart}:{currentAnnotation}";
-                if (!_citationKeys.Add(key)) continue;
+                bool firstObservation = _citationKeys.Add(key);
+                if (!firstObservation && !authoritative) continue;
                 // The published REST fields do not establish their offset unit for emitted no-inline text.
                 var citation = new LlmCitation(RequiredString(annotation, "url"), OptionalString(annotation, "title"));
                 _citations.Add(citation);
-                yield return new LlmCitationEvent(citation);
+                if (firstObservation) yield return new LlmCitationEvent(citation);
             }
         }
     }

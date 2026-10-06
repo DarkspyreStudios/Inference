@@ -239,6 +239,8 @@ public sealed class ProviderTerminalEvidenceTests
 
             data: {"type":"response.output_text.delta","delta":"provisional"}
 
+            data: {"type":"response.output_item.done","output_index":1,"item":{"type":"message","id":"message-1","content":[{"type":"output_text","text":"provisional","annotations":[{"type":"url_citation","url":"https://source.example.test/provisional"}]}]}}
+
             data: {"type":"response.output_item.done","output_index":0,"item":{"type":"function_call","id":"fc-1","call_id":"call-1","name":"echo","arguments":"{}"}}
 
             data: {"type":"response.completed","response":{"id":"response-1","model":"reported-model","status":"completed","output":[],"usage":{"input_tokens":5,"output_tokens":2,"total_tokens":7}}}
@@ -265,6 +267,7 @@ public sealed class ProviderTerminalEvidenceTests
         Assert.Equal("call-1", Assert.Single(events.OfType<LlmToolCallStartedEvent>()).ToolCallId);
         Assert.Single(events.OfType<LlmToolCallArgumentsDeltaEvent>());
         Assert.Single(events.OfType<LlmTextDeltaEvent>());
+        Assert.Single(events.OfType<LlmCitationEvent>());
         Assert.Empty(events.OfType<LlmToolCallCompletedEvent>());
         LlmChatResult terminal = Assert.IsType<LlmChatCompletionEvent>(events[^1]).Result;
         LlmChatResult restored = JsonSerializer.Deserialize(
@@ -274,7 +277,39 @@ public sealed class ProviderTerminalEvidenceTests
         Assert.Equal(new LlmUsage(5, 2, 7), restored.Usage);
         Assert.Empty(restored.Text);
         Assert.Empty(restored.ToolCalls);
+        Assert.Empty(restored.Citations);
         Assert.Null(restored.ContinuationState);
+    }
+
+    [Fact]
+    public async Task GrokTerminalCitationsReplaceProvisionalValuesWithoutRepeatingObservedPositions()
+    {
+        const string body = """
+            data: {"type":"response.output_item.done","output_index":0,"item":{"type":"message","id":"message-1","content":[{"type":"output_text","text":"answer","annotations":[{"type":"url_citation","url":"https://source.example.test/provisional"}]}]}}
+
+            data: {"type":"response.completed","response":{"id":"response-1","model":"reported-model","status":"completed","output":[{"type":"message","id":"message-1","role":"assistant","content":[{"type":"output_text","text":"answer","annotations":[{"type":"url_citation","url":"https://source.example.test/final"}]}]}]}}
+            """;
+        using var http = new HttpClient(new Handler(LlmTransport.XaiResponses, streaming: true, body + "\n\n"));
+        var client = new XaiResponsesLlmClient(http);
+        var connection = new LlmConnection
+        {
+            Version = "1",
+            Transport = LlmTransport.XaiResponses,
+            Endpoint = "https://api.x.ai/v1",
+            Xai = new(),
+            Credential = new LlmCredential { OAuth = new() { AccessToken = "test-token" } }.Serialize()
+        };
+        var events = new List<LlmStreamEvent>();
+        await foreach (LlmStreamEvent item in client.StreamAsync(connection,
+            new() { ModelId = "selected-model", Messages = [new("user", "hello")] })) events.Add(item);
+
+        Assert.Single(events.OfType<LlmCitationEvent>());
+        LlmChatResult terminal = Assert.IsType<LlmChatCompletionEvent>(events[^1]).Result;
+        LlmChatResult restored = JsonSerializer.Deserialize(
+            JsonSerializer.Serialize(terminal, ConnectLlmJson.ChatResult), ConnectLlmJson.ChatResult)!;
+        Assert.Equal(LlmCompletionStatus.Completed, restored.Status);
+        Assert.Equal("answer", restored.Text);
+        Assert.Equal("https://source.example.test/final", Assert.Single(restored.Citations).Url);
     }
 
     private sealed class Handler(LlmTransport transport, bool streaming, string? scriptedBody = null,
