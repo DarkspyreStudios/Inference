@@ -376,7 +376,7 @@ public sealed class BedrockSafetyTests
                                 new LlmToolOutputBinary(LlmBinaryKind.Document, "application/pdf", "%PDF-"u8.ToArray(), "report.pdf"),
                                 new LlmToolOutputBinary(LlmBinaryKind.Document, "text/csv", "hour,f\n1,72"u8.ToArray(), "hours.csv")
                             ],
-                            StructuredContent = JsonSerializer.SerializeToElement(new { temperature_f = 72 }),
+                            StructuredContent = JsonElement.Parse("""{"temperature_f":72}"""),
                             IsError = true
                         })
                     ]
