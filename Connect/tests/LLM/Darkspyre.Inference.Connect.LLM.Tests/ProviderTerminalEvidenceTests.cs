@@ -10,6 +10,37 @@ namespace Darkspyre.Inference.Connect.LLM.Tests;
 
 public sealed class ProviderTerminalEvidenceTests
 {
+    [Fact]
+    public async Task GrokFileFailureKeepsSafeRequestAndRetryFactsWithoutRetryingOrDisposingBorrowedContent()
+    {
+        var retryAfter = TimeSpan.FromSeconds(17);
+        var handler = new Handler(LlmTransport.XaiResponses, streaming: false,
+            "{\"error\":{\"message\":\"Rate limit test-token\",\"refresh_token\":\"provider-secret\"}}",
+            HttpStatusCode.TooManyRequests, retryAfter, "request-test-token-1");
+        using var http = new HttpClient(handler);
+        await using var files = new XaiFileClient(http);
+        using var source = new MemoryStream(Encoding.UTF8.GetBytes("reference text"), writable: false);
+        var connection = new LlmConnection
+        {
+            Version = "1",
+            Transport = LlmTransport.XaiResponses,
+            Endpoint = "https://api.x.ai/v1",
+            Xai = new(),
+            Credential = new LlmCredential { OAuth = new() { AccessToken = "test-token" } }.Serialize()
+        };
+
+        LlmProviderException failure = await Assert.ThrowsAsync<LlmProviderException>(() =>
+            files.UploadAsync(connection, source, "reference.txt", null, () => { }, CancellationToken.None));
+
+        Assert.Equal(HttpStatusCode.TooManyRequests, failure.StatusCode);
+        Assert.Equal("request-[REDACTED]-1", failure.RequestId);
+        Assert.Equal(retryAfter, failure.RetryAfter);
+        Assert.DoesNotContain("test-token", failure.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain("provider-secret", failure.ToString(), StringComparison.Ordinal);
+        Assert.Equal(1, handler.Calls);
+        Assert.True(source.CanRead);
+    }
+
     [Theory]
     [InlineData(LlmTransport.GoogleGeminiApi, true, HttpStatusCode.OK)]
     [InlineData(LlmTransport.GoogleGeminiApi, false, HttpStatusCode.OK)]
@@ -247,7 +278,7 @@ public sealed class ProviderTerminalEvidenceTests
     }
 
     private sealed class Handler(LlmTransport transport, bool streaming, string? scriptedBody = null,
-        HttpStatusCode statusCode = HttpStatusCode.OK, TimeSpan? retryAfter = null) : HttpMessageHandler
+        HttpStatusCode statusCode = HttpStatusCode.OK, TimeSpan? retryAfter = null, string? requestId = null) : HttpMessageHandler
     {
         internal int Calls { get; private set; }
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
@@ -260,6 +291,7 @@ public sealed class ProviderTerminalEvidenceTests
                 Content = new StringContent(body, Encoding.UTF8, streaming && statusCode == HttpStatusCode.OK ? "text/event-stream" : "application/json")
             };
             if (retryAfter is { } delay) response.Headers.RetryAfter = new(delay);
+            if (requestId is not null) response.Headers.Add("x-request-id", requestId);
             return Task.FromResult(response);
         }
     }

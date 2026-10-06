@@ -2855,6 +2855,9 @@ accepts rotated tokens and saves through `LlmConnectionAccess`'s version-conditi
 token-validation 403 message to `AuthenticationRequired`, and 402 or a blocked account to the named
 entitlement failure (`AccessDenied`). Unknown 403 responses remain provider errors. Subscription-specific
 403 matching is not implemented or live-qualified. Errors never trigger a retry or refresh.
+The shared HTTP classifier preserves the response status, observed request ID and delta
+`Retry-After` across its resource and authentication routes. Request IDs use the same credential
+redactor as diagnostic bodies. A reported retry delay is diagnostic data, not permission to retry.
 Named authentication and entitlement failures clear the setup device attempt without saving a credential.
 
 The shared Responses pipeline retains xAI output as an ordered deep clone, including hosted-tool

@@ -25,40 +25,38 @@ public static class XaiErrorClassifier
         CancellationToken cancellationToken,
         bool diagnosticBody = true) =>
         ThrowIfUnsuccessfulCoreAsync(response, credential, additionalSecrets,
-            diagnosticBody, "Provider rejected the Files request.", null, null, cancellationToken);
+            diagnosticBody, "Provider rejected the Files request.", cancellationToken);
 
     internal static Task ThrowIfUnsuccessfulSpeechAsync(HttpResponseMessage response, LlmCredential? credential,
         CancellationToken cancellationToken) =>
         ThrowIfUnsuccessfulCoreAsync(response, credential, [],
-            false, "Provider rejected the speech request.", null, null, cancellationToken);
+            false, "Provider rejected the speech request.", cancellationToken);
 
     internal static Task ThrowIfUnsuccessfulImageAsync(HttpResponseMessage response, LlmCredential? credential,
         IEnumerable<string> additionalSecrets, CancellationToken cancellationToken) =>
         ThrowIfUnsuccessfulCoreAsync(response, credential, additionalSecrets,
-            false, "Provider rejected the image request.", null, null, cancellationToken);
+            false, "Provider rejected the image request.", cancellationToken);
 
     internal static Task ThrowIfUnsuccessfulVideoAsync(HttpResponseMessage response, LlmCredential? credential,
         IEnumerable<string> additionalSecrets, CancellationToken cancellationToken) =>
         ThrowIfUnsuccessfulCoreAsync(response, credential, additionalSecrets,
-            true, "Provider rejected the video request.", ProviderHttp.ReadRequestId(response), response.Headers.RetryAfter?.Delta, cancellationToken);
+            true, "Provider rejected the video request.", cancellationToken);
 
     internal static Task ThrowIfUnsuccessfulEmbeddingAsync(HttpResponseMessage response, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(response);
-        return ThrowIfUnsuccessfulCoreAsync(response, null, [], false, "Provider rejected the embedding request.",
-            ProviderHttp.ReadRequestId(response), response.Headers.RetryAfter?.Delta, cancellationToken);
+        return ThrowIfUnsuccessfulCoreAsync(response, null, [], false, "Provider rejected the embedding request.", cancellationToken);
     }
 
     internal static Task ThrowIfUnsuccessfulDocumentSearchAsync(HttpResponseMessage response, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(response);
-        return ThrowIfUnsuccessfulCoreAsync(response, null, [], false, "Provider rejected the document-search request.",
-            ProviderHttp.ReadRequestId(response), response.Headers.RetryAfter?.Delta, cancellationToken);
+        return ThrowIfUnsuccessfulCoreAsync(response, null, [], false, "Provider rejected the document-search request.", cancellationToken);
     }
 
     private static async Task ThrowIfUnsuccessfulCoreAsync(HttpResponseMessage response, LlmCredential? credential,
         IEnumerable<string> additionalSecrets, bool diagnosticBody, string diagnosticMessage,
-        string? requestId, TimeSpan? retryAfter, CancellationToken cancellationToken)
+        CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(response);
         cancellationToken.ThrowIfCancellationRequested();
@@ -68,6 +66,8 @@ public static class XaiErrorClassifier
         cancellationToken.ThrowIfCancellationRequested();
         string safe = diagnosticBody ? SecretRedactor.Sanitize(body, credential, additionalSecrets)
             : diagnosticMessage;
+        string? requestId = ProviderHttp.ReadRequestId(response, credential, additionalSecrets);
+        TimeSpan? retryAfter = response.Headers.RetryAfter?.Delta;
         (string? code, string? message) = ReadError(body);
         throw Classify(response.StatusCode, code, message, safe, requestId: requestId, retryAfter: retryAfter);
     }
