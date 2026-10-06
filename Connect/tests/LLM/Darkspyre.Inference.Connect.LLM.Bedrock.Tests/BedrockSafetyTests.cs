@@ -64,7 +64,9 @@ public sealed class BedrockSafetyTests
         await using var agents = new LlmAgentProviderService(source, [new ManagedBedrockAgentClient(client, providers)]);
         await using ILlmAgentSession session = await agents.StartSessionAsync("connection", new()
         {
-            ModelId = Request().ModelId, SessionId = "session", Context = context,
+            ModelId = Request().ModelId,
+            SessionId = "session",
+            Context = context,
             UnboundContinuationState = LlmUnboundContinuationState.Omit,
             CallerServices = new() { Resources = access }
         });
@@ -315,6 +317,54 @@ public sealed class BedrockSafetyTests
         Assert.Equal((4, 6, 10), (restored.Usage!.InputTokens, restored.Usage.OutputTokens, restored.Usage.TotalTokens));
         Assert.Null(restored.ContinuationState);
         Assert.Empty(restored.ToolCalls);
+    }
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public async Task TerminalUsagePreservesTheReportedTotalInsteadOfReplacingIt(bool streaming, bool totalOnly)
+    {
+        await using var factory = new BedrockClientFactory(_ => throw new NotSupportedException(),
+            _ => new StreamControl(), _ => throw new NotSupportedException());
+        await using var guard = new BedrockLoggingGuard();
+        var usage = totalOnly ? new TokenUsage { TotalTokens = 10 } : new TokenUsage
+        {
+            InputTokens = 4,
+            OutputTokens = 6,
+            TotalTokens = 10,
+            CacheReadInputTokens = 3,
+            CacheWriteInputTokens = 2
+        };
+        var invoker = new StubConverseInvoker
+        {
+            Response = StubConverseInvoker.Converse([new() { Text = "answer" }], "end_turn", usage),
+            Events = [new ContentBlockDeltaEvent { ContentBlockIndex = 0, Delta = new() { Text = "answer" } },
+                new MessageStopEvent { StopReason = new("end_turn") }, new ConverseStreamMetadataEvent { Usage = usage }]
+        };
+        var client = new BedrockLlmClient(factory, guard, invoker, NullLogger<BedrockLlmClient>.Instance);
+        LlmConnection connection = Connection() with
+        {
+            CapabilityOverrides = new() { SupportsStreaming = streaming },
+            Credential = new LlmCredential
+            {
+                Aws = new() { Region = "us-east-1", AccessKeyId = "fixture-key", SecretAccessKey = "fixture-secret" }
+            }.Serialize()
+        };
+        var events = new List<LlmStreamEvent>();
+        await foreach (LlmStreamEvent item in client.StreamAsync(connection, Request())) events.Add(item);
+        LlmChatResult terminal = Assert.IsType<LlmChatCompletionEvent>(events[^1]).Result;
+        LlmChatResult restored = JsonSerializer.Deserialize(JsonSerializer.SerializeToUtf8Bytes(terminal,
+            ConnectLlmJson.ChatResult), ConnectLlmJson.ChatResult)!;
+
+        var expected = totalOnly ? new LlmUsage(null, null, 10) : new LlmUsage(9, 6, 10)
+        { CachedInputTokens = 3, CacheWriteInputTokens = 2 };
+        Assert.Equal(expected, restored.Usage);
+        Assert.Equal("answer", restored.Text);
+        Assert.Equal(LlmCompletionStatus.Completed, restored.Status);
+        Assert.Equal(streaming ? 1 : 0, invoker.StreamRequests.Count);
+        Assert.Equal(streaming ? 0 : 1, invoker.ConverseRequests.Count);
     }
 
     [Theory]

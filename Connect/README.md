@@ -3392,8 +3392,12 @@ instead. Its events then arrive after generation ends, in the order reasoning, t
 completion. Reasoning text arrives as `LlmReasoningDeltaEvent` with `IsSummary = false`. A Claude model
 under its default `omitted` reasoning display streams no reasoning text. Usage arrives in the stream's
 final metadata event and reaches the host on the completion.
+Converse usage includes cache reads and writes in normalized input tokens. A reported `totalTokens`
+remains authoritative and is not replaced by that normalized sum. A total-only SDK observation keeps
+input and output counts null. Both request modes use the same projection.
 
-Tool calls return only with `RequiresAction`. The stop reasons `max_tokens` and
+Valid tool calls return with `RequiresAction` or `Unknown`. Unknown calls remain observed evidence,
+not admitted tool execution. The stop reasons `max_tokens` and
 `model_context_window_exceeded` report `Incomplete`, `content_filtered` and `guardrail_intervened` report
 `Refused`, and `malformed_model_output` and `malformed_tool_use` report `Failed` with no tool calls and no
 continuation state. An unknown or missing stop reason reports `Unknown`.

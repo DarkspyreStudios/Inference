@@ -482,9 +482,14 @@ internal sealed class BedrockLlmClient(
                     _ => StructuredOutput.Validate(text, structured, enforcement.Value)
                 }
                 : null;
-        LlmUsage? usage = reply.Usage is { } reported
-            ? AnthropicUsage.Create(reported.InputTokens, reported.OutputTokens, reported.CacheReadInputTokens, reported.CacheWriteInputTokens)
-            : null;
+        LlmUsage? usage = null;
+        if (reply.Usage is { } reported)
+        {
+            usage = AnthropicUsage.Create(reported.InputTokens, reported.OutputTokens,
+                reported.CacheReadInputTokens, reported.CacheWriteInputTokens);
+            if (reported.TotalTokens is { } total)
+                usage = (usage ?? new LlmUsage(null, null, null)) with { TotalTokens = total };
+        }
         return new LlmChatResult
         {
             Text = text,
