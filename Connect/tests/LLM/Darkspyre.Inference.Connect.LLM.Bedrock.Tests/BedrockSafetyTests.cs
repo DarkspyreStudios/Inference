@@ -18,6 +18,83 @@ namespace Darkspyre.Inference.Connect.LLM.Bedrock.Tests;
 
 public sealed class BedrockSafetyTests
 {
+    [Theory]
+    [InlineData(false, "future_stop", LlmCompletionStatus.Unknown)]
+    [InlineData(true, "future_stop", LlmCompletionStatus.Unknown)]
+    [InlineData(false, "tool_use", LlmCompletionStatus.RequiresAction)]
+    [InlineData(true, "tool_use", LlmCompletionStatus.RequiresAction)]
+    public async Task UnknownStopsPreserveObservedToolsWithoutSuccessfulContinuation(
+        bool streaming, string stopReason, LlmCompletionStatus expectedStatus)
+    {
+        var control = new StreamControl();
+        await using var factory = new BedrockClientFactory(_ => throw new NotSupportedException(),
+            _ => control, _ => throw new NotSupportedException());
+        await using var guard = new BedrockLoggingGuard();
+        const string partialText = "{\"partial\":";
+        const string arguments = "{\"city\":\"Chicago\"}";
+        var usage = new TokenUsage { InputTokens = 4, OutputTokens = 6, TotalTokens = 10 };
+        var invoker = new StubConverseInvoker
+        {
+            Response = StubConverseInvoker.Converse(
+            [
+                new() { Text = partialText },
+                new() { ReasoningContent = new() { ReasoningText = new() { Text = "reasoning", Signature = "signature" } } },
+                new() { ToolUse = new() { ToolUseId = "tool-1", Name = "weather", Input = BedrockDocumentJson.Read(arguments) } }
+            ], stopReason, usage),
+            Events =
+            [
+                new ContentBlockDeltaEvent { ContentBlockIndex = 0, Delta = new() { Text = partialText } },
+                new ContentBlockDeltaEvent { ContentBlockIndex = 1, Delta = new() { ReasoningContent = new() { Text = "reasoning" } } },
+                new ContentBlockDeltaEvent { ContentBlockIndex = 1, Delta = new() { ReasoningContent = new() { Signature = "signature" } } },
+                new ContentBlockStartEvent { ContentBlockIndex = 2, Start = new() { ToolUse = new() { ToolUseId = "tool-1", Name = "weather" } } },
+                new ContentBlockDeltaEvent { ContentBlockIndex = 2, Delta = new() { ToolUse = new() { Input = arguments } } },
+                new ContentBlockStopEvent { ContentBlockIndex = 2 },
+                new MessageStopEvent { StopReason = new(stopReason) },
+                new ConverseStreamMetadataEvent { Usage = usage }
+            ]
+        };
+        var client = new BedrockLlmClient(factory, guard, invoker, NullLogger<BedrockLlmClient>.Instance);
+        LlmConnection connection = Connection() with
+        {
+            ResolvedContinuationScope = "fixture-scope",
+            CapabilityOverrides = new() { SupportsStreaming = streaming },
+            Credential = new LlmCredential
+            {
+                Aws = new() { Region = "us-east-1", AccessKeyId = "fixture-key", SecretAccessKey = "fixture-secret" }
+            }.Serialize()
+        };
+        LlmChatRequest request = Request() with
+        {
+            StructuredOutput = new()
+            {
+                Name = "answer",
+                Schema = JsonElement.Parse("""{"type":"object"}"""),
+                Fallback = LlmStructuredOutputFallback.LocalValidation
+            }
+        };
+        var events = new List<LlmStreamEvent>();
+        await foreach (LlmStreamEvent item in client.StreamAsync(connection, request)) events.Add(item);
+        LlmChatResult result = Assert.IsType<LlmChatCompletionEvent>(events[^1]).Result;
+        byte[] json = JsonSerializer.SerializeToUtf8Bytes(result, ConnectLlmJson.ChatResult);
+        LlmChatResult restored = JsonSerializer.Deserialize(json, ConnectLlmJson.ChatResult)!;
+
+        Assert.Equal(expectedStatus, restored.Status);
+        Assert.Equal(partialText, restored.Text);
+        LlmToolCall call = Assert.IsType<LlmToolCall>(Assert.Single(restored.ToolCalls));
+        Assert.Equal(("tool-1", "weather", arguments), (call.Id, call.Name, call.ArgumentsJson));
+        Assert.Equal(call, Assert.Single(events.OfType<LlmToolCallCompletedEvent>()).ToolCall);
+        Assert.Null(restored.StructuredOutput);
+        Assert.Equal((4, 6, 10), (restored.Usage!.InputTokens, restored.Usage.OutputTokens, restored.Usage.TotalTokens));
+        if (expectedStatus == LlmCompletionStatus.Unknown)
+        {
+            Assert.Equal(stopReason, restored.FinishReason);
+            Assert.Null(restored.ContinuationState);
+        }
+        else Assert.NotNull(restored.ContinuationState);
+        Assert.Equal(streaming ? 1 : 0, invoker.StreamRequests.Count);
+        Assert.Equal(streaming ? 0 : 1, invoker.ConverseRequests.Count);
+    }
+
     [Fact]
     public async Task AgentCoreStreamFailureSurvivesFailedResponseCleanup()
     {

@@ -1339,6 +1339,10 @@ outcome. Each HTTP event publication checks caller cancellation, including buffe
 non-streaming events and adapters using a borrowed HTTP client.
 Claude CLI and Antigravity also check caller cancellation before each buffered non-streaming event.
 
+Bedrock Converse and ConverseStream also retain decoded tool calls for an unknown stop reason.
+Their terminal result preserves partial text, reported usage and the observed stop reason without
+continuation state or structured-answer evaluation. Observed calls do not authorize tool execution.
+
 Compatible Chat Completions skips structured-output validation for a refused result, including
 `content_filter` without refusal text. Its partial text, reported model, usage and finish reason
 remain available. Filtered partial JSON is not published as an evaluated or valid structured answer.

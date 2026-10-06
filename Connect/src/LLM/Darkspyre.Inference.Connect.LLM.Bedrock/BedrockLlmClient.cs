@@ -422,8 +422,10 @@ internal sealed class BedrockLlmClient(
 
     /// <summary>
     /// Builds the result of a complete Converse reply, streamed or not. Tool calls return only with
-    /// <see cref="LlmCompletionStatus.RequiresAction"/>. A reply with reasoning keeps the ordered reply as continuation
-    /// state, so its signed reasoning is replayed on the next request; any other reply keeps its reported token counts.
+    /// <see cref="LlmCompletionStatus.RequiresAction"/> or <see cref="LlmCompletionStatus.Unknown"/>.
+    /// An unknown stop preserves observed calls without continuation or structured-answer evaluation.
+    /// A continuation-eligible reply with reasoning keeps the ordered reply as continuation state for signed replay.
+    /// Other continuation-eligible replies keep their reported token counts.
     /// </summary>
     internal static LlmChatResult BuildResult(
         LlmConnection connection,
@@ -455,10 +457,10 @@ internal sealed class BedrockLlmClient(
             "malformed_model_output" or "malformed_tool_use" => LlmCompletionStatus.Failed,
             _ => LlmCompletionStatus.Unknown
         };
-        IReadOnlyList<LlmToolCall> toolCalls = status == LlmCompletionStatus.RequiresAction ? validCalls : [];
+        IReadOnlyList<LlmToolCall> toolCalls = status is LlmCompletionStatus.RequiresAction or LlmCompletionStatus.Unknown ? validCalls : [];
         LlmStructuredOutputValidation? validation = request.StructuredOutput is { } structured
             && enforcement is not null
-            && status != LlmCompletionStatus.RequiresAction
+            && status is not (LlmCompletionStatus.RequiresAction or LlmCompletionStatus.Unknown)
                 ? status switch
                 {
                     LlmCompletionStatus.Refused => new LlmStructuredOutputValidation(
@@ -485,7 +487,7 @@ internal sealed class BedrockLlmClient(
             FinishReason = MapFinishReason(stopReason),
             IncompleteReason = status == LlmCompletionStatus.Incomplete ? stopReason : null,
             Usage = usage,
-            ContinuationState = status == LlmCompletionStatus.Failed
+            ContinuationState = status is LlmCompletionStatus.Failed or LlmCompletionStatus.Unknown
                 ? null
                 : EncodeState(connection, request.ModelId, reply, toolCalls, usage),
             ToolCalls = toolCalls,
