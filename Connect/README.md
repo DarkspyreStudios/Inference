@@ -2531,6 +2531,11 @@ format. Gemini API wraps the complete request in `generateContentRequest`. Verte
 the count API's input fields and generation config without `toolConfig`. Fields a count API cannot
 represent are rejected, not silently stripped from the prompt.
 
+The focused counting tests compare the real count and nonstreaming generation builders on all four
+routes. They check instructions, explicit document bytes, function schemas and reasoning controls,
+plus native count routing and generation-only field removal. Scripted HTTP and a borrowed Vertex
+authentication stand-in qualify request projection only; they do not qualify provider acceptance.
+
 `LlmProviderInputTokenCount` carries the resolved model, provider-reported input count, nullable
 cached-input and billable-character counts, modality breakdowns, and omitted continuation-state
 count. Unknown modalities retain their counts as `Unknown`. Missing optional values stay null;
