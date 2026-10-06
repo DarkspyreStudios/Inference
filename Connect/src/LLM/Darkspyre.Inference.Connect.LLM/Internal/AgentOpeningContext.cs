@@ -14,9 +14,15 @@ internal sealed record AgentOpeningContext(string Text, IReadOnlyList<LlmAttachm
     /// <summary>The opening context for a session start, or null when the start supplies no entries.</summary>
     public static AgentOpeningContext? For(LlmAgentSessionOptions options, bool carriesAttachments)
     {
+        (LlmAgentContext? context, int omitted) = Validate(options);
+        return context is null ? null : From(context, omitted, carriesAttachments);
+    }
+
+    internal static (LlmAgentContext? Context, int Omitted) Validate(LlmAgentSessionOptions options, bool supportsResources = false)
+    {
         if (options.Context is null)
         {
-            return null;
+            return (null, 0);
         }
         if (options.UnboundContinuationState != LlmUnboundContinuationState.Omit)
         {
@@ -24,7 +30,11 @@ internal sealed record AgentOpeningContext(string Text, IReadOnlyList<LlmAttachm
                 "This runtime starts a new provider conversation that carries no continuation state. "
                 + "Start with UnboundContinuationState.Omit to carry the context as opening context.");
         }
-        (LlmAgentContext context, int omitted) = ManagedAgentContext.WithoutContinuationState(options.Context);
+        return ManagedAgentContext.WithoutContinuationState(options.Context, supportsResources);
+    }
+
+    internal static AgentOpeningContext? From(LlmAgentContext context, int omitted, bool carriesAttachments)
+    {
         if (context.Entries.Count == 0)
         {
             return null;
@@ -45,13 +55,14 @@ internal sealed record AgentOpeningContext(string Text, IReadOnlyList<LlmAttachm
                 {
                     Kind = binary.Kind == LlmBinaryKind.Image ? LlmBinaryKind.Image : LlmBinaryKind.Document,
                     FileName = binary.FileName ?? "attachment",
+                    MediaType = binary.MediaType,
                     Data = binary.Data
                 })];
         int uncarried = toolBytes.Length - toolBytes.OfType<LlmToolOutputBinary>()
             .Count(binary => binary.Kind is LlmBinaryKind.Image or LlmBinaryKind.Document);
         if (carriesAttachments)
         {
-            LlmAttachments.Validate(attachments, supportsImages: true, supportsDocuments: true, parameterName: nameof(options));
+            LlmAttachments.Validate(attachments, supportsImages: true, supportsDocuments: true, parameterName: nameof(context));
         }
         string notice = "History was carried as opening context in a new provider conversation; "
             + $"continuation state from {omitted} earlier messages was not carried.";

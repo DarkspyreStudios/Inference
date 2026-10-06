@@ -51,10 +51,11 @@ internal static class NativeAgentContract
     };
 
     /// <summary>The validated start settings of a runtime that declares <paramref name="agent"/>.</summary>
-    public static LlmAgentNativeRuntimeOptions ValidateStart(LlmAgentSessionOptions options, LlmAgentCapabilities agent)
+    public static LlmAgentNativeRuntimeOptions ValidateStart(LlmAgentSessionOptions options, LlmAgentCapabilities agent,
+        bool supportsResources = false)
     {
         HostedTools.Validate(options.HostedTools, options.MaxHostedTurns, agent.HostedTools);
-        ClientTools.ValidateCallerServices(options.CallerServices, agent);
+        ClientTools.ValidateCallerServices(options.CallerServices, agent, supportsResources);
         // A supplied context becomes opening context; see AgentOpeningContext.
         if (options.ThreadId is not null || options.SessionId is not null || options.ExecutionOptions is not null)
         {
@@ -74,10 +75,11 @@ internal static class NativeAgentContract
     /// The validated resume settings: the supplied runtime whole, or the documented host-controlled resume
     /// defaults. A runtime that does not accept host-controlled policy therefore rejects a null runtime.
     /// </summary>
-    public static LlmAgentNativeRuntimeOptions ResumeRuntime(LlmAgentResumeOptions options, LlmAgentCapabilities agent)
+    public static LlmAgentNativeRuntimeOptions ResumeRuntime(LlmAgentResumeOptions options, LlmAgentCapabilities agent,
+        bool supportsResources = false)
     {
         HostedTools.Validate(options.HostedTools, options.MaxHostedTurns, agent.HostedTools);
-        ClientTools.ValidateCallerServices(options.CallerServices, agent);
+        ClientTools.ValidateCallerServices(options.CallerServices, agent, supportsResources);
         ValidateTools(options.Tools);
         LlmAgentNativeRuntimeOptions runtime = options.Runtime ?? new()
         {

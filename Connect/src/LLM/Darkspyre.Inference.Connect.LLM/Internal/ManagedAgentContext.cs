@@ -51,9 +51,9 @@ internal static class ManagedAgentContext
     /// Validates a context for a new provider-side conversation, which carries no continuation state. Every
     /// entry's state is removed and counted.
     /// </summary>
-    public static (LlmAgentContext Context, int Omitted) WithoutContinuationState(LlmAgentContext context)
+    public static (LlmAgentContext Context, int Omitted) WithoutContinuationState(LlmAgentContext context, bool supportsResources = false)
     {
-        ValidateRuntimeResources(context);
+        if (!supportsResources) ValidateRuntimeResources(context);
         int omitted = 0;
         LlmAgentContext validated = Validate(context, message =>
         {

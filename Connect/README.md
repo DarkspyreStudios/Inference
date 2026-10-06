@@ -1186,8 +1186,21 @@ Claude CLI streaming chat sends materialized prompt and tool files through its e
 stream-json content blocks. Its shared tool-output projection supplies text to the labelled history
 and appends native image/document blocks after the transcript and prompt attachments. Capability
 restrictions apply to that projection. The plain-text nonstreaming lane refuses resource-bound
-requests before resource callbacks. Native Claude sessions still refuse logical resource bindings;
-the chat preparation lane does not enable native session import or capture.
+requests before resource callbacks.
+Native Claude Start, Resume and Fork borrow `CallerServices.Resources`. Opening validates the
+Workspace/Session selection snapshot before starting the CLI. Imported history stays logical until
+the first prompt; that prompt materializes the opening history and current input together. Later
+prompts read the current selection and append references absent from the supplied graph. Existing
+references keep their order and duplicates. Copied native content is built and its readers settle
+before the prompt is written. This path neither changes caller selection nor restores a native
+continuation from foreign history. Native context capture and replacement remain unsupported;
+the caller retains its resource authority and selection.
+Claude MCP tool results materialize only their explicitly named, already-selected resources. They
+do not append unrelated selected files. The existing MCP projection carries text/JSON and images;
+logical content it cannot carry, including PDF on this route, raises an explicit error. Public tool
+results retain logical references. Background failures reach the session observer. Retirement drains
+ignoring resource callbacks before releasing the process, detaches borrowed access, and preserves
+operation and independent cleanup failures once for every retirement caller.
 Gemini API and Vertex use the shared inline materializer before their existing native request builders. Preflight
 validates the selected route and cache binding before resource reads. The materialized request retains
 native format and size validation. Claude uses the shared Anthropic document builder. Gemini sends

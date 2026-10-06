@@ -5,6 +5,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Threading.Channels;
 using Darkspyre.Inference.Common.LLM;
+using Darkspyre.Inference.Common.Resources;
 using Darkspyre.Inference.Connect.LLM.Internal;
 
 namespace Darkspyre.Inference.Connect.LLM.Providers;
@@ -23,14 +24,16 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
         LlmAgentSessionOptions options,
         CancellationToken cancellationToken = default)
     {
-        ArgumentNullException.ThrowIfNull(options);
-        LlmAgentNativeRuntimeOptions runtime = NativeAgentContract.ValidateStart(options, NativeAgentContract.Claude);
+        options = ClientTools.Snapshot(options);
+        LlmAgentNativeRuntimeOptions runtime = NativeAgentContract.ValidateStart(options, NativeAgentContract.Claude, supportsResources: true);
         LlmAgentHostRuntimePolicy policy = NativeAgentContract.HostPolicy(runtime);
         NativeAgentContract.ValidateConnection(connection, NativeAgentContract.Claude, supportsAgentToolUse: true,
             options.ModelId, options.Tools, options.ToolHandler);
         ClaudeCliConfiguration.ValidateConnection(connection);
         ValidateOptions(options.ModelId, runtime.WorkingDirectory, ClientTools.Functions(options.Tools), options.ToolHandler);
-        AgentOpeningContext? opening = AgentOpeningContext.For(options, carriesAttachments: true);
+        (LlmAgentContext? Context, int Omitted) opening = AgentOpeningContext.Validate(options, supportsResources: true);
+        if (options.CallerServices?.Resources is null && opening.Context is { } context)
+            _ = AgentOpeningContext.From(context, opening.Omitted, carriesAttachments: true);
         string threadId = Guid.NewGuid().ToString();
         return await CreateSessionAsync(
             threadId,
@@ -50,6 +53,7 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             connection,
             NativeAgentContract.Claude.RichContentSupported.For(connection, options.ModelId),
             opening,
+            options.CallerServices?.Resources,
             policy.AllowRuntimeBackgroundWork,
             options.ResourceOutputRetentionBytes,
             cancellationToken);
@@ -64,10 +68,10 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
     {
         ClaudeCliConfiguration.ValidateConnection(connection);
         CliInfrastructure.ValidateThreadId(threadId);
-        options ??= new LlmAgentResumeOptions();
+        options = ClientTools.Snapshot(options ?? new LlmAgentResumeOptions());
         NativeAgentContract.ValidateConnection(connection, NativeAgentContract.Claude, supportsAgentToolUse: true,
             options.ModelId, options.Tools, options.ToolHandler);
-        LlmAgentNativeRuntimeOptions runtime = NativeAgentContract.ResumeRuntime(options, NativeAgentContract.Claude);
+        LlmAgentNativeRuntimeOptions runtime = NativeAgentContract.ResumeRuntime(options, NativeAgentContract.Claude, supportsResources: true);
         LlmAgentHostRuntimePolicy policy = NativeAgentContract.HostPolicy(runtime);
         ValidateOptions(options.ModelId, runtime.WorkingDirectory, ClientTools.Functions(options.Tools), options.ToolHandler, modelOptional: true);
         return await CreateSessionAsync(
@@ -87,7 +91,8 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             runtime.Ephemeral,
             connection,
             NativeAgentContract.Claude.RichContentSupported.For(connection, options.ModelId),
-            opening: null,
+            opening: (null, 0),
+            options.CallerServices?.Resources,
             policy.AllowRuntimeBackgroundWork,
             options.ResourceOutputRetentionBytes,
             cancellationToken);
@@ -109,10 +114,10 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
                 "Claude CLI can fork a session only at its current persisted position.");
         }
 
-        options ??= new LlmAgentResumeOptions();
+        options = ClientTools.Snapshot(options ?? new LlmAgentResumeOptions());
         NativeAgentContract.ValidateConnection(connection, NativeAgentContract.Claude, supportsAgentToolUse: true,
             options.ModelId, options.Tools, options.ToolHandler);
-        LlmAgentNativeRuntimeOptions runtime = NativeAgentContract.ResumeRuntime(options, NativeAgentContract.Claude);
+        LlmAgentNativeRuntimeOptions runtime = NativeAgentContract.ResumeRuntime(options, NativeAgentContract.Claude, supportsResources: true);
         LlmAgentHostRuntimePolicy policy = NativeAgentContract.HostPolicy(runtime);
         ValidateOptions(options.ModelId, runtime.WorkingDirectory, ClientTools.Functions(options.Tools), options.ToolHandler, modelOptional: true);
         string forkedThreadId = Guid.NewGuid().ToString();
@@ -133,10 +138,33 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             runtime.Ephemeral,
             connection,
             NativeAgentContract.Claude.RichContentSupported.For(connection, options.ModelId),
-            opening: null,
+            opening: (null, 0),
+            options.CallerServices?.Resources,
             policy.AllowRuntimeBackgroundWork,
             options.ResourceOutputRetentionBytes,
             cancellationToken);
+    }
+
+    private static async Task<InferenceResourceSelectionVersion?> ReadResourceScopeAsync(
+        IInferenceResourceAccess? access, LlmAgentContext? context, CancellationToken token)
+    {
+        if (access is null)
+        {
+            if (context is not null) ManagedAgentContext.ValidateRuntimeResources(context);
+            return null;
+        }
+        InferenceResourceSelection selection = await LlmResourcePreparation.ReadSelectionAsync(access, static () => { }, token);
+        context ??= new()
+        {
+            ResourceSelectionVersion = new(selection.WorkspaceId, selection.SessionId, selection.Revision),
+            SelectedResources = selection.SelectedResources
+        };
+        await LlmResourcePreparation.ValidateContextAsync(context, selection, access, static () => { }, token);
+        LlmAttachments.ValidateReferences(new() { ModelId = string.Empty, Messages = context.Entries.Select(entry => entry.Message).ToArray() },
+            supportsResources: true);
+        foreach (LlmAgentContextEntry entry in context.Entries)
+            LlmAttachments.Validate(entry.Message.Attachments, true, true, nameof(context), supportsReferences: true);
+        return new(selection.WorkspaceId, selection.SessionId, selection.Revision);
     }
 
     [SuppressMessage("Design", "CA1031", Justification = "Failed opening preserves both the original failure and a genuine retirement failure.")]
@@ -157,7 +185,8 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
         bool ephemeral,
         LlmConnection connection,
         LlmRichContentSupported richContent,
-        AgentOpeningContext? opening,
+        (LlmAgentContext? Context, int Omitted) opening,
+        IInferenceResourceAccess? resourceAccess,
         bool allowRuntimeBackgroundWork,
         long retentionBytes,
         CancellationToken cancellationToken)
@@ -177,6 +206,7 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             networkAllowed,
             allowRuntimeBackgroundWork,
             capabilities.SupportsReasoningText);
+        InferenceResourceSelectionVersion? resourceScope = await ReadResourceScopeAsync(resourceAccess, opening.Context, cancellationToken);
         IClaudeCliSessionProcess process;
         try
         {
@@ -202,6 +232,8 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             NativeAgentContract.Claude.RichContentSupported.For(connection, null),
             richContent,
             opening,
+            resourceAccess,
+            resourceScope,
             retentionBytes,
             connection);
         try
@@ -438,7 +470,10 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
         private Exception? _failure;
         private int _observing;
         // Sent with the first turn, then cleared once the provider has received it.
-        private AgentOpeningContext? _opening;
+        private LlmAgentContext? _openingContext;
+        private readonly int _openingOmitted;
+        private IInferenceResourceAccess? _resourceAccess;
+        private readonly InferenceResourceSelectionVersion? _resourceScope;
         private string? _activeTurnId;
         private bool _disposed;
 
@@ -451,7 +486,9 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             LlmAgentToolHandler? toolHandler,
             LlmRichContentSupported richRoute,
             LlmRichContentSupported richContent,
-            AgentOpeningContext? opening,
+            (LlmAgentContext? Context, int Omitted) opening,
+            IInferenceResourceAccess? resourceAccess,
+            InferenceResourceSelectionVersion? resourceScope,
             long retentionBytes,
             LlmConnection connection)
         {
@@ -460,7 +497,9 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
                 TimeSpan.FromMilliseconds(500));
             _richRoute = richRoute;
             _richContent = richContent;
-            _opening = opening;
+            (_openingContext, _openingOmitted) = opening;
+            _resourceAccess = resourceAccess;
+            _resourceScope = resourceScope;
             ThreadId = threadId;
             SessionId = sessionId;
             _selectedModelId = initialModelId;
@@ -595,7 +634,9 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
                 request.Attachments,
                 supportsImages: true,
                 supportsDocuments: true,
-                parameterName: nameof(request));
+                parameterName: nameof(request),
+                supportsReferences: _resourceAccess is not null);
+            _ = SerializeInput(request.Input, []);
             if (!_turnGate.Wait(0, cancellationToken))
             {
                 throw new InvalidOperationException("The session is running or paused.");
@@ -609,6 +650,7 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
                 LlmProviderCapabilities capabilities = ClaudeCliLlmClient.ResolveCapabilities(
                     _connection, request.ModelId ?? selectedModelId);
                 LlmReasoningEffort.Validate(request.ReasoningLevel, capabilities);
+                (JsonArray input, string? openingNotice) = await PrepareInputAsync(request, selectedModelId, cancellationToken);
                 var settings = new JsonObject { ["showThinkingSummaries"] = capabilities.SupportsReasoningText };
                 if (request.ReasoningLevel is { } level)
                 {
@@ -632,10 +674,9 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
                 cancellationToken.ThrowIfCancellationRequested();
                 yield return new LlmAgentTurnStartedEvent(ThreadId, turnId);
                 cancellationToken.ThrowIfCancellationRequested();
-                AgentOpeningContext? opening = _opening;
-                if (opening is not null)
+                if (openingNotice is not null)
                 {
-                    yield return new LlmAgentWarningEvent(ThreadId, turnId, opening.Notice);
+                    yield return new LlmAgentWarningEvent(ThreadId, turnId, openingNotice);
                     cancellationToken.ThrowIfCancellationRequested();
                 }
                 lock (_route)
@@ -652,16 +693,12 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
                         ["message"] = new JsonObject
                         {
                             ["role"] = "user",
-                            ["content"] = opening is null
-                                ? SerializeInput(request.Input, request.Attachments)
-                                : SerializeInput(
-                                    [new LlmAgentTextContent(opening.Text), .. request.Input],
-                                    [.. opening.Attachments, .. request.Attachments])
+                            ["content"] = input
                         },
                         ["parent_tool_use_id"] = null
                     },
                     cancellationToken);
-                _opening = null;
+                _openingContext = null;
 
                 // The reader routes this turn's events here once the CLI echoes the message back.
                 await foreach (LlmAgentEvent item in turn.Events.Reader.ReadAllAsync(cancellationToken))
@@ -684,6 +721,40 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
                     await AbandonAsync(turn);
                 }
                 _turnGate.Release();
+            }
+        }
+
+        private async Task<(JsonArray Content, string? Notice)> PrepareInputAsync(LlmAgentTurnRequest turn, string? selectedModelId, CancellationToken token)
+        {
+            LlmAgentContext? openingContext = _openingContext;
+            var request = new LlmChatRequest
+            {
+                ModelId = turn.ModelId ?? selectedModelId ?? string.Empty,
+                Resources = _resourceAccess,
+                Messages = [.. openingContext?.Entries.Select(entry => entry.Message) ?? [],
+                    new("user", string.Empty) { Attachments = turn.Attachments }]
+            };
+            LlmAttachments.ValidateReferences(request, supportsResources: _resourceAccess is not null);
+            (JsonArray Content, string? Notice) Project(LlmChatRequest prepared)
+            {
+                AgentOpeningContext? opening = openingContext is null ? null : AgentOpeningContext.From(openingContext with
+                {
+                    Entries = openingContext.Entries.Select((entry, index) => entry with { Message = prepared.Messages[index] }).ToArray()
+                }, _openingOmitted, carriesAttachments: true);
+                return (opening is null ? SerializeInput(turn.Input, prepared.Messages[^1].Attachments)
+                    : SerializeInput([new LlmAgentTextContent(opening.Text), .. turn.Input],
+                        [.. opening.Attachments, .. prepared.Messages[^1].Attachments]), opening?.Notice);
+            }
+            if (_resourceAccess is not { } access) return Project(request);
+            try
+            {
+                LlmResourcePreparation.ValidateScope(access, _resourceScope!, static () => { }, token);
+                return await LlmResourcePreparation.ProjectInlineAsync(request, Project, static () => { }, token);
+            }
+            catch (Exception error) when (LlmResourcePreparation.IsCleanupFailure(error))
+            {
+                lock (_route) { _toolFailures.Add(error); }
+                throw;
             }
         }
 
@@ -829,6 +900,8 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
                 else failures.Add(error);
             }
             _sessionEvents.Writer.TryComplete();
+            _resourceAccess = null;
+            _openingContext = null;
             _readerStop.Dispose();
             _turnGate.Dispose();
             _writeLock.Dispose();
@@ -1042,7 +1115,7 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
                 {
                     response = await RunToolCallAsync(call, id, running.Cancellation.Token);
                 }
-                catch (OperationCanceledException) when (running.Cancellation.IsCancellationRequested)
+                catch (OperationCanceledException error) when (running.Cancellation.IsCancellationRequested && !LlmResourcePreparation.IsCleanupFailure(error))
                 {
                     // The CLI cancelled the call, or the session ended. The call's control request is still answered.
                     response = new McpResponse(McpResult(id, new JsonObject
@@ -1059,7 +1132,7 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
                 }
                 await WriteMcpResponseAsync(requestId, response.Message, operation.Token);
             }
-            catch (OperationCanceledException) when (operation.Token.IsCancellationRequested) { }
+            catch (OperationCanceledException error) when (operation.Token.IsCancellationRequested && !LlmResourcePreparation.IsCleanupFailure(error)) { }
             catch (Exception failure)
             {
                 bool failSession;
@@ -1100,8 +1173,35 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             }
 
             cancellationToken.ThrowIfCancellationRequested();
+            output = ManagedAgentContext.CopyOutput(output);
+            if (output.Parts.Any(part => part is LlmToolOutputSessionResource))
+            {
+                IInferenceResourceAccess access = _resourceAccess ?? throw new NotSupportedException("Tool resources require caller-owned access.");
+                LlmResourcePreparation.ValidateScope(access, _resourceScope!, static () => { }, cancellationToken);
+                var request = new LlmChatRequest
+                {
+                    ModelId = string.Empty,
+                    Resources = access,
+                    Messages = [new("user", string.Empty) { ToolResults = [new LlmToolResult(call.CallId, output)] }]
+                };
+                return await LlmResourcePreparation.ProjectInlineAsync(request, prepared =>
+                {
+                    LlmToolOutput binary = ClientTools.Functions(prepared.Messages[0].ToolResults)[0].Output;
+                    ProjectedToolOutput resourceProjection = ToolOutputProjector.Project(binary, _richRoute, _richContent);
+                    for (int index = 0; index < output.Parts.Count; index++)
+                        if (output.Parts[index] is LlmToolOutputSessionResource
+                            && resourceProjection.Report.Parts[index].Delivery == LlmToolPartDelivery.Omitted)
+                            throw new NotSupportedException("The Claude MCP route cannot carry this logical resource content.");
+                    return ToolResponse(call, id, output, resourceProjection);
+                }, static () => { }, cancellationToken, includeSelection: false);
+            }
             // Unsupported parts are omitted by the projection; they never fail the tool or the turn.
             ProjectedToolOutput projected = ToolOutputProjector.Project(output, _richRoute, _richContent);
+            return ToolResponse(call, id, output, projected);
+        }
+
+        private McpResponse ToolResponse(LlmAgentToolCall call, JsonElement id, LlmToolOutput output, ProjectedToolOutput projected)
+        {
             var toolEvent = new LlmAgentToolEvent(
                 ThreadId,
                 call.TurnId,
@@ -1621,7 +1721,7 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             // No CLI remains to take a host tool's result.
             foreach (RunningToolCall call in calls) { Cancel(call); }
             _tasks.EndAll();
-            _sessionEvents.Writer.TryComplete();
+            _sessionEvents.Writer.TryComplete(failure);
         }
 
         /// <summary>The consumer stopped reading a turn: interrupt it now, or when the CLI starts it.</summary>

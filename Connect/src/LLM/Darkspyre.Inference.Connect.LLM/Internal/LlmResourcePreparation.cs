@@ -190,15 +190,20 @@ internal sealed class LlmResourcePreparation : IAsyncDisposable
         {
             InferenceResourceSelection selection = await ReadSelectionAsync(access, fence, token).ConfigureAwait(false);
             Scope scope = new(selection.WorkspaceId, selection.SessionId);
+            ValidateToolSelection(output, selection);
             foreach (LlmToolOutputSessionResource part in output.Parts.OfType<LlmToolOutputSessionResource>())
             {
                 _ = await RequireDescriptorAsync(access, part.Resource, scope, fence, token).ConfigureAwait(false);
-                if (!selection.SelectedResources.Contains(part.Resource))
-                    throw new ArgumentException("A registered tool artifact must already be selected in the caller-owned session.", nameof(output));
             }
             Check(fence, token);
         }
         catch (Exception error) { ExceptionDispatchInfo.Capture(AsResourceFailure(error, token)).Throw(); throw; }
+    }
+
+    private static void ValidateToolSelection(LlmToolOutput output, InferenceResourceSelection selection)
+    {
+        if (output.Parts.OfType<LlmToolOutputSessionResource>().Any(part => !selection.SelectedResources.Contains(part.Resource)))
+            throw new ArgumentException("A registered tool artifact must already be selected in the caller-owned session.", nameof(output));
     }
 
     internal static bool IsResourceFailure(Exception error) => error is InferenceResourceOperationException or InferenceResourceOperationCanceledException
@@ -390,7 +395,35 @@ internal sealed class LlmResourcePreparation : IAsyncDisposable
         if (terminal is not null) yield return terminal;
     }
 
-    internal static async Task<LlmResourcePreparation> PrepareInlineAsync(LlmChatRequest request, Action fence, CancellationToken token)
+    /// <summary>Projects copied inline content and settles its readers before returning the detached value.</summary>
+    internal static async Task<T> ProjectInlineAsync<T>(LlmChatRequest request, Func<LlmChatRequest, T> project,
+        Action fence, CancellationToken token, bool includeSelection = true)
+    {
+        LlmResourcePreparation? resources = null;
+        Exception? failure = null;
+        T result = default!;
+        try
+        {
+            resources = await PrepareInlineAsync(ClientTools.Snapshot(request), fence, token, includeSelection).ConfigureAwait(false);
+            result = project(resources.Request);
+            Check(fence, token);
+        }
+        catch (Exception error)
+        {
+            failure = AsResourceFailure(error, token);
+        }
+        try { if (resources is not null) await resources.DisposeAsync().ConfigureAwait(false); }
+        catch (Exception cleanup)
+        {
+            failure = failure is null ? cleanup : new AggregateException(failure, cleanup);
+        }
+        if (failure is not null) ExceptionDispatchInfo.Capture(failure).Throw();
+        Check(fence, token);
+        return result;
+    }
+
+    internal static async Task<LlmResourcePreparation> PrepareInlineAsync(LlmChatRequest request, Action fence, CancellationToken token,
+        bool includeSelection = true)
     {
         ValidateArguments(request);
         var operation = new LlmResourcePreparation(request);
@@ -402,7 +435,10 @@ internal sealed class LlmResourcePreparation : IAsyncDisposable
         {
             var access = request.Resources ?? throw new ArgumentException("Inline resources require caller-owned access.", nameof(request));
             InferenceResourceSelection selection = await ReadSelectionAsync(access, Fence, token).ConfigureAwait(false);
-            request = AppendSelection(request, selection);
+            if (includeSelection) request = AppendSelection(request, selection);
+            else
+                foreach (LlmToolResult result in request.Messages.SelectMany(message => ClientTools.Functions(message.ToolResults)))
+                    ValidateToolSelection(result.Output, selection);
             operation._readScope = new(selection.WorkspaceId, selection.SessionId);
             operation.SelectionVersion = new(selection.WorkspaceId, selection.SessionId, selection.Revision);
             var attachments = new Dictionary<InferenceResourceReference, LlmAttachment>();

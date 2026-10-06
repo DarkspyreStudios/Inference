@@ -634,7 +634,7 @@ public sealed class ResourcePreparationTests
         }
     }
 
-    private sealed class Source(LlmConnection connection) : ILlmConnectionSource
+    internal sealed class Source(LlmConnection connection) : ILlmConnectionSource
     {
         public Task<LlmConnection?> GetConnectionAsync(string connectionId, CancellationToken cancellationToken = default) =>
             Task.FromResult<LlmConnection?>(connection);
@@ -669,12 +669,13 @@ public sealed class ResourcePreparationTests
         }
     }
 
-    private sealed class Resources(InferenceResourceSelection selection,
-        IReadOnlyList<(InferenceResourceReference Reference, string Name, byte[] Bytes)> content, Exception? releaseFailure = null) : IInferenceResourceAccess
+    internal sealed class Resources(InferenceResourceSelection selection,
+        IReadOnlyList<(InferenceResourceReference Reference, string Name, byte[] Bytes)> content, Exception? releaseFailure = null,
+        Task? readRelease = null) : IInferenceResourceAccess
     {
-        public string WorkspaceId => selection.WorkspaceId;
-        public string SessionId => selection.SessionId;
-        public InferenceResourceSelection Selection => selection;
+        public string WorkspaceId => Selection.WorkspaceId;
+        public string SessionId => Selection.SessionId;
+        public InferenceResourceSelection Selection { get; set; } = selection;
         public List<MemoryStream> Reads { get; } = [];
         public int ReleaseAttempts { get; private set; }
 
@@ -686,12 +687,14 @@ public sealed class ResourcePreparationTests
 
         public async Task<IInferenceResourceReadHandle> OpenReadAsync(InferenceResourceReference reference, CancellationToken cancellationToken = default)
         {
+            ReadEntered.TrySetResult();
+            if (readRelease is not null) await readRelease;
             var stream = new MemoryStream(content.Single(item => item.Reference == reference).Bytes, writable: false);
             Reads.Add(stream);
             return new Read((await GetAsync(reference, cancellationToken))!, stream, this);
         }
 
-        public Task<InferenceResourceSelection> GetSelectionAsync(CancellationToken cancellationToken = default) => Task.FromResult(selection);
+        public Task<InferenceResourceSelection> GetSelectionAsync(CancellationToken cancellationToken = default) => Task.FromResult(Selection);
         public Task<IInferenceResourceWriteHandle> OpenWriteAsync(InferenceResourceCreate resource, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<InferenceResourceSelection> SelectAsync(IReadOnlyList<InferenceResourceReference> references, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<InferenceResourceSelection> ReplaceSelectionAsync(IReadOnlyList<InferenceResourceReference> references, long expectedRevision, CancellationToken cancellationToken = default) => throw new NotSupportedException();
@@ -707,5 +710,6 @@ public sealed class ResourcePreparationTests
             }
         }
         private Exception? ReleaseFailure => releaseFailure;
+        internal TaskCompletionSource ReadEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
     }
 }

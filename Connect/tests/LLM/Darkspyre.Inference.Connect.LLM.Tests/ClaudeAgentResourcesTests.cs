@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using System.Threading.Channels;
 using Darkspyre.Inference.Common.LLM;
+using Darkspyre.Inference.Common.Resources;
 using Darkspyre.Inference.Connect.LLM.Internal;
 using Darkspyre.Inference.Connect.LLM.Providers;
 
@@ -13,6 +14,290 @@ public sealed class ClaudeAgentResourcesTests : IDisposable
     private readonly string _directory = Directory.CreateTempSubdirectory("connect-claude-resources-").FullName;
 
     public void Dispose() => Directory.Delete(_directory, recursive: true);
+
+    [Theory]
+    [InlineData("result.json", false)]
+    [InlineData("result.json", true)]
+    [InlineData("result.pdf", true)]
+    public async Task NativeOpeningCarriesTheActualLogicalFilesWithoutTakingSelectionOwnership(string fileName, bool generatedByTool)
+    {
+        var reference = new InferenceResourceReference("workspace", "reference");
+        var generated = new InferenceResourceReference("workspace", "generated");
+        byte[] bytes = fileName.EndsWith(".pdf", StringComparison.Ordinal)
+            ? "%PDF-1.7\nactual generated content"u8.ToArray() : "{\"answer\":42}"u8.ToArray();
+        var access = new ResourcePreparationTests.Resources(new("workspace", "session", 4, [generated, reference]),
+            [(reference, "reference.txt", "reference text"u8.ToArray()), (generated, fileName, bytes)]);
+        var context = new LlmAgentContext
+        {
+            Revision = 9,
+            ResourceSelectionVersion = new("workspace", "session", 4),
+            SelectedResources = [generated, reference],
+            Entries = [new("prompt", "old-turn", new("user", "Read the reference")
+                { Attachments = [new LlmResourceAttachment(reference), new LlmResourceAttachment(reference)] }),
+                new("answer", "old-turn", new("assistant", "Created " + fileName))]
+        };
+        if (generatedByTool)
+            context = context with
+            {
+                Entries = [context.Entries[0], context.Entries[1] with
+                { Message = context.Entries[1].Message with { ToolCalls = [new LlmToolCall("create-1", "create_file", "{}")] } },
+                    new("tool", "old-turn", new("user", string.Empty)
+                    { ToolResults = [new LlmToolResult("create-1", new() { Parts = [new LlmToolOutputSessionResource(generated)] })] })]
+            };
+        LlmAgentContext restored = JsonSerializer.Deserialize(JsonSerializer.SerializeToUtf8Bytes(context, ConnectLlmJson.AgentContext),
+            ConnectLlmJson.AgentContext)!;
+        var process = new ManualProcess();
+        await using var providers = new LlmAgentProviderService(new ResourcePreparationTests.Source(Connection()), [new ClaudeAgentClient(new Factory(process))]);
+        await using ILlmAgentSession session = await providers.StartSessionAsync("connection", new()
+        {
+            ModelId = "claude-test",
+            Context = restored,
+            UnboundContinuationState = LlmUnboundContinuationState.Omit,
+            CallerServices = new() { Resources = access },
+            Runtime = new() { WorkingDirectory = _directory }
+        });
+        using var limit = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        await using IAsyncEnumerator<LlmAgentEvent> feed = session.RunTurnAsync(
+            new() { Input = [new LlmAgentTextContent("Compare the files")] }, limit.Token).GetAsyncEnumerator(limit.Token);
+        Assert.True(await feed.MoveNextAsync());
+        Assert.IsType<LlmAgentTurnStartedEvent>(feed.Current);
+        string turnId = await process.WaitForUserMessage(limit.Token);
+        JsonElement input = Assert.Single(process.Writes(), item => item.GetProperty("type").GetString() == "user");
+        JsonElement[] documents = input.GetProperty("message").GetProperty("content").EnumerateArray()
+            .Where(part => part.GetProperty("type").GetString() == "document").ToArray();
+        Assert.Equal(["reference.txt", "reference.txt", fileName], documents.Select(part => part.GetProperty("title").GetString()));
+        JsonElement source = documents[^1].GetProperty("source");
+        Assert.Equal(bytes, source.GetProperty("type").GetString() == "base64"
+            ? Convert.FromBase64String(source.GetProperty("data").GetString()!) : Encoding.UTF8.GetBytes(source.GetProperty("data").GetString()!));
+        Assert.Equal(2, access.Reads.Count);
+        Assert.All(access.Reads, stream => Assert.False(stream.CanRead));
+        Assert.Equal(2, access.ReleaseAttempts);
+        process.Push(new { type = "user", uuid = turnId, isReplay = true });
+        process.Push(new { type = "result", subtype = "success", is_error = false, result = "answer", stop_reason = "end_turn" });
+        List<LlmAgentEvent> events = await ReadUntil(feed, item => item is LlmAgentTurnCompletedEvent);
+        Assert.Equal(LlmAgentCompletionReason.Completed, Assert.Single(events.OfType<LlmAgentTurnCompletedEvent>()).Reason);
+        await Assert.ThrowsAsync<NotSupportedException>(() => session.CaptureContextAsync());
+        Assert.Equal([generated, reference], access.Selection.SelectedResources);
+        Assert.Equal(4, access.Selection.Revision);
+        Assert.Equal(9, restored.Revision);
+        Assert.IsType<LlmResourceAttachment>(restored.Entries[0].Message.Attachments[0]);
+    }
+
+    [Fact]
+    public async Task NativeOpeningRejectsADifferentSelectionBeforeStartingTheProcess()
+    {
+        var reference = new InferenceResourceReference("workspace", "reference");
+        var access = new ResourcePreparationTests.Resources(new("workspace", "session", 4, [reference]),
+            [(reference, "reference.txt", "reference text"u8.ToArray())]);
+        var factory = new Factory(new ManualProcess());
+        var client = new ClaudeAgentClient(factory);
+        await Assert.ThrowsAsync<ArgumentException>(() => client.StartSessionAsync("connection", Connection(), new()
+        {
+            ModelId = "claude-test",
+            Context = new() { ResourceSelectionVersion = new("workspace", "session", 3), SelectedResources = [reference] },
+            UnboundContinuationState = LlmUnboundContinuationState.Omit,
+            CallerServices = new() { Resources = access },
+            Runtime = new() { WorkingDirectory = _directory }
+        }));
+        Assert.Null(factory.Invocation);
+        Assert.Empty(access.Reads);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task NativeResumedAndForkedPromptsCarryTheBoundSelection(bool fork)
+    {
+        var reference = new InferenceResourceReference("workspace", "reference");
+        var access = new ResourcePreparationTests.Resources(new("workspace", "session", 4, [reference]),
+            [(reference, "reference.txt", "reference text"u8.ToArray())]);
+        var process = new ManualProcess();
+        var client = new ClaudeAgentClient(new Factory(process));
+        var options = new LlmAgentResumeOptions
+        { ModelId = "claude-test", CallerServices = new() { Resources = access }, Runtime = new() { WorkingDirectory = _directory } };
+        string threadId = Guid.NewGuid().ToString();
+        await using ILlmAgentSession session = fork
+            ? await client.ForkSessionAsync("connection", Connection(), threadId, options: options)
+            : await client.ResumeSessionAsync("connection", Connection(), threadId, options);
+        using var limit = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        await using IAsyncEnumerator<LlmAgentEvent> feed = session.RunTurnAsync(
+            new() { Input = [new LlmAgentTextContent("Read the file")] }, limit.Token).GetAsyncEnumerator(limit.Token);
+        Assert.True(await feed.MoveNextAsync());
+        string turnId = await process.WaitForUserMessage(limit.Token);
+        JsonElement input = Assert.Single(process.Writes(), item => item.GetProperty("type").GetString() == "user");
+        JsonElement document = Assert.Single(input.GetProperty("message").GetProperty("content").EnumerateArray(),
+            part => part.GetProperty("type").GetString() == "document");
+        Assert.Equal("reference text", document.GetProperty("source").GetProperty("data").GetString());
+        Assert.Equal("reference.txt", document.GetProperty("title").GetString());
+        Assert.Single(access.Reads);
+        Assert.False(access.Reads[0].CanRead);
+        process.Push(new { type = "user", uuid = turnId, isReplay = true });
+        process.Push(new { type = "result", subtype = "success", is_error = false, result = "answer", stop_reason = "end_turn" });
+        List<LlmAgentEvent> events = await ReadUntil(feed, item => item is LlmAgentTurnCompletedEvent);
+        Assert.Equal(LlmAgentCompletionReason.Completed, Assert.Single(events.OfType<LlmAgentTurnCompletedEvent>()).Reason);
+        Assert.Equal(4, access.Selection.Revision);
+
+        access.Selection = new("workspace", "session", 5, []);
+        await using IAsyncEnumerator<LlmAgentEvent> next = session.RunTurnAsync(
+            new() { Input = [new LlmAgentTextContent("Continue")] }, limit.Token).GetAsyncEnumerator(limit.Token);
+        Assert.True(await next.MoveNextAsync());
+        string nextTurnId = await process.WaitForUserMessage(limit.Token, index: 1);
+        JsonElement nextInput = process.Writes().Last(item => item.GetProperty("type").GetString() == "user");
+        Assert.DoesNotContain(nextInput.GetProperty("message").GetProperty("content").EnumerateArray(),
+            part => part.GetProperty("type").GetString() == "document");
+        process.Push(new { type = "user", uuid = nextTurnId, isReplay = true });
+        process.Push(new { type = "result", subtype = "success", is_error = false, result = "answer", stop_reason = "end_turn" });
+        Assert.Equal(LlmAgentCompletionReason.Completed, Assert.Single((await ReadUntil(next,
+            item => item is LlmAgentTurnCompletedEvent)).OfType<LlmAgentTurnCompletedEvent>()).Reason);
+        Assert.Single(access.Reads);
+        Assert.Equal(5, access.Selection.Revision);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task NativeInputCleanupRefusalPreventsTheWriteAndRemainsVisibleAtRetirement(bool invalidContent)
+    {
+        var reference = new InferenceResourceReference("workspace", "reference");
+        var cleanup = new IOException("The resource reader refuses release.");
+        var access = new ResourcePreparationTests.Resources(new("workspace", "session", 1, [reference]),
+            [(reference, "reference.txt", invalidContent ? new byte[] { 0xff } : "reference text"u8.ToArray())], cleanup);
+        var process = new ManualProcess();
+        ILlmAgentSession session = await new ClaudeAgentClient(new Factory(process)).StartSessionAsync("connection", Connection(), new()
+        { ModelId = "claude-test", CallerServices = new() { Resources = access }, Runtime = new() { WorkingDirectory = _directory } });
+        Exception failure = (await Record.ExceptionAsync(async () =>
+        {
+            await foreach (LlmAgentEvent _ in session.RunTurnAsync(new() { Input = [new LlmAgentTextContent("Read the file")] })) { }
+        }))!;
+        Exception release = failure;
+        if (invalidContent)
+        {
+            Exception[] causes = Assert.IsType<AggregateException>(failure).InnerExceptions.ToArray();
+            Assert.Equal(2, causes.Length);
+            Assert.IsType<NotSupportedException>(Assert.IsType<InferenceResourceOperationException>(causes[0]).InnerException);
+            release = causes[1];
+        }
+        var refused = Assert.IsType<InferenceResourceOperationException>(release);
+        Assert.Equal(InferenceResourceOperationPhase.Cleanup, refused.Failure.Phase);
+        Assert.Same(cleanup, refused.InnerException);
+        Assert.DoesNotContain(process.Writes(), item => item.GetProperty("type").GetString() == "user");
+        Exception retired = (await Record.ExceptionAsync(() => session.DisposeAsync().AsTask()))!;
+        if (invalidContent)
+        {
+            Exception[] original = Assert.IsType<AggregateException>(failure).Flatten().InnerExceptions.ToArray();
+            Exception[] actual = Assert.IsType<AggregateException>(retired).Flatten().InnerExceptions.ToArray();
+            Assert.Equal(original.Length, actual.Length);
+            Assert.All(original, cause => Assert.Contains(actual, item => ReferenceEquals(cause, item)));
+        }
+        else Assert.Same(failure, retired);
+        Assert.Same(retired, await Record.ExceptionAsync(() => session.DisposeAsync().AsTask()));
+        Assert.Equal(1, access.ReleaseAttempts);
+        using MemoryStream retained = Assert.Single(access.Reads);
+        Assert.True(retained.CanRead);
+        Assert.Equal(1, process.Disposals);
+    }
+
+    [Fact]
+    public async Task NativeRetirementDrainsAnIgnoringResourceOpenAndReleasesItsActualReader()
+    {
+        var reference = new InferenceResourceReference("workspace", "reference");
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var access = new ResourcePreparationTests.Resources(new("workspace", "session", 1, [reference]),
+            [(reference, "reference.txt", "reference text"u8.ToArray())], readRelease: release.Task);
+        var process = new ManualProcess();
+        ILlmAgentSession session = await new ClaudeAgentClient(new Factory(process)).StartSessionAsync("connection", Connection(), new()
+        { ModelId = "claude-test", CallerServices = new() { Resources = access }, Runtime = new() { WorkingDirectory = _directory } });
+        await using IAsyncEnumerator<LlmAgentEvent> feed = session.RunTurnAsync(new() { Input = [new LlmAgentTextContent("Read the file")] }).GetAsyncEnumerator();
+        Task<bool> read = feed.MoveNextAsync().AsTask();
+        try
+        {
+            await access.ReadEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            Task retirement = session.DisposeAsync().AsTask();
+            Assert.False(retirement.IsCompleted);
+            Assert.Equal(0, process.Disposals);
+            release.TrySetResult();
+            await retirement.WaitAsync(TimeSpan.FromSeconds(5));
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => read);
+            Assert.All(access.Reads, stream => Assert.False(stream.CanRead));
+            Assert.Single(access.Reads);
+            Assert.Equal(1, access.ReleaseAttempts);
+            Assert.Equal(1, process.Disposals);
+            Assert.DoesNotContain(process.Writes(), item => item.GetProperty("type").GetString() == "user");
+        }
+        finally
+        {
+            release.TrySetResult();
+            await session.DisposeAsync();
+        }
+    }
+
+    [Fact]
+    public async Task NativeMcpMaterializesOnlyTheToolsNamedSelectedResourceAndKeepsItsLogicalResult()
+    {
+        var reference = new InferenceResourceReference("workspace", "reference");
+        var generated = new InferenceResourceReference("workspace", "generated");
+        var access = new ResourcePreparationTests.Resources(new("workspace", "session", 4, [generated, reference]),
+            [(reference, "reference.txt", "reference text"u8.ToArray()), (generated, "result.json", "{\"answer\":42}"u8.ToArray())]);
+        var process = new ManualProcess();
+        await using ILlmAgentSession session = await new ClaudeAgentClient(new Factory(process)).StartSessionAsync("connection", Connection(), new()
+        {
+            ModelId = "claude-test",
+            Runtime = new() { WorkingDirectory = _directory },
+            CallerServices = new() { Resources = access },
+            Tools = [new LlmAgentToolDefinition { Name = "hold", InputSchema = JsonElement.Parse("{\"type\":\"object\"}") }],
+            ToolHandler = (_, _) => Task.FromResult(new LlmToolOutput { Parts = [new LlmToolOutputSessionResource(generated)] })
+        });
+        using var limit = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        await using IAsyncEnumerator<LlmAgentEvent> feed = session.ObserveAsync(limit.Token).GetAsyncEnumerator(limit.Token);
+        process.Push(ToolUse("tu1"));
+        process.Push(ToolCall("c1", 7));
+        JsonElement answer = await AnswerFor(process, "c1");
+        JsonElement resource = Assert.Single(answer.GetProperty("result").GetProperty("content").EnumerateArray()).GetProperty("resource");
+        Assert.Equal("application/json", resource.GetProperty("mimeType").GetString());
+        Assert.Equal("{\"answer\":42}", resource.GetProperty("text").GetString());
+        Assert.Single(access.Reads);
+        Assert.False(access.Reads[0].CanRead);
+        Assert.Equal(1, access.ReleaseAttempts);
+        process.Push(new { type = "result", subtype = "success", is_error = false, result = "answer", stop_reason = "end_turn" });
+        List<LlmAgentEvent> events = await ReadUntil(feed, item => item is LlmAgentTurnCompletedEvent);
+        LlmAgentToolEvent tool = Assert.Single(events.OfType<LlmAgentToolEvent>(), item => item.Output is not null);
+        Assert.Equal(generated, Assert.IsType<LlmToolOutputSessionResource>(Assert.Single(tool.Output!.Parts)).Resource);
+        Assert.Equal([generated, reference], access.Selection.SelectedResources);
+    }
+
+    [Fact]
+    public async Task NativeMcpResourceRefusalReachesTheSessionObserverAndRetirement()
+    {
+        var generated = new InferenceResourceReference("workspace", "generated");
+        var access = new ResourcePreparationTests.Resources(new("workspace", "session", 4, [generated]),
+            [(generated, "result.pdf", "%PDF-1.7\nactual generated content"u8.ToArray())]);
+        var process = new ManualProcess();
+        ILlmAgentSession session = await new ClaudeAgentClient(new Factory(process)).StartSessionAsync("connection", Connection(), new()
+        {
+            ModelId = "claude-test",
+            Runtime = new() { WorkingDirectory = _directory },
+            CallerServices = new() { Resources = access },
+            Tools = [new LlmAgentToolDefinition { Name = "hold", InputSchema = JsonElement.Parse("{\"type\":\"object\"}") }],
+            ToolHandler = (_, _) => Task.FromResult(new LlmToolOutput { Parts = [new LlmToolOutputSessionResource(generated)] })
+        });
+        using var limit = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        process.Push(ToolUse("tu1"));
+        process.Push(ToolCall("c1", 7));
+        Exception? observed = await Record.ExceptionAsync(async () =>
+        {
+            await foreach (LlmAgentEvent _ in session.ObserveAsync(limit.Token)) { }
+        });
+        Exception? retired = await Record.ExceptionAsync(() => session.DisposeAsync().AsTask());
+        var providerFailure = Assert.IsType<LlmProviderException>(observed);
+        var resourceFailure = Assert.IsType<InferenceResourceOperationException>(providerFailure.InnerException);
+        Assert.IsType<NotSupportedException>(resourceFailure.InnerException);
+        Assert.Same(resourceFailure, retired);
+        Assert.Same(retired, await Record.ExceptionAsync(() => session.DisposeAsync().AsTask()));
+        Assert.Single(access.Reads);
+        Assert.False(access.Reads[0].CanRead);
+        Assert.Equal(1, access.ReleaseAttempts);
+        Assert.DoesNotContain(process.Writes(), item => item.GetProperty("type").GetString() == "control_response");
+    }
 
     [Fact]
     public async Task ATrailerWrittenAfterTheTaskEndedIsStillExcludedAndGivesTheExitCode()
